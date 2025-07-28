@@ -61,6 +61,8 @@ Client SDK for the Fabstir P2P LLM marketplace, enabling applications to connect
 - [ ] Implement job submission
 - [ ] Implement payment handling
 - [ ] Implement event monitoring
+- [ ] Implement S5 result retrieval (**NEW**)
+- [ ] Implement Vector DB cache check (**NEW**)
 
 **Test Files:**
 
@@ -68,6 +70,8 @@ Client SDK for the Fabstir P2P LLM marketplace, enabling applications to connect
 - `tests/contracts/test_jobs.spec.ts`
 - `tests/contracts/test_payments.spec.ts`
 - `tests/contracts/test_events.spec.ts`
+- `tests/contracts/test_s5_retrieval.spec.ts` (**NEW**)
+- `tests/contracts/test_vector_cache.spec.ts` (**NEW**)
 
 ### Sub-phase 1.5: Model Discovery (**NEW**)
 
@@ -91,6 +95,8 @@ Client SDK for the Fabstir P2P LLM marketplace, enabling applications to connect
 - [ ] Implement vector-db queries
 - [ ] Implement cache management
 - [ ] Implement result retrieval
+- [ ] Use Enhanced S5.js path-based API (**NEW**)
+- [ ] Implement CBOR decoding for results (**NEW**)
 
 **Test Files:**
 
@@ -98,6 +104,8 @@ Client SDK for the Fabstir P2P LLM marketplace, enabling applications to connect
 - `tests/s5/test_vector_queries.spec.ts`
 - `tests/s5/test_cache.spec.ts`
 - `tests/s5/test_retrieval.spec.ts`
+- `tests/s5/test_path_api.spec.ts` (**NEW**)
+- `tests/s5/test_cbor_decode.spec.ts` (**NEW**)
 
 ### Sub-phase 2.2: Base Account SDK
 
