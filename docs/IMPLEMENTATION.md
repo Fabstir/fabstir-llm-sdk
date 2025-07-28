@@ -69,6 +69,20 @@ Client SDK for the Fabstir P2P LLM marketplace, enabling applications to connect
 - `tests/contracts/test_payments.spec.ts`
 - `tests/contracts/test_events.spec.ts`
 
+### Sub-phase 1.5: Model Discovery (**NEW**)
+
+- [ ] Implement model marketplace query
+- [ ] Implement host discovery by model
+- [ ] Implement pricing comparison
+- [ ] Implement latency-based routing
+
+**Test Files:**
+
+- `tests/discovery/test_marketplace.spec.ts`
+- `tests/discovery/test_host_search.spec.ts`
+- `tests/discovery/test_pricing.spec.ts`
+- `tests/discovery/test_routing.spec.ts`
+
 ## Phase 2: Advanced Features (Month 2)
 
 ### Sub-phase 2.1: Enhanced S5 Client
@@ -126,6 +140,34 @@ Client SDK for the Fabstir P2P LLM marketplace, enabling applications to connect
 - `tests/ui/test_vue.spec.ts`
 - `tests/ui/test_vanilla.spec.ts`
 - `tests/ui/test_mobile.spec.ts`
+
+### Sub-phase 2.5: Payment Integration (**NEW**)
+
+- [ ] Implement USDC payment flow
+- [ ] Implement FAB token payment with discount
+- [ ] Implement payment estimation
+- [ ] Implement transaction tracking
+
+**Test Files:**
+
+- `tests/payments/test_usdc.spec.ts`
+- `tests/payments/test_fab.spec.ts`
+- `tests/payments/test_estimation.spec.ts`
+- `tests/payments/test_tracking.spec.ts`
+
+### Sub-phase 2.6: Host Selection (**NEW**)
+
+- [ ] Implement automatic host selection
+- [ ] Implement reputation-based routing
+- [ ] Implement failover mechanisms
+- [ ] Implement load distribution
+
+**Test Files:**
+
+- `tests/selection/test_auto_select.spec.ts`
+- `tests/selection/test_reputation.spec.ts`
+- `tests/selection/test_failover.spec.ts`
+- `tests/selection/test_load_balance.spec.ts`
 
 ## Phase 3: Multi-Language SDKs (Month 3)
 
