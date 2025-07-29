@@ -323,18 +323,80 @@ export class FabstirSDK extends EventEmitter {
   }
 
   async getJobResult(jobId: number): Promise<any> {
-    throw new Error("Not implemented");
+    const job = this._jobs.get(jobId);
+    if (!job || !job.result) {
+      throw new Error('Job result not found');
+    }
+    return { ...job.result };
   }
 
   async streamJobResponse(
     jobId: number,
     callback: (token: string) => void
   ): Promise<void> {
-    throw new Error("Not implemented");
+    const job = this._jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    return new Promise((resolve, reject) => {
+      const jobEmitter = this._jobEventEmitters.get(jobId);
+      if (!jobEmitter) {
+        reject(new Error(`Job ${jobId} not found`));
+        return;
+      }
+      
+      // Listen for tokens
+      const tokenHandler = (token: string) => {
+        callback(token);
+      };
+      
+      // Listen for status changes
+      const statusHandler = (status: JobStatus) => {
+        if (status === JobStatus.COMPLETED) {
+          jobEmitter.removeListener('token', tokenHandler);
+          jobEmitter.removeListener('statusChange', statusHandler);
+          resolve();
+        } else if (status === JobStatus.FAILED) {
+          jobEmitter.removeListener('token', tokenHandler);
+          jobEmitter.removeListener('statusChange', statusHandler);
+          reject(new Error('Job failed'));
+        }
+      };
+      
+      jobEmitter.on('token', tokenHandler);
+      jobEmitter.on('statusChange', statusHandler);
+      
+      // Check if already completed
+      if (job.status === JobStatus.COMPLETED) {
+        jobEmitter.removeListener('token', tokenHandler);
+        jobEmitter.removeListener('statusChange', statusHandler);
+        resolve();
+      } else if (job.status === JobStatus.FAILED) {
+        jobEmitter.removeListener('token', tokenHandler);
+        jobEmitter.removeListener('statusChange', statusHandler);
+        reject(new Error('Job failed'));
+      }
+    });
   }
 
   async getResultMetadata(jobId: number): Promise<any> {
-    throw new Error("Not implemented");
+    const job = this._jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    const inferenceTime = job.result?.inferenceTime || 5000; // Default 5 seconds
+    const tokensUsed = job.result?.tokensUsed || 0;
+    const tokensPerSecond = inferenceTime > 0 ? (tokensUsed / (inferenceTime / 1000)) : 0;
+    
+    return {
+      model: job.modelId,
+      temperature: job.temperature || 0.7,
+      inferenceTime,
+      tokensPerSecond,
+      totalTokens: tokensUsed
+    };
   }
 
   async verifyResultProof(jobId: number): Promise<boolean> {
@@ -345,7 +407,98 @@ export class FabstirSDK extends EventEmitter {
     jobId: number,
     options?: any
   ): AsyncIterableIterator<any> {
-    throw new Error("Not implemented");
+    const job = this._jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    const jobEmitter = this._jobEventEmitters.get(jobId);
+    if (!jobEmitter) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    let tokenIndex = 0;
+    const tokenQueue: any[] = [];
+    let ended = false;
+    let error: Error | null = null;
+    
+    // Set up token handler
+    const tokenHandler = (token: string) => {
+      tokenQueue.push({
+        content: token,
+        index: tokenIndex++,
+        timestamp: Date.now()
+      });
+    };
+    
+    // Set up status handler
+    const statusHandler = (status: JobStatus) => {
+      if (status === JobStatus.COMPLETED) {
+        ended = true;
+        jobEmitter.removeListener('token', tokenHandler);
+        jobEmitter.removeListener('statusChange', statusHandler);
+      } else if (status === JobStatus.FAILED) {
+        error = new Error('Job failed');
+        ended = true;
+        jobEmitter.removeListener('token', tokenHandler);
+        jobEmitter.removeListener('statusChange', statusHandler);
+      }
+    };
+    
+    jobEmitter.on('token', tokenHandler);
+    jobEmitter.on('statusChange', statusHandler);
+    
+    // Check initial status
+    if (job.status === JobStatus.COMPLETED) {
+      ended = true;
+    } else if (job.status === JobStatus.FAILED) {
+      error = new Error('Job failed');
+      ended = true;
+    }
+    
+    // Return async iterator
+    return {
+      async next() {
+        // If there's an error, throw it
+        if (error) {
+          throw error;
+        }
+        
+        // If we have tokens in queue, return them
+        if (tokenQueue.length > 0) {
+          const token = tokenQueue.shift()!;
+          return { done: false, value: token };
+        }
+        
+        // If ended and no more tokens, we're done
+        if (ended) {
+          return { done: true, value: undefined };
+        }
+        
+        // Wait for more tokens or end
+        return new Promise((resolve) => {
+          const checkQueue = setInterval(() => {
+            if (error) {
+              clearInterval(checkQueue);
+              throw error;
+            }
+            
+            if (tokenQueue.length > 0) {
+              clearInterval(checkQueue);
+              const token = tokenQueue.shift()!;
+              resolve({ done: false, value: token });
+            } else if (ended) {
+              clearInterval(checkQueue);
+              resolve({ done: true, value: undefined });
+            }
+          }, 10);
+        });
+      },
+      
+      [Symbol.asyncIterator]() {
+        return this;
+      }
+    };
   }
 
   async withRetry(fn: () => Promise<any>, options: any): Promise<any> {
@@ -398,6 +551,31 @@ export class FabstirSDK extends EventEmitter {
     const jobEmitter = this._jobEventEmitters.get(jobId);
     if (jobEmitter) {
       jobEmitter.emit('event', { ...event, jobId });
+    }
+  }
+  
+  async _simulateJobResult(jobId: number, result: any): Promise<void> {
+    const job = this._jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    // Store the result with inference time
+    job.result = {
+      ...result,
+      inferenceTime: result.inferenceTime || 5000 // Default 5 seconds
+    };
+  }
+  
+  async _simulateStreamToken(jobId: number, token: string): Promise<void> {
+    const job = this._jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    const jobEmitter = this._jobEventEmitters.get(jobId);
+    if (jobEmitter) {
+      jobEmitter.emit('token', token);
     }
   }
 }
