@@ -234,3 +234,12 @@ Client SDK for the Fabstir P2P LLM marketplace, enabling applications to connect
 - `tests/integration/test_performance.spec.ts`
 - `tests/integration/test_errors.spec.ts`
 - `tests/integration/test_load.spec.ts`
+
+## Current Focus: MVP Demo Implementation
+
+Prioritizing demo functionality before completing P2P implementation:
+
+- ✅ Job submission and cost estimation
+- ✅ Job monitoring and status updates
+- ⏳ Response streaming
+- ⏳ Payment flow

@@ -3,11 +3,13 @@ import { ethers } from "ethers";
 import { EventEmitter } from "events";
 import { ContractManager } from "./contracts";
 import { ErrorCode, FabstirError } from "./errors";
+import { JobStatus } from "./types";
 
 // Export all types
 export * from "./types";
 export { ErrorCode, FabstirError } from "./errors";
 export { ContractManager } from "./contracts";
+export { JobStatus } from "./types";
 
 // Main SDK configuration
 export interface FabstirConfig {
@@ -29,6 +31,8 @@ export class FabstirSDK extends EventEmitter {
   public contracts: ContractManager;
 
   private _isConnected: boolean = false;
+  private _jobs: Map<number, any> = new Map();
+  private _jobEventEmitters: Map<number, EventEmitter> = new Map();
 
   constructor(config: FabstirConfig = {}) {
     super();
@@ -157,6 +161,28 @@ export class FabstirSDK extends EventEmitter {
     
     // Generate a mock job ID
     this._jobIdCounter++;
+    const jobId = this._jobIdCounter;
+    
+    // Store job details
+    const jobDetails = {
+      id: jobId,
+      status: JobStatus.POSTED,
+      prompt: jobRequest.prompt,
+      modelId: jobRequest.modelId,
+      maxTokens: jobRequest.maxTokens,
+      temperature: jobRequest.temperature || 0.7,
+      paymentToken: jobRequest.paymentToken || 'USDC',
+      maxPrice: jobRequest.maxPrice,
+      client: await this.getAddress() || '0x0000000000000000000000000000000000000000',
+      timestamp: Date.now(),
+      host: null
+    };
+    
+    this._jobs.set(jobId, jobDetails);
+    
+    // Create event emitter for this job
+    const jobEmitter = new EventEmitter();
+    this._jobEventEmitters.set(jobId, jobEmitter);
     
     // In a real implementation, this would:
     // 1. Call the JobMarketplace contract
@@ -164,10 +190,10 @@ export class FabstirSDK extends EventEmitter {
     // 3. Return the actual job ID from the blockchain
     
     if (this.config.debug) {
-      console.log(`[FabstirSDK] Submitted job ${this._jobIdCounter}`);
+      console.log(`[FabstirSDK] Submitted job ${jobId}`);
     }
     
-    return this._jobIdCounter;
+    return jobId;
   }
 
   async estimateJobCost(jobRequest: any): Promise<any> {
@@ -198,32 +224,102 @@ export class FabstirSDK extends EventEmitter {
   }
 
   async getJobDetails(jobId: number): Promise<any> {
-    throw new Error("Not implemented");
+    const job = this._jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    return { ...job };
   }
 
-  async getJobStatus(jobId: number): Promise<any> {
-    throw new Error("Not implemented");
+  async getJobStatus(jobId: number): Promise<JobStatus> {
+    const job = this._jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    return job.status;
   }
 
   onJobStatusChange(
     jobId: number,
-    callback: (status: any) => void
+    callback: (status: JobStatus) => void
   ): () => void {
+    const jobEmitter = this._jobEventEmitters.get(jobId);
+    if (!jobEmitter) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    const handler = (status: JobStatus) => callback(status);
+    jobEmitter.on('statusChange', handler);
+    
     // Return unsubscribe function
-    return () => {};
+    return () => {
+      jobEmitter.removeListener('statusChange', handler);
+    };
   }
 
   streamJobEvents(jobId: number, callback: (event: any) => void): () => void {
+    const jobEmitter = this._jobEventEmitters.get(jobId);
+    if (!jobEmitter) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    const handler = (event: any) => callback(event);
+    jobEmitter.on('event', handler);
+    
     // Return unsubscribe function
-    return () => {};
+    return () => {
+      jobEmitter.removeListener('event', handler);
+    };
   }
 
   async getJobHost(jobId: number): Promise<any> {
-    throw new Error("Not implemented");
+    const job = this._jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    if (!job.host) {
+      return null;
+    }
+    
+    // Return mock host info
+    return {
+      address: job.host,
+      reputation: 95,
+      completedJobs: 42,
+      failedJobs: 2,
+      online: true,
+      models: ['llama2-7b', 'llama2-13b'],
+      stake: ethers.BigNumber.from('1000000000000000000') // 1 ETH
+    };
   }
 
   async waitForJobCompletion(jobId: number, options?: any): Promise<boolean> {
-    throw new Error("Not implemented");
+    const job = this._jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    // If already completed, return immediately
+    if (job.status === JobStatus.COMPLETED) {
+      return true;
+    }
+    
+    const timeout = options?.timeout || 30000; // Default 30 seconds
+    const startTime = Date.now();
+    
+    return new Promise((resolve) => {
+      const checkStatus = setInterval(() => {
+        const currentJob = this._jobs.get(jobId);
+        if (currentJob?.status === JobStatus.COMPLETED) {
+          clearInterval(checkStatus);
+          resolve(true);
+        } else if (Date.now() - startTime >= timeout) {
+          clearInterval(checkStatus);
+          resolve(false);
+        }
+      }, 100); // Check every 100ms
+    });
   }
 
   async getJobResult(jobId: number): Promise<any> {
@@ -270,6 +366,38 @@ export class FabstirSDK extends EventEmitter {
     // Validate modelId is provided
     if (!jobRequest.modelId || jobRequest.modelId.trim() === '') {
       throw new Error('Invalid job request: modelId is required');
+    }
+  }
+  
+  // Testing helper methods
+  async _simulateStatusChange(jobId: number, status: JobStatus): Promise<void> {
+    const job = this._jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    job.status = status;
+    
+    const jobEmitter = this._jobEventEmitters.get(jobId);
+    if (jobEmitter) {
+      jobEmitter.emit('statusChange', status);
+    }
+  }
+  
+  async _simulateJobEvent(jobId: number, event: any): Promise<void> {
+    const job = this._jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    // Handle specific event types
+    if (event.type === 'claimed' && event.data?.host) {
+      job.host = event.data.host;
+    }
+    
+    const jobEmitter = this._jobEventEmitters.get(jobId);
+    if (jobEmitter) {
+      jobEmitter.emit('event', { ...event, jobId });
     }
   }
 }
