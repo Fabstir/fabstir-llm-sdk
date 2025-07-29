@@ -3,7 +3,7 @@ import { ethers } from "ethers";
 import { EventEmitter } from "events";
 import { ContractManager } from "./contracts";
 import { ErrorCode, FabstirError } from "./errors";
-import { JobStatus } from "./types";
+import { JobStatus, PaymentStatus } from "./types";
 
 // Export all types
 export * from "./types";
@@ -33,6 +33,9 @@ export class FabstirSDK extends EventEmitter {
   private _isConnected: boolean = false;
   private _jobs: Map<number, any> = new Map();
   private _jobEventEmitters: Map<number, EventEmitter> = new Map();
+  private _payments: Map<number, any> = new Map();
+  private _paymentHistory: Map<number, any[]> = new Map();
+  private _paymentEventEmitter: EventEmitter = new EventEmitter();
 
   constructor(config: FabstirConfig = {}) {
     super();
@@ -183,6 +186,31 @@ export class FabstirSDK extends EventEmitter {
     // Create event emitter for this job
     const jobEmitter = new EventEmitter();
     this._jobEventEmitters.set(jobId, jobEmitter);
+    
+    // Create payment data
+    const estimate = await this.estimateJobCost(jobRequest);
+    const paymentData = {
+      jobId,
+      amount: estimate.estimatedCost,
+      token: jobRequest.paymentToken || 'USDC',
+      status: PaymentStatus.ESCROWED,
+      payer: await this.getAddress() || '0x0000000000000000000000000000000000000000',
+      recipient: '0x0000000000000000000000000000000000000000', // Will be set when job is claimed
+      escrowedAt: Date.now(),
+      releasedAt: undefined
+    };
+    
+    this._payments.set(jobId, paymentData);
+    
+    // Initialize payment history
+    this._paymentHistory.set(jobId, [{
+      event: 'PaymentEscrowed',
+      timestamp: Date.now(),
+      data: {
+        amount: paymentData.amount.toString(),
+        token: paymentData.token
+      }
+    }]);
     
     // In a real implementation, this would:
     // 1. Call the JobMarketplace contract
@@ -546,6 +574,12 @@ export class FabstirSDK extends EventEmitter {
     // Handle specific event types
     if (event.type === 'claimed' && event.data?.host) {
       job.host = event.data.host;
+      
+      // Update payment recipient when job is claimed
+      const payment = this._payments.get(jobId);
+      if (payment) {
+        payment.recipient = event.data.host;
+      }
     }
     
     const jobEmitter = this._jobEventEmitters.get(jobId);
@@ -577,5 +611,211 @@ export class FabstirSDK extends EventEmitter {
     if (jobEmitter) {
       jobEmitter.emit('token', token);
     }
+  }
+  
+  // Payment related methods
+  async getPaymentDetails(jobId: number): Promise<any> {
+    const payment = this._payments.get(jobId);
+    if (!payment) {
+      throw new Error(`Payment details not found for job ${jobId}`);
+    }
+    return { ...payment };
+  }
+  
+  async calculateActualCost(jobId: number): Promise<any> {
+    const job = this._jobs.get(jobId);
+    if (!job || !job.result) {
+      throw new Error(`Job ${jobId} not found or not completed`);
+    }
+    
+    // Base price per token: $0.00001 (10 units in USDC 6 decimals)
+    const pricePerToken = ethers.BigNumber.from(10);
+    const tokensUsed = job.result.tokensUsed;
+    const totalCost = pricePerToken.mul(tokensUsed);
+    
+    // Calculate breakdown: 85% host, 10% treasury, 5% stakers
+    const hostPayment = totalCost.mul(85).div(100);
+    const treasuryFee = totalCost.mul(10).div(100);
+    const stakerReward = totalCost.mul(5).div(100);
+    
+    return {
+      totalCost,
+      tokensUsed,
+      pricePerToken,
+      breakdown: {
+        hostPayment,
+        treasuryFee,
+        stakerReward
+      }
+    };
+  }
+  
+  async approvePayment(token: string, amount: ethers.BigNumber): Promise<any> {
+    // Generate mock transaction hash
+    const randomBytes = ethers.utils.randomBytes(32);
+    const hash = ethers.utils.hexlify(randomBytes);
+    
+    const tx = {
+      hash,
+      from: await this.getAddress() || '0x0000000000000000000000000000000000000000',
+      to: '0x0000000000000000000000000000000000000000', // Mock token address
+      value: ethers.BigNumber.from(0),
+      wait: async () => ({
+        transactionHash: hash,
+        confirmations: 1,
+        from: await this.getAddress() || '0x0000000000000000000000000000000000000000',
+        to: '0x0000000000000000000000000000000000000000',
+        contractAddress: null,
+        status: 1,
+        blockNumber: 1000000,
+        blockHash: '0x' + '0'.repeat(64),
+        transactionIndex: 0,
+        gasUsed: ethers.BigNumber.from(50000),
+        cumulativeGasUsed: ethers.BigNumber.from(50000),
+        effectiveGasPrice: ethers.BigNumber.from('1000000000'),
+        logs: [],
+        logsBloom: '0x' + '0'.repeat(512),
+        type: 2
+      })
+    };
+    
+    return tx;
+  }
+  
+  async approveJobPayment(jobId: number): Promise<any> {
+    const payment = this._payments.get(jobId);
+    if (!payment) {
+      throw new Error(`Payment not found for job ${jobId}`);
+    }
+    
+    // Update payment status
+    payment.status = PaymentStatus.RELEASED;
+    payment.releasedAt = Date.now();
+    
+    // Update recipient to host if job was claimed
+    const job = this._jobs.get(jobId);
+    if (job && job.host) {
+      payment.recipient = job.host;
+    }
+    
+    // Add to payment history
+    const history = this._paymentHistory.get(jobId) || [];
+    history.push({
+      event: 'PaymentReleased',
+      timestamp: Date.now(),
+      data: {
+        amount: payment.amount.toString(),
+        recipient: payment.recipient
+      }
+    });
+    this._paymentHistory.set(jobId, history);
+    
+    // Emit payment event
+    this._paymentEventEmitter.emit('payment', {
+      type: 'PaymentReleased',
+      jobId,
+      amount: payment.amount,
+      recipient: payment.recipient,
+      timestamp: Date.now()
+    });
+    
+    // Return mock transaction
+    return this.approvePayment(payment.token, payment.amount);
+  }
+  
+  async getPaymentStatus(jobId: number): Promise<PaymentStatus> {
+    const payment = this._payments.get(jobId);
+    if (!payment) {
+      throw new Error(`Payment not found for job ${jobId}`);
+    }
+    return payment.status;
+  }
+  
+  async requestRefund(jobId: number): Promise<any> {
+    const payment = this._payments.get(jobId);
+    if (!payment) {
+      throw new Error(`Payment not found for job ${jobId}`);
+    }
+    
+    const job = this._jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    // Only allow refund for failed/cancelled jobs
+    if (job.status !== JobStatus.FAILED && job.status !== JobStatus.CANCELLED) {
+      throw new Error('Refund only available for failed or cancelled jobs');
+    }
+    
+    // Update payment status
+    payment.status = PaymentStatus.REFUNDED;
+    payment.releasedAt = Date.now();
+    
+    // Add to payment history
+    const history = this._paymentHistory.get(jobId) || [];
+    history.push({
+      event: 'PaymentRefunded',
+      timestamp: Date.now(),
+      data: {
+        amount: payment.amount.toString(),
+        reason: job.status
+      }
+    });
+    this._paymentHistory.set(jobId, history);
+    
+    // Emit payment event
+    this._paymentEventEmitter.emit('payment', {
+      type: 'PaymentRefunded',
+      jobId,
+      amount: payment.amount,
+      payer: payment.payer,
+      timestamp: Date.now()
+    });
+    
+    // Return mock transaction
+    return this.approvePayment(payment.token, payment.amount);
+  }
+  
+  async getPaymentHistory(jobId: number): Promise<any[]> {
+    const history = this._paymentHistory.get(jobId);
+    if (!history) {
+      throw new Error(`Payment history not found for job ${jobId}`);
+    }
+    return [...history];
+  }
+  
+  onPaymentEvent(callback: (event: any) => void): () => void {
+    const handler = (event: any) => callback(event);
+    this._paymentEventEmitter.on('payment', handler);
+    
+    // Return unsubscribe function
+    return () => {
+      this._paymentEventEmitter.removeListener('payment', handler);
+    };
+  }
+  
+  async calculateRefundAmount(jobId: number): Promise<ethers.BigNumber> {
+    const job = this._jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    
+    const payment = this._payments.get(jobId);
+    if (!payment) {
+      throw new Error(`Payment not found for job ${jobId}`);
+    }
+    
+    // Full refund for cancelled/failed jobs
+    if (job.status === JobStatus.CANCELLED || job.status === JobStatus.FAILED) {
+      return payment.amount;
+    }
+    
+    // No refund for completed jobs
+    if (job.status === JobStatus.COMPLETED) {
+      return ethers.BigNumber.from(0);
+    }
+    
+    // For other statuses, return full amount (could be adjusted based on business logic)
+    return payment.amount;
   }
 }

@@ -242,4 +242,4 @@ Prioritizing demo functionality before completing P2P implementation:
 - ✅ Job submission and cost estimation
 - ✅ Job monitoring and status updates
 - ✅ Response streaming
-- ⏳ Payment flow
+- ✅ Payment flow
