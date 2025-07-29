@@ -149,12 +149,48 @@ export class FabstirSDK extends EventEmitter {
   }
 
   // TODO: Implement these methods for the tests
+  private _jobIdCounter: number = 0;
+  
   async submitJob(jobRequest: any): Promise<number> {
-    throw new Error("Not implemented");
+    // Validate the job request first
+    this.validateJobRequest(jobRequest);
+    
+    // Generate a mock job ID
+    this._jobIdCounter++;
+    
+    // In a real implementation, this would:
+    // 1. Call the JobMarketplace contract
+    // 2. Emit events
+    // 3. Return the actual job ID from the blockchain
+    
+    if (this.config.debug) {
+      console.log(`[FabstirSDK] Submitted job ${this._jobIdCounter}`);
+    }
+    
+    return this._jobIdCounter;
   }
 
   async estimateJobCost(jobRequest: any): Promise<any> {
-    throw new Error("Not implemented");
+    // Base price per token: $0.00001 (10 units in USDC 6 decimals)
+    const pricePerToken = ethers.BigNumber.from(10);
+    
+    // Estimate prompt tokens: prompt.length / 4 (rough approximation)
+    const promptTokens = Math.ceil(jobRequest.prompt.length / 4);
+    
+    // Total estimated tokens: prompt tokens + (maxTokens * 0.8) (assume 80% usage)
+    const estimatedResponseTokens = Math.floor(jobRequest.maxTokens * 0.8);
+    const estimatedTokens = promptTokens + estimatedResponseTokens;
+    
+    // Calculate estimated cost
+    const estimatedCost = pricePerToken.mul(estimatedTokens);
+    
+    return {
+      estimatedCost,
+      estimatedTokens,
+      pricePerToken,
+      modelId: jobRequest.modelId,
+      includesBuffer: true
+    };
   }
 
   async approvePayment(token: string, amount: any): Promise<any> {
@@ -221,6 +257,19 @@ export class FabstirSDK extends EventEmitter {
   }
 
   validateJobRequest(jobRequest: any): void {
-    throw new Error("Not implemented");
+    // Validate prompt is not empty
+    if (!jobRequest.prompt || jobRequest.prompt.trim() === '') {
+      throw new Error('Invalid job request: prompt cannot be empty');
+    }
+    
+    // Validate maxTokens is positive
+    if (!jobRequest.maxTokens || jobRequest.maxTokens <= 0) {
+      throw new Error('Invalid job request: maxTokens must be positive');
+    }
+    
+    // Validate modelId is provided
+    if (!jobRequest.modelId || jobRequest.modelId.trim() === '') {
+      throw new Error('Invalid job request: modelId is required');
+    }
   }
 }
