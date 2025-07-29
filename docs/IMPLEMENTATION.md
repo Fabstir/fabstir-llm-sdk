@@ -15,10 +15,10 @@ Client SDK for the Fabstir P2P LLM marketplace, enabling applications to connect
 
 ### Sub-phase 1.1: Project Setup
 
-- [ ] Initialize TypeScript project
-- [ ] Configure build system
-- [ ] Set up testing framework
-- [ ] Create package structure
+- [x] Initialize TypeScript project
+- [x] Configure build system
+- [x] Set up testing framework
+- [x] Create package structure
 
 **Test Files:**
 

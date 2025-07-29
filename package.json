@@ -1,13 +1,50 @@
 {
-  "name": "workspace",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "@fabstir/llm-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for Fabstir P2P LLM Marketplace",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/**/*",
+    "README.md"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
+    "clean": "rm -rf dist",
+    "prepare": "npm run build",
+    "dev": "tsc --watch"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "packageManager": "pnpm@10.13.1"
+  "keywords": [
+    "fabstir",
+    "llm",
+    "ai",
+    "marketplace",
+    "p2p",
+    "blockchain",
+    "base"
+  ],
+  "author": "Fabstir",
+  "license": "MIT",
+  "dependencies": {
+    "ethers": "^5.0.0",
+    "events": "^3.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@vitest/coverage-v8": "^1.6.0",
+    "@vitest/ui": "^1.6.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.3",
+    "vite": "^5.3.5",
+    "vitest": "^1.6.0"
+  },
+  "peerDependencies": {
+    "ethers": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
 }
