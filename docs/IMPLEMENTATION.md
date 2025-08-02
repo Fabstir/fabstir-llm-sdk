@@ -2,244 +2,338 @@
 
 ## Overview
 
-Client SDK for the Fabstir P2P LLM marketplace, enabling applications to connect directly to host nodes without central coordination.
+Client SDK for the Fabstir P2P LLM marketplace, enabling applications to connect directly to host nodes without central coordination. The SDK supports two modes:
+
+- **Mock Mode**: For demos and development (current default)
+- **Production Mode**: For real P2P connectivity with libp2p
 
 ## Development Setup
 
 - **Language**: TypeScript/JavaScript
-- **P2P**: js-libp2p
-- **UI Testing**: Puppeteer
-- **Package Manager**: pnpm
+- **P2P**: js-libp2p (production mode only)
+- **Testing**: Vitest with TDD approach
+- **Package Manager**: npm/pnpm
+- **Backward Compatibility**: Must maintain exact demo behavior
 
-## Phase 1: Core SDK (Month 1)
+## Phase 1: Mock Implementation (COMPLETED) ✅
 
-### Sub-phase 1.1: Project Setup
+### Sub-phase 1.1: Project Setup ✅
 
 - [x] Initialize TypeScript project
 - [x] Configure build system
-- [x] Set up testing framework
+- [x] Set up basic testing
 - [x] Create package structure
 
+### Sub-phase 1.2: Mock Provider ✅
+
+- [x] Implement mock Web3 provider
+- [x] Implement mock contract interactions
+- [x] Implement simulated responses
+- [x] Create demo integration
+
+### Sub-phase 1.3: Basic SDK Interface ✅
+
+- [x] Implement FabstirSDK class
+- [x] Implement job submission
+- [x] Implement status tracking
+- [x] Implement response streaming
+
+### Sub-phase 1.4: Demo Integration ✅
+
+- [x] Connect with fabstir-llm-demo
+- [x] Support all demo features
+- [x] Mock timeline events
+- [x] Cost estimation
+
+## Phase 2: Production Mode Upgrade (IN PROGRESS)
+
+### Sub-phase 2.1: Mode Configuration
+
+- [x] Add SDKMode type ('mock' | 'production')
+- [ ] Update FabstirConfig interface
+- [ ] Implement mode validation
+- [ ] Ensure backward compatibility
+
 **Test Files:**
 
-- `tests/setup/test_project.spec.ts`
-- `tests/setup/test_build.spec.ts`
-- `tests/setup/test_packages.spec.ts`
-- `tests/setup/test_types.spec.ts`
+- `src/__tests__/config/mode.test.ts`
+- `src/__tests__/compatibility/demo.test.ts`
 
-### Sub-phase 1.2: P2P Client
+**Claude Code Prompt:**
 
-- [ ] Implement libp2p client
+```
+Add 'mode' configuration to SDK that defaults to 'mock'.
+Tests in src/__tests__/config/mode.test.ts need to pass.
+Minimal changes only - don't break existing functionality.
+```
+
+### Sub-phase 2.2: P2P Configuration
+
+- [ ] Add P2PConfig interface
+- [ ] Validate P2P config in production mode
+- [ ] Add bootstrap nodes validation
+- [ ] Implement config freezing
+
+**Test Files:**
+
+- `src/__tests__/p2p/config.test.ts`
+
+**Claude Code Prompt:**
+
+```
+Add P2P configuration validation when mode='production'.
+Must have bootstrapNodes array. Throw clear errors.
+```
+
+### Sub-phase 2.3: P2P Client Structure
+
+- [ ] Create P2PClient class skeleton
+- [ ] Add libp2p dependencies
+- [ ] Implement client lifecycle (start/stop)
+- [ ] Add connection state tracking
+
+**Test Files:**
+
+- `src/__tests__/p2p/client-lifecycle.test.ts`
+
+**Claude Code Prompt:**
+
+```
+Create basic P2PClient class that can start/stop.
+Don't implement actual P2P yet - just structure.
+```
+
+### Sub-phase 2.4: Mode-Specific Behavior
+
+- [ ] Update connect() for mode handling
+- [ ] Update submitJob() for mode routing
+- [ ] Update status methods for mode
+- [ ] Ensure mock mode unchanged
+
+**Test Files:**
+
+- `src/__tests__/mode/behavior.test.ts`
+
+**Claude Code Prompt:**
+
+```
+Make SDK methods check mode and route to appropriate implementation.
+Mock mode must work exactly as before.
+```
+
+### Sub-phase 2.5: P2P Connection
+
+- [ ] Implement libp2p node creation
+- [ ] Connect to bootstrap nodes
+- [ ] Handle connection events
+- [ ] Implement connection retry
+
+**Test Files:**
+
+- `src/__tests__/p2p/connection.test.ts`
+
+**Claude Code Prompt:**
+
+```
+Implement actual P2P connection using libp2p.
+Connect to bootstrap nodes and emit events.
+```
+
+### Sub-phase 2.6: Node Discovery
+
 - [ ] Implement DHT queries
-- [ ] Implement peer discovery
-- [ ] Implement connection handling
+- [ ] Parse node capabilities
+- [ ] Filter by requirements
+- [ ] Cache discovered nodes
 
 **Test Files:**
 
-- `tests/p2p/test_client.spec.ts`
-- `tests/p2p/test_dht.spec.ts`
-- `tests/p2p/test_discovery.spec.ts`
-- `tests/p2p/test_connections.spec.ts`
+- `src/__tests__/p2p/discovery.test.ts`
 
-### Sub-phase 1.3: Node Communication
+**Claude Code Prompt:**
 
-- [ ] Implement request protocol
-- [ ] Implement response handling
-- [ ] Implement streaming support
-- [ ] Implement error recovery
+```
+Implement node discovery via DHT.
+Find nodes offering 'llm-inference' service.
+```
 
-**Test Files:**
+### Sub-phase 2.7: Job Negotiation
 
-- `tests/comm/test_requests.spec.ts`
-- `tests/comm/test_responses.spec.ts`
-- `tests/comm/test_streaming.spec.ts`
-- `tests/comm/test_recovery.spec.ts`
-
-### Sub-phase 1.4: Contract Integration
-
-- [ ] Implement Web3 provider
-- [ ] Implement job submission
-- [ ] Implement payment handling
-- [ ] Implement event monitoring
-- [ ] Implement S5 result retrieval (**NEW**)
-- [ ] Implement Vector DB cache check (**NEW**)
+- [ ] Define job request protocol
+- [ ] Send job to specific node
+- [ ] Handle accept/reject
+- [ ] Implement node selection
 
 **Test Files:**
 
-- `tests/contracts/test_web3.spec.ts`
-- `tests/contracts/test_jobs.spec.ts`
-- `tests/contracts/test_payments.spec.ts`
-- `tests/contracts/test_events.spec.ts`
-- `tests/contracts/test_s5_retrieval.spec.ts` (**NEW**)
-- `tests/contracts/test_vector_cache.spec.ts` (**NEW**)
+- `src/__tests__/p2p/job-negotiation.test.ts`
 
-### Sub-phase 1.5: Model Discovery (**NEW**)
+**Claude Code Prompt:**
 
-- [ ] Implement model marketplace query
-- [ ] Implement host discovery by model
-- [ ] Implement pricing comparison
-- [ ] Implement latency-based routing
+```
+Implement job request protocol over P2P.
+Send job details and handle node response.
+```
 
-**Test Files:**
+### Sub-phase 2.8: Response Streaming
 
-- `tests/discovery/test_marketplace.spec.ts`
-- `tests/discovery/test_host_search.spec.ts`
-- `tests/discovery/test_pricing.spec.ts`
-- `tests/discovery/test_routing.spec.ts`
-
-## Phase 2: Advanced Features (Month 2)
-
-### Sub-phase 2.1: Enhanced S5 Client
-
-- [ ] Implement S5 integration
-- [ ] Implement vector-db queries
-- [ ] Implement cache management
-- [ ] Implement result retrieval
-- [ ] Use Enhanced S5.js path-based API (**NEW**)
-- [ ] Implement CBOR decoding for results (**NEW**)
+- [ ] Implement stream protocol
+- [ ] Handle token messages
+- [ ] Support stream resumption
+- [ ] Track streaming metrics
 
 **Test Files:**
 
-- `tests/s5/test_integration.spec.ts`
-- `tests/s5/test_vector_queries.spec.ts`
-- `tests/s5/test_cache.spec.ts`
-- `tests/s5/test_retrieval.spec.ts`
-- `tests/s5/test_path_api.spec.ts` (**NEW**)
-- `tests/s5/test_cbor_decode.spec.ts` (**NEW**)
+- `src/__tests__/streaming/p2p-stream.test.ts`
 
-### Sub-phase 2.2: Base Account SDK
+**Claude Code Prompt:**
 
-- [ ] Implement smart wallet support
-- [ ] Implement gasless transactions
-- [ ] Implement session management
-- [ ] Implement batch operations
+```
+Implement response streaming over P2P connection.
+Handle individual tokens and completion.
+```
 
-**Test Files:**
+### Sub-phase 2.9: Contract Bridge
 
-- `tests/base/test_wallets.spec.ts`
-- `tests/base/test_gasless.spec.ts`
-- `tests/base/test_sessions.spec.ts`
-- `tests/base/test_batch.spec.ts`
-
-### Sub-phase 2.3: Developer Experience
-
-- [ ] Implement TypeScript types
-- [ ] Implement error handling
-- [ ] Implement logging system
-- [ ] Implement debugging tools
+- [ ] Link P2P events to contracts
+- [ ] Submit job to blockchain
+- [ ] Monitor contract events
+- [ ] Handle payment flow
 
 **Test Files:**
 
-- `tests/dx/test_types.spec.ts`
-- `tests/dx/test_errors.spec.ts`
-- `tests/dx/test_logging.spec.ts`
-- `tests/dx/test_debugging.spec.ts`
+- `src/__tests__/contracts/p2p-integration.test.ts`
 
-### Sub-phase 2.4: UI Components
+**Claude Code Prompt:**
 
-- [ ] Implement React components
-- [ ] Implement Vue components
-- [ ] Implement vanilla JS widgets
-- [ ] Implement mobile support
+```
+Bridge P2P functionality with smart contracts.
+Submit jobs on-chain while using P2P for execution.
+```
 
-**Test Files (Puppeteer):**
+### Sub-phase 2.10: Error Recovery
 
-- `tests/ui/test_react.spec.ts`
-- `tests/ui/test_vue.spec.ts`
-- `tests/ui/test_vanilla.spec.ts`
-- `tests/ui/test_mobile.spec.ts`
-
-### Sub-phase 2.5: Payment Integration (**NEW**)
-
-- [ ] Implement USDC payment flow
-- [ ] Implement FAB token payment with discount
-- [ ] Implement payment estimation
-- [ ] Implement transaction tracking
+- [ ] Implement retry mechanisms
+- [ ] Handle node failures
+- [ ] Support job recovery
+- [ ] Track node reliability
 
 **Test Files:**
 
-- `tests/payments/test_usdc.spec.ts`
-- `tests/payments/test_fab.spec.ts`
-- `tests/payments/test_estimation.spec.ts`
-- `tests/payments/test_tracking.spec.ts`
+- `src/__tests__/error/recovery.test.ts`
 
-### Sub-phase 2.6: Host Selection (**NEW**)
+**Claude Code Prompt:**
 
-- [ ] Implement automatic host selection
-- [ ] Implement reputation-based routing
-- [ ] Implement failover mechanisms
-- [ ] Implement load distribution
+```
+Add error recovery for P2P operations.
+Retry failed connections and handle node failures.
+```
 
-**Test Files:**
+### Sub-phase 2.11: Integration Testing
 
-- `tests/selection/test_auto_select.spec.ts`
-- `tests/selection/test_reputation.spec.ts`
-- `tests/selection/test_failover.spec.ts`
-- `tests/selection/test_load_balance.spec.ts`
-
-## Phase 3: Multi-Language SDKs (Month 3)
-
-### Sub-phase 3.1: Python SDK
-
-- [ ] Implement Python client
-- [ ] Implement async support
-- [ ] Implement type hints
-- [ ] Create documentation
+- [ ] Test full job lifecycle
+- [ ] Verify mode switching
+- [ ] Test fallback scenarios
+- [ ] Performance benchmarks
 
 **Test Files:**
 
-- `tests/python/test_client.py`
-- `tests/python/test_async.py`
-- `tests/python/test_types.py`
-- `tests/python/test_docs.py`
+- `src/__tests__/integration/e2e.test.ts`
 
-### Sub-phase 3.2: Rust SDK
+**Claude Code Prompt:**
 
-- [ ] Implement Rust client
-- [ ] Implement async runtime
-- [ ] Implement FFI bindings
-- [ ] Create documentation
+```
+Verify complete flow works in both modes.
+Test job submission through completion.
+```
 
-**Test Files:**
+### Sub-phase 2.12: Documentation
 
-- `tests/rust/test_client.rs`
-- `tests/rust/test_async.rs`
-- `tests/rust/test_ffi.rs`
-- `tests/rust/test_docs.rs`
+- [ ] Update README with modes
+- [ ] Document P2P configuration
+- [ ] Add migration guide
+- [ ] Update API docs
 
-### Sub-phase 3.3: Go SDK
+**Files:**
 
-- [ ] Implement Go client
-- [ ] Implement goroutines
-- [ ] Implement interfaces
-- [ ] Create documentation
+- `README.md`
+- `docs/MIGRATION.md`
+- `docs/API.md`
 
-**Test Files:**
+## Phase 3: Advanced Features (FUTURE)
 
-- `tests/go/test_client.go`
-- `tests/go/test_goroutines.go`
-- `tests/go/test_interfaces.go`
-- `tests/go/test_docs.go`
+### Sub-phase 3.1: Multi-language Support
 
-### Sub-phase 3.4: Integration Testing
+- [ ] Python SDK
+- [ ] Go SDK
+- [ ] Rust SDK bindings
+- [ ] SDK feature parity
 
-- [ ] Test cross-language compatibility
-- [ ] Test performance benchmarks
-- [ ] Test error scenarios
-- [ ] Test production loads
+### Sub-phase 3.2: Enhanced Streaming
 
-**Test Files:**
+- [ ] Binary protocol support
+- [ ] Compression
+- [ ] Multi-stream jobs
+- [ ] Stream prioritization
 
-- `tests/integration/test_compatibility.spec.ts`
-- `tests/integration/test_performance.spec.ts`
-- `tests/integration/test_errors.spec.ts`
-- `tests/integration/test_load.spec.ts`
+### Sub-phase 3.3: Caching Layer
 
-## Current Focus: MVP Demo Implementation
+- [ ] S5.js integration
+- [ ] Semantic caching
+- [ ] Result deduplication
+- [ ] Cache invalidation
 
-Prioritizing demo functionality before completing P2P implementation:
+### Sub-phase 3.4: Production Optimization
 
-- ✅ Job submission and cost estimation
-- ✅ Job monitoring and status updates
-- ✅ Response streaming
-- ✅ Payment flow
+- [ ] Connection pooling
+- [ ] Request batching
+- [ ] Metric collection
+- [ ] Performance tuning
+
+## Testing Strategy
+
+1. **Write test first** (TDD approach)
+2. **Run test** - should fail
+3. **Implement minimal code** to pass
+4. **Refactor** if needed
+5. **Run all tests** to ensure no regression
+
+## Success Criteria
+
+### Phase 2 Completion
+
+- [ ] All Phase 2 tests passing
+- [ ] Demo works unchanged in mock mode
+- [ ] Can connect to real P2P nodes in production
+- [ ] Can submit and process real jobs
+- [ ] Test coverage > 80%
+- [ ] No breaking changes
+
+### Integration Success
+
+- [ ] Works with fabstir-llm-node
+- [ ] Integrates with smart contracts
+- [ ] Handles network failures gracefully
+- [ ] Performance meets requirements
+
+## Current Status
+
+- **Phase 1**: ✅ Complete (Mock implementation working)
+- **Phase 2**: 🚧 In Progress (Starting with 2.1)
+- **Phase 3**: 📋 Planned
+
+## Implementation Order
+
+For Phase 2, implement sub-phases in order:
+
+1. Start with 2.1 (Mode Configuration)
+2. Ensure 2.1 tests pass completely
+3. Move to 2.2, and so on
+4. Don't skip ahead - each phase builds on previous
+
+## Notes
+
+- **Backward Compatibility**: The demo must continue working exactly as is
+- **Incremental Changes**: Each sub-phase should be small and focused
+- **Test Coverage**: Aim for 100% coverage of new code
+- **Documentation**: Update docs as features are added
