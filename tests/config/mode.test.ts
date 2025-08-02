@@ -14,12 +14,22 @@ describe("SDK Mode Configuration - Sub-phase 2.1", () => {
     });
 
     it("should accept production mode", () => {
-      const sdk = new FabstirSDK({ mode: "production" });
+      const sdk = new FabstirSDK({ 
+        mode: "production",
+        p2pConfig: {
+          bootstrapNodes: ["/ip4/127.0.0.1/tcp/4001/p2p/12D3KooW..."]
+        }
+      });
       expect(sdk.config.mode).toBe("production");
     });
 
     it("should store mode in config object", () => {
-      const sdk = new FabstirSDK({ mode: "production" });
+      const sdk = new FabstirSDK({ 
+        mode: "production",
+        p2pConfig: {
+          bootstrapNodes: ["/ip4/127.0.0.1/tcp/4001/p2p/12D3KooW..."]
+        }
+      });
       expect(sdk.config).toHaveProperty("mode", "production");
     });
   });

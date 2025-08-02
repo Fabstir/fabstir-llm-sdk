@@ -47,7 +47,12 @@ describe("SDK Mode Configuration - Complete Sub-phase 2.1", () => {
     it("should accept all valid config combinations with mode", () => {
       // Mode only
       expect(() => new FabstirSDK({ mode: "mock" })).not.toThrow();
-      expect(() => new FabstirSDK({ mode: "production" })).not.toThrow();
+      expect(() => new FabstirSDK({ 
+        mode: "production",
+        p2pConfig: {
+          bootstrapNodes: ["/ip4/127.0.0.1/tcp/4001/p2p/12D3KooW..."]
+        }
+      })).not.toThrow();
 
       // Mode with network
       expect(
@@ -71,6 +76,9 @@ describe("SDK Mode Configuration - Complete Sub-phase 2.1", () => {
               paymentEscrow: "0x456",
               nodeRegistry: "0x789",
             },
+            p2pConfig: {
+              bootstrapNodes: ["/ip4/127.0.0.1/tcp/4001/p2p/12D3KooW..."]
+            }
           })
       ).not.toThrow();
     });
@@ -177,7 +185,12 @@ describe("SDK Mode Configuration - Complete Sub-phase 2.1", () => {
     });
 
     it("should prepare for P2P initialization in production mode", () => {
-      const sdk = new FabstirSDK({ mode: "production" });
+      const sdk = new FabstirSDK({ 
+        mode: "production",
+        p2pConfig: {
+          bootstrapNodes: ["/ip4/127.0.0.1/tcp/4001/p2p/12D3KooW..."]
+        }
+      });
 
       // Should be ready for P2P but not initialized yet (requires connect)
       expect(sdk.config.mode).toBe("production");
@@ -186,7 +199,12 @@ describe("SDK Mode Configuration - Complete Sub-phase 2.1", () => {
 
     it("should expose mode information through public API", () => {
       const mockSdk = new FabstirSDK({ mode: "mock" });
-      const prodSdk = new FabstirSDK({ mode: "production" });
+      const prodSdk = new FabstirSDK({ 
+        mode: "production",
+        p2pConfig: {
+          bootstrapNodes: ["/ip4/127.0.0.1/tcp/4001/p2p/12D3KooW..."]
+        }
+      });
 
       expect(mockSdk.config.mode).toBe("mock");
       expect(prodSdk.config.mode).toBe("production");

@@ -179,3 +179,13 @@ export interface ResultMetadata {
   nodeAddress: string;
   timestamp: number;
 }
+
+// P2P Configuration
+export interface P2PConfig {
+  bootstrapNodes: string[];        // Required, must have at least one
+  enableDHT?: boolean;            // Optional, defaults to true
+  enableMDNS?: boolean;           // Optional, defaults to true  
+  listenAddresses?: string[];     // Optional, for specifying listen addresses
+  dialTimeout?: number;           // Optional, defaults to 30000 (30s)
+  requestTimeout?: number;        // Optional, defaults to 60000 (60s)
+}

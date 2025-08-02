@@ -10,6 +10,7 @@ export * from "./types";
 export { ErrorCode, FabstirError } from "./errors";
 export { ContractManager } from "./contracts";
 export { JobStatus } from "./types";
+import { P2PConfig } from "./types";
 
 // Main SDK configuration
 export interface FabstirConfig {
@@ -22,6 +23,7 @@ export interface FabstirConfig {
     paymentEscrow?: string;
     nodeRegistry?: string;
   };
+  p2pConfig?: P2PConfig;
 }
 
 // Main SDK class
@@ -66,6 +68,91 @@ export class FabstirSDK extends EventEmitter {
       // Check if mode is a valid value
       if (this.config.mode !== "mock" && this.config.mode !== "production") {
         throw new Error(`Invalid SDK mode: ${this.config.mode}. Must be "mock" or "production"`);
+      }
+    }
+
+    // Validate P2P configuration for production mode
+    if (this.config.mode === "production") {
+      if (!this.config.p2pConfig) {
+        throw new Error("P2P configuration required for production mode");
+      }
+
+      // Validate bootstrap nodes
+      if (!this.config.p2pConfig.bootstrapNodes || !Array.isArray(this.config.p2pConfig.bootstrapNodes)) {
+        throw new Error("P2P configuration must include bootstrapNodes array");
+      }
+
+      if (this.config.p2pConfig.bootstrapNodes.length === 0) {
+        throw new Error("At least one bootstrap node required for production mode");
+      }
+
+      // Validate bootstrap node format
+      const validPrefixes = ['/ip4/', '/ip6/', '/dns4/', '/dnsaddr/'];
+      for (const node of this.config.p2pConfig.bootstrapNodes) {
+        if (typeof node !== 'string') {
+          throw new Error("Bootstrap nodes must be strings");
+        }
+        
+        const hasValidPrefix = validPrefixes.some(prefix => node.startsWith(prefix));
+        if (!hasValidPrefix) {
+          throw new Error(`Invalid bootstrap node format: ${node}`);
+        }
+      }
+
+      // Apply defaults for optional P2P fields
+      if (this.config.p2pConfig.enableDHT === undefined) {
+        this.config.p2pConfig.enableDHT = true;
+      }
+      if (this.config.p2pConfig.enableMDNS === undefined) {
+        this.config.p2pConfig.enableMDNS = true;
+      }
+      if (this.config.p2pConfig.dialTimeout === undefined) {
+        this.config.p2pConfig.dialTimeout = 30000;
+      }
+      if (this.config.p2pConfig.requestTimeout === undefined) {
+        this.config.p2pConfig.requestTimeout = 60000;
+      }
+
+      // Validate optional fields
+      if (this.config.p2pConfig.enableDHT !== undefined && typeof this.config.p2pConfig.enableDHT !== 'boolean') {
+        throw new Error("enableDHT must be a boolean");
+      }
+      if (this.config.p2pConfig.enableMDNS !== undefined && typeof this.config.p2pConfig.enableMDNS !== 'boolean') {
+        throw new Error("enableMDNS must be a boolean");
+      }
+      if (this.config.p2pConfig.dialTimeout !== undefined) {
+        if (typeof this.config.p2pConfig.dialTimeout !== 'number') {
+          throw new Error("dialTimeout must be a number");
+        }
+        if (this.config.p2pConfig.dialTimeout <= 0) {
+          throw new Error("dialTimeout must be a positive number");
+        }
+      }
+      if (this.config.p2pConfig.requestTimeout !== undefined) {
+        if (typeof this.config.p2pConfig.requestTimeout !== 'number' || this.config.p2pConfig.requestTimeout <= 0) {
+          throw new Error("requestTimeout must be a positive number");
+        }
+      }
+      if (this.config.p2pConfig.listenAddresses !== undefined) {
+        if (!Array.isArray(this.config.p2pConfig.listenAddresses)) {
+          throw new Error("listenAddresses must be an array");
+        }
+        for (const addr of this.config.p2pConfig.listenAddresses) {
+          if (typeof addr !== 'string') {
+            throw new Error("listenAddresses must be strings");
+          }
+        }
+      }
+
+      // Deep freeze p2pConfig
+      if (this.config.p2pConfig) {
+        Object.freeze(this.config.p2pConfig);
+        if (this.config.p2pConfig.bootstrapNodes) {
+          Object.freeze(this.config.p2pConfig.bootstrapNodes);
+        }
+        if (this.config.p2pConfig.listenAddresses) {
+          Object.freeze(this.config.p2pConfig.listenAddresses);
+        }
       }
     }
 
