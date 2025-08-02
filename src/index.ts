@@ -88,6 +88,13 @@ export class FabstirSDK extends EventEmitter {
         throw new Error("At least one bootstrap node required for production mode");
       }
 
+      // Validate bootstrap node types only
+      for (const node of this.config.p2pConfig.bootstrapNodes) {
+        if (typeof node !== 'string') {
+          throw new Error("Bootstrap nodes must be strings");
+        }
+      }
+
       // Apply defaults for optional P2P fields
       if (this.config.p2pConfig.enableDHT === undefined) {
         this.config.p2pConfig.enableDHT = true;
@@ -170,7 +177,7 @@ export class FabstirSDK extends EventEmitter {
         ).getSigner();
       }
 
-      // Verify network
+      // Verify network first
       const network = await provider.getNetwork();
       const expectedChainId = this.getExpectedChainId();
 
@@ -179,8 +186,22 @@ export class FabstirSDK extends EventEmitter {
         throw new Error("Wrong network");
       }
 
+      // In production mode, require signer after network check
+      if (this.config.mode === "production" && !this.signer) {
+        throw new Error("Production mode requires a provider with signer");
+      }
+
       // Initialize contracts with provider
       await this.contracts.initialize(provider, this.signer);
+
+      // Set up provider event listeners in production mode
+      if (this.config.mode === "production" && "on" in provider) {
+        (provider as any).on("network", () => {
+          if (this.config.debug) {
+            console.log("[FabstirSDK] Network changed");
+          }
+        });
+      }
 
       // Initialize P2P client in production mode
       if (this.config.mode === "production" && this.config.p2pConfig) {
@@ -210,7 +231,7 @@ export class FabstirSDK extends EventEmitter {
     } catch (error: any) {
       this._isConnected = false;
       // Re-throw specific errors as-is
-      if (error.message === "Wrong network") {
+      if (error.message === "Wrong network" || error.message === "Production mode requires a provider with signer") {
         throw error;
       }
       throw new FabstirError(
@@ -316,6 +337,12 @@ export class FabstirSDK extends EventEmitter {
     // Validate the job request first
     this.validateJobRequest(jobRequest);
     
+    // Route to P2P client in production mode
+    if (this.config.mode === "production" && this._p2pClient) {
+      return await this._p2pClient.submitJob(jobRequest);
+    }
+    
+    // Mock mode implementation
     // Generate a mock job ID
     this._jobIdCounter++;
     const jobId = this._jobIdCounter;
@@ -411,9 +438,19 @@ export class FabstirSDK extends EventEmitter {
   }
 
   async getJobStatus(jobId: number): Promise<JobStatus> {
+    // Route to P2P client in production mode
+    if (this.config.mode === "production" && this._p2pClient) {
+      const status = await this._p2pClient.getJobStatus(jobId);
+      if (status === null) {
+        throw new Error("Job not found");
+      }
+      return status as JobStatus;
+    }
+    
+    // Mock mode implementation
     const job = this._jobs.get(jobId);
     if (!job) {
-      throw new Error(`Job ${jobId} not found`);
+      throw new Error("Job not found");
     }
     return job.status;
   }
@@ -586,6 +623,12 @@ export class FabstirSDK extends EventEmitter {
     jobId: number,
     options?: any
   ): AsyncIterableIterator<any> {
+    // Route to P2P client in production mode
+    if (this.config.mode === "production" && this._p2pClient) {
+      return this._p2pClient.createResponseStream(jobId);
+    }
+    
+    // Mock mode implementation - preserve original event-based behavior
     const job = this._jobs.get(jobId);
     if (!job) {
       throw new Error(`Job ${jobId} not found`);
@@ -687,17 +730,17 @@ export class FabstirSDK extends EventEmitter {
   validateJobRequest(jobRequest: any): void {
     // Validate prompt is not empty
     if (!jobRequest.prompt || jobRequest.prompt.trim() === '') {
-      throw new Error('Invalid job request: prompt cannot be empty');
+      throw new Error('Prompt cannot be empty');
     }
     
     // Validate maxTokens is positive
     if (!jobRequest.maxTokens || jobRequest.maxTokens <= 0) {
-      throw new Error('Invalid job request: maxTokens must be positive');
+      throw new Error('Max tokens must be positive');
     }
     
     // Validate modelId is provided
     if (!jobRequest.modelId || jobRequest.modelId.trim() === '') {
-      throw new Error('Invalid job request: modelId is required');
+      throw new Error('Invalid model ID');
     }
   }
   

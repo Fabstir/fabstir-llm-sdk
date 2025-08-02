@@ -85,7 +85,7 @@ Add P2P configuration validation when mode='production'.
 Must have bootstrapNodes array. Throw clear errors.
 ```
 
-### Sub-phase 2.3: P2P Client Structure
+### Sub-phase 2.3: P2P Client Structure ✅
 
 - [x] Create P2PClient class skeleton
 - [x] Add libp2p dependencies
@@ -103,12 +103,12 @@ Create basic P2PClient class that can start/stop.
 Don't implement actual P2P yet - just structure.
 ```
 
-### Sub-phase 2.4: Mode-Specific Behavior
+### Sub-phase 2.4: Mode-Specific Behavior ✅
 
-- [ ] Update connect() for mode handling
-- [ ] Update submitJob() for mode routing
-- [ ] Update status methods for mode
-- [ ] Ensure mock mode unchanged
+- [x] Update connect() for mode handling
+- [x] Update submitJob() for mode routing
+- [x] Update status methods for mode
+- [x] Ensure mock mode unchanged
 
 **Test Files:**
 
