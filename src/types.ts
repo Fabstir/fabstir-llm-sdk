@@ -263,6 +263,7 @@ export interface NegotiationOptions {
   paymentToken?: string;
   allowP2PFallback?: boolean;
   preferredNodes?: string[];
+  stream?: boolean;
 }
 
 // P2P Response Streaming types
@@ -394,3 +395,82 @@ export interface ErrorRecoveryReport {
 }
 
 export type FailoverStrategy = "automatic" | "manual" | "disabled";
+
+// Performance Tracking types
+export interface PerformanceMetrics {
+  totalOperations: number;
+  operations: {
+    connect: OperationMetrics;
+    discover: OperationMetrics;
+    submitJob: OperationMetrics;
+    stream: OperationMetrics;
+  };
+  streaming: {
+    averageTokenLatency: number;
+    totalTokensProcessed: number;
+    averageThroughput: number;
+  };
+  timestamp: number;
+}
+
+export interface OperationMetrics {
+  count: number;
+  totalTime: number;
+  averageTime: number;
+  minTime: number;
+  maxTime: number;
+  errors: number;
+  successRate: number;
+}
+
+// Mode Transition types
+export interface ModeTransitionReport {
+  success: boolean;
+  from: "mock" | "production";
+  to: "mock" | "production";
+  statePreserved: boolean;
+  jobsMigrated?: number;
+  duration: number;
+  warnings?: string[];
+}
+
+export interface ModeTransitionOptions {
+  from: "mock" | "production";
+  to: "mock" | "production";
+  preserveState?: boolean;
+  migrateJobs?: boolean;
+}
+
+// System Health types
+export interface SystemHealthReport {
+  status: "healthy" | "degraded" | "unhealthy";
+  mode: "mock" | "production";
+  isConnected: boolean;
+  p2p: {
+    status: "connected" | "disconnected" | "error";
+    connectedPeers: number;
+    discoveredNodes: number;
+    activeStreams?: number;
+  };
+  blockchain: {
+    status: "connected" | "disconnected" | "error";
+    chainId: number;
+    latestBlock: number;
+    contractsInitialized?: boolean;
+  };
+  jobs: {
+    active: number;
+    completed: number;
+    failed: number;
+    queued: number;
+  };
+  performance: {
+    averageConnectionTime: number;
+    averageDiscoveryTime: number;
+    averageJobSubmissionTime: number;
+    averageTokenLatency: number;
+  };
+  issues?: string[];
+  recommendations?: string[];
+  timestamp: number;
+}
