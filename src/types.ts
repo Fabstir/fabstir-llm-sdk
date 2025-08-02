@@ -188,4 +188,6 @@ export interface P2PConfig {
   listenAddresses?: string[];     // Optional, for specifying listen addresses
   dialTimeout?: number;           // Optional, defaults to 30000 (30s)
   requestTimeout?: number;        // Optional, defaults to 60000 (60s)
+  maxRetries?: number;            // Optional, defaults to 3
+  retryDelay?: number;            // Optional, defaults to 1000 (1s)
 }

@@ -1,17 +1,17 @@
 // src/index.ts
 import { ethers } from "ethers";
 import { EventEmitter } from "events";
-import { ContractManager } from "./contracts";
-import { ErrorCode, FabstirError } from "./errors";
-import { JobStatus, PaymentStatus } from "./types";
-import { P2PClient } from "./p2p/client";
+import { ContractManager } from "./contracts.js";
+import { ErrorCode, FabstirError } from "./errors.js";
+import { JobStatus, PaymentStatus } from "./types.js";
+import { P2PClient } from "./p2p/client.js";
 
 // Export all types
-export * from "./types";
-export { ErrorCode, FabstirError } from "./errors";
-export { ContractManager } from "./contracts";
-export { JobStatus } from "./types";
-import { P2PConfig } from "./types";
+export * from "./types.js";
+export { ErrorCode, FabstirError } from "./errors.js";
+export { ContractManager } from "./contracts.js";
+export { JobStatus } from "./types.js";
+import { P2PConfig } from "./types.js";
 
 // Main SDK configuration
 export interface FabstirConfig {
@@ -62,10 +62,6 @@ export class FabstirSDK extends EventEmitter {
       // Check if mode is not a string
       if (typeof this.config.mode !== "string") {
         throw new Error(`Invalid SDK mode: ${this.config.mode}. Must be "mock" or "production"`);
-      }
-      // Check if mode is an empty string
-      if (this.config.mode === "") {
-        throw new Error(`Invalid SDK mode: . Must be "mock" or "production"`);
       }
       // Check if mode is a valid value
       if (this.config.mode !== "mock" && this.config.mode !== "production") {
@@ -207,6 +203,24 @@ export class FabstirSDK extends EventEmitter {
       if (this.config.mode === "production" && this.config.p2pConfig) {
         try {
           this._p2pClient = new P2PClient(this.config.p2pConfig);
+          
+          // Set up P2P event listeners
+          this._p2pClient.on('peer:connect', (peerId) => {
+            this.emit('p2p:peer:connect', peerId);
+          });
+          
+          this._p2pClient.on('peer:disconnect', (peerId) => {
+            this.emit('p2p:peer:disconnect', peerId);
+          });
+          
+          this._p2pClient.on('connection:retry', (data) => {
+            this.emit('p2p:connection:retry', data);
+          });
+          
+          this._p2pClient.on('connection:failed', (data) => {
+            this.emit('p2p:connection:failed', data);
+          });
+          
           await this._p2pClient.start();
           this.emit("p2p:started");
           
@@ -214,6 +228,9 @@ export class FabstirSDK extends EventEmitter {
             console.log("[FabstirSDK] P2P client started");
           }
         } catch (p2pError) {
+          // Emit P2P error event
+          this.emit('error', { type: 'P2P_ERROR', error: p2pError });
+          
           // P2P errors should not prevent SDK connection
           if (this.config.debug) {
             console.warn("[FabstirSDK] P2P client failed to start:", p2pError);
@@ -328,6 +345,16 @@ export class FabstirSDK extends EventEmitter {
       return "disabled";
     }
     return this.isP2PConnected() ? "connected" : "disconnected";
+  }
+
+  /**
+   * Get P2P metrics
+   */
+  getP2PMetrics(): any {
+    if (!this._p2pClient) {
+      return null;
+    }
+    return this._p2pClient.getP2PMetrics();
   }
 
   // TODO: Implement these methods for the tests

@@ -121,12 +121,12 @@ Make SDK methods check mode and route to appropriate implementation.
 Mock mode must work exactly as before.
 ```
 
-### Sub-phase 2.5: P2P Connection
+### Sub-phase 2.5: P2P Connection ✅
 
-- [ ] Implement libp2p node creation
-- [ ] Connect to bootstrap nodes
-- [ ] Handle connection events
-- [ ] Implement connection retry
+- [x] Implement libp2p node creation
+- [x] Connect to bootstrap nodes
+- [x] Handle connection events
+- [x] Implement connection retry
 
 **Test Files:**
 
