@@ -191,3 +191,38 @@ export interface P2PConfig {
   maxRetries?: number;            // Optional, defaults to 3
   retryDelay?: number;            // Optional, defaults to 1000 (1s)
 }
+
+// Node discovery types
+export interface NodeCapabilities {
+  models: string[]; // Supported model IDs
+  maxTokens: number; // Maximum tokens per request
+  pricePerToken: string; // Price in wei
+  computeType?: string; // "CPU" | "GPU" | "TPU"
+  gpuModel?: string; // e.g., "RTX 4090"
+  maxConcurrentJobs?: number; // Parallel job capacity
+}
+
+export interface DiscoveredNode {
+  peerId: string;
+  multiaddrs: string[];
+  capabilities: NodeCapabilities;
+  latency?: number; // Measured latency in ms
+  reputation?: number; // 0-100 score
+  lastSeen: number; // Timestamp
+}
+
+export interface NodeDiscoveryOptions {
+  modelId: string;
+  maxLatency?: number;
+  minReputation?: number;
+  maxPrice?: string;
+  preferredNodes?: string[];
+  excludeNodes?: string[];
+  forceRefresh?: boolean;
+}
+
+export interface DiscoveryConfig {
+  cacheTTL?: number; // Cache time-to-live in ms
+  maxNodes?: number; // Maximum nodes to return
+  discoveryTimeout?: number; // Discovery timeout in ms
+}

@@ -3,7 +3,7 @@ import { ethers } from "ethers";
 import { EventEmitter } from "events";
 import { ContractManager } from "./contracts.js";
 import { ErrorCode, FabstirError } from "./errors.js";
-import { JobStatus, PaymentStatus } from "./types.js";
+import { JobStatus, PaymentStatus, DiscoveryConfig, NodeDiscoveryOptions, DiscoveredNode } from "./types.js";
 import { P2PClient } from "./p2p/client.js";
 
 // Export all types
@@ -25,6 +25,7 @@ export interface FabstirConfig {
     nodeRegistry?: string;
   };
   p2pConfig?: P2PConfig;
+  nodeDiscovery?: DiscoveryConfig;
 }
 
 // Main SDK class
@@ -41,6 +42,7 @@ export class FabstirSDK extends EventEmitter {
   private _paymentHistory: Map<number, any[]> = new Map();
   private _paymentEventEmitter: EventEmitter = new EventEmitter();
   private _p2pClient?: P2PClient;
+  private _discoveryCache: Map<string, { nodes: DiscoveredNode[]; timestamp: number }> = new Map();
 
   constructor(config: FabstirConfig = {}) {
     super();
@@ -297,6 +299,9 @@ export class FabstirSDK extends EventEmitter {
       this.emit("p2p:stopped");
     }
     
+    // Clear discovery cache
+    this._discoveryCache.clear();
+    
     this._isConnected = false;
     this.provider = undefined;
     this.signer = undefined;
@@ -347,15 +352,6 @@ export class FabstirSDK extends EventEmitter {
     return this.isP2PConnected() ? "connected" : "disconnected";
   }
 
-  /**
-   * Get P2P metrics
-   */
-  getP2PMetrics(): any {
-    if (!this._p2pClient) {
-      return null;
-    }
-    return this._p2pClient.getP2PMetrics();
-  }
 
   // TODO: Implement these methods for the tests
   private _jobIdCounter: number = 0;
@@ -1038,5 +1034,187 @@ export class FabstirSDK extends EventEmitter {
     
     // For other statuses, return full amount (could be adjusted based on business logic)
     return payment.amount;
+  }
+
+  // P2P Discovery methods
+  async discoverNodes(options: NodeDiscoveryOptions): Promise<DiscoveredNode[]> {
+    // Check if in mock mode
+    if (this.config.mode === "mock") {
+      throw new Error("Node discovery not available in mock mode");
+    }
+
+    // Check if P2P client is available
+    if (!this._p2pClient || !this._p2pClient.isStarted()) {
+      throw new Error("P2P client not initialized");
+    }
+
+    // Emit discovery start event
+    const discoveryEvent = {
+      type: 'discovery:start',
+      modelId: options.modelId,
+      timestamp: Date.now()
+    };
+    this.emit('discovery:start', discoveryEvent);
+
+    try {
+      // Check cache if not forcing refresh
+      const cacheKey = `discovery:${JSON.stringify(options)}`;
+      const cacheTTL = this.config.nodeDiscovery?.cacheTTL || 300000; // Default 5 minutes
+      
+      if (!options.forceRefresh) {
+        const cached = this._discoveryCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < cacheTTL) {
+          const filteredNodes = this.filterAndSortNodes(cached.nodes, options);
+          this.emit('discovery:complete', {
+            type: 'discovery:complete',
+            modelId: options.modelId,
+            nodesFound: filteredNodes.length,
+            fromCache: true,
+            timestamp: Date.now()
+          });
+          return filteredNodes;
+        }
+      }
+
+      // Clear cache if force refresh
+      if (options.forceRefresh) {
+        this._discoveryCache.clear();
+      }
+
+      // Discover nodes for the specified model
+      const service = options.modelId ? `llm-inference/${options.modelId}` : 'llm-inference';
+      const discoveryTimeout = this.config.nodeDiscovery?.discoveryTimeout || 30000;
+      
+      let allNodes = await this._p2pClient.findProviders(service, { 
+        timeout: discoveryTimeout 
+      });
+
+      // If no nodes found for specific model, try general service
+      if (allNodes.length === 0 && options.modelId) {
+        allNodes = await this._p2pClient.findProviders('llm-inference', {
+          timeout: discoveryTimeout
+        });
+      }
+
+      // Cache all discovered nodes
+      this._discoveryCache.set(cacheKey, { nodes: allNodes, timestamp: Date.now() });
+
+      // Filter and sort nodes
+      const filteredNodes = this.filterAndSortNodes(allNodes, options);
+
+      // Emit discovery complete event
+      this.emit('discovery:complete', {
+        type: 'discovery:complete',
+        modelId: options.modelId,
+        nodesFound: filteredNodes.length,
+        totalDiscovered: allNodes.length,
+        fromCache: false,
+        timestamp: Date.now()
+      });
+
+      return filteredNodes;
+    } catch (error) {
+      // Emit discovery complete with error
+      this.emit('discovery:complete', {
+        type: 'discovery:complete',
+        modelId: options.modelId,
+        nodesFound: 0,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: Date.now()
+      });
+      throw error;
+    }
+  }
+
+  private filterAndSortNodes(nodes: DiscoveredNode[], options: NodeDiscoveryOptions): DiscoveredNode[] {
+    // Filter nodes based on criteria
+    let filtered = nodes.filter(node => {
+      // Check model support
+      if (options.modelId && !node.capabilities.models.includes(options.modelId)) {
+        return false;
+      }
+
+      // Check latency
+      if (options.maxLatency !== undefined && node.latency !== undefined) {
+        if (node.latency > options.maxLatency) {
+          return false;
+        }
+      }
+
+      // Check reputation
+      if (options.minReputation !== undefined && node.reputation !== undefined) {
+        if (node.reputation < options.minReputation) {
+          return false;
+        }
+      }
+
+      // Check price
+      if (options.maxPrice !== undefined) {
+        const nodePrice = BigInt(node.capabilities.pricePerToken);
+        const maxPrice = BigInt(options.maxPrice);
+        if (nodePrice > maxPrice) {
+          return false;
+        }
+      }
+
+      // Check excluded nodes
+      if (options.excludeNodes && options.excludeNodes.includes(node.peerId)) {
+        return false;
+      }
+
+      return true;
+    });
+
+    // Sort nodes
+    filtered.sort((a, b) => {
+      // Preferred nodes first
+      if (options.preferredNodes) {
+        const aPreferred = options.preferredNodes.includes(a.peerId);
+        const bPreferred = options.preferredNodes.includes(b.peerId);
+        if (aPreferred && !bPreferred) return -1;
+        if (!aPreferred && bPreferred) return 1;
+        
+        // If both preferred, maintain order from preferredNodes
+        if (aPreferred && bPreferred) {
+          const aIndex = options.preferredNodes.indexOf(a.peerId);
+          const bIndex = options.preferredNodes.indexOf(b.peerId);
+          return aIndex - bIndex;
+        }
+      }
+
+      // Then by reputation (higher first)
+      if (a.reputation !== undefined && b.reputation !== undefined) {
+        if (a.reputation !== b.reputation) {
+          return b.reputation - a.reputation;
+        }
+      }
+
+      // Then by latency (lower first)
+      if (a.latency !== undefined && b.latency !== undefined) {
+        if (a.latency !== b.latency) {
+          return a.latency - b.latency;
+        }
+      }
+
+      // Finally by price (lower first)
+      const aPrice = BigInt(a.capabilities.pricePerToken);
+      const bPrice = BigInt(b.capabilities.pricePerToken);
+      return aPrice < bPrice ? -1 : (aPrice > bPrice ? 1 : 0);
+    });
+
+    // Limit number of nodes if configured
+    const maxNodes = this.config.nodeDiscovery?.maxNodes;
+    if (maxNodes && filtered.length > maxNodes) {
+      filtered = filtered.slice(0, maxNodes);
+    }
+
+    return filtered;
+  }
+
+  getP2PMetrics(): any {
+    if (!this._p2pClient || !this._p2pClient.isStarted()) {
+      return null;
+    }
+    return this._p2pClient.getP2PMetrics();
   }
 }

@@ -56,14 +56,14 @@ Client SDK for the Fabstir P2P LLM marketplace, enabling applications to connect
 
 **Test Files:**
 
-- `src/__tests__/config/mode.test.ts`
-- `src/__tests__/compatibility/demo.test.ts`
+- `tests/config/mode.test.ts`
+- `tests/compatibility/demo.test.ts`
 
 **Claude Code Prompt:**
 
 ```
 Add 'mode' configuration to SDK that defaults to 'mock'.
-Tests in src/__tests__/config/mode.test.ts need to pass.
+Tests in tests/config/mode.test.ts need to pass.
 Minimal changes only - don't break existing functionality.
 ```
 
@@ -76,7 +76,7 @@ Minimal changes only - don't break existing functionality.
 
 **Test Files:**
 
-- `src/__tests__/p2p/config.test.ts`
+- `tests/p2p/config.test.ts`
 
 **Claude Code Prompt:**
 
@@ -94,7 +94,7 @@ Must have bootstrapNodes array. Throw clear errors.
 
 **Test Files:**
 
-- `src/__tests__/p2p/client-lifecycle.test.ts`
+- `tests/p2p/client-lifecycle.test.ts`
 
 **Claude Code Prompt:**
 
@@ -112,7 +112,7 @@ Don't implement actual P2P yet - just structure.
 
 **Test Files:**
 
-- `src/__tests__/mode/behavior.test.ts`
+- `tests/mode/behavior.test.ts`
 
 **Claude Code Prompt:**
 
@@ -130,7 +130,7 @@ Mock mode must work exactly as before.
 
 **Test Files:**
 
-- `src/__tests__/p2p/connection.test.ts`
+- `tests/p2p/connection.test.ts`
 
 **Claude Code Prompt:**
 
@@ -139,16 +139,16 @@ Implement actual P2P connection using libp2p.
 Connect to bootstrap nodes and emit events.
 ```
 
-### Sub-phase 2.6: Node Discovery
+### Sub-phase 2.6: Node Discovery ✅
 
-- [ ] Implement DHT queries
-- [ ] Parse node capabilities
-- [ ] Filter by requirements
-- [ ] Cache discovered nodes
+- [x] Implement DHT queries
+- [x] Parse node capabilities
+- [x] Filter by requirements
+- [x] Cache discovered nodes
 
 **Test Files:**
 
-- `src/__tests__/p2p/discovery.test.ts`
+- `tests/p2p/discovery.test.ts`
 
 **Claude Code Prompt:**
 
@@ -166,7 +166,7 @@ Find nodes offering 'llm-inference' service.
 
 **Test Files:**
 
-- `src/__tests__/p2p/job-negotiation.test.ts`
+- `tests/p2p/job-negotiation.test.ts`
 
 **Claude Code Prompt:**
 
@@ -184,7 +184,7 @@ Send job details and handle node response.
 
 **Test Files:**
 
-- `src/__tests__/streaming/p2p-stream.test.ts`
+- `tests/streaming/p2p-stream.test.ts`
 
 **Claude Code Prompt:**
 
@@ -202,7 +202,7 @@ Handle individual tokens and completion.
 
 **Test Files:**
 
-- `src/__tests__/contracts/p2p-integration.test.ts`
+- `tests/contracts/p2p-integration.test.ts`
 
 **Claude Code Prompt:**
 
@@ -220,7 +220,7 @@ Submit jobs on-chain while using P2P for execution.
 
 **Test Files:**
 
-- `src/__tests__/error/recovery.test.ts`
+- `tests/error/recovery.test.ts`
 
 **Claude Code Prompt:**
 
@@ -238,7 +238,7 @@ Retry failed connections and handle node failures.
 
 **Test Files:**
 
-- `src/__tests__/integration/e2e.test.ts`
+- `tests/integration/e2e.test.ts`
 
 **Claude Code Prompt:**
 

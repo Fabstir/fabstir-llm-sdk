@@ -30,17 +30,18 @@
   "author": "Fabstir",
   "license": "MIT",
   "dependencies": {
+    "@chainsafe/libp2p-noise": "^16.0.0",
+    "@chainsafe/libp2p-yamux": "^7.0.1",
+    "@libp2p/bootstrap": "^11.0.13",
+    "@libp2p/identify": "^3.0.0",
+    "@libp2p/kad-dht": "^14.1.5",
+    "@libp2p/mdns": "^11.0.14",
+    "@libp2p/tcp": "^10.1.8",
+    "@libp2p/websockets": "^9.0.11",
     "ethers": "^5.0.0",
     "events": "^3.3.0",
     "libp2p": "^2.4.1",
-    "@libp2p/tcp": "^10.1.8",
-    "@libp2p/websockets": "^9.0.11",
-    "@chainsafe/libp2p-noise": "^16.0.0",
-    "@chainsafe/libp2p-yamux": "^7.0.1",
-    "@libp2p/kad-dht": "^14.1.5",
-    "@libp2p/mdns": "^11.0.14",
-    "@libp2p/bootstrap": "^11.0.13",
-    "@libp2p/identify": "^3.0.0"
+    "multiformats": "^13.3.7"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
