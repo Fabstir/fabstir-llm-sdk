@@ -247,6 +247,8 @@ export interface JobNegotiation {
   request: JobRequest;
   response: JobResponse;
   timestamp: number;
+  negotiatedPrice?: BigNumber;
+  txHash?: string;
 }
 
 export interface NegotiationOptions {
@@ -257,6 +259,9 @@ export interface NegotiationOptions {
   maxNodes?: number;
   maxBudget?: BigNumber;
   maxRetries?: number;
+  submitToChain?: boolean;
+  paymentToken?: string;
+  allowP2PFallback?: boolean;
 }
 
 // P2P Response Streaming types
@@ -318,4 +323,25 @@ export interface ResponseStreamOptions {
   jobId: string;
   requestId: string;
   resumeFrom?: number;
+}
+
+// P2P-Contract Bridge types
+export interface JobMapping {
+  p2pJobId: string;
+  blockchainJobId: number;
+  nodeId: string;
+  txHash?: string;
+  createdAt: number;
+}
+
+export interface ChainReorgEvent {
+  removedBlocks: number[];
+  jobsAffected: number[];
+}
+
+export interface P2PJobState {
+  jobId: number;
+  p2pState: string;
+  blockchainState?: JobStatus;
+  lastSync: number;
 }

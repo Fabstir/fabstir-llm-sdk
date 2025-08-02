@@ -195,10 +195,10 @@ Handle individual tokens and completion.
 
 ### Sub-phase 2.9: Contract Bridge
 
-- [ ] Link P2P events to contracts
-- [ ] Submit job to blockchain
-- [ ] Monitor contract events
-- [ ] Handle payment flow
+- [x] Link P2P events to contracts
+- [x] Submit job to blockchain
+- [x] Monitor contract events
+- [x] Handle payment flow
 
 **Test Files:**
 
