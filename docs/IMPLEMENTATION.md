@@ -47,7 +47,7 @@ Client SDK for the Fabstir P2P LLM marketplace, enabling applications to connect
 
 ## Phase 2: Production Mode Upgrade (IN PROGRESS)
 
-### Sub-phase 2.1: Mode Configuration
+### Sub-phase 2.1: Mode Configuration ✅
 
 - [x] Add SDKMode type ('mock' | 'production')
 - [x] Update FabstirConfig interface
@@ -67,12 +67,12 @@ Tests in src/__tests__/config/mode.test.ts need to pass.
 Minimal changes only - don't break existing functionality.
 ```
 
-### Sub-phase 2.2: P2P Configuration
+### Sub-phase 2.2: P2P Configuration ✅
 
-- [ ] Add P2PConfig interface
-- [ ] Validate P2P config in production mode
-- [ ] Add bootstrap nodes validation
-- [ ] Implement config freezing
+- [x] Add P2PConfig interface
+- [x] Validate P2P config in production mode
+- [x] Add bootstrap nodes validation
+- [x] Implement config freezing
 
 **Test Files:**
 
