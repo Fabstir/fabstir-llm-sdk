@@ -12,7 +12,8 @@ import {
   JobRequest,
   JobResponse,
   JobNegotiation,
-  NegotiationOptions
+  NegotiationOptions,
+  P2PResponseStream
 } from "./types.js";
 import { P2PClient } from "./p2p/client.js";
 
@@ -53,6 +54,7 @@ export class FabstirSDK extends EventEmitter {
   private _paymentEventEmitter: EventEmitter = new EventEmitter();
   private _p2pClient?: P2PClient;
   private _discoveryCache: Map<string, { nodes: DiscoveredNode[]; timestamp: number }> = new Map();
+  private _activeStreams: Map<number, P2PResponseStream> = new Map();
 
   constructor(config: FabstirConfig = {}) {
     super();
@@ -303,6 +305,16 @@ export class FabstirSDK extends EventEmitter {
    * Disconnect from provider
    */
   async disconnect(): Promise<void> {
+    // Close all active streams
+    for (const [jobId, stream] of this._activeStreams) {
+      try {
+        stream.close();
+      } catch (error) {
+        // Ignore errors during cleanup
+      }
+    }
+    this._activeStreams.clear();
+    
     // Stop P2P client if running
     if (this._p2pClient?.isStarted()) {
       await this._p2pClient.stop();
@@ -366,7 +378,7 @@ export class FabstirSDK extends EventEmitter {
   // TODO: Implement these methods for the tests
   private _jobIdCounter: number = 0;
   
-  async submitJob(jobRequest: any): Promise<number> {
+  async submitJob(jobRequest: any): Promise<number | { jobId: number; stream?: P2PResponseStream }> {
     // Validate the job request first
     this.validateJobRequest(jobRequest);
     
@@ -381,10 +393,63 @@ export class FabstirSDK extends EventEmitter {
           temperature: jobRequest.temperature,
           maxBudget: jobRequest.maxPrice
         });
+        
+        // If streaming requested, create stream
+        if (jobRequest.stream) {
+          const stream = await this._p2pClient.createResponseStream(result.selectedNode, {
+            jobId: result.jobId.toString(),
+            requestId: `req-${result.jobId}`
+          });
+          
+          // Emit SDK events
+          this.emit("stream:start", { type: "stream:start", jobId: result.jobId, nodeId: result.selectedNode });
+          
+          // Forward stream events to SDK
+          stream.on("token", (token) => {
+            this.emit("stream:token", { type: "stream:token", jobId: result.jobId, token });
+          });
+          
+          stream.on("end", (summary) => {
+            this.emit("stream:end", { type: "stream:end", jobId: result.jobId, summary });
+          });
+          
+          // Track active stream
+          this._activeStreams.set(result.jobId, stream);
+          
+          return { jobId: result.jobId, stream };
+        }
+        
         return result.jobId;
       }
       
-      return await this._p2pClient.submitJob(jobRequest);
+      const jobId = await this._p2pClient.submitJob(jobRequest);
+      
+      // If streaming requested, create stream
+      if (jobRequest.stream) {
+        const stream = await this._p2pClient.createResponseStream(jobRequest.nodeAddress || "default-node", {
+          jobId: jobId.toString(),
+          requestId: `req-${jobId}`
+        });
+        
+        // Emit SDK events
+        this.emit("stream:start", { type: "stream:start", jobId, nodeId: jobRequest.nodeAddress });
+        
+        // Forward stream events to SDK
+        stream.on("token", (token) => {
+          this.emit("stream:token", { type: "stream:token", jobId, token });
+        });
+        
+        stream.on("end", (summary) => {
+          this.emit("stream:end", { type: "stream:end", jobId, summary });
+        });
+        
+        // Track active stream
+        this._activeStreams.set(jobId, stream);
+        
+        return { jobId, stream };
+      }
+      
+      return jobId;
     }
     
     // Mock mode implementation
@@ -445,6 +510,11 @@ export class FabstirSDK extends EventEmitter {
     
     if (this.config.debug) {
       console.log(`[FabstirSDK] Submitted job ${jobId}`);
+    }
+    
+    // Streaming not supported in mock mode
+    if (jobRequest.stream) {
+      return jobId; // Just return the jobId without stream
     }
     
     return jobId;
@@ -670,7 +740,9 @@ export class FabstirSDK extends EventEmitter {
   ): AsyncIterableIterator<any> {
     // Route to P2P client in production mode
     if (this.config.mode === "production" && this._p2pClient) {
-      return this._p2pClient.createResponseStream(jobId);
+      // This method returns AsyncIterableIterator, not P2PResponseStream
+      // For streaming support, use submitJob with stream: true option
+      throw new Error("Use submitJob with stream: true for P2P streaming");
     }
     
     // Mock mode implementation - preserve original event-based behavior
@@ -1413,7 +1485,7 @@ export class FabstirSDK extends EventEmitter {
       
       if (accepted) {
         // Submit job to the selected node
-        const jobId = await this.submitJob({
+        const result = await this.submitJob({
           prompt: options.prompt,
           modelId: options.modelId,
           maxTokens: options.maxTokens,
@@ -1421,6 +1493,9 @@ export class FabstirSDK extends EventEmitter {
           maxPrice: accepted.response.actualCost,
           nodeAddress: accepted.node.peerId
         });
+        
+        // Extract jobId from result
+        const jobId = typeof result === 'number' ? result : result.jobId;
 
         return {
           jobId,

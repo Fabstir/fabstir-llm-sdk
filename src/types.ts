@@ -10,6 +10,7 @@ export interface JobSubmissionRequest {
   paymentToken?: string;
   maxPrice?: BigNumber;
   metadata?: Record<string, any>;
+  stream?: boolean;
 }
 
 export enum JobStatus {
@@ -156,16 +157,6 @@ export interface StreamOptions {
   signal?: AbortSignal;
 }
 
-export interface StreamToken {
-  content: string;
-  timestamp: number;
-  index: number;
-  metadata?: {
-    modelId: string;
-    temperature: number;
-    jobId: number;
-  };
-}
 
 // Result metadata
 export interface ResultMetadata {
@@ -266,4 +257,65 @@ export interface NegotiationOptions {
   maxNodes?: number;
   maxBudget?: BigNumber;
   maxRetries?: number;
+}
+
+// P2P Response Streaming types
+export interface P2PResponseStream {
+  jobId: string;
+  nodeId: string;
+  status: "active" | "paused" | "closed" | "error";
+  startTime: number;
+  bytesReceived: number;
+  tokensReceived: number;
+
+  on(event: "token", listener: (token: StreamToken) => void): void;
+  on(event: "end", listener: (summary: StreamEndSummary) => void): void;
+  on(event: "error", listener: (error: StreamError) => void): void;
+  on(event: "metrics", listener: (metrics: StreamMetrics) => void): void;
+
+  pause(): void;
+  resume(): void;
+  close(): void;
+  getMetrics(): StreamMetrics;
+}
+
+export interface StreamToken {
+  content: string;
+  index: number;
+  timestamp: number;
+  type?: "content" | "metadata";
+  metadata?: {
+    modelId?: string;
+    temperature?: number;
+    jobId?: string;
+  };
+}
+
+export interface StreamEndSummary {
+  totalTokens: number;
+  duration: number;
+  finalStatus: "completed" | "interrupted" | "error";
+  error?: string;
+}
+
+export interface StreamError {
+  code: string;
+  message: string;
+  recoverable: boolean;
+}
+
+export interface StreamMetrics {
+  tokensReceived: number;
+  bytesReceived: number;
+  tokensPerSecond: number;
+  averageLatency: number;
+  startTime: number;
+  lastTokenTime?: number;
+  totalTokens?: number;
+}
+
+export interface ResponseStreamOptions {
+  jobId: string;
+  requestId: string;
+  resumeFrom?: number;
 }

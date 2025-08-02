@@ -6,6 +6,7 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["tests/**/*.{test,spec}.{js,ts}"],
+    setupFiles: ["./tests/setup-polyfills.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
