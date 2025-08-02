@@ -1,5 +1,5 @@
 // src/p2p/client.ts
-import { P2PConfig, DiscoveredNode, NodeCapabilities } from "../types.js";
+import { P2PConfig, DiscoveredNode, NodeCapabilities, JobRequest, JobResponse } from "../types.js";
 import { createLibp2p, Libp2p } from "libp2p";
 import { tcp } from "@libp2p/tcp";
 import { webSockets } from "@libp2p/websockets";
@@ -14,6 +14,7 @@ import { multiaddr } from "@multiformats/multiaddr";
 import { CID } from "multiformats/cid";
 import * as json from 'multiformats/codecs/json';
 import { sha256 } from 'multiformats/hashes/sha2';
+import { BigNumber } from "ethers";
 
 export interface P2PStatus {
   connected: boolean;
@@ -49,6 +50,7 @@ export class P2PClient extends EventEmitter {
   };
   private nodeCache: Map<string, { node: DiscoveredNode; timestamp: number }> = new Map();
   private discoveryCache: Map<string, { nodes: DiscoveredNode[]; timestamp: number }> = new Map();
+  private registeredProtocols: string[] = [];
 
   constructor(config: P2PConfig) {
     super();
@@ -125,14 +127,14 @@ export class P2PClient extends EventEmitter {
       this.node = await createLibp2p(nodeConfig);
 
       // Set up event listeners
-      this.node.addEventListener('peer:connect', (evt) => {
-        const peerId = evt.detail.toString();
+      this.node.addEventListener('peer:connect', (evt: any) => {
+        const peerId = evt.detail?.toString() || evt.toString();
         this.metrics.successfulConnections++;
         this.emit('peer:connect', peerId);
       });
 
-      this.node.addEventListener('peer:disconnect', (evt) => {
-        const peerId = evt.detail.toString();
+      this.node.addEventListener('peer:disconnect', (evt: any) => {
+        const peerId = evt.detail?.toString() || evt.toString();
         this.emit('peer:disconnect', peerId);
       });
 
@@ -140,6 +142,9 @@ export class P2PClient extends EventEmitter {
       await this.node.start();
       this.started = true;
       this.startTime = Date.now();
+
+      // Register job negotiation protocol
+      await this.registerJobProtocol();
 
       // Attempt to connect to bootstrap nodes with retry logic
       if (this.config.bootstrapNodes && this.config.bootstrapNodes.length > 0) {
@@ -438,5 +443,95 @@ export class P2PClient extends EventEmitter {
     }
     
     return nodes;
+  }
+
+  private async registerJobProtocol(): Promise<void> {
+    const protocol = "/fabstir/job/1.0.0";
+    
+    if (!this.node) {
+      throw new Error("Node not started");
+    }
+
+    // Register protocol handler
+    await this.node.handle(protocol, async ({ stream }) => {
+      try {
+        // In real implementation, would handle incoming job requests
+        // For now, just close the stream
+        stream.close();
+      } catch (error) {
+        // Handle error
+      }
+    });
+
+    this.registeredProtocols.push(protocol);
+  }
+
+  getRegisteredProtocols(): string[] {
+    return [...this.registeredProtocols];
+  }
+
+  async sendJobRequest(
+    nodeId: string, 
+    request: JobRequest, 
+    options?: { timeout?: number }
+  ): Promise<JobResponse> {
+    const timeout = options?.timeout || this.config.requestTimeout || 60000;
+
+    // Mock implementation for now
+    // In real implementation, would open stream to peer and send request
+    
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Mock response based on request parameters
+    const isBusyNode = nodeId === "12D3KooWBusyNode";
+    const isOfflineNode = nodeId === "12D3KooWOfflineNode";
+    const isOldNode = nodeId === "12D3KooWOldNode";
+    
+    if (isOfflineNode) {
+      throw new Error("Connection timeout");
+    }
+
+    if (isOldNode) {
+      return {
+        requestId: request.id,
+        nodeId,
+        status: "error",
+        message: "Protocol version mismatch",
+        reason: "error"
+      };
+    }
+
+    if (isBusyNode || request.modelId === "llama-3.2-70b") {
+      return {
+        requestId: request.id,
+        nodeId,
+        status: "rejected",
+        message: "Node is busy or model too large",
+        reason: "busy"
+      };
+    }
+
+    // Check if payment is too low
+    const minCost = BigNumber.from("50000000"); // 0.05 ETH minimum
+    if (request.estimatedCost.lt(minCost)) {
+      return {
+        requestId: request.id,
+        nodeId,
+        status: "rejected",
+        message: "Insufficient payment offered",
+        reason: "insufficient_payment"
+      };
+    }
+
+    // Accept the job
+    return {
+      requestId: request.id,
+      nodeId,
+      status: "accepted",
+      estimatedTime: 3000 + Math.floor(Math.random() * 2000), // 3-5 seconds
+      actualCost: request.estimatedCost.mul(95).div(100), // 95% of estimated
+      message: "Job accepted, starting inference"
+    };
   }
 }

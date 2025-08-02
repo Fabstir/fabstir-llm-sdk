@@ -3,7 +3,17 @@ import { ethers } from "ethers";
 import { EventEmitter } from "events";
 import { ContractManager } from "./contracts.js";
 import { ErrorCode, FabstirError } from "./errors.js";
-import { JobStatus, PaymentStatus, DiscoveryConfig, NodeDiscoveryOptions, DiscoveredNode } from "./types.js";
+import { 
+  JobStatus, 
+  PaymentStatus, 
+  DiscoveryConfig, 
+  NodeDiscoveryOptions, 
+  DiscoveredNode,
+  JobRequest,
+  JobResponse,
+  JobNegotiation,
+  NegotiationOptions
+} from "./types.js";
 import { P2PClient } from "./p2p/client.js";
 
 // Export all types
@@ -362,6 +372,18 @@ export class FabstirSDK extends EventEmitter {
     
     // Route to P2P client in production mode
     if (this.config.mode === "production" && this._p2pClient) {
+      // If no nodeAddress provided, auto-negotiate
+      if (!jobRequest.nodeAddress) {
+        const result = await this.submitJobWithNegotiation({
+          modelId: jobRequest.modelId,
+          prompt: jobRequest.prompt,
+          maxTokens: jobRequest.maxTokens,
+          temperature: jobRequest.temperature,
+          maxBudget: jobRequest.maxPrice
+        });
+        return result.jobId;
+      }
+      
       return await this._p2pClient.submitJob(jobRequest);
     }
     
@@ -1216,5 +1238,198 @@ export class FabstirSDK extends EventEmitter {
       return null;
     }
     return this._p2pClient.getP2PMetrics();
+  }
+
+  async selectBestNode(criteria: {
+    modelId: string;
+    estimatedTokens: number;
+    maxBudget?: ethers.BigNumber;
+  }): Promise<DiscoveredNode> {
+    // Discover nodes that support the model
+    const nodes = await this.discoverNodes({
+      modelId: criteria.modelId,
+      maxPrice: criteria.maxBudget?.toString()
+    });
+
+    if (nodes.length === 0) {
+      throw new Error(`No nodes found for model ${criteria.modelId}`);
+    }
+
+    // Calculate cost for each node
+    const nodesWithCost = nodes.map(node => {
+      const pricePerToken = ethers.BigNumber.from(node.capabilities.pricePerToken);
+      const totalCost = pricePerToken.mul(criteria.estimatedTokens);
+      return { node, totalCost };
+    });
+
+    // Filter by budget if provided
+    let eligible = nodesWithCost;
+    if (criteria.maxBudget) {
+      eligible = nodesWithCost.filter(n => n.totalCost.lte(criteria.maxBudget!));
+    }
+
+    if (eligible.length === 0) {
+      throw new Error("No nodes within budget");
+    }
+
+    // Sort by reputation, latency, and price
+    eligible.sort((a, b) => {
+      // Prefer higher reputation
+      const repDiff = (b.node.reputation || 0) - (a.node.reputation || 0);
+      if (repDiff !== 0) return repDiff;
+
+      // Then lower latency
+      const latDiff = (a.node.latency || 999) - (b.node.latency || 999);
+      if (latDiff !== 0) return latDiff;
+
+      // Finally lower cost
+      return a.totalCost.lt(b.totalCost) ? -1 : 1;
+    });
+
+    return eligible[0]!.node;
+  }
+
+  async negotiateWithNodes(options: NegotiationOptions): Promise<JobNegotiation[]> {
+    if (this.config.mode === "mock") {
+      throw new Error("Node negotiation not available in mock mode");
+    }
+
+    if (!this._p2pClient || !this._p2pClient.isStarted()) {
+      throw new Error("P2P client not connected");
+    }
+
+    this.emit("negotiation:start", { type: "negotiation:start", options });
+
+    // Discover nodes
+    const nodes = await this.discoverNodes({
+      modelId: options.modelId,
+      maxPrice: options.maxBudget?.toString()
+    });
+
+    if (nodes.length === 0) {
+      throw new Error(`No nodes found for model ${options.modelId}`);
+    }
+
+    // Take top N nodes
+    const maxNodes = options.maxNodes || 3;
+    const topNodes = nodes.slice(0, maxNodes);
+
+    // Create job request
+    const jobRequest: JobRequest = {
+      id: `job-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      requester: await this.getAddress() || "0x0000000000000000000000000000000000000000",
+      modelId: options.modelId,
+      prompt: options.prompt,
+      maxTokens: options.maxTokens,
+      temperature: options.temperature,
+      estimatedCost: options.maxBudget || ethers.BigNumber.from("100000000"), // 0.1 ETH default
+      timestamp: Date.now()
+    };
+
+    // Send requests to all nodes in parallel
+    const negotiations = await Promise.all(
+      topNodes.map(async node => {
+        try {
+          const response = await this._p2pClient!.sendJobRequest(
+            node.peerId,
+            jobRequest
+          );
+          
+          this.emit("negotiation:offer", { 
+            type: "negotiation:offer",
+            nodeId: node.peerId, 
+            status: response.status,
+            cost: response.actualCost?.toString()
+          });
+
+          return {
+            node,
+            request: jobRequest,
+            response,
+            timestamp: Date.now()
+          };
+        } catch (error) {
+          // If request fails, return error response
+          return {
+            node,
+            request: jobRequest,
+            response: {
+              requestId: jobRequest.id,
+              nodeId: node.peerId,
+              status: "error" as const,
+              message: error instanceof Error ? error.message : "Unknown error",
+              reason: "timeout" as const
+            },
+            timestamp: Date.now()
+          };
+        }
+      })
+    );
+
+    // Sort by best offer (accepted first, then by cost/time ratio)
+    negotiations.sort((a, b) => {
+      // Accepted offers first
+      if (a.response.status === "accepted" && b.response.status !== "accepted") return -1;
+      if (b.response.status === "accepted" && a.response.status !== "accepted") return 1;
+
+      // If both accepted, sort by cost/time ratio
+      if (a.response.status === "accepted" && b.response.status === "accepted") {
+        const aScore = Number(a.response.actualCost) / (a.response.estimatedTime || 1);
+        const bScore = Number(b.response.actualCost) / (b.response.estimatedTime || 1);
+        return aScore - bScore;
+      }
+
+      return 0;
+    });
+
+    this.emit("negotiation:complete", { 
+      type: "negotiation:complete",
+      negotiations: negotiations.length,
+      accepted: negotiations.filter(n => n.response.status === "accepted").length 
+    });
+
+    return negotiations;
+  }
+
+  async submitJobWithNegotiation(options: NegotiationOptions): Promise<{
+    jobId: number;
+    selectedNode: string;
+    negotiationAttempts: number;
+  }> {
+    const maxRetries = options.maxRetries || 3;
+    let attempts = 0;
+    
+    while (attempts < maxRetries) {
+      attempts++;
+      
+      // Negotiate with nodes
+      const negotiations = await this.negotiateWithNodes({
+        ...options,
+        maxNodes: maxRetries - attempts + 1 // Try fewer nodes on each retry
+      });
+
+      // Find first accepted offer
+      const accepted = negotiations.find(n => n.response.status === "accepted");
+      
+      if (accepted) {
+        // Submit job to the selected node
+        const jobId = await this.submitJob({
+          prompt: options.prompt,
+          modelId: options.modelId,
+          maxTokens: options.maxTokens,
+          temperature: options.temperature,
+          maxPrice: accepted.response.actualCost,
+          nodeAddress: accepted.node.peerId
+        });
+
+        return {
+          jobId,
+          selectedNode: accepted.node.peerId,
+          negotiationAttempts: attempts
+        };
+      }
+    }
+
+    throw new Error("No nodes accepted the job request");
   }
 }

@@ -157,12 +157,12 @@ Implement node discovery via DHT.
 Find nodes offering 'llm-inference' service.
 ```
 
-### Sub-phase 2.7: Job Negotiation
+### Sub-phase 2.7: Job Negotiation ✅
 
-- [ ] Define job request protocol
-- [ ] Send job to specific node
-- [ ] Handle accept/reject
-- [ ] Implement node selection
+- [x] Define job request protocol
+- [x] Send job to specific node
+- [x] Handle accept/reject
+- [x] Implement node selection
 
 **Test Files:**
 

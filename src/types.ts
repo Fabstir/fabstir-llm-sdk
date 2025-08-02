@@ -2,7 +2,7 @@
 import { BigNumber } from "ethers";
 
 // Job related types
-export interface JobRequest {
+export interface JobSubmissionRequest {
   prompt: string;
   modelId: string;
   maxTokens: number;
@@ -225,4 +225,45 @@ export interface DiscoveryConfig {
   cacheTTL?: number; // Cache time-to-live in ms
   maxNodes?: number; // Maximum nodes to return
   discoveryTimeout?: number; // Discovery timeout in ms
+}
+
+// Job negotiation types
+export interface JobRequest {
+  id: string;
+  requester: string;
+  modelId: string;
+  prompt: string;
+  maxTokens: number;
+  temperature?: number;
+  topP?: number;
+  topK?: number;
+  estimatedCost: BigNumber;
+  timestamp: number;
+}
+
+export interface JobResponse {
+  requestId: string;
+  nodeId: string;
+  status: "accepted" | "rejected" | "error";
+  estimatedTime?: number; // ms
+  actualCost?: BigNumber;
+  message?: string;
+  reason?: "busy" | "insufficient_payment" | "unsupported_model" | "timeout" | "error";
+}
+
+export interface JobNegotiation {
+  node: DiscoveredNode;
+  request: JobRequest;
+  response: JobResponse;
+  timestamp: number;
+}
+
+export interface NegotiationOptions {
+  modelId: string;
+  prompt: string;
+  maxTokens: number;
+  temperature?: number;
+  maxNodes?: number;
+  maxBudget?: BigNumber;
+  maxRetries?: number;
 }
