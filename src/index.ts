@@ -4,6 +4,7 @@ import { EventEmitter } from "events";
 import { ContractManager } from "./contracts";
 import { ErrorCode, FabstirError } from "./errors";
 import { JobStatus, PaymentStatus } from "./types";
+import { P2PClient } from "./p2p/client";
 
 // Export all types
 export * from "./types";
@@ -39,6 +40,7 @@ export class FabstirSDK extends EventEmitter {
   private _payments: Map<number, any> = new Map();
   private _paymentHistory: Map<number, any[]> = new Map();
   private _paymentEventEmitter: EventEmitter = new EventEmitter();
+  private _p2pClient?: P2PClient;
 
   constructor(config: FabstirConfig = {}) {
     super();
@@ -84,19 +86,6 @@ export class FabstirSDK extends EventEmitter {
 
       if (this.config.p2pConfig.bootstrapNodes.length === 0) {
         throw new Error("At least one bootstrap node required for production mode");
-      }
-
-      // Validate bootstrap node format
-      const validPrefixes = ['/ip4/', '/ip6/', '/dns4/', '/dnsaddr/'];
-      for (const node of this.config.p2pConfig.bootstrapNodes) {
-        if (typeof node !== 'string') {
-          throw new Error("Bootstrap nodes must be strings");
-        }
-        
-        const hasValidPrefix = validPrefixes.some(prefix => node.startsWith(prefix));
-        if (!hasValidPrefix) {
-          throw new Error(`Invalid bootstrap node format: ${node}`);
-        }
       }
 
       // Apply defaults for optional P2P fields
@@ -193,6 +182,25 @@ export class FabstirSDK extends EventEmitter {
       // Initialize contracts with provider
       await this.contracts.initialize(provider, this.signer);
 
+      // Initialize P2P client in production mode
+      if (this.config.mode === "production" && this.config.p2pConfig) {
+        try {
+          this._p2pClient = new P2PClient(this.config.p2pConfig);
+          await this._p2pClient.start();
+          this.emit("p2p:started");
+          
+          if (this.config.debug) {
+            console.log("[FabstirSDK] P2P client started");
+          }
+        } catch (p2pError) {
+          // P2P errors should not prevent SDK connection
+          if (this.config.debug) {
+            console.warn("[FabstirSDK] P2P client failed to start:", p2pError);
+          }
+          // Continue without P2P
+        }
+      }
+
       this._isConnected = true;
       this.emit("connected", { network, address: await this.getAddress() });
 
@@ -245,6 +253,12 @@ export class FabstirSDK extends EventEmitter {
    * Disconnect from provider
    */
   async disconnect(): Promise<void> {
+    // Stop P2P client if running
+    if (this._p2pClient?.isStarted()) {
+      await this._p2pClient.stop();
+      this.emit("p2p:stopped");
+    }
+    
     this._isConnected = false;
     this.provider = undefined;
     this.signer = undefined;
@@ -265,6 +279,34 @@ export class FabstirSDK extends EventEmitter {
       default:
         return 84532; // Default to Base Sepolia
     }
+  }
+
+  /**
+   * Check if P2P is enabled
+   */
+  isP2PEnabled(): boolean {
+    return this.config.mode === "production" && !!this.config.p2pConfig;
+  }
+
+  /**
+   * Check if P2P is connected
+   */
+  isP2PConnected(): boolean {
+    return !!this._p2pClient?.isStarted();
+  }
+
+  /**
+   * Get P2P status
+   */
+  getP2PStatus(): "disabled" | "connected" | "disconnected" {
+    if (!this.isP2PEnabled()) {
+      return "disabled";
+    }
+    // If P2P is enabled but client doesn't exist yet, consider it disabled
+    if (!this._p2pClient) {
+      return "disabled";
+    }
+    return this.isP2PConnected() ? "connected" : "disconnected";
   }
 
   // TODO: Implement these methods for the tests

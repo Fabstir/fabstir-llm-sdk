@@ -87,10 +87,10 @@ Must have bootstrapNodes array. Throw clear errors.
 
 ### Sub-phase 2.3: P2P Client Structure
 
-- [ ] Create P2PClient class skeleton
-- [ ] Add libp2p dependencies
-- [ ] Implement client lifecycle (start/stop)
-- [ ] Add connection state tracking
+- [x] Create P2PClient class skeleton
+- [x] Add libp2p dependencies
+- [x] Implement client lifecycle (start/stop)
+- [x] Add connection state tracking
 
 **Test Files:**
 
