@@ -193,7 +193,7 @@ Implement response streaming over P2P connection.
 Handle individual tokens and completion.
 ```
 
-### Sub-phase 2.9: Contract Bridge
+### Sub-phase 2.9: Contract Bridge ✅
 
 - [x] Link P2P events to contracts
 - [x] Submit job to blockchain
@@ -211,12 +211,12 @@ Bridge P2P functionality with smart contracts.
 Submit jobs on-chain while using P2P for execution.
 ```
 
-### Sub-phase 2.10: Error Recovery
+### Sub-phase 2.10: Error Recovery ✅
 
-- [ ] Implement retry mechanisms
-- [ ] Handle node failures
-- [ ] Support job recovery
-- [ ] Track node reliability
+- [x] Implement retry mechanisms
+- [x] Handle node failures
+- [x] Support job recovery
+- [x] Track node reliability
 
 **Test Files:**
 

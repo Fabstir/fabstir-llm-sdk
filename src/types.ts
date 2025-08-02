@@ -262,6 +262,7 @@ export interface NegotiationOptions {
   submitToChain?: boolean;
   paymentToken?: string;
   allowP2PFallback?: boolean;
+  preferredNodes?: string[];
 }
 
 // P2P Response Streaming types
@@ -345,3 +346,51 @@ export interface P2PJobState {
   blockchainState?: JobStatus;
   lastSync: number;
 }
+
+// Error Recovery types
+export interface RetryOptions {
+  maxRetries?: number;
+  initialDelay?: number;
+  maxDelay?: number;
+  backoffFactor?: number;
+  shouldRetry?: (error: Error, attemptNumber: number) => boolean;
+  onRetry?: (error: Error, attemptNumber: number) => void;
+  signal?: AbortSignal;
+}
+
+export interface NodeReliabilityRecord {
+  nodeId: string;
+  totalJobs: number;
+  successfulJobs: number;
+  failedJobs: number;
+  averageResponseTime: number;
+  successRate: number;
+  lastSuccess?: number;
+  lastFailure?: number;
+  reliability: number; // 0-100 score
+}
+
+export interface JobRecoveryInfo {
+  jobId: number | string;
+  nodeId: string;
+  requestParams: any;
+  lastCheckpoint: number;
+  tokensProcessed: number;
+  canResume: boolean;
+  resultHash?: string;
+}
+
+export interface ErrorRecoveryReport {
+  period: {
+    start: number;
+    end: number;
+  };
+  totalRetries: number;
+  successfulRecoveries: number;
+  failedRecoveries: number;
+  blacklistedNodes: string[];
+  nodeReliability: Record<string, NodeReliabilityRecord>;
+  recommendations: string[];
+}
+
+export type FailoverStrategy = "automatic" | "manual" | "disabled";

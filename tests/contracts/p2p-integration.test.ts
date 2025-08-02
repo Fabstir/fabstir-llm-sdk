@@ -75,7 +75,9 @@ describe("P2P Contract Bridge - Sub-phase 2.9", () => {
     await sdk.connect(mockProvider);
     
     // Set up mock contracts
-    sdk.contracts.jobMarketplace = mockContract;
+    // Mock the getJobMarketplace method to return our mock contract
+    sdk.contracts.getJobMarketplace = vi.fn().mockResolvedValue(mockContract);
+    sdk.contracts.getPaymentEscrow = vi.fn().mockResolvedValue(null);
     
     return sdk;
   };
@@ -313,7 +315,7 @@ describe("P2P Contract Bridge - Sub-phase 2.9", () => {
       await setupSDK();
       
       // Mock escrow contract
-      sdk.contracts.paymentEscrow = escrowContract;
+      sdk.contracts.getPaymentEscrow = vi.fn().mockResolvedValue(escrowContract);
 
       const result = await sdk.submitJobWithNegotiation({
         prompt: "Payment test",
