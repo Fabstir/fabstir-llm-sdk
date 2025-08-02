@@ -50,9 +50,9 @@ Client SDK for the Fabstir P2P LLM marketplace, enabling applications to connect
 ### Sub-phase 2.1: Mode Configuration
 
 - [x] Add SDKMode type ('mock' | 'production')
-- [ ] Update FabstirConfig interface
-- [ ] Implement mode validation
-- [ ] Ensure backward compatibility
+- [x] Update FabstirConfig interface
+- [x] Implement mode validation
+- [x] Ensure backward compatibility
 
 **Test Files:**
 
