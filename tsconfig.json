@@ -31,11 +31,9 @@
     "moduleResolution": "node"
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "tests/config/demo.test.ts",
+    "tests/config/mode.test.ts"
   ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "tests"
-  ]
+  "exclude": ["node_modules", "dist", "tests"]
 }

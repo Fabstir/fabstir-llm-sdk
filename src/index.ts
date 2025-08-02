@@ -16,6 +16,7 @@ export interface FabstirConfig {
   network?: "base-sepolia" | "base-mainnet" | "local";
   rpcUrl?: string;
   debug?: boolean;
+  mode?: "mock" | "production";
   contractAddresses?: {
     jobMarketplace?: string;
     paymentEscrow?: string;
@@ -44,8 +45,32 @@ export class FabstirSDK extends EventEmitter {
     this.config = {
       network: "base-sepolia",
       debug: false,
+      mode: "mock",
       ...config,
     };
+
+    // Validate mode
+    if (this.config.mode !== undefined) {
+      // Check if mode is null
+      if (this.config.mode === null) {
+        throw new Error(`Invalid SDK mode: null. Must be "mock" or "production"`);
+      }
+      // Check if mode is not a string
+      if (typeof this.config.mode !== "string") {
+        throw new Error(`Invalid SDK mode: ${this.config.mode}. Must be "mock" or "production"`);
+      }
+      // Check if mode is an empty string
+      if (this.config.mode === "") {
+        throw new Error(`Invalid SDK mode: . Must be "mock" or "production"`);
+      }
+      // Check if mode is a valid value
+      if (this.config.mode !== "mock" && this.config.mode !== "production") {
+        throw new Error(`Invalid SDK mode: ${this.config.mode}. Must be "mock" or "production"`);
+      }
+    }
+
+    // Make config immutable
+    Object.freeze(this.config);
 
     // Initialize contract manager
     this.contracts = new ContractManager(this.config);
@@ -247,9 +272,6 @@ export class FabstirSDK extends EventEmitter {
     };
   }
 
-  async approvePayment(token: string, amount: any): Promise<any> {
-    throw new Error("Not implemented");
-  }
 
   async getJobDetails(jobId: number): Promise<any> {
     const job = this._jobs.get(jobId);
