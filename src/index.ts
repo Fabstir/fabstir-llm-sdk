@@ -36,6 +36,7 @@ export * from "./types.js";
 export { ErrorCode, FabstirError } from "./errors.js";
 export { ContractManager } from "./contracts.js";
 export { JobStatus } from "./types.js";
+export { FabstirLLMSDK } from "./fabstir-llm-sdk.js";
 import { P2PConfig } from "./types.js";
 
 // Main SDK configuration
@@ -2859,13 +2860,60 @@ export class FabstirSDK extends EventEmitter {
             ...this.config.retryOptions
           };
           
-          const tx = await this._retryWithBackoff(
-            async () => jobMarketplace['postJob'](
-              options.modelId,
-              acceptedResponse!.actualCost || jobRequest.estimatedCost
-            ),
-            retryOptions
-          );
+          // Detect payment method from options
+          const paymentToken = (options as any).paymentToken;
+          let tx;
+          
+          if (paymentToken === 'USDC') {
+            // USDC payment flow
+            const usdcAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+            const paymentAmount = (options as any).paymentAmount || (acceptedResponse!.actualCost || jobRequest.estimatedCost).toString();
+            
+            // Check and approve USDC if needed
+            const usdcContract = new ethers.Contract(usdcAddress, [
+              'function balanceOf(address owner) view returns (uint256)',
+              'function allowance(address owner, address spender) view returns (uint256)', 
+              'function approve(address spender, uint256 amount) returns (bool)'
+            ], this.signer);
+            
+            const userAddress = await this.signer!.getAddress();
+            const balance = await usdcContract['balanceOf'](userAddress);
+            
+            if (balance.lt(paymentAmount)) {
+              throw new Error('Insufficient USDC balance');
+            }
+            
+            const allowance = await usdcContract['allowance'](userAddress, jobMarketplaceInfo.address);
+            if (allowance.lt(paymentAmount)) {
+              const approveTx = await usdcContract['approve'](jobMarketplaceInfo.address, paymentAmount);
+              await approveTx.wait();
+            }
+            
+            // Call postJobWithToken
+            tx = await this._retryWithBackoff(
+              async () => jobMarketplace['postJobWithToken'](
+                options.modelId,
+                options.prompt || '',
+                acceptedResponse!.actualCost || jobRequest.estimatedCost,
+                options.maxTokens || 1000,
+                usdcAddress,
+                paymentAmount
+              ),
+              retryOptions
+            );
+          } else {
+            // ETH payment flow (default)
+            tx = await this._retryWithBackoff(
+              async () => jobMarketplace['postJob'](
+                options.modelId,
+                options.prompt || '',
+                acceptedResponse!.actualCost || jobRequest.estimatedCost,
+                options.maxTokens || 1000,
+                { value: acceptedResponse!.actualCost || jobRequest.estimatedCost }
+              ),
+              retryOptions
+            );
+          }
 
           const receipt = await tx.wait();
           txHash = receipt.transactionHash;

@@ -1,0 +1,111 @@
+[
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "modelId",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "prompt",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "offerPrice",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint32",
+        "name": "maxTokens",
+        "type": "uint32"
+      }
+    ],
+    "name": "postJob",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "modelId",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "prompt",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "offerPrice",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint32",
+        "name": "maxTokens",
+        "type": "uint32"
+      },
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "postJobWithToken",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "jobId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "customer",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "modelId",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "offerPrice",
+        "type": "uint256"
+      }
+    ],
+    "name": "JobPosted",
+    "type": "event"
+  }
+]
