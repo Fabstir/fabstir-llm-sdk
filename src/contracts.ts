@@ -58,7 +58,8 @@ export class ContractManager {
   private createMockInterface(): ethers.utils.Interface {
     // Create a minimal mock ABI for testing
     const mockAbi = [
-      'function submitJob(string memory modelId, uint256 payment) returns (uint256)',
+      'function postJob(string memory modelId, string memory prompt, uint256 offerPrice, uint32 maxTokens) payable returns (uint256)',
+      'function postJobWithToken(string memory modelId, string memory prompt, uint256 offerPrice, uint32 maxTokens, address token, uint256 amount) returns (uint256)',
       'function getJobStatus(uint256 jobId) view returns (uint8)',
       'function version() view returns (string)'
     ];
