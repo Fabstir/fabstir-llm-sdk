@@ -43,9 +43,22 @@ Before you begin, ensure you have the following installed:
   - [WalletConnect](https://walletconnect.com/) compatible wallet
   - Hardware wallet (Ledger, Trezor) with Web3 provider
 
-- **Base Sepolia ETH** for gas fees
-  - Get test ETH from [Base Sepolia Faucet](https://faucet.quicknode.com/base/sepolia)
-  - You'll need at least 0.1 ETH for testing
+- **Base Sepolia Network Setup**:
+  1. Add Base Sepolia to MetaMask:
+     - Network Name: Base Sepolia
+     - RPC URL: https://sepolia.base.org
+     - Chain ID: 84532
+     - Currency Symbol: ETH
+     - Block Explorer: https://sepolia.basescan.org
+
+- **Required Tokens**:
+  - **Base Sepolia ETH** for gas fees
+    - Get from [Base Sepolia Faucet](https://faucet.quicknode.com/base/sepolia)
+    - You'll need at least 0.1 ETH for testing
+  - **USDC** for job payments (primary payment method)
+    - Get test USDC from the marketplace faucet (see below)
+  - **FAB** tokens (optional, for governance/staking only)
+    - NOT used for job payments anymore
 
 ## Installation
 
@@ -53,17 +66,17 @@ Before you begin, ensure you have the following installed:
 
 Using npm:
 ```bash
-npm install @fabstir/llm-sdk
+npm install @fabstir/llm-marketplace-sdk
 ```
 
 Using pnpm (recommended):
 ```bash
-pnpm add @fabstir/llm-sdk
+pnpm add @fabstir/llm-marketplace-sdk
 ```
 
 Using yarn:
 ```bash
-yarn add @fabstir/llm-sdk
+yarn add @fabstir/llm-marketplace-sdk
 ```
 
 ### 2. Install Required Dependencies
@@ -71,8 +84,10 @@ yarn add @fabstir/llm-sdk
 The SDK requires these peer dependencies:
 
 ```bash
-pnpm add ethers@^5.7.2
+pnpm add ethers@^6.0.0
 ```
+
+Note: The SDK uses ethers v6, not v5. Make sure your project is compatible.
 
 ### 3. TypeScript Setup (Optional)
 
@@ -109,22 +124,22 @@ Create a `.env` file in your project root:
 
 ```bash
 # Network Configuration
-FABSTIR_NETWORK=base-sepolia
-FABSTIR_MODE=production
+NETWORK=base-sepolia
 
-# Contract Addresses (Base Sepolia)
-FABSTIR_JOB_MARKETPLACE=0x742d35Cc6634C0532925a3b844Bc9e7595f5b9A1
-FABSTIR_PAYMENT_ESCROW=0x12892b2fD2e484B88C19568E7D63bB3b9fE4dB02
-FABSTIR_NODE_REGISTRY=0x8Ba7968C30496aB344bc9e7595f5b9A185E3eD89
+# Base Sepolia Contract Addresses (Deployed)
+JOB_MARKETPLACE_ADDRESS=0x6C4283A2aAee2f94BcD2EB04e951EfEa1c35b0B6
+PAYMENT_ESCROW_ADDRESS=0x4B7f... # Check latest deployment
+USDC_ADDRESS=0x036CbD53842c5426634e7929541eC2318f3dCF7e # Base Sepolia USDC
+FAB_ADDRESS=0x... # FAB token (governance only, not for payments)
 
-# P2P Bootstrap Nodes
-FABSTIR_BOOTSTRAP_NODES="/ip4/34.70.224.193/tcp/4001/p2p/12D3KooWRm8J3iL796zPFi2EtGGtUJn58AG67gcRzQ4FENEemvpg,/ip4/35.185.215.242/tcp/4001/p2p/12D3KooWQH5gJ9YjDfRpLnBKY7vtkbPQkxQ5XbVJHmENw5YjLs2V"
+# RPC Endpoint
+RPC_URL=https://sepolia.base.org
 
-# Optional: RPC Endpoint (if not using default)
-FABSTIR_RPC_URL=https://base-sepolia.public.blastapi.io
+# Your wallet private key (keep secure!)
+PRIVATE_KEY=0x...
 
 # Optional: Debug Mode
-FABSTIR_DEBUG=true
+DEBUG=true
 ```
 
 ### 2. Load Environment Variables
@@ -275,30 +290,26 @@ fabstir-node id
 ### Basic Configuration
 
 ```typescript
-import { FabstirSDK } from '@fabstir/llm-sdk';
+import { FabstirLLMSDK } from '@fabstir/llm-marketplace-sdk';
 import { ethers } from 'ethers';
 
 // Initialize SDK
-const sdk = new FabstirSDK({
-  mode: process.env.FABSTIR_MODE as 'mock' | 'production',
-  network: process.env.FABSTIR_NETWORK,
+const sdk = new FabstirLLMSDK({
+  network: 'base-sepolia',
   
   // Contract addresses
   contracts: {
-    jobMarketplace: process.env.FABSTIR_JOB_MARKETPLACE,
-    paymentEscrow: process.env.FABSTIR_PAYMENT_ESCROW,
-    nodeRegistry: process.env.FABSTIR_NODE_REGISTRY,
+    jobMarketplace: process.env.JOB_MARKETPLACE_ADDRESS!,
+    paymentEscrow: process.env.PAYMENT_ESCROW_ADDRESS!,
+    usdc: process.env.USDC_ADDRESS!,
+    fab: process.env.FAB_ADDRESS!, // Only for governance
   },
   
-  // P2P configuration
-  p2pConfig: {
-    bootstrapNodes: process.env.FABSTIR_BOOTSTRAP_NODES?.split(',') || [],
-    enableDHT: true,
-    enableMDNS: true,
-  },
+  // RPC configuration
+  rpcUrl: process.env.RPC_URL || 'https://sepolia.base.org',
   
   // Optional settings
-  debug: process.env.FABSTIR_DEBUG === 'true',
+  debug: process.env.DEBUG === 'true',
 });
 ```
 
@@ -306,121 +317,150 @@ const sdk = new FabstirSDK({
 
 ```typescript
 // For browser environment with MetaMask
-const provider = new ethers.providers.Web3Provider(window.ethereum);
-await provider.send("eth_requestAccounts", []);
+const provider = new ethers.BrowserProvider(window.ethereum);
+const signer = await provider.getSigner();
 
 // For Node.js with private key
-const provider = new ethers.providers.JsonRpcProvider(process.env.FABSTIR_RPC_URL);
+const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
 const wallet = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
 
-// Connect SDK
-await sdk.connect(provider);
+// Initialize SDK with signer
+const sdk = new FabstirLLMSDK({
+  signer: signer, // or wallet for Node.js
+  network: 'base-sepolia',
+  contracts: {
+    jobMarketplace: process.env.JOB_MARKETPLACE_ADDRESS!,
+    paymentEscrow: process.env.PAYMENT_ESCROW_ADDRESS!,
+    usdc: process.env.USDC_ADDRESS!,
+  },
+  rpcUrl: process.env.RPC_URL,
+});
 
-console.log('Connected to:', await sdk.getNetwork());
-console.log('Address:', await sdk.getAddress());
+const address = await signer.getAddress();
+console.log('Connected address:', address);
 ```
 
-## First Job Submission
+## First Job Submission with USDC
 
-### 1. Check System Health
+### 1. Get Test USDC
 
 ```typescript
-// Verify everything is working
-const health = await sdk.getSystemHealthReport();
+// Check your USDC balance
+const usdcContract = new ethers.Contract(
+  process.env.USDC_ADDRESS!,
+  ['function balanceOf(address) view returns (uint256)'],
+  provider
+);
 
-console.log('System Status:', health.status);
-console.log('P2P Connected:', health.p2p.status);
-console.log('Blockchain Connected:', health.blockchain.status);
+const balance = await usdcContract.balanceOf(address);
+console.log('USDC Balance:', ethers.formatUnits(balance, 6), 'USDC');
 
-if (health.status !== 'healthy') {
-  console.error('Issues detected:', health.issues);
-  // Address issues before proceeding
+// If you need test USDC, get from faucet or DEX
+// Note: Base Sepolia USDC faucets may vary
+```
+
+### 2. Approve USDC Spending
+
+```typescript
+// Check current USDC allowance
+const currentAllowance = await sdk.checkUSDCAllowance(address);
+console.log('Current USDC allowance:', ethers.formatUnits(currentAllowance, 6));
+
+// Approve USDC if needed (10 USDC for testing)
+const amountToApprove = ethers.parseUnits('10', 6); // 10 USDC
+
+if (currentAllowance < amountToApprove) {
+  console.log('Approving USDC...');
+  const approveTx = await sdk.approveUSDC(amountToApprove);
+  await approveTx.wait();
+  console.log('USDC approved!');
 }
 ```
 
-### 2. Discover Available Nodes
-
-```typescript
-// Find nodes that support your desired model
-const nodes = await sdk.discoverNodes({
-  modelId: 'llama-3.2-1b-instruct',
-  maxLatency: 1000,  // Max 1 second latency
-  minReputation: 80, // Minimum reputation score
-});
-
-console.log(`Found ${nodes.length} suitable nodes:`);
-nodes.forEach(node => {
-  console.log(`- ${node.peerId}: ${node.capabilities.models.join(', ')}`);
-  console.log(`  Price: ${node.capabilities.pricePerToken} wei/token`);
-  console.log(`  Latency: ${node.latency}ms`);
-});
-```
-
-### 3. Submit Your First Job
+### 3. Submit Your First Job with USDC Payment
 
 ```typescript
 try {
-  // Submit job with automatic negotiation
-  const result = await sdk.submitJobWithNegotiation({
-    prompt: "Write a haiku about blockchain technology",
-    modelId: "llama-3.2-1b-instruct",
-    maxTokens: 50,
-    temperature: 0.7,
-    stream: true,  // Enable streaming
-  });
-
-  console.log('Job submitted!');
-  console.log('Job ID:', result.jobId);
-  console.log('Selected Node:', result.selectedNode);
-  console.log('Estimated Cost:', ethers.utils.formatEther(result.negotiatedPrice));
+  // Prepare job details (field order matters!)
+  const jobDetails = {
+    requester: address,
+    model: 'gpt-4',
+    prompt: 'Write a haiku about blockchain technology',
+    offerPrice: ethers.parseUnits('5', 6), // 5 USDC
+    maxTokens: 100n,
+    seed: 0n
+  };
   
-  // Handle streaming response
-  if (result.stream) {
-    console.log('\nResponse:');
-    
-    result.stream.on('token', (token) => {
-      process.stdout.write(token.content);
-    });
-    
-    result.stream.on('end', (summary) => {
-      console.log('\n\nCompleted!');
-      console.log('Total tokens:', summary.totalTokens);
-      console.log('Duration:', summary.duration, 'ms');
-    });
-    
-    result.stream.on('error', (error) => {
-      console.error('Stream error:', error);
-    });
-  }
+  const requirements = {
+    trustedExecution: false
+  };
+  
+  // Submit job with USDC payment
+  console.log('Submitting job with USDC payment...');
+  const tx = await sdk.postJobWithToken(
+    jobDetails,
+    requirements,
+    process.env.USDC_ADDRESS!,
+    ethers.parseUnits('5', 6) // 5 USDC payment
+  );
+  
+  console.log('Transaction hash:', tx.hash);
+  const receipt = await tx.wait();
+  
+  // Extract job ID from events
+  const jobId = receipt.logs[0].topics[1]; // Adjust based on actual event
+  console.log('Job submitted successfully!');
+  console.log('Job ID:', jobId);
+  console.log('Payment: 5 USDC escrowed');
+  console.log('\nWaiting for host to claim and process...');
+  
+  // Payment flow:
+  // 1. USDC transferred to PaymentEscrow
+  // 2. Host claims and processes job
+  // 3. On completion: 90% (4.5 USDC) to host, 10% (0.5 USDC) to treasury
+  
 } catch (error) {
   console.error('Job submission failed:', error);
+  
+  // Common errors:
+  // - "Insufficient allowance": Need to approve USDC first
+  // - "Insufficient balance": Need more USDC
+  // - "Invalid struct": Check field order in jobDetails
 }
 ```
 
-### 4. Monitor Job Progress
+### 4. Submit Job with ETH Payment (Alternative)
 
 ```typescript
-// For non-streaming jobs, poll for status
-const jobId = result.jobId;
-
-const checkStatus = async () => {
-  const status = await sdk.getJobStatus(jobId);
-  console.log('Job Status:', status.status);
+// ETH payments don't require approval
+try {
+  const jobDetails = {
+    requester: address,
+    model: 'gpt-4',
+    prompt: 'Explain Web3 in simple terms',
+    offerPrice: ethers.parseEther('0.001'), // 0.001 ETH
+    maxTokens: 200n,
+    seed: 0n
+  };
   
-  if (status.status === 'COMPLETED') {
-    const result = await sdk.getJobResult(jobId);
-    console.log('Result:', result.response);
-    console.log('Tokens used:', result.tokensUsed);
-  } else if (status.status === 'FAILED') {
-    console.error('Job failed:', status.error);
-  } else {
-    // Check again in 2 seconds
-    setTimeout(checkStatus, 2000);
-  }
-};
-
-// Start monitoring
-checkStatus();
+  const requirements = {
+    trustedExecution: false
+  };
+  
+  // Submit with ETH (use AddressZero for ETH)
+  const tx = await sdk.postJobWithToken(
+    jobDetails,
+    requirements,
+    ethers.ZeroAddress, // ETH payment
+    ethers.parseEther('0.001')
+  );
+  
+  await tx.wait();
+  console.log('Job submitted with ETH payment!');
+  
+} catch (error) {
+  console.error('ETH payment failed:', error);
+}
 ```
 
 ## Testing Your Setup
@@ -430,60 +470,86 @@ checkStatus();
 Create `test-setup.ts`:
 
 ```typescript
-import { FabstirSDK } from '@fabstir/llm-sdk';
+import { FabstirLLMSDK } from '@fabstir/llm-marketplace-sdk';
 import { ethers } from 'ethers';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 async function testSetup() {
-  console.log('🧪 Testing Fabstir SDK Setup...\n');
+  console.log('🧪 Testing Fabstir LLM SDK Setup...\n');
   
   try {
-    // 1. Initialize SDK
-    console.log('1️⃣ Initializing SDK...');
-    const sdk = new FabstirSDK({
-      mode: 'production',
+    // 1. Setup provider and wallet
+    console.log('1️⃣ Setting up provider...');
+    const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+    const wallet = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+    const address = await wallet.getAddress();
+    console.log('✅ Wallet connected:', address, '\n');
+    
+    // 2. Initialize SDK
+    console.log('2️⃣ Initializing SDK...');
+    const sdk = new FabstirLLMSDK({
+      signer: wallet,
       network: 'base-sepolia',
-      p2pConfig: {
-        bootstrapNodes: process.env.FABSTIR_BOOTSTRAP_NODES?.split(',') || [],
+      contracts: {
+        jobMarketplace: process.env.JOB_MARKETPLACE_ADDRESS!,
+        paymentEscrow: process.env.PAYMENT_ESCROW_ADDRESS!,
+        usdc: process.env.USDC_ADDRESS!,
       },
+      rpcUrl: process.env.RPC_URL,
       debug: true,
     });
     console.log('✅ SDK initialized\n');
     
-    // 2. Connect wallet
-    console.log('2️⃣ Connecting wallet...');
-    const provider = new ethers.providers.JsonRpcProvider(
-      process.env.FABSTIR_RPC_URL
+    // 3. Check USDC balance
+    console.log('3️⃣ Checking USDC balance...');
+    const usdcContract = new ethers.Contract(
+      process.env.USDC_ADDRESS!,
+      ['function balanceOf(address) view returns (uint256)'],
+      provider
     );
-    await sdk.connect(provider);
-    console.log('✅ Wallet connected\n');
+    const balance = await usdcContract.balanceOf(address);
+    console.log(`✅ USDC Balance: ${ethers.formatUnits(balance, 6)} USDC\n`);
     
-    // 3. Check health
-    console.log('3️⃣ Checking system health...');
-    const health = await sdk.getSystemHealthReport();
-    console.log(`✅ System status: ${health.status}`);
-    console.log(`   P2P: ${health.p2p.status}`);
-    console.log(`   Blockchain: ${health.blockchain.status}\n`);
+    // 4. Check USDC allowance
+    console.log('4️⃣ Checking USDC allowance...');
+    const allowance = await sdk.checkUSDCAllowance(address);
+    console.log(`✅ Current allowance: ${ethers.formatUnits(allowance, 6)} USDC\n`);
     
-    // 4. Discover nodes
-    console.log('4️⃣ Discovering nodes...');
-    const nodes = await sdk.discoverNodes({
-      modelId: 'llama-3.2-1b-instruct',
-    });
-    console.log(`✅ Found ${nodes.length} nodes\n`);
+    // 5. Test job submission with USDC
+    console.log('5️⃣ Testing job submission with USDC...');
     
-    // 5. Test job submission
-    console.log('5️⃣ Testing job submission...');
-    const result = await sdk.submitJobWithNegotiation({
-      prompt: "Say 'Hello, Fabstir!'",
-      modelId: "llama-3.2-1b-instruct",
-      maxTokens: 10,
-    });
-    console.log(`✅ Job ${result.jobId} submitted to ${result.selectedNode}\n`);
+    // Approve if needed
+    if (allowance < ethers.parseUnits('1', 6)) {
+      console.log('   Approving USDC...');
+      const approveTx = await sdk.approveUSDC(ethers.parseUnits('10', 6));
+      await approveTx.wait();
+      console.log('   ✅ USDC approved');
+    }
+    
+    // Submit job
+    const jobDetails = {
+      requester: address,
+      model: 'gpt-4',
+      prompt: 'Say "Hello, Fabstir!"',
+      offerPrice: ethers.parseUnits('1', 6), // 1 USDC
+      maxTokens: 10n,
+      seed: 0n
+    };
+    
+    const tx = await sdk.postJobWithToken(
+      jobDetails,
+      { trustedExecution: false },
+      process.env.USDC_ADDRESS!,
+      ethers.parseUnits('1', 6)
+    );
+    
+    const receipt = await tx.wait();
+    console.log(`✅ Job submitted! Tx: ${receipt.hash}\n`);
     
     console.log('🎉 All tests passed! Your setup is working correctly.');
+    console.log('\n📝 Note: FAB tokens are NOT used for payments, only USDC/ETH');
     
   } catch (error) {
     console.error('❌ Test failed:', error);
@@ -503,32 +569,37 @@ npx ts-node test-setup.ts
 ### 2. Verify Contract Connections
 
 ```typescript
-// Test contract interactions
-const contracts = await sdk.getContractAddresses();
-console.log('Contract Addresses:', contracts);
+// Verify contract addresses
+console.log('Contract Addresses:');
+console.log('  JobMarketplace:', process.env.JOB_MARKETPLACE_ADDRESS);
+console.log('  PaymentEscrow:', process.env.PAYMENT_ESCROW_ADDRESS);
+console.log('  USDC:', process.env.USDC_ADDRESS);
+console.log('  FAB (governance only):', process.env.FAB_ADDRESS);
 
-// Check your balance
-const balance = await sdk.getBalance();
-console.log('Wallet Balance:', ethers.utils.formatEther(balance), 'ETH');
+// Check balances
+const ethBalance = await provider.getBalance(address);
+console.log('ETH Balance:', ethers.formatEther(ethBalance), 'ETH');
+
+const usdcBalance = await usdcContract.balanceOf(address);
+console.log('USDC Balance:', ethers.formatUnits(usdcBalance, 6), 'USDC');
 ```
 
-### 3. Test Mock Mode
+### 3. Important Payment Notes
 
 ```typescript
-// Test with mock mode for development
-const mockSdk = new FabstirSDK({
-  mode: 'mock',
-});
+// IMPORTANT: Payment Token Changes
+// - FAB tokens are NO LONGER used for job payments
+// - Use USDC (recommended) or ETH for all job payments
+// - FAB is only for governance voting and node staking
 
-await mockSdk.connect(provider);
+// Correct payment flow:
+// 1. User approves USDC (one-time or per-job)
+// 2. User submits job with USDC payment
+// 3. USDC goes to PaymentEscrow contract
+// 4. Host claims and processes job
+// 5. Payment released: 90% to host, 10% to treasury
 
-const mockJob = await mockSdk.submitJob({
-  prompt: "Test mock response",
-  modelId: "llama-3.2-1b-instruct",
-  maxTokens: 50,
-});
-
-console.log('Mock job:', mockJob);
+// If you see errors about FAB payments, update your code!
 ```
 
 ## Next Steps
@@ -583,16 +654,39 @@ const nodes = await sdk.discoverNodes({
 
 **Transaction Failures**
 ```typescript
-// Add retry logic
-const result = await sdk.submitJobWithRetry(
-  jobParams,
-  {
-    maxRetries: 3,
-    onRetry: (error, attempt) => {
-      console.log(`Retry ${attempt} after error:`, error.message);
-    }
-  }
+// Common transaction errors and solutions:
+
+// Error: "Insufficient allowance"
+// Solution: Approve USDC first
+await sdk.approveUSDC(requiredAmount);
+
+// Error: "Invalid struct"
+// Solution: Check field order matches Solidity exactly
+const jobDetails = {
+  requester: address,      // Field 1
+  model: 'gpt-4',          // Field 2
+  prompt: 'test',          // Field 3
+  offerPrice: amount,      // Field 4
+  maxTokens: 100n,         // Field 5
+  seed: 0n                 // Field 6
+};
+
+// Error: "FAB payment failed"
+// Solution: FAB is not for payments! Use USDC or ETH
+const tx = await sdk.postJobWithToken(
+  jobDetails,
+  requirements,
+  USDC_ADDRESS, // NOT FAB_ADDRESS!
+  amount
 );
 ```
 
-For more help, see the [P2P Configuration Guide](P2P_CONFIGURATION.md#troubleshooting).
+**USDC Issues**
+```typescript
+// No USDC balance on Base Sepolia?
+// 1. Bridge USDC from Base Sepolia faucet
+// 2. Or swap ETH for USDC on a Base Sepolia DEX
+// 3. Or ask in Discord for test USDC
+```
+
+For more help, see the [API Documentation](API.md) or ask in [Discord](https://discord.gg/fabstir).

@@ -19,7 +19,7 @@ Complete API documentation for the Fabstir LLM SDK, including all public methods
 
 ## FabstirSDK Class
 
-The main class for interacting with the Fabstir P2P LLM network.
+The main class for interacting with the Fabstir LLM Marketplace on Base Sepolia. Supports USDC and ETH payments for AI inference jobs.
 
 ### Constructor
 
@@ -35,11 +35,13 @@ Creates a new instance of the SDK.
 **Example:**
 ```typescript
 const sdk = new FabstirSDK({
-  mode: "production",
   network: "base-sepolia",
-  p2pConfig: {
-    bootstrapNodes: ["/ip4/34.70.224.193/tcp/4001/p2p/12D3KooW..."],
+  contracts: {
+    jobMarketplace: "0x6C4283A2aAee2f94BcD2EB04e951EfEa1c35b0B6",
+    paymentEscrow: "0x4B7f...", // Check actual deployment
+    usdc: "0x...", // Base Sepolia USDC address
   },
+  rpcUrl: process.env.RPC_URL || "https://sepolia.base.org",
   debug: true,
 });
 ```
@@ -100,28 +102,56 @@ if (sdk.isConnected) {
 
 ### Job Methods
 
-#### submitJob(params)
+#### postJobWithToken(jobDetails, requirements, paymentToken, paymentAmount)
 
-Submits a job to the network (simplified interface).
+Submits a job with USDC or ETH payment to the marketplace.
 
 ```typescript
-async submitJob(params: JobSubmissionRequest): Promise<number>
+async postJobWithToken(
+  jobDetails: JobDetails,
+  requirements: JobRequirements,
+  paymentToken: string,  // USDC or ETH address
+  paymentAmount: bigint
+): Promise<ContractTransaction>
 ```
 
 **Parameters:**
-- `params`: Job submission parameters
+- `jobDetails`: Job details struct (6 fields, order matters!)
+- `requirements`: Job requirements including trusted execution settings
+- `paymentToken`: Address of payment token (USDC or ETH)
+- `paymentAmount`: Payment amount in token units
 
-**Returns:** Job ID
+**Returns:** Contract transaction
 
 **Example:**
 ```typescript
-const jobId = await sdk.submitJob({
-  prompt: "Explain quantum computing",
-  modelId: "llama-3.2-1b-instruct",
-  maxTokens: 200,
-  temperature: 0.7,
-  stream: true,
-});
+// First approve USDC if needed
+const approveTx = await sdk.approveUSDC(ethers.parseUnits('10', 6));
+await approveTx.wait();
+
+// Submit job with USDC payment
+const tx = await sdk.postJobWithToken(
+  {
+    requester: userAddress,
+    model: 'gpt-4',
+    prompt: 'Explain quantum computing',
+    offerPrice: ethers.parseUnits('5', 6), // 5 USDC
+    maxTokens: 200n,
+    seed: 0n
+  },
+  { trustedExecution: false },
+  USDC_ADDRESS,
+  ethers.parseUnits('5', 6)
+);
+await tx.wait();
+```
+
+#### submitJob(params) [DEPRECATED]
+
+⚠️ **Deprecated**: Use `postJobWithToken` instead. This method only supported FAB token payments which are no longer used.
+
+```typescript
+async submitJob(params: JobSubmissionRequest): Promise<number>
 ```
 
 #### submitJobWithNegotiation(params)
@@ -247,6 +277,88 @@ const result = await sdk.getJobResult(123);
 console.log("Response:", result.response);
 console.log("Tokens used:", result.tokensUsed);
 console.log("Inference time:", result.inferenceTime, "ms");
+```
+
+#### approveUSDC(amount)
+
+Approves USDC spending for the JobMarketplace contract.
+
+```typescript
+async approveUSDC(amount: bigint): Promise<ContractTransaction>
+```
+
+**Parameters:**
+- `amount`: Amount to approve in USDC units (6 decimals)
+
+**Returns:** Approval transaction
+
+**Example:**
+```typescript
+// Approve 100 USDC
+const tx = await sdk.approveUSDC(ethers.parseUnits('100', 6));
+await tx.wait();
+```
+
+#### checkUSDCAllowance(owner)
+
+Checks the current USDC allowance for a user.
+
+```typescript
+async checkUSDCAllowance(owner: string): Promise<bigint>
+```
+
+**Parameters:**
+- `owner`: Wallet address to check
+
+**Returns:** Current allowance in USDC units
+
+**Example:**
+```typescript
+const allowance = await sdk.checkUSDCAllowance(userAddress);
+if (allowance < jobCost) {
+  // Need to approve more USDC
+  await sdk.approveUSDC(jobCost);
+}
+```
+
+#### claimJob(jobId)
+
+Allows a host to claim a posted job for processing.
+
+```typescript
+async claimJob(jobId: string): Promise<ContractTransaction>
+```
+
+**Parameters:**
+- `jobId`: The job ID to claim
+
+**Returns:** Claim transaction
+
+**Example:**
+```typescript
+const tx = await sdk.claimJob('123');
+await tx.wait();
+```
+
+#### completeJob(jobId, result)
+
+Submits the result for a claimed job.
+
+```typescript
+async completeJob(jobId: string, result: string): Promise<ContractTransaction>
+```
+
+**Parameters:**
+- `jobId`: The job ID
+- `result`: The inference result
+
+**Returns:** Completion transaction
+
+**Example:**
+```typescript
+const tx = await sdk.completeJob('123', 'Quantum computing is...');
+await tx.wait();
+// Payment automatically released: 90% to host, 10% to treasury
 ```
 
 #### cancelJob(jobId)
@@ -652,7 +764,7 @@ stream.on("metrics", (metrics: StreamMetrics) => {
 sdk.on("payment:escrowed", (data: {
   jobId: number;
   amount: BigNumber;
-  token: string;
+  token: string;  // USDC or ETH address
 }) => {
   console.log("Payment escrowed:", data);
 });
@@ -663,6 +775,7 @@ sdk.on("payment:released", (data: {
   recipient: string;
 }) => {
   console.log("Payment released:", data);
+  // Note: 90% goes to host, 10% to treasury
 });
 
 sdk.on("payment:disputed", (data: {
@@ -672,6 +785,14 @@ sdk.on("payment:disputed", (data: {
 }) => {
   console.log("Payment disputed:", data);
 });
+
+// USDC-specific events
+sdk.on("usdc:approved", (data: {
+  amount: BigNumber;
+  spender: string;
+}) => {
+  console.log("USDC approved:", data);
+});
 ```
 
 ## Types and Interfaces
@@ -680,22 +801,47 @@ sdk.on("payment:disputed", (data: {
 
 ```typescript
 interface SDKConfig {
-  mode?: "mock" | "production";
-  network?: string;
+  network?: string;  // "base-sepolia" for production
   contracts?: {
-    jobMarketplace?: string;
-    paymentEscrow?: string;
-    nodeRegistry?: string;
+    jobMarketplace?: string;  // Core marketplace contract
+    paymentEscrow?: string;   // Handles USDC/ETH payments
+    usdc?: string;           // USDC token address
+    fab?: string;            // FAB token (governance only, NOT for payments)
   };
-  p2pConfig?: P2PConfig;
+  rpcUrl?: string;  // Base Sepolia RPC URL
   retryOptions?: RetryOptions;
   debug?: boolean;
   enablePerformanceTracking?: boolean;
-  failoverStrategy?: FailoverStrategy;
 }
 ```
 
-### JobSubmissionRequest
+### JobDetails
+
+**IMPORTANT**: Field order must match Solidity struct exactly!
+
+```typescript
+interface JobDetails {
+  requester: string;     // User's wallet address
+  model: string;         // Model ID (e.g., "gpt-4")
+  prompt: string;        // The prompt text
+  offerPrice: bigint;    // Payment amount in token units
+  maxTokens: bigint;     // Maximum tokens for response
+  seed: bigint;          // Random seed for reproducibility
+}
+```
+
+### JobRequirements
+
+```typescript
+interface JobRequirements {
+  trustedExecution: boolean;  // Whether TEE is required
+  // Additional requirements as needed
+}
+```
+
+### JobSubmissionRequest [DEPRECATED]
+
+⚠️ **Deprecated**: Use `JobDetails` with `postJobWithToken` instead.
 
 ```typescript
 interface JobSubmissionRequest {
@@ -819,8 +965,10 @@ enum ErrorCode {
   
   // Payment errors
   INSUFFICIENT_BALANCE = "INSUFFICIENT_BALANCE",
+  INSUFFICIENT_ALLOWANCE = "INSUFFICIENT_ALLOWANCE",  // USDC not approved
   PAYMENT_FAILED = "PAYMENT_FAILED",
   ESCROW_FAILED = "ESCROW_FAILED",
+  INVALID_PAYMENT_TOKEN = "INVALID_PAYMENT_TOKEN",  // Not USDC or ETH
   
   // P2P errors
   P2P_CONNECTION_FAILED = "P2P_CONNECTION_FAILED",
@@ -854,7 +1002,13 @@ try {
         
       case ErrorCode.INSUFFICIENT_BALANCE:
         console.error("Insufficient balance:", error.details);
-        // Top up wallet
+        // Top up wallet with USDC or ETH
+        break;
+        
+      case ErrorCode.INSUFFICIENT_ALLOWANCE:
+        console.error("USDC not approved:", error.details);
+        // Call approveUSDC() first
+        await sdk.approveUSDC(requiredAmount);
         break;
         
       case ErrorCode.P2P_TIMEOUT:
@@ -870,6 +1024,81 @@ try {
   }
 }
 ```
+
+## Payment Flow Examples
+
+### Complete USDC Payment Flow
+
+```typescript
+// 1. Check USDC balance (optional)
+const usdcBalance = await sdk.getUSDCBalance(userAddress);
+console.log('USDC Balance:', ethers.formatUnits(usdcBalance, 6));
+
+// 2. Check and approve USDC if needed
+const jobCost = ethers.parseUnits('10', 6); // 10 USDC
+const allowance = await sdk.checkUSDCAllowance(userAddress);
+
+if (allowance < jobCost) {
+  console.log('Approving USDC...');
+  const approveTx = await sdk.approveUSDC(jobCost);
+  await approveTx.wait();
+  console.log('USDC approved');
+}
+
+// 3. Submit job with USDC payment
+const jobTx = await sdk.postJobWithToken(
+  {
+    requester: userAddress,
+    model: 'gpt-4',
+    prompt: 'Write a haiku about blockchain',
+    offerPrice: jobCost,
+    maxTokens: 100n,
+    seed: 0n
+  },
+  { trustedExecution: false },
+  USDC_ADDRESS,
+  jobCost
+);
+
+const receipt = await jobTx.wait();
+console.log('Job submitted:', receipt.transactionHash);
+
+// 4. USDC is now in escrow
+// 5. Host claims and processes job
+// 6. Payment automatically released: 90% to host, 10% to treasury
+```
+
+### ETH Payment Flow
+
+```typescript
+// ETH payments don't require approval
+const jobCost = ethers.parseEther('0.01'); // 0.01 ETH
+
+const jobTx = await sdk.postJobWithToken(
+  {
+    requester: userAddress,
+    model: 'gpt-4',
+    prompt: 'Explain Web3',
+    offerPrice: jobCost,
+    maxTokens: 200n,
+    seed: 0n
+  },
+  { trustedExecution: false },
+  ETH_ADDRESS, // Or use ethers.constants.AddressZero
+  jobCost
+);
+
+await jobTx.wait();
+```
+
+### Important Notes on FAB Tokens
+
+⚠️ **FAB tokens are NOT used for payments anymore!** They are only used for:
+- Governance voting
+- Node staking
+- Platform incentives
+
+If you see any code using FAB for job payments, it is outdated and should be updated to use USDC or ETH.
 
 ## Advanced Usage
 

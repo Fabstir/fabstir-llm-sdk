@@ -16,12 +16,13 @@ This document provides a comprehensive overview of the Fabstir LLM SDK architect
 
 ## System Overview
 
-The Fabstir LLM SDK is built on a decentralized architecture that enables direct peer-to-peer communication between clients and LLM nodes. The system eliminates central servers by leveraging:
+The Fabstir LLM SDK provides a decentralized marketplace for AI inference jobs on Base Sepolia. The system connects users who need AI inference with hosts who provide compute resources, using:
 
-- **libp2p** for P2P networking and discovery
-- **Ethereum smart contracts** for trustless payments and job coordination
-- **IPFS/S5** for decentralized storage of results
-- **WebRTC/WebSocket** for real-time streaming
+- **Base Sepolia** for low-cost, fast blockchain transactions
+- **USDC/ETH payments** for job compensation (FAB tokens are only for governance)
+- **Smart contracts** for trustless job posting and payment escrow
+- **PaymentEscrow** for secure fund management with automatic distribution
+- **P2P architecture** (planned) for direct node communication
 
 ### Key Design Principles
 
@@ -46,10 +47,11 @@ graph TB
         PEERS[Peer Nodes]
     end
 
-    subgraph Blockchain
+    subgraph Blockchain[Base Sepolia]
         JM[Job Marketplace]
         PE[Payment Escrow]
-        NR[Node Registry]
+        USDC[USDC Token]
+        FAB[FAB Token - Governance Only]
     end
 
     subgraph Storage
@@ -68,7 +70,9 @@ graph TB
     SDK <--> PEERS
     SDK <--> JM
     SDK <--> PE
-    SDK <--> NR
+    SDK <--> USDC
+    JM <--> PE
+    PE <--> USDC
     SDK <--> NODE1
     SDK <--> NODE2
     SDK <--> NODE3
@@ -131,26 +135,32 @@ class P2PClient {
 
 ### 3. ContractManager
 
-Interfaces with blockchain smart contracts:
+Interfaces with Base Sepolia smart contracts:
 
 ```typescript
 class ContractManager {
   private jobMarketplace: JobMarketplace;
   private paymentEscrow: PaymentEscrow;
-  private nodeRegistry: NodeRegistry;
+  private usdcToken: IERC20;
   
-  // Contract interactions
-  async postJob(params: JobParams): Promise<number>
-  async escrowPayment(jobId: number, amount: BigNumber): Promise<void>
-  async claimJob(jobId: number): Promise<void>
+  // Core contract interactions
+  async approveUSDC(amount: bigint): Promise<ContractTransaction>
+  async postJobWithToken(
+    jobDetails: JobDetails,
+    requirements: JobRequirements,
+    paymentToken: string,  // USDC or ETH address
+    paymentAmount: bigint
+  ): Promise<ContractTransaction>
+  async claimJob(jobId: string): Promise<ContractTransaction>
+  async completeJob(jobId: string, result: string): Promise<ContractTransaction>
 }
 ```
 
 **Contract Interactions:**
-- Job posting and claiming
-- Payment escrow and release
-- Node registration and updates
-- Dispute resolution
+- USDC approval for spending
+- Job posting with USDC/ETH payment
+- Payment escrow and automatic release (90% host, 10% treasury)
+- Job claiming and completion
 
 ### 4. StreamManager
 
@@ -236,102 +246,112 @@ function calculateScore(node: DiscoveredNode, criteria: SelectionCriteria): numb
 
 A job goes through multiple stages from submission to completion:
 
-### 1. Job Submission Flow
+### 1. Job Submission Flow with USDC/ETH Payment
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Negotiating: Submit Job
-    Negotiating --> Posted: Price Agreed
-    Posted --> Claimed: Node Claims
+    [*] --> ApproveUSDC: If Using USDC
+    [*] --> PostJob: If Using ETH
+    ApproveUSDC --> PostJob: USDC Approved
+    PostJob --> Posted: Job Posted with Payment
+    Posted --> Escrowed: Payment in Escrow
+    Escrowed --> Claimed: Host Claims Job
     Claimed --> Processing: Start Processing
-    Processing --> Streaming: If Stream Enabled
-    Processing --> Completed: Direct Response
-    Streaming --> Completed: Stream Finished
-    Completed --> [*]: Job Done
+    Processing --> Completed: Job Completed
+    Completed --> PaymentReleased: 90% to Host, 10% to Treasury
+    PaymentReleased --> [*]: Job Done
     
-    Negotiating --> Failed: No Nodes Available
     Processing --> Failed: Processing Error
-    Failed --> [*]: Job Failed
+    Failed --> Refunded: Payment Refunded
+    Refunded --> [*]: Job Failed
 ```
 
-### 2. Detailed Job Flow
+### 2. Detailed Job Flow with USDC Payment
 
 ```mermaid
 sequenceDiagram
     participant Client
     participant SDK
-    participant P2P
-    participant Node
-    participant Blockchain
-    participant Storage
+    participant USDC
+    participant JobMarketplace
+    participant PaymentEscrow
+    participant Host
+    participant Treasury
     
-    Client->>SDK: submitJobWithNegotiation()
-    SDK->>P2P: discoverNodes()
-    P2P->>Node: queryCapabilities()
-    Node->>P2P: returnCapabilities()
-    P2P->>SDK: availableNodes[]
+    Client->>SDK: submitJob(jobDetails)
     
-    SDK->>Node: negotiateJob()
-    Node->>SDK: acceptJob()
-    
-    SDK->>Blockchain: postJob()
-    Blockchain->>SDK: jobId
-    
-    SDK->>Blockchain: escrowPayment()
-    Blockchain-->>Node: JobPosted event
-    
-    Node->>Blockchain: claimJob()
-    Node->>Node: processJob()
-    
-    alt Streaming Enabled
-        loop While Processing
-            Node->>Client: streamToken()
+    alt USDC Payment
+        SDK->>USDC: checkAllowance()
+        USDC->>SDK: currentAllowance
+        
+        alt Insufficient Allowance
+            SDK->>USDC: approve(JobMarketplace, amount)
+            USDC->>SDK: approved
         end
-    else Direct Response
-        Node->>Storage: storeResult()
-        Storage->>Node: resultHash
     end
     
-    Node->>Blockchain: submitResult()
-    Blockchain->>Node: releasePayment()
-    SDK->>Client: jobCompleted()
+    SDK->>JobMarketplace: postJobWithToken(details, USDC, amount)
+    JobMarketplace->>USDC: transferFrom(client, escrow, amount)
+    USDC->>PaymentEscrow: amount transferred
+    JobMarketplace->>SDK: jobId
+    
+    Host->>JobMarketplace: claimJob(jobId)
+    JobMarketplace->>Host: job assigned
+    
+    Host->>Host: processJob()
+    Host->>JobMarketplace: completeJob(jobId, result)
+    
+    JobMarketplace->>PaymentEscrow: releasePayment(jobId)
+    PaymentEscrow->>Host: 90% of payment
+    PaymentEscrow->>Treasury: 10% protocol fee
+    
+    SDK->>Client: jobCompleted(result)
 ```
 
 ## Contract Interaction Flow
 
-### Smart Contract Architecture
+### Smart Contract Architecture (Base Sepolia)
 
 ```mermaid
 graph LR
-    subgraph Contracts
-        JM[JobMarketplace]
+    subgraph Contracts[Base Sepolia Contracts]
+        JM[JobMarketplace<br/>0x6C4283A2aAee...]
         PE[PaymentEscrow]
-        NR[NodeRegistry]
+        USDC[USDC Token]
+        FAB[FAB Token<br/>Governance Only]
     end
     
     subgraph Participants
         CLIENT[Client]
-        NODE[LLM Node]
+        HOST[Host Node]
         TREASURY[Treasury]
     end
     
-    CLIENT -->|Post Job| JM
-    CLIENT -->|Escrow Payment| PE
-    NODE -->|Register| NR
-    NODE -->|Claim Job| JM
-    NODE -->|Submit Result| JM
-    PE -->|Release Payment| NODE
-    PE -->|Protocol Fee| TREASURY
-    JM -->|Query Nodes| NR
+    CLIENT -->|Approve USDC| USDC
+    CLIENT -->|Post Job with USDC/ETH| JM
+    JM -->|Transfer USDC/ETH| PE
+    HOST -->|Claim Job| JM
+    HOST -->|Complete Job| JM
+    PE -->|90% Payment| HOST
+    PE -->|10% Fee| TREASURY
+    CLIENT -->|Stake FAB| FAB
+    HOST -->|Stake FAB| FAB
 ```
 
-### Payment Flow
+### Payment Flow (USDC/ETH)
 
-1. **Escrow**: Client deposits payment into escrow contract
-2. **Lock**: Funds are locked when node claims the job
-3. **Release**: Payment released on successful completion
-4. **Refund**: Client can reclaim funds if job fails
-5. **Dispute**: Either party can initiate dispute resolution
+1. **Approval** (USDC only): Client approves JobMarketplace to spend USDC
+2. **Escrow**: Payment automatically transferred to PaymentEscrow on job posting
+3. **Lock**: Funds locked when host claims the job
+4. **Distribution**: On completion:
+   - 90% released to host
+   - 10% sent to treasury as protocol fee
+5. **Refund**: Client can reclaim funds if job expires unclaimed or fails
+
+**Important**: FAB tokens are NOT used for job payments. They are only for:
+- Governance voting
+- Node staking requirements
+- Platform incentives
 
 ## Streaming Protocol
 
@@ -559,13 +579,14 @@ async submitMultipleJobs(jobs: JobParams[]) {
 - **NAT traversal**: Built-in hole punching
 - **Protocol agnostic**: Supports multiple transports
 
-### Why Ethereum L2 (Base)?
+### Why Base Sepolia?
 
-- **Low fees**: Fraction of mainnet costs
-- **Fast finality**: Quick transaction confirmation
-- **EVM compatible**: Existing tooling works
-- **Growing ecosystem**: Active development
-- **Security**: Inherits Ethereum security
+- **Low fees**: Fraction of mainnet costs, ideal for micropayments
+- **Fast finality**: Quick transaction confirmation (2-3 seconds)
+- **USDC native support**: Direct USDC integration on Base
+- **EVM compatible**: All Ethereum tools work seamlessly
+- **Coinbase backing**: Strong institutional support
+- **Growing ecosystem**: Rapidly expanding DeFi and developer community
 
 ### Why EventEmitter Pattern?
 
@@ -575,8 +596,21 @@ async submitMultipleJobs(jobs: JobParams[]) {
 - **Async-friendly**: Natural fit for async operations
 - **Debuggable**: Easy to trace event flow
 
-### Future Enhancements
+### Current Implementation Status
 
+✅ **Completed**:
+- USDC payment integration
+- ETH payment support
+- JobMarketplace with postJobWithToken
+- PaymentEscrow with automatic distribution
+- Base Sepolia deployment
+
+🚧 **In Progress**:
+- P2P node discovery
+- Direct node communication
+- WebSocket streaming
+
+📋 **Planned**:
 1. **Multi-chain Support**: Deploy to multiple L2s
 2. **Advanced Routing**: ML-based node selection
 3. **Compression**: Reduce bandwidth usage

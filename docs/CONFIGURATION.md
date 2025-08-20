@@ -41,13 +41,23 @@ Configuration sources are applied in this order (highest to lowest priority):
 ```typescript
 interface SDKConfig {
   // Core settings
-  mode?: "mock" | "production";                    // Default: "production"
   network?: string;                                // Default: "base-sepolia"
   debug?: boolean;                                 // Default: false
+  rpcUrl?: string;                                 // Base Sepolia RPC URL
+  
+  // Signer/Provider
+  signer?: ethers.Signer;                         // Required for transactions
+  provider?: ethers.Provider;                     // Optional, derived from signer
+  
+  // Contract addresses (Base Sepolia)
+  contracts?: {
+    jobMarketplace: string;                       // Core marketplace contract
+    paymentEscrow: string;                        // Handles USDC/ETH payments
+    usdc: string;                                 // USDC token address
+    fab?: string;                                 // FAB token (governance only)
+  };
   
   // Component configurations
-  p2pConfig?: P2PConfig;                          // P2P network settings
-  contracts?: ContractConfig;                      // Smart contract addresses
   retryOptions?: RetryOptions;                     // Global retry settings
   performanceConfig?: PerformanceConfig;           // Performance tuning
   securityConfig?: SecurityConfig;                 // Security settings
@@ -76,17 +86,28 @@ interface SDKConfig {
 ### Minimal Configuration
 
 ```typescript
-// Minimal production setup
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: ["/ip4/34.70.224.193/tcp/4001/p2p/12D3KooW..."]
-  }
+// Minimal Base Sepolia setup with USDC
+const sdk = new FabstirLLMSDK({
+  signer: wallet, // or MetaMask signer
+  network: "base-sepolia",
+  contracts: {
+    jobMarketplace: "0x6C4283A2aAee2f94BcD2EB04e951EfEa1c35b0B6",
+    paymentEscrow: "0x4B7f...",
+    usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // Base Sepolia USDC
+  },
+  rpcUrl: "https://sepolia.base.org"
 });
 
-// Minimal mock setup (for development)
-const sdk = new FabstirSDK({
-  mode: "mock"
+// With environment variables
+const sdk = new FabstirLLMSDK({
+  signer: wallet,
+  network: process.env.NETWORK!,
+  contracts: {
+    jobMarketplace: process.env.JOB_MARKETPLACE_ADDRESS!,
+    paymentEscrow: process.env.PAYMENT_ESCROW_ADDRESS!,
+    usdc: process.env.USDC_ADDRESS!,
+  },
+  rpcUrl: process.env.RPC_URL
 });
 ```
 
