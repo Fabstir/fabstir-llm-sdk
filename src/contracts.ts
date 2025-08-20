@@ -9,23 +9,22 @@ export interface ContractAddresses {
 
 export class ContractManager {
   private provider?: ethers.providers.Provider;
-  private signer?: ethers.Signer;
   public jobMarketplaceAddress?: string;
   private chainId?: number;
+  private contractAddresses?: ContractAddresses;
   
   constructor(private config: any) {}
   
   async initialize(provider: ethers.providers.Provider, signer?: ethers.Signer): Promise<void> {
     this.provider = provider;
-    this.signer = signer;
     
     // Get and store chain ID
     const network = await provider.getNetwork();
     this.chainId = network.chainId;
     
     // Set addresses based on network
-    const addresses = this.getAddressesForNetwork();
-    this.jobMarketplaceAddress = addresses.jobMarketplace;
+    this.contractAddresses = this.getAddressesForNetwork();
+    this.jobMarketplaceAddress = this.contractAddresses.jobMarketplace;
   }
   
   private getAddressesForNetwork(): ContractAddresses {
@@ -105,5 +104,102 @@ export class ContractManager {
   async getContractVersion(): Promise<string> {
     // TODO: Return contract version
     return '1.0.0';
+  }
+
+  /**
+   * Post a job with token payment (USDC or ETH)
+   * @param signer Required signer for transaction
+   */
+  async postJobWithToken(
+    jobDetails: any,
+    requirements: any,
+    paymentToken: string,
+    paymentAmount: bigint,
+    signer: ethers.Signer
+  ): Promise<ethers.ContractTransaction> {
+    if (!this.provider) {
+      throw new Error('Provider not initialized. Call initialize() first.');
+    }
+
+    // For mock mode, return mock transaction
+    if (this.config.mode === 'mock') {
+      const mockTx: any = {
+        hash: `0x${Math.random().toString(16).substr(2, 64)}`,
+        wait: async () => ({
+          transactionHash: mockTx.hash,
+          status: 1,
+          events: []
+        })
+      };
+      return mockTx as ethers.ContractTransaction;
+    }
+
+    // TODO: Implement actual contract call
+    // const jobMarketplace = new ethers.Contract(
+    //   this.contractAddresses!.jobMarketplace,
+    //   JobMarketplaceABI,
+    //   signer
+    // );
+    // return jobMarketplace.postJobWithToken(
+    //   jobDetails,
+    //   requirements,
+    //   paymentToken,
+    //   paymentAmount
+    // );
+    
+    throw new Error('postJobWithToken not yet implemented in production mode');
+  }
+
+  /**
+   * Approve USDC spending
+   * @param signer Required signer for transaction
+   */
+  async approveUSDC(amount: bigint, signer: ethers.Signer): Promise<ethers.ContractTransaction> {
+    if (!this.provider) {
+      throw new Error('Provider not initialized. Call initialize() first.');
+    }
+
+    // For mock mode, return mock transaction
+    if (this.config.mode === 'mock') {
+      const mockTx: any = {
+        hash: `0x${Math.random().toString(16).substr(2, 64)}`,
+        wait: async () => ({
+          transactionHash: mockTx.hash,
+          status: 1,
+          events: []
+        })
+      };
+      return mockTx as ethers.ContractTransaction;
+    }
+
+    // TODO: Implement actual USDC approval
+    // const usdcContract = new ethers.Contract(
+    //   USDC_ADDRESS,
+    //   ERC20_ABI,
+    //   signer
+    // );
+    // return usdcContract.approve(this.contractAddresses!.jobMarketplace, amount);
+    
+    throw new Error('approveUSDC not yet implemented in production mode');
+  }
+
+  /**
+   * Check USDC allowance (read-only, doesn't need signer)
+   */
+  async checkUSDCAllowance(owner: string, provider: ethers.providers.Provider): Promise<bigint> {
+    // For mock mode, return mock allowance
+    if (this.config.mode === 'mock') {
+      return BigInt(1000000000);
+    }
+
+    // TODO: Implement actual allowance check
+    // const usdcContract = new ethers.Contract(
+    //   USDC_ADDRESS,
+    //   ERC20_ABI,
+    //   provider
+    // );
+    // return usdcContract.allowance(owner, this.contractAddresses!.jobMarketplace);
+    
+    return BigInt(0);
   }
 }

@@ -7,7 +7,7 @@ import {
   CONTRACT_ADDRESSES, 
   ERC20_ABI,
   JobStatus 
-} from './types/contracts';
+} from './types/contracts.js';
 
 interface FabstirLLMSDKEvents {
   jobSubmitted: (data: { jobId: string; paymentToken: string; txHash: string }) => void;

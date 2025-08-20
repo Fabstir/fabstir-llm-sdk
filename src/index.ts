@@ -37,10 +37,18 @@ export { ErrorCode, FabstirError } from "./errors.js";
 export { ContractManager } from "./contracts.js";
 export { JobStatus } from "./types.js";
 export { FabstirLLMSDK } from "./fabstir-llm-sdk.js";
+
+// Export headless SDK as the primary export
+export { FabstirSDKHeadless, HeadlessSDKConfig } from "./fabstir-sdk-headless.js";
+
+// BACKWARD COMPATIBILITY: Export compatibility wrapper as FabstirSDK
+// This ensures all existing tests and code continue to work
+export { FabstirSDK, FabstirConfig } from "./fabstir-sdk-compat.js";
+
 import { P2PConfig } from "./types.js";
 
-// Main SDK configuration
-export interface FabstirConfig {
+// Main SDK configuration (OLD - now exported from fabstir-sdk-compat.ts)
+interface FabstirConfigOld {
   network?: "base-sepolia" | "base-mainnet" | "local";
   rpcUrl?: string;
   debug?: boolean;
@@ -65,9 +73,9 @@ export interface FabstirConfig {
   discoveryConfig?: DiscoveryConfig;
 }
 
-// Main SDK class
-export class FabstirSDK extends EventEmitter {
-  public config: FabstirConfig;
+// Main SDK class (OLD - kept for reference, not exported)
+class FabstirSDKOld extends EventEmitter {
+  public config: FabstirConfigOld;
   public provider?: ethers.providers.Provider;
   public signer?: ethers.Signer;
   public contracts: ContractManager;
@@ -106,7 +114,7 @@ export class FabstirSDK extends EventEmitter {
   };
   private _operationTimings: Map<string, number[]> = new Map();
 
-  constructor(config: FabstirConfig = {}) {
+  constructor(config: FabstirConfigOld = {}) {
     super();
 
     // Set default configuration
@@ -363,8 +371,8 @@ export class FabstirSDK extends EventEmitter {
         throw error;
       }
       throw new FabstirError(
-        "Failed to connect",
         ErrorCode.CONNECTION_FAILED,
+        "Failed to connect",
         error
       );
     }
