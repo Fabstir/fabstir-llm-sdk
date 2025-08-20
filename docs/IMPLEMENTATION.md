@@ -260,6 +260,111 @@ Test job submission through completion.
 - `docs/MIGRATION.md`
 - `docs/API.md`
 
+## Sub-phase 2.13: Headless SDK Architecture Refactor
+
+### Objective
+Refactor the SDK to be a headless library that accepts signer/provider as input rather than managing its own Web3 context. This fixes the fundamental architecture flaw causing WagmiProvider conflicts.
+
+### Current Problem
+- SDK creates its own WagmiProvider/Web3 context
+- Cannot access user's connected wallet
+- Causes context isolation and SSR issues
+- Results in `WagmiProviderNotFoundError` throughout the app
+
+### Implementation Plan
+
+```markdown
+### Sub-phase 2.13: Headless SDK Refactoring 🚨 CRITICAL
+
+- [ ] Remove all React dependencies from SDK core
+- [ ] Convert to pure TypeScript/JavaScript functions
+- [ ] Accept signer/provider as parameters
+- [ ] Separate React hooks into app layer
+- [ ] Maintain backward compatibility via adapter pattern
+
+**Files to Refactor:**
+- `src/sdk/sdk-provider.tsx` → DELETE
+- `src/providers/` → DELETE entire directory
+- `src/hooks/use-wallet.ts` → Move to app layer
+- `src/sdk/sdk-adapter.ts` → Convert to headless
+- `src/sdk/fabstir-llm-sdk.ts` → Remove React, accept signer
+
+**New Structure:**
+```typescript
+// src/sdk/headless-sdk.ts
+export class FabstirSDKHeadless {
+  constructor(
+    private signer?: ethers.Signer,
+    private provider?: ethers.Provider,
+    private config: SDKConfig
+  ) {}
+
+  async postJob(
+    params: JobParams,
+    signer?: ethers.Signer
+  ): Promise<string> {
+    const s = signer || this.signer;
+    if (!s) throw new Error('No signer provided');
+    // Direct contract interaction
+  }
+}
+
+// src/adapters/react-adapter.ts (optional, for compatibility)
+export function useSDK() {
+  const { signer } = useWalletClient(); // App's wagmi
+  return useMemo(() => 
+    new FabstirSDKHeadless(signer, provider, config),
+    [signer]
+  );
+}
+```
+
+**Test Files:**
+- `tests/headless/sdk-core.test.ts`
+- `tests/headless/contract-interaction.test.ts`
+- `tests/headless/signer-injection.test.ts`
+- `tests/compatibility/adapter.test.ts`
+
+**Success Criteria:**
+- [ ] SDK works without any React/Provider dependencies
+- [ ] Can be used in Node.js environments
+- [ ] Accepts signer from consuming app
+- [ ] No more WagmiProvider errors
+- [ ] Backward compatibility maintained
+- [ ] All existing tests still pass
+- [ ] New headless tests passing
+```
+
+### Benefits of This Refactor
+
+1. **Fixes Root Cause**: Eliminates provider conflicts permanently
+2. **Universal Usage**: SDK works in any JavaScript environment
+3. **Clean Architecture**: Proper separation of concerns
+4. **Testing**: Can test SDK in isolation without React
+5. **SSR Compatible**: No browser-only dependencies
+6. **Composable**: Apps control their own wallet management
+
+### Migration Path
+
+```typescript
+// OLD (broken)
+import { SDKProvider, useSDK } from '@fabstir/sdk-client';
+
+<SDKProvider>
+  <App />
+</SDKProvider>
+
+// NEW (working)
+import { FabstirSDKHeadless } from '@fabstir/sdk-client';
+import { useWalletClient } from 'wagmi';
+
+function useSDK() {
+  const { data: signer } = useWalletClient();
+  return new FabstirSDKHeadless(signer, config);
+}
+```
+
+
 ## Phase 3: Advanced Features (FUTURE)
 
 ### Sub-phase 3.1: Multi-language Support
