@@ -1,11 +1,14 @@
 # Fabstir LLM SDK Configuration Guide
 
-This guide covers all configuration options available in the Fabstir LLM SDK, including defaults, environment variables, and best practices.
+This guide covers all configuration options available in the Fabstir LLM SDK, including the new headless architecture, payment methods, and best practices.
 
 ## Table of Contents
 
 - [Configuration Overview](#configuration-overview)
-- [SDK Configuration](#sdk-configuration)
+- [Headless SDK Configuration](#headless-sdk-configuration)
+- [FabstirLLMSDK Configuration](#fabstirllmsdk-configuration)
+- [Legacy SDK Configuration](#legacy-sdk-configuration)
+- [Payment Configuration](#payment-configuration)
 - [Mode Configuration](#mode-configuration)
 - [Network Configuration](#network-configuration)
 - [P2P Configuration](#p2p-configuration)
@@ -18,12 +21,11 @@ This guide covers all configuration options available in the Fabstir LLM SDK, in
 
 ## Configuration Overview
 
-The SDK can be configured through:
+The SDK offers three main configuration approaches:
 
-1. **Constructor options** - Direct configuration object
-2. **Environment variables** - For sensitive data and deployment settings
-3. **Configuration files** - For complex setups
-4. **Runtime updates** - Some settings can be changed after initialization
+1. **FabstirSDKHeadless** - Headless, environment-agnostic configuration
+2. **FabstirLLMSDK** - Contract-focused with automatic payment handling
+3. **FabstirSDK (Legacy)** - Original configuration with provider connection
 
 ### Configuration Priority
 
@@ -34,59 +36,179 @@ Configuration sources are applied in this order (highest to lowest priority):
 3. Environment variables
 4. Default values
 
-## SDK Configuration
+## Headless SDK Configuration
 
-### Complete Configuration Interface
+### HeadlessConfig Interface
 
 ```typescript
-interface SDKConfig {
+interface HeadlessConfig {
   // Core settings
-  mode?: "mock" | "production";                    // Default: "production"
-  network?: string;                                // Default: "base-sepolia"
+  mode?: "mock" | "production";                    // Default: "mock"
+  network?: "base-sepolia" | "base-mainnet" | "local"; // Default: "base-sepolia"
   debug?: boolean;                                 // Default: false
   
-  // Component configurations
-  p2pConfig?: P2PConfig;                          // P2P network settings
-  contracts?: ContractConfig;                      // Smart contract addresses
-  retryOptions?: RetryOptions;                     // Global retry settings
-  performanceConfig?: PerformanceConfig;           // Performance tuning
-  securityConfig?: SecurityConfig;                 // Security settings
+  // Contract addresses (optional overrides)
+  contractAddresses?: {
+    jobMarketplace?: string;
+    paymentEscrow?: string;
+    nodeRegistry?: string;
+  };
   
-  // Feature flags
-  enablePerformanceTracking?: boolean;             // Default: false
-  enableJobRecovery?: boolean;                     // Default: true
-  enableAutoFailover?: boolean;                    // Default: true
-  enableMetrics?: boolean;                         // Default: false
+  // P2P Configuration
+  p2pConfig?: P2PConfig;
   
-  // Advanced options
-  failoverStrategy?: FailoverStrategy;             // Default: "automatic"
-  nodeSelectionStrategy?: SelectionStrategy;       // Default: "balanced"
-  cachingStrategy?: CachingStrategy;               // Default: "memory"
+  // Discovery settings
+  nodeDiscovery?: DiscoveryConfig;
+  discoveryConfig?: DiscoveryConfig;              // Alias for nodeDiscovery
   
-  // Timeouts and limits
-  defaultTimeout?: number;                         // Default: 60000 (60s)
-  maxConcurrentJobs?: number;                      // Default: 10
-  maxRetries?: number;                             // Default: 3
+  // Error recovery
+  retryOptions?: RetryOptions;
+  failoverStrategy?: FailoverStrategy;
+  nodeBlacklistDuration?: number;                 // Default: 3600000 (1 hour)
+  enableJobRecovery?: boolean;                    // Default: true
+  recoveryDataTTL?: number;                       // Default: 86400000 (24 hours)
   
-  // Event handling
-  eventConfig?: EventConfig;                       // Event emitter settings
+  // Performance
+  reliabilityThreshold?: number;                  // Default: 0.8
+  nodeSelectionStrategy?: "reliability-weighted" | "random" | "price";
+  maxCascadingRetries?: number;                   // Default: 3
+  enableRecoveryReports?: boolean;                // Default: false
+  enablePerformanceTracking?: boolean;            // Default: false
 }
 ```
 
-### Minimal Configuration
+### Basic Headless Configuration
 
 ```typescript
-// Minimal production setup
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: ["/ip4/34.70.224.193/tcp/4001/p2p/12D3KooW..."]
-  }
+import { FabstirSDKHeadless } from '@fabstir/llm-sdk';
+
+const sdk = new FabstirSDKHeadless({
+  mode: 'production',
+  network: 'base-sepolia',
+  debug: true
 });
 
-// Minimal mock setup (for development)
+// Set signer separately (required for blockchain operations)
+const signer = await getSigner(); // Your signer logic
+await sdk.setSigner(signer);
+```
+
+### Advanced Headless Configuration
+
+```typescript
+const sdk = new FabstirSDKHeadless({
+  mode: 'production',
+  network: 'base-mainnet',
+  contractAddresses: {
+    jobMarketplace: '0x...',
+    paymentEscrow: '0x...',
+    nodeRegistry: '0x...'
+  },
+  p2pConfig: {
+    bootstrapNodes: [
+      '/ip4/34.70.224.193/tcp/4001/p2p/12D3KooW...',
+      '/ip4/35.232.100.45/tcp/4001/p2p/12D3KooW...'
+    ],
+    enableDHT: true,
+    enableMDNS: true,
+    dialTimeout: 30000,
+    requestTimeout: 60000
+  },
+  retryOptions: {
+    maxRetries: 3,
+    retryDelay: 1000,
+    backoffMultiplier: 2
+  },
+  nodeSelectionStrategy: 'reliability-weighted',
+  enablePerformanceTracking: true
+});
+```
+
+## FabstirLLMSDK Configuration
+
+Specialized SDK for contract interactions with payment support:
+
+```typescript
+import { FabstirLLMSDK } from '@fabstir/llm-sdk';
+import { ethers } from 'ethers';
+
+// Requires a provider with signer
+const provider = new ethers.providers.Web3Provider(window.ethereum);
+const sdk = new FabstirLLMSDK(provider);
+
+// Submit job with payment configuration
+await sdk.submitJob({
+  modelId: 'gpt-3.5-turbo',
+  prompt: 'Hello world',
+  maxTokens: 100,
+  offerPrice: '1000000',      // Price in payment token units
+  paymentToken: 'USDC',        // 'ETH' or 'USDC'
+  paymentAmount: '1000000',    // Optional: different from offer price
+  temperature: 0.7,
+  seed: 42,
+  resultFormat: 'json'
+});
+```
+
+## Legacy SDK Configuration
+
+For backward compatibility:
+
+```typescript
+import { FabstirSDK } from '@fabstir/llm-sdk';
+
 const sdk = new FabstirSDK({
-  mode: "mock"
+  mode: 'production',
+  network: 'base-sepolia',
+  // ... other config
+});
+
+// Requires connect() call
+await sdk.connect(provider);
+```
+
+## Payment Configuration
+
+### Supported Payment Tokens
+
+```typescript
+// Token addresses on mainnet
+const TOKEN_ADDRESSES = {
+  USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+  USDT: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+  DAI: '0x6B175474E89094C44Da98b954EedeAC495271d0F'
+};
+
+// Base Sepolia test tokens
+const BASE_SEPOLIA_TOKENS = {
+  USDC: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+  USDT: '0x...',  // Deploy your own test token
+  DAI: '0x...'     // Deploy your own test token
+};
+```
+
+### Payment Method Selection
+
+```typescript
+// ETH payment (native token)
+await sdk.submitJob({
+  // ... job params
+  paymentToken: 'ETH',
+  offerPrice: '1000000000000000'  // Wei units (18 decimals)
+});
+
+// USDC payment (ERC20 token)
+await sdk.submitJob({
+  // ... job params
+  paymentToken: 'USDC',
+  offerPrice: '1000000',          // USDC units (6 decimals)
+  paymentAmount: '1000000'         // Can differ from offer price
+});
+
+// Default to ETH if not specified
+await sdk.submitJob({
+  // ... job params
+  offerPrice: '1000000000000000'  // Defaults to ETH
 });
 ```
 
@@ -94,248 +216,123 @@ const sdk = new FabstirSDK({
 
 ### Mock Mode
 
-Mock mode is designed for development and testing without real network connections:
+For development and testing without real network:
 
 ```typescript
-const sdk = new FabstirSDK({
-  mode: "mock",
-  
-  // Mock-specific options
-  mockConfig: {
-    // Response generation
-    defaultResponse: "Mock response for: {prompt}",
-    responseDelay: 100,                   // Milliseconds
-    streamingDelay: 50,                   // Delay between tokens
-    
-    // Behavior simulation
-    simulateErrors: true,                 // Random errors for testing
-    errorRate: 0.1,                       // 10% error rate
-    
-    // Mock data
-    mockNodes: [
-      {
-        peerId: "12D3KooWMockNode1",
-        capabilities: {
-          models: ["llama-3.2-1b-instruct", "gpt-4"],
-          maxTokens: 4096,
-          pricePerToken: "1000000"
-        }
-      }
-    ],
-    
-    // Performance simulation
-    simulateLatency: true,
-    latencyRange: [50, 200],              // Min/max ms
-  }
+const sdk = new FabstirSDKHeadless({
+  mode: 'mock',
+  // P2P and contract interactions are simulated
 });
+
+// Mock mode features:
+// - Instant job responses
+// - No real blockchain transactions
+// - Simulated P2P discovery
+// - Predictable test data
 ```
 
 ### Production Mode
 
-Production mode connects to real P2P network and blockchain:
+For real network interactions:
 
 ```typescript
-const sdk = new FabstirSDK({
-  mode: "production",
-  
-  // Production-specific settings
-  productionConfig: {
-    // Network verification
-    requireBootstrapConnection: true,      // Fail if can't connect
-    minBootstrapNodes: 2,                 // Minimum connected nodes
-    
-    // Health checks
-    enableHealthChecks: true,
-    healthCheckInterval: 300000,          // 5 minutes
-    
-    // Resource limits
-    maxMemoryUsage: 500 * 1024 * 1024,   // 500MB
-    maxConnectionsPerNode: 3,
-    
-    // Blockchain settings
-    confirmationBlocks: 2,                // Wait for confirmations
-    gasMultiplier: 1.2,                   // Gas price buffer
+const sdk = new FabstirSDKHeadless({
+  mode: 'production',
+  p2pConfig: {
+    bootstrapNodes: [...] // Required for production
   }
 });
 ```
 
 ## Network Configuration
 
-### Network Selection
+### Supported Networks
 
 ```typescript
-const sdk = new FabstirSDK({
-  network: "base-sepolia",  // or "base-mainnet"
-  
-  // Custom network configuration
-  networkConfig: {
-    chainId: 84532,
-    rpcUrl: "https://base-sepolia.public.blastapi.io",
-    explorerUrl: "https://sepolia.basescan.org",
-    
-    // Gas settings
-    gasPrice: "auto",              // "auto" | BigNumber
-    maxFeePerGas: "50000000000",   // 50 gwei
-    maxPriorityFeePerGas: "2000000000", // 2 gwei
-    
-    // Transaction settings
-    txTimeout: 120000,             // 2 minutes
-    txRetries: 3,
-    
-    // Block monitoring
-    blockPollingInterval: 3000,    // 3 seconds
-  }
-});
+type Network = "base-sepolia" | "base-mainnet" | "local";
+
+// Network chain IDs
+const CHAIN_IDS = {
+  "base-mainnet": 8453,
+  "base-sepolia": 84532,
+  "local": 31337
+};
 ```
 
-### Multi-Network Support
+### Custom RPC Configuration
 
 ```typescript
-const sdk = new FabstirSDK({
-  // Primary network
-  network: "base-sepolia",
-  
-  // Fallback networks
-  networks: {
-    "base-sepolia": {
-      rpcUrl: "https://base-sepolia.public.blastapi.io",
-      contracts: {
-        jobMarketplace: "0x742d35Cc...",
-        paymentEscrow: "0x12892b2f...",
-        nodeRegistry: "0x8Ba7968C..."
-      }
-    },
-    "polygon-mumbai": {
-      rpcUrl: "https://rpc-mumbai.maticvigil.com",
-      contracts: {
-        jobMarketplace: "0x456def...",
-        paymentEscrow: "0x789abc...",
-        nodeRegistry: "0xdef123..."
-      }
-    }
-  },
-  
-  // Network selection strategy
-  networkSelection: "latency" // "latency" | "cost" | "reliability"
+// Using custom RPC endpoint
+const provider = new ethers.providers.JsonRpcProvider({
+  url: 'https://your-rpc-endpoint.com',
+  headers: {
+    'Authorization': 'Bearer YOUR_API_KEY'
+  }
 });
+
+const signer = provider.getSigner();
+await sdk.setSigner(signer);
 ```
 
 ## P2P Configuration
 
-### Complete P2P Options
+### P2PConfig Interface
 
 ```typescript
-const sdk = new FabstirSDK({
-  p2pConfig: {
-    // Required: Bootstrap nodes
-    bootstrapNodes: [
-      "/ip4/34.70.224.193/tcp/4001/p2p/12D3KooWRm8J3iL796zPFi2EtGGtUJn58AG67gcRzQ4FENEemvpg",
-      "/ip4/35.185.215.242/tcp/4001/p2p/12D3KooWQH5gJ9YjDfRpLnBKY7vtkbPQkxQ5XbVJHmENw5YjLs2V"
-    ],
-    
-    // Discovery mechanisms
-    enableDHT: true,
-    enableMDNS: true,
-    enableBootstrapDiscovery: true,
-    
-    // Custom discovery
-    customDiscovery: {
-      enabled: true,
-      endpoint: "https://nodes.fabstir.com/api/v1/peers",
-      interval: 60000,
-      timeout: 10000
-    },
-    
-    // Connection settings
-    dialTimeout: 30000,
-    requestTimeout: 60000,
-    keepAliveInterval: 30000,
-    
-    // Transport configuration
-    transports: {
-      tcp: { enabled: true, port: 0 },      // Random port
-      websocket: { enabled: true, port: 0 },
-      webrtc: { enabled: false }            // Disabled by default
-    },
-    
-    // Listen addresses
-    listenAddresses: [
-      "/ip4/0.0.0.0/tcp/0",                // Any available port
-      "/ip4/0.0.0.0/tcp/0/ws"              // WebSocket
-    ],
-    
-    // Connection management
-    connectionManager: {
-      maxConnections: 100,
-      minConnections: 10,
-      autoDial: true,
-      autoDialInterval: 10000,
-      
-      // Connection scoring
-      scoreThresholds: {
-        disconnect: -50,
-        reconnect: -20,
-        ban: -100
-      }
-    },
-    
-    // Protocol settings
-    protocols: {
-      job: "/fabstir/job/1.0.0",
-      stream: "/fabstir/stream/1.0.0",
-      discovery: "/fabstir/discovery/1.0.0"
-    },
-    
-    // Relay configuration (for NAT traversal)
-    relay: {
-      enabled: true,
-      hop: {
-        enabled: false,    // Don't relay for others
-        active: false
-      },
-      autoRelay: {
-        enabled: true,
-        maxListeners: 2
-      }
-    }
-  }
-});
+interface P2PConfig {
+  // Required
+  bootstrapNodes: string[];           // Multiaddrs of bootstrap nodes
+  
+  // Optional
+  enableDHT?: boolean;                // Default: true
+  enableMDNS?: boolean;               // Default: true (local discovery)
+  listenAddresses?: string[];         // Custom listen addresses
+  dialTimeout?: number;               // Default: 30000ms
+  requestTimeout?: number;            // Default: 60000ms
+  maxConnections?: number;            // Default: 50
+  minConnections?: number;            // Default: 5
+  
+  // DHT Configuration
+  dhtConfig?: {
+    kBucketSize?: number;            // Default: 20
+    alpha?: number;                  // Default: 3
+    randomWalk?: {
+      enabled?: boolean;              // Default: true
+      interval?: number;              // Default: 300000ms
+      timeout?: number;               // Default: 10000ms
+    };
+  };
+}
 ```
 
-### P2P Performance Tuning
+### P2P Configuration Example
 
 ```typescript
-const sdk = new FabstirSDK({
-  p2pConfig: {
-    bootstrapNodes: [...],
-    
-    // Performance optimizations
-    performance: {
-      // Message batching
-      messageBatching: true,
-      batchSize: 10,
-      batchTimeout: 100,
-      
-      // Connection pooling
-      connectionPooling: true,
-      poolSize: 20,
-      poolTimeout: 300000,
-      
-      // Caching
-      peerCaching: true,
-      peerCacheTTL: 600000,        // 10 minutes
-      peerCacheSize: 1000,
-      
-      // Bandwidth management
-      maxBandwidth: 10485760,       // 10 MB/s
-      bandwidthThrottling: true,
-      
-      // Concurrent operations
-      maxConcurrentDials: 10,
-      maxConcurrentStreams: 50
+const p2pConfig: P2PConfig = {
+  bootstrapNodes: [
+    '/ip4/34.70.224.193/tcp/4001/p2p/12D3KooW...',
+    '/ip4/35.232.100.45/tcp/4001/p2p/12D3KooW...',
+    '/dnsaddr/bootstrap.fabstir.network/p2p/12D3KooW...'
+  ],
+  enableDHT: true,
+  enableMDNS: true,
+  listenAddresses: [
+    '/ip4/0.0.0.0/tcp/0',
+    '/ip4/0.0.0.0/tcp/0/ws'
+  ],
+  dialTimeout: 30000,
+  requestTimeout: 60000,
+  maxConnections: 100,
+  minConnections: 10,
+  dhtConfig: {
+    kBucketSize: 20,
+    randomWalk: {
+      enabled: true,
+      interval: 300000,
+      timeout: 10000
     }
   }
-});
+};
 ```
 
 ## Contract Configuration
@@ -343,320 +340,160 @@ const sdk = new FabstirSDK({
 ### Contract Addresses
 
 ```typescript
-const sdk = new FabstirSDK({
-  contracts: {
-    // Required contracts
-    jobMarketplace: "0x742d35Cc6634C0532925a3b844Bc9e7595f5b9A1",
-    paymentEscrow: "0x12892b2fD2e484B88C19568E7D63bB3b9fE4dB02",
-    nodeRegistry: "0x8Ba7968C30496aB344bc9e7595f5b9A185E3eD89",
-    
-    // Optional contracts
-    disputeResolver: "0x123...",
-    tokenRegistry: "0x456...",
-    
-    // Contract configuration
-    config: {
-      // Gas optimization
-      useMulticall: true,           // Batch contract calls
-      estimateGas: true,            // Auto gas estimation
-      gasBuffer: 1.2,               // 20% gas buffer
-      
-      // Event monitoring
-      eventPolling: true,
-      eventBlockRange: 1000,        // Blocks per query
-      eventConcurrency: 3,          // Parallel queries
-      
-      // Transaction management
-      nonce: "auto",                // "auto" | "manual"
-      replacementStrategy: "bump",   // "bump" | "cancel"
-      bumpPercentage: 10            // 10% gas bump
-    }
-  }
-});
-```
+interface ContractAddresses {
+  jobMarketplace: string;
+  paymentEscrow: string;
+  nodeRegistry: string;
+}
 
-### ABI Configuration
+// Default addresses (Base Sepolia)
+const DEFAULT_CONTRACTS = {
+  jobMarketplace: '0x6C4283A2aAee2f94BcD2EB04e951EfEa1c35b0B6',
+  paymentEscrow: '0x...', // To be deployed
+  nodeRegistry: '0x...'   // To be deployed
+};
 
-```typescript
-const sdk = new FabstirSDK({
-  contracts: {
-    jobMarketplace: "0x742d35Cc...",
-    
-    // Custom ABIs
-    abis: {
-      jobMarketplace: customJobMarketplaceABI,
-      paymentEscrow: customPaymentEscrowABI,
-      nodeRegistry: customNodeRegistryABI
-    },
-    
-    // ABI source
-    abiSource: "etherscan"  // "etherscan" | "local" | "remote"
+// Override default addresses
+const sdk = new FabstirSDKHeadless({
+  contractAddresses: {
+    jobMarketplace: '0xYourCustomAddress',
+    // Others will use defaults
   }
 });
 ```
 
 ## Performance Configuration
 
-### Performance Tracking
+### Retry Options
 
 ```typescript
-const sdk = new FabstirSDK({
-  enablePerformanceTracking: true,
-  
-  performanceConfig: {
-    // Metrics collection
-    collectMetrics: true,
-    metricsInterval: 60000,         // 1 minute
-    metricsRetention: 3600000,      // 1 hour
-    
-    // Performance thresholds
-    thresholds: {
-      connectionTime: 5000,         // Alert if > 5s
-      discoveryTime: 10000,         // Alert if > 10s
-      jobSubmissionTime: 15000,     // Alert if > 15s
-      tokenLatency: 500             // Alert if > 500ms
-    },
-    
-    // Sampling
-    sampling: {
-      enabled: true,
-      rate: 0.1,                    // Sample 10% of operations
-      alwaysSample: ["error", "slow"] // Always track these
-    },
-    
-    // Export settings
-    export: {
-      enabled: true,
-      endpoint: "https://metrics.fabstir.com/v1/collect",
-      interval: 300000,             // 5 minutes
-      format: "otlp"                // OpenTelemetry
-    }
+interface RetryOptions {
+  maxRetries?: number;           // Default: 3
+  retryDelay?: number;           // Default: 1000ms
+  backoffMultiplier?: number;     // Default: 2
+  maxRetryDelay?: number;        // Default: 30000ms
+  retryCondition?: (error: Error) => boolean;
+}
+
+const retryOptions: RetryOptions = {
+  maxRetries: 5,
+  retryDelay: 2000,
+  backoffMultiplier: 1.5,
+  maxRetryDelay: 60000,
+  retryCondition: (error) => {
+    // Retry on network errors, not on user errors
+    return error.code === 'NETWORK_ERROR' || 
+           error.code === 'TIMEOUT';
   }
-});
+};
 ```
 
-### Caching Configuration
+### Failover Strategy
 
 ```typescript
-const sdk = new FabstirSDK({
-  cachingStrategy: "memory",  // "memory" | "disk" | "hybrid" | "redis"
-  
-  cacheConfig: {
-    // Memory cache
-    memory: {
-      maxSize: 100 * 1024 * 1024,  // 100MB
-      ttl: 300000,                  // 5 minutes default
-      
-      // Specific TTLs
-      ttls: {
-        nodes: 600000,              // 10 minutes
-        models: 3600000,            // 1 hour
-        prices: 60000               // 1 minute
-      }
-    },
-    
-    // Disk cache (if enabled)
-    disk: {
-      directory: "./cache",
-      maxSize: 1024 * 1024 * 1024,  // 1GB
-      cleanup: true,
-      cleanupInterval: 3600000      // 1 hour
-    },
-    
-    // Redis cache (if enabled)
-    redis: {
-      url: "redis://localhost:6379",
-      keyPrefix: "fabstir:",
-      maxRetries: 3
-    },
-    
-    // Cache behavior
-    behavior: {
-      readThrough: true,
-      writeThrough: true,
-      invalidateOnError: true,
-      compressionThreshold: 1024   // Compress if > 1KB
-    }
-  }
+type FailoverStrategy = 
+  | "sequential"      // Try nodes in order
+  | "random"         // Random selection
+  | "fastest"        // Select by latency
+  | "cheapest";      // Select by price
+
+const sdk = new FabstirSDKHeadless({
+  failoverStrategy: 'fastest',
+  nodeBlacklistDuration: 3600000, // 1 hour
+  reliabilityThreshold: 0.8
 });
 ```
 
 ## Security Configuration
 
-### Security Settings
+### Signer Management
 
 ```typescript
-const sdk = new FabstirSDK({
-  securityConfig: {
-    // Authentication
-    authentication: {
-      required: true,
-      method: "signature",          // "signature" | "jwt" | "oauth"
-      sessionDuration: 86400000,    // 24 hours
-      
-      // Signature verification
-      signature: {
-        algorithm: "ECDSA",
-        challengeExpiry: 300000,    // 5 minutes
-        nonceLength: 32
-      }
-    },
-    
-    // Encryption
-    encryption: {
-      transport: true,              // Enable TLS
-      storage: true,                // Encrypt stored data
-      algorithm: "AES-256-GCM",
-      keyDerivation: "PBKDF2"
-    },
-    
-    // Access control
-    accessControl: {
-      enabled: true,
-      
-      // Allowlist/Blocklist
-      allowlist: [],                // Empty = allow all
-      blocklist: [
-        "12D3KooWBadNode1",
-        "12D3KooWBadNode2"
-      ],
-      
-      // Rate limiting
-      rateLimit: {
-        enabled: true,
-        windowMs: 60000,            // 1 minute
-        maxRequests: 100,
-        
-        // Different limits by operation
-        limits: {
-          submitJob: 10,
-          discoverNodes: 50,
-          createStream: 20
-        }
-      },
-      
-      // IP filtering
-      ipFilter: {
-        enabled: false,
-        whitelist: [],
-        blacklist: []
-      }
-    },
-    
-    // Audit logging
-    audit: {
-      enabled: true,
-      logLevel: "info",             // "debug" | "info" | "warn" | "error"
-      
-      // What to log
-      events: [
-        "connection",
-        "authentication",
-        "jobSubmission",
-        "payment",
-        "error"
-      ],
-      
-      // Log destination
-      destination: "file",          // "file" | "syslog" | "remote"
-      filePath: "./logs/audit.log",
-      maxFileSize: 10485760,        // 10MB
-      maxFiles: 5
-    }
-  }
-});
+// Never store private keys in config!
+// Always use secure signer management
+
+// Good: Pass signer from wallet
+const signer = await getWalletSigner();
+await sdk.setSigner(signer);
+
+// Good: Use hardware wallet
+const ledgerSigner = await getLedgerSigner();
+await sdk.setSigner(ledgerSigner);
+
+// Bad: Never do this!
+// const privateKey = '0x...'; // NEVER!
 ```
 
-### Privacy Configuration
+### Network Validation
 
 ```typescript
-const sdk = new FabstirSDK({
-  privacyConfig: {
-    // Data minimization
-    dataMinimization: {
-      enabled: true,
-      excludeFields: ["ip", "location", "deviceId"],
-      anonymizeErrors: true
-    },
-    
-    // Consent management
-    consent: {
-      required: true,
-      types: ["analytics", "performance", "functional"],
-      defaultConsent: {
-        analytics: false,
-        performance: true,
-        functional: true
-      }
-    },
-    
-    // Data retention
-    retention: {
-      logs: 604800000,              // 7 days
-      metrics: 2592000000,          // 30 days
-      jobHistory: 7776000000        // 90 days
-    }
-  }
+// Enable strict network validation
+const sdk = new FabstirSDKHeadless({
+  network: 'base-mainnet',
+  // SDK will reject signers on wrong network
 });
+
+// Handle network mismatch
+try {
+  await sdk.setSigner(signer);
+} catch (error) {
+  if (error.message.includes('Wrong network')) {
+    // Prompt user to switch networks
+    await switchNetwork('base-mainnet');
+  }
+}
 ```
 
 ## Environment Variables
 
-The SDK supports configuration through environment variables:
+Supported environment variables:
 
 ```bash
-# Core settings
-FABSTIR_MODE=production                          # or "mock"
+# Network Configuration
 FABSTIR_NETWORK=base-sepolia
-FABSTIR_DEBUG=true
+FABSTIR_RPC_URL=https://sepolia.base.org
 
-# Contract addresses
-FABSTIR_JOB_MARKETPLACE=0x742d35Cc6634C0532925a3b844Bc9e7595f5b9A1
-FABSTIR_PAYMENT_ESCROW=0x12892b2fD2e484B88C19568E7D63bB3b9fE4dB02
-FABSTIR_NODE_REGISTRY=0x8Ba7968C30496aB344bc9e7595f5b9A185E3eD89
+# Contract Addresses
+FABSTIR_JOB_MARKETPLACE=0x...
+FABSTIR_PAYMENT_ESCROW=0x...
+FABSTIR_NODE_REGISTRY=0x...
 
-# P2P configuration
-FABSTIR_BOOTSTRAP_NODES=/ip4/34.70.224.193/tcp/4001/p2p/12D3KooW...,/ip4/35.185.215.242/tcp/4001/p2p/12D3KooW...
+# P2P Configuration
+FABSTIR_BOOTSTRAP_NODES=/ip4/34.70.224.193/tcp/4001/p2p/...,/ip4/35.232.100.45/tcp/4001/p2p/...
 FABSTIR_P2P_PORT=4001
 FABSTIR_ENABLE_DHT=true
 FABSTIR_ENABLE_MDNS=true
 
-# Network settings
-FABSTIR_RPC_URL=https://base-sepolia.public.blastapi.io
-FABSTIR_CHAIN_ID=84532
-
 # Performance
-FABSTIR_ENABLE_PERFORMANCE_TRACKING=true
-FABSTIR_ENABLE_METRICS=true
-FABSTIR_CACHE_STRATEGY=memory
-
-# Security
-FABSTIR_ENABLE_ENCRYPTION=true
-FABSTIR_ENABLE_AUDIT=true
-FABSTIR_RATE_LIMIT=100
-
-# Timeouts (milliseconds)
-FABSTIR_DEFAULT_TIMEOUT=60000
-FABSTIR_DIAL_TIMEOUT=30000
-FABSTIR_REQUEST_TIMEOUT=60000
-
-# Limits
-FABSTIR_MAX_CONCURRENT_JOBS=10
 FABSTIR_MAX_RETRIES=3
-FABSTIR_MAX_CONNECTIONS=100
+FABSTIR_RETRY_DELAY=1000
+FABSTIR_NODE_SELECTION=reliability-weighted
+
+# Debug
+FABSTIR_DEBUG=true
+FABSTIR_LOG_LEVEL=debug
 ```
 
 ### Loading Environment Variables
 
 ```typescript
+// Automatic loading in Node.js
 import dotenv from 'dotenv';
 dotenv.config();
 
-// SDK automatically reads environment variables
-const sdk = new FabstirSDK({
-  // Environment variables are used as defaults
-  // Explicit config overrides environment variables
-  mode: process.env.FABSTIR_MODE || "production"
+const sdk = new FabstirSDKHeadless({
+  network: process.env.FABSTIR_NETWORK || 'base-sepolia',
+  debug: process.env.FABSTIR_DEBUG === 'true',
+  contractAddresses: {
+    jobMarketplace: process.env.FABSTIR_JOB_MARKETPLACE,
+    paymentEscrow: process.env.FABSTIR_PAYMENT_ESCROW,
+    nodeRegistry: process.env.FABSTIR_NODE_REGISTRY
+  },
+  p2pConfig: process.env.FABSTIR_BOOTSTRAP_NODES ? {
+    bootstrapNodes: process.env.FABSTIR_BOOTSTRAP_NODES.split(','),
+    enableDHT: process.env.FABSTIR_ENABLE_DHT !== 'false',
+    enableMDNS: process.env.FABSTIR_ENABLE_MDNS !== 'false'
+  } : undefined
 });
 ```
 
@@ -665,321 +502,173 @@ const sdk = new FabstirSDK({
 ### Development Configuration
 
 ```typescript
-const devConfig = {
-  mode: "mock",
+// Development with mock mode
+const devConfig: HeadlessConfig = {
+  mode: 'mock',
+  network: 'local',
   debug: true,
-  network: "base-sepolia",
-  
-  mockConfig: {
-    simulateErrors: true,
-    errorRate: 0.2,
-    responseDelay: 500
+  enablePerformanceTracking: true,
+  enableRecoveryReports: true
+};
+```
+
+### Testing Configuration
+
+```typescript
+// Testing with real network but safe defaults
+const testConfig: HeadlessConfig = {
+  mode: 'production',
+  network: 'base-sepolia',
+  debug: true,
+  p2pConfig: {
+    bootstrapNodes: ['...'],
+    dialTimeout: 5000,      // Faster timeouts for tests
+    requestTimeout: 10000
   },
-  
-  performanceConfig: {
-    collectMetrics: true,
-    thresholds: {
-      connectionTime: 10000,    // Relaxed for dev
-      tokenLatency: 1000
-    }
-  },
-  
-  securityConfig: {
-    authentication: {
-      required: false          // Skip auth in dev
-    }
+  retryOptions: {
+    maxRetries: 1,          // Minimal retries for tests
+    retryDelay: 100
   }
 };
-
-const sdk = new FabstirSDK(devConfig);
 ```
 
 ### Production Configuration
 
 ```typescript
-const prodConfig = {
-  mode: "production",
+// Production with all features
+const prodConfig: HeadlessConfig = {
+  mode: 'production',
+  network: 'base-mainnet',
   debug: false,
-  network: "base-mainnet",
-  
   p2pConfig: {
     bootstrapNodes: [
       // Multiple bootstrap nodes for redundancy
-      "/ip4/34.70.224.193/tcp/4001/p2p/12D3KooW...",
-      "/ip4/35.185.215.242/tcp/4001/p2p/12D3KooW...",
-      "/ip4/104.197.140.89/tcp/4001/p2p/12D3KooW..."
+      '/dnsaddr/bootstrap1.fabstir.network/p2p/...',
+      '/dnsaddr/bootstrap2.fabstir.network/p2p/...',
+      '/dnsaddr/bootstrap3.fabstir.network/p2p/...'
     ],
-    
-    connectionManager: {
-      maxConnections: 200,
-      minConnections: 20
-    }
+    enableDHT: true,
+    enableMDNS: false,      // Disable local discovery in production
+    maxConnections: 200,
+    minConnections: 20
   },
-  
-  contracts: {
-    jobMarketplace: process.env.JOB_MARKETPLACE!,
-    paymentEscrow: process.env.PAYMENT_ESCROW!,
-    nodeRegistry: process.env.NODE_REGISTRY!,
-    
-    config: {
-      useMulticall: true,
-      gasBuffer: 1.5          // Higher buffer for mainnet
-    }
-  },
-  
-  performanceConfig: {
-    collectMetrics: true,
-    export: {
-      enabled: true,
-      endpoint: process.env.METRICS_ENDPOINT!
-    }
-  },
-  
-  securityConfig: {
-    authentication: { required: true },
-    encryption: { transport: true, storage: true },
-    audit: { enabled: true }
-  },
-  
   retryOptions: {
     maxRetries: 5,
-    initialDelay: 1000,
-    maxDelay: 30000
-  }
-};
-
-const sdk = new FabstirSDK(prodConfig);
-```
-
-### High-Performance Configuration
-
-```typescript
-const highPerfConfig = {
-  mode: "production",
-  
-  p2pConfig: {
-    bootstrapNodes: [...],
-    
-    performance: {
-      messageBatching: true,
-      connectionPooling: true,
-      maxConcurrentStreams: 100
-    },
-    
-    connectionManager: {
-      maxConnections: 500
-    }
+    retryDelay: 2000,
+    backoffMultiplier: 2
   },
-  
-  cachingStrategy: "hybrid",
-  cacheConfig: {
-    memory: { maxSize: 500 * 1024 * 1024 },  // 500MB
-    disk: { maxSize: 10 * 1024 * 1024 * 1024 } // 10GB
-  },
-  
-  maxConcurrentJobs: 50,
-  
-  performanceConfig: {
-    sampling: { rate: 0.01 }  // Sample only 1%
-  }
+  failoverStrategy: 'fastest',
+  nodeSelectionStrategy: 'reliability-weighted',
+  enableJobRecovery: true,
+  enablePerformanceTracking: true,
+  nodeBlacklistDuration: 7200000  // 2 hours
 };
-
-const sdk = new FabstirSDK(highPerfConfig);
 ```
 
 ## Best Practices
 
-### 1. Environment-Specific Configuration
+### 1. Signer Management
 
 ```typescript
-// config/index.ts
-export function getConfig(env: string): SDKConfig {
-  const baseConfig = {
-    network: process.env.FABSTIR_NETWORK,
-    contracts: {
-      jobMarketplace: process.env.JOB_MARKETPLACE!,
-      paymentEscrow: process.env.PAYMENT_ESCROW!,
-      nodeRegistry: process.env.NODE_REGISTRY!
-    }
-  };
+// ✅ Good: Dynamic signer management
+class MyApp {
+  private sdk: FabstirSDKHeadless;
   
-  switch (env) {
-    case 'development':
-      return { ...baseConfig, mode: 'mock', debug: true };
-    
-    case 'staging':
-      return { ...baseConfig, mode: 'production', debug: true };
-    
-    case 'production':
-      return { 
-        ...baseConfig, 
-        mode: 'production',
-        debug: false,
-        securityConfig: { authentication: { required: true } }
-      };
-    
-    default:
-      throw new Error(`Unknown environment: ${env}`);
+  async connectWallet() {
+    const signer = await getUserSigner();
+    await this.sdk.setSigner(signer);
+  }
+  
+  async disconnectWallet() {
+    this.sdk.clearSigner();
+  }
+  
+  async switchAccount(newSigner: Signer) {
+    await this.sdk.setSigner(newSigner);
   }
 }
 
-// Usage
-const sdk = new FabstirSDK(getConfig(process.env.NODE_ENV));
+// ❌ Bad: Storing private keys
+const sdk = new FabstirSDK({
+  privateKey: '0x...' // NEVER DO THIS
+});
 ```
 
-### 2. Configuration Validation
+### 2. Network Handling
 
 ```typescript
-import { z } from 'zod';
-
-// Define configuration schema
-const configSchema = z.object({
-  mode: z.enum(['mock', 'production']),
-  network: z.string(),
-  p2pConfig: z.object({
-    bootstrapNodes: z.array(z.string()).min(1)
-  }).optional(),
-  contracts: z.object({
-    jobMarketplace: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
-    paymentEscrow: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
-    nodeRegistry: z.string().regex(/^0x[a-fA-F0-9]{40}$/)
-  }).optional()
+// ✅ Good: Handle network changes
+provider.on('network', async (newNetwork) => {
+  if (newNetwork.chainId !== expectedChainId) {
+    sdk.clearSigner();
+    alert('Please switch to the correct network');
+  }
 });
 
-// Validate configuration
-function validateConfig(config: any): SDKConfig {
-  try {
-    return configSchema.parse(config);
-  } catch (error) {
-    console.error('Invalid configuration:', error);
-    throw new Error('Configuration validation failed');
-  }
+// ✅ Good: Validate before operations
+if (!sdk.hasSigner()) {
+  throw new Error('Please connect wallet first');
 }
-
-// Usage
-const config = validateConfig({
-  mode: 'production',
-  network: 'base-sepolia',
-  // ...
-});
-
-const sdk = new FabstirSDK(config);
 ```
 
-### 3. Dynamic Configuration
+### 3. Error Recovery
 
 ```typescript
-class ConfigurableSDK {
-  private sdk: FabstirSDK;
-  
-  constructor(initialConfig: SDKConfig) {
-    this.sdk = new FabstirSDK(initialConfig);
-  }
-  
-  async updateConfig(updates: Partial<SDKConfig>) {
-    // Some settings require reconnection
-    if (updates.mode || updates.network || updates.p2pConfig) {
-      await this.sdk.disconnect();
-      this.sdk = new FabstirSDK({
-        ...this.sdk.config,
-        ...updates
-      });
-      await this.sdk.connect(this.provider);
-    } else {
-      // Other settings can be updated dynamically
-      Object.assign(this.sdk.config, updates);
-    }
+// ✅ Good: Comprehensive error handling
+try {
+  const job = await sdk.submitJob(params);
+} catch (error) {
+  if (error.code === 'INSUFFICIENT_BALANCE') {
+    // Handle insufficient USDC
+    alert('Please add USDC to your wallet');
+  } else if (error.code === 'WRONG_NETWORK') {
+    // Handle network mismatch
+    await switchNetwork();
+  } else if (error.code === 'CONNECTION_FAILED') {
+    // Retry with exponential backoff
+    await retryWithBackoff(() => sdk.submitJob(params));
   }
 }
 ```
 
-### 4. Secret Management
+### 4. Performance Optimization
 
 ```typescript
-// Use environment variables for secrets
-const config: SDKConfig = {
-  mode: 'production',
-  
-  // Never hardcode sensitive data
-  contracts: {
-    jobMarketplace: process.env.JOB_MARKETPLACE!,
-    paymentEscrow: process.env.PAYMENT_ESCROW!,
-    nodeRegistry: process.env.NODE_REGISTRY!
-  },
-  
-  securityConfig: {
-    encryption: {
-      // Load keys from secure storage
-      encryptionKey: await loadFromVault('encryption-key'),
-      signingKey: await loadFromVault('signing-key')
+// ✅ Good: Cache discovered nodes
+const nodeCache = new Map();
+
+async function getNodes(modelId: string) {
+  if (nodeCache.has(modelId)) {
+    const cached = nodeCache.get(modelId);
+    if (Date.now() - cached.timestamp < 300000) { // 5 min TTL
+      return cached.nodes;
     }
   }
-};
+  
+  const nodes = await sdk.discoverNodes({ modelId });
+  nodeCache.set(modelId, { nodes, timestamp: Date.now() });
+  return nodes;
+}
 ```
 
-### 5. Performance Monitoring
+### 5. Payment Token Selection
 
 ```typescript
-// Monitor configuration effectiveness
-sdk.on('performance:metrics', (metrics) => {
-  // Adjust configuration based on metrics
-  if (metrics.operations.connect.averageTime > 5000) {
-    console.warn('Slow connections detected, adjusting timeouts');
-    sdk.updateConfig({
-      p2pConfig: {
-        dialTimeout: 60000,  // Increase timeout
-        connectionManager: {
-          maxConnections: 50  // Reduce connections
-        }
-      }
-    });
-  }
-});
-```
-
-## Troubleshooting Configuration
-
-### Common Issues
-
-1. **Bootstrap Connection Failures**
-   - Verify bootstrap node addresses are correct
-   - Check firewall settings
-   - Try alternative bootstrap nodes
-
-2. **Contract Address Mismatch**
-   - Ensure addresses match the network
-   - Verify contract deployment
-   - Check address checksums
-
-3. **Performance Issues**
-   - Enable caching
-   - Reduce concurrent operations
-   - Optimize connection limits
-
-4. **Memory Leaks**
-   - Set appropriate cache limits
-   - Enable automatic cleanup
-   - Monitor memory usage
-
-### Debug Configuration
-
-```typescript
-const debugConfig: SDKConfig = {
-  mode: 'production',
-  debug: true,
+// ✅ Good: Let users choose payment method
+async function submitJobWithUserChoice(params: JobParams) {
+  const paymentMethod = await promptUser('Select payment method:', ['ETH', 'USDC']);
   
-  // Verbose logging
-  logConfig: {
-    level: 'debug',
-    categories: ['p2p', 'contracts', 'jobs'],
-    format: 'json',
-    destination: 'stdout'
-  },
-  
-  // Detailed metrics
-  performanceConfig: {
-    collectMetrics: true,
-    sampling: { rate: 1.0 }  // Sample everything
+  if (paymentMethod === 'USDC') {
+    // Check USDC balance first
+    const balance = await checkUSDCBalance();
+    if (balance < params.offerPrice) {
+      throw new Error('Insufficient USDC balance');
+    }
   }
-};
+  
+  return sdk.submitJob({
+    ...params,
+    paymentToken: paymentMethod
+  });
+}
 ```
