@@ -260,6 +260,25 @@ Test job submission through completion.
 - `docs/MIGRATION.md`
 - `docs/API.md`
 
+### Sub-phase 2.13: Headless SDK Refactoring ✅ COMPLETED
+
+- [x] Remove all React dependencies from SDK core
+- [x] Convert to pure TypeScript/JavaScript functions
+- [x] Accept signer/provider as parameters via setSigner()
+- [x] Separate React hooks into app layer
+- [x] Maintain backward compatibility via adapter pattern
+
+**Files Created:**
+- `src/sdk-headless.ts` → Main headless SDK class
+- `src/contracts-headless.ts` → Headless contract manager  
+- `src/adapters/react/use-sdk.ts` → Optional React hook
+- `src/adapters/react/index.ts` → React adapter exports
+- Modified `src/index.ts` → Export both original and headless
+
+**Documentation:** See [HEADLESS_ARCHITECTURE.md](./HEADLESS_ARCHITECTURE.md) for full details
+
+**Test Results:** 8/8 USDC tests passing, 8/8 headless tests passing
+
 ## Phase 3: Advanced Features (FUTURE)
 
 ### Sub-phase 3.1: Multi-language Support

@@ -37,6 +37,8 @@ export { ErrorCode, FabstirError } from "./errors.js";
 export { ContractManager } from "./contracts.js";
 export { JobStatus } from "./types.js";
 export { FabstirLLMSDK } from "./fabstir-llm-sdk.js";
+export { FabstirSDKHeadless, HeadlessConfig } from "./sdk-headless.js";
+export { HeadlessContractManager } from "./contracts-headless.js";
 import { P2PConfig } from "./types.js";
 
 // Main SDK configuration
