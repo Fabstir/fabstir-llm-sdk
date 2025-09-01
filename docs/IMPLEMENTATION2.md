@@ -31,20 +31,20 @@ Build SDK session support using Test-Driven Development with bounded autonomy. T
 - [x] Verify all tests pass
 - [x] Check line count: `wc -l SessionManager.ts` (must be < 60)
 
-### Sub-phase 1.2: Contract Interface (Max 75 lines)
-- [ ] Create test file: `packages/sdk-client/test/contracts/session-contract.test.ts`
-  - [ ] Test: Loads ABI from JSON file
-  - [ ] Test: Creates contract instance with provider
-  - [ ] Test: Encodes createSession function call
-  - [ ] Test: Decodes session created events
-  - [ ] Test: Estimates gas for transactions
-  - [ ] Test: Filters events by job ID
-  - [ ] Test: Handles missing ABI gracefully
-  - [ ] Test: Validates contract address format
-- [ ] Run tests - verify ALL fail
-- [ ] Implement minimal contract interface
-- [ ] Verify all tests pass
-- [ ] Check line count compliance
+### Sub-phase 1.2: Contract Interface (Max 75 lines) ✅
+- [x] Create test file: `tests/contracts/session-contract.test.ts`
+  - [x] Test: Loads ABI from JSON file
+  - [x] Test: Creates contract instance with provider
+  - [x] Test: Encodes createSession function call
+  - [x] Test: Decodes session created events
+  - [x] Test: Estimates gas for transactions
+  - [x] Test: Filters events by job ID
+  - [x] Test: Handles missing ABI gracefully
+  - [x] Test: Validates contract address format
+- [x] Run tests - verify ALL fail
+- [x] Implement minimal contract interface
+- [x] Verify all tests pass
+- [x] Check line count compliance (72/75 lines)
 
 ---
 
