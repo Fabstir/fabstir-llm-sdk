@@ -48,24 +48,22 @@ Build SDK session support using Test-Driven Development with bounded autonomy. T
 
 ---
 
-## Phase 2: P2P Client
-
-### Sub-phase 2.1: WebSocket Client (Max 80 lines)
-- [ ] Create test file: `packages/sdk-client/src/p2p/WebSocketClient.test.ts`
-  - [ ] Test: Connects to WebSocket URL
-  - [ ] Test: Sends prompt with index
-  - [ ] Test: Receives streaming response
-  - [ ] Test: Handles connection drops with retry
-  - [ ] Test: Implements exponential backoff
-  - [ ] Test: Calls response callback on data
-  - [ ] Test: Disconnects cleanly
-  - [ ] Test: Rejects invalid URLs
-  - [ ] Test: Handles max retry limit
-  - [ ] Test: Queues messages when disconnected
-- [ ] Mock WebSocket server for tests
-- [ ] Run tests - verify ALL fail
-- [ ] Implement WebSocketClient
-- [ ] Verify all tests pass
+### Sub-phase 2.1: WebSocket Client (Max 80 lines) ✅
+- [x] Create test file: `tests/p2p/WebSocketClient.test.ts`
+  - [x] Test: Connects to WebSocket URL
+  - [x] Test: Sends prompt with index
+  - [x] Test: Receives streaming response
+  - [x] Test: Handles connection drops with retry
+  - [x] Test: Implements exponential backoff
+  - [x] Test: Calls response callback on data
+  - [x] Test: Disconnects cleanly
+  - [x] Test: Rejects invalid URLs
+  - [x] Test: Handles max retry limit
+  - [x] Test: Queues messages when disconnected
+- [x] Mock WebSocket server for tests
+- [x] Run tests - verify ALL fail
+- [x] Implement WebSocketClient
+- [x] Verify all tests pass
 
 ### Sub-phase 2.2: Host Discovery (Max 50 lines)
 - [ ] Create test file: `packages/sdk-client/src/p2p/HostDiscovery.test.ts`
