@@ -99,18 +99,21 @@ Build SDK session support using Test-Driven Development with bounded autonomy. T
 - [x] Verify all tests pass (9/9 passing)
 - [x] Line count: 69/70 lines ✅
 
-### Sub-phase 3.2: Local Cache (Max 40 lines)
-- [ ] Create test file: `packages/sdk-client/src/storage/SessionCache.test.ts`
-  - [ ] Test: Stores session in memory
-  - [ ] Test: Retrieves session by ID
-  - [ ] Test: Updates existing session
-  - [ ] Test: Deletes session from cache
-  - [ ] Test: Lists all active sessions
-  - [ ] Test: Clears entire cache
-  - [ ] Test: Handles memory limits
-- [ ] Run tests - verify ALL fail
-- [ ] Implement SessionCache
-- [ ] Verify all tests pass
+### Sub-phase 3.2: Local Cache (Max 40 lines) ✅
+- [x] Create test file: `tests/storage/SessionCache.test.ts`
+  - [x] Test: Stores session in memory
+  - [x] Test: Retrieves session by ID
+  - [x] Test: Updates existing session
+  - [x] Test: Deletes session from cache
+  - [x] Test: Lists all active sessions
+  - [x] Test: Clears entire cache
+  - [x] Test: Handles memory limits
+  - [x] Test: Respects TTL expiration
+  - [x] Test: Returns cache statistics
+  - [x] Test: Implements LRU eviction policy
+- [x] Run tests - verify ALL fail
+- [x] Implement SessionCache (40/40 lines)
+- [x] Verify all tests pass (10/10)
 
 ---
 
