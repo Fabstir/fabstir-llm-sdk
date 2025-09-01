@@ -1,0 +1,30 @@
+FROM node:22-slim
+
+# Only essentials for SDK development
+RUN apt-get update && apt-get install -y \
+    git curl build-essential python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Global packages for SDK development
+RUN npm install -g pnpm typescript ts-node vitest
+
+WORKDIR /workspace
+
+# Setup script that runs on container start
+RUN echo '#!/bin/bash\n\
+if [ -d "/workspace/packages/s5js" ]; then\n\
+  mkdir -p /workspace/node_modules/@s5-dev\n\
+  ln -sfn /workspace/packages/s5js /workspace/node_modules/@s5-dev/s5js\n\
+  echo "✅ S5.js symlink created"\n\
+fi\n\
+exec "$@"' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+# Create developer user
+RUN useradd -m -s /bin/bash developer && \
+    echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+USER developer
+WORKDIR /workspace
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/bin/bash"]

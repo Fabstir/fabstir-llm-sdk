@@ -1,36 +1,23 @@
-FROM node:18-bookworm
+FROM node:22-slim
 
-# Install Chrome for Puppeteer
+# Only essentials for SDK development
 RUN apt-get update && apt-get install -y \
-    chromium chromium-driver \
-    build-essential python3 git curl jq \
-    vim tmux inotify-tools netcat-openbsd \
+    git curl build-essential python3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Puppeteer configuration
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
-
-# Install global packages
-RUN npm install -g pnpm typescript ts-node \
-    @playwright/test eslint prettier
-
-# Install Rust for WASM bindings
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN cargo install wasm-pack
+# Global packages for SDK development
+RUN npm install -g pnpm typescript ts-node vitest
 
 WORKDIR /workspace
 
-# Copy YOLO scripts
-COPY yolo-runner.sh test-watcher.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/*.sh
+# Setup script that runs on container start
+RUN echo '#!/bin/bash\n\
+if [ -d "/workspace/packages/s5js" ]; then\n\
+  mkdir -p /workspace/node_modules/@s5-dev\n\
+  ln -sfn /workspace/packages/s5js /workspace/node_modules/@s5-dev/s5js\n\
+  echo "✅ S5.js symlink created"\n\
+fi\n\
+exec "$@"' > /entrypoint.sh && chmod +x /entrypoint.sh
 
-# Create developer user
-RUN useradd -m -s /bin/bash developer && \
-    echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
-USER developer
-WORKDIR /workspace
-
-ENTRYPOINT ["/usr/local/bin/yolo-runner.sh"]
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/bin/bash"]

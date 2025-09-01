@@ -1,0 +1,19 @@
+export interface Message {
+  id: string;
+  sessionId: number;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: number;
+  tokenCount?: number;
+}
+
+export interface StorageConfig {
+  seedPhrase: string;
+  portalUrl?: string;
+}
+
+export interface AccessGrant {
+  sessionId: number;
+  grantedTo: string;
+  timestamp: number;
+}
