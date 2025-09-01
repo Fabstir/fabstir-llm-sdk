@@ -65,18 +65,18 @@ Build SDK session support using Test-Driven Development with bounded autonomy. T
 - [x] Implement WebSocketClient
 - [x] Verify all tests pass
 
-### Sub-phase 2.2: Host Discovery (Max 50 lines)
-- [ ] Create test file: `packages/sdk-client/src/p2p/HostDiscovery.test.ts`
-  - [ ] Test: Discovers available hosts
-  - [ ] Test: Gets detailed host information
-  - [ ] Test: Pings host and returns latency
-  - [ ] Test: Filters hosts by requirements
-  - [ ] Test: Handles unreachable hosts
-  - [ ] Test: Caches discovery results
-  - [ ] Test: Refreshes stale cache
-- [ ] Run tests - verify ALL fail
-- [ ] Implement HostDiscovery
-- [ ] Verify all tests pass
+### Sub-phase 2.2: Host Discovery (Max 50 lines) ✅
+- [x] Create test file: `tests/p2p/HostDiscovery.test.ts`
+  - [x] Test: Discovers available hosts
+  - [x] Test: Gets detailed host information
+  - [x] Test: Pings host and returns latency
+  - [x] Test: Filters hosts by requirements
+  - [x] Test: Handles unreachable hosts
+  - [x] Test: Caches discovery results
+  - [x] Test: Refreshes stale cache
+- [x] Run tests - verify ALL fail
+- [x] Implement HostDiscovery (44/50 lines)
+- [x] Verify all tests pass
 
 ---
 

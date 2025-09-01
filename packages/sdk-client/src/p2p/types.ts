@@ -20,3 +20,24 @@ export enum ConnectionState {
   CONNECTED = 'connected',
   RECONNECTING = 'reconnecting'
 }
+
+export interface Host {
+  id: string;
+  address: string;
+  url: string;
+  models: string[];
+  pricePerToken: string;
+  available: boolean;
+}
+
+export interface HostFilter {
+  model?: string;
+  maxPrice?: string;
+  minAvailability?: number;
+}
+
+export interface HostDetails extends Host {
+  latency: number;
+  reputation: number;
+  totalJobs: number;
+}
