@@ -63,3 +63,11 @@ playwright/.cache/
 .npmrc
 *.txt
 tests/old-jest-tests/
+# Build artifacts
+*.js
+*.js.map
+*.d.ts
+*.d.ts.map
+dist/
+!jest.config.js
+!vitest.config.js

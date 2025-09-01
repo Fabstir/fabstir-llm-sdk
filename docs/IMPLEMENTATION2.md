@@ -155,58 +155,54 @@ Build SDK session support using Test-Driven Development with bounded autonomy. T
 
 ---
 
-## Phase 5: Automated Testing Suite
+## Phase 5: Infrastructure Services (NEW)
 
-### Sub-phase 5.1: Synpress E2E Tests
-- [ ] Create test file: `packages/sdk-client/test/e2e/session-flow.spec.ts`
-  - [ ] Test: Connects Frame wallet
-  - [ ] Test: Creates session with ETH deposit
-  - [ ] Test: Completes conversation flow
-  - [ ] Test: Handles timeout scenario
-  - [ ] Test: Recovers from errors
-  - [ ] Test: Manages multiple sessions
-  - [ ] Test: Works without any UI
-- [ ] Configure Synpress with Frame wallet
-- [ ] Run tests against local environment
-- [ ] Verify all E2E tests pass
+### Sub-phase 5.1: Mock Discovery Service (Max 30 lines)
+- [ ] Create `test-services/discovery-server.js`
+- [ ] Implement /api/hosts endpoint
+- [ ] Return test host data
+- [ ] Run on port 3000
 
-### Sub-phase 5.2: Integration Tests
-- [ ] Create test file: `packages/sdk-client/test/integration/full-flow.test.ts`
-  - [ ] Test: Deploys contracts locally
-  - [ ] Test: Connects to P2P node
-  - [ ] Test: Persists to mock S5
-  - [ ] Test: Complete session lifecycle
-  - [ ] Test: Handles network failures
-  - [ ] Test: Validates gas usage
-- [ ] Create docker-compose.yml for test environment
-- [ ] Run integration tests
-- [ ] Verify all pass
+### Sub-phase 5.2: WebSocket Test Servers (Max 50 lines)
+- [ ] Create `test-services/ws-servers.js`
+- [ ] Support ports 8080-8088
+- [ ] Handle prompt/response protocol
+- [ ] Echo back test responses
 
----
+### Sub-phase 5.3: Test Environment Setup
+- [ ] Create `test-services/start-all.sh`
+- [ ] Docker compose for services
+- [ ] Environment configuration
+- [ ] Health check script
 
-## Phase 6: SDK Distribution
+## Phase 6: Integration Testing (REVISED)
 
-### Sub-phase 6.1: Build Validation Tests
-- [ ] Create test file: `packages/sdk-client/test/build/package.test.ts`
-  - [ ] Test: Package.json has no UI dependencies
-  - [ ] Test: Builds to ESM format
-  - [ ] Test: Builds to CommonJS format
-  - [ ] Test: Exports TypeScript definitions
-  - [ ] Test: Tree shaking works correctly
-  - [ ] Test: Source maps generated
-  - [ ] Test: Bundle size under 100KB
-- [ ] Run build tests
-- [ ] Fix any build issues
+### Sub-phase 6.1: End-to-End Tests
+- [ ] All services running
+- [ ] 12/12 SDK tests passing
+- [ ] Real contracts on Base Sepolia
+- [ ] Real S5 storage working
+- [ ] Real WebSocket streaming
 
-### Sub-phase 6.2: Documentation Tests
-- [ ] Create test file: `packages/sdk-client/test/docs/examples.test.ts`
-  - [ ] Test: Basic session example runs
-  - [ ] Test: Storage example works
-  - [ ] Test: Error handling example catches errors
-  - [ ] Test: Multi-session example manages state
-  - [ ] Test: All code snippets in README execute
-- [ ] Write documentation
-- [ ] Verify all examples work
+### Sub-phase 6.2: Performance Tests
+- [ ] Latency measurements
+- [ ] Concurrent session tests
+- [ ] S5 storage performance
+- [ ] Gas usage optimization
+
+## Phase 7: SDK Distribution (MOVED FROM PHASE 6)
+
+### Sub-phase 7.1: Build & Package
+- [ ] ESM and CommonJS builds
+- [ ] TypeScript definitions
+- [ ] Source maps
+- [ ] NPM package preparation
+
+### Sub-phase 7.2: Documentation
+- [ ] API documentation
+- [ ] Integration guide
+- [ ] Example applications
+- [ ] Migration guide
 
 ---
 

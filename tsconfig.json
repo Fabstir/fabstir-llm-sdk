@@ -7,7 +7,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": "./",
     "removeComments": true,
     "strict": true,
     "noImplicitAny": true,
@@ -32,6 +32,7 @@
   },
   "include": [
     "src/**/*",
+    "packages/sdk-client/src/**/*",
     "tests/config/demo.test.ts",
     "tests/config/mode.test.ts"
   ],
