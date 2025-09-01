@@ -17,19 +17,19 @@ Build SDK session support using Test-Driven Development with bounded autonomy. T
 ## Phase 1: SDK Foundation
 
 ### Sub-phase 1.1: Session Manager Core (Max 60 lines)
-- [ ] Create test file: `packages/sdk-client/src/session/SessionManager.test.ts`
-  - [ ] Test: Creates session manager with signer and contract address
-  - [ ] Test: Creates session with valid parameters
-  - [ ] Test: Rejects session creation with invalid deposit
-  - [ ] Test: Completes session with token count
-  - [ ] Test: Gets session status for valid job ID
-  - [ ] Test: Handles timeout trigger correctly
-  - [ ] Test: Emits correct events on state changes
-  - [ ] Test: Handles contract revert errors gracefully
-- [ ] Run tests - verify ALL fail with "not implemented"
-- [ ] Implement minimal SessionManager to pass tests
-- [ ] Verify all tests pass
-- [ ] Check line count: `wc -l SessionManager.ts` (must be < 60)
+- [x] Create test file: `packages/sdk-client/src/session/SessionManager.test.ts`
+  - [x] Test: Creates session manager with signer and contract address
+  - [x] Test: Creates session with valid parameters
+  - [x] Test: Rejects session creation with invalid deposit
+  - [x] Test: Completes session with token count
+  - [x] Test: Gets session status for valid job ID
+  - [x] Test: Handles timeout trigger correctly
+  - [x] Test: Emits correct events on state changes
+  - [x] Test: Handles contract revert errors gracefully
+- [x] Run tests - verify ALL fail with "not implemented"
+- [x] Implement minimal SessionManager to pass tests
+- [x] Verify all tests pass
+- [x] Check line count: `wc -l SessionManager.ts` (must be < 60)
 
 ### Sub-phase 1.2: Contract Interface (Max 75 lines)
 - [ ] Create test file: `packages/sdk-client/test/contracts/session-contract.test.ts`
