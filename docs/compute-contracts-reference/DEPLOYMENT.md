@@ -4,19 +4,26 @@ Your contracts are now live on Base Sepolia testnet!
 
 ## Current Contract Addresses (Session Jobs Enabled)
 
-### Core Contracts (LATEST - December 2, 2024)
+### Core Contracts (LATEST - With Economic Minimums)
 
 | Contract | Address | Description |
 |----------|---------|-------------|
-| **JobMarketplaceFABWithS5** | `0x292772334a1982cC22D828D8Db660146bfF6d130` | ✅ SESSION JOBS WITH CORRECT NODEREGISTRY |
-| **ProofSystem** | `0xDFF7F451dCD98cD3c1516164277491aB0A9FA15A` | EZKL proof verification |
+| **JobMarketplaceFABWithS5** | `0x9DE1fCABb9e3E903229B47bA737B23fc473173A1` | ✅ With MIN_DEPOSIT and MIN_PROVEN_TOKENS |
+| **ProofSystem** | `0x02868C63A9F2740311fb04a0e4093D47975f09ca` | EZKL proof verification |
 
-- JobMarketplaceFABWithS5: https://sepolia.basescan.org/address/0x292772334a1982cC22D828D8Db660146bfF6d130
-- ProofSystem: https://sepolia.basescan.org/address/0xDFF7F451dCD98cD3c1516164277491aB0A9FA15A
+- JobMarketplaceFABWithS5: https://sepolia.basescan.org/address/0x9DE1fCABb9e3E903229B47bA737B23fc473173A1
+- ProofSystem: https://sepolia.basescan.org/address/0x02868C63A9F2740311fb04a0e4093D47975f09ca
 
-### Previous Deployment (NodeRegistry was not set - DO NOT USE)
-- Old JobMarketplace: `0x445882e14b22E921c7d4Fe32a7736a32197578AF` (NodeRegistry was 0x0)
-- Old ProofSystem: `0x707B775933C4C4c89894EC516edad83b2De77A05`
+### Economic Parameters
+- **MIN_DEPOSIT**: 0.0002 ETH (~$0.80 at $4000/ETH) for ETH payments
+- **MIN_PROVEN_TOKENS**: 100 tokens minimum per proof submission
+- **Token Minimums**: 800000 (0.80 USDC with 6 decimals) for USDC payments
+
+### Previous Deployments (DO NOT USE)
+- `0x9579056a85B3b1432da700742BF80EF8A8a5e3Fe` - Without economic minimums
+- `0x292772334a1982cC22D828D8Db660146bfF6d130` - Missing Job struct in createSessionJob
+- `0x445882e14b22E921c7d4Fe32a7736a32197578AF` - NodeRegistry was 0x0
+- Old ProofSystem addresses also deprecated
 
 ### Supporting Infrastructure
 
@@ -35,9 +42,9 @@ Your contracts are now live on Base Sepolia testnet!
 
 ```javascript
 const config = {
-  // Session Jobs Enabled Contracts (LATEST - December 2, 2024)
-  jobMarketplace: '0x292772334a1982cC22D828D8Db660146bfF6d130', // ✅ CORRECT with NodeRegistry set
-  proofSystem: '0xDFF7F451dCD98cD3c1516164277491aB0A9FA15A',
+  // Session Jobs Enabled Contracts (LATEST - With Economic Minimums)
+  jobMarketplace: '0x9DE1fCABb9e3E903229B47bA737B23fc473173A1', // ✅ With MIN_DEPOSIT and MIN_PROVEN_TOKENS
+  proofSystem: '0x02868C63A9F2740311fb04a0e4093D47975f09ca',
   
   // Supporting contracts
   nodeRegistry: '0x87516C13Ea2f99de598665e14cab64E191A0f8c4',

@@ -40,7 +40,7 @@ export class SessionManager extends EventEmitter {
       300, // proofInterval (5 minutes)
       { 
         value: params.depositAmount, // deposit must match msg.value
-        gasLimit: 300000
+        gasLimit: 500000 // Increased for new contract
       }
     );
     
@@ -98,8 +98,14 @@ export class SessionManager extends EventEmitter {
       throw new Error('Session not found');
     }
     
+    // CORRECT enum mapping from contract:
+    // enum SessionStatus { Active, Completed, TimedOut, Disputed, Abandoned }
     const statusMap: { [key: number]: string } = {
-      0: 'Open', 1: 'Active', 2: 'Completed', 3: 'Failed', 4: 'Disputed'
+      0: 'Active',    // First enum value in Solidity
+      1: 'Completed',
+      2: 'TimedOut',
+      3: 'Disputed',
+      4: 'Abandoned'
     };
     
     return {

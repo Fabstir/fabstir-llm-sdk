@@ -5,8 +5,8 @@ export const JobMarketplaceABI = [
   // Complete session job - USER function (not completeJob!)
   "function completeSessionJob(uint256 jobId) external",
   
-  // Submit proof - HOST function to prove work done
-  "function submitProof(uint256 jobId, bytes32 proofHash, uint256 tokenCount) external",
+  // Submit proof of work - HOST function to prove work done
+  "function submitProofOfWork(uint256 jobId, bytes ekzlProof, uint256 tokensInBatch) external returns (bool)",
   
   // Get session details
   "function sessions(uint256) view returns (uint256 depositAmount, uint256 pricePerToken, uint256 maxDuration, uint256 sessionStartTime, address assignedHost, uint8 status, uint256 provenTokens, uint256 lastProofSubmission, bytes32 aggregateProofHash, uint256 checkpointInterval, uint256 lastActivity, uint256 disputeDeadline)",

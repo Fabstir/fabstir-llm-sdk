@@ -56,6 +56,32 @@
   },
   {
     "type": "function",
+    "name": "MIN_DEPOSIT",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MIN_PROVEN_TOKENS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MIN_SESSION_DURATION",
     "inputs": [],
     "outputs": [
@@ -392,25 +418,6 @@
       },
       {
         "name": "totalEarnings",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getHostTotalCredited",
-    "inputs": [
-      {
-        "name": "host",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -907,35 +914,6 @@
   },
   {
     "type": "function",
-    "name": "postJob",
-    "inputs": [
-      {
-        "name": "_modelId",
-        "type": "string",
-        "internalType": "string"
-      },
-      {
-        "name": "_inputHash",
-        "type": "string",
-        "internalType": "string"
-      },
-      {
-        "name": "_maxPrice",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
     "name": "postJobWithDetails",
     "inputs": [
       {
@@ -1223,6 +1201,11 @@
         "name": "accepted",
         "type": "bool",
         "internalType": "bool"
+      },
+      {
+        "name": "minDeposit",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [],
@@ -1357,6 +1340,25 @@
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "tokenMinDeposits",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",

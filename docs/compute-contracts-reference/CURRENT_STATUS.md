@@ -6,16 +6,17 @@ This document helps you navigate the Fabstir documentation and identify which fi
 
 ## 🚀 Current Architecture
 
-The project now uses **JobMarketplaceFABWithS5** with a hybrid payment model:
-- **Session Jobs**: Direct, self-contained payments (NEW)
+The project now uses **JobMarketplaceFABWithS5** with a hybrid payment model and economic minimums:
+- **Session Jobs**: Direct, self-contained payments with MIN_DEPOSIT and MIN_PROVEN_TOKENS
 - **Single-Prompt Jobs**: May use external contracts (LEGACY)
+- **Economic Protection**: Minimum thresholds prevent spam and ensure meaningful work
 
 ### Active Contracts (Base Sepolia)
 
 | Contract | Address | Status |
 |----------|---------|--------|
-| **JobMarketplaceFABWithS5** | `0x445882e14b22E921c7d4Fe32a7736a32197578AF` | ✅ SESSION JOBS ENABLED |
-| **ProofSystem** | `0x707B775933C4C4c89894EC516edad83b2De77A05` | ✅ CURRENT |
+| **JobMarketplaceFABWithS5** | `0x9DE1fCABb9e3E903229B47bA737B23fc473173A1` | ✅ WITH ECONOMIC MINIMUMS |
+| **ProofSystem** | `0x02868C63A9F2740311fb04a0e4093D47975f09ca` | ✅ CURRENT |
 | **NodeRegistry** | `0x87516C13Ea2f99de598665e14cab64E191A0f8c4` | ✅ CURRENT |
 | **Treasury** | `0xbeaBB2a5AEd358aA0bd442dFFd793411519Bdc11` | ✅ CURRENT |
 | **FAB Token** | `0xC78949004B4EB6dEf2D66e49Cd81231472612D62` | ✅ STABLE |
@@ -26,7 +27,9 @@ The project now uses **JobMarketplaceFABWithS5** with a hybrid payment model:
 
 | Contract | Old Address | Replaced By |
 |----------|-------------|-------------|
-| JobMarketplaceFABWithS5 (old) | `0x7ce861CC0188c260f3Ba58eb9a4d33e17Eb62304` | Session-enabled version |
+| JobMarketplaceFABWithS5 (without minimums) | `0x9579056a85B3b1432da700742BF80EF8A8a5e3Fe` | Version with economic minimums |
+| JobMarketplaceFABWithS5 (older) | `0x445882e14b22E921c7d4Fe32a7736a32197578AF` | Version with economic minimums |
+| JobMarketplaceFABWithS5 (oldest) | `0x7ce861CC0188c260f3Ba58eb9a4d33e17Eb62304` | Session-enabled version |
 | JobMarketplaceFABWithEarnings | `0xEB646BF2323a441698B256623F858c8787d70f9F` | JobMarketplaceFABWithS5 |
 | PaymentEscrowWithEarnings | `0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C` | Internal payments |
 | HostEarnings | `0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E` | Direct transfers |
