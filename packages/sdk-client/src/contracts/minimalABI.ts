@@ -14,6 +14,9 @@ export const JobMarketplaceABI = [
   // Cancel abandoned job
   "function cancelAbandonedJob(uint256 jobId) external",
   
+  // Create session job with ERC20 token
+  "function createSessionJobWithToken(address host, address token, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval) returns (uint256)",
+  
   // Events
   "event SessionJobCreated(uint256 indexed jobId, address indexed client, address indexed host, uint256 depositAmount, uint256 pricePerToken, uint256 maxDuration)",
   "event SessionJobCompleted(uint256 indexed jobId, address indexed client, address indexed host, uint256 payment)",

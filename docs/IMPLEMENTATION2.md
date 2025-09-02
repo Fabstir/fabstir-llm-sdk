@@ -161,27 +161,35 @@ Build SDK session support using Test-Driven Development with bounded autonomy. T
 
 ## Phase 6: Integration Testing ✅ COMPLETE
 
-## Phase 6: Integration Testing ✅ COMPLETE
-
 ### Sub-phase 6.1: End-to-End Tests ✅ COMPLETE
 - [x] All services running
 - [x] 12/12 SDK tests passing
 - [x] Real S5 storage working (9/9 S5 tests pass)
 - [x] WebSocket streaming working
-- [x] Real contracts on Base Sepolia ✅ WITH PAYMENTS
-  - Session 15 creation: 0x16919a1c9dcc5b2b66f94603b9e4ae277b1e9a1e5a1ee55a4cc0decbacc70606
-  - Proof (100 tokens): 0xfec487a4fd4af7f6665a639e1f158633bc8a48f00fc52dc7b3e71bbd9c0e8f3f
-  - Completion with payment: 0x8d2d762aaa29878a95148e515cbb9c5d4a655ba13a439f6e3b339d9e94556648
-  - ✅ Treasury received 10% fee
-  - ✅ Host payment mechanism verified
+- [x] Real contracts on Base Sepolia ✅ WITH ETH & USDC PAYMENTS
+  
+  **ETH Payments Verified:**
+  - Session creation: 0x191f4709c63cdd1a00949c9a07a957a3362590dc15287df9adb1cfc3869881d5
+  - Proof submission: 0x9f0c749a364a87491a251dd4bf07125742b6f098d852b3051bb6b2548c6ac9b0
+  - Session completion: 0x9ad01f5a1693dfe7123d48d87bd22d2cdfbf9429ea5b3e966aea1be203cc1cce
+  - ✅ Host receives 90%, Treasury receives 10%
+  
+  **USDC Payments Verified:**
+  - USDC approval: 0x5e3f2c3c2b1e68b31db4cbf3cf067da1bb1c0093e30dc0a20f8f67db3c948c47
+  - Session creation: 0x4e943834f3d8f9cd06c468ffa89e20b1a3d0fd4f23884369390989a714a64e33
+  - Proof submission: 0x0abfe368118168ae677872faaf20026736e96213ef1c717672e20a466ce9ff2e
+  - Session completion: 0x9386bfae91f4fe362d36437587ec6b255cbb20d450007b2020528e7cf209e17e
+  - ✅ Host received 1,260 USDC units (90%)
+  - ✅ Treasury received 140 USDC units (10%)
 
 ## Summary
-✅ **SDK FULLY FUNCTIONAL**: Complete E2E flow with real blockchain payments
-- 76/76 total tests passing (64 unit + 12 integration)
-- Economic minimums enforced and working
-- Proof submission validated (100 tokens proven)
-- Payment distribution verified on-chain
-- Ready for production UI integration
+✅ **SDK COMPLETE**: Full P2P LLM marketplace functionality verified
+- 77/77 total tests passing (64 unit + 12 ETH integration + 1 USDC integration)
+- Both ETH and USDC payment flows working on-chain
+- Economic minimums enforced (0.0002 ETH / 800000 USDC units)
+- Payment distribution verified: 90% host, 10% treasury
+- No stuck funds - automatic distribution working
+- Ready for production deployment
 
 ### Sub-phase 6.2: Performance Tests ⏳ FUTURE
 - [ ] Latency measurements
