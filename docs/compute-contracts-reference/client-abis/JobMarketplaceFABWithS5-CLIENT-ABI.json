@@ -355,16 +355,16 @@
   },
   {
     "type": "function",
-    "name": "emergencyResolveSession",
+    "name": "emergencyWithdraw",
     "inputs": [
       {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
-    "stateMutability": "view"
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -381,45 +381,6 @@
         "name": "jobIds",
         "type": "uint256[]",
         "internalType": "uint256[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getHostStats",
-    "inputs": [
-      {
-        "name": "host",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "totalSessions",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "activeSessions",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "completedSessions",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "totalTokensProven",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "totalEarnings",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -737,74 +698,6 @@
   },
   {
     "type": "function",
-    "name": "getSessionsPaginated",
-    "inputs": [
-      {
-        "name": "host",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "offset",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "limit",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "jobIds",
-        "type": "uint256[]",
-        "internalType": "uint256[]"
-      },
-      {
-        "name": "totalCount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getTimeoutStatus",
-    "inputs": [
-      {
-        "name": "jobId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "isExpired",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "isAbandoned",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "timeRemaining",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "inactivityPeriod",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "getTokenBalance",
     "inputs": [
       {
@@ -882,19 +775,6 @@
         "name": "",
         "type": "address",
         "internalType": "contract NodeRegistryFAB"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "owner",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -1419,19 +1299,6 @@
     "stateMutability": "view"
   },
   {
-    "type": "function",
-    "name": "withdrawFromSession",
-    "inputs": [
-      {
-        "name": "jobId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "view"
-  },
-  {
     "type": "event",
     "name": "BatchProofsSubmitted",
     "inputs": [
@@ -1462,6 +1329,31 @@
     "inputs": [
       {
         "name": "host",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "EmergencyWithdrawal",
+    "inputs": [
+      {
+        "name": "recipient",
         "type": "address",
         "indexed": true,
         "internalType": "address"

@@ -6,14 +6,7 @@ const hosts = {
     address: '0x4594F755F593B517Bb3194F4DeC20C48a3f04504',
     url: 'ws://localhost:8080',
     models: ['gpt-3.5', 'gpt-4'],
-    pricePerToken: '1000000000',
-    available: true
-  }, {
-    id: 'host-2',
-    address: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb3',
-    url: 'ws://localhost:8081',
-    models: ['gpt-3.5'],
-    pricePerToken: '500000000',
+    pricePerToken: '10000000000000', // 10000 gwei per token for meaningful payments
     available: true
   }]
 };

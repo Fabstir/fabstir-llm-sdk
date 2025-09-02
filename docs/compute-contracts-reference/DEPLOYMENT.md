@@ -2,17 +2,22 @@
 
 Your contracts are now live on Base Sepolia testnet!
 
-## Current Contract Addresses (Session Jobs Enabled)
+## Current Contract Addresses (Session Jobs with Fixed Payments)
 
-### Core Contracts (LATEST - With Economic Minimums)
+### Core Contracts (LATEST - December 2, 2024)
 
 | Contract | Address | Description |
 |----------|---------|-------------|
-| **JobMarketplaceFABWithS5** | `0x9DE1fCABb9e3E903229B47bA737B23fc473173A1` | ✅ With MIN_DEPOSIT and MIN_PROVEN_TOKENS |
-| **ProofSystem** | `0x02868C63A9F2740311fb04a0e4093D47975f09ca` | EZKL proof verification |
+| **JobMarketplaceFABWithS5** | `0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A` | ✅ FIXED payment distribution + economic minimums |
+| **ProofSystem** | `0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9` | EZKL proof verification (new deployment) |
 
-- JobMarketplaceFABWithS5: https://sepolia.basescan.org/address/0x9DE1fCABb9e3E903229B47bA737B23fc473173A1
-- ProofSystem: https://sepolia.basescan.org/address/0x02868C63A9F2740311fb04a0e4093D47975f09ca
+- JobMarketplaceFABWithS5: https://sepolia.basescan.org/address/0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A
+- ProofSystem: https://sepolia.basescan.org/address/0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9
+
+### Key Fixes in This Deployment
+- **Payment Distribution**: Fixed ETH transfers using `call{value:}()` instead of `transfer()`
+- **Emergency Withdrawal**: Added function to recover stuck funds
+- **HostEarnings Optional**: Contract works when HostEarnings is address(0)
 
 ### Economic Parameters
 - **MIN_DEPOSIT**: 0.0002 ETH (~$0.80 at $4000/ETH) for ETH payments
@@ -20,9 +25,10 @@ Your contracts are now live on Base Sepolia testnet!
 - **Token Minimums**: 800000 (0.80 USDC with 6 decimals) for USDC payments
 
 ### Previous Deployments (DO NOT USE)
+- `0x9DE1fCABb9e3E903229B47bA737B23fc473173A1` - Had payment distribution bug (transfer() fails)
+- `0x445882e14b22E921c7d4Fe32a7736a32197578AF` - Had payment distribution bug (transfer() fails)
 - `0x9579056a85B3b1432da700742BF80EF8A8a5e3Fe` - Without economic minimums
 - `0x292772334a1982cC22D828D8Db660146bfF6d130` - Missing Job struct in createSessionJob
-- `0x445882e14b22E921c7d4Fe32a7736a32197578AF` - NodeRegistry was 0x0
 - Old ProofSystem addresses also deprecated
 
 ### Supporting Infrastructure
@@ -30,7 +36,7 @@ Your contracts are now live on Base Sepolia testnet!
 | Contract/Address | Value | Description |
 |-----------------|-------|-------------|
 | **NodeRegistry** | `0x87516C13Ea2f99de598665e14cab64E191A0f8c4` | Node registration (1000 FAB stake) |
-| **Treasury** | `0xbeaBB2a5AEd358aA0bd442dFFd793411519Bdc11` | Receives 10% platform fees |
+| **Treasury** | `0x4e770e723B95A0d8923Db006E49A8a3cb0BAA078` | Receives 10% platform fees |
 | **USDC** | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` | Base Sepolia USDC for payments |
 | **FAB Token** | `0xC78949004B4EB6dEf2D66e49Cd81231472612D62` | Governance and staking token |
 
@@ -42,13 +48,13 @@ Your contracts are now live on Base Sepolia testnet!
 
 ```javascript
 const config = {
-  // Session Jobs Enabled Contracts (LATEST - With Economic Minimums)
-  jobMarketplace: '0x9DE1fCABb9e3E903229B47bA737B23fc473173A1', // ✅ With MIN_DEPOSIT and MIN_PROVEN_TOKENS
-  proofSystem: '0x02868C63A9F2740311fb04a0e4093D47975f09ca',
+  // Fixed Payment Distribution Contracts (LATEST - December 2, 2024)
+  jobMarketplace: '0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A', // ✅ FIXED payments + minimums
+  proofSystem: '0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9',
   
   // Supporting contracts
   nodeRegistry: '0x87516C13Ea2f99de598665e14cab64E191A0f8c4',
-  treasury: '0xbeaBB2a5AEd358aA0bd442dFFd793411519Bdc11',
+  treasury: '0x4e770e723B95A0d8923Db006E49A8a3cb0BAA078',
   
   // Tokens
   fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',

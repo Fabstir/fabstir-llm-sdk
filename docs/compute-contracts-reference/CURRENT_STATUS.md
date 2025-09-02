@@ -1,35 +1,37 @@
 # Current Documentation Status
 
-**Last Updated: September 1, 2025**
+**Last Updated: December 2, 2024**
 
 This document helps you navigate the Fabstir documentation and identify which files reflect the current architecture vs historical implementations.
 
 ## 🚀 Current Architecture
 
-The project now uses **JobMarketplaceFABWithS5** with a hybrid payment model and economic minimums:
+The project now uses **JobMarketplaceFABWithS5** with fixed payment distribution and economic minimums:
 - **Session Jobs**: Direct, self-contained payments with MIN_DEPOSIT and MIN_PROVEN_TOKENS
-- **Single-Prompt Jobs**: May use external contracts (LEGACY)
+- **Payment Fix**: Uses `call{value:}()` instead of `transfer()` for reliable ETH payments
+- **Emergency Recovery**: Includes `emergencyWithdraw()` for stuck funds
 - **Economic Protection**: Minimum thresholds prevent spam and ensure meaningful work
 
-### Active Contracts (Base Sepolia)
+### Active Contracts (Base Sepolia - LATEST December 2, 2024)
 
 | Contract | Address | Status |
 |----------|---------|--------|
-| **JobMarketplaceFABWithS5** | `0x9DE1fCABb9e3E903229B47bA737B23fc473173A1` | ✅ WITH ECONOMIC MINIMUMS |
-| **ProofSystem** | `0x02868C63A9F2740311fb04a0e4093D47975f09ca` | ✅ CURRENT |
+| **JobMarketplaceFABWithS5** | `0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A` | ✅ FIXED PAYMENTS + MINIMUMS |
+| **ProofSystem** | `0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9` | ✅ CURRENT |
 | **NodeRegistry** | `0x87516C13Ea2f99de598665e14cab64E191A0f8c4` | ✅ CURRENT |
-| **Treasury** | `0xbeaBB2a5AEd358aA0bd442dFFd793411519Bdc11` | ✅ CURRENT |
+| **Treasury** | `0x4e770e723B95A0d8923Db006E49A8a3cb0BAA078` | ✅ CURRENT |
 | **FAB Token** | `0xC78949004B4EB6dEf2D66e49Cd81231472612D62` | ✅ STABLE |
 | **USDC (Base Sepolia)** | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` | ✅ STABLE |
 | **USDC (Base Mainnet)** | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | ✅ STABLE |
 
 ### Deprecated Contracts (DO NOT USE)
 
-| Contract | Old Address | Replaced By |
-|----------|-------------|-------------|
-| JobMarketplaceFABWithS5 (without minimums) | `0x9579056a85B3b1432da700742BF80EF8A8a5e3Fe` | Version with economic minimums |
-| JobMarketplaceFABWithS5 (older) | `0x445882e14b22E921c7d4Fe32a7736a32197578AF` | Version with economic minimums |
-| JobMarketplaceFABWithS5 (oldest) | `0x7ce861CC0188c260f3Ba58eb9a4d33e17Eb62304` | Session-enabled version |
+| Contract | Old Address | Issue |
+|----------|-------------|-------|
+| JobMarketplaceFABWithS5 (payment bug) | `0x9DE1fCABb9e3E903229B47bA737B23fc473173A1` | transfer() fails silently |
+| JobMarketplaceFABWithS5 (payment bug) | `0x445882e14b22E921c7d4Fe32a7736a32197578AF` | transfer() fails silently |
+| JobMarketplaceFABWithS5 (without minimums) | `0x9579056a85B3b1432da700742BF80EF8A8a5e3Fe` | No economic protection |
+| JobMarketplaceFABWithS5 (oldest) | `0x7ce861CC0188c260f3Ba58eb9a4d33e17Eb62304` | No session support |
 | JobMarketplaceFABWithEarnings | `0xEB646BF2323a441698B256623F858c8787d70f9F` | JobMarketplaceFABWithS5 |
 | PaymentEscrowWithEarnings | `0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C` | Internal payments |
 | HostEarnings | `0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E` | Direct transfers |

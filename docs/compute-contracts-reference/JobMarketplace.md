@@ -9,11 +9,17 @@
 
 ## Current Implementation: JobMarketplaceFABWithS5
 
-**Current Contract Address (Base Sepolia)**: `0x9DE1fCABb9e3E903229B47bA737B23fc473173A1` ✅  
-**Features**: Session jobs, direct payments, EZKL proof verification, **economic minimums**  
+**Current Contract Address (Base Sepolia)**: `0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A` ✅ (Fixed Dec 2, 2024)  
+**Previous Address with Payment Bug**: `0x9DE1fCABb9e3E903229B47bA737B23fc473173A1` ⚠️  
+**Features**: Session jobs, direct payments, EZKL proof verification, **economic minimums**, **fixed ETH transfers**  
 **Documentation**: See [SESSION_JOBS.md](../../SESSION_JOBS.md)
 
-### Economic Minimums (NEW)
+### Recent Fixes (December 2, 2024)
+- **Payment Distribution**: Fixed using `call{value:}()` instead of `transfer()`
+- **Emergency Withdrawal**: Added `emergencyWithdraw()` for stuck funds recovery
+- **Optional HostEarnings**: Works correctly when set to address(0)
+
+### Economic Minimums
 - **MIN_DEPOSIT**: 0.0002 ETH (~$0.80) - Prevents spam sessions
 - **MIN_PROVEN_TOKENS**: 100 - Ensures meaningful work per proof
 - **Token Minimums**: Configurable per token (800000 for USDC = $0.80)

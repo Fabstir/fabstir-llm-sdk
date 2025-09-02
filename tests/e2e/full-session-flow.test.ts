@@ -72,7 +72,7 @@ describe('E2E: Full Session Flow with Payments', () => {
     console.log('\n1. Discovering available hosts...');
     const hosts = await sdk.findHosts({
       model: 'gpt-3.5',
-      maxPrice: '10000000000' // 10 gwei max
+      maxPrice: '100000000000000' // 100000 gwei max to accept our test host
     });
     
     expect(hosts.length).toBeGreaterThan(0);
@@ -80,14 +80,14 @@ describe('E2E: Full Session Flow with Payments', () => {
     console.log(`   Selected host: ${selectedHost.id} at ${selectedHost.address}`);
     
     // Step 2: Create session with deposit
-    console.log('\n2. Creating session with economic minimum deposit...');
-    const depositAmount = 0.0002; // ETH - Minimum deposit enforced by contract (~$0.80)
+    console.log('\n2. Creating session with meaningful deposit for testing...');
+    const depositAmount = 0.001; // ETH - Larger deposit for meaningful payments
     const session = await sdk.startSession(selectedHost, depositAmount);
     
     sessionId = session.jobId;
     expect(sessionId).toBeGreaterThan(0);
     console.log(`   Session created with ID: ${sessionId}`);
-    console.log(`   Deposit: ${depositAmount} ETH (~$${(depositAmount * 4000).toFixed(2)} USD)`);
+    console.log(`   Deposit: ${depositAmount} ETH`);
     
     // Step 3: Submit first prompt
     console.log('\n3. Submitting first prompt...');
@@ -233,6 +233,41 @@ describe('E2E: Full Session Flow with Payments', () => {
     console.log(`   Session closed. Tokens used: ${session.tokensUsed} (minimum required)`);
     console.log(`   Transaction hash: ${receipt.transactionHash}`);
     
+    // Parse completion events and check internal transactions
+    const provider2 = new ethers.providers.JsonRpcProvider(process.env.RPC_URL_BASE_SEPOLIA);
+    const txReceipt = await provider2.getTransactionReceipt(receipt.transactionHash);
+    console.log('\n   Parsing completion transaction:');
+    console.log(`   Total logs: ${txReceipt.logs.length}`);
+    
+    // Check the transaction details
+    const tx = await provider2.getTransaction(receipt.transactionHash);
+    console.log(`   Transaction from: ${tx.from}`);
+    console.log(`   Transaction to: ${tx.to}`);
+    console.log(`   Transaction value: ${ethers.utils.formatEther(tx.value)} ETH`);
+    
+    // Check session data before completion
+    const sessionDataBefore = await hostContract.sessions(sessionId);
+    console.log(`   Session deposit: ${ethers.utils.formatEther(sessionDataBefore.depositAmount)} ETH`);
+    console.log(`   Price per token: ${sessionDataBefore.pricePerToken.toString()} wei`);
+    console.log(`   Proven tokens: ${sessionDataBefore.provenTokens.toString()}`);
+    const totalPayment = sessionDataBefore.pricePerToken.mul(sessionDataBefore.provenTokens);
+    console.log(`   Calculated total payment: ${ethers.utils.formatEther(totalPayment)} ETH`);
+    
+    for (const log of txReceipt.logs) {
+      console.log(`\n   Event from: ${log.address}`);
+      console.log(`   Topic: ${log.topics[0]}`);
+      if (log.data && log.data !== '0x' && log.data !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+        try {
+          const value = ethers.BigNumber.from(log.data);
+          if (!value.isZero()) {
+            console.log(`   Data (as value): ${ethers.utils.formatEther(value)} ETH`);
+          }
+        } catch {
+          console.log(`   Data: ${log.data.slice(0, 66)}...`);
+        }
+      }
+    }
+    
     // Wait for transaction to be mined
     console.log('\n6. Waiting for blockchain confirmation...');
     // await provider.waitForTransaction(receipt.transactionHash, 1);
@@ -254,13 +289,13 @@ describe('E2E: Full Session Flow with Payments', () => {
     console.log(`  Treasury received: ${ethers.utils.formatEther(treasuryReceived)} ETH`);
     
     // Calculate expected payment based on proven tokens
-    const pricePerToken = ethers.BigNumber.from('1000000000'); // 1 gwei per token (from host data)
+    const pricePerToken = ethers.BigNumber.from('10000000000000'); // 10000 gwei per token (from host data)
     const provenTokens = 100; // Minimum tokens enforced by contract
     const expectedTotalPayment = pricePerToken.mul(provenTokens);
     const expectedHostPayment = expectedTotalPayment.mul(90).div(100); // 90% to host
     const expectedTreasuryPayment = expectedTotalPayment.mul(10).div(100); // 10% to treasury
     
-    console.log('\nExpected Payments (based on 100 proven tokens at 1 gwei/token):');
+    console.log('\nExpected Payments (based on 100 proven tokens at 10000 gwei/token):');
     console.log(`  Total: ${ethers.utils.formatEther(expectedTotalPayment)} ETH`);
     console.log(`  Host (90%): ${ethers.utils.formatEther(expectedHostPayment)} ETH`);
     console.log(`  Treasury (10%): ${ethers.utils.formatEther(expectedTreasuryPayment)} ETH`);
@@ -274,11 +309,11 @@ describe('E2E: Full Session Flow with Payments', () => {
     expect(treasuryReceived.gte(0)).toBe(true); // Treasury should receive payment
     
     // Verify payment split (approximately 90% to host, 10% to treasury)
-    const totalPayment = hostReceived.add(treasuryReceived);
+    const actualTotalPayment = hostReceived.add(treasuryReceived);
     
-    if (totalPayment.gt(0)) {
-      const hostPercentage = hostReceived.mul(100).div(totalPayment).toNumber();
-      const treasuryPercentage = treasuryReceived.mul(100).div(totalPayment).toNumber();
+    if (actualTotalPayment.gt(0)) {
+      const hostPercentage = hostReceived.mul(100).div(actualTotalPayment).toNumber();
+      const treasuryPercentage = treasuryReceived.mul(100).div(actualTotalPayment).toNumber();
       
       console.log('\nActual Payment Split:');
       console.log(`  Host: ${hostPercentage}%`);

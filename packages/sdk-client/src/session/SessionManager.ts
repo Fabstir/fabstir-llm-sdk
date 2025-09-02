@@ -13,8 +13,8 @@ export class SessionManager extends EventEmitter {
     this.signer = signer;
     // Always create contract with minimal ABI
     try {
-      this.contract = new ethers.Contract(contractAddress, JobMarketplaceABI, signer);
-      console.log('SessionManager: Contract initialized at', contractAddress);
+      this.contract = new ethers.Contract(contractAddress || '0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A', JobMarketplaceABI, signer);
+      console.log('SessionManager: Contract initialized at', contractAddress || '0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A');
     } catch (error: any) {
       console.error('SessionManager: Failed to initialize contract:', error.message);
       this.contract = null;

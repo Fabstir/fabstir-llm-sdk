@@ -37,6 +37,10 @@ node scripts/deploy-fresh-test.js
 - **JobMarketplaceFABWithS5** - Fresh job counter starting from 1
   - Session jobs use internal `_sendPayments()` for direct transfers
   - No external PaymentEscrow needed for session jobs
+  - **Fixed Payment Distribution** (as of Dec 2, 2024):
+    - Uses `call{value:}()` instead of `transfer()` for reliable ETH payments
+    - Includes `emergencyWithdraw()` function for stuck funds recovery
+    - HostEarnings is optional (can be address(0))
   - **Economic Minimums Enforced:**
     - MIN_DEPOSIT: 0.0002 ETH (prevents spam)
     - MIN_PROVEN_TOKENS: 100 (ensures meaningful work)
@@ -47,7 +51,7 @@ node scripts/deploy-fresh-test.js
 - **NodeRegistry** (`0x87516C13Ea2f99de598665e14cab64E191A0f8c4`) - Keep existing host registrations
 - **FAB Token** (`0xC78949004B4EB6dEf2D66e49Cd81231472612D62`) - Same token contract
 - **USDC** (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) - Same stablecoin
-- **Treasury Address** - Same fee recipient
+- **Treasury Address** (`0x4e770e723B95A0d8923Db006E49A8a3cb0BAA078`) - Same fee recipient
 
 ### Note on Architecture
 The JobMarketplaceFABWithS5 contract uses a **hybrid payment model**:

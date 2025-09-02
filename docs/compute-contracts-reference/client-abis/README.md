@@ -2,12 +2,14 @@
 
 This directory contains the Application Binary Interfaces (ABIs) for client integration.
 
-## Updated Contracts (with Economic Minimums)
+## Updated Contracts (Fixed Payment Distribution - December 2, 2024)
 
 ### JobMarketplaceFABWithS5
-- **Address**: 0x9DE1fCABb9e3E903229B47bA737B23fc473173A1
+- **Address**: 0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A
 - **Network**: Base Sepolia
 - **Key Features**:
+  - **FIXED**: Payment distribution using `call{value:}()` instead of `transfer()`
+  - **NEW**: `emergencyWithdraw(address token)` function for stuck funds recovery
   - MIN_DEPOSIT: 0.0002 ETH (~$0.80)
   - MIN_PROVEN_TOKENS: 100 tokens minimum
   - Token-specific minimums via mapping (800000 for USDC)
@@ -15,7 +17,7 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
   - EZKL proof verification integration
 
 ### ProofSystem
-- **Address**: 0x02868C63A9F2740311fb04a0e4093D47975f09ca
+- **Address**: 0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9
 - **Network**: Base Sepolia
 - **Purpose**: EZKL proof verification for trustless AI inference
 
@@ -42,7 +44,7 @@ const provider = new ethers.providers.JsonRpcProvider('https://base-sepolia.g.al
 
 // Create contract instances
 const marketplace = new ethers.Contract(
-  '0x9DE1fCABb9e3E903229B47bA737B23fc473173A1',
+  '0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A', // Fixed payment distribution
   JobMarketplaceABI,
   provider
 );
@@ -73,6 +75,13 @@ Key functions for session jobs:
 - `submitProofOfWork()` - Submit proof with minimum 100 tokens
 - `completeSessionJob()` - Complete and settle payments
 - `triggerSessionTimeout()` - Handle timeout scenarios
+
+## Emergency Functions (NEW)
+
+For treasury address only:
+- `emergencyWithdraw(address token)` - Recover stuck funds
+  - Pass `address(0)` for ETH
+  - Pass token address for ERC20 tokens
 
 ## Constants
 
