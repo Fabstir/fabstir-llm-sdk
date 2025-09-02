@@ -4,6 +4,41 @@
 
 Session jobs represent a revolutionary approach to blockchain-based AI inference, enabling continuous interaction between users and AI models while minimizing transaction costs. Unlike traditional per-prompt payment models, session jobs use a checkpoint-based proof system that reduces blockchain transactions by 85-95%.
 
+## ⚠️ CRITICAL: Proof Submission Required
+
+**Hosts MUST submit cryptographic proofs at checkpoint intervals or they will NOT be paid.**
+
+Payment is based ONLY on `provenTokens` (cryptographically verified work), not claimed usage:
+- **Without proof submission**: `provenTokens` = 0 → Host payment = 0 → User gets full refund
+- **With proof submission**: `provenTokens` accumulates → Host gets paid → User pays for actual usage
+
+This proof-based system is what makes session jobs trustless and prevents either party from cheating.
+
+## Complete Session Flow
+
+```
+1. USER CREATES SESSION (on-chain)
+   ↓ Deposits funds, sets price/token, assigns host
+   
+2. USER ↔ HOST INTERACTION (off-chain)
+   ↓ Prompts sent, responses generated, tokens counted
+   
+3. HOST SUBMITS PROOFS (on-chain) ← MANDATORY!
+   ↓ Every N tokens (checkpoint), cryptographic proof submitted
+   ↓ Updates provenTokens in contract
+   
+4. USER COMPLETES SESSION (on-chain)
+   ↓ Calls completeSessionJob()
+   
+5. CONTRACT CALCULATES & DISTRIBUTES (automatic)
+   - Payment = provenTokens × pricePerToken
+   - Host receives: 90% of payment
+   - Treasury receives: 10% of payment  
+   - User receives: Refund of unused deposit
+```
+
+**Key Point**: Step 3 (proof submission) is what enables trustless payment. Skip it and the host gets nothing!
+
 ## Key Innovation: Off-Chain Inference, On-Chain Verification
 
 The session job model separates:
@@ -196,7 +231,10 @@ During the session:
 - User sends prompts off-chain
 - Host generates responses off-chain
 - Host accumulates token counts
-- Host submits proofs at checkpoints
+- **Host MUST submit proofs at checkpoints** (every N tokens as defined by `checkpointInterval`)
+  - Without proof submission, host will NOT be paid
+  - Each proof updates `provenTokens` in the contract
+  - Only `provenTokens` are paid, not claimed tokens
 
 **Gas cost per checkpoint**: ~30,000 gas
 
@@ -244,9 +282,10 @@ function _sendPayments(job, host, payment, fee, refund) {
 ### Payment Security
 
 - Funds locked in contract during session
-- Payment only on cryptographic proof
-- Automatic refunds for unused deposits
+- **Payment ONLY on cryptographic proof (provenTokens)**
+- Automatic refunds for unused deposits  
 - No funds can be trapped
+- **Critical**: Unproven tokens = unpaid work (host gets nothing for tokens without proof)
 
 ## Timeout and Dispute Protection
 
@@ -317,20 +356,32 @@ Designed specifically for Layer 2 networks like Base:
 ### For Frontend Developers
 
 ```javascript
-// Create a session
+// 1. Create a session (on-chain)
 const tx = await marketplace.createSessionJob(
     hostAddress,
     ethers.utils.parseEther("1"),     // 1 ETH deposit
     ethers.utils.parseEther("0.0001"), // Price per token
     86400,                              // 24 hour duration
-    500                                 // Proof every 500 tokens
+    500                                 // Proof every 500 tokens (checkpoint interval)
 );
+const jobId = tx.events[0].args.jobId;
 
-// Monitor off-chain
-// ... handle prompts and responses off-chain ...
+// 2. Off-chain interaction
+// Send prompts to host, receive responses
+// Track token usage but DO NOT pay yet
 
-// Complete when done
+// 3. CRITICAL: Host must submit proofs periodically
+// The host will call submitProofOfWork() every 500 tokens
+// This happens independently - frontend just needs to wait
+// Monitor ProofSubmitted events to track progress:
+marketplace.on("ProofSubmitted", (jobId, tokens) => {
+    console.log(`Proof submitted for ${tokens} tokens`);
+});
+
+// 4. Complete session when done (on-chain)
 await marketplace.completeSessionJob(jobId);
+// Payment automatically calculated from provenTokens
+// Host gets 90%, treasury gets 10%, user gets refund
 ```
 
 ### For Host Operators
@@ -339,18 +390,29 @@ await marketplace.completeSessionJob(jobId);
 // Accept session
 const session = await marketplace.getSessionDetails(jobId);
 
-// Generate tokens off-chain
+// CRITICAL: Track tokens and submit proofs to get paid!
 let tokenCount = 0;
 for (const prompt of prompts) {
     const response = await model.generate(prompt);
     tokenCount += response.tokenCount;
     
-    // Submit proof at checkpoint
+    // MANDATORY: Submit proof at checkpoint or lose payment!
     if (tokenCount >= session.checkpointInterval) {
         const proof = await generateEKZLProof(tokenCount);
+        
+        // This updates provenTokens - your payment depends on this!
         await marketplace.submitProofOfWork(jobId, proof, tokenCount);
+        console.log(`Proof submitted for ${tokenCount} tokens - payment secured`);
+        
         tokenCount = 0; // Reset for next batch
     }
+}
+
+// WARNING: Any tokens not proven will NOT be paid!
+// If session ends with unproven tokens, submit final proof:
+if (tokenCount > 0) {
+    const finalProof = await generateEKZLProof(tokenCount);
+    await marketplace.submitProofOfWork(jobId, finalProof, tokenCount);
 }
 ```
 
@@ -429,6 +491,27 @@ Session jobs require minimal trust:
 - Decentralized proof generation
 - AI model composition protocols
 
+## Common Pitfalls & Troubleshooting
+
+### Host Not Getting Paid?
+1. **Check if proofs were submitted**: Query `sessions[jobId].provenTokens`
+2. **Verify proof submission frequency**: Must be at checkpoint intervals
+3. **Ensure proofs are valid**: Invalid proofs don't update `provenTokens`
+4. **Check session status**: Can't submit proofs after session ends
+
+### User Paying Nothing?
+- Normal if host didn't submit proofs
+- `provenTokens = 0` means no verifiable work was done
+- User gets full refund when no tokens are proven
+
+### Understanding Payment Calculation
+```
+Always remember:
+- Payment = provenTokens × pricePerToken (NOT totalTokens × price)
+- provenTokens ≤ totalTokensGenerated (only proven work counts)
+- If provenTokens = 0, then payment = 0
+```
+
 ## Conclusion
 
 Session jobs represent a paradigm shift in blockchain-based AI inference. By separating off-chain computation from on-chain verification, they achieve:
@@ -439,3 +522,5 @@ Session jobs represent a paradigm shift in blockchain-based AI inference. By sep
 - **Scalability** for real-world AI applications
 
 This model makes decentralized AI inference economically viable and user-friendly, paving the way for widespread adoption of blockchain-based AI services.
+
+**Remember**: The proof submission requirement is not optional - it's the core mechanism that makes the system trustless and fair for both parties.

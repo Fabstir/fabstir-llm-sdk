@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { ethers } from 'ethers';
 import type { SessionParams, SessionJob, SessionStatus, TxReceipt } from './types';
-import ABI from '../../../../docs/compute-contracts-reference/client-abis/JobMarketplaceFABWithS5-CLIENT-ABI.json';
+import { JobMarketplaceABI } from '../contracts/minimalABI';
 
 export class SessionManager extends EventEmitter {
   private contract: any;
@@ -11,37 +11,111 @@ export class SessionManager extends EventEmitter {
   constructor(signer: any, contractAddress: string) {
     super();
     this.signer = signer;
-    // For testing, skip contract creation if signer has no _isSigner property
-    if (signer._isSigner !== false) {
-      try {
-        this.contract = new ethers.Contract(contractAddress, ABI, signer);
-      } catch {
-        this.contract = null; // Mock mode
-      }
+    // Always create contract with minimal ABI
+    try {
+      this.contract = new ethers.Contract(contractAddress, JobMarketplaceABI, signer);
+      console.log('SessionManager: Contract initialized at', contractAddress);
+    } catch (error: any) {
+      console.error('SessionManager: Failed to initialize contract:', error.message);
+      this.contract = null;
     }
   }
 
   async createSession(params: SessionParams): Promise<SessionJob> {
     if (params.depositAmount === '0') throw new Error('Invalid deposit amount');
     
-    const tx = { transactionHash: '0xmocked', blockNumber: 1, gasUsed: '100000' };
-    const jobId = this.jobCounter++;
+    console.log('Creating session with params:', {
+      host: params.hostAddress,
+      deposit: params.depositAmount,
+      pricePerToken: params.pricePerToken,
+      maxDuration: params.maxDuration
+    });
+    
+    // createSessionJob takes 5 parameters: host, deposit, pricePerToken, maxDuration, proofInterval
+    const tx = await this.contract.createSessionJob(
+      params.hostAddress,
+      params.depositAmount,
+      params.pricePerToken,
+      params.maxDuration,
+      300, // proofInterval (5 minutes)
+      { 
+        value: params.depositAmount, // deposit must match msg.value
+        gasLimit: 300000
+      }
+    );
+    
+    console.log('Transaction sent:', tx.hash);
+    const receipt = await tx.wait();
+    console.log('Transaction confirmed in block:', receipt.blockNumber);
+    
+    // Parse SessionJobCreated or JobCreated event
+    let jobId: number | undefined;
+    for (const log of receipt.logs) {
+      try {
+        const parsed = this.contract.interface.parseLog(log);
+        if (parsed.name === 'SessionJobCreated' || parsed.name === 'JobCreated') {
+          jobId = parsed.args.jobId.toNumber();
+          console.log('Job created with ID:', jobId);
+          break;
+        }
+      } catch {}
+    }
+    
+    if (!jobId) {
+      throw new Error('Failed to parse job ID from transaction receipt');
+    }
     
     this.emit('session:created', { jobId, ...params });
-    
     return { jobId, status: 'Active', depositAmount: params.depositAmount, hostAddress: params.hostAddress };
   }
 
   async completeSession(jobId: number, tokens: number): Promise<TxReceipt> {
-    return { transactionHash: '0xcomplete' + jobId, blockNumber: 100, gasUsed: '50000' };
+    try {
+      console.log('User completing session:', { jobId, tokens });
+      
+      // USER completes their own session using completeSessionJob
+      const tx = await this.contract.completeSessionJob(jobId, { gasLimit: 200000 });
+      
+      console.log('Complete transaction sent:', tx.hash);
+      const receipt = await tx.wait();
+      console.log('Session completed successfully:', receipt.transactionHash);
+      
+      return {
+        transactionHash: receipt.transactionHash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString()
+      };
+    } catch (error: any) {
+      console.error('Failed to complete session:', error.message);
+      throw error; // No mocks! Let the error propagate
+    }
   }
 
   async getSessionStatus(jobId: number): Promise<SessionStatus> {
-    if (jobId === 999999) throw new Error('Job not found');
-    return { status: 'Active', provenTokens: 0, depositAmount: '100000000000000000' };
+    const session = await this.contract.sessions(jobId);
+    // Check if session exists (depositAmount > 0 or has assignedHost)
+    if (!session || (session.depositAmount.eq(0) && session.assignedHost === ethers.constants.AddressZero)) {
+      throw new Error('Session not found');
+    }
+    
+    const statusMap: { [key: number]: string } = {
+      0: 'Open', 1: 'Active', 2: 'Completed', 3: 'Failed', 4: 'Disputed'
+    };
+    
+    return {
+      status: statusMap[session.status] || 'Active',
+      provenTokens: session.provenTokens.toNumber(),
+      depositAmount: session.depositAmount.toString()
+    };
   }
 
   async triggerTimeout(jobId: number): Promise<TxReceipt> {
-    return { transactionHash: '0xtimeout' + jobId, blockNumber: 200, gasUsed: '45000' };
+    const tx = await this.contract.cancelAbandonedJob(jobId);
+    const receipt = await tx.wait();
+    return {
+      transactionHash: receipt.transactionHash,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed.toString()
+    };
   }
 }
