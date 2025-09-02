@@ -127,35 +127,6 @@
   },
   {
     "type": "function",
-    "name": "calculateCurrentEarnings",
-    "inputs": [
-      {
-        "name": "jobId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "grossEarnings",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "treasuryFee",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "netEarnings",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "claimAbandonedSession",
     "inputs": [
       {
@@ -588,79 +559,6 @@
     "outputs": [
       {
         "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getRequiredProofInterval",
-    "inputs": [
-      {
-        "name": "jobId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getSessionDetails",
-    "inputs": [
-      {
-        "name": "jobId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "user",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "host",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "deposit",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "pricePerToken",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "provenTokens",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "startTime",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "status",
-        "type": "uint8",
-        "internalType": "enum JobMarketplaceFABWithS5.SessionStatus"
-      },
-      {
-        "name": "lastActivity",
         "type": "uint256",
         "internalType": "uint256"
       }

@@ -35,16 +35,20 @@ node scripts/deploy-fresh-test.js
 
 ### New Contracts (Fresh Instances)
 - **JobMarketplaceFABWithS5** - Fresh job counter starting from 1
-  - Session jobs use internal `_sendPayments()` for direct transfers
-  - No external PaymentEscrow needed for session jobs
+  - **Fixed USDC Session Validation** (as of Jan 2, 2025):
+    - Validates host registration through NodeRegistry
+    - Validates all parameters (price, duration, proof interval)
+    - Moves token transfers after validations to save gas
+    - Contract size optimized to 24,564 bytes (under limit)
   - **Fixed Payment Distribution** (as of Dec 2, 2024):
     - Uses `call{value:}()` instead of `transfer()` for reliable ETH payments
     - Includes `emergencyWithdraw()` function for stuck funds recovery
-    - HostEarnings is optional (can be address(0))
   - **Economic Minimums Enforced:**
     - MIN_DEPOSIT: 0.0002 ETH (prevents spam)
     - MIN_PROVEN_TOKENS: 100 (ensures meaningful work)
     - Token minimums: 800000 for USDC (0.80 USDC)
+- **PaymentEscrowWithEarnings** - Payment distribution with earnings
+- **HostEarnings** - Host earnings accumulation
 - **ProofSystem** - Clean proof verification state
 
 ### Reused Contracts (Existing)
@@ -101,8 +105,10 @@ After deployment, update your client app with the new addresses:
 ```javascript
 // Update your config file or environment
 const contracts = {
-  marketplace: "0x...", // New JobMarketplaceFABWithS5 address
-  proofSystem: "0x...", // New ProofSystem address
+  marketplace: "0xC6E3B618E2901b1b2c1beEB4E2BB86fc87d48D2d", // Latest with USDC fix
+  paymentEscrow: "0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C", // Earnings system
+  hostEarnings: "0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E", // Host tracking
+  proofSystem: "0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9", // EZKL verification
   nodeRegistry: "0x87516C13Ea2f99de598665e14cab64E191A0f8c4", // Same
   usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" // Same
 };
@@ -110,9 +116,10 @@ const contracts = {
 
 #### Environment Variables
 ```bash
-export JOB_MARKETPLACE_FAB="0x..." # New address
-export PROOF_SYSTEM="0x..." # New address
-# Note: No separate PaymentEscrow/HostEarnings needed for session jobs
+export JOB_MARKETPLACE_FAB="0xC6E3B618E2901b1b2c1beEB4E2BB86fc87d48D2d" # Latest
+export PAYMENT_ESCROW="0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C"
+export HOST_EARNINGS="0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E"
+export PROOF_SYSTEM="0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9"
 ```
 
 ### Step 3: Verify Deployment

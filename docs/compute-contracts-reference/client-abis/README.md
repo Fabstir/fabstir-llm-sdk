@@ -2,19 +2,30 @@
 
 This directory contains the Application Binary Interfaces (ABIs) for client integration.
 
-## Updated Contracts (Fixed Payment Distribution - December 2, 2024)
+## Updated Contracts (Fixed USDC Validation - January 2, 2025)
 
 ### JobMarketplaceFABWithS5
-- **Address**: 0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A
+- **Address**: 0xC6E3B618E2901b1b2c1beEB4E2BB86fc87d48D2d
 - **Network**: Base Sepolia
 - **Key Features**:
+  - **FIXED**: USDC session validation with host registration checks
   - **FIXED**: Payment distribution using `call{value:}()` instead of `transfer()`
-  - **NEW**: `emergencyWithdraw(address token)` function for stuck funds recovery
+  - **OPTIMIZED**: Contract size reduced to 24,564 bytes (under limit)
   - MIN_DEPOSIT: 0.0002 ETH (~$0.80)
   - MIN_PROVEN_TOKENS: 100 tokens minimum
   - Token-specific minimums via mapping (800000 for USDC)
-  - Session jobs with direct payments
+  - Session jobs with earnings accumulation
   - EZKL proof verification integration
+
+### PaymentEscrowWithEarnings
+- **Address**: 0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C
+- **Network**: Base Sepolia
+- **Purpose**: Payment distribution with earnings accumulation
+
+### HostEarnings
+- **Address**: 0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E
+- **Network**: Base Sepolia
+- **Purpose**: Tracks accumulated earnings for hosts
 
 ### ProofSystem
 - **Address**: 0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9
@@ -26,17 +37,12 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
 - **Network**: Base Sepolia
 - **Stake Required**: 1000 FAB tokens
 
-### HostEarnings
-- **Purpose**: Tracks accumulated earnings for hosts (legacy support)
-
-### PaymentEscrowWithEarnings
-- **Purpose**: Legacy payment escrow for single-prompt jobs
-
 ## Usage Example
 
 ```javascript
 import JobMarketplaceABI from './JobMarketplaceFABWithS5-CLIENT-ABI.json';
-import ProofSystemABI from './ProofSystem-CLIENT-ABI.json';
+import PaymentEscrowABI from './PaymentEscrowWithEarnings-CLIENT-ABI.json';
+import HostEarningsABI from './HostEarnings-CLIENT-ABI.json';
 import { ethers } from 'ethers';
 
 // Initialize provider
@@ -44,26 +50,40 @@ const provider = new ethers.providers.JsonRpcProvider('https://base-sepolia.g.al
 
 // Create contract instances
 const marketplace = new ethers.Contract(
-  '0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A', // Fixed payment distribution
+  '0xC6E3B618E2901b1b2c1beEB4E2BB86fc87d48D2d', // Fixed USDC validation
   JobMarketplaceABI,
   provider
 );
 
-// Check economic minimums
-const minDeposit = await marketplace.MIN_DEPOSIT(); // 0.0002 ETH
-const minTokens = await marketplace.MIN_PROVEN_TOKENS(); // 100
+const paymentEscrow = new ethers.Contract(
+  '0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C',
+  PaymentEscrowABI,
+  provider
+);
 
-// Create session job (with signer)
+const hostEarnings = new ethers.Contract(
+  '0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E',
+  HostEarningsABI,
+  provider
+);
+
+// Create USDC session job (with signer)
 const signer = provider.getSigner();
 const marketplaceWithSigner = marketplace.connect(signer);
 
-await marketplaceWithSigner.createSessionJob(
+// First approve USDC
+const usdcAddress = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+const usdcContract = new ethers.Contract(usdcAddress, ['function approve(address,uint256)'], signer);
+await usdcContract.approve(marketplace.address, ethers.utils.parseUnits("10", 6)); // 10 USDC
+
+// Create session with USDC
+await marketplaceWithSigner.createSessionJobWithToken(
+  usdcAddress,
   hostAddress,
-  ethers.utils.parseEther("0.001"), // deposit
-  ethers.utils.parseUnits("1", "gwei"), // price per token
+  ethers.utils.parseUnits("10", 6), // 10 USDC deposit
+  ethers.utils.parseUnits("0.001", 6), // price per token in USDC
   3600, // max duration (1 hour)
-  300, // proof interval
-  { value: ethers.utils.parseEther("0.001") }
+  300 // proof interval
 );
 ```
 
@@ -92,4 +112,4 @@ For treasury address only:
 - `ABANDONMENT_TIMEOUT`: 86400 seconds (24 hours)
 
 ## Last Updated
-December 2024 - With economic minimums implementation for Base L2
+January 2, 2025 - Fixed USDC session validation and contract size optimization
