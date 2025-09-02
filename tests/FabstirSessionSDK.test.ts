@@ -29,7 +29,7 @@ describe('FabstirSessionSDK', () => {
     
     const config: SDKConfig = {
       contractAddress: process.env.CONTRACT_JOB_MARKETPLACE!,
-      discoveryUrl: 'http://localhost:3001',
+      discoveryUrl: 'http://localhost:3003',
       s5SeedPhrase: 'test seed phrase', // Not used when enableS5 is false
       s5PortalUrl: 'https://s5.vup.cx',
       cacheConfig: {

@@ -119,49 +119,39 @@ Build SDK session support using Test-Driven Development with bounded autonomy. T
 
 ## Phase 4: Integrated Session Client
 
-### Sub-phase 4.1: Unified Session API (Max 100 lines)
-- [ ] Create test file: `packages/sdk-client/src/FabstirSessionSDK.test.ts`
-  - [ ] Test: Initializes with configuration
-  - [ ] Test: Starts session with host and deposit
-  - [ ] Test: Sends prompt to active session
-  - [ ] Test: Receives streaming responses
-  - [ ] Test: Ends session and gets receipt
-  - [ ] Test: Finds hosts matching requirements
-  - [ ] Test: Saves conversation to S5
-  - [ ] Test: Loads previous session
-  - [ ] Test: Handles multiple concurrent sessions
-  - [ ] Test: Rejects operations on inactive session
-  - [ ] Test: Calculates token usage correctly
-  - [ ] Test: Emits lifecycle events
-- [ ] Run tests - verify ALL fail
-- [ ] Implement FabstirSessionSDK
-- [ ] Verify all tests pass
+### Sub-phase 4.1: Unified Session API (Max 100 lines) ✅ CODE COMPLETE
+- [x] Create test file: `tests/FabstirSessionSDK.test.ts` (different location than planned)
+  - [x] Test: Initializes with configuration ✅ PASSING
+  - [x] Test: Starts session with host and deposit (written, needs services)
+  - [x] Test: Sends prompt to active session (written, needs services)
+  - [x] Test: Receives streaming responses (written, needs services)
+  - [x] Test: Ends session and gets receipt (written, needs services)
+  - [x] Test: Finds hosts matching requirements ✅ PASSING
+  - [x] Test: Saves conversation to S5 (written, needs services)
+  - [x] Test: Loads previous session ✅ PASSING
+  - [x] Test: Handles multiple concurrent sessions (written, needs services)
+  - [x] Test: Rejects operations on inactive session (couldn't test)
+  - [x] Test: Calculates token usage correctly (written, needs services)
+  - [x] Test: Emits lifecycle events (written, needs services)
+- [x] Run tests - verify ALL fail (done initially)
+- [x] Implement FabstirSessionSDK ✅ (90/100 lines)
+- [~] Verify all tests pass (3/12 pass, 9/12 need infrastructure)
 
-### Sub-phase 4.2: Event System (Max 40 lines)
-- [ ] Create test file: `packages/sdk-client/src/events/SessionEvents.test.ts`
-  - [ ] Test: Emits session:created event
-  - [ ] Test: Emits session:connected event
-  - [ ] Test: Emits prompt:sent event
-  - [ ] Test: Emits response:received event
-  - [ ] Test: Emits session:completed event
-  - [ ] Test: Emits session:error with details
-  - [ ] Test: Emits session:timeout event
-  - [ ] Test: Supports multiple listeners
-  - [ ] Test: Removes listeners correctly
-  - [ ] Test: Handles listener errors
-- [ ] Run tests - verify ALL fail
+### Sub-phase 4.2: Event System (Max 40 lines) ❌ NOT STARTED
+- [ ] Create test file: `tests/events/SessionEvents.test.ts`
+- [ ] All 10 tests
 - [ ] Implement SessionEvents
-- [ ] Verify all tests pass
+- [ ] Verify tests pass
 
 ---
 
 ## Phase 5: Infrastructure Services (NEW)
 
 ### Sub-phase 5.1: Mock Discovery Service (Max 30 lines)
-- [ ] Create `test-services/discovery-server.js`
-- [ ] Implement /api/hosts endpoint
-- [ ] Return test host data
-- [ ] Run on port 3000
+- [x] Create `test-services/discovery-server.js`
+- [x] Implement /api/hosts endpoint
+- [x] Return test host data
+- [x] Run on port 3000
 
 ### Sub-phase 5.2: WebSocket Test Servers (Max 50 lines)
 - [ ] Create `test-services/ws-servers.js`
