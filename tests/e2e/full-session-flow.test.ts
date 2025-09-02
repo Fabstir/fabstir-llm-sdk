@@ -159,6 +159,17 @@ describe('E2E: Full Session Flow with Payments', () => {
       // Check if any events were emitted
       if (proofReceipt.logs.length > 0) {
         console.log('   Events emitted:', proofReceipt.logs.length);
+        for (const log of proofReceipt.logs) {
+          console.log('   Event from:', log.address);
+          try {
+            const parsed = hostContract.interface.parseLog(log);
+            console.log('   Event name:', parsed.name);
+            console.log('   Event args:', parsed.args);
+          } catch (e) {
+            // Try ProofSystem contract events
+            console.log('   Raw topics:', log.topics[0]);
+          }
+        }
       }
       
       // Wait a moment for state to be readable
@@ -166,8 +177,13 @@ describe('E2E: Full Session Flow with Payments', () => {
       
       // Verify session is Active with proven tokens
       const sessionData = await hostContract.sessions(sessionId);
-      console.log('   Session status:', sessionData.status, '(0=Active, 1=Completed, 2=TimedOut)');
-      console.log('   Proven tokens:', sessionData.provenTokens.toString());
+      console.log('   Full session data:');
+      console.log('     depositAmount:', sessionData.depositAmount.toString());
+      console.log('     pricePerToken:', sessionData.pricePerToken.toString());
+      console.log('     assignedHost:', sessionData.assignedHost);
+      console.log('     status:', sessionData.status, '(0=Active, 1=Completed, 2=TimedOut)');
+      console.log('     provenTokens:', sessionData.provenTokens.toString());
+      console.log('     lastProofSubmission:', sessionData.lastProofSubmission.toString());
       
       // Status 0 means Active (not Open!) - this is correct for the contract
       if (sessionData.status === 0) {

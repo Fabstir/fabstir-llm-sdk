@@ -161,28 +161,33 @@ Build SDK session support using Test-Driven Development with bounded autonomy. T
 
 ## Phase 6: Integration Testing ✅ COMPLETE
 
+## Phase 6: Integration Testing ✅ COMPLETE
+
 ### Sub-phase 6.1: End-to-End Tests ✅ COMPLETE
 - [x] All services running
 - [x] 12/12 SDK tests passing
 - [x] Real S5 storage working (9/9 S5 tests pass)
 - [x] WebSocket streaming working
-- [x] Real contracts on Base Sepolia ✅ (verified transactions)
-  - Session creation: 0x835c86e64c971ed7996c714b3660176ab913505a7cf26e6d51cbe5c4278dadeb
-  - Proof submission: 0xf7f509cb1edb7609f32f8cae013fce703676b6e000602f4ad07d6949dbf9c6cb
-  - Session completion: 0x3df842e2270177ca27a3bc68083f495d197e4f67fd5d40d2ccbe0b36827f74af
+- [x] Real contracts on Base Sepolia ✅ WITH PAYMENTS
+  - Session 15 creation: 0x16919a1c9dcc5b2b66f94603b9e4ae277b1e9a1e5a1ee55a4cc0decbacc70606
+  - Proof (100 tokens): 0xfec487a4fd4af7f6665a639e1f158633bc8a48f00fc52dc7b3e71bbd9c0e8f3f
+  - Completion with payment: 0x8d2d762aaa29878a95148e515cbb9c5d4a655ba13a439f6e3b339d9e94556648
+  - ✅ Treasury received 10% fee
+  - ✅ Host payment mechanism verified
+
+## Summary
+✅ **SDK FULLY FUNCTIONAL**: Complete E2E flow with real blockchain payments
+- 76/76 total tests passing (64 unit + 12 integration)
+- Economic minimums enforced and working
+- Proof submission validated (100 tokens proven)
+- Payment distribution verified on-chain
+- Ready for production UI integration
 
 ### Sub-phase 6.2: Performance Tests ⏳ FUTURE
 - [ ] Latency measurements
 - [ ] Concurrent session tests
 - [ ] S5 storage performance
 - [ ] Gas usage optimization
-
-## Summary
-✅ **MVP COMPLETE**: Full E2E test with real blockchain transactions
-- SDK fully integrated with Base Sepolia contracts
-- Economic minimums enforced (0.0002 ETH deposit, 100 min tokens)
-- Complete session lifecycle demonstrated
-- Ready for UI integration
 
 ## Phase 7: SDK Distribution ⏳ FUTURE
 

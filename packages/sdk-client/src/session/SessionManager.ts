@@ -37,7 +37,7 @@ export class SessionManager extends EventEmitter {
       params.depositAmount,
       params.pricePerToken,
       params.maxDuration,
-      300, // proofInterval (5 minutes)
+      100, // proofInterval - 100 tokens minimum
       { 
         value: params.depositAmount, // deposit must match msg.value
         gasLimit: 500000 // Increased for new contract
