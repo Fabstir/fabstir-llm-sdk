@@ -47,6 +47,11 @@ Before you begin, ensure you have the following installed:
   - Get test ETH from [Base Sepolia Faucet](https://faucet.quicknode.com/base/sepolia)
   - You'll need at least 0.1 ETH for testing
 
+- **Base Sepolia USDC** for payments (optional)
+  - Get test USDC from [Circle Faucet](https://faucet.circle.com/)
+  - Select Base Sepolia network
+  - You'll need at least 10 USDC for testing
+
 ## Installation
 
 ### 1. Install the SDK
@@ -275,19 +280,19 @@ fabstir-node id
 ### Basic Configuration
 
 ```typescript
-import { FabstirSDK } from '@fabstir/llm-sdk';
+import { FabstirSDKHeadless } from '@fabstir/llm-sdk';
 import { ethers } from 'ethers';
 
-// Initialize SDK
-const sdk = new FabstirSDK({
+// Initialize SDK (New Headless version)
+const sdk = new FabstirSDKHeadless({
   mode: process.env.FABSTIR_MODE as 'mock' | 'production',
-  network: process.env.FABSTIR_NETWORK,
+  network: process.env.FABSTIR_NETWORK || 'base-sepolia',
   
-  // Contract addresses
-  contracts: {
-    jobMarketplace: process.env.FABSTIR_JOB_MARKETPLACE,
-    paymentEscrow: process.env.FABSTIR_PAYMENT_ESCROW,
-    nodeRegistry: process.env.FABSTIR_NODE_REGISTRY,
+  // Contract addresses (Base Sepolia)
+  contractAddresses: {
+    jobMarketplace: '0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A',
+    paymentEscrow: '0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C',
+    nodeRegistry: '0x87516C13Ea2f99de598665e14cab64E191A0f8c4',
   },
   
   // P2P configuration
@@ -302,22 +307,23 @@ const sdk = new FabstirSDK({
 });
 ```
 
-### Connect Wallet
+### Set Signer (New Headless Approach)
 
 ```typescript
 // For browser environment with MetaMask
 const provider = new ethers.providers.Web3Provider(window.ethereum);
 await provider.send("eth_requestAccounts", []);
+const signer = provider.getSigner();
 
 // For Node.js with private key
 const provider = new ethers.providers.JsonRpcProvider(process.env.FABSTIR_RPC_URL);
-const wallet = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
 
-// Connect SDK
-await sdk.connect(provider);
+// Set signer in SDK (Headless approach)
+await sdk.setSigner(signer);
 
-console.log('Connected to:', await sdk.getNetwork());
-console.log('Address:', await sdk.getAddress());
+console.log('Network:', (await signer.provider.getNetwork()).name);
+console.log('Address:', await signer.getAddress());
 ```
 
 ## First Job Submission
@@ -360,12 +366,14 @@ nodes.forEach(node => {
 
 ```typescript
 try {
-  // Submit job with automatic negotiation
-  const result = await sdk.submitJobWithNegotiation({
+  // Submit job with payment token selection
+  const result = await sdk.submitJob({
     prompt: "Write a haiku about blockchain technology",
     modelId: "llama-3.2-1b-instruct",
     maxTokens: 50,
     temperature: 0.7,
+    offerPrice: '1000000',     // 1 USDC
+    paymentToken: 'USDC',       // Use USDC for payment
     stream: true,  // Enable streaming
   });
 
@@ -430,7 +438,7 @@ checkStatus();
 Create `test-setup.ts`:
 
 ```typescript
-import { FabstirSDK } from '@fabstir/llm-sdk';
+import { FabstirSDKHeadless } from '@fabstir/llm-sdk';
 import { ethers } from 'ethers';
 import dotenv from 'dotenv';
 

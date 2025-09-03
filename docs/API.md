@@ -5,6 +5,7 @@ Complete API documentation for the Fabstir LLM SDK, including all public methods
 ## Table of Contents
 
 - [SDK Classes](#sdk-classes)
+  - [FabstirSessionSDK](#fabstirsessionsdk)
   - [FabstirSDKHeadless](#fabstirsdkheadless)
   - [FabstirLLMSDK](#fabstirllmsdk)
   - [FabstirSDK (Legacy)](#fabstirsdk-legacy)
@@ -16,6 +17,148 @@ Complete API documentation for the Fabstir LLM SDK, including all public methods
 - [React Adapter](#react-adapter)
 
 ## SDK Classes
+
+### FabstirSessionSDK
+
+Session-based SDK for conversational AI interactions with built-in S5 storage and WebSocket support.
+
+#### Constructor
+
+```typescript
+new FabstirSessionSDK(config: SDKConfig, signer: ethers.Signer)
+```
+
+Creates a new session-based SDK instance.
+
+**Parameters:**
+- `config`: SDK configuration object with S5 and discovery settings
+- `signer`: An ethers.js Signer for blockchain operations
+
+**Example:**
+```typescript
+const config: SDKConfig = {
+  contractAddress: '0x445882e14b22E921c7d4Fe32a7736a32197578AF',
+  discoveryUrl: 'https://discovery.fabstir.com',
+  s5SeedPhrase: 'your twelve word seed phrase here for s5 storage',
+  s5PortalUrl: 'https://s5.fabstir.com',
+  enableS5: true,
+  cacheConfig: {
+    maxEntries: 100,
+    ttl: 3600000 // 1 hour
+  }
+};
+
+const sdk = new FabstirSessionSDK(config, signer);
+```
+
+#### Session Management Methods
+
+##### startSession(host, deposit)
+
+Starts a new AI conversation session with a host.
+
+```typescript
+async startSession(host: Host, deposit: number): Promise<Session>
+```
+
+**Parameters:**
+- `host`: Host information object
+- `deposit`: Deposit amount in ETH
+
+**Returns:** Session object with job details
+
+##### sendPrompt(content)
+
+Sends a prompt message in the active session.
+
+```typescript
+async sendPrompt(content: string): Promise<void>
+```
+
+##### endSession()
+
+Ends the current session and settles payment.
+
+```typescript
+async endSession(): Promise<PaymentReceipt>
+```
+
+**Returns:** Payment receipt with transaction details
+
+##### onResponse(handler)
+
+Registers a handler for incoming response messages.
+
+```typescript
+onResponse(handler: (msg: Message) => void): void
+```
+
+#### Host Discovery
+
+##### findHosts(criteria)
+
+Discovers available hosts matching criteria.
+
+```typescript
+async findHosts(criteria: any): Promise<Host[]>
+```
+
+**Parameters:**
+- `criteria`: Object with `model` and `maxPrice` fields
+
+#### Storage Methods
+
+##### saveConversation()
+
+Saves the current conversation to S5 storage.
+
+```typescript
+async saveConversation(): Promise<void>
+```
+
+##### loadPreviousSession(sessionId)
+
+Loads a previous session from cache or S5 storage.
+
+```typescript
+async loadPreviousSession(sessionId: number): Promise<{ sessionId: number; messages: Message[] }>
+```
+
+#### Session Queries
+
+##### getActiveSessions()
+
+Returns all active sessions.
+
+```typescript
+getActiveSessions(): Session[]
+```
+
+##### getActiveSession(id)
+
+Gets a specific active session by ID.
+
+```typescript
+getActiveSession(id: number): Session | undefined
+```
+
+#### Lifecycle Methods
+
+##### isInitialized()
+
+Checks if SDK is initialized.
+
+```typescript
+isInitialized(): boolean
+```
+
+##### cleanup()
+
+Cleans up resources and disconnects S5 storage.
+
+```typescript
+async cleanup(): Promise<void>
+```
 
 ### FabstirSDKHeadless
 
@@ -166,12 +309,10 @@ The SDK now supports multiple payment methods instead of just FAB tokens:
 
 ### Supported Payment Tokens
 
-| Token | Symbol | Contract Address | Decimals |
-|-------|--------|-----------------|----------|
+| Token | Symbol | Base Sepolia Contract Address | Decimals |
+|-------|--------|-------------------------------|----------|
 | Ether | ETH | Native | 18 |
-| USD Coin | USDC | 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 | 6 |
-| Tether | USDT | 0xdAC17F958D2ee523a2206206994597C13D831ec7 | 6 |
-| DAI | DAI | 0x6B175474E89094C44Da98b954EedeAC495271d0F | 18 |
+| USD Coin | USDC | 0x036CbD53842c5426634e7929541eC2318f3dCF7e | 6 |
 
 ### Payment Flow
 
@@ -241,9 +382,35 @@ sdk.on('jobSubmitted', (data: {
 sdk.on('p2p:peer:connect', (peerId: string) => {});
 sdk.on('p2p:peer:disconnect', (peerId: string) => {});
 sdk.on('p2p:error', (error: Error) => {});
+
+// Session events (FabstirSessionSDK)
+sdk.on('session:created', (session: Session) => {});
+sdk.on('session:connected', (session: Session) => {});
+sdk.on('prompt:sent', (message: Message) => {});
+sdk.on('response:received', (message: Message) => {});
+sdk.on('session:completed', (session: Session) => {});
+sdk.on('session:error', (error: Error) => {});
 ```
 
 ## Types and Interfaces
+
+### SDKConfig
+
+Configuration for FabstirSessionSDK:
+
+```typescript
+interface SDKConfig {
+  contractAddress: string;
+  discoveryUrl: string;
+  s5SeedPhrase: string;
+  s5PortalUrl?: string;
+  cacheConfig?: {
+    maxEntries?: number;
+    ttl?: number;
+  };
+  enableS5?: boolean;
+}
+```
 
 ### HeadlessConfig
 
@@ -293,6 +460,55 @@ interface JobResponse {
   actualCost?: BigNumber;
   message?: string;
   paymentToken?: string;  // Token used for payment
+}
+```
+
+### Session Types (FabstirSessionSDK)
+
+```typescript
+interface Session {
+  jobId: number;
+  client: string;
+  status: string;
+  params: SessionParams;
+  checkpointCount: number;
+  lastCheckpoint: number;
+  currentCost: string;
+  host: Host;
+  messages: Message[];
+  websocketUrl: string;
+  tokensUsed: number;
+}
+
+interface SessionParams {
+  duration: number;
+  maxInactivity: number;
+  messageLimit: number;
+  checkpointInterval: number;
+}
+
+interface Host {
+  id: string;
+  address: string;
+  url: string;
+  models: string[];
+  pricePerToken: string;
+  available: boolean;
+}
+
+interface Message {
+  id: string;
+  sessionId: number;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: number;
+}
+
+interface PaymentReceipt {
+  sessionId: number;
+  totalTokens: number;
+  totalCost: string;
+  transactionHash: string;
 }
 ```
 
@@ -405,8 +621,13 @@ await sdk.submitJob({
 ## Contract Addresses
 
 ### Base Sepolia (Chain ID: 84532)
-- JobMarketplace: `0x6C4283A2aAee2f94BcD2EB04e951EfEa1c35b0B6`
-- USDC: `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`
+- JobMarketplace: `0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A`
+- ProofSystem: `0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9`
+- NodeRegistry: `0x87516C13Ea2f99de598665e14cab64E191A0f8c4`
+- HostEarnings: `0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E`
+- PaymentEscrow: `0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C`
+- USDC: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
+- FAB Token: `0xC78949004B4EB6dEf2D66e49Cd81231472612D62`
 
 ### Base Mainnet (Chain ID: 8453)
 - JobMarketplace: TBD

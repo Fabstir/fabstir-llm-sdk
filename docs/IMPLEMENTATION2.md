@@ -211,6 +211,133 @@ Build SDK session support using Test-Driven Development with bounded autonomy. T
 - [ ] Example applications
 - [ ] Migration guide
 
+Based on the IMPLEMENTATION2.md structure, here's the E2E testing phase to add:
+
+## Phase 8: End-to-End Session Job Cycle Testing
+
+### Sub-phase 8.1: Test Infrastructure Setup (Max 200 lines)
+- [ ] Create `tests/e2e/setup/test-accounts.ts`
+  - [ ] Configure test user with Base smart wallet
+  - [ ] Configure test host with Base smart wallet  
+  - [ ] Setup treasury address for fee collection
+  - [ ] Create account funding utilities
+- [ ] Create `tests/e2e/setup/mock-llm-host.ts`
+  - [ ] Mock host that auto-accepts sessions
+  - [ ] Auto-responds to prompts with mock LLM responses
+  - [ ] Simulates proof of computation
+- [ ] Create `tests/e2e/setup/test-helpers.ts`
+  - [ ] Balance checking utilities
+  - [ ] Transaction monitoring
+  - [ ] S5 storage verification helpers
+- [ ] Verify setup works: `npm run test:e2e:setup`
+- [ ] Commit: "test: add E2E test infrastructure"
+
+### Sub-phase 8.2: Authentication & Funding (Max 150 lines)
+- [ ] Create `tests/e2e/01-auth-funding.test.ts`
+  - [ ] Test: User authenticates with Base Account Kit
+  - [ ] Test: User gets unique S5 seed from passkey
+  - [ ] Test: Host authenticates separately
+  - [ ] Test: Fund user wallet with test USDC
+  - [ ] Test: Fund host wallet for staking
+  - [ ] Test: Verify initial balances
+- [ ] Run test: `npm run test:e2e:auth`
+- [ ] Commit: "test: add E2E auth and funding tests"
+
+### Sub-phase 8.3: Session Creation & Discovery (Max 150 lines)
+- [ ] Create `tests/e2e/02-session-creation.test.ts`
+  - [ ] Test: Host registers and stakes
+  - [ ] Test: User discovers available host
+  - [ ] Test: User creates session with discovered host
+  - [ ] Test: Session recorded on-chain
+  - [ ] Test: Deposit held in escrow
+  - [ ] Test: Host accepts session
+- [ ] Run test: `npm run test:e2e:session`
+- [ ] Commit: "test: add E2E session creation tests"
+
+### Sub-phase 8.4: Message Exchange & S5 Storage (Max 200 lines)
+- [ ] Create `tests/e2e/03-message-exchange.test.ts`
+  - [ ] Test: User sends first prompt
+  - [ ] Test: Host processes and responds
+  - [ ] Test: Conversation stored in S5 with user's seed
+  - [ ] Test: User sends second prompt
+  - [ ] Test: Verify S5 contains full conversation history
+  - [ ] Test: Verify encryption uses user's unique seed
+  - [ ] Test: Different user cannot access conversation
+- [ ] Run test: `npm run test:e2e:messages`
+- [ ] Commit: "test: add E2E message exchange tests"
+
+### Sub-phase 8.5: Session Completion & Payment (Max 200 lines)
+- [ ] Create `tests/e2e/04-payment-settlement.test.ts`
+  - [ ] Test: User ends session
+  - [ ] Test: Proof of computation verified
+  - [ ] Test: Payment calculated correctly
+  - [ ] Test: User balance decreased by correct amount
+  - [ ] Test: Host balance increased (minus fees)
+  - [ ] Test: Treasury receives fees
+  - [ ] Test: Transaction hashes recorded
+  - [ ] Test: Final balances match expectations
+- [ ] Run test: `npm run test:e2e:payment`
+- [ ] Commit: "test: add E2E payment settlement tests"
+
+### Sub-phase 8.6: Full Cycle Integration (Max 250 lines)
+- [ ] Create `tests/e2e/05-full-cycle.test.ts`
+  - [ ] Test: Complete flow from auth to payment
+  - [ ] Test: Multiple sessions with same user/host
+  - [ ] Test: Session recovery after interruption
+  - [ ] Test: Error scenarios (insufficient funds, host offline)
+  - [ ] Test: S5 persistence across sessions
+- [ ] Create `tests/e2e/test-report.ts`
+  - [ ] Generate summary of all transactions
+  - [ ] Show balance flow diagram
+  - [ ] Export test metrics
+- [ ] Run full suite: `npm run test:e2e:all`
+- [ ] Commit: "test: add complete E2E cycle test"
+
+### Sub-phase 8.7: Documentation & CI Setup
+- [ ] Create `docs/E2E_TESTING.md`
+  - [ ] Document test account setup
+  - [ ] Explain funding requirements
+  - [ ] Show expected outputs
+  - [ ] Troubleshooting guide
+- [ ] Update `.github/workflows/e2e.yml`
+  - [ ] Schedule daily E2E runs
+  - [ ] Setup test wallet funding
+  - [ ] Report results to dashboard
+- [ ] Commit: "docs: add E2E testing documentation and CI"
+
+## Test Data Structure
+```typescript
+// tests/e2e/config/test-config.ts
+export const E2E_CONFIG = {
+  user: {
+    name: 'e2e-test-user',
+    initialUSDC: '10.00',
+    prompts: [
+      'What is the capital of France?',
+      'Explain quantum computing'
+    ]
+  },
+  host: {
+    name: 'e2e-test-host',
+    stakeAmount: '5.00',
+    modelId: 'llama-3.2-1b-instruct',
+    pricePerToken: '0.0001'
+  },
+  session: {
+    depositAmount: '2.00',
+    maxDuration: 3600, // 1 hour
+    proofInterval: 60   // 1 minute
+  },
+  expected: {
+    userSpend: '0.50-1.00', // Range
+    hostEarnings: '0.40-0.90',
+    treasuryFees: '0.05-0.10'
+  }
+};
+```
+
+This phase provides comprehensive E2E testing that validates the entire system working together with real smart wallets, authenticated users, S5 storage with unique seeds, and complete payment flows.
+
 ---
 
 ## Test Execution Strategy

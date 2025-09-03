@@ -67,12 +67,11 @@ const jobId = await sdk.submitJob({
 
 ### Supported Tokens
 
-| Token | Symbol | Decimals | Mainnet Address |
-|-------|--------|----------|-----------------|
+| Token | Symbol | Decimals | Base Sepolia Address |
+|-------|--------|----------|---------------------|
 | Ether | ETH | 18 | Native |
-| USD Coin | USDC | 6 | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` |
-| Tether | USDT | 6 | `0xdAC17F958D2ee523a2206206994597C13D831ec7` |
-| DAI | DAI | 18 | `0x6B175474E89094C44Da98b954EedeAC495271d0F` |
+| USD Coin | USDC | 6 | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
+| FAB Token | FAB | 18 | `0xC78949004B4EB6dEf2D66e49Cd81231472612D62` |
 
 ### Payment Examples
 
@@ -325,8 +324,13 @@ try {
 
 ```typescript
 const CONTRACTS = {
-  JobMarketplace: '0x6C4283A2aAee2f94BcD2EB04e951EfEa1c35b0B6',
-  USDC: '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+  JobMarketplace: '0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A',
+  ProofSystem: '0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9',
+  NodeRegistry: '0x87516C13Ea2f99de598665e14cab64E191A0f8c4',
+  HostEarnings: '0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E',
+  PaymentEscrow: '0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C',
+  USDC: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+  FAB: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62'
 };
 ```
 

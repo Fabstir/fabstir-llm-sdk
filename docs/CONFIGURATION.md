@@ -172,18 +172,16 @@ await sdk.connect(provider);
 ### Supported Payment Tokens
 
 ```typescript
-// Token addresses on mainnet
-const TOKEN_ADDRESSES = {
-  USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-  USDT: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-  DAI: '0x6B175474E89094C44Da98b954EedeAC495271d0F'
-};
-
 // Base Sepolia test tokens
 const BASE_SEPOLIA_TOKENS = {
   USDC: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-  USDT: '0x...',  // Deploy your own test token
-  DAI: '0x...'     // Deploy your own test token
+  FAB: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62'
+};
+
+// Base Mainnet tokens
+const BASE_MAINNET_TOKENS = {
+  USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  // FAB and other tokens TBD
 };
 ```
 
@@ -348,9 +346,11 @@ interface ContractAddresses {
 
 // Default addresses (Base Sepolia)
 const DEFAULT_CONTRACTS = {
-  jobMarketplace: '0x6C4283A2aAee2f94BcD2EB04e951EfEa1c35b0B6',
-  paymentEscrow: '0x...', // To be deployed
-  nodeRegistry: '0x...'   // To be deployed
+  jobMarketplace: '0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A',
+  proofSystem: '0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9',
+  nodeRegistry: '0x87516C13Ea2f99de598665e14cab64E191A0f8c4',
+  hostEarnings: '0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E',
+  paymentEscrow: '0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C'
 };
 
 // Override default addresses
@@ -453,10 +453,12 @@ Supported environment variables:
 FABSTIR_NETWORK=base-sepolia
 FABSTIR_RPC_URL=https://sepolia.base.org
 
-# Contract Addresses
-FABSTIR_JOB_MARKETPLACE=0x...
-FABSTIR_PAYMENT_ESCROW=0x...
-FABSTIR_NODE_REGISTRY=0x...
+# Contract Addresses (Base Sepolia)
+FABSTIR_JOB_MARKETPLACE=0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A
+FABSTIR_PROOF_SYSTEM=0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9
+FABSTIR_NODE_REGISTRY=0x87516C13Ea2f99de598665e14cab64E191A0f8c4
+FABSTIR_HOST_EARNINGS=0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E
+FABSTIR_PAYMENT_ESCROW=0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C
 
 # P2P Configuration
 FABSTIR_BOOTSTRAP_NODES=/ip4/34.70.224.193/tcp/4001/p2p/...,/ip4/35.232.100.45/tcp/4001/p2p/...

@@ -239,14 +239,13 @@ class P2PClient {
 
 ### Payment Token Support
 
-The SDK has transitioned from FAB tokens to mainstream payment tokens:
+The SDK supports multiple payment tokens on Base Sepolia:
 
-| Token | Symbol | Network | Contract Address | Decimals |
-|-------|--------|---------|-----------------|----------|
+| Token | Symbol | Network | Base Sepolia Contract | Decimals |
+|-------|--------|---------|----------------------|----------|
 | Ether | ETH | Native | N/A | 18 |
-| USD Coin | USDC | ERC20 | 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 | 6 |
-| Tether | USDT | ERC20 | 0xdAC17F958D2ee523a2206206994597C13D831ec7 | 6 |
-| DAI | DAI | ERC20 | 0x6B175474E89094C44Da98b954EedeAC495271d0F | 18 |
+| USD Coin | USDC | ERC20 | 0x036CbD53842c5426634e7929541eC2318f3dCF7e | 6 |
+| FAB Token | FAB | ERC20 | 0xC78949004B4EB6dEf2D66e49Cd81231472612D62 | 18 |
 
 ### Payment Flow Comparison
 
