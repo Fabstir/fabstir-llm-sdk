@@ -46,7 +46,7 @@ export class MockLLMHost {
       address: this.hostAccount.address,
       url: 'ws://localhost:8080',
       models: ['llama2-7b', 'mistral-7b', 'gpt-3.5'],
-      pricePerToken: '0.0001',
+      pricePerToken: '100000000000000', // 0.0001 ETH in Wei
       available: true
     };
   }

@@ -18,10 +18,13 @@ class MockAuthManager {
   }
   async exportForSDK() {
     const wallet = ethers.Wallet.createRandom();
+    // Add mock provider for testing
+    const mockProvider = new ethers.providers.JsonRpcProvider('http://localhost:8545');
+    wallet._provider = mockProvider;
     const words = ['abandon', 'ability', 'able', 'about', 'above', 'absent', 
                    'absorb', 'abstract', 'absurd', 'abuse', 'access', 'accident'];
     const seed = words.sort(() => Math.random() - 0.5).slice(0, 12).join(' ');
-    return { signer: wallet, s5Seed: seed,
+    return { signer: wallet.connect(mockProvider), s5Seed: seed,
       userId: `${this.provider}:${this.username || wallet.address.toLowerCase()}`,
       capabilities: { gasSponsorship: this.provider === 'base',
         passkey: this.provider === 'base', smartWallet: this.provider === 'base' }
