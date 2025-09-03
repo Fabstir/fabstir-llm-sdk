@@ -1,0 +1,20 @@
+{
+  "network": "base-sepolia",
+  "models": ["llama2-7b", "gpt-3.5-turbo"],
+  "pricePerToken": "0.0001",
+  "autoClaim": true,
+  "maxConcurrentJobs": 3,
+  "p2p": {
+    "listenAddresses": ["/ip4/0.0.0.0/tcp/4002"],
+    "bootstrapNodes": ["/ip4/34.70.224.193/tcp/4001/p2p/12D3KooWRQVMgktfPx1KeLhHhtMdBBJwPDjyTX3aPbQCCszqfMUV"]
+  },
+  "stakeAmount": "1.0",
+  "gasLimit": 500000,
+  "responseTimeout": 30000,
+  "heartbeatInterval": 5000,
+  "capabilities": {
+    "streaming": true,
+    "checkpoints": true,
+    "maxTokens": 4096
+  }
+}

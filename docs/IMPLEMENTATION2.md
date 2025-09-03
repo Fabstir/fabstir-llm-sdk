@@ -391,6 +391,205 @@ This phase provides comprehensive E2E testing that validates the entire system w
 
 ---
 
+## Phase 9: Real Integration Testing
+
+### Overview
+Test the complete system with real services: Base Sepolia blockchain, P2P discovery, enhanced S5.js storage, and actual host nodes. Verify the entire job lifecycle with real transactions and balance tracking.
+
+### Prerequisites
+- Funded test accounts on Base Sepolia (ETH + USDC)
+- Deployed smart contracts on Base Sepolia
+- P2P bootstrap nodes running
+- S5 portal access
+
+---
+
+### Sub-phase 9.1: Host Node Setup ✅ COMPLETE
+- [x] Create `scripts/test-host/run-host.ts`
+  - [x] Initialize host with test private key
+  - [x] Register on NodeRegistry contract
+  - [x] Start P2P service listening
+  - [x] Implement job claim handler
+  - [x] Generate responses for testing
+  - [x] Submit proof of computation
+- [x] Create `scripts/test-host/host-config.json`
+  - [x] P2P listen addresses
+  - [x] Model configurations
+  - [x] Pricing parameters
+- [x] Test: Host starts and registers successfully
+- [x] Status: 3 tests passing, 3 skipped (require live network)
+
+**Achievement**: Real host node with blockchain and P2P integration ready
+
+### Sub-phase 9.2: Real SDK Configuration (Max 100 lines)
+- [ ] Create `tests/integration/config/sdk-setup.ts`
+  - [ ] Load .env.test configuration
+  - [ ] Initialize provider with Base Sepolia RPC
+  - [ ] Configure production mode SDK
+  - [ ] Setup P2P with bootstrap nodes
+  - [ ] Configure S5 with real portal
+- [ ] Create `tests/integration/utils/balance-tracker.ts`
+  - [ ] Track ETH balances
+  - [ ] Track USDC balances
+  - [ ] Calculate gas costs
+  - [ ] Generate balance reports
+- [ ] Test: SDK connects to real network
+- [ ] Commit: "test: add real SDK configuration"
+
+### Sub-phase 9.3: ETH Payment Integration Test (Max 200 lines)
+- [ ] Create `tests/integration/eth-payment-cycle.test.ts`
+  - [ ] Test: Fund user account with ETH
+  - [ ] Test: Discover host via P2P
+  - [ ] Test: Submit job with ETH payment
+  - [ ] Test: Verify escrow creation on-chain
+  - [ ] Test: Host claims job (transaction hash)
+  - [ ] Test: Host submits result
+  - [ ] Test: Payment settles correctly
+  - [ ] Test: Generate transaction report
+- [ ] Verify all transaction hashes on Basescan
+- [ ] Commit: "test: add ETH payment integration test"
+
+### Sub-phase 9.4: USDC Payment Integration Test (Max 200 lines)
+- [ ] Create `tests/integration/usdc-payment-cycle.test.ts`
+  - [ ] Test: Check USDC balance
+  - [ ] Test: Approve USDC spending
+  - [ ] Test: Submit job with USDC payment
+  - [ ] Test: Verify token transfer
+  - [ ] Test: Complete job cycle
+  - [ ] Test: Verify USDC settlement
+  - [ ] Test: Check fee distribution
+- [ ] Create allowance management utilities
+- [ ] Commit: "test: add USDC payment integration test"
+
+### Sub-phase 9.5: S5 Storage Integration (Max 150 lines)
+- [ ] Create `tests/integration/s5-storage.test.ts`
+  - [ ] Test: Connect to S5 portal
+  - [ ] Test: Store conversation with real encryption
+  - [ ] Test: Retrieve conversation with same seed
+  - [ ] Test: Verify encryption with different seed fails
+  - [ ] Test: List all stored sessions
+  - [ ] Test: Delete old sessions
+- [ ] Verify data persistence across sessions
+- [ ] Commit: "test: add S5 storage integration test"
+
+### Sub-phase 9.6: P2P Discovery Integration (Max 150 lines)
+- [ ] Create `tests/integration/p2p-discovery.test.ts`
+  - [ ] Test: Connect to bootstrap nodes
+  - [ ] Test: Discover peer hosts
+  - [ ] Test: Query host capabilities
+  - [ ] Test: Negotiate job terms via P2P
+  - [ ] Test: Handle host disconnection
+  - [ ] Test: Reconnect to different host
+- [ ] Measure P2P latency and reliability
+- [ ] Commit: "test: add P2P discovery integration test"
+
+### Sub-phase 9.7: Full Cycle Stress Test (Max 250 lines)
+- [ ] Create `tests/integration/stress-test.test.ts`
+  - [ ] Test: Multiple sequential jobs
+  - [ ] Test: Concurrent jobs with different hosts
+  - [ ] Test: Recovery from network failures
+  - [ ] Test: Gas price fluctuations
+  - [ ] Test: Large prompt/response handling
+  - [ ] Test: Session timeout scenarios
+- [ ] Generate performance metrics report
+- [ ] Commit: "test: add stress testing suite"
+
+### Sub-phase 9.8: Test Report Generator (Max 150 lines)
+- [ ] Create `tests/integration/report-generator.ts`
+  - [ ] Collect all transaction hashes
+  - [ ] Query on-chain events
+  - [ ] Calculate total costs (ETH + USDC)
+  - [ ] Generate balance flow diagram
+  - [ ] Create CSV export
+  - [ ] Generate markdown summary
+- [ ] Create `test-reports/` directory structure
+- [ ] Commit: "feat: add integration test reporter"
+
+### Sub-phase 9.9: CI/CD for Integration Tests
+- [ ] Create `.github/workflows/integration.yml`
+  - [ ] Scheduled weekly runs
+  - [ ] Wallet funding check
+  - [ ] Start test host node
+  - [ ] Run integration suite
+  - [ ] Upload reports to artifacts
+  - [ ] Notify on failures
+- [ ] Create monitoring dashboard
+- [ ] Commit: "ci: add integration test workflow"
+
+---
+
+## Success Criteria
+
+### Test Coverage
+- [ ] ETH payments work end-to-end
+- [ ] USDC payments with approval work
+- [ ] P2P discovery finds real hosts
+- [ ] S5 storage encrypts/decrypts correctly
+- [ ] All transactions verified on Basescan
+
+### Performance Metrics
+- [ ] Job completion < 60 seconds
+- [ ] P2P discovery < 10 seconds
+- [ ] Transaction costs documented
+- [ ] Gas usage optimized
+
+### Reports Generated
+- [ ] Transaction hash list
+- [ ] Balance change summary
+- [ ] Gas cost analysis
+- [ ] Performance metrics
+- [ ] Error logs (if any)
+```
+
+## Starting with Sub-phase 9.1: Host Node Setup
+
+Let me create the bounded autonomy prompt for Claude Code to implement the test host node:
+
+```markdown
+# Sub-phase 9.1: Host Node Setup
+
+## Objective
+Create a test host node that can register on-chain, listen for jobs via P2P, and process them with mock LLM responses.
+
+## Scope - ONLY these files:
+- scripts/test-host/run-host.ts (max 150 lines)
+- scripts/test-host/host-config.json (max 30 lines)
+- scripts/test-host/README.md (max 50 lines)
+
+## Requirements
+
+### run-host.ts must:
+1. Load host private key from environment
+2. Connect to Base Sepolia
+3. Register on NodeRegistry contract
+4. Start P2P listener
+5. Listen for job events
+6. Auto-claim jobs
+7. Generate mock responses
+8. Submit proof and results
+
+### host-config.json must include:
+- P2P listen addresses
+- Supported models
+- Price per token
+- Auto-claim settings
+
+## Implementation Notes
+- Use existing SDK methods where possible
+- Mock LLM responses (don't call real APIs)
+- Generate simple proof hashes
+- Log all activities for debugging
+
+## Success Criteria
+- Host registers on-chain successfully
+- P2P service starts and listens
+- Can claim and complete jobs
+- Transactions logged with hashes
+```
+
+This Phase 9 provides a structured approach to test the real system. Should we start with Sub-phase 9.1 to create the host node runner?
+
+
 ## Test Execution Strategy
 
 ### For Each Sub-phase:
