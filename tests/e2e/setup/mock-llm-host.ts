@@ -14,12 +14,16 @@ export class MockLLMHost {
   public autoAcceptSessions: boolean = true;
   private responses: Map<string, string> = new Map();
   private running: boolean = false;
+  private activeSessions: Map<number, any> = new Map();
   
   constructor(private hostAccount: TestAccount) {}
 
   async start(): Promise<void> {
     this.running = true;
-    // Mock WebSocket server would start here
+    // Mock staking - reduce balance by 1 USDC
+    const { setMockBalance, checkBalance } = await import('./test-helpers');
+    const currentBalance = await checkBalance(this.hostAccount);
+    await setMockBalance(this.hostAccount.address, currentBalance - BigInt(1000000));
   }
 
   async stop(): Promise<void> {
@@ -71,5 +75,23 @@ export class MockLLMHost {
   // Check if host is running
   isRunning(): boolean {
     return this.running;
+  }
+
+  // Accept incoming session
+  async acceptSession(jobId: number): Promise<boolean> {
+    if (!this.autoAcceptSessions) return false;
+    this.activeSessions.set(jobId, { jobId, status: 'active', startTime: Date.now() });
+    return true;
+  }
+
+  // Get active session
+  getActiveSession(jobId: number): any {
+    return this.activeSessions.get(jobId);
+  }
+
+  // Process prompt for session
+  async processPrompt(jobId: number, prompt: string): Promise<string> {
+    if (!this.activeSessions.has(jobId)) throw new Error('Session not found');
+    return this.generateResponse(prompt);
   }
 }
