@@ -345,15 +345,15 @@ Based on the IMPLEMENTATION2.md structure, here's the E2E testing phase to add:
 - Test reporting infrastructure in place
 
 ### Sub-phase 8.7: Documentation & CI Setup
-- [ ] Create `docs/E2E_TESTING.md`
-  - [ ] Document test account setup
-  - [ ] Explain funding requirements
-  - [ ] Show expected outputs
-  - [ ] Troubleshooting guide
-- [ ] Update `.github/workflows/e2e.yml`
-  - [ ] Schedule daily E2E runs
-  - [ ] Setup test wallet funding
-  - [ ] Report results to dashboard
+- [x] Create `docs/E2E_TESTING.md`
+  - [x] Document test account setup
+  - [x] Explain funding requirements
+  - [x] Show expected outputs
+  - [x] Troubleshooting guide
+- [x] Update `.github/workflows/e2e.yml`
+  - [x] Schedule daily E2E runs
+  - [x] Setup test wallet funding
+  - [x] Report results to dashboard
 - [ ] Commit: "docs: add E2E testing documentation and CI"
 
 ## Test Data Structure
