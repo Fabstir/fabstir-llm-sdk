@@ -35,9 +35,10 @@ export class MockLLMHost {
     this.responses.set(prompt, response);
   }
 
-  simulateProofOfComputation(): string {
+  simulateProofOfComputation(sessionId?: number): string {
     // Generate mock proof hash
-    return '0x' + ethers.utils.keccak256(ethers.utils.toUtf8Bytes('mock-proof')).slice(2);
+    const proofData = `mock-proof-${sessionId || Date.now()}`;
+    return '0x' + ethers.utils.keccak256(ethers.utils.toUtf8Bytes(proofData)).slice(2);
   }
 
   getHostInfo(): Host {

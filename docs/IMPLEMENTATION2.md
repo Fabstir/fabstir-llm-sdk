@@ -302,18 +302,26 @@ Based on the IMPLEMENTATION2.md structure, here's the E2E testing phase to add:
 - Conversation persistence across sessions
 - All mocking properly implemented to avoid real network calls
 
-### Sub-phase 8.5: Session Completion & Payment (Max 200 lines)
-- [ ] Create `tests/e2e/04-payment-settlement.test.ts`
-  - [ ] Test: User ends session
-  - [ ] Test: Proof of computation verified
-  - [ ] Test: Payment calculated correctly
-  - [ ] Test: User balance decreased by correct amount
-  - [ ] Test: Host balance increased (minus fees)
-  - [ ] Test: Treasury receives fees
-  - [ ] Test: Transaction hashes recorded
-  - [ ] Test: Final balances match expectations
-- [ ] Run test: `npm run test:e2e:payment`
-- [ ] Commit: "test: add E2E payment settlement tests"
+### Sub-phase 8.5: Session Completion & Payment ✅ COMPLETE
+- [x] Create `tests/e2e/04-payment-settlement.test.ts`
+  - [x] Test: User ends session
+  - [x] Test: Proof of computation verified
+  - [x] Test: Payment calculated correctly
+  - [x] Test: User balance decreased by correct amount
+  - [x] Test: Host balance increased (minus fees)
+  - [x] Test: Treasury receives fees
+  - [x] Test: Transaction hashes recorded
+  - [x] Test: Final balances match expectations
+- [x] Run test: All 16 tests passing
+- [x] Commit: "test: add E2E payment settlement tests"
+
+**Status**: ✅ COMPLETE (16 tests passing, 193 lines)
+**Achievement**:
+- Complete payment settlement flow tested
+- Platform fee calculation and distribution verified
+- Conservation of value across all parties confirmed
+- Proof verification mocked properly
+- Transaction recording validated
 
 ### Sub-phase 8.6: Full Cycle Integration (Max 250 lines)
 - [ ] Create `tests/e2e/05-full-cycle.test.ts`
