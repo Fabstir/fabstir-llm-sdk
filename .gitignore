@@ -71,3 +71,4 @@ tests/old-jest-tests/
 dist/
 !jest.config.js
 !vitest.config.js
+test-reports/

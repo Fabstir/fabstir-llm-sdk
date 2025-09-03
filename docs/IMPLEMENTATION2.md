@@ -438,18 +438,21 @@ Test the complete system with real services: Base Sepolia blockchain, P2P discov
 
 **Achievement**: Real SDK configuration with balance tracking ready
 
-### Sub-phase 9.3: ETH Payment Integration Test (Max 200 lines)
-- [ ] Create `tests/integration/eth-payment-cycle.test.ts`
-  - [ ] Test: Fund user account with ETH
-  - [ ] Test: Discover host via P2P
-  - [ ] Test: Submit job with ETH payment
-  - [ ] Test: Verify escrow creation on-chain
-  - [ ] Test: Host claims job (transaction hash)
-  - [ ] Test: Host submits result
-  - [ ] Test: Payment settles correctly
-  - [ ] Test: Generate transaction report
-- [ ] Verify all transaction hashes on Basescan
-- [ ] Commit: "test: add ETH payment integration test"
+### Sub-phase 9.3: ETH Payment Integration Test ✅ COMPLETE
+- [x] Create `tests/integration/eth-payment-cycle.test.ts`
+  - [x] Test: Fund user account with ETH
+  - [x] Test: Discover host via P2P
+  - [x] Test: Submit job with ETH payment
+  - [x] Test: Verify escrow creation on-chain
+  - [x] Test: Host claims job (transaction hash)
+  - [x] Test: Host submits result
+  - [x] Test: Payment settles correctly
+  - [x] Test: Generate transaction report
+- [x] Verify all transaction hashes on Basescan
+- [x] Status: Working with 0.001 ETH payments
+
+**Achievement**: Real ETH payments on Base Sepolia verified
+**Key Learning**: Minimum deposit is 0.0002 ETH, gas costs are minimal
 
 ### Sub-phase 9.4: USDC Payment Integration Test (Max 200 lines)
 - [ ] Create `tests/integration/usdc-payment-cycle.test.ts`
