@@ -1,12 +1,14 @@
 // src/FabstirSDK.ts
 import { ethers } from 'ethers';
 import { SDKConfig, AuthResult, SDKError } from './types';
+import PaymentManager from './managers/PaymentManager';
 
 export class FabstirSDK {
   public config: SDKConfig;
   public provider?: ethers.providers.JsonRpcProvider;
   public signer?: ethers.Signer;
   private authResult?: AuthResult;
+  private paymentManager?: PaymentManager;
   
   constructor(config: SDKConfig = {}) {
     this.config = {
@@ -83,8 +85,31 @@ export class FabstirSDK {
     return {}; // TODO: Implement SessionManager in later phase
   }
   
-  getPaymentManager(): any {
-    return {}; // TODO: Implement PaymentManager in later phase
+  getPaymentManager(): PaymentManager {
+    if (!this.signer) {
+      const error: SDKError = new Error('Must authenticate before accessing PaymentManager') as SDKError;
+      error.code = 'MANAGER_NOT_AUTHENTICATED';
+      throw error;
+    }
+    
+    if (!this.paymentManager) {
+      // Load JobMarketplace ABI
+      const jobMarketplaceABI = [
+        'function createSessionJob(address,uint256,uint256,uint256,uint256) payable returns (uint256)',
+        'function createSessionJobWithToken(address,address,uint256,uint256,uint256,uint256) returns (uint256)',
+        'function completeSessionJob(uint256) returns (bool)'
+      ];
+      
+      const jobMarketplace = new ethers.Contract(
+        this.config.contractAddresses?.jobMarketplace || '',
+        jobMarketplaceABI,
+        this.signer
+      );
+      
+      this.paymentManager = new PaymentManager(jobMarketplace, this.signer);
+    }
+    
+    return this.paymentManager;
   }
   
   getStorageManager(): any {

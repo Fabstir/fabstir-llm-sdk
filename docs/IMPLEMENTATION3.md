@@ -21,16 +21,16 @@ Extract proven functionality from integration tests into a clean public API that
 Total: 176 lines (well under 200 line limit) ✅
 
 ### Sub-phase 10.2: Authentication Manager (Max 150 lines)
-- [ ] Create `src/managers/AuthManager.ts`
-  - [ ] Extract from integration test setup
-  - [ ] Wrap @fabstir/llm-auth internally
-  - [ ] Generate S5 seeds from signatures
-  - [ ] Handle multiple auth providers
-- [ ] Methods:
-  - [ ] `authenticate(provider: 'base' | 'metamask'): Promise<AuthResult>`
-  - [ ] `getS5Seed(): string`
-  - [ ] `getSigner(): ethers.Signer`
-- [ ] Test: Auth flow with seed generation
+- [x] Create `src/managers/AuthManager.ts`
+  - [x] Extract from integration test setup
+  - [x] Wrap @fabstir/llm-auth internally
+  - [x] Generate S5 seeds from signatures
+  - [x] Handle multiple auth providers
+- [x] Methods:
+  - [x] `authenticate(provider: 'base' | 'metamask'): Promise<AuthResult>`
+  - [x] `getS5Seed(): string`
+  - [x] `getSigner(): ethers.Signer`
+- [x] Test: Auth flow with seed generation
 
 ### Sub-phase 10.3: Payment Manager (Max 200 lines)
 - [ ] Create `src/managers/PaymentManager.ts`
