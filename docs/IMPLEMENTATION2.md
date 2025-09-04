@@ -470,16 +470,19 @@ Test the complete system with real services: Base Sepolia blockchain, P2P discov
 **Achievement**: USDC payment flow working with correct distribution
 **Solution**: Used staticCall for job ID retrieval
 
-### Sub-phase 9.5: S5 Storage Integration (Max 150 lines)
-- [ ] Create `tests/integration/s5-storage.test.ts`
-  - [ ] Test: Connect to S5 portal
-  - [ ] Test: Store conversation with real encryption
-  - [ ] Test: Retrieve conversation with same seed
-  - [ ] Test: Verify encryption with different seed fails
-  - [ ] Test: List all stored sessions
-  - [ ] Test: Delete old sessions
-- [ ] Verify data persistence across sessions
-- [ ] Commit: "test: add S5 storage integration test"
+### Sub-phase 9.5: S5 Storage Integration ✅ COMPLETE
+- [x] Create `tests/integration/s5-storage.test.ts`
+  - [x] Test: Connect to S5 portal
+  - [x] Test: Store conversation with real encryption
+  - [x] Test: Retrieve conversation with same seed
+  - [x] Test: Verify encryption with different seed fails (properly handled)
+  - [x] Test: List all stored sessions
+  - [x] Test: Delete old sessions
+- [x] Verify data persistence across sessions
+- [x] Status: All tests passing with proper isolation verification
+
+**Achievement**: Real S5 storage with encryption and complete data isolation
+**Files**: Both s5-storage.test.ts and s5-storage-minimal.test.ts passing
 
 ### Sub-phase 9.6: P2P Discovery Integration (Max 150 lines)
 - [ ] Create `tests/integration/p2p-discovery.test.ts`
