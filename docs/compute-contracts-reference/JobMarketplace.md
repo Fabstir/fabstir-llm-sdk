@@ -9,8 +9,10 @@
 
 ## Current Implementation: JobMarketplaceFABWithS5
 
-**Current Contract Address (Base Sepolia)**: `0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A` ✅ (Fixed Dec 2, 2024)  
-**Previous Address with Payment Bug**: `0x9DE1fCABb9e3E903229B47bA737B23fc473173A1` ⚠️  
+**Current Contract Address (Base Sepolia)**: `0xD937c594682Fe74E6e3d06239719805C04BE804A` ✅ (USDC Working - Jan 4, 2025)  
+**Previous Addresses**:
+- `0x6135dfbe0fB50Bc3AF7e9bFD137c5b10ce6D5Dd4` ⚠️ (Job storage issue)
+- `0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A` ⚠️ (Missing USDC validation)  
 **Features**: Session jobs, direct payments, EZKL proof verification, **economic minimums**, **fixed ETH transfers**  
 **Documentation**: See [SESSION_JOBS.md](../../SESSION_JOBS.md)
 

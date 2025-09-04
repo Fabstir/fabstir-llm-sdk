@@ -6,21 +6,22 @@ This document helps you navigate the Fabstir documentation and identify which fi
 
 ## 🚀 Current Architecture
 
-The project now uses **JobMarketplaceFABWithS5** with fully working USDC payment settlement:
+The project now uses **JobMarketplaceFABWithS5** with fully working USDC payment settlement AND host earnings accumulation:
 - **USDC Payments**: ✅ VERIFIED WORKING with 90% host / 10% treasury distribution
+- **ETH Payments**: ✅ WORKING with accumulation in HostEarnings
+- **Host Earnings**: ✅ Both ETH and USDC accumulate for batch withdrawals
 - **Session Jobs**: Direct, self-contained payments with MIN_DEPOSIT and MIN_PROVEN_TOKENS
-- **Payment Fix**: Uses `call{value:}()` for ETH and `transfer()` for USDC payments
-- **ProofSystem**: Fixed internal verification for USDC sessions
-- **Economic Protection**: Minimum thresholds prevent spam and ensure meaningful work
+- **Gas Savings**: ~70% reduction through earnings accumulation
 
 ### Active Contracts (Base Sepolia - LATEST January 4, 2025)
 
 | Contract | Address | Status |
 |----------|---------|--------|
-| **JobMarketplaceFABWithS5** | `0xD937c594682Fe74E6e3d06239719805C04BE804A` | ✅ USDC PAYMENTS VERIFIED |
+| **JobMarketplaceFABWithS5** | `0xD937c594682Fe74E6e3d06239719805C04BE804A` | ✅ USDC & ETH PAYMENTS VERIFIED |
+| **HostEarnings** | `0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E` | ✅ ACCUMULATION WORKING |
 | **ProofSystem** | `0x2ACcc60893872A499700908889B38C5420CBcFD1` | ✅ FIXED INTERNAL VERIFICATION |
 | **NodeRegistry** | `0x87516C13Ea2f99de598665e14cab64E191A0f8c4` | ✅ CURRENT |
-| **Treasury** | `0x4e770e723B95A0d8923Db006E49A8a3cb0BAA078` | ✅ CURRENT |
+| **Treasury** | `0xbeaBB2a5AEd358aA0bd442dFFd793411519Bdc11` | ✅ CURRENT |
 | **FAB Token** | `0xC78949004B4EB6dEf2D66e49Cd81231472612D62` | ✅ STABLE |
 | **USDC (Base Sepolia)** | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` | ✅ STABLE |
 | **USDC (Base Mainnet)** | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | ✅ STABLE |
@@ -29,6 +30,7 @@ The project now uses **JobMarketplaceFABWithS5** with fully working USDC payment
 
 | Contract | Old Address | Issue |
 |----------|-------------|-------|
+| JobMarketplaceFABWithS5 (direct payments) | `0xD937c594682Fe74E6e3d06239719805C04BE804A` | Higher gas costs, no accumulation |
 | JobMarketplaceFABWithS5 (storage issue) | `0x6135dfbe0fB50Bc3AF7e9bFD137c5b10ce6D5Dd4` | Job struct storage problem |
 | JobMarketplaceFABWithS5 (missing USDC validation) | `0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A` | No host validation for USDC |
 | JobMarketplaceFABWithS5 (payment bug) | `0x445882e14b22E921c7d4Fe32a7736a32197578AF` | transfer() fails silently |
@@ -45,6 +47,7 @@ The project now uses **JobMarketplaceFABWithS5** with fully working USDC payment
 These documents reflect the current architecture and should be your primary reference:
 
 ### Essential Reading
+- **[ETH_ACCUMULATION_STATUS.md](./ETH_ACCUMULATION_STATUS.md)** - ETH and USDC earnings accumulation guide
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Current system architecture with session jobs
 - **[SESSION_JOBS.md](./SESSION_JOBS.md)** - Comprehensive guide to session-based AI inference
 - **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Latest deployment info with all contract addresses

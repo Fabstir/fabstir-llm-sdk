@@ -5,15 +5,16 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
 ## Current Deployed Contracts (January 4, 2025)
 
 ### JobMarketplaceFABWithS5
-- **Address**: 0x6135dfbe0fB50Bc3AF7e9bFD137c5b10ce6D5Dd4
+- **Address**: 0xD937c594682Fe74E6e3d06239719805C04BE804A
 - **Network**: Base Sepolia
+- **Status**: ✅ USDC PAYMENTS VERIFIED WORKING
 - **Key Features**:
-  - Fresh deployment to resolve stuck session issues
-  - USDC and ETH payment support
-  - Direct payment distribution (90% host, 10% treasury)
+  - USDC payment settlement with 90% host / 10% treasury distribution
+  - ETH and USDC payment support fully functional
+  - Direct payment distribution (no external escrow)
   - Session jobs with proof checkpoints
   - EZKL proof verification integration
-  - MIN_DEPOSIT: 0.0002 ETH (~$0.80)
+  - MIN_DEPOSIT: 0.0002 ETH or 0.80 USDC minimum
   - MIN_PROVEN_TOKENS: 100 tokens minimum
 
 ### ProofSystem
@@ -50,7 +51,7 @@ const provider = new ethers.providers.JsonRpcProvider('https://base-sepolia.g.al
 
 // Create contract instances
 const marketplace = new ethers.Contract(
-  '0x6135dfbe0fB50Bc3AF7e9bFD137c5b10ce6D5Dd4', // Current deployment
+  '0xD937c594682Fe74E6e3d06239719805C04BE804A', // USDC verified working
   JobMarketplaceABI,
   provider
 );
@@ -112,4 +113,4 @@ For treasury address only:
 - `ABANDONMENT_TIMEOUT`: 86400 seconds (24 hours)
 
 ## Last Updated
-January 4, 2025 - Fixed ProofSystem internal verification for USDC sessions
+January 4, 2025 - USDC payment settlement fully working with 90/10 distribution verified

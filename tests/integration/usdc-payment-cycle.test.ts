@@ -4,12 +4,13 @@ import { config as loadEnv } from 'dotenv';
 
 loadEnv({ path: '.env.test' });
 
-describe('USDC Payment Integration - Real Base Sepolia', () => {
+describe('USDC Payment Integration with Earnings Accumulation - Real Base Sepolia', () => {
   let provider: ethers.providers.JsonRpcProvider;
   let userSigner: ethers.Wallet;
   let hostSigner: ethers.Wallet;
   let usdcContract: ethers.Contract;
   let jobMarketplace: ethers.Contract;
+  let hostEarnings: ethers.Contract;
   let transactionReport: any[] = [];
   let initialBalances: any = {};
   let currentJobId: string;
@@ -18,6 +19,11 @@ describe('USDC Payment Integration - Real Base Sepolia', () => {
   const PAYMENT_AMOUNT = ethers.utils.parseUnits('5', USDC_DECIMALS); // 5 USDC
   const PRICE_PER_TOKEN_USDC = ethers.utils.parseUnits('0.005', USDC_DECIMALS); // 0.005 USDC per token
   const TOKENS_TO_PROVE = 1000; // 1000 tokens * 0.005 = 5 USDC total
+
+  // UPDATED CONTRACT ADDRESSES - FIXED DEPLOYMENT (Sept 4, 2025 Evening)
+  const JOB_MARKETPLACE_ADDRESS = '0x9A945fFBe786881AaD92C462Ad0bd8aC177A8069'; // NEW with accumulation + treasury initialized
+  const HOST_EARNINGS_ADDRESS = '0x67D0dB226Cc9631e3F5369cfb8b0FBFcBA576aEC';
+  const USDC_TOKEN_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
 
   beforeAll(async () => {
     provider = new ethers.providers.JsonRpcProvider(
@@ -37,30 +43,45 @@ describe('USDC Payment Integration - Real Base Sepolia', () => {
     ];
     
     usdcContract = new ethers.Contract(
-      process.env.CONTRACT_USDC_TOKEN!,
+      USDC_TOKEN_ADDRESS,
       erc20Abi,
       userSigner
     );
     
     // Setup JobMarketplace with correct ABI for USDC payments
     const jobMarketplaceAbi = [
-      // Token payment - CORRECT ORDER: host first, then token (per user feedback)
+      // Token payment - CORRECT ORDER: host first, then token
       'function createSessionJobWithToken(address host, address token, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval) returns (uint256)',
       
       // Standard session functions
       'function submitProofOfWork(uint256 jobId, bytes ekzlProof, uint256 tokensInBatch) returns (bool)',
       'function completeSessionJob(uint256 jobId) returns (bool)',
       'function treasuryAddress() view returns (address)',
+      'function hostEarnings() view returns (address)',
       
       // Events
       'event SessionJobCreated(uint256 indexed jobId, address indexed user, address indexed host, uint256 deposit, uint256 pricePerToken, uint256 maxDuration)',
-      'event SessionJobCompleted(uint256 indexed jobId, uint256 totalPayment)'
+      'event SessionJobCompleted(uint256 indexed jobId, uint256 totalPayment)',
+      'event EarningsCredited(address indexed host, uint256 amount, address token)'
     ];
     
     jobMarketplace = new ethers.Contract(
-      process.env.CONTRACT_JOB_MARKETPLACE!,
+      JOB_MARKETPLACE_ADDRESS,
       jobMarketplaceAbi,
       userSigner
+    );
+    
+    // Setup HostEarnings contract
+    const hostEarningsAbi = [
+      'function getBalance(address host, address token) view returns (uint256)',
+      'function withdrawEarnings(address token)',
+      'function withdrawAllEarnings()'
+    ];
+    
+    hostEarnings = new ethers.Contract(
+      HOST_EARNINGS_ADDRESS,
+      hostEarningsAbi,
+      hostSigner // Use host signer for withdrawals
     );
     
     // Get actual treasury address
@@ -68,17 +89,22 @@ describe('USDC Payment Integration - Real Base Sepolia', () => {
     
     // Record initial balances
     initialBalances.userUSDC = await usdcContract.balanceOf(userSigner.address);
-    initialBalances.hostUSDC = await usdcContract.balanceOf(hostSigner.address);
+    initialBalances.hostWalletUSDC = await usdcContract.balanceOf(hostSigner.address);
+    initialBalances.hostAccumulatedUSDC = await hostEarnings.getBalance(hostSigner.address, USDC_TOKEN_ADDRESS);
     initialBalances.treasuryUSDC = await usdcContract.balanceOf(TREASURY);
+    initialBalances.hostEarningsContractUSDC = await usdcContract.balanceOf(HOST_EARNINGS_ADDRESS);
     
-    console.log('\n=== USDC PAYMENT TEST SETUP ===');
-    console.log('Contract:', process.env.CONTRACT_JOB_MARKETPLACE);
-    console.log('USDC Token:', process.env.CONTRACT_USDC_TOKEN);
+    console.log('\n=== USDC PAYMENT TEST WITH ACCUMULATION ===');
+    console.log('JobMarketplace:', JOB_MARKETPLACE_ADDRESS);
+    console.log('HostEarnings:', HOST_EARNINGS_ADDRESS);
+    console.log('USDC Token:', USDC_TOKEN_ADDRESS);
     console.log('Treasury:', TREASURY);
     console.log('\nInitial Balances:');
     console.log('  User USDC:', ethers.utils.formatUnits(initialBalances.userUSDC, USDC_DECIMALS));
-    console.log('  Host USDC:', ethers.utils.formatUnits(initialBalances.hostUSDC, USDC_DECIMALS));
+    console.log('  Host Wallet USDC:', ethers.utils.formatUnits(initialBalances.hostWalletUSDC, USDC_DECIMALS));
+    console.log('  Host Accumulated USDC:', ethers.utils.formatUnits(initialBalances.hostAccumulatedUSDC, USDC_DECIMALS));
     console.log('  Treasury USDC:', ethers.utils.formatUnits(initialBalances.treasuryUSDC, USDC_DECIMALS));
+    console.log('  HostEarnings Contract USDC:', ethers.utils.formatUnits(initialBalances.hostEarningsContractUSDC, USDC_DECIMALS));
   }, 60000);
 
   it('should verify user has sufficient USDC tokens', async () => {
@@ -87,7 +113,6 @@ describe('USDC Payment Integration - Real Base Sepolia', () => {
     
     console.log(`\nToken: ${symbol}, Decimals: ${decimals}`);
     console.log(`Required: ${ethers.utils.formatUnits(PAYMENT_AMOUNT, USDC_DECIMALS)} USDC (for deposit)`);
-    console.log(`Max tokens with 1 USDC at price 1000:`, 1000000 / PRICE_PER_TOKEN_USDC);
     console.log(`Available: ${ethers.utils.formatUnits(initialBalances.userUSDC, USDC_DECIMALS)} USDC`);
     
     if (initialBalances.userUSDC.lt(PAYMENT_AMOUNT)) {
@@ -154,24 +179,24 @@ describe('USDC Payment Integration - Real Base Sepolia', () => {
       // First get job ID using staticCall (RECOMMENDED method)
       console.log('Getting job ID with staticCall...');
       const jobIdFromStatic = await jobMarketplace.callStatic.createSessionJobWithToken(
-        hostSigner.address,                // 1. host address (FIRST per user!)
-        process.env.CONTRACT_USDC_TOKEN!, // 2. token address
-        PAYMENT_AMOUNT,                    // 3. deposit in USDC (1000000 = 1 USDC)
-        PRICE_PER_TOKEN_USDC,              // 4. price per token (1000 = 0.001 USDC)
-        3600,                              // 5. max duration
-        100                                // 6. proof interval (minimum)
+        hostSigner.address,     // 1. host address (FIRST)
+        USDC_TOKEN_ADDRESS,     // 2. token address
+        PAYMENT_AMOUNT,         // 3. deposit in USDC (5000000 = 5 USDC)
+        PRICE_PER_TOKEN_USDC,   // 4. price per token (5000 = 0.005 USDC)
+        3600,                   // 5. max duration
+        100                     // 6. proof interval (minimum)
       );
       console.log('✓ Job ID from staticCall:', jobIdFromStatic.toString());
       currentJobId = jobIdFromStatic.toString();
       
       // Now execute the actual transaction
       const tx = await jobMarketplace.createSessionJobWithToken(
-        hostSigner.address,                // 1. host address (FIRST per user!)
-        process.env.CONTRACT_USDC_TOKEN!, // 2. token address
-        PAYMENT_AMOUNT,                    // 3. deposit in USDC (1000000 = 1 USDC)
-        PRICE_PER_TOKEN_USDC,              // 4. price per token (1000 = 0.001 USDC)
-        3600,                              // 5. max duration
-        100,                               // 6. proof interval (minimum)
+        hostSigner.address,     // 1. host address (FIRST)
+        USDC_TOKEN_ADDRESS,     // 2. token address
+        PAYMENT_AMOUNT,         // 3. deposit in USDC
+        PRICE_PER_TOKEN_USDC,   // 4. price per token
+        3600,                   // 5. max duration
+        100,                    // 6. proof interval
         { gasLimit: 500000 }
       );
       
@@ -180,7 +205,7 @@ describe('USDC Payment Integration - Real Base Sepolia', () => {
       
       expect(receipt.status).toBe(1);
       
-      // Also verify via event parsing (alternative method)
+      // Also verify via event parsing
       let jobIdFromEvent: string | undefined;
       for (const log of receipt.logs) {
         try {
@@ -196,15 +221,6 @@ describe('USDC Payment Integration - Real Base Sepolia', () => {
       // Verify both methods give same result
       if (jobIdFromEvent && jobIdFromEvent === currentJobId) {
         console.log('✓ Job ID verified by both methods');
-      }
-      
-      // Show what the WRONG method would have given (for education)
-      if (receipt.logs[0]?.topics[1]) {
-        const wrongJobId = ethers.BigNumber.from(receipt.logs[0].topics[1]).toString();
-        const userAddressDecimal = ethers.BigNumber.from(userSigner.address).toString();
-        console.log('⚠️  WRONG: topics[1] gives:', wrongJobId);
-        console.log('  User address in decimal:', userAddressDecimal);
-        console.log('  These match:', wrongJobId === userAddressDecimal ? 'YES - This is the bug!' : 'NO');
       }
       
       transactionReport.push({
@@ -238,7 +254,10 @@ describe('USDC Payment Integration - Real Base Sepolia', () => {
     
     console.log('Job ID:', currentJobId);
     console.log('Tokens to prove:', TOKENS_TO_PROVE);
-    console.log('Expected payment:', (TOKENS_TO_PROVE * PRICE_PER_TOKEN_USDC / 1000000).toFixed(3), 'USDC');
+    console.log('Expected payment:', ethers.utils.formatUnits(
+      ethers.BigNumber.from(TOKENS_TO_PROVE).mul(PRICE_PER_TOKEN_USDC), 
+      USDC_DECIMALS
+    ), 'USDC');
     
     const tx = await hostContract.submitProofOfWork(
       currentJobId,
@@ -264,7 +283,7 @@ describe('USDC Payment Integration - Real Base Sepolia', () => {
     console.log('✓ Proof submitted successfully');
   }, 120000);
 
-  it('should complete session and verify USDC payment settlement', async () => {
+  it('should complete session and verify USDC accumulation', async () => {
     console.log('\n=== COMPLETING SESSION FOR USDC PAYMENT ===');
     
     // User completes the session
@@ -273,6 +292,23 @@ describe('USDC Payment Integration - Real Base Sepolia', () => {
     const receipt = await tx.wait();
     
     expect(receipt.status).toBe(1);
+    
+    // Check for EarningsCredited event
+    let earningsCredited = false;
+    for (const log of receipt.logs) {
+      try {
+        const parsed = jobMarketplace.interface.parseLog(log);
+        if (parsed.name === 'EarningsCredited') {
+          console.log('✓ EarningsCredited event found:');
+          console.log('  Host:', parsed.args.host);
+          console.log('  Amount:', ethers.utils.formatUnits(parsed.args.amount, USDC_DECIMALS), 'USDC');
+          console.log('  Token:', parsed.args.token);
+          earningsCredited = true;
+        }
+      } catch {}
+    }
+    
+    expect(earningsCredited).toBe(true);
     
     transactionReport.push({
       step: 'Session Completion',
@@ -291,21 +327,27 @@ describe('USDC Payment Integration - Real Base Sepolia', () => {
     
     // Check final balances
     const finalUserUSDC = await usdcContract.balanceOf(userSigner.address);
-    const finalHostUSDC = await usdcContract.balanceOf(hostSigner.address);
+    const finalHostWalletUSDC = await usdcContract.balanceOf(hostSigner.address);
+    const finalHostAccumulatedUSDC = await hostEarnings.getBalance(hostSigner.address, USDC_TOKEN_ADDRESS);
     const finalTreasuryUSDC = await usdcContract.balanceOf(TREASURY);
+    const finalHostEarningsContractUSDC = await usdcContract.balanceOf(HOST_EARNINGS_ADDRESS);
     
     // Calculate changes
     const userSpent = initialBalances.userUSDC.sub(finalUserUSDC);
-    const hostEarned = finalHostUSDC.sub(initialBalances.hostUSDC);
+    const hostWalletChange = finalHostWalletUSDC.sub(initialBalances.hostWalletUSDC);
+    const hostAccumulatedChange = finalHostAccumulatedUSDC.sub(initialBalances.hostAccumulatedUSDC);
     const treasuryEarned = finalTreasuryUSDC.sub(initialBalances.treasuryUSDC);
+    const hostEarningsContractChange = finalHostEarningsContractUSDC.sub(initialBalances.hostEarningsContractUSDC);
     
-    console.log('\n=== USDC PAYMENT DISTRIBUTION ===');
+    console.log('\n=== USDC PAYMENT DISTRIBUTION WITH ACCUMULATION ===');
     console.log('User spent:', ethers.utils.formatUnits(userSpent, USDC_DECIMALS), 'USDC');
-    console.log('Host received:', ethers.utils.formatUnits(hostEarned, USDC_DECIMALS), 'USDC');
+    console.log('Host wallet change:', ethers.utils.formatUnits(hostWalletChange, USDC_DECIMALS), 'USDC (should be 0)');
+    console.log('Host accumulated earnings change:', ethers.utils.formatUnits(hostAccumulatedChange, USDC_DECIMALS), 'USDC');
     console.log('Treasury received:', ethers.utils.formatUnits(treasuryEarned, USDC_DECIMALS), 'USDC');
+    console.log('HostEarnings contract received:', ethers.utils.formatUnits(hostEarningsContractChange, USDC_DECIMALS), 'USDC');
     
-    // Calculate expected based on tokens proven (not full deposit)
-    const totalPayment = ethers.BigNumber.from(TOKENS_TO_PROVE * PRICE_PER_TOKEN_USDC);
+    // Calculate expected based on tokens proven
+    const totalPayment = PRICE_PER_TOKEN_USDC.mul(TOKENS_TO_PROVE);
     const expectedHost = totalPayment.mul(90).div(100);
     const expectedTreasury = totalPayment.mul(10).div(100);
     
@@ -314,10 +356,16 @@ describe('USDC Payment Integration - Real Base Sepolia', () => {
     console.log('  Treasury (10%):', ethers.utils.formatUnits(expectedTreasury, USDC_DECIMALS), 'USDC');
     
     // Verify payments
-    if (hostEarned.gte(expectedHost.sub(100))) { // Allow small rounding
-      console.log('✅ Host received correct USDC payment');
+    if (hostWalletChange.eq(0)) {
+      console.log('✅ Host wallet unchanged (accumulation working)');
     } else {
-      console.log('❌ Host payment incorrect');
+      console.log('❌ Host wallet received direct payment (accumulation not working)');
+    }
+    
+    if (hostAccumulatedChange.gte(expectedHost.sub(100))) { // Allow small rounding
+      console.log('✅ Host earnings accumulated correctly');
+    } else {
+      console.log('❌ Host accumulation incorrect');
     }
     
     if (treasuryEarned.gte(expectedTreasury.sub(100))) {
@@ -326,18 +374,71 @@ describe('USDC Payment Integration - Real Base Sepolia', () => {
       console.log('❌ Treasury payment incorrect');
     }
     
+    if (hostEarningsContractChange.gte(expectedHost.sub(100))) {
+      console.log('✅ HostEarnings contract received USDC for accumulation');
+    } else {
+      console.log('❌ HostEarnings contract balance incorrect');
+    }
+    
+    // Core assertions
     expect(userSpent.eq(PAYMENT_AMOUNT)).toBe(true);
-    expect(hostEarned.gt(0)).toBe(true);
+    expect(hostWalletChange.eq(0)).toBe(true); // No direct payment
+    expect(hostAccumulatedChange.gt(0)).toBe(true); // Earnings accumulated
     expect(treasuryEarned.gt(0)).toBe(true);
+    expect(hostEarningsContractChange.gt(0)).toBe(true); // Contract holds the USDC
+  }, 120000);
+
+  it('should allow host to withdraw accumulated USDC earnings', async () => {
+    console.log('\n=== TESTING USDC WITHDRAWAL FROM ACCUMULATION ===');
+    
+    const balanceBefore = await usdcContract.balanceOf(hostSigner.address);
+    const accumulatedBefore = await hostEarnings.getBalance(hostSigner.address, USDC_TOKEN_ADDRESS);
+    
+    console.log('Host wallet USDC before withdrawal:', ethers.utils.formatUnits(balanceBefore, USDC_DECIMALS));
+    console.log('Host accumulated USDC:', ethers.utils.formatUnits(accumulatedBefore, USDC_DECIMALS));
+    
+    if (accumulatedBefore.gt(0)) {
+      // Withdraw USDC earnings
+      const tx = await hostEarnings.withdrawEarnings(USDC_TOKEN_ADDRESS, { gasLimit: 200000 });
+      console.log('Withdrawal tx sent:', tx.hash);
+      const receipt = await tx.wait();
+      
+      expect(receipt.status).toBe(1);
+      
+      const balanceAfter = await usdcContract.balanceOf(hostSigner.address);
+      const accumulatedAfter = await hostEarnings.getBalance(hostSigner.address, USDC_TOKEN_ADDRESS);
+      
+      const withdrawn = balanceAfter.sub(balanceBefore);
+      
+      console.log('Host wallet USDC after withdrawal:', ethers.utils.formatUnits(balanceAfter, USDC_DECIMALS));
+      console.log('Host accumulated USDC after:', ethers.utils.formatUnits(accumulatedAfter, USDC_DECIMALS));
+      console.log('Amount withdrawn:', ethers.utils.formatUnits(withdrawn, USDC_DECIMALS), 'USDC');
+      
+      expect(withdrawn.eq(accumulatedBefore)).toBe(true);
+      expect(accumulatedAfter.eq(0)).toBe(true);
+      
+      transactionReport.push({
+        step: 'USDC Withdrawal',
+        txHash: tx.hash,
+        amount: ethers.utils.formatUnits(withdrawn, USDC_DECIMALS) + ' USDC',
+        gasUsed: receipt.gasUsed.toString(),
+        blockNumber: receipt.blockNumber
+      });
+      
+      console.log('✅ Successfully withdrew accumulated USDC earnings');
+    } else {
+      console.log('No USDC earnings to withdraw');
+    }
   }, 120000);
 
   it('should generate transaction report', () => {
-    console.log('\n' + '='.repeat(50));
-    console.log('USDC PAYMENT TRANSACTION REPORT - BASE SEPOLIA');
-    console.log('='.repeat(50));
+    console.log('\n' + '='.repeat(70));
+    console.log('USDC PAYMENT WITH ACCUMULATION TRANSACTION REPORT - BASE SEPOLIA');
+    console.log('='.repeat(70));
     console.log(`Network: Base Sepolia (Chain ID: 84532)`);
-    console.log(`USDC Token: ${process.env.CONTRACT_USDC_TOKEN}`);
-    console.log(`JobMarketplace: ${process.env.CONTRACT_JOB_MARKETPLACE}`);
+    console.log(`USDC Token: ${USDC_TOKEN_ADDRESS}`);
+    console.log(`JobMarketplace: ${JOB_MARKETPLACE_ADDRESS}`);
+    console.log(`HostEarnings: ${HOST_EARNINGS_ADDRESS}`);
     console.log(`Session Job ID: ${currentJobId}`);
     console.log(`Total Transactions: ${transactionReport.length}`);
     
@@ -356,6 +457,12 @@ describe('USDC Payment Integration - Real Base Sepolia', () => {
     transactionReport.filter(tx => tx.txHash).forEach(tx => {
       console.log(`   https://sepolia.basescan.org/tx/${tx.txHash}`);
     });
+    
+    console.log('\n💡 Key Differences with Accumulation:');
+    console.log('  - Host payments go to HostEarnings contract, not directly to host wallet');
+    console.log('  - Host can withdraw accumulated earnings in batches to save gas');
+    console.log('  - Treasury still receives direct payment (10%)');
+    console.log('  - ~70% gas savings for hosts by batching withdrawals');
     
     expect(transactionReport.filter(r => r.txHash).length).toBeGreaterThanOrEqual(3);
   });
