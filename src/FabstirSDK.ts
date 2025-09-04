@@ -72,7 +72,7 @@ export class FabstirSDK {
   }
   
   getPaymentManager(): PaymentManager {
-    if (!this.signer) {
+    if (!this.authManager.isAuthenticated()) {
       const error: SDKError = new Error('Must authenticate before accessing PaymentManager') as SDKError;
       error.code = 'MANAGER_NOT_AUTHENTICATED';
       throw error;
@@ -89,10 +89,10 @@ export class FabstirSDK {
       const jobMarketplace = new ethers.Contract(
         this.config.contractAddresses?.jobMarketplace || '',
         jobMarketplaceABI,
-        this.signer
+        this.provider
       );
       
-      this.paymentManager = new PaymentManager(jobMarketplace, this.signer);
+      this.paymentManager = new PaymentManager(jobMarketplace, this.authManager);
     }
     
     return this.paymentManager;

@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import AuthManager from './AuthManager';
 
 export default class PaymentManager {
   static readonly MIN_ETH_PAYMENT = '0.005';
@@ -10,7 +11,7 @@ export default class PaymentManager {
 
   constructor(
     private jobMarketplace: ethers.Contract,
-    private signer: ethers.Signer
+    private authManager: AuthManager
   ) {}
 
   async createETHSessionJob(
@@ -21,12 +22,14 @@ export default class PaymentManager {
     proofInterval: number
   ): Promise<{ jobId: string; txHash: string }> {
     try {
+      const signer = this.authManager.getSigner();
       const depositAmount = ethers.utils.parseEther(amount);
-      const jobIdBN = await this.jobMarketplace.callStatic.createSessionJob(
+      const contractWithSigner = this.jobMarketplace.connect(signer);
+      const jobIdBN = await contractWithSigner.callStatic.createSessionJob(
         hostAddress, depositAmount, pricePerToken, duration, proofInterval,
         { value: depositAmount, gasLimit: 500000 }
       );
-      const tx = await this.jobMarketplace.createSessionJob(
+      const tx = await contractWithSigner.createSessionJob(
         hostAddress, depositAmount, pricePerToken, duration, proofInterval,
         { value: depositAmount, gasLimit: 500000 }
       );
@@ -40,10 +43,11 @@ export default class PaymentManager {
 
   async approveUSDC(tokenAddress: string, amount: string): Promise<string> {
     try {
+      const signer = this.authManager.getSigner();
       const usdcContract = new ethers.Contract(
         tokenAddress,
         ['function approve(address spender, uint256 amount) returns (bool)'],
-        this.signer
+        signer
       );
       const tx = await usdcContract.approve(
         this.jobMarketplace.address,
@@ -67,11 +71,13 @@ export default class PaymentManager {
     proofInterval: number
   ): Promise<{ jobId: string; txHash: string }> {
     try {
+      const signer = this.authManager.getSigner();
+      const contractWithSigner = this.jobMarketplace.connect(signer);
       const depositAmount = ethers.utils.parseUnits(amount, PaymentManager.USDC_DECIMALS);
-      const jobIdBN = await this.jobMarketplace.callStatic.createSessionJobWithToken(
+      const jobIdBN = await contractWithSigner.callStatic.createSessionJobWithToken(
         hostAddress, tokenAddress, depositAmount, pricePerToken, duration, proofInterval
       );
-      const tx = await this.jobMarketplace.createSessionJobWithToken(
+      const tx = await contractWithSigner.createSessionJobWithToken(
         hostAddress, tokenAddress, depositAmount, pricePerToken, duration, proofInterval,
         { gasLimit: 500000 }
       );
@@ -85,7 +91,9 @@ export default class PaymentManager {
 
   async completeSessionJob(jobId: string): Promise<string> {
     try {
-      const tx = await this.jobMarketplace.completeSessionJob(jobId, { gasLimit: 200000 });
+      const signer = this.authManager.getSigner();
+      const contractWithSigner = this.jobMarketplace.connect(signer);
+      const tx = await contractWithSigner.completeSessionJob(jobId, { gasLimit: 200000 });
       const receipt = await tx.wait();
       if (receipt.status !== 1) throw new Error('Transaction failed');
       return tx.hash;

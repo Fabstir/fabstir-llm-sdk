@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ethers } from 'ethers';
 import PaymentManager from '../../src/managers/PaymentManager';
+import AuthManager from '../../src/managers/AuthManager';
 
 describe('PaymentManager', () => {
   let paymentManager: PaymentManager;
   let mockJobMarketplace: any;
+  let mockAuthManager: AuthManager;
   let mockSigner: any;
   let mockUsdcContract: any;
 
@@ -15,8 +17,16 @@ describe('PaymentManager', () => {
       getAddress: vi.fn().mockResolvedValue('0xUserAddress123')
     };
 
-    // Mock job marketplace contract
-    mockJobMarketplace = {
+    // Mock AuthManager
+    mockAuthManager = {
+      getSigner: vi.fn(() => mockSigner),
+      getUserAddress: vi.fn(() => '0xUserAddress123'),
+      getS5Seed: vi.fn(() => 'mock seed phrase'),
+      isAuthenticated: vi.fn(() => true)
+    } as any;
+
+    // Mock job marketplace contract with connect method
+    const mockConnectedContract = {
       address: '0xJobMarketplace456',
       callStatic: {
         createSessionJob: vi.fn(),
@@ -30,13 +40,18 @@ describe('PaymentManager', () => {
       }
     };
 
+    mockJobMarketplace = {
+      ...mockConnectedContract,
+      connect: vi.fn(() => mockConnectedContract)
+    };
+
     // Mock USDC contract
     mockUsdcContract = {
       approve: vi.fn(),
       allowance: vi.fn()
     };
 
-    paymentManager = new PaymentManager(mockJobMarketplace, mockSigner);
+    paymentManager = new PaymentManager(mockJobMarketplace, mockAuthManager);
   });
 
   describe('ETH Payments', () => {
@@ -47,8 +62,9 @@ describe('PaymentManager', () => {
       const duration = 3600;
       const proofInterval = 300;
 
-      // Mock static call returns job ID
-      mockJobMarketplace.callStatic.createSessionJob.mockResolvedValue(
+      // Mock static call returns job ID (on connected contract)
+      const connectedContract = mockJobMarketplace.connect();
+      connectedContract.callStatic.createSessionJob.mockResolvedValue(
         ethers.BigNumber.from('42')
       );
 
@@ -62,7 +78,7 @@ describe('PaymentManager', () => {
           }]
         })
       };
-      mockJobMarketplace.createSessionJob.mockResolvedValue(mockTx);
+      connectedContract.createSessionJob.mockResolvedValue(mockTx);
 
       const result = await paymentManager.createETHSessionJob(
         hostAddress,
@@ -178,11 +194,12 @@ describe('PaymentManager', () => {
   describe('Job Completion', () => {
     it('should complete session job successfully', async () => {
       const jobId = '42';
+      const connectedContract = mockJobMarketplace.connect();
       const mockTx = {
         hash: '0xCompleteTx999',
         wait: vi.fn().mockResolvedValue({ status: 1 })
       };
-      mockJobMarketplace.completeSessionJob.mockResolvedValue(mockTx);
+      connectedContract.completeSessionJob.mockResolvedValue(mockTx);
 
       const txHash = await paymentManager.completeSessionJob(jobId);
 
