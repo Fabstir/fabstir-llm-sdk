@@ -5,18 +5,20 @@ Extract proven functionality from integration tests into a clean public API that
 
 ## Phase 10: Public API Development
 
-### Sub-phase 10.1: Core SDK Architecture (Max 200 lines)
-- [ ] Create `src/FabstirSDK.ts` main class
-  - [ ] Initialize with configuration
-  - [ ] Wrap authentication (Option A)
-  - [ ] Expose manager instances
-  - [ ] Handle provider/signer setup
-- [ ] Create `src/types/index.ts` for all interfaces
-  - [ ] SessionOptions, PaymentOptions, etc.
-  - [ ] Response types
-  - [ ] Error types
-- [ ] Create `src/index.ts` main export file
-- [ ] Test: SDK initialization and configuration
+### Sub-phase 10.1: Core SDK Architecture (Max 200 lines) ✅
+- [x] Create `src/FabstirSDK.ts` main class (92 lines)
+  - [x] Initialize with configuration
+  - [x] Wrap authentication (Option A - mock implementation)
+  - [x] Expose manager instances (stubs for now)
+  - [x] Handle provider/signer setup
+- [x] Create `src/types/index.ts` for all interfaces (42 lines)
+  - [x] SessionOptions, PaymentOptions, etc.
+  - [x] Response types
+  - [x] Error types
+- [x] Create `src/index.ts` main export file (42 lines)
+- [x] Test: SDK initialization and configuration (24 unit tests in tests/unit/)
+
+Total: 176 lines (well under 200 line limit) ✅
 
 ### Sub-phase 10.2: Authentication Manager (Max 150 lines)
 - [ ] Create `src/managers/AuthManager.ts`
