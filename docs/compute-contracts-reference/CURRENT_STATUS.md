@@ -1,23 +1,24 @@
 # Current Documentation Status
 
-**Last Updated: September 2, 2024**
+**Last Updated: January 4, 2025**
 
 This document helps you navigate the Fabstir documentation and identify which files reflect the current architecture vs historical implementations.
 
 ## 🚀 Current Architecture
 
-The project now uses **JobMarketplaceFABWithS5** with fixed payment distribution and economic minimums:
+The project now uses **JobMarketplaceFABWithS5** with fully working USDC payment settlement:
+- **USDC Payments**: ✅ VERIFIED WORKING with 90% host / 10% treasury distribution
 - **Session Jobs**: Direct, self-contained payments with MIN_DEPOSIT and MIN_PROVEN_TOKENS
-- **Payment Fix**: Uses `call{value:}()` instead of `transfer()` for reliable ETH payments
-- **Emergency Recovery**: Includes `emergencyWithdraw()` for stuck funds
+- **Payment Fix**: Uses `call{value:}()` for ETH and `transfer()` for USDC payments
+- **ProofSystem**: Fixed internal verification for USDC sessions
 - **Economic Protection**: Minimum thresholds prevent spam and ensure meaningful work
 
-### Active Contracts (Base Sepolia - LATEST December 2, 2024)
+### Active Contracts (Base Sepolia - LATEST January 4, 2025)
 
 | Contract | Address | Status |
 |----------|---------|--------|
-| **JobMarketplaceFABWithS5** | `0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A` | ✅ FIXED PAYMENTS + MINIMUMS |
-| **ProofSystem** | `0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9` | ✅ CURRENT |
+| **JobMarketplaceFABWithS5** | `0xD937c594682Fe74E6e3d06239719805C04BE804A` | ✅ USDC PAYMENTS VERIFIED |
+| **ProofSystem** | `0x2ACcc60893872A499700908889B38C5420CBcFD1` | ✅ FIXED INTERNAL VERIFICATION |
 | **NodeRegistry** | `0x87516C13Ea2f99de598665e14cab64E191A0f8c4` | ✅ CURRENT |
 | **Treasury** | `0x4e770e723B95A0d8923Db006E49A8a3cb0BAA078` | ✅ CURRENT |
 | **FAB Token** | `0xC78949004B4EB6dEf2D66e49Cd81231472612D62` | ✅ STABLE |
@@ -28,9 +29,10 @@ The project now uses **JobMarketplaceFABWithS5** with fixed payment distribution
 
 | Contract | Old Address | Issue |
 |----------|-------------|-------|
-| JobMarketplaceFABWithS5 (payment bug) | `0x9DE1fCABb9e3E903229B47bA737B23fc473173A1` | transfer() fails silently |
+| JobMarketplaceFABWithS5 (storage issue) | `0x6135dfbe0fB50Bc3AF7e9bFD137c5b10ce6D5Dd4` | Job struct storage problem |
+| JobMarketplaceFABWithS5 (missing USDC validation) | `0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A` | No host validation for USDC |
 | JobMarketplaceFABWithS5 (payment bug) | `0x445882e14b22E921c7d4Fe32a7736a32197578AF` | transfer() fails silently |
-| JobMarketplaceFABWithS5 (without minimums) | `0x9579056a85B3b1432da700742BF80EF8A8a5e3Fe` | No economic protection |
+| ProofSystem (external call bug) | `0x48f94914979eD6B0e16c6E4E04Bfa8a8041DcF1D` | Incorrect external call |
 | JobMarketplaceFABWithS5 (oldest) | `0x7ce861CC0188c260f3Ba58eb9a4d33e17Eb62304` | No session support |
 | JobMarketplaceFABWithEarnings | `0xEB646BF2323a441698B256623F858c8787d70f9F` | JobMarketplaceFABWithS5 |
 | PaymentEscrowWithEarnings | `0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C` | Internal payments |

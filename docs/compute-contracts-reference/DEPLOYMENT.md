@@ -2,26 +2,27 @@
 
 Your contracts are now live on Base Sepolia testnet!
 
-## Current Contract Addresses (Session Jobs with USDC Validation Fix)
+## Current Contract Addresses (USDC Payment Settlement Verified)
 
-### Core Contracts (LATEST - September 2, 2025)
+### Core Contracts (LATEST - January 4, 2025)
 
 | Contract | Address | Description |
 |----------|---------|-------------|
-| **JobMarketplaceFABWithS5** | `0xC6E3B618E2901b1b2c1beEB4E2BB86fc87d48D2d` | ✅ FIXED USDC validation + payments |
-| **PaymentEscrowWithEarnings** | `0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C` | Payment handling with earnings |
-| **HostEarnings** | `0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E` | Host earnings accumulation |
-| **ProofSystem** | `0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9` | EZKL proof verification |
+| **JobMarketplaceFABWithS5** | `0xD937c594682Fe74E6e3d06239719805C04BE804A` | ✅ USDC PAYMENTS WORKING - 90/10 VERIFIED |
+| **ProofSystem** | `0x2ACcc60893872A499700908889B38C5420CBcFD1` | ✅ FIXED internal verification |
+| **PaymentEscrowWithEarnings** | `0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C` | Not used for session jobs |
+| **HostEarnings** | `0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E` | Not used for session jobs |
 
-- JobMarketplaceFABWithS5: https://sepolia.basescan.org/address/0xC6E3B618E2901b1b2c1beEB4E2BB86fc87d48D2d
-- PaymentEscrow: https://sepolia.basescan.org/address/0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C
-- HostEarnings: https://sepolia.basescan.org/address/0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E
-- ProofSystem: https://sepolia.basescan.org/address/0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9
+- JobMarketplaceFABWithS5: https://sepolia.basescan.org/address/0xD937c594682Fe74E6e3d06239719805C04BE804A
+- ProofSystem: https://sepolia.basescan.org/address/0x2ACcc60893872A499700908889B38C5420CBcFD1
+- PaymentEscrow: https://sepolia.basescan.org/address/0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C (not used for sessions)
+- HostEarnings: https://sepolia.basescan.org/address/0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E (not used for sessions)
 
 ### Key Fixes in This Deployment
-- **USDC Session Validation**: Added host registration and parameter validation for `createSessionJobWithToken`
-- **Gas Optimization**: Moved token transfers after validations to save gas on failed transactions
-- **Contract Size**: Optimized to 24,564 bytes (under EIP-170 limit)
+- **USDC Payment Settlement**: Fully working with verified 90% host / 10% treasury distribution
+- **ProofSystem Fix**: Internal verification function call corrected for USDC sessions
+- **Job Structure**: Proper storage and retrieval of job data for token payments
+- **Tested and Verified**: 2 USDC deposit, 200 tokens completed, payments distributed correctly
 
 ### Economic Parameters
 - **MIN_DEPOSIT**: 0.0002 ETH (~$0.80 at $4000/ETH) for ETH payments
@@ -29,8 +30,9 @@ Your contracts are now live on Base Sepolia testnet!
 - **Token Minimums**: 800000 (0.80 USDC with 6 decimals) for USDC payments
 
 ### Previous Deployments (DO NOT USE)
+- `0x6135dfbe0fB50Bc3AF7e9bFD137c5b10ce6D5Dd4` - Job struct storage issue (January 3, 2025)
+- `0xC6E3B618E2901b1b2c1beEB4E2BB86fc87d48D2d` - Never actually deployed (insufficient funds)
 - `0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A` - Missing USDC session validation (December 2024)
-- `0x9DE1fCABb9e3E903229B47bA737B23fc473173A1` - Had payment distribution bug (transfer() fails)
 - `0x445882e14b22E921c7d4Fe32a7736a32197578AF` - Had payment distribution bug (transfer() fails)
 - `0x9579056a85B3b1432da700742BF80EF8A8a5e3Fe` - Without economic minimums
 - `0x292772334a1982cC22D828D8Db660146bfF6d130` - Missing Job struct in createSessionJob

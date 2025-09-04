@@ -35,9 +35,10 @@ node scripts/deploy-fresh-test.js
 
 ### New Contracts (Fresh Instances)
 - **JobMarketplaceFABWithS5** - Fresh job counter starting from 1
-  - **Fixed USDC Session Validation** (as of Jan 2, 2025):
-    - Validates host registration through NodeRegistry
-    - Validates all parameters (price, duration, proof interval)
+  - **USDC Payment Settlement Working** (as of Jan 4, 2025):
+    - Verified 90% host / 10% treasury distribution
+    - Fixed ProofSystem internal verification
+    - Proper job struct storage for token payments
     - Moves token transfers after validations to save gas
     - Contract size optimized to 24,564 bytes (under limit)
   - **Fixed Payment Distribution** (as of Dec 2, 2024):
@@ -105,10 +106,10 @@ After deployment, update your client app with the new addresses:
 ```javascript
 // Update your config file or environment
 const contracts = {
-  marketplace: "0xC6E3B618E2901b1b2c1beEB4E2BB86fc87d48D2d", // Latest with USDC fix
-  paymentEscrow: "0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C", // Earnings system
-  hostEarnings: "0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E", // Host tracking
-  proofSystem: "0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9", // EZKL verification
+  marketplace: "0xD937c594682Fe74E6e3d06239719805C04BE804A", // USDC payments verified
+  proofSystem: "0x2ACcc60893872A499700908889B38C5420CBcFD1", // Fixed internal verification
+  paymentEscrow: "0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C", // Not used for sessions
+  hostEarnings: "0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E", // Not used for sessions
   nodeRegistry: "0x87516C13Ea2f99de598665e14cab64E191A0f8c4", // Same
   usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" // Same
 };
@@ -116,7 +117,8 @@ const contracts = {
 
 #### Environment Variables
 ```bash
-export JOB_MARKETPLACE_FAB="0xC6E3B618E2901b1b2c1beEB4E2BB86fc87d48D2d" # Latest
+export JOB_MARKETPLACE_FAB="0xD937c594682Fe74E6e3d06239719805C04BE804A" # USDC working
+export PROOF_SYSTEM="0x2ACcc60893872A499700908889B38C5420CBcFD1" # Fixed
 export PAYMENT_ESCROW="0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C"
 export HOST_EARNINGS="0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E"
 export PROOF_SYSTEM="0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9"

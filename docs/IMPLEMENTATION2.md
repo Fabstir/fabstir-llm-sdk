@@ -455,17 +455,20 @@ Test the complete system with real services: Base Sepolia blockchain, P2P discov
 **Achievement**: Real ETH payments on Base Sepolia verified
 **Key Learning**: Minimum deposit is 0.0002 ETH, gas costs are minimal
 
-### Sub-phase 9.4: USDC Payment Integration Test (Max 200 lines)
-- [ ] Create `tests/integration/usdc-payment-cycle.test.ts`
-  - [ ] Test: Check USDC balance
-  - [ ] Test: Approve USDC spending
-  - [ ] Test: Submit job with USDC payment
-  - [ ] Test: Verify token transfer
-  - [ ] Test: Complete job cycle
-  - [ ] Test: Verify USDC settlement
-  - [ ] Test: Check fee distribution
-- [ ] Create allowance management utilities
-- [ ] Commit: "test: add USDC payment integration test"
+### Sub-phase 9.4: USDC Payment Integration Test ✅ COMPLETE
+- [x] Create `tests/integration/usdc-payment-cycle.test.ts`
+  - [x] Test: Check USDC balance
+  - [x] Test: Approve USDC spending
+  - [x] Test: Submit job with USDC payment
+  - [x] Test: Verify token transfer
+  - [x] Test: Complete job cycle
+  - [x] Test: Verify USDC settlement ✅
+  - [x] Test: Check fee distribution (90/10) ✅
+- [x] Create allowance management utilities
+- [x] Status: All tests passing with real transactions
+
+**Achievement**: USDC payment flow working with correct distribution
+**Solution**: Used staticCall for job ID retrieval
 
 ### Sub-phase 9.5: S5 Storage Integration (Max 150 lines)
 - [ ] Create `tests/integration/s5-storage.test.ts`
