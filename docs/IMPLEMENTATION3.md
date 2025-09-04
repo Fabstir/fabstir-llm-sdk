@@ -82,16 +82,16 @@ Total: 176 lines (well under 200 line limit) ✅
 - [x] Test: P2P discovery through manager
 
 ### Sub-phase 10.6: Session Manager (Max 200 lines)
-- [ ] Create `src/managers/SessionManager.ts`
-  - [ ] Orchestrate other managers
-  - [ ] Handle complete job lifecycle
-- [ ] Methods:
-  - [ ] `createSession(options): Promise<Session>`
-  - [ ] `sendPrompt(sessionId, prompt): Promise<Response>`
-  - [ ] `streamResponse(sessionId): AsyncIterator<Token>`
-  - [ ] `endSession(sessionId): Promise<void>`
-  - [ ] `getSessionHistory(sessionId): Promise<Message[]>`
-- [ ] Test: Full session flow
+- [x] Create `src/managers/SessionManager.ts`
+  - [x] Orchestrate other managers
+  - [x] Handle complete job lifecycle
+- [x] Methods:
+  - [x] `createSession(options): Promise<Session>`
+  - [x] `sendPrompt(sessionId, prompt): Promise<Response>`
+  - [x] `streamResponse(sessionId): AsyncIterator<Token>`
+  - [x] `endSession(sessionId): Promise<void>`
+  - [x] `getSessionHistory(sessionId): Promise<Message[]>`
+- [x] Test: Full session flow
 
 ### Sub-phase 10.7: High-Level SDK Interface (Max 150 lines)
 - [ ] Update `src/FabstirSDK.ts` with convenience methods

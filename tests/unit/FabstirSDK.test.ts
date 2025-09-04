@@ -154,11 +154,18 @@ describe('FabstirSDK', () => {
       sdk = new FabstirSDK(config);
     });
 
-    it('should provide session manager (stub)', () => {
-      const sessionManager = sdk.getSessionManager();
+    it('should provide session manager', async () => {
+      // Test that it throws without auth
+      await expect(sdk.getSessionManager()).rejects.toThrow('Must authenticate before using SessionManager');
+      
+      await sdk.authenticate('0x1234567890abcdef');
+      
+      const sessionManager = await sdk.getSessionManager();
       expect(sessionManager).toBeDefined();
-      // For now, just a stub
-      expect(sessionManager).toEqual({});
+      expect(sessionManager).toHaveProperty('createSession');
+      expect(sessionManager).toHaveProperty('completeSession');
+      expect(sessionManager).toHaveProperty('submitProof');
+      expect(sessionManager).toHaveProperty('storeSessionData');
     });
 
     it('should provide payment manager (stub)', async () => {

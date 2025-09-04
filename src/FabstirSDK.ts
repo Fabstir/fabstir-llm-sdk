@@ -5,6 +5,7 @@ import AuthManager, { AuthResult } from './managers/AuthManager';
 import PaymentManager from './managers/PaymentManager';
 import StorageManager from './managers/StorageManager';
 import DiscoveryManager from './managers/DiscoveryManager';
+import SessionManager from './managers/SessionManager';
 
 export class FabstirSDK {
   public config: SDKConfig;
@@ -15,6 +16,7 @@ export class FabstirSDK {
   private paymentManager?: PaymentManager;
   private storageManager?: StorageManager;
   private discoveryManager?: DiscoveryManager;
+  private sessionManager?: SessionManager;
   
   constructor(config: SDKConfig = {}) {
     this.authManager = new AuthManager();
@@ -127,5 +129,29 @@ export class FabstirSDK {
     }
     
     return this.discoveryManager;
+  }
+  
+  async getSessionManager(): Promise<SessionManager> {
+    if (!this.authManager.isAuthenticated()) {
+      const error: SDKError = new Error('Must authenticate before using SessionManager') as SDKError;
+      error.code = 'MANAGER_NOT_AUTHENTICATED';
+      throw error;
+    }
+    
+    if (!this.sessionManager) {
+      // Ensure all required managers are initialized
+      const paymentManager = this.getPaymentManager();
+      const storageManager = await this.getStorageManager();
+      const discoveryManager = this.getDiscoveryManager();
+      
+      this.sessionManager = new SessionManager(
+        this.authManager,
+        paymentManager,
+        storageManager,
+        discoveryManager
+      );
+    }
+    
+    return this.sessionManager;
   }
 }
