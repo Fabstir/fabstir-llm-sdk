@@ -1,16 +1,21 @@
 // src/FabstirSDK.ts
 import { ethers } from 'ethers';
-import { SDKConfig, AuthResult, SDKError } from './types';
+import { SDKConfig, SDKError } from './types';
+import AuthManager, { AuthResult } from './managers/AuthManager';
 import PaymentManager from './managers/PaymentManager';
+import StorageManager from './managers/StorageManager';
 
 export class FabstirSDK {
   public config: SDKConfig;
   public provider?: ethers.providers.JsonRpcProvider;
   public signer?: ethers.Signer;
+  private authManager: AuthManager;
   private authResult?: AuthResult;
   private paymentManager?: PaymentManager;
+  private storageManager?: StorageManager;
   
   constructor(config: SDKConfig = {}) {
+    this.authManager = new AuthManager();
     this.config = {
       rpcUrl: config.rpcUrl || process.env.RPC_URL_BASE_SEPOLIA || 
         'https://base-sepolia.g.alchemy.com/v2/demo',
@@ -35,19 +40,6 @@ export class FabstirSDK {
     };
   }
   
-  private generateSeedFromSignature(signature: string): string {
-    const hash = ethers.utils?.keccak256 ? 
-      ethers.utils.keccak256(ethers.utils.toUtf8Bytes(signature)) :
-      '0x' + signature.slice(2, 66); // Mock fallback
-    const entropy = hash.slice(2);
-    const words = [];
-    for (let i = 0; i < 12; i++) {
-      const chunk = entropy.slice(i * 5, i * 5 + 5);
-      const index = parseInt(chunk, 16) % 2048;
-      words.push(`word${index}`);
-    }
-    return words.join(' ');
-  }
   
   async authenticate(privateKey: string): Promise<AuthResult> {
     if (!privateKey || privateKey.length === 0) {
@@ -57,19 +49,13 @@ export class FabstirSDK {
     }
     
     try {
-      this.provider = new ethers.providers.JsonRpcProvider(
-        this.config.rpcUrl, { chainId: 84532, name: 'base-sepolia' }
-      );
-      this.signer = new ethers.Wallet(privateKey, this.provider);
-      const address = await this.signer.getAddress();
-      const signature = await this.signer.signMessage("Generate S5 seed for Fabstir LLM");
-      const s5Seed = this.generateSeedFromSignature(signature);
+      this.authResult = await this.authManager.authenticate('private-key', {
+        privateKey,
+        rpcUrl: this.config.rpcUrl
+      });
       
-      this.authResult = {
-        user: { address },
-        signer: this.signer,
-        s5Seed
-      };
+      this.signer = this.authResult.signer;
+      this.provider = (this.signer as any).provider;
       
       return this.authResult;
     } catch (err: any) {
@@ -112,7 +98,18 @@ export class FabstirSDK {
     return this.paymentManager;
   }
   
-  getStorageManager(): any {
-    return {}; // TODO: Implement StorageManager in later phase
+  async getStorageManager(): Promise<StorageManager> {
+    if (!this.authManager.isAuthenticated()) {
+      const error: SDKError = new Error('Must authenticate before accessing StorageManager') as SDKError;
+      error.code = 'MANAGER_NOT_AUTHENTICATED';
+      throw error;
+    }
+    
+    if (!this.storageManager) {
+      this.storageManager = new StorageManager(this.config.s5PortalUrl);
+      await this.storageManager.initialize(this.authManager);
+    }
+    
+    return this.storageManager;
   }
 }

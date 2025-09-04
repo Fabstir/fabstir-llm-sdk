@@ -2,6 +2,24 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { FabstirSDK } from '../../src/FabstirSDK';
 import { SDKConfig } from './types';
 import { ethers } from 'ethers';
+import 'fake-indexeddb/auto'; // Required for S5 in Node.js
+
+// Mock S5 module
+vi.mock('@s5-dev/s5js', () => {
+  const mockS5Client = {
+    recoverIdentityFromSeedPhrase: vi.fn().mockResolvedValue(undefined),
+    registerOnNewPortal: vi.fn().mockResolvedValue(undefined),
+    fs: {
+      ensureIdentityInitialized: vi.fn().mockResolvedValue(undefined)
+    }
+  };
+  
+  return {
+    S5: {
+      create: vi.fn().mockResolvedValue(mockS5Client)
+    }
+  };
+});
 
 // Mock ethers
 vi.mock('ethers', () => {
@@ -23,7 +41,17 @@ vi.mock('ethers', () => {
       providers: {
         JsonRpcProvider: vi.fn().mockImplementation(() => mockProvider)
       },
-      Wallet: vi.fn().mockImplementation(() => mockSigner)
+      Wallet: vi.fn().mockImplementation(() => mockSigner),
+      Contract: vi.fn().mockImplementation(() => ({
+        interface: {},
+        provider: mockProvider,
+        address: '0xContractAddress'
+      })),
+      utils: {
+        keccak256: vi.fn((bytes) => '0xhash'),
+        toUtf8Bytes: vi.fn((text) => new Uint8Array([...text].map(c => c.charCodeAt(0)))),
+        arrayify: vi.fn((hash) => new Uint8Array(32).fill(0))
+      }
     }
   };
 });
@@ -78,8 +106,7 @@ describe('FabstirSDK', () => {
       const result = await sdk.authenticate(privateKey);
       
       expect(result).toBeDefined();
-      expect(result.user).toBeDefined();
-      expect(result.user.address).toBe('0x123');
+      expect(result.userAddress).toBe('0x123');
       expect(result.signer).toBeDefined();
       expect(result.s5Seed).toBeDefined();
     });
@@ -89,8 +116,10 @@ describe('FabstirSDK', () => {
       const result = await sdk.authenticate(privateKey);
       
       // Should generate deterministic seed from signature
-      expect(result.s5Seed).toContain(' ');
-      expect(result.s5Seed.split(' ').length).toBeGreaterThanOrEqual(12);
+      expect(result.s5Seed).toBeDefined();
+      expect(typeof result.s5Seed).toBe('string');
+      // AuthManager generates seed phrase with 12 words
+      expect(result.s5Seed.split(' ').length).toBe(12);
     });
 
     it('should handle authentication errors', async () => {
@@ -121,9 +150,8 @@ describe('FabstirSDK', () => {
   });
 
   describe('Manager Instances', () => {
-    beforeEach(async () => {
+    beforeEach(() => {
       sdk = new FabstirSDK(config);
-      await sdk.authenticate('0x1234567890abcdef');
     });
 
     it('should provide session manager (stub)', () => {
@@ -133,18 +161,31 @@ describe('FabstirSDK', () => {
       expect(sessionManager).toEqual({});
     });
 
-    it('should provide payment manager (stub)', () => {
+    it('should provide payment manager (stub)', async () => {
+      // Test that it throws without auth
+      expect(() => sdk.getPaymentManager()).toThrow('Must authenticate before accessing PaymentManager');
+      
+      await sdk.authenticate('0x1234567890abcdef');
+      
       const paymentManager = sdk.getPaymentManager();
       expect(paymentManager).toBeDefined();
-      // For now, just a stub
-      expect(paymentManager).toEqual({});
+      expect(paymentManager).toHaveProperty('createETHSessionJob');
+      expect(paymentManager).toHaveProperty('createUSDCSessionJob');
     });
 
-    it('should provide storage manager (stub)', () => {
-      const storageManager = sdk.getStorageManager();
+    it('should provide storage manager (stub)', async () => {
+      // Since we need authentication first, test that it throws without auth
+      await expect(sdk.getStorageManager()).rejects.toThrow('Must authenticate before accessing StorageManager');
+      
+      // After auth, should return StorageManager instance
+      await sdk.authenticate('0x1234567890abcdef');
+      
+      const storageManager = await sdk.getStorageManager();
       expect(storageManager).toBeDefined();
-      // For now, just a stub
-      expect(storageManager).toEqual({});
+      expect(storageManager).toHaveProperty('storeData');
+      expect(storageManager).toHaveProperty('retrieveData');
+      expect(storageManager).toHaveProperty('listUserData');
+      expect(storageManager.isInitialized()).toBe(true);
     });
   });
 
