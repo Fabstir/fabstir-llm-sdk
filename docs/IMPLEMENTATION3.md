@@ -34,14 +34,14 @@ Total: 176 lines (well under 200 line limit) ✅
 
 ### Sub-phase 10.3: Payment Manager (Max 200 lines)
 - [ ] Create `src/managers/PaymentManager.ts`
-  - [ ] Extract from eth-payment-cycle.test.ts
-  - [ ] Extract from usdc-payment-cycle.test.ts
-- [ ] Methods:
-  - [ ] `createETHSession(options): Promise<string>`
-  - [ ] `createUSDCSession(options): Promise<string>`
-  - [ ] `approveToken(token, amount): Promise<void>`
-  - [ ] `getPaymentStatus(sessionId): Promise<PaymentStatus>`
-- [ ] Test: Payment operations through manager
+  - [x] Extract from eth-payment-cycle.test.ts
+  - [x] Extract from usdc-payment-cycle.test.ts
+- [x] Methods:
+  - [x] `createETHSession(options): Promise<string>`
+  - [x] `createUSDCSession(options): Promise<string>`
+  - [x] `approveToken(token, amount): Promise<void>`
+  - [x] `getPaymentStatus(sessionId): Promise<PaymentStatus>`
+- [x] Test: Payment operations through manager
 
 ### Sub-phase 10.3.1: Account Abstraction Gas Management (POST-MVP)
 - [ ] Create `src/managers/GasManager.ts`
