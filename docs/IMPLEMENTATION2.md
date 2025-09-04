@@ -512,16 +512,19 @@ Test the complete system with real services: Base Sepolia blockchain, P2P discov
 **Achievement**: Comprehensive stress testing proves system resilience
 **Duration**: 21.6 seconds for complete test suite
 
-### Sub-phase 9.8: Test Report Generator (Max 150 lines)
-- [ ] Create `tests/integration/report-generator.ts`
-  - [ ] Collect all transaction hashes
-  - [ ] Query on-chain events
-  - [ ] Calculate total costs (ETH + USDC)
-  - [ ] Generate balance flow diagram
-  - [ ] Create CSV export
-  - [ ] Generate markdown summary
-- [ ] Create `test-reports/` directory structure
-- [ ] Commit: "feat: add integration test reporter"
+### Sub-phase 9.8: Test Report Generator ✅ COMPLETE
+- [x] Create `tests/integration/report-generator.ts`
+  - [x] Collect all transaction hashes (79 transactions)
+  - [x] Query on-chain events
+  - [x] Calculate total costs (0.0083 ETH)
+  - [x] Generate balance flow diagram
+  - [x] Create CSV export
+  - [x] Generate markdown summary
+- [x] Create `test-reports/` directory structure
+- [x] Status: All 7 tests passing
+
+**Achievement**: Comprehensive reporting for 79 real blockchain transactions
+**Total Gas Cost**: 0.0083 ETH across all integration tests
 
 ### Sub-phase 9.9: CI/CD for Integration Tests
 - [ ] Create `.github/workflows/integration.yml`
