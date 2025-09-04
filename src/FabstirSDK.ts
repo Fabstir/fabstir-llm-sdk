@@ -4,6 +4,7 @@ import { SDKConfig, SDKError } from './types';
 import AuthManager, { AuthResult } from './managers/AuthManager';
 import PaymentManager from './managers/PaymentManager';
 import StorageManager from './managers/StorageManager';
+import DiscoveryManager from './managers/DiscoveryManager';
 
 export class FabstirSDK {
   public config: SDKConfig;
@@ -13,6 +14,7 @@ export class FabstirSDK {
   private authResult?: AuthResult;
   private paymentManager?: PaymentManager;
   private storageManager?: StorageManager;
+  private discoveryManager?: DiscoveryManager;
   
   constructor(config: SDKConfig = {}) {
     this.authManager = new AuthManager();
@@ -111,5 +113,19 @@ export class FabstirSDK {
     }
     
     return this.storageManager;
+  }
+  
+  getDiscoveryManager(): DiscoveryManager {
+    if (!this.authManager.isAuthenticated()) {
+      const error: SDKError = new Error('Must authenticate before accessing DiscoveryManager') as SDKError;
+      error.code = 'MANAGER_NOT_AUTHENTICATED';
+      throw error;
+    }
+    
+    if (!this.discoveryManager) {
+      this.discoveryManager = new DiscoveryManager(this.authManager);
+    }
+    
+    return this.discoveryManager;
   }
 }

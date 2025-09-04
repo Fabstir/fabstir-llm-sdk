@@ -71,15 +71,15 @@ Total: 176 lines (well under 200 line limit) ✅
 - [x] Test: Storage operations with encryption
 
 ### Sub-phase 10.5: Discovery Manager (Max 150 lines)
-- [ ] Create `src/managers/DiscoveryManager.ts`
-  - [ ] Extract from p2p-discovery.test.ts
-  - [ ] Handle P2P node lifecycle
+- [x] Create `src/managers/DiscoveryManager.ts`
+  - [x] Extract from p2p-discovery.test.ts
+  - [ x Handle P2P node lifecycle
 - [ ] Methods:
-  - [ ] `startDiscovery(): Promise<void>`
-  - [ ] `findHosts(criteria): Promise<Host[]>`
-  - [ ] `getHostCapabilities(hostId): Promise<Capabilities>`
-  - [ ] `selectOptimalHost(requirements): Promise<Host>`
-- [ ] Test: P2P discovery through manager
+  - [x] `startDiscovery(): Promise<void>`
+  - [x] `findHosts(criteria): Promise<Host[]>`
+  - [x] `getHostCapabilities(hostId): Promise<Capabilities>`
+  - [x] `selectOptimalHost(requirements): Promise<Host>`
+- [x] Test: P2P discovery through manager
 
 ### Sub-phase 10.6: Session Manager (Max 200 lines)
 - [ ] Create `src/managers/SessionManager.ts`
