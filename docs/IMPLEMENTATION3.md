@@ -59,16 +59,16 @@ Total: 176 lines (well under 200 line limit) ✅
 - [ ] Status: DEFERRED - Base Sepolia sponsors gas automatically
 
 ### Sub-phase 10.4: Storage Manager (Max 150 lines)
-- [ ] Create `src/managers/StorageManager.ts`
-  - [ ] Extract from s5-storage.test.ts
-  - [ ] Handle S5 client lifecycle
-- [ ] Methods:
-  - [ ] `initialize(seed: string): Promise<void>`
-  - [ ] `storeConversation(sessionId, data): Promise<void>`
-  - [ ] `retrieveConversation(sessionId): Promise<Conversation>`
-  - [ ] `listSessions(): Promise<string[]>`
-  - [ ] `deleteSession(sessionId): Promise<void>`
-- [ ] Test: Storage operations with encryption
+- [x] Create `src/managers/StorageManager.ts`
+  - [x] Extract from s5-storage.test.ts
+  - [x] Handle S5 client lifecycle
+- [x] Methods:
+  - [x] `initialize(seed: string): Promise<void>`
+  - [x] `storeConversation(sessionId, data): Promise<void>`
+  - [x] `retrieveConversation(sessionId): Promise<Conversation>`
+  - [x] `listSessions(): Promise<string[]>`
+  - [x] `deleteSession(sessionId): Promise<void>`
+- [x] Test: Storage operations with encryption
 
 ### Sub-phase 10.5: Discovery Manager (Max 150 lines)
 - [ ] Create `src/managers/DiscoveryManager.ts`
