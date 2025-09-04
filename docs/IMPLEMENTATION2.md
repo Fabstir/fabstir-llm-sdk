@@ -484,16 +484,19 @@ Test the complete system with real services: Base Sepolia blockchain, P2P discov
 **Achievement**: Real S5 storage with encryption and complete data isolation
 **Files**: Both s5-storage.test.ts and s5-storage-minimal.test.ts passing
 
-### Sub-phase 9.6: P2P Discovery Integration (Max 150 lines)
-- [ ] Create `tests/integration/p2p-discovery.test.ts`
-  - [ ] Test: Connect to bootstrap nodes
-  - [ ] Test: Discover peer hosts
-  - [ ] Test: Query host capabilities
-  - [ ] Test: Negotiate job terms via P2P
-  - [ ] Test: Handle host disconnection
-  - [ ] Test: Reconnect to different host
-- [ ] Measure P2P latency and reliability
-- [ ] Commit: "test: add P2P discovery integration test"
+### Sub-phase 9.6: P2P Discovery Integration ✅ COMPLETE
+- [x] Create `tests/integration/p2p-discovery.test.ts`
+  - [x] Test: Connect to bootstrap nodes
+  - [x] Test: Discover peer hosts
+  - [x] Test: Query host capabilities
+  - [x] Test: Negotiate job terms via P2P
+  - [x] Test: Handle host disconnection
+  - [x] Test: Reconnect to different host
+- [x] Measure P2P latency and reliability
+- [x] Status: 5 tests passing with real libp2p
+
+**Achievement**: P2P infrastructure validated with libp2p
+**Note**: Limited hosts online is expected in early testing
 
 ### Sub-phase 9.7: Full Cycle Stress Test (Max 250 lines)
 - [ ] Create `tests/integration/stress-test.test.ts`
