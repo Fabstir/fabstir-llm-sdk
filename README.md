@@ -15,82 +15,114 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 
 ## Quick Start
 
-### Mock Mode (Development)
+### Basic Usage
 
-Perfect for development and testing without needing a full P2P network:
+Simple example to get started with the SDK:
 
 ```typescript
 import { FabstirSDK } from "@fabstir/llm-sdk";
-import { ethers } from "ethers";
 
-// Initialize SDK in mock mode
-const sdk = new FabstirSDK({
-  mode: "mock", // Uses local mock responses
-});
+async function main() {
+  // Initialize SDK
+  const sdk = new FabstirSDK({
+    rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/your-key',
+    s5PortalUrl: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p'
+  });
 
-// Connect wallet (required even in mock mode)
-const provider = new ethers.providers.Web3Provider(window.ethereum);
-await sdk.connect(provider);
+  // Authenticate with private key
+  await sdk.authenticate('0x1234567890abcdef...');
 
-// Submit a job - returns instantly
-const jobId = await sdk.submitJob({
-  prompt: "Hello, world!",
-  modelId: "llama-3.2-1b-instruct",
-  maxTokens: 50,
-});
+  // Create a compute session
+  const sessionManager = await sdk.getSessionManager();
+  const session = await sessionManager.createSession({
+    paymentType: 'ETH',
+    amount: '0.005',
+    hostAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7'
+  });
 
-console.log(`Job ${jobId} submitted!`);
+  console.log('Session created:', session.sessionId);
+}
+
+main().catch(console.error);
 ```
 
-### Production Mode (Real P2P)
+### Advanced Usage with All Managers
 
-For production use with real P2P network and blockchain integration:
+Using the full power of the SDK with all manager components:
 
 ```typescript
 import { FabstirSDK } from "@fabstir/llm-sdk";
-import { ethers } from "ethers";
 
-// Initialize SDK with P2P configuration
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: [
-      "/ip4/34.70.224.193/tcp/4001/p2p/12D3KooWRm8J3iL796zPFi2EtGGtUJn58AG67gcRzQ4FENEemvpg"
-    ],
-  },
-});
+async function advancedExample() {
+  // Initialize and authenticate
+  const sdk = new FabstirSDK();
+  await sdk.authenticate(process.env.PRIVATE_KEY!);
 
-// Connect wallet
-const provider = new ethers.providers.Web3Provider(window.ethereum);
-await sdk.connect(provider);
+  // Use different managers
+  const authManager = sdk.getAuthManager();
+  const paymentManager = sdk.getPaymentManager();
+  const storageManager = await sdk.getStorageManager();
+  const discoveryManager = sdk.getDiscoveryManager();
+  const sessionManager = await sdk.getSessionManager();
 
-// Discover available nodes
-const nodes = await sdk.discoverNodes({
-  modelId: "llama-3.2-1b-instruct",
-});
-console.log(`Found ${nodes.length} nodes`);
-
-// Submit job with negotiation
-const result = await sdk.submitJobWithNegotiation({
-  prompt: "Explain quantum computing",
-  modelId: "llama-3.2-1b-instruct",
-  maxTokens: 200,
-  stream: true,
-});
-
-// Stream the response
-if (result.stream) {
-  result.stream.on("token", (token) => {
-    process.stdout.write(token.content);
-  });
+  // Create P2P node for discovery
+  await discoveryManager.createNode();
   
-  result.stream.on("end", (summary) => {
-    console.log(`\nCompleted: ${summary.totalTokens} tokens`);
+  // Find suitable host
+  const hostAddress = await discoveryManager.findHost({
+    minReputation: 100
   });
+
+  // Create session with discovered host
+  const session = await sessionManager.createSession({
+    paymentType: 'ETH',
+    amount: '0.005',
+    hostAddress
+  });
+
+  // Store conversation data
+  await storageManager.storeData(
+    `session-${session.sessionId}`,
+    { prompt: 'Hello AI!', timestamp: Date.now() }
+  );
+
+  // Complete session
+  const completion = await sessionManager.completeSession(session.sessionId);
+  console.log('Payment distributed:', completion.paymentDistribution);
 }
 ```
 
 ## Installation
+
+### Development Setup (npm link)
+
+For local development when working on both `fabstir-llm-sdk` and `fabstir-llm-ui`:
+
+```bash
+# In fabstir-llm-sdk directory
+cd ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-sdk
+npm link
+
+# In fabstir-llm-ui directory  
+cd ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-ui
+npm link @fabstir/llm-sdk
+```
+
+This creates a symbolic link allowing the UI to use your local SDK development version.
+
+### Production Setup
+
+Install from GitHub repository:
+
+```bash
+npm install git+https://github.com/yourusername/fabstir-llm-sdk.git
+# or
+yarn add git+https://github.com/yourusername/fabstir-llm-sdk.git
+# or
+pnpm add git+https://github.com/yourusername/fabstir-llm-sdk.git
+```
+
+Or from npm registry (when published):
 
 ```bash
 npm install @fabstir/llm-sdk
@@ -129,8 +161,8 @@ const sdk = new FabstirSDK({
 
 ## Documentation
 
+- [**SDK API Reference**](docs/SDK_API.md) - Complete API documentation for all managers
 - [Setup Guide](docs/SETUP_GUIDE.md) - Detailed setup instructions
-- [API Reference](docs/API.md) - Complete API documentation
 - [P2P Configuration](docs/P2P_CONFIGURATION.md) - P2P network configuration
 - [Architecture](docs/ARCHITECTURE.md) - System architecture overview
 - [Configuration](docs/CONFIGURATION.md) - All configuration options
@@ -139,8 +171,11 @@ const sdk = new FabstirSDK({
 
 Check out the [examples](examples/) directory for complete working examples:
 
-- [`basic-mock.ts`](examples/basic-mock.ts) - Simple mock mode example
-- [`basic-production.ts`](examples/basic-production.ts) - Basic production usage
+- [**`basic-usage.ts`**](examples/basic-usage.ts) - Simple example with manager-based SDK
+- [**`advanced-usage.ts`**](examples/advanced-usage.ts) - Advanced features using all managers
+- [**`ui-integration.ts`**](examples/ui-integration.ts) - React/Next.js integration patterns
+- [`basic-mock.ts`](examples/basic-mock.ts) - Simple mock mode example (legacy)
+- [`basic-production.ts`](examples/basic-production.ts) - Basic production usage (legacy)
 - [`streaming.ts`](examples/streaming.ts) - Response streaming
 - [`error-handling.ts`](examples/error-handling.ts) - Proper error handling
 - [`advanced-negotiation.ts`](examples/advanced-negotiation.ts) - Complex job negotiation

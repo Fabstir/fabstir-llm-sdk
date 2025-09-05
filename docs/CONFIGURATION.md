@@ -1,31 +1,24 @@
 # Fabstir LLM SDK Configuration Guide
 
-This guide covers all configuration options available in the Fabstir LLM SDK, including the new headless architecture, payment methods, and best practices.
+This guide covers all configuration options available in the Fabstir LLM SDK with the manager-based architecture.
 
 ## Table of Contents
 
 - [Configuration Overview](#configuration-overview)
-- [Headless SDK Configuration](#headless-sdk-configuration)
-- [FabstirLLMSDK Configuration](#fabstirllmsdk-configuration)
-- [Legacy SDK Configuration](#legacy-sdk-configuration)
-- [Payment Configuration](#payment-configuration)
-- [Mode Configuration](#mode-configuration)
+- [SDK Configuration](#sdk-configuration)
+- [Manager Configurations](#manager-configurations)
 - [Network Configuration](#network-configuration)
-- [P2P Configuration](#p2p-configuration)
 - [Contract Configuration](#contract-configuration)
-- [Performance Configuration](#performance-configuration)
-- [Security Configuration](#security-configuration)
+- [Storage Configuration](#storage-configuration)
+- [P2P Configuration](#p2p-configuration)
+- [Payment Configuration](#payment-configuration)
 - [Environment Variables](#environment-variables)
 - [Configuration Examples](#configuration-examples)
 - [Best Practices](#best-practices)
 
 ## Configuration Overview
 
-The SDK offers three main configuration approaches:
-
-1. **FabstirSDKHeadless** - Headless, environment-agnostic configuration
-2. **FabstirLLMSDK** - Contract-focused with automatic payment handling
-3. **FabstirSDK (Legacy)** - Original configuration with provider connection
+The Fabstir LLM SDK uses a centralized configuration approach through the main `FabstirSDK` class, which then configures all managers appropriately.
 
 ### Configuration Priority
 
@@ -36,210 +29,196 @@ Configuration sources are applied in this order (highest to lowest priority):
 3. Environment variables
 4. Default values
 
-## Headless SDK Configuration
+### Configuration Flow
 
-### HeadlessConfig Interface
+```
+FabstirSDK(config)
+    ├── AuthManager (uses SDK's RPC URL)
+    ├── PaymentManager (uses contract addresses)
+    ├── StorageManager (uses S5 portal URL)
+    ├── DiscoveryManager (uses P2P settings)
+    └── SessionManager (uses all manager configs)
+```
+
+## SDK Configuration
+
+### SDKConfig Interface
 
 ```typescript
-interface HeadlessConfig {
-  // Core settings
-  mode?: "mock" | "production";                    // Default: "mock"
-  network?: "base-sepolia" | "base-mainnet" | "local"; // Default: "base-sepolia"
-  debug?: boolean;                                 // Default: false
+interface SDKConfig {
+  // Network configuration
+  rpcUrl?: string;
   
-  // Contract addresses (optional overrides)
+  // Storage configuration
+  s5PortalUrl?: string;
+  
+  // Contract addresses
   contractAddresses?: {
     jobMarketplace?: string;
-    paymentEscrow?: string;
     nodeRegistry?: string;
+    proofSystem?: string;
+    usdcToken?: string;
+    fabToken?: string;
   };
   
-  // P2P Configuration
-  p2pConfig?: P2PConfig;
-  
-  // Discovery settings
-  nodeDiscovery?: DiscoveryConfig;
-  discoveryConfig?: DiscoveryConfig;              // Alias for nodeDiscovery
-  
-  // Error recovery
-  retryOptions?: RetryOptions;
-  failoverStrategy?: FailoverStrategy;
-  nodeBlacklistDuration?: number;                 // Default: 3600000 (1 hour)
-  enableJobRecovery?: boolean;                    // Default: true
-  recoveryDataTTL?: number;                       // Default: 86400000 (24 hours)
-  
-  // Performance
-  reliabilityThreshold?: number;                  // Default: 0.8
-  nodeSelectionStrategy?: "reliability-weighted" | "random" | "price";
-  maxCascadingRetries?: number;                   // Default: 3
-  enableRecoveryReports?: boolean;                // Default: false
-  enablePerformanceTracking?: boolean;            // Default: false
+  // Optional debug mode
+  debug?: boolean;
 }
 ```
 
-### Basic Headless Configuration
-
-```typescript
-import { FabstirSDKHeadless } from '@fabstir/llm-sdk';
-
-const sdk = new FabstirSDKHeadless({
-  mode: 'production',
-  network: 'base-sepolia',
-  debug: true
-});
-
-// Set signer separately (required for blockchain operations)
-const signer = await getSigner(); // Your signer logic
-await sdk.setSigner(signer);
-```
-
-### Advanced Headless Configuration
-
-```typescript
-const sdk = new FabstirSDKHeadless({
-  mode: 'production',
-  network: 'base-mainnet',
-  contractAddresses: {
-    jobMarketplace: '0x...',
-    paymentEscrow: '0x...',
-    nodeRegistry: '0x...'
-  },
-  p2pConfig: {
-    bootstrapNodes: [
-      '/ip4/34.70.224.193/tcp/4001/p2p/12D3KooW...',
-      '/ip4/35.232.100.45/tcp/4001/p2p/12D3KooW...'
-    ],
-    enableDHT: true,
-    enableMDNS: true,
-    dialTimeout: 30000,
-    requestTimeout: 60000
-  },
-  retryOptions: {
-    maxRetries: 3,
-    retryDelay: 1000,
-    backoffMultiplier: 2
-  },
-  nodeSelectionStrategy: 'reliability-weighted',
-  enablePerformanceTracking: true
-});
-```
-
-## FabstirLLMSDK Configuration
-
-Specialized SDK for contract interactions with payment support:
-
-```typescript
-import { FabstirLLMSDK } from '@fabstir/llm-sdk';
-import { ethers } from 'ethers';
-
-// Requires a provider with signer
-const provider = new ethers.providers.Web3Provider(window.ethereum);
-const sdk = new FabstirLLMSDK(provider);
-
-// Submit job with payment configuration
-await sdk.submitJob({
-  modelId: 'gpt-3.5-turbo',
-  prompt: 'Hello world',
-  maxTokens: 100,
-  offerPrice: '1000000',      // Price in payment token units
-  paymentToken: 'USDC',        // 'ETH' or 'USDC'
-  paymentAmount: '1000000',    // Optional: different from offer price
-  temperature: 0.7,
-  seed: 42,
-  resultFormat: 'json'
-});
-```
-
-## Legacy SDK Configuration
-
-For backward compatibility:
+### Basic Configuration
 
 ```typescript
 import { FabstirSDK } from '@fabstir/llm-sdk';
 
 const sdk = new FabstirSDK({
-  mode: 'production',
-  network: 'base-sepolia',
-  // ... other config
-});
-
-// Requires connect() call
-await sdk.connect(provider);
-```
-
-## Payment Configuration
-
-### Supported Payment Tokens
-
-```typescript
-// Base Sepolia test tokens
-const BASE_SEPOLIA_TOKENS = {
-  USDC: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-  FAB: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62'
-};
-
-// Base Mainnet tokens
-const BASE_MAINNET_TOKENS = {
-  USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-  // FAB and other tokens TBD
-};
-```
-
-### Payment Method Selection
-
-```typescript
-// ETH payment (native token)
-await sdk.submitJob({
-  // ... job params
-  paymentToken: 'ETH',
-  offerPrice: '1000000000000000'  // Wei units (18 decimals)
-});
-
-// USDC payment (ERC20 token)
-await sdk.submitJob({
-  // ... job params
-  paymentToken: 'USDC',
-  offerPrice: '1000000',          // USDC units (6 decimals)
-  paymentAmount: '1000000'         // Can differ from offer price
-});
-
-// Default to ETH if not specified
-await sdk.submitJob({
-  // ... job params
-  offerPrice: '1000000000000000'  // Defaults to ETH
-});
-```
-
-## Mode Configuration
-
-### Mock Mode
-
-For development and testing without real network:
-
-```typescript
-const sdk = new FabstirSDKHeadless({
-  mode: 'mock',
-  // P2P and contract interactions are simulated
-});
-
-// Mock mode features:
-// - Instant job responses
-// - No real blockchain transactions
-// - Simulated P2P discovery
-// - Predictable test data
-```
-
-### Production Mode
-
-For real network interactions:
-
-```typescript
-const sdk = new FabstirSDKHeadless({
-  mode: 'production',
-  p2pConfig: {
-    bootstrapNodes: [...] // Required for production
+  rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY',
+  s5PortalUrl: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p',
+  contractAddresses: {
+    jobMarketplace: '0xD937c594682Fe74E6e3d06239719805C04BE804A',
+    nodeRegistry: '0x87516C13Ea2f99de598665e14cab64E191A0f8c4',
+    usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
   }
 });
+```
+
+### Default Values
+
+```typescript
+// Default RPC URL
+const DEFAULT_RPC_URL = 'https://base-sepolia.g.alchemy.com/v2/demo';
+
+// Default S5 Portal
+const DEFAULT_S5_PORTAL = 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p';
+
+// Default contract addresses (Base Sepolia - Jan 2025)
+const DEFAULT_CONTRACTS = {
+  jobMarketplace: '0xD937c594682Fe74E6e3d06239719805C04BE804A',
+  nodeRegistry: '0x87516C13Ea2f99de598665e14cab64E191A0f8c4',
+  proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
+  usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+  fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62'
+};
+```
+
+## Manager Configurations
+
+### 1. AuthManager Configuration
+
+AuthManager is configured through authentication:
+
+```typescript
+// Authentication options
+interface AuthOptions {
+  privateKey?: string;  // For private-key provider
+  rpcUrl?: string;      // Override SDK's RPC URL
+}
+
+// Authenticate with options
+await sdk.authenticate(privateKey);
+
+// Or with provider type
+const authManager = sdk.getAuthManager();
+await authManager.authenticate('private-key', {
+  privateKey: '0x...',
+  rpcUrl: 'custom-rpc-url'
+});
+```
+
+### 2. PaymentManager Configuration
+
+PaymentManager uses contract addresses from SDK config:
+
+```typescript
+// Payment constants
+const PAYMENT_CONSTANTS = {
+  MIN_ETH_PAYMENT: '0.005',        // 0.005 ETH minimum
+  DEFAULT_PRICE_PER_TOKEN: 5000,   // 5000 wei per token
+  DEFAULT_DURATION: 3600,          // 1 hour
+  DEFAULT_PROOF_INTERVAL: 300,     // 5 minutes
+  TOKENS_PER_PROOF: 1000           // Tokens per proof
+};
+
+// Payment split configuration
+const PAYMENT_SPLIT = {
+  host: 0.9,      // 90% to host
+  treasury: 0.1   // 10% to treasury
+};
+```
+
+### 3. StorageManager Configuration
+
+StorageManager configuration:
+
+```typescript
+// S5 storage constants
+const STORAGE_CONFIG = {
+  DEFAULT_S5_PORTAL: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p',
+  SEED_MESSAGE: 'Generate S5 seed for Fabstir LLM',
+  REGISTRY_PREFIX: 'fabstir-llm',
+  CONVERSATION_PATH: 'home/conversations'
+};
+
+// Custom S5 portal
+const storageManager = new StorageManager(customS5PortalUrl);
+```
+
+### 4. DiscoveryManager Configuration
+
+P2P discovery configuration:
+
+```typescript
+// Discovery options
+interface DiscoveryOptions {
+  listen?: string[];     // Listen addresses
+  bootstrap?: string[];  // Bootstrap nodes
+}
+
+// Discovery constants
+const DISCOVERY_CONFIG = {
+  DEFAULT_LISTEN: ['/ip4/127.0.0.1/tcp/0'],
+  MIN_CONNECTIONS: 0,
+  MAX_CONNECTIONS: 10,
+  PROTOCOL_PREFIX: '/fabstir-llm/1.0.0'
+};
+
+// Configure discovery
+await discoveryManager.createNode({
+  listen: ['/ip4/0.0.0.0/tcp/4001'],
+  bootstrap: [
+    '/ip4/34.70.224.193/tcp/4001/p2p/12D3KooW...'
+  ]
+});
+```
+
+### 5. SessionManager Configuration
+
+SessionManager uses configuration from all other managers:
+
+```typescript
+// Session options
+interface SessionOptions {
+  paymentType: 'ETH' | 'USDC';
+  amount: string;
+  pricePerToken?: number;      // Default: 5000
+  duration?: number;            // Default: 3600
+  proofInterval?: number;       // Default: 300
+  hostAddress?: string;         // Direct host selection
+  tokenAddress?: string;        // For USDC payments
+  hostCriteria?: {              // Auto-discovery criteria
+    minReputation?: number;
+    maxLatency?: number;
+    requiredModels?: string[];
+  };
+}
+
+// Session defaults
+const SESSION_DEFAULTS = {
+  DEFAULT_PRICE_PER_TOKEN: 5000,
+  DEFAULT_DURATION: 3600,
+  DEFAULT_PROOF_INTERVAL: 300,
+  MIN_ETH_PAYMENT: '0.005'
+};
 ```
 
 ## Network Configuration
@@ -247,90 +226,41 @@ const sdk = new FabstirSDKHeadless({
 ### Supported Networks
 
 ```typescript
-type Network = "base-sepolia" | "base-mainnet" | "local";
-
-// Network chain IDs
-const CHAIN_IDS = {
-  "base-mainnet": 8453,
-  "base-sepolia": 84532,
-  "local": 31337
-};
-```
-
-### Custom RPC Configuration
-
-```typescript
-// Using custom RPC endpoint
-const provider = new ethers.providers.JsonRpcProvider({
-  url: 'https://your-rpc-endpoint.com',
-  headers: {
-    'Authorization': 'Bearer YOUR_API_KEY'
-  }
-});
-
-const signer = provider.getSigner();
-await sdk.setSigner(signer);
-```
-
-## P2P Configuration
-
-### P2PConfig Interface
-
-```typescript
-interface P2PConfig {
-  // Required
-  bootstrapNodes: string[];           // Multiaddrs of bootstrap nodes
-  
-  // Optional
-  enableDHT?: boolean;                // Default: true
-  enableMDNS?: boolean;               // Default: true (local discovery)
-  listenAddresses?: string[];         // Custom listen addresses
-  dialTimeout?: number;               // Default: 30000ms
-  requestTimeout?: number;            // Default: 60000ms
-  maxConnections?: number;            // Default: 50
-  minConnections?: number;            // Default: 5
-  
-  // DHT Configuration
-  dhtConfig?: {
-    kBucketSize?: number;            // Default: 20
-    alpha?: number;                  // Default: 3
-    randomWalk?: {
-      enabled?: boolean;              // Default: true
-      interval?: number;              // Default: 300000ms
-      timeout?: number;               // Default: 10000ms
-    };
-  };
+enum Network {
+  BASE_SEPOLIA = 84532,     // Testnet
+  BASE_MAINNET = 8453,      // Mainnet (future)
+  LOCAL = 31337            // Local development
 }
-```
 
-### P2P Configuration Example
-
-```typescript
-const p2pConfig: P2PConfig = {
-  bootstrapNodes: [
-    '/ip4/34.70.224.193/tcp/4001/p2p/12D3KooW...',
-    '/ip4/35.232.100.45/tcp/4001/p2p/12D3KooW...',
-    '/dnsaddr/bootstrap.fabstir.network/p2p/12D3KooW...'
-  ],
-  enableDHT: true,
-  enableMDNS: true,
-  listenAddresses: [
-    '/ip4/0.0.0.0/tcp/0',
-    '/ip4/0.0.0.0/tcp/0/ws'
-  ],
-  dialTimeout: 30000,
-  requestTimeout: 60000,
-  maxConnections: 100,
-  minConnections: 10,
-  dhtConfig: {
-    kBucketSize: 20,
-    randomWalk: {
-      enabled: true,
-      interval: 300000,
-      timeout: 10000
-    }
+// Network-specific configuration
+const NETWORK_CONFIG = {
+  [Network.BASE_SEPOLIA]: {
+    name: 'base-sepolia',
+    rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/',
+    explorer: 'https://sepolia.basescan.org'
+  },
+  [Network.BASE_MAINNET]: {
+    name: 'base',
+    rpcUrl: 'https://base.g.alchemy.com/v2/',
+    explorer: 'https://basescan.org'
   }
 };
+```
+
+### RPC Configuration
+
+```typescript
+// Alchemy RPC
+const alchemyRpc = 'https://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY';
+
+// Infura RPC
+const infuraRpc = 'https://base-sepolia.infura.io/v3/YOUR_PROJECT_ID';
+
+// QuickNode RPC
+const quickNodeRpc = 'https://YOUR_ENDPOINT.base-sepolia.quiknode.pro/';
+
+// Local node
+const localRpc = 'http://localhost:8545';
 ```
 
 ## Contract Configuration
@@ -338,339 +268,343 @@ const p2pConfig: P2PConfig = {
 ### Contract Addresses
 
 ```typescript
-interface ContractAddresses {
-  jobMarketplace: string;
-  paymentEscrow: string;
-  nodeRegistry: string;
-}
-
-// Default addresses (Base Sepolia)
-const DEFAULT_CONTRACTS = {
-  jobMarketplace: '0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A',
-  proofSystem: '0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9',
+// Base Sepolia (January 2025)
+const CONTRACTS_BASE_SEPOLIA = {
+  jobMarketplace: '0xD937c594682Fe74E6e3d06239719805C04BE804A',
   nodeRegistry: '0x87516C13Ea2f99de598665e14cab64E191A0f8c4',
-  hostEarnings: '0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E',
-  paymentEscrow: '0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C'
+  proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
+  usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+  fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62'
 };
 
-// Override default addresses
-const sdk = new FabstirSDKHeadless({
+// Override specific contracts
+const sdk = new FabstirSDK({
   contractAddresses: {
-    jobMarketplace: '0xYourCustomAddress',
-    // Others will use defaults
+    jobMarketplace: '0xCustomAddress',
+    // Other contracts use defaults
   }
 });
 ```
 
-## Performance Configuration
+### Contract ABIs
 
-### Retry Options
+ABIs are located in:
+- `src/contracts/JobMarketplace.abi.json`
+- `docs/compute-contracts-reference/client-abis/`
+
+## Storage Configuration
+
+### S5 Network Configuration
 
 ```typescript
-interface RetryOptions {
-  maxRetries?: number;           // Default: 3
-  retryDelay?: number;           // Default: 1000ms
-  backoffMultiplier?: number;     // Default: 2
-  maxRetryDelay?: number;        // Default: 30000ms
-  retryCondition?: (error: Error) => boolean;
-}
+// S5 portal options
+const S5_PORTALS = {
+  // Official S5 portal
+  official: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p',
+  
+  // Custom portal
+  custom: 'wss://YOUR_PORTAL/s5/p2p',
+  
+  // Local portal
+  local: 'ws://localhost:5050/s5/p2p'
+};
 
-const retryOptions: RetryOptions = {
-  maxRetries: 5,
-  retryDelay: 2000,
-  backoffMultiplier: 1.5,
-  maxRetryDelay: 60000,
-  retryCondition: (error) => {
-    // Retry on network errors, not on user errors
-    return error.code === 'NETWORK_ERROR' || 
-           error.code === 'TIMEOUT';
-  }
+// S5 configuration in SDK
+const sdk = new FabstirSDK({
+  s5PortalUrl: S5_PORTALS.official
+});
+```
+
+### Storage Paths
+
+```typescript
+// Storage key patterns
+const STORAGE_PATHS = {
+  conversations: 'home/conversations/{sessionId}',
+  proofs: 'home/proofs/{jobId}/{proofId}',
+  metadata: 'home/metadata/{sessionId}',
+  userPrefs: 'home/preferences'
 };
 ```
 
-### Failover Strategy
+## P2P Configuration
+
+### Bootstrap Nodes
 
 ```typescript
-type FailoverStrategy = 
-  | "sequential"      // Try nodes in order
-  | "random"         // Random selection
-  | "fastest"        // Select by latency
-  | "cheapest";      // Select by price
+// Production bootstrap nodes
+const BOOTSTRAP_NODES_PRODUCTION = [
+  '/ip4/34.70.224.193/tcp/4001/p2p/12D3KooWRm8J3iL796zPFi2EtGGtUJn58AG67gcRzQ4FENEemvpg',
+  '/ip4/35.185.215.242/tcp/4001/p2p/12D3KooWQH5gJ9YjDfRpLnBKY7vtkbPQkxQ5XbVJHmENw5YjLs2V'
+];
 
-const sdk = new FabstirSDKHeadless({
-  failoverStrategy: 'fastest',
-  nodeBlacklistDuration: 3600000, // 1 hour
-  reliabilityThreshold: 0.8
-});
+// Development bootstrap nodes
+const BOOTSTRAP_NODES_DEV = [
+  '/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWLocal'
+];
 ```
 
-## Security Configuration
-
-### Signer Management
+### Listen Addresses
 
 ```typescript
-// Never store private keys in config!
-// Always use secure signer management
-
-// Good: Pass signer from wallet
-const signer = await getWalletSigner();
-await sdk.setSigner(signer);
-
-// Good: Use hardware wallet
-const ledgerSigner = await getLedgerSigner();
-await sdk.setSigner(ledgerSigner);
-
-// Bad: Never do this!
-// const privateKey = '0x...'; // NEVER!
+// Listen configuration
+const LISTEN_ADDRESSES = {
+  // All interfaces
+  all: ['/ip4/0.0.0.0/tcp/4001'],
+  
+  // Localhost only
+  local: ['/ip4/127.0.0.1/tcp/4001'],
+  
+  // Multiple transports
+  multi: [
+    '/ip4/0.0.0.0/tcp/4001',
+    '/ip4/0.0.0.0/tcp/4002/ws'
+  ]
+};
 ```
 
-### Network Validation
+## Payment Configuration
+
+### ETH Payment Configuration
 
 ```typescript
-// Enable strict network validation
-const sdk = new FabstirSDKHeadless({
-  network: 'base-mainnet',
-  // SDK will reject signers on wrong network
-});
+// ETH payment settings
+const ETH_CONFIG = {
+  MIN_PAYMENT: '0.005',           // 0.005 ETH minimum
+  GAS_LIMIT: 500000,              // Gas limit for transactions
+  GAS_PRICE_MULTIPLIER: 1.2       // Multiply estimated gas price
+};
+```
 
-// Handle network mismatch
-try {
-  await sdk.setSigner(signer);
-} catch (error) {
-  if (error.message.includes('Wrong network')) {
-    // Prompt user to switch networks
-    await switchNetwork('base-mainnet');
-  }
-}
+### USDC Payment Configuration
+
+```typescript
+// USDC payment settings
+const USDC_CONFIG = {
+  TOKEN_ADDRESS: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+  DECIMALS: 6,                    // USDC has 6 decimals
+  MIN_PAYMENT: '5',               // 5 USDC minimum
+  APPROVAL_AMOUNT: '1000000'      // Large approval to avoid repeat txs
+};
 ```
 
 ## Environment Variables
 
-Supported environment variables:
+### Complete .env Configuration
 
 ```bash
 # Network Configuration
-FABSTIR_NETWORK=base-sepolia
-FABSTIR_RPC_URL=https://sepolia.base.org
+RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY
+CHAIN_ID=84532
+NETWORK=base-sepolia
 
-# Contract Addresses (Base Sepolia)
-FABSTIR_JOB_MARKETPLACE=0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A
-FABSTIR_PROOF_SYSTEM=0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9
-FABSTIR_NODE_REGISTRY=0x87516C13Ea2f99de598665e14cab64E191A0f8c4
-FABSTIR_HOST_EARNINGS=0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E
-FABSTIR_PAYMENT_ESCROW=0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C
+# Authentication
+PRIVATE_KEY=0x... # Your wallet private key
+
+# Contract Addresses
+CONTRACT_JOB_MARKETPLACE=0xD937c594682Fe74E6e3d06239719805C04BE804A
+CONTRACT_NODE_REGISTRY=0x87516C13Ea2f99de598665e14cab64E191A0f8c4
+CONTRACT_PROOF_SYSTEM=0x2ACcc60893872A499700908889B38C5420CBcFD1
+CONTRACT_USDC_TOKEN=0x036CbD53842c5426634e7929541eC2318f3dCF7e
+CONTRACT_FAB_TOKEN=0xC78949004B4EB6dEf2D66e49Cd81231472612D62
+
+# Storage Configuration
+S5_PORTAL_URL=wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p
+S5_REGISTRY_PREFIX=fabstir-llm
 
 # P2P Configuration
-FABSTIR_BOOTSTRAP_NODES=/ip4/34.70.224.193/tcp/4001/p2p/...,/ip4/35.232.100.45/tcp/4001/p2p/...
-FABSTIR_P2P_PORT=4001
-FABSTIR_ENABLE_DHT=true
-FABSTIR_ENABLE_MDNS=true
+P2P_BOOTSTRAP_NODES=["/ip4/34.70.224.193/tcp/4001/p2p/..."]
+P2P_LISTEN_ADDRESSES=["/ip4/0.0.0.0/tcp/4001"]
+P2P_ENABLE_DHT=true
+P2P_ENABLE_MDNS=true
 
-# Performance
-FABSTIR_MAX_RETRIES=3
-FABSTIR_RETRY_DELAY=1000
-FABSTIR_NODE_SELECTION=reliability-weighted
+# Payment Configuration
+MIN_ETH_PAYMENT=0.005
+DEFAULT_PRICE_PER_TOKEN=5000
+DEFAULT_DURATION=3600
+DEFAULT_PROOF_INTERVAL=300
 
-# Debug
-FABSTIR_DEBUG=true
-FABSTIR_LOG_LEVEL=debug
+# Debug Configuration
+DEBUG=false
+LOG_LEVEL=info
 ```
 
 ### Loading Environment Variables
 
 ```typescript
-// Automatic loading in Node.js
-import dotenv from 'dotenv';
+import * as dotenv from 'dotenv';
+
+// Load from .env file
 dotenv.config();
 
-const sdk = new FabstirSDKHeadless({
-  network: process.env.FABSTIR_NETWORK || 'base-sepolia',
-  debug: process.env.FABSTIR_DEBUG === 'true',
+// Load from specific file
+dotenv.config({ path: '.env.production' });
+
+// Use in SDK
+const sdk = new FabstirSDK({
+  rpcUrl: process.env.RPC_URL_BASE_SEPOLIA,
+  s5PortalUrl: process.env.S5_PORTAL_URL,
   contractAddresses: {
-    jobMarketplace: process.env.FABSTIR_JOB_MARKETPLACE,
-    paymentEscrow: process.env.FABSTIR_PAYMENT_ESCROW,
-    nodeRegistry: process.env.FABSTIR_NODE_REGISTRY
-  },
-  p2pConfig: process.env.FABSTIR_BOOTSTRAP_NODES ? {
-    bootstrapNodes: process.env.FABSTIR_BOOTSTRAP_NODES.split(','),
-    enableDHT: process.env.FABSTIR_ENABLE_DHT !== 'false',
-    enableMDNS: process.env.FABSTIR_ENABLE_MDNS !== 'false'
-  } : undefined
+    jobMarketplace: process.env.CONTRACT_JOB_MARKETPLACE,
+    nodeRegistry: process.env.CONTRACT_NODE_REGISTRY,
+    usdcToken: process.env.CONTRACT_USDC_TOKEN
+  }
 });
 ```
 
 ## Configuration Examples
 
+### Minimal Configuration
+
+```typescript
+// Uses all defaults
+const sdk = new FabstirSDK();
+await sdk.authenticate(privateKey);
+```
+
 ### Development Configuration
 
 ```typescript
-// Development with mock mode
-const devConfig: HeadlessConfig = {
-  mode: 'mock',
-  network: 'local',
-  debug: true,
-  enablePerformanceTracking: true,
-  enableRecoveryReports: true
-};
-```
-
-### Testing Configuration
-
-```typescript
-// Testing with real network but safe defaults
-const testConfig: HeadlessConfig = {
-  mode: 'production',
-  network: 'base-sepolia',
-  debug: true,
-  p2pConfig: {
-    bootstrapNodes: ['...'],
-    dialTimeout: 5000,      // Faster timeouts for tests
-    requestTimeout: 10000
+const sdk = new FabstirSDK({
+  rpcUrl: 'http://localhost:8545',
+  s5PortalUrl: 'ws://localhost:5050/s5/p2p',
+  contractAddresses: {
+    // Local deployment addresses
+    jobMarketplace: '0x5FbDB2315678afecb367f032d93F642f64180aa3'
   },
-  retryOptions: {
-    maxRetries: 1,          // Minimal retries for tests
-    retryDelay: 100
-  }
-};
+  debug: true
+});
 ```
 
 ### Production Configuration
 
 ```typescript
-// Production with all features
-const prodConfig: HeadlessConfig = {
-  mode: 'production',
-  network: 'base-mainnet',
-  debug: false,
-  p2pConfig: {
-    bootstrapNodes: [
-      // Multiple bootstrap nodes for redundancy
-      '/dnsaddr/bootstrap1.fabstir.network/p2p/...',
-      '/dnsaddr/bootstrap2.fabstir.network/p2p/...',
-      '/dnsaddr/bootstrap3.fabstir.network/p2p/...'
-    ],
-    enableDHT: true,
-    enableMDNS: false,      // Disable local discovery in production
-    maxConnections: 200,
-    minConnections: 20
+const sdk = new FabstirSDK({
+  rpcUrl: process.env.RPC_URL_BASE_MAINNET,
+  s5PortalUrl: process.env.S5_PORTAL_URL_PROD,
+  contractAddresses: {
+    jobMarketplace: process.env.CONTRACT_JOB_MARKETPLACE_PROD,
+    nodeRegistry: process.env.CONTRACT_NODE_REGISTRY_PROD,
+    usdcToken: process.env.CONTRACT_USDC_TOKEN_PROD
   },
-  retryOptions: {
-    maxRetries: 5,
-    retryDelay: 2000,
-    backoffMultiplier: 2
-  },
-  failoverStrategy: 'fastest',
-  nodeSelectionStrategy: 'reliability-weighted',
-  enableJobRecovery: true,
-  enablePerformanceTracking: true,
-  nodeBlacklistDuration: 7200000  // 2 hours
-};
+  debug: false
+});
+```
+
+### Multi-Network Configuration
+
+```typescript
+function getSDKForNetwork(network: 'testnet' | 'mainnet' | 'local') {
+  const configs = {
+    testnet: {
+      rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/KEY',
+      contractAddresses: CONTRACTS_BASE_SEPOLIA
+    },
+    mainnet: {
+      rpcUrl: 'https://base.g.alchemy.com/v2/KEY',
+      contractAddresses: CONTRACTS_BASE_MAINNET
+    },
+    local: {
+      rpcUrl: 'http://localhost:8545',
+      contractAddresses: CONTRACTS_LOCAL
+    }
+  };
+  
+  return new FabstirSDK(configs[network]);
+}
 ```
 
 ## Best Practices
 
-### 1. Signer Management
+### 1. Security
+
+- **Never commit private keys**: Use environment variables
+- **Use secure key storage**: Consider hardware wallets for production
+- **Validate RPC URLs**: Ensure HTTPS for remote endpoints
+- **Rotate keys regularly**: Implement key rotation strategy
+
+### 2. Performance
+
+- **Reuse SDK instances**: Create once, use throughout app lifecycle
+- **Cache manager instances**: Managers are singletons within SDK
+- **Batch operations**: Group storage operations when possible
+- **Use appropriate timeouts**: Set reasonable timeouts for network operations
+
+### 3. Error Handling
 
 ```typescript
-// ✅ Good: Dynamic signer management
-class MyApp {
-  private sdk: FabstirSDKHeadless;
-  
-  async connectWallet() {
-    const signer = await getUserSigner();
-    await this.sdk.setSigner(signer);
-  }
-  
-  async disconnectWallet() {
-    this.sdk.clearSigner();
-  }
-  
-  async switchAccount(newSigner: Signer) {
-    await this.sdk.setSigner(newSigner);
-  }
-}
-
-// ❌ Bad: Storing private keys
-const sdk = new FabstirSDK({
-  privateKey: '0x...' // NEVER DO THIS
-});
-```
-
-### 2. Network Handling
-
-```typescript
-// ✅ Good: Handle network changes
-provider.on('network', async (newNetwork) => {
-  if (newNetwork.chainId !== expectedChainId) {
-    sdk.clearSigner();
-    alert('Please switch to the correct network');
-  }
-});
-
-// ✅ Good: Validate before operations
-if (!sdk.hasSigner()) {
-  throw new Error('Please connect wallet first');
-}
-```
-
-### 3. Error Recovery
-
-```typescript
-// ✅ Good: Comprehensive error handling
+// Wrap configuration in try-catch
 try {
-  const job = await sdk.submitJob(params);
+  const sdk = new FabstirSDK(config);
+  await sdk.authenticate(privateKey);
 } catch (error) {
-  if (error.code === 'INSUFFICIENT_BALANCE') {
-    // Handle insufficient USDC
-    alert('Please add USDC to your wallet');
-  } else if (error.code === 'WRONG_NETWORK') {
-    // Handle network mismatch
-    await switchNetwork();
-  } else if (error.code === 'CONNECTION_FAILED') {
-    // Retry with exponential backoff
-    await retryWithBackoff(() => sdk.submitJob(params));
+  if (error.code === 'INVALID_CONFIG') {
+    console.error('Configuration error:', error.message);
   }
+  // Handle other errors
 }
 ```
 
-### 4. Performance Optimization
+### 4. Environment Management
 
 ```typescript
-// ✅ Good: Cache discovered nodes
-const nodeCache = new Map();
+// Use different configs per environment
+const config = {
+  development: { /* dev config */ },
+  staging: { /* staging config */ },
+  production: { /* prod config */ }
+}[process.env.NODE_ENV || 'development'];
 
-async function getNodes(modelId: string) {
-  if (nodeCache.has(modelId)) {
-    const cached = nodeCache.get(modelId);
-    if (Date.now() - cached.timestamp < 300000) { // 5 min TTL
-      return cached.nodes;
-    }
-  }
-  
-  const nodes = await sdk.discoverNodes({ modelId });
-  nodeCache.set(modelId, { nodes, timestamp: Date.now() });
-  return nodes;
-}
+const sdk = new FabstirSDK(config);
 ```
 
-### 5. Payment Token Selection
+### 5. Debugging
 
 ```typescript
-// ✅ Good: Let users choose payment method
-async function submitJobWithUserChoice(params: JobParams) {
-  const paymentMethod = await promptUser('Select payment method:', ['ETH', 'USDC']);
-  
-  if (paymentMethod === 'USDC') {
-    // Check USDC balance first
-    const balance = await checkUSDCBalance();
-    if (balance < params.offerPrice) {
-      throw new Error('Insufficient USDC balance');
-    }
-  }
-  
-  return sdk.submitJob({
-    ...params,
-    paymentToken: paymentMethod
-  });
+// Enable debug mode for development
+const sdk = new FabstirSDK({
+  debug: process.env.NODE_ENV === 'development'
+});
+
+// Use debug logging
+if (sdk.config.debug) {
+  console.log('SDK initialized with:', sdk.config);
 }
 ```
+
+## Migration Guide
+
+### From Legacy SDK
+
+```typescript
+// Old pattern
+const sdk = new FabstirSDK(config, signer);
+
+// New pattern
+const sdk = new FabstirSDK(config);
+await sdk.authenticate(privateKey);
+```
+
+### From Headless SDK
+
+```typescript
+// Old headless pattern
+const sdk = new FabstirSDKHeadless(config);
+sdk.setSigner(signer);
+
+// New pattern
+const sdk = new FabstirSDK(config);
+await sdk.authenticate(privateKey);
+```
+
+## See Also
+
+- [SDK API Reference](SDK_API.md)
+- [Setup Guide](SETUP_GUIDE.md)
+- [Architecture Overview](ARCHITECTURE.md)
+- [P2P Configuration](P2P_CONFIGURATION.md)
+- [Integration Testing](INTEGRATED_TESTING.md)
+
+---
+
+*Last updated: January 2025 - Manager-Based Architecture v2.0*

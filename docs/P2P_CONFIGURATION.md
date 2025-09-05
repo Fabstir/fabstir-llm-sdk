@@ -1,532 +1,487 @@
 # P2P Configuration Guide
 
-This guide covers the complete P2P configuration options for the Fabstir LLM SDK, including network setup, discovery mechanisms, and troubleshooting.
+This guide covers P2P configuration for the Fabstir LLM SDK's DiscoveryManager, including network setup, node discovery, and troubleshooting.
 
 ## Table of Contents
 
 - [Overview](#overview)
+- [DiscoveryManager Setup](#discoverymanager-setup)
 - [Configuration Options](#configuration-options)
 - [Bootstrap Nodes](#bootstrap-nodes)
 - [Network Requirements](#network-requirements)
-- [Discovery Configuration](#discovery-configuration)
-- [Connection Settings](#connection-settings)
+- [Discovery Mechanisms](#discovery-mechanisms)
+- [Connection Management](#connection-management)
 - [Advanced Configuration](#advanced-configuration)
 - [Troubleshooting](#troubleshooting)
 
 ## Overview
 
-The Fabstir SDK uses libp2p for peer-to-peer communication, enabling direct connections between nodes without central servers. Proper P2P configuration is essential for:
+The SDK's DiscoveryManager uses libp2p for peer-to-peer communication, enabling direct connections between compute nodes without central servers. P2P is used for:
 
-- Node discovery and connectivity
-- Network performance and reliability
-- Security and access control
-- Optimal routing and latency
+- Finding available compute hosts
+- Direct node-to-node messaging
+- Real-time capability negotiation
+- Decentralized node registry
+
+## DiscoveryManager Setup
+
+The DiscoveryManager handles all P2P operations in the SDK:
+
+```typescript
+import { FabstirSDK } from '@fabstir/llm-sdk';
+
+// Initialize SDK and authenticate
+const sdk = new FabstirSDK();
+await sdk.authenticate(privateKey);
+
+// Get DiscoveryManager
+const discoveryManager = sdk.getDiscoveryManager();
+
+// Create P2P node with configuration
+const peerId = await discoveryManager.createNode({
+  listen: ['/ip4/0.0.0.0/tcp/4001'],
+  bootstrap: [
+    '/ip4/34.70.224.193/tcp/4001/p2p/12D3KooWRm8J3iL796zPFi2EtGGtUJn58AG67gcRzQ4FENEemvpg'
+  ]
+});
+
+console.log('P2P Node started:', peerId);
+```
 
 ## Configuration Options
 
-### Basic P2P Configuration
+### DiscoveryOptions Interface
 
 ```typescript
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    // Required: Bootstrap nodes for initial network connection
-    bootstrapNodes: [
-      "/ip4/34.70.224.193/tcp/4001/p2p/12D3KooWRm8J3iL796zPFi2EtGGtUJn58AG67gcRzQ4FENEemvpg",
-      "/ip4/35.185.215.242/tcp/4001/p2p/12D3KooWQH5gJ9YjDfRpLnBKY7vtkbPQkxQ5XbVJHmENw5YjLs2V"
-    ],
-    
-    // Optional: Enable DHT for distributed discovery
-    enableDHT: true, // Default: true
-    
-    // Optional: Enable mDNS for local network discovery
-    enableMDNS: true, // Default: true
-    
-    // Optional: Custom listen addresses
-    listenAddresses: [
-      "/ip4/0.0.0.0/tcp/4002",
-      "/ip4/0.0.0.0/tcp/4003/ws"
-    ],
-    
-    // Optional: Connection timeouts
-    dialTimeout: 30000, // Default: 30 seconds
-    requestTimeout: 60000, // Default: 60 seconds
-    
-    // Optional: Retry configuration
-    maxRetries: 3, // Default: 3
-    retryDelay: 1000, // Default: 1 second
-  }
-});
+interface DiscoveryOptions {
+  listen?: string[];     // Listen addresses for incoming connections
+  bootstrap?: string[];  // Bootstrap node addresses for network entry
+}
 ```
 
-### Complete Configuration Interface
+### Default Configuration
 
 ```typescript
-interface P2PConfig {
-  bootstrapNodes: string[];        // Required, must have at least one
-  enableDHT?: boolean;            // Optional, defaults to true
-  enableMDNS?: boolean;           // Optional, defaults to true  
-  listenAddresses?: string[];     // Optional, for specifying listen addresses
-  dialTimeout?: number;           // Optional, defaults to 30000 (30s)
-  requestTimeout?: number;        // Optional, defaults to 60000 (60s)
-  maxRetries?: number;            // Optional, defaults to 3
-  retryDelay?: number;            // Optional, defaults to 1000 (1s)
-}
+// Default listen addresses
+const DEFAULT_LISTEN = ['/ip4/127.0.0.1/tcp/0'];
+
+// Connection limits
+const MIN_CONNECTIONS = 0;
+const MAX_CONNECTIONS = 10;
+
+// Protocol prefix
+const PROTOCOL_PREFIX = '/fabstir-llm/1.0.0';
+```
+
+### Complete Configuration Example
+
+```typescript
+const discoveryManager = sdk.getDiscoveryManager();
+
+const peerId = await discoveryManager.createNode({
+  // Listen on multiple addresses
+  listen: [
+    '/ip4/0.0.0.0/tcp/4001',        // TCP on all interfaces
+    '/ip4/127.0.0.1/tcp/4002',      // TCP on localhost
+    '/ip4/0.0.0.0/tcp/4003/ws'      // WebSocket
+  ],
+  
+  // Connect to bootstrap nodes
+  bootstrap: [
+    // Production bootstrap nodes
+    '/ip4/34.70.224.193/tcp/4001/p2p/12D3KooWRm8J3iL796zPFi2EtGGtUJn58AG67gcRzQ4FENEemvpg',
+    '/ip4/35.185.215.242/tcp/4001/p2p/12D3KooWQH5gJ9YjDfRpLnBKY7vtkbPQkxQ5XbVJHmENw5YjLs2V',
+    
+    // Backup bootstrap nodes
+    '/ip4/104.199.116.132/tcp/4001/p2p/12D3KooWSoLzkmBQFXBJmkR7Fh2UpwVcZkr1kNx6SH8Y9VqKdEeU'
+  ]
+});
 ```
 
 ## Bootstrap Nodes
 
-Bootstrap nodes are essential for joining the P2P network. They serve as initial connection points.
+Bootstrap nodes are essential for joining the P2P network. They provide:
 
-### Format
+- Initial peer discovery
+- Network topology information
+- DHT routing data
 
-Bootstrap node addresses follow the multiaddr format:
+### Production Bootstrap Nodes
+
+```typescript
+const PRODUCTION_BOOTSTRAP_NODES = [
+  // Primary nodes (US West)
+  '/ip4/34.70.224.193/tcp/4001/p2p/12D3KooWRm8J3iL796zPFi2EtGGtUJn58AG67gcRzQ4FENEemvpg',
+  '/ip4/35.185.215.242/tcp/4001/p2p/12D3KooWQH5gJ9YjDfRpLnBKY7vtkbPQkxQ5XbVJHmENw5YjLs2V',
+  
+  // Secondary nodes (US East)
+  '/ip4/104.199.116.132/tcp/4001/p2p/12D3KooWSoLzkmBQFXBJmkR7Fh2UpwVcZkr1kNx6SH8Y9VqKdEeU',
+  '/ip4/35.237.93.141/tcp/4001/p2p/12D3KooWQQjPvN8JVDiSZPGPELSqPvPRqBYzPrFNJHqFBFgRxDTu'
+];
 ```
-/ip4/<IP_ADDRESS>/tcp/<PORT>/p2p/<PEER_ID>
+
+### Development Bootstrap Nodes
+
+For local development and testing:
+
+```typescript
+const DEV_BOOTSTRAP_NODES = [
+  // Local node
+  '/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWLocalPeerIdHere',
+  
+  // Docker network
+  '/ip4/172.17.0.2/tcp/4001/p2p/12D3KooWDockerPeerIdHere'
+];
 ```
 
-Example:
+### Running Your Own Bootstrap Node
+
+```bash
+# Install libp2p CLI
+npm install -g libp2p
+
+# Start bootstrap node
+libp2p daemon \
+  --listen /ip4/0.0.0.0/tcp/4001 \
+  --announce /ip4/YOUR_PUBLIC_IP/tcp/4001
 ```
-/ip4/34.70.224.193/tcp/4001/p2p/12D3KooWRm8J3iL796zPFi2EtGGtUJn58AG67gcRzQ4FENEemvpg
-```
-
-### Setting Up Your Own Bootstrap Node
-
-1. **Install the Fabstir node software:**
-   ```bash
-   npm install -g @fabstir/node
-   ```
-
-2. **Generate a node identity:**
-   ```bash
-   fabstir-node init
-   ```
-
-3. **Configure the node:**
-   ```yaml
-   # config.yaml
-   listen:
-     - /ip4/0.0.0.0/tcp/4001
-     - /ip4/0.0.0.0/tcp/4002/ws
-   
-   bootstrap: true
-   dht: true
-   mdns: false  # Disable for public nodes
-   ```
-
-4. **Start the bootstrap node:**
-   ```bash
-   fabstir-node start --config config.yaml
-   ```
-
-5. **Get your node's multiaddr:**
-   ```bash
-   fabstir-node info
-   ```
-
-### Choosing Bootstrap Nodes
-
-- Use at least 2-3 bootstrap nodes for redundancy
-- Select geographically distributed nodes for better performance
-- Consider network latency when choosing nodes
-- For private networks, run your own bootstrap nodes
 
 ## Network Requirements
 
-### Ports
-
-The SDK requires the following ports:
+### Port Requirements
 
 | Port | Protocol | Purpose | Direction |
 |------|----------|---------|-----------|
 | 4001 | TCP | P2P communication | Inbound/Outbound |
-| 4002 | TCP | WebSocket connections | Inbound/Outbound |
-| 4003 | UDP | mDNS discovery | Outbound |
+| 4002 | TCP | Alternative P2P | Inbound/Outbound |
+| 4003 | WebSocket | Browser connections | Inbound |
+| 9090 | WebSocket | WebRTC signaling | Inbound |
 
 ### Firewall Configuration
 
-Allow the following:
-
 ```bash
-# TCP ports for P2P
-sudo ufw allow 4001/tcp
-sudo ufw allow 4002/tcp
+# Allow P2P ports (Linux/iptables)
+sudo iptables -A INPUT -p tcp --dport 4001 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 4002 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 4003 -j ACCEPT
 
-# UDP for mDNS (optional)
-sudo ufw allow 5353/udp
+# Allow P2P ports (macOS)
+sudo pfctl -e
+echo "pass in proto tcp from any to any port 4001" | sudo pfctl -f -
 ```
 
 ### NAT Traversal
 
-The SDK supports automatic NAT traversal using:
-- STUN for address discovery
-- Circuit relay for restrictive NATs
-- Direct connection upgrade when possible
+The SDK automatically handles NAT traversal using:
 
-No manual configuration needed in most cases.
+- **UPnP**: Automatic port forwarding
+- **NAT-PMP**: Apple router support
+- **STUN**: WebRTC for browsers
+- **Relay**: Fallback through bootstrap nodes
 
-## Discovery Configuration
+## Discovery Mechanisms
 
-### DHT (Distributed Hash Table)
+### 1. DHT (Distributed Hash Table)
 
-The DHT enables decentralized peer discovery:
+Used for global peer discovery:
 
 ```typescript
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: [...],
-    enableDHT: true,
-    
-    // Advanced DHT options
-    dhtOptions: {
-      clientMode: false,      // Run as full DHT node
-      kBucketSize: 20,       // Routing table bucket size
-      refreshInterval: 900000 // 15 minutes
-    }
-  }
+// DHT is enabled by default in libp2p
+// Peers are discovered via content routing
+const hostAddress = await discoveryManager.findHost({
+  minReputation: 100,
+  requiredModels: ['llama-3.2-1b-instruct']
 });
 ```
 
-### mDNS (Multicast DNS)
+### 2. mDNS (Local Network Discovery)
 
-For local network discovery:
+Discovers peers on the same network:
 
 ```typescript
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: [...],
-    enableMDNS: true,
-    
-    // mDNS options
-    mdnsOptions: {
-      interval: 10000,     // Discovery interval
-      serviceTag: "fabstir" // Service identifier
-    }
-  }
+// mDNS is enabled by default
+// Automatically discovers local peers
+// Useful for development and private networks
+```
+
+### 3. Direct Peer Connection
+
+Connect to a known peer:
+
+```typescript
+await discoveryManager.connectToPeer(
+  '/ip4/192.168.1.100/tcp/4001/p2p/12D3KooWPeerIdHere'
+);
+```
+
+## Connection Management
+
+### Get Connected Peers
+
+```typescript
+const peers = discoveryManager.getConnectedPeers();
+console.log('Connected to', peers.length, 'peers');
+peers.forEach(peerId => {
+  console.log(' -', peerId);
 });
 ```
 
-### Custom Discovery
-
-Implement custom discovery mechanisms:
+### Send Messages
 
 ```typescript
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: [...],
-    
-    // Custom peer discovery
-    peerDiscovery: [
-      {
-        tag: "custom-discovery",
-        enabled: true,
-        options: {
-          endpoint: "https://peers.fabstir.com/api/v1/peers",
-          interval: 30000
-        }
-      }
-    ]
-  }
+// Register message handler
+discoveryManager.onMessage((message) => {
+  console.log('Received:', message);
+});
+
+// Send message to peer
+await discoveryManager.sendMessage(peerId, {
+  type: 'job_request',
+  data: { model: 'llama-3.2-1b-instruct', prompt: 'Hello' }
 });
 ```
 
-## Connection Settings
-
-### Connection Limits
-
-Control the number of connections:
+### Connection Lifecycle
 
 ```typescript
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: [...],
-    
-    connectionManager: {
-      maxConnections: 100,      // Maximum total connections
-      minConnections: 10,       // Minimum to maintain
-      maxData: 1000000000,      // 1GB data limit
-      maxSentData: 500000000,   // 500MB upload limit
-      maxReceivedData: 500000000, // 500MB download limit
-      maxEventLoopDelay: 150,   // 150ms max delay
-      pollInterval: 2000        // Check every 2s
-    }
-  }
-});
-```
+// Check if node is running
+if (discoveryManager.isRunning()) {
+  console.log('P2P node is active');
+}
 
-### Transport Configuration
-
-Configure specific transports:
-
-```typescript
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: [...],
-    
-    transports: {
-      tcp: {
-        enabled: true,
-        maxConnections: 50
-      },
-      websocket: {
-        enabled: true,
-        maxConnections: 30
-      },
-      webrtc: {
-        enabled: false  // Disable WebRTC
-      }
-    }
-  }
-});
+// Stop P2P node
+await discoveryManager.stop();
+console.log('P2P node stopped');
 ```
 
 ## Advanced Configuration
 
-### Custom Protocols
+### Custom libp2p Configuration
 
-Register custom protocols:
+For advanced users who need fine-grained control:
 
 ```typescript
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: [...],
-    
-    protocols: [
-      {
-        id: "/fabstir/custom/1.0.0",
-        handler: async (stream) => {
-          // Custom protocol handler
-        }
-      }
-    ]
+// Internal libp2p configuration (simplified)
+const libp2pConfig = {
+  addresses: {
+    listen: options.listen || DEFAULT_LISTEN
+  },
+  connectionManager: {
+    minConnections: MIN_CONNECTIONS,
+    maxConnections: MAX_CONNECTIONS
+  },
+  streamMuxers: [yamux()],
+  connectionEncryption: [noise()],
+  transports: [tcp(), webSockets()],
+  peerDiscovery: [
+    bootstrap({ list: options.bootstrap || [] }),
+    mdns()
+  ],
+  services: {
+    dht: kadDHT(),
+    identify: identify()
   }
-});
+};
 ```
 
-### Metrics and Monitoring
+### Protocol Handlers
 
-Enable P2P metrics:
+The DiscoveryManager uses custom protocols:
 
 ```typescript
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: [...],
-    
-    metrics: {
-      enabled: true,
-      computeThrottleMaxQueueSize: 1000,
-      computeThrottleTimeout: 2000,
-      movingAverageInterval: 60000,
-      maxOldPeersRetention: 50
-    }
-  }
-});
+// Protocol for job negotiation
+const JOB_PROTOCOL = '/fabstir-llm/job/1.0.0';
 
-// Access metrics
-const metrics = await sdk.getP2PMetrics();
-console.log("Connected peers:", metrics.peers);
-console.log("Protocol stats:", metrics.protocols);
+// Protocol for status updates  
+const STATUS_PROTOCOL = '/fabstir-llm/status/1.0.0';
+
+// Protocol for model discovery
+const DISCOVERY_PROTOCOL = '/fabstir-llm/discovery/1.0.0';
 ```
 
-### Security Configuration
+### Peer Filtering
 
-Configure P2P security:
+Filter peers based on capabilities:
 
 ```typescript
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: [...],
-    
-    security: {
-      // Peer ID allowlist
-      allowlist: [
-        "12D3KooWTrustedPeer1...",
-        "12D3KooWTrustedPeer2..."
-      ],
-      
-      // Peer ID blocklist
-      blocklist: [
-        "12D3KooWBadPeer1..."
-      ],
-      
-      // Enable connection encryption
-      enableEncryption: true,
-      
-      // Custom authentication
-      authenticate: async (peerId, connection) => {
-        // Return true to allow, false to reject
-        return true;
-      }
-    }
-  }
-});
+const hostCriteria = {
+  minReputation: 100,
+  maxLatency: 500, // milliseconds
+  requiredModels: ['llama-3.2-1b-instruct', 'gpt-4'],
+  minUptime: 3600, // seconds
+  location: 'US' // optional geo-filtering
+};
+
+const suitableHost = await discoveryManager.findHost(hostCriteria);
 ```
 
 ## Troubleshooting
 
-### Common Issues
+### Common Issues and Solutions
 
-#### 1. Cannot Connect to Bootstrap Nodes
+#### "Failed to start P2P node"
 
-**Symptoms:**
-- "Failed to connect to any bootstrap node" error
-- Timeout errors during connection
+**Causes**:
+- Port already in use
+- Firewall blocking
+- Invalid multiaddress format
 
-**Solutions:**
-```typescript
-// Increase timeouts
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: [...],
-    dialTimeout: 60000,  // Increase to 60s
-    requestTimeout: 120000 // Increase to 120s
-  }
-});
+**Solutions**:
+```bash
+# Check if port is in use
+lsof -i :4001
 
-// Try alternative bootstrap nodes
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: [
-      // Primary nodes
-      "/ip4/34.70.224.193/tcp/4001/p2p/12D3KooW...",
-      // Backup nodes
-      "/ip4/35.185.215.242/tcp/4001/p2p/12D3KooW...",
-      "/ip4/104.197.140.89/tcp/4001/p2p/12D3KooW..."
-    ]
-  }
-});
+# Kill process using port
+kill -9 $(lsof -t -i:4001)
+
+# Use different port
+listen: ['/ip4/0.0.0.0/tcp/4002']
 ```
 
-#### 2. Poor Discovery Performance
+#### "Cannot connect to bootstrap nodes"
 
-**Symptoms:**
-- Few or no nodes discovered
-- Slow node discovery
+**Causes**:
+- Network connectivity issues
+- Bootstrap nodes offline
+- Firewall/proxy blocking
 
-**Solutions:**
+**Solutions**:
 ```typescript
-// Enable multiple discovery mechanisms
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: [...],
-    enableDHT: true,
-    enableMDNS: true,
-    
-    // Aggressive discovery settings
-    discoveryOptions: {
-      interval: 5000,      // Check every 5s
-      timeout: 30000,      // 30s timeout
-      maxPeers: 100,       // Find more peers
-      forceRefresh: true   // Always query fresh
-    }
+// Test connectivity
+const testConnection = async () => {
+  try {
+    await discoveryManager.connectToPeer(bootstrapAddress);
+    console.log('✅ Connected to bootstrap');
+  } catch (error) {
+    console.error('❌ Bootstrap connection failed:', error);
   }
-});
+};
+
+// Use alternative bootstrap nodes
+const alternativeBootstrap = [
+  '/ip4/YOUR_BACKUP_NODE/tcp/4001/p2p/...'
+];
 ```
 
-#### 3. Connection Drops
+#### "No peers discovered"
 
-**Symptoms:**
-- Frequent disconnections
-- "Connection reset" errors
+**Causes**:
+- DHT not synchronized
+- No peers with matching criteria
+- Network partition
 
-**Solutions:**
+**Solutions**:
 ```typescript
-// Configure keep-alive and stability
-const sdk = new FabstirSDK({
-  mode: "production",
-  p2pConfig: {
-    bootstrapNodes: [...],
-    
-    // Keep connections alive
-    keepAlive: {
-      interval: 30000,     // Ping every 30s
-      timeout: 10000       // 10s timeout
-    },
-    
-    // Increase connection resilience
-    connectionManager: {
-      maxConnections: 50,  // Reduce load
-      minConnections: 5,   // Maintain minimum
-      autoDial: true,      // Auto-reconnect
-      autoDialInterval: 5000 // Try every 5s
-    }
-  }
-});
+// Wait for DHT to populate
+await new Promise(resolve => setTimeout(resolve, 5000));
+
+// Relax discovery criteria
+const criteria = {
+  minReputation: 50, // Lower threshold
+  requiredModels: [] // Any model
+};
 ```
 
-### Debug Mode
+#### "Message delivery failed"
 
-Enable debug logging:
+**Causes**:
+- Peer disconnected
+- Protocol mismatch
+- Message too large
 
+**Solutions**:
 ```typescript
-const sdk = new FabstirSDK({
-  mode: "production",
-  debug: true,  // Enable SDK debug logs
-  p2pConfig: {
-    bootstrapNodes: [...],
-    
-    // P2P debug options
-    debug: {
-      enabled: true,
-      verbose: true,
-      logLevel: "debug",
-      subsystems: [
-        "dht",
-        "discovery", 
-        "connection",
-        "transport"
-      ]
+// Check peer connection before sending
+const peers = discoveryManager.getConnectedPeers();
+if (peers.includes(targetPeerId)) {
+  await discoveryManager.sendMessage(targetPeerId, message);
+}
+
+// Implement retry logic
+const sendWithRetry = async (peerId, message, retries = 3) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await discoveryManager.sendMessage(peerId, message);
+      return;
+    } catch (error) {
+      console.log(`Retry ${i + 1}/${retries}`);
+      await new Promise(r => setTimeout(r, 1000 * (i + 1)));
     }
   }
-});
+  throw new Error('Message delivery failed after retries');
+};
+```
 
-// Listen to debug events
-sdk.on("p2p:debug", (log) => {
-  console.log(`[P2P ${log.subsystem}]`, log.message);
-});
+### Debug Logging
+
+Enable detailed P2P logging:
+
+```typescript
+// Set environment variable
+process.env.DEBUG = 'libp2p:*';
+
+// Or configure in code
+import debug from 'debug';
+debug.enable('libp2p:*');
 ```
 
 ### Network Diagnostics
 
-Run network diagnostics:
-
 ```typescript
-// Check P2P health
-const health = await sdk.getSystemHealthReport();
-console.log("P2P Status:", health.p2p);
-
-// Test connectivity
-const connectivityTest = await sdk.testP2PConnectivity();
-console.log("Can reach bootstrap nodes:", connectivityTest.bootstrap);
-console.log("Can discover peers:", connectivityTest.discovery);
-console.log("NAT type:", connectivityTest.natType);
-
-// Analyze network performance
-const perfTest = await sdk.testNetworkPerformance();
-console.log("Average latency:", perfTest.avgLatency);
-console.log("Bandwidth:", perfTest.bandwidth);
+async function diagnostics() {
+  const discoveryManager = sdk.getDiscoveryManager();
+  
+  console.log('P2P Diagnostics');
+  console.log('===============');
+  
+  // Node status
+  console.log('Running:', discoveryManager.isRunning());
+  
+  // Peer connections
+  const peers = discoveryManager.getConnectedPeers();
+  console.log('Connected peers:', peers.length);
+  
+  // Test bootstrap connectivity
+  for (const bootstrap of PRODUCTION_BOOTSTRAP_NODES) {
+    try {
+      await discoveryManager.connectToPeer(bootstrap);
+      console.log('✅', bootstrap.split('/').pop());
+    } catch (error) {
+      console.log('❌', bootstrap.split('/').pop());
+    }
+  }
+}
 ```
 
-### Getting Help
+## Best Practices
 
-If you're still experiencing issues:
+1. **Use Multiple Bootstrap Nodes**: Ensures network connectivity even if some nodes fail
+2. **Implement Connection Monitoring**: Track peer connections and reconnect as needed
+3. **Handle Network Changes**: Detect and adapt to network interface changes
+4. **Rate Limit Discovery**: Avoid overwhelming the network with discovery requests
+5. **Cache Peer Information**: Store successful peer connections for faster reconnection
+6. **Use Appropriate Timeouts**: Set reasonable timeouts for connection attempts
+7. **Implement Graceful Shutdown**: Properly close connections when stopping
 
-1. Check the [FAQ](https://docs.fabstir.com/faq)
-2. Search [existing issues](https://github.com/fabstir/llm-sdk/issues)
-3. Join our [Discord](https://discord.gg/fabstir) for community support
-4. Open a [new issue](https://github.com/fabstir/llm-sdk/issues/new) with:
-   - Your P2P configuration
-   - Error messages
-   - Network environment details
-   - Debug logs
+## Environment Variables
+
+```bash
+# P2P Configuration
+P2P_LISTEN_ADDRESSES=["/ip4/0.0.0.0/tcp/4001"]
+P2P_BOOTSTRAP_NODES=["/ip4/34.70.224.193/tcp/4001/p2p/..."]
+P2P_ENABLE_DHT=true
+P2P_ENABLE_MDNS=true
+P2P_MAX_CONNECTIONS=10
+P2P_CONNECTION_TIMEOUT=30000
+```
+
+## See Also
+
+- [DiscoveryManager API](SDK_API.md#discoverymanager)
+- [Integration Testing](INTEGRATED_TESTING.md)
+- [Architecture Overview](ARCHITECTURE.md)
+- [libp2p Documentation](https://docs.libp2p.io/)
+
+---
+
+*Last updated: January 2025 - DiscoveryManager with libp2p v2.x*

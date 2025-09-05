@@ -1,541 +1,494 @@
 # Fabstir LLM SDK Architecture
 
-This document provides a comprehensive overview of the Fabstir LLM SDK architecture, including the new headless design, payment system changes, and system components.
+This document provides a comprehensive overview of the Fabstir LLM SDK's manager-based architecture, system components, and design principles.
 
 ## Table of Contents
 
 - [System Overview](#system-overview)
-- [Headless Architecture](#headless-architecture)
+- [Manager-Based Architecture](#manager-based-architecture)
 - [Architecture Diagram](#architecture-diagram)
 - [Core Components](#core-components)
+- [Manager Components](#manager-components)
 - [Payment System](#payment-system)
 - [P2P Discovery Process](#p2p-discovery-process)
-- [Job Lifecycle](#job-lifecycle)
+- [Session Lifecycle](#session-lifecycle)
 - [Contract Interaction Flow](#contract-interaction-flow)
-- [Streaming Protocol](#streaming-protocol)
+- [Storage Architecture](#storage-architecture)
 - [Security Architecture](#security-architecture)
 - [Performance Considerations](#performance-considerations)
 
 ## System Overview
 
-The Fabstir LLM SDK is built on a decentralized, headless architecture that enables direct peer-to-peer communication between clients and LLM nodes. The system eliminates central servers by leveraging:
+The Fabstir LLM SDK uses a manager-based architecture that provides clean separation of concerns while enabling decentralized LLM access. The system leverages:
 
-- **libp2p** for P2P networking and discovery
-- **Ethereum smart contracts** for trustless payments (USDC/ETH) and job coordination
-- **IPFS/S5** for decentralized storage of results
-- **WebRTC/WebSocket** for real-time streaming
-- **Headless design** for environment-agnostic operation
+- **Manager Pattern** for modular functionality (Auth, Payment, Storage, Discovery, Session)
+- **libp2p** for P2P networking and node discovery
+- **Ethereum smart contracts** for trustless payments (ETH/USDC) and job coordination
+- **S5 Network** for decentralized storage of conversations and session data
+- **WebSocket** for real-time communication
+- **Session-based jobs** for efficient multi-turn conversations
 
 ### Key Design Principles
 
-1. **Decentralization**: No single point of failure or control
-2. **Headless Operation**: Works in any JavaScript environment (Node.js, browser, Deno)
-3. **Flexible Payments**: Support for multiple payment tokens (ETH, USDC, USDT, DAI)
-4. **Trustless**: Smart contracts ensure fair payment and delivery
-5. **Scalable**: P2P architecture scales with network size
-6. **Resilient**: Automatic failover and recovery mechanisms
-7. **Privacy-Preserving**: Direct connections minimize data exposure
+1. **Modularity**: Each manager handles a specific domain
+2. **Decentralization**: No central servers or control points
+3. **Authentication-First**: All operations require wallet authentication
+4. **Flexible Payments**: Support for ETH and USDC payments
+5. **Trustless**: Smart contracts ensure fair payment distribution
+6. **Scalable**: P2P architecture scales with network growth
+7. **Privacy-Preserving**: Direct peer connections and encrypted storage
 
-## Headless Architecture
+## Manager-Based Architecture
 
-The SDK now features a headless architecture that separates concerns and improves flexibility:
+The SDK uses five specialized managers, each responsible for a specific aspect of functionality:
 
-```mermaid
-graph TD
-    subgraph Application Layer
-        APP[Application]
-        SIGNER[Wallet/Signer]
-    end
-    
-    subgraph SDK Core
-        HEADLESS[FabstirSDKHeadless]
-        CONTRACTS[HeadlessContractManager]
-        P2P[P2PClient]
-    end
-    
-    subgraph Optional Adapters
-        REACT[React Adapter]
-        VUE[Vue Adapter]
-        NODE[Node.js Utils]
-    end
-    
-    APP --> SIGNER
-    SIGNER --> HEADLESS
-    HEADLESS --> CONTRACTS
-    HEADLESS --> P2P
-    APP -.-> REACT
-    REACT --> HEADLESS
 ```
-
-### Key Architectural Changes
-
-1. **Dynamic Signer Management**: Signers are passed to the SDK, not created by it
-2. **Environment Agnostic**: No browser-specific dependencies in core
-3. **Adapter Pattern**: Optional framework-specific adapters for convenience
-4. **Stateless Contracts**: Contract methods accept signers as parameters
+┌─────────────────────────────────────────┐
+│           FabstirSDK (Main)             │
+│                                         │
+│  ┌─────────────────────────────────┐   │
+│  │        AuthManager              │   │
+│  │  - Wallet authentication        │   │
+│  │  - S5 seed generation           │   │
+│  └─────────────────────────────────┘   │
+│                                         │
+│  ┌─────────────────────────────────┐   │
+│  │        PaymentManager           │   │
+│  │  - ETH/USDC payments           │   │
+│  │  - Job creation                │   │
+│  │  - Token approvals             │   │
+│  └─────────────────────────────────┘   │
+│                                         │
+│  ┌─────────────────────────────────┐   │
+│  │        StorageManager           │   │
+│  │  - S5 network integration      │   │
+│  │  - Data persistence            │   │
+│  │  - Conversation storage        │   │
+│  └─────────────────────────────────┘   │
+│                                         │
+│  ┌─────────────────────────────────┐   │
+│  │        DiscoveryManager         │   │
+│  │  - P2P node creation           │   │
+│  │  - Host discovery              │   │
+│  │  - Peer messaging              │   │
+│  └─────────────────────────────────┘   │
+│                                         │
+│  ┌─────────────────────────────────┐   │
+│  │        SessionManager           │   │
+│  │  - Session orchestration       │   │
+│  │  - Proof submission            │   │
+│  │  - Payment distribution        │   │
+│  └─────────────────────────────────┘   │
+└─────────────────────────────────────────┘
+```
 
 ## Architecture Diagram
 
 ```mermaid
 graph TB
-    subgraph Client Layer
-        HEADLESS_SDK[FabstirSDKHeadless]
-        LLM_SDK[FabstirLLMSDK]
-        LEGACY_SDK[FabstirSDK - Legacy]
+    subgraph Client Application
         APP[Application]
+        UI[UI Layer]
     end
-
-    subgraph Payment Layer
-        ETH[ETH Native]
-        USDC[USDC Token]
-        USDT[USDT Token]
-        DAI[DAI Token]
+    
+    subgraph FabstirSDK
+        MAIN[FabstirSDK Main]
+        AUTH[AuthManager]
+        PAY[PaymentManager]
+        STORE[StorageManager]
+        DISC[DiscoveryManager]
+        SESS[SessionManager]
     end
-
-    subgraph P2P Network
-        DHT[DHT Network]
-        BOOTSTRAP[Bootstrap Nodes]
-        PEERS[Peer Nodes]
+    
+    subgraph External Systems
+        ETH[Ethereum/Base]
+        S5[S5 Network]
+        P2P[libp2p Network]
+        HOST[Compute Hosts]
     end
-
-    subgraph Blockchain
-        JM[Job Marketplace]
-        PE[Payment Escrow]
-        NR[Node Registry]
-        TOKEN[ERC20 Contracts]
-    end
-
-    subgraph Storage
-        IPFS[IPFS/S5 Network]
-    end
-
-    subgraph LLM Nodes
-        NODE1[LLM Node 1]
-        NODE2[LLM Node 2]
-        NODE3[LLM Node N]
-    end
-
-    APP --> HEADLESS_SDK
-    APP --> LLM_SDK
-    HEADLESS_SDK --> ETH
-    HEADLESS_SDK --> USDC
-    LLM_SDK --> USDC
-    LLM_SDK --> ETH
-    USDC --> TOKEN
-    HEADLESS_SDK <--> DHT
-    HEADLESS_SDK <--> BOOTSTRAP
-    HEADLESS_SDK <--> PEERS
-    HEADLESS_SDK <--> JM
-    HEADLESS_SDK <--> PE
-    HEADLESS_SDK <--> NR
-    HEADLESS_SDK <--> NODE1
-    HEADLESS_SDK <--> NODE2
-    HEADLESS_SDK <--> NODE3
-    NODE1 <--> IPFS
-    NODE2 <--> IPFS
-    NODE3 <--> IPFS
+    
+    APP --> MAIN
+    MAIN --> AUTH
+    MAIN --> PAY
+    MAIN --> STORE
+    MAIN --> DISC
+    MAIN --> SESS
+    
+    AUTH --> ETH
+    PAY --> ETH
+    STORE --> S5
+    DISC --> P2P
+    SESS --> HOST
+    
+    SESS --> PAY
+    SESS --> STORE
+    SESS --> DISC
 ```
 
 ## Core Components
 
-### 1. FabstirSDKHeadless
+### FabstirSDK
 
-The new headless SDK that accepts signers dynamically:
+The main SDK class that:
+- Manages SDK configuration
+- Handles authentication flow
+- Provides access to all managers
+- Maintains singleton manager instances
 
 ```typescript
-class FabstirSDKHeadless extends EventEmitter {
-  // No provider/signer stored at construction
-  private provider?: ethers.providers.Provider;
-  private signer?: ethers.Signer;
-  
-  // Dynamic signer management
-  async setSigner(signer: ethers.Signer): Promise<void>
-  clearSigner(): void
-  hasSigner(): boolean
-  
-  // Core functionality
-  private contracts: HeadlessContractManager;
-  private p2pClient: P2PClient;
-  private config: HeadlessConfig;
-  
-  // State management
-  private jobs: Map<number, JobState>;
-  private nodes: Map<string, NodeInfo>;
-  private streams: Map<string, P2PResponseStream>;
+class FabstirSDK {
+  constructor(config: SDKConfig)
+  authenticate(privateKey: string): Promise<AuthResult>
+  getAuthManager(): AuthManager
+  getPaymentManager(): PaymentManager
+  getStorageManager(): Promise<StorageManager>
+  getDiscoveryManager(): DiscoveryManager
+  getSessionManager(): Promise<SessionManager>
 }
 ```
 
-**Key Features:**
-- No browser dependencies
-- Dynamic signer updates
-- Works in Node.js, Deno, and browsers
-- Event-driven architecture maintained
+### SDKConfig
 
-### 2. FabstirLLMSDK
-
-Specialized SDK for smart contract interactions with USDC/ETH payment support:
+Configuration for the SDK:
 
 ```typescript
-class FabstirLLMSDK extends EventEmitter {
-  constructor(provider: ethers.providers.Provider)
-  
-  // Payment method routing
-  async submitJob(params: JobSubmissionParams): Promise<string>
-  private async submitJobWithUSDC(params: JobSubmissionParams): Promise<string>
-  private async submitJobWithETH(params: JobSubmissionParams): Promise<string>
-  
-  // Automatic token approval handling
-  private async ensureTokenApproval(token: string, amount: string): Promise<void>
+interface SDKConfig {
+  rpcUrl?: string;              // Ethereum RPC endpoint
+  s5PortalUrl?: string;         // S5 storage portal
+  contractAddresses?: {
+    jobMarketplace?: string;
+    nodeRegistry?: string;
+    usdcToken?: string;
+  };
 }
 ```
 
-**Payment Features:**
-- Automatic payment token selection
-- USDC balance checking
-- Automatic approval handling
-- ETH and ERC20 token support
+## Manager Components
 
-### 3. HeadlessContractManager
+### 1. AuthManager
 
-Contract manager that accepts signers in method calls:
+Handles all authentication-related operations:
 
-```typescript
-class HeadlessContractManager {
-  // No stored signer - passed in each method
-  async postJob(
-    jobDetails: JobDetails,
-    requirements: JobRequirements,
-    signer: ethers.Signer
-  ): Promise<Transaction>
-  
-  async postJobWithToken(
-    jobDetails: JobDetails,
-    requirements: JobRequirements,
-    paymentToken: string,
-    paymentAmount: string,
-    signer: ethers.Signer
-  ): Promise<Transaction>
-}
-```
+- **Wallet Integration**: Supports private key authentication
+- **Signer Management**: Provides ethers.js signer for transactions
+- **S5 Seed Generation**: Derives deterministic seed from wallet signature
+- **Network Detection**: Identifies and validates chain ID
 
-### 4. P2PClient
+Key Methods:
+- `authenticate()`: Authenticate with provider
+- `getSigner()`: Get ethers signer
+- `getS5Seed()`: Get S5 storage seed
+- `getUserAddress()`: Get wallet address
+- `isAuthenticated()`: Check auth status
 
-Handles all peer-to-peer networking (unchanged):
+### 2. PaymentManager
 
-```typescript
-class P2PClient {
-  private libp2p: Libp2p;
-  private discovery: PeerDiscovery;
-  private protocols: Map<string, Protocol>;
-  
-  // Core P2P operations (work without signer)
-  async findProviders(query: ProviderQuery): Promise<DiscoveredNode[]>
-  async sendJobRequest(nodeId: string, request: JobRequest): Promise<JobResponse>
-  async createStream(nodeId: string, options: StreamOptions): Promise<Stream>
-}
-```
+Manages all payment operations:
+
+- **ETH Payments**: Direct ETH transfers for jobs
+- **USDC Payments**: ERC20 token payments with approval
+- **Job Creation**: Creates session jobs on smart contracts
+- **Gas Estimation**: Calculates transaction costs
+- **Payment Tracking**: Monitors payment status
+
+Key Methods:
+- `createETHSessionJob()`: Create ETH-funded job
+- `approveUSDC()`: Approve USDC spending
+- `createUSDCSessionJob()`: Create USDC-funded job
+- `completeSessionJob()`: Complete job and release payment
+
+### 3. StorageManager
+
+Interfaces with S5 decentralized storage:
+
+- **S5 Client**: Manages S5 network connection
+- **Data Persistence**: Stores conversation data
+- **Content Addressing**: Uses CIDs for data retrieval
+- **Metadata Support**: Attaches metadata to stored data
+- **User Data Management**: Lists and manages user's data
+
+Key Methods:
+- `initialize()`: Setup S5 client with auth
+- `storeData()`: Store data with optional metadata
+- `retrieveData()`: Retrieve data by key
+- `listUserData()`: List all user's stored data
+
+### 4. DiscoveryManager
+
+Handles P2P networking and discovery:
+
+- **libp2p Integration**: Full libp2p v2.x support
+- **Node Creation**: Creates and manages P2P nodes
+- **Peer Discovery**: DHT-based peer discovery
+- **Direct Messaging**: Peer-to-peer messaging
+- **Host Selection**: Finds suitable compute hosts
+
+Key Methods:
+- `createNode()`: Start P2P node
+- `connectToPeer()`: Connect to specific peer
+- `getConnectedPeers()`: List connected peers
+- `sendMessage()`: Send message to peer
+- `findHost()`: Find host matching criteria
+- `stop()`: Shutdown P2P node
+
+### 5. SessionManager
+
+Orchestrates complete session workflows:
+
+- **Session Creation**: Coordinates job creation with discovery
+- **Proof Management**: Handles proof submission
+- **Payment Distribution**: Manages 90/10 payment split
+- **Session Storage**: Persists session data
+- **Status Tracking**: Monitors session lifecycle
+
+Key Methods:
+- `createSession()`: Create new compute session
+- `submitProof()`: Submit computation proof
+- `completeSession()`: Complete and distribute payments
+- `storeSessionData()`: Store session-specific data
+- `getSessionData()`: Retrieve session data
+- `getSessionStatus()`: Check session status
 
 ## Payment System
 
-### Payment Token Support
+### Payment Flow
 
-The SDK supports multiple payment tokens on Base Sepolia:
+1. **Job Creation**: User creates job with payment (ETH or USDC)
+2. **Escrow**: Payment held in smart contract
+3. **Execution**: Host performs computation
+4. **Proof Submission**: Host submits proof of work
+5. **Payment Release**: Contract distributes payment (90% host, 10% treasury)
 
-| Token | Symbol | Network | Base Sepolia Contract | Decimals |
-|-------|--------|---------|----------------------|----------|
-| Ether | ETH | Native | N/A | 18 |
-| USD Coin | USDC | ERC20 | 0x036CbD53842c5426634e7929541eC2318f3dCF7e | 6 |
-| FAB Token | FAB | ERC20 | 0xC78949004B4EB6dEf2D66e49Cd81231472612D62 | 18 |
-
-### Payment Flow Comparison
-
-#### Old Flow (FAB Tokens)
-```mermaid
-sequenceDiagram
-    Client->>SDK: submitJob(params)
-    SDK->>FABToken: transfer(amount)
-    FABToken->>Contract: transferFrom(client, contract, amount)
-    Contract->>Node: JobPosted event
-```
-
-#### New Flow (USDC/ETH)
-```mermaid
-sequenceDiagram
-    Client->>SDK: submitJob(params, paymentToken)
-    
-    alt ETH Payment
-        SDK->>Contract: postJob{value: amount}()
-    else USDC Payment
-        SDK->>USDC: balanceOf(client)
-        SDK->>USDC: allowance(client, contract)
-        alt Needs Approval
-            SDK->>USDC: approve(contract, amount)
-        end
-        SDK->>Contract: postJobWithToken(token, amount)
-    end
-    
-    Contract->>Node: JobPosted event
-```
-
-### Automatic Approval Management
-
-The SDK automatically handles ERC20 token approvals:
+### ETH Payment
 
 ```typescript
-// Internal flow for USDC payments
-async function submitJobWithUSDC(params) {
-  // 1. Check balance
-  const balance = await usdcContract.balanceOf(userAddress);
-  if (balance < paymentAmount) throw new Error('Insufficient USDC');
-  
-  // 2. Check allowance
-  const allowance = await usdcContract.allowance(userAddress, jobMarketplace);
-  
-  // 3. Approve if needed
-  if (allowance < paymentAmount) {
-    await usdcContract.approve(jobMarketplace, paymentAmount);
-  }
-  
-  // 4. Submit job
-  return await jobMarketplace.postJobWithToken(
-    modelId, prompt, offerPrice, maxTokens, USDC_ADDRESS, paymentAmount
-  );
-}
+// Direct ETH transfer with job creation
+await paymentManager.createETHSessionJob(
+  hostAddress,
+  '0.005',  // ETH amount
+  5000,     // price per token
+  3600,     // duration
+  300       // proof interval
+);
+```
+
+### USDC Payment
+
+```typescript
+// Requires approval first
+await paymentManager.approveUSDC(usdcAddress, '100');
+await paymentManager.createUSDCSessionJob(
+  hostAddress,
+  usdcAddress,
+  '100',    // USDC amount
+  5000,     // price per token
+  3600,     // duration
+  300       // proof interval
+);
 ```
 
 ## P2P Discovery Process
 
-The SDK uses a multi-layered approach for discovering LLM nodes:
+1. **Node Initialization**
+   ```typescript
+   await discoveryManager.createNode({
+     listen: ['/ip4/0.0.0.0/tcp/4001'],
+     bootstrap: [...]
+   });
+   ```
 
-### Discovery Flow
+2. **DHT Population**
+   - Node connects to bootstrap peers
+   - DHT routing tables populate
+   - Peer capabilities advertised
 
-```mermaid
-sequenceDiagram
-    participant SDK
-    participant Bootstrap
-    participant DHT
-    participant Providers
-    
-    SDK->>Bootstrap: Connect to bootstrap nodes
-    Bootstrap->>SDK: Return peer list
-    SDK->>DHT: Join DHT network
-    DHT->>SDK: Routing table established
-    
-    SDK->>DHT: Query for model providers
-    DHT->>Providers: Discover matching nodes
-    Providers->>SDK: Return capabilities
-    SDK->>SDK: Filter and rank nodes
-```
+3. **Host Discovery**
+   ```typescript
+   const host = await discoveryManager.findHost({
+     minReputation: 100,
+     requiredModels: ['llama-3.2-1b']
+   });
+   ```
 
-### Node Selection Algorithm
+4. **Direct Communication**
+   - Establish direct connection to selected host
+   - Exchange job details and negotiate terms
+   - Begin computation
 
-```typescript
-function selectOptimalNode(nodes: DiscoveredNode[], criteria: SelectionCriteria): DiscoveredNode {
-  // 1. Filter by requirements
-  const eligible = nodes.filter(node => 
-    node.capabilities.models.includes(criteria.modelId) &&
-    node.latency <= criteria.maxLatency &&
-    parseInt(node.capabilities.pricePerToken) <= criteria.maxPrice
-  );
-  
-  // 2. Score nodes
-  const scored = eligible.map(node => ({
-    node,
-    score: calculateScore(node, criteria)
-  }));
-  
-  // 3. Select best node
-  return scored.sort((a, b) => b.score - a.score)[0].node;
-}
-```
-
-## Job Lifecycle
-
-### Job States
-
-```mermaid
-stateDiagram-v2
-    [*] --> Negotiating: Submit Job
-    Negotiating --> Posted: Price Agreed
-    Posted --> Claimed: Node Claims
-    Claimed --> Processing: Start Processing
-    Processing --> Streaming: If Stream Enabled
-    Processing --> Completed: Direct Response
-    Streaming --> Completed: Stream Finished
-    Completed --> PaymentReleased: Payment Released
-    PaymentReleased --> [*]: Job Done
-    
-    Negotiating --> Failed: No Nodes/Insufficient Funds
-    Processing --> Failed: Processing Error
-    Failed --> [*]: Job Failed
-```
-
-### Detailed Job Flow with Payments
+## Session Lifecycle
 
 ```mermaid
 sequenceDiagram
-    participant Client
-    participant SDK
-    participant Token
-    participant Contract
-    participant Node
-    participant Storage
+    participant User
+    participant SessionManager
+    participant PaymentManager
+    participant DiscoveryManager
+    participant StorageManager
+    participant Host
     
-    Client->>SDK: submitJob(params, paymentToken: 'USDC')
+    User->>SessionManager: createSession()
+    SessionManager->>DiscoveryManager: findHost()
+    DiscoveryManager->>Host: discover
+    Host-->>DiscoveryManager: capabilities
+    DiscoveryManager-->>SessionManager: hostAddress
+    SessionManager->>PaymentManager: createJob()
+    PaymentManager-->>SessionManager: jobId
+    SessionManager->>StorageManager: storeMetadata()
+    SessionManager-->>User: sessionId
     
-    rect rgb(200, 230, 255)
-        Note over SDK,Token: Payment Preparation
-        SDK->>Token: Check balance
-        SDK->>Token: Check allowance
-        SDK->>Token: Approve if needed
+    loop During Computation
+        Host->>SessionManager: submitProof()
+        SessionManager->>StorageManager: storeProof()
     end
     
-    SDK->>Contract: postJobWithToken(USDC, amount)
-    Contract->>Contract: Escrow payment
-    Contract-->>Node: JobPosted event
-    
-    Node->>Contract: claimJob(jobId)
-    Node->>Node: Process job
-    
-    alt Streaming
-        loop While Processing
-            Node->>Client: streamToken()
-        end
-    else Batch Result
-        Node->>Storage: storeResult()
-        Storage->>Node: resultHash
-    end
-    
-    Node->>Contract: submitResult(jobId, resultHash)
-    Contract->>Token: Transfer payment to node
-    Contract->>Client: JobCompleted event
+    User->>SessionManager: completeSession()
+    SessionManager->>PaymentManager: completeJob()
+    PaymentManager-->>Host: payment (90%)
+    PaymentManager-->>Treasury: fee (10%)
+    SessionManager-->>User: completion
 ```
 
 ## Contract Interaction Flow
 
 ### Smart Contract Architecture
 
-```mermaid
-graph LR
-    subgraph Contracts
-        JM[JobMarketplace]
-        PE[PaymentEscrow]
-        NR[NodeRegistry]
-    end
-    
-    subgraph Tokens
-        ETH[ETH Native]
-        USDC[USDC Contract]
-        USDT[USDT Contract]
-    end
-    
-    subgraph Participants
-        CLIENT[Client]
-        NODE[LLM Node]
-        TREASURY[Protocol Treasury]
-    end
-    
-    CLIENT -->|Post Job| JM
-    CLIENT -->|Approve| USDC
-    USDC -->|TransferFrom| JM
-    ETH -->|msg.value| JM
-    NODE -->|Register| NR
-    NODE -->|Claim Job| JM
-    NODE -->|Submit Result| JM
-    JM -->|Release Payment| NODE
-    JM -->|Protocol Fee| TREASURY
-    JM -->|Query Nodes| NR
 ```
+┌──────────────────────────┐
+│   JobMarketplaceFABWithS5│
+│                          │
+│  - createSessionJobETH() │
+│  - createSessionJobToken()│
+│  - completeSessionJob()  │
+│  - submitProof()         │
+└──────────────────────────┘
+            │
+            ├──────────────┐
+            │              │
+    ┌───────▼────┐  ┌──────▼──────┐
+    │NodeRegistry│  │ProofSystem  │
+    │            │  │             │
+    │ - register │  │ - verify    │
+    │ - lookup   │  │ - store     │
+    └────────────┘  └─────────────┘
+```
+
+### Contract Addresses (Base Sepolia - Jan 2025)
+
+- JobMarketplace: `0xD937c594682Fe74E6e3d06239719805C04BE804A`
+- NodeRegistry: `0x87516C13Ea2f99de598665e14cab64E191A0f8c4`
+- ProofSystem: `0x2ACcc60893872A499700908889B38C5420CBcFD1`
+- USDC Token: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
+
+## Storage Architecture
+
+### S5 Network Integration
+
+```
+┌─────────────────┐
+│  StorageManager │
+└────────┬────────┘
+         │
+    ┌────▼────┐
+    │S5 Client│
+    └────┬────┘
+         │
+┌────────▼────────┐
+│   S5 Network    │
+│                 │
+│ - Decentralized │
+│ - Content-based │
+│ - Encrypted     │
+└─────────────────┘
+```
+
+### Data Types Stored
+
+1. **Session Metadata**: Job details, timestamps, participants
+2. **Conversation Data**: Messages, prompts, responses
+3. **Proof Data**: Computation proofs, checkpoints
+4. **User Preferences**: Settings, model preferences
 
 ## Security Architecture
 
-### Authentication Flow
+### Authentication Security
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant SDK
-    participant Node
-    
-    Client->>SDK: Set signer
-    SDK->>SDK: Validate signer
-    SDK->>Node: Request challenge
-    Node->>SDK: Challenge nonce
-    SDK->>SDK: Sign challenge with signer
-    SDK->>Node: Submit signature
-    Node->>Node: Verify signature
-    Node->>SDK: Session established
-```
+- Private keys never leave client
+- S5 seed derived from wallet signature
+- All managers require authentication
 
-### Security Layers
+### Payment Security
 
-1. **Transport Security**: TLS/Noise protocol for P2P connections
-2. **Message Security**: End-to-end encryption for sensitive data
-3. **Payment Security**: Smart contract escrow with atomic swaps
-4. **Signer Security**: Application manages private keys, SDK never stores them
+- Smart contract escrow
+- Atomic payment distribution
+- No trust required between parties
+
+### Data Security
+
+- End-to-end encryption in S5
+- Content-addressed storage
+- User-controlled access
+
+### Network Security
+
+- libp2p encryption (Noise protocol)
+- Peer identity verification
+- DHT security features
 
 ## Performance Considerations
 
-### Connection Pooling
+### Optimization Strategies
 
-```typescript
-class ConnectionPool {
-  private connections: Map<string, Connection>;
-  private maxConnections: number = 50;
-  private idleTimeout: number = 300000; // 5 minutes
-  
-  async getConnection(nodeId: string): Promise<Connection> {
-    // Reuse existing connection
-    if (this.connections.has(nodeId)) {
-      return this.connections.get(nodeId);
-    }
-    
-    // Create new connection with limits
-    if (this.connections.size >= this.maxConnections) {
-      await this.evictIdleConnections();
-    }
-    
-    const conn = await this.createConnection(nodeId);
-    this.connections.set(nodeId, conn);
-    return conn;
-  }
-}
-```
+1. **Connection Pooling**: Reuse P2P connections
+2. **Caching**: Cache discovery results
+3. **Batch Operations**: Batch storage operations
+4. **Lazy Loading**: Initialize managers on-demand
+5. **Stream Processing**: Use streaming for large responses
 
-### Caching Strategy
+### Benchmarks
 
-- **Node Discovery**: 5-minute TTL for discovered nodes
-- **Token Balances**: Cached per block
-- **Allowances**: Cached until changed
-- **Job Results**: Permanent cache in IPFS
+| Operation | Expected Time | Notes |
+|-----------|--------------|-------|
+| Authentication | < 1s | Wallet signature |
+| Session Creation | 3-5s | Including discovery |
+| S5 Store (1KB) | 1-2s | Depends on network |
+| P2P Discovery | 2-5s | First discovery |
+| Job Creation | 3-5s | Blockchain tx |
+| USDC Approval | 2-4s | One-time per token |
 
-## Design Decisions
+### Scalability Factors
 
-### Why Headless Architecture?
+- **P2P Network Size**: More peers improve discovery
+- **S5 Network Load**: Distributed storage scales well
+- **Blockchain Congestion**: Affects transaction times
+- **Host Availability**: More hosts reduce wait times
 
-- **Flexibility**: Works in any JavaScript environment
-- **Separation of Concerns**: Applications manage wallets, SDK handles operations
-- **Testability**: Easier to test without browser dependencies
-- **Maintainability**: Cleaner codebase with single responsibility
+## Future Enhancements
 
-### Why USDC/ETH over FAB Tokens?
+### Planned Features
 
-- **Liquidity**: Major tokens have better liquidity
-- **User Experience**: Users already have ETH/USDC
-- **Reduced Friction**: No need to acquire custom tokens
-- **Market Standard**: Aligns with DeFi ecosystem
+1. **Multi-Model Sessions**: Single session, multiple models
+2. **Batch Job Processing**: Multiple prompts in one transaction
+3. **Advanced Routing**: Intelligent host selection
+4. **Cross-Chain Support**: Expand beyond Base
+5. **Privacy Features**: Zero-knowledge proofs
+6. **Model Marketplace**: Direct model trading
 
-### Why Dynamic Signer Management?
+### Architecture Evolution
 
-- **Security**: SDK never stores private keys
-- **Flexibility**: Easy wallet switching
-- **Multi-Account**: Support for multiple signers
-- **Framework Agnostic**: Works with any wallet library
+- Enhanced manager modularity
+- Plugin system for custom managers
+- WebAssembly support for compute
+- IPFS integration alongside S5
+- Layer 2 scaling solutions
 
-### Future Enhancements
+## See Also
 
-1. **Multi-chain Support**: Deploy to multiple L2s
-2. **Advanced Payment Options**: Subscription models, batch payments
-3. **Zero-Knowledge Proofs**: Privacy-preserving job submissions
-4. **Decentralized Governance**: DAO for protocol upgrades
-5. **Cross-chain Bridges**: Payment token bridges between chains
+- [SDK API Reference](SDK_API.md)
+- [Manager Documentation](SDK_QUICK_REFERENCE.md)
+- [P2P Configuration](P2P_CONFIGURATION.md)
+- [Setup Guide](SETUP_GUIDE.md)
+- [Integration Testing](INTEGRATED_TESTING.md)
+
+---
+
+*Last updated: January 2025 - Manager-Based Architecture v2.0*

@@ -1,446 +1,285 @@
 # Fabstir LLM SDK Quick Reference
 
-Quick reference guide for the Fabstir LLM SDK with headless architecture and USDC/ETH payments.
+Quick reference guide for the Fabstir LLM SDK with manager-based architecture.
 
 ## Installation
 
+### Development (npm link)
+```bash
+# In SDK directory
+cd ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-sdk
+npm link
+
+# In UI directory
+cd ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-ui
+npm link @fabstir/llm-sdk
+```
+
+### Production
 ```bash
 npm install @fabstir/llm-sdk ethers
 ```
 
 ## Quick Start
 
-### Headless SDK (Recommended)
+### Basic SDK Usage
 
 ```typescript
-import { FabstirSDKHeadless } from '@fabstir/llm-sdk';
-import { ethers } from 'ethers';
+import { FabstirSDK } from '@fabstir/llm-sdk';
 
-// Create SDK
-const sdk = new FabstirSDKHeadless({
-  mode: 'production',
-  network: 'base-sepolia'
+// Initialize SDK
+const sdk = new FabstirSDK({
+  rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/your-key',
+  s5PortalUrl: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p'
 });
 
-// Set signer
-const signer = await getSigner();
-await sdk.setSigner(signer);
+// Authenticate
+await sdk.authenticate('0x1234567890abcdef...');
 
-// Submit job with USDC
-const job = await sdk.submitJob({
-  modelId: 'gpt-3.5-turbo',
-  prompt: 'Hello world',
-  maxTokens: 100,
-  offerPrice: '1000000',    // 1 USDC
-  paymentToken: 'USDC'
-});
+// Get managers
+const sessionManager = await sdk.getSessionManager();
+const storageManager = await sdk.getStorageManager();
 ```
 
-### FabstirLLMSDK (Contract-focused)
+## Manager Pattern
 
+The SDK uses a manager-based architecture with 5 specialized managers:
+
+### 1. AuthManager
 ```typescript
-import { FabstirLLMSDK } from '@fabstir/llm-sdk';
+const authManager = sdk.getAuthManager();
 
-const provider = new ethers.providers.Web3Provider(window.ethereum);
-const sdk = new FabstirLLMSDK(provider);
-
-// Automatic USDC approval handling
-const jobId = await sdk.submitJob({
-  modelId: 'gpt-3.5-turbo',
-  prompt: 'Hello world',
-  maxTokens: 100,
-  offerPrice: '1000000',
-  paymentToken: 'USDC'
-});
-```
-
-## Core Classes
-
-| Class | Purpose | Key Features |
-|-------|---------|--------------|
-| `FabstirSDKHeadless` | Main SDK, environment-agnostic | Dynamic signer, no browser deps |
-| `FabstirLLMSDK` | Contract interactions | Auto USDC approval, payment routing |
-| `FabstirSDK` | Legacy compatibility | Requires `connect()` call |
-| `HeadlessContractManager` | Contract operations | Signer passed per method |
-
-## Payment Methods
-
-### Supported Tokens
-
-| Token | Symbol | Decimals | Base Sepolia Address |
-|-------|--------|----------|---------------------|
-| Ether | ETH | 18 | Native |
-| USD Coin | USDC | 6 | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
-| FAB Token | FAB | 18 | `0xC78949004B4EB6dEf2D66e49Cd81231472612D62` |
-
-### Payment Examples
-
-```typescript
-// ETH Payment
-await sdk.submitJob({
-  // ... job params
-  offerPrice: '1000000000000000',  // 0.001 ETH (wei)
-  paymentToken: 'ETH'
-});
-
-// USDC Payment
-await sdk.submitJob({
-  // ... job params
-  offerPrice: '1000000',           // 1 USDC (6 decimals)
-  paymentToken: 'USDC',
-  paymentAmount: '1000000'         // Optional: different amount
-});
-```
-
-## Signer Management
-
-### Setting Signer
-
-```typescript
-// MetaMask
-const provider = new ethers.providers.Web3Provider(window.ethereum);
-const signer = provider.getSigner();
-await sdk.setSigner(signer);
-
-// WalletConnect
-const wcSigner = await getWalletConnectSigner();
-await sdk.setSigner(wcSigner);
-
-// Hardware Wallet
-const ledgerSigner = await getLedgerSigner();
-await sdk.setSigner(ledgerSigner);
-```
-
-### Dynamic Updates
-
-```typescript
-// Switch account
-await sdk.setSigner(newSigner);
-
-// Clear signer
-sdk.clearSigner();
-
-// Check status
-if (sdk.hasSigner()) {
-  const address = await sdk.getSignerAddress();
+// Check authentication
+if (authManager.isAuthenticated()) {
+  const address = authManager.getUserAddress();
+  const signer = authManager.getSigner();
+  const s5Seed = authManager.getS5Seed();
 }
 ```
 
-## Configuration
-
-### Minimal Config
-
+### 2. PaymentManager
 ```typescript
-const sdk = new FabstirSDKHeadless({
-  mode: 'production',
-  network: 'base-sepolia'
+const paymentManager = sdk.getPaymentManager();
+
+// ETH payment
+const ethJob = await paymentManager.createETHSessionJob(
+  hostAddress,    // '0x...'
+  '0.005',        // ETH amount
+  5000,           // price per token
+  3600,           // duration (seconds)
+  300             // proof interval
+);
+
+// USDC payment (requires approval)
+await paymentManager.approveUSDC(usdcAddress, '100');
+const usdcJob = await paymentManager.createUSDCSessionJob(
+  hostAddress,
+  usdcAddress,
+  '100',          // USDC amount
+  5000,           // price per token
+  3600,           // duration
+  300             // proof interval
+);
+```
+
+### 3. StorageManager
+```typescript
+const storageManager = await sdk.getStorageManager();
+
+// Store data
+const cid = await storageManager.storeData(
+  'my-key',
+  { data: 'value' },
+  { metadata: 'optional' }
+);
+
+// Retrieve data
+const data = await storageManager.retrieveData('my-key');
+
+// List user data
+const userDataList = await storageManager.listUserData();
+```
+
+### 4. DiscoveryManager
+```typescript
+const discoveryManager = sdk.getDiscoveryManager();
+
+// Create P2P node
+const peerId = await discoveryManager.createNode({
+  listen: ['/ip4/127.0.0.1/tcp/0'],
+  bootstrap: []
+});
+
+// Find host
+const hostAddress = await discoveryManager.findHost({
+  minReputation: 100
+});
+
+// Send/receive messages
+discoveryManager.onMessage((msg) => console.log(msg));
+await discoveryManager.sendMessage(peerId, { type: 'hello' });
+```
+
+### 5. SessionManager
+```typescript
+const sessionManager = await sdk.getSessionManager();
+
+// Create session
+const session = await sessionManager.createSession({
+  paymentType: 'ETH',
+  amount: '0.005',
+  pricePerToken: 5000,
+  duration: 3600,
+  hostAddress: '0x...' // or use hostCriteria for auto-discovery
+});
+
+// Submit proof
+await sessionManager.submitProof(session.sessionId, proofData);
+
+// Complete session
+const result = await sessionManager.completeSession(session.sessionId);
+console.log('Payment distribution:', result.paymentDistribution);
+```
+
+## Common Patterns
+
+### Session with Auto-Discovery
+```typescript
+const session = await sessionManager.createSession({
+  paymentType: 'ETH',
+  amount: '0.005',
+  hostCriteria: {
+    minReputation: 50,
+    preferredModels: ['llama-3.2-1b-instruct']
+  }
 });
 ```
 
-### Full Config
-
+### Store Session Conversation
 ```typescript
-const sdk = new FabstirSDKHeadless({
-  mode: 'production',
-  network: 'base-sepolia',
-  debug: true,
-  contractAddresses: {
-    jobMarketplace: '0x...',
-    paymentEscrow: '0x...',
-    nodeRegistry: '0x...'
-  },
-  p2pConfig: {
-    bootstrapNodes: [...],
-    enableDHT: true,
-    enableMDNS: true,
-    dialTimeout: 30000,
-    requestTimeout: 60000
-  },
-  retryOptions: {
-    maxRetries: 3,
-    retryDelay: 1000,
-    backoffMultiplier: 2
-  },
-  nodeSelectionStrategy: 'reliability-weighted',
-  failoverStrategy: 'fastest'
-});
+const conversation = {
+  messages: [
+    { role: 'user', content: 'Hello' },
+    { role: 'assistant', content: 'Hi there!' }
+  ],
+  timestamp: Date.now()
+};
+
+await sessionManager.storeSessionData(
+  session.sessionId,
+  conversation
+);
 ```
 
-## Common Operations
-
-### Submit Job
-
-```typescript
-const job = await sdk.submitJob({
-  modelId: 'gpt-3.5-turbo',       // Required
-  prompt: 'Your prompt',           // Required
-  maxTokens: 100,                  // Required
-  offerPrice: '1000000',           // Required (token units)
-  paymentToken: 'USDC',            // Optional (default: 'ETH')
-  paymentAmount: '1000000',        // Optional
-  temperature: 0.7,                // Optional
-  seed: 42,                        // Optional
-  resultFormat: 'json'             // Optional
-});
-```
-
-### Discover Nodes
-
-```typescript
-const nodes = await sdk.discoverNodes({
-  modelId: 'gpt-3.5-turbo',
-  maxLatency: 1000,
-  minReputation: 80,
-  maxPrice: '2000000000000000',
-  forceRefresh: true
-});
-```
-
-### Get Job Status
-
-```typescript
-const status = await sdk.getJobStatus(jobId);
-// Returns: JobStatus enum value
-```
-
-## Events
-
-### Connection Events
-
-```typescript
-sdk.on('connected', ({ address, chainId }) => {
-  console.log(`Connected: ${address} on chain ${chainId}`);
-});
-
-sdk.on('disconnected', () => {
-  console.log('Disconnected');
-});
-```
-
-### Job Events
-
-```typescript
-sdk.on('job:submitted', ({ jobId, request }) => {});
-sdk.on('job:processing', ({ jobId }) => {});
-sdk.on('job:completed', ({ jobId, result }) => {});
-sdk.on('job:failed', ({ jobId, error }) => {});
-```
-
-### Payment Events (FabstirLLMSDK)
-
-```typescript
-sdk.on('jobSubmitted', ({ jobId, paymentToken, txHash }) => {
-  console.log(`Job ${jobId} paid with ${paymentToken}`);
-  console.log(`Transaction: ${txHash}`);
-});
-```
-
-## React Integration
-
-### Basic Hook
-
-```typescript
-import { useSDK } from '@fabstir/llm-sdk/adapters/react';
-
-function Component() {
-  const sdk = useSDK(config, signer);
-  
-  if (!sdk) return <div>Connecting...</div>;
-  
-  // Use SDK
-}
-```
-
-### Advanced Hook
-
-```typescript
-import { useSDKWithState } from '@fabstir/llm-sdk/adapters/react';
-
-function Component() {
-  const {
-    sdk,
-    isConnected,
-    isLoading,
-    error,
-    jobs,
-    submitJob,
-    discoverNodes
-  } = useSDKWithState(config, signer);
-  
-  // Use SDK with state management
-}
-```
-
-## Error Handling
-
-### Error Codes
-
-```typescript
-enum ErrorCode {
-  CONNECTION_FAILED = 'CONNECTION_FAILED',
-  WRONG_NETWORK = 'WRONG_NETWORK',
-  INSUFFICIENT_FUNDS = 'INSUFFICIENT_FUNDS',
-  INSUFFICIENT_BALANCE = 'INSUFFICIENT_BALANCE',  // USDC
-  APPROVAL_FAILED = 'APPROVAL_FAILED',            // USDC
-  JOB_NOT_FOUND = 'JOB_NOT_FOUND',
-  TIMEOUT = 'TIMEOUT',
-  INVALID_INPUT = 'INVALID_INPUT'
-}
-```
-
-### Error Handling Pattern
-
+### Error Handling
 ```typescript
 try {
-  const job = await sdk.submitJob(params);
-} catch (error) {
+  await sessionManager.createSession(options);
+} catch (error: any) {
   switch (error.code) {
+    case 'AUTH_FAILED':
+      console.error('Authentication failed');
+      break;
     case 'INSUFFICIENT_BALANCE':
-      alert('Please add USDC to your wallet');
+      console.error('Insufficient balance');
       break;
-    case 'WRONG_NETWORK':
-      await switchNetwork();
-      break;
-    case 'APPROVAL_FAILED':
-      console.error('USDC approval rejected');
+    case 'SESSION_NOT_FOUND':
+      console.error('Session not found');
       break;
     default:
-      console.error('Unknown error:', error);
+      console.error('Unexpected error:', error);
   }
 }
 ```
 
-## Network Configuration
-
-### Supported Networks
-
-| Network | Chain ID | RPC URL |
-|---------|----------|---------|
-| Base Mainnet | 8453 | https://mainnet.base.org |
-| Base Sepolia | 84532 | https://sepolia.base.org |
-| Local | 31337 | http://localhost:8545 |
-
-### Contract Addresses (Base Sepolia)
+## Constants
 
 ```typescript
-const CONTRACTS = {
-  JobMarketplace: '0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A',
-  ProofSystem: '0xE7dfB24117a525fCEA51718B1D867a2D779A7Bb9',
-  NodeRegistry: '0x87516C13Ea2f99de598665e14cab64E191A0f8c4',
-  HostEarnings: '0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E',
-  PaymentEscrow: '0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C',
-  USDC: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-  FAB: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62'
-};
+// Payment defaults
+MIN_ETH_PAYMENT = '0.005'
+DEFAULT_PRICE_PER_TOKEN = 5000
+DEFAULT_DURATION = 3600
+DEFAULT_PROOF_INTERVAL = 300
+
+// Payment split
+PAYMENT_SPLIT = { 
+  host: 0.9,      // 90% to host
+  treasury: 0.1   // 10% to treasury
+}
+
+// Network
+BASE_SEPOLIA_CHAIN_ID = 84532
 ```
 
-## Migration Cheatsheet
+## Contract Addresses (Base Sepolia)
 
-### From Legacy SDK
-
-| Old (FabstirSDK) | New (FabstirSDKHeadless) |
-|------------------|--------------------------|
-| `new FabstirSDK(config)` | `new FabstirSDKHeadless(config)` |
-| `sdk.connect(provider)` | `sdk.setSigner(signer)` |
-| `price: '1000'` (FAB) | `offerPrice: '1000000', paymentToken: 'USDC'` |
-| Provider in constructor | Signer set dynamically |
-| Browser-only | Works anywhere |
-
-### From FAB to USDC/ETH
-
-| Old (FAB Tokens) | New (USDC/ETH) |
-|------------------|----------------|
-| Implicit FAB payment | Explicit `paymentToken` |
-| Single token type | Multiple tokens supported |
-| Manual approval | Automatic approval |
-| `price` parameter | `offerPrice` + `paymentAmount` |
-
-## Best Practices
-
-### ✅ DO
-
-- Set signer before blockchain operations
-- Handle network mismatches gracefully
-- Check balances before submission
-- Use mock mode for development
-- Clean up with `disconnect()`
-- Cache discovered nodes
-- Use TypeScript for type safety
-
-### ❌ DON'T
-
-- Store private keys in code
-- Create SDK in every render (React)
-- Ignore error handling
-- Use production mode for tests
-- Hardcode contract addresses
-- Skip network validation
+```typescript
+// Latest deployment (January 2025)
+JobMarketplace: 0xD937c594682Fe74E6e3d06239719805C04BE804A
+NodeRegistry: 0x87516C13Ea2f99de598665e14cab64E191A0f8c4
+USDC Token: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
+```
 
 ## Environment Variables
 
 ```bash
-# .env file
-FABSTIR_NETWORK=base-sepolia
-FABSTIR_RPC_URL=https://sepolia.base.org
-FABSTIR_JOB_MARKETPLACE=0x...
-FABSTIR_BOOTSTRAP_NODES=/ip4/34.70.224.193/tcp/4001/p2p/...
-FABSTIR_DEBUG=true
+# .env
+PRIVATE_KEY=0x...
+RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/your-key
+S5_PORTAL_URL=wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p
+CONTRACT_JOB_MARKETPLACE=0xD937c594682Fe74E6e3d06239719805C04BE804A
+CONTRACT_NODE_REGISTRY=0x87516C13Ea2f99de598665e14cab64E191A0f8c4
+CONTRACT_USDC_TOKEN=0x036CbD53842c5426634e7929541eC2318f3dCF7e
 ```
 
-## Testing
-
-### Mock Mode
+## Full Example
 
 ```typescript
-const sdk = new FabstirSDKHeadless({
-  mode: 'mock'  // No real network calls
-});
+import { FabstirSDK } from '@fabstir/llm-sdk';
+import * as dotenv from 'dotenv';
 
-// Mock signer
-const mockSigner = {
-  provider: { getNetwork: async () => ({ chainId: 84532 }) },
-  getAddress: async () => '0x...'
-};
+dotenv.config();
 
-await sdk.setSigner(mockSigner);
+async function main() {
+  // Initialize and authenticate
+  const sdk = new FabstirSDK();
+  await sdk.authenticate(process.env.PRIVATE_KEY!);
+  
+  // Get managers
+  const sessionManager = await sdk.getSessionManager();
+  const storageManager = await sdk.getStorageManager();
+  const discoveryManager = sdk.getDiscoveryManager();
+  
+  // Find host via P2P
+  await discoveryManager.createNode();
+  const hostAddress = await discoveryManager.findHost({
+    minReputation: 100
+  });
+  
+  // Create session
+  const session = await sessionManager.createSession({
+    paymentType: 'ETH',
+    amount: '0.005',
+    hostAddress
+  });
+  
+  // Store conversation
+  await storageManager.storeData(
+    `session-${session.sessionId}`,
+    { prompt: 'Hello AI!', timestamp: Date.now() }
+  );
+  
+  // Complete session
+  const completion = await sessionManager.completeSession(session.sessionId);
+  console.log('Payment distributed:', completion.paymentDistribution);
+}
+
+main().catch(console.error);
 ```
 
-### Test Pattern
+## See Also
 
-```typescript
-describe('Job Submission', () => {
-  let sdk: FabstirSDKHeadless;
-  
-  beforeEach(() => {
-    sdk = new FabstirSDKHeadless({ mode: 'mock' });
-  });
-  
-  afterEach(async () => {
-    await sdk.disconnect();
-  });
-  
-  it('should submit job', async () => {
-    // Test implementation
-  });
-});
-```
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| "No signer available" | Call `setSigner()` first |
-| "Wrong network" | Switch to Base Sepolia |
-| "Insufficient USDC" | Add USDC to wallet |
-| "Approval failed" | Check USDC balance and retry |
-| "Connection failed" | Check bootstrap nodes |
-| "Job not found" | Verify job ID and network |
-
-## Links
-
-- [Full API Reference](./API.md)
-- [Configuration Guide](./CONFIGURATION.md)
-- [Examples](./EXAMPLES.md)
-- [Architecture](./ARCHITECTURE.md)
-- [GitHub](https://github.com/fabstir/llm-sdk)
-- [Discord](https://discord.gg/fabstir)
+- [Full API Reference](SDK_API.md)
+- [Architecture Overview](ARCHITECTURE.md)
+- [Integration Tests](INTEGRATED_TESTING.md)
+- [Examples Directory](../examples/)

@@ -1,26 +1,26 @@
 # Fabstir LLM SDK Setup Guide
 
-This guide walks you through setting up the Fabstir LLM SDK from scratch, including prerequisites, installation, configuration, and your first job submission.
+This guide walks you through setting up the Fabstir LLM SDK with the new manager-based architecture, including prerequisites, installation, configuration, and your first session creation.
 
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Environment Setup](#environment-setup)
-- [Contract Deployment](#contract-deployment)
-- [Bootstrap Node Setup](#bootstrap-node-setup)
-- [SDK Configuration](#sdk-configuration)
-- [First Job Submission](#first-job-submission)
+- [Quick Start](#quick-start)
+- [Manager Configuration](#manager-configuration)
+- [Contract Setup](#contract-setup)
+- [S5 Storage Setup](#s5-storage-setup)
+- [P2P Network Setup](#p2p-network-setup)
 - [Testing Your Setup](#testing-your-setup)
+- [Troubleshooting](#troubleshooting)
 - [Next Steps](#next-steps)
 
 ## Prerequisites
 
-Before you begin, ensure you have the following installed:
-
 ### Required Software
 
-- **Node.js** v16.0 or higher
+- **Node.js** v16.0 or higher (v18+ recommended)
   ```bash
   node --version  # Should output v16.0.0 or higher
   ```
@@ -31,576 +31,484 @@ Before you begin, ensure you have the following installed:
   npm install -g pnpm
   ```
 
-- **Git** for cloning repositories
+- **TypeScript** 4.5 or higher (for TypeScript projects)
   ```bash
-  git --version
+  npm install -g typescript
   ```
 
 ### Blockchain Requirements
 
-- **Ethereum Wallet** (one of the following):
-  - [MetaMask](https://metamask.io/) browser extension
-  - [WalletConnect](https://walletconnect.com/) compatible wallet
-  - Hardware wallet (Ledger, Trezor) with Web3 provider
-
-- **Base Sepolia ETH** for gas fees
-  - Get test ETH from [Base Sepolia Faucet](https://faucet.quicknode.com/base/sepolia)
-  - You'll need at least 0.1 ETH for testing
-
-- **Base Sepolia USDC** for payments (optional)
-  - Get test USDC from [Circle Faucet](https://faucet.circle.com/)
-  - Select Base Sepolia network
-  - You'll need at least 10 USDC for testing
+- **Ethereum Wallet** with private key access
+- **Base Sepolia ETH** for gas fees (minimum 0.01 ETH)
+  - Get from [Coinbase Faucet](https://portal.cdp.coinbase.com/products/faucet)
+  - Or [Alchemy Faucet](https://basesepolia-faucet.com)
+- **Base Sepolia USDC** for USDC payments (optional)
 
 ## Installation
 
-### 1. Install the SDK
+### 1. Production Installation
 
-Using npm:
-```bash
-npm install @fabstir/llm-sdk
-```
-
-Using pnpm (recommended):
-```bash
-pnpm add @fabstir/llm-sdk
-```
-
-Using yarn:
-```bash
-yarn add @fabstir/llm-sdk
-```
-
-### 2. Install Required Dependencies
-
-The SDK requires these peer dependencies:
+Install from npm registry:
 
 ```bash
-pnpm add ethers@^5.7.2
+npm install @fabstir/llm-sdk ethers
+# or
+pnpm add @fabstir/llm-sdk ethers
 ```
 
-### 3. TypeScript Setup (Optional)
+### 2. Development Installation (npm link)
 
-For TypeScript projects, install type definitions:
+For local development with both SDK and UI:
 
 ```bash
-pnpm add -D typescript @types/node
+# Clone and setup SDK
+git clone https://github.com/yourusername/fabstir-llm-sdk.git
+cd fabstir-llm-sdk
+npm install
+npm link
+
+# In your project
+cd your-project
+npm link @fabstir/llm-sdk
 ```
 
-Create or update `tsconfig.json`:
+### 3. Install from GitHub
 
-```json
-{
-  "compilerOptions": {
-    "target": "ES2020",
-    "module": "commonjs",
-    "lib": ["ES2020"],
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "moduleResolution": "node",
-    "types": ["node"]
-  }
-}
+```bash
+npm install git+https://github.com/yourusername/fabstir-llm-sdk.git
 ```
 
 ## Environment Setup
 
-### 1. Create Environment Variables
-
 Create a `.env` file in your project root:
 
 ```bash
-# Network Configuration
-FABSTIR_NETWORK=base-sepolia
-FABSTIR_MODE=production
+# RPC Configuration
+RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY
 
-# Contract Addresses (Base Sepolia)
-FABSTIR_JOB_MARKETPLACE=0x742d35Cc6634C0532925a3b844Bc9e7595f5b9A1
-FABSTIR_PAYMENT_ESCROW=0x12892b2fD2e484B88C19568E7D63bB3b9fE4dB02
-FABSTIR_NODE_REGISTRY=0x8Ba7968C30496aB344bc9e7595f5b9A185E3eD89
+# Wallet Configuration
+PRIVATE_KEY=0x... # Your wallet private key (keep secure!)
 
-# P2P Bootstrap Nodes
-FABSTIR_BOOTSTRAP_NODES="/ip4/34.70.224.193/tcp/4001/p2p/12D3KooWRm8J3iL796zPFi2EtGGtUJn58AG67gcRzQ4FENEemvpg,/ip4/35.185.215.242/tcp/4001/p2p/12D3KooWQH5gJ9YjDfRpLnBKY7vtkbPQkxQ5XbVJHmENw5YjLs2V"
+# Contract Addresses (Base Sepolia - January 2025)
+CONTRACT_JOB_MARKETPLACE=0xD937c594682Fe74E6e3d06239719805C04BE804A
+CONTRACT_NODE_REGISTRY=0x87516C13Ea2f99de598665e14cab64E191A0f8c4
+CONTRACT_PROOF_SYSTEM=0x2ACcc60893872A499700908889B38C5420CBcFD1
+CONTRACT_USDC_TOKEN=0x036CbD53842c5426634e7929541eC2318f3dCF7e
 
-# Optional: RPC Endpoint (if not using default)
-FABSTIR_RPC_URL=https://base-sepolia.public.blastapi.io
+# S5 Storage Configuration
+S5_PORTAL_URL=wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p
+# S5 seed is auto-generated from wallet signature
 
-# Optional: Debug Mode
-FABSTIR_DEBUG=true
+# P2P Configuration (optional)
+P2P_BOOTSTRAP_NODES=["/ip4/127.0.0.1/tcp/4001/p2p/12D3KooW..."]
+P2P_LISTEN_ADDRESSES=["/ip4/0.0.0.0/tcp/0"]
 ```
 
-### 2. Load Environment Variables
+## Quick Start
 
-Install dotenv:
-```bash
-pnpm add dotenv
-```
+### Basic SDK Setup
 
-Load in your application:
 ```typescript
-import dotenv from 'dotenv';
+import { FabstirSDK } from '@fabstir/llm-sdk';
+import * as dotenv from 'dotenv';
+
+// Load environment variables
 dotenv.config();
-```
 
-## Contract Deployment
-
-If you need to deploy your own contracts (optional for testing):
-
-### 1. Clone Contracts Repository
-
-```bash
-git clone https://github.com/fabstir/llm-contracts
-cd llm-contracts
-pnpm install
-```
-
-### 2. Configure Deployment
-
-Create `hardhat.config.ts`:
-
-```typescript
-import { HardhatUserConfig } from "hardhat/config";
-import "@nomicfoundation/hardhat-toolbox";
-
-const config: HardhatUserConfig = {
-  solidity: "0.8.20",
-  networks: {
-    baseSepolia: {
-      url: process.env.RPC_URL || "https://base-sepolia.public.blastapi.io",
-      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
-    },
-  },
-};
-
-export default config;
-```
-
-### 3. Deploy Contracts
-
-```bash
-# Deploy all contracts
-npx hardhat run scripts/deploy.ts --network baseSepolia
-
-# Output will show contract addresses
-# JobMarketplace deployed to: 0x...
-# PaymentEscrow deployed to: 0x...
-# NodeRegistry deployed to: 0x...
-```
-
-### 4. Verify Contracts (Optional)
-
-```bash
-npx hardhat verify --network baseSepolia CONTRACT_ADDRESS
-```
-
-## Bootstrap Node Setup
-
-To run your own bootstrap node:
-
-### 1. Install Fabstir Node
-
-```bash
-npm install -g @fabstir/node
-```
-
-### 2. Initialize Node
-
-```bash
-fabstir-node init --name my-bootstrap-node
-```
-
-This creates:
-- Node identity keypair
-- Configuration file
-- Data directory
-
-### 3. Configure Bootstrap Node
-
-Edit `~/.fabstir/config.yaml`:
-
-```yaml
-# Node Configuration
-identity:
-  peer_id: 12D3KooW...  # Auto-generated
-  private_key: ...       # Keep secret!
-
-# Network Settings
-network:
-  listen_addresses:
-    - /ip4/0.0.0.0/tcp/4001
-    - /ip4/0.0.0.0/tcp/4002/ws
-  
-  announce_addresses:
-    - /ip4/YOUR_PUBLIC_IP/tcp/4001
-    - /ip4/YOUR_PUBLIC_IP/tcp/4002/ws
-
-# Bootstrap Settings
-bootstrap:
-  enabled: true
-  peers: []  # Empty for first bootstrap node
-
-# Discovery
-discovery:
-  dht: true
-  mdns: false  # Disable for public nodes
-
-# API
-api:
-  enabled: true
-  address: 0.0.0.0
-  port: 5001
-```
-
-### 4. Start Bootstrap Node
-
-```bash
-# Start in foreground
-fabstir-node start
-
-# Or run as daemon
-fabstir-node daemon
-```
-
-### 5. Get Node Multiaddr
-
-```bash
-fabstir-node id
-
-# Output:
-# PeerID: 12D3KooWRm8J3iL796zPFi2EtGGtUJn58AG67gcRzQ4FENEemvpg
-# Addresses:
-# - /ip4/34.70.224.193/tcp/4001/p2p/12D3KooWRm8J3iL796zPFi2EtGGtUJn58AG67gcRzQ4FENEemvpg
-```
-
-## SDK Configuration
-
-### Basic Configuration
-
-```typescript
-import { FabstirSDKHeadless } from '@fabstir/llm-sdk';
-import { ethers } from 'ethers';
-
-// Initialize SDK (New Headless version)
-const sdk = new FabstirSDKHeadless({
-  mode: process.env.FABSTIR_MODE as 'mock' | 'production',
-  network: process.env.FABSTIR_NETWORK || 'base-sepolia',
-  
-  // Contract addresses (Base Sepolia)
-  contractAddresses: {
-    jobMarketplace: '0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A',
-    paymentEscrow: '0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C',
-    nodeRegistry: '0x87516C13Ea2f99de598665e14cab64E191A0f8c4',
-  },
-  
-  // P2P configuration
-  p2pConfig: {
-    bootstrapNodes: process.env.FABSTIR_BOOTSTRAP_NODES?.split(',') || [],
-    enableDHT: true,
-    enableMDNS: true,
-  },
-  
-  // Optional settings
-  debug: process.env.FABSTIR_DEBUG === 'true',
-});
-```
-
-### Set Signer (New Headless Approach)
-
-```typescript
-// For browser environment with MetaMask
-const provider = new ethers.providers.Web3Provider(window.ethereum);
-await provider.send("eth_requestAccounts", []);
-const signer = provider.getSigner();
-
-// For Node.js with private key
-const provider = new ethers.providers.JsonRpcProvider(process.env.FABSTIR_RPC_URL);
-const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
-
-// Set signer in SDK (Headless approach)
-await sdk.setSigner(signer);
-
-console.log('Network:', (await signer.provider.getNetwork()).name);
-console.log('Address:', await signer.getAddress());
-```
-
-## First Job Submission
-
-### 1. Check System Health
-
-```typescript
-// Verify everything is working
-const health = await sdk.getSystemHealthReport();
-
-console.log('System Status:', health.status);
-console.log('P2P Connected:', health.p2p.status);
-console.log('Blockchain Connected:', health.blockchain.status);
-
-if (health.status !== 'healthy') {
-  console.error('Issues detected:', health.issues);
-  // Address issues before proceeding
-}
-```
-
-### 2. Discover Available Nodes
-
-```typescript
-// Find nodes that support your desired model
-const nodes = await sdk.discoverNodes({
-  modelId: 'llama-3.2-1b-instruct',
-  maxLatency: 1000,  // Max 1 second latency
-  minReputation: 80, // Minimum reputation score
-});
-
-console.log(`Found ${nodes.length} suitable nodes:`);
-nodes.forEach(node => {
-  console.log(`- ${node.peerId}: ${node.capabilities.models.join(', ')}`);
-  console.log(`  Price: ${node.capabilities.pricePerToken} wei/token`);
-  console.log(`  Latency: ${node.latency}ms`);
-});
-```
-
-### 3. Submit Your First Job
-
-```typescript
-try {
-  // Submit job with payment token selection
-  const result = await sdk.submitJob({
-    prompt: "Write a haiku about blockchain technology",
-    modelId: "llama-3.2-1b-instruct",
-    maxTokens: 50,
-    temperature: 0.7,
-    offerPrice: '1000000',     // 1 USDC
-    paymentToken: 'USDC',       // Use USDC for payment
-    stream: true,  // Enable streaming
+async function setupSDK() {
+  // 1. Initialize SDK with configuration
+  const sdk = new FabstirSDK({
+    rpcUrl: process.env.RPC_URL_BASE_SEPOLIA,
+    s5PortalUrl: process.env.S5_PORTAL_URL,
+    contractAddresses: {
+      jobMarketplace: process.env.CONTRACT_JOB_MARKETPLACE,
+      nodeRegistry: process.env.CONTRACT_NODE_REGISTRY,
+      usdcToken: process.env.CONTRACT_USDC_TOKEN
+    }
   });
 
-  console.log('Job submitted!');
-  console.log('Job ID:', result.jobId);
-  console.log('Selected Node:', result.selectedNode);
-  console.log('Estimated Cost:', ethers.utils.formatEther(result.negotiatedPrice));
+  // 2. Authenticate with private key
+  const authResult = await sdk.authenticate(process.env.PRIVATE_KEY!);
+  console.log('✅ Authenticated as:', authResult.userAddress);
+  console.log('   Network:', authResult.network?.name);
   
-  // Handle streaming response
-  if (result.stream) {
-    console.log('\nResponse:');
-    
-    result.stream.on('token', (token) => {
-      process.stdout.write(token.content);
-    });
-    
-    result.stream.on('end', (summary) => {
-      console.log('\n\nCompleted!');
-      console.log('Total tokens:', summary.totalTokens);
-      console.log('Duration:', summary.duration, 'ms');
-    });
-    
-    result.stream.on('error', (error) => {
-      console.error('Stream error:', error);
-    });
-  }
-} catch (error) {
-  console.error('Job submission failed:', error);
+  // 3. SDK is ready - all managers are now accessible
+  return sdk;
 }
 ```
 
-### 4. Monitor Job Progress
+### Create Your First Session
 
 ```typescript
-// For non-streaming jobs, poll for status
-const jobId = result.jobId;
-
-const checkStatus = async () => {
-  const status = await sdk.getJobStatus(jobId);
-  console.log('Job Status:', status.status);
+async function createFirstSession() {
+  const sdk = await setupSDK();
   
-  if (status.status === 'COMPLETED') {
-    const result = await sdk.getJobResult(jobId);
-    console.log('Result:', result.response);
-    console.log('Tokens used:', result.tokensUsed);
-  } else if (status.status === 'FAILED') {
-    console.error('Job failed:', status.error);
-  } else {
-    // Check again in 2 seconds
-    setTimeout(checkStatus, 2000);
-  }
-};
-
-// Start monitoring
-checkStatus();
+  // Get the session manager
+  const sessionManager = await sdk.getSessionManager();
+  
+  // Create an ETH-funded session
+  const session = await sessionManager.createSession({
+    paymentType: 'ETH',
+    amount: '0.005', // 0.005 ETH
+    pricePerToken: 5000,
+    duration: 3600, // 1 hour
+    hostAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7' // Example host
+  });
+  
+  console.log('✅ Session created!');
+  console.log('   Session ID:', session.sessionId);
+  console.log('   Job ID:', session.jobId);
+  console.log('   Transaction:', session.txHash);
+  
+  return session;
+}
 ```
+
+## Manager Configuration
+
+The SDK uses 5 specialized managers, each handling specific functionality:
+
+### 1. AuthManager Setup
+
+Handles wallet authentication and S5 seed generation:
+
+```typescript
+const authManager = sdk.getAuthManager();
+
+// Check authentication status
+if (!authManager.isAuthenticated()) {
+  await sdk.authenticate(privateKey);
+}
+
+// Access authentication details
+const userAddress = authManager.getUserAddress();
+const signer = authManager.getSigner();
+const s5Seed = authManager.getS5Seed(); // Auto-generated from wallet
+```
+
+### 2. PaymentManager Setup
+
+Manages ETH and USDC payments:
+
+```typescript
+const paymentManager = sdk.getPaymentManager();
+
+// For ETH payments
+const ethJob = await paymentManager.createETHSessionJob(
+  hostAddress,
+  '0.005',  // ETH amount
+  5000,     // price per token
+  3600,     // duration
+  300       // proof interval
+);
+
+// For USDC payments (requires approval)
+await paymentManager.approveUSDC(usdcAddress, '100');
+const usdcJob = await paymentManager.createUSDCSessionJob(
+  hostAddress,
+  usdcAddress,
+  '100',    // USDC amount
+  5000,     // price per token
+  3600,     // duration
+  300       // proof interval
+);
+```
+
+### 3. StorageManager Setup
+
+Interfaces with S5 decentralized storage:
+
+```typescript
+const storageManager = await sdk.getStorageManager();
+
+// Store conversation data
+const cid = await storageManager.storeData(
+  'conversation-123',
+  {
+    messages: [
+      { role: 'user', content: 'Hello' },
+      { role: 'assistant', content: 'Hi there!' }
+    ],
+    timestamp: Date.now()
+  }
+);
+
+// Retrieve data
+const data = await storageManager.retrieveData('conversation-123');
+```
+
+### 4. DiscoveryManager Setup
+
+Handles P2P node discovery:
+
+```typescript
+const discoveryManager = sdk.getDiscoveryManager();
+
+// Create P2P node
+const peerId = await discoveryManager.createNode({
+  listen: ['/ip4/0.0.0.0/tcp/0'],
+  bootstrap: [] // Add bootstrap nodes for production
+});
+
+// Find suitable host
+const hostAddress = await discoveryManager.findHost({
+  minReputation: 100,
+  preferredModels: ['llama-3.2-1b-instruct']
+});
+```
+
+### 5. SessionManager Setup
+
+Orchestrates complete session workflows:
+
+```typescript
+const sessionManager = await sdk.getSessionManager();
+
+// Create session with auto-discovery
+const session = await sessionManager.createSession({
+  paymentType: 'ETH',
+  amount: '0.005',
+  hostCriteria: {
+    minReputation: 50,
+    maxLatency: 500
+  }
+});
+
+// Submit proof during computation
+await sessionManager.submitProof(session.sessionId, proofData);
+
+// Complete session and distribute payments
+const completion = await sessionManager.completeSession(session.sessionId);
+console.log('Payment distribution:', completion.paymentDistribution);
+```
+
+## Contract Setup
+
+### Verify Contract Deployment
+
+The SDK uses deployed contracts on Base Sepolia. Verify they're accessible:
+
+```typescript
+import { ethers } from 'ethers';
+
+async function verifyContracts() {
+  const provider = new ethers.providers.JsonRpcProvider(
+    process.env.RPC_URL_BASE_SEPOLIA
+  );
+  
+  // Check JobMarketplace
+  const jobCode = await provider.getCode(process.env.CONTRACT_JOB_MARKETPLACE!);
+  console.log('JobMarketplace deployed:', jobCode !== '0x');
+  
+  // Check NodeRegistry
+  const nodeCode = await provider.getCode(process.env.CONTRACT_NODE_REGISTRY!);
+  console.log('NodeRegistry deployed:', nodeCode !== '0x');
+  
+  // Check USDC Token
+  const usdcCode = await provider.getCode(process.env.CONTRACT_USDC_TOKEN!);
+  console.log('USDC Token deployed:', usdcCode !== '0x');
+}
+```
+
+### Current Deployment (January 2025)
+
+- **Network**: Base Sepolia (Chain ID: 84532)
+- **JobMarketplace**: `0xD937c594682Fe74E6e3d06239719805C04BE804A`
+- **NodeRegistry**: `0x87516C13Ea2f99de598665e14cab64E191A0f8c4`
+- **ProofSystem**: `0x2ACcc60893872A499700908889B38C5420CBcFD1`
+- **USDC Token**: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
+
+## S5 Storage Setup
+
+S5 provides decentralized storage for conversations and session data.
+
+### S5 Seed Generation
+
+The S5 seed is automatically generated from your wallet:
+
+```typescript
+// This happens internally in AuthManager
+const SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM';
+const signature = await signer.signMessage(SEED_MESSAGE);
+const s5Seed = deriveS5SeedFromSignature(signature);
+```
+
+### S5 Portal Configuration
+
+Default portal: `wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p`
+
+For custom portals:
+
+```typescript
+const sdk = new FabstirSDK({
+  s5PortalUrl: 'wss://your-custom-portal/s5/p2p'
+});
+```
+
+## P2P Network Setup
+
+### Bootstrap Nodes
+
+For production P2P connectivity:
+
+```typescript
+const discoveryManager = sdk.getDiscoveryManager();
+
+await discoveryManager.createNode({
+  listen: ['/ip4/0.0.0.0/tcp/4001'],
+  bootstrap: [
+    '/ip4/34.70.224.193/tcp/4001/p2p/12D3KooWRm8J3iL796zPFi2EtGGtUJn58AG67gcRzQ4FENEemvpg',
+    // Add more bootstrap nodes for redundancy
+  ]
+});
+```
+
+### Firewall Configuration
+
+Ensure these ports are open:
+- TCP 4001: P2P communication
+- TCP 9090: WebSocket connections (if using)
 
 ## Testing Your Setup
 
-### 1. Run SDK Tests
-
-Create `test-setup.ts`:
+### 1. Test Authentication
 
 ```typescript
-import { FabstirSDKHeadless } from '@fabstir/llm-sdk';
-import { ethers } from 'ethers';
-import dotenv from 'dotenv';
+async function testAuth() {
+  const sdk = new FabstirSDK();
+  const result = await sdk.authenticate(process.env.PRIVATE_KEY!);
+  
+  console.assert(result.userAddress, 'Authentication failed');
+  console.assert(result.s5Seed, 'S5 seed generation failed');
+  console.log('✅ Authentication test passed');
+}
+```
 
-dotenv.config();
+### 2. Test Storage
 
-async function testSetup() {
-  console.log('🧪 Testing Fabstir SDK Setup...\n');
+```typescript
+async function testStorage() {
+  const sdk = await setupSDK();
+  const storageManager = await sdk.getStorageManager();
+  
+  const testData = { test: 'data', timestamp: Date.now() };
+  const cid = await storageManager.storeData('test-key', testData);
+  
+  const retrieved = await storageManager.retrieveData('test-key');
+  console.assert(retrieved.test === 'data', 'Storage test failed');
+  console.log('✅ Storage test passed');
+}
+```
+
+### 3. Test Session Creation
+
+```typescript
+async function testSession() {
+  const sdk = await setupSDK();
+  const sessionManager = await sdk.getSessionManager();
   
   try {
-    // 1. Initialize SDK
-    console.log('1️⃣ Initializing SDK...');
-    const sdk = new FabstirSDK({
-      mode: 'production',
-      network: 'base-sepolia',
-      p2pConfig: {
-        bootstrapNodes: process.env.FABSTIR_BOOTSTRAP_NODES?.split(',') || [],
-      },
-      debug: true,
+    const session = await sessionManager.createSession({
+      paymentType: 'ETH',
+      amount: '0.005',
+      hostAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7'
     });
-    console.log('✅ SDK initialized\n');
-    
-    // 2. Connect wallet
-    console.log('2️⃣ Connecting wallet...');
-    const provider = new ethers.providers.JsonRpcProvider(
-      process.env.FABSTIR_RPC_URL
-    );
-    await sdk.connect(provider);
-    console.log('✅ Wallet connected\n');
-    
-    // 3. Check health
-    console.log('3️⃣ Checking system health...');
-    const health = await sdk.getSystemHealthReport();
-    console.log(`✅ System status: ${health.status}`);
-    console.log(`   P2P: ${health.p2p.status}`);
-    console.log(`   Blockchain: ${health.blockchain.status}\n`);
-    
-    // 4. Discover nodes
-    console.log('4️⃣ Discovering nodes...');
-    const nodes = await sdk.discoverNodes({
-      modelId: 'llama-3.2-1b-instruct',
-    });
-    console.log(`✅ Found ${nodes.length} nodes\n`);
-    
-    // 5. Test job submission
-    console.log('5️⃣ Testing job submission...');
-    const result = await sdk.submitJobWithNegotiation({
-      prompt: "Say 'Hello, Fabstir!'",
-      modelId: "llama-3.2-1b-instruct",
-      maxTokens: 10,
-    });
-    console.log(`✅ Job ${result.jobId} submitted to ${result.selectedNode}\n`);
-    
-    console.log('🎉 All tests passed! Your setup is working correctly.');
-    
+    console.log('✅ Session test passed:', session.sessionId);
   } catch (error) {
-    console.error('❌ Test failed:', error);
-    process.exit(1);
+    console.error('Session test failed:', error);
   }
 }
-
-testSetup();
 ```
 
-Run the test:
-
-```bash
-npx ts-node test-setup.ts
-```
-
-### 2. Verify Contract Connections
+### Run All Tests
 
 ```typescript
-// Test contract interactions
-const contracts = await sdk.getContractAddresses();
-console.log('Contract Addresses:', contracts);
+async function runAllTests() {
+  await testAuth();
+  await testStorage();
+  await testSession();
+  console.log('✅ All tests passed!');
+}
 
-// Check your balance
-const balance = await sdk.getBalance();
-console.log('Wallet Balance:', ethers.utils.formatEther(balance), 'ETH');
+runAllTests().catch(console.error);
 ```
-
-### 3. Test Mock Mode
-
-```typescript
-// Test with mock mode for development
-const mockSdk = new FabstirSDK({
-  mode: 'mock',
-});
-
-await mockSdk.connect(provider);
-
-const mockJob = await mockSdk.submitJob({
-  prompt: "Test mock response",
-  modelId: "llama-3.2-1b-instruct",
-  maxTokens: 50,
-});
-
-console.log('Mock job:', mockJob);
-```
-
-## Next Steps
-
-Now that your SDK is set up and working:
-
-1. **Explore the Examples**
-   - Check the [examples/](../examples/) directory
-   - Try different job types and configurations
-
-2. **Read the API Documentation**
-   - [API Reference](API.md) for all available methods
-   - [Configuration Guide](CONFIGURATION.md) for advanced options
-
-3. **Join the Community**
-   - [Discord](https://discord.gg/fabstir) for support
-   - [GitHub Discussions](https://github.com/fabstir/llm-sdk/discussions) for Q&A
-
-4. **Build Your Application**
-   - Integrate the SDK into your project
-   - Implement error handling and retries
-   - Add monitoring and logging
-
-5. **Deploy to Production**
-   - Set up production bootstrap nodes
-   - Configure proper security
-   - Monitor performance and costs
 
 ## Troubleshooting
 
 ### Common Issues
 
-**Connection Timeout**
+#### "Cannot find module '@fabstir/llm-sdk'"
+- Ensure SDK is installed: `npm list @fabstir/llm-sdk`
+- For npm link: verify link is active with `npm ls -g --depth=0 --link=true`
+
+#### "Authentication failed"
+- Check private key format (should start with 0x)
+- Verify private key has no spaces or line breaks
+- Ensure wallet has ETH for gas
+
+#### "Insufficient balance"
+- Check ETH balance: minimum 0.005 ETH for session + gas
+- For USDC: ensure approval transaction completes first
+- Verify correct network (Base Sepolia)
+
+#### "Contract call failed"
+- Verify RPC URL is correct
+- Check contract addresses match deployment
+- Ensure you're on Base Sepolia network
+
+#### "S5 storage timeout"
+- Check internet connectivity
+- Verify S5 portal URL is accessible
+- Try alternative portal if available
+
+#### "P2P connection failed"
+- Check firewall settings
+- Verify bootstrap nodes are running
+- Ensure listen addresses are not blocked
+
+### Debug Mode
+
+Enable debug logging:
+
 ```typescript
-// Increase timeouts
 const sdk = new FabstirSDK({
-  p2pConfig: {
-    dialTimeout: 60000,  // 60 seconds
-    requestTimeout: 120000, // 120 seconds
-  }
+  // ... config
+  debug: true
 });
+
+// Or set environment variable
+process.env.DEBUG = 'fabstir:*';
 ```
 
-**No Nodes Found**
-```typescript
-// Force refresh discovery
-const nodes = await sdk.discoverNodes({
-  modelId: 'llama-3.2-1b-instruct',
-  forceRefresh: true,
-});
-```
+## Next Steps
 
-**Transaction Failures**
-```typescript
-// Add retry logic
-const result = await sdk.submitJobWithRetry(
-  jobParams,
-  {
-    maxRetries: 3,
-    onRetry: (error, attempt) => {
-      console.log(`Retry ${attempt} after error:`, error.message);
-    }
-  }
-);
-```
+1. **Explore Examples**
+   - [Basic Usage](../examples/basic-usage.ts)
+   - [Advanced Usage](../examples/advanced-usage.ts)
+   - [UI Integration](../examples/ui-integration.ts)
 
-For more help, see the [P2P Configuration Guide](P2P_CONFIGURATION.md#troubleshooting).
+2. **Read Documentation**
+   - [SDK API Reference](SDK_API.md)
+   - [Quick Reference](SDK_QUICK_REFERENCE.md)
+   - [Integration Testing](INTEGRATED_TESTING.md)
+
+3. **Join Community**
+   - Discord: [discord.gg/fabstir](https://discord.gg/fabstir)
+   - GitHub: [github.com/fabstir](https://github.com/fabstir)
+
+4. **Deploy to Production**
+   - Switch to Base Mainnet
+   - Use production bootstrap nodes
+   - Implement proper key management
+   - Add monitoring and logging
+
+## Support
+
+- 📖 [Full Documentation](https://docs.fabstir.com)
+- 💬 [Discord Community](https://discord.gg/fabstir)
+- 🐛 [Issue Tracker](https://github.com/fabstir/llm-sdk/issues)
+- 📧 Email: support@fabstir.com
+
+---
+
+*Last updated: January 2025 - Manager-based Architecture v2.0*
