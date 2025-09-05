@@ -2,13 +2,15 @@
 
 This directory contains the Application Binary Interfaces (ABIs) for client integration.
 
-## Current Deployed Contracts (January 4, 2025)
+## Current Deployed Contracts (January 5, 2025)
 
 ### JobMarketplaceFABWithS5
-- **Address**: 0xD937c594682Fe74E6e3d06239719805C04BE804A
+- **Address**: 0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b
 - **Network**: Base Sepolia
-- **Status**: ✅ USDC PAYMENTS VERIFIED WORKING
+- **Status**: ✅ TREASURY + HOST ACCUMULATION ENABLED
 - **Key Features**:
+  - Treasury fee accumulation for batch withdrawals (NEW)
+  - Host earnings accumulation (70% gas savings)
   - USDC payment settlement with 90% host / 10% treasury distribution
   - ETH and USDC payment support fully functional
   - Direct payment distribution (no external escrow)
@@ -16,6 +18,7 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
   - EZKL proof verification integration
   - MIN_DEPOSIT: 0.0002 ETH or 0.80 USDC minimum
   - MIN_PROVEN_TOKENS: 100 tokens minimum
+  - Total gas savings: ~80%
 
 ### ProofSystem
 - **Address**: 0x2ACcc60893872A499700908889B38C5420CBcFD1
@@ -29,9 +32,9 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
 - **Purpose**: Payment distribution with earnings accumulation (not used for session jobs)
 
 ### HostEarnings
-- **Address**: 0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E
+- **Address**: 0x908962e8c6CE72610021586f85ebDE09aAc97776
 - **Network**: Base Sepolia
-- **Purpose**: Tracks accumulated earnings for hosts (not used for session jobs)
+- **Purpose**: Tracks accumulated earnings for hosts with batch withdrawal support
 
 ### NodeRegistryFAB
 - **Address**: 0x87516C13Ea2f99de598665e14cab64E191A0f8c4
@@ -51,7 +54,7 @@ const provider = new ethers.providers.JsonRpcProvider('https://base-sepolia.g.al
 
 // Create contract instances
 const marketplace = new ethers.Contract(
-  '0xD937c594682Fe74E6e3d06239719805C04BE804A', // USDC verified working
+  '0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b', // Treasury + Host accumulation
   JobMarketplaceABI,
   provider
 );
@@ -63,7 +66,7 @@ const paymentEscrow = new ethers.Contract(
 );
 
 const hostEarnings = new ethers.Contract(
-  '0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E',
+  '0x908962e8c6CE72610021586f85ebDE09aAc97776',
   HostEarningsABI,
   provider
 );
@@ -97,10 +100,15 @@ Key functions for session jobs:
 - `completeSessionJob()` - Complete and settle payments
 - `triggerSessionTimeout()` - Handle timeout scenarios
 
-## Emergency Functions (NEW)
+## Treasury Functions (NEW - January 5, 2025)
 
 For treasury address only:
-- `emergencyWithdraw(address token)` - Recover stuck funds
+- `withdrawTreasuryETH()` - Withdraw accumulated ETH fees
+- `withdrawTreasuryTokens(address token)` - Withdraw accumulated token fees
+- `withdrawAllTreasuryFees(address[] tokens)` - Batch withdraw ETH + multiple tokens
+- `accumulatedTreasuryETH()` - View accumulated ETH fees
+- `accumulatedTreasuryTokens(address token)` - View accumulated token fees
+- `emergencyWithdraw(address token)` - Recover stuck funds (respects accumulation)
   - Pass `address(0)` for ETH
   - Pass token address for ERC20 tokens
 
@@ -113,4 +121,4 @@ For treasury address only:
 - `ABANDONMENT_TIMEOUT`: 86400 seconds (24 hours)
 
 ## Last Updated
-January 4, 2025 - USDC payment settlement fully working with 90/10 distribution verified
+January 5, 2025 - Treasury accumulation added for maximum gas savings (~80% reduction)

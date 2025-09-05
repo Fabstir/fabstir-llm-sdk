@@ -1,380 +1,196 @@
 # JobMarketplace Contract Documentation
 
-> ⚠️ **OUTDATED DOCUMENTATION**  
-> This document describes JobMarketplaceFABWithEarnings which has been **SUPERSEDED**.  
-> Current implementation is **JobMarketplaceFABWithS5** with session jobs and direct payments.  
-> See [CURRENT_STATUS.md](../../CURRENT_STATUS.md) and [SESSION_JOBS.md](../../SESSION_JOBS.md) for current architecture.
-
----
-
 ## Current Implementation: JobMarketplaceFABWithS5
 
-**Current Contract Address (Base Sepolia)**: `0xD937c594682Fe74E6e3d06239719805C04BE804A` ✅ (USDC Working - Jan 4, 2025)  
-**Previous Addresses**:
-- `0x6135dfbe0fB50Bc3AF7e9bFD137c5b10ce6D5Dd4` ⚠️ (Job storage issue)
-- `0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A` ⚠️ (Missing USDC validation)  
-**Features**: Session jobs, direct payments, EZKL proof verification, **economic minimums**, **fixed ETH transfers**  
-**Documentation**: See [SESSION_JOBS.md](../../SESSION_JOBS.md)
-
-### Recent Fixes (December 2, 2024)
-- **Payment Distribution**: Fixed using `call{value:}()` instead of `transfer()`
-- **Emergency Withdrawal**: Added `emergencyWithdraw()` for stuck funds recovery
-- **Optional HostEarnings**: Works correctly when set to address(0)
-
-### Economic Minimums
-- **MIN_DEPOSIT**: 0.0002 ETH (~$0.80) - Prevents spam sessions
-- **MIN_PROVEN_TOKENS**: 100 - Ensures meaningful work per proof
-- **Token Minimums**: Configurable per token (800000 for USDC = $0.80)
-
----
-
-## Historical: JobMarketplaceFABWithEarnings (DEPRECATED)
-
-**OLD Contract Address**: `0xEB646BF2323a441698B256623F858c8787d70f9F` ❌ **SUPERSEDED**  
-**Previous Version**: `0x870E74D1Fe7D9097deC27651f67422B598b689Cd` ❌ **DEPRECATED**  
-**Status**: **REPLACED BY JobMarketplaceFABWithS5**
+**Current Contract Address (Base Sepolia)**: `0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b` ✅ (Treasury + Host Accumulation - Jan 5, 2025)
 
 ### Key Features
-- Integration with NodeRegistryFAB for FAB-based host verification
-- USDC payment support through PaymentEscrowWithEarnings
-- **NEW: Host earnings accumulation via HostEarnings contract**
-- **NEW: 40-46% gas savings for multiple job completions**
-- Job lifecycle management (Posted → Claimed → Completed)
-- Automatic earnings credit with 10% platform fee
-- Deadline enforcement for job completion
+- **Treasury Fee Accumulation**: Treasury fees accumulate for batch withdrawals (NEW)
+- **Host Earnings Accumulation**: Via HostEarnings contract integration
+- **Session Jobs**: Multi-prompt AI inference with proof checkpoints
+- **Direct Payments**: Internal `_sendPayments()` function, no external escrow
+- **Multi-Token Support**: ETH and USDC (Base Sepolia: 0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+- **EZKL Proof Verification**: Integration with ProofSystem contract
+- **Economic Minimums**: MIN_DEPOSIT (0.0002 ETH), MIN_PROVEN_TOKENS (100)
+- **Gas Savings**: ~80% reduction through dual accumulation
 
-### Dependencies
-- NodeRegistryFAB (for host verification)
-- PaymentEscrowWithEarnings (for USDC escrow with earnings routing)
-- HostEarnings (for accumulating host payments)
-- OpenZeppelin ReentrancyGuard
-- IERC20 (for USDC transfers)
-
-## Constructor
+### Contract Architecture
 
 ```solidity
-constructor(address _nodeRegistry, address payable _hostEarnings)
-```
-
-### Parameters
-| Name | Type | Description |
-|------|------|-------------|
-| `_nodeRegistry` | `address` | Address of NodeRegistryFAB contract |
-| `_hostEarnings` | `address payable` | Address of HostEarnings contract |
-
-### Example Deployment
-```solidity
-// Deploy with NodeRegistryFAB and HostEarnings addresses
-JobMarketplaceFABWithEarnings marketplace = new JobMarketplaceFABWithEarnings(
-    0x87516C13Ea2f99de598665e14cab64E191A0f8c4,  // NodeRegistryFAB
-    0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E   // HostEarnings
-);
-// Configure USDC
-marketplace.setUsdcAddress(USDC_ADDRESS);
-// Set PaymentEscrowWithEarnings
-marketplace.setPaymentEscrow(PAYMENT_ESCROW_ADDRESS);
-```
-
-## State Variables
-
-### Constants
-| Name | Type | Value | Description |
-|------|------|-------|-------------|
-| `MAX_PAYMENT` | `uint256` | 1000 ether | Maximum payment amount per job |
-| `usdcAddress` | `address` | Configurable | USDC token address (Base Sepolia: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`) |
-
-### Public Variables
-| Name | Type | Description |
-|------|------|-------------|
-| `nodeRegistry` | `NodeRegistryFAB` | FAB-based node registry contract |
-| `paymentEscrow` | `IPaymentEscrow` | Payment escrow contract with earnings routing |
-| `hostEarnings` | `HostEarnings` | Host earnings accumulation contract |
-| `reputationSystem` | `IReputationSystem` | Optional reputation tracking |
-| `nextJobId` | `uint256` | Counter for internal job IDs |
-| `totalEarningsCredited` | `mapping(address => uint256)` | Total earnings credited per host |
-
-## Structs
-
-### Job
-```solidity
-struct Job {
-    address renter;           // Job creator address
-    JobStatus status;         // Current job status
-    address assignedHost;     // Assigned host address
-    uint256 maxPrice;         // Payment amount in USDC
-    uint256 deadline;         // Completion deadline timestamp
-    uint256 completedAt;      // Completion timestamp
-    address paymentToken;     // Payment token (USDC)
-    bytes32 escrowId;        // PaymentEscrow job ID
-    string modelId;          // AI model identifier
-    string inputHash;        // Input data hash
-    string resultHash;       // Result data hash
+contract JobMarketplaceFABWithS5 {
+    // Core components
+    NodeRegistryFAB public nodeRegistry;
+    IProofSystem public proofSystem;
+    HostEarnings public hostEarnings;
+    
+    // Treasury accumulation (NEW)
+    uint256 public accumulatedTreasuryETH;
+    mapping(address => uint256) public accumulatedTreasuryTokens;
+    
+    // Session management
+    mapping(uint256 => Session) public sessions;
+    mapping(uint256 => Job) public jobs;
 }
 ```
 
-### JobStatus
+### Session Job Lifecycle
+
+1. **Creation**: User creates session with deposit
+2. **Active**: Host submits periodic proofs of work
+3. **Completion**: User or host completes, payments distributed
+4. **Settlement**: 90% to host (accumulated), 10% to treasury (accumulated)
+
+### Key Functions
+
+#### Session Management
 ```solidity
-enum JobStatus {
-    Posted,    // Job created and funded
-    Claimed,   // Job assigned to host
-    Completed  // Job finished and paid
-}
+// Create ETH-based session
+function createSessionJob(
+    address host,
+    uint256 deposit,
+    uint256 pricePerToken,
+    uint256 maxDuration,
+    uint256 proofInterval
+) external payable returns (uint256 jobId)
+
+// Create token-based session
+function createSessionJobWithToken(
+    address host,
+    address token,
+    uint256 deposit,
+    uint256 pricePerToken,
+    uint256 maxDuration,
+    uint256 proofInterval
+) external returns (uint256 jobId)
+
+// Submit proof of work
+function submitProofOfWork(
+    uint256 jobId,
+    bytes calldata ekzlProof,
+    uint256 tokensInBatch
+) external returns (bool verified)
+
+// Complete session
+function completeSessionJob(uint256 jobId) external
 ```
 
-## Core Functions
-
-### postJobWithToken
-Posts a new job with USDC payment.
-
+#### Treasury Functions (NEW - January 5, 2025)
 ```solidity
-function postJobWithToken(
-    IJobMarketplace.JobDetails memory details,
-    IJobMarketplace.JobRequirements memory requirements,
-    address paymentToken,
-    uint256 paymentAmount
-) external nonReentrant returns (bytes32)
+// Withdraw accumulated ETH fees
+function withdrawTreasuryETH() external onlyTreasury nonReentrant
+
+// Withdraw accumulated token fees
+function withdrawTreasuryTokens(address token) external onlyTreasury nonReentrant
+
+// Batch withdraw all fees
+function withdrawAllTreasuryFees(address[] calldata tokens) external onlyTreasury nonReentrant
+
+// View accumulated fees
+function accumulatedTreasuryETH() external view returns (uint256)
+function accumulatedTreasuryTokens(address token) external view returns (uint256)
 ```
 
-**Parameters:**
-- `details`: Job execution details (model, prompt, parameters)
-- `requirements`: Job requirements (GPU memory, time limit, etc.)
-- `paymentToken`: Must be USDC address
-- `paymentAmount`: Payment in USDC (6 decimals)
+### Economic Parameters
 
-**Requirements:**
-- Payment token must be USDC
-- Payment amount must be positive
-- User must approve USDC transfer
-- PaymentEscrow must be configured
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| MIN_DEPOSIT | 0.0002 ETH | Minimum session deposit |
+| MIN_PROVEN_TOKENS | 100 | Minimum tokens per proof |
+| TREASURY_FEE_PERCENT | 10% | Platform fee |
+| MIN_SESSION_DURATION | 600 seconds | Minimum session length |
+| ABANDONMENT_TIMEOUT | 24 hours | Timeout for inactive sessions |
+| DISPUTE_WINDOW | 1 hour | Time to dispute after completion |
 
-**Example:**
-```javascript
-// Approve USDC
-await usdc.approve(marketplace.address, "10000000"); // 10 USDC
+### Gas Optimization
 
-// Create job details
-const details = {
-    modelId: "gpt-4",
-    prompt: "Analyze this dataset",
-    maxTokens: 1000,
-    temperature: 70,
-    seed: 42,
-    resultFormat: "json"
-};
+The dual accumulation pattern provides significant gas savings:
 
-const requirements = {
-    minGPUMemory: 16,
-    minReputationScore: 0,
-    maxTimeToComplete: 3600,
-    requiresProof: false
-};
+| Operation | Direct Transfer | With Accumulation | Savings |
+|-----------|----------------|-------------------|---------|
+| Job Completion | ~70,000 gas | ~14,000 gas | 80% |
+| 10 Jobs (Host) | ~700,000 gas | ~140,000 gas | 80% |
+| 10 Jobs (Treasury) | ~250,000 gas | ~140,000 gas | 44% |
 
-// Post job
-const jobId = await marketplace.postJobWithToken(
-    details,
-    requirements,
-    USDC_ADDRESS,
-    "10000000" // 10 USDC
-);
-```
+### Integration with Other Contracts
 
-### claimJob
-Claims an available job (host only).
+#### NodeRegistryFAB
+- Validates host registration
+- Checks FAB token stake (1000 FAB minimum)
+- Address: `0x87516C13Ea2f99de598665e14cab64E191A0f8c4`
 
-```solidity
-function claimJob(uint256 _jobId) external
-```
+#### ProofSystem
+- Verifies EZKL proofs
+- Prevents proof replay attacks
+- Address: `0x2ACcc60893872A499700908889B38C5420CBcFD1`
 
-**Requirements:**
-- Job must exist and be in Posted status
-- Job must not be expired
-- Caller must be registered in NodeRegistryFAB
-- Caller must have active status
-- Caller must have at least 1000 FAB staked
+#### HostEarnings
+- Accumulates host payments
+- Enables batch withdrawals
+- Address: `0x908962e8c6CE72610021586f85ebDE09aAc97776`
 
-**Effects:**
-- Assigns job to caller
-- Changes status to Claimed
-- Emits JobClaimed event
-
-### completeJob
-Completes a claimed job and triggers payment.
-
-```solidity
-function completeJob(
-    uint256 _jobId,
-    string memory _resultHash,
-    bytes memory _proof
-) external nonReentrant
-```
-
-**Requirements:**
-- Caller must be the assigned host
-- Job must be in Claimed status
-- Must be before deadline
-- Result hash must be provided
-
-**Effects:**
-- Changes status to Completed
-- Credits earnings to host's balance (minus 10% fee)
-- Updates reputation if available
-- Emits JobCompleted and EarningsCredited events
-
-**Payment Flow:**
-1. PaymentEscrowWithEarnings routes payment to HostEarnings
-2. 10% fee is deducted (1000 basis points) and sent to TreasuryManager
-3. Host's earnings balance credited with 90% of payment
-4. Host can withdraw accumulated earnings anytime
-
-### getJob
-Retrieves job details.
+### Events
 
 ```solidity
-function getJob(uint256 _jobId) external view returns (
-    address renter,
-    uint256 payment,
-    JobStatus status,
-    address assignedHost,
-    string memory resultHash,
-    uint256 deadline
-)
+// Session lifecycle
+event SessionJobCreated(uint256 indexed jobId, address indexed user, address indexed host, uint256 deposit, uint256 pricePerToken, uint256 maxDuration)
+event ProofSubmitted(uint256 indexed jobId, address indexed host, uint256 tokensClaimed, bytes32 proofHash, bool verified)
+event SessionCompleted(uint256 indexed jobId, address indexed completedBy, uint256 tokensPaid, uint256 paymentAmount, uint256 refundAmount)
+
+// Treasury accumulation
+event TreasuryFeesAccumulated(uint256 amount, address token)
+event TreasuryFeesWithdrawn(uint256 amount, address token)
+
+// Host earnings
+event EarningsCredited(address indexed host, uint256 amount, address token)
 ```
 
-### setPaymentEscrow
-Sets the PaymentEscrow contract (one-time configuration).
+### Security Considerations
 
-```solidity
-function setPaymentEscrow(address _paymentEscrow) external
-```
+1. **ReentrancyGuard**: All state-changing functions protected
+2. **Proof Verification**: Integration with ProofSystem prevents fraud
+3. **Timeout Protection**: Automatic refunds for abandoned sessions
+4. **Access Control**: Treasury-only functions for fee withdrawal
+5. **Emergency Withdrawal**: Respects accumulated amounts
 
-**Requirements:**
-- Can only be set once
-- Must be valid contract address
+### Deployment History
 
-### setUsdcAddress
-Configures USDC token address.
+| Date | Address | Features |
+|------|---------|----------|
+| Jan 5, 2025 | `0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b` | Treasury accumulation added |
+| Jan 4, 2025 | `0x9A945fFBe786881AaD92C462Ad0bd8aC177A8069` | Host accumulation only |
+| Jan 4, 2025 | `0xD937c594682Fe74E6e3d06239719805C04BE804A` | USDC fixes, no accumulation |
+| Dec 2024 | Various | Earlier versions with bugs |
 
-```solidity
-function setUsdcAddress(address _usdc) external
-```
+### Migration from Old Contracts
 
-## Events
+If migrating from non-accumulation contracts:
 
-```solidity
-event JobCreated(uint256 indexed jobId, address indexed renter, string modelId, uint256 maxPrice);
-event JobCreatedWithToken(bytes32 indexed jobId, address indexed renter, address paymentToken, uint256 paymentAmount);
-event JobClaimed(uint256 indexed jobId, address indexed host);
-event JobCompleted(uint256 indexed jobId, string resultHash);
-event EarningsCredited(address indexed host, uint256 amount, address token);
-```
+1. Deploy new JobMarketplaceFABWithS5
+2. Deploy new HostEarnings
+3. Configure treasury address
+4. Update ProofSystem reference
+5. No migration of existing jobs needed (clean slate)
 
-## Integration Flow
+### Best Practices
 
-### Complete Job Lifecycle
-1. **Host Registration** (in NodeRegistryFAB)
-   - Host stakes 1000 FAB tokens
-   - Registers with metadata
+1. **For Users**:
+   - Create sessions with sufficient deposit for expected usage
+   - Complete sessions promptly to release unused funds
+   - Monitor proof submissions for quality
 
-2. **Job Posting**
-   - Renter approves USDC to marketplace
-   - Posts job with payment
-   - USDC transferred to PaymentEscrow
+2. **For Hosts**:
+   - Submit proofs regularly at checkpoint intervals
+   - Withdraw accumulated earnings periodically
+   - Maintain sufficient FAB stake
 
-3. **Job Claiming**
-   - Host claims job
-   - Marketplace verifies FAB stake
-   - Job assigned to host
+3. **For Treasury**:
+   - Use `withdrawAllTreasuryFees()` for batch withdrawals
+   - Monitor accumulated fees regularly
+   - Consider automatic withdrawal triggers
 
-4. **Job Completion**
-   - Host completes work
-   - Submits result hash
-   - Payment released automatically
+### References
 
-5. **Payment Settlement**
-   - 90% credited to host's earnings (e.g., 9 USDC from 10 USDC job)
-   - 10% platform fee to TreasuryManager
-
-6. **Earnings Withdrawal** (NEW)
-   - Host can withdraw accumulated earnings
-   - Batch withdrawal saves gas
-
-## Security Considerations
-
-1. **Reentrancy Protection**: Critical functions use `nonReentrant`
-2. **Deadline Enforcement**: Jobs expire if not completed on time
-3. **Host Verification**: Only FAB-staked hosts can claim jobs
-4. **Payment Safety**: USDC held in escrow until completion
-5. **One-time Configuration**: Critical addresses can only be set once
-
-## Gas Optimization
-
-- **NEW: Earnings accumulation saves 40-46% gas**
-  - Direct transfer: ~115,000 gas per job
-  - Accumulation: ~69,000 gas per job
-  - Example: 5 jobs save ~220,000 gas total
-- Efficient storage packing in Job struct
-- Minimal external calls during critical operations
-- Batch withdrawal reduces per-job gas cost
-
-## Differences from Original JobMarketplace
-
-| Feature | JobMarketplace | JobMarketplaceFAB |
-|---------|----------------|-------------------|
-| Host Registry | NodeRegistry (ETH) | NodeRegistryFAB (FAB) |
-| Minimum Stake | 100 ETH | 1000 FAB |
-| Payment Support | ETH + ERC20 | USDC (configurable) |
-| Host Verification | `getNode()` method | `nodes()` mapping |
-| Deployment | Single | With dependencies |
-
-## Example Usage
-
-### Complete Flow Example
-```javascript
-// 1. Setup contracts
-const marketplace = await ethers.getContractAt("JobMarketplaceFAB", MARKETPLACE_ADDRESS);
-const usdc = await ethers.getContractAt("IERC20", USDC_ADDRESS);
-
-// 2. Post job (as renter)
-await usdc.approve(marketplace.address, ethers.parseUnits("10", 6));
-const tx = await marketplace.postJobWithToken(
-    details,
-    requirements,
-    USDC_ADDRESS,
-    ethers.parseUnits("10", 6)
-);
-const receipt = await tx.wait();
-const jobId = 1; // First job
-
-// 3. Claim job (as host)
-await marketplace.claimJob(jobId);
-
-// 4. Complete job (as host)
-await marketplace.completeJob(jobId, "QmResultHash...", "0x");
-// Earnings are credited, not transferred directly
-
-// 5. Check accumulated earnings
-const hostEarnings = await ethers.getContractAt("HostEarnings", HOST_EARNINGS_ADDRESS);
-const earnings = await hostEarnings.getBalance(hostAddress, USDC_ADDRESS);
-console.log("Host earnings:", earnings); // 9 USDC credited
-
-// 6. Withdraw accumulated earnings (can be done later)
-await hostEarnings.withdrawAll(USDC_ADDRESS);
-const balance = await usdc.balanceOf(hostAddress);
-console.log("Host balance after withdrawal:", balance); // 9 USDC received
-```
-
-## Deployed Addresses
-
-| Network | JobMarketplaceFABWithEarnings | NodeRegistryFAB | PaymentEscrowWithEarnings | HostEarnings |
-|---------|-------------------------------|-----------------|---------------------------|-------------|
-| Base Sepolia | `0xEB646BF2323a441698B256623F858c8787d70f9F` | `0x87516C13Ea2f99de598665e14cab64E191A0f8c4` | `0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C` | `0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E` |
-| Base Mainnet | TBD | TBD | TBD | TBD |
-
-## Verified Transactions
-
-Example successful job flow on Base Sepolia:
-1. FAB Transfer: [0xdf21f074635f5b03a78d3acd7ea90056779759b0b14feba0c042e9d3224a9067](https://sepolia.basescan.org/tx/0xdf21f074635f5b03a78d3acd7ea90056779759b0b14feba0c042e9d3224a9067)
-2. Host Registration: [0xa193198058e70343105b8e8306fa8600421c77417658ad5780b03a202b3666dc](https://sepolia.basescan.org/tx/0xa193198058e70343105b8e8306fa8600421c77417658ad5780b03a202b3666dc)
-3. Job Posted: [0xd186457017d07e7ee5e858c9ca3862bac964624629a8581a77e8ba9a9acd6d8f](https://sepolia.basescan.org/tx/0xd186457017d07e7ee5e858c9ca3862bac964624629a8581a77e8ba9a9acd6d8f)
-4. Job Claimed: [0xb6995908db02db9620631e15641f3e643f826858cb06c2f955fe2feb0b5fc375](https://sepolia.basescan.org/tx/0xb6995908db02db9620631e15641f3e643f826858cb06c2f955fe2feb0b5fc375)
-5. Payment Released: [0x049085aab9e89b8425fd5010c8721a8acb409b952aa9034158b52d0e08062406](https://sepolia.basescan.org/tx/0x049085aab9e89b8425fd5010c8721a8acb409b952aa9034158b52d0e08062406)
+- [SESSION_JOBS.md](../../SESSION_JOBS.md) - Comprehensive session job guide
+- [CURRENT_STATUS.md](../../CURRENT_STATUS.md) - Latest deployment info
+- [Source Code](../../../src/JobMarketplaceFABWithS5.sol) - Contract implementation
+- [Tests](../../../test/JobMarketplace/SessionJobs/) - 340+ test cases

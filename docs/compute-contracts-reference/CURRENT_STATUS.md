@@ -1,24 +1,25 @@
 # Current Documentation Status
 
-**Last Updated: January 4, 2025**
+**Last Updated: January 5, 2025**
 
 This document helps you navigate the Fabstir documentation and identify which files reflect the current architecture vs historical implementations.
 
 ## 🚀 Current Architecture
 
-The project now uses **JobMarketplaceFABWithS5** with fully working USDC payment settlement AND host earnings accumulation:
+The project now uses **JobMarketplaceFABWithS5** with treasury accumulation AND host earnings accumulation:
+- **Treasury Accumulation**: ✅ NEW - Treasury fees accumulate for batch withdrawals
 - **USDC Payments**: ✅ VERIFIED WORKING with 90% host / 10% treasury distribution
-- **ETH Payments**: ✅ WORKING with accumulation in HostEarnings
+- **ETH Payments**: ✅ WORKING with dual accumulation (treasury + host)
 - **Host Earnings**: ✅ Both ETH and USDC accumulate for batch withdrawals
 - **Session Jobs**: Direct, self-contained payments with MIN_DEPOSIT and MIN_PROVEN_TOKENS
-- **Gas Savings**: ~70% reduction through earnings accumulation
+- **Gas Savings**: ~80% reduction through dual accumulation (treasury + host)
 
-### Active Contracts (Base Sepolia - LATEST January 4, 2025)
+### Active Contracts (Base Sepolia - LATEST January 5, 2025)
 
 | Contract | Address | Status |
 |----------|---------|--------|
-| **JobMarketplaceFABWithS5** | `0xD937c594682Fe74E6e3d06239719805C04BE804A` | ✅ USDC & ETH PAYMENTS VERIFIED |
-| **HostEarnings** | `0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E` | ✅ ACCUMULATION WORKING |
+| **JobMarketplaceFABWithS5** | `0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b` | ✅ TREASURY + HOST ACCUMULATION |
+| **HostEarnings** | `0x908962e8c6CE72610021586f85ebDE09aAc97776` | ✅ ACCUMULATION WORKING |
 | **ProofSystem** | `0x2ACcc60893872A499700908889B38C5420CBcFD1` | ✅ FIXED INTERNAL VERIFICATION |
 | **NodeRegistry** | `0x87516C13Ea2f99de598665e14cab64E191A0f8c4` | ✅ CURRENT |
 | **Treasury** | `0xbeaBB2a5AEd358aA0bd442dFFd793411519Bdc11` | ✅ CURRENT |
@@ -30,6 +31,7 @@ The project now uses **JobMarketplaceFABWithS5** with fully working USDC payment
 
 | Contract | Old Address | Issue |
 |----------|-------------|-------|
+| JobMarketplaceFABWithS5 (no treasury accumulation) | `0x9A945fFBe786881AaD92C462Ad0bd8aC177A8069` | Treasury direct transfer, no accumulation |
 | JobMarketplaceFABWithS5 (direct payments) | `0xD937c594682Fe74E6e3d06239719805C04BE804A` | Higher gas costs, no accumulation |
 | JobMarketplaceFABWithS5 (storage issue) | `0x6135dfbe0fB50Bc3AF7e9bFD137c5b10ce6D5Dd4` | Job struct storage problem |
 | JobMarketplaceFABWithS5 (missing USDC validation) | `0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A` | No host validation for USDC |

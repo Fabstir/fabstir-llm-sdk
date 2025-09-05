@@ -24,13 +24,14 @@ export default class PaymentManager {
     try {
       const signer = this.authManager.getSigner();
       const depositAmount = ethers.utils.parseEther(amount);
+      const pricePerTokenWei = ethers.utils.parseUnits(pricePerToken.toString(), 'gwei');
       const contractWithSigner = this.jobMarketplace.connect(signer);
-      const jobIdBN = await contractWithSigner.callStatic.createSessionJob(
-        hostAddress, depositAmount, pricePerToken, duration, proofInterval,
+      const jobIdBN = await contractWithSigner.callStatic['createSessionJob'](
+        hostAddress, depositAmount, pricePerTokenWei, duration, proofInterval,
         { value: depositAmount, gasLimit: 500000 }
       );
-      const tx = await contractWithSigner.createSessionJob(
-        hostAddress, depositAmount, pricePerToken, duration, proofInterval,
+      const tx = await contractWithSigner['createSessionJob'](
+        hostAddress, depositAmount, pricePerTokenWei, duration, proofInterval,
         { value: depositAmount, gasLimit: 500000 }
       );
       const receipt = await tx.wait();
@@ -74,11 +75,13 @@ export default class PaymentManager {
       const signer = this.authManager.getSigner();
       const contractWithSigner = this.jobMarketplace.connect(signer);
       const depositAmount = ethers.utils.parseUnits(amount, PaymentManager.USDC_DECIMALS);
+      // Convert pricePerToken to BigNumber (it's in nanoUSDC, smallest unit)
+      const pricePerTokenBN = ethers.BigNumber.from(pricePerToken);
       const jobIdBN = await contractWithSigner.callStatic.createSessionJobWithToken(
-        hostAddress, tokenAddress, depositAmount, pricePerToken, duration, proofInterval
+        hostAddress, tokenAddress, depositAmount, pricePerTokenBN, duration, proofInterval
       );
       const tx = await contractWithSigner.createSessionJobWithToken(
-        hostAddress, tokenAddress, depositAmount, pricePerToken, duration, proofInterval,
+        hostAddress, tokenAddress, depositAmount, pricePerTokenBN, duration, proofInterval,
         { gasLimit: 500000 }
       );
       const receipt = await tx.wait();
