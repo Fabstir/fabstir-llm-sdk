@@ -6,6 +6,7 @@ import PaymentManager from './managers/PaymentManager';
 import StorageManager from './managers/StorageManager';
 import DiscoveryManager from './managers/DiscoveryManager';
 import SessionManager from './managers/SessionManager';
+import SmartWalletManager from './managers/SmartWalletManager';
 
 export class FabstirSDK {
   public config: SDKConfig;
@@ -17,6 +18,7 @@ export class FabstirSDK {
   private storageManager?: StorageManager;
   private discoveryManager?: DiscoveryManager;
   private sessionManager?: SessionManager;
+  private smartWalletManager?: SmartWalletManager;
   
   constructor(config: SDKConfig = {}) {
     this.authManager = new AuthManager();
@@ -40,7 +42,8 @@ export class FabstirSDK {
           '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
         usdcToken: process.env.CONTRACT_USDC_TOKEN ||
           '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
-      }
+      },
+      smartWallet: config.smartWallet
     };
   }
   
@@ -64,6 +67,53 @@ export class FabstirSDK {
       return this.authResult;
     } catch (err: any) {
       const error: SDKError = new Error(`Authentication failed: ${err.message}`) as SDKError;
+      error.code = 'AUTH_FAILED';
+      error.details = err;
+      throw error;
+    }
+  }
+  
+  /**
+   * Convenience method for authenticating with Base Account Kit smart wallet
+   * Enables gasless transactions via paymaster and USDC-only operations
+   */
+  async authenticateWithSmartWallet(
+    privateKey: string,
+    options?: {
+      sponsorDeployment?: boolean;
+      autoDepositUSDC?: string;
+    }
+  ): Promise<AuthResult> {
+    if (!privateKey || privateKey.length === 0) {
+      const error: SDKError = new Error('Private key is required') as SDKError;
+      error.code = 'AUTH_INVALID_KEY';
+      throw error;
+    }
+    
+    try {
+      // Authenticate with smart wallet enabled
+      this.authResult = await this.authManager.authenticate('private-key', {
+        privateKey,
+        rpcUrl: this.config.rpcUrl,
+        useSmartWallet: true,
+        sponsorDeployment: options?.sponsorDeployment ?? true, // Default to gasless
+        paymasterUrl: this.config.smartWallet?.paymasterUrl
+      });
+      
+      this.signer = this.authResult.signer;
+      this.provider = (this.signer as any).provider;
+      
+      // Get smart wallet manager from auth manager
+      this.smartWalletManager = this.authManager.getSmartWalletManager();
+      
+      // Auto-deposit USDC if requested
+      if (options?.autoDepositUSDC && this.smartWalletManager) {
+        await this.smartWalletManager.depositUSDC(options.autoDepositUSDC);
+      }
+      
+      return this.authResult;
+    } catch (err: any) {
+      const error: SDKError = new Error(`Smart wallet authentication failed: ${err.message}`) as SDKError;
       error.code = 'AUTH_FAILED';
       error.details = err;
       throw error;
@@ -153,5 +203,20 @@ export class FabstirSDK {
     }
     
     return this.sessionManager;
+  }
+  
+  /**
+   * Get smart wallet manager for direct smart wallet operations
+   * Only available after authenticating with smart wallet
+   */
+  getSmartWalletManager(): SmartWalletManager | undefined {
+    return this.authManager.getSmartWalletManager();
+  }
+  
+  /**
+   * Check if currently using a smart wallet
+   */
+  isUsingSmartWallet(): boolean {
+    return this.authManager.isUsingSmartWallet();
   }
 }

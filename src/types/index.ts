@@ -11,6 +11,11 @@ export interface SDKConfig {
     fabToken?: string;
     usdcToken?: string;
   };
+  smartWallet?: {
+    enabled: boolean;
+    paymasterUrl?: string;
+    sponsorDeployment?: boolean;
+  };
 }
 
 // Options for creating a session

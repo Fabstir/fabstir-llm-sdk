@@ -51,8 +51,18 @@ export default class StorageManager {
 
   async initialize(authManager: AuthManager): Promise<void> {
     try {
+      // ALWAYS use EOA for S5 seed and address, even with smart wallets
+      // This ensures consistent S5 paths regardless of wallet type
       this.userSeed = authManager.getS5Seed();
-      this.userAddress = authManager.getUserAddress();
+      
+      // Use EOA address for S5 paths to maintain consistency
+      // Smart wallet addresses would create different S5 paths
+      if (authManager.isUsingSmartWallet()) {
+        this.userAddress = authManager.getEOAAddress();
+      } else {
+        this.userAddress = authManager.getUserAddress();
+      }
+      
       this.s5Client = await S5.create({ initialPeers: [this.s5PortalUrl] });
       await this.s5Client.recoverIdentityFromSeedPhrase(this.userSeed);
       try {
