@@ -92,14 +92,20 @@ export default class PaymentManager {
     }
   }
 
-  async completeSessionJob(jobId: string): Promise<string> {
+  async completeSessionJob(jobId: string): Promise<any> {
     try {
       const signer = this.authManager.getSigner();
       const contractWithSigner = this.jobMarketplace.connect(signer);
       const tx = await contractWithSigner.completeSessionJob(jobId, { gasLimit: 200000 });
       const receipt = await tx.wait();
       if (receipt.status !== 1) throw new Error('Transaction failed');
-      return tx.hash;
+      
+      // Return an object matching what the tests expect
+      return {
+        success: true,
+        txHash: tx.hash,
+        receipt: receipt
+      };
     } catch (error: any) {
       throw new Error(`Failed to complete session job: ${error.message}`);
     }

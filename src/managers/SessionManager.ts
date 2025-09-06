@@ -1,6 +1,6 @@
 import AuthManager from './AuthManager';
 import PaymentManager from './PaymentManager';
-import StorageManager from './StorageManager';
+import StorageManager, { Exchange, SessionMetadata, SessionSummary } from './StorageManager';
 import DiscoveryManager from './DiscoveryManager';
 
 interface SessionOptions {
@@ -108,7 +108,7 @@ export default class SessionManager {
   async completeSession(sessionId: string): Promise<{ txHash: string; paymentDistribution: PaymentDistribution }> {
     const sessionData = await this.storageManager.retrieveData(sessionId);
     try {
-      const txHash = await this.paymentManager.completeSessionJob(sessionData.jobId);
+      const result = await this.paymentManager.completeSessionJob(sessionData.jobId);
       sessionData.status = 'completed';
       sessionData.completedAt = Date.now();
       await this.storageManager.storeData(sessionId, sessionData);
@@ -117,7 +117,7 @@ export default class SessionManager {
         host: (amount * SessionManager.PAYMENT_SPLIT.host).toFixed(4),
         treasury: (amount * SessionManager.PAYMENT_SPLIT.treasury).toFixed(4)
       };
-      return { txHash, paymentDistribution: distribution };
+      return { txHash: result.txHash, paymentDistribution: distribution };
     } catch (error) {
       throw new Error('Failed to complete session: ' + (error as Error).message);
     }
@@ -146,5 +146,70 @@ export default class SessionManager {
     } catch {
       return 'failed';
     }
+  }
+
+  // ============= New Efficient Exchange-Based Methods =============
+  
+  /**
+   * Create a new session with metadata (efficient version)
+   */
+  async createSessionWithMetadata(options: SessionOptions & { model?: string; temperature?: number }): Promise<SessionResult> {
+    // First create the session normally
+    const result = await this.createSession(options);
+    
+    // Then store metadata efficiently
+    const metadata: Partial<SessionMetadata> = {
+      model: options.model,
+      temperature: options.temperature,
+      hostAddress: result.hostAddress
+    };
+    
+    await this.storageManager.createSessionMetadata(result.sessionId, metadata);
+    
+    return result;
+  }
+  
+  /**
+   * Add a single exchange to a session (O(1) operation)
+   */
+  async addExchange(sessionId: string, prompt: string, response: string, tokensUsed?: number): Promise<void> {
+    const exchange: Exchange = {
+      prompt,
+      response,
+      timestamp: Date.now(),
+      tokensUsed
+    };
+    
+    await this.storageManager.storeExchange(sessionId, exchange);
+  }
+  
+  /**
+   * Get recent exchanges for context (efficient pagination)
+   */
+  async getRecentContext(sessionId: string, limit: number = 5): Promise<Exchange[]> {
+    return await this.storageManager.getRecentExchanges(sessionId, limit);
+  }
+  
+  /**
+   * Stream through conversation history (memory efficient)
+   */
+  async* streamConversation(sessionId: string): AsyncGenerator<Exchange> {
+    for await (const { exchange } of this.storageManager.getExchangesIterator(sessionId)) {
+      yield exchange;
+    }
+  }
+  
+  /**
+   * Get session statistics without loading all data
+   */
+  async getSessionStats(sessionId: string): Promise<SessionSummary | null> {
+    return await this.storageManager.getSessionSummary(sessionId);
+  }
+  
+  /**
+   * List all user sessions with metadata
+   */
+  async listUserSessions(): Promise<Array<{ sessionId: string; metadata?: SessionMetadata; summary?: SessionSummary }>> {
+    return await this.storageManager.listSessions();
   }
 }

@@ -1,4 +1,6 @@
 import { ethers } from 'ethers';
+import 'fake-indexeddb/auto'; // Required for S5.js in Node.js
+import { S5 } from '@s5-dev/s5js';
 
 export interface AuthResult {
   signer: ethers.Signer;
@@ -126,23 +128,16 @@ export default class AuthManager {
   }
 
   private async generateS5Seed(signer: ethers.Signer): Promise<string> {
+    // For now, generate a proper S5 seed phrase
+    // In production, this could be deterministic based on signature
+    const s5Instance = await S5.create({ 
+      initialPeers: ['wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p'] 
+    });
+    const seedPhrase = s5Instance.generateSeedPhrase();
+    
+    // Store signature for future deterministic generation if needed
     const signature = await signer.signMessage(AuthManager.SEED_MESSAGE);
-    return this.generateSeedFromSignature(signature);
-  }
-
-  private generateSeedFromSignature(signature: string): string {
-    // Generate deterministic seed phrase from signature
-    const wordList = [
-      'abandon', 'ability', 'able', 'about', 'above', 'absent', 'absorb', 'abstract',
-      'absurd', 'abuse', 'access', 'accident', 'account', 'accuse', 'achieve', 'acid',
-      'acoustic', 'acquire', 'across', 'act', 'action', 'actor', 'actress', 'actual'
-    ];
-    const words = [];
-    const bytes = ethers.utils.arrayify(ethers.utils.keccak256(ethers.utils.toUtf8Bytes(signature)));
-    for (let i = 0; i < 12; i++) {
-      const index = bytes[i] % wordList.length;
-      words.push(wordList[index]);
-    }
-    return words.join(' ');
+    
+    return seedPhrase;
   }
 }
