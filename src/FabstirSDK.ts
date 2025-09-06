@@ -7,6 +7,7 @@ import StorageManager from './managers/StorageManager';
 import DiscoveryManager from './managers/DiscoveryManager';
 import SessionManager from './managers/SessionManager';
 import SmartWalletManager from './managers/SmartWalletManager';
+import InferenceManager from './managers/InferenceManager';
 
 export class FabstirSDK {
   public config: SDKConfig;
@@ -19,6 +20,7 @@ export class FabstirSDK {
   private discoveryManager?: DiscoveryManager;
   private sessionManager?: SessionManager;
   private smartWalletManager?: SmartWalletManager;
+  private inferenceManager?: InferenceManager;
   
   constructor(config: SDKConfig = {}) {
     this.authManager = new AuthManager();
@@ -203,6 +205,29 @@ export class FabstirSDK {
     }
     
     return this.sessionManager;
+  }
+
+  async getInferenceManager(): Promise<InferenceManager> {
+    if (!this.authManager.isAuthenticated()) {
+      const error: SDKError = new Error('Must authenticate before using InferenceManager') as SDKError;
+      error.code = 'MANAGER_NOT_AUTHENTICATED';
+      throw error;
+    }
+    
+    if (!this.inferenceManager) {
+      // Get session manager to ensure it's initialized
+      const sessionManager = await this.getSessionManager();
+      
+      // Create inference manager with discovery URL and S5 config from SDK config
+      this.inferenceManager = new InferenceManager(
+        this.authManager,
+        sessionManager,
+        this.config.discoveryUrl || 'http://localhost:3003',
+        this.config.s5Config
+      );
+    }
+    
+    return this.inferenceManager;
   }
   
   /**
