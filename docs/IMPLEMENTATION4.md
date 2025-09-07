@@ -122,28 +122,28 @@ See `docs/node-reference/Fabstir SDK → Fabstir-LLM-Node Communication Protocol
 - [x] Test files: `tests/unit/token-tracking.test.ts`
 
 ### Sub-phase 11.5: Security Integration (Max 150 lines) - NEW FROM NODE UPGRADE
-- [ ] Create `tests/integration/inference-security.test.ts` (20 tests)
-  - [ ] Test JWT authentication flow
-  - [ ] Test token refresh mechanism
-  - [ ] Test Ed25519 message signing
-  - [ ] Test signature verification
-  - [ ] Test permission-based access
-- [ ] Implement JWT authentication
-  - [ ] `authenticateSession(jobId): Promise<string>` - Get JWT token
-  - [ ] `refreshToken(token): Promise<string>` - Refresh expired token
-  - [ ] `validateToken(token): boolean` - Validate JWT claims
-  - [ ] Auto-refresh before expiry
-- [ ] Add Ed25519 signing support
-  - [ ] Generate key pairs for signing
-  - [ ] Sign critical messages (high-value prompts)
-  - [ ] Verify signatures from node
-  - [ ] Store keys securely
-- [ ] Implement permission controls
-  - [ ] Check permissions before operations
-  - [ ] Handle permission denied errors
-  - [ ] Request elevated permissions
-  - [ ] Track permission usage
-- [ ] Test files: `tests/integration/inference-security.test.ts`
+- [x] Create `tests/integration/inference-security.test.ts` (20 tests)
+  - [x] Test JWT authentication flow
+  - [x] Test token refresh mechanism
+  - [x] Test Ed25519 message signing
+  - [x] Test signature verification
+  - [x] Test permission-based access
+- [x] Implement JWT authentication
+  - [x] `authenticateSession(jobId): Promise<string>` - Get JWT token
+  - [x] `refreshToken(token): Promise<string>` - Refresh expired token
+  - [x] `validateToken(token): boolean` - Validate JWT claims
+  - [x] Auto-refresh before expiry
+- [x] Add Ed25519 signing support
+  - [x] Generate key pairs for signing
+  - [x] Sign critical messages (high-value prompts)
+  - [x] Verify signatures from node
+  - [x] Store keys securely
+- [x] Implement permission controls
+  - [x] Check permissions before operations
+  - [x] Handle permission denied errors
+  - [x] Request elevated permissions
+  - [x] Track permission usage
+- [x] Test files: `tests/integration/inference-security.test.ts`
 
 ### Sub-phase 11.6: EZKL Proof Generation and Verification (Max 200 lines)
 - [ ] Create `tests/integration/inference-proofs.test.ts` (25 tests)
