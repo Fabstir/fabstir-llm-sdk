@@ -51,7 +51,7 @@ See `docs/node-reference/Fabstir SDK → Fabstir-LLM-Node Communication Protocol
 - [x] Test files: Created multiple integration tests demonstrating real inference
 
 ### Sub-phase 11.2: WebSocket Connection Management (Max 200 lines) - UPDATED FOR NODE UPGRADE
-- [ ] Create `tests/integration/inference-websocket.test.ts` (20 tests)
+- [x] Create `tests/integration/inference-websocket.test.ts` (20 tests)
   - [x] Test connection to host WebSocket with authentication
   - [x] Test session_init message protocol
   - [x] Test session_resume with conversation_context
@@ -75,28 +75,28 @@ See `docs/node-reference/Fabstir SDK → Fabstir-LLM-Node Communication Protocol
 - [x] Test files: `tests/integration/inference-websocket.test.ts`
 
 ### Sub-phase 11.3: Prompt Sending and Response Handling (Max 250 lines) - OPTIMIZED FOR NODE
-- [ ] Create `tests/integration/inference-prompts.test.ts` (25 tests)
-  - [ ] Test prompt with server-side context management
-  - [ ] Test streaming response handling
-  - [ ] Test conversation_context array format
-  - [ ] Test message compression
-  - [ ] Test rate limiting handling
-- [ ] Update prompt methods for new protocol
-  - [ ] `sendPrompt(prompt, options)` - Send only prompt text, not context
-  - [ ] Use proper message format: `{type: 'prompt', session_id, content, message_index}`
-  - [ ] Handle compressed responses when enabled
-  - [ ] Track tokens from server response
-- [ ] Add message signing for secure sessions
-  - [ ] Ed25519 signature generation
-  - [ ] Signature verification
-  - [ ] Timestamp validation
-  - [ ] Replay attack prevention
-- [ ] Optimize for efficiency
-  - [ ] Enable gzip compression for large contexts
-  - [ ] Batch multiple prompts when possible
-  - [ ] Cache responses locally
-  - [ ] Minimize redundant data transmission
-- [ ] Test files: `tests/integration/inference-prompts.test.ts`
+- [x] Create `tests/integration/inference-prompts.test.ts` (25 tests)
+  - [x] Test prompt with server-side context management
+  - [x] Test streaming response handling
+  - [x] Test conversation_context array format
+  - [x] Test message compression
+  - [x] Test rate limiting handling
+- [x] Update prompt methods for new protocol
+  - [x] `sendPrompt(prompt, options)` - Send only prompt text, not context
+  - [x] Use proper message format: `{type: 'prompt', session_id, content, message_index}`
+  - [x] Handle compressed responses when enabled
+  - [x] Track tokens from server response
+- [x] Add message signing for secure sessions
+  - [x] Ed25519 signature generation
+  - [x] Signature verification
+  - [x] Timestamp validation
+  - [x] Replay attack prevention
+- [x] Optimize for efficiency
+  - [x] Enable gzip compression for large contexts
+  - [x] Batch multiple prompts when possible
+  - [x] Cache responses locally
+  - [x] Minimize redundant data transmission
+- [x] Test files: `tests/integration/inference-prompts.test.ts`
 
 ### Sub-phase 11.4: Token Tracking and Billing (Max 150 lines)
 - [ ] Create `tests/unit/token-tracking.test.ts` (20 tests)

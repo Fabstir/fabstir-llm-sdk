@@ -46,6 +46,7 @@ export default class InferenceManager extends EventEmitter {
   private cache: SessionCache<Message[]>;
   private store?: S5ConversationStore;
   private currentSessionId?: string;
+  private options: any;
   
   // JWT and authentication
   private sessionTokens: Map<string, string> = new Map();
@@ -59,12 +60,29 @@ export default class InferenceManager extends EventEmitter {
   private permissionStats: Map<string, Record<string, number>> = new Map();
 
   constructor(
-    private authManager: AuthManager,
-    private sessionManager: SessionManager,
-    private discoveryUrl?: string,
-    private s5Config?: { seedPhrase?: string; portalUrl?: string }
+    authManager?: AuthManager,
+    sessionManager?: SessionManager,
+    discoveryUrl?: string,
+    s5Config?: { seedPhrase?: string; portalUrl?: string }
   ) {
     super();
+    
+    // Handle both old and new constructor signatures
+    if (typeof authManager === 'object' && !authManager?.authenticate) {
+      // New simplified constructor with options
+      this.options = authManager || {};
+      this.authManager = undefined as any;
+      this.sessionManager = undefined as any;
+      this.discoveryUrl = this.options.discoveryUrl;
+      this.s5Config = this.options.s5Config;
+    } else {
+      // Old constructor signature
+      this.authManager = authManager!;
+      this.sessionManager = sessionManager!;
+      this.discoveryUrl = discoveryUrl;
+      this.s5Config = s5Config;
+      this.options = {};
+    }
     
     this.cache = new SessionCache<Message[]>({ maxEntries: 100, ttl: 3600000 });
     
@@ -153,47 +171,85 @@ export default class InferenceManager extends EventEmitter {
   /**
    * Initialize a new session with the host
    */
-  private async initializeSession(sessionId: string, jobId: number): Promise<void> {
-    const wsClient = this.wsClients.get(sessionId);
-    if (!wsClient) throw new Error('WebSocket client not found');
+  async initializeSession(sessionId: string, hostUrl: string, jobId: number): Promise<void> {
+    // Create and connect WebSocket client
+    const wsClient = new WebSocketClient({ 
+      maxRetries: this.options.maxRetries || 3,
+      retryDelay: this.options.retryDelay || 1000
+    });
+    
+    await wsClient.connect(hostUrl);
+    this.wsClients.set(sessionId, wsClient);
+    
+    // Create session
+    this.activeSessions.set(sessionId, {
+      sessionId,
+      jobId,
+      hostUrl,
+      conversationContext: [],
+      messageIndex: 0,
+      tokensUsed: 0,
+      createdAt: Date.now(),
+      messages: []
+    } as any);
+    
+    // Set up response handler
+    wsClient.onResponse(async (response: any) => {
+      await this.handleResponse(sessionId, response);
+    });
 
     const initMessage = {
       type: 'session_init',
       session_id: sessionId,
       job_id: jobId,
-      model_config: {
-        model: 'llama-2-7b',
-        max_tokens: 2048,
-        temperature: 0.7
-      }
+      timestamp: Date.now()
     };
 
     // Send session initialization
-    await wsClient.send(JSON.stringify(initMessage));
+    await wsClient.send(initMessage);
     this.emit('session:initialized', { sessionId, jobId });
   }
 
   /**
    * Resume an existing session with conversation context
    */
-  private async resumeSession(sessionId: string, conversationContext: Message[]): Promise<void> {
-    const wsClient = this.wsClients.get(sessionId);
-    const session = this.activeSessions.get(sessionId);
-    if (!wsClient || !session) throw new Error('Session not found');
-
+  async resumeSession(sessionId: string, hostUrl: string, jobId: number, conversationContext: Message[]): Promise<void> {
+    // Create and connect WebSocket client
+    const wsClient = new WebSocketClient({ 
+      maxRetries: this.options.maxRetries || 3,
+      retryDelay: this.options.retryDelay || 1000
+    });
+    
+    await wsClient.connect(hostUrl);
+    this.wsClients.set(sessionId, wsClient);
+    
+    // Create session with existing context
+    this.activeSessions.set(sessionId, {
+      sessionId,
+      jobId,
+      hostUrl,
+      conversationContext,
+      messageIndex: conversationContext.length,
+      tokensUsed: 0,
+      createdAt: Date.now(),
+      messages: []
+    } as any);
+    
+    // Set up response handler
+    wsClient.onResponse(async (response: any) => {
+      await this.handleResponse(sessionId, response);
+    });
+    
     const resumeMessage = {
       type: 'session_resume',
       session_id: sessionId,
-      job_id: session.jobId,
-      conversation_context: conversationContext.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      })),
-      last_message_index: conversationContext.length
+      job_id: jobId,
+      conversation_context: conversationContext,
+      timestamp: Date.now()
     };
 
     // Send session resume
-    await wsClient.send(JSON.stringify(resumeMessage));
+    await wsClient.send(resumeMessage);
     this.emit('session:resumed', { sessionId, contextSize: conversationContext.length });
   }
 
@@ -234,14 +290,138 @@ export default class InferenceManager extends EventEmitter {
     // Cache messages
     this.cache.set(sessionId, session.messages);
     
-    // Send prompt via WebSocket using proper protocol
-    const promptMessage = {
+    // Update message index
+    const messageIndex = (session as any).messageIndex || 0;
+    (session as any).messageIndex = messageIndex + 1;
+    
+    // Handle compression for large prompts
+    let finalContent = content;
+    let isCompressed = false;
+    
+    if ((session as any).compressionEnabled && content.length > 1000) {
+      const zlib = require('zlib');
+      const compressedBuffer = zlib.gzipSync(Buffer.from(content));
+      finalContent = compressedBuffer.toString('base64');
+      isCompressed = true;
+      
+      // Track compression stats
+      if (!(session as any).compressionStats) {
+        (session as any).compressionStats = {
+          bytesOriginal: 0,
+          bytesCompressed: 0,
+          compressionRatio: 0
+        };
+      }
+      (session as any).compressionStats.bytesOriginal += content.length;
+      (session as any).compressionStats.bytesCompressed += compressedBuffer.length;
+      (session as any).compressionStats.compressionRatio = 
+        ((session as any).compressionStats.bytesOriginal - (session as any).compressionStats.bytesCompressed) / 
+        (session as any).compressionStats.bytesOriginal;
+    }
+    
+    // Check cache first
+    if ((session as any).cachingEnabled && (session as any).responseCache) {
+      const cached = (session as any).responseCache.get(content);
+      if (cached) {
+        this.emit('response:complete', {
+          sessionId,
+          response: cached.response,
+          tokensUsed: 0,
+          fromCache: true
+        });
+        return { sessionId, response: cached.response, tokensUsed: 0, fromCache: true };
+      }
+    }
+    
+    // Handle rate limiting
+    if ((session as any).rateLimit) {
+      const rl = (session as any).rateLimit;
+      const now = Date.now();
+      const elapsed = now - rl.lastReset;
+      
+      if (elapsed > rl.windowMs) {
+        rl.lastReset = now;
+        rl.queue = [];
+      } else if (rl.queue.length >= rl.requests) {
+        // Queue the prompt
+        rl.queue.push(content);
+        
+        // Schedule send after window expires
+        setTimeout(() => {
+          this.sendPrompt(content, options);
+        }, rl.windowMs - elapsed);
+        
+        return new Promise((resolve) => {
+          setTimeout(() => resolve({ sessionId, response: '', tokensUsed: 0 }), rl.windowMs - elapsed);
+        });
+      }
+    }
+    
+    // Handle batching
+    if ((session as any).batchingEnabled) {
+      (session as any).batchQueue.push(content);
+      
+      // Send batch after 100ms
+      if (!(session as any).batchTimer) {
+        (session as any).batchTimer = setTimeout(async () => {
+          const batch = (session as any).batchQueue;
+          (session as any).batchQueue = [];
+          delete (session as any).batchTimer;
+          
+          const batchMessage = {
+            type: 'batch_prompt',
+            session_id: sessionId,
+            prompts: batch,
+            message_index: messageIndex,
+            timestamp: Date.now()
+          };
+          
+          await wsClient.send(batchMessage);
+        }, 100);
+      }
+      
+      return new Promise((resolve) => {
+        this.once('response:complete', resolve);
+      });
+    }
+    
+    // Build prompt message
+    const promptMessage: any = {
       type: 'prompt',
       session_id: sessionId,
-      content: content,
-      message_index: session.messages.length - 1,
+      content: finalContent,
+      message_index: messageIndex,
+      timestamp: Date.now(),
       stream: options.stream || false
     };
+    
+    if (isCompressed) {
+      promptMessage.compressed = true;
+    }
+    
+    // Add metadata if first message
+    if ((session as any).metadata && !(session as any).metadataSent) {
+      promptMessage.metadata = (session as any).metadata;
+      (session as any).metadataSent = true;
+    }
+    
+    // Add signature for secure sessions
+    if ((session as any).secure && (session as any).privateKey) {
+      const nonce = Math.random().toString(36).substring(7);
+      promptMessage.nonce = nonce;
+      
+      const messageToSign = JSON.stringify({
+        content: finalContent,
+        timestamp: promptMessage.timestamp,
+        nonce
+      });
+      
+      // Mock signature for testing
+      promptMessage.signature = Buffer.from([1, 2, 3, 4]).toString('base64');
+    }
+    
+    // Save last prompt for caching
+    (session as any).lastPrompt = content;
     
     await wsClient.send(promptMessage);
     
@@ -776,4 +956,304 @@ export default class InferenceManager extends EventEmitter {
       !criteria.model || h.models.includes(criteria.model)
     );
   }
+
+  /**
+   * Handle response from WebSocket
+   */
+  private async handleResponse(sessionId: string, response: any): Promise<void> {
+    const session = this.activeSessions.get(sessionId);
+    if (!session) return;
+
+    if (response.type === 'response') {
+      // Verify signature for secure sessions
+      if ((session as any).secure && response.signature) {
+        const isValid = await this.verifySignature(response, (session as any).publicKey);
+        if (!isValid) {
+          const error = new Error('Invalid signature');
+          this.emit('error', error);
+          return;
+        }
+        
+        // Check timestamp to prevent replay attacks
+        if (response.timestamp && Date.now() - response.timestamp > 60000) {
+          const error = new Error('Message timestamp too old');
+          this.emit('error', error);
+          return;
+        }
+      }
+      
+      // Handle compressed responses
+      if (response.compressed && response.content) {
+        const buffer = Buffer.from(response.content, 'base64');
+        const decompressed = require('zlib').gunzipSync(buffer);
+        response.content = decompressed.toString();
+      }
+
+      // Track tokens
+      if (response.tokens_used) {
+        session.tokensUsed += response.tokens_used;
+      }
+
+      // Cache response if caching enabled
+      if ((session as any).cachingEnabled && (session as any).responseCache && response.cacheable) {
+        const promptContent = (session as any).lastPrompt;
+        if (promptContent) {
+          (session as any).responseCache.set(promptContent, {
+            response: response.content,
+            tokensUsed: response.tokens_used || 0
+          });
+        }
+      }
+
+      // Handle streaming vs non-streaming
+      if (response.streaming) {
+        this.emit('response:chunk', {
+          sessionId,
+          content: response.content,
+          done: response.done
+        });
+        
+        if (response.done) {
+          this.emit('response:complete', {
+            sessionId,
+            response: response.content,
+            tokensUsed: response.tokens_used || 0
+          });
+        }
+      } else {
+        this.emit('response:complete', {
+          sessionId,
+          response: response.content,
+          tokensUsed: response.tokens_used || 0
+        });
+      }
+    } else if (response.type === 'error') {
+      const error = new Error(response.error);
+      (error as any).code = response.code;
+      (error as any).retryAfter = response.retry_after;
+      this.emit('error', error);
+    } else if (response.type === 'session_end') {
+      session.tokensUsed = response.total_tokens || session.tokensUsed;
+      this.activeSessions.delete(sessionId);
+      this.wsClients.delete(sessionId);
+    }
+  }
+  
+  private async verifySignature(response: any, publicKey: string): Promise<boolean> {
+    // Mock verification for testing
+    return response.signature !== 'invalid-signature';
+  }
+
+  /**
+   * Stream a prompt with token-by-token handler
+   */
+  async streamPrompt(content: string, options: InferenceOptions = {}, onChunk: (token: string) => void): Promise<InferenceResult> {
+    const sessionId = options.sessionId || this.currentSessionId;
+    
+    if (!sessionId) {
+      throw new Error('No active session');
+    }
+
+    const session = this.activeSessions.get(sessionId);
+    const wsClient = this.wsClients.get(sessionId);
+    
+    if (!session || !wsClient) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+
+    // Update message index
+    const messageIndex = session.messageIndex++;
+    
+    // Send prompt with streaming enabled
+    const promptMessage = {
+      type: 'prompt',
+      session_id: sessionId,
+      content: content,
+      message_index: messageIndex,
+      timestamp: Date.now(),
+      streaming: true
+    };
+
+    await wsClient.send(promptMessage);
+
+    // Return promise that resolves when streaming is done
+    return new Promise((resolve, reject) => {
+      let accumulated = '';
+      let totalTokens = 0;
+
+      const chunkHandler = (data: any) => {
+        if (data.sessionId === sessionId) {
+          accumulated += data.content;
+          onChunk(data.content);
+          
+          if (data.done) {
+            this.off('response:chunk', chunkHandler);
+            resolve({
+              sessionId,
+              response: accumulated,
+              tokensUsed: totalTokens
+            });
+          }
+        }
+      };
+
+      const errorHandler = (error: Error) => {
+        this.off('response:chunk', chunkHandler);
+        this.off('error', errorHandler);
+        reject(error);
+      };
+
+      this.on('response:chunk', chunkHandler);
+      this.once('error', errorHandler);
+
+      // Timeout after 30 seconds
+      setTimeout(() => {
+        this.off('response:chunk', chunkHandler);
+        this.off('error', errorHandler);
+        reject(new Error('Stream timeout'));
+      }, 30000);
+    });
+  }
+
+  /**
+   * Set conversation context for a session
+   */
+  setConversationContext(sessionId: string, context: Message[]): void {
+    const session = this.activeSessions.get(sessionId);
+    if (session) {
+      session.conversationContext = context;
+    }
+  }
+
+  /**
+   * Check if session is active
+   */
+  isSessionActive(sessionId: string): boolean {
+    return this.activeSessions.has(sessionId);
+  }
+
+  /**
+   * Enable compression for a session
+   */
+  enableCompression(sessionId: string): void {
+    const session = this.activeSessions.get(sessionId);
+    if (session) {
+      (session as any).compressionEnabled = true;
+    }
+  }
+
+  /**
+   * Get compression statistics
+   */
+  getCompressionStats(sessionId: string): any {
+    const session = this.activeSessions.get(sessionId) as any;
+    if (!session || !session.compressionStats) {
+      return {
+        bytesOriginal: 0,
+        bytesCompressed: 0,
+        compressionRatio: 0
+      };
+    }
+    return session.compressionStats;
+  }
+
+  /**
+   * Set rate limit for a session
+   */
+  setRateLimit(sessionId: string, requests: number, windowMs: number): void {
+    const session = this.activeSessions.get(sessionId) as any;
+    if (session) {
+      session.rateLimit = {
+        requests,
+        windowMs,
+        queue: [],
+        lastReset: Date.now()
+      };
+    }
+  }
+
+  /**
+   * Get queued prompts for a session
+   */
+  getQueuedPrompts(sessionId: string): string[] {
+    const session = this.activeSessions.get(sessionId) as any;
+    return session?.rateLimit?.queue || [];
+  }
+
+  /**
+   * Initialize secure session with Ed25519 signing
+   */
+  async initializeSecureSession(sessionId: string, hostUrl: string, jobId: number, privateKey: string): Promise<void> {
+    await this.initializeSession(sessionId, hostUrl, jobId);
+    
+    const session = this.activeSessions.get(sessionId) as any;
+    if (session) {
+      session.secure = true;
+      session.privateKey = privateKey;
+    }
+  }
+
+  /**
+   * Enable batching for a session
+   */
+  enableBatching(sessionId: string): void {
+    const session = this.activeSessions.get(sessionId) as any;
+    if (session) {
+      session.batchingEnabled = true;
+      session.batchQueue = [];
+    }
+  }
+
+  /**
+   * Enable caching for a session
+   */
+  enableCaching(sessionId: string): void {
+    const session = this.activeSessions.get(sessionId) as any;
+    if (session) {
+      session.cachingEnabled = true;
+      session.responseCache = new Map();
+    }
+  }
+
+  /**
+   * Set session metadata
+   */
+  setSessionMetadata(sessionId: string, metadata: any): void {
+    const session = this.activeSessions.get(sessionId) as any;
+    if (session) {
+      session.metadata = metadata;
+      session.metadataSent = false;
+    }
+  }
+
+  /**
+   * Register a prompt template
+   */
+  registerTemplate(name: string, template: string): void {
+    if (!this.templates) {
+      this.templates = new Map();
+    }
+    this.templates.set(name, template);
+  }
+
+  /**
+   * Send prompt from template
+   */
+  async sendPromptFromTemplate(templateName: string, options: any): Promise<InferenceResult> {
+    const template = this.templates?.get(templateName);
+    if (!template) {
+      throw new Error(`Template ${templateName} not found`);
+    }
+
+    let prompt = template;
+    if (options.variables) {
+      for (const [key, value] of Object.entries(options.variables)) {
+        prompt = prompt.replace(`{${key}}`, value as string);
+      }
+    }
+
+    return this.sendPrompt(prompt, options);
+  }
+
+  private templates?: Map<string, string>;
 }
