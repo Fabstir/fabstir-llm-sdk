@@ -169,23 +169,23 @@ See `docs/node-reference/Fabstir SDK → Fabstir-LLM-Node Communication Protocol
 - [x] Test files: `tests/integration/inference-proofs.test.ts`
 
 ### Sub-phase 11.7: Conversation Management (Max 150 lines) - LEVERAGING NODE CACHE
-- [ ] Create `tests/integration/conversation-management.test.ts` (20 tests)
-  - [ ] Test conversation with server-side context
-  - [ ] Test session recovery with full history
-  - [ ] Test context truncation by node
-  - [ ] Test conversation export from S5
-  - [ ] Test seamless host switching
-- [ ] Update conversation methods for stateless hosts
-  - [ ] `getConversation(sessionId)` - Load from S5 storage
-  - [ ] `resumeSessionWithHistory(sessionId, hostUrl, jobId)` - Resume with context
-  - [ ] `exportConversation(sessionId, format)` - Export from S5
-  - [ ] `switchHost(sessionId, newHostUrl)` - Move session to new host
-- [ ] Optimize storage strategy
-  - [ ] Store every message in S5 immediately
-  - [ ] Load full history when resuming
-  - [ ] Let node handle context window
-  - [ ] Implement efficient caching
-- [ ] Test files: `tests/integration/conversation-management.test.ts`
+- [x] Create `tests/integration/conversation-management.test.ts` (20 tests)
+  - [x] Test conversation with server-side context
+  - [x] Test session recovery with full history
+  - [x] Test context truncation by node
+  - [x] Test conversation export from S5
+  - [x] Test seamless host switching
+- [x] Update conversation methods for stateless hosts
+  - [x] `getConversation(sessionId)` - Load from S5 storage
+  - [x] `resumeSessionWithHistory(sessionId, hostUrl, jobId)` - Resume with context
+  - [x] `exportConversation(sessionId, format)` - Export from S5
+  - [x] `switchHost(sessionId, newHostUrl)` - Move session to new host
+- [x] Optimize storage strategy
+  - [x] Store every message in S5 immediately
+  - [x] Load full history when resuming
+  - [x] Let node handle context window
+  - [x] Implement efficient caching
+- [x] Test files: `tests/integration/conversation-management.test.ts`
 
 ## Phase 12: Enhanced Node Discovery
 

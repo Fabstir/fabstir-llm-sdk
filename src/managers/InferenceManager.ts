@@ -1795,6 +1795,130 @@ export default class InferenceManager extends EventEmitter {
   async getProofHistory(sessionId: string): Promise<ProofData[]> {
     return this.proofHistory.get(sessionId) || [];
   }
+
+  /**
+   * Export conversation in specified format
+   */
+  async exportConversation(sessionId: string, format: 'json' | 'markdown' = 'json'): Promise<string> {
+    const messages = await this.getConversation(sessionId);
+    
+    if (format === 'json') {
+      const session = this.activeSessions.get(sessionId);
+      const metadata = {
+        totalTokens: session?.tokensUsed || 0,
+        createdAt: messages[0]?.timestamp || Date.now(),
+        lastActivity: messages[messages.length - 1]?.timestamp || Date.now()
+      };
+      
+      return JSON.stringify({
+        sessionId,
+        messages,
+        messageCount: messages.length,
+        metadata
+      }, null, 2);
+    } else if (format === 'markdown') {
+      let markdown = '# Conversation\n\n';
+      markdown += `**Session ID:** ${sessionId}\n\n`;
+      
+      for (const msg of messages) {
+        const role = msg.role === 'user' ? '**User:**' : '**Assistant:**';
+        markdown += `${role} ${msg.content}\n\n`;
+      }
+      
+      return markdown;
+    }
+    
+    throw new Error(`Unsupported export format: ${format}`);
+  }
+
+  /**
+   * Switch host for an active session
+   */
+  async switchHost(sessionId: string, newHostUrl: string): Promise<void> {
+    const session = this.activeSessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+    
+    // Disconnect from current host
+    const wsClient = this.wsClients.get(sessionId);
+    if (wsClient) {
+      wsClient.disconnect();
+      this.wsClients.delete(sessionId);
+    }
+    
+    // Load conversation history from storage
+    const conversationHistory = await this.getConversation(sessionId);
+    
+    // Connect to new host with full context
+    const newWsClient = new WebSocketClient();
+    await newWsClient.connect(newHostUrl);
+    this.wsClients.set(sessionId, newWsClient);
+    
+    // Update session
+    session.hostUrl = newHostUrl;
+    
+    // Send session_resume message to new host
+    const resumeMessage = {
+      type: 'session_resume',
+      session_id: sessionId,
+      job_id: session.jobId,
+      conversation_context: conversationHistory,
+      last_message_index: conversationHistory.length - 1,
+      timestamp: Date.now()
+    };
+    
+    await newWsClient.send(resumeMessage);
+    
+    // Set up response handler for new connection
+    newWsClient.onResponse((response: any) => {
+      this.handleWebSocketResponse(sessionId, response);
+    });
+    
+    this.emit('host:switched', { sessionId, newHost: newHostUrl });
+  }
+
+  /**
+   * Handle connection loss and attempt recovery
+   */
+  async handleConnectionLoss(sessionId: string): Promise<void> {
+    const session = this.activeSessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+    
+    // Load conversation from storage for recovery
+    const conversationHistory = await this.getConversation(sessionId);
+    
+    // Mark session as disconnected
+    session.isConnected = false;
+    
+    // Attempt to find alternative host if discovery is available
+    if (this.discoveryUrl) {
+      try {
+        const discovery = new HostDiscovery(this.discoveryUrl);
+        const hosts = await discovery.discover({ model: 'any' });
+        
+        if (hosts.length > 0) {
+          // Try to reconnect to first available host
+          const newHost = hosts[0];
+          await this.switchHost(sessionId, `ws://${newHost.address}:${newHost.port || 8080}`);
+          return;
+        }
+      } catch (error) {
+        console.error('Failed to find alternative host:', error);
+      }
+    }
+    
+    // If no alternative found, just ensure conversation is saved
+    if (this.store && conversationHistory.length > 0) {
+      // Conversation is already saved, just emit event
+      this.emit('session:disconnected', { 
+        sessionId, 
+        savedMessages: conversationHistory.length 
+      });
+    }
+  }
 }
 
 interface ProofData {
