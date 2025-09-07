@@ -238,27 +238,27 @@ See `docs/node-reference/Fabstir SDK → Fabstir-LLM-Node Communication Protocol
 - [x] Test files: `tests/integration/p2p-discovery-enhanced.test.ts`
 
 ### Sub-phase 12.3: HTTP Discovery Service Integration (Max 150 lines)
-- [ ] Create `tests/integration/http-discovery-service.test.ts` (20 tests)
-  - [ ] Test querying discovery service
-  - [ ] Test filtering by model
-  - [ ] Test latency-based selection
-  - [ ] Test caching discovery results
-  - [ ] Test fallback on service failure
-- [ ] Create `src/discovery/HttpDiscoveryClient.ts`
-  - [ ] Constructor with discovery URL
-  - [ ] HTTP client setup
-  - [ ] Request retry logic
-  - [ ] Response caching
-- [ ] Implement HTTP discovery methods
-  - [ ] `discoverHosts(filter?: HostFilter): Promise<Host[]>`
-  - [ ] `getHostDetails(hostId: string): Promise<HostDetails>`
-  - [ ] `pingHost(url: string): Promise<number>`
-  - [ ] `reportHost(hostId: string, issue: string): Promise<void>`
-- [ ] Add result caching
-  - [ ] TTL-based cache
-  - [ ] Cache invalidation
-  - [ ] Background refresh
-- [ ] Test files: `tests/integration/http-discovery-service.test.ts`
+- [x] Create `tests/integration/http-discovery-service.test.ts` (20 tests)
+  - [x] Test querying discovery service
+  - [x] Test filtering by model
+  - [x] Test latency-based selection
+  - [x] Test caching discovery results
+  - [x] Test fallback on service failure
+- [x] Create `src/discovery/HttpDiscoveryClient.ts`
+  - [x] Constructor with discovery URL
+  - [x] HTTP client setup
+  - [x] Request retry logic
+  - [x] Response caching
+- [x] Implement HTTP discovery methods
+  - [x] `discoverHosts(filter?: HostFilter): Promise<Host[]>`
+  - [x] `getHostDetails(hostId: string): Promise<HostDetails>`
+  - [x] `pingHost(url: string): Promise<number>`
+  - [x] `reportHost(hostId: string, issue: string): Promise<void>`
+- [x] Add result caching
+  - [x] TTL-based cache
+  - [x] Cache invalidation
+  - [x] Background refresh
+- [x] Test files: `tests/integration/http-discovery-service.test.ts`
 
 ### Sub-phase 12.4: Optimal Host Selection (Max 200 lines)
 - [ ] Create `tests/unit/host-selection.test.ts` (25 tests)

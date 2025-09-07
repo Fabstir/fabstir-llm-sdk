@@ -43,3 +43,35 @@ export interface PreferredPeerOptions {
   priority?: number;
   reason?: string;
 }
+
+// HTTP Discovery Service types
+export interface Host {
+  id?: string;
+  peerId?: string;
+  url?: string;
+  models?: string[];
+  pricePerToken?: number;
+  latency?: number;
+  region?: string;
+  capabilities?: string[];
+}
+
+export interface HostFilter {
+  model?: string;
+  maxPrice?: number;
+  region?: string;
+  sortBy?: 'latency' | 'price' | 'reliability';
+  forceRefresh?: boolean;
+}
+
+export interface HostDetails extends Host {
+  uptime?: number;
+  totalRequests?: number;
+  averageResponseTime?: number;
+}
+
+export interface DiscoveryClientOptions {
+  cacheTTL?: number;
+  maxRetries?: number;
+  timeout?: number;
+}
