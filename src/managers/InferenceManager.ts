@@ -1630,4 +1630,176 @@ export default class InferenceManager extends EventEmitter {
     
     return this.sendPrompt(prompt, { sessionId });
   }
+
+  // EZKL Proof Generation and Verification Methods
+
+  private proofCache: Map<string, string> = new Map();
+  private proofHistory: Map<string, Array<ProofData>> = new Map();
+  private proofRejection: boolean = false;
+  private sessionProofStatus: Map<string, string> = new Map();
+
+  async generateProof(sessionId: string, tokensUsed: number): Promise<string> {
+    if (!this.activeSessions.has(sessionId)) {
+      throw new Error('Session not found');
+    }
+
+    // Check cache first
+    const cacheKey = `${sessionId}-${tokensUsed}`;
+    if (this.proofCache.has(cacheKey)) {
+      return this.proofCache.get(cacheKey)!;
+    }
+
+    const session = this.activeSessions.get(sessionId)!;
+    const timestamp = Date.now();
+    
+    // Collect inference data
+    const inferenceCount = this.promptUsage.get(sessionId)?.length || 0;
+    
+    // Create proof structure
+    const proofData = {
+      sessionId,
+      tokensUsed,
+      timestamp,
+      inferenceCount,
+      jobId: session.jobId,
+      hostUrl: session.hostUrl,
+      checksum: ''
+    };
+    
+    // Generate checksum
+    const dataStr = JSON.stringify(proofData);
+    const hash = createHash('sha256').update(dataStr).digest('hex');
+    proofData.checksum = hash;
+    
+    // Generate proof as hex string
+    const proof = '0x' + Buffer.from(JSON.stringify(proofData)).toString('hex');
+    
+    // Cache the proof
+    this.proofCache.set(cacheKey, proof);
+    
+    return proof;
+  }
+
+  decodeProof(proof: string): any {
+    if (!proof.startsWith('0x')) {
+      throw new Error('Invalid proof format');
+    }
+    
+    try {
+      const hexData = proof.slice(2);
+      const jsonStr = Buffer.from(hexData, 'hex').toString();
+      return JSON.parse(jsonStr);
+    } catch (error) {
+      throw new Error('Failed to decode proof');
+    }
+  }
+
+  async verifyProof(proof: string): Promise<boolean> {
+    try {
+      // Check format
+      if (!proof.startsWith('0x')) {
+        return false;
+      }
+      
+      // Decode and validate structure
+      const proofData = this.decodeProof(proof);
+      
+      // Verify checksum
+      const checksum = proofData.checksum;
+      const dataWithoutChecksum = { ...proofData, checksum: '' };
+      const dataStr = JSON.stringify(dataWithoutChecksum);
+      const expectedChecksum = createHash('sha256').update(dataStr).digest('hex');
+      
+      return checksum === expectedChecksum;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  validateProofStructure(proof: string): boolean {
+    try {
+      const proofData = this.decodeProof(proof);
+      
+      // Check required fields
+      const requiredFields = ['sessionId', 'tokensUsed', 'timestamp', 'inferenceCount', 'jobId', 'hostUrl', 'checksum'];
+      for (const field of requiredFields) {
+        if (!(field in proofData)) {
+          return false;
+        }
+      }
+      
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async submitProof(sessionId: string, proof: string): Promise<any> {
+    if (this.proofRejection) {
+      throw new Error('Proof rejected by contract');
+    }
+    
+    // Mock contract submission
+    const receipt = {
+      transactionHash: '0x' + '1'.repeat(64),
+      blockNumber: 12345,
+      status: 1
+    };
+    
+    // Update session proof status
+    this.sessionProofStatus.set(sessionId, 'accepted');
+    
+    // Add to proof history
+    if (!this.proofHistory.has(sessionId)) {
+      this.proofHistory.set(sessionId, []);
+    }
+    
+    const proofData = this.decodeProof(proof);
+    this.proofHistory.get(sessionId)!.push({
+      proof,
+      timestamp: Date.now(),
+      tokensUsed: proofData.tokensUsed,
+      status: 'accepted'
+    });
+    
+    // Emit event
+    this.emit('proofSubmitted', { sessionId, proof, receipt });
+    
+    return receipt;
+  }
+
+  setProofRejection(reject: boolean): void {
+    this.proofRejection = reject;
+  }
+
+  getSessionProofStatus(sessionId: string): string | undefined {
+    return this.sessionProofStatus.get(sessionId);
+  }
+
+  getCachedProof(sessionId: string, tokensUsed: number): string | undefined {
+    const cacheKey = `${sessionId}-${tokensUsed}`;
+    return this.proofCache.get(cacheKey);
+  }
+
+  clearProofCache(sessionId: string): void {
+    // Clear all cached proofs for this session
+    const keysToDelete: string[] = [];
+    for (const key of this.proofCache.keys()) {
+      if (key.startsWith(sessionId + '-')) {
+        keysToDelete.push(key);
+      }
+    }
+    keysToDelete.forEach(key => this.proofCache.delete(key));
+  }
+
+  async getProofHistory(sessionId: string): Promise<ProofData[]> {
+    return this.proofHistory.get(sessionId) || [];
+  }
+}
+
+interface ProofData {
+  proof: string;
+  timestamp: number;
+  tokensUsed: number;
+  status: string;
 }

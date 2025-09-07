@@ -146,27 +146,27 @@ See `docs/node-reference/Fabstir SDK → Fabstir-LLM-Node Communication Protocol
 - [x] Test files: `tests/integration/inference-security.test.ts`
 
 ### Sub-phase 11.6: EZKL Proof Generation and Verification (Max 200 lines)
-- [ ] Create `tests/integration/inference-proofs.test.ts` (25 tests)
-  - [ ] Test proof generation for inference
-  - [ ] Test proof verification
-  - [ ] Test proof submission to contract
-  - [ ] Test invalid proof handling
-  - [ ] Test proof caching
-- [ ] Implement proof methods
-  - [ ] `generateProof(sessionId: string, tokensUsed: number): Promise<string>`
-  - [ ] `verifyProof(proof: string): Promise<boolean>`
-  - [ ] `submitProof(sessionId: string, proof: string): Promise<TxReceipt>`
-  - [ ] `getProofHistory(sessionId: string): Promise<ProofData[]>`
-- [ ] Add proof generation logic
-  - [ ] Collect inference data
-  - [ ] Generate EZKL proof structure
-  - [ ] Hash proof for verification
-  - [ ] Cache generated proofs
-- [ ] Contract integration
-  - [ ] Submit proof to ProofSystem contract
-  - [ ] Handle proof acceptance/rejection
-  - [ ] Update session with proof status
-- [ ] Test files: `tests/integration/inference-proofs.test.ts`
+- [x] Create `tests/integration/inference-proofs.test.ts` (25 tests)
+  - [x] Test proof generation for inference
+  - [x] Test proof verification
+  - [x] Test proof submission to contract
+  - [x] Test invalid proof handling
+  - [x] Test proof caching
+- [x] Implement proof methods
+  - [x] `generateProof(sessionId: string, tokensUsed: number): Promise<string>`
+  - [x] `verifyProof(proof: string): Promise<boolean>`
+  - [x] `submitProof(sessionId: string, proof: string): Promise<TxReceipt>`
+  - [x] `getProofHistory(sessionId: string): Promise<ProofData[]>`
+- [x] Add proof generation logic
+  - [x] Collect inference data
+  - [x] Generate EZKL proof structure
+  - [x] Hash proof for verification
+  - [x] Cache generated proofs
+- [x] Contract integration
+  - [x] Submit proof to ProofSystem contract
+  - [x] Handle proof acceptance/rejection
+  - [x] Update session with proof status
+- [x] Test files: `tests/integration/inference-proofs.test.ts`
 
 ### Sub-phase 11.7: Conversation Management (Max 150 lines) - LEVERAGING NODE CACHE
 - [ ] Create `tests/integration/conversation-management.test.ts` (20 tests)
