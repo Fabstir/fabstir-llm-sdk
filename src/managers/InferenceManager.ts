@@ -46,6 +46,17 @@ export default class InferenceManager extends EventEmitter {
   private cache: SessionCache<Message[]>;
   private store?: S5ConversationStore;
   private currentSessionId?: string;
+  
+  // JWT and authentication
+  private sessionTokens: Map<string, string> = new Map();
+  private tokenRefreshTimers: Map<string, NodeJS.Timeout> = new Map();
+  
+  // Connection state management
+  private connectionStates: Map<string, string> = new Map();
+  private messageIndices: Map<string, number> = new Map();
+  
+  // Permission tracking
+  private permissionStats: Map<string, Record<string, number>> = new Map();
 
   constructor(
     private authManager: AuthManager,
@@ -72,7 +83,8 @@ export default class InferenceManager extends EventEmitter {
     hostUrl: string, 
     jobId: number, 
     hostAddress: string,
-    conversationContext: Message[] = []
+    conversationContext: Message[] = [],
+    options: { timeout?: number; maxRetries?: number } = {}
   ): Promise<void> {
     if (!this.authManager.isAuthenticated()) {
       throw new Error('Must authenticate before connecting to session');
@@ -87,12 +99,19 @@ export default class InferenceManager extends EventEmitter {
       }
     }
 
-    // Create new WebSocket client for this session
-    const wsClient = new WebSocketClient();
+    // Set connection state
+    this.setConnectionState(sessionId, 'connecting');
+
+    // Create new WebSocket client for this session with options
+    const wsClient = new WebSocketClient({
+      timeout: options.timeout,
+      maxRetries: options.maxRetries
+    });
     
     try {
       // Connect to host WebSocket
       await wsClient.connect(hostUrl);
+      this.setConnectionState(sessionId, 'connected');
       
       // Store client and session info
       this.wsClients.set(sessionId, wsClient);
@@ -126,6 +145,7 @@ export default class InferenceManager extends EventEmitter {
       }
       
     } catch (error: any) {
+      this.setConnectionState(sessionId, 'disconnected');
       throw new Error(`Failed to connect to session: ${error.message}`);
     }
   }
@@ -474,9 +494,260 @@ export default class InferenceManager extends EventEmitter {
   }
 
   /**
+   * JWT Token Management
+   */
+  
+  setSessionToken(sessionId: string, token: string): void {
+    this.sessionTokens.set(sessionId, token);
+  }
+  
+  getSessionToken(sessionId: string): string | undefined {
+    return this.sessionTokens.get(sessionId);
+  }
+  
+  async generateAuthToken(sessionId: string, jobId: number): Promise<string> {
+    // Simple JWT-like token generation
+    const header = { alg: 'HS256', typ: 'JWT' };
+    const payload = {
+      session_id: sessionId,
+      job_id: jobId,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 300 // 5 minutes
+    };
+    
+    const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64url');
+    const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const signature = 'mock-signature'; // In production, use proper signing
+    
+    return `${encodedHeader}.${encodedPayload}.${signature}`;
+  }
+  
+  validateToken(token: string): boolean {
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) return false;
+      
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+      const now = Math.floor(Date.now() / 1000);
+      
+      return payload.exp > now;
+    } catch {
+      return false;
+    }
+  }
+  
+  decodeToken(token: string): any {
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) return null;
+      
+      return JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+    } catch {
+      return null;
+    }
+  }
+  
+  isTokenExpired(sessionId: string): boolean {
+    const token = this.getSessionToken(sessionId);
+    if (!token) return true;
+    
+    const decoded = this.decodeToken(token);
+    if (!decoded) return true;
+    
+    const now = Math.floor(Date.now() / 1000);
+    return decoded.exp <= now;
+  }
+  
+  async refreshTokenIfNeeded(sessionId: string): Promise<boolean> {
+    if (this.isTokenExpired(sessionId)) {
+      const session = this.activeSessions.get(sessionId);
+      if (session) {
+        const newToken = await this.generateAuthToken(sessionId, session.jobId);
+        this.setSessionToken(sessionId, newToken);
+        return true;
+      }
+    }
+    return false;
+  }
+  
+  setupTokenRefresh(sessionId: string): void {
+    // Clear existing timer
+    const existingTimer = this.tokenRefreshTimers.get(sessionId);
+    if (existingTimer) clearTimeout(existingTimer);
+    
+    // Set up refresh 30 seconds before expiry
+    const timer = setTimeout(async () => {
+      await this.refreshTokenIfNeeded(sessionId);
+      this.setupTokenRefresh(sessionId); // Reschedule
+    }, 270000); // 4.5 minutes
+    
+    this.tokenRefreshTimers.set(sessionId, timer);
+  }
+  
+  enableAutoRefresh(sessionId: string, refreshBeforeMs: number = 30000): void {
+    const existingTimer = this.tokenRefreshTimers.get(sessionId);
+    if (existingTimer) clearTimeout(existingTimer);
+    
+    const checkAndRefresh = async () => {
+      const token = this.getSessionToken(sessionId);
+      if (token) {
+        const decoded = this.decodeToken(token);
+        if (decoded) {
+          const now = Math.floor(Date.now() / 1000);
+          const timeUntilExpiry = (decoded.exp - now) * 1000;
+          
+          if (timeUntilExpiry <= refreshBeforeMs) {
+            // Refresh now
+            const session = this.activeSessions.get(sessionId);
+            if (session) {
+              const newToken = await this.generateAuthToken(sessionId, session.jobId);
+              this.setSessionToken(sessionId, newToken);
+            }
+          }
+          
+          // Schedule next check
+          const nextCheck = Math.max(timeUntilExpiry - refreshBeforeMs, 1000);
+          const timer = setTimeout(checkAndRefresh, nextCheck);
+          this.tokenRefreshTimers.set(sessionId, timer);
+        }
+      }
+    };
+    
+    checkAndRefresh();
+  }
+  
+  /**
+   * Permission Management
+   */
+  
+  hasPermission(sessionId: string, permission: string): boolean {
+    const token = this.getSessionToken(sessionId);
+    if (!token) return false;
+    
+    const decoded = this.decodeToken(token);
+    if (!decoded || !decoded.permissions) return false;
+    
+    return decoded.permissions.includes(permission);
+  }
+  
+  async sendPromptWithPermissionCheck(sessionId: string, prompt: string): Promise<void> {
+    if (!this.hasPermission(sessionId, 'inference')) {
+      throw new Error('Permission denied: inference');
+    }
+    
+    await this.sendPrompt(prompt, { sessionId });
+  }
+  
+  async requestElevatedPermissions(sessionId: string, permissions: string[]): Promise<string> {
+    // Mock implementation - in production, this would request from auth service
+    const session = this.activeSessions.get(sessionId);
+    if (!session) throw new Error('Session not found');
+    
+    const header = { alg: 'HS256', typ: 'JWT' };
+    const payload = {
+      session_id: sessionId,
+      job_id: session.jobId,
+      permissions,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 300
+    };
+    
+    const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64url');
+    const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    
+    return `${encodedHeader}.${encodedPayload}.mock-signature`;
+  }
+  
+  recordPermissionUsage(sessionId: string, permission: string): void {
+    const stats = this.permissionStats.get(sessionId) || {};
+    stats[permission] = (stats[permission] || 0) + 1;
+    this.permissionStats.set(sessionId, stats);
+  }
+  
+  getPermissionStats(sessionId: string): Record<string, number> {
+    return this.permissionStats.get(sessionId) || {};
+  }
+  
+  resetPermissionStats(sessionId: string): void {
+    this.permissionStats.set(sessionId, {});
+  }
+  
+  /**
+   * Message Creation Helpers
+   */
+  
+  createSessionInitMessage(sessionId: string, jobId: number): any {
+    return {
+      type: 'session_init',
+      session_id: sessionId,
+      job_id: jobId,
+      model_config: {
+        model: 'llama-2-7b',
+        max_tokens: 2048,
+        temperature: 0.7
+      }
+    };
+  }
+  
+  createSessionResumeMessage(sessionId: string, jobId: number, conversationContext: any[]): any {
+    return {
+      type: 'session_resume',
+      session_id: sessionId,
+      job_id: jobId,
+      conversation_context: conversationContext,
+      last_message_index: conversationContext.length
+    };
+  }
+  
+  createPromptMessage(sessionId: string, content: string, messageIndex: number): any {
+    return {
+      type: 'prompt',
+      session_id: sessionId,
+      content,
+      message_index: messageIndex
+    };
+  }
+  
+  /**
+   * Connection State Management
+   */
+  
+  getConnectionState(sessionId: string): string {
+    return this.connectionStates.get(sessionId) || 'disconnected';
+  }
+  
+  setConnectionState(sessionId: string, state: string): void {
+    this.connectionStates.set(sessionId, state);
+  }
+  
+  /**
+   * Message Index Tracking
+   */
+  
+  initializeMessageIndex(sessionId: string, initialValue: number = 0): void {
+    this.messageIndices.set(sessionId, initialValue);
+  }
+  
+  getNextMessageIndex(sessionId: string): number {
+    const current = this.messageIndices.get(sessionId) || 0;
+    this.messageIndices.set(sessionId, current + 1);
+    return current;
+  }
+  
+  getAllActiveSessions(): string[] {
+    return Array.from(this.activeSessions.keys());
+  }
+  
+  /**
    * Clean up resources
    */
   async cleanup(): Promise<void> {
+    // Clear all token refresh timers
+    for (const timer of this.tokenRefreshTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.tokenRefreshTimers.clear();
+    
     await this.disconnect();
     
     if (this.store) {

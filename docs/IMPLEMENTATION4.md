@@ -17,6 +17,14 @@ Implement the missing inference capabilities in the SDK using the manager patter
 4. **Efficiency**: Enable compression and let node handle context truncation
 5. **Stateless Host Recovery**: SDK maintains full history in S5 for seamless host switching
 
+### Protocol Reference
+See `docs/node-reference/Fabstir SDK → Fabstir-LLM-Node Communication Protocol Report.md` for complete protocol specification including:
+- WebSocket message formats (session_init, session_resume, prompt, response)
+- Session initialization and resumption procedures
+- Data flow architecture and sequence diagrams
+- Recovery procedures for host crashes
+- Security considerations and performance optimizations
+
 ## Phase 11: InferenceManager Implementation (UPDATED)
 
 ### Sub-phase 11.1: Core InferenceManager Architecture (Max 150 lines) ✅ COMPLETED
@@ -44,27 +52,27 @@ Implement the missing inference capabilities in the SDK using the manager patter
 
 ### Sub-phase 11.2: WebSocket Connection Management (Max 200 lines) - UPDATED FOR NODE UPGRADE
 - [ ] Create `tests/integration/inference-websocket.test.ts` (20 tests)
-  - [ ] Test connection to host WebSocket with authentication
-  - [ ] Test session_init message protocol
-  - [ ] Test session_resume with conversation_context
-  - [ ] Test JWT token handling
-  - [ ] Test connection timeout and retry logic
-- [ ] Enhance connection methods with new protocol
-  - [ ] `connectToSession(sessionId, hostUrl, jobId, conversationContext?): Promise<void>`
-  - [ ] `initializeSession(sessionId, jobId): Promise<void>` - Send session_init
-  - [ ] `resumeSession(sessionId, conversationContext): Promise<void>` - Send session_resume
-  - [ ] `resumeSessionWithHistory(sessionId, hostUrl, jobId): Promise<void>` - Load from S5
-- [ ] Add authentication support
-  - [ ] JWT token generation and validation
-  - [ ] Token refresh mechanism
-  - [ ] Permission-based access control
-  - [ ] Session expiry handling
-- [ ] Implement server-side context management
-  - [ ] Send only new prompts during active session
-  - [ ] Send conversation_context array on resume
-  - [ ] Let node handle context truncation
-  - [ ] Track message indices for ordering
-- [ ] Test files: `tests/integration/inference-websocket.test.ts`
+  - [x] Test connection to host WebSocket with authentication
+  - [x] Test session_init message protocol
+  - [x] Test session_resume with conversation_context
+  - [x] Test JWT token handling
+  - [x] Test connection timeout and retry logic
+- [x] Enhance connection methods with new protocol
+  - [x] `connectToSession(sessionId, hostUrl, jobId, conversationContext?): Promise<void>`
+  - [x] `initializeSession(sessionId, jobId): Promise<void>` - Send session_init
+  - [x] `resumeSession(sessionId, conversationContext): Promise<void>` - Send session_resume
+  - [x] `resumeSessionWithHistory(sessionId, hostUrl, jobId): Promise<void>` - Load from S5
+- [x] Add authentication support
+  - [x] JWT token generation and validation
+  - [x] Token refresh mechanism
+  - [x] Permission-based access control
+  - [x] Session expiry handling
+- [x] Implement server-side context management
+  - [x] Send only new prompts during active session
+  - [x] Send conversation_context array on resume
+  - [x] Let node handle context truncation
+  - [x] Track message indices for ordering
+- [x] Test files: `tests/integration/inference-websocket.test.ts`
 
 ### Sub-phase 11.3: Prompt Sending and Response Handling (Max 250 lines) - OPTIMIZED FOR NODE
 - [ ] Create `tests/integration/inference-prompts.test.ts` (25 tests)

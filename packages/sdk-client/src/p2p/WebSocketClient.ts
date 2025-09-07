@@ -54,6 +54,23 @@ export class WebSocketClient {
     });
   }
 
+  async send(data: string | object): Promise<void> {
+    const message = typeof data === 'string' ? data : JSON.stringify(data);
+    if (this.state === ConnectionState.CONNECTED && this.ws?.readyState === 1) {
+      this.ws.send(message);
+    } else {
+      // Queue as P2PMessage for later processing
+      const msg: P2PMessage = { 
+        type: 'queued', 
+        index: 0, 
+        content: message, 
+        timestamp: Date.now() 
+      };
+      this.messageQueue.push(msg);
+      if (this.state === ConnectionState.CONNECTED) setTimeout(() => this.processQueue(), 10);
+    }
+  }
+
   async sendPrompt(prompt: string, index: number): Promise<void> {
     const msg: P2PMessage = { type: 'prompt', index, content: prompt, timestamp: Date.now() };
     if (this.state === ConnectionState.CONNECTED && this.ws?.readyState === 1) {
