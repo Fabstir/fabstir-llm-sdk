@@ -99,27 +99,27 @@ See `docs/node-reference/Fabstir SDK → Fabstir-LLM-Node Communication Protocol
 - [x] Test files: `tests/integration/inference-prompts.test.ts`
 
 ### Sub-phase 11.4: Token Tracking and Billing (Max 150 lines)
-- [ ] Create `tests/unit/token-tracking.test.ts` (20 tests)
-  - [ ] Test token counting accuracy
-  - [ ] Test cost calculation
-  - [ ] Test token limit enforcement
-  - [ ] Test billing event emission
-  - [ ] Test usage statistics
-- [ ] Implement token tracking
-  - [ ] `getTokenUsage(sessionId: string): number`
-  - [ ] `estimateTokens(prompt: string): number`
-  - [ ] `getSessionCost(sessionId: string): BigNumber`
-  - [ ] `getRemainingTokens(sessionId: string): number`
-- [ ] Add billing integration
-  - [ ] Track tokens per prompt
-  - [ ] Accumulate session totals
-  - [ ] Calculate costs based on pricing
-  - [ ] Emit billing events
-- [ ] Usage statistics
-  - [ ] Average tokens per prompt
-  - [ ] Total tokens per session
-  - [ ] Cost breakdown
-- [ ] Test files: `tests/unit/token-tracking.test.ts`
+- [x] Create `tests/unit/token-tracking.test.ts` (20 tests)
+  - [x] Test token counting accuracy
+  - [x] Test cost calculation
+  - [x] Test token limit enforcement
+  - [x] Test billing event emission
+  - [x] Test usage statistics
+- [x] Implement token tracking
+  - [x] `getTokenUsage(sessionId: string): number`
+  - [x] `estimateTokens(prompt: string): number`
+  - [x] `getSessionCost(sessionId: string): BigNumber`
+  - [x] `getRemainingTokens(sessionId: string): number`
+- [x] Add billing integration
+  - [x] Track tokens per prompt
+  - [x] Accumulate session totals
+  - [x] Calculate costs based on pricing
+  - [x] Emit billing events
+- [x] Usage statistics
+  - [x] Average tokens per prompt
+  - [x] Total tokens per session
+  - [x] Cost breakdown
+- [x] Test files: `tests/unit/token-tracking.test.ts`
 
 ### Sub-phase 11.5: Security Integration (Max 150 lines) - NEW FROM NODE UPGRADE
 - [ ] Create `tests/integration/inference-security.test.ts` (20 tests)

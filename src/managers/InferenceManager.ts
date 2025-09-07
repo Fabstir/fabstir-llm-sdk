@@ -594,16 +594,19 @@ export default class InferenceManager extends EventEmitter {
    * Estimate tokens for a prompt (simple word count)
    */
   estimateTokens(prompt: string): number {
+    if (!prompt || prompt.trim() === '') return 0;
     // Simple estimation: ~1.3 tokens per word on average
-    return Math.ceil(prompt.split(' ').length * 1.3);
+    return Math.ceil(prompt.split(' ').filter(w => w.length > 0).length * 1.3);
   }
 
   /**
    * Calculate session cost based on tokens and price per token
    */
-  getSessionCost(sessionId: string, pricePerToken: string): ethers.BigNumber {
+  getSessionCost(sessionId: string): ethers.BigNumber {
     const tokens = this.getTokenUsage(sessionId);
-    return ethers.BigNumber.from(pricePerToken).mul(tokens);
+    const pricing = this.sessionPricing.get(sessionId) || this.defaultPricing;
+    // pricing is per 1000 tokens
+    return pricing.mul(tokens).div(1000);
   }
 
   /**
@@ -1256,4 +1259,128 @@ export default class InferenceManager extends EventEmitter {
   }
 
   private templates?: Map<string, string>;
+  
+  // Token tracking and billing fields
+  private tokenLimits: Map<string, number> = new Map();
+  private sessionPricing: Map<string, ethers.BigNumber> = new Map();
+  private promptUsage: Map<string, Array<{promptId: string, tokens: number, cost: ethers.BigNumber}>> = new Map();
+  private defaultPricing = ethers.utils.parseEther('0.001'); // $0.001 per 1000 tokens
+
+  /**
+   * Update token count for a session (internal use)
+   */
+  private updateTokenCount(sessionId: string, tokens: number): void {
+    const session = this.activeSessions.get(sessionId);
+    if (session) {
+      session.tokensUsed += tokens;
+      
+      // Emit billing event
+      this.emit('billing', {
+        sessionId,
+        tokens,
+        totalTokens: session.tokensUsed,
+        timestamp: Date.now()
+      });
+    }
+  }
+
+  /**
+   * Set custom pricing for a session
+   */
+  setPricing(sessionId: string, pricePerThousandTokens: ethers.BigNumber): void {
+    this.sessionPricing.set(sessionId, pricePerThousandTokens);
+  }
+
+  /**
+   * Set token limit for a session
+   */
+  setTokenLimit(sessionId: string, limit: number): void {
+    this.tokenLimits.set(sessionId, limit);
+  }
+
+  /**
+   * Get remaining tokens for a session
+   */
+  getRemainingTokens(sessionId: string): number {
+    const limit = this.tokenLimits.get(sessionId);
+    if (!limit) return -1; // No limit set
+    
+    const used = this.getTokenUsage(sessionId);
+    return Math.max(0, limit - used);
+  }
+
+  /**
+   * Record prompt usage for statistics
+   */
+  private recordPromptUsage(sessionId: string, promptId: string, tokens: number): void {
+    if (!this.promptUsage.has(sessionId)) {
+      this.promptUsage.set(sessionId, []);
+    }
+    
+    const pricing = this.sessionPricing.get(sessionId) || this.defaultPricing;
+    const cost = pricing.mul(tokens).div(1000);
+    
+    this.promptUsage.get(sessionId)!.push({
+      promptId,
+      tokens,
+      cost
+    });
+    
+    // Also update the session token count
+    this.updateTokenCount(sessionId, tokens);
+  }
+
+  /**
+   * Get usage statistics for a session
+   */
+  getUsageStatistics(sessionId: string): {
+    averageTokensPerPrompt: number;
+    totalTokens: number;
+    totalCost: ethers.BigNumber;
+    promptCount: number;
+    costBreakdown: Array<{promptId: string, tokens: number, cost: ethers.BigNumber}>;
+  } {
+    const usage = this.promptUsage.get(sessionId) || [];
+    const totalTokens = this.getTokenUsage(sessionId);
+    const promptCount = usage.length;
+    const averageTokensPerPrompt = promptCount > 0 ? Math.round(totalTokens / promptCount) : 0;
+    
+    const pricing = this.sessionPricing.get(sessionId) || this.defaultPricing;
+    const totalCost = pricing.mul(totalTokens).div(1000);
+    
+    return {
+      averageTokensPerPrompt,
+      totalTokens,
+      totalCost,
+      promptCount,
+      costBreakdown: usage
+    };
+  }
+
+  /**
+   * End a session and emit final billing event
+   */
+  endSession(sessionId: string): void {
+    const session = this.activeSessions.get(sessionId);
+    if (session) {
+      const stats = this.getUsageStatistics(sessionId);
+      
+      this.emit('billing:session-end', {
+        sessionId,
+        totalTokens: stats.totalTokens,
+        totalCost: stats.totalCost,
+        promptCount: stats.promptCount,
+        timestamp: Date.now()
+      });
+      
+      // Clean up session data
+      this.activeSessions.delete(sessionId);
+      this.wsClients.get(sessionId)?.disconnect();
+      this.wsClients.delete(sessionId);
+      this.messageHandlers.delete(sessionId);
+      this.promptUsage.delete(sessionId);
+      this.tokenLimits.delete(sessionId);
+      this.sessionPricing.delete(sessionId);
+    }
+  }
 }
