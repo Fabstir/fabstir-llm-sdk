@@ -290,28 +290,28 @@ See `docs/node-reference/Fabstir SDK → Fabstir-LLM-Node Communication Protocol
 - [x] Test files: `tests/unit/host-selection.test.ts`
 
 ### Sub-phase 12.5: Unified Discovery Interface (Max 150 lines)
-- [ ] Create `tests/integration/unified-discovery.test.ts` (20 tests)
-  - [ ] Test combining all discovery sources
-  - [ ] Test deduplication
-  - [ ] Test priority ordering
-  - [ ] Test fallback chain
-  - [ ] Test discovery caching
-- [ ] Update DiscoveryManager with unified interface
-  - [ ] `discoverAllHosts(): Promise<Host[]>`
-  - [ ] `setDiscoveryPriority(order: string[]): void`
-  - [ ] `enableDiscoverySource(source: string, enabled: boolean): void`
-  - [ ] `getDiscoveryStats(): DiscoveryStats`
-- [ ] Implement aggregation logic
-  - [ ] Merge results from all sources
-  - [ ] Remove duplicate hosts
-  - [ ] Apply global filters
-  - [ ] Sort by preference
-- [ ] Add monitoring
-  - [ ] Discovery source health
-  - [ ] Success rates per source
-  - [ ] Average discovery time
-  - [ ] Cache hit rates
-- [ ] Test files: `tests/integration/unified-discovery.test.ts`
+- [x] Create `tests/integration/unified-discovery.test.ts` (20 tests)
+  - [x] Test combining all discovery sources
+  - [x] Test deduplication
+  - [x] Test priority ordering
+  - [x] Test fallback chain
+  - [x] Test discovery caching
+- [x] Update DiscoveryManager with unified interface
+  - [x] `discoverAllHosts(): Promise<Host[]>`
+  - [x] `setDiscoveryPriority(order: string[]): void`
+  - [x] `enableDiscoverySource(source: string, enabled: boolean): void`
+  - [x] `getDiscoveryStats(): DiscoveryStats`
+- [x] Implement aggregation logic
+  - [x] Merge results from all sources
+  - [x] Remove duplicate hosts
+  - [x] Apply global filters
+  - [x] Sort by preference
+- [x] Add monitoring
+  - [x] Discovery source health
+  - [x] Success rates per source
+  - [x] Average discovery time
+  - [x] Cache hit rates
+- [x] Test files: `tests/integration/unified-discovery.test.ts`
 
 ## Phase 13: Real LLM Node Integration (Optional - Post MVP)
 

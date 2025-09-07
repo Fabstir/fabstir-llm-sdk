@@ -54,6 +54,8 @@ export interface Host {
   latency?: number;
   region?: string;
   capabilities?: string[];
+  source?: string;
+  timestamp?: number;
 }
 
 export interface HostFilter {
@@ -123,4 +125,31 @@ export interface SelectionStats {
 
 export interface HostWithReliability extends Host {
   reliability?: number;
+}
+
+// Unified Discovery types
+export interface DiscoverySourceStats {
+  attempts: number;
+  successes: number;
+  failures: number;
+  averageTime: number;
+  lastSuccess?: number;
+  lastFailure?: number;
+}
+
+export interface DiscoveryStats {
+  totalDiscoveries: number;
+  cacheHits: number;
+  cacheMisses: number;
+  cacheHitRate: number;
+  sourceStats: Record<string, DiscoverySourceStats>;
+}
+
+export interface UnifiedDiscoveryOptions {
+  forceRefresh?: boolean;
+  maxPrice?: number;
+  model?: string;
+  region?: string;
+  minLatency?: number;
+  maxLatency?: number;
 }

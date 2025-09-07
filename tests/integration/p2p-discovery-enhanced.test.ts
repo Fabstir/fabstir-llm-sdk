@@ -159,10 +159,9 @@ describe('P2P Discovery Enhancement', () => {
 
     it('should handle DHT query failures', async () => {
       mockP2PClient.discoverGlobal = vi.fn().mockRejectedValue(new Error('DHT error'));
+      mockP2PClient.getBootstrapPeers = vi.fn().mockResolvedValue([]); // No bootstrap nodes
       
-      const nodes = await discoveryManager.discoverGlobalNodes();
-      
-      expect(nodes).toEqual([]);
+      await expect(discoveryManager.discoverGlobalNodes()).rejects.toThrow('DHT error');
     });
 
     it('should limit global discovery results', async () => {

@@ -1,8 +1,10 @@
 import type AuthManager from './AuthManager';
 import type { 
   Node, PeerInfo, ReputationScore, ConnectionMetrics, 
-  DiscoveryOptions as DiscoveryOpts, NetworkTopology, PreferredPeerOptions 
+  DiscoveryOptions as DiscoveryOpts, NetworkTopology, PreferredPeerOptions,
+  Host, DiscoveryStats, DiscoverySourceStats, UnifiedDiscoveryOptions
 } from '../types/discovery';
+import HttpDiscoveryClient from '../discovery/HttpDiscoveryClient';
 
 // Dynamic imports to support mocking in tests
 type Libp2p = any;
@@ -28,6 +30,17 @@ export default class DiscoveryManager {
   private blacklist = new Map<string, { reason: string; until?: number }>();
   private preferredPeers = new Map<string, PreferredPeerOptions>();
   private connectionMetrics = new Map<string, ConnectionMetrics[]>();
+  
+  // Unified discovery properties
+  private httpClient?: HttpDiscoveryClient;
+  private discoveryPriority = ['p2p-local', 'p2p-global', 'http'];
+  private enabledSources = new Map([['p2p-local', true], ['p2p-global', true], ['http', true]]);
+  private discoveryStats: Record<string, DiscoverySourceStats> = {};
+  private totalDiscoveries = 0;
+  private cacheHits = 0;
+  private cacheMisses = 0;
+  private unifiedCacheTTL = 60000;
+  private unifiedCache?: { hosts: Host[]; timestamp: number };
 
   constructor(private authManager: AuthManager | any) {
     // Support both AuthManager and P2P client for testing
@@ -169,7 +182,7 @@ export default class DiscoveryManager {
     
     // Use cache if available and no explicit TTL, or if TTL hasn't expired
     if (cached) {
-      if (!options?.cacheTTL) {
+      if (options?.cacheTTL === undefined) {
         // No TTL specified, use cache indefinitely
         return cached.nodes;
       }
@@ -206,28 +219,39 @@ export default class DiscoveryManager {
   }
 
   async discoverGlobalNodes(options?: DiscoveryOpts): Promise<Node[]> {
-    try {
-      let nodes: Node[] = [];
-      
-      if (this.p2pClient?.discoverGlobal) {
-        try {
-          nodes = await this.p2pClient.discoverGlobal();
-        } catch (error) {
-          // Fallback to bootstrap nodes
-          if (this.p2pClient?.getBootstrapPeers) {
-            nodes = await this.p2pClient.getBootstrapPeers();
+    let nodes: Node[] = [];
+    let lastError: any = null;
+    
+    if (this.p2pClient?.discoverGlobal) {
+      try {
+        nodes = await this.p2pClient.discoverGlobal();
+      } catch (error) {
+        lastError = error;
+        // Fallback to bootstrap nodes
+        if (this.p2pClient?.getBootstrapPeers) {
+          try {
+            const bootstrapNodes = await this.p2pClient.getBootstrapPeers();
+            if (bootstrapNodes && bootstrapNodes.length > 0) {
+              nodes = bootstrapNodes;
+              lastError = null; // Only clear error if we got actual nodes
+            }
+          } catch (fallbackError) {
+            // Keep the original error
           }
         }
+        
+        // If we still have an error, throw it
+        if (lastError) {
+          throw lastError;
+        }
       }
-
-      if (options?.maxNodes) {
-        nodes = nodes.slice(0, options.maxNodes);
-      }
-
-      return this.filterBlacklisted(nodes);
-    } catch (error) {
-      return [];
     }
+
+    if (options?.maxNodes) {
+      nodes = nodes.slice(0, options.maxNodes);
+    }
+
+    return this.filterBlacklisted(nodes);
   }
 
   async discoverHybrid(): Promise<Node[]> {
@@ -448,5 +472,148 @@ export default class DiscoveryManager {
                      (1 / ((b.metrics?.averageLatency || 1000) / 100)) * 0.3;
       return bScore - aScore;
     });
+  }
+
+  // ============= Unified Discovery Interface =============
+
+  async discoverAllHosts(options?: UnifiedDiscoveryOptions): Promise<Host[]> {
+    // Debug logging
+    if (process.env.NODE_ENV === 'test' && process.env.DEBUG_CACHE) {
+      console.log('[DiscoverAllHosts] Called with options:', options);
+      console.log('[DiscoverAllHosts] unifiedCache exists:', !!this.unifiedCache);
+      console.log('[DiscoverAllHosts] unifiedCacheTTL:', this.unifiedCacheTTL);
+    }
+    
+    if (!options?.forceRefresh && this.unifiedCache) {
+      const age = Date.now() - this.unifiedCache.timestamp;
+      if (process.env.NODE_ENV === 'test' && process.env.DEBUG_CACHE) {
+        console.log('[DiscoverAllHosts] Cache age:', age, 'ms');
+        console.log('[DiscoverAllHosts] Cache valid?:', age < this.unifiedCacheTTL);
+      }
+      if (age < this.unifiedCacheTTL) {
+        this.cacheHits++;
+        return this.applyGlobalFilters(this.unifiedCache.hosts, options);
+      }
+    }
+    this.cacheMisses++;
+    this.totalDiscoveries++;
+
+    if (process.env.NODE_ENV === 'test' && process.env.DEBUG_CACHE) {
+      console.log('[DiscoverAllHosts] Fetching from sources...');
+      console.log('[DiscoverAllHosts] Discovery priority:', this.discoveryPriority);
+      console.log('[DiscoverAllHosts] Enabled sources:', Array.from(this.enabledSources.entries()));
+    }
+
+    const allHosts = new Map<string, Host>();
+    const promises = this.discoveryPriority
+      .filter(s => this.enabledSources.get(s))
+      .map(source => {
+        const startTime = Date.now();
+        return this.discoverFromSource(source)
+          .then(hosts => {
+            this.recordSourceStats(source, Date.now() - startTime, true);
+            hosts.forEach(h => {
+              if (!h.id) h.id = h.peerId || h.url || Math.random().toString();
+              h.source = source;
+              const existing = allHosts.get(h.id!);
+              allHosts.set(h.id!, existing ? this.mergeHostInfo(existing, h) : h);
+            });
+          })
+          .catch(() => this.recordSourceStats(source, Date.now() - startTime, false));
+      });
+
+    await Promise.allSettled(promises);
+    let hosts = Array.from(allHosts.values());
+    hosts = this.sortByPriority(hosts);
+    hosts = this.applyGlobalFilters(hosts, options);
+    this.unifiedCache = { hosts, timestamp: Date.now() };
+    return hosts;
+  }
+
+  setDiscoveryPriority(order: string[]): void {
+    this.discoveryPriority = order.filter(s => ['p2p-local', 'p2p-global', 'http'].includes(s));
+  }
+
+  enableDiscoverySource(source: string, enabled: boolean): void {
+    this.enabledSources.set(source, enabled);
+  }
+
+  setCacheTTL(ttl: number): void { this.unifiedCacheTTL = ttl; }
+
+  getDiscoveryStats(): DiscoveryStats {
+    return {
+      totalDiscoveries: this.totalDiscoveries,
+      cacheHits: this.cacheHits,
+      cacheMisses: this.cacheMisses,
+      cacheHitRate: this.totalDiscoveries > 0 ? 
+        this.cacheHits / (this.cacheHits + this.cacheMisses) : 0,
+      sourceStats: { ...this.discoveryStats }
+    };
+  }
+
+  private async discoverFromSource(source: string): Promise<Host[]> {
+    if (process.env.NODE_ENV === 'test' && process.env.DEBUG_CACHE) {
+      console.log('[discoverFromSource] Called with source:', source);
+      console.log('[discoverFromSource] p2pClient exists:', !!this.p2pClient);
+    }
+    switch (source) {
+      case 'p2p-local': 
+        if (process.env.NODE_ENV === 'test' && process.env.DEBUG_CACHE) {
+          console.log('[discoverFromSource] Calling discoverLocalNodes...');
+        }
+        // Force refresh to bypass individual method caches
+        return (await this.discoverLocalNodes({ cacheTTL: 0 })) as Host[];
+      case 'p2p-global': 
+        return (await this.discoverGlobalNodes({ cacheTTL: 0 })) as Host[];
+      case 'http':
+        if (!this.httpClient) this.httpClient = new HttpDiscoveryClient('https://discovery.fabstir.net');
+        return await this.httpClient.discoverHosts();
+      default: return [];
+    }
+  }
+
+  private mergeHostInfo(existing: Host, newer: Host): Host {
+    const newerTime = (newer as any).timestamp || Date.now();
+    return newerTime >= ((existing as any).timestamp || 0) ? 
+      { ...existing, ...newer } : { ...newer, ...existing };
+  }
+
+  private sortByPriority(hosts: Host[]): Host[] {
+    const priorityMap = new Map(this.discoveryPriority.map((s, i) => [s, i]));
+    return hosts.sort((a, b) => 
+      (priorityMap.get(a.source || '') ?? 999) - (priorityMap.get(b.source || '') ?? 999)
+    );
+  }
+
+  private applyGlobalFilters(hosts: Host[], options?: UnifiedDiscoveryOptions): Host[] {
+    if (!options) return hosts;
+    let filtered = [...hosts];
+    if (options.maxPrice !== undefined)
+      filtered = filtered.filter(h => (h.pricePerToken || 0) <= options.maxPrice!);
+    if (options.model)
+      filtered = filtered.filter(h => h.models?.includes(options.model!));
+    if (options.region)
+      filtered = filtered.filter(h => h.region === options.region);
+    if (options.minLatency !== undefined)
+      filtered = filtered.filter(h => (h.latency || 0) >= options.minLatency!);
+    if (options.maxLatency !== undefined)
+      filtered = filtered.filter(h => (h.latency || Infinity) <= options.maxLatency!);
+    return filtered;
+  }
+
+  private recordSourceStats(source: string, time: number, success: boolean): void {
+    if (!this.discoveryStats[source]) {
+      this.discoveryStats[source] = { attempts: 0, successes: 0, failures: 0, averageTime: 0 };
+    }
+    const stats = this.discoveryStats[source];
+    stats.attempts++;
+    if (success) {
+      stats.successes++;
+      stats.lastSuccess = Date.now();
+    } else {
+      stats.failures++;
+      stats.lastFailure = Date.now();
+    }
+    stats.averageTime = (stats.averageTime * (stats.attempts - 1) + time) / stats.attempts;
   }
 }
