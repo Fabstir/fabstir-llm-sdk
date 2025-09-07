@@ -325,6 +325,11 @@ export interface ResponseStreamOptions {
   jobId: string;
   requestId: string;
   resumeFrom?: number;
+  nodeUrl?: string;
+  model?: string;
+  prompt?: string;
+  maxTokens?: number;
+  temperature?: number;
 }
 
 // P2P-Contract Bridge types

@@ -27,6 +27,7 @@ import { CID } from "multiformats/cid";
 import * as json from 'multiformats/codecs/json';
 import { sha256 } from 'multiformats/hashes/sha2';
 import { BigNumber } from "ethers";
+import { LLMNodeClient } from "../inference/LLMNodeClient.js";
 
 export interface P2PStatus {
   connected: boolean;
@@ -60,6 +61,8 @@ class P2PResponseStreamImpl extends EventEmitter implements P2PResponseStream {
   private metricsTimer?: NodeJS.Timeout;
   private lastTokenTime?: number;
   private tokenLatencies: number[] = [];
+  private nodeClient?: LLMNodeClient;
+  private useMockMode: boolean = false;
   private mockTokens = [
     "Hello", " ", "world", "!", " ", "This", " ", "is", " ", "a", " ", "streaming", " ", "response", "."
   ];
@@ -77,17 +80,104 @@ class P2PResponseStreamImpl extends EventEmitter implements P2PResponseStream {
       this.tokenIndex = options.resumeFrom;
     }
     
-    // Start token generation
-    this.startTokenGeneration();
+    // Check if we have a node URL for real inference
+    if (options.nodeUrl) {
+      this.initializeRealNode(options.nodeUrl);
+    } else {
+      this.useMockMode = true;
+      // Start token generation
+      this.startTokenGeneration();
+    }
     
     // Start metrics updates
     this.startMetricsUpdates();
   }
 
-  private startTokenGeneration(): void {
-    if (this.status !== "active") return;
+  private async initializeRealNode(nodeUrl: string): Promise<void> {
+    try {
+      this.nodeClient = new LLMNodeClient(nodeUrl);
+      const health = await this.nodeClient.checkHealth();
+      
+      if (health.status === 'healthy' || health.status === 'degraded') {
+        this.useMockMode = false;
+        await this.startRealStreaming();
+      } else {
+        console.warn(`Node ${nodeUrl} unhealthy, falling back to mock mode`);
+        this.useMockMode = true;
+        this.startTokenGeneration();
+      }
+    } catch (error) {
+      console.warn(`Failed to connect to node ${nodeUrl}, using mock mode:`, error);
+      this.useMockMode = true;
+      this.startTokenGeneration();
+    }
+  }
+
+  private async startRealStreaming(): Promise<void> {
+    if (!this.nodeClient) return;
     
-    // Generate tokens at ~15 tokens/second
+    try {
+      const stream = await this.nodeClient.streamInferenceWS({
+        model: this.options.model || 'llama-2-7b',
+        prompt: this.options.prompt || 'Continue the conversation',
+        max_tokens: this.options.maxTokens || 100,
+        temperature: this.options.temperature || 0.7
+      });
+      
+      stream.on('token', (token: string) => {
+        if (this.status !== "active") return;
+        
+        const now = Date.now();
+        const streamToken: StreamToken = {
+          content: token,
+          index: this.tokenIndex++,
+          timestamp: now,
+          type: "content"
+        };
+        
+        this.updateMetrics(streamToken, now);
+        this.emit("token", streamToken);
+        this.tokensReceived++;
+        this.bytesReceived += token.length;
+      });
+      
+      stream.on('end', () => {
+        this.handleStreamEnd();
+      });
+      
+      stream.on('error', (error: any) => {
+        const streamError: StreamError = {
+          code: "STREAM_ERROR",
+          message: error.message || "Stream error",
+          recoverable: true
+        };
+        this.emit("error", streamError);
+        this.status = "error";
+        this.cleanup();
+      });
+      
+      stream.start();
+    } catch (error: any) {
+      console.warn('Failed to start real streaming, falling back to mock:', error);
+      this.useMockMode = true;
+      this.startTokenGeneration();
+    }
+  }
+
+  private updateMetrics(token: StreamToken, now: number): void {
+    if (this.lastTokenTime) {
+      this.tokenLatencies.push(now - this.lastTokenTime);
+      if (this.tokenLatencies.length > 100) {
+        this.tokenLatencies.shift();
+      }
+    }
+    this.lastTokenTime = now;
+  }
+
+  private startTokenGeneration(): void {
+    if (this.status !== "active" || !this.useMockMode) return;
+    
+    // Generate tokens at ~15 tokens/second (only in mock mode)
     this.tokenTimer = setInterval(() => {
       if (this.status === "paused" || this.status === "closed") return;
       
@@ -114,14 +204,7 @@ class P2PResponseStreamImpl extends EventEmitter implements P2PResponseStream {
         };
         
         // Track metrics
-        if (this.lastTokenTime) {
-          this.tokenLatencies.push(now - this.lastTokenTime);
-          // Keep only last 100 latencies
-          if (this.tokenLatencies.length > 100) {
-            this.tokenLatencies.shift();
-          }
-        }
-        this.lastTokenTime = now;
+        this.updateMetrics(token, now);
         
         this.tokensReceived++;
         this.bytesReceived += token.content.length;

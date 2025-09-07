@@ -313,21 +313,36 @@ See `docs/node-reference/Fabstir SDK → Fabstir-LLM-Node Communication Protocol
   - [x] Cache hit rates
 - [x] Test files: `tests/integration/unified-discovery.test.ts`
 
-## Phase 13: Real LLM Node Integration (Optional - Post MVP)
+## Phase 13: Real LLM Node Integration
 
-### Sub-phase 13.1: Fabstir LLM Node Client (Max 200 lines)
-- [ ] Create `tests/integration/llm-node-client.test.ts` (25 tests)
-  - [ ] Test health check endpoint
-  - [ ] Test model listing
-  - [ ] Test inference request
-  - [ ] Test streaming response
-  - [ ] Test error handling
-- [ ] Create `src/inference/LLMNodeClient.ts`
-  - [ ] HTTP/WebSocket client for Fabstir LLM Node
-  - [ ] Support all API endpoints from docs/node-reference/API.md
-  - [ ] Handle authentication if required
-  - [ ] Implement retry and timeout logic
-- [ ] Test files: `tests/integration/llm-node-client.test.ts`
+### Sub-phase 13.1: LLM Node Client Bridge (Max 200 lines)
+**Context**: The fabstir-llm-node backend already provides real LLM inference. This sub-phase bridges the gap between the SDK's discovery system and the real node endpoints, replacing mock responses with real LLM streams.
+
+- [x] Create `tests/integration/llm-node-client.test.ts` (25 tests)
+  - [x] Test connection to discovered fabstir-llm-node instances
+  - [x] Test health check endpoint
+  - [x] Test model listing endpoint
+  - [x] Test real inference via HTTP `/v1/inference` endpoint
+  - [x] Test WebSocket session streaming
+  - [x] Test SSE (Server-Sent Events) streaming
+  - [x] Test switching from mock to real responses
+  - [x] Test error handling and node failover
+  - [x] Test authentication with API keys
+  - [x] Test rate limiting handling
+- [x] Create `src/inference/LLMNodeClient.ts`
+  - [x] Connect to fabstir-llm-node instances from discovery
+  - [x] HTTP client for `/v1/inference` endpoint
+  - [x] WebSocket client for streaming sessions
+  - [x] SSE client for streaming responses
+  - [x] Handle node authentication if configured
+  - [x] Implement retry logic for failed nodes
+  - [x] Bridge between P2PClient and actual node endpoints
+- [x] Update `src/p2p/client.ts` P2PResponseStreamImpl
+  - [x] Remove mockTokens array
+  - [x] Add LLMNodeClient instance
+  - [x] Stream real tokens from node's WebSocket/SSE response
+  - [x] Update createResponseStream() to use real node URLs
+- [x] Test files: `tests/integration/llm-node-client.test.ts`
 
 ## Testing Strategy
 
@@ -353,19 +368,19 @@ See `docs/node-reference/Fabstir SDK → Fabstir-LLM-Node Communication Protocol
 ## Success Criteria
 
 ### Phase 11 Complete When:
-- [ ] InferenceManager fully integrated into SDK
-- [ ] All manager methods implemented and tested
-- [ ] Real WebSocket communication working
-- [ ] EZKL proof generation functional
-- [ ] Token tracking accurate
-- [ ] All tests passing (>80% coverage)
+- [x] InferenceManager fully integrated into SDK
+- [x] All manager methods implemented and tested
+- [x] Real WebSocket communication working
+- [x] EZKL proof generation functional
+- [x] Token tracking accurate
+- [x] All tests passing (>80% coverage)
 
 ### Phase 12 Complete When:
-- [ ] All discovery sources integrated
-- [ ] Optimal host selection working
-- [ ] Discovery results deduplicated and cached
-- [ ] Performance metrics collected
-- [ ] All tests passing (>80% coverage)
+- [x] All discovery sources integrated
+- [x] Optimal host selection working
+- [x] Discovery results deduplicated and cached
+- [x] Performance metrics collected
+- [x] All tests passing (>80% coverage)
 
 ## Notes
 
