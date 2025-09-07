@@ -261,33 +261,33 @@ See `docs/node-reference/Fabstir SDK → Fabstir-LLM-Node Communication Protocol
 - [x] Test files: `tests/integration/http-discovery-service.test.ts`
 
 ### Sub-phase 12.4: Optimal Host Selection (Max 200 lines)
-- [ ] Create `tests/unit/host-selection.test.ts` (25 tests)
-  - [ ] Test selection by price
-  - [ ] Test selection by latency
-  - [ ] Test selection by capability
-  - [ ] Test multi-criteria scoring
-  - [ ] Test load balancing
-- [ ] Create `src/discovery/HostSelector.ts`
-  - [ ] Constructor with selection strategy
-  - [ ] Scoring algorithm
-  - [ ] Weight configuration
-  - [ ] Selection history
-- [ ] Implement selection methods
-  - [ ] `selectOptimalHost(hosts: Host[], criteria: SelectionCriteria): Host`
-  - [ ] `rankHosts(hosts: Host[], weights: Weights): Host[]`
-  - [ ] `filterByRequirements(hosts: Host[], requirements: Requirements): Host[]`
-  - [ ] `loadBalance(hosts: Host[]): Host`
-- [ ] Add selection strategies
-  - [ ] Lowest price
-  - [ ] Lowest latency
-  - [ ] Best reputation
-  - [ ] Composite scoring
-  - [ ] Round-robin
-- [ ] Performance tracking
-  - [ ] Selection success rate
-  - [ ] Average session duration
-  - [ ] Host reliability scores
-- [ ] Test files: `tests/unit/host-selection.test.ts`
+- [x] Create `tests/unit/host-selection.test.ts` (25 tests)
+  - [x] Test selection by price
+  - [x] Test selection by latency
+  - [x] Test selection by capability
+  - [x] Test multi-criteria scoring
+  - [x] Test load balancing
+- [x] Create `src/discovery/HostSelector.ts`
+  - [x] Constructor with selection strategy
+  - [x] Scoring algorithm
+  - [x] Weight configuration
+  - [x] Selection history
+- [x] Implement selection methods
+  - [x] `selectOptimalHost(hosts: Host[], criteria: SelectionCriteria): Host`
+  - [x] `rankHosts(hosts: Host[], weights: Weights): Host[]`
+  - [x] `filterByRequirements(hosts: Host[], requirements: Requirements): Host[]`
+  - [x] `loadBalance(hosts: Host[]): Host`
+- [x] Add selection strategies
+  - [x] Lowest price
+  - [x] Lowest latency
+  - [x] Best reputation
+  - [x] Composite scoring
+  - [x] Round-robin
+- [x] Performance tracking
+  - [x] Selection success rate
+  - [x] Average session duration
+  - [x] Host reliability scores
+- [x] Test files: `tests/unit/host-selection.test.ts`
 
 ### Sub-phase 12.5: Unified Discovery Interface (Max 150 lines)
 - [ ] Create `tests/integration/unified-discovery.test.ts` (20 tests)

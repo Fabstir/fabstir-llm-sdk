@@ -75,3 +75,52 @@ export interface DiscoveryClientOptions {
   maxRetries?: number;
   timeout?: number;
 }
+
+// Host Selection types
+export type SelectionStrategy = 'price' | 'latency' | 'capability' | 'composite' | 'round-robin';
+
+export interface SelectionCriteria {
+  strategy: SelectionStrategy;
+  maxPrice?: number;
+  maxLatency?: number;
+  requiredModel?: string;
+  requiredCapabilities?: string[];
+  preferredCapabilities?: string[];
+  preferredRegion?: string;
+}
+
+export interface Weights {
+  price: number;
+  latency: number;
+  reliability: number;
+}
+
+export interface Requirements {
+  models?: string[];
+  capabilities?: string[];
+  maxPrice?: number;
+  maxLatency?: number;
+  region?: string;
+}
+
+export interface HostScore {
+  host: Host;
+  score: number;
+  breakdown?: {
+    priceScore?: number;
+    latencyScore?: number;
+    reliabilityScore?: number;
+  };
+}
+
+export interface SelectionStats {
+  totalSelections: number;
+  successRate: number;
+  hostSelectionCounts: Record<string, number>;
+  hostReliabilityScores: Record<string, number>;
+  averageSessionDuration?: number;
+}
+
+export interface HostWithReliability extends Host {
+  reliability?: number;
+}
