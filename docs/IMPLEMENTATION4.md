@@ -190,28 +190,28 @@ See `docs/node-reference/Fabstir SDK → Fabstir-LLM-Node Communication Protocol
 ## Phase 12: Enhanced Node Discovery
 
 ### Sub-phase 12.1: NodeRegistry Integration (Max 200 lines)
-- [ ] Create `tests/integration/node-registry-discovery.test.ts` (25 tests)
-  - [ ] Test querying active nodes
-  - [ ] Test parsing node metadata
-  - [ ] Test filtering by capabilities
-  - [ ] Test handling inactive nodes
-  - [ ] Test registry event monitoring
-- [ ] Create `src/discovery/NodeRegistryClient.ts`
-  - [ ] Constructor with contract address
-  - [ ] Connect to NodeRegistry contract
-  - [ ] Parse contract ABI
-  - [ ] Handle contract errors
-- [ ] Implement registry methods
-  - [ ] `getAllActiveNodes(): Promise<string[]>`
-  - [ ] `getNodeMetadata(address: string): Promise<NodeMetadata>`
-  - [ ] `isNodeActive(address: string): Promise<boolean>`
-  - [ ] `getNodeStake(address: string): Promise<BigNumber>`
-- [ ] Add metadata parsing
-  - [ ] Parse JSON metadata
-  - [ ] Validate metadata schema
-  - [ ] Extract capabilities
-  - [ ] Handle malformed data
-- [ ] Test files: `tests/integration/node-registry-discovery.test.ts`
+- [x] Create `tests/integration/node-registry-discovery.test.ts` (25 tests)
+  - [x] Test querying active nodes
+  - [x] Test parsing node metadata
+  - [x] Test filtering by capabilities
+  - [x] Test handling inactive nodes
+  - [x] Test registry event monitoring
+- [x] Create `src/discovery/NodeRegistryClient.ts`
+  - [x] Constructor with contract address
+  - [x] Connect to NodeRegistry contract
+  - [x] Parse contract ABI
+  - [x] Handle contract errors
+- [x] Implement registry methods
+  - [x] `getAllActiveNodes(): Promise<string[]>`
+  - [x] `getNodeMetadata(address: string): Promise<NodeMetadata>`
+  - [x] `isNodeActive(address: string): Promise<boolean>`
+  - [x] `getNodeStake(address: string): Promise<BigNumber>`
+- [x] Add metadata parsing
+  - [x] Parse JSON metadata
+  - [x] Validate metadata schema
+  - [x] Extract capabilities
+  - [x] Handle malformed data
+- [x] Test files: `tests/integration/node-registry-discovery.test.ts`
 
 ### Sub-phase 12.2: P2P Discovery Enhancement (Max 200 lines)
 - [ ] Create `tests/integration/p2p-discovery-enhanced.test.ts` (25 tests)
