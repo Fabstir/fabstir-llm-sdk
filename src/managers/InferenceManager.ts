@@ -67,7 +67,13 @@ export default class InferenceManager extends EventEmitter {
   /**
    * Connect to a host for an active session
    */
-  async connectToSession(sessionId: string, hostUrl: string, jobId: number, hostAddress: string): Promise<void> {
+  async connectToSession(
+    sessionId: string, 
+    hostUrl: string, 
+    jobId: number, 
+    hostAddress: string,
+    conversationContext: Message[] = []
+  ): Promise<void> {
     if (!this.authManager.isAuthenticated()) {
       throw new Error('Must authenticate before connecting to session');
     }
@@ -96,7 +102,7 @@ export default class InferenceManager extends EventEmitter {
         jobId,
         hostUrl,
         hostAddress,
-        messages: [],
+        messages: conversationContext,  // Initialize with existing context if provided
         tokensUsed: 0,
         isConnected: true,
         startTime: Date.now()
@@ -112,9 +118,63 @@ export default class InferenceManager extends EventEmitter {
       
       this.emit('session:connected', { sessionId, hostUrl });
       
+      // Send session initialization or resume message based on context
+      if (conversationContext.length > 0) {
+        await this.resumeSession(sessionId, conversationContext);
+      } else {
+        await this.initializeSession(sessionId, jobId);
+      }
+      
     } catch (error: any) {
       throw new Error(`Failed to connect to session: ${error.message}`);
     }
+  }
+
+  /**
+   * Initialize a new session with the host
+   */
+  private async initializeSession(sessionId: string, jobId: number): Promise<void> {
+    const wsClient = this.wsClients.get(sessionId);
+    if (!wsClient) throw new Error('WebSocket client not found');
+
+    const initMessage = {
+      type: 'session_init',
+      session_id: sessionId,
+      job_id: jobId,
+      model_config: {
+        model: 'llama-2-7b',
+        max_tokens: 2048,
+        temperature: 0.7
+      }
+    };
+
+    // Send session initialization
+    await wsClient.send(JSON.stringify(initMessage));
+    this.emit('session:initialized', { sessionId, jobId });
+  }
+
+  /**
+   * Resume an existing session with conversation context
+   */
+  private async resumeSession(sessionId: string, conversationContext: Message[]): Promise<void> {
+    const wsClient = this.wsClients.get(sessionId);
+    const session = this.activeSessions.get(sessionId);
+    if (!wsClient || !session) throw new Error('Session not found');
+
+    const resumeMessage = {
+      type: 'session_resume',
+      session_id: sessionId,
+      job_id: session.jobId,
+      conversation_context: conversationContext.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      })),
+      last_message_index: conversationContext.length
+    };
+
+    // Send session resume
+    await wsClient.send(JSON.stringify(resumeMessage));
+    this.emit('session:resumed', { sessionId, contextSize: conversationContext.length });
   }
 
   /**
@@ -154,8 +214,16 @@ export default class InferenceManager extends EventEmitter {
     // Cache messages
     this.cache.set(sessionId, session.messages);
     
-    // Send prompt via WebSocket
-    await wsClient.sendPrompt(content, session.messages.length);
+    // Send prompt via WebSocket using proper protocol
+    const promptMessage = {
+      type: 'prompt',
+      session_id: sessionId,
+      content: content,
+      message_index: session.messages.length - 1,
+      stream: options.stream || false
+    };
+    
+    await wsClient.send(promptMessage);
     
     this.emit('prompt:sent', message);
     
@@ -291,6 +359,27 @@ export default class InferenceManager extends EventEmitter {
     }
     
     return [];
+  }
+
+  /**
+   * Resume a session with full conversation history from storage
+   */
+  async resumeSessionWithHistory(
+    sessionId: string,
+    hostUrl: string,
+    jobId: number,
+    hostAddress: string
+  ): Promise<void> {
+    // Load conversation history from storage
+    const conversationHistory = await this.getConversation(sessionId);
+    
+    // Connect with the loaded context
+    await this.connectToSession(sessionId, hostUrl, jobId, hostAddress, conversationHistory);
+    
+    this.emit('session:resumed:with-history', { 
+      sessionId, 
+      messageCount: conversationHistory.length 
+    });
   }
 
   /**

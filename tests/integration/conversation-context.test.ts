@@ -145,27 +145,26 @@ describe('Conversation Context with Storage', () => {
       conversation.push(userMessage);
       
       try {
-        // For real LLM inference, we need to send context
-        let fullPrompt = prompt;
+        // Build conversation context array for server-side management
+        const conversationContext = requiresContext && conversation.length > 1
+          ? conversation.slice(0, -1).map(msg => ({
+              role: msg.role,
+              content: msg.content
+            }))
+          : [];
         
-        if (requiresContext && conversation.length > 1) {
-          // Build context from previous messages
-          const context = conversation
-            .slice(0, -1) // Exclude current message
-            .map(msg => `${msg.role === 'user' ? 'Human' : 'Assistant'}: ${msg.content}`)
-            .join('\n');
-          
-          fullPrompt = `${context}\n\nHuman: ${prompt}\n\nAssistant:`;
-          console.log('\n[Sending with context from previous messages]');
+        if (requiresContext && conversationContext.length > 0) {
+          console.log(`\n[Sending with ${conversationContext.length} context messages]`);
         }
         
-        // Try real inference first
+        // Send inference request with conversation_context array
         const inferenceResponse = await fetch(`${LLM_NODE_URL}/v1/inference`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: 'llama-2-7b',
-            prompt: fullPrompt,
+            prompt: prompt,  // Only send the new prompt
+            conversation_context: conversationContext,  // Server manages context
             max_tokens: 50,
             temperature: 0.7,
             stream: false
@@ -296,12 +295,11 @@ describe('Conversation Context with Storage', () => {
         console.log(`\nContinuing conversation...`);
         console.log(`User: "${continuationPrompt}"`);
         
-        // Build full context
-        const context = messages
-          .map(msg => `${msg.role === 'user' ? 'Human' : 'Assistant'}: ${msg.content}`)
-          .join('\n');
-        
-        const fullPrompt = `${context}\n\nHuman: ${continuationPrompt}\n\nAssistant:`;
+        // Send conversation context as array for server-side management
+        const conversationContext = messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }));
         
         try {
           const response = await fetch(`${LLM_NODE_URL}/v1/inference`, {
@@ -309,7 +307,8 @@ describe('Conversation Context with Storage', () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               model: 'llama-2-7b',
-              prompt: fullPrompt,
+              prompt: continuationPrompt,  // Only send new prompt
+              conversation_context: conversationContext,  // Server manages context
               max_tokens: 60,
               temperature: 0.7,
               stream: false
@@ -381,12 +380,12 @@ describe('Conversation Context with Storage', () => {
     console.log('2. WITH CONTEXT (about Paris):');
     console.log(`   Prompt: "${ambiguousPrompt}"`);
     
-    const contextPrompt = `Human: What is the capital of France?
-Assistant: The capital of France is Paris.
-Human: Tell me more about it.
-Assistant: Paris is known as the City of Light and is famous for its culture, art, and history.
-Human: ${ambiguousPrompt}
-Assistant:`;
+    const parisContext = [
+      { role: 'user', content: 'What is the capital of France?' },
+      { role: 'assistant', content: 'The capital of France is Paris.' },
+      { role: 'user', content: 'Tell me more about it.' },
+      { role: 'assistant', content: 'Paris is known as the City of Light and is famous for its culture, art, and history.' }
+    ];
     
     try {
       const withContextResponse = await fetch(`${LLM_NODE_URL}/v1/inference`, {
@@ -394,7 +393,8 @@ Assistant:`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: 'llama-2-7b',
-          prompt: contextPrompt,
+          prompt: ambiguousPrompt,
+          conversation_context: parisContext,  // Server manages context formatting
           max_tokens: 40,
           temperature: 0.7,
           stream: false
