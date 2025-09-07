@@ -214,28 +214,28 @@ See `docs/node-reference/Fabstir SDK → Fabstir-LLM-Node Communication Protocol
 - [x] Test files: `tests/integration/node-registry-discovery.test.ts`
 
 ### Sub-phase 12.2: P2P Discovery Enhancement (Max 200 lines)
-- [ ] Create `tests/integration/p2p-discovery-enhanced.test.ts` (25 tests)
-  - [ ] Test mDNS local discovery
-  - [ ] Test DHT global discovery
-  - [ ] Test bootstrap node connection
-  - [ ] Test peer capability announcement
-  - [ ] Test network topology mapping
-- [ ] Enhance DiscoveryManager P2P capabilities
-  - [ ] `discoverLocalNodes(): Promise<Node[]>`
-  - [ ] `discoverGlobalNodes(): Promise<Node[]>`
-  - [ ] `announceCapabilities(capabilities: string[]): Promise<void>`
-  - [ ] `searchByCapability(capability: string): Promise<Node[]>`
-- [ ] Add discovery strategies
-  - [ ] mDNS for local network
-  - [ ] Kademlia DHT for global
-  - [ ] Bootstrap node fallback
-  - [ ] Hybrid discovery mode
-- [ ] Implement peer management
-  - [ ] Peer reputation tracking
-  - [ ] Connection quality metrics
-  - [ ] Blacklist management
-  - [ ] Preferred peer list
-- [ ] Test files: `tests/integration/p2p-discovery-enhanced.test.ts`
+- [x] Create `tests/integration/p2p-discovery-enhanced.test.ts` (25 tests)
+  - [x] Test mDNS local discovery
+  - [x] Test DHT global discovery
+  - [x] Test bootstrap node connection
+  - [x] Test peer capability announcement
+  - [x] Test network topology mapping
+- [x] Enhance DiscoveryManager P2P capabilities
+  - [x] `discoverLocalNodes(): Promise<Node[]>`
+  - [x] `discoverGlobalNodes(): Promise<Node[]>`
+  - [x] `announceCapabilities(capabilities: string[]): Promise<void>`
+  - [x] `searchByCapability(capability: string): Promise<Node[]>`
+- [x] Add discovery strategies
+  - [x] mDNS for local network
+  - [x] Kademlia DHT for global
+  - [x] Bootstrap node fallback
+  - [x] Hybrid discovery mode
+- [x] Implement peer management
+  - [x] Peer reputation tracking
+  - [x] Connection quality metrics
+  - [x] Blacklist management
+  - [x] Preferred peer list
+- [x] Test files: `tests/integration/p2p-discovery-enhanced.test.ts`
 
 ### Sub-phase 12.3: HTTP Discovery Service Integration (Max 150 lines)
 - [ ] Create `tests/integration/http-discovery-service.test.ts` (20 tests)
