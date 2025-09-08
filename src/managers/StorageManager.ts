@@ -351,17 +351,22 @@ export default class StorageManager {
   }
 
   /**
-   * List all sessions for the current user
+   * List all sessions for the current user (detailed version)
    */
-  async listSessions(): Promise<Array<{ sessionId: string; metadata?: SessionMetadata; summary?: SessionSummary }>> {
+  async listSessionsDetailed(): Promise<Array<{ sessionId: string; metadata?: SessionMetadata; summary?: SessionSummary }>> {
     if (!this.initialized) throw new Error('StorageManager not initialized');
     
     try {
       const userSessionsPath = `${StorageManager.SESSIONS_PATH}/${this.userAddress}`;
       
       const sessions = [];
-      for await (const item of this.s5Client.fs.list(userSessionsPath)) {
-        sessions.push(item);
+      try {
+        for await (const item of this.s5Client.fs.list(userSessionsPath)) {
+          sessions.push(item);
+        }
+      } catch (error) {
+        // Path doesn't exist yet
+        return [];
       }
       
       const sessionList = [];
@@ -384,7 +389,7 @@ export default class StorageManager {
       
       return sessionList;
     } catch (error: any) {
-      console.debug('listSessions error:', error.message);
+      console.debug('listSessionsDetailed error:', error.message);
       return [];
     }
   }
@@ -442,8 +447,13 @@ export default class StorageManager {
       const userPath = `${StorageManager.CONVERSATION_PATH}/${this.userAddress}`;
       
       const files = [];
-      for await (const item of this.s5Client.fs.list(userPath)) {
-        files.push(item);
+      try {
+        for await (const item of this.s5Client.fs.list(userPath)) {
+          files.push(item);
+        }
+      } catch (error) {
+        // Path doesn't exist yet
+        return [];
       }
       
       const items = [];
@@ -472,4 +482,106 @@ export default class StorageManager {
   }
 
   isInitialized(): boolean { return this.initialized; }
+  
+  // ============= Conversation-Based Methods for UI =============
+  
+  /**
+   * Save a full conversation (for UI compatibility)
+   */
+  async saveConversation(sessionId: string, messages: Array<{ role: string; content: string }>): Promise<void> {
+    if (!this.initialized) throw new Error('StorageManager not initialized');
+    
+    try {
+      const conversationPath = `${StorageManager.CONVERSATION_PATH}/${this.userAddress}/${sessionId}/messages.json`;
+      await this.s5Client.fs.put(conversationPath, messages);
+    } catch (error: any) {
+      throw new Error(`Failed to save conversation: ${error.message}`);
+    }
+  }
+  
+  /**
+   * Load a full conversation (for UI compatibility)
+   */
+  async loadConversation(sessionId: string): Promise<Array<{ role: string; content: string }>> {
+    if (!this.initialized) throw new Error('StorageManager not initialized');
+    
+    try {
+      const conversationPath = `${StorageManager.CONVERSATION_PATH}/${this.userAddress}/${sessionId}/messages.json`;
+      const messages = await this.s5Client.fs.get(conversationPath);
+      return messages || [];
+    } catch (error: any) {
+      // Return empty array if conversation doesn't exist
+      return [];
+    }
+  }
+  
+  /**
+   * Save session metadata (for UI compatibility)
+   */
+  async saveSessionMetadata(sessionId: string, metadata: any): Promise<void> {
+    if (!this.initialized) throw new Error('StorageManager not initialized');
+    
+    try {
+      const metadataPath = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${sessionId}/ui-metadata.json`;
+      await this.s5Client.fs.put(metadataPath, metadata);
+    } catch (error: any) {
+      throw new Error(`Failed to save session metadata: ${error.message}`);
+    }
+  }
+  
+  /**
+   * Load session metadata (for UI compatibility)
+   */
+  async loadSessionMetadata(sessionId: string): Promise<any> {
+    if (!this.initialized) throw new Error('StorageManager not initialized');
+    
+    try {
+      const metadataPath = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${sessionId}/ui-metadata.json`;
+      return await this.s5Client.fs.get(metadataPath);
+    } catch (error: any) {
+      return null;
+    }
+  }
+  
+  /**
+   * List all sessions (for UI compatibility)
+   */
+  async listSessions(): Promise<Array<{ id: string; created?: number }>> {
+    if (!this.initialized) throw new Error('StorageManager not initialized');
+    
+    try {
+      const sessionsPath = `${StorageManager.SESSIONS_PATH}/${this.userAddress}`;
+      
+      const sessions = [];
+      try {
+        // fs.list returns an async iterator, not an array
+        for await (const entry of this.s5Client.fs.list(sessionsPath)) {
+          if (entry.type === 'directory') {
+            // Try to get metadata for created timestamp
+            let created = Date.now();
+            try {
+              const metadata = await this.s5Client.fs.get(`${sessionsPath}/${entry.name}/ui-metadata.json`);
+              if (metadata?.createdAt) {
+                created = metadata.createdAt;
+              }
+            } catch {}
+            
+            sessions.push({ 
+              id: entry.name,
+              created
+            });
+          }
+        }
+      } catch (error) {
+        // Path doesn't exist yet, return empty array
+        console.debug('Sessions path does not exist yet');
+        return [];
+      }
+      
+      return sessions;
+    } catch (error: any) {
+      console.debug('listSessions error:', error.message);
+      return [];
+    }
+  }
 }

@@ -2,9 +2,11 @@ import type AuthManager from './AuthManager';
 import type { 
   Node, PeerInfo, ReputationScore, ConnectionMetrics, 
   DiscoveryOptions as DiscoveryOpts, NetworkTopology, PreferredPeerOptions,
-  Host, DiscoveryStats, DiscoverySourceStats, UnifiedDiscoveryOptions
+  Host, DiscoveryStats, DiscoverySourceStats, UnifiedDiscoveryOptions,
+  SelectionStrategy, SelectionCriteria
 } from '../types/discovery';
 import HttpDiscoveryClient from '../discovery/HttpDiscoveryClient';
+import HostSelector from '../discovery/HostSelector';
 
 // Dynamic imports to support mocking in tests
 type Libp2p = any;
@@ -41,6 +43,7 @@ export default class DiscoveryManager {
   private cacheMisses = 0;
   private unifiedCacheTTL = 60000;
   private unifiedCache?: { hosts: Host[]; timestamp: number };
+  private hostSelector = new HostSelector();
 
   constructor(private authManager: AuthManager | any) {
     // Support both AuthManager and P2P client for testing
@@ -583,6 +586,42 @@ export default class DiscoveryManager {
     return hosts.sort((a, b) => 
       (priorityMap.get(a.source || '') ?? 999) - (priorityMap.get(b.source || '') ?? 999)
     );
+  }
+
+  async selectHostForModel(model: string, strategy: SelectionStrategy = 'random'): Promise<Host | null> {
+    // Get all available hosts
+    const allHosts = await this.discoverAllHosts({ forceRefresh: false });
+    
+    // Filter hosts that support the requested model
+    const compatibleHosts = allHosts.filter(host => {
+      // Check if host has the model in its models array
+      if (host.models?.includes(model)) return true;
+      
+      // Also check capabilities for backward compatibility
+      if (host.capabilities?.includes(model)) return true;
+      
+      // Check if model is mentioned in any capability string
+      return host.capabilities?.some(cap => cap.includes(model)) || false;
+    });
+    
+    if (compatibleHosts.length === 0) {
+      console.log(`No hosts found supporting model: ${model}`);
+      return null;
+    }
+    
+    // Use HostSelector to choose based on strategy
+    const criteria: SelectionCriteria = {
+      strategy,
+      requiredModel: model
+    };
+    
+    const selected = this.hostSelector.selectOptimalHost(compatibleHosts, criteria);
+    
+    if (selected) {
+      console.log(`Selected host ${selected.id} for model ${model} using ${strategy} strategy`);
+    }
+    
+    return selected;
   }
 
   private applyGlobalFilters(hosts: Host[], options?: UnifiedDiscoveryOptions): Host[] {

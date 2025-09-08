@@ -79,7 +79,7 @@ export interface DiscoveryClientOptions {
 }
 
 // Host Selection types
-export type SelectionStrategy = 'price' | 'latency' | 'capability' | 'composite' | 'round-robin';
+export type SelectionStrategy = 'price' | 'latency' | 'capability' | 'composite' | 'round-robin' | 'random';
 
 export interface SelectionCriteria {
   strategy: SelectionStrategy;

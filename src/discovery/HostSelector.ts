@@ -40,6 +40,7 @@ export default class HostSelector {
       case 'capability': selected = this.selectByCapability(candidates, criteria.preferredCapabilities); break;
       case 'composite': selected = this.rankHosts(candidates, this.weights)[0]?.host || null; break;
       case 'round-robin': selected = this.loadBalance(candidates); break;
+      case 'random': selected = this.selectRandom(candidates); break;
       default: selected = candidates[0];
     }
 
@@ -153,6 +154,12 @@ export default class HostSelector {
       const bestMatches = caps.filter(c => best?.capabilities?.includes(c)).length;
       return matches > bestMatches ? host : best;
     }, null as Host | null);
+  }
+
+  private selectRandom(hosts: Host[]): Host | null {
+    if (!hosts.length) return null;
+    const randomIndex = Math.floor(Math.random() * hosts.length);
+    return hosts[randomIndex];
   }
 
   private normalize(val: number, min: number, max: number, inv: boolean): number {

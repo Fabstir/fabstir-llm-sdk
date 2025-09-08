@@ -8,6 +8,7 @@ import DiscoveryManager from './managers/DiscoveryManager';
 import SessionManager from './managers/SessionManager';
 import SmartWalletManager from './managers/SmartWalletManager';
 import InferenceManager from './managers/InferenceManager';
+import HostManager from './managers/HostManager';
 
 export class FabstirSDK {
   public config: SDKConfig;
@@ -15,12 +16,14 @@ export class FabstirSDK {
   public signer?: ethers.Signer;
   private authManager: AuthManager;
   private authResult?: AuthResult;
+  private jobMarketplace?: ethers.Contract;
   private paymentManager?: PaymentManager;
   private storageManager?: StorageManager;
   private discoveryManager?: DiscoveryManager;
   private sessionManager?: SessionManager;
   private smartWalletManager?: SmartWalletManager;
   private inferenceManager?: InferenceManager;
+  private hostManager?: HostManager;
   
   constructor(config: SDKConfig = {}) {
     this.authManager = new AuthManager();
@@ -49,6 +52,24 @@ export class FabstirSDK {
     };
   }
   
+  private initializeContracts() {
+    if (!this.provider) return;
+    
+    // Initialize JobMarketplace contract
+    const jobMarketplaceABI = [
+      'function createSessionJob(address,uint256,uint256,uint256,uint256) payable returns (uint256)',
+      'function createSessionJobWithToken(address,address,uint256,uint256,uint256,uint256) returns (uint256)',
+      'function completeSessionJob(uint256) returns (bool)',
+      'function getJob(uint256) view returns (tuple(address,address,uint256,uint256,uint256,uint256,uint256,uint256,string,bool))'
+    ];
+    
+    this.jobMarketplace = new ethers.Contract(
+      this.config.contractAddresses?.jobMarketplace || '',
+      jobMarketplaceABI,
+      this.provider
+    );
+  }
+  
   
   async authenticate(privateKey: string): Promise<AuthResult> {
     if (!privateKey || privateKey.length === 0) {
@@ -65,6 +86,9 @@ export class FabstirSDK {
       
       this.signer = this.authResult.signer;
       this.provider = (this.signer as any).provider;
+      
+      // Initialize JobMarketplace contract after authentication
+      this.initializeContracts();
       
       return this.authResult;
     } catch (err: any) {
@@ -85,7 +109,7 @@ export class FabstirSDK {
       sponsorDeployment?: boolean;
       autoDepositUSDC?: string;
     }
-  ): Promise<AuthResult> {
+  ): Promise<AuthResult & { smartWalletAddress: string; eoaAddress: string; isDeployed: boolean }> {
     if (!privateKey || privateKey.length === 0) {
       const error: SDKError = new Error('Private key is required') as SDKError;
       error.code = 'AUTH_INVALID_KEY';
@@ -105,15 +129,29 @@ export class FabstirSDK {
       this.signer = this.authResult.signer;
       this.provider = (this.signer as any).provider;
       
+      // Initialize JobMarketplace contract after authentication
+      this.initializeContracts();
+      
       // Get smart wallet manager from auth manager
       this.smartWalletManager = this.authManager.getSmartWalletManager();
+      
+      // Get smart wallet info
+      const smartWalletAddress = this.smartWalletManager?.getSmartWalletAddress() || this.authResult.userAddress;
+      const eoaAddress = this.smartWalletManager?.getEOAAddress() || this.authResult.eoaAddress || this.authResult.userAddress;
+      const isDeployed = await this.smartWalletManager?.isDeployed() || false;
       
       // Auto-deposit USDC if requested
       if (options?.autoDepositUSDC && this.smartWalletManager) {
         await this.smartWalletManager.depositUSDC(options.autoDepositUSDC);
       }
       
-      return this.authResult;
+      // Return enhanced result with smart wallet details
+      return {
+        ...this.authResult,
+        smartWalletAddress,
+        eoaAddress,
+        isDeployed
+      };
     } catch (err: any) {
       const error: SDKError = new Error(`Smart wallet authentication failed: ${err.message}`) as SDKError;
       error.code = 'AUTH_FAILED';
@@ -122,9 +160,19 @@ export class FabstirSDK {
     }
   }
   
-  // Manager methods - return stubs for now
-  getSessionManager(): any {
-    return {}; // TODO: Implement SessionManager in later phase
+  // Manager methods
+  getSessionManager(): SessionManager {
+    if (!this.authResult || !this.signer) {
+      throw new Error('Must authenticate before accessing SessionManager');
+    }
+    if (!this.sessionManager) {
+      this.sessionManager = new SessionManager(
+        this.jobMarketplace!,
+        this.authManager,
+        this.storageManager
+      );
+    }
+    return this.sessionManager;
   }
   
   getPaymentManager(): PaymentManager {
@@ -135,20 +183,10 @@ export class FabstirSDK {
     }
     
     if (!this.paymentManager) {
-      // Load JobMarketplace ABI
-      const jobMarketplaceABI = [
-        'function createSessionJob(address,uint256,uint256,uint256,uint256) payable returns (uint256)',
-        'function createSessionJobWithToken(address,address,uint256,uint256,uint256,uint256) returns (uint256)',
-        'function completeSessionJob(uint256) returns (bool)'
-      ];
-      
-      const jobMarketplace = new ethers.Contract(
-        this.config.contractAddresses?.jobMarketplace || '',
-        jobMarketplaceABI,
-        this.provider
-      );
-      
-      this.paymentManager = new PaymentManager(jobMarketplace, this.authManager);
+      if (!this.jobMarketplace) {
+        throw new Error('Contracts not initialized. Call authenticate() first.');
+      }
+      this.paymentManager = new PaymentManager(this.jobMarketplace, this.authManager);
     }
     
     return this.paymentManager;
@@ -243,5 +281,30 @@ export class FabstirSDK {
    */
   isUsingSmartWallet(): boolean {
     return this.authManager.isUsingSmartWallet();
+  }
+  
+  /**
+   * Get host manager for host registration and staking operations
+   */
+  getHostManager(): HostManager {
+    if (!this.authManager.isAuthenticated()) {
+      const error: SDKError = new Error('Must authenticate before accessing HostManager') as SDKError;
+      error.code = 'MANAGER_NOT_AUTHENTICATED';
+      throw error;
+    }
+    
+    if (!this.hostManager) {
+      const nodeRegistryAddress = this.config.contractAddresses?.nodeRegistry || 
+        process.env.CONTRACT_NODE_REGISTRY || 
+        '0x039AB5d5e8D5426f9963140202F506A2Ce6988F9';
+      const fabTokenAddress = this.config.contractAddresses?.fabToken || 
+        process.env.CONTRACT_FAB_TOKEN || 
+        '0xC78949004B4EB6dEf2D66e49Cd81231472612D62';
+      
+      this.hostManager = new HostManager(nodeRegistryAddress, fabTokenAddress);
+      this.hostManager.setSigner(this.signer!);
+    }
+    
+    return this.hostManager;
   }
 }
