@@ -30,10 +30,10 @@
   "author": "Fabstir",
   "license": "MIT",
   "dependencies": {
-    "@base-org/account": "^1.0.0",
+    "@base-org/account": "^2.1.0",
     "@chainsafe/libp2p-noise": "^16.0.0",
     "@chainsafe/libp2p-yamux": "^7.0.1",
-    "@coinbase/smart-wallet": "^1.0.0",
+    "@coinbase/wallet-sdk": "^4.3.7",
     "@fabstir/llm-auth": "file:../fabstir-llm-auth",
     "@libp2p/bootstrap": "^11.0.13",
     "@libp2p/identify": "^3.0.0",
