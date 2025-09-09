@@ -9,6 +9,10 @@
     "dist/**/*",
     "README.md"
   ],
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "vitest",
@@ -16,7 +20,10 @@
     "test:coverage": "vitest run --coverage",
     "clean": "rm -rf dist",
     "prepare": "npm run build",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "build:all": "yarn workspaces foreach run build && yarn build",
+    "test:all": "yarn workspaces foreach run test && yarn test",
+    "clean:all": "yarn workspaces foreach run clean && yarn clean"
   },
   "keywords": [
     "fabstir",
