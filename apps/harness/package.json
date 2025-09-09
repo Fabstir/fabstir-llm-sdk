@@ -6,7 +6,8 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "test": "vitest"
+    "test": "vitest",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@base-org/account": "^2.1.0",
@@ -17,6 +18,8 @@
     "viem": "^2.21.0"
   },
   "devDependencies": {
+    "@coinbase/onchaintestkit": "^0.3.0",
+    "@playwright/test": "^1.47.0",
     "@types/node": "^20.11.30",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
