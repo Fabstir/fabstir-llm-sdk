@@ -769,10 +769,18 @@ describe('USDC MVP Flow', () => {
       console.log('   ✅ Payments were directly transferred (no withdrawal needed)');
     }
     
-    // Verify final user balance
+    // Verify final user balance and refund
     const finalEoaBalance = await usdcContract.balanceOf(userAddress);
     const netChange = finalEoaBalance.sub(initialEoaBalance);
     console.log(`\n💰 Net Change for User EOA: ${netChange.gte(0) ? '+' : ''}${ethers.utils.formatUnits(netChange, USDC_DECIMALS)} USDC`);
+    
+    // Add assertions to verify the refund amount
+    const expectedCost = ethers.utils.parseUnits('0.2', USDC_DECIMALS); // 100 tokens * 0.002 USDC/token
+    const actualCost = initialEoaBalance.sub(finalEoaBalance);
+    
+    // User should only pay for actual usage (0.2 USDC), not full deposit (2.0 USDC)
+    expect(actualCost.toString()).toBe(expectedCost.toString());
+    console.log('✅ Refund verification: User only paid for actual usage (0.2 USDC)');
     
     // Verify statistics
     console.log('\nStep 10: Final verification...');
