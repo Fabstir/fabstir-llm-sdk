@@ -68,10 +68,13 @@ export class HeadlessContractManager {
   private getAddressesForNetwork(): ContractAddresses {
     // Use configured addresses if provided
     if (this.config.contractAddresses) {
+      if (!this.config.contractAddresses.jobMarketplace) {
+        throw new Error('jobMarketplace address is required in contractAddresses config');
+      }
       return {
-        jobMarketplace: this.config.contractAddresses.jobMarketplace || CONTRACT_ADDRESSES.JobMarketplace,
-        paymentEscrow: this.config.contractAddresses.paymentEscrow || '0x0000000000000000000000000000000000000000',
-        nodeRegistry: this.config.contractAddresses.nodeRegistry || '0x0000000000000000000000000000000000000000'
+        jobMarketplace: this.config.contractAddresses.jobMarketplace,
+        paymentEscrow: this.config.contractAddresses.paymentEscrow || undefined,
+        nodeRegistry: this.config.contractAddresses.nodeRegistry || undefined
       };
     }
     

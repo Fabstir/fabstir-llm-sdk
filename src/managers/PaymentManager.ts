@@ -26,17 +26,39 @@ export default class PaymentManager {
       const depositAmount = ethers.utils.parseEther(amount);
       const pricePerTokenWei = ethers.utils.parseUnits(pricePerToken.toString(), 'gwei');
       const contractWithSigner = this.jobMarketplace.connect(signer);
-      const jobIdBN = await contractWithSigner.callStatic['createSessionJob'](
-        hostAddress, depositAmount, pricePerTokenWei, duration, proofInterval,
-        { value: depositAmount, gasLimit: 500000 }
-      );
+      
       const tx = await contractWithSigner['createSessionJob'](
         hostAddress, depositAmount, pricePerTokenWei, duration, proofInterval,
         { value: depositAmount, gasLimit: 500000 }
       );
       const receipt = await tx.wait();
       if (receipt.status !== 1) throw new Error('Transaction failed');
-      return { jobId: jobIdBN.toString(), txHash: tx.hash };
+      
+      // Parse job ID from events
+      let eventJobId = null;
+      console.log(`Receipt logs count: ${receipt.logs.length}`);
+      for (const log of receipt.logs) {
+        try {
+          const parsed = this.jobMarketplace.interface.parseLog({
+            topics: log.topics,
+            data: log.data
+          });
+          console.log(`Parsed event: ${parsed.name}`);
+          if (parsed.name === 'SessionJobCreated' && parsed.args.jobId) {
+            eventJobId = parsed.args.jobId.toString();
+            console.log('Job ID from event:', eventJobId);
+            break;
+          }
+        } catch (err) {
+          console.log('Failed to parse log:', err);
+        }
+      }
+      
+      if (!eventJobId) {
+        throw new Error('Could not parse job ID from ETH session transaction events - check ABI compatibility');
+      }
+      
+      return { jobId: eventJobId, txHash: tx.hash };
     } catch (error: any) {
       throw new Error(`Failed to create ETH session job: ${error.message}`);
     }
@@ -77,16 +99,61 @@ export default class PaymentManager {
       const depositAmount = ethers.utils.parseUnits(amount, PaymentManager.USDC_DECIMALS);
       // Convert pricePerToken to BigNumber (it's in nanoUSDC, smallest unit)
       const pricePerTokenBN = ethers.BigNumber.from(pricePerToken);
-      const jobIdBN = await contractWithSigner.callStatic.createSessionJobWithToken(
-        hostAddress, tokenAddress, depositAmount, pricePerTokenBN, duration, proofInterval
-      );
+      
+      console.log('Creating USDC session with params:', {
+        host: hostAddress,
+        token: tokenAddress,
+        deposit: ethers.utils.formatUnits(depositAmount, 6) + ' USDC',
+        pricePerToken: pricePerToken,
+        duration: duration,
+        proofInterval: proofInterval
+      });
+      
+      // No simulation - we'll get the real job ID from events only
+      
       const tx = await contractWithSigner.createSessionJobWithToken(
         hostAddress, tokenAddress, depositAmount, pricePerTokenBN, duration, proofInterval,
         { gasLimit: 500000 }
       );
       const receipt = await tx.wait();
       if (receipt.status !== 1) throw new Error('Transaction failed');
-      return { jobId: jobIdBN.toString(), txHash: tx.hash };
+      
+      // Parse job ID from events
+      let eventJobId = null;
+      console.log(`Receipt logs count: ${receipt.logs.length}`);
+      console.log('Transaction hash:', tx.hash);
+      console.log('Contract address:', this.jobMarketplace.address);
+      
+      for (let i = 0; i < receipt.logs.length; i++) {
+        const log = receipt.logs[i];
+        console.log(`Log ${i}:`, {
+          address: log.address,
+          topics: log.topics,
+          data: log.data
+        });
+        
+        try {
+          const parsed = this.jobMarketplace.interface.parseLog({
+            topics: log.topics,
+            data: log.data
+          });
+          console.log(`Parsed event: ${parsed.name}`, parsed.args);
+          if ((parsed.name === 'SessionJobCreated' || parsed.name === 'SessionJobCreatedWithToken') && parsed.args.jobId) {
+            eventJobId = parsed.args.jobId.toString();
+            console.log('Job ID from event:', eventJobId);
+            break;
+          }
+        } catch (err: any) {
+          console.log(`Failed to parse log ${i}:`, err.message);
+        }
+      }
+      
+      if (!eventJobId) {
+        throw new Error('Could not parse job ID from transaction events - check ABI compatibility');
+      }
+      const finalJobId = eventJobId;
+      
+      return { jobId: finalJobId, txHash: tx.hash };
     } catch (error: any) {
       throw new Error(`Failed to create USDC session job: ${error.message}`);
     }
@@ -96,7 +163,10 @@ export default class PaymentManager {
     try {
       const signer = this.authManager.getSigner();
       const userAddress = address || (await signer.getAddress());
-      const usdcAddress = process.env.CONTRACT_USDC_TOKEN || '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+      const usdcAddress = process.env.CONTRACT_USDC_TOKEN;
+      if (!usdcAddress) {
+        throw new Error('CONTRACT_USDC_TOKEN environment variable is not set');
+      }
       
       const usdcContract = new ethers.Contract(
         usdcAddress,
@@ -164,8 +234,11 @@ export default class PaymentManager {
   }
 
   getUSDCTokenAddress(): string {
-    // This should be configured, using Base Sepolia USDC for now
-    return process.env.CONTRACT_USDC_TOKEN || '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+    const usdcAddress = process.env.CONTRACT_USDC_TOKEN;
+    if (!usdcAddress) {
+      throw new Error('CONTRACT_USDC_TOKEN environment variable is not set');
+    }
+    return usdcAddress;
   }
 
   getMinimumDeposit(): string {

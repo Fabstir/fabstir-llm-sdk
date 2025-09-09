@@ -9,6 +9,7 @@ import SessionManager from './managers/SessionManager';
 import SmartWalletManager from './managers/SmartWalletManager';
 import InferenceManager from './managers/InferenceManager';
 import HostManager from './managers/HostManager';
+import JobMarketplaceABI from './contracts/JobMarketplace.abi.json';
 
 export class FabstirSDK {
   public config: SDKConfig;
@@ -27,45 +28,53 @@ export class FabstirSDK {
   
   constructor(config: SDKConfig = {}) {
     this.authManager = new AuthManager();
+    
+    // Require environment variables - no hardcoded addresses
+    const jobMarketplace = config.contractAddresses?.jobMarketplace || process.env.CONTRACT_JOB_MARKETPLACE;
+    const nodeRegistry = config.contractAddresses?.nodeRegistry || process.env.CONTRACT_NODE_REGISTRY;
+    const fabToken = config.contractAddresses?.fabToken || process.env.CONTRACT_FAB_TOKEN;
+    const usdcToken = config.contractAddresses?.usdcToken || process.env.CONTRACT_USDC_TOKEN;
+    
+    if (!jobMarketplace) {
+      throw new Error('CONTRACT_JOB_MARKETPLACE not set in environment or config');
+    }
+    if (!nodeRegistry) {
+      throw new Error('CONTRACT_NODE_REGISTRY not set in environment or config');
+    }
+    if (!fabToken) {
+      throw new Error('CONTRACT_FAB_TOKEN not set in environment or config');
+    }
+    if (!usdcToken) {
+      throw new Error('CONTRACT_USDC_TOKEN not set in environment or config');
+    }
+    
     this.config = {
-      rpcUrl: config.rpcUrl || process.env.RPC_URL_BASE_SEPOLIA || 
-        'https://base-sepolia.g.alchemy.com/v2/demo',
-      s5PortalUrl: config.s5PortalUrl || process.env.S5_PORTAL_URL || 
-        'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p',
-      contractAddresses: config.contractAddresses ? {
-        ...config.contractAddresses,
-        fabToken: config.contractAddresses.fabToken || process.env.CONTRACT_FAB_TOKEN ||
-          '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
-        usdcToken: config.contractAddresses.usdcToken || process.env.CONTRACT_USDC_TOKEN ||
-          '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
-      } : {
-        jobMarketplace: process.env.CONTRACT_JOB_MARKETPLACE || 
-          '0xD937c594682Fe74E6e3d06239719805C04BE804A',
-        nodeRegistry: process.env.CONTRACT_NODE_REGISTRY || 
-          '0x87516C13Ea2f99de598665e14cab64E191A0f8c4',
-        fabToken: process.env.CONTRACT_FAB_TOKEN ||
-          '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
-        usdcToken: process.env.CONTRACT_USDC_TOKEN ||
-          '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+      rpcUrl: config.rpcUrl || process.env.RPC_URL_BASE_SEPOLIA,
+      s5PortalUrl: config.s5PortalUrl || process.env.S5_PORTAL_URL,
+      contractAddresses: {
+        jobMarketplace,
+        nodeRegistry,
+        fabToken,
+        usdcToken
       },
       smartWallet: config.smartWallet
     };
+    
+    if (!this.config.rpcUrl) {
+      throw new Error('RPC_URL_BASE_SEPOLIA not set in environment or config');
+    }
+    if (!this.config.s5PortalUrl) {
+      throw new Error('S5_PORTAL_URL not set in environment or config');
+    }
   }
   
   private initializeContracts() {
     if (!this.provider) return;
     
-    // Initialize JobMarketplace contract
-    const jobMarketplaceABI = [
-      'function createSessionJob(address,uint256,uint256,uint256,uint256) payable returns (uint256)',
-      'function createSessionJobWithToken(address,address,uint256,uint256,uint256,uint256) returns (uint256)',
-      'function completeSessionJob(uint256) returns (bool)',
-      'function getJob(uint256) view returns (tuple(address,address,uint256,uint256,uint256,uint256,uint256,uint256,string,bool))'
-    ];
-    
+    // Initialize JobMarketplace contract with full ABI from file
     this.jobMarketplace = new ethers.Contract(
-      this.config.contractAddresses?.jobMarketplace || '',
-      jobMarketplaceABI,
+      this.config.contractAddresses!.jobMarketplace,
+      JobMarketplaceABI,
       this.provider
     );
   }
@@ -284,6 +293,13 @@ export class FabstirSDK {
   }
   
   /**
+   * Get the current signer (either EOA or smart wallet)
+   */
+  getSigner(): ethers.Signer | undefined {
+    return this.signer;
+  }
+  
+  /**
    * Get host manager for host registration and staking operations
    */
   getHostManager(): HostManager {
@@ -294,12 +310,8 @@ export class FabstirSDK {
     }
     
     if (!this.hostManager) {
-      const nodeRegistryAddress = this.config.contractAddresses?.nodeRegistry || 
-        process.env.CONTRACT_NODE_REGISTRY || 
-        '0x039AB5d5e8D5426f9963140202F506A2Ce6988F9';
-      const fabTokenAddress = this.config.contractAddresses?.fabToken || 
-        process.env.CONTRACT_FAB_TOKEN || 
-        '0xC78949004B4EB6dEf2D66e49Cd81231472612D62';
+      const nodeRegistryAddress = this.config.contractAddresses!.nodeRegistry;
+      const fabTokenAddress = this.config.contractAddresses!.fabToken;
       
       this.hostManager = new HostManager(nodeRegistryAddress, fabTokenAddress);
       this.hostManager.setSigner(this.signer!);

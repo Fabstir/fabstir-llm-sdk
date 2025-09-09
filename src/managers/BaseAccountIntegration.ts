@@ -175,7 +175,10 @@ export class BaseAccountIntegration {
    */
   async getUSDCBalance(): Promise<ethers.BigNumber> {
     const address = await this.getSmartAccountAddress();
-    const usdcAddress = process.env.CONTRACT_USDC_TOKEN || '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+    const usdcAddress = process.env.CONTRACT_USDC_TOKEN;
+    if (!usdcAddress) {
+      throw new Error('CONTRACT_USDC_TOKEN environment variable is not set');
+    }
     
     const usdcContract = new ethers.Contract(
       usdcAddress,

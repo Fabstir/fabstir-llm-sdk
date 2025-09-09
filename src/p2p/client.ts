@@ -142,7 +142,7 @@ class P2PResponseStreamImpl extends EventEmitter implements P2PResponseStream {
       });
       
       stream.on('end', () => {
-        this.handleStreamEnd();
+        this.handleStreamEnd(stream);
       });
       
       stream.on('error', (error: any) => {
