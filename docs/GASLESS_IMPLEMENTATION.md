@@ -276,12 +276,12 @@ Browser-based testing harness for achieving truly gasless transactions on Base S
 - No OS prompts appear
 - Authentication seamless
 
-### Sub-phase 3.4: USDC Flow Migration (90 lines)
+### Sub-phase 3.4: USDC Flow Migration (90 lines) ✅
 
-- [ ] Port usdc-mvp-flow-v2 test logic
-- [ ] Adapt for browser environment
-- [ ] Add balance assertions
-- [ ] Verify gasless execution
+- [x] Port usdc-mvp-flow-v2 test logic
+- [x] Adapt for browser environment
+- [x] Add balance assertions
+- [x] Verify gasless execution
 
 **Test Files:**
 - `apps/harness/e2e/usdc-flow.spec.ts`
