@@ -378,6 +378,44 @@ export class FabstirSDK {
   }
 
   /**
+   * Complete ETH payment flow for session creation
+   * Convenience method that handles the entire ETH payment flow
+   */
+  async completeETHFlow(params: {
+    hostAddress: string;
+    amount: string; // ETH amount as string (e.g., "0.001")
+    pricePerToken?: number; // Price per token in wei
+    duration?: number;
+    proofInterval?: number;
+  }): Promise<{
+    jobId: string;
+    sessionId: string;
+    txHash: string;
+  }> {
+    try {
+      const paymentManager = this.getPaymentManager();
+      
+      // Directly use PaymentManager to create ETH session
+      const result = await paymentManager.createETHSessionJob(
+        params.hostAddress,
+        params.amount,
+        params.pricePerToken || 10000000000000, // Default 10^13 wei per token (0.00001 ETH)
+        params.duration || 86400,
+        params.proofInterval || 100
+      );
+      
+      return {
+        jobId: result.jobId,
+        sessionId: result.jobId, // For session jobs, jobId and sessionId are the same
+        txHash: result.txHash
+      };
+    } catch (error: any) {
+      console.error('ETH flow failed:', error);
+      throw new Error(`ETH flow failed: ${error.message}`);
+    }
+  }
+
+  /**
    * Get complete session summary including payment details
    */
   async getSessionSummary(jobId: string | number): Promise<{

@@ -25,7 +25,8 @@ export default class PaymentManager {
     try {
       const signer = this.authManager.getSigner();
       const depositAmount = ethers.utils.parseEther(amount);
-      const pricePerTokenWei = ethers.utils.parseUnits(pricePerToken.toString(), 'gwei');
+      // pricePerToken is already in wei, don't convert from gwei
+      const pricePerTokenWei = ethers.BigNumber.from(pricePerToken);
       const contractWithSigner = this.jobMarketplace.connect(signer);
       
       const tx = await contractWithSigner['createSessionJob'](
