@@ -102,12 +102,12 @@ Browser-based testing harness for achieving truly gasless transactions on Base S
 - Can navigate to index page
 - No console errors
 
-### Sub-phase 2.2: Base Account SDK Integration (80 lines)
+### Sub-phase 2.2: Base Account SDK Integration (80 lines) ✅
 
-- [ ] Install @base-org/account package
-- [ ] Create SDK initialization module
-- [ ] Add provider management
-- [ ] Implement connection handling
+- [x] Install @base-org/account package
+- [x] Create SDK initialization module
+- [x] Add provider management
+- [x] Implement connection handling
 
 **Test Files:**
 - `apps/harness/tests/base-sdk.test.ts`
@@ -121,12 +121,12 @@ Browser-based testing harness for achieving truly gasless transactions on Base S
 - Provider available globally
 - Can detect wallet connection
 
-### Sub-phase 2.3: Sub-account Management (70 lines)
+### Sub-phase 2.3: Sub-account Management (70 lines) ✅
 
-- [ ] Implement sub-account detection
-- [ ] Create sub-account if missing
-- [ ] Handle auto-spend permissions
-- [ ] Store sub-account address
+- [x] Implement sub-account detection
+- [x] Create sub-account if missing
+- [x] Handle auto-spend permissions
+- [x] Store sub-account address
 
 **Test Files:**
 - `apps/harness/tests/sub-account.test.ts`
@@ -140,12 +140,12 @@ Browser-based testing harness for achieving truly gasless transactions on Base S
 - Auto-spend enabled by default
 - Address persisted correctly
 
-### Sub-phase 2.4: SDK Wrapper Integration (75 lines)
+### Sub-phase 2.4: SDK Wrapper Integration (75 lines) ✅
 
-- [ ] Import fabstir SDK from workspace
-- [ ] Create browser-compatible wrapper
-- [ ] Integrate BaseAccountWallet class
-- [ ] Export unified interface
+- [x] Import fabstir SDK from workspace
+- [x] Create browser-compatible wrapper
+- [x] Integrate BaseAccountWallet class
+- [x] Export unified interface
 
 **Test Files:**
 - `apps/harness/tests/sdk-wrapper.test.ts`
@@ -159,12 +159,12 @@ Browser-based testing harness for achieving truly gasless transactions on Base S
 - BaseAccountWallet accessible
 - Type definitions work
 
-### Sub-phase 2.5: EIP-5792 Batch Implementation (85 lines)
+### Sub-phase 2.5: EIP-5792 Batch Implementation (85 lines) ✅
 
-- [ ] Build USDC approval call
-- [ ] Build job creation call
-- [ ] Implement wallet_sendCalls
-- [ ] Add status polling
+- [x] Build USDC approval call
+- [x] Build job creation call
+- [x] Implement wallet_sendCalls
+- [x] Add status polling
 
 **Test Files:**
 - `apps/harness/tests/batch-calls.test.ts`
@@ -178,12 +178,12 @@ Browser-based testing harness for achieving truly gasless transactions on Base S
 - EIP-5792 v2 format used
 - Status polling works
 
-### Sub-phase 2.6: UI Components (65 lines)
+### Sub-phase 2.6: UI Components (65 lines) ✅
 
-- [ ] Create run button component
-- [ ] Add status display
-- [ ] Implement loading states
-- [ ] Show transaction results
+- [x] Create run button component
+- [x] Add status display
+- [x] Implement loading states
+- [x] Show transaction results
 
 **Test Files:**
 - `apps/harness/tests/components.test.tsx`
