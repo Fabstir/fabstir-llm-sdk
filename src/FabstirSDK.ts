@@ -9,7 +9,8 @@ import SessionManager from './managers/SessionManager';
 import SmartWalletManager from './managers/SmartWalletManager';
 import InferenceManager from './managers/InferenceManager';
 import HostManager from './managers/HostManager';
-import JobMarketplaceABI from './contracts/JobMarketplace.abi.json';
+import TreasuryManager from './managers/TreasuryManager';
+import { JobMarketplaceABI } from './contracts/abis';
 
 export class FabstirSDK {
   public config: SDKConfig;
@@ -25,6 +26,7 @@ export class FabstirSDK {
   private smartWalletManager?: SmartWalletManager;
   private inferenceManager?: InferenceManager;
   private hostManager?: HostManager;
+  private treasuryManager?: TreasuryManager;
   
   constructor(config: SDKConfig = {}) {
     this.authManager = new AuthManager();
@@ -50,20 +52,23 @@ export class FabstirSDK {
     
     this.config = {
       rpcUrl: config.rpcUrl || process.env.RPC_URL_BASE_SEPOLIA,
-      s5PortalUrl: config.s5PortalUrl || process.env.S5_PORTAL_URL,
+      s5PortalUrl: config.s5PortalUrl || config.s5Config?.portalUrl || process.env.S5_PORTAL_URL,
       contractAddresses: {
         jobMarketplace,
         nodeRegistry,
         fabToken,
         usdcToken
       },
-      smartWallet: config.smartWallet
+      smartWallet: config.smartWallet,
+      s5Config: config.s5Config,
+      mode: config.mode
     };
     
     if (!this.config.rpcUrl) {
       throw new Error('RPC_URL_BASE_SEPOLIA not set in environment or config');
     }
-    if (!this.config.s5PortalUrl) {
+    // Only require s5PortalUrl if s5Config.portalUrl is not provided
+    if (!this.config.s5PortalUrl && !config.s5Config?.portalUrl) {
       throw new Error('S5_PORTAL_URL not set in environment or config');
     }
   }
@@ -170,20 +175,6 @@ export class FabstirSDK {
   }
   
   // Manager methods
-  getSessionManager(): SessionManager {
-    if (!this.authResult || !this.signer) {
-      throw new Error('Must authenticate before accessing SessionManager');
-    }
-    if (!this.sessionManager) {
-      this.sessionManager = new SessionManager(
-        this.jobMarketplace!,
-        this.authManager,
-        this.storageManager
-      );
-    }
-    return this.sessionManager;
-  }
-  
   getPaymentManager(): PaymentManager {
     if (!this.authManager.isAuthenticated()) {
       const error: SDKError = new Error('Must authenticate before accessing PaymentManager') as SDKError;
@@ -318,5 +309,188 @@ export class FabstirSDK {
     }
     
     return this.hostManager;
+  }
+
+  /**
+   * Get treasury manager for treasury operations
+   */
+  getTreasuryManager(): TreasuryManager {
+    if (!this.authManager.isAuthenticated()) {
+      const error: SDKError = new Error('Must authenticate before accessing TreasuryManager') as SDKError;
+      error.code = 'MANAGER_NOT_AUTHENTICATED';
+      throw error;
+    }
+    
+    if (!this.treasuryManager) {
+      this.treasuryManager = new TreasuryManager(this.authManager);
+    }
+    
+    return this.treasuryManager;
+  }
+
+  /**
+   * Complete USDC payment flow from approval to completion
+   * Convenience method that handles the entire flow
+   */
+  async completeUSDCFlow(params: {
+    hostAddress: string;
+    amount: string;
+    pricePerToken?: number;
+    duration?: number;
+    proofInterval?: number;
+    tokenAddress?: string;
+  }): Promise<{
+    jobId: string;
+    sessionId: string;
+    txHash: string;
+    distribution?: any;
+  }> {
+    try {
+      const paymentManager = this.getPaymentManager();
+      
+      // Use USDC token from environment if not provided
+      const usdcAddress = params.tokenAddress || process.env.CONTRACT_USDC_TOKEN;
+      if (!usdcAddress) {
+        throw new Error('USDC token address not provided and CONTRACT_USDC_TOKEN not set');
+      }
+      
+      // Directly use PaymentManager to create session
+      const result = await paymentManager.createUSDCSessionJob(
+        params.hostAddress,
+        usdcAddress,
+        params.amount,
+        params.pricePerToken || 2000,
+        params.duration || 86400,
+        params.proofInterval || 100
+      );
+      
+      // Wait for confirmation
+      await paymentManager.verifySessionCreated(result.jobId);
+      
+      return {
+        jobId: result.jobId,
+        sessionId: `session-${result.jobId}`,
+        txHash: result.txHash
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to complete USDC flow: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get complete session summary including payment details
+   */
+  async getSessionSummary(jobId: string | number): Promise<{
+    sessionDetails: any;
+    paymentDistribution: any;
+    balances?: any;
+  }> {
+    try {
+      const paymentManager = this.getPaymentManager();
+      const sessionManager = await this.getSessionManager();
+      
+      // Get session details from contract
+      const sessionDetails = await paymentManager.getSessionStatus(jobId);
+      
+      // Get payment distribution
+      const paymentDistribution = await sessionManager.getPaymentDistribution(jobId);
+      
+      // Optionally get current balances
+      const addresses = {
+        user: await this.signer!.getAddress(),
+        host: sessionDetails.host,
+        treasury: process.env.TEST_TREASURY_ACCOUNT || process.env.TREASURY_ACCOUNT || ''
+      };
+      
+      let balances;
+      try {
+        balances = await paymentManager.checkBalances(addresses);
+      } catch (error) {
+        // Balances are optional
+      }
+      
+      return {
+        sessionDetails,
+        paymentDistribution,
+        balances
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to get session summary: ${error.message}`);
+    }
+  }
+
+  /**
+   * Perform host claim and withdrawal in one operation
+   */
+  async hostClaimAndWithdraw(jobId: string | number, tokenAddress?: string): Promise<{
+    claimSuccess: boolean;
+    withdrawalSuccess: boolean;
+    amountWithdrawn?: string;
+  }> {
+    try {
+      const hostManager = this.getHostManager();
+      const usdcAddress = tokenAddress || process.env.CONTRACT_USDC_TOKEN;
+      
+      // First claim the payment
+      let claimSuccess = false;
+      try {
+        await hostManager.claimSessionPayment(jobId);
+        claimSuccess = true;
+      } catch (error: any) {
+        console.error(`Claim failed: ${error.message}`);
+      }
+      
+      // Then withdraw accumulated earnings
+      let withdrawalSuccess = false;
+      let amountWithdrawn = '0';
+      
+      if (usdcAddress) {
+        try {
+          const earnings = await hostManager.checkAccumulatedEarnings(usdcAddress);
+          if (earnings && earnings.gt(0)) {
+            await hostManager.withdrawEarnings(usdcAddress);
+            withdrawalSuccess = true;
+            amountWithdrawn = ethers.utils.formatUnits(earnings, 6); // Assuming USDC
+          }
+        } catch (error: any) {
+          console.error(`Withdrawal failed: ${error.message}`);
+        }
+      }
+      
+      return {
+        claimSuccess,
+        withdrawalSuccess,
+        amountWithdrawn
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to claim and withdraw: ${error.message}`);
+    }
+  }
+
+  /**
+   * Perform treasury withdrawal
+   */
+  async treasuryWithdraw(tokenAddress?: string): Promise<{
+    success: boolean;
+    amountWithdrawn?: string;
+  }> {
+    try {
+      const treasuryManager = this.getTreasuryManager();
+      const usdcAddress = tokenAddress || process.env.CONTRACT_USDC_TOKEN;
+      
+      if (!usdcAddress) {
+        throw new Error('Token address not provided and CONTRACT_USDC_TOKEN not set');
+      }
+      
+      const balanceBefore = await treasuryManager.getTreasuryBalance(usdcAddress);
+      const receipt = await treasuryManager.withdrawTreasuryFees(usdcAddress);
+      
+      return {
+        success: receipt.status === 1,
+        amountWithdrawn: ethers.utils.formatUnits(balanceBefore, 6) // Assuming USDC
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to withdraw treasury fees: ${error.message}`);
+    }
   }
 }

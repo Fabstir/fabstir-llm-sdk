@@ -1,0 +1,22 @@
+[
+  {
+    "inputs": [
+      { "name": "owners", "type": "bytes[]" },
+      { "name": "nonce", "type": "uint256" }
+    ],
+    "name": "createAccount",
+    "outputs": [{ "name": "account", "type": "address" }],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "name": "owners", "type": "bytes[]" },
+      { "name": "nonce", "type": "uint256" }
+    ],
+    "name": "getAddress",
+    "outputs": [{ "name": "", "type": "address" }],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]

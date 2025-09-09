@@ -1,3 +1,4 @@
+import { ethers } from 'ethers';
 import AuthManager from './AuthManager';
 import PaymentManager from './PaymentManager';
 import StorageManager, { Exchange, SessionMetadata, SessionSummary } from './StorageManager';
@@ -286,5 +287,134 @@ export default class SessionManager {
    */
   async listUserSessions(): Promise<Array<{ sessionId: string; metadata?: SessionMetadata; summary?: SessionSummary }>> {
     return await this.storageManager.listSessions();
+  }
+
+  /**
+   * Calculate and return payment distribution for a session
+   * @param jobId The session job ID
+   * @returns Payment distribution details
+   */
+  async getPaymentDistribution(jobId: string | number): Promise<{
+    totalCost: string;
+    hostPayment: string;
+    treasuryFee: string;
+    userRefund: string;
+    tokensUsed: number;
+    pricePerToken: string;
+  }> {
+    try {
+      // Get session details from payment manager
+      const sessionDetails = await this.paymentManager.getSessionStatus(jobId);
+      
+      const tokensProven = sessionDetails.tokensProven || ethers.BigNumber.from(0);
+      const pricePerToken = sessionDetails.pricePerToken || ethers.BigNumber.from(0);
+      const deposit = sessionDetails.deposit || ethers.BigNumber.from(0);
+      
+      // Calculate total cost
+      const totalCost = tokensProven.mul(pricePerToken);
+      
+      // Calculate 90/10 split
+      const hostPayment = totalCost.mul(90).div(100);
+      const treasuryFee = totalCost.sub(hostPayment);
+      
+      // Calculate refund
+      const userRefund = deposit.sub(totalCost);
+      
+      // Format for display (assuming USDC with 6 decimals)
+      const USDC_DECIMALS = 6;
+      
+      return {
+        totalCost: ethers.utils.formatUnits(totalCost, USDC_DECIMALS),
+        hostPayment: ethers.utils.formatUnits(hostPayment, USDC_DECIMALS),
+        treasuryFee: ethers.utils.formatUnits(treasuryFee, USDC_DECIMALS),
+        userRefund: ethers.utils.formatUnits(userRefund.gt(0) ? userRefund : 0, USDC_DECIMALS),
+        tokensUsed: tokensProven.toNumber(),
+        pricePerToken: ethers.utils.formatUnits(pricePerToken, USDC_DECIMALS)
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to get payment distribution: ${error.message}`);
+    }
+  }
+
+  /**
+   * Verify that the user received the correct refund amount
+   * @param jobId The session job ID
+   * @param expectedRefund The expected refund amount in USDC
+   * @returns Boolean indicating if refund matches
+   */
+  async verifyRefund(jobId: string | number, expectedRefund: string): Promise<boolean> {
+    try {
+      const distribution = await this.getPaymentDistribution(jobId);
+      const actualRefund = parseFloat(distribution.userRefund);
+      const expected = parseFloat(expectedRefund);
+      
+      // Allow small rounding differences (0.01 USDC)
+      return Math.abs(actualRefund - expected) < 0.01;
+    } catch (error: any) {
+      throw new Error(`Failed to verify refund: ${error.message}`);
+    }
+  }
+
+  /**
+   * Wait for session confirmation on blockchain
+   * @param jobId The session job ID
+   * @param timeout Maximum time to wait in milliseconds
+   * @returns Boolean indicating if session was confirmed
+   */
+  async waitForSessionConfirmation(jobId: string | number, timeout: number = 30000): Promise<boolean> {
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < timeout) {
+      try {
+        const exists = await this.paymentManager.verifySessionCreated(jobId);
+        if (exists) {
+          return true;
+        }
+      } catch (error) {
+        // Continue waiting
+      }
+      
+      // Wait 2 seconds before checking again
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    
+    return false;
+  }
+
+  /**
+   * Complete a USDC payment session including claim and withdrawals
+   * @param jobId The session job ID
+   * @returns Object with completion details
+   */
+  async completeUSDCSession(jobId: string | number): Promise<{
+    claimSuccess: boolean;
+    hostWithdrawal: boolean;
+    treasuryWithdrawal: boolean;
+    distribution: any;
+  }> {
+    try {
+      // First claim the payment with proof
+      let claimSuccess = false;
+      try {
+        await this.paymentManager.claimWithProof(jobId);
+        claimSuccess = true;
+      } catch (error: any) {
+        console.error(`Claim failed: ${error.message}`);
+      }
+      
+      // Get payment distribution
+      const distribution = await this.getPaymentDistribution(jobId);
+      
+      // Note: Actual withdrawals would be done by host and treasury managers
+      // This is just to track the status
+      return {
+        claimSuccess,
+        hostWithdrawal: false, // Would be done by host
+        treasuryWithdrawal: false, // Would be done by treasury
+        distribution
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to complete USDC session: ${error.message}`);
+    }
   }
 }

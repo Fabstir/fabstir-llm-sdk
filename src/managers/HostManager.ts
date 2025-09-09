@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { HostEarningsABI, JobMarketplaceABI, NodeRegistryABI, ERC20ABI } from '../contracts/abis';
 
 export interface HostRegistrationParams {
   metadata: string;
@@ -36,20 +37,7 @@ export default class HostManager {
       throw new Error('Signer not set. Call setSigner() first.');
     }
 
-    const abi = [
-      'function registerNode(string metadata) external',
-      'function unregisterNode() external',
-      'function stake(uint256 amount) external',
-      'function updateMetadata(string newMetadata) external',
-      'function nodes(address) view returns (address operator, uint256 stakedAmount, bool active, string metadata)',
-      'function MIN_STAKE() view returns (uint256)',
-      'event NodeRegistered(address indexed operator, uint256 stakedAmount, string metadata)',
-      'event NodeUnregistered(address indexed operator, uint256 returnedAmount)',
-      'event StakeAdded(address indexed operator, uint256 additionalAmount)',
-      'event MetadataUpdated(address indexed operator, string newMetadata)'
-    ];
-
-    return new ethers.Contract(this.nodeRegistryAddress, abi, this.signer);
+    return new ethers.Contract(this.nodeRegistryAddress, NodeRegistryABI, this.signer);
   }
 
   private getFabTokenContract(): ethers.Contract {
@@ -57,15 +45,7 @@ export default class HostManager {
       throw new Error('Signer not set. Call setSigner() first.');
     }
 
-    const abi = [
-      'function balanceOf(address account) view returns (uint256)',
-      'function approve(address spender, uint256 amount) returns (bool)',
-      'function allowance(address owner, address spender) view returns (uint256)',
-      'function decimals() view returns (uint8)',
-      'function symbol() view returns (string)'
-    ];
-
-    return new ethers.Contract(this.fabTokenAddress, abi, this.signer);
+    return new ethers.Contract(this.fabTokenAddress, ERC20ABI, this.signer);
   }
 
   private parseHostModels(metadata: string): string[] {
@@ -316,5 +296,194 @@ export default class HostManager {
         error: error.message
       };
     }
+  }
+
+  /**
+   * Withdraw accumulated host earnings from HostEarnings contract
+   * @param tokenAddress The token address to withdraw (e.g., USDC)
+   * @returns Transaction receipt
+   */
+  async withdrawEarnings(tokenAddress: string): Promise<ethers.ContractReceipt> {
+    try {
+      const hostEarningsAddress = process.env.CONTRACT_HOST_EARNINGS;
+      if (!hostEarningsAddress) {
+        throw new Error('CONTRACT_HOST_EARNINGS environment variable is not set');
+      }
+
+      if (!this.signer) {
+        throw new Error('Signer not set. Call setSigner() first.');
+      }
+      const signer = this.signer;
+      
+      // Use centralized ABI import
+      const hostEarningsContract = new ethers.Contract(
+        hostEarningsAddress,
+        HostEarningsABI,
+        signer
+      );
+
+      // Call withdrawAll function
+      const tx = await hostEarningsContract.withdrawAll(tokenAddress, {
+        gasLimit: 200000
+      });
+      
+      const receipt = await tx.wait();
+      
+      if (receipt.status !== 1) {
+        throw new Error('Host earnings withdrawal transaction failed');
+      }
+      
+      return receipt;
+    } catch (error: any) {
+      // Don't throw on "No earnings to withdraw" - that's expected sometimes
+      if (error.message.includes('No earnings') || error.message.includes('Nothing to withdraw')) {
+        console.log('No host earnings available to withdraw');
+        return { status: 0 } as any;
+      }
+      throw new Error(`Failed to withdraw host earnings: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check accumulated earnings for the host
+   * @param tokenAddress The token address to check earnings for
+   * @returns Accumulated earnings as BigNumber
+   */
+  async checkAccumulatedEarnings(tokenAddress: string): Promise<ethers.BigNumber> {
+    try {
+      const hostEarningsAddress = process.env.CONTRACT_HOST_EARNINGS;
+      if (!hostEarningsAddress) {
+        throw new Error('CONTRACT_HOST_EARNINGS environment variable is not set');
+      }
+
+      if (!this.signer) {
+        throw new Error('Signer not set. Call setSigner() first.');
+      }
+      const signer = this.signer;
+      const hostAddress = await signer.getAddress();
+      
+      // Use centralized ABI import
+      const hostEarningsContract = new ethers.Contract(
+        hostEarningsAddress,
+        HostEarningsABI,
+        signer
+      );
+
+      // Call getBalance function (correct ABI method name)
+      return await hostEarningsContract.getBalance(hostAddress, tokenAddress);
+    } catch (error: any) {
+      throw new Error(`Failed to check accumulated earnings: ${error.message}`);
+    }
+  }
+
+  /**
+   * Submit proof of work for a session
+   * @param jobId The session job ID
+   * @param proof The proof bytes (e.g., EZKL proof)
+   * @param tokensProven Number of tokens proven
+   * @returns Transaction receipt
+   */
+  async submitProofOfWork(jobId: string | number, proof: string, tokensProven: number): Promise<ethers.ContractReceipt> {
+    try {
+      if (!this.signer) {
+        throw new Error('Signer not set. Call setSigner() first.');
+      }
+      const signer = this.signer;
+      
+      const jobMarketplaceAddress = process.env.CONTRACT_JOB_MARKETPLACE;
+      if (!jobMarketplaceAddress) {
+        throw new Error('CONTRACT_JOB_MARKETPLACE environment variable is not set');
+      }
+      
+      const jobMarketplace = new ethers.Contract(
+        jobMarketplaceAddress,
+        JobMarketplaceABI,
+        signer
+      );
+      
+      const tx = await jobMarketplace.submitProofOfWork(
+        jobId,
+        proof,
+        tokensProven,
+        { gasLimit: 300000 }
+      );
+      const receipt = await tx.wait();
+      
+      if (receipt.status !== 1) {
+        throw new Error('Proof submission failed');
+      }
+      
+      return receipt;
+    } catch (error: any) {
+      throw new Error(`Failed to submit proof: ${error.message}`);
+    }
+  }
+
+  /**
+   * Claim payment for a completed session job (calls claimWithProof)
+   * @param jobId The session job ID to claim payment for
+   * @returns Transaction receipt
+   */
+  async claimSessionPayment(jobId: string | number): Promise<ethers.ContractReceipt> {
+    try {
+      if (!this.signer) {
+        throw new Error('Signer not set. Call setSigner() first.');
+      }
+      const signer = this.signer;
+      
+      // Use centralized ABI import
+      const marketplaceAddress = process.env.CONTRACT_JOB_MARKETPLACE;
+      
+      if (!marketplaceAddress) {
+        throw new Error('CONTRACT_JOB_MARKETPLACE environment variable is not set');
+      }
+      
+      const marketplaceContract = new ethers.Contract(
+        marketplaceAddress,
+        JobMarketplaceABI,
+        signer
+      );
+
+      // Call claimWithProof function
+      const tx = await marketplaceContract.claimWithProof(jobId, {
+        gasLimit: 300000
+      });
+      
+      const receipt = await tx.wait();
+      
+      if (receipt.status !== 1) {
+        throw new Error('Claim payment transaction failed');
+      }
+      
+      return receipt;
+    } catch (error: any) {
+      throw new Error(`Failed to claim session payment: ${error.message}`);
+    }
+  }
+
+  /**
+   * Withdraw all available earnings for all supported tokens
+   * @returns Object with withdrawal results for each token
+   */
+  async withdrawAllEarnings(): Promise<{ [token: string]: ethers.ContractReceipt | null }> {
+    const results: { [token: string]: ethers.ContractReceipt | null } = {};
+    
+    // Always try USDC first
+    const usdcAddress = process.env.CONTRACT_USDC_TOKEN;
+    if (usdcAddress) {
+      try {
+        const earnings = await this.checkAccumulatedEarnings(usdcAddress);
+        if (earnings && earnings.gt(0)) {
+          results.usdc = await this.withdrawEarnings(usdcAddress);
+        } else {
+          results.usdc = null;
+        }
+      } catch (error: any) {
+        console.error(`Failed to withdraw USDC earnings: ${error.message}`);
+        results.usdc = null;
+      }
+    }
+    
+    return results;
   }
 }

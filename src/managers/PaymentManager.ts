@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import AuthManager from './AuthManager';
+import { ERC20ABI } from '../contracts/abis';
 
 export default class PaymentManager {
   static readonly MIN_ETH_PAYMENT = '0.005';
@@ -69,7 +70,7 @@ export default class PaymentManager {
       const signer = this.authManager.getSigner();
       const usdcContract = new ethers.Contract(
         tokenAddress,
-        ['function approve(address spender, uint256 amount) returns (bool)'],
+        ERC20ABI,
         signer
       );
       const tx = await usdcContract.approve(
@@ -111,6 +112,20 @@ export default class PaymentManager {
       
       // No simulation - we'll get the real job ID from events only
       
+      // First approve USDC
+      const usdcContract = new ethers.Contract(
+        tokenAddress,
+        ERC20ABI,
+        signer
+      );
+      const approveTx = await usdcContract.approve(
+        this.jobMarketplace.address,
+        depositAmount,
+        { gasLimit: 100000 }
+      );
+      await approveTx.wait();
+      
+      // Then create session using createSessionJobWithToken for USDC
       const tx = await contractWithSigner.createSessionJobWithToken(
         hostAddress, tokenAddress, depositAmount, pricePerTokenBN, duration, proofInterval,
         { gasLimit: 500000 }
@@ -159,6 +174,117 @@ export default class PaymentManager {
     }
   }
 
+  /**
+   * Claim payment with proof for a completed session job
+   * @param jobId The session job ID to claim payment for
+   * @returns Transaction receipt
+   */
+  async claimWithProof(jobId: string | number): Promise<ethers.ContractReceipt> {
+    try {
+      const signer = this.authManager.getSigner();
+      const contractWithSigner = this.jobMarketplace.connect(signer);
+      
+      // Use the claimWithProof function from the contract
+      const tx = await contractWithSigner.claimWithProof(jobId, { gasLimit: 300000 });
+      const receipt = await tx.wait();
+      
+      if (receipt.status !== 1) {
+        throw new Error('Claim transaction failed');
+      }
+      
+      return receipt;
+    } catch (error: any) {
+      throw new Error(`Failed to claim payment with proof: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get session job status and details from the contract
+   * @param jobId The session job ID to query
+   * @returns Session details including status, deposit, tokens proven, etc.
+   */
+  async getSessionStatus(jobId: string | number): Promise<any> {
+    try {
+      const signer = this.authManager.getSigner();
+      
+      // Use the sessions function to get job details
+      const sessionDetails = await this.jobMarketplace.sessions(jobId);
+      
+      // Map ABI field names to expected names
+      return {
+        deposit: sessionDetails.depositAmount,
+        pricePerToken: sessionDetails.pricePerToken,
+        maxDuration: sessionDetails.maxDuration,
+        endTime: sessionDetails.sessionStartTime && sessionDetails.maxDuration ? 
+          ethers.BigNumber.from(sessionDetails.sessionStartTime).add(sessionDetails.maxDuration) : undefined,
+        host: sessionDetails.assignedHost,
+        renter: sessionDetails.requester, // Note: ABI doesn't have 'renter', might be 'requester'
+        proofInterval: sessionDetails.proofInterval,
+        tokensProven: sessionDetails.provenTokens,
+        completedAt: sessionDetails.completedAt,
+        paymentToken: sessionDetails.paymentToken || ethers.constants.AddressZero,
+        isCompleted: sessionDetails.status === 2 // Status 2 = Completed in enum
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to get session status: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check multiple balances (USDC and ETH) for given addresses
+   * @param addresses Object with addresses to check
+   * @returns Object with balances for each address
+   */
+  async checkBalances(addresses: { [key: string]: string }): Promise<{ [key: string]: { usdc: string; eth: string } }> {
+    try {
+      const signer = this.authManager.getSigner();
+      const provider = signer.provider;
+      
+      const usdcAddress = process.env.CONTRACT_USDC_TOKEN;
+      if (!usdcAddress) {
+        throw new Error('CONTRACT_USDC_TOKEN environment variable is not set');
+      }
+      
+      const usdcContract = new ethers.Contract(
+        usdcAddress,
+        ERC20ABI,
+        provider
+      );
+      
+      const balances: { [key: string]: { usdc: string; eth: string } } = {};
+      
+      for (const [name, address] of Object.entries(addresses)) {
+        const usdcBalance = await usdcContract.balanceOf(address);
+        const ethBalance = await provider.getBalance(address);
+        
+        balances[name] = {
+          usdc: ethers.utils.formatUnits(usdcBalance, PaymentManager.USDC_DECIMALS),
+          eth: ethers.utils.formatEther(ethBalance)
+        };
+      }
+      
+      return balances;
+    } catch (error: any) {
+      throw new Error(`Failed to check balances: ${error.message}`);
+    }
+  }
+
+  /**
+   * Verify that a session was successfully created on-chain
+   * @param jobId The session job ID to verify
+   * @returns Boolean indicating if session exists
+   */
+  async verifySessionCreated(jobId: string | number): Promise<boolean> {
+    try {
+      const sessionDetails = await this.getSessionStatus(jobId);
+      // Session exists if we got valid data back with a deposit
+      return sessionDetails.deposit && ethers.BigNumber.from(sessionDetails.deposit).gt(0);
+    } catch (error: any) {
+      // If we can't read the session, it doesn't exist
+      return false;
+    }
+  }
+
   async getUSDCBalance(address?: string): Promise<ethers.BigNumber> {
     try {
       const signer = this.authManager.getSigner();
@@ -170,7 +296,7 @@ export default class PaymentManager {
       
       const usdcContract = new ethers.Contract(
         usdcAddress,
-        ['function balanceOf(address) view returns (uint256)'],
+        ERC20ABI,
         signer.provider
       );
       

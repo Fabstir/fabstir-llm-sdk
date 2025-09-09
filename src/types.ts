@@ -1,6 +1,32 @@
 // src/types.ts
 import { BigNumber } from "ethers";
 
+// SDK Configuration types
+export interface SDKConfig {
+  rpcUrl?: string;
+  s5PortalUrl?: string;
+  contractAddresses?: {
+    jobMarketplace: string;
+    nodeRegistry: string;
+    fabToken: string;
+    usdcToken?: string;
+  };
+  smartWallet?: {
+    paymasterUrl?: string;
+  };
+  s5Config?: {
+    portalUrl?: string;
+    seedPhrase?: string;
+  };
+  mode?: string;
+  discoveryUrl?: string;
+}
+
+export interface SDKError extends Error {
+  code?: string;
+  details?: any;
+}
+
 // Job related types
 export interface JobSubmissionRequest {
   prompt: string;
