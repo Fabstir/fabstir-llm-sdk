@@ -4,6 +4,7 @@ import { connectWallet, getAccountInfo } from '../lib/base-account';
 import { useSubAccount } from '../hooks/useSubAccount';
 import { BalanceDisplay } from '../components/BalanceDisplay';
 import { USDCFlowButton } from '../components/USDCFlowButton';
+import { E2ETestFlow } from '../components/E2ETestFlow';
 import { getEthBalance } from '../e2e/assertions';
 
 const USDCDemo: NextPage = () => {
@@ -83,6 +84,7 @@ const USDCDemo: NextPage = () => {
               <p><strong>Session Job Created:</strong> {lastSessionId}</p>
             </div>
           )}
+          {connected && <E2ETestFlow smartAccount={smartAccount} jobId={1001} />}
         </div>
       )}
     </main>
