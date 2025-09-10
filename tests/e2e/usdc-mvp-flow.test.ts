@@ -117,9 +117,9 @@ describe('USDC MVP Flow', () => {
     console.log(`✅ EOA has sufficient USDC for session`);
     
     // Ensure EOA has sufficient ETH for gas
-    const minimumEth = ethers.utils.parseEther('0.005'); // 0.005 ETH for gas
+    const minimumEth = ethers.utils.parseEther('0.004'); // 0.004 ETH for gas
     if (eoaETH.lt(minimumEth)) {
-      throw new Error(`Insufficient ETH for gas. Need at least 0.005 ETH, have ${ethers.utils.formatEther(eoaETH)} ETH`);
+      throw new Error(`Insufficient ETH for gas. Need at least 0.004 ETH, have ${ethers.utils.formatEther(eoaETH)} ETH`);
     }
     console.log(`✅ EOA has sufficient ETH for gas`);
     

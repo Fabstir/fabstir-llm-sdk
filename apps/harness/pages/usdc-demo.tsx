@@ -4,8 +4,20 @@ import { connectWallet, getAccountInfo } from '../lib/base-account';
 import { useSubAccount } from '../hooks/useSubAccount';
 import { BalanceDisplay } from '../components/BalanceDisplay';
 import { USDCFlowButton } from '../components/USDCFlowButton';
-import { E2ETestFlow } from '../components/E2ETestFlow';
-import { getEthBalance } from '../e2e/assertions';
+// import { E2ETestFlow } from '../components/E2ETestFlow'; // Commented out - uses Node modules
+// Removed missing import - getEthBalance functionality inline below
+
+// Simple ETH balance getter
+const getEthBalance = async (address: string): Promise<bigint> => {
+  if (typeof window !== 'undefined' && window.ethereum) {
+    const balance = await window.ethereum.request({
+      method: 'eth_getBalance',
+      params: [address, 'latest']
+    });
+    return BigInt(balance);
+  }
+  return BigInt(0);
+};
 
 const USDCDemo: NextPage = () => {
   const [account, setAccount] = useState('');
@@ -84,7 +96,7 @@ const USDCDemo: NextPage = () => {
               <p><strong>Session Job Created:</strong> {lastSessionId}</p>
             </div>
           )}
-          {connected && <E2ETestFlow smartAccount={smartAccount} jobId={1001} />}
+          {/* {connected && <E2ETestFlow smartAccount={smartAccount} jobId={1001} />} */}
         </div>
       )}
     </main>

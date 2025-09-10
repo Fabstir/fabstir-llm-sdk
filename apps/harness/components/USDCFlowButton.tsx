@@ -20,7 +20,7 @@ export function USDCFlowButton({ smartAccount, onSuccess, onError }: USDCFlowBut
     try {
       const [approveCall, createCall] = buildSessionJobBatch(
         parseUnits('2', USDC_DECIMALS), parseUnits('0.002', USDC_DECIMALS));
-      const provider = window.ethereum as any;
+      const provider = (window as any).ethereum;
       const res = await provider.request({
         method: 'wallet_sendCalls',
         params: [{ version: '2.0.0', chainId: CHAIN_ID_HEX, from: smartAccount,
@@ -39,7 +39,7 @@ export function USDCFlowButton({ smartAccount, onSuccess, onError }: USDCFlowBut
         } else if (stat.status === 'FAILED') throw new Error('Transaction failed');
         await new Promise(r => setTimeout(r, 1000));
       }
-    } catch (error) {
+    } catch (error: any) {
       setStatus(`Error: ${error.message}`);
       onError?.(error as Error);
     } finally { setLoading(false); }

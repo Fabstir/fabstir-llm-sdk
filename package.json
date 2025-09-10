@@ -19,7 +19,6 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
     "clean": "rm -rf dist",
-    "prepare": "npm run build",
     "dev": "tsc --watch",
     "build:all": "yarn workspaces foreach run build && yarn build",
     "test:all": "yarn workspaces foreach run test && yarn test",
@@ -40,7 +39,6 @@
     "@base-org/account": "^2.1.0",
     "@chainsafe/libp2p-noise": "^16.0.0",
     "@chainsafe/libp2p-yamux": "^7.0.1",
-    "@coinbase/wallet-sdk": "^4.3.7",
     "@fabstir/llm-auth": "file:../fabstir-llm-auth",
     "@libp2p/bootstrap": "^11.0.13",
     "@libp2p/identify": "^3.0.0",
@@ -48,13 +46,11 @@
     "@libp2p/mdns": "^11.0.14",
     "@libp2p/tcp": "^10.1.8",
     "@libp2p/websockets": "^9.0.11",
-    "@types/react": "^19.1.12",
     "ethers": "^5.0.0",
     "events": "^3.3.0",
     "fake-indexeddb": "^6.2.2",
     "libp2p": "^2.4.1",
-    "multiformats": "^13.3.7",
-    "react": "^19.1.1"
+    "multiformats": "^13.3.7"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",

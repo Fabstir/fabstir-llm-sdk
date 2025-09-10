@@ -1,25 +1,37 @@
 FROM node:22
 
-# Only essentials for SDK development
+# --- Base system packages ---
 RUN apt-get update && apt-get install -y \
     git curl build-essential python3 \
+    # Extra deps for Chrome/Playwright
+    xvfb libgtk-3-0 libnss3 libxss1 libasound2 \
+    libatk1.0-0 libatk-bridge2.0-0 libdrm2 libgbm1 libxshmfence1 \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Global packages for SDK development
+# --- Global Node tools for SDK dev ---
 RUN npm install -g pnpm typescript ts-node vitest
+
+# --- Install Playwright + Chromium ---
+# Installs Playwright CLI + browsers (includes Chromium, Firefox, WebKit)
+RUN npm install -g playwright \
+    && npx playwright install --with-deps
 
 WORKDIR /workspace
 
-# Setup script that runs on container start
+# --- Setup script for symlink ---
 RUN echo '#!/bin/bash\n\
 if [ -d "/workspace/packages/s5js" ]; then\n\
   mkdir -p /workspace/node_modules/@s5-dev\n\
   ln -sfn /workspace/packages/s5js /workspace/node_modules/@s5-dev/s5js\n\
   echo "✅ S5.js symlink created"\n\
 fi\n\
+# Start Xvfb for headless Chrome/Playwright\n\
+Xvfb :99 -screen 0 1280x1024x24 &\n\
+export DISPLAY=:99\n\
 exec "$@"' > /entrypoint.sh && chmod +x /entrypoint.sh
 
-# Create developer user
+# --- Developer user ---
 RUN useradd -m -s /bin/bash developer && \
     echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 

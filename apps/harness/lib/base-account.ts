@@ -22,6 +22,17 @@ export function createSDK(): BaseAccountSDK {
 }
 
 /**
+ * Get account information including smart account address
+ */
+export async function getAccountInfo(address: string): Promise<{ smartAccount?: string }> {
+  // For Base Account Kit with passkeys, the connected address IS the smart account
+  // No separate smart account needed
+  return {
+    smartAccount: address
+  };
+}
+
+/**
  * Connect wallet and ensure on Base Sepolia
  */
 export async function connectWallet(): Promise<string[]> {
