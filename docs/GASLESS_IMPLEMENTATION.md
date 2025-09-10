@@ -353,6 +353,101 @@ Browser-based testing harness for achieving truly gasless transactions on Base S
 - `docs/GASLESS_TESTING.md`
 - `docs/TROUBLESHOOTING.md`
 
+## Phase 5: USDC Demo UI Implementation
+
+### Sub-phase 5.1: Demo Page Setup (50 lines) ✅
+
+- [x] Create usdc-demo.tsx page
+- [x] Add wallet connection UI
+- [x] Display chain and account info
+- [x] Add navigation from index
+
+**Test Files:**
+- `apps/harness/tests/usdc-demo-page.test.tsx`
+
+**Files to Create:**
+- `apps/harness/pages/usdc-demo.tsx`
+- Update `apps/harness/pages/index.tsx`
+
+**Success Criteria:**
+- Demo page accessible at /usdc-demo
+- Wallet connection working
+- Account info displayed
+
+### Sub-phase 5.2: Balance Display Component (45 lines) ✅
+
+- [x] Create BalanceDisplay component
+- [x] Fetch USDC balances
+- [x] Auto-refresh after transactions
+- [x] Format with proper decimals
+
+**Test Files:**
+- `apps/harness/tests/balance-display.test.tsx`
+
+**Files to Create:**
+- `apps/harness/components/BalanceDisplay.tsx`
+- `apps/harness/lib/balance-fetcher.ts`
+
+**Success Criteria:**
+- Shows Smart Account, Host, Treasury balances
+- Updates automatically
+- Proper USDC decimal formatting
+
+### Sub-phase 5.3: Session Job Call Builder (60 lines) ✅
+
+- [x] Update call-builder with createSessionJobWithToken
+- [x] Add correct contract ABI
+- [x] Build proper batch call structure
+- [x] Add parameter validation
+
+**Test Files:**
+- `apps/harness/tests/session-job-builder.test.ts`
+
+**Files to Modify:**
+- `apps/harness/lib/call-builder.ts`
+
+**Success Criteria:**
+- Correct function signature
+- Proper parameter encoding
+- Batch call structure matches contract
+
+### Sub-phase 5.4: USDC Flow Button Component (70 lines) ✅
+
+- [x] Create USDCFlowButton component
+- [x] Execute approve + createSessionJob batch
+- [x] Handle transaction status
+- [x] Display progress and results
+
+**Test Files:**
+- `apps/harness/tests/usdc-flow-button.test.tsx`
+
+**Files to Create:**
+- `apps/harness/components/USDCFlowButton.tsx`
+
+**Success Criteria:**
+- Executes complete USDC flow
+- Shows real-time status
+- Handles errors gracefully
+
+### Sub-phase 5.5: Integration & Polish (40 lines)
+
+- [ ] Wire up all components on demo page
+- [ ] Add error handling
+- [ ] Show gasless verification
+- [ ] Display session job ID
+
+**Test Files:**
+- `apps/harness/tests/usdc-demo-integration.test.tsx`
+
+**Files to Modify:**
+- `apps/harness/pages/usdc-demo.tsx`
+
+**Success Criteria:**
+- Complete working demo
+- Zero ETH spent verification
+- Clear UI showing all steps
+- Reference implementation for SDK integration
+
 ## Success Criteria
 
 ### Phase 1 Complete
@@ -378,6 +473,149 @@ Browser-based testing harness for achieving truly gasless transactions on Base S
 - [ ] Performance optimized
 - [ ] Fully documented
 
+### Phase 5 Complete
+- [x] USDC demo page functional
+- [x] Complete flow executing gaslessly
+- [x] Balances updating correctly
+- [x] Reference implementation ready
+
+## Phase 6: Autonomous E2E Test Implementation
+
+### Sub-phase 6.1: WebSocket Client for Harness (60 lines)
+
+- [ ] Connect to fabstir-llm-node WebSocket endpoint
+- [ ] Handle session initialization with job ID
+- [ ] Stream tokens from LLM responses
+- [ ] Manage connection lifecycle
+
+**Test Files:**
+- `apps/harness/tests/websocket-client.test.ts`
+
+**Files to Create:**
+- `apps/harness/lib/websocket-client.ts`
+
+**Success Criteria:**
+- Connects to real host WebSocket
+- Streams tokens in real-time
+- Handles disconnections gracefully
+
+### Sub-phase 6.2: LLM Service Integration (50 lines)
+
+- [ ] Send prompts to host via WebSocket
+- [ ] Receive streaming responses
+- [ ] Track token usage
+- [ ] Handle errors and retries
+
+**Test Files:**
+- `apps/harness/tests/llm-service.test.ts`
+
+**Files to Create:**
+- `apps/harness/lib/llm-service.ts`
+
+**Success Criteria:**
+- Sends "1 + 1 = ?" prompt
+- Receives actual LLM response
+- Counts tokens accurately
+
+### Sub-phase 6.3: Proof Submission Handler (55 lines)
+
+- [ ] Generate mock EZKL proof structure
+- [ ] Submit proof to contract as host
+- [ ] Wait for confirmation
+- [ ] Return proof status
+
+**Test Files:**
+- `apps/harness/tests/proof-handler.test.ts`
+
+**Files to Create:**
+- `apps/harness/lib/proof-handler.ts`
+
+**Success Criteria:**
+- Valid proof structure generated
+- Proof accepted by contract
+- Status confirmed on-chain
+
+### Sub-phase 6.4: Payment Settlement (45 lines)
+
+- [ ] Claim payments as host
+- [ ] Trigger treasury distribution
+- [ ] Process user refunds
+- [ ] Check final balances
+
+**Test Files:**
+- `apps/harness/tests/payment-settlement.test.ts`
+
+**Files to Create:**
+- `apps/harness/lib/payment-settlement.ts`
+
+**Success Criteria:**
+- Host receives 90% of payment
+- Treasury receives 10%
+- User refunded unused USDC
+
+### Sub-phase 6.5: S5 Conversation Store (50 lines)
+
+- [ ] Initialize S5 with seed phrase
+- [ ] Save prompts and responses
+- [ ] Create conversation metadata
+- [ ] Handle storage errors
+
+**Test Files:**
+- `apps/harness/tests/s5-storage.test.ts`
+
+**Files to Create:**
+- `apps/harness/lib/s5-storage.ts`
+
+**Success Criteria:**
+- Conversation saved to S5
+- Retrievable with seed phrase
+- Metadata properly structured
+
+### Sub-phase 6.6: E2E Test Flow Component (80 lines)
+
+- [ ] Create automated test button
+- [ ] Execute complete flow on click
+- [ ] Display progress indicators
+- [ ] Show final results
+
+**Test Files:**
+- `apps/harness/tests/e2e-test-flow.test.tsx`
+
+**Files to Create:**
+- `apps/harness/components/E2ETestFlow.tsx`
+
+**Success Criteria:**
+- Single button triggers entire flow
+- Progress visible to user
+- All results displayed
+
+### Sub-phase 6.7: Integration & Playwright Test (70 lines)
+
+- [ ] Add E2ETestFlow to demo page
+- [ ] Create Playwright test
+- [ ] Verify gasless execution
+- [ ] Assert all steps complete
+
+**Test Files:**
+- `apps/harness/e2e/full-flow.spec.ts`
+
+**Files to Modify:**
+- `apps/harness/pages/usdc-demo.tsx`
+
+**Success Criteria:**
+- Full flow executes automatically
+- Zero ETH spent from EOA
+- All assertions pass
+
+### Phase 6 Complete
+- [ ] WebSocket streaming working
+- [ ] Real LLM responses received
+- [ ] Proofs submitted successfully
+- [ ] Payments settled correctly
+- [ ] S5 storage functional
+- [ ] Complete E2E test passing
+- [ ] Gasless execution verified
+
 ## Testing Strategy
 
 1. **Write test first** - Define expected behavior
@@ -388,10 +626,12 @@ Browser-based testing harness for achieving truly gasless transactions on Base S
 
 ## Current Status
 
-- **Phase 1**: 📋 Ready to start
-- **Phase 2**: ⏳ Pending Phase 1
-- **Phase 3**: ⏳ Pending Phase 2
-- **Phase 4**: ⏳ Pending Phase 3
+- **Phase 1**: ✅ Complete (Workspace configured)
+- **Phase 2**: ✅ Complete (Harness app functional)
+- **Phase 3**: ✅ Complete (E2E automation working)
+- **Phase 4**: ⏳ Optional (Production optimizations)
+- **Phase 5**: ✅ Complete (USDC demo UI functional)
+- **Phase 6**: 📋 Ready to start (Autonomous E2E test)
 
 ## Implementation Notes
 

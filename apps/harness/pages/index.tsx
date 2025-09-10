@@ -1,4 +1,5 @@
 import type { NextPage } from 'next';
+import Link from 'next/link';
 
 const Home: NextPage = () => {
   return (
@@ -8,6 +9,22 @@ const Home: NextPage = () => {
       <div>
         <p>Chain: Base Sepolia (ID: {process.env.NEXT_PUBLIC_CHAIN_ID})</p>
         <p>Ready for wallet integration.</p>
+      </div>
+      
+      <div style={{ marginTop: '32px' }}>
+        <h2>Available Demos</h2>
+        <ul style={{ listStyle: 'none', padding: 0 }}>
+          <li style={{ marginBottom: '12px' }}>
+            <Link href="/run" style={{ color: '#0052cc', textDecoration: 'none', fontSize: '18px' }}>
+              → Basic Batch Transaction Demo
+            </Link>
+          </li>
+          <li style={{ marginBottom: '12px' }}>
+            <Link href="/usdc-demo" style={{ color: '#0052cc', textDecoration: 'none', fontSize: '18px' }}>
+              → USDC Demo (Session Jobs with Gasless Transactions)
+            </Link>
+          </li>
+        </ul>
       </div>
     </main>
   );
