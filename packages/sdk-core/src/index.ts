@@ -9,8 +9,8 @@
 // Export main SDK class (to be created)
 // export { FabstirSDKCore } from './FabstirSDKCore';
 
-// Export browser-compatible managers (to be migrated)
-// export { AuthManager } from './managers/AuthManager';
+// Export browser-compatible managers
+export { AuthManager } from './managers/AuthManager';
 // export { PaymentManager } from './managers/PaymentManager';
 // export { StorageManager } from './managers/StorageManager';
 // export { SessionManager } from './managers/SessionManager';

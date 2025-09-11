@@ -137,13 +137,13 @@ Create two packages:
 **Goal**: Make AuthManager fully browser-compatible
 
 #### Tasks:
-- [ ] Replace node:crypto with Web Crypto API
-- [ ] Update private key handling for browser security
-- [ ] Ensure MetaMask integration works
-- [ ] Support WalletConnect in browser
-- [ ] Update S5 seed generation for browser
-- [ ] Remove any fs operations
-- [ ] Test with multiple wallet providers
+- [x] Replace node:crypto with Web Crypto API
+- [x] Update private key handling for browser security
+- [x] Ensure MetaMask integration works
+- [x] Support WalletConnect in browser
+- [x] Update S5 seed generation for browser
+- [x] Remove any fs operations
+- [x] Test with multiple wallet providers
 
 ### Sub-phase 3.4: Refactor Storage Manager
 **Goal**: Ensure S5.js integration is browser-compatible

@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication Manager Test</title>
+    <script src="https://cdn.ethers.io/lib/ethers-6.9.0.esm.min.js" type="module"></script>
+</head>
+<body>
+    <h1>Browser Authentication Test</h1>
+    
+    <div id="status">Not connected</div>
+    
+    <h2>Wallet Connection</h2>
+    <button id="connectMetaMask">Connect MetaMask</button>
+    <button id="connectCoinbase">Connect Coinbase Wallet</button>
+    <button id="connectPrivateKey">Test with Private Key</button>
+    
+    <h2>Crypto Operations</h2>
+    <button id="testWebCrypto" disabled>Test Web Crypto API</button>
+    <button id="testS5Seed" disabled>Test S5 Seed Generation</button>
+    <button id="testEncryption" disabled>Test Encryption/Decryption</button>
+    
+    <div id="results"></div>
+
+    <script type="module">
+        import { ethers } from 'https://cdn.ethers.io/lib/ethers-6.9.0.esm.min.js';
+        
+        let signer, address, s5Seed;
+        
+        // Web Crypto utilities
+        const WebCrypto = {
+            async sha256(data) {
+                const encoder = new TextEncoder();
+                const dataBuffer = encoder.encode(data);
+                const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            },
+            
+            getRandomHex(length) {
+                const bytes = new Uint8Array(length);
+                crypto.getRandomValues(bytes);
+                return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+            },
+            
+            async hmacSha256(key, data) {
+                const encoder = new TextEncoder();
+                const cryptoKey = await crypto.subtle.importKey(
+                    'raw',
+                    encoder.encode(key),
+                    { name: 'HMAC', hash: 'SHA-256' },
+                    false,
+                    ['sign']
+                );
+                const signature = await crypto.subtle.sign(
+                    'HMAC',
+                    cryptoKey,
+                    encoder.encode(data)
+                );
+                return Array.from(new Uint8Array(signature))
+                    .map(b => b.toString(16).padStart(2, '0')).join('');
+            }
+        };
+        
+        // Generate S5 seed from signer
+        async function generateS5Seed(signer) {
+            const message = 'Generate S5 seed for Fabstir LLM';
+            const signature = await signer.signMessage(message);
+            const seed = await WebCrypto.sha256(signature);
+            return seed.slice(0, 64); // 32 bytes as hex
+        }
+        
+        // Connect MetaMask
+        document.getElementById('connectMetaMask').addEventListener('click', async () => {
+            try {
+                if (!window.ethereum) {
+                    throw new Error('MetaMask is not installed');
+                }
+                
+                const accounts = await window.ethereum.request({ 
+                    method: 'eth_requestAccounts' 
+                });
+                
+                const provider = new ethers.BrowserProvider(window.ethereum);
+                signer = await provider.getSigner();
+                address = await signer.getAddress();
+                s5Seed = await generateS5Seed(signer);
+                
+                updateStatus('MetaMask');
+                log('✅ Connected to MetaMask');
+                log(`Address: ${address}`);
+                log(`S5 Seed: ${s5Seed.slice(0, 16)}...`);
+                
+                enableCryptoTests();
+            } catch (error) {
+                log(`❌ MetaMask error: ${error.message}`);
+            }
+        });
+        
+        // Connect Coinbase Wallet
+        document.getElementById('connectCoinbase').addEventListener('click', async () => {
+            try {
+                if (!window.ethereum || !window.ethereum.isCoinbaseWallet) {
+                    throw new Error('Coinbase Wallet is not installed');
+                }
+                
+                const accounts = await window.ethereum.request({ 
+                    method: 'eth_requestAccounts' 
+                });
+                
+                const provider = new ethers.BrowserProvider(window.ethereum);
+                signer = await provider.getSigner();
+                address = await signer.getAddress();
+                s5Seed = await generateS5Seed(signer);
+                
+                updateStatus('Coinbase Wallet');
+                log('✅ Connected to Coinbase Wallet');
+                log(`Address: ${address}`);
+                log(`S5 Seed: ${s5Seed.slice(0, 16)}...`);
+                
+                enableCryptoTests();
+            } catch (error) {
+                log(`❌ Coinbase error: ${error.message}`);
+            }
+        });
+        
+        // Test with private key
+        document.getElementById('connectPrivateKey').addEventListener('click', async () => {
+            try {
+                // Test private key (never do this in production!)
+                const testPrivateKey = '0x' + '1'.repeat(64);
+                const rpcUrl = 'https://base-sepolia.g.alchemy.com/v2/demo';
+                
+                const provider = new ethers.JsonRpcProvider(rpcUrl);
+                const wallet = new ethers.Wallet(testPrivateKey, provider);
+                
+                signer = wallet;
+                address = await wallet.getAddress();
+                s5Seed = await generateS5Seed(wallet);
+                
+                updateStatus('Private Key (Test)');
+                log('✅ Connected with test private key');
+                log(`Address: ${address}`);
+                log(`S5 Seed: ${s5Seed.slice(0, 16)}...`);
+                log('⚠️ WARNING: Never use private keys in production browser apps!');
+                
+                enableCryptoTests();
+            } catch (error) {
+                log(`❌ Private key error: ${error.message}`);
+            }
+        });
+        
+        // Test Web Crypto API
+        document.getElementById('testWebCrypto').addEventListener('click', async () => {
+            try {
+                log('\nTesting Web Crypto API...');
+                
+                // Test random generation
+                const random = WebCrypto.getRandomHex(32);
+                log(`✅ Random hex (32 bytes): ${random.slice(0, 16)}...`);
+                
+                // Test SHA-256
+                const hash = await WebCrypto.sha256('Hello, Fabstir!');
+                log(`✅ SHA-256 hash: ${hash.slice(0, 16)}...`);
+                
+                // Test HMAC
+                const hmac = await WebCrypto.hmacSha256('secret-key', 'message');
+                log(`✅ HMAC-SHA256: ${hmac.slice(0, 16)}...`);
+                
+                // Check Web Crypto availability
+                const available = typeof crypto !== 'undefined' && 
+                                typeof crypto.subtle !== 'undefined';
+                log(`✅ Web Crypto API available: ${available}`);
+                
+                // Test performance
+                const start = performance.now();
+                for (let i = 0; i < 100; i++) {
+                    await WebCrypto.sha256(`test-${i}`);
+                }
+                const duration = performance.now() - start;
+                log(`✅ 100 SHA-256 operations: ${duration.toFixed(2)}ms`);
+                
+            } catch (error) {
+                log(`❌ Web Crypto test failed: ${error.message}`);
+            }
+        });
+        
+        // Test S5 seed generation
+        document.getElementById('testS5Seed').addEventListener('click', async () => {
+            try {
+                log('\nTesting S5 Seed Generation...');
+                
+                // Test deterministic seed generation
+                const seed1 = await generateS5Seed(signer);
+                const seed2 = await generateS5Seed(signer);
+                
+                log(`✅ Seed 1: ${seed1.slice(0, 16)}...`);
+                log(`✅ Seed 2: ${seed2.slice(0, 16)}...`);
+                log(`✅ Seeds are ${seed1 === seed2 ? 'identical (deterministic)' : 'different'}`);
+                
+                // Test seed format
+                const isValidHex = /^[0-9a-f]{64}$/i.test(seed1);
+                log(`✅ Valid hex format (64 chars): ${isValidHex}`);
+                
+                // Test seed entropy
+                const uniqueChars = new Set(seed1).size;
+                log(`✅ Unique characters in seed: ${uniqueChars}/16`);
+                
+            } catch (error) {
+                log(`❌ S5 seed test failed: ${error.message}`);
+            }
+        });
+        
+        // Test encryption/decryption
+        document.getElementById('testEncryption').addEventListener('click', async () => {
+            try {
+                log('\nTesting Encryption/Decryption...');
+                
+                const testData = 'Secret message for Fabstir SDK';
+                const password = 'test-password-123';
+                
+                // Generate salt and IV
+                const salt = WebCrypto.getRandomHex(16);
+                const iv = new Uint8Array(12);
+                crypto.getRandomValues(iv);
+                
+                log(`✅ Generated salt: ${salt.slice(0, 16)}...`);
+                log(`✅ Generated IV: ${Array.from(iv.slice(0, 4)).join(',')}...`);
+                
+                // Derive key from password
+                const encoder = new TextEncoder();
+                const passwordKey = await crypto.subtle.importKey(
+                    'raw',
+                    encoder.encode(password),
+                    'PBKDF2',
+                    false,
+                    ['deriveBits']
+                );
+                
+                const derivedBits = await crypto.subtle.deriveBits(
+                    {
+                        name: 'PBKDF2',
+                        salt: encoder.encode(salt),
+                        iterations: 100000,
+                        hash: 'SHA-256'
+                    },
+                    passwordKey,
+                    256
+                );
+                
+                log(`✅ Derived key from password`);
+                
+                // Import key for AES-GCM
+                const key = await crypto.subtle.importKey(
+                    'raw',
+                    derivedBits,
+                    'AES-GCM',
+                    false,
+                    ['encrypt', 'decrypt']
+                );
+                
+                // Encrypt
+                const encrypted = await crypto.subtle.encrypt(
+                    { name: 'AES-GCM', iv },
+                    key,
+                    encoder.encode(testData)
+                );
+                
+                log(`✅ Encrypted ${testData.length} bytes`);
+                
+                // Decrypt
+                const decrypted = await crypto.subtle.decrypt(
+                    { name: 'AES-GCM', iv },
+                    key,
+                    encrypted
+                );
+                
+                const decryptedText = new TextDecoder().decode(decrypted);
+                log(`✅ Decrypted: "${decryptedText}"`);
+                log(`✅ Encryption/Decryption ${testData === decryptedText ? 'successful' : 'failed'}`);
+                
+            } catch (error) {
+                log(`❌ Encryption test failed: ${error.message}`);
+            }
+        });
+        
+        function updateStatus(provider) {
+            document.getElementById('status').textContent = `Connected: ${address} (${provider})`;
+        }
+        
+        function enableCryptoTests() {
+            document.getElementById('testWebCrypto').disabled = false;
+            document.getElementById('testS5Seed').disabled = false;
+            document.getElementById('testEncryption').disabled = false;
+        }
+        
+        function log(message) {
+            const results = document.getElementById('results');
+            const entry = document.createElement('div');
+            entry.textContent = message;
+            entry.style.margin = '5px 0';
+            results.appendChild(entry);
+            console.log(message);
+        }
+        
+        // Check Web Crypto API on load
+        window.addEventListener('load', () => {
+            if (typeof crypto === 'undefined' || typeof crypto.subtle === 'undefined') {
+                log('❌ Web Crypto API is not available!');
+                log('Please use HTTPS or localhost');
+            } else {
+                log('✅ Web Crypto API is available');
+            }
+        });
+    </script>
+</body>
+</html>
