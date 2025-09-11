@@ -137,9 +137,9 @@ graph TD
 
 ### Current Status
 ```yaml
-overall_progress: 10%
-current_phase: Phase 1 Complete
-current_sub_phase: Ready for Phase 2
+overall_progress: 20%
+current_phase: Phase 2 Complete
+current_sub_phase: Ready for Phase 3
 last_updated: 2024-01-11
 ```
 
@@ -150,8 +150,8 @@ last_updated: 2024-01-11
 - [x] Sub-phase 1.2: Classify Components by Environment
 
 #### Phase 2: Package Structure
-- [ ] Sub-phase 2.1: Setup @fabstir/sdk-core Package
-- [ ] Sub-phase 2.2: Setup @fabstir/sdk-node Package
+- [x] Sub-phase 2.1: Setup @fabstir/sdk-core Package
+- [x] Sub-phase 2.2: Setup @fabstir/sdk-node Package
 
 #### Phase 3: Refactor Core Components
 - [ ] Sub-phase 3.1: Extract Browser-Compatible Interfaces

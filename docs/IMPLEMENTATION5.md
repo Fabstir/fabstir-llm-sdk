@@ -84,25 +84,25 @@ Create two packages:
 **Goal**: Create browser-compatible core package structure
 
 #### Tasks:
-- [ ] Create packages/sdk-core directory
-- [ ] Setup package.json with browser-compatible settings
-- [ ] Configure TypeScript for browser target (tsconfig.json)
-- [ ] Setup build process for ESM and CommonJS
-- [ ] Configure webpack/rollup for browser bundling
-- [ ] Add browser field in package.json
-- [ ] Setup exports map for proper module resolution
+- [x] Create packages/sdk-core directory
+- [x] Setup package.json with browser-compatible settings
+- [x] Configure TypeScript for browser target (tsconfig.json)
+- [x] Setup build process for ESM and CommonJS
+- [x] Configure webpack/rollup for browser bundling
+- [x] Add browser field in package.json
+- [x] Setup exports map for proper module resolution
 
 ### Sub-phase 2.2: Setup @fabstir/sdk-node Package
 **Goal**: Create server-only package structure
 
 #### Tasks:
-- [ ] Create packages/sdk-node directory
-- [ ] Setup package.json with @fabstir/sdk-core as dependency
-- [ ] Configure TypeScript for Node.js target
-- [ ] Setup build process for Node.js
-- [ ] Configure proper Node.js module resolution
-- [ ] Add engines field requiring Node.js version
-- [ ] Setup exports for server-only components
+- [x] Create packages/sdk-node directory
+- [x] Setup package.json with @fabstir/sdk-core as dependency
+- [x] Configure TypeScript for Node.js target
+- [x] Setup build process for Node.js
+- [x] Configure proper Node.js module resolution
+- [x] Add engines field requiring Node.js version
+- [x] Setup exports for server-only components
 
 ---
 

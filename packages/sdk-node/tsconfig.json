@@ -1,0 +1,72 @@
+{
+  "compilerOptions": {
+    /* Language and Environment */
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    
+    /* Node.js Specific */
+    "skipLibCheck": true,
+    "allowJs": false,
+    
+    /* Emit */
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "removeComments": true,
+    "preserveConstEnums": true,
+    
+    /* Type Checking */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "allowUnreachableCode": false,
+    "exactOptionalPropertyTypes": true,
+    
+    /* Interop Constraints */
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    
+    /* Advanced */
+    "useDefineForClassFields": true,
+    "importsNotUsedAsValues": "remove",
+    "preserveValueImports": false,
+    
+    /* Path Mapping */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@p2p/*": ["src/p2p/*"],
+      "@proof/*": ["src/proof/*"],
+      "@managers/*": ["src/managers/*"],
+      "@utils/*": ["src/utils/*"],
+      "@fabstir/sdk-core": ["../sdk-core/src/index"]
+    },
+    
+    /* Node.js Module Support */
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "**/__tests__/**"
+  ],
+  "references": [
+    { "path": "../sdk-core" }
+  ]
+}

@@ -28,7 +28,12 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "moduleResolution": "node"
+    "moduleResolution": "node",
+    "composite": true,
+    "paths": {
+      "@fabstir/sdk-core": ["packages/sdk-core/src/index"],
+      "@fabstir/sdk-node": ["packages/sdk-node/src/index"]
+    }
   },
   "include": [
     "src/**/*",
@@ -36,5 +41,9 @@
     "tests/config/demo.test.ts",
     "tests/config/mode.test.ts"
   ],
-  "exclude": ["node_modules", "dist", "tests"]
+  "exclude": ["node_modules", "dist", "tests"],
+  "references": [
+    { "path": "./packages/sdk-core" },
+    { "path": "./packages/sdk-node" }
+  ]
 }

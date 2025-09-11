@@ -1,0 +1,97 @@
+{
+  "name": "@fabstir/sdk-node",
+  "version": "1.0.0",
+  "description": "Server-side extensions for Fabstir SDK with P2P and proof capabilities",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./p2p": {
+      "types": "./dist/p2p/index.d.ts",
+      "import": "./dist/p2p/index.mjs",
+      "require": "./dist/p2p/index.js"
+    },
+    "./proof": {
+      "types": "./dist/proof/index.d.ts",
+      "import": "./dist/proof/index.mjs",
+      "require": "./dist/proof/index.js"
+    },
+    "./managers": {
+      "types": "./dist/managers/index.d.ts",
+      "import": "./dist/managers/index.mjs",
+      "require": "./dist/managers/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "pnpm run build:clean && pnpm run build:esm && pnpm run build:cjs && pnpm run build:types",
+    "build:clean": "rimraf dist",
+    "build:esm": "esbuild src/index.ts --bundle --format=esm --platform=node --target=node18 --outfile=dist/index.mjs --external:@fabstir/sdk-core --external:libp2p --external:@libp2p/* --external:@chainsafe/* --external:ethers --external:crypto --external:zlib",
+    "build:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=node --target=node18 --outfile=dist/index.js --external:@fabstir/sdk-core --external:libp2p --external:@libp2p/* --external:@chainsafe/* --external:ethers --external:crypto --external:zlib",
+    "build:types": "tsc --emitDeclarationOnly --declaration --declarationMap",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fabstir/sdk-core": "workspace:*",
+    "libp2p": "^1.0.0",
+    "@libp2p/tcp": "^9.0.0",
+    "@libp2p/websockets": "^8.0.0",
+    "@chainsafe/libp2p-noise": "^14.0.0",
+    "@chainsafe/libp2p-yamux": "^6.0.0",
+    "@libp2p/kad-dht": "^11.0.0",
+    "@libp2p/mdns": "^10.0.0",
+    "@libp2p/bootstrap": "^10.0.0",
+    "@libp2p/identify": "^1.0.0",
+    "ethers": "^6.9.0",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@types/ws": "^8.5.10",
+    "esbuild": "^0.19.10",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.3.3",
+    "vitest": "^1.1.0",
+    "@vitest/ui": "^1.1.0"
+  },
+  "peerDependencies": {
+    "@fabstir/sdk-core": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fabstir/fabstir-llm-sdk.git",
+    "directory": "packages/sdk-node"
+  },
+  "keywords": [
+    "fabstir",
+    "sdk",
+    "node",
+    "server",
+    "p2p",
+    "libp2p",
+    "ethereum",
+    "blockchain",
+    "llm",
+    "ai",
+    "proof",
+    "ezkl"
+  ],
+  "author": "Fabstir",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

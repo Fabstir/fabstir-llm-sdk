@@ -1,0 +1,94 @@
+{
+  "name": "@fabstir/sdk-core",
+  "version": "1.0.0",
+  "description": "Browser-compatible core SDK for Fabstir P2P LLM marketplace",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "browser": {
+    "./dist/index.js": "./dist/browser.js",
+    "./dist/index.mjs": "./dist/browser.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "browser": {
+        "import": "./dist/browser.mjs",
+        "require": "./dist/browser.js"
+      },
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./managers": {
+      "types": "./dist/managers/index.d.ts",
+      "import": "./dist/managers/index.mjs",
+      "require": "./dist/managers/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts/index.d.ts",
+      "import": "./dist/contracts/index.mjs",
+      "require": "./dist/contracts/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.mjs",
+      "require": "./dist/types/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "pnpm run build:clean && pnpm run build:esm && pnpm run build:cjs && pnpm run build:types",
+    "build:clean": "rimraf dist",
+    "build:esm": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2020 --outfile=dist/index.mjs --external:ethers --external:@s5-dev/s5js",
+    "build:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=browser --target=es2020 --outfile=dist/index.js --external:ethers --external:@s5-dev/s5js",
+    "build:browser": "pnpm run build:browser:esm && pnpm run build:browser:cjs",
+    "build:browser:esm": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2020 --outfile=dist/browser.mjs --minify",
+    "build:browser:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=browser --target=es2020 --outfile=dist/browser.js --minify",
+    "build:types": "tsc --emitDeclarationOnly --declaration --declarationMap",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:browser": "vitest --environment=jsdom",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ethers": "^6.9.0",
+    "@s5-dev/s5js": "file:../../packages/s5js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "esbuild": "^0.19.10",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.3.3",
+    "vitest": "^1.1.0",
+    "@vitest/ui": "^1.1.0",
+    "jsdom": "^23.0.1"
+  },
+  "peerDependencies": {
+    "ethers": "^6.9.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fabstir/fabstir-llm-sdk.git",
+    "directory": "packages/sdk-core"
+  },
+  "keywords": [
+    "fabstir",
+    "sdk",
+    "browser",
+    "ethereum",
+    "blockchain",
+    "llm",
+    "ai"
+  ],
+  "author": "Fabstir",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

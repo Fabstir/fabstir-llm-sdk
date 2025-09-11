@@ -1,0 +1,36 @@
+/**
+ * @fabstir/sdk-node - Server-side extensions for Fabstir SDK
+ * 
+ * This package provides Node.js-specific functionality including:
+ * - P2P networking via libp2p
+ * - EZKL proof generation
+ * - Heavy cryptographic operations
+ * - WebSocket server capabilities
+ */
+
+// Re-export everything from sdk-core for convenience
+export * from '@fabstir/sdk-core';
+
+// Export the extended SDK class
+export { FabstirSDKNode } from './FabstirSDKNode';
+
+// Export P2P components
+export { P2PClient } from './p2p/P2PClient';
+export { DiscoveryManager } from './managers/DiscoveryManager';
+export { P2PBridge } from './p2p/P2PBridge';
+
+// Export proof components
+export { EZKLProofGenerator } from './proof/EZKLProofGenerator';
+export { ProofVerifier } from './proof/ProofVerifier';
+
+// Export Node.js specific managers
+export { InferenceManagerNode } from './managers/InferenceManagerNode';
+
+// Export WebSocket server
+export { WebSocketServer } from './p2p/WebSocketServer';
+
+// Export utilities
+export * from './utils';
+
+// Version
+export const VERSION = '1.0.0';

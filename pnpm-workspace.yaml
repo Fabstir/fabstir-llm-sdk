@@ -1,0 +1,7 @@
+packages:
+  - 'packages/*'
+  - 'apps/*'
+  - '.'
+
+# This tells pnpm to treat the packages folder as a workspace
+# and enables cross-package dependencies using workspace: protocol
