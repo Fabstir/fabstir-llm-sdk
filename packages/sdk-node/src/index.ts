@@ -15,13 +15,17 @@ export * from '@fabstir/sdk-core';
 export { FabstirSDKNode } from './FabstirSDKNode';
 
 // Export P2P components
-export { P2PClient } from './p2p/P2PClient';
-export { DiscoveryManager } from './managers/DiscoveryManager';
-export { P2PBridge } from './p2p/P2PBridge';
+export { P2PBridgeServer } from './p2p/P2PBridgeServer';
+export * from './p2p/types';
 
 // Export proof components
 export { EZKLProofGenerator } from './proof/EZKLProofGenerator';
-export { ProofVerifier } from './proof/ProofVerifier';
+export { ProofBridgeServer } from './proof/ProofBridgeServer';
+export * from './proof/types';
+
+// Export bridge components
+export { UnifiedBridgeServer } from './bridge/UnifiedBridgeServer';
+export type { BridgeConfig } from './bridge/UnifiedBridgeServer';
 
 // Export Node.js specific managers
 export { InferenceManagerNode } from './managers/InferenceManagerNode';
