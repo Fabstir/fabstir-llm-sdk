@@ -13,6 +13,7 @@ export * from '@fabstir/sdk-core';
 
 // Export the extended SDK class
 export { FabstirSDKNode } from './FabstirSDKNode';
+export type { FabstirSDKNodeConfig } from './FabstirSDKNode';
 
 // Export P2P components
 export { P2PBridgeServer } from './p2p/P2PBridgeServer';

@@ -245,25 +245,25 @@ Create two packages:
 **Goal**: Create consistent API across both packages
 
 #### Tasks:
-- [ ] Define FabstirSDKCore class
-- [ ] Define FabstirSDKNode class extending Core
-- [ ] Ensure API compatibility between versions
-- [ ] Create migration guide from current SDK
-- [ ] Document breaking changes
-- [ ] Create compatibility layer for existing code
-- [ ] Setup deprecation warnings
+- [x] Define FabstirSDKCore class
+- [x] Define FabstirSDKNode class extending Core
+- [x] Ensure API compatibility between versions
+- [x] Create migration guide from current SDK
+- [x] Document breaking changes
+- [x] Create compatibility layer for existing code
+- [x] Setup deprecation warnings
 
 ### Sub-phase 6.2: Implement Factory Pattern
 **Goal**: Smart SDK initialization based on environment
 
 #### Tasks:
-- [ ] Create SDK factory function
-- [ ] Detect environment (browser vs Node.js)
-- [ ] Auto-select appropriate implementation
-- [ ] Handle missing server features gracefully
-- [ ] Provide clear error messages
-- [ ] Create environment capability detection
-- [ ] Document environment requirements
+- [x] Create SDK factory function
+- [x] Detect environment (browser vs Node.js)
+- [x] Auto-select appropriate implementation
+- [x] Handle missing server features gracefully
+- [x] Provide clear error messages
+- [x] Create environment capability detection
+- [x] Document environment requirements
 
 ---
 
