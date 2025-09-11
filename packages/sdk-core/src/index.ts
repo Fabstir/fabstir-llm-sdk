@@ -6,23 +6,24 @@
  * and storage capabilities.
  */
 
-// Export main SDK class
-export { FabstirSDKCore } from './FabstirSDKCore';
+// Export main SDK class (to be created)
+// export { FabstirSDKCore } from './FabstirSDKCore';
 
-// Export browser-compatible managers
-export { AuthManager } from './managers/AuthManager';
-export { PaymentManager } from './managers/PaymentManager';
-export { StorageManager } from './managers/StorageManager';
-export { SessionManager } from './managers/SessionManager';
-export { HostManager } from './managers/HostManager';
-export { SmartWalletManager } from './managers/SmartWalletManager';
-export { TreasuryManager } from './managers/TreasuryManager';
+// Export browser-compatible managers (to be migrated)
+// export { AuthManager } from './managers/AuthManager';
+// export { PaymentManager } from './managers/PaymentManager';
+// export { StorageManager } from './managers/StorageManager';
+// export { SessionManager } from './managers/SessionManager';
+// export { HostManager } from './managers/HostManager';
+// export { SmartWalletManager } from './managers/SmartWalletManager';
+// export { TreasuryManager } from './managers/TreasuryManager';
 
-// Export contract interfaces
+// Export contract interfaces and helpers
 export * from './contracts';
+export { TransactionHelper } from './contracts/TransactionHelper';
 
-// Export types
-export * from './types';
+// Export types (to be created)
+// export * from './types';
 
 // Export utilities
 export * from './utils';

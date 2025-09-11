@@ -155,7 +155,7 @@ last_updated: 2024-01-11
 
 #### Phase 3: Refactor Core Components
 - [ ] Sub-phase 3.1: Extract Browser-Compatible Interfaces
-- [ ] Sub-phase 3.2: Refactor Contract Interactions
+- [x] Sub-phase 3.2: Refactor Contract Interactions
 - [ ] Sub-phase 3.3: Refactor Authentication
 - [ ] Sub-phase 3.4: Refactor Storage Manager
 
@@ -413,3 +413,8 @@ The refactor is complete when:
 Do not use `npm` that causes problems in this project with dependency hoisting; sdk must not have dependencies it doesn't use cluttering up its node_modules. Use `pnpm` as its been configured to not hoist dependencies.
 
 Do not hardcode any addresses. Use From `/workspace/.env.test`. Use their variable names.
+
+The source of truth for all contract ABIs are in the `src/contracts/abis` folder
+
+This harness page that works from end to end, does have low level contract interactions which obviously the flow functionality must be abstracted to sdk and manager wrapper classes as that is what a UI developer has access to, but it serves as a useful reference: 
+`apps/harness/pages/base-usdc-mvp-flow.test.tsx`

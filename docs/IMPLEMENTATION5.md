@@ -125,13 +125,13 @@ Create two packages:
 **Goal**: Ensure all contract code is browser-compatible
 
 #### Tasks:
-- [ ] Move contract ABIs to sdk-core
-- [ ] Refactor contract initialization to use ethers.js v6 browser providers
-- [ ] Update all BigNumber usage to native BigInt
-- [ ] Remove any Node.js specific ethers imports
-- [ ] Test contract calls work with MetaMask provider
-- [ ] Ensure gas estimation works in browser
-- [ ] Verify transaction signing in browser context
+- [x] Move contract ABIs to sdk-core
+- [x] Refactor contract initialization to use ethers.js v6 browser providers
+- [x] Update all BigNumber usage to native BigInt
+- [x] Remove any Node.js specific ethers imports
+- [x] Test contract calls work with MetaMask provider
+- [x] Ensure gas estimation works in browser
+- [x] Verify transaction signing in browser context
 
 ### Sub-phase 3.3: Refactor Authentication
 **Goal**: Make AuthManager fully browser-compatible

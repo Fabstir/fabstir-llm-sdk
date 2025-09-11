@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MetaMask Contract Test</title>
+    <script src="https://cdn.ethers.io/lib/ethers-6.9.0.esm.min.js" type="module"></script>
+</head>
+<body>
+    <h1>Browser Contract Interaction Test</h1>
+    
+    <div id="status">Not connected</div>
+    
+    <button id="connect">Connect MetaMask</button>
+    <button id="testContract" disabled>Test Contract Call</button>
+    <button id="testGas" disabled>Test Gas Estimation</button>
+    <button id="testSign" disabled>Test Message Signing</button>
+    
+    <div id="results"></div>
+
+    <script type="module">
+        import { ethers } from 'https://cdn.ethers.io/lib/ethers-6.9.0.esm.min.js';
+        
+        let provider, signer, address;
+        
+        // Test contract ABI (minimal)
+        const testABI = [
+            "function balanceOf(address owner) view returns (uint256)",
+            "function transfer(address to, uint256 amount) returns (bool)",
+            "function symbol() view returns (string)",
+            "function decimals() view returns (uint8)"
+        ];
+        
+        // USDC on Base Sepolia
+        const USDC_ADDRESS = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+        
+        document.getElementById('connect').addEventListener('click', async () => {
+            try {
+                // Check if MetaMask is installed
+                if (typeof window.ethereum === 'undefined') {
+                    alert('MetaMask is not installed!');
+                    return;
+                }
+                
+                // Request account access
+                const accounts = await window.ethereum.request({ 
+                    method: 'eth_requestAccounts' 
+                });
+                
+                // Create provider and signer
+                provider = new ethers.BrowserProvider(window.ethereum);
+                signer = await provider.getSigner();
+                address = await signer.getAddress();
+                
+                // Update UI
+                document.getElementById('status').textContent = `Connected: ${address}`;
+                document.getElementById('testContract').disabled = false;
+                document.getElementById('testGas').disabled = false;
+                document.getElementById('testSign').disabled = false;
+                
+                log('✅ Connected to MetaMask');
+                log(`Address: ${address}`);
+                
+                // Get network info
+                const network = await provider.getNetwork();
+                log(`Network: ${network.name} (Chain ID: ${network.chainId})`);
+                
+            } catch (error) {
+                log(`❌ Connection failed: ${error.message}`);
+            }
+        });
+        
+        document.getElementById('testContract').addEventListener('click', async () => {
+            try {
+                log('Testing contract interaction...');
+                
+                // Create contract instance
+                const contract = new ethers.Contract(USDC_ADDRESS, testABI, provider);
+                
+                // Test read operations (no gas required)
+                const symbol = await contract.symbol();
+                const decimals = await contract.decimals();
+                log(`✅ Token Symbol: ${symbol}`);
+                log(`✅ Token Decimals: ${decimals}`);
+                
+                // Test BigInt usage
+                const balance = await contract.balanceOf(address);
+                log(`✅ Balance (raw BigInt): ${balance}`);
+                log(`✅ Balance (formatted): ${ethers.formatUnits(balance, decimals)} ${symbol}`);
+                
+            } catch (error) {
+                log(`❌ Contract test failed: ${error.message}`);
+            }
+        });
+        
+        document.getElementById('testGas').addEventListener('click', async () => {
+            try {
+                log('Testing gas estimation...');
+                
+                // Get current gas prices (returns BigInt)
+                const feeData = await provider.getFeeData();
+                log(`✅ Gas Price: ${feeData.gasPrice} wei`);
+                log(`✅ Max Fee Per Gas: ${feeData.maxFeePerGas} wei`);
+                log(`✅ Max Priority Fee: ${feeData.maxPriorityFeePerGas} wei`);
+                
+                // Convert to Gwei for display
+                if (feeData.gasPrice) {
+                    const gasPriceGwei = ethers.formatUnits(feeData.gasPrice, 'gwei');
+                    log(`✅ Gas Price: ${gasPriceGwei} Gwei`);
+                }
+                
+                // Test gas estimation for a transfer
+                const contract = new ethers.Contract(USDC_ADDRESS, testABI, signer);
+                const estimatedGas = await contract.transfer.estimateGas(
+                    address, // Send to self
+                    0n // Send 0 amount
+                );
+                log(`✅ Estimated Gas for Transfer: ${estimatedGas}`);
+                
+            } catch (error) {
+                log(`❌ Gas estimation failed: ${error.message}`);
+            }
+        });
+        
+        document.getElementById('testSign').addEventListener('click', async () => {
+            try {
+                log('Testing message signing...');
+                
+                const message = "Hello from Fabstir SDK!";
+                log(`Message to sign: "${message}"`);
+                
+                // Sign message
+                const signature = await signer.signMessage(message);
+                log(`✅ Signature: ${signature}`);
+                
+                // Verify signature
+                const recoveredAddress = ethers.verifyMessage(message, signature);
+                log(`✅ Recovered Address: ${recoveredAddress}`);
+                log(`✅ Signature Valid: ${recoveredAddress.toLowerCase() === address.toLowerCase()}`);
+                
+            } catch (error) {
+                log(`❌ Signing failed: ${error.message}`);
+            }
+        });
+        
+        function log(message) {
+            const results = document.getElementById('results');
+            const entry = document.createElement('div');
+            entry.textContent = message;
+            entry.style.margin = '5px 0';
+            results.appendChild(entry);
+            console.log(message);
+        }
+        
+        // Listen for account changes
+        if (window.ethereum) {
+            window.ethereum.on('accountsChanged', (accounts) => {
+                log(`⚠️ Account changed to: ${accounts[0] || 'disconnected'}`);
+                if (accounts.length === 0) {
+                    document.getElementById('status').textContent = 'Not connected';
+                    document.getElementById('testContract').disabled = true;
+                    document.getElementById('testGas').disabled = true;
+                    document.getElementById('testSign').disabled = true;
+                }
+            });
+            
+            window.ethereum.on('chainChanged', (chainId) => {
+                log(`⚠️ Chain changed to: ${chainId}`);
+                window.location.reload();
+            });
+        }
+    </script>
+</body>
+</html>
