@@ -53,28 +53,28 @@ Create two packages:
 **Goal**: Catalog all Node.js-specific imports and dependencies
 
 #### Tasks:
-- [ ] Scan all imports in FabstirSDK.ts for Node.js modules
-- [ ] Scan all manager files for Node.js dependencies
-- [ ] Identify libp2p usage in P2PClient and related files
-- [ ] Document crypto module usage (node:crypto vs Web Crypto API)
-- [ ] Check buffer usage (node:buffer vs browser Buffer)
-- [ ] Identify assert usage and other Node.js built-ins
-- [ ] Create dependency map showing which components need which environment
+- [x] Scan all imports in FabstirSDK.ts for Node.js modules
+- [x] Scan all manager files for Node.js dependencies
+- [x] Identify libp2p usage in P2PClient and related files
+- [x] Document crypto module usage (node:crypto vs Web Crypto API)
+- [x] Check buffer usage (node:buffer vs browser Buffer)
+- [x] Identify assert usage and other Node.js built-ins
+- [x] Create dependency map showing which components need which environment
 
 ### Sub-phase 1.2: Classify Components by Environment
 **Goal**: Determine which components can be browser-compatible
 
 #### Tasks:
-- [ ] Classify AuthManager (likely browser-compatible)
-- [ ] Classify PaymentManager (likely browser-compatible)
-- [ ] Classify StorageManager (S5.js is browser-compatible)
-- [ ] Classify SessionManager (likely browser-compatible)
-- [ ] Classify HostManager (likely browser-compatible)
-- [ ] Classify DiscoveryManager (P2P parts are server-only)
-- [ ] Classify InferenceManager (mixed - contracts browser, P2P server)
-- [ ] Classify SmartWalletManager (browser-compatible)
-- [ ] Classify TreasuryManager (browser-compatible)
-- [ ] Document classification results in architecture diagram
+- [x] Classify AuthManager (likely browser-compatible)
+- [x] Classify PaymentManager (likely browser-compatible)
+- [x] Classify StorageManager (S5.js is browser-compatible)
+- [x] Classify SessionManager (likely browser-compatible)
+- [x] Classify HostManager (likely browser-compatible)
+- [x] Classify DiscoveryManager (P2P parts are server-only)
+- [x] Classify InferenceManager (mixed - contracts browser, P2P server)
+- [x] Classify SmartWalletManager (browser-compatible)
+- [x] Classify TreasuryManager (browser-compatible)
+- [x] Document classification results in architecture diagram
 
 ---
 
