@@ -221,4 +221,84 @@ export class ContractManager {
   ): Promise<ethers.TransactionReceipt | null> {
     return await this.provider.waitForTransaction(txHash, confirmations);
   }
+
+  /**
+   * Get the provider
+   */
+  getProvider() {
+    return this.provider;
+  }
+
+  /**
+   * Get contract address by name
+   */
+  async getContractAddress(name: string): Promise<string> {
+    switch (name) {
+      case 'jobMarketplace':
+        return this.addresses.jobMarketplace;
+      case 'nodeRegistry':
+        return this.addresses.nodeRegistry;
+      case 'hostEarnings':
+        if (!this.addresses.hostEarnings) {
+          throw new Error('Host earnings contract address not configured');
+        }
+        return this.addresses.hostEarnings;
+      case 'paymentEscrow':
+        if (!this.addresses.paymentEscrow) {
+          throw new Error('Payment escrow contract address not configured');
+        }
+        return this.addresses.paymentEscrow;
+      case 'proofSystem':
+        if (!this.addresses.proofSystem) {
+          throw new Error('Proof system contract address not configured');
+        }
+        return this.addresses.proofSystem;
+      case 'fabToken':
+        return this.addresses.fabToken;
+      case 'usdcToken':
+        return this.addresses.usdcToken;
+      case 'baseAccountFactory':
+        if (!this.addresses.baseAccountFactory) {
+          throw new Error('Base account factory address not configured');
+        }
+        return this.addresses.baseAccountFactory;
+      default:
+        throw new Error(`Unknown contract: ${name}`);
+    }
+  }
+
+  /**
+   * Get contract ABI by name
+   */
+  async getContractABI(name: string): Promise<ContractInterface> {
+    switch (name) {
+      case 'jobMarketplace':
+        return JobMarketplaceABI as ContractInterface;
+      case 'nodeRegistry':
+        return NodeRegistryABI as ContractInterface;
+      case 'hostEarnings':
+        return HostEarningsABI as ContractInterface;
+      case 'paymentEscrow':
+        return PaymentEscrowABI as ContractInterface;
+      case 'proofSystem':
+        return ProofSystemABI as ContractInterface;
+      case 'fabToken':
+      case 'usdcToken':
+        return ERC20ABI as ContractInterface;
+      case 'baseAccountFactory':
+        return BaseAccountFactoryABI as ContractInterface;
+      default:
+        throw new Error(`Unknown contract ABI: ${name}`);
+    }
+  }
+
+  /**
+   * Get ERC20 token contract
+   */
+  getERC20Contract(tokenAddress: string): Contract {
+    if (!this.signer) {
+      throw new Error('Signer not set');
+    }
+    return new Contract(tokenAddress, ERC20ABI, this.signer);
+  }
 }

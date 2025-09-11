@@ -205,13 +205,13 @@ Create two packages:
 **Goal**: Ensure payment flows work in browser
 
 #### Tasks:
-- [ ] Remove Node.js dependencies from PaymentManager
-- [ ] Update USDC approval flows for browser
-- [ ] Ensure ETH payments work with browser wallets
-- [ ] Update gas estimation for browser
-- [ ] Test with multiple browser wallets
-- [ ] Verify transaction receipts in browser
-- [ ] Update error handling for browser context
+- [x] Remove Node.js dependencies from PaymentManager
+- [x] Update USDC approval flows for browser
+- [x] Ensure ETH payments work with browser wallets
+- [x] Update gas estimation for browser
+- [x] Test with multiple browser wallets
+- [x] Verify transaction receipts in browser
+- [x] Update error handling for browser context
 
 ### Sub-phase 5.2: Refactor SessionManager
 **Goal**: Make session management browser-compatible
