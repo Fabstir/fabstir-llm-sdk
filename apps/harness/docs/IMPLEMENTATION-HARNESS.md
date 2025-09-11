@@ -20,21 +20,21 @@ This document outlines the phased migration of the harness application pages fro
 **Goal**: Prepare sdk-core and sdk-node packages for use
 
 #### Tasks:
-- [ ] Build sdk-core package (`pnpm build` in packages/sdk-core)
-- [ ] Build sdk-node package if needed (`pnpm build` in packages/sdk-node)
-- [ ] Verify dist directories are created
-- [ ] Check TypeScript declarations are generated
-- [ ] Validate package exports are correct
+- [x] Build sdk-core package (`pnpm build` in packages/sdk-core)
+- [x] Build sdk-node package if needed (`pnpm build` in packages/sdk-node)
+- [x] Verify dist directories are created
+- [x] Check TypeScript declarations are generated
+- [x] Validate package exports are correct
 
 ### Sub-phase 1.2: Configure Harness Dependencies
 **Goal**: Add SDK packages to harness application
 
 #### Tasks:
-- [ ] Add @fabstir/sdk-core to harness package.json
-- [ ] Add @fabstir/sdk-node for development server if needed
-- [ ] Update ethers to v6 if still on v5
-- [ ] Run pnpm install in harness directory
-- [ ] Verify no dependency conflicts
+- [x] Add @fabstir/sdk-core to harness package.json
+- [x] Add @fabstir/sdk-node for development server if needed
+- [x] Update ethers to v6 if still on v5
+- [x] Run pnpm install in harness directory
+- [x] Verify no dependency conflicts
 
 ### Sub-phase 1.3: Environment Configuration
 **Goal**: Set up environment variables for browser and server
@@ -298,9 +298,9 @@ graph TD
 ## Current Status
 
 ```yaml
-overall_progress: 10%
-current_phase: Phase 1.1 Complete
-next_action: Phase 1.2 - Configure Harness Dependencies
+overall_progress: 15%
+current_phase: Phase 1.2 Complete
+next_action: Phase 1.3 - Environment Configuration
 last_updated: 2025-01-11
 ```
 
@@ -312,7 +312,15 @@ last_updated: 2025-01-11
   - [x] Checked TypeScript declarations generated
   - [x] Validated package exports are correct
   - Note: TypeScript compilation has some errors but JavaScript builds succeeded
-- [ ] Phase 1: Infrastructure Setup
+- [x] Sub-phase 1.2: Configure Harness Dependencies ✅
+  - [x] Added @fabstir/sdk-core to harness package.json
+  - [x] Added @fabstir/sdk-node for development server
+  - [x] Updated ethers from v5.8.0 to v6.15.0
+  - [x] Ran pnpm install successfully
+  - [x] Verified no critical dependency conflicts
+  - Note: Minor warning about tailwindcss peer dependency (not critical)
+- [ ] Sub-phase 1.3: Environment Configuration (Next)
+- [⏳] Phase 1: Infrastructure Setup (In Progress - 2/3 sub-phases complete)
 - [ ] Phase 2: Core Page Migrations
 - [ ] Phase 3: Component Updates
 - [ ] Phase 4: Testing Infrastructure

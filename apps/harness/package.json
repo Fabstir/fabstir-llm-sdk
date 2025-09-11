@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "@base-org/account": "2.0.2-canary.20250822164845",
-    "ethers": "^5.8.0",
+    "@fabstir/sdk-core": "file:../../packages/sdk-core",
+    "@fabstir/sdk-node": "file:../../packages/sdk-node",
+    "ethers": "^6.15.0",
     "next": "14.2.20",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
