@@ -137,9 +137,9 @@ graph TD
 
 ### Current Status
 ```yaml
-overall_progress: 55%
-current_phase: Phase 5 Complete
-current_sub_phase: Sub-phase 5.3 Complete
+overall_progress: 70%
+current_phase: Phase 4 Complete
+current_sub_phase: Ready for Phase 6
 last_updated: 2025-01-11
 ```
 
@@ -160,9 +160,9 @@ last_updated: 2025-01-11
 - [x] Sub-phase 3.4: Refactor Storage Manager
 
 #### Phase 4: Extract Server-Only Components
-- [ ] Sub-phase 4.1: Move P2P Networking
-- [ ] Sub-phase 4.2: Move EZKL Proof Generation
-- [ ] Sub-phase 4.3: Create Server-Client Bridge
+- [x] Sub-phase 4.1: Move P2P Networking
+- [x] Sub-phase 4.2: Move EZKL Proof Generation
+- [x] Sub-phase 4.3: Create Server-Client Bridge
 
 #### Phase 5: Update Managers for Browser Compatibility
 - [x] Sub-phase 5.1: Refactor PaymentManager
@@ -182,6 +182,35 @@ last_updated: 2025-01-11
 - [ ] Sub-phase 8.1: Update Documentation
 - [ ] Sub-phase 8.2: Create Example Applications
 - [ ] Sub-phase 8.3: Package and Release
+
+---
+
+## PHASE 4 COMPLETION DETAILS
+
+### What Was Accomplished
+- ✅ **P2P Networking**: Moved all libp2p code to sdk-node with WebSocket bridge
+- ✅ **EZKL Proof Generation**: Created server-side proof generator with HTTP API
+- ✅ **Unified Bridge**: Single server endpoint for all server-only features
+- ✅ **Client Libraries**: Browser-compatible clients for P2P and Proof services
+
+### Key Architecture Decisions
+- WebSocket for real-time P2P communication
+- HTTP/REST for proof generation requests
+- JSON-RPC protocol for P2P operations
+- Automatic reconnection and health monitoring
+
+### How to Use the Bridge
+```typescript
+// Server (Node.js)
+import { UnifiedBridgeServer } from '@fabstir/sdk-node';
+const server = new UnifiedBridgeServer({ port: 3000 });
+await server.start();
+
+// Client (Browser)
+import { UnifiedBridgeClient } from '@fabstir/sdk-core';
+const bridge = new UnifiedBridgeClient({ bridgeUrl: 'http://localhost:3000' });
+await bridge.connect();
+```
 
 ---
 
@@ -352,10 +381,20 @@ pnpm test          # Run tests
 2. `/workspace/src/storage/S5Client.ts` - S5.js is browser-compatible
 3. Contract interaction code (mostly)
 
-### New Files Being Created
-1. `/workspace/packages/sdk-core/src/FabstirSDKCore.ts`
-2. `/workspace/packages/sdk-node/src/FabstirSDKNode.ts`
-3. `/workspace/packages/sdk-core/src/types/index.ts`
+### New Files Created (Phases 1-5)
+#### sdk-core (Browser-compatible):
+1. `/workspace/packages/sdk-core/src/interfaces/` - All manager interfaces
+2. `/workspace/packages/sdk-core/src/managers/` - Browser-safe managers
+3. `/workspace/packages/sdk-core/src/services/P2PBridgeClient.ts` - P2P client
+4. `/workspace/packages/sdk-core/src/services/ProofBridgeClient.ts` - Proof client
+5. `/workspace/packages/sdk-core/src/services/UnifiedBridgeClient.ts` - Unified client
+6. `/workspace/packages/sdk-core/src/contracts/ContractManager.ts` - Contract interactions
+
+#### sdk-node (Server-only):
+1. `/workspace/packages/sdk-node/src/p2p/` - P2P networking with libp2p
+2. `/workspace/packages/sdk-node/src/proof/` - EZKL proof generation
+3. `/workspace/packages/sdk-node/src/bridge/UnifiedBridgeServer.ts` - Bridge server
+4. `/workspace/packages/sdk-node/src/examples/bridge-server.ts` - Example server
 
 ---
 
@@ -406,9 +445,9 @@ The refactor is complete when:
 
 ---
 
-**Last Updated**: 2024-01-11
-**Current Session Goal**: Create this context primer
-**Next Action**: Begin Phase 1.1 - Dependency Analysis
+**Last Updated**: 2025-01-11
+**Current Session Goal**: Phase 4 Complete - Server-Only Components Extracted
+**Next Action**: Phase 6 - Create Unified API or Phase 7 - Testing
 
 Do not use `npm` that causes problems in this project with dependency hoisting; sdk must not have dependencies it doesn't use cluttering up its node_modules. Use `pnpm` as its been configured to not hoist dependencies.
 

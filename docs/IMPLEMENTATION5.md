@@ -165,37 +165,37 @@ Create two packages:
 **Goal**: Isolate P2P code in sdk-node package
 
 #### Tasks:
-- [ ] Move P2PClient to sdk-node
-- [ ] Move libp2p dependencies to sdk-node
-- [ ] Create P2P service interface for sdk-core
-- [ ] Implement WebSocket client in sdk-core for P2P bridge
-- [ ] Move DHT operations to sdk-node
-- [ ] Move peer discovery to sdk-node
-- [ ] Create API bridge between core and node packages
+- [x] Move P2PClient to sdk-node
+- [x] Move libp2p dependencies to sdk-node
+- [x] Create P2P service interface for sdk-core
+- [x] Implement WebSocket client in sdk-core for P2P bridge
+- [x] Move DHT operations to sdk-node
+- [x] Move peer discovery to sdk-node
+- [x] Create API bridge between core and node packages
 
 ### Sub-phase 4.2: Move EZKL Proof Generation
 **Goal**: Isolate heavy cryptography in sdk-node
 
 #### Tasks:
-- [ ] Move EZKL proof generation to sdk-node
-- [ ] Create proof verification interface for sdk-core
-- [ ] Move heavy crypto operations to sdk-node
-- [ ] Implement proof submission from browser
-- [ ] Create API for proof status checking
-- [ ] Ensure proof validation works in browser
-- [ ] Setup proof caching mechanism
+- [x] Move EZKL proof generation to sdk-node
+- [x] Create proof verification interface for sdk-core
+- [x] Move heavy crypto operations to sdk-node
+- [x] Implement proof submission from browser
+- [x] Create API for proof status checking
+- [x] Ensure proof validation works in browser
+- [x] Setup proof caching mechanism
 
 ### Sub-phase 4.3: Create Server-Client Bridge
 **Goal**: Enable sdk-core to communicate with sdk-node services
 
 #### Tasks:
-- [ ] Design WebSocket protocol for core-node communication
-- [ ] Implement WebSocket client in sdk-core
-- [ ] Implement WebSocket server in sdk-node
-- [ ] Create RPC-style method calls
-- [ ] Handle connection management
-- [ ] Implement retry logic
-- [ ] Add authentication between core and node
+- [x] Design WebSocket protocol for core-node communication
+- [x] Implement WebSocket client in sdk-core
+- [x] Implement WebSocket server in sdk-node
+- [x] Create RPC-style method calls
+- [x] Handle connection management
+- [x] Implement retry logic
+- [x] Add authentication between core and node
 
 ---
 
