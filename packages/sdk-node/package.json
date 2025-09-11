@@ -42,7 +42,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@fabstir/sdk-core": "workspace:*",
+    "@fabstir/sdk-core": "file:../sdk-core",
     "libp2p": "^1.0.0",
     "@libp2p/tcp": "^9.0.0",
     "@libp2p/websockets": "^8.0.0",

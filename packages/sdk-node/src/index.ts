@@ -22,20 +22,20 @@ export * from './p2p/types';
 // Export proof components
 export { EZKLProofGenerator } from './proof/EZKLProofGenerator';
 export { ProofBridgeServer } from './proof/ProofBridgeServer';
-export * from './proof/types';
+// export * from './proof/types'; // TODO: Create types file
 
 // Export bridge components
 export { UnifiedBridgeServer } from './bridge/UnifiedBridgeServer';
 export type { BridgeConfig } from './bridge/UnifiedBridgeServer';
 
 // Export Node.js specific managers
-export { InferenceManagerNode } from './managers/InferenceManagerNode';
+// export { InferenceManagerNode } from './managers/InferenceManagerNode'; // TODO: Create this file
 
 // Export WebSocket server
-export { WebSocketServer } from './p2p/WebSocketServer';
+// export { WebSocketServer } from './p2p/WebSocketServer'; // TODO: Create this file
 
 // Export utilities
-export * from './utils';
+// export * from './utils'; // TODO: Create utils exports
 
 // Version
 export const VERSION = '1.0.0';
