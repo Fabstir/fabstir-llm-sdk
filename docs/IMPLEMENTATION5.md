@@ -217,13 +217,13 @@ Create two packages:
 **Goal**: Make session management browser-compatible
 
 #### Tasks:
-- [ ] Update WebSocket client for browser
-- [ ] Remove Node.js specific WebSocket code
-- [ ] Ensure session state persists in browser
-- [ ] Update checkpoint handling for browser
-- [ ] Verify streaming works in browser
-- [ ] Test session recovery in browser
-- [ ] Update error handling for browser
+- [x] Update WebSocket client for browser
+- [x] Remove Node.js specific WebSocket code
+- [x] Ensure session state persists in browser
+- [x] Update checkpoint handling for browser
+- [x] Verify streaming works in browser
+- [x] Test session recovery in browser
+- [x] Update error handling for browser
 
 ### Sub-phase 5.3: Refactor HostManager
 **Goal**: Enable host operations from browser

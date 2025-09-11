@@ -13,7 +13,7 @@
 export { AuthManager } from './managers/AuthManager';
 export { PaymentManager } from './managers/PaymentManager';
 export { StorageManager } from './managers/StorageManager';
-// export { SessionManager } from './managers/SessionManager';
+export { SessionManager } from './managers/SessionManager';
 // export { HostManager } from './managers/HostManager';
 // export { SmartWalletManager } from './managers/SmartWalletManager';
 // export { TreasuryManager } from './managers/TreasuryManager';
@@ -30,6 +30,9 @@ export * from './interfaces';
 
 // Export utilities
 export * from './utils';
+
+// Export WebSocket client
+export { WebSocketClient } from './websocket/WebSocketClient';
 
 // Version
 export const VERSION = '1.0.0';

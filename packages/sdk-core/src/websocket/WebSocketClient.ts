@@ -1,0 +1,325 @@
+/**
+ * Browser-compatible WebSocket Client
+ * 
+ * Handles real-time communication with LLM nodes using native WebSocket API.
+ * Supports reconnection, message queuing, and event handling.
+ */
+
+import { SDKError } from '../types';
+
+export interface WebSocketMessage {
+  type: string;
+  [key: string]: any;
+}
+
+export interface WebSocketOptions {
+  reconnect?: boolean;
+  reconnectInterval?: number;
+  maxReconnectAttempts?: number;
+  heartbeatInterval?: number;
+}
+
+export class WebSocketClient {
+  private ws?: WebSocket;
+  private url: string;
+  private options: WebSocketOptions;
+  private messageHandlers: Set<(data: any) => void> = new Set();
+  private connectionPromise?: Promise<void>;
+  private reconnectAttempts = 0;
+  private heartbeatTimer?: number;
+  private messageQueue: WebSocketMessage[] = [];
+  private isReconnecting = false;
+
+  constructor(url: string, options: WebSocketOptions = {}) {
+    this.url = url;
+    this.options = {
+      reconnect: true,
+      reconnectInterval: 5000,
+      maxReconnectAttempts: 5,
+      heartbeatInterval: 30000,
+      ...options
+    };
+  }
+
+  /**
+   * Connect to WebSocket server
+   */
+  async connect(): Promise<void> {
+    if (this.connectionPromise) {
+      return this.connectionPromise;
+    }
+
+    this.connectionPromise = new Promise<void>((resolve, reject) => {
+      try {
+        // Use native WebSocket (works in browsers)
+        this.ws = new WebSocket(this.url);
+
+        this.ws.onopen = () => {
+          console.log(`WebSocket connected to ${this.url}`);
+          this.reconnectAttempts = 0;
+          this.isReconnecting = false;
+          
+          // Start heartbeat
+          this.startHeartbeat();
+          
+          // Send queued messages
+          this.flushMessageQueue();
+          
+          resolve();
+        };
+
+        this.ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            this.handleMessage(data);
+          } catch (error) {
+            console.error('Failed to parse WebSocket message:', error);
+          }
+        };
+
+        this.ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          if (!this.isReconnecting) {
+            reject(new SDKError(
+              'WebSocket connection failed',
+              'WS_CONNECTION_ERROR',
+              { originalError: error }
+            ));
+          }
+        };
+
+        this.ws.onclose = (event) => {
+          console.log('WebSocket disconnected', event.code, event.reason);
+          this.stopHeartbeat();
+          this.connectionPromise = undefined;
+          
+          if (this.options.reconnect && !this.isReconnecting) {
+            this.handleReconnect();
+          }
+        };
+      } catch (error: any) {
+        reject(new SDKError(
+          `Failed to create WebSocket: ${error.message}`,
+          'WS_CREATE_ERROR',
+          { originalError: error }
+        ));
+      }
+    });
+
+    return this.connectionPromise;
+  }
+
+  /**
+   * Disconnect from WebSocket server
+   */
+  async disconnect(): Promise<void> {
+    this.options.reconnect = false;
+    this.stopHeartbeat();
+    
+    if (this.ws) {
+      if (this.ws.readyState === WebSocket.OPEN) {
+        this.ws.close(1000, 'Client disconnect');
+      }
+      this.ws = undefined;
+    }
+    
+    this.connectionPromise = undefined;
+    this.messageHandlers.clear();
+    this.messageQueue = [];
+  }
+
+  /**
+   * Send a message through WebSocket
+   */
+  async sendMessage(message: WebSocketMessage): Promise<string> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      if (this.options.reconnect) {
+        // Queue message for sending after reconnection
+        this.messageQueue.push(message);
+        
+        // Try to reconnect
+        if (!this.isReconnecting) {
+          await this.connect();
+        }
+        
+        // Wait a bit for reconnection
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          throw new SDKError('WebSocket not connected', 'WS_NOT_CONNECTED');
+        }
+      } else {
+        throw new SDKError('WebSocket not connected', 'WS_NOT_CONNECTED');
+      }
+    }
+
+    return new Promise<string>((resolve, reject) => {
+      try {
+        // Add message ID for tracking
+        const messageId = this.generateMessageId();
+        const messageWithId = { ...message, id: messageId };
+        
+        // Set up one-time response handler
+        const responseHandler = (data: any) => {
+          if (data.id === messageId || data.responseId === messageId) {
+            this.messageHandlers.delete(responseHandler);
+            
+            if (data.error) {
+              reject(new SDKError(
+                data.error.message || 'Request failed',
+                'WS_REQUEST_ERROR',
+                { originalError: data.error }
+              ));
+            } else {
+              resolve(data.content || data.response || JSON.stringify(data));
+            }
+          }
+        };
+        
+        this.messageHandlers.add(responseHandler);
+        
+        // Send message
+        this.ws!.send(JSON.stringify(messageWithId));
+        
+        // Set timeout for response
+        setTimeout(() => {
+          this.messageHandlers.delete(responseHandler);
+          reject(new SDKError('Request timeout', 'WS_TIMEOUT'));
+        }, 30000);
+      } catch (error: any) {
+        reject(new SDKError(
+          `Failed to send message: ${error.message}`,
+          'WS_SEND_ERROR',
+          { originalError: error }
+        ));
+      }
+    });
+  }
+
+  /**
+   * Register a message handler
+   */
+  onMessage(handler: (data: any) => void): () => void {
+    this.messageHandlers.add(handler);
+    
+    // Return unsubscribe function
+    return () => {
+      this.messageHandlers.delete(handler);
+    };
+  }
+
+  /**
+   * Check if connected
+   */
+  isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  /**
+   * Get connection state
+   */
+  getReadyState(): number {
+    return this.ws?.readyState ?? WebSocket.CLOSED;
+  }
+
+  /**
+   * Handle incoming messages
+   */
+  private handleMessage(data: any): void {
+    // Call all registered handlers
+    for (const handler of this.messageHandlers) {
+      try {
+        handler(data);
+      } catch (error) {
+        console.error('Message handler error:', error);
+      }
+    }
+  }
+
+  /**
+   * Handle reconnection
+   */
+  private async handleReconnect(): Promise<void> {
+    if (this.isReconnecting) return;
+    
+    this.isReconnecting = true;
+    
+    while (
+      this.reconnectAttempts < this.options.maxReconnectAttempts! &&
+      this.options.reconnect
+    ) {
+      this.reconnectAttempts++;
+      console.log(`Reconnection attempt ${this.reconnectAttempts}/${this.options.maxReconnectAttempts}`);
+      
+      await new Promise(resolve => 
+        setTimeout(resolve, this.options.reconnectInterval)
+      );
+      
+      try {
+        await this.connect();
+        break;
+      } catch (error) {
+        console.error('Reconnection failed:', error);
+      }
+    }
+    
+    if (this.reconnectAttempts >= this.options.maxReconnectAttempts!) {
+      console.error('Max reconnection attempts reached');
+      this.isReconnecting = false;
+      throw new SDKError(
+        'Failed to reconnect to WebSocket',
+        'WS_RECONNECT_FAILED'
+      );
+    }
+  }
+
+  /**
+   * Start heartbeat to keep connection alive
+   */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    
+    this.heartbeatTimer = window.setInterval(() => {
+      if (this.isConnected()) {
+        try {
+          this.ws!.send(JSON.stringify({ type: 'ping' }));
+        } catch (error) {
+          console.error('Heartbeat failed:', error);
+        }
+      }
+    }, this.options.heartbeatInterval!);
+  }
+
+  /**
+   * Stop heartbeat
+   */
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+    }
+  }
+
+  /**
+   * Flush message queue
+   */
+  private async flushMessageQueue(): Promise<void> {
+    const queue = [...this.messageQueue];
+    this.messageQueue = [];
+    
+    for (const message of queue) {
+      try {
+        await this.sendMessage(message);
+      } catch (error) {
+        console.error('Failed to send queued message:', error);
+      }
+    }
+  }
+
+  /**
+   * Generate unique message ID
+   */
+  private generateMessageId(): string {
+    return `${Date.now()}-${Math.random().toString(36).substring(7)}`;
+  }
+}
