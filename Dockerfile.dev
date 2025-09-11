@@ -1,4 +1,4 @@
-FROM node:22
+FROM fabstir-llm-sdk-dev-cdp:latest
 
 # --- Base system packages ---
 RUN apt-get update && apt-get install -y \
