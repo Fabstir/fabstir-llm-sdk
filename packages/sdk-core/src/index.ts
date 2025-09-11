@@ -14,7 +14,7 @@ export { AuthManager } from './managers/AuthManager';
 export { PaymentManager } from './managers/PaymentManager';
 export { StorageManager } from './managers/StorageManager';
 export { SessionManager } from './managers/SessionManager';
-// export { HostManager } from './managers/HostManager';
+export { HostManager } from './managers/HostManager';
 // export { SmartWalletManager } from './managers/SmartWalletManager';
 // export { TreasuryManager } from './managers/TreasuryManager';
 

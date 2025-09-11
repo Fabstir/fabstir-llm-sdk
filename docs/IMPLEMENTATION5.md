@@ -229,13 +229,13 @@ Create two packages:
 **Goal**: Enable host operations from browser
 
 #### Tasks:
-- [ ] Update registration flows for browser
-- [ ] Ensure staking works with browser wallets
-- [ ] Update metadata management for browser
-- [ ] Verify earnings withdrawal in browser
-- [ ] Test host info queries from browser
-- [ ] Update node metrics fetching
-- [ ] Remove server-only host operations
+- [x] Update registration flows for browser
+- [x] Ensure staking works with browser wallets
+- [x] Update metadata management for browser
+- [x] Verify earnings withdrawal in browser
+- [x] Test host info queries from browser
+- [x] Update node metrics fetching
+- [x] Remove server-only host operations
 
 ---
 
