@@ -22,8 +22,11 @@ export { AuthManager } from './managers/AuthManager';
 export * from './contracts';
 export { TransactionHelper } from './contracts/TransactionHelper';
 
-// Export types (to be created)
-// export * from './types';
+// Export types
+export * from './types';
+
+// Export interfaces
+export * from './interfaces';
 
 // Export utilities
 export * from './utils';
