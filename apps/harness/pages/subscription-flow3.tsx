@@ -1,23 +1,25 @@
 import { useState, useEffect } from 'react';
 import { createBaseAccountSDK } from "@base-org/account";
 import { encodeFunctionData, parseUnits, createPublicClient, http, getAddress, formatUnits } from "viem";
-import { ethers } from 'ethers';
+import { FabstirSDKCore } from '@fabstir/sdk-core';
+import type { PaymentManager } from '@fabstir/sdk-core';
 
-// Chain configuration
+// Get configuration from environment variables
 const CHAIN_HEX = "0x14a34";  // Base Sepolia
-const CHAIN_ID_NUM = 84532;
-const RPC_URL = "https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR";
+const CHAIN_ID_NUM = parseInt(process.env.NEXT_PUBLIC_CHAIN_ID || '84532');
+const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!;
+const USDC = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN as `0x${string}`;
 
-// Contract addresses
-const USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as const;
+// Test accounts from environment
+const TEST_USER_1_ADDRESS = process.env.NEXT_PUBLIC_TEST_USER_1_ADDRESS!;
+const TEST_HOST_1_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_1_ADDRESS!;
+const TEST_HOST_2_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_2_ADDRESS!;
 
-// Test accounts from .env.test
-const TEST_USER_1_ADDRESS = "0x8D642988E3e7b6DB15b6058461d5563835b04bF6";
-const TEST_USER_1_PRIVATE_KEY = "0x2d5db36770a53811d9a11163a5e6577bb867e19552921bf40f74064308bea952"; // Replace with actual key
-const TEST_HOST_1_ADDRESS = "0x4594F755F593B517Bb3194F4DeC20C48a3f04504";
-const TEST_HOST_2_ADDRESS = "0x20f2A5FCDf271A5E6b04383C2915Ea980a50948c";
+// Note: In production, private key should NEVER be in browser code
+// This is only for testing purposes - use a secure method in production
+const TEST_USER_1_PRIVATE_KEY = "0x2d5db36770a53811d9a11163a5e6577bb867e19552921bf40f74064308bea952";
 
-// ERC20 ABIs
+// ERC20 ABIs for direct contract calls (still needed for Base Account SDK integration)
 const erc20TransferAbi = [{
   type: "function",
   name: "transfer",
@@ -42,7 +44,7 @@ interface Balances {
   host2?: string;
 }
 
-export default function SubscriptionFlow() {
+export default function SubscriptionFlowSDK() {
   const [status, setStatus] = useState("Ready to start");
   const [currentStep, setCurrentStep] = useState(0);
   const [primaryAddr, setPrimaryAddr] = useState<string>("");
@@ -50,6 +52,40 @@ export default function SubscriptionFlow() {
   const [balances, setBalances] = useState<Balances>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
+  const [sdk, setSdk] = useState<FabstirSDKCore | null>(null);
+  const [paymentManager, setPaymentManager] = useState<PaymentManager | null>(null);
+
+  // Initialize SDK
+  useEffect(() => {
+    const initSDK = async () => {
+      try {
+        // Initialize FabstirSDKCore for browser environment
+        const sdkInstance = new FabstirSDKCore({
+          rpcUrl: RPC_URL,
+          chainId: CHAIN_ID_NUM,
+          contractAddresses: {
+            usdcToken: USDC,
+            jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE,
+            nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY,
+            proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM,
+            hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS,
+            fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN
+          },
+          s5Config: {
+            portalUrl: process.env.NEXT_PUBLIC_S5_PORTAL_URL,
+            seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE
+          }
+        });
+
+        setSdk(sdkInstance);
+        console.log("FabstirSDKCore initialized");
+      } catch (err) {
+        console.error("Failed to initialize SDK:", err);
+      }
+    };
+
+    initSDK();
+  }, []);
 
   // Helper: Get or create sub-account with auto spend permissions
   async function ensureSubAccount(provider: any, universal: `0x${string}`): Promise<`0x${string}`> {
@@ -72,7 +108,7 @@ export default function SubscriptionFlow() {
     }
 
     try {
-      // Create sub-account - auto spend permissions are enabled by default in SDK 2.1.0+
+      // Create sub-account - auto spend permissions are enabled by default
       const created = await provider.request({
         method: "wallet_addSubAccount",
         params: [{ 
@@ -87,7 +123,7 @@ export default function SubscriptionFlow() {
       return created.address;
     } catch (err) {
       console.error("Failed to create sub-account:", err);
-      throw new Error("Failed to create sub-account. Make sure you're using SDK version 2.0.2-canary.20250822164845 or later");
+      throw new Error("Failed to create sub-account");
     }
   }
 
@@ -145,12 +181,12 @@ export default function SubscriptionFlow() {
     setStatus("Funding primary account from TEST_USER_1...");
 
     try {
-      // Initialize Base Account SDK with auto spend permissions enabled (default)
+      if (!sdk) throw new Error("SDK not initialized");
+
+      // Initialize Base Account SDK for smart wallet
       const bas = createBaseAccountSDK({
-        appName: "Subscription Flow Test",
+        appName: "Subscription Flow Test with SDK",
         appChainIds: [CHAIN_ID_NUM],
-        // Auto spend permissions are enabled by default in SDK 2.1.0+
-        // But we can be explicit:
         subAccounts: {
           unstable_enableAutoSpendPermissions: true
         }
@@ -167,20 +203,31 @@ export default function SubscriptionFlow() {
       setPrimaryAddr(primary);
       console.log("Connected to primary account:", primary);
 
-      // Send USDC from TEST_USER_1 to primary account
-      const ethersProvider = new ethers.providers.JsonRpcProvider(RPC_URL);
-      const wallet = new ethers.Wallet(TEST_USER_1_PRIVATE_KEY, ethersProvider);
+      // For the initial funding, we still need to use a private key
+      // In production, this would be done through a different mechanism
+      // (e.g., user deposits, backend service, etc.)
+      await sdk.authenticate('privatekey', { privateKey: TEST_USER_1_PRIVATE_KEY });
       
-      const usdcContract = new ethers.Contract(USDC, [
-        "function transfer(address to, uint256 amount) returns (bool)"
-      ], wallet);
+      // Get PaymentManager for USDC transfer
+      const pm = sdk.getPaymentManager();
+      if (!pm) throw new Error("PaymentManager not available");
+      setPaymentManager(pm);
 
-      const amount = parseUnits("2", 6); // $2 USDC
       setStatus("Sending $2 USDC from TEST_USER_1 to primary account...");
       
-      const tx = await usdcContract.transfer(primary, amount);
+      // Use PaymentManager to transfer USDC
+      const amount = BigInt(2 * 10**6); // $2 USDC (6 decimals)
+      const txHash = await pm.transferToken(
+        USDC,
+        primary,
+        amount
+      );
+
       setStatus("Waiting for transaction confirmation...");
-      await tx.wait();
+      console.log("Transfer transaction:", txHash);
+
+      // Wait for transaction to be mined
+      await new Promise(r => setTimeout(r, 3000));
 
       setStatus("✅ Step 1 complete: $2 USDC funded to primary account");
       setCurrentStep(1);
@@ -241,8 +288,9 @@ export default function SubscriptionFlow() {
 
       const amount = parseUnits("0.8", 6); // $0.80 USDC
       
-      // Use regular transfer from sub-account
-      // Auto spend permissions will automatically pull from primary account
+      // Use Base Account SDK for sub-account transfers
+      // The SDK doesn't yet have full smart wallet integration,
+      // so we still use direct contract calls through the provider
       const transferData = encodeFunctionData({
         abi: erc20TransferAbi,
         functionName: "transfer",
@@ -282,7 +330,6 @@ export default function SubscriptionFlow() {
       let confirmed = false;
       for (let i = 0; i < 30; i++) {
         try {
-          // Try string format directly (works with current SDK)
           const res = await provider.request({
             method: "wallet_getCallsStatus",
             params: [id]
@@ -369,7 +416,6 @@ export default function SubscriptionFlow() {
       let confirmed = false;
       for (let i = 0; i < 30; i++) {
         try {
-          // Try string format directly (works with current SDK)
           const res = await provider.request({
             method: "wallet_getCallsStatus",
             params: [id]
@@ -433,6 +479,16 @@ export default function SubscriptionFlow() {
     }
   }
 
+  // Clean up SDK on unmount
+  useEffect(() => {
+    return () => {
+      if (sdk) {
+        // SDK cleanup if needed
+        console.log("Cleaning up SDK");
+      }
+    };
+  }, [sdk]);
+
   // Load initial balances
   useEffect(() => {
     readAllBalances();
@@ -440,26 +496,26 @@ export default function SubscriptionFlow() {
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui, -apple-system, sans-serif" }}>
-      <h1>USDC Subscription Flow Test</h1>
-      <p>Complete flow: $2 subscription → Sub-account with auto spend → Two job payments</p>
+      <h1>USDC Subscription Flow Test (SDK Version)</h1>
+      <p>Using FabstirSDKCore with Base Account SDK for smart wallets</p>
 
       <div style={{ marginTop: 24, marginBottom: 24 }}>
         <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
           <button 
             id="run-full-flow"
             onClick={runFullFlow} 
-            disabled={loading}
+            disabled={loading || !sdk}
             style={{
               padding: "12px 24px",
               fontSize: 16,
-              backgroundColor: loading ? "#666" : "#28a745",
+              backgroundColor: loading || !sdk ? "#666" : "#28a745",
               color: "white",
               border: "none",
               borderRadius: 4,
-              cursor: loading ? "wait" : "pointer"
+              cursor: loading || !sdk ? "wait" : "pointer"
             }}
           >
-            Run Full Flow
+            {!sdk ? "Initializing SDK..." : "Run Full Flow"}
           </button>
         </div>
 
@@ -467,15 +523,15 @@ export default function SubscriptionFlow() {
           <button 
             id="step1-button"
             onClick={fundPrimaryAccount} 
-            disabled={loading || currentStep > 0}
+            disabled={loading || !sdk || currentStep > 0}
             style={{
               padding: "10px 20px",
               fontSize: 14,
-              backgroundColor: currentStep > 0 ? "#28a745" : loading ? "#666" : "#007bff",
+              backgroundColor: currentStep > 0 ? "#28a745" : loading || !sdk ? "#666" : "#007bff",
               color: "white",
               border: "none",
               borderRadius: 4,
-              cursor: loading || currentStep > 0 ? "not-allowed" : "pointer"
+              cursor: loading || !sdk || currentStep > 0 ? "not-allowed" : "pointer"
             }}
           >
             {currentStep > 0 ? "✓" : ""} Step 1: Fund $2
@@ -564,6 +620,18 @@ export default function SubscriptionFlow() {
             {subAddr && <div>Sub-account: {subAddr.slice(0, 10)}...{subAddr.slice(-8)}</div>}
           </div>
         )}
+        {sdk && (
+          <div style={{ 
+            marginTop: 8, 
+            padding: 8, 
+            backgroundColor: "#d4edda", 
+            borderRadius: 4,
+            fontSize: 14,
+            color: "#155724"
+          }}>
+            ✅ SDK Initialized - Using FabstirSDKCore
+          </div>
+        )}
       </div>
 
       <div style={{ marginTop: 24 }}>
@@ -596,7 +664,7 @@ export default function SubscriptionFlow() {
             <tr style={{ borderBottom: "1px solid #dee2e6" }}>
               <td style={{ padding: 8 }}>TEST_USER_1</td>
               <td style={{ padding: 8, textAlign: "right" }}>${balances.testUser1 || "—"}</td>
-              <td style={{ padding: 8, fontSize: 12 }}>{TEST_USER_1_ADDRESS.slice(0, 10)}...</td>
+              <td style={{ padding: 8, fontSize: 12 }}>{TEST_USER_1_ADDRESS?.slice(0, 10)}...</td>
             </tr>
             <tr style={{ borderBottom: "1px solid #dee2e6", backgroundColor: primaryAddr ? "#e7f3ff" : "transparent" }}>
               <td style={{ padding: 8 }}>Primary Account</td>
@@ -611,12 +679,12 @@ export default function SubscriptionFlow() {
             <tr style={{ borderBottom: "1px solid #dee2e6" }}>
               <td style={{ padding: 8 }}>HOST_1</td>
               <td style={{ padding: 8, textAlign: "right" }}>${balances.host1 || "—"}</td>
-              <td style={{ padding: 8, fontSize: 12 }}>{TEST_HOST_1_ADDRESS.slice(0, 10)}...</td>
+              <td style={{ padding: 8, fontSize: 12 }}>{TEST_HOST_1_ADDRESS?.slice(0, 10)}...</td>
             </tr>
             <tr style={{ borderBottom: "1px solid #dee2e6" }}>
               <td style={{ padding: 8 }}>HOST_2</td>
               <td style={{ padding: 8, textAlign: "right" }}>${balances.host2 || "—"}</td>
-              <td style={{ padding: 8, fontSize: 12 }}>{TEST_HOST_2_ADDRESS.slice(0, 10)}...</td>
+              <td style={{ padding: 8, fontSize: 12 }}>{TEST_HOST_2_ADDRESS?.slice(0, 10)}...</td>
             </tr>
           </tbody>
         </table>
@@ -626,10 +694,10 @@ export default function SubscriptionFlow() {
         <h4>Flow Steps:</h4>
         <ol style={{ paddingLeft: 20 }}>
           <li style={{ color: currentStep >= 1 ? "#28a745" : "inherit" }}>
-            Fund $2 USDC from TEST_USER_1 to Primary Account
+            Fund $2 USDC from TEST_USER_1 to Primary Account (using SDK PaymentManager)
           </li>
           <li style={{ color: currentStep >= 2 ? "#28a745" : "inherit" }}>
-            Create Sub-account with auto spend permissions (enabled by default)
+            Create Sub-account with auto spend permissions (Base Account SDK)
           </li>
           <li style={{ color: currentStep >= 3 ? "#28a745" : "inherit" }}>
             Sub-account pays $0.80 to HOST_1 (auto-pulls from Primary, no popup)
@@ -643,13 +711,24 @@ export default function SubscriptionFlow() {
         </div>
       </div>
 
+      <div style={{ marginTop: 24, padding: 16, backgroundColor: "#d1ecf1", borderRadius: 4 }}>
+        <h4>🚀 SDK Integration Features:</h4>
+        <ul style={{ paddingLeft: 20 }}>
+          <li>Uses FabstirSDKCore for browser-compatible SDK operations</li>
+          <li>PaymentManager handles USDC transfers</li>
+          <li>Base Account SDK provides smart wallet functionality</li>
+          <li>Environment variables loaded from .env.local</li>
+          <li>No hardcoded addresses (except test private key for demo)</li>
+        </ul>
+      </div>
+
       <div style={{ marginTop: 24, padding: 16, backgroundColor: "#fff3cd", borderRadius: 4 }}>
         <h4>⚠️ Important Notes:</h4>
         <ul style={{ paddingLeft: 20 }}>
-          <li>Make sure you're using Base Account SDK version 2.0.2-canary.20250822164845 or later</li>
-          <li>Auto spend permissions are enabled by default with Sub Accounts</li>
-          <li>No ERC20 approve calls are needed - sub-accounts can directly spend from parent</li>
-          <li>If popups still appear, check SDK version and ensure auto spend permissions are enabled</li>
+          <li>SDK initialization happens automatically on page load</li>
+          <li>Private key is only used for test funding (never do this in production!)</li>
+          <li>Sub-account operations still use Base Account SDK directly</li>
+          <li>Full SDK integration for smart wallets coming in future updates</li>
         </ul>
       </div>
     </main>

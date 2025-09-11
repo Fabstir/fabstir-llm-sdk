@@ -10,16 +10,16 @@
 export { FabstirSDKCore } from './FabstirSDKCore';
 export type { FabstirSDKCoreConfig } from './FabstirSDKCore';
 
-// Factory pattern
-export { 
-  FabstirSDKFactory,
-  createFabstirSDK,
-  createAutoSDK
-} from './factory/FabstirSDKFactory';
-export type { SDKFactoryConfig, SDKEnvironment } from './factory/FabstirSDKFactory';
+// Factory pattern - commented out to avoid sdk-node imports in browser
+// export { 
+//   FabstirSDKFactory,
+//   createFabstirSDK,
+//   createAutoSDK
+// } from './factory/FabstirSDKFactory';
+// export type { SDKFactoryConfig, SDKEnvironment } from './factory/FabstirSDKFactory';
 
-// Compatibility layer
-export { FabstirSDK } from './compat/FabstirSDKCompat';
+// Compatibility layer - commented out temporarily
+// export { FabstirSDK } from './compat/FabstirSDKCompat';
 
 // Export browser-compatible managers
 export { AuthManager } from './managers/AuthManager';

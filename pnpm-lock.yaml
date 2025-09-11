@@ -90,9 +90,6 @@ importers:
       '@fabstir/sdk-core':
         specifier: file:../../packages/sdk-core
         version: link:../../packages/sdk-core
-      '@fabstir/sdk-node':
-        specifier: file:../../packages/sdk-node
-        version: link:../../packages/sdk-node
       ethers:
         specifier: ^6.15.0
         version: 6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10)
@@ -8786,7 +8783,7 @@ snapshots:
     dependencies:
       '@adraffy/ens-normalize': 1.11.0
       '@noble/curves': 1.9.7
-      '@noble/hashes': 1.8.0
+      '@noble/hashes': 1.7.1
       '@scure/bip32': 1.6.2
       '@scure/bip39': 1.5.4
       abitype: 1.0.8(typescript@5.9.2)(zod@3.22.4)
