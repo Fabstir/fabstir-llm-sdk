@@ -73,25 +73,52 @@ export class StorageManager implements IStorageManager {
       this.userSeed = seed;
       this.userAddress = userAddress || '';
       
-      console.log('StorageManager.initialize: Creating S5 client...');
-      // Create S5 client with browser-compatible configuration
-      this.s5Client = await S5.create({ 
-        initialPeers: [this.s5PortalUrl],
+      console.log('StorageManager.initialize: Creating S5 client with timeout...');
+      console.log('StorageManager.initialize: Using portal URL:', this.s5PortalUrl);
+      
+      // Wrap S5 creation in a timeout to avoid hanging
+      // Use empty array to skip default peers and only use our portal
+      const peersToUse = this.s5PortalUrl ? [this.s5PortalUrl] : [];
+      console.log('StorageManager.initialize: Peers to use:', peersToUse);
+      
+      const s5CreatePromise = S5.create({ 
+        initialPeers: peersToUse,
         // No Node.js specific options
       });
-      console.log('StorageManager.initialize: S5 client created');
       
+      // Add a 5-second timeout
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('S5 client creation timed out after 5 seconds')), 5000);
+      });
+      
+      try {
+        this.s5Client = await Promise.race([s5CreatePromise, timeoutPromise]);
+        console.log('✅ StorageManager.initialize: S5 client created SUCCESSFULLY!');
+        console.log('✅ S5 is connected and ready to use');
+      } catch (timeoutError: any) {
+        console.warn('⚠️ StorageManager.initialize: S5 client creation failed or timed out:', timeoutError.message);
+        console.warn('⚠️ StorageManager: Continuing without S5 storage (operations will fail gracefully)');
+        this.initialized = false;
+        return;
+      }
+      
+      console.log('🔐 Recovering identity from seed phrase...');
       await this.s5Client.recoverIdentityFromSeedPhrase(this.userSeed);
+      console.log('✅ Identity recovered successfully');
       
       // Optional portal registration
       try {
+        console.log('📡 Attempting portal registration...');
         await this.s5Client.registerOnNewPortal('https://s5.vup.cx');
+        console.log('✅ Portal registration successful');
       } catch (error) {
-        console.debug('Portal registration failed, continuing');
+        console.log('ℹ️ Portal registration skipped (optional)');
       }
       
+      console.log('🔧 Ensuring identity is initialized...');
       await this.s5Client.fs.ensureIdentityInitialized();
       this.initialized = true;
+      console.log('🎉 StorageManager fully initialized and ready!');
     } catch (error: any) {
       throw new SDKError(
         `Failed to initialize StorageManager: ${error.message}`,

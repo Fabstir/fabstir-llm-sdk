@@ -410,6 +410,168 @@ Create two packages:
 
 ---
 
+## Phase 9: S5 Seed Phrase Derivation from User Identity
+
+### Sub-phase 9.1: Understand S5 Seed Format
+**Goal**: Document S5's custom seed phrase requirements
+
+#### Background:
+S5.js uses a custom 15-word seed phrase format, NOT standard BIP39:
+- 13 seed words + 2 checksum words = 15 total words
+- Custom wordlist of 1024 words (10 bits per word)
+- Word 13 limited to first 256 words (8 bits)
+- Custom checksum algorithm using Blake3 hash
+
+#### Tasks:
+- [ ] Document S5 wordlist structure and requirements
+- [ ] Understand S5 checksum generation algorithm
+- [ ] Map entropy requirements (16 bytes of entropy)
+- [ ] Document word selection process
+- [ ] Create test vectors for validation
+
+### Sub-phase 9.2: Design Deterministic Derivation
+**Goal**: Create reproducible S5 seed from user signature
+
+#### Approach:
+```typescript
+// Current flow (temporary):
+1. User signs message with private key/wallet
+2. SHA-256 hash of signature → 32 bytes entropy
+3. Currently: Using hardcoded seed phrase from config
+
+// Target flow:
+1. User signs message with private key/wallet
+2. SHA-256 hash of signature → 32 bytes entropy
+3. Take first 16 bytes as S5 entropy
+4. Convert entropy to S5 seed words using S5 algorithm
+5. Generate checksum words
+6. Combine into valid 15-word S5 seed phrase
+```
+
+#### Tasks:
+- [ ] Import S5 wordlist into sdk-core
+- [ ] Port S5 seed generation algorithm
+- [ ] Implement entropy to seed word conversion
+- [ ] Implement checksum generation
+- [ ] Create deterministic derivation function
+- [ ] Add unit tests for seed generation
+- [ ] Verify seeds work with S5.js
+
+### Sub-phase 9.3: Implement Seed Derivation
+**Goal**: Replace hardcoded seed with derived seed
+
+#### Implementation Plan:
+```typescript
+// packages/sdk-core/src/utils/s5-seed-generator.ts
+import { wordlist } from './s5-wordlist';
+
+export function deriveS5SeedFromSignature(signature: string): string {
+  // 1. Hash signature to get entropy
+  const entropy = sha256(signature).slice(0, 16); // 16 bytes
+  
+  // 2. Convert entropy to seed words (13 words)
+  const seedWords = entropyToSeedWords(entropy);
+  
+  // 3. Generate checksum (2 words)
+  const checksumWords = generateChecksum(seedWords);
+  
+  // 4. Combine into phrase
+  return [...seedWords, ...checksumWords].join(' ');
+}
+```
+
+#### Tasks:
+- [ ] Create s5-seed-generator.ts utility
+- [ ] Copy S5 wordlist to sdk-core
+- [ ] Implement entropyToSeedWords function
+- [ ] Implement generateChecksum function
+- [ ] Integrate with FabstirSDKCore authentication
+- [ ] Remove hardcoded seed phrase
+- [ ] Test with multiple wallets/signatures
+- [ ] Verify deterministic generation
+
+### Sub-phase 9.4: Handle Edge Cases
+**Goal**: Ensure robust seed generation
+
+#### Considerations:
+- Different wallet signatures (MetaMask, WalletConnect, etc.)
+- Consistent message for signing
+- Fallback for failed generation
+- Migration from existing seeds
+- Security implications
+
+#### Tasks:
+- [ ] Define standard signing message
+- [ ] Handle signature format variations
+- [ ] Add entropy validation
+- [ ] Implement fallback mechanism
+- [ ] Create migration strategy for existing users
+- [ ] Security audit of derivation process
+- [ ] Document security considerations
+
+### Sub-phase 9.5: Testing and Validation
+**Goal**: Ensure derived seeds work correctly
+
+#### Test Cases:
+1. Same signature → same seed (deterministic)
+2. Different signatures → different seeds
+3. Generated seeds work with S5.js
+4. Seeds persist across sessions
+5. Seeds recover correct identity
+
+#### Tasks:
+- [ ] Create comprehensive test suite
+- [ ] Test with real S5 network
+- [ ] Verify identity recovery
+- [ ] Test file storage/retrieval
+- [ ] Performance benchmarks
+- [ ] Cross-browser testing
+- [ ] Document test results
+
+### Implementation Code Example:
+
+```typescript
+// packages/sdk-core/src/FabstirSDKCore.ts
+private async generateS5Seed(signature: string): Promise<void> {
+  if (!this.config.authMethod || this.config.authMethod === 'none') {
+    return;
+  }
+  
+  try {
+    // Derive S5 seed from signature entropy
+    const { deriveS5SeedFromSignature } = await import('./utils/s5-seed-generator');
+    this.s5Seed = deriveS5SeedFromSignature(signature);
+    console.log('S5 seed derived from user signature');
+  } catch (error) {
+    console.warn('Failed to derive S5 seed, using fallback:', error);
+    // Fallback to config seed if available
+    if (this.config.s5Config?.seedPhrase) {
+      this.s5Seed = this.config.s5Config.seedPhrase;
+    } else {
+      throw new SDKError('Failed to generate S5 seed', 'S5_SEED_ERROR');
+    }
+  }
+}
+```
+
+### Success Criteria:
+1. ✅ Deterministic seed generation from user signature
+2. ✅ No hardcoded seeds in production code
+3. ✅ Seeds compatible with S5.js requirements
+4. ✅ Consistent seeds across sessions for same user
+5. ✅ Proper error handling and fallbacks
+6. ✅ Comprehensive test coverage
+7. ✅ Security best practices followed
+
+### Timeline:
+- Research & Design: 1 day
+- Implementation: 2 days  
+- Testing: 1 day
+- Documentation: 0.5 day
+**Total: 4.5 days**
+
+---
+
 ## Next Steps
 
 1. Begin with Phase 1.1 - Dependency analysis
@@ -417,5 +579,6 @@ Create two packages:
 3. Set up new package structure
 4. Start incremental refactoring
 5. Test continuously throughout process
+6. **Implement S5 seed derivation (Phase 9) after core browser compatibility**
 
 This refactor will enable UI developers to use FabstirSDK directly in browsers while maintaining full functionality through the optional server package for advanced features.

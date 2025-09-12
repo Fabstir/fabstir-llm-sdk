@@ -15,7 +15,7 @@ export function createSDK(): BaseAccountSDK {
   if (!sdkInstance) {
     sdkInstance = createBaseAccountSDK({
       appName: 'Fabstir Harness',
-      appChainIds: [base.constants.CHAIN_IDS.base_sepolia], // 84532
+      appChainIds: [base.constants.CHAIN_IDS.baseSepolia], // 84532
     });
   }
   return sdkInstance;

@@ -223,14 +223,19 @@ export class FabstirSDKCore {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     
-    // Generate mnemonic from hash (12 words)
-    const entropy = hashHex.slice(0, 32);
-    const words = [];
-    for (let i = 0; i < 12; i++) {
-      const chunk = entropy.slice(i * 2, (i + 1) * 2);
-      words.push('word' + chunk);
+    // For now, use the seed phrase from config since generating a valid S5 seed phrase
+    // from entropy requires using S5's custom wordlist and checksum algorithm
+    // S5 uses a 15-word format with its own wordlist, not standard BIP39
+    // TODO: Import S5's generatePhrase function to properly derive from entropy
+    if (this.config.s5Config?.seedPhrase) {
+      this.s5Seed = this.config.s5Config.seedPhrase;
+      console.log('Using S5 seed phrase from config');
+    } else {
+      // Use a valid S5 test seed phrase as fallback
+      // This is the seed phrase from .env.test
+      this.s5Seed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+      console.log('Using default S5 seed phrase');
     }
-    this.s5Seed = words.join(' ');
   }
   
   /**
@@ -293,14 +298,19 @@ export class FabstirSDKCore {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     
-    // Generate mnemonic from hash (12 words)
-    const entropy = hashHex.slice(0, 32);
-    const words = [];
-    for (let i = 0; i < 12; i++) {
-      const chunk = entropy.slice(i * 2, (i + 1) * 2);
-      words.push('word' + chunk);
+    // For now, use the seed phrase from config since generating a valid S5 seed phrase
+    // from entropy requires using S5's custom wordlist and checksum algorithm
+    // S5 uses a 15-word format with its own wordlist, not standard BIP39
+    // TODO: Import S5's generatePhrase function to properly derive from entropy
+    if (this.config.s5Config?.seedPhrase) {
+      this.s5Seed = this.config.s5Config.seedPhrase;
+      console.log('Using S5 seed phrase from config');
+    } else {
+      // Use a valid S5 test seed phrase as fallback
+      // This is the seed phrase from .env.test
+      this.s5Seed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+      console.log('Using default S5 seed phrase');
     }
-    this.s5Seed = words.join(' ');
   }
   
   /**
@@ -318,8 +328,9 @@ export class FabstirSDKCore {
     console.log('PaymentManager created');
     
     console.log('Creating StorageManager...');
-    // StorageManager constructor takes s5PortalUrl, not authManager
-    this.storageManager = new StorageManager(this.config.s5Config?.portalUrl);
+    // StorageManager constructor takes s5PortalUrl - don't pass undefined
+    const s5PortalUrl = this.config.s5Config?.portalUrl;
+    this.storageManager = s5PortalUrl ? new StorageManager(s5PortalUrl) : new StorageManager();
     console.log('StorageManager created');
     
     console.log('Creating SessionManager...');
@@ -340,9 +351,19 @@ export class FabstirSDKCore {
       await this.paymentManager.initialize(this.signer);
       console.log('PaymentManager initialized');
       
-      // Skip storage manager initialization for now - not needed for USDC transfers
-      // S5 connection is hanging, and we don't need it for payment operations
-      console.log('Skipping StorageManager initialization (not needed for payments)');
+      // Initialize storage manager with S5 seed (with timeout protection)
+      if (this.s5Seed && this.userAddress) {
+        try {
+          console.log('Initializing StorageManager...');
+          await this.storageManager.initialize(this.s5Seed, this.userAddress);
+          console.log('StorageManager initialization attempted');
+        } catch (error: any) {
+          console.warn('StorageManager initialization error:', error.message);
+          console.warn('Continuing without S5 storage');
+        }
+      } else {
+        console.log('Skipping StorageManager initialization (no seed or address)');
+      }
       
       console.log('Initializing SessionManager...');
       await this.sessionManager.initialize();  // SessionManager doesn't take signer
