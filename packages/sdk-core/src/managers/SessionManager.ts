@@ -5,6 +5,7 @@
  * and completion. Works with WebSocket for real-time streaming.
  */
 
+import { ethers } from 'ethers';
 import { ISessionManager } from '../interfaces';
 import {
   SDKError,
@@ -21,6 +22,7 @@ export interface SessionState {
   jobId: bigint;
   model: string;
   provider: string;
+  endpoint?: string; // WebSocket endpoint URL
   status: 'pending' | 'active' | 'paused' | 'completed' | 'failed';
   prompts: string[];
   responses: string[];
@@ -65,7 +67,8 @@ export class SessionManager implements ISessionManager {
   async startSession(
     model: string,
     provider: string,
-    config: SessionConfig
+    config: SessionConfig,
+    endpoint?: string
   ): Promise<{
     sessionId: bigint;
     jobId: bigint;
@@ -76,13 +79,16 @@ export class SessionManager implements ISessionManager {
 
     try {
       // Create session job with payment
+      // Convert BigInt values to appropriate types for PaymentManager
+      // Format depositAmount from smallest units (2000000) to decimal units ("2")
+      const formattedDeposit = ethers.formatUnits(config.depositAmount, 6);
       const result = await this.paymentManager.createSessionJob(
         model,
         provider,
-        config.depositAmount,
-        config.pricePerToken,
-        config.proofInterval,
-        config.duration
+        formattedDeposit, // Pass as decimal string "2" instead of "2000000"
+        Number(config.pricePerToken), // Convert BigInt to number
+        Number(config.proofInterval), // Convert BigInt to number
+        Number(config.duration) // Convert BigInt to number
       );
 
       // Create session state
@@ -91,6 +97,7 @@ export class SessionManager implements ISessionManager {
         jobId: result.jobId,
         model,
         provider,
+        endpoint,
         status: 'active',
         prompts: [],
         responses: [],
@@ -102,7 +109,7 @@ export class SessionManager implements ISessionManager {
       // Store in memory
       this.sessions.set(result.sessionId.toString(), sessionState);
 
-      // Persist to storage
+      // Persist to storage (convert BigInt values to strings for JSON serialization)
       await this.storageManager.storeConversation({
         id: result.sessionId.toString(),
         messages: [],
@@ -110,7 +117,12 @@ export class SessionManager implements ISessionManager {
           model,
           provider,
           jobId: result.jobId.toString(),
-          config
+          config: {
+            depositAmount: config.depositAmount.toString(),
+            pricePerToken: config.pricePerToken.toString(),
+            proofInterval: config.proofInterval.toString(),
+            duration: config.duration.toString()
+          }
         },
         createdAt: sessionState.startTime,
         updatedAt: sessionState.startTime
@@ -153,19 +165,57 @@ export class SessionManager implements ISessionManager {
       // Add prompt to session
       session.prompts.push(prompt);
 
-      // Initialize WebSocket if needed
-      if (!this.wsClient) {
-        this.wsClient = new WebSocketClient(`wss://${session.provider}/ws`);
-        await this.wsClient.connect();
+      // Use REST API instead of WebSocket (as per node implementation)
+      console.log('Session endpoint from storage:', session.endpoint);
+      const endpoint = session.endpoint || 'http://localhost:8080';
+      const httpUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
+      
+      // Call REST API for inference
+      const inferenceUrl = `${httpUrl}/v1/inference`;
+      const requestBody = {
+        model: session.model || 'tiny-vicuna-1b',
+        prompt: prompt,
+        max_tokens: 200,  // Allow longer responses for poems, stories, etc.
+        temperature: 0.7,  // Add temperature for better responses
+        sessionId: sessionId.toString(),
+        jobId: session.jobId.toString()
+      };
+      
+      console.log('Sending inference request to:', inferenceUrl);
+      console.log('Request body:', requestBody);
+      
+      let fetchResponse;
+      try {
+        fetchResponse = await fetch(inferenceUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        });
+      } catch (fetchError: any) {
+        console.error('Fetch error:', fetchError);
+        throw new Error(`Network error calling inference API: ${fetchError.message}`);
+      }
+      
+      if (!fetchResponse.ok) {
+        const errorText = await fetchResponse.text();
+        throw new Error(`Inference failed: ${fetchResponse.status} - ${errorText}`);
+      }
+      
+      const result = await fetchResponse.json();
+      console.log('Inference API response:', result);
+      
+      // Try different possible response fields
+      let response = result.response || result.text || result.content || result.generated_text;
+      
+      if (!response) {
+        console.error('Unexpected response format:', result);
+        throw new Error('No response received from inference endpoint. Response: ' + JSON.stringify(result));
       }
 
-      // Send prompt and get response
-      const response = await this.wsClient.sendMessage({
-        type: 'prompt',
-        sessionId: sessionId.toString(),
-        prompt,
-        model: session.model
-      });
+      // Clean up repetitive responses (common issue with small models)
+      response = this.cleanupRepetitiveText(response);
 
       // Add response to session
       session.responses.push(response);
@@ -302,6 +352,36 @@ export class SessionManager implements ISessionManager {
         { originalError: error }
       );
     }
+  }
+
+  /**
+   * Clean up repetitive text (common issue with small models)
+   */
+  private cleanupRepetitiveText(text: string): string {
+    // Split into sentences
+    const sentences = text.split(/[.!?]+/).filter(s => s.trim());
+    
+    if (sentences.length <= 1) return text;
+    
+    // Check for exact repetitions
+    const uniqueSentences = new Set<string>();
+    const result: string[] = [];
+    
+    for (const sentence of sentences) {
+      const cleaned = sentence.trim().toLowerCase();
+      if (cleaned && !uniqueSentences.has(cleaned)) {
+        uniqueSentences.add(cleaned);
+        result.push(sentence.trim());
+      }
+    }
+    
+    // If we removed a lot of repetitions, add a note
+    const finalText = result.join('. ') + '.';
+    if (sentences.length > result.length * 2) {
+      console.log(`Cleaned up repetitive response: ${sentences.length} sentences -> ${result.length} unique`);
+    }
+    
+    return finalText;
   }
 
   /**
@@ -503,38 +583,47 @@ export class SessionManager implements ISessionManager {
       // Add prompt to session
       session.prompts.push(prompt);
 
-      // Initialize WebSocket if needed
-      if (!this.wsClient) {
-        this.wsClient = new WebSocketClient(`wss://${session.provider}/ws`);
-        await this.wsClient.connect();
-      }
-
-      // Set up streaming handler
-      let fullResponse = '';
-      this.wsClient.onMessage((data) => {
-        if (data.type === 'chunk') {
-          onChunk(data.content);
-          fullResponse += data.content;
-        }
-      });
-
-      // Send prompt with streaming flag
-      await this.wsClient.sendMessage({
-        type: 'prompt',
+      // For now, use REST API and simulate streaming
+      const endpoint = session.endpoint || 'http://localhost:8080';
+      const httpUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
+      
+      // Call REST API for inference
+      const inferenceUrl = `${httpUrl}/v1/inference`;
+      const requestBody = {
+        model: session.model || 'tiny-vicuna-1b',
+        prompt: prompt,
+        max_tokens: 200,  // Allow longer responses for poems, stories, etc.
+        temperature: 0.7,  // Add temperature for better responses
         sessionId: sessionId.toString(),
-        prompt,
-        model: session.model,
-        stream: true
+        jobId: session.jobId.toString()
+      };
+      
+      const fetchResponse = await fetch(inferenceUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
       });
-
-      // Wait for streaming to complete
-      await new Promise<void>((resolve) => {
-        this.wsClient!.onMessage((data) => {
-          if (data.type === 'stream_end') {
-            resolve();
-          }
-        });
-      });
+      
+      if (!fetchResponse.ok) {
+        const errorText = await fetchResponse.text();
+        throw new Error(`Inference failed: ${fetchResponse.status} - ${errorText}`);
+      }
+      
+      const result = await fetchResponse.json();
+      const fullResponse = result.response || result.text;
+      
+      if (!fullResponse) {
+        throw new Error('No response received from inference endpoint');
+      }
+      
+      // Simulate streaming by chunking the response
+      const words = fullResponse.split(' ');
+      for (const word of words) {
+        onChunk(word + ' ');
+        await new Promise(resolve => setTimeout(resolve, 50)); // Small delay to simulate streaming
+      }
 
       // Add complete response to session
       session.responses.push(fullResponse);

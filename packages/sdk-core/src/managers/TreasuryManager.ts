@@ -49,8 +49,8 @@ export class TreasuryManager implements ITreasuryManager {
       );
 
       // Get treasury address and fee percentage from contract
-      const treasuryAddress = await jobMarketplace.treasury();
-      const feePercentage = await jobMarketplace.platformFeePercentage();
+      const treasuryAddress = await jobMarketplace.treasuryAddress();
+      const feePercentage = await jobMarketplace.TREASURY_FEE_PERCENT();
       
       // Get balances for common tokens
       const usdcAddress = await this.contractManager.getContractAddress('usdcToken');
@@ -153,11 +153,8 @@ export class TreasuryManager implements ITreasuryManager {
       }
 
       // Withdraw through contract
-      const tx = await jobMarketplace.withdrawTreasuryFunds(
-        tokenAddress,
-        amount,
-        recipient
-      );
+      // Note: withdrawTreasuryTokens sends to the treasury address configured in contract
+      const tx = await jobMarketplace.withdrawTreasuryTokens(tokenAddress);
       await tx.wait();
       
       return tx.hash;
@@ -379,5 +376,71 @@ export class TreasuryManager implements ITreasuryManager {
       'Multi-admin not yet implemented in contract',
       'NOT_IMPLEMENTED'
     );
+  }
+
+  /**
+   * Record fees for treasury
+   */
+  async recordFees(amount: bigint): Promise<string> {
+    if (!this.initialized || !this.signer) {
+      throw new SDKError('TreasuryManager not initialized', 'TREASURY_NOT_INITIALIZED');
+    }
+
+    // Treasury fees are automatically recorded by the JobMarketplace contract
+    // during session completion. This is not a user-callable function.
+    throw new SDKError(
+      'Treasury fees are automatically recorded by the contract during session completion',
+      'NOT_USER_CALLABLE'
+    );
+  }
+
+  /**
+   * Withdraw fees from treasury
+   */
+  async withdrawFees(): Promise<string> {
+    if (!this.initialized || !this.signer) {
+      throw new SDKError('TreasuryManager not initialized', 'TREASURY_NOT_INITIALIZED');
+    }
+
+    try {
+      // Get USDC address
+      const usdcAddress = await this.contractManager.getContractAddress('usdcToken');
+      
+      // Check accumulated treasury tokens in the JobMarketplace contract
+      const jobMarketplaceAddress = await this.contractManager.getContractAddress('jobMarketplace');
+      const jobMarketplaceABI = await this.contractManager.getContractABI('jobMarketplace');
+      const jobMarketplace = new ethers.Contract(
+        jobMarketplaceAddress,
+        jobMarketplaceABI,
+        this.signer!
+      );
+      
+      // Get accumulated treasury tokens
+      const accumulatedAmount = await jobMarketplace.accumulatedTreasuryTokens(usdcAddress);
+      
+      if (accumulatedAmount === 0n) {
+        throw new SDKError('No accumulated treasury funds to withdraw', 'NO_TREASURY_FUNDS');
+      }
+      
+      // Withdraw treasury tokens (this sends to the configured treasury address)
+      const tx = await jobMarketplace.withdrawTreasuryTokens(usdcAddress);
+      await tx.wait();
+      
+      return tx.hash;
+    } catch (error: any) {
+      if (error instanceof SDKError) throw error;
+      throw new SDKError(
+        `Failed to withdraw treasury fees: ${error.message}`,
+        'TREASURY_WITHDRAWAL_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Check if initialized
+   */
+  isInitialized(): boolean {
+    return this.initialized;
   }
 }

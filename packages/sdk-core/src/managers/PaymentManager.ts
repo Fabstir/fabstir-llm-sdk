@@ -5,7 +5,7 @@
  * with support for MetaMask, Coinbase Wallet, and other browser wallets.
  */
 
-import { ethers } from 'ethers';
+import { ethers, Signer } from 'ethers';
 import { IPaymentManager } from '../interfaces';
 import {
   SDKError,
@@ -416,15 +416,50 @@ export class PaymentManager implements IPaymentManager {
     }
 
     try {
-      const result = await this.sessionJobManager.submitCheckpointProof(
+      // submitCheckpointProof needs: sessionId, checkpoint number, tokensGenerated, proof
+      // We'll use checkpoint number 1 for simplicity
+      const txHash = await this.sessionJobManager.submitCheckpointProof(
         jobId,
+        1, // checkpoint number
         tokensGenerated,
         proof
       );
-      return result.txHash;
+      return txHash;
     } catch (error: any) {
       throw new SDKError(
         `Failed to submit checkpoint: ${error.message}`,
+        'CHECKPOINT_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Submit checkpoint proof as host (requires host signer)
+   */
+  async submitCheckpointAsHost(
+    jobId: bigint,
+    tokensGenerated: number,
+    proof: string,
+    hostSigner: Signer
+  ): Promise<string> {
+    if (!this.initialized) {
+      throw new SDKError('PaymentManager not initialized', 'PAYMENT_NOT_INITIALIZED');
+    }
+
+    try {
+      // Submit proof as host
+      const txHash = await this.sessionJobManager.submitCheckpointProofAsHost(
+        jobId,
+        1, // checkpoint number
+        tokensGenerated,
+        proof,
+        hostSigner
+      );
+      return txHash;
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to submit checkpoint as host: ${error.message}`,
         'CHECKPOINT_ERROR',
         { originalError: error }
       );
@@ -444,12 +479,13 @@ export class PaymentManager implements IPaymentManager {
     }
 
     try {
-      const result = await this.sessionJobManager.completeSessionJob(
+      // completeSessionJob returns the txHash directly as a string
+      const txHash = await this.sessionJobManager.completeSessionJob(
         jobId,
         totalTokens,
         finalProof
       );
-      return result.txHash;
+      return txHash;
     } catch (error: any) {
       throw new SDKError(
         `Failed to complete session: ${error.message}`,
@@ -667,6 +703,33 @@ export class PaymentManager implements IPaymentManager {
       );
     }
   }
+
+  /**
+   * Get token balance for an address
+   */
+  async getBalance(tokenAddress: string, userAddress: string): Promise<bigint> {
+    if (!this.initialized || !this.signer) {
+      throw new SDKError('PaymentManager not initialized', 'PAYMENT_NOT_INITIALIZED');
+    }
+
+    try {
+      const tokenContract = new ethers.Contract(
+        tokenAddress,
+        ['function balanceOf(address account) view returns (uint256)'],
+        this.signer.provider
+      );
+      
+      const balance = await tokenContract.balanceOf(userAddress);
+      return BigInt(balance.toString());
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to get balance: ${error.message}`,
+        'BALANCE_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
 
   /**
    * Get payment history

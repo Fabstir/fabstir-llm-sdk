@@ -72,43 +72,71 @@ export class SessionJobManager {
     }
 
     // Approve USDC spending
+    const jobMarketplaceAddress = await jobMarketplace.getAddress();
+    console.log('JobMarketplace address:', jobMarketplaceAddress);
+    
     const currentAllowance = await usdcToken.allowance(
       userAddress,
-      await jobMarketplace.getAddress()
+      jobMarketplaceAddress
     ) as bigint;
     
+    console.log('Current USDC allowance:', ethers.formatUnits(currentAllowance, 6));
+    console.log('Required deposit:', ethers.formatUnits(depositAmount, 6));
+    
     if (currentAllowance < depositAmount) {
+      console.log('Approving USDC spending...');
       const approveTx = await usdcToken.approve(
-        await jobMarketplace.getAddress(),
+        jobMarketplaceAddress,
         depositAmount
       );
-      await approveTx.wait();
+      const approveReceipt = await approveTx.wait();
+      console.log('USDC approval complete:', approveReceipt.hash);
+      
+      // Wait for blockchain confirmation
+      console.log('Waiting for blockchain confirmation...');
+      await new Promise(resolve => setTimeout(resolve, 3000)); // 3 seconds for blockchain
+      
+      // Verify the allowance was set
+      const newAllowance = await usdcToken.allowance(
+        userAddress,
+        jobMarketplaceAddress
+      ) as bigint;
+      console.log('New USDC allowance after approval:', ethers.formatUnits(newAllowance, 6));
+      
+      if (newAllowance < depositAmount) {
+        throw new Error(
+          `Approval failed. Required: ${ethers.formatUnits(depositAmount, 6)}, ` +
+          `Got: ${ethers.formatUnits(newAllowance, 6)}`
+        );
+      }
+    } else {
+      console.log('Sufficient allowance already exists');
     }
 
-    // Create session job
-    const tx = await jobMarketplace.createSessionJob(
-      params.model,
-      params.provider,
-      depositAmount,
-      params.sessionConfig.pricePerToken,
-      params.sessionConfig.proofInterval,
-      params.sessionConfig.duration
+    // Create session job with USDC token
+    const tx = await jobMarketplace.createSessionJobWithToken(
+      params.provider, // host address
+      await usdcToken.getAddress(), // token address (USDC)
+      depositAmount, // deposit amount
+      params.sessionConfig.pricePerToken, // price per token
+      params.sessionConfig.duration, // max duration
+      params.sessionConfig.proofInterval // proof interval
     );
 
     const receipt = await tx.wait();
     
-    // Parse events to get session ID and job ID
+    // Parse events to get job ID (which is also the session ID for session jobs)
     const sessionCreatedEvent = receipt.logs.find(
-      (log: any) => log.topics[0] === ethers.id('SessionJobCreated(uint256,uint256,address,string)')
+      (log: any) => log.topics[0] === ethers.id('SessionJobCreatedWithToken(uint256,address,uint256)')
     );
     
     if (!sessionCreatedEvent) {
-      throw new Error('SessionJobCreated event not found');
+      throw new Error('SessionJobCreatedWithToken event not found');
     }
 
-    // Decode event data
-    const sessionId = BigInt(sessionCreatedEvent.topics[1]);
-    const jobId = BigInt(sessionCreatedEvent.topics[2]);
+    // Decode event data - jobId is in topics[1], token address in topics[2]
+    const jobId = BigInt(sessionCreatedEvent.topics[1]);
+    const sessionId = jobId; // For session jobs, sessionId equals jobId
 
     return {
       sessionId,
@@ -133,11 +161,43 @@ export class SessionJobManager {
 
     const jobMarketplace = this.contractManager.getJobMarketplace();
     
-    const tx = await jobMarketplace.submitCheckpointProof(
-      sessionId,
-      checkpoint,
-      tokensGenerated,
-      proofData
+    // The contract method is actually submitProofOfWork
+    // It takes: jobId, ekzlProof (bytes), tokensInBatch
+    const tx = await jobMarketplace.submitProofOfWork(
+      sessionId,  // jobId
+      proofData,  // ekzlProof
+      tokensGenerated  // tokensInBatch
+    );
+
+    const receipt = await tx.wait();
+    return receipt.hash;
+  }
+
+  /**
+   * Submit checkpoint proof as host (requires host signer)
+   */
+  async submitCheckpointProofAsHost(
+    sessionId: bigint,
+    checkpoint: number,
+    tokensGenerated: number,
+    proofData: string,
+    hostSigner: Signer
+  ): Promise<string> {
+    // Create a new contract instance with host signer
+    const jobMarketplaceAddress = await this.contractManager.getJobMarketplace().getAddress();
+    const jobMarketplaceAbi = this.contractManager.getJobMarketplace().interface;
+    
+    const jobMarketplaceAsHost = new Contract(
+      jobMarketplaceAddress,
+      jobMarketplaceAbi,
+      hostSigner
+    );
+    
+    // Submit proof as host
+    const tx = await jobMarketplaceAsHost.submitProofOfWork(
+      sessionId,  // jobId
+      proofData,  // ekzlProof
+      tokensGenerated  // tokensInBatch
     );
 
     const receipt = await tx.wait();
@@ -158,11 +218,10 @@ export class SessionJobManager {
 
     const jobMarketplace = this.contractManager.getJobMarketplace();
     
-    const tx = await jobMarketplace.completeSessionJob(
-      sessionId,
-      totalTokensGenerated,
-      finalProof
-    );
+    // The contract's completeSessionJob only takes jobId as parameter
+    // The totalTokensGenerated and finalProof are not needed for completion
+    // The contract automatically settles based on proven tokens from checkpoints
+    const tx = await jobMarketplace.completeSessionJob(sessionId);
 
     const receipt = await tx.wait();
     return receipt.hash;

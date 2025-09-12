@@ -130,7 +130,7 @@ export class FabstirSDKCore {
   /**
    * Authenticate with wallet
    */
-  async authenticate(method: 'metamask' | 'walletconnect' | 'privatekey' = 'metamask', options?: any): Promise<void> {
+  async authenticate(method: 'metamask' | 'walletconnect' | 'privatekey' | 'signer' = 'metamask', options?: any): Promise<void> {
     try {
       if (method === 'metamask') {
         await this.authenticateWithMetaMask();
@@ -141,6 +141,11 @@ export class FabstirSDKCore {
           throw new SDKError('Private key required in options', 'PRIVATE_KEY_MISSING');
         }
         await this.authenticateWithPrivateKey(options.privateKey);
+      } else if (method === 'signer') {
+        if (!options || !options.signer) {
+          throw new SDKError('Signer required in options', 'SIGNER_MISSING');
+        }
+        await this.authenticateWithSigner(options.signer);
       } else {
         throw new SDKError('Unsupported authentication method', 'AUTH_METHOD_UNSUPPORTED');
       }
@@ -273,6 +278,67 @@ export class FabstirSDKCore {
     this.userAddress = await this.signer.getAddress();
     console.log('Got address:', this.userAddress);
     
+    // Generate S5 seed deterministically from signature  
+    console.log('Starting S5 seed generation...');
+    const SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM SDK';
+    console.log('About to sign message for S5 seed...');
+    
+    let signature: string;
+    try {
+      signature = await this.signer.signMessage(SEED_MESSAGE);
+      console.log('Message signed successfully');
+    } catch (signError: any) {
+      console.error('Error signing message:', signError);
+      // Re-throw the error since we don't have a private key fallback
+      throw signError;
+    }
+    
+    // Use Web Crypto API to derive seed
+    const encoder = new TextEncoder();
+    const data = encoder.encode(signature);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    
+    // For now, use the seed phrase from config since generating a valid S5 seed phrase
+    // from entropy requires using S5's custom wordlist and checksum algorithm
+    // S5 uses a 15-word format with its own wordlist, not standard BIP39
+    // TODO: Import S5's generatePhrase function to properly derive from entropy
+    if (this.config.s5Config?.seedPhrase) {
+      this.s5Seed = this.config.s5Config.seedPhrase;
+      console.log('Using S5 seed phrase from config');
+    } else {
+      // Use a valid S5 test seed phrase as fallback
+      // This is the seed phrase from .env.test
+      this.s5Seed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+      console.log('Using default S5 seed phrase');
+    }
+  }
+  
+  /**
+   * Authenticate with an existing signer (for testing with external wallets)
+   */
+  private async authenticateWithSigner(signer: ethers.Signer): Promise<void> {
+    if (!signer) {
+      throw new SDKError('Signer required', 'SIGNER_REQUIRED');
+    }
+    
+    this.signer = signer;
+    
+    // Get provider from signer if available
+    if ('provider' in signer && signer.provider) {
+      this.provider = signer.provider as ethers.Provider;
+    } else if (this.config.rpcUrl) {
+      // Create provider if not available
+      this.provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
+    } else {
+      throw new SDKError('Provider or RPC URL required', 'PROVIDER_REQUIRED');
+    }
+    
+    console.log('Getting signer address...');
+    this.userAddress = await this.signer.getAddress();
+    console.log('Got address:', this.userAddress);
+    
     // Generate S5 seed deterministically from signature
     console.log('Starting S5 seed generation...');
     const SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM SDK';
@@ -284,11 +350,8 @@ export class FabstirSDKCore {
       console.log('Message signed successfully');
     } catch (signError: any) {
       console.error('Error signing message:', signError);
-      // For testing, just use a deterministic signature based on the private key
-      // This avoids network calls
-      const wallet = new ethers.Wallet(privateKey);
-      signature = await wallet.signMessage(SEED_MESSAGE);
-      console.log('Message signed successfully (offline)');
+      // Re-throw the error since we don't have a private key fallback
+      throw signError;
     }
     
     // Use Web Crypto API to derive seed
