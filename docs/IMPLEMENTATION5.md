@@ -572,11 +572,238 @@ private async generateS5Seed(signature: string): Promise<void> {
 
 ---
 
+## Phase 10: Host Discovery Integration
+
+### Overview
+Integrate blockchain-based host discovery mechanism to automatically find LLM host API endpoints without hardcoding URLs.
+
+### Sub-phase 10.1: Update Contract ABIs
+**Goal**: Update NodeRegistry ABI with new host discovery functions
+**Line limit**: N/A (file copy)
+
+#### Tasks:
+- [ ] Copy NodeRegistryFAB-CLIENT-ABI.json from docs/compute-contracts-reference/client-abis/
+- [ ] Replace src/contracts/abis/NodeRegistryFAB-CLIENT-ABI.json
+- [ ] Verify new functions exist: getNodeApiUrl, updateApiUrl, registerNodeWithUrl
+- [ ] Update ContractManager to load new ABI
+- [ ] Test ABI loading in browser environment
+
+### Sub-phase 10.2: Create Host Discovery Service
+**Goal**: Service to query blockchain for host API endpoints
+**Line limit**: 150 lines
+
+#### Implementation: `packages/sdk-core/src/services/HostDiscovery.ts`
+```typescript
+export class HostDiscovery {
+  private nodeRegistry: ethers.Contract;
+  private cache: Map<string, { url: string; timestamp: number }>;
+  
+  async discoverHost(hostAddress: string): Promise<string>;
+  async discoverAllHosts(): Promise<Map<string, HostInfo>>;
+  async findBestHost(requirements: HostRequirements): Promise<HostInfo>;
+  private validateApiUrl(url: string): boolean;
+  private cacheUrl(address: string, url: string): void;
+}
+```
+
+#### Tasks:
+- [ ] Write tests for host discovery (TDD)
+- [ ] Create HostDiscovery class skeleton
+- [ ] Implement discoverHost method
+- [ ] Implement discoverAllHosts method
+- [ ] Add URL validation and sanitization
+- [ ] Implement caching with TTL
+- [ ] Add findBestHost with selection logic
+- [ ] Handle contract call failures gracefully
+
+### Sub-phase 10.3: Update HostManager
+**Goal**: Add API URL support to host management
+**Line limit**: 50 lines added
+
+#### Tasks:
+- [ ] Write tests for new HostManager methods
+- [ ] Add getHostApiUrl(address) method
+- [ ] Add discoverAvailableHosts() method
+- [ ] Update registerHost to include API URL
+- [ ] Add updateHostApiUrl(url) method
+- [ ] Update getHostInfo to return API URL
+- [ ] Test integration with HostDiscovery service
+
+---
+
+## Phase 11: WebSocket Streaming Integration
+
+### Overview
+Integrate the new WebSocket API (`/v1/ws`) for real-time token streaming from LLM hosts.
+
+### Sub-phase 11.1: Enhance WebSocket Client
+**Goal**: Update WebSocket client for new protocol
+**Line limit**: 200 lines modified
+
+#### Implementation Updates: `packages/sdk-core/src/websocket/WebSocketClient.ts`
+```typescript
+interface InferenceMessage {
+  type: 'inference';
+  request: {
+    model: string;
+    prompt: string;
+    max_tokens: number;
+    stream: boolean;
+  };
+}
+
+interface StreamToken {
+  type: 'stream_token';
+  token: string;
+  finish_reason?: string;
+}
+```
+
+#### Tasks:
+- [ ] Write tests for WebSocket streaming
+- [ ] Add support for /v1/ws endpoint
+- [ ] Implement inference message type
+- [ ] Add auth message type (for future JWT)
+- [ ] Implement streaming token handler
+- [ ] Add connection state management
+- [ ] Handle reconnection with session recovery
+- [ ] Add compression support (gzip/deflate)
+- [ ] Implement rate limiting awareness
+
+### Sub-phase 11.2: Create Inference Manager
+**Goal**: Manager for direct inference without blockchain
+**Line limit**: 150 lines
+
+#### Implementation: `packages/sdk-core/src/managers/InferenceManager.ts`
+```typescript
+export class InferenceManager {
+  private wsClient: WebSocketClient;
+  private hostDiscovery: HostDiscovery;
+  
+  async *inference(prompt: string, options?: InferenceOptions): AsyncGenerator<string>;
+  async *sessionInference(sessionId: string, prompt: string): AsyncGenerator<string>;
+  private async connectToHost(hostUrl: string): Promise<void>;
+  private handleStreamToken(token: StreamToken): void;
+}
+```
+
+#### Tasks:
+- [ ] Write tests for InferenceManager
+- [ ] Create InferenceManager class
+- [ ] Implement direct inference method
+- [ ] Add async generator for streaming
+- [ ] Implement session-based inference
+- [ ] Add model selection logic
+- [ ] Handle connection failures
+- [ ] Add timeout and retry logic
+- [ ] Implement token buffering
+
+### Sub-phase 11.3: Update SessionManager
+**Goal**: Integrate WebSocket streaming with sessions
+**Line limit**: 100 lines modified
+
+#### Tasks:
+- [ ] Write tests for streaming sessions
+- [ ] Add connectToHost method
+- [ ] Modify createSession to discover & connect
+- [ ] Update sendPrompt to return AsyncGenerator
+- [ ] Implement streamPrompt method
+- [ ] Add session context management
+- [ ] Handle checkpoint proofs with streaming
+- [ ] Update session state for WebSocket
+- [ ] Test with real host connections
+
+### Sub-phase 11.4: SDK Core Integration
+**Goal**: Wire everything together in FabstirSDKCore
+**Line limit**: 50 lines added
+
+#### Tasks:
+- [ ] Add InferenceManager to SDK core
+- [ ] Create getInferenceManager() method
+- [ ] Update initialize() to setup discovery
+- [ ] Add host discovery to config
+- [ ] Cache discovered endpoints
+- [ ] Add WebSocket connection pooling
+- [ ] Update exports and types
+- [ ] Test full integration flow
+
+---
+
+## Phase 12: End-to-End Testing and Documentation
+
+### Sub-phase 12.1: Integration Testing
+**Goal**: Comprehensive testing of new features
+
+#### Test Scenarios:
+1. Register host with API URL → Discover → Connect → Stream
+2. Multiple hosts → Select best → Failover
+3. Session with streaming → Checkpoint → Complete
+4. Direct inference without blockchain
+5. Connection recovery and session resumption
+
+#### Tasks:
+- [ ] Create integration test suite
+- [ ] Mock WebSocket server for testing
+- [ ] Test host discovery flow
+- [ ] Test streaming inference
+- [ ] Test error scenarios
+- [ ] Performance benchmarks
+- [ ] Load testing with multiple connections
+- [ ] Browser compatibility testing
+
+### Sub-phase 12.2: Update Example Applications
+**Goal**: Update harness pages to use new features
+
+#### Tasks:
+- [ ] Update base-usdc-mvp-flow-sdk.test.tsx
+- [ ] Add streaming UI components
+- [ ] Create host discovery demo page
+- [ ] Add real-time token display
+- [ ] Update documentation examples
+- [ ] Create migration guide
+
+### Sub-phase 12.3: Documentation
+**Goal**: Complete documentation for new features
+
+#### Tasks:
+- [ ] Document HostDiscovery API
+- [ ] Document InferenceManager API
+- [ ] Update SessionManager docs
+- [ ] Create WebSocket protocol guide
+- [ ] Add troubleshooting section
+- [ ] Update README with examples
+- [ ] Create video demo/tutorial
+
+---
+
+## Success Criteria for Phases 10-12
+
+1. ✅ No hardcoded host URLs in SDK
+2. ✅ Automatic host discovery from blockchain
+3. ✅ Real-time token streaming via WebSocket
+4. ✅ Direct inference without blockchain payments
+5. ✅ Session persistence and recovery
+6. ✅ Graceful failover between hosts
+7. ✅ Browser-compatible implementation
+8. ✅ Comprehensive test coverage (>80%)
+9. ✅ Full backward compatibility
+10. ✅ Production-ready documentation
+
+## Timeline
+
+- **Phase 10**: 3 days (Host Discovery)
+- **Phase 11**: 5 days (WebSocket Integration)
+- **Phase 12**: 2 days (Testing & Documentation)
+- **Total**: 10 days
+
+---
+
 ## Next Steps
 
-1. Begin with Phase 1.1 - Dependency analysis
-2. Create detailed technical design document
-3. Set up new package structure
+1. Complete Phase 9 (S5 Seed Derivation) if not done
+2. Begin Phase 10.1 - Update Contract ABIs
+3. Follow TDD approach for each sub-phase
+4. Test in browser environment continuously
 4. Start incremental refactoring
 5. Test continuously throughout process
 6. **Implement S5 seed derivation (Phase 9) after core browser compatibility**

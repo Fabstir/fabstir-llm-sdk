@@ -2,16 +2,19 @@
 
 This directory contains the Application Binary Interfaces (ABIs) for client integration.
 
-## Current Deployed Contracts (January 5, 2025)
+## Current Deployed Contracts (January 12, 2025)
 
-### JobMarketplaceFABWithS5
-- **Address**: 0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b
+### JobMarketplaceFABWithS5Deploy
+- **Address**: 0x3B632813c3e31D94Fd552b4aE387DD321eec67Ba
+- **Previous**: 0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b
 - **Network**: Base Sepolia
-- **Status**: ✅ TREASURY + HOST ACCUMULATION ENABLED
+- **Status**: ✅ API DISCOVERY COMPATIBLE + TREASURY ACCUMULATION
 - **Key Features**:
-  - Treasury fee accumulation for batch withdrawals (NEW)
+  - Compatible with 5-field Node struct from updated NodeRegistry (NEW)
+  - User refunds fixed for session jobs
+  - Treasury fee accumulation for batch withdrawals
   - Host earnings accumulation (70% gas savings)
-  - USDC payment settlement with 90% host / 10% treasury distribution
+  - USDC payment settlement with 97.5% host / 2.5% treasury distribution
   - ETH and USDC payment support fully functional
   - Direct payment distribution (no external escrow)
   - Session jobs with proof checkpoints
@@ -20,32 +23,69 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
   - MIN_PROVEN_TOKENS: 100 tokens minimum
   - Total gas savings: ~80%
 
+### NodeRegistryFAB (with API Discovery)
+- **Address**: 0x2B745E45818e1dE570f253259dc46b91A82E3204
+- **Previous**: 0x87516C13Ea2f99de598665e14cab64E191A0f8c4
+- **Network**: Base Sepolia
+- **Status**: ✅ API ENDPOINT DISCOVERY ENABLED
+- **Stake Required**: 1000 FAB tokens
+- **New Features**:
+  - API endpoint discovery for automatic host URL resolution
+  - `registerNodeWithUrl()` - Register with API endpoint
+  - `updateApiUrl()` - Update host's API endpoint
+  - `getNodeApiUrl()` - Get host's API URL
+  - `getNodeFullInfo()` - Get all host info including API URL
+
 ### ProofSystem
 - **Address**: 0x2ACcc60893872A499700908889B38C5420CBcFD1
 - **Network**: Base Sepolia
 - **Purpose**: EZKL proof verification for trustless AI inference
 - **Fixed**: Internal verification function call for USDC sessions
-
-### PaymentEscrowWithEarnings
-- **Address**: 0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C
-- **Network**: Base Sepolia
-- **Purpose**: Payment distribution with earnings accumulation (not used for session jobs)
+- **Requirement**: Minimum 64-byte proofs
 
 ### HostEarnings
 - **Address**: 0x908962e8c6CE72610021586f85ebDE09aAc97776
 - **Network**: Base Sepolia
 - **Purpose**: Tracks accumulated earnings for hosts with batch withdrawal support
+- **Authorized Marketplace**: 0x3B632813c3e31D94Fd552b4aE387DD321eec67Ba
 
-### NodeRegistryFAB
-- **Address**: 0x87516C13Ea2f99de598665e14cab64E191A0f8c4
-- **Network**: Base Sepolia
-- **Stake Required**: 1000 FAB tokens
+## API Discovery Usage (NEW)
+
+```javascript
+import NodeRegistryABI from './NodeRegistryFAB-CLIENT-ABI.json';
+import { ethers } from 'ethers';
+
+const provider = new ethers.providers.JsonRpcProvider('https://base-sepolia.g.alchemy.com/v2/YOUR_KEY');
+const nodeRegistry = new ethers.Contract(
+  '0x2B745E45818e1dE570f253259dc46b91A82E3204',
+  NodeRegistryABI,
+  provider
+);
+
+// For hosts - register with API URL
+const signer = provider.getSigner();
+const registryWithSigner = nodeRegistry.connect(signer);
+await registryWithSigner.registerNodeWithUrl(
+  'llama-2-7b,gpt-4,inference',
+  'http://your-host.com:8080'
+);
+
+// For hosts - update API URL
+await registryWithSigner.updateApiUrl('https://new-host.com:8443');
+
+// For clients - discover host endpoints
+const apiUrl = await nodeRegistry.getNodeApiUrl(hostAddress);
+console.log(`Host API endpoint: ${apiUrl}`);
+
+// Get full host information
+const [operator, stakedAmount, active, metadata, apiUrl] = await nodeRegistry.getNodeFullInfo(hostAddress);
+```
 
 ## Usage Example
 
 ```javascript
-import JobMarketplaceABI from './JobMarketplaceFABWithS5-CLIENT-ABI.json';
-import PaymentEscrowABI from './PaymentEscrowWithEarnings-CLIENT-ABI.json';
+import JobMarketplaceABI from './JobMarketplaceFABWithS5Deploy-CLIENT-ABI.json';
+import NodeRegistryABI from './NodeRegistryFAB-CLIENT-ABI.json';
 import HostEarningsABI from './HostEarnings-CLIENT-ABI.json';
 import { ethers } from 'ethers';
 
@@ -54,14 +94,14 @@ const provider = new ethers.providers.JsonRpcProvider('https://base-sepolia.g.al
 
 // Create contract instances
 const marketplace = new ethers.Contract(
-  '0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b', // Treasury + Host accumulation
+  '0x3B632813c3e31D94Fd552b4aE387DD321eec67Ba', // NEW deployment with API discovery
   JobMarketplaceABI,
   provider
 );
 
-const paymentEscrow = new ethers.Contract(
-  '0x7abC91AF9E5aaFdc954Ec7a02238d0796Bbf9a3C',
-  PaymentEscrowABI,
+const nodeRegistry = new ethers.Contract(
+  '0x2B745E45818e1dE570f253259dc46b91A82E3204', // NEW with API discovery
+  NodeRegistryABI,
   provider
 );
 
@@ -70,6 +110,12 @@ const hostEarnings = new ethers.Contract(
   HostEarningsABI,
   provider
 );
+
+// Discover host API endpoint
+const hostApiUrl = await nodeRegistry.getNodeApiUrl(hostAddress);
+if (!hostApiUrl) {
+  throw new Error('Host has not set API URL');
+}
 
 // Create USDC session job (with signer)
 const signer = provider.getSigner();
@@ -82,13 +128,24 @@ await usdcContract.approve(marketplace.address, ethers.utils.parseUnits("10", 6)
 
 // Create session with USDC
 await marketplaceWithSigner.createSessionJobWithToken(
-  usdcAddress,
   hostAddress,
+  usdcAddress,
   ethers.utils.parseUnits("10", 6), // 10 USDC deposit
   ethers.utils.parseUnits("0.001", 6), // price per token in USDC
   3600, // max duration (1 hour)
   300 // proof interval
 );
+
+// Now connect to host using discovered API URL
+const response = await fetch(`${hostApiUrl}/api/v1/inference`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    model: 'llama-2-7b',
+    prompt: 'Hello, world!',
+    jobId: jobId
+  })
+});
 ```
 
 ## Session Job Functions
@@ -100,7 +157,7 @@ Key functions for session jobs:
 - `completeSessionJob()` - Complete and settle payments
 - `triggerSessionTimeout()` - Handle timeout scenarios
 
-## Treasury Functions (NEW - January 5, 2025)
+## Treasury Functions
 
 For treasury address only:
 - `withdrawTreasuryETH()` - Withdraw accumulated ETH fees
@@ -108,17 +165,34 @@ For treasury address only:
 - `withdrawAllTreasuryFees(address[] tokens)` - Batch withdraw ETH + multiple tokens
 - `accumulatedTreasuryETH()` - View accumulated ETH fees
 - `accumulatedTreasuryTokens(address token)` - View accumulated token fees
-- `emergencyWithdraw(address token)` - Recover stuck funds (respects accumulation)
-  - Pass `address(0)` for ETH
-  - Pass token address for ERC20 tokens
 
 ## Constants
 
 - `MIN_DEPOSIT`: 200000000000000 wei (0.0002 ETH)
 - `MIN_PROVEN_TOKENS`: 100
-- `TREASURY_FEE_PERCENT`: 10
-- `MIN_SESSION_DURATION`: 600 seconds
-- `ABANDONMENT_TIMEOUT`: 86400 seconds (24 hours)
+- `TREASURY_FEE_PERCENT`: 2.5
+- `MIN_SESSION_DURATION`: 1 hour
+- `ABANDONMENT_TIMEOUT`: 24 hours
+- `DISPUTE_WINDOW`: 1 hour
+
+## Migration Notes
+
+### Breaking Changes
+- NodeRegistry `nodes()` now returns 5 fields instead of 4 (added `apiUrl`)
+- JobMarketplace contracts must handle the 5-field struct
+
+### For Existing Hosts
+If you're already registered, add your API URL:
+```javascript
+await nodeRegistry.updateApiUrl('http://your-host.com:8080');
+```
+
+### For SDK Developers
+Update contract addresses and use the new discovery functions:
+```javascript
+const NODE_REGISTRY = '0x2B745E45818e1dE570f253259dc46b91A82E3204';
+const JOB_MARKETPLACE = '0x3B632813c3e31D94Fd552b4aE387DD321eec67Ba';
+```
 
 ## Last Updated
-January 5, 2025 - Treasury accumulation added for maximum gas savings (~80% reduction)
+January 12, 2025 - API endpoint discovery added for automatic host URL resolution

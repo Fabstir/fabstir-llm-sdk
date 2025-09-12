@@ -250,6 +250,138 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Send prompt with WebSocket streaming support
+   */
+  async sendPromptStreaming(
+    sessionId: bigint,
+    prompt: string,
+    onToken?: (token: string) => void
+  ): Promise<string> {
+    if (!this.initialized) {
+      throw new SDKError('SessionManager not initialized', 'SESSION_NOT_INITIALIZED');
+    }
+
+    const session = this.sessions.get(sessionId.toString());
+    if (!session) {
+      throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
+    }
+
+    if (session.status !== 'active') {
+      throw new SDKError(`Session is ${session.status}`, 'SESSION_NOT_ACTIVE');
+    }
+
+    try {
+      // Add prompt to session
+      session.prompts.push(prompt);
+
+      // Get WebSocket URL from endpoint
+      const endpoint = session.endpoint || 'http://localhost:8080';
+      const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://') 
+        ? endpoint 
+        : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
+
+      // Initialize WebSocket client if not already connected
+      if (!this.wsClient || !this.wsClient.isConnected()) {
+        this.wsClient = new WebSocketClient(wsUrl);
+        await this.wsClient.connect();
+      }
+
+      // Collect full response
+      let fullResponse = '';
+      
+      // Set up streaming handler
+      if (onToken) {
+        const unsubscribe = this.wsClient.onMessage((data: any) => {
+          if (data.type === 'token' && data.token) {
+            onToken(data.token);
+            fullResponse += data.token;
+          } else if (data.type === 'complete') {
+            fullResponse = data.response || fullResponse;
+          }
+        });
+
+        // Send message and wait for response
+        const response = await this.wsClient.sendMessage({
+          type: 'inference',
+          prompt,
+          sessionId: sessionId.toString(),
+          model: session.model,
+          stream: true
+        });
+
+        // Clean up handler
+        unsubscribe();
+        
+        // Use collected response or fallback to returned response
+        const finalResponse = fullResponse || response;
+        
+        // Add response to session
+        session.responses.push(finalResponse);
+        
+        // Update storage
+        await this.storageManager.appendMessage(
+          sessionId.toString(),
+          {
+            role: 'user',
+            content: prompt,
+            timestamp: Date.now()
+          }
+        );
+
+        await this.storageManager.appendMessage(
+          sessionId.toString(),
+          {
+            role: 'assistant',
+            content: finalResponse,
+            timestamp: Date.now()
+          }
+        );
+
+        return finalResponse;
+      } else {
+        // Non-streaming mode
+        const response = await this.wsClient.sendMessage({
+          type: 'inference',
+          prompt,
+          sessionId: sessionId.toString(),
+          model: session.model,
+          stream: false
+        });
+
+        // Add response to session
+        session.responses.push(response);
+
+        // Update storage
+        await this.storageManager.appendMessage(
+          sessionId.toString(),
+          {
+            role: 'user',
+            content: prompt,
+            timestamp: Date.now()
+          }
+        );
+
+        await this.storageManager.appendMessage(
+          sessionId.toString(),
+          {
+            role: 'assistant',
+            content: response,
+            timestamp: Date.now()
+          }
+        );
+
+        return response;
+      }
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to send prompt via WebSocket: ${error.message}`,
+        'WS_PROMPT_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
    * Submit checkpoint proof
    */
   async submitCheckpoint(
@@ -328,6 +460,12 @@ export class SessionManager implements ISessionManager {
       session.status = 'completed';
       session.totalTokens = totalTokens;
       session.endTime = Date.now();
+      
+      // Clean up WebSocket connection if active
+      if (this.wsClient && this.wsClient.isConnected()) {
+        await this.wsClient.disconnect();
+        this.wsClient = undefined;
+      }
 
       // Update storage
       const conversation = await this.storageManager.loadConversation(sessionId.toString());

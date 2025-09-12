@@ -109,6 +109,64 @@
   },
   {
     "type": "function",
+    "name": "getNodeApiUrl",
+    "inputs": [
+      {
+        "name": "operator",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getNodeFullInfo",
+    "inputs": [
+      {
+        "name": "operator",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "nodeOperator",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "stakedAmount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "metadata",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "apiUrl",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "getNodeMetadata",
     "inputs": [
       {
@@ -207,6 +265,11 @@
         "name": "metadata",
         "type": "string",
         "internalType": "string"
+      },
+      {
+        "name": "apiUrl",
+        "type": "string",
+        "internalType": "string"
       }
     ],
     "stateMutability": "view"
@@ -230,6 +293,24 @@
     "inputs": [
       {
         "name": "metadata",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "registerNodeWithUrl",
+    "inputs": [
+      {
+        "name": "metadata",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "apiUrl",
         "type": "string",
         "internalType": "string"
       }
@@ -292,6 +373,19 @@
   },
   {
     "type": "function",
+    "name": "updateApiUrl",
+    "inputs": [
+      {
+        "name": "newApiUrl",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "updateMetadata",
     "inputs": [
       {
@@ -302,6 +396,25 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "ApiUrlUpdated",
+    "inputs": [
+      {
+        "name": "operator",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newApiUrl",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      }
+    ],
+    "anonymous": false
   },
   {
     "type": "event",
@@ -340,6 +453,37 @@
       },
       {
         "name": "metadata",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "NodeRegisteredWithUrl",
+    "inputs": [
+      {
+        "name": "operator",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "stakedAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "metadata",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "apiUrl",
         "type": "string",
         "indexed": false,
         "internalType": "string"

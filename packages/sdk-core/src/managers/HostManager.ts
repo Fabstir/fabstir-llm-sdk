@@ -14,6 +14,7 @@ import {
   NodeMetrics
 } from '../types';
 import { ContractManager } from '../contracts/ContractManager';
+import { HostDiscoveryService } from '../services/HostDiscoveryService';
 
 export class HostManager implements IHostManager {
   private contractManager: ContractManager;
@@ -22,6 +23,7 @@ export class HostManager implements IHostManager {
   private nodeRegistryAddress?: string;
   private hostEarningsAddress?: string;
   private fabTokenAddress?: string;
+  private discoveryService?: HostDiscoveryService;
 
   constructor(contractManager: ContractManager) {
     this.contractManager = contractManager;
@@ -42,6 +44,15 @@ export class HostManager implements IHostManager {
     try {
       this.hostEarningsAddress = await this.contractManager.getContractAddress('hostEarnings');
     } catch {}
+    
+    // Initialize discovery service
+    const provider = await signer.provider;
+    if (provider && this.nodeRegistryAddress) {
+      this.discoveryService = new HostDiscoveryService(
+        this.nodeRegistryAddress,
+        provider
+      );
+    }
     
     this.initialized = true;
   }
@@ -407,6 +418,45 @@ export class HostManager implements IHostManager {
     }
     
     return realHosts;
+  }
+
+  /**
+   * Discover API URL for a specific host from blockchain
+   */
+  async discoverHostApiUrl(hostAddress: string): Promise<string> {
+    if (!this.initialized || !this.discoveryService) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      return await this.discoveryService.getNodeApiUrl(hostAddress);
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to discover host API URL: ${error.message}`,
+        'DISCOVERY_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Discover all active hosts with their API URLs
+   */
+  async discoverAllActiveHosts(): Promise<Array<{nodeAddress: string; apiUrl: string}>> {
+    if (!this.initialized || !this.discoveryService) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      const nodes = await this.discoveryService.getAllActiveNodes();
+      return nodes.map(n => ({ nodeAddress: n.nodeAddress, apiUrl: n.apiUrl }));
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to discover active hosts: ${error.message}`,
+        'DISCOVERY_ERROR',
+        { originalError: error }
+      );
+    }
   }
 
   /**

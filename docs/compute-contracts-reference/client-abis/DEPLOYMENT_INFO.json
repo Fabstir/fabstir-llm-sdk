@@ -1,15 +1,18 @@
 {
   "network": "Base Sepolia",
   "chainId": 84532,
-  "lastUpdated": "2025-01-05",
-  "status": "Treasury + Host Accumulation Deployed",
+  "lastUpdated": "2025-01-12",
+  "status": "API Discovery + Treasury Accumulation Deployed",
   "contracts": {
-    "JobMarketplaceFABWithS5": {
-      "address": "0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b",
-      "deploymentDate": "2025-01-05",
-      "status": "ACTIVE - TREASURY ACCUMULATION ADDED",
+    "JobMarketplaceFABWithS5Deploy": {
+      "address": "0x3B632813c3e31D94Fd552b4aE387DD321eec67Ba",
+      "previousAddress": "0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b",
+      "deploymentDate": "2025-01-12",
+      "status": "ACTIVE - API DISCOVERY COMPATIBLE",
       "features": [
-        "Treasury fee accumulation (NEW)",
+        "Compatible with 5-field Node struct (NEW)",
+        "User refunds fixed",
+        "Treasury fee accumulation",
         "Host earnings accumulation",
         "USDC payment settlement working",
         "90% host / 10% treasury distribution",
@@ -19,10 +22,27 @@
         "80% total gas savings"
       ]
     },
+    "NodeRegistryFAB": {
+      "address": "0x2B745E45818e1dE570f253259dc46b91A82E3204",
+      "previousAddress": "0x87516C13Ea2f99de598665e14cab64E191A0f8c4",
+      "deploymentDate": "2025-01-12",
+      "status": "ACTIVE - API DISCOVERY ADDED",
+      "features": [
+        "API endpoint discovery (NEW)",
+        "registerNodeWithUrl() function (NEW)",
+        "updateApiUrl() function (NEW)",
+        "getNodeApiUrl() getter (NEW)",
+        "getNodeFullInfo() getter (NEW)",
+        "FAB token staking",
+        "1000 FAB minimum stake",
+        "Host registration and validation"
+      ]
+    },
     "HostEarnings": {
       "address": "0x908962e8c6CE72610021586f85ebDE09aAc97776",
       "deploymentDate": "2025-01-05",
       "status": "ACTIVE",
+      "authorizedMarketplace": "0x3B632813c3e31D94Fd552b4aE387DD321eec67Ba",
       "features": [
         "Batch withdrawal for hosts",
         "Multi-token support (ETH + USDC)",
@@ -36,16 +56,8 @@
       "features": [
         "Internal verification function fixed",
         "USDC session proof verification working",
-        "Batch verification support"
-      ]
-    },
-    "NodeRegistryFAB": {
-      "address": "0x87516C13Ea2f99de598665e14cab64E191A0f8c4",
-      "status": "ACTIVE",
-      "features": [
-        "FAB token staking",
-        "1000 FAB minimum stake",
-        "Host registration and validation"
+        "Batch verification support",
+        "Minimum 64-byte proof requirement"
       ]
     }
   },
@@ -65,9 +77,24 @@
   },
   "platform": {
     "treasury": "0xbeaBB2a5AEd358aA0bd442dFFd793411519Bdc11",
-    "feePercent": 10,
+    "feePercent": 2.5,
+    "hostPercent": 97.5,
     "minStake": "1000000000000000000000",
     "minStakeFormatted": "1000 FAB"
+  },
+  "apiDiscovery": {
+    "description": "Hosts can now register with API URLs for automatic discovery",
+    "functions": {
+      "registerNodeWithUrl": "Register new host with API endpoint",
+      "updateApiUrl": "Update existing host's API endpoint",
+      "getNodeApiUrl": "Get host's API endpoint URL",
+      "getNodeFullInfo": "Get all host information including API URL"
+    },
+    "example": {
+      "registration": "nodeRegistry.registerNodeWithUrl('llama-2-7b,inference', 'http://host.com:8080')",
+      "update": "nodeRegistry.updateApiUrl('https://new-host.com:8443')",
+      "discovery": "nodeRegistry.getNodeApiUrl(hostAddress)"
+    }
   },
   "treasuryFunctions": {
     "withdrawTreasuryETH": "Withdraw accumulated ETH fees",
@@ -75,6 +102,14 @@
     "withdrawAllTreasuryFees": "Batch withdraw all fees",
     "accumulatedTreasuryETH": "View accumulated ETH",
     "accumulatedTreasuryTokens": "View accumulated tokens"
+  },
+  "migrationNotes": {
+    "forHosts": "Existing hosts should call updateApiUrl() to add their endpoint",
+    "forClients": "Update SDK to use new contract addresses and discovery functions",
+    "breakingChanges": [
+      "NodeRegistry nodes() now returns 5 fields instead of 4",
+      "JobMarketplace must handle 5-field struct from NodeRegistry"
+    ]
   },
   "rpcEndpoints": [
     "https://sepolia.base.org",

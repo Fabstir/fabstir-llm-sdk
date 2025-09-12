@@ -137,11 +137,12 @@ graph TD
 
 ### Current Status
 ```yaml
-overall_progress: 85%
-current_phase: Phase 6 Complete, S5 Integration Fixed
-current_sub_phase: Ready for Phase 7 (Testing) or Phase 8 (Documentation)
+overall_progress: 90%
+current_phase: Phase 9 Complete (S5 Seed Caching), Ready for Phase 10
+current_sub_phase: Phase 10.1 - Update Contract ABIs for Host Discovery
 last_updated: 2025-09-12
-s5_status: FULLY WORKING - Connected and initialized
+s5_status: FULLY WORKING with deterministic seed caching
+payment_flow: USDC deposit model with Base Account Kit working
 ```
 
 ### Phase Completion Status
@@ -473,6 +474,57 @@ See `/workspace/docs/IMPLEMENTATION5.md` Phase 9 for plan to:
 
 ---
 
+## 15. TODAY'S SESSION ACCOMPLISHMENTS (2025-09-12)
+
+### S5 Seed Caching Implementation (Phase 9 Complete)
+- **Created**: `/workspace/packages/sdk-core/src/utils/s5-seed-derivation.ts`
+  - Deterministic seed from wallet signature
+  - LocalStorage caching with wallet-specific keys
+  - No more popups after first generation!
+- **Updated**: FabstirSDKCore to use `getOrGenerateS5Seed()`
+- **Cache Key Format**: `fabstir_s5_seed_{walletAddress}_v1`
+
+### Base Account Kit Integration
+- **Smart Wallet Support**: Gasless transactions via `wallet_sendCalls`
+- **Deposit Model**: User deposits $2, uses $0.20/session, keeps refund
+- **Sub-account Architecture**: Primary → Sub-account → Session
+- **Test Page**: `apps/harness/pages/base-usdc-mvp-flow-sdk.test.tsx`
+
+### Unified Payment Flow Demo
+- **Created**: `apps/harness/components/UnifiedPaymentFlow.tsx`
+- **Created**: `apps/harness/pages/unified-payment-demo.tsx`
+- **Features**:
+  - Auto-detects EOA vs Smart Wallet
+  - Shows appropriate payment methods
+  - Credit card for smart wallets, USDC for EOA
+
+### New Integration Phases Added (10-12)
+- **Phase 10**: Host Discovery Integration
+  - NodeRegistry API URL storage
+  - Automatic endpoint discovery
+  - No more hardcoded URLs!
+- **Phase 11**: WebSocket Streaming Integration
+  - Direct connection to `/v1/ws`
+  - Real-time token streaming
+  - InferenceManager for direct queries
+- **Phase 12**: End-to-End Testing & Documentation
+
+### Key Files Modified Today
+1. `packages/sdk-core/src/utils/s5-seed-derivation.ts` (NEW)
+2. `packages/sdk-core/src/FabstirSDKCore.ts` (seed caching)
+3. `apps/harness/pages/base-usdc-mvp-flow-sdk.test.tsx` (pre-cache seeds)
+4. `apps/harness/components/UnifiedPaymentFlow.tsx` (NEW)
+5. `apps/harness/pages/unified-payment-demo.tsx` (NEW)
+6. `docs/IMPLEMENTATION5.md` (Phases 10-12 added)
+
+### Critical Info for Next Session
+- **WebSocket Endpoint**: `ws://[host]:8080/v1/ws`
+- **New NodeRegistry Functions**: `getNodeApiUrl()`, `registerNodeWithUrl()`
+- **New ABI Location**: `docs/compute-contracts-reference/client-abis/NodeRegistryFAB-CLIENT-ABI.json`
+- **Must Update**: `src/contracts/abis/NodeRegistryFAB-CLIENT-ABI.json`
+
+---
+
 ## REFERENCE
  1. /workspace/docs/PHASE1_DEPENDENCY_ANALYSIS.md - Comprehensive 300+ line analysis with:
     - Full dependency mapping
@@ -492,9 +544,15 @@ See `/workspace/docs/IMPLEMENTATION5.md` Phase 9 for plan to:
 
 ---
 
-**Last Updated**: 2025-09-12
-**Current Session Goal**: S5 Integration Fixed, USDC Subscription Flow Working
-**Next Action**: Phase 7 - Testing and Validation or Phase 9 - S5 Seed Derivation
+**Last Updated**: 2025-09-12 (End of Session)
+**Session Accomplishments**: 
+- ✅ Implemented deterministic S5 seed caching (no more popups!)
+- ✅ Base Account Kit gasless payments working
+- ✅ Deposit model: $2 deposit, $0.20 per session, refund to sub-account
+- ✅ Created unified payment flow for EOA and smart wallets
+- ✅ Added WebSocket & Host Discovery phases to IMPLEMENTATION5.md
+
+**Next Action**: Phase 10.1 - Update Contract ABIs for Host Discovery
 
 Do not use `npm` that causes problems in this project with dependency hoisting; sdk must not have dependencies it doesn't use cluttering up its node_modules. Use `pnpm` as its been configured to not hoist dependencies.
 
