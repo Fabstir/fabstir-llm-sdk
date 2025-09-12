@@ -57,38 +57,34 @@ export default function Run() {
       setLog(`connected: ${from.slice(0, 10)}...`);
 
       // 3) optional: check capabilities for this chain
-      await provider.request({ method: "wallet_getCapabilities", params: [[CHAIN_HEX]] });
+      // Commented out for now as it's causing parameter errors
+      // await provider.request({ 
+      //   method: "wallet_getCapabilities", 
+      //   params: [{ account: from, chainIds: [CHAIN_HEX] }] 
+      // });
 
-      // 4) batch calls (approve USDC + create session job)
-      const depositAmount = parseUnits("2", 6); // 2 USDC
-      const pricePerToken = parseUnits("0.002", 6); // 0.002 USDC per token
+      // 4) Simple USDC transfer for testing wallet connection
+      const transferAmount = parseUnits("0.1", 6); // 0.1 USDC
       
-      const approveData = encodeFunctionData({
-        abi: erc20ApproveAbi, 
-        functionName: "approve",
-        args: [JOB_MARKETPLACE, depositAmount]
-      });
-
-      const createSessionData = encodeFunctionData({
-        abi: createSessionJobAbi,
-        functionName: "createSessionJobWithToken",
-        args: [
-          "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7", // host address
-          USDC,
-          depositAmount,
-          pricePerToken,
-          BigInt(86400), // 24 hour duration
-          BigInt(100) // proof interval
-        ]
+      // Transfer USDC to TEST_HOST_1_ADDRESS as a simple test
+      const transferData = encodeFunctionData({
+        abi: [{
+          type: "function",
+          name: "transfer",
+          stateMutability: "nonpayable",
+          inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }],
+          outputs: [{ name: "", type: "bool" }]
+        }],
+        functionName: "transfer",
+        args: ["0x4594f755f593b517bb3194f4dec20c48a3f04504" as `0x${string}`, transferAmount] // TEST_HOST_1_ADDRESS (lowercase)
       });
 
       const calls = [
-        { to: USDC, data: approveData as `0x${string}` },
-        { to: JOB_MARKETPLACE, data: createSessionData as `0x${string}` }
+        { to: USDC, data: transferData as `0x${string}` }
       ];
 
       // 5) send wallet-led batch via EIP-5792 v2 from the Sub-account
-      const { id } = await provider.request({
+      const result = await provider.request({
         method: "wallet_sendCalls",
         params: [{
           version: "2.0.0",
@@ -97,7 +93,16 @@ export default function Run() {
           calls,
           capabilities: { atomic: { required: true } } // v2 shape
         }]
-      }) as { id: string };
+      });
+      
+      console.log("wallet_sendCalls result:", result);
+      
+      // The result might be a string ID directly or an object with an id property
+      const id = typeof result === 'string' ? result : (result as any).id;
+      
+      if (!id) {
+        throw new Error("No transaction ID returned from wallet_sendCalls");
+      }
 
       setLog(`submitted: ${id} — polling…`);
 
@@ -105,7 +110,7 @@ export default function Run() {
       for (let i = 0; i < 60; i++) { // Max 60 attempts (~ 1 minute)
         const status = await provider.request({
           method: "wallet_getCallsStatus",
-          params: [{ id }]  // Pass as object
+          params: [id]  // Pass id directly as string
         }) as { status: string | number; receipts?: Array<{ transactionHash?: string }> };
 
         // Check if status is CONFIRMED (200-series code) - handle both string and numeric
