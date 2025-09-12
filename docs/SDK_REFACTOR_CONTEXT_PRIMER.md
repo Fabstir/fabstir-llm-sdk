@@ -137,10 +137,11 @@ graph TD
 
 ### Current Status
 ```yaml
-overall_progress: 80%
-current_phase: Phase 6 Complete
+overall_progress: 85%
+current_phase: Phase 6 Complete, S5 Integration Fixed
 current_sub_phase: Ready for Phase 7 (Testing) or Phase 8 (Documentation)
-last_updated: 2025-01-11
+last_updated: 2025-09-12
+s5_status: FULLY WORKING - Connected and initialized
 ```
 
 ### Phase Completion Status
@@ -411,7 +412,53 @@ The refactor is complete when:
 
 ---
 
-## 13. CONTACT & RESOURCES
+## 13. S5 INTEGRATION FIXES (COMPLETED)
+
+### Problem Solved
+S5.js was hanging indefinitely when trying to connect, blocking the entire SDK initialization.
+
+### Root Causes Found & Fixed
+
+1. **Wrong Portal URL in .env.local**
+   - **Was**: `NEXT_PUBLIC_S5_PORTAL_URL=https://s5.cx` (incorrect HTTP URL)
+   - **Fixed**: `NEXT_PUBLIC_S5_PORTAL_URL=wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p`
+
+2. **Invalid Seed Phrase Generation**
+   - **Was**: Generating fake words like "word01 word02..." 
+   - **Fixed**: Using valid 15-word S5 seed phrase from config
+   - **Note**: S5 uses custom format (13 seed + 2 checksum), NOT BIP39
+
+3. **No Timeout Protection**
+   - **Was**: S5.create() would hang forever if connection failed
+   - **Fixed**: Added 5-second timeout with Promise.race()
+
+### Current Implementation
+```typescript
+// StorageManager now has timeout protection
+const s5CreatePromise = S5.create({ initialPeers: [this.s5PortalUrl] });
+const timeoutPromise = new Promise((_, reject) => {
+  setTimeout(() => reject(new Error('S5 timeout')), 5000);
+});
+this.s5Client = await Promise.race([s5CreatePromise, timeoutPromise]);
+```
+
+### S5 Status After Fixes
+- ✅ S5 client connects successfully
+- ✅ Identity recovered from seed phrase
+- ✅ StorageManager fully initialized
+- ✅ Account setup: `s5.vup.cx:tHnbXE1Sm2fwj7j3`
+- ✅ Graceful fallback if S5 fails (SDK continues for payments)
+
+### Future Work: Phase 9 - S5 Seed Derivation
+See `/workspace/docs/IMPLEMENTATION5.md` Phase 9 for plan to:
+- Derive valid S5 seed from user signature entropy
+- Implement S5's custom wordlist and checksum algorithm
+- Remove hardcoded seed phrases
+- Make each user's S5 identity unique and deterministic
+
+---
+
+## 14. CONTACT & RESOURCES
 
 ### Key Documentation
 - Refactor Plan: `/workspace/docs/IMPLEMENTATION5.md`
@@ -445,9 +492,9 @@ The refactor is complete when:
 
 ---
 
-**Last Updated**: 2025-01-11
-**Current Session Goal**: Phase 6 Complete - Unified API Created
-**Next Action**: Phase 7 - Testing and Validation or Phase 8 - Documentation and Release
+**Last Updated**: 2025-09-12
+**Current Session Goal**: S5 Integration Fixed, USDC Subscription Flow Working
+**Next Action**: Phase 7 - Testing and Validation or Phase 9 - S5 Seed Derivation
 
 Do not use `npm` that causes problems in this project with dependency hoisting; sdk must not have dependencies it doesn't use cluttering up its node_modules. Use `pnpm` as its been configured to not hoist dependencies.
 
@@ -457,3 +504,10 @@ The source of truth for all contract ABIs are in the `src/contracts/abis` folder
 
 This harness page that works from end to end, does have low level contract interactions which obviously the flow functionality must be abstracted to sdk and manager wrapper classes as that is what a UI developer has access to, but it serves as a useful reference: 
 `apps/harness/pages/base-usdc-mvp-flow.test.tsx`
+
+When working with UI, please read `/root/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-sdk/docs/CDP_BRIDGE_SETUP.md` so as to connect to user's host browser for quicker debugging.
+
+The goal is to ensure that sdk exposes all functionality necessary for my UI developer to build a production ready UI application as they will have access to nothing else but the sdk to do so.
+
+Please read to bring context memory up to speed
+`docs/SDK_REFACTOR_CONTEXT_PRIMER.md`
