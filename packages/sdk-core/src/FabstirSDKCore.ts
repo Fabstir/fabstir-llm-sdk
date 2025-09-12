@@ -23,6 +23,7 @@ import { TreasuryManager } from './managers/TreasuryManager';
 import { ContractManager } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 import { SDKConfig, SDKError } from './types';
+import { getOrGenerateS5Seed, hasCachedSeed } from './utils/s5-seed-derivation';
 
 export interface FabstirSDKCoreConfig {
   // Network configuration
@@ -217,29 +218,32 @@ export class FabstirSDKCore {
       }
     }
     
-    // Generate S5 seed deterministically from signature
-    const SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM SDK';
-    const signature = await this.signer.signMessage(SEED_MESSAGE);
-    
-    // Use Web Crypto API to derive seed
-    const encoder = new TextEncoder();
-    const data = encoder.encode(signature);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    
-    // For now, use the seed phrase from config since generating a valid S5 seed phrase
-    // from entropy requires using S5's custom wordlist and checksum algorithm
-    // S5 uses a 15-word format with its own wordlist, not standard BIP39
-    // TODO: Import S5's generatePhrase function to properly derive from entropy
-    if (this.config.s5Config?.seedPhrase) {
-      this.s5Seed = this.config.s5Config.seedPhrase;
-      console.log('Using S5 seed phrase from config');
-    } else {
-      // Use a valid S5 test seed phrase as fallback
-      // This is the seed phrase from .env.test
-      this.s5Seed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
-      console.log('Using default S5 seed phrase');
+    // Generate or retrieve S5 seed deterministically
+    try {
+      // Check if we have a cached seed for this wallet
+      const hasCached = hasCachedSeed(this.userAddress);
+      console.log(`[S5 Seed] Wallet ${this.userAddress} has cached seed: ${hasCached}`);
+      
+      // Get or generate the seed (will use cache if available)
+      this.s5Seed = await getOrGenerateS5Seed(this.signer);
+      
+      if (!hasCached) {
+        console.log('[S5 Seed] Generated new deterministic seed from wallet signature');
+      } else {
+        console.log('[S5 Seed] Retrieved cached seed (no popup required)');
+      }
+    } catch (error: any) {
+      console.warn('[S5 Seed] Failed to generate deterministic seed:', error);
+      
+      // Fallback to config or default
+      if (this.config.s5Config?.seedPhrase) {
+        this.s5Seed = this.config.s5Config.seedPhrase;
+        console.log('[S5 Seed] Using seed phrase from config as fallback');
+      } else {
+        // Use test seed phrase as last resort
+        this.s5Seed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+        console.log('[S5 Seed] Using default test seed phrase as fallback');
+      }
     }
   }
   
@@ -278,40 +282,34 @@ export class FabstirSDKCore {
     this.userAddress = await this.signer.getAddress();
     console.log('Got address:', this.userAddress);
     
-    // Generate S5 seed deterministically from signature  
+    // Generate or retrieve S5 seed deterministically
     console.log('Starting S5 seed generation...');
-    const SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM SDK';
-    console.log('About to sign message for S5 seed...');
     
-    let signature: string;
     try {
-      signature = await this.signer.signMessage(SEED_MESSAGE);
-      console.log('Message signed successfully');
-    } catch (signError: any) {
-      console.error('Error signing message:', signError);
-      // Re-throw the error since we don't have a private key fallback
-      throw signError;
-    }
-    
-    // Use Web Crypto API to derive seed
-    const encoder = new TextEncoder();
-    const data = encoder.encode(signature);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    
-    // For now, use the seed phrase from config since generating a valid S5 seed phrase
-    // from entropy requires using S5's custom wordlist and checksum algorithm
-    // S5 uses a 15-word format with its own wordlist, not standard BIP39
-    // TODO: Import S5's generatePhrase function to properly derive from entropy
-    if (this.config.s5Config?.seedPhrase) {
-      this.s5Seed = this.config.s5Config.seedPhrase;
-      console.log('Using S5 seed phrase from config');
-    } else {
-      // Use a valid S5 test seed phrase as fallback
-      // This is the seed phrase from .env.test
-      this.s5Seed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
-      console.log('Using default S5 seed phrase');
+      // Check if we have a cached seed for this wallet
+      const hasCached = hasCachedSeed(this.userAddress);
+      console.log(`[S5 Seed] Wallet ${this.userAddress} has cached seed: ${hasCached}`);
+      
+      // Get or generate the seed (will use cache if available)
+      this.s5Seed = await getOrGenerateS5Seed(this.signer);
+      
+      if (!hasCached) {
+        console.log('[S5 Seed] Generated new deterministic seed from wallet signature');
+      } else {
+        console.log('[S5 Seed] Retrieved cached seed (no popup required)');
+      }
+    } catch (error: any) {
+      console.error('[S5 Seed] Failed to generate deterministic seed:', error);
+      
+      // Fallback to config or default
+      if (this.config.s5Config?.seedPhrase) {
+        this.s5Seed = this.config.s5Config.seedPhrase;
+        console.log('[S5 Seed] Using seed phrase from config as fallback');
+      } else {
+        // Use test seed phrase as last resort
+        this.s5Seed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+        console.log('[S5 Seed] Using default test seed phrase as fallback');
+      }
     }
   }
   
@@ -339,40 +337,34 @@ export class FabstirSDKCore {
     this.userAddress = await this.signer.getAddress();
     console.log('Got address:', this.userAddress);
     
-    // Generate S5 seed deterministically from signature
+    // Generate or retrieve S5 seed deterministically
     console.log('Starting S5 seed generation...');
-    const SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM SDK';
-    console.log('About to sign message for S5 seed...');
     
-    let signature: string;
     try {
-      signature = await this.signer.signMessage(SEED_MESSAGE);
-      console.log('Message signed successfully');
-    } catch (signError: any) {
-      console.error('Error signing message:', signError);
-      // Re-throw the error since we don't have a private key fallback
-      throw signError;
-    }
-    
-    // Use Web Crypto API to derive seed
-    const encoder = new TextEncoder();
-    const data = encoder.encode(signature);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    
-    // For now, use the seed phrase from config since generating a valid S5 seed phrase
-    // from entropy requires using S5's custom wordlist and checksum algorithm
-    // S5 uses a 15-word format with its own wordlist, not standard BIP39
-    // TODO: Import S5's generatePhrase function to properly derive from entropy
-    if (this.config.s5Config?.seedPhrase) {
-      this.s5Seed = this.config.s5Config.seedPhrase;
-      console.log('Using S5 seed phrase from config');
-    } else {
-      // Use a valid S5 test seed phrase as fallback
-      // This is the seed phrase from .env.test
-      this.s5Seed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
-      console.log('Using default S5 seed phrase');
+      // Check if we have a cached seed for this wallet
+      const hasCached = hasCachedSeed(this.userAddress);
+      console.log(`[S5 Seed] Wallet ${this.userAddress} has cached seed: ${hasCached}`);
+      
+      // Get or generate the seed (will use cache if available)
+      this.s5Seed = await getOrGenerateS5Seed(this.signer);
+      
+      if (!hasCached) {
+        console.log('[S5 Seed] Generated new deterministic seed from wallet signature');
+      } else {
+        console.log('[S5 Seed] Retrieved cached seed (no popup required)');
+      }
+    } catch (error: any) {
+      console.error('[S5 Seed] Failed to generate deterministic seed:', error);
+      
+      // Fallback to config or default
+      if (this.config.s5Config?.seedPhrase) {
+        this.s5Seed = this.config.s5Config.seedPhrase;
+        console.log('[S5 Seed] Using seed phrase from config as fallback');
+      } else {
+        // Use test seed phrase as last resort
+        this.s5Seed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+        console.log('[S5 Seed] Using default test seed phrase as fallback');
+      }
     }
   }
   

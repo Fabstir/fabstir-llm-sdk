@@ -20,6 +20,7 @@ import { createBaseAccountSDK } from "@base-org/account";
 import { encodeFunctionData, parseUnits, createPublicClient, http, getAddress, formatUnits } from "viem";
 import { ethers } from 'ethers';
 import { FabstirSDKCore } from '@fabstir/sdk-core';
+import { cacheSeed, hasCachedSeed } from '../../../packages/sdk-core/src/utils/s5-seed-derivation';
 import type { 
   PaymentManager, 
   SessionManager, 
@@ -196,6 +197,17 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
   // Read initial balances on mount (with delay for SDK initialization)
   useEffect(() => {
+    // Pre-cache S5 seed for TEST_USER_1 to avoid popup
+    const userAddress = TEST_USER_1_ADDRESS.toLowerCase();
+    if (!hasCachedSeed(userAddress)) {
+      // Pre-cache the default test seed to avoid signing popup
+      const testSeed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+      cacheSeed(userAddress, testSeed);
+      console.log(`[S5 Seed] Pre-cached test seed for ${userAddress} to avoid popup`);
+    } else {
+      console.log(`[S5 Seed] Seed already cached for ${userAddress}`);
+    }
+    
     const timer = setTimeout(() => {
       console.log("Reading initial balances...");
       readAllBalances();
@@ -1243,7 +1255,20 @@ export default function BaseUsdcMvpFlowSDKTest() {
           },
           
           async signMessage(message: string | Uint8Array): Promise<string> {
-            // For message signing, we need to use the primary account
+            // Check if this is for S5 seed generation
+            const messageStr = typeof message === 'string' ? message : ethers.toUtf8String(message);
+            if (messageStr.includes('Generate S5 seed')) {
+              // If we have a cached seed, return a deterministic mock signature
+              // This avoids the popup since the SDK will use the cached seed anyway
+              const subAccountLower = subAccount.toLowerCase();
+              if (hasCachedSeed(subAccountLower)) {
+                console.log('[S5 Seed] Returning mock signature - seed is already cached');
+                // Return a deterministic "signature" that will be ignored since we have cache
+                return '0x' + '0'.repeat(130); // Valid signature format
+              }
+            }
+            
+            // For other messages or if no cache, use the primary account
             // This is used for S5 seed generation
             const signature = await provider.request({
               method: "personal_sign",
@@ -1341,10 +1366,18 @@ export default function BaseUsdcMvpFlowSDKTest() {
         };
         addLog(`SDK will sign transactions as sub-account: ${subAccount}`);
         
+        // Pre-cache seed for sub-account to avoid popup
+        const subAccountLower = subAccount.toLowerCase();
+        if (!hasCachedSeed(subAccountLower)) {
+          const testSeed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+          cacheSeed(subAccountLower, testSeed);
+          addLog(`Pre-cached S5 seed for sub-account to avoid popup`);
+        }
+        
         await sdk!.authenticate('signer', { 
           signer: subAccountSigner as any
         });
-        addLog("✅ SDK authenticated with sub-account signer");
+        addLog("✅ SDK authenticated with sub-account signer (no S5 popup!)");
         addLog("🎉 Transactions will use sub-account auto-spend (no popups!)");
       }
       
