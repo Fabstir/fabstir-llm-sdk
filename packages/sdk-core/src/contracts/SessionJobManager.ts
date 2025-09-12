@@ -60,16 +60,27 @@ export class SessionJobManager {
     // Convert deposit amount to token units (USDC has 6 decimals)
     const depositAmount = ethers.parseUnits(params.sessionConfig.depositAmount, 6);
     
+    // Calculate minimum required balance (actual session cost)
+    // pricePerToken is in units of 1/1000000 USDC per token
+    // proofInterval is the number of tokens per session
+    const actualCost = BigInt(params.sessionConfig.pricePerToken) * BigInt(params.sessionConfig.proofInterval);
+    const minRequired = actualCost; // This is the actual amount that will be consumed
+    
     // Check USDC balance
     const userAddress = await this.signer.getAddress();
     const balance = await usdcToken.balanceOf(userAddress) as bigint;
     
-    if (balance < depositAmount) {
+    // For deposit model: only check if we have enough for the actual session cost
+    if (balance < minRequired) {
       throw new Error(
-        `Insufficient USDC balance. Required: ${params.sessionConfig.depositAmount}, ` +
+        `Insufficient USDC balance for session. Required: ${ethers.formatUnits(minRequired, 6)}, ` +
         `Available: ${ethers.formatUnits(balance, 6)}`
       );
     }
+    
+    // Use either the full deposit amount or the current balance, whichever is smaller
+    const amountToUse = balance < depositAmount ? balance : depositAmount;
+    console.log(`Using ${ethers.formatUnits(amountToUse, 6)} USDC for session (balance: ${ethers.formatUnits(balance, 6)})`)
 
     // Approve USDC spending
     const jobMarketplaceAddress = await jobMarketplace.getAddress();
@@ -83,11 +94,11 @@ export class SessionJobManager {
     console.log('Current USDC allowance:', ethers.formatUnits(currentAllowance, 6));
     console.log('Required deposit:', ethers.formatUnits(depositAmount, 6));
     
-    if (currentAllowance < depositAmount) {
+    if (currentAllowance < amountToUse) {
       console.log('Approving USDC spending...');
       const approveTx = await usdcToken.approve(
         jobMarketplaceAddress,
-        depositAmount
+        amountToUse
       );
       const approveReceipt = await approveTx.wait();
       console.log('USDC approval complete:', approveReceipt.hash);
@@ -103,9 +114,9 @@ export class SessionJobManager {
       ) as bigint;
       console.log('New USDC allowance after approval:', ethers.formatUnits(newAllowance, 6));
       
-      if (newAllowance < depositAmount) {
+      if (newAllowance < amountToUse) {
         throw new Error(
-          `Approval failed. Required: ${ethers.formatUnits(depositAmount, 6)}, ` +
+          `Approval failed. Required: ${ethers.formatUnits(amountToUse, 6)}, ` +
           `Got: ${ethers.formatUnits(newAllowance, 6)}`
         );
       }
@@ -113,11 +124,11 @@ export class SessionJobManager {
       console.log('Sufficient allowance already exists');
     }
 
-    // Create session job with USDC token
+    // Create session job with USDC token (using available balance)
     const tx = await jobMarketplace.createSessionJobWithToken(
       params.provider, // host address
       await usdcToken.getAddress(), // token address (USDC)
-      depositAmount, // deposit amount
+      amountToUse, // deposit amount (may be less than full $2 if using existing balance)
       params.sessionConfig.pricePerToken, // price per token
       params.sessionConfig.duration, // max duration
       params.sessionConfig.proofInterval // proof interval

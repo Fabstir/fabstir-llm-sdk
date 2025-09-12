@@ -72,3 +72,4 @@ dist/
 !jest.config.js
 !vitest.config.js
 test-reports/
+*.cjs

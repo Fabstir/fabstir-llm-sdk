@@ -1,3 +1,20 @@
+/**
+ * USDC Payment Flow Test Page - Using FabstirSDKCore
+ * This test page demonstrates the complete flow using SDK managers instead of direct contract calls
+ * 
+ * Key Interaction Patterns (Primary → Sub-account → Session):
+ * 1. Primary account holds main USDC balance ($4 min for smooth operation)
+ * 2. Sub-account needs only $0.20 minimum to run a session (actual usage)
+ * 3. If sub has >= $0.20, session runs gasless (no popups!)
+ * 4. Session deposits $2 to contract, uses $0.20, refunds $1.80 to sub
+ * 5. Refund stays in sub-account for future sessions (deposit model)
+ * 
+ * Payment Distribution (via JobMarketplace contract):
+ * - Host receives: $0.18 (90% of $0.20 consumed)
+ * - Treasury receives: $0.02 (10% of $0.20 consumed)
+ * - Sub-account keeps: $1.80 refund for next session
+ */
+
 import { useState, useEffect } from 'react';
 import { createBaseAccountSDK } from "@base-org/account";
 import { encodeFunctionData, parseUnits, createPublicClient, http, getAddress, formatUnits } from "viem";
@@ -47,6 +64,17 @@ const erc20BalanceOfAbi = [{
   stateMutability: "view",
   inputs: [{ name: "account", type: "address" }],
   outputs: [{ name: "", type: "uint256" }]
+}] as const;
+
+const erc20TransferAbi = [{
+  type: "function",
+  name: "transfer",
+  stateMutability: "nonpayable",
+  inputs: [
+    { name: "to", type: "address" },
+    { name: "amount", type: "uint256" }
+  ],
+  outputs: [{ name: "", type: "bool" }]
 }] as const;
 
 interface Balances {
@@ -1070,14 +1098,257 @@ export default function BaseUsdcMvpFlowSDKTest() {
     setLoading(true);
     
     try {
-      // Step 1: Connect & Fund
-      addLog("=== Step 1: Connect & Fund ===");
+      // Step 1: Connect & Fund with Base Account Kit
+      addLog("=== Step 1: Connect & Fund (Base Account Kit) ===");
       setStepStatus(prev => ({ ...prev, 1: 'in-progress' }));
       
-      // Authenticate SDK
-      await sdk!.authenticate('privatekey', { privateKey: TEST_USER_1_PRIVATE_KEY });
+      // Check if Base Account SDK is available
+      const provider = (window as any).__basProvider;
+      let primaryAccount: string = "";
+      let subAccount: string = "";
       
-      // Get managers directly from SDK
+      if (!provider) {
+        // Fallback to direct wallet if Base Account SDK not available
+        addLog("⚠️ Base Account SDK not available, using direct wallet");
+        await sdk!.authenticate('privatekey', { privateKey: TEST_USER_1_PRIVATE_KEY });
+        primaryAccount = TEST_USER_1_ADDRESS;
+        subAccount = TEST_USER_1_ADDRESS;
+        setPrimaryAddr(primaryAccount);
+        setSubAddr(subAccount);
+      } else {
+        // Use Base Account Kit for gasless transactions
+        addLog("🚀 Using Base Account Kit for gasless transactions");
+        
+        // Connect to Base Account
+        const accounts = await provider.request({ 
+          method: "eth_requestAccounts", 
+          params: [] 
+        }) as `0x${string}`[];
+        primaryAccount = accounts[0]!;
+        setPrimaryAddr(primaryAccount);
+        addLog(`Connected to primary account: ${primaryAccount}`);
+        
+        // Set up ethers wallet for funding operations
+        const ethersProvider = new ethers.JsonRpcProvider(RPC_URL);
+        const wallet = new ethers.Wallet(TEST_USER_1_PRIVATE_KEY, ethersProvider);
+        
+        const usdcContract = new ethers.Contract(USDC, [
+          "function transfer(address to, uint256 amount) returns (bool)",
+          "function balanceOf(address) view returns (uint256)"
+        ], wallet);
+        
+        // Check primary account balance
+        const primaryBalance = await usdcContract.balanceOf(primaryAccount);
+        const primaryBalanceFormatted = formatUnits(primaryBalance, 6);
+        addLog(`Primary balance: $${primaryBalanceFormatted} USDC`);
+        
+        // Ensure primary has enough for multiple runs ($4 min)
+        const minBalance = parseUnits("4", 6);
+        const primaryBalanceBig = BigInt(primaryBalance.toString());
+        const minBalanceBig = BigInt(minBalance.toString());
+        
+        if (primaryBalanceBig < minBalanceBig) {
+          // Top up primary from user account
+          const topUpAmount = minBalanceBig - primaryBalanceBig;
+          const topUpFormatted = formatUnits(topUpAmount, 6);
+          
+          addLog(`📤 Topping up primary with $${topUpFormatted} USDC...`);
+          addLog(`(This enables multiple gasless runs)`);
+          
+          const tx = await usdcContract.transfer(primaryAccount, topUpAmount);
+          await tx.wait();
+          addLog(`✅ Primary topped up to $4.00 USDC`);
+        } else {
+          addLog(`✅ Primary has sufficient funds for multiple runs`);
+          addLog(`🎉 No popup needed - running gasless!`);
+        }
+        
+        // Get or create sub-account
+        addLog("Setting up sub-account with auto-spend permissions...");
+        subAccount = await ensureSubAccount(provider, primaryAccount as `0x${string}`);
+        setSubAddr(subAccount);
+        addLog(`Sub-account: ${subAccount}`);
+        
+        // Check sub-account balance and fund if needed
+        const subBalance = await usdcContract.balanceOf(subAccount);
+        const subBalanceFormatted = formatUnits(subBalance, 6);
+        addLog(`Sub-account balance: $${subBalanceFormatted} USDC`);
+        
+        // We only use $0.20 per session (100 tokens at 0.002 USDC/token)
+        const minSessionFunds = parseUnits("0.20", 6);  // Actual usage per session
+        const idealFunds = parseUnits("2", 6);           // Deposit amount for contract
+        
+        const subBalanceBig = BigInt(subBalance.toString());
+        const minSessionFundsBig = BigInt(minSessionFunds.toString());
+        const idealFundsBig = BigInt(idealFunds.toString());
+        
+        if (subBalanceBig >= minSessionFundsBig) {
+          // Has enough for this session - no transfer needed!
+          addLog(`✅ Sub has funds for session ($${subBalanceFormatted} >= $0.20)`);
+          addLog(`🎉 Running gasless - no transfers needed!`);
+          addLog(`   Session will consume: $0.20 (100 tokens)`);
+          addLog(`   Refund after session: $1.80 (for future use)`);
+        } else {
+          // Sub-account needs funding to reach ideal balance
+          const neededAmount = idealFundsBig - subBalanceBig;
+          const neededFormatted = formatUnits(neededAmount, 6);
+          
+          addLog(`📤 Funding sub-account with $${neededFormatted} USDC...`);
+          addLog(`   (Deposit: $2.00, Actual usage: $0.20)`);
+          
+          const fundSubData = encodeFunctionData({
+            abi: erc20TransferAbi,
+            functionName: "transfer",
+            args: [subAccount as `0x${string}`, neededAmount]
+          });
+          
+          const fundResponse = await provider.request({
+            method: "wallet_sendCalls",
+            params: [{
+              version: "2.0.0",
+              chainId: CHAIN_HEX,
+              from: primaryAccount as `0x${string}`,
+              calls: [{ 
+                to: USDC, 
+                data: fundSubData as `0x${string}` 
+              }],
+              capabilities: { 
+                atomic: { required: true }
+              }
+            }]
+          });
+          
+          addLog(`Transfer initiated: ${fundResponse}`);
+          
+          // Wait for confirmation
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          addLog(`✅ Sub-account funded to $2.00 USDC`);
+          addLog(`   Will use: $0.20 (host: $0.18, treasury: $0.02)`);
+          addLog(`   Will keep: $1.80 for future sessions`);
+        }
+        
+        // Authenticate SDK with Base Account provider for gasless signing
+        addLog("Authenticating SDK with Base Account provider...");
+        
+        // Create a custom signer that uses sub-account for transactions
+        const subAccountSigner = {
+          provider: new ethers.BrowserProvider(provider),
+          
+          async getAddress(): Promise<string> {
+            return subAccount;
+          },
+          
+          async signTransaction(tx: ethers.TransactionRequest): Promise<string> {
+            throw new Error("signTransaction not supported - use sendTransaction");
+          },
+          
+          async signMessage(message: string | Uint8Array): Promise<string> {
+            // For message signing, we need to use the primary account
+            // This is used for S5 seed generation
+            const signature = await provider.request({
+              method: "personal_sign",
+              params: [
+                typeof message === 'string' ? message : ethers.hexlify(message),
+                primaryAccount
+              ]
+            });
+            return signature;
+          },
+          
+          async sendTransaction(tx: ethers.TransactionRequest): Promise<ethers.TransactionResponse> {
+            // Use wallet_sendCalls with sub-account as from address
+            const calls = [{
+              to: tx.to as `0x${string}`,
+              data: tx.data as `0x${string}`,
+              value: tx.value ? `0x${BigInt(tx.value).toString(16)}` : undefined
+            }];
+            
+            console.log('Sending transaction via wallet_sendCalls:', {
+              from: subAccount,
+              to: tx.to,
+              data: tx.data?.slice(0, 10) + '...' // Log function selector
+            });
+            
+            const response = await provider.request({
+              method: "wallet_sendCalls",
+              params: [{
+                version: "2.0.0",
+                chainId: CHAIN_HEX,
+                from: subAccount as `0x${string}`,
+                calls: calls,
+                capabilities: { 
+                  atomic: { required: true }
+                }
+              }]
+            });
+            
+            const bundleId = typeof response === 'string' ? response : (response as any).id;
+            console.log('Bundle ID:', bundleId);
+            
+            // Wait for the bundle to be confirmed and get the real transaction hash
+            let realTxHash: string | undefined;
+            for (let i = 0; i < 30; i++) {
+              try {
+                const res = await provider.request({
+                  method: "wallet_getCallsStatus",
+                  params: [bundleId]
+                }) as { status: number | string, receipts?: any[] };
+                
+                const ok = 
+                  (typeof res.status === "number" && res.status >= 200 && res.status < 300) ||
+                  (typeof res.status === "string" && (res.status === "CONFIRMED" || res.status.startsWith("2")));
+                
+                if (ok && res.receipts?.[0]?.transactionHash) {
+                  realTxHash = res.receipts[0].transactionHash;
+                  console.log('Transaction confirmed with hash:', realTxHash);
+                  break;
+                }
+              } catch (err) {
+                // Continue polling
+              }
+              await new Promise(r => setTimeout(r, 1000));
+            }
+            
+            if (!realTxHash) {
+              throw new Error("Transaction failed to confirm");
+            }
+            
+            // Return a proper transaction response with the real hash
+            const ethersProvider = new ethers.BrowserProvider(provider);
+            const txResponse = await ethersProvider.getTransaction(realTxHash);
+            
+            if (!txResponse) {
+              // If we can't get the transaction, create a minimal response
+              return {
+                hash: realTxHash,
+                from: subAccount,
+                to: tx.to,
+                data: tx.data,
+                value: tx.value || 0n,
+                nonce: 0,
+                gasLimit: 0n,
+                gasPrice: 0n,
+                chainId: CHAIN_ID_NUM,
+                wait: async () => {
+                  const receipt = await ethersProvider.getTransactionReceipt(realTxHash);
+                  return receipt || { status: 1, hash: realTxHash } as any;
+                }
+              } as any;
+            }
+            
+            return txResponse;
+          }
+        };
+        addLog(`SDK will sign transactions as sub-account: ${subAccount}`);
+        
+        await sdk!.authenticate('signer', { 
+          signer: subAccountSigner as any
+        });
+        addLog("✅ SDK authenticated with sub-account signer");
+        addLog("🎉 Transactions will use sub-account auto-spend (no popups!)");
+      }
+      
+      // Get managers after authentication
       const pm = sdk!.getPaymentManager();
       const sm = sdk!.getSessionManager();
       const hm = sdk!.getHostManager();
@@ -1270,53 +1541,79 @@ export default function BaseUsdcMvpFlowSDKTest() {
         return balance;
       };
       
-      // Read balances before completion
+      // Read balances before completion (including sub-account!)
       addLog("Reading balances before session completion...");
       const balancesBefore = {
         user: await readBalanceViem(TEST_USER_1_ADDRESS),
+        subAccount: subAccount ? await readBalanceViem(subAccount) : 0n,
         host: await readBalanceViem(TEST_HOST_1_ADDRESS),
         treasury: await readBalanceViem(TEST_TREASURY_ADDRESS)
       };
-      addLog(`Before completion - User: ${ethers.formatUnits(balancesBefore.user, 6)}, Host: ${ethers.formatUnits(balancesBefore.host, 6)}, Treasury: ${ethers.formatUnits(balancesBefore.treasury, 6)}`);
+      addLog(`Before completion:`);
+      addLog(`  User: $${ethers.formatUnits(balancesBefore.user, 6)}`);
+      if (subAccount) {
+        addLog(`  Sub-account: $${ethers.formatUnits(balancesBefore.subAccount, 6)} (session initiator)`);
+      }
+      addLog(`  Host: $${ethers.formatUnits(balancesBefore.host, 6)}`);
+      addLog(`  Treasury: $${ethers.formatUnits(balancesBefore.treasury, 6)}`);
       
+      addLog("📝 Completing session (triggers automatic payment distribution)...");
       const finalProof = "0x" + "00".repeat(32);
       const txHash = await sm.completeSession(result.sessionId, 100, finalProof); // Use 100 tokens to match checkpoint
       addLog(`✅ Session marked as completed - TX: ${txHash}`);
       
       // Wait for blockchain transaction to complete and payments to settle
-      addLog("Waiting for payment settlement...");
+      addLog("⏳ Waiting for payment settlement on blockchain...");
       await new Promise(resolve => setTimeout(resolve, 10000)); // 10 seconds for settlement
       
       // Read balances after completion
       addLog("Reading balances after session completion...");
       const balancesAfter = {
         user: await readBalanceViem(TEST_USER_1_ADDRESS),
+        subAccount: subAccount ? await readBalanceViem(subAccount) : 0n,
         host: await readBalanceViem(TEST_HOST_1_ADDRESS),
         treasury: await readBalanceViem(TEST_TREASURY_ADDRESS)
       };
-      addLog(`After completion - User: ${ethers.formatUnits(balancesAfter.user, 6)}, Host: ${ethers.formatUnits(balancesAfter.host, 6)}, Treasury: ${ethers.formatUnits(balancesAfter.treasury, 6)}`);
+      addLog(`After completion:`);
+      addLog(`  User: $${ethers.formatUnits(balancesAfter.user, 6)}`);
+      if (subAccount) {
+        addLog(`  Sub-account: $${ethers.formatUnits(balancesAfter.subAccount, 6)}`);
+      }
+      addLog(`  Host: $${ethers.formatUnits(balancesAfter.host, 6)}`);
+      addLog(`  Treasury: $${ethers.formatUnits(balancesAfter.treasury, 6)}`);
       
       // Calculate payment changes
       const payments = {
         userRefund: balancesAfter.user - balancesBefore.user,
+        subAccountRefund: subAccount ? balancesAfter.subAccount - balancesBefore.subAccount : 0n,
         hostPayment: balancesAfter.host - balancesBefore.host,
         treasuryFee: balancesAfter.treasury - balancesBefore.treasury
       };
       
+      addLog("💰 Payment Distribution Results:");
+      
       if (payments.hostPayment > 0n) {
-        addLog(`✅ Host received payment: ${ethers.formatUnits(payments.hostPayment, 6)} USDC`);
+        addLog(`  ✅ Host received: $${ethers.formatUnits(payments.hostPayment, 6)} (90% of $0.20)`);
       } else {
-        addLog(`❌ No payment to host detected`);
+        addLog(`  ❌ No payment to host detected`);
       }
       
       if (payments.treasuryFee > 0n) {
-        addLog(`✅ Treasury received fee: ${ethers.formatUnits(payments.treasuryFee, 6)} USDC`);
+        addLog(`  ✅ Treasury received: $${ethers.formatUnits(payments.treasuryFee, 6)} (10% of $0.20)`);
       } else {
-        addLog(`❌ No fee to treasury detected`);
+        addLog(`  ❌ No fee to treasury detected`);
       }
       
-      if (payments.userRefund > 0n) {
-        addLog(`✅ User received refund: ${ethers.formatUnits(payments.userRefund, 6)} USDC`);
+      // Check for refund to sub-account (not user)
+      if (payments.subAccountRefund > 0n) {
+        addLog(`  ✅ Sub-account refund: $${ethers.formatUnits(payments.subAccountRefund, 6)}`);
+        addLog(`     💡 Deposit Model: This refund stays in sub-account`);
+        addLog(`     💡 Next session will use this balance (no new deposit needed!)`);
+        addLog(`     💡 User can run ${Math.floor(Number(payments.subAccountRefund) / 200000)} more sessions`);
+      } else if (payments.userRefund > 0n) {
+        addLog(`  ✅ User refund: $${ethers.formatUnits(payments.userRefund, 6)}`);
+      } else {
+        addLog(`  ℹ️  No refund (session used full deposit)`);
       }
       
       setStepStatus(prev => ({ ...prev, 13: 'completed' }));
