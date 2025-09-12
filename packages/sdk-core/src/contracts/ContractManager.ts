@@ -230,6 +230,13 @@ export class ContractManager {
   }
 
   /**
+   * Get the signer
+   */
+  getSigner() {
+    return this.signer;
+  }
+
+  /**
    * Get contract address by name
    */
   async getContractAddress(name: string): Promise<string> {

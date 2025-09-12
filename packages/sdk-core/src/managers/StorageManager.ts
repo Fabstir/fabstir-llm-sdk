@@ -68,15 +68,18 @@ export class StorageManager implements IStorageManager {
    * Initialize storage with S5 seed
    */
   async initialize(seed: string, userAddress?: string): Promise<void> {
+    console.log('StorageManager.initialize: Starting...');
     try {
       this.userSeed = seed;
       this.userAddress = userAddress || '';
       
+      console.log('StorageManager.initialize: Creating S5 client...');
       // Create S5 client with browser-compatible configuration
       this.s5Client = await S5.create({ 
         initialPeers: [this.s5PortalUrl],
         // No Node.js specific options
       });
+      console.log('StorageManager.initialize: S5 client created');
       
       await this.s5Client.recoverIdentityFromSeedPhrase(this.userSeed);
       

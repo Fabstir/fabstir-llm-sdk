@@ -43,10 +43,15 @@ export class PaymentManager implements IPaymentManager {
    * Initialize with signer
    */
   async initialize(signer: ethers.Signer): Promise<void> {
+    console.log('PaymentManager.initialize: Setting signer...');
     this.signer = signer;
-    await this.contractManager.setSigner(signer);
+    // ContractManager already has signer from SDK initialization
+    // Just set it on sessionJobManager
+    console.log('PaymentManager.initialize: Calling sessionJobManager.setSigner...');
     await this.sessionJobManager.setSigner(signer);
+    console.log('PaymentManager.initialize: sessionJobManager.setSigner completed');
     this.initialized = true;
+    console.log('PaymentManager.initialize: Initialization complete');
   }
 
   /**
@@ -554,8 +559,14 @@ export class PaymentManager implements IPaymentManager {
     to: string,
     amount: bigint
   ): Promise<TransactionResult> {
+    // Auto-initialize if not done yet
     if (!this.initialized || !this.signer) {
-      throw new SDKError('PaymentManager not initialized', 'PAYMENT_NOT_INITIALIZED');
+      const signer = this.contractManager.getSigner();
+      if (signer) {
+        await this.initialize(signer);
+      } else {
+        throw new SDKError('PaymentManager not initialized - no signer available', 'PAYMENT_NOT_INITIALIZED');
+      }
     }
 
     try {

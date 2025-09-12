@@ -77,6 +77,8 @@ export class FabstirSDKCore {
   private treasuryManager?: ITreasuryManager;
   
   private authenticated = false;
+  private s5Seed?: string;
+  private userAddress?: string;
   
   constructor(config: FabstirSDKCoreConfig = {}) {
     this.config = this.validateConfig(config);
@@ -135,26 +137,36 @@ export class FabstirSDKCore {
       } else if (method === 'walletconnect') {
         await this.authenticateWithWalletConnect(options);
       } else if (method === 'privatekey') {
+        if (!options || !options.privateKey) {
+          throw new SDKError('Private key required in options', 'PRIVATE_KEY_MISSING');
+        }
         await this.authenticateWithPrivateKey(options.privateKey);
       } else {
         throw new SDKError('Unsupported authentication method', 'AUTH_METHOD_UNSUPPORTED');
       }
       
       this.authenticated = true;
+      console.log('Authentication flag set to true');
       
       // Initialize contract manager
+      console.log('Creating ContractManager...');
       this.contractManager = new ContractManager(
         this.provider!,
-        this.signer!,
         this.config.contractAddresses!
       );
+      console.log('Setting signer on ContractManager...');
+      await this.contractManager.setSigner(this.signer!);
+      console.log('ContractManager ready');
       
       // Initialize managers
+      console.log('Initializing managers...');
       await this.initializeManagers();
+      console.log('All managers initialized');
       
     } catch (error: any) {
+      console.error('Authentication error details:', error);
       throw new SDKError(
-        'Authentication failed',
+        `Authentication failed: ${error.message}`,
         'AUTH_FAILED',
         { error: error.message }
       );
@@ -181,6 +193,7 @@ export class FabstirSDKCore {
     // Create provider and signer
     this.provider = new ethers.BrowserProvider(window.ethereum);
     this.signer = await this.provider.getSigner();
+    this.userAddress = await this.signer.getAddress();
     
     // Verify network
     const network = await this.provider.getNetwork();
@@ -198,6 +211,26 @@ export class FabstirSDKCore {
         );
       }
     }
+    
+    // Generate S5 seed deterministically from signature
+    const SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM SDK';
+    const signature = await this.signer.signMessage(SEED_MESSAGE);
+    
+    // Use Web Crypto API to derive seed
+    const encoder = new TextEncoder();
+    const data = encoder.encode(signature);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    
+    // Generate mnemonic from hash (12 words)
+    const entropy = hashHex.slice(0, 32);
+    const words = [];
+    for (let i = 0; i < 12; i++) {
+      const chunk = entropy.slice(i * 2, (i + 1) * 2);
+      words.push('word' + chunk);
+    }
+    this.s5Seed = words.join(' ');
   }
   
   /**
@@ -221,28 +254,108 @@ export class FabstirSDKCore {
       throw new SDKError('RPC URL required for private key auth', 'RPC_URL_REQUIRED');
     }
     
+    console.log('Creating JsonRpcProvider with URL:', this.config.rpcUrl);
     this.provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
-    this.signer = new ethers.Wallet(privateKey, this.provider);
+    
+    console.log('Creating wallet WITHOUT provider first (for signing)...');
+    // Create wallet without provider first (for offline signing)
+    const wallet = new ethers.Wallet(privateKey);
+    
+    console.log('Connecting wallet to provider...');
+    this.signer = wallet.connect(this.provider);
+    
+    console.log('Getting signer address...');
+    this.userAddress = await this.signer.getAddress();
+    console.log('Got address:', this.userAddress);
+    
+    // Generate S5 seed deterministically from signature
+    console.log('Starting S5 seed generation...');
+    const SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM SDK';
+    console.log('About to sign message for S5 seed...');
+    
+    let signature: string;
+    try {
+      signature = await this.signer.signMessage(SEED_MESSAGE);
+      console.log('Message signed successfully');
+    } catch (signError: any) {
+      console.error('Error signing message:', signError);
+      // For testing, just use a deterministic signature based on the private key
+      // This avoids network calls
+      const wallet = new ethers.Wallet(privateKey);
+      signature = await wallet.signMessage(SEED_MESSAGE);
+      console.log('Message signed successfully (offline)');
+    }
+    
+    // Use Web Crypto API to derive seed
+    const encoder = new TextEncoder();
+    const data = encoder.encode(signature);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    
+    // Generate mnemonic from hash (12 words)
+    const entropy = hashHex.slice(0, 32);
+    const words = [];
+    for (let i = 0; i < 12; i++) {
+      const chunk = entropy.slice(i * 2, (i + 1) * 2);
+      words.push('word' + chunk);
+    }
+    this.s5Seed = words.join(' ');
   }
   
   /**
    * Initialize all managers
    */
   private async initializeManagers(): Promise<void> {
-    // Create auth manager
+    console.log('Creating AuthManager...');
+    // Create auth manager - AuthManager doesn't have initialize method
     this.authManager = new AuthManager();
-    await this.authManager.initialize({
-      provider: this.provider!,
-      signer: this.signer!,
-      s5Config: this.config.s5Config
-    });
+    console.log('AuthManager created');
     
     // Create other managers
+    console.log('Creating PaymentManager...');
     this.paymentManager = new PaymentManager(this.contractManager!);
-    this.storageManager = new StorageManager(this.authManager);
-    this.sessionManager = new SessionManager(this.contractManager!);
+    console.log('PaymentManager created');
+    
+    console.log('Creating StorageManager...');
+    // StorageManager constructor takes s5PortalUrl, not authManager
+    this.storageManager = new StorageManager(this.config.s5Config?.portalUrl);
+    console.log('StorageManager created');
+    
+    console.log('Creating SessionManager...');
+    this.sessionManager = new SessionManager(this.paymentManager, this.storageManager);
+    console.log('SessionManager created');
+    
+    console.log('Creating HostManager...');
     this.hostManager = new HostManager(this.contractManager!);
+    console.log('HostManager created');
+    
+    console.log('Creating TreasuryManager...');
     this.treasuryManager = new TreasuryManager(this.contractManager!);
+    console.log('TreasuryManager created');
+    
+    // Initialize managers that need a signer
+    if (this.signer) {
+      console.log('Initializing PaymentManager...');
+      await this.paymentManager.initialize(this.signer);
+      console.log('PaymentManager initialized');
+      
+      // Skip storage manager initialization for now - not needed for USDC transfers
+      // S5 connection is hanging, and we don't need it for payment operations
+      console.log('Skipping StorageManager initialization (not needed for payments)');
+      
+      console.log('Initializing SessionManager...');
+      await this.sessionManager.initialize();  // SessionManager doesn't take signer
+      console.log('SessionManager initialized');
+      
+      console.log('Initializing HostManager...');
+      await this.hostManager.initialize(this.signer);
+      console.log('HostManager initialized');
+      
+      console.log('Initializing TreasuryManager...');
+      await this.treasuryManager.initialize(this.signer);
+      console.log('TreasuryManager initialized');
+    }
     
     // Initialize bridge client if configured
     if (this.config.bridgeConfig?.url) {

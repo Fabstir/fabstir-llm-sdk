@@ -40,8 +40,10 @@ export class SessionJobManager {
    * Set signer for transactions
    */
   async setSigner(signer: Signer) {
+    console.log('SessionJobManager.setSigner: Setting signer...');
     this.signer = signer;
-    await this.contractManager.setSigner(signer);
+    // ContractManager already has the signer, don't call setSigner again
+    console.log('SessionJobManager.setSigner: Complete');
   }
 
   /**

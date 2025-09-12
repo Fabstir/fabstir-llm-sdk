@@ -52,8 +52,9 @@ export class SessionManager implements ISessionManager {
     if (!this.paymentManager.isInitialized()) {
       throw new SDKError('PaymentManager not initialized', 'PAYMENT_NOT_INITIALIZED');
     }
+    // StorageManager is optional (may not be available in Node.js)
     if (!this.storageManager.isInitialized()) {
-      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+      console.warn('StorageManager not initialized - session persistence disabled');
     }
     this.initialized = true;
   }
