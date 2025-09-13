@@ -6,6 +6,11 @@
         "name": "_fabToken",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "_modelRegistry",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
@@ -63,13 +68,6 @@
   },
   {
     "type": "function",
-    "name": "emergencyWithdraw",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "fabToken",
     "inputs": [],
     "outputs": [
@@ -77,19 +75,6 @@
         "name": "",
         "type": "address",
         "internalType": "contract IERC20"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getActiveNodeCount",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -128,6 +113,25 @@
   },
   {
     "type": "function",
+    "name": "getNodeController",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
     "name": "getNodeFullInfo",
     "inputs": [
       {
@@ -138,74 +142,79 @@
     ],
     "outputs": [
       {
-        "name": "nodeOperator",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "stakedAmount",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "active",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "metadata",
-        "type": "string",
-        "internalType": "string"
-      },
-      {
-        "name": "apiUrl",
-        "type": "string",
-        "internalType": "string"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getNodeMetadata",
-    "inputs": [
-      {
-        "name": "operator",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
         "name": "",
-        "type": "string",
-        "internalType": "string"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getNodeStake",
-    "inputs": [
-      {
-        "name": "operator",
         "type": "address",
         "internalType": "address"
-      }
-    ],
-    "outputs": [
+      },
       {
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
       }
     ],
     "stateMutability": "view"
   },
   {
     "type": "function",
-    "name": "isNodeActive",
+    "name": "getNodeModels",
+    "inputs": [
+      {
+        "name": "nodeAddress",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getNodesForModel",
+    "inputs": [
+      {
+        "name": "modelId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address[]",
+        "internalType": "address[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isActiveNode",
     "inputs": [
       {
         "name": "operator",
@@ -224,16 +233,64 @@
   },
   {
     "type": "function",
-    "name": "minimumStake",
+    "name": "modelRegistry",
     "inputs": [],
     "outputs": [
       {
         "name": "",
+        "type": "address",
+        "internalType": "contract ModelRegistry"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "modelToNodes",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "",
         "type": "uint256",
         "internalType": "uint256"
       }
     ],
-    "stateMutability": "pure"
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "nodeSupportsModel",
+    "inputs": [
+      {
+        "name": "nodeAddress",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "modelId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -295,24 +352,16 @@
         "name": "metadata",
         "type": "string",
         "internalType": "string"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "registerNodeWithUrl",
-    "inputs": [
-      {
-        "name": "metadata",
-        "type": "string",
-        "internalType": "string"
       },
       {
         "name": "apiUrl",
         "type": "string",
         "internalType": "string"
+      },
+      {
+        "name": "modelIds",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
       }
     ],
     "outputs": [],
@@ -324,19 +373,6 @@
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "requiredStake",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "pure"
   },
   {
     "type": "function",
@@ -398,6 +434,32 @@
     "stateMutability": "nonpayable"
   },
   {
+    "type": "function",
+    "name": "updateModelRegistry",
+    "inputs": [
+      {
+        "name": "newRegistry",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateSupportedModels",
+    "inputs": [
+      {
+        "name": "newModelIds",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
     "type": "event",
     "name": "ApiUrlUpdated",
     "inputs": [
@@ -437,6 +499,38 @@
   },
   {
     "type": "event",
+    "name": "ModelRegistryUpdated",
+    "inputs": [
+      {
+        "name": "newRegistry",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ModelsUpdated",
+    "inputs": [
+      {
+        "name": "operator",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newModels",
+        "type": "bytes32[]",
+        "indexed": false,
+        "internalType": "bytes32[]"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "NodeRegistered",
     "inputs": [
       {
@@ -456,37 +550,12 @@
         "type": "string",
         "indexed": false,
         "internalType": "string"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "NodeRegisteredWithUrl",
-    "inputs": [
-      {
-        "name": "operator",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
       },
       {
-        "name": "stakedAmount",
-        "type": "uint256",
+        "name": "models",
+        "type": "bytes32[]",
         "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "metadata",
-        "type": "string",
-        "indexed": false,
-        "internalType": "string"
-      },
-      {
-        "name": "apiUrl",
-        "type": "string",
-        "indexed": false,
-        "internalType": "string"
+        "internalType": "bytes32[]"
       }
     ],
     "anonymous": false
@@ -525,25 +594,6 @@
         "type": "address",
         "indexed": true,
         "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "StakeAdded",
-    "inputs": [
-      {
-        "name": "operator",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "additionalAmount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
       }
     ],
     "anonymous": false

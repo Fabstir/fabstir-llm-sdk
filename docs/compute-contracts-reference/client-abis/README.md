@@ -2,11 +2,11 @@
 
 This directory contains the Application Binary Interfaces (ABIs) for client integration.
 
-## Current Deployed Contracts (January 12, 2025)
+## Current Deployed Contracts (January 13, 2025)
 
-### JobMarketplaceFABWithS5Deploy
-- **Address**: 0x3B632813c3e31D94Fd552b4aE387DD321eec67Ba
-- **Previous**: 0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b
+### JobMarketplace
+- **Address**: 0x001A47Bb8C6CaD9995639b8776AB5816Ab9Ac4E0
+- **Previous**: 0x6b4D28bD09Ba31394972B55E8870CFD4F835Acb6
 - **Network**: Base Sepolia
 - **Status**: ✅ API DISCOVERY COMPATIBLE + TREASURY ACCUMULATION
 - **Key Features**:
@@ -23,18 +23,39 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
   - MIN_PROVEN_TOKENS: 100 tokens minimum
   - Total gas savings: ~80%
 
-### NodeRegistryFAB (with API Discovery)
+### ModelRegistry (NEW - CORRECTED)
+- **Address**: 0xfE54c2aa68A7Afe8E0DD571933B556C8b6adC357
+- **Network**: Base Sepolia
+- **Status**: ✅ MODEL GOVERNANCE ENABLED
+- **Purpose**: Manages approved AI models for the marketplace
+- **Key Features**:
+  - Two-tier approval system (owner-curated and community-voted)
+  - SHA256 hash verification for model integrity
+  - FAB token voting for community proposals
+  - Emergency model deactivation capability
+- **Approved Models** (MVP Testing - ONLY THESE TWO):
+  - TinyVicuna-1B-32k (CohereForAI/TinyVicuna-1B-32k-GGUF)
+  - TinyLlama-1.1B Chat (TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF)
+
+### NodeRegistryWithModels (DEPLOYED)
+- **Address**: 0xaa14Ed58c3EF9355501bc360E5F09Fb9EC8c1100
+- **Network**: Base Sepolia
+- **Status**: ✅ DEPLOYED AND READY
+- **Stake Required**: 1000 FAB tokens
+- **Key Features**:
+  - Integrates with ModelRegistry for approved models only
+  - Structured JSON metadata format
+  - Tracks which hosts support which models
+  - API endpoint discovery (inherited from previous version)
+  - Hosts must register with specific model IDs
+
+### NodeRegistryFAB (DEPRECATED - Use NodeRegistryWithModels)
 - **Address**: 0x2B745E45818e1dE570f253259dc46b91A82E3204
 - **Previous**: 0x87516C13Ea2f99de598665e14cab64E191A0f8c4
 - **Network**: Base Sepolia
-- **Status**: ✅ API ENDPOINT DISCOVERY ENABLED
+- **Status**: ⚠️ DEPRECATED - Will be replaced by NodeRegistryWithModels
 - **Stake Required**: 1000 FAB tokens
-- **New Features**:
-  - API endpoint discovery for automatic host URL resolution
-  - `registerNodeWithUrl()` - Register with API endpoint
-  - `updateApiUrl()` - Update host's API endpoint
-  - `getNodeApiUrl()` - Get host's API URL
-  - `getNodeFullInfo()` - Get all host info including API URL
+- **Note**: Still functional but lacks model governance
 
 ### ProofSystem
 - **Address**: 0x2ACcc60893872A499700908889B38C5420CBcFD1
@@ -47,9 +68,60 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
 - **Address**: 0x908962e8c6CE72610021586f85ebDE09aAc97776
 - **Network**: Base Sepolia
 - **Purpose**: Tracks accumulated earnings for hosts with batch withdrawal support
-- **Authorized Marketplace**: 0x3B632813c3e31D94Fd552b4aE387DD321eec67Ba
+- **Authorized Marketplace**: 0x001A47Bb8C6CaD9995639b8776AB5816Ab9Ac4E0
 
-## API Discovery Usage (NEW)
+## Model Registry Usage (NEW)
+
+```javascript
+import ModelRegistryABI from './ModelRegistry-CLIENT-ABI.json';
+import NodeRegistryABI from './NodeRegistryWithModels-CLIENT-ABI.json';
+import { ethers } from 'ethers';
+
+const provider = new ethers.providers.JsonRpcProvider('https://base-sepolia.g.alchemy.com/v2/YOUR_KEY');
+
+// Model Registry instance
+const modelRegistry = new ethers.Contract(
+  '0xfE54c2aa68A7Afe8E0DD571933B556C8b6adC357',  // CORRECTED - Only 2 models
+  ModelRegistryABI,
+  provider
+);
+
+// Get model ID for registration
+const modelId = await modelRegistry.getModelId(
+  "CohereForAI/TinyVicuna-1B-32k-GGUF",
+  "tiny-vicuna-1b.q4_k_m.gguf"
+);
+
+// Check if model is approved
+const isApproved = await modelRegistry.isModelApproved(modelId);
+
+// Get model details
+const model = await modelRegistry.getModel(modelId);
+console.log(`Model: ${model.huggingfaceRepo}/${model.fileName}`);
+console.log(`SHA256: ${model.sha256Hash}`);
+console.log(`Active: ${model.active}`);
+
+// For hosts - register with approved models only
+const nodeRegistry = new ethers.Contract(
+  '0xaa14Ed58c3EF9355501bc360E5F09Fb9EC8c1100',  // NodeRegistryWithModels
+  NodeRegistryABI,
+  signer
+);
+
+const metadata = JSON.stringify({
+  hardware: { gpu: "rtx-4090", vram: 24 },
+  capabilities: ["inference", "streaming"],
+  location: "us-east"
+});
+
+await nodeRegistry.registerNode(
+  metadata,
+  "http://my-host.com:8080",
+  [modelId] // Must be an approved model ID
+);
+```
+
+## API Discovery Usage
 
 ```javascript
 import NodeRegistryABI from './NodeRegistryFAB-CLIENT-ABI.json';
@@ -94,13 +166,13 @@ const provider = new ethers.providers.JsonRpcProvider('https://base-sepolia.g.al
 
 // Create contract instances
 const marketplace = new ethers.Contract(
-  '0x3B632813c3e31D94Fd552b4aE387DD321eec67Ba', // NEW deployment with API discovery
+  '0x001A47Bb8C6CaD9995639b8776AB5816Ab9Ac4E0', // CURRENT deployment with USDC fixed
   JobMarketplaceABI,
   provider
 );
 
 const nodeRegistry = new ethers.Contract(
-  '0x2B745E45818e1dE570f253259dc46b91A82E3204', // NEW with API discovery
+  '0xaa14Ed58c3EF9355501bc360E5F09Fb9EC8c1100', // NodeRegistryWithModels
   NodeRegistryABI,
   provider
 );
@@ -190,9 +262,10 @@ await nodeRegistry.updateApiUrl('http://your-host.com:8080');
 ### For SDK Developers
 Update contract addresses and use the new discovery functions:
 ```javascript
-const NODE_REGISTRY = '0x2B745E45818e1dE570f253259dc46b91A82E3204';
-const JOB_MARKETPLACE = '0x3B632813c3e31D94Fd552b4aE387DD321eec67Ba';
+const NODE_REGISTRY = '0xaa14Ed58c3EF9355501bc360E5F09Fb9EC8c1100';
+const JOB_MARKETPLACE = '0x001A47Bb8C6CaD9995639b8776AB5816Ab9Ac4E0';
+const MODEL_REGISTRY = '0xfE54c2aa68A7Afe8E0DD571933B556C8b6adC357';
 ```
 
 ## Last Updated
-January 12, 2025 - API endpoint discovery added for automatic host URL resolution
+January 13, 2025 - Model governance system added with ModelRegistry and NodeRegistryWithModels contracts

@@ -1,13 +1,13 @@
 {
   "network": "Base Sepolia",
   "chainId": 84532,
-  "lastUpdated": "2025-01-12",
-  "status": "API Discovery + Treasury Accumulation Deployed",
+  "lastUpdated": "2025-01-13",
+  "status": "Model Governance + API Discovery + Treasury Accumulation Deployed",
   "contracts": {
-    "JobMarketplaceFABWithS5Deploy": {
-      "address": "0x3B632813c3e31D94Fd552b4aE387DD321eec67Ba",
-      "previousAddress": "0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b",
-      "deploymentDate": "2025-01-12",
+    "JobMarketplace": {
+      "address": "0x001A47Bb8C6CaD9995639b8776AB5816Ab9Ac4E0",
+      "previousAddress": "0x6b4D28bD09Ba31394972B55E8870CFD4F835Acb6",
+      "deploymentDate": "2025-09-13",
       "status": "ACTIVE - API DISCOVERY COMPATIBLE",
       "features": [
         "Compatible with 5-field Node struct (NEW)",
@@ -22,27 +22,59 @@
         "80% total gas savings"
       ]
     },
-    "NodeRegistryFAB": {
-      "address": "0x2B745E45818e1dE570f253259dc46b91A82E3204",
-      "previousAddress": "0x87516C13Ea2f99de598665e14cab64E191A0f8c4",
-      "deploymentDate": "2025-01-12",
-      "status": "ACTIVE - API DISCOVERY ADDED",
+    "ModelRegistry": {
+      "address": "0xfE54c2aa68A7Afe8E0DD571933B556C8b6adC357",
+      "deploymentDate": "2025-01-13",
+      "status": "ACTIVE - MVP MODELS ONLY",
       "features": [
-        "API endpoint discovery (NEW)",
-        "registerNodeWithUrl() function (NEW)",
-        "updateApiUrl() function (NEW)",
-        "getNodeApiUrl() getter (NEW)",
-        "getNodeFullInfo() getter (NEW)",
+        "Two-tier approval system",
+        "SHA256 hash verification",
+        "FAB token voting for proposals",
+        "Emergency model deactivation",
+        "ONLY 2 approved models for MVP"
+      ],
+      "approvedModels": [
+        {
+          "name": "TinyVicuna-1B-32k",
+          "repo": "CohereForAI/TinyVicuna-1B-32k-GGUF",
+          "file": "tiny-vicuna-1b.q4_k_m.gguf",
+          "hash": "0x329d002bc20d4e7baae25df802c9678b5a4340b3ce91f23e6a0644975e95935f"
+        },
+        {
+          "name": "TinyLlama-1.1B Chat",
+          "repo": "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
+          "file": "tinyllama-1b.Q4_K_M.gguf",
+          "hash": "0x45b71fe98efe5f530b825dce6f5049d738e9c16869f10be4370ab81a9912d4a6"
+        }
+      ]
+    },
+    "NodeRegistryWithModels": {
+      "address": "0xaa14Ed58c3EF9355501bc360E5F09Fb9EC8c1100",
+      "deploymentDate": "2025-01-13",
+      "status": "ACTIVE - MODEL VALIDATION ENFORCED",
+      "features": [
+        "Model validation via ModelRegistry",
+        "Structured JSON metadata",
+        "Model-to-node mapping",
+        "API endpoint discovery",
         "FAB token staking",
-        "1000 FAB minimum stake",
-        "Host registration and validation"
+        "1000 FAB minimum stake"
+      ]
+    },
+    "NodeRegistryFAB": {
+      "address": "0x039AB5d5e8D5426f9963140202F506A2Ce6988F9",
+      "previousAddress": "0xb212F4e62a2F3BA36048054Fe75e3d0b0d61EB44",
+      "deploymentDate": "2025-01-09",
+      "status": "DEPRECATED - Use NodeRegistryWithModels",
+      "features": [
+        "Legacy registration without model validation"
       ]
     },
     "HostEarnings": {
       "address": "0x908962e8c6CE72610021586f85ebDE09aAc97776",
       "deploymentDate": "2025-01-05",
       "status": "ACTIVE",
-      "authorizedMarketplace": "0x3B632813c3e31D94Fd552b4aE387DD321eec67Ba",
+      "authorizedMarketplace": "0x001A47Bb8C6CaD9995639b8776AB5816Ab9Ac4E0",
       "features": [
         "Batch withdrawal for hosts",
         "Multi-token support (ETH + USDC)",
