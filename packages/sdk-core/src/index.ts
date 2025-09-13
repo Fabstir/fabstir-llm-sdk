@@ -29,6 +29,11 @@ export { SessionManager } from './managers/SessionManager';
 export { HostManager } from './managers/HostManager';
 export { TreasuryManager } from './managers/TreasuryManager';
 
+// Model governance managers
+export { ModelManager } from './managers/ModelManager';
+export { HostManagerEnhanced } from './managers/HostManagerEnhanced';
+export { ClientManager } from './managers/ClientManager';
+
 // Services
 export { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 export { P2PBridgeClient } from './services/P2PBridgeClient';
@@ -42,9 +47,13 @@ export { ContractManager } from './contracts/ContractManager';
 
 // Export types
 export * from './types';
+export * from './types/models';
 
 // Export interfaces
 export * from './interfaces';
+
+// Export model constants
+export * from './constants/models';
 
 // Export utilities
 export * from './utils';

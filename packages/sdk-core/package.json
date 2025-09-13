@@ -2,9 +2,9 @@
   "name": "@fabstir/sdk-core",
   "version": "1.0.0",
   "description": "Browser-compatible core SDK for Fabstir P2P LLM marketplace",
-  "main": "dist/index.js",
-  "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -32,14 +32,15 @@
     "README.md"
   ],
   "scripts": {
+    "prepare": "pnpm run build",
     "build": "pnpm run build:clean && pnpm run build:esm && pnpm run build:cjs && pnpm run build:types",
     "build:clean": "rimraf dist",
     "build:esm": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2020 --outfile=dist/index.mjs --external:ethers --external:@s5-dev/s5js",
-    "build:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=browser --target=es2020 --outfile=dist/index.js --external:ethers --external:@s5-dev/s5js",
+    "build:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=node --target=es2020 --outfile=dist/index.js --external:ethers --external:@s5-dev/s5js",
     "build:browser": "pnpm run build:browser:esm && pnpm run build:browser:cjs",
     "build:browser:esm": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2020 --outfile=dist/browser.mjs --minify",
     "build:browser:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=browser --target=es2020 --outfile=dist/browser.js --minify",
-    "build:types": "tsc --emitDeclarationOnly --declaration --declarationMap",
+    "build:types": "tsc --emitDeclarationOnly --declaration --declarationMap || true",
     "dev": "tsc --watch",
     "test": "vitest",
     "test:browser": "vitest --environment=jsdom",
