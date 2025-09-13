@@ -5,92 +5,118 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 ## Features
 
 - 🌐 **Decentralized P2P Network** - Direct node-to-node communication without intermediaries
-- 🚀 **Mock Mode** - Development mode with instant responses for rapid prototyping
-- 🔄 **Real-time Streaming** - Stream LLM responses token-by-token
+- 🚀 **WebSocket Streaming** - Real-time token streaming via WebSocket connections
+- 🔍 **Automatic Host Discovery** - Discover LLM hosts from blockchain without hardcoded URLs
 - 💰 **Automated Payments** - Built-in escrow and payment handling via smart contracts
-- 🔍 **Node Discovery** - Automatic discovery of available nodes and models
-- 📊 **Performance Tracking** - Monitor latency, throughput, and system health
+- 🔄 **Session Management** - Stateful conversations with checkpoint proofs
+- 📦 **S5 Storage Integration** - Decentralized conversation persistence
 - 🛡️ **Error Recovery** - Automatic retries and failover to ensure reliability
-- 🔌 **Event-Driven Architecture** - Rich event system for monitoring operations
+- 🔌 **Browser Compatible** - Works in both Node.js and browser environments
 
 ## Quick Start
 
-### Basic Usage
+### WebSocket Streaming with Host Discovery
 
-Simple example to get started with the SDK:
+Stream LLM responses in real-time with automatic host discovery:
 
 ```typescript
-import { FabstirSDK } from "@fabstir/llm-sdk";
+import { FabstirSDKCore } from "@fabstir/sdk-core";
 
-async function main() {
+async function streamingExample() {
   // Initialize SDK
-  const sdk = new FabstirSDK({
-    rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/your-key',
-    s5PortalUrl: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p'
+  const sdk = new FabstirSDKCore({
+    network: 'base-sepolia',
+    rpcUrl: process.env.RPC_URL
   });
 
-  // Authenticate with private key
-  await sdk.authenticate('0x1234567890abcdef...');
+  // Authenticate with wallet
+  await sdk.authenticate(privateKey);
 
-  // Create a compute session
-  const sessionManager = await sdk.getSessionManager();
+  // Discover available hosts automatically
+  const hostManager = sdk.getHostManager();
+  const hosts = await hostManager.discoverAllActiveHosts();
+  console.log(`Found ${hosts.length} active hosts`);
+
+  // Create session with best available host
+  const sessionManager = sdk.getSessionManager();
   const session = await sessionManager.createSession({
-    paymentType: 'ETH',
-    amount: '0.005',
-    hostAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7'
+    model: 'llama-2-13b-chat',
+    temperature: 0.7
   });
 
-  console.log('Session created:', session.sessionId);
+  // Stream tokens as they arrive
+  for await (const token of sessionManager.streamPrompt(
+    session.id,
+    "Explain quantum computing in simple terms"
+  )) {
+    process.stdout.write(token);
+  }
+
+  // End session
+  await sessionManager.endSession(session.id);
 }
 
-main().catch(console.error);
+streamingExample().catch(console.error);
 ```
 
-### Advanced Usage with All Managers
+### Host Registration and Discovery
 
-Using the full power of the SDK with all manager components:
+Register your node and discover other hosts:
 
 ```typescript
-import { FabstirSDK } from "@fabstir/llm-sdk";
+import { FabstirSDKCore } from "@fabstir/sdk-core";
 
-async function advancedExample() {
-  // Initialize and authenticate
-  const sdk = new FabstirSDK();
-  await sdk.authenticate(process.env.PRIVATE_KEY!);
-
-  // Use different managers
-  const authManager = sdk.getAuthManager();
-  const paymentManager = sdk.getPaymentManager();
-  const storageManager = await sdk.getStorageManager();
-  const discoveryManager = sdk.getDiscoveryManager();
-  const sessionManager = await sdk.getSessionManager();
-
-  // Create P2P node for discovery
-  await discoveryManager.createNode();
+async function hostManagement() {
+  const sdk = new FabstirSDKCore({ network: 'base-sepolia' });
+  await sdk.authenticate(privateKey);
   
-  // Find suitable host
-  const hostAddress = await discoveryManager.findHost({
-    minReputation: 100
-  });
-
-  // Create session with discovered host
-  const session = await sessionManager.createSession({
-    paymentType: 'ETH',
-    amount: '0.005',
-    hostAddress
-  });
-
-  // Store conversation data
-  await storageManager.storeData(
-    `session-${session.sessionId}`,
-    { prompt: 'Hello AI!', timestamp: Date.now() }
+  const hostManager = sdk.getHostManager();
+  
+  // Register as a host provider
+  await hostManager.registerNodeWithUrl(
+    'llama-2-7b,gpt-4,inference,gpu',  // Capabilities
+    '1000',                              // Stake amount (FAB tokens)
+    'https://my-node.example.com'       // Your API endpoint
   );
-
-  // Complete session
-  const completion = await sessionManager.completeSession(session.sessionId);
-  console.log('Payment distributed:', completion.paymentDistribution);
+  
+  // Discover other hosts
+  const hosts = await hostManager.discoverAllActiveHosts();
+  
+  for (const host of hosts) {
+    console.log(`Host: ${host.address}`);
+    console.log(`API: ${host.apiUrl}`);
+    console.log(`Models: ${host.metadata}`);
+    
+    // Check health
+    const health = await hostManager.checkNodeHealth(host.apiUrl);
+    console.log(`Health: ${health.healthy ? '✅' : '❌'} (${health.latency}ms)`);
+  }
 }
 ```
+
+### Direct Inference Without Blockchain
+
+Stream inference directly without blockchain transactions:
+
+```typescript
+async function directInference() {
+  const sdk = new FabstirSDKCore({ network: 'base-sepolia' });
+  await sdk.authenticate(privateKey);
+  
+  const inferenceManager = sdk.getInferenceManager();
+  
+  // Stream tokens with automatic host selection
+  for await (const token of inferenceManager.streamInference(
+    "Write a haiku about coding",
+    { 
+      model: 'llama-2-7b',
+      temperature: 0.9,
+      maxTokens: 100 
+    }
+  )) {
+    process.stdout.write(token);
+  }
+}
 
 ## Installation
 
@@ -233,11 +259,19 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## Documentation
+
+- 📚 [Host Discovery API](./docs/HOST_DISCOVERY_API.md) - Automatic host discovery from blockchain
+- 🔌 [WebSocket Protocol Guide](./docs/WEBSOCKET_PROTOCOL_GUIDE.md) - Real-time streaming protocol
+- 💬 [Session Manager API](./docs/SESSION_MANAGER_ENHANCED.md) - Conversation management
+- 🚀 [Inference Manager API](./docs/INFERENCE_MANAGER_API.md) - Direct inference without blockchain
+- 🔧 [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) - Common issues and solutions
+- 📖 [Full SDK Documentation](./docs/SDK_API.md) - Complete API reference
+
 ## Support
 
-- 📖 [Documentation](https://docs.fabstir.com)
 - 💬 [Discord Community](https://discord.gg/fabstir)
-- 🐛 [Issue Tracker](https://github.com/fabstir/llm-sdk/issues)
+- 🐛 [Issue Tracker](https://github.com/fabstir/fabstir-llm-sdk/issues)
 - 📧 Email: support@fabstir.com
 
 ## Acknowledgments

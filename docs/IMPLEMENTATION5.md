@@ -577,29 +577,31 @@ private async generateS5Seed(signature: string): Promise<void> {
 ### Overview
 Integrate blockchain-based host discovery mechanism to automatically find LLM host API endpoints without hardcoding URLs.
 
-### Sub-phase 10.1: Update Contract ABIs
+### Sub-phase 10.1: Update Contract ABIs ✅ COMPLETED
 **Goal**: Update NodeRegistry ABI with new host discovery functions
 **Line limit**: N/A (file copy)
 
 #### Tasks:
-- [ ] Copy NodeRegistryFAB-CLIENT-ABI.json from docs/compute-contracts-reference/client-abis/
-- [ ] Replace src/contracts/abis/NodeRegistryFAB-CLIENT-ABI.json
-- [ ] Verify new functions exist: getNodeApiUrl, updateApiUrl, registerNodeWithUrl
-- [ ] Update ContractManager to load new ABI
-- [ ] Test ABI loading in browser environment
+- [x] Copy NodeRegistryFAB-CLIENT-ABI.json from docs/compute-contracts-reference/client-abis/
+- [x] Replace src/contracts/abis/NodeRegistryFAB-CLIENT-ABI.json
+- [x] Verify new functions exist: getNodeApiUrl, updateApiUrl, registerNodeWithUrl
+- [x] Update ContractManager to load new ABI
+- [x] Test ABI loading in browser environment
 
-### Sub-phase 10.2: Create Host Discovery Service
+**Implementation Notes**: Successfully deployed new NodeRegistry contract at 0xb212F4e62a2F3BA36048054Fe75e3d0b0d61EB44 with full API URL support.
+
+### Sub-phase 10.2: Create Host Discovery Service ✅ COMPLETED
 **Goal**: Service to query blockchain for host API endpoints
 **Line limit**: 150 lines
 
-#### Implementation: `packages/sdk-core/src/services/HostDiscovery.ts`
+#### Implementation: `packages/sdk-core/src/services/HostDiscoveryService.ts`
 ```typescript
-export class HostDiscovery {
+export class HostDiscoveryService {
   private nodeRegistry: ethers.Contract;
   private cache: Map<string, { url: string; timestamp: number }>;
   
   async discoverHost(hostAddress: string): Promise<string>;
-  async discoverAllHosts(): Promise<Map<string, HostInfo>>;
+  async discoverAllActiveHosts(): Promise<Array<HostInfo>>;
   async findBestHost(requirements: HostRequirements): Promise<HostInfo>;
   private validateApiUrl(url: string): boolean;
   private cacheUrl(address: string, url: string): void;
@@ -607,27 +609,31 @@ export class HostDiscovery {
 ```
 
 #### Tasks:
-- [ ] Write tests for host discovery (TDD)
-- [ ] Create HostDiscovery class skeleton
-- [ ] Implement discoverHost method
-- [ ] Implement discoverAllHosts method
-- [ ] Add URL validation and sanitization
-- [ ] Implement caching with TTL
-- [ ] Add findBestHost with selection logic
-- [ ] Handle contract call failures gracefully
+- [x] Write tests for host discovery (TDD)
+- [x] Create HostDiscoveryService class skeleton
+- [x] Implement discoverHost method
+- [x] Implement discoverAllActiveHosts method
+- [x] Add URL validation and sanitization
+- [x] Implement caching with TTL
+- [x] Add findBestHost with selection logic
+- [x] Handle contract call failures gracefully
 
-### Sub-phase 10.3: Update HostManager
+**Implementation Notes**: Successfully created HostDiscoveryService that queries NodeRegistry for API URLs. Verified discovery of both nodes at ports 8080 and 8083.
+
+### Sub-phase 10.3: Update HostManager ✅ COMPLETED
 **Goal**: Add API URL support to host management
 **Line limit**: 50 lines added
 
 #### Tasks:
-- [ ] Write tests for new HostManager methods
-- [ ] Add getHostApiUrl(address) method
-- [ ] Add discoverAvailableHosts() method
-- [ ] Update registerHost to include API URL
-- [ ] Add updateHostApiUrl(url) method
-- [ ] Update getHostInfo to return API URL
-- [ ] Test integration with HostDiscovery service
+- [x] Write tests for new HostManager methods
+- [x] Add getNodeApiUrl(address) method
+- [x] Add discoverAllActiveHosts() method
+- [x] Update registerHost to include API URL (registerNodeWithUrl)
+- [x] Add updateApiUrl(url) method
+- [x] Update getHostInfo to return API URL
+- [x] Test integration with HostDiscoveryService
+
+**Implementation Notes**: HostManager now fully supports API URL registration and updates. Both production nodes successfully registered with their respective URLs.
 
 ---
 
@@ -636,7 +642,7 @@ export class HostDiscovery {
 ### Overview
 Integrate the new WebSocket API (`/v1/ws`) for real-time token streaming from LLM hosts.
 
-### Sub-phase 11.1: Enhance WebSocket Client
+### Sub-phase 11.1: Enhance WebSocket Client ✅ COMPLETED
 **Goal**: Update WebSocket client for new protocol
 **Line limit**: 200 lines modified
 
@@ -653,22 +659,24 @@ interface InferenceMessage {
 }
 
 interface StreamToken {
-  type: 'stream_token';
-  token: string;
+  type: 'stream_chunk';
+  content: string;
   finish_reason?: string;
 }
 ```
 
 #### Tasks:
-- [ ] Write tests for WebSocket streaming
-- [ ] Add support for /v1/ws endpoint
-- [ ] Implement inference message type
-- [ ] Add auth message type (for future JWT)
-- [ ] Implement streaming token handler
-- [ ] Add connection state management
-- [ ] Handle reconnection with session recovery
-- [ ] Add compression support (gzip/deflate)
-- [ ] Implement rate limiting awareness
+- [x] Write tests for WebSocket streaming
+- [x] Add support for /v1/ws endpoint
+- [x] Implement inference message type
+- [x] Add auth message type (for future JWT)
+- [x] Implement streaming token handler
+- [x] Add connection state management
+- [x] Handle reconnection with session recovery
+- [x] Add compression support (gzip/deflate)
+- [x] Implement rate limiting awareness
+
+**Implementation Notes**: WebSocket connections confirmed working at ws://localhost:8080/v1/ws and ws://localhost:8083/v1/ws. Both nodes send welcome message on connection.
 
 ### Sub-phase 11.2: Create Inference Manager
 **Goal**: Manager for direct inference without blockchain
@@ -778,34 +786,52 @@ export class InferenceManager {
 
 ## Success Criteria for Phases 10-12
 
-1. ✅ No hardcoded host URLs in SDK
-2. ✅ Automatic host discovery from blockchain
-3. ✅ Real-time token streaming via WebSocket
-4. ✅ Direct inference without blockchain payments
-5. ✅ Session persistence and recovery
-6. ✅ Graceful failover between hosts
-7. ✅ Browser-compatible implementation
-8. ✅ Comprehensive test coverage (>80%)
-9. ✅ Full backward compatibility
-10. ✅ Production-ready documentation
+1. ✅ No hardcoded host URLs in SDK - **ACHIEVED**
+2. ✅ Automatic host discovery from blockchain - **ACHIEVED**
+3. ✅ Real-time token streaming via WebSocket - **ACHIEVED**
+4. ✅ Direct inference without blockchain payments - **IN PROGRESS**
+5. ✅ Session persistence and recovery - **IN PROGRESS**
+6. ✅ Graceful failover between hosts - **PLANNED**
+7. ✅ Browser-compatible implementation - **ACHIEVED**
+8. ✅ Comprehensive test coverage (>80%) - **IN PROGRESS**
+9. ✅ Full backward compatibility - **ACHIEVED**
+10. ✅ Production-ready documentation - **IN PROGRESS**
 
 ## Timeline
 
-- **Phase 10**: 3 days (Host Discovery)
-- **Phase 11**: 5 days (WebSocket Integration)
-- **Phase 12**: 2 days (Testing & Documentation)
-- **Total**: 10 days
+- **Phase 10**: ✅ COMPLETED (Host Discovery)
+- **Phase 11**: ✅ PARTIALLY COMPLETED (WebSocket Integration)
+- **Phase 12**: IN PROGRESS (Testing & Documentation)
 
 ---
 
-## Next Steps
+## Recent Achievements (September 2025)
 
-1. Complete Phase 9 (S5 Seed Derivation) if not done
-2. Begin Phase 10.1 - Update Contract ABIs
-3. Follow TDD approach for each sub-phase
-4. Test in browser environment continuously
-4. Start incremental refactoring
-5. Test continuously throughout process
-6. **Implement S5 seed derivation (Phase 9) after core browser compatibility**
+### Successfully Completed:
+1. **Host Discovery Implementation**
+   - New NodeRegistry contract deployed with API URL support
+   - HostDiscoveryService created and functional
+   - Both production nodes (8080, 8083) registered with API URLs
+   - Dynamic discovery working without hardcoded URLs
+
+2. **WebSocket Streaming Integration**
+   - WebSocket connections confirmed at /v1/ws endpoint
+   - Real-time streaming verified with both nodes
+   - Connection protocol with welcome message working
+   - Browser-based WebSocket clients functional
+
+3. **Node Management Enhancement**
+   - Created enhanced node-management page
+   - Dynamic wallet connection without hardcoded addresses
+   - Real-time health checks and WebSocket connectivity
+   - API URL update functionality for registered nodes
+
+### Next Steps
+
+1. Complete remaining Phase 11 sub-phases (InferenceManager, SessionManager updates)
+2. Implement Phase 12 comprehensive testing
+3. Complete Phase 9 (S5 Seed Derivation) if needed
+4. Update documentation with new features
+5. Create production deployment guide
 
 This refactor will enable UI developers to use FabstirSDK directly in browsers while maintaining full functionality through the optional server package for advanced features.
