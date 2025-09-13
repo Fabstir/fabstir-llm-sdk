@@ -50,7 +50,8 @@
     "events": "^3.3.0",
     "fake-indexeddb": "^6.2.2",
     "libp2p": "^2.4.1",
-    "multiformats": "^13.3.7"
+    "multiformats": "^13.3.7",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",

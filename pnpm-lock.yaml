@@ -53,6 +53,9 @@ importers:
       multiformats:
         specifier: ^13.3.7
         version: 13.4.0
+      ws:
+        specifier: ^8.18.3
+        version: 8.18.3(bufferutil@4.0.9)(utf-8-validate@5.0.10)
     devDependencies:
       '@types/node':
         specifier: ^20.11.30
@@ -113,7 +116,7 @@ importers:
         specifier: ^1.47.0
         version: 1.55.0
       '@types/node':
-        specifier: ^20.11.30
+        specifier: ^20.19.13
         version: 20.19.13
       '@types/react':
         specifier: ^18.3.24
@@ -128,7 +131,7 @@ importers:
         specifier: ^1.55.0
         version: 1.55.0
       typescript:
-        specifier: ^5.4.3
+        specifier: ^5.9.2
         version: 5.9.2
       vitest:
         specifier: ^1.6.1

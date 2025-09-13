@@ -117,11 +117,33 @@ export class HostManager implements IHostManager {
         }
       }
 
-      // Register host
-      const tx = await registry['registerNode'](
-        request.metadata,
-        { gasLimit: 300000n }
-      );
+      // Extract API URL from metadata if it's JSON
+      let apiUrl = '';
+      try {
+        if (request.metadata && request.metadata.startsWith('{')) {
+          const metaObj = JSON.parse(request.metadata);
+          apiUrl = metaObj.apiUrl || metaObj.endpoint || '';
+        }
+      } catch (e) {
+        // Metadata is not JSON, that's okay
+      }
+
+      // Register host with URL if available
+      let tx;
+      if (apiUrl) {
+        // Use registerNodeWithUrl to set both metadata and API URL
+        tx = await registry['registerNodeWithUrl'](
+          request.metadata,
+          apiUrl,
+          { gasLimit: 300000n }
+        );
+      } else {
+        // Fallback to basic registration
+        tx = await registry['registerNode'](
+          request.metadata,
+          { gasLimit: 300000n }
+        );
+      }
       
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) {
@@ -211,6 +233,55 @@ export class HostManager implements IHostManager {
       throw new SDKError(
         `Failed to update metadata: ${error.message}`,
         'UPDATE_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Update host API URL
+   */
+  async updateApiUrl(apiUrl: string): Promise<string> {
+    if (!this.initialized || !this.signer) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      const nodeRegistryABI = await this.contractManager.getContractABI('nodeRegistry');
+      const registry = new ethers.Contract(
+        this.nodeRegistryAddress!,
+        nodeRegistryABI,
+        this.signer
+      );
+
+      // Check if registered
+      const hostAddress = await this.signer.getAddress();
+      const nodeInfo = await registry['nodes'](hostAddress);
+      const isRegistered = nodeInfo.operator !== '0x0000000000000000000000000000000000000000';
+      
+      if (!isRegistered) {
+        throw new SDKError('Host is not registered', 'HOST_NOT_REGISTERED');
+      }
+
+      // Update API URL
+      console.log('Calling updateApiUrl with:', apiUrl);
+      console.log('Registry address:', this.nodeRegistryAddress);
+      console.log('ABI has updateApiUrl?:', nodeRegistryABI.find((item: any) => item.name === 'updateApiUrl'));
+      console.log('Contract has method?:', typeof registry['updateApiUrl']);
+      const tx = await registry['updateApiUrl'](apiUrl, { gasLimit: 200000n });
+      
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) {
+        throw new SDKError('Update API URL failed', 'UPDATE_API_URL_FAILED');
+      }
+      
+      return receipt.hash;
+    } catch (error: any) {
+      console.error('updateApiUrl error:', error);
+      if (error instanceof SDKError) throw error;
+      throw new SDKError(
+        `Failed to update API URL: ${error.message}`,
+        'UPDATE_API_URL_ERROR',
         { originalError: error }
       );
     }

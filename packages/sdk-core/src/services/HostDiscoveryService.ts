@@ -43,29 +43,31 @@ export class HostDiscoveryService {
     }
 
     try {
-      // Call contract to get node info
-      const nodeInfo = await this.contract.getNode(nodeAddress);
+      // Call contract to get API URL directly
+      const apiUrl = await this.contract.getNodeApiUrl(nodeAddress);
       
-      if (!nodeInfo.isActive) {
-        throw new Error(`Node ${nodeAddress} is not active`);
+      if (!apiUrl || apiUrl === '') {
+        throw new Error(`Node ${nodeAddress} has no API URL registered`);
       }
 
-      if (!nodeInfo.apiUrl || nodeInfo.apiUrl === '') {
-        throw new Error(`Node ${nodeAddress} has no API URL registered`);
+      // Check if node is active
+      const isActive = await this.contract.isNodeActive(nodeAddress);
+      if (!isActive) {
+        throw new Error(`Node ${nodeAddress} is not active`);
       }
 
       // Cache the result
       const info: NodeInfo = {
         nodeAddress: nodeAddress.toLowerCase(),
-        apiUrl: nodeInfo.apiUrl,
-        region: nodeInfo.region,
-        isActive: nodeInfo.isActive
+        apiUrl: apiUrl,
+        region: '',
+        isActive: true
       };
       
       this.nodeCache.set(nodeAddress.toLowerCase(), info);
       this.lastCacheTime = Date.now();
       
-      return nodeInfo.apiUrl;
+      return apiUrl;
     } catch (error: any) {
       throw new Error(`Failed to discover node ${nodeAddress}: ${error.message}`);
     }
@@ -76,21 +78,46 @@ export class HostDiscoveryService {
    */
   async getAllActiveNodes(): Promise<NodeInfo[]> {
     try {
-      // Get all registered nodes from contract
-      const nodeAddresses = await this.contract.getAllNodes();
+      // Get all active nodes from contract - returns array of addresses
+      const nodeAddresses = await this.contract.getAllActiveNodes();
       const activeNodes: NodeInfo[] = [];
+
+      // If no active nodes, return empty array
+      if (!nodeAddresses || nodeAddresses.length === 0) {
+        return activeNodes;
+      }
 
       for (const address of nodeAddresses) {
         try {
-          const nodeInfo = await this.contract.getNode(address);
-          if (nodeInfo.isActive && nodeInfo.apiUrl) {
-            activeNodes.push({
-              nodeAddress: address.toLowerCase(),
-              apiUrl: nodeInfo.apiUrl,
-              region: nodeInfo.region,
-              isActive: true
-            });
+          // Try to get metadata first - this might contain the API URL
+          let apiUrl = '';
+          let metadata = '';
+          
+          // Try the newer getNodeApiUrl function first
+          try {
+            apiUrl = await this.contract.getNodeApiUrl(address);
+          } catch (e) {
+            // If getNodeApiUrl fails, try getting metadata
+            try {
+              metadata = await this.contract.getNodeMetadata(address);
+              // Parse metadata to extract API URL if it's JSON
+              if (metadata && metadata.startsWith('{')) {
+                const metaObj = JSON.parse(metadata);
+                apiUrl = metaObj.apiUrl || metaObj.endpoint || '';
+              }
+            } catch (metaError) {
+              console.warn(`No API URL or metadata for node ${address}`);
+            }
           }
+          
+          // Even if no API URL, show the node as registered
+          activeNodes.push({
+            nodeAddress: address.toLowerCase(),
+            apiUrl: apiUrl || 'No API URL registered',
+            region: '',
+            isActive: true
+          });
+          
         } catch (error) {
           console.warn(`Failed to get info for node ${address}:`, error);
         }
