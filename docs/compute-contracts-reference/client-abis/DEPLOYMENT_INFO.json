@@ -23,7 +23,7 @@
       ]
     },
     "ModelRegistry": {
-      "address": "0xfE54c2aa68A7Afe8E0DD571933B556C8b6adC357",
+      "address": "0x92b2De840bB2171203011A6dBA928d855cA8183E",
       "deploymentDate": "2025-01-13",
       "status": "ACTIVE - MVP MODELS ONLY",
       "features": [
@@ -49,7 +49,7 @@
       ]
     },
     "NodeRegistryWithModels": {
-      "address": "0xaa14Ed58c3EF9355501bc360E5F09Fb9EC8c1100",
+      "address": "0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218",
       "deploymentDate": "2025-01-13",
       "status": "ACTIVE - MODEL VALIDATION ENFORCED",
       "features": [
