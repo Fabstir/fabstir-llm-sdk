@@ -162,38 +162,94 @@ export class ModelManager {
   }
 
   /**
-   * Get all approved models (for UI display)
+   * Get all approved models using direct contract reads
    */
   async getAllApprovedModels(): Promise<ModelInfo[]> {
     this.ensureInitialized();
 
     try {
-      // Get all model IDs from registry
-      const filter = this.modelRegistry.filters.ModelAdded();
-      const events = await this.modelRegistry.queryFilter(filter);
+      console.log('Fetching all models using direct contract reads...');
 
-      const approvedModels: ModelInfo[] = [];
-      const uniqueModelIds = new Set<string>();
+      // Get all model IDs directly from the contract
+      const modelIds = await this.modelRegistry.getAllModels();
 
-      // Extract model IDs from events
-      for (const event of events) {
-        if (event.args?.modelId) {
-          uniqueModelIds.add(event.args.modelId);
-        }
+      console.log(`Found ${modelIds.length} model IDs from contract`);
+
+      if (modelIds.length === 0) {
+        return [];
       }
 
-      // Fetch details for each model
-      for (const modelId of uniqueModelIds) {
-        const details = await this.getModelDetails(modelId);
-        if (details && details.active) {
-          approvedModels.push(details);
-        }
-      }
+      // Fetch details for each model in parallel
+      const modelPromises = modelIds.map(async (modelId) => {
+        try {
+          // Get model details
+          const model = await this.modelRegistry.models(modelId);
 
-      return approvedModels;
+          // Check if approved
+          const isApproved = await this.modelRegistry.isModelApproved(modelId);
+
+          // Return formatted model info
+          return {
+            modelId,
+            huggingfaceRepo: model.huggingfaceRepo,
+            fileName: model.fileName,
+            sha256Hash: model.sha256Hash,
+            approvalTier: Number(model.approvalTier),
+            active: model.active,
+            timestamp: Number(model.timestamp),
+            approved: isApproved
+          } as ModelInfo;
+        } catch (error) {
+          console.warn(`Error fetching model ${modelId}:`, error);
+          return null;
+        }
+      });
+
+      const models = await Promise.all(modelPromises);
+
+      // Filter out nulls and inactive models
+      const activeModels = models.filter(
+        (model): model is ModelInfo => model !== null && model.active
+      );
+
+      console.log(`Fetched ${activeModels.length} active approved models`);
+      return activeModels;
     } catch (error) {
       console.error('Error fetching approved models:', error);
-      return [];
+
+      // Fallback: try to get some basic info if getAllModels fails
+      try {
+        console.log('Trying fallback approach...');
+        const knownModels: ModelInfo[] = [];
+
+        // Try a few known model IDs (you can expand this)
+        // This is just for testing - in production getAllModels should work
+        for (let i = 0; i < 10; i++) {
+          try {
+            const testId = `0x${i.toString().padStart(64, '0')}`;
+            const model = await this.modelRegistry.models(testId);
+            if (model.huggingfaceRepo && model.huggingfaceRepo !== '') {
+              knownModels.push({
+                modelId: testId,
+                huggingfaceRepo: model.huggingfaceRepo,
+                fileName: model.fileName,
+                sha256Hash: model.sha256Hash,
+                approvalTier: Number(model.approvalTier),
+                active: model.active,
+                timestamp: Number(model.timestamp),
+                approved: await this.modelRegistry.isModelApproved(testId)
+              });
+            }
+          } catch (e) {
+            // This model ID doesn't exist, continue
+          }
+        }
+
+        return knownModels;
+      } catch (fallbackError) {
+        console.error('Fallback also failed:', fallbackError);
+        return [];
+      }
     }
   }
 
