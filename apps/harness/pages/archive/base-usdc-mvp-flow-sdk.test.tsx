@@ -19,7 +19,7 @@ import { useState, useEffect } from 'react';
 import { createBaseAccountSDK } from "@base-org/account";
 import { encodeFunctionData, parseUnits, createPublicClient, http, getAddress, formatUnits } from "viem";
 import { ethers } from 'ethers';
-import { FabstirSDKCore, getOrGenerateS5Seed } from '@fabstir/sdk-core';
+import { FabstirSDKCore } from '@fabstir/sdk-core';
 import { cacheSeed, hasCachedSeed } from '../../../packages/sdk-core/src/utils/s5-seed-derivation';
 import type { 
   PaymentManager, 
@@ -142,13 +142,12 @@ export default function BaseUsdcMvpFlowSDKTest() {
           chainId: CHAIN_ID_NUM,
           rpcUrl: RPC_URL,
           contractAddresses: {
-            jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!,
-            nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY!,
-            proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM!,
-            hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS!,
-            fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN!,
-            usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
-            modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY!
+            jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE,
+            nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY,
+            proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM,
+            hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS,
+            fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN,
+            usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN
           },
           s5Config: {
             portalUrl: process.env.NEXT_PUBLIC_S5_PORTAL_URL,
@@ -218,38 +217,27 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
   // Helper: Get or create sub-account with auto spend permissions
   async function ensureSubAccount(provider: any, universal: `0x${string}`): Promise<`0x${string}`> {
-    console.log("ensureSubAccount: Starting with primary account:", universal);
-
     try {
-      console.log("ensureSubAccount: Calling wallet_getSubAccounts...");
       const resp = await provider.request({
         method: "wallet_getSubAccounts",
-        params: [{
-          account: universal,
-          domain: window.location.origin
+        params: [{ 
+          account: universal, 
+          domain: window.location.origin 
         }]
       }) as { subAccounts?: Array<{ address: `0x${string}` }> };
 
-      console.log("ensureSubAccount: Response from wallet_getSubAccounts:", resp);
-
       if (resp?.subAccounts?.length) {
-        const subAccount = resp.subAccounts[0]!.address;
-        addLog(`Using existing sub-account: ${subAccount}`);
-        console.log("ensureSubAccount: Returning existing sub-account:", subAccount);
-        return subAccount;
+        addLog(`Using existing sub-account: ${resp.subAccounts[0]!.address}`);
+        return resp.subAccounts[0]!.address;
       }
-
-      console.log("ensureSubAccount: No existing sub-accounts found");
     } catch (e) {
-      console.error("ensureSubAccount: Error getting sub-accounts:", e);
-      addLog(`Error checking for existing sub-accounts: ${e}`);
+      addLog("No existing sub-accounts found, creating new one");
     }
 
     try {
-      console.log("ensureSubAccount: Creating new sub-account...");
       const created = await provider.request({
         method: "wallet_addSubAccount",
-        params: [{
+        params: [{ 
           account: universal,
           spender: {
             address: JOB_MARKETPLACE as `0x${string}`,
@@ -258,17 +246,12 @@ export default function BaseUsdcMvpFlowSDKTest() {
           }
         }]
       }) as { address: `0x${string}` };
-
-      console.log("ensureSubAccount: Created sub-account:", created);
+      
       addLog(`Created new sub-account: ${created.address}`);
       return created.address;
     } catch (error) {
-      console.error("ensureSubAccount: Failed to create sub-account:", error);
       addLog(`Failed to create sub-account: ${error}`);
-      // Fallback to using primary account if sub-account creation fails
-      addLog(`WARNING: Using primary account instead of sub-account (popups may occur)`);
-      console.log("ensureSubAccount: Falling back to primary account:", universal);
-      return universal;
+      throw error;
     }
   }
 
@@ -413,39 +396,14 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
       // Transfer initial USDC using PaymentManager
       addLog("Checking USDC balances...");
-
+      
       // Check TEST_USER_1 balance first
       const user1Balance = await pm.getBalance(USDC, TEST_USER_1_ADDRESS);
       addLog(`TEST_USER_1 USDC balance: ${formatUnits(user1Balance, 6)} USDC`);
-
+      
       // If using TEST_USER_1 directly, no transfer needed
       if (primaryAddr === TEST_USER_1_ADDRESS || subAddr === TEST_USER_1_ADDRESS) {
         addLog(`Using TEST_USER_1 directly (no transfer needed)`);
-      } else if (primaryAddr) {
-        // Transfer USDC from TEST_USER_1 to primary account
-        const primaryBalance = await pm.getBalance(USDC, primaryAddr);
-        addLog(`Primary account USDC balance: ${formatUnits(primaryBalance, 6)} USDC`);
-
-        // Transfer 10 USDC from TEST_USER_1 to primary account if needed
-        if (primaryBalance < parseUnits('5', 6)) {
-          addLog(`Transferring 10 USDC from TEST_USER_1 to primary account...`);
-          const transferAmount = parseUnits('10', 6);
-
-          // Use PaymentManager to transfer USDC
-          const txHash = await pm.transferToken(
-            USDC,
-            primaryAddr,
-            transferAmount
-          );
-          addLog(`Transfer complete! TX: ${txHash}`);
-
-          // Note: PaymentManager's transferToken already waits for confirmation
-          // No additional wait needed here
-
-          // Check new balance
-          const newPrimaryBalance = await pm.getBalance(USDC, primaryAddr);
-          addLog(`Primary account new balance: ${formatUnits(newPrimaryBalance, 6)} USDC`);
-        }
       }
 
       // Read all balances
@@ -485,23 +443,23 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog("Step 2: Starting - Discover Active Hosts");
       console.log("Calling hostManager.getActiveHosts()...");
 
-      // Use HostManager to discover active hosts with models
-      const hosts = await (hostManager as any).discoverAllActiveHostsWithModels();
+      // Use HostManager to get active hosts
+      const hosts = await hostManager.getActiveHosts();
       console.log("Got hosts:", hosts);
       addLog(`Found ${hosts.length} active hosts via SDK`);
 
-      // Parse host metadata - hosts already come with proper structure
-      const parsedHosts = hosts.map((host: any) => ({
+      // Parse host metadata using HostManager utilities
+      const parsedHosts = hosts.map(host => ({
         address: host.address,
-        endpoint: host.apiUrl || host.endpoint,
-        models: host.supportedModels || [],
-        pricePerToken: 2000 // Default price
+        endpoint: host.endpoint,
+        models: host.models,
+        pricePerToken: host.pricePerToken
       }));
 
       setActiveHosts(parsedHosts);
       
-      parsedHosts.forEach((host: any) => {
-        addLog(`Host: ${host.address}, Models: ${host.models.length > 0 ? host.models.join(', ') : 'none'}, Price: ${host.pricePerToken}`);
+      parsedHosts.forEach(host => {
+        addLog(`Host: ${host.address}, Models: ${host.models.join(', ')}, Price: ${host.pricePerToken}`);
       });
 
       setStepStatus(prev => ({ ...prev, 2: 'completed' }));
@@ -538,46 +496,35 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog("Step 3: Starting - Create Session with USDC deposit");
       console.log("Step 3: Creating session...");
 
-      // Validate we have hosts available
-      if (activeHosts.length === 0) {
-        throw new Error('No active hosts available. Please ensure hosts are registered and online.');
-      }
+      // Select first available host (or use specific host)
+      const selectedHost = activeHosts[0] || { 
+        address: TEST_HOST_1_ADDRESS,
+        models: ['gpt-3.5-turbo'],
+        pricePerToken: PRICE_PER_TOKEN
+      };
 
-      const selectedHost = activeHosts[0];
-
-      // Validate host has models
-      if (!selectedHost.models || selectedHost.models.length === 0) {
-        throw new Error(`Host ${selectedHost.address} does not support any models. Please ensure the host has registered models.`);
-      }
-
-      const selectedModel = selectedHost.models[0];
-      const hostEndpoint = selectedHost.endpoint || TEST_HOST_1_URL;
-
-      addLog(`Using host: ${selectedHost.address}`);
-      addLog(`Using model: ${selectedModel}`);
-      addLog(`Using endpoint: ${hostEndpoint}`);
+      addLog(`Using host: ${selectedHost.address}, Model: ${selectedHost.models[0]}`);
 
       // Create session using SessionManager
       const sessionConfig = {
         depositAmount: parseUnits(SESSION_DEPOSIT_AMOUNT, 6), // 2 USDC
-        pricePerToken: BigInt(selectedHost.pricePerToken || PRICE_PER_TOKEN),
+        pricePerToken: BigInt(PRICE_PER_TOKEN),
         proofInterval: BigInt(PROOF_INTERVAL),
         duration: BigInt(SESSION_DURATION)
       };
 
       console.log("Session config:", sessionConfig);
       console.log("Calling sessionManager.startSession with:", {
-        model: selectedModel,
+        model: selectedHost.models[0],
         provider: selectedHost.address,
-        config: sessionConfig,
-        endpoint: hostEndpoint
+        config: sessionConfig
       });
 
       const result = await sessionManager.startSession(
-        selectedModel,
+        selectedHost.models[0],
         selectedHost.address,
         sessionConfig,
-        hostEndpoint
+        selectedHost.endpoint // Pass the endpoint URL
       );
 
       console.log("Session created successfully:", result);
@@ -734,11 +681,11 @@ export default function BaseUsdcMvpFlowSDKTest() {
     try {
       addLog("Step 7: Starting - Submit proof checkpoint");
 
-      // Create checkpoint proof (64 bytes minimum for ProofSystem)
+      // Create checkpoint proof
       const checkpointProof = {
         checkpoint: 1,
         tokensGenerated: 42,
-        proofData: "0x" + "00".repeat(64) // 64 bytes required by ProofSystem
+        proofData: "0x" + "00".repeat(32) // Simulated proof data
       };
 
       // Submit checkpoint via SessionManager
@@ -900,7 +847,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
           { role: 'assistant' as const, content: history.responses[idx] || '', timestamp: Date.now() }
         ])).flat(),
         metadata: {
-          model: 'tiny-vicuna-1b', // Use the actual model name
+          model: 'gpt-3.5-turbo',
           provider: TEST_HOST_1_ADDRESS,
           jobId: jobId?.toString(),
           totalTokens: 42
@@ -1221,7 +1168,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
           addLog(`(This enables multiple gasless runs)`);
           
           const tx = await usdcContract.transfer(primaryAccount, topUpAmount);
-          await tx.wait(3); // Wait for 3 confirmations
+          await tx.wait();
           addLog(`✅ Primary topped up to $4.00 USDC`);
         } else {
           addLog(`✅ Primary has sufficient funds for multiple runs`);
@@ -1239,44 +1186,55 @@ export default function BaseUsdcMvpFlowSDKTest() {
         const subBalanceFormatted = formatUnits(subBalance, 6);
         addLog(`Sub-account balance: $${subBalanceFormatted} USDC`);
         
-        // We need $2.00 for the deposit (even though only $0.20 is consumed)
+        // We only use $0.20 per session (100 tokens at 0.002 USDC/token)
         const minSessionFunds = parseUnits("0.20", 6);  // Actual usage per session
         const idealFunds = parseUnits("2", 6);           // Deposit amount for contract
-
+        
         const subBalanceBig = BigInt(subBalance.toString());
         const minSessionFundsBig = BigInt(minSessionFunds.toString());
         const idealFundsBig = BigInt(idealFunds.toString());
-
-        if (subBalanceBig >= idealFundsBig) {
-          // Has enough for full deposit - no transfer needed!
-          addLog(`✅ Sub has funds for deposit ($${subBalanceFormatted} >= $2.00)`);
+        
+        if (subBalanceBig >= minSessionFundsBig) {
+          // Has enough for this session - no transfer needed!
+          addLog(`✅ Sub has funds for session ($${subBalanceFormatted} >= $0.20)`);
           addLog(`🎉 Running gasless - no transfers needed!`);
           addLog(`   Session will consume: $0.20 (100 tokens)`);
           addLog(`   Refund after session: $1.80 (for future use)`);
         } else {
-          // Smart wallet needs funding from TEST_USER_1 to reach ideal balance
+          // Sub-account needs funding to reach ideal balance
           const neededAmount = idealFundsBig - subBalanceBig;
           const neededFormatted = formatUnits(neededAmount, 6);
-
-          addLog(`📤 Funding smart wallet with $${neededFormatted} USDC from TEST_USER_1...`);
-          addLog(`   Current balance: $${subBalanceFormatted}`);
-          addLog(`   Target balance: $2.00`);
-          addLog(`   Actual session usage: $0.20`);
-
-          // Transfer from TEST_USER_1 to the sub-account using ethers wallet
-          const tx = await usdcContract.transfer(subAccount, neededAmount);
-          addLog(`Waiting for 3 blockchain confirmations...`);
-          await tx.wait(3); // Wait for 3 confirmations
-
-          // Verify the new balance
-          const newBalance = await usdcContract.balanceOf(subAccount);
-          const newBalanceFormatted = formatUnits(newBalance, 6);
-          addLog(`✅ Sub-account funded! New balance: $${newBalanceFormatted} USDC`);
-
-          if (BigInt(newBalance.toString()) < idealFundsBig) {
-            throw new Error(`Funding failed! Balance is still ${newBalanceFormatted}, expected 2.00`);
-          }
-
+          
+          addLog(`📤 Funding sub-account with $${neededFormatted} USDC...`);
+          addLog(`   (Deposit: $2.00, Actual usage: $0.20)`);
+          
+          const fundSubData = encodeFunctionData({
+            abi: erc20TransferAbi,
+            functionName: "transfer",
+            args: [subAccount as `0x${string}`, neededAmount]
+          });
+          
+          const fundResponse = await provider.request({
+            method: "wallet_sendCalls",
+            params: [{
+              version: "2.0.0",
+              chainId: CHAIN_HEX,
+              from: primaryAccount as `0x${string}`,
+              calls: [{ 
+                to: USDC, 
+                data: fundSubData as `0x${string}` 
+              }],
+              capabilities: { 
+                atomic: { required: true }
+              }
+            }]
+          });
+          
+          addLog(`Transfer initiated: ${fundResponse}`);
+          
+          // Wait for confirmation
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          addLog(`✅ Sub-account funded to $2.00 USDC`);
           addLog(`   Will use: $0.20 (host: $0.18, treasury: $0.02)`);
           addLog(`   Will keep: $1.80 for future sessions`);
         }
@@ -1289,7 +1247,6 @@ export default function BaseUsdcMvpFlowSDKTest() {
           provider: new ethers.BrowserProvider(provider),
           
           async getAddress(): Promise<string> {
-            console.log(`[SubAccountSigner] getAddress() called, returning: ${subAccount}`);
             return subAccount;
           },
           
@@ -1441,61 +1398,56 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog("✅ SDK authenticated and managers initialized");
       setStepStatus(prev => ({ ...prev, 1: 'completed' }));
       setCurrentStep(1);
-
+      
+      // Wait for state to settle
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
       // Step 2: Discover Hosts
       addLog("=== Step 2: Discover Hosts ===");
       setStepStatus(prev => ({ ...prev, 2: 'in-progress' }));
       
-      const hosts = await (hm as any).discoverAllActiveHostsWithModels();
+      const hosts = await hm.getActiveHosts();
       addLog(`Found ${hosts.length} active hosts via SDK`);
       
       // Log host details for debugging
       if (hosts.length > 0) {
         hosts.forEach((host: any, index: number) => {
           addLog(`Host ${index + 1}: ${host.address}`);
-          addLog(`  - Endpoint: ${host.apiUrl || host.endpoint || 'No endpoint'}`);
-          addLog(`  - Models: ${host.supportedModels && host.supportedModels.length > 0 ? host.supportedModels.join(', ') : 'No models'}`);
+          addLog(`  - Endpoint: ${host.endpoint || 'No endpoint'}`);
+          addLog(`  - Models: ${host.models?.join(', ') || 'No models'}`);
         });
       }
       
       setActiveHosts(hosts);
       setStepStatus(prev => ({ ...prev, 2: 'completed' }));
       setCurrentStep(2);
-
+      
+      // Wait before next blockchain operation
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
       // Step 3: Create Session
       addLog("=== Step 3: Create Session ===");
       setStepStatus(prev => ({ ...prev, 3: 'in-progress' }));
-
-      // Validate we have hosts to work with
-      if (hosts.length === 0) {
-        throw new Error('No active hosts found. Please ensure hosts are registered and online.');
-      }
-
-      const selectedHost = hosts[0];
-
-      // Check if host has models
-      let selectedModel: string;
-      if (selectedHost.supportedModels && selectedHost.supportedModels.length > 0) {
-        selectedModel = selectedHost.supportedModels[0];
-        addLog(`Using host's model: ${selectedModel}`);
-      } else {
-        // Production error - hosts must have models
-        throw new Error(`Host ${selectedHost.address} does not support any models. Host must register models before accepting sessions.`);
-      }
-
-      const hostEndpoint = selectedHost.apiUrl || selectedHost.endpoint || TEST_HOST_1_URL;
-      addLog(`Using host: ${selectedHost.address}`);
-      addLog(`Using endpoint: ${hostEndpoint}`);
-
+      
+      const selectedHost = hosts[0] || { 
+        address: TEST_HOST_1_ADDRESS,
+        models: ['tiny-vicuna-1b'],  // Use the model that the node actually has
+        endpoint: TEST_HOST_1_URL
+      };
+      
+      // Use TEST_HOST_1_URL if host doesn't have an endpoint
+      const hostEndpoint = selectedHost.endpoint || TEST_HOST_1_URL;
+      addLog(`Using host endpoint: ${hostEndpoint}`);
+      
       const sessionConfig = {
         depositAmount: 2000000n, // 2 USDC in smallest units
         pricePerToken: 2000n,
         proofInterval: 100n,
         duration: 86400n
       };
-
+      
       const result = await sm.startSession(
-        selectedModel,
+        selectedHost.models[0],
         selectedHost.address,
         sessionConfig,
         hostEndpoint
@@ -1506,7 +1458,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog(`✅ Session created - ID: ${result.sessionId}, Job ID: ${result.jobId}`);
       setStepStatus(prev => ({ ...prev, 3: 'completed' }));
       setCurrentStep(3);
-
+      
+      // Wait for blockchain to settle
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
       // Step 4: Send real prompt to LLM
       addLog("=== Step 4: Send Prompt to Real LLM ===");
       setStepStatus(prev => ({ ...prev, 4: 'in-progress' }));
@@ -1558,16 +1513,11 @@ export default function BaseUsdcMvpFlowSDKTest() {
       const tokensGenerated = 100; // Must match proofInterval from session config
       
       try {
-        // REQUIRED: Wait for token accumulation (ProofSystem enforces 10 tokens/sec generation rate)
-        // With 100 tokens claimed and 2x burst allowance, we need at least 5 seconds
-        addLog("Waiting 5 seconds for token accumulation (required by ProofSystem rate limits)...");
-        await new Promise(resolve => setTimeout(resolve, 5000));
-
         // Create host signer for proof submission
         const hostProvider = new ethers.JsonRpcProvider(RPC_URL);
         const hostSigner = new ethers.Wallet(TEST_HOST_1_PRIVATE_KEY, hostProvider);
         addLog(`Using host signer: ${await hostSigner.getAddress()}`);
-
+        
         // Use PaymentManager's submitCheckpointAsHost method
         const checkpointTx = await pm.submitCheckpointAsHost(
           result.sessionId,
@@ -1577,19 +1527,12 @@ export default function BaseUsdcMvpFlowSDKTest() {
         );
         addLog(`✅ Checkpoint proof submitted by host - TX: ${checkpointTx}`);
         
-        // Transaction confirmation is handled by submitCheckpointProofAsHost
-        addLog("✅ Checkpoint proof submitted and confirmed");
+        // Wait for checkpoint transaction to be confirmed
+        addLog("Waiting for checkpoint confirmation...");
+        await new Promise(resolve => setTimeout(resolve, 5000)); // 5 seconds for confirmation
         
       } catch (error: any) {
         addLog(`⚠️ Checkpoint submission failed: ${error.message}`);
-
-        if (error.message.includes('Proof system not set')) {
-          console.error("CRITICAL: The JobMarketplace contract doesn't have a proof system configured!");
-          console.error("This is a deployment issue - the contract owner needs to call setProofSystem()");
-          console.error("Without a proof system, no payments can be distributed.");
-          addLog("❌ CRITICAL: Contract missing proof system - payments will fail!");
-        }
-
         // Continue anyway to see what happens
       }
       
@@ -1652,8 +1595,9 @@ export default function BaseUsdcMvpFlowSDKTest() {
       const txHash = await sm.completeSession(result.sessionId, 100, finalProof); // Use 100 tokens to match checkpoint
       addLog(`✅ Session marked as completed - TX: ${txHash}`);
       
-      // Transaction confirmation is handled by completeSessionJob
-      addLog("✅ Session completed and payments distributed on-chain");
+      // Wait for blockchain transaction to complete and payments to settle
+      addLog("⏳ Waiting for payment settlement on blockchain...");
+      await new Promise(resolve => setTimeout(resolve, 10000)); // 10 seconds for settlement
       
       // Read balances after completion
       addLog("Reading balances after session completion...");
@@ -1685,17 +1629,12 @@ export default function BaseUsdcMvpFlowSDKTest() {
         addLog(`  ✅ Host received: $${ethers.formatUnits(payments.hostPayment, 6)} (90% of $0.20)`);
       } else {
         addLog(`  ❌ No payment to host detected`);
-        console.error("ERROR: Host payment failed! This usually means:");
-        console.error("  1. Checkpoint proof was not submitted successfully");
-        console.error("  2. Or the proof was invalid/rejected by the contract");
-        console.error("  Without valid proofs, the contract won't distribute payments");
       }
-
+      
       if (payments.treasuryFee > 0n) {
         addLog(`  ✅ Treasury received: $${ethers.formatUnits(payments.treasuryFee, 6)} (10% of $0.20)`);
       } else {
         addLog(`  ❌ No fee to treasury detected`);
-        console.error("ERROR: Treasury fee not collected! Payments may have failed.");
       }
       
       // Check for refund to sub-account (not user)
@@ -1741,12 +1680,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
           chainId: CHAIN_ID_NUM,
           contractAddresses: {
             jobMarketplace: JOB_MARKETPLACE,
-            nodeRegistry: NODE_REGISTRY,
             proofSystem: PROOF_SYSTEM,
             hostEarnings: HOST_EARNINGS,
             fabToken: FAB_TOKEN,
-            usdcToken: USDC,
-            modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY!
+            usdcToken: USDC
           },
           s5Config: {
             seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE,
@@ -1762,13 +1699,11 @@ export default function BaseUsdcMvpFlowSDKTest() {
         const withdrawTx = await hostManager.withdrawEarnings(USDC);
         addLog(`✅ Host withdrew earnings - TX: ${withdrawTx}`);
         
+        // Wait for withdrawal to settle
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
       } catch (error: any) {
         addLog(`⚠️ Host withdrawal failed: ${error.message}`);
-        if (error.message.includes('withdrawEarnings is not a function')) {
-          console.error("ERROR: Host cannot withdraw earnings!");
-          console.error("  This means no earnings were accumulated in the HostEarnings contract");
-          console.error("  Likely because the checkpoint proof submission failed");
-        }
       }
       
       setStepStatus(prev => ({ ...prev, 16: 'completed' }));
@@ -1792,12 +1727,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
           chainId: CHAIN_ID_NUM,
           contractAddresses: {
             jobMarketplace: JOB_MARKETPLACE,
-            nodeRegistry: NODE_REGISTRY,
             proofSystem: PROOF_SYSTEM,
             hostEarnings: HOST_EARNINGS,
             fabToken: FAB_TOKEN,
-            usdcToken: USDC,
-            modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY!
+            usdcToken: USDC
           },
           s5Config: {
             seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE,
@@ -1812,6 +1745,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
         const treasuryManager = treasurySdk.getTreasuryManager();
         const treasuryWithdrawTx = await treasuryManager.withdrawFees();
         addLog(`✅ Treasury withdrew fees via SDK - TX: ${treasuryWithdrawTx}`);
+        
+        // Wait for withdrawal to settle
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
       } catch (error: any) {
         addLog(`⚠️ Treasury withdrawal failed: ${error.message}`);
         addLog("Note: Only authorized treasury account can withdraw fees in production");

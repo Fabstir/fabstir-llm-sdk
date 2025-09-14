@@ -442,12 +442,15 @@ export class FabstirSDKCore {
         throw new SDKError('Node Registry address not configured', 'CONFIG_ERROR');
       }
       const fabTokenAddress = this.config.contractAddresses?.fabToken;
+      const hostEarningsAddress = this.config.contractAddresses?.hostEarnings;
       console.log('FAB token address from config:', fabTokenAddress);
       this.hostManager = new HostManagerEnhanced(
         this.signer,
         nodeRegistryAddress,
         this.modelManager,
-        fabTokenAddress
+        fabTokenAddress,
+        hostEarningsAddress,
+        this.contractManager
       );
       console.log('HostManagerEnhanced created with FAB token:', fabTokenAddress);
 

@@ -5,7 +5,7 @@
  */
 
 // Import all ABIs from local folder
-import JobMarketplaceABI from './JobMarketplaceFABWithS5-CLIENT-ABI.json';
+import JobMarketplaceABI from './JobMarketplaceWithModels-CLIENT-ABI.json';
 import HostEarningsABI from './HostEarnings-CLIENT-ABI.json';
 import NodeRegistryABI from './NodeRegistryFAB-CLIENT-ABI.json';
 import ProofSystemABI from './ProofSystem-CLIENT-ABI.json';

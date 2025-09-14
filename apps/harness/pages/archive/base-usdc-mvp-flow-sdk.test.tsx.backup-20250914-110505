@@ -439,8 +439,8 @@ export default function BaseUsdcMvpFlowSDKTest() {
           );
           addLog(`Transfer complete! TX: ${txHash}`);
 
-          // Note: PaymentManager's transferToken already waits for confirmation
-          // No additional wait needed here
+          // Wait for transaction to be mined
+          await new Promise(resolve => setTimeout(resolve, 5000));
 
           // Check new balance
           const newPrimaryBalance = await pm.getBalance(USDC, primaryAddr);
@@ -1221,7 +1221,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
           addLog(`(This enables multiple gasless runs)`);
           
           const tx = await usdcContract.transfer(primaryAccount, topUpAmount);
-          await tx.wait(3); // Wait for 3 confirmations
+          await tx.wait();
           addLog(`✅ Primary topped up to $4.00 USDC`);
         } else {
           addLog(`✅ Primary has sufficient funds for multiple runs`);
@@ -1265,8 +1265,11 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
           // Transfer from TEST_USER_1 to the sub-account using ethers wallet
           const tx = await usdcContract.transfer(subAccount, neededAmount);
-          addLog(`Waiting for 3 blockchain confirmations...`);
-          await tx.wait(3); // Wait for 3 confirmations
+          await tx.wait();
+
+          // Wait for blockchain confirmation
+          addLog(`Waiting for blockchain confirmation...`);
+          await new Promise(resolve => setTimeout(resolve, 5000)); // 5 seconds
 
           // Verify the new balance
           const newBalance = await usdcContract.balanceOf(subAccount);
@@ -1441,7 +1444,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog("✅ SDK authenticated and managers initialized");
       setStepStatus(prev => ({ ...prev, 1: 'completed' }));
       setCurrentStep(1);
-
+      
+      // Wait for state to settle
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
       // Step 2: Discover Hosts
       addLog("=== Step 2: Discover Hosts ===");
       setStepStatus(prev => ({ ...prev, 2: 'in-progress' }));
@@ -1461,7 +1467,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
       setActiveHosts(hosts);
       setStepStatus(prev => ({ ...prev, 2: 'completed' }));
       setCurrentStep(2);
-
+      
+      // Wait before next blockchain operation
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
       // Step 3: Create Session
       addLog("=== Step 3: Create Session ===");
       setStepStatus(prev => ({ ...prev, 3: 'in-progress' }));
@@ -1506,7 +1515,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog(`✅ Session created - ID: ${result.sessionId}, Job ID: ${result.jobId}`);
       setStepStatus(prev => ({ ...prev, 3: 'completed' }));
       setCurrentStep(3);
-
+      
+      // Wait for blockchain to settle
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
       // Step 4: Send real prompt to LLM
       addLog("=== Step 4: Send Prompt to Real LLM ===");
       setStepStatus(prev => ({ ...prev, 4: 'in-progress' }));
@@ -1558,9 +1570,8 @@ export default function BaseUsdcMvpFlowSDKTest() {
       const tokensGenerated = 100; // Must match proofInterval from session config
       
       try {
-        // REQUIRED: Wait for token accumulation (ProofSystem enforces 10 tokens/sec generation rate)
-        // With 100 tokens claimed and 2x burst allowance, we need at least 5 seconds
-        addLog("Waiting 5 seconds for token accumulation (required by ProofSystem rate limits)...");
+        // Wait for token accumulation (10 tokens/sec, max 2x burst)
+        addLog("Waiting 5 seconds for token accumulation before proof submission...");
         await new Promise(resolve => setTimeout(resolve, 5000));
 
         // Create host signer for proof submission
@@ -1577,8 +1588,9 @@ export default function BaseUsdcMvpFlowSDKTest() {
         );
         addLog(`✅ Checkpoint proof submitted by host - TX: ${checkpointTx}`);
         
-        // Transaction confirmation is handled by submitCheckpointProofAsHost
-        addLog("✅ Checkpoint proof submitted and confirmed");
+        // Wait for checkpoint transaction to be confirmed
+        addLog("Waiting for checkpoint confirmation...");
+        await new Promise(resolve => setTimeout(resolve, 5000)); // 5 seconds for confirmation
         
       } catch (error: any) {
         addLog(`⚠️ Checkpoint submission failed: ${error.message}`);
@@ -1652,8 +1664,9 @@ export default function BaseUsdcMvpFlowSDKTest() {
       const txHash = await sm.completeSession(result.sessionId, 100, finalProof); // Use 100 tokens to match checkpoint
       addLog(`✅ Session marked as completed - TX: ${txHash}`);
       
-      // Transaction confirmation is handled by completeSessionJob
-      addLog("✅ Session completed and payments distributed on-chain");
+      // Wait for blockchain transaction to complete and payments to settle
+      addLog("⏳ Waiting for payment settlement on blockchain...");
+      await new Promise(resolve => setTimeout(resolve, 10000)); // 10 seconds for settlement
       
       // Read balances after completion
       addLog("Reading balances after session completion...");
@@ -1762,6 +1775,9 @@ export default function BaseUsdcMvpFlowSDKTest() {
         const withdrawTx = await hostManager.withdrawEarnings(USDC);
         addLog(`✅ Host withdrew earnings - TX: ${withdrawTx}`);
         
+        // Wait for withdrawal to settle
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
       } catch (error: any) {
         addLog(`⚠️ Host withdrawal failed: ${error.message}`);
         if (error.message.includes('withdrawEarnings is not a function')) {
@@ -1812,6 +1828,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
         const treasuryManager = treasurySdk.getTreasuryManager();
         const treasuryWithdrawTx = await treasuryManager.withdrawFees();
         addLog(`✅ Treasury withdrew fees via SDK - TX: ${treasuryWithdrawTx}`);
+        
+        // Wait for withdrawal to settle
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
       } catch (error: any) {
         addLog(`⚠️ Treasury withdrawal failed: ${error.message}`);
         addLog("Note: Only authorized treasury account can withdraw fees in production");

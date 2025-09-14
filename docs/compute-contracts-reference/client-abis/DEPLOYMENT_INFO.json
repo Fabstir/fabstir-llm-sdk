@@ -1,167 +1,155 @@
-# Current Contract Addresses - Base Sepolia
-
-Last Updated: January 13, 2025 (Model Governance System Added)
-
-> **🚀 LATEST DEPLOYMENT**: JobMarketplace Compatible with NodeRegistryWithModels (2025-09-14)
-> - **JobMarketplaceWithModels**: `0x56431bDeA20339c40470eC86BC2E3c09B065AFFe` ✅ CURRENT - Compatible with model governance
-> - **ModelRegistry**: `0x92b2De840bB2171203011A6dBA928d855cA8183E` ✅ Model governance - ONLY 2 approved models
-> - **NodeRegistryWithModels**: `0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218` ✅ Model-validated registration
-> - **HostEarnings**: `0x908962e8c6CE72610021586f85ebDE09aAc97776` ✅ ETH & USDC accumulation
-> - **ProofSystem**: `0x2ACcc60893872A499700908889B38C5420CBcFD1` ✅ FIXED internal verification
-> - **Note**: Model governance ensures only approved models can be used in the marketplace
-
-## ✅ Active Contracts - With Model Governance + Treasury/Host Accumulation (Current)
-
-These contracts include model governance, all fixes, AND both treasury and host earnings accumulation for maximum gas savings:
-
-| Contract | Address | Description |
-|----------|---------|-------------|
-| **JobMarketplaceWithModels** | `0x56431bDeA20339c40470eC86BC2E3c09B065AFFe` | ✅ CURRENT - Compatible with NodeRegistryWithModels |
-| **ModelRegistry** | `0x92b2De840bB2171203011A6dBA928d855cA8183E` | ✅ Model governance - ONLY 2 approved models |
-| **NodeRegistryWithModels** | `0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218` | ✅ Node registration with model validation |
-| **ProofSystem** | `0x2ACcc60893872A499700908889B38C5420CBcFD1` | ✅ FIXED internal verification for USDC |
-| **HostEarnings** | `0x908962e8c6CE72610021586f85ebDE09aAc97776` | ✅ Host earnings accumulation (ETH & USDC) |
-
-### 🎯 Approved Models for MVP Testing
-
-| Model | HuggingFace Repo | File | SHA256 Hash |
-|-------|------------------|------|-------------|
-| **TinyVicuna-1B** | CohereForAI/TinyVicuna-1B-32k-GGUF | tiny-vicuna-1b.q4_k_m.gguf | 0x329d002bc20d4e7baae25df802c9678b5a4340b3ce91f23e6a0644975e95935f |
-| **TinyLlama-1.1B** | TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF | tinyllama-1b.Q4_K_M.gguf | 0x45b71fe98efe5f530b825dce6f5049d738e9c16869f10be4370ab81a9912d4a6 |
-
-## ⚠️ Previous Deployments with Issues
-
-### Incompatible with NodeRegistryWithModels (Jan 13, 2025)
-| Contract | Address | Issue |
-|----------|---------|-------|
-| **JobMarketplace** | `0x001A47Bb8C6CaD9995639b8776AB5816Ab9Ac4E0` | Uses old NodeRegistryFAB, incompatible with model governance |
-
-### Wrong NodeRegistry (Jan 5, 2025)
-| Contract | Address | Issue |
-|----------|---------|-------|
-| **JobMarketplaceFABWithS5** | `0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b` | Uses old buggy NodeRegistry, hosts can't re-register |
-
-### Missing Treasury Accumulation (Sept 4, 2025)
-| Contract | Address | Issue |
-|----------|---------|-------|
-| **JobMarketplaceFABWithS5** | `0x9A945fFBe786881AaD92C462Ad0bd8aC177A8069` | No treasury accumulation, direct transfers only |
-| **HostEarnings** | `0x67D0dB226Cc9631e3F5369cfb8b0FBFcBA576aEC` | Works but paired with non-accumulating treasury |
-
-### Missing Treasury Initialization (Sept 4, 2025)
-| Contract | Address | Issue |
-|----------|---------|-------|
-| **JobMarketplaceFABWithS5** | `0xEB646BF2323a441698B256623F858c8787d70f9F` | Treasury not initialized, all transactions revert |
-| **HostEarnings** | `0xcbD91249cC8A7634a88d437Eaa083496C459Ef4E` | Works but paired with unusable marketplace |
-
-### Missing Accumulation Logic (January 2025)
-| Contract | Address | Issue |
-|----------|---------|-------|
-| **JobMarketplaceFABWithS5** | `0xD937c594682Fe74E6e3d06239719805C04BE804A` | No accumulation logic, direct payments only |
-
-### Missing USDC Validations (December 2024)
-| Contract | Address | Issue |
-|----------|---------|-------|
-| **JobMarketplaceFABWithS5** | `0xebD3bbc24355d05184C7Af753d9d631E2b3aAF7A` | No host/parameter validation for USDC sessions |
-
-### Session Jobs with Payment Bug (November 2024)
-| Contract | Address | Issue |
-|----------|---------|-------|
-| **JobMarketplaceFABWithS5** | `0x445882e14b22E921c7d4Fe32a7736a32197578AF` | transfer() fails silently |
-| **ProofSystem** | `0x707B775933C4C4c89894EC516edad83b2De77A05` | Works but paired with buggy marketplace |
-
-### Old Single-Prompt Contracts (DEPRECATED)
-| Contract | Address | Issue |
-|----------|---------|-------|
-| **JobMarketplaceFABWithS5** (old) | `0x7ce861CC0188c260f3Ba58eb9a4d33e17Eb62304` | No session job support |
-| **HostEarnings** | `0xbFfCd6BAaCCa205d471bC52Bd37e1957B1A43d4a` | Not used for session jobs |
-| **PaymentEscrowWithEarnings** | `0xa4C5599Ea3617060ce86Ff0916409e1fb4a0d2c6` | Not used for session jobs |
-
-## 📦 Token Contracts
-
-| Token | Address | Description |
-|-------|---------|-------------|
-| **FAB Token** | `0xC78949004B4EB6dEf2D66e49Cd81231472612D62` | Governance and staking token |
-| **USDC** | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` | Base Sepolia USDC for job payments |
-
-## 🏦 Platform Configuration
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| **Treasury** | `0x4e770e723B95A0d8923Db006E49A8a3cb0BAA078` | Receives 10% platform fees |
-| **Platform Fee** | 1000 basis points (10%) | Applied to all job completions |
-| **Min Stake** | 1000 FAB tokens | Required for node registration |
-
-## ❌ Deprecated Contracts (DO NOT USE)
-
-These contracts are from earlier deployments and are no longer compatible with the current system:
-
-| Contract | Address | Issue |
-|----------|---------|-------|
-| JobMarketplaceFABWithEarnings | `0x1A173A3703858D2F5EA4Bf48dDEb53FD4278187D` | No S5 CID support - hosts receive placeholder text |
-| NodeRegistry (Original) | `0xF6420Cc8d44Ac92a6eE29A5E8D12D00aE91a73B3` | Used ETH staking instead of FAB |
-| NodeRegistryFAB (Old) | `0x039AB5d5e8D5426f9963140202F506A2Ce6988F9` | Deprecated - no model validation, use NodeRegistryWithModels |
-| NodeRegistryFAB (Buggy) | `0x87516C13Ea2f99de598665e14cab64E191A0f8c4` | Re-registration bug - couldn't register after unregister |
-| JobMarketplace (Original) | `0x6C4283A2aAee2f94BcD2EB04e951EfEa1c35b0B6` | No earnings accumulation |
-| PaymentEscrow (Original) | `0x3b96fBD7b463e94463Ae4d0f2629e08cf1F25894` | No earnings support |
-
-## 🔄 System Evolution
-
-1. **Phase 1**: Original system with ETH staking and direct payments
-2. **Phase 2**: FAB token integration and USDC support  
-3. **Phase 3**: Earnings accumulation system (40-46% gas savings)
-4. **Phase 4** (Current): S5 CID storage system
-   - Fixes critical issue: hosts now receive actual prompts via S5 CIDs
-   - Unlimited prompt/response size (not limited by gas)
-   - Maintains gas efficiency of earnings system
-   - Clean job ID sequence (starts from 1)
-
-## 🚀 For Your Client Application
-
-Update your configuration with the NEW contracts with accumulation:
-
-```javascript
-const config = {
-  // Model Governance + USDC Support Fixed (CURRENT - 2025-09-13)
-  jobMarketplace: '0x56431bDeA20339c40470eC86BC2E3c09B065AFFe',  // ✅ CURRENT - Compatible with NodeRegistryWithModels
-  modelRegistry: '0x92b2De840bB2171203011A6dBA928d855cA8183E',   // ✅ Model governance - ONLY 2 approved models
-  nodeRegistry: '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',    // ✅ NodeRegistryWithModels - Use this
-  proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',      // ✅ FIXED internal verification
-  hostEarnings: '0x908962e8c6CE72610021586f85ebDE09aAc97776',    // ✅ Host earnings accumulation
-
-  // Tokens
-  fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
-  usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-
-  // Platform
-  treasury: '0xbeaBB2a5AEd358aA0bd442dFFd793411519Bdc11',
-
-  // Approved Models (MVP Testing Only)
-  approvedModels: {
-    tinyVicuna: {
-      repo: 'CohereForAI/TinyVicuna-1B-32k-GGUF',
-      file: 'tiny-vicuna-1b.q4_k_m.gguf'
+{
+  "network": "Base Sepolia",
+  "chainId": 84532,
+  "lastUpdated": "2025-01-14 FINAL",
+  "status": "FULLY WORKING JobMarketplace - All Issues Fixed",
+  "contracts": {
+    "JobMarketplaceWithModels": {
+      "address": "0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944",
+      "previousAddress": "0xb082Ae609D59BFB21073AF73eB37BFe4C36ab1c9",
+      "deploymentDate": "2025-01-14 FINAL",
+      "status": "ACTIVE - FULLY WORKING",
+      "features": [
+        "Compatible with NodeRegistryWithModels 6-field struct",
+        "FIXED: Properly calls creditEarnings() in HostEarnings",
+        "ProofSystem configured at 0x2ACcc60893872A499700908889B38C5420CBcFD1",
+        "Authorized in HostEarnings contract",
+        "Validates host has supported models",
+        "User refunds fixed",
+        "Treasury fee accumulation",
+        "Host earnings accumulation WITH PROPER TRACKING",
+        "USDC payment settlement working",
+        "90% host / 10% treasury distribution",
+        "ETH payments working",
+        "Session jobs with proof checkpoints",
+        "EZKL proof verification",
+        "80% total gas savings"
+      ]
     },
-    tinyLlama: {
-      repo: 'TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF',
-      file: 'tinyllama-1b.Q4_K_M.gguf'
+    "ModelRegistry": {
+      "address": "0x92b2De840bB2171203011A6dBA928d855cA8183E",
+      "deploymentDate": "2025-01-13",
+      "status": "ACTIVE - MVP MODELS ONLY",
+      "features": [
+        "Two-tier approval system",
+        "SHA256 hash verification",
+        "FAB token voting for proposals",
+        "Emergency model deactivation",
+        "ONLY 2 approved models for MVP"
+      ],
+      "approvedModels": [
+        {
+          "name": "TinyVicuna-1B-32k",
+          "repo": "CohereForAI/TinyVicuna-1B-32k-GGUF",
+          "file": "tiny-vicuna-1b.q4_k_m.gguf",
+          "hash": "0x329d002bc20d4e7baae25df802c9678b5a4340b3ce91f23e6a0644975e95935f"
+        },
+        {
+          "name": "TinyLlama-1.1B Chat",
+          "repo": "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
+          "file": "tinyllama-1b.Q4_K_M.gguf",
+          "hash": "0x45b71fe98efe5f530b825dce6f5049d738e9c16869f10be4370ab81a9912d4a6"
+        }
+      ]
+    },
+    "NodeRegistryWithModels": {
+      "address": "0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218",
+      "deploymentDate": "2025-01-13",
+      "status": "ACTIVE - MODEL VALIDATION ENFORCED",
+      "features": [
+        "Model validation via ModelRegistry",
+        "Structured JSON metadata",
+        "Model-to-node mapping",
+        "API endpoint discovery",
+        "FAB token staking",
+        "1000 FAB minimum stake"
+      ]
+    },
+    "NodeRegistryFAB": {
+      "address": "0x039AB5d5e8D5426f9963140202F506A2Ce6988F9",
+      "previousAddress": "0xb212F4e62a2F3BA36048054Fe75e3d0b0d61EB44",
+      "deploymentDate": "2025-01-09",
+      "status": "DEPRECATED - Use NodeRegistryWithModels",
+      "features": [
+        "Legacy registration without model validation"
+      ]
+    },
+    "HostEarnings": {
+      "address": "0x908962e8c6CE72610021586f85ebDE09aAc97776",
+      "deploymentDate": "2025-01-05",
+      "status": "ACTIVE",
+      "authorizedMarketplace": "0xb082Ae609D59BFB21073AF73eB37BFe4C36ab1c9",
+      "features": [
+        "Batch withdrawal for hosts",
+        "Multi-token support (ETH + USDC)",
+        "Gas-efficient accumulation pattern",
+        "creditEarnings() properly called by JobMarketplace"
+      ]
+    },
+    "ProofSystem": {
+      "address": "0x2ACcc60893872A499700908889B38C5420CBcFD1",
+      "deploymentDate": "2025-01-04",
+      "status": "ACTIVE - FIXED",
+      "features": [
+        "Internal verification function fixed",
+        "USDC session proof verification working",
+        "Batch verification support",
+        "Minimum 64-byte proof requirement"
+      ]
     }
   },
-
-  // Network
-  chainId: 84532, // Base Sepolia
-  rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY'
-};
-```
-
-## 📝 Important Notes
-
-- **Model Governance**: Only approved GGUF models can be used (TinyVicuna-1B and TinyLlama-1.1B for MVP)
-- **Gas Savings**: ~80% reduction in gas costs through dual accumulation (treasury + host)
-- **Host Registration**: Will require approved model IDs once NodeRegistryWithModels is deployed
-- **Host Withdrawals**: Hosts can withdraw accumulated earnings at their convenience
-- **Treasury Withdrawals**: Treasury can batch withdraw all accumulated fees with one transaction
-- **Job IDs**: Start from 1 in JobMarketplaceLite
-- **Payment Support**: Both ETH and USDC payments with accumulation
-- **Staking**: Requires FAB tokens, not ETH
-- **Contract Size**: JobMarketplaceLite is 5KB (vs 26KB original)
-- **Verification**: All contracts verified on [Base Sepolia Explorer](https://sepolia.basescan.org)
+  "tokens": {
+    "FAB": {
+      "address": "0xC78949004B4EB6dEf2D66e49Cd81231472612D62",
+      "decimals": 18,
+      "usage": "Governance and host staking"
+    },
+    "USDC": {
+      "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+      "decimals": 6,
+      "usage": "Job payments",
+      "minimumDeposit": 800000,
+      "minimumDepositFormatted": "0.80 USDC"
+    }
+  },
+  "platform": {
+    "treasury": "0xbeaBB2a5AEd358aA0bd442dFFd793411519Bdc11",
+    "feePercent": 2.5,
+    "hostPercent": 97.5,
+    "minStake": "1000000000000000000000",
+    "minStakeFormatted": "1000 FAB"
+  },
+  "apiDiscovery": {
+    "description": "Hosts can now register with API URLs for automatic discovery",
+    "functions": {
+      "registerNodeWithUrl": "Register new host with API endpoint",
+      "updateApiUrl": "Update existing host's API endpoint",
+      "getNodeApiUrl": "Get host's API endpoint URL",
+      "getNodeFullInfo": "Get all host information including API URL"
+    },
+    "example": {
+      "registration": "nodeRegistry.registerNodeWithUrl('llama-2-7b,inference', 'http://host.com:8080')",
+      "update": "nodeRegistry.updateApiUrl('https://new-host.com:8443')",
+      "discovery": "nodeRegistry.getNodeApiUrl(hostAddress)"
+    }
+  },
+  "treasuryFunctions": {
+    "withdrawTreasuryETH": "Withdraw accumulated ETH fees",
+    "withdrawTreasuryTokens": "Withdraw accumulated token fees",
+    "withdrawAllTreasuryFees": "Batch withdraw all fees",
+    "accumulatedTreasuryETH": "View accumulated ETH",
+    "accumulatedTreasuryTokens": "View accumulated tokens"
+  },
+  "migrationNotes": {
+    "forHosts": "Existing hosts should call updateApiUrl() to add their endpoint",
+    "forClients": "Update SDK to use new contract addresses and discovery functions",
+    "breakingChanges": [
+      "NodeRegistry nodes() now returns 5 fields instead of 4",
+      "JobMarketplace must handle 5-field struct from NodeRegistry"
+    ]
+  },
+  "rpcEndpoints": [
+    "https://sepolia.base.org",
+    "https://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY"
+  ]
+}

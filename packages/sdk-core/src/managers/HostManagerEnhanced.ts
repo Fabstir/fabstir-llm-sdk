@@ -37,12 +37,15 @@ export class HostManagerEnhanced {
   private nodeRegistryAddress?: string;
   private discoveryService?: HostDiscoveryService;
   private fabTokenAddress?: string;
+  private hostEarningsAddress?: string;
 
   constructor(
     signer: Signer,
     nodeRegistryAddress: string,
     modelManager: ModelManager,
-    fabTokenAddress?: string
+    fabTokenAddress?: string,
+    hostEarningsAddress?: string,
+    contractManager?: any
   ) {
     if (!isAddress(nodeRegistryAddress)) {
       throw new ModelRegistryError(
@@ -55,6 +58,8 @@ export class HostManagerEnhanced {
     this.nodeRegistryAddress = nodeRegistryAddress;
     this.modelManager = modelManager;
     this.fabTokenAddress = fabTokenAddress;
+    this.hostEarningsAddress = hostEarningsAddress;
+    this.contractManager = contractManager;
 
     // Initialize contract with full NodeRegistryWithModels ABI
     console.log('Initializing NodeRegistry contract with full ABI');
@@ -593,6 +598,44 @@ export class HostManagerEnhanced {
         `Failed to update API URL: ${error.message}`,
         this.nodeRegistry?.address,
         error
+      );
+    }
+  }
+
+  /**
+   * Withdraw earnings from HostEarnings contract
+   */
+  async withdrawEarnings(tokenAddress: string): Promise<string> {
+    if (!this.initialized || !this.signer) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    if (!this.hostEarningsAddress) {
+      throw new SDKError('Host earnings contract not configured', 'NO_EARNINGS_CONTRACT');
+    }
+
+    try {
+      const hostEarningsABI = await this.contractManager.getContractABI('hostEarnings');
+      const earnings = new ethers.Contract(
+        this.hostEarningsAddress,
+        hostEarningsABI,
+        this.signer
+      );
+
+      // Use withdrawAll to withdraw all accumulated earnings for the token
+      const tx = await earnings.withdrawAll(tokenAddress);
+
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) {
+        throw new SDKError('Withdrawal failed', 'WITHDRAWAL_FAILED');
+      }
+
+      return receipt.hash;
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to withdraw earnings: ${error.message}`,
+        'WITHDRAWAL_ERROR',
+        { originalError: error }
       );
     }
   }

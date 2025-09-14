@@ -50,6 +50,7 @@ const NodeManagementEnhanced: React.FC = () => {
   
   // SDK instance
   const [sdk, setSdk] = useState<FabstirSDKCore | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   // Helper: Add log message
   const addLog = (message: string) => {
@@ -61,38 +62,32 @@ const NodeManagementEnhanced: React.FC = () => {
 
   // 1. CONNECT WALLET (No hardcoded addresses!)
   const connectWallet = async () => {
+    // Prevent duplicate connections
+    if (isConnecting) {
+      addLog('⏳ Connection already in progress...');
+      return;
+    }
+
     try {
+      setIsConnecting(true);
       addLog('🔌 Connecting to MetaMask...');
-      
+      addLog('💡 IMPORTANT: To use a different account, first switch it in MetaMask extension, then connect');
+
       if (!window.ethereum) {
         throw new Error('MetaMask not found! Please install MetaMask.');
       }
-      
-      // Force MetaMask to show account selection by using wallet_requestPermissions
-      // This ensures user can choose which account to connect
-      try {
-        await window.ethereum.request({
-          method: 'wallet_requestPermissions',
-          params: [{
-            eth_accounts: {}
-          }]
-        });
-      } catch (error) {
-        // User rejected the permission request
-        addLog('❌ User rejected connection request');
-        return;
-      }
-      
-      // Now get the accounts
-      const accounts = await window.ethereum.request({ 
-        method: 'eth_requestAccounts' 
+
+      // Simply request accounts - will use the currently selected account in MetaMask
+      // Users must manually switch accounts in MetaMask BEFORE connecting
+      const accounts = await window.ethereum.request({
+        method: 'eth_requestAccounts'
       });
-      
+
       if (accounts.length === 0) {
         throw new Error('No accounts found');
       }
-      
-      // Use the first account (the one user selected)
+
+      // Use the currently active account in MetaMask
       const selectedAccount = accounts[0];
       
       const provider = new ethers.BrowserProvider(window.ethereum);
@@ -239,7 +234,8 @@ const NodeManagementEnhanced: React.FC = () => {
           address: address,
           isActive: info.isActive,
           stakedAmount: info.stakedAmount ? ethers.formatUnits(info.stakedAmount, 18) : '0',
-          metadata: typeof info.metadata === 'object' ? JSON.stringify(info.metadata, null, 2) : (info.metadata || 'None')
+          metadata: typeof info.metadata === 'object' ? JSON.stringify(info.metadata, null, 2) : (info.metadata || 'None'),
+          supportedModels: info.supportedModels || []
         });
         
       } else {
@@ -311,7 +307,8 @@ const NodeManagementEnhanced: React.FC = () => {
           address: address,
           isActive: info.isActive,
           stakedAmount: info.stakedAmount ? ethers.formatUnits(info.stakedAmount, 18) : '0',
-          metadata: typeof info.metadata === 'object' ? JSON.stringify(info.metadata, null, 2) : (info.metadata || 'None')
+          metadata: typeof info.metadata === 'object' ? JSON.stringify(info.metadata, null, 2) : (info.metadata || 'None'),
+          supportedModels: info.supportedModels || []
         });
         
       } else {
@@ -707,11 +704,10 @@ const NodeManagementEnhanced: React.FC = () => {
     }
   };
 
-  // Auto-check for existing wallet connection on mount
+  // DO NOT auto-connect - let user manually connect to choose account
   useEffect(() => {
-    if (window.ethereum && window.ethereum.selectedAddress) {
-      connectWallet();
-    }
+    addLog('👋 Welcome! Click "Connect MetaMask" to choose your account.');
+    addLog('💡 Tip: Use Disconnect button to switch between accounts.');
   }, []);
 
   // Listen for account changes in MetaMask
@@ -758,38 +754,63 @@ const NodeManagementEnhanced: React.FC = () => {
       
       {/* Wallet Connection */}
       {!walletConnected ? (
-        <div style={{ 
-          padding: '30px', 
-          border: '2px solid #007bff', 
-          borderRadius: '10px', 
+        <div style={{
+          padding: '30px',
+          border: '2px solid #007bff',
+          borderRadius: '10px',
           textAlign: 'center',
           marginBottom: '20px'
         }}>
           <h2>Connect Your Wallet</h2>
           <p>Connect any wallet to manage your node or register as a new node</p>
-          <button 
+
+          {/* Account Switching Instructions */}
+          <div style={{
+            backgroundColor: '#fff3cd',
+            border: '1px solid #ffc107',
+            borderRadius: '5px',
+            padding: '15px',
+            margin: '20px auto',
+            maxWidth: '500px',
+            textAlign: 'left'
+          }}>
+            <strong>⚠️ To Switch Accounts:</strong>
+            <ol style={{ marginTop: '10px', marginBottom: '10px' }}>
+              <li>Open MetaMask extension</li>
+              <li>Click on the account dropdown at the top</li>
+              <li>Select the desired account (User or Host)</li>
+              <li>Then click Connect below</li>
+            </ol>
+            <small style={{ color: '#856404' }}>
+              MetaMask will connect with the currently selected account.
+              You must switch accounts in MetaMask BEFORE connecting.
+            </small>
+          </div>
+
+          <button
             onClick={connectWallet}
-            style={{ 
-              padding: '12px 30px', 
+            disabled={isConnecting}
+            style={{
+              padding: '12px 30px',
               fontSize: '16px',
-              backgroundColor: '#007bff',
+              backgroundColor: isConnecting ? '#6c757d' : '#007bff',
               color: 'white',
               border: 'none',
               borderRadius: '5px',
-              cursor: 'pointer'
+              cursor: isConnecting ? 'not-allowed' : 'pointer'
             }}
           >
-            Connect MetaMask
+            {isConnecting ? 'Connecting...' : 'Connect MetaMask'}
           </button>
         </div>
       ) : (
         <>
           {/* Connected Wallet Info */}
-          <div style={{ 
-            marginBottom: '20px', 
-            padding: '15px', 
+          <div style={{
+            marginBottom: '20px',
+            padding: '15px',
             backgroundColor: '#e8f4fd',
-            borderRadius: '5px' 
+            borderRadius: '5px'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
               <div>
@@ -803,36 +824,41 @@ const NodeManagementEnhanced: React.FC = () => {
                   </>
                 )}
               </div>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button 
-                  onClick={() => checkRegistrationStatus(walletAddress)}
-                  disabled={loading}
-                  style={{ 
-                    padding: '5px 10px',
-                    fontSize: '12px',
-                    backgroundColor: '#17a2b8',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '3px',
-                    cursor: loading ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  🔄 Refresh
-                </button>
-                <button 
-                  onClick={disconnectWallet}
-                  style={{ 
-                    padding: '5px 10px',
-                    fontSize: '12px',
-                    backgroundColor: '#dc3545',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '3px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  🔌 Disconnect
-                </button>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ display: 'flex', gap: '10px', marginBottom: '8px' }}>
+                  <button
+                    onClick={() => checkRegistrationStatus(walletAddress)}
+                    disabled={loading}
+                    style={{
+                      padding: '5px 10px',
+                      fontSize: '12px',
+                      backgroundColor: '#17a2b8',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '3px',
+                      cursor: loading ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    🔄 Refresh
+                  </button>
+                  <button
+                    onClick={disconnectWallet}
+                    style={{
+                      padding: '5px 10px',
+                      fontSize: '12px',
+                      backgroundColor: '#dc3545',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '3px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🔌 Disconnect
+                  </button>
+                </div>
+                <small style={{ color: '#6c757d', fontSize: '11px' }}>
+                  To switch accounts: Disconnect → Switch in MetaMask → Connect
+                </small>
               </div>
             </div>
           </div>
@@ -911,7 +937,28 @@ const NodeManagementEnhanced: React.FC = () => {
               <div style={{ marginBottom: '15px', fontSize: '14px' }}>
                 <div>Active: {nodeInfo.isActive ? '✅ Yes' : '❌ No'}</div>
                 <div>Staked: {nodeInfo.stakedAmount} FAB</div>
-                <div style={{ wordBreak: 'break-all' }}>Metadata: {nodeInfo.metadata}</div>
+                <div style={{ marginBottom: '10px' }}>
+                  <strong>Supported Models:</strong>
+                  {nodeInfo.supportedModels && nodeInfo.supportedModels.length > 0 ? (
+                    <ul style={{ marginTop: '5px', marginBottom: '5px', paddingLeft: '20px' }}>
+                      {nodeInfo.supportedModels.map((modelId: string, index: number) => (
+                        <li key={index} style={{ fontFamily: 'monospace', fontSize: '12px', wordBreak: 'break-all' }}>
+                          {modelId === '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced'
+                            ? `TinyVicuna-1B (${modelId.slice(0, 10)}...)`
+                            : modelId}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span style={{ color: '#ff6b6b', marginLeft: '10px' }}>❌ No models configured</span>
+                  )}
+                </div>
+                <details style={{ marginTop: '10px' }}>
+                  <summary style={{ cursor: 'pointer', color: '#007bff' }}>View Metadata</summary>
+                  <div style={{ wordBreak: 'break-all', marginTop: '5px', padding: '10px', backgroundColor: '#f5f5f5', borderRadius: '3px' }}>
+                    {nodeInfo.metadata}
+                  </div>
+                </details>
               </div>
               
               <div style={{ marginBottom: '10px' }}>
