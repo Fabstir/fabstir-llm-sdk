@@ -35,15 +35,12 @@ const ModelRegistryPage: React.FC = () => {
     try {
       // Use read-only provider for viewing
       const provider = new ethers.JsonRpcProvider(
-        process.env.NEXT_PUBLIC_RPC_URL ||
-        'https://base-sepolia.g.alchemy.com/v2/demo'
+        process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!
       );
 
-      const modelRegistryAddress =
-        process.env.NEXT_PUBLIC_MODEL_REGISTRY_ADDRESS ||
-        '0xfE54c2aa68A7Afe8E0DD571933B556C8b6adC357';
+      const modelRegistryAddress = process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY!;
 
-      const manager = new ModelManager(modelRegistryAddress, provider);
+      const manager = new ModelManager(provider, modelRegistryAddress);
       await manager.initialize();
 
       setModelManager(manager);

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Diagnostic</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        .status { padding: 10px; margin: 10px 0; border: 1px solid #ccc; }
+        .success { background-color: #d4edda; }
+        .error { background-color: #f8d7da; }
+        .info { background-color: #d1ecf1; }
+        button { margin: 5px; padding: 10px; }
+        pre { background: #f4f4f4; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Endpoint Diagnostic</h1>
+    
+    <div class="status info">
+        <h3>🔍 Issue Summary</h3>
+        <p>The fabstir-llm-node containers are NOT running the updated code with WebSocket support.</p>
+        <ul>
+            <li>Expected endpoint: <code>/v1/ws</code> (per documentation)</li>
+            <li>Actual status: Returns 404 (endpoint doesn't exist)</li>
+            <li>Health endpoint: <code>/health</code> works (without /v1 prefix)</li>
+            <li>Node developer reported fix: Added initial "connected" message</li>
+            <li>Problem: Fix appears not deployed to running containers</li>
+        </ul>
+    </div>
+
+    <h2>Test Results</h2>
+    <button onclick="testAll()">Run All Tests</button>
+    <button onclick="clearResults()">Clear Results</button>
+    
+    <div id="results"></div>
+
+    <script>
+        function log(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `status ${type}`;
+            div.innerHTML = `<strong>${new Date().toISOString()}</strong><br>${message}`;
+            results.appendChild(div);
+        }
+
+        async function testEndpoint(url, method = 'GET') {
+            try {
+                const response = await fetch(url, { method });
+                const text = await response.text();
+                return {
+                    url,
+                    status: response.status,
+                    statusText: response.statusText,
+                    body: text.substring(0, 200)
+                };
+            } catch (error) {
+                return {
+                    url,
+                    error: error.message
+                };
+            }
+        }
+
+        async function testWebSocket(url) {
+            return new Promise((resolve) => {
+                const ws = new WebSocket(url);
+                let timeout = setTimeout(() => {
+                    ws.close();
+                    resolve({ url, status: 'timeout' });
+                }, 3000);
+
+                ws.onopen = () => {
+                    clearTimeout(timeout);
+                    ws.close();
+                    resolve({ url, status: 'connected' });
+                };
+
+                ws.onerror = (error) => {
+                    clearTimeout(timeout);
+                    resolve({ url, status: 'error', error: 'Connection failed' });
+                };
+
+                ws.onclose = (event) => {
+                    clearTimeout(timeout);
+                    if (event.code === 1006) {
+                        resolve({ url, status: 'rejected', code: event.code, reason: 'Server rejected connection (likely 404)' });
+                    }
+                };
+            });
+        }
+
+        async function testAll() {
+            log('Starting diagnostic tests...', 'info');
+
+            // Test HTTP endpoints
+            log('Testing HTTP endpoints:', 'info');
+            
+            const httpTests = [
+                'http://localhost:8080/health',
+                'http://localhost:8080/v1/health',
+                'http://localhost:8080/v1/ws',
+                'http://localhost:8083/health',
+                'http://localhost:8083/v1/health',
+                'http://localhost:8083/v1/ws'
+            ];
+
+            for (const url of httpTests) {
+                const result = await testEndpoint(url);
+                if (result.error) {
+                    log(`❌ ${url}: ${result.error}`, 'error');
+                } else if (result.status === 200) {
+                    log(`✅ ${url}: ${result.status} ${result.statusText}<br><pre>${result.body}</pre>`, 'success');
+                } else {
+                    log(`⚠️ ${url}: ${result.status} ${result.statusText}`, 'error');
+                }
+            }
+
+            // Test WebSocket endpoints
+            log('Testing WebSocket endpoints:', 'info');
+            
+            const wsTests = [
+                'ws://localhost:8080/v1/ws',
+                'ws://localhost:8080/ws',
+                'ws://localhost:8083/v1/ws',
+                'ws://localhost:8083/ws'
+            ];
+
+            for (const url of wsTests) {
+                const result = await testWebSocket(url);
+                if (result.status === 'connected') {
+                    log(`✅ ${url}: Successfully connected!`, 'success');
+                } else if (result.status === 'rejected') {
+                    log(`❌ ${url}: ${result.reason} (code: ${result.code})`, 'error');
+                } else {
+                    log(`❌ ${url}: ${result.status} ${result.error || ''}`, 'error');
+                }
+            }
+
+            log('Diagnostic complete.', 'info');
+            
+            log(`
+                <h3>📋 Next Steps:</h3>
+                <ol>
+                    <li>Confirm with node developer that WebSocket code is deployed</li>
+                    <li>Check if containers need restart: <code>docker restart fabstir-llm-node-host1 fabstir-llm-node-host2</code></li>
+                    <li>Verify node version has WebSocket support: <code>docker exec fabstir-llm-node-host1 cat /app/Cargo.toml | grep version</code></li>
+                    <li>Check node logs for WebSocket initialization: <code>docker logs fabstir-llm-node-host1 --tail 50</code></li>
+                </ol>
+            `, 'info');
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        // Auto-run tests on load
+        window.onload = () => testAll();
+    </script>
+</body>
+</html>

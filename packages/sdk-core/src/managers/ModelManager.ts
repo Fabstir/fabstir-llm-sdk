@@ -141,9 +141,9 @@ export class ModelManager {
         huggingfaceRepo: model.huggingfaceRepo,
         fileName: model.fileName,
         sha256Hash: model.sha256Hash,
-        approvalTier: model.approvalTier.toNumber(),
+        approvalTier: Number(model.approvalTier),
         active: model.active,
-        timestamp: model.timestamp.toNumber()
+        timestamp: Number(model.timestamp)
       };
 
       // Update cache

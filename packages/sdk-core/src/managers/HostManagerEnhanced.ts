@@ -20,7 +20,7 @@ import { SDKError } from '../errors';
 import { ContractManager } from '../contracts/ContractManager';
 import { ModelManager } from './ModelManager';
 import { HostDiscoveryService } from '../services/HostDiscoveryService';
-import NodeRegistryWithModelsABI from '../contracts/abis/NodeRegistryWithModels-CLIENT-ABI.json';
+import { NodeRegistryWithModelsABI } from '../contracts/abis';
 
 export interface HostRegistrationWithModels {
   metadata: HostMetadata;
@@ -36,11 +36,13 @@ export class HostManagerEnhanced {
   private initialized = false;
   private nodeRegistryAddress?: string;
   private discoveryService?: HostDiscoveryService;
+  private fabTokenAddress?: string;
 
   constructor(
     signer: Signer,
     nodeRegistryAddress: string,
-    modelManager: ModelManager
+    modelManager: ModelManager,
+    fabTokenAddress?: string
   ) {
     if (!isAddress(nodeRegistryAddress)) {
       throw new ModelRegistryError(
@@ -52,13 +54,27 @@ export class HostManagerEnhanced {
     this.signer = signer;
     this.nodeRegistryAddress = nodeRegistryAddress;
     this.modelManager = modelManager;
+    this.fabTokenAddress = fabTokenAddress;
 
-    // Initialize contract
+    // Initialize contract with full NodeRegistryWithModels ABI
+    console.log('Initializing NodeRegistry contract with full ABI');
+    console.log('Contract address:', nodeRegistryAddress);
+
     this.nodeRegistry = new Contract(
       nodeRegistryAddress,
       NodeRegistryWithModelsABI,
       signer
     );
+
+    // Verify the contract interface is loaded
+    if (this.nodeRegistry.interface) {
+      console.log('Contract interface initialized successfully');
+      const functions = Object.keys(this.nodeRegistry.interface.functions || {});
+      console.log(`Loaded ${functions.length} contract functions`);
+      console.log('Has updateSupportedModels?', functions.includes('updateSupportedModels(bytes32[])'));
+    } else {
+      console.error('Failed to initialize contract interface');
+    }
   }
 
   /**
@@ -128,23 +144,81 @@ export class HostManagerEnhanced {
         costPerToken: request.metadata.costPerToken || 0.0001
       });
 
-      // Check stake amount
+      // Get FAB token contract address
+      console.log('FAB token address from constructor:', this.fabTokenAddress);
+      if (!this.fabTokenAddress) {
+        throw new ModelRegistryError(
+          'FAB token address not configured',
+          this.nodeRegistry?.address
+        );
+      }
+
+      // Check stake amount (FAB tokens, not ETH)
       const stakeAmount = ethers.parseEther(
         request.metadata.stakeAmount || '1000'
       );
 
-      // Call new registration method with models
+      // Step 1: Create FAB token contract interface
+      console.log('Creating FAB token contract with address:', this.fabTokenAddress);
+      console.log('NodeRegistry address for operations:', this.nodeRegistryAddress);
+
+      const fabToken = new Contract(
+        this.fabTokenAddress,
+        [
+          'function approve(address spender, uint256 amount) returns (bool)',
+          'function allowance(address owner, address spender) view returns (uint256)',
+          'function balanceOf(address account) view returns (uint256)'
+        ],
+        this.signer
+      );
+
+      // Check FAB token balance
+      const signerAddress = await this.signer.getAddress();
+      const fabBalance = await fabToken.balanceOf(signerAddress);
+      console.log(`FAB token balance: ${ethers.formatEther(fabBalance)} FAB`);
+
+      if (fabBalance < stakeAmount) {
+        throw new ModelRegistryError(
+          `Insufficient FAB balance. Required: ${ethers.formatEther(stakeAmount)}, Available: ${ethers.formatEther(fabBalance)}`,
+          this.fabTokenAddress
+        );
+      }
+
+      // Step 2: Approve FAB tokens for the NodeRegistry contract
+      console.log(`Approving ${ethers.formatEther(stakeAmount)} FAB tokens for NodeRegistry...`);
+      const approveTx = await fabToken.approve(this.nodeRegistryAddress, stakeAmount);
+      await approveTx.wait();
+      console.log('FAB token approval successful');
+
+      // Verify approval
+      const allowance = await fabToken.allowance(signerAddress, this.nodeRegistryAddress);
+      console.log(`Allowance after approval: ${ethers.formatEther(allowance)} FAB`);
+
+      // Step 3: Register node with models (no ETH value needed)
+      console.log('Registering node with models...');
       const tx = await this.nodeRegistry['registerNode'](
         metadataJson,
         request.apiUrl,
         modelIds,
         {
-          value: stakeAmount,
           gasLimit: 500000n
         }
       );
 
-      const receipt = await tx.wait();
+      await tx.wait();
+      console.log('Node registration successful');
+
+      // Step 4: Stake FAB tokens (separate transaction after registration)
+      console.log(`Staking ${ethers.formatEther(stakeAmount)} FAB tokens...`);
+
+      // The stake function requires the node to be registered first
+      // It will transfer FAB tokens from the signer to the contract
+      const stakeTx = await this.nodeRegistry['stake'](stakeAmount, {
+        gasLimit: 500000n  // Increased gas limit for stake operation
+      });
+
+      const receipt = await stakeTx.wait();
+
       if (!receipt || receipt.status !== 1) {
         throw new ModelRegistryError(
           'Host registration transaction failed',
@@ -281,7 +355,7 @@ export class HostManagerEnhanced {
     isRegistered: boolean;
     isActive: boolean;
     supportedModels: string[];
-    stake: BigNumber;
+    stake: bigint;
     metadata?: HostMetadata;
     apiUrl?: string;
   }> {
@@ -300,7 +374,7 @@ export class HostManagerEnhanced {
           isRegistered: false,
           isActive: false,
           supportedModels: [],
-          stake: BigNumber.from(0)
+          stake: 0n
         };
       }
 
@@ -395,5 +469,131 @@ export class HostManagerEnhanced {
    */
   getModelManager(): ModelManager {
     return this.modelManager;
+  }
+
+  /**
+   * Update host's supported models
+   */
+  async updateSupportedModels(modelIds: string[]): Promise<string> {
+    // Ensure initialized
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new ModelRegistryError('Not initialized', this.nodeRegistryAddress);
+    }
+
+    try {
+      // Convert string model IDs to bytes32 format if needed
+      const modelIdsBytes32 = modelIds.map(id => {
+        // If it's already a hex string starting with 0x, use it
+        if (id.startsWith('0x')) {
+          return id;
+        }
+        // Otherwise, convert the number to bytes32
+        return ethers.zeroPadValue(ethers.toBeHex(BigInt(id)), 32);
+      });
+
+      console.log('Updating supported models with IDs:', modelIdsBytes32);
+      console.log('Contract address:', this.nodeRegistry.target || this.nodeRegistry.address);
+
+      // Ensure the contract interface has the function
+      if (!this.nodeRegistry.updateSupportedModels) {
+        console.error('updateSupportedModels function not found on contract');
+        console.log('Available functions:', Object.keys(this.nodeRegistry.functions || {}));
+        throw new Error('Contract method updateSupportedModels not found');
+      }
+
+      // Call updateSupportedModels on the NodeRegistry contract
+      console.log('Calling updateSupportedModels...');
+      const tx = await this.nodeRegistry.updateSupportedModels(
+        modelIdsBytes32,
+        { gasLimit: 500000n }
+      );
+
+      const receipt = await tx.wait();
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Failed to update supported models',
+          this.nodeRegistry.address
+        );
+      }
+
+      console.log('Successfully updated supported models');
+      return receipt.hash;
+    } catch (error: any) {
+      throw new ModelRegistryError(
+        `Failed to update supported models: ${error.message}`,
+        this.nodeRegistry?.address,
+        error
+      );
+    }
+  }
+
+  /**
+   * Get host information (IHostManager interface compatibility)
+   */
+  async getHostInfo(address: string): Promise<HostInfo> {
+    const status = await this.getHostStatus(address);
+
+    return {
+      address,
+      isRegistered: status.isRegistered,
+      isActive: status.isActive,
+      apiUrl: status.apiUrl || '',
+      metadata: status.metadata || {
+        hardware: { gpu: '', vram: 0, ram: 0 },
+        capabilities: { streaming: false },
+        location: '',
+        maxConcurrent: 0,
+        costPerToken: 0
+      },
+      supportedModels: status.supportedModels || [],
+      stake: status.stake
+    };
+  }
+
+  /**
+   * Update the API URL for the host
+   */
+  async updateApiUrl(apiUrl: string): Promise<string> {
+    // Ensure initialized
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new ModelRegistryError('Not initialized', this.nodeRegistryAddress);
+    }
+
+    try {
+      console.log('Updating API URL to:', apiUrl);
+
+      // Call updateApiUrl on the NodeRegistry contract
+      const tx = await this.nodeRegistry.updateApiUrl(
+        apiUrl,
+        { gasLimit: 300000n }
+      );
+
+      const receipt = await tx.wait();
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Failed to update API URL',
+          this.nodeRegistry.address
+        );
+      }
+
+      console.log('Successfully updated API URL');
+      return receipt.hash;
+    } catch (error: any) {
+      throw new ModelRegistryError(
+        `Failed to update API URL: ${error.message}`,
+        this.nodeRegistry?.address,
+        error
+      );
+    }
   }
 }

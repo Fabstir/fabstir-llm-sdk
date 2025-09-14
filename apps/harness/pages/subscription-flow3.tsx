@@ -5,7 +5,7 @@ import type { PaymentManager } from '@fabstir/sdk-core';
 
 // Get configuration from environment variables
 const CHAIN_HEX = "0x14a34";  // Base Sepolia
-const CHAIN_ID_NUM = parseInt(process.env.NEXT_PUBLIC_CHAIN_ID || '84532');
+const CHAIN_ID_NUM = parseInt(process.env.NEXT_PUBLIC_CHAIN_ID!);
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!;
 const USDC = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN as `0x${string}`;
 
@@ -17,7 +17,7 @@ const TEST_HOST_2_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_2_ADDRESS!;
 
 // Note: In production, private key should NEVER be in browser code
 // This is only for testing purposes - use a secure method in production
-const TEST_USER_1_PRIVATE_KEY = "0x2d5db36770a53811d9a11163a5e6577bb867e19552921bf40f74064308bea952";
+const TEST_USER_1_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_USER_1_PRIVATE_KEY!;
 
 // ERC20 ABIs for direct contract calls (still needed for Base Account SDK integration)
 const erc20TransferAbi = [{
@@ -71,7 +71,7 @@ async function ensureSubAccount(provider: any, primaryAddr: `0x${string}`): Prom
   } catch (error) {
     console.error("Failed to get/create sub-account:", error);
     // Return a dummy address as fallback
-    return "0x1234567890123456789012345678901234567890" as `0x${string}`;
+    throw new Error('No subscription found for user');
   }
 }
 
@@ -285,7 +285,7 @@ export default function SubscriptionFlowSDK() {
       if (!provider) {
         // Fallback if Base Account SDK is not available
         console.warn("Base Account SDK not initialized, using dummy sub-account");
-        const sub = "0x1234567890123456789012345678901234567890" as `0x${string}`;
+        throw new Error('Cannot create mock subscription in production');
         setSubAddr(sub);
       } else {
         // Use Base Account SDK to create/get sub-account

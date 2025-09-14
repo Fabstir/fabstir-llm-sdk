@@ -31,7 +31,7 @@ import type {
 
 // Get configuration from environment variables
 const CHAIN_HEX = "0x14a34";  // Base Sepolia
-const CHAIN_ID_NUM = parseInt(process.env.NEXT_PUBLIC_CHAIN_ID || '84532');
+const CHAIN_ID_NUM = parseInt(process.env.NEXT_PUBLIC_CHAIN_ID!);
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!;
 
 // Contract addresses from environment
@@ -44,13 +44,13 @@ const FAB_TOKEN = process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN!;
 
 // Test accounts from environment
 const TEST_USER_1_ADDRESS = process.env.NEXT_PUBLIC_TEST_USER_1_ADDRESS!;
-const TEST_USER_1_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_USER_1_PRIVATE_KEY || "0x2d5db36770a53811d9a11163a5e6577bb867e19552921bf40f74064308bea952";
+const TEST_USER_1_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_USER_1_PRIVATE_KEY!;
 const TEST_HOST_1_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_1_ADDRESS!;
-const TEST_HOST_1_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_HOST_1_PRIVATE_KEY || "0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2";
-const TEST_HOST_1_URL = process.env.NEXT_PUBLIC_TEST_HOST_1_URL || 'http://localhost:8080';
+const TEST_HOST_1_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_HOST_1_PRIVATE_KEY!;
+const TEST_HOST_1_URL = process.env.NEXT_PUBLIC_TEST_HOST_1_URL!;
 const TEST_HOST_2_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_2_ADDRESS!;
 const TEST_TREASURY_ADDRESS = process.env.NEXT_PUBLIC_TEST_TREASURY_ADDRESS!;
-const TEST_TREASURY_PRIVATE_KEY = "0xe7231a57c89df087f0291bf20b952199c1d4575206d256397c02ba6383dedc97";
+const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_KEY!;
 
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = '2'; // $2 USDC

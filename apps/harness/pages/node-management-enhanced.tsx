@@ -169,7 +169,8 @@ const NodeManagementEnhanced: React.FC = () => {
           nodeRegistry: nodeRegistryAddress,
           fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN,
           hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS,
-          usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN
+          usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN,
+          modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY
         }
       });
       
@@ -193,9 +194,9 @@ const NodeManagementEnhanced: React.FC = () => {
       const hostManager = sdkInstance.getHostManager();
       addLog(`🔍 Calling getHostInfo for ${address}...`);
       const info = await hostManager.getHostInfo(address);
-      
+
       // Log the full info for debugging
-      console.log('Host info:', info);
+      console.log('Host status:', info);
       addLog(`📊 Registration check result: isRegistered=${info.isRegistered}, isActive=${info.isActive}`);
       if (info.stakedAmount) {
         addLog(`💰 Staked amount: ${ethers.formatUnits(info.stakedAmount, 18)} FAB`);
@@ -211,22 +212,26 @@ const NodeManagementEnhanced: React.FC = () => {
           setMetadata(info.metadata);
         }
         
-        // Try to discover API URL from blockchain
-        try {
-          const apiUrl = await hostManager.discoverHostApiUrl(address);
-          setDiscoveredApiUrl(apiUrl);
-          addLog(`📍 Discovered API URL: ${apiUrl}`);
-        } catch (error) {
-          addLog('ℹ️ No API URL found in registry (metadata may be empty)');
-          // Try to parse from metadata
+        // Check for API URL in the info object
+        if (info.apiUrl) {
+          setDiscoveredApiUrl(info.apiUrl);
+          addLog(`📍 API URL from registry: ${info.apiUrl}`);
+        } else {
+          // Try to parse from metadata as fallback
           if (info.metadata) {
             try {
-              const meta = JSON.parse(info.metadata);
+              const meta = typeof info.metadata === 'string' ? JSON.parse(info.metadata) : info.metadata;
               if (meta.apiUrl) {
                 setDiscoveredApiUrl(meta.apiUrl);
                 addLog(`📍 Found API URL in metadata: ${meta.apiUrl}`);
+              } else {
+                addLog('ℹ️ No API URL found in registry');
               }
-            } catch {}
+            } catch {
+              addLog('ℹ️ No API URL found in registry');
+            }
+          } else {
+            addLog('ℹ️ No API URL found in registry');
           }
         }
         
@@ -234,7 +239,7 @@ const NodeManagementEnhanced: React.FC = () => {
           address: address,
           isActive: info.isActive,
           stakedAmount: info.stakedAmount ? ethers.formatUnits(info.stakedAmount, 18) : '0',
-          metadata: info.metadata || 'None'
+          metadata: typeof info.metadata === 'object' ? JSON.stringify(info.metadata, null, 2) : (info.metadata || 'None')
         });
         
       } else {
@@ -279,22 +284,26 @@ const NodeManagementEnhanced: React.FC = () => {
           setMetadata(info.metadata);
         }
         
-        // Try to discover API URL from blockchain
-        try {
-          const apiUrl = await hostManager.discoverHostApiUrl(address);
-          setDiscoveredApiUrl(apiUrl);
-          addLog(`📍 Discovered API URL: ${apiUrl}`);
-        } catch (error) {
-          addLog('ℹ️ No API URL found in registry (metadata may be empty)');
-          // Try to parse from metadata
+        // Check for API URL in the info object
+        if (info.apiUrl) {
+          setDiscoveredApiUrl(info.apiUrl);
+          addLog(`📍 API URL from registry: ${info.apiUrl}`);
+        } else {
+          // Try to parse from metadata as fallback
           if (info.metadata) {
             try {
-              const meta = JSON.parse(info.metadata);
+              const meta = typeof info.metadata === 'string' ? JSON.parse(info.metadata) : info.metadata;
               if (meta.apiUrl) {
                 setDiscoveredApiUrl(meta.apiUrl);
                 addLog(`📍 Found API URL in metadata: ${meta.apiUrl}`);
+              } else {
+                addLog('ℹ️ No API URL found in registry');
               }
-            } catch {}
+            } catch {
+              addLog('ℹ️ No API URL found in registry');
+            }
+          } else {
+            addLog('ℹ️ No API URL found in registry');
           }
         }
         
@@ -302,7 +311,7 @@ const NodeManagementEnhanced: React.FC = () => {
           address: address,
           isActive: info.isActive,
           stakedAmount: info.stakedAmount ? ethers.formatUnits(info.stakedAmount, 18) : '0',
-          metadata: info.metadata || 'None'
+          metadata: typeof info.metadata === 'object' ? JSON.stringify(info.metadata, null, 2) : (info.metadata || 'None')
         });
         
       } else {
@@ -321,27 +330,53 @@ const NodeManagementEnhanced: React.FC = () => {
     setLoading(true);
     try {
       if (!sdk) throw new Error('SDK not initialized');
-      
-      addLog('📝 Registering as node...');
+
+      addLog('📝 Registering as node with models...');
       addLog(`API URL: ${apiUrl}`);
       addLog(`Metadata: ${metadata}`);
       addLog(`Stake: ${stakeAmount} FAB`);
-      
-      // Add apiUrl to metadata
-      let metadataWithUrl = metadata;
+
+      // Parse metadata to get models
+      let metaObj: any = {};
       try {
-        const metaObj = JSON.parse(metadata);
-        metaObj.apiUrl = apiUrl;
-        metadataWithUrl = JSON.stringify(metaObj);
+        metaObj = JSON.parse(metadata);
       } catch (e) {
-        // If metadata is not JSON, append as string
-        metadataWithUrl = metadata + ` | apiUrl: ${apiUrl}`;
+        // Create default metadata
+        metaObj = {
+          name: "Test Node",
+          description: "A test node on Base Sepolia",
+          models: ["tiny-vicuna-1b"]
+        };
       }
-      
-      const hostManager = sdk.getHostManager();
-      const txHash = await hostManager.registerHost({
-        metadata: metadataWithUrl,
-        stakeAmount: stakeAmount
+
+      // Use HostManagerEnhanced for model-aware registration
+      const hostManager = sdk.getHostManager() as any; // Cast to avoid type issues
+
+      // Use the new registerHostWithModels method
+      // Using a pre-approved model (you may need to check which models are approved in your ModelRegistry)
+      const txHash = await hostManager.registerHostWithModels({
+        apiUrl: apiUrl,
+        supportedModels: [
+          {
+            repo: "tiny-vicuna-1b",  // This should match what's in the ModelRegistry
+            file: "model.gguf"      // This should match what's in the ModelRegistry
+          }
+        ],
+        metadata: {
+          hardware: {
+            gpu: "RTX 3090",
+            vram: 24,
+            ram: 32
+          },
+          capabilities: {
+            streaming: true,
+            batch: true
+          },
+          location: metaObj.region || "us-west-2",
+          maxConcurrent: 5,
+          costPerToken: 0.0001,
+          stakeAmount: stakeAmount.toString()
+        }
       });
       
       addLog(`✅ Node registered! TX: ${txHash}`);
@@ -379,22 +414,28 @@ const NodeManagementEnhanced: React.FC = () => {
     }
   };
 
-  // 6. UPDATE METADATA
+  // 6. UPDATE METADATA / MODELS
   const updateMetadata = async () => {
     setLoading(true);
     try {
       if (!sdk) throw new Error('SDK not initialized');
-      
-      addLog('📝 Updating metadata...');
-      
-      const hostManager = sdk.getHostManager();
-      const txHash = await hostManager.updateMetadata(metadata);
-      
-      addLog(`✅ Metadata updated! TX: ${txHash}`);
-      
-      // Refresh to get new API URL
+
+      addLog('📝 Updating supported models to include TinyVicuna-1B...');
+
+      const hostManager = sdk.getHostManager() as any;
+
+      // Use the actual approved model ID for TinyVicuna-1B
+      // This is the keccak256 hash of the model's HuggingFace repo + filename
+      const TINY_VICUNA_MODEL_ID = '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced';
+
+      const txHash = await hostManager.updateSupportedModels([TINY_VICUNA_MODEL_ID]);
+
+      addLog(`✅ Models updated! TX: ${txHash}`);
+      addLog('✅ Host now supports TinyVicuna-1B (CohereForAI/TinyVicuna-1B-32k-GGUF)');
+
+      // Refresh to get updated info
       await checkRegistrationStatus(walletAddress);
-      
+
     } catch (error: any) {
       addLog(`❌ Update failed: ${error.message}`);
     } finally {
@@ -654,7 +695,7 @@ const NodeManagementEnhanced: React.FC = () => {
       
       const hostManager = sdk.getHostManager();
       const txHash = await hostManager.withdrawEarnings(
-        process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN || '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+        process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!
       );
       
       addLog(`✅ Earnings withdrawn! TX: ${txHash}`);
@@ -925,7 +966,7 @@ const NodeManagementEnhanced: React.FC = () => {
               </div>
               
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                <button onClick={updateMetadata} disabled={loading}>Update Metadata</button>
+                <button onClick={updateMetadata} disabled={loading}>Add Model Support</button>
                 <button onClick={withdrawEarnings} disabled={loading}>Withdraw Earnings</button>
                 <button 
                   onClick={unregisterNode} 

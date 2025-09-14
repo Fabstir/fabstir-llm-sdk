@@ -23,9 +23,9 @@ import {
 } from '@fabstir/sdk-core';
 
 // Contract addresses from environment
-const MODEL_REGISTRY_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY || '0x92b2De840bB2171203011A6dBA928d855cA8183E';
-const DEPLOYER_PRIVATE_KEY = process.env.NEXT_PUBLIC_DEPLOYER_PRIVATE_KEY || '0xe7231a57c89df087f0291bf20b952199c1d4575206d256397c02ba6383dedc97';
-const DEPLOYER_ADDRESS = process.env.NEXT_PUBLIC_DEPLOYER_ADDRESS || '0xbeaBB2a5AEd358aA0bd442dFFd793411519Bdc11';
+const MODEL_REGISTRY_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY!;
+const DEPLOYER_PRIVATE_KEY = process.env.NEXT_PUBLIC_DEPLOYER_PRIVATE_KEY!;
+const DEPLOYER_ADDRESS = process.env.NEXT_PUBLIC_DEPLOYER_ADDRESS!;
 
 // Test models for quick addition
 const TEST_MODELS = [
@@ -90,7 +90,7 @@ export default function ModelManagementPage() {
       }
 
       // Use our own RPC URL for Base Sepolia
-      const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA || 'https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR';
+      const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!;
 
       // Request network switch to Base Sepolia with our RPC
       try {

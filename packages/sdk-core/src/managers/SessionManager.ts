@@ -284,29 +284,36 @@ export class SessionManager implements ISessionManager {
       if (!this.wsClient || !this.wsClient.isConnected()) {
         this.wsClient = new WebSocketClient(wsUrl);
         await this.wsClient.connect();
+
+        // Try simpler inference protocol first
+        // TODO: Switch to session_init once node supports it
       }
 
       // Collect full response
       let fullResponse = '';
-      
+
       // Set up streaming handler
       if (onToken) {
         const unsubscribe = this.wsClient.onMessage((data: any) => {
-          if (data.type === 'token' && data.token) {
-            onToken(data.token);
-            fullResponse += data.token;
-          } else if (data.type === 'complete') {
-            fullResponse = data.response || fullResponse;
+          if (data.type === 'stream_chunk' && data.content) {
+            onToken(data.content);
+            fullResponse += data.content;
+          } else if (data.type === 'response') {
+            fullResponse = data.content || fullResponse;
           }
         });
 
         // Send message and wait for response
+        // Try simpler inference format that the node might support
         const response = await this.wsClient.sendMessage({
           type: 'inference',
-          prompt,
-          sessionId: sessionId.toString(),
-          model: session.model,
-          stream: true
+          request: {
+            model: 'tiny-vicuna',  // Use tiny-vicuna as confirmed by node developer
+            prompt: prompt,
+            max_tokens: 50,
+            temperature: 0.7,
+            stream: true
+          }
         });
 
         // Clean up handler
@@ -342,10 +349,13 @@ export class SessionManager implements ISessionManager {
         // Non-streaming mode
         const response = await this.wsClient.sendMessage({
           type: 'inference',
-          prompt,
-          sessionId: sessionId.toString(),
-          model: session.model,
-          stream: false
+          request: {
+            model: 'tiny-vicuna',  // Use tiny-vicuna as confirmed by node developer
+            prompt: prompt,
+            max_tokens: 50,
+            temperature: 0.7,
+            stream: false
+          }
         });
 
         // Add response to session

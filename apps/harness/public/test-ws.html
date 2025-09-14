@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test</title>
+</head>
+<body>
+    <h1>Direct WebSocket Test</h1>
+    <button onclick="testWebSocket()">Connect to ws://localhost:8080/v1/ws</button>
+    <button onclick="testWebSocket8083()">Connect to ws://localhost:8083/v1/ws</button>
+    <div id="status"></div>
+    <div id="messages"></div>
+    
+    <script>
+        function testWebSocket() {
+            testConnection('ws://localhost:8080/v1/ws');
+        }
+        
+        function testWebSocket8083() {
+            testConnection('ws://localhost:8083/v1/ws');
+        }
+        
+        function testConnection(wsUrl) {
+            const status = document.getElementById('status');
+            const messages = document.getElementById('messages');
+            
+            status.innerHTML = 'Connecting to ' + wsUrl + '...';
+            messages.innerHTML = '';
+            
+            console.log('Creating WebSocket to:', wsUrl);
+            
+            try {
+                const ws = new WebSocket(wsUrl);
+                
+                ws.onopen = function() {
+                    status.innerHTML = '✅ WebSocket Connected to ' + wsUrl;
+                    console.log('WebSocket connected');
+                    messages.innerHTML += '<br>Connected! Sending test message...';
+                    
+                    // Send a test message
+                    const testMsg = {
+                        type: 'ping',
+                        timestamp: Date.now()
+                    };
+                    ws.send(JSON.stringify(testMsg));
+                    messages.innerHTML += '<br>Sent: ' + JSON.stringify(testMsg);
+                };
+                
+                ws.onmessage = function(event) {
+                    messages.innerHTML += '<br>Received: ' + event.data;
+                    console.log('Message received:', event.data);
+                };
+                
+                ws.onerror = function(error) {
+                    status.innerHTML = '❌ WebSocket Error';
+                    messages.innerHTML += '<br>Error occurred (check console)';
+                    console.error('WebSocket error:', error);
+                };
+                
+                ws.onclose = function(event) {
+                    status.innerHTML = '❌ WebSocket Closed';
+                    messages.innerHTML += '<br>Closed with code: ' + event.code + ', reason: ' + event.reason;
+                    console.log('WebSocket closed:', event.code, event.reason);
+                };
+                
+            } catch (error) {
+                status.innerHTML = '❌ Failed to create WebSocket';
+                messages.innerHTML = 'Error: ' + error.message;
+                console.error('WebSocket creation error:', error);
+            }
+        }
+    </script>
+</body>
+</html>

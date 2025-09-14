@@ -21,6 +21,7 @@ export interface ContractAddresses {
   proofSystem?: string;
   fabToken: string;
   usdcToken: string;
+  modelRegistry?: string;
   baseAccountFactory?: string;
 }
 
@@ -107,6 +108,13 @@ export class ContractManager {
       this.addresses.usdcToken,
       ERC20ABI
     );
+  }
+
+  /**
+   * Get USDC token address
+   */
+  getUsdcTokenAddress(): string {
+    return this.addresses.usdcToken;
   }
 
   /**

@@ -42,7 +42,8 @@ export class SessionJobManager {
   async setSigner(signer: Signer) {
     console.log('SessionJobManager.setSigner: Setting signer...');
     this.signer = signer;
-    // ContractManager already has the signer, don't call setSigner again
+    // Also ensure ContractManager has the signer
+    await this.contractManager.setSigner(signer);
     console.log('SessionJobManager.setSigner: Complete');
   }
 
@@ -55,7 +56,17 @@ export class SessionJobManager {
     }
 
     const jobMarketplace = this.contractManager.getJobMarketplace();
-    const usdcToken = this.contractManager.getUsdcToken();
+
+    // Create USDC token contract directly with proper ABI and signer
+    const ERC20_ABI = [
+      'function approve(address spender, uint256 amount) returns (bool)',
+      'function allowance(address owner, address spender) view returns (uint256)',
+      'function balanceOf(address account) view returns (uint256)',
+      'function transfer(address to, uint256 amount) returns (bool)'
+    ];
+
+    const usdcAddress = this.contractManager.getUsdcTokenAddress();
+    const usdcToken = new ethers.Contract(usdcAddress, ERC20_ABI, this.signer);
     
     // Convert deposit amount to token units (USDC has 6 decimals)
     const depositAmount = ethers.parseUnits(params.sessionConfig.depositAmount, 6);
@@ -69,23 +80,35 @@ export class SessionJobManager {
     // Check USDC balance
     const userAddress = await this.signer.getAddress();
     const balance = await usdcToken.balanceOf(userAddress) as bigint;
-    
-    // For deposit model: only check if we have enough for the actual session cost
-    if (balance < minRequired) {
-      throw new Error(
-        `Insufficient USDC balance for session. Required: ${ethers.formatUnits(minRequired, 6)}, ` +
-        `Available: ${ethers.formatUnits(balance, 6)}`
-      );
-    }
-    
-    // Use either the full deposit amount or the current balance, whichever is smaller
-    const amountToUse = balance < depositAmount ? balance : depositAmount;
-    console.log(`Using ${ethers.formatUnits(amountToUse, 6)} USDC for session (balance: ${ethers.formatUnits(balance, 6)})`)
+    console.log(`User USDC balance: ${ethers.formatUnits(balance, 6)} USDC`);
 
-    // Approve USDC spending
-    const jobMarketplaceAddress = await jobMarketplace.getAddress();
+    // Check if user has sufficient balance for the requested deposit amount
+    if (balance < depositAmount) {
+      const errorMsg = `Insufficient USDC balance. Required: ${ethers.formatUnits(depositAmount, 6)} USDC, ` +
+        `Available: ${ethers.formatUnits(balance, 6)} USDC. ` +
+        `Please top up your USDC balance or reduce the deposit amount.`;
+      console.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    // Also check against minimum required for session
+    if (balance < minRequired) {
+      const errorMsg = `Insufficient USDC balance for session. Minimum required: ${ethers.formatUnits(minRequired, 6)} USDC, ` +
+        `Available: ${ethers.formatUnits(balance, 6)} USDC`;
+      console.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    // Use the requested deposit amount (we've verified the user has enough)
+    const amountToUse = depositAmount;
+    console.log(`Using ${ethers.formatUnits(amountToUse, 6)} USDC for session`)
+
+    // Approve USDC spending - get the address from ContractManager directly
+    const jobMarketplaceAddress = await this.contractManager.getContractAddress('jobMarketplace');
     console.log('JobMarketplace address:', jobMarketplaceAddress);
-    
+    console.log('USDC token address:', usdcAddress);
+    console.log('User address:', userAddress);
+
     const currentAllowance = await usdcToken.allowance(
       userAddress,
       jobMarketplaceAddress
@@ -93,59 +116,104 @@ export class SessionJobManager {
     
     console.log('Current USDC allowance:', ethers.formatUnits(currentAllowance, 6));
     console.log('Required deposit:', ethers.formatUnits(depositAmount, 6));
-    
+
+    // Only approve if current allowance is insufficient
+    let newAllowance = currentAllowance;
     if (currentAllowance < amountToUse) {
-      console.log('Approving USDC spending...');
+      console.log('Setting USDC approval for amount:', ethers.formatUnits(amountToUse, 6));
       const approveTx = await usdcToken.approve(
         jobMarketplaceAddress,
         amountToUse
       );
       const approveReceipt = await approveTx.wait();
       console.log('USDC approval complete:', approveReceipt.hash);
-      
-      // Wait for blockchain confirmation
-      console.log('Waiting for blockchain confirmation...');
-      await new Promise(resolve => setTimeout(resolve, 3000)); // 3 seconds for blockchain
-      
-      // Verify the allowance was set
-      const newAllowance = await usdcToken.allowance(
-        userAddress,
-        jobMarketplaceAddress
-      ) as bigint;
-      console.log('New USDC allowance after approval:', ethers.formatUnits(newAllowance, 6));
-      
-      if (newAllowance < amountToUse) {
-        throw new Error(
-          `Approval failed. Required: ${ethers.formatUnits(amountToUse, 6)}, ` +
-          `Got: ${ethers.formatUnits(newAllowance, 6)}`
-        );
+
+      // Wait for blockchain confirmation - Base Sepolia needs more time
+      console.log('Waiting for Base Sepolia blockchain confirmation (15 seconds)...');
+      await new Promise(resolve => setTimeout(resolve, 15000)); // 15 seconds initial wait
+
+      // Verify the allowance was set - try multiple times with longer waits
+      newAllowance = BigInt(0);
+      for (let i = 0; i < 5; i++) {
+        newAllowance = await usdcToken.allowance(
+          userAddress,
+          jobMarketplaceAddress
+        ) as bigint;
+        console.log(`Attempt ${i+1}/5 - New USDC allowance after approval:`, ethers.formatUnits(newAllowance, 6));
+
+        if (newAllowance >= amountToUse) {
+          console.log('✅ Allowance confirmed on-chain');
+          break;
+        }
+
+        if (i < 4) {
+          console.log(`Allowance not yet updated, waiting 10 more seconds... (${(i+2)*10} seconds total)`);
+          await new Promise(resolve => setTimeout(resolve, 10000)); // 10 seconds between checks
+        }
       }
     } else {
-      console.log('Sufficient allowance already exists');
+      console.log('Sufficient allowance already exists, skipping approval');
+    }
+
+    if (newAllowance < amountToUse) {
+      throw new Error(
+        `Approval failed. Required: ${ethers.formatUnits(amountToUse, 6)}, ` +
+        `Got: ${ethers.formatUnits(newAllowance, 6)}`
+      );
     }
 
     // Create session job with USDC token (using available balance)
-    const tx = await jobMarketplace.createSessionJobWithToken(
+    // Note: Model validation happens in the contract based on the host's registered models
+    console.log('Creating session job with params:', {
+      provider: params.provider,
+      token: usdcAddress,
+      deposit: amountToUse.toString(),
+      pricePerToken: params.sessionConfig.pricePerToken,
+      duration: params.sessionConfig.duration,
+      proofInterval: params.sessionConfig.proofInterval
+    });
+
+    // Ensure the contract has a signer by connecting it explicitly
+    const jobMarketplaceWithSigner = jobMarketplace.connect(this.signer);
+
+    // Log the actual contract address being used
+    const actualContractAddress = await jobMarketplaceWithSigner.getAddress();
+    console.log('Actual JobMarketplace contract address being used:', actualContractAddress);
+    console.log('Expected JobMarketplace address:', jobMarketplaceAddress);
+
+    if (actualContractAddress.toLowerCase() !== jobMarketplaceAddress.toLowerCase()) {
+      console.error('WARNING: Contract address mismatch!');
+      console.error('Expected:', jobMarketplaceAddress);
+      console.error('Actual:', actualContractAddress);
+    }
+
+    const tx = await jobMarketplaceWithSigner.createSessionJobWithToken(
       params.provider, // host address
-      await usdcToken.getAddress(), // token address (USDC)
+      usdcAddress, // token address (USDC) - use the already obtained address
       amountToUse, // deposit amount (may be less than full $2 if using existing balance)
       params.sessionConfig.pricePerToken, // price per token
       params.sessionConfig.duration, // max duration
       params.sessionConfig.proofInterval // proof interval
     );
 
+    console.log('Transaction sent, waiting for confirmation...');
     const receipt = await tx.wait();
+    console.log('Transaction confirmed:', receipt.hash);
+
+    // Give Base Sepolia extra time to fully process
+    console.log('Waiting 5 seconds for Base Sepolia to fully process...');
+    await new Promise(resolve => setTimeout(resolve, 5000));
     
     // Parse events to get job ID (which is also the session ID for session jobs)
     const sessionCreatedEvent = receipt.logs.find(
-      (log: any) => log.topics[0] === ethers.id('SessionJobCreatedWithToken(uint256,address,uint256)')
+      (log: any) => log.topics[0] === ethers.id('SessionJobCreated(uint256,address,address,uint256)')
     );
-    
+
     if (!sessionCreatedEvent) {
-      throw new Error('SessionJobCreatedWithToken event not found');
+      throw new Error('SessionJobCreated event not found');
     }
 
-    // Decode event data - jobId is in topics[1], token address in topics[2]
+    // Decode event data - jobId is in topics[1], requester in topics[2], host in topics[3]
     const jobId = BigInt(sessionCreatedEvent.topics[1]);
     const sessionId = jobId; // For session jobs, sessionId equals jobId
 
@@ -228,11 +296,11 @@ export class SessionJobManager {
     }
 
     const jobMarketplace = this.contractManager.getJobMarketplace();
-    
-    // The contract's completeSessionJob only takes jobId as parameter
-    // The totalTokensGenerated and finalProof are not needed for completion
-    // The contract automatically settles based on proven tokens from checkpoints
-    const tx = await jobMarketplace.completeSessionJob(sessionId);
+
+    // The contract's completeSessionJob takes jobId and conversationCID
+    // We'll pass an empty string for conversationCID if not needed
+    const conversationCID = ''; // Optional conversation CID for S5 storage
+    const tx = await jobMarketplace.completeSessionJob(sessionId, conversationCID);
 
     const receipt = await tx.wait();
     return receipt.hash;

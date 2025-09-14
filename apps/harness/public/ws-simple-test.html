@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple WebSocket Test</title>
+</head>
+<body>
+    <h1>WebSocket Test - Fabstir LLM Nodes ✅</h1>
+    <button onclick="connect8080()">Connect to Node 1 (ws://localhost:8080/v1/ws)</button>
+    <button onclick="connect8083()">Connect to Node 2 (ws://localhost:8083/v1/ws)</button>
+    <button onclick="sendTest()">Send Inference Request</button>
+    <button onclick="closeWs()">Close Connection</button>
+    <div id="status">Not connected</div>
+    <div id="messages"></div>
+    
+    <script>
+        let ws = null;
+        
+        function connect8083() {
+            connectToNode('ws://localhost:8083/v1/ws', 'Node 2');
+        }
+        
+        function connect8080() {
+            connectToNode('ws://localhost:8080/v1/ws', 'Node 1');
+        }
+        
+        function connectToNode(url, nodeName) {
+            const status = document.getElementById('status');
+            const messages = document.getElementById('messages');
+            
+            if (ws) {
+                ws.close();
+            }
+            
+            status.textContent = 'Connecting...';
+            messages.innerHTML = '';
+            
+            console.log(`Creating WebSocket connection to ${url}`);
+            
+            ws = new WebSocket(url);
+            
+            ws.onopen = function() {
+                status.textContent = `✅ Connected to ${nodeName}!`;
+                console.log('WebSocket opened');
+            };
+            
+            ws.onmessage = function(event) {
+                console.log('Message received:', event.data);
+                const msg = document.createElement('div');
+                msg.style.padding = '5px';
+                msg.style.margin = '5px';
+                msg.style.border = '1px solid #ccc';
+                msg.textContent = 'Received: ' + event.data;
+                messages.appendChild(msg);
+                
+                // Parse and handle message
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'connected') {
+                        status.textContent = '✅ Connected - ' + data.message;
+                    }
+                } catch (e) {
+                    console.log('Non-JSON message:', event.data);
+                }
+            };
+            
+            ws.onerror = function(error) {
+                status.textContent = '❌ Error occurred';
+                console.error('WebSocket error:', error);
+            };
+            
+            ws.onclose = function(event) {
+                status.textContent = `❌ Disconnected (code: ${event.code})`;
+                console.log('WebSocket closed:', event.code, event.reason);
+                ws = null;
+            };
+        }
+        
+        function sendTest() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('Not connected!');
+                return;
+            }
+            
+            const testMsg = {
+                type: 'inference',
+                request: {
+                    prompt: 'Say hello in 5 words',
+                    model: 'tiny-vicuna-1b',
+                    stream: true,
+                    temperature: 0.7,
+                    max_tokens: 20
+                }
+            };
+            
+            console.log('Sending:', testMsg);
+            ws.send(JSON.stringify(testMsg));
+        }
+        
+        function closeWs() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+    </script>
+</body>
+</html>

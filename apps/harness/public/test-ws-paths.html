@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Path Discovery</title>
+    <style>
+        .test-result { margin: 10px 0; padding: 10px; border: 1px solid #ccc; }
+        .success { background-color: #d4edda; }
+        .failure { background-color: #f8d7da; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Endpoint Discovery</h1>
+    <p>Testing different possible WebSocket paths...</p>
+    <button onclick="testAll()">Test All Paths</button>
+    <div id="results"></div>
+    
+    <script>
+        const paths = [
+            '/v1/ws',
+            '/ws',
+            '/websocket',
+            '/v1/websocket',
+            '/api/ws',
+            '/api/v1/ws',
+            '/stream',
+            '/v1/stream',
+            '/socket',
+            '/v1/socket',
+            '/',
+            '/v1'
+        ];
+        
+        function testAll() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '';
+            
+            paths.forEach(path => {
+                testPath('localhost:8080', path);
+            });
+        }
+        
+        function testPath(host, path) {
+            const wsUrl = `ws://${host}${path}`;
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'test-result';
+            resultDiv.innerHTML = `Testing ${wsUrl}... <span id="status-${path.replace(/\//g, '_')}">⏳</span>`;
+            document.getElementById('results').appendChild(resultDiv);
+            
+            try {
+                const ws = new WebSocket(wsUrl);
+                let timeoutId;
+                
+                ws.onopen = function() {
+                    clearTimeout(timeoutId);
+                    resultDiv.className = 'test-result success';
+                    resultDiv.innerHTML = `✅ SUCCESS: ${wsUrl} - Connected!`;
+                    console.log(`Connected to ${wsUrl}`);
+                    ws.close();
+                };
+                
+                ws.onerror = function(error) {
+                    clearTimeout(timeoutId);
+                    resultDiv.className = 'test-result failure';
+                    resultDiv.innerHTML = `❌ FAILED: ${wsUrl}`;
+                };
+                
+                ws.onclose = function(event) {
+                    if (event.code !== 1000) { // Not a normal closure
+                        resultDiv.className = 'test-result failure';
+                        resultDiv.innerHTML = `❌ FAILED: ${wsUrl} (code: ${event.code})`;
+                    }
+                };
+                
+                // Timeout after 2 seconds
+                timeoutId = setTimeout(() => {
+                    resultDiv.className = 'test-result failure';
+                    resultDiv.innerHTML = `❌ TIMEOUT: ${wsUrl}`;
+                    ws.close();
+                }, 2000);
+                
+            } catch (error) {
+                resultDiv.className = 'test-result failure';
+                resultDiv.innerHTML = `❌ ERROR: ${wsUrl} - ${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html>

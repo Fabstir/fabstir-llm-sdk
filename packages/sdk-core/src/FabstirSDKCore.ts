@@ -18,7 +18,8 @@ import { AuthManager } from './managers/AuthManager';
 import { PaymentManager } from './managers/PaymentManager';
 import { StorageManager } from './managers/StorageManager';
 import { SessionManager } from './managers/SessionManager';
-import { HostManager } from './managers/HostManager';
+import { HostManagerEnhanced } from './managers/HostManagerEnhanced';
+import { ModelManager } from './managers/ModelManager';
 import { TreasuryManager } from './managers/TreasuryManager';
 import { ContractManager } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
@@ -38,6 +39,7 @@ export interface FabstirSDKCoreConfig {
     hostEarnings?: string;
     fabToken?: string;
     usdcToken?: string;
+    modelRegistry?: string;
   };
   
   // S5 Storage configuration
@@ -75,6 +77,7 @@ export class FabstirSDKCore {
   private storageManager?: IStorageManager;
   private sessionManager?: ISessionManager;
   private hostManager?: IHostManager;
+  private modelManager?: ModelManager;
   private treasuryManager?: ITreasuryManager;
   
   private authenticated = false;
@@ -101,7 +104,8 @@ export class FabstirSDKCore {
         proofSystem: config.contractAddresses?.proofSystem || process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM,
         hostEarnings: config.contractAddresses?.hostEarnings || process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS,
         fabToken: config.contractAddresses?.fabToken || process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN,
-        usdcToken: config.contractAddresses?.usdcToken || process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN
+        usdcToken: config.contractAddresses?.usdcToken || process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN,
+        modelRegistry: config.contractAddresses?.modelRegistry || process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY
       },
       
       s5Config: {
@@ -391,14 +395,13 @@ export class FabstirSDKCore {
     console.log('Creating SessionManager...');
     this.sessionManager = new SessionManager(this.paymentManager, this.storageManager);
     console.log('SessionManager created');
-    
-    console.log('Creating HostManager...');
-    this.hostManager = new HostManager(this.contractManager!);
-    console.log('HostManager created');
-    
+
     console.log('Creating TreasuryManager...');
     this.treasuryManager = new TreasuryManager(this.contractManager!);
     console.log('TreasuryManager created');
+
+    // Note: HostManagerEnhanced and ModelManager will be created after authentication
+    // when we have a signer available
     
     // Initialize managers that need a signer
     if (this.signer) {
@@ -423,10 +426,34 @@ export class FabstirSDKCore {
       console.log('Initializing SessionManager...');
       await this.sessionManager.initialize();  // SessionManager doesn't take signer
       console.log('SessionManager initialized');
-      
-      console.log('Initializing HostManager...');
-      await this.hostManager.initialize(this.signer);
-      console.log('HostManager initialized');
+
+      // Create and initialize ModelManager and HostManagerEnhanced now that we have a signer
+      console.log('Creating ModelManager...');
+      const modelRegistryAddress = this.config.contractAddresses?.modelRegistry;
+      if (!modelRegistryAddress) {
+        throw new SDKError('Model Registry address not configured', 'CONFIG_ERROR');
+      }
+      this.modelManager = new ModelManager(this.signer, modelRegistryAddress);
+      console.log('ModelManager created');
+
+      console.log('Creating HostManagerEnhanced...');
+      const nodeRegistryAddress = this.config.contractAddresses?.nodeRegistry;
+      if (!nodeRegistryAddress) {
+        throw new SDKError('Node Registry address not configured', 'CONFIG_ERROR');
+      }
+      const fabTokenAddress = this.config.contractAddresses?.fabToken;
+      console.log('FAB token address from config:', fabTokenAddress);
+      this.hostManager = new HostManagerEnhanced(
+        this.signer,
+        nodeRegistryAddress,
+        this.modelManager,
+        fabTokenAddress
+      );
+      console.log('HostManagerEnhanced created with FAB token:', fabTokenAddress);
+
+      console.log('Initializing HostManagerEnhanced...');
+      await this.hostManager.initialize();
+      console.log('HostManagerEnhanced initialized');
       
       console.log('Initializing TreasuryManager...');
       await this.treasuryManager.initialize(this.signer);

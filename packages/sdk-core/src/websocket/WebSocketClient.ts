@@ -70,10 +70,12 @@ export class WebSocketClient {
 
         this.ws.onmessage = (event) => {
           try {
+            console.log('WebSocket received raw message:', event.data);
             const data = JSON.parse(event.data);
+            console.log('WebSocket parsed message:', data);
             this.handleMessage(data);
           } catch (error) {
-            console.error('Failed to parse WebSocket message:', error);
+            console.error('Failed to parse WebSocket message:', error, 'Raw data:', event.data);
           }
         };
 
@@ -158,32 +160,58 @@ export class WebSocketClient {
         // Add message ID for tracking
         const messageId = this.generateMessageId();
         const messageWithId = { ...message, id: messageId };
-        
+
+        // Track accumulated streaming content
+        let streamContent = '';
+        let isStreaming = false;
+
         // Set up one-time response handler
         const responseHandler = (data: any) => {
-          if (data.id === messageId || data.responseId === messageId) {
+          // Handle streaming chunks
+          if (data.type === 'stream_chunk') {
+            isStreaming = true;
+            if (data.content) {
+              streamContent += data.content;
+            }
+            return; // Don't complete yet, wait for stream_end
+          }
+
+          // Handle stream end
+          if (data.type === 'stream_end' && isStreaming) {
             this.messageHandlers.delete(responseHandler);
-            
-            if (data.error) {
+            resolve(streamContent || 'Stream completed with no content');
+            return;
+          }
+
+          // Handle response for our message ID or session-based responses
+          if (data.id === messageId || data.responseId === messageId ||
+              (message.type === 'prompt' && data.session_id === message.session_id &&
+               (data.type === 'response' || data.type === 'stream_complete'))) {
+            this.messageHandlers.delete(responseHandler);
+
+            if (data.error || data.type === 'error') {
               reject(new SDKError(
-                data.error.message || 'Request failed',
-                'WS_REQUEST_ERROR',
-                { originalError: data.error }
+                data.message || data.error?.message || 'Request failed',
+                data.error_code || 'WS_REQUEST_ERROR',
+                { originalError: data.error || data }
               ));
             } else {
-              resolve(data.content || data.response || JSON.stringify(data));
+              resolve(data.content || data.response || streamContent || JSON.stringify(data));
             }
           }
         };
-        
+
         this.messageHandlers.add(responseHandler);
         
         // Send message
-        this.ws!.send(JSON.stringify(messageWithId));
-        
+        const messageStr = JSON.stringify(messageWithId);
+        console.log('WebSocket sending message:', messageStr);
+        this.ws!.send(messageStr);
+
         // Set timeout for response
         setTimeout(() => {
           this.messageHandlers.delete(responseHandler);
+          console.log(`WebSocket timeout for message ${messageId} - no response received within 30s`);
           reject(new SDKError('Request timeout', 'WS_TIMEOUT'));
         }, 30000);
       } catch (error: any) {

@@ -569,3 +569,5 @@ The goal is to ensure that sdk exposes all functionality necessary for my UI dev
 
 Please read to bring context memory up to speed
 `docs/SDK_REFACTOR_CONTEXT_PRIMER.md`
+
+Do not use minmal ABIs, because this is hardcoding that leads to duplicates that when get out of date and then crash in multiple places when executed. This bad practise, just load the ABI file.
