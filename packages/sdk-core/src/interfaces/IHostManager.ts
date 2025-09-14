@@ -40,7 +40,17 @@ export interface IHostManager {
    * List all active hosts
    */
   listActiveHosts(): Promise<HostInfo[]>;
-  
+
+  /**
+   * Get active hosts (alias for listActiveHosts)
+   */
+  getActiveHosts(): Promise<HostInfo[]>;
+
+  /**
+   * Discover all active hosts from blockchain
+   */
+  discoverAllActiveHosts(): Promise<Array<{nodeAddress: string; apiUrl: string}>>;
+
   /**
    * Query hosts by model
    */

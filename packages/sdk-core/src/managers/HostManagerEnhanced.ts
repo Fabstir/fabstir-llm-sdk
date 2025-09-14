@@ -413,6 +413,75 @@ export class HostManagerEnhanced {
   }
 
   /**
+   * Get active hosts from blockchain
+   */
+  async getActiveHosts(): Promise<HostInfo[]> {
+    try {
+      if (!this.nodeRegistryAddress) {
+        throw new SDKError('NodeRegistry address not configured', 'CONFIG_ERROR');
+      }
+
+      // Ensure discoveryService is initialized
+      if (!this.discoveryService) {
+        const provider = this.signer?.provider;
+        if (!provider) {
+          throw new SDKError('No provider available', 'PROVIDER_ERROR');
+        }
+        this.discoveryService = new HostDiscoveryService(
+          this.nodeRegistryAddress,
+          provider
+        );
+      }
+
+      // Get real hosts with full metadata from blockchain
+      const activeNodes = await this.discoveryService.getAllActiveNodes();
+
+      // Transform NodeInfo to HostInfo format
+      return activeNodes.map(node => ({
+        address: node.nodeAddress,
+        isRegistered: true,
+        isActive: node.isActive,
+        stakedAmount: (node as any).stakedAmount || 1000000000000000000n,
+        metadata: (node as any).metadata || JSON.stringify({
+          models: (node as any).models || [],
+          endpoint: node.apiUrl
+        }),
+        models: (node as any).models || [],
+        endpoint: node.apiUrl,
+        reputation: (node as any).reputation || 95,
+        pricePerToken: (node as any).pricePerToken || 2000
+      } as HostInfo));
+    } catch (error: any) {
+      console.error('Failed to get active hosts:', error);
+      // Return empty array - let UI handle empty state properly
+      return [];
+    }
+  }
+
+  /**
+   * Discover all active hosts (simplified version for compatibility)
+   */
+  async discoverAllActiveHosts(): Promise<Array<{nodeAddress: string; apiUrl: string}>> {
+    if (!this.initialized || !this.discoveryService) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      const nodes = await this.discoveryService.getAllActiveNodes();
+      return nodes.map(n => ({
+        nodeAddress: n.nodeAddress,
+        apiUrl: n.apiUrl
+      }));
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to discover active hosts: ${error.message}`,
+        'DISCOVERY_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
    * Discover all active hosts with model information
    */
   async discoverAllActiveHostsWithModels(): Promise<HostInfo[]> {

@@ -446,49 +446,49 @@ export class HostManager implements IHostManager {
   }
 
   /**
-   * Get active hosts (alias for listActiveHosts)
-   * For compatibility with the test page
+   * Get active hosts from blockchain
+   * Always queries real blockchain state - no hardcoded data
    */
   async getActiveHosts(): Promise<HostInfo[]> {
-    // For testing, return mock hosts if no real hosts available
-    const realHosts = await this.listActiveHosts();
-    
-    if (realHosts.length === 0) {
-      // Return test hosts with real endpoints
-      // In browser, these come from Next.js environment variables
-      const host1Url = 'http://localhost:8080';
-      const host2Url = 'http://localhost:8081';
-      
-      // Keep HTTP URLs for REST API (don't convert to WebSocket)
-      // The SessionManager will use REST API at /v1/inference
-      
-      return [
-        {
-          address: '0x4594F755F593B517Bb3194F4DeC20C48a3f04504',
-          isRegistered: true,
-          isActive: true,
-          stakedAmount: 1000000000000000000n,
-          metadata: `{"models":["tiny-vicuna-1b"],"endpoint":"${host1Url}"}`,
-          models: ['tiny-vicuna-1b'],  // Use the actual model the node has
-          endpoint: host1Url,  // Keep as HTTP for REST API
-          reputation: 95,
-          pricePerToken: 2000
-        },
-        {
-          address: '0x20f2A5FCDf271A5E6b04383C2915Ea980a50948c',
-          isRegistered: true,
-          isActive: true,
-          stakedAmount: 1000000000000000000n,
-          metadata: `{"models":["tiny-vicuna-1b"],"endpoint":"${host2Url}"}`,
-          models: ['tiny-vicuna-1b'],
-          endpoint: host2Url,  // Keep as HTTP for REST API
-          reputation: 90,
-          pricePerToken: 1500
-        }
-      ] as any;
+    try {
+      if (!this.nodeRegistryAddress) {
+        throw new SDKError('NodeRegistry address not configured', 'CONFIG_ERROR');
+      }
+
+      // Always use HostDiscoveryService to get real hosts from blockchain
+      const provider = this.signer?.provider;
+      if (!provider) {
+        throw new SDKError('No provider available', 'PROVIDER_ERROR');
+      }
+
+      const discoveryService = new HostDiscoveryService(
+        this.nodeRegistryAddress,
+        provider
+      );
+
+      // Get real hosts with full metadata from blockchain
+      const activeNodes = await discoveryService.getAllActiveNodes();
+
+      // Transform NodeInfo to HostInfo format
+      return activeNodes.map(node => ({
+        address: node.nodeAddress,
+        isRegistered: true,
+        isActive: node.isActive,
+        stakedAmount: (node as any).stakedAmount || 1000000000000000000n,
+        metadata: (node as any).metadata || JSON.stringify({
+          models: (node as any).models || [],
+          endpoint: node.apiUrl
+        }),
+        models: (node as any).models || [],
+        endpoint: node.apiUrl,
+        reputation: (node as any).reputation || 95,
+        pricePerToken: (node as any).pricePerToken || 2000
+      } as HostInfo));
+    } catch (error: any) {
+      console.error('Failed to get active hosts:', error);
+      // Return empty array - let UI handle empty state properly
+      return [];
     }
-    
-    return realHosts;
   }
 
   /**
