@@ -1,593 +1,1022 @@
-# FabstirSDK API Reference
+# Fabstir SDK API Reference
 
 ## Table of Contents
+- [Overview](#overview)
 - [Installation](#installation)
+- [Migration Guide](#migration-guide)
 - [Core SDK](#core-sdk)
-- [AuthManager](#authmanager)
-- [PaymentManager](#paymentmanager)
-- [StorageManager](#storagemanager)
-- [DiscoveryManager](#discoverymanager)
-- [SessionManager](#sessionmanager)
+- [Authentication](#authentication)
+- [Session Management](#session-management)
+- [Payment Management](#payment-management)
+- [Model Governance](#model-governance)
+- [Host Management](#host-management)
+- [Storage Management](#storage-management)
+- [Treasury Management](#treasury-management)
+- [WebSocket Communication](#websocket-communication)
+- [Contract Integration](#contract-integration)
+- [Services](#services)
 - [Error Handling](#error-handling)
 - [Types and Interfaces](#types-and-interfaces)
+- [Usage Examples](#usage-examples)
+
+## Overview
+
+The Fabstir SDK provides a comprehensive interface for interacting with the Fabstir P2P LLM marketplace. The SDK has been refactored into browser-compatible (`@fabstir/sdk-core`) and Node.js-specific (`@fabstir/sdk-node`) packages.
+
+### Key Features
+- Browser-compatible core functionality
+- USDC and ETH payment support
+- Session-based LLM interactions with context preservation
+- Model governance and validation
+- WebSocket real-time streaming
+- S5 decentralized storage integration
+- Base Account Kit for gasless transactions
 
 ## Installation
 
+### Browser/React Applications
+
+```bash
+npm install @fabstir/sdk-core
+```
+
+### Node.js Applications
+
+```bash
+npm install @fabstir/sdk-core @fabstir/sdk-node
+```
+
 ### Development Setup (npm link)
 
-For local development when working on both fabstir-llm-sdk and fabstir-llm-ui:
-
 ```bash
-# In fabstir-llm-sdk directory
-cd ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-sdk
+# In sdk-core directory
+cd packages/sdk-core
+pnpm build
 npm link
 
-# In fabstir-llm-ui directory
-cd ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-ui
-npm link @fabstir/llm-sdk
+# In your application
+npm link @fabstir/sdk-core
 ```
 
-### Production Setup
+## Migration Guide
 
-Install from GitHub repository:
+### From `@fabstir/llm-sdk` to `@fabstir/sdk-core`
 
-```bash
-npm install git+https://github.com/yourusername/fabstir-llm-sdk.git
-```
-
-Or from npm registry (when published):
-
-```bash
-npm install @fabstir/llm-sdk
-```
-
-## Core SDK
-
-### Import
-
+**Old Import:**
 ```typescript
 import { FabstirSDK } from '@fabstir/llm-sdk';
 ```
 
-### Constructor
-
+**New Import:**
 ```typescript
-new FabstirSDK(config?: SDKConfig)
+import { FabstirSDKCore } from '@fabstir/sdk-core';
 ```
 
-Creates a new instance of the FabstirSDK.
+### Key Changes
+1. P2P functionality moved to `@fabstir/sdk-node`
+2. Browser-first design with polyfills for Node.js
+3. Enhanced model governance system
+4. Improved session management with streaming
+5. USDC payment flows with Base Account Kit
 
-**Parameters:**
-- `config` (optional): SDK configuration object
+## Core SDK
 
-**Config Options:**
+### FabstirSDKCore
+
+The main SDK class for browser environments.
+
 ```typescript
-interface SDKConfig {
-  rpcUrl?: string;           // RPC URL for blockchain connection
-  s5PortalUrl?: string;      // S5 storage portal URL
+import { FabstirSDKCore } from '@fabstir/sdk-core';
+```
+
+#### Constructor
+
+```typescript
+new FabstirSDKCore(config?: FabstirSDKCoreConfig)
+```
+
+**Configuration:**
+```typescript
+interface FabstirSDKCoreConfig {
+  rpcUrl?: string;                    // Blockchain RPC URL
+  chainId?: number;                   // Chain ID (default: Base Sepolia)
   contractAddresses?: {
-    jobMarketplace?: string;  // JobMarketplace contract address
-    nodeRegistry?: string;    // NodeRegistry contract address
-    fabToken?: string;        // FAB token address
-    usdcToken?: string;       // USDC token address
+    jobMarketplace?: string;
+    nodeRegistry?: string;
+    proofSystem?: string;
+    hostEarnings?: string;
+    fabToken?: string;
+    usdcToken?: string;
+    modelRegistry?: string;
+  };
+  s5Config?: {
+    portalUrl?: string;
+    seedPhrase?: string;
   };
 }
 ```
 
 **Example:**
 ```typescript
-const sdk = new FabstirSDK({
-  rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/your-key',
-  s5PortalUrl: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p'
+const sdk = new FabstirSDKCore({
+  rpcUrl: process.env.RPC_URL_BASE_SEPOLIA,
+  contractAddresses: {
+    jobMarketplace: '0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944',
+    usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+  }
 });
 ```
 
+## Authentication
+
 ### authenticate
 
+Authenticates the SDK with various providers.
+
 ```typescript
-async authenticate(privateKey: string): Promise<AuthResult>
+async authenticate(
+  privateKeyOrSigner: string | ethers.Signer
+): Promise<void>
 ```
 
-Authenticates the SDK with a private key.
+**Parameters:**
+- `privateKeyOrSigner`: Private key string or ethers.Signer instance
+
+**Example with Private Key:**
+```typescript
+await sdk.authenticate('0x...');
+```
+
+**Example with Base Account Kit (Gasless):**
+```typescript
+import { createBaseAccountSDK } from "@base-org/account";
+
+// Create Base Account SDK
+const baseAccountSDK = await createBaseAccountSDK({
+  chainId: 84532, // Base Sepolia
+  jsonRpcUrl: RPC_URL,
+  bundlerUrl: 'https://api.developer.coinbase.com/rpc/v1/base-sepolia/...',
+  paymasterUrl: 'https://api.developer.coinbase.com/rpc/v1/base-sepolia/...'
+});
+
+// Create sub-account for auto-spend
+const subAccount = await baseAccountSDK.createSubAccount({
+  spender: {
+    address: JOB_MARKETPLACE_ADDRESS,
+    token: USDC_ADDRESS,
+    allowance: parseUnits('1000', 6) // 1000 USDC allowance
+  }
+});
+
+// Authenticate SDK with sub-account signer
+const signer = new ethers.Wallet(subAccountPrivateKey, provider);
+await sdk.authenticate(signer);
+```
+
+## Session Management
+
+The SessionManager handles LLM session lifecycle, streaming responses, and context preservation.
+
+### Get SessionManager
+
+```typescript
+const sessionManager = sdk.getSessionManager();
+```
+
+### startSession
+
+Creates a new LLM session with blockchain job creation.
+
+```typescript
+async startSession(
+  model: string,
+  provider: string,
+  config: SessionConfig
+): Promise<{
+  sessionId: bigint;
+  jobId: bigint;
+}>
+```
 
 **Parameters:**
-- `privateKey`: Ethereum private key (with or without '0x' prefix)
-
-**Returns:** `AuthResult` object containing signer and user information
+```typescript
+interface SessionConfig {
+  depositAmount: bigint;     // USDC amount in smallest units (e.g., 2000000 for $2)
+  pricePerToken: bigint;     // Price per token (e.g., 200)
+  duration: bigint;          // Session duration in seconds (e.g., 3600)
+  proofInterval: bigint;     // Checkpoint interval in seconds (e.g., 100)
+}
+```
 
 **Example:**
 ```typescript
-const authResult = await sdk.authenticate('0x1234...');
-console.log('Authenticated as:', authResult.userAddress);
+const { sessionId, jobId } = await sessionManager.startSession(
+  '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced', // Model hash
+  '0x4594F755F593B517Bb3194F4DeC20C48a3f04504', // Provider address
+  {
+    depositAmount: BigInt(2000000), // $2 USDC
+    pricePerToken: BigInt(200),
+    duration: BigInt(3600),
+    proofInterval: BigInt(100)
+  }
+);
 ```
 
-### Manager Getters
+### sendPrompt
 
-All manager getters require authentication before use.
-
-#### getAuthManager
+Sends a prompt to the LLM and receives response.
 
 ```typescript
-getAuthManager(): AuthManager
+async sendPrompt(
+  sessionId: bigint,
+  prompt: string
+): Promise<string>
 ```
 
-Returns the AuthManager instance.
+**Example:**
+```typescript
+const response = await sessionManager.sendPrompt(
+  sessionId,
+  "What is the capital of France?"
+);
+```
 
-#### getPaymentManager
+### sendPromptStreaming
+
+Sends a prompt and receives streaming response via WebSocket.
 
 ```typescript
-getPaymentManager(): PaymentManager
+async sendPromptStreaming(
+  sessionId: bigint,
+  prompt: string,
+  onChunk: (chunk: string) => void,
+  onComplete?: () => void,
+  onError?: (error: Error) => void
+): Promise<void>
 ```
 
-Returns the PaymentManager instance. Requires authentication.
+**Example:**
+```typescript
+await sessionManager.sendPromptStreaming(
+  sessionId,
+  "Tell me a story",
+  (chunk) => console.log(chunk),
+  () => console.log("Complete"),
+  (error) => console.error(error)
+);
+```
 
-#### getStorageManager
+### submitCheckpoint
+
+Submits a checkpoint proof for token usage.
 
 ```typescript
-async getStorageManager(): Promise<StorageManager>
+async submitCheckpoint(
+  sessionId: bigint,
+  proof: CheckpointProof
+): Promise<string>
 ```
-
-Returns the StorageManager instance. Requires authentication. Automatically initializes on first call.
-
-#### getDiscoveryManager
-
-```typescript
-getDiscoveryManager(): DiscoveryManager
-```
-
-Returns the DiscoveryManager instance. Requires authentication.
-
-#### getSessionManager
-
-```typescript
-async getSessionManager(): Promise<SessionManager>
-```
-
-Returns the SessionManager instance. Requires authentication. Automatically initializes with all required managers.
-
-## AuthManager
-
-Handles wallet authentication and S5 seed generation.
-
-### authenticate
-
-```typescript
-authenticate(provider: 'base' | 'metamask' | 'private-key', options?: AuthOptions): Promise<AuthResult>
-```
-
-Authenticates with different providers.
 
 **Parameters:**
-- `provider`: Authentication provider type
-- `options`: Provider-specific options
-
-**Options:**
 ```typescript
-interface AuthOptions {
-  privateKey?: string;  // Required for 'private-key' provider
-  rpcUrl?: string;      // Optional RPC URL override
+interface CheckpointProof {
+  checkpointNumber: number;
+  tokensUsed: number;
+  proofData: string;        // 64-byte proof minimum
+  timestamp: number;
 }
 ```
 
-### getSigner
+### completeSession
+
+Completes a session and triggers payment distribution.
 
 ```typescript
-getSigner(): ethers.Signer
+async completeSession(
+  sessionId: bigint,
+  totalTokens: number,
+  finalProof: string
+): Promise<string>
 ```
 
-Returns the authenticated signer. Throws if not authenticated.
+### getSessionHistory
 
-### getS5Seed
+Retrieves conversation history for a session.
 
 ```typescript
-getS5Seed(): string
+async getSessionHistory(
+  sessionId: bigint
+): Promise<{
+  prompts: string[];
+  responses: string[];
+  timestamps: number[];
+  tokenCounts: number[];
+}>
 ```
 
-Returns the S5 storage seed. Throws if not authenticated.
+### resumeSession
 
-### getUserAddress
+Resumes a paused session.
 
 ```typescript
-getUserAddress(): string
+async resumeSession(sessionId: bigint): Promise<void>
 ```
 
-Returns the authenticated user's address. Throws if not authenticated.
+### pauseSession
 
-### isAuthenticated
+Pauses an active session.
 
 ```typescript
-isAuthenticated(): boolean
+async pauseSession(sessionId: bigint): Promise<void>
 ```
 
-Returns whether the user is authenticated.
+## Payment Management
 
-## PaymentManager
+Handles ETH and USDC payments for jobs.
 
-Manages ETH and USDC payments for jobs.
-
-### createETHSessionJob
+### Get PaymentManager
 
 ```typescript
-createETHSessionJob(
-  hostAddress: string,
-  amount: string,
-  pricePerToken: number,
-  duration: number,
-  proofInterval: number
-): Promise<{ jobId: string; txHash: string }>
+const paymentManager = sdk.getPaymentManager();
 ```
 
-Creates a new ETH-paid session job.
+### createSessionJobWithUSDC
 
-**Parameters:**
-- `hostAddress`: Address of the compute host
-- `amount`: ETH amount in ether (e.g., '0.005')
-- `pricePerToken`: Price per token in wei
-- `duration`: Job duration in seconds
-- `proofInterval`: Proof submission interval in seconds
-
-**Returns:** Object with jobId and transaction hash
-
-### approveUSDC
+Creates a session job with USDC payment.
 
 ```typescript
-approveUSDC(tokenAddress: string, amount: string): Promise<string>
+async createSessionJobWithUSDC(
+  provider: string,
+  amount: string,         // Amount in USDC (e.g., "2" for $2)
+  config: {
+    pricePerToken: number;
+    duration: number;
+    proofInterval: number;
+  }
+): Promise<{
+    sessionId: bigint;
+    txHash: string;
+}>
 ```
 
-Approves USDC spending for the marketplace contract.
-
-**Parameters:**
-- `tokenAddress`: USDC token contract address
-- `amount`: Amount to approve in USDC (e.g., '100' for 100 USDC)
-
-**Returns:** Transaction hash
-
-### createUSDCSessionJob
-
+**Example:**
 ```typescript
-createUSDCSessionJob(
-  hostAddress: string,
-  tokenAddress: string,
-  amount: string,
-  pricePerToken: number,
-  duration: number,
-  proofInterval: number
-): Promise<{ jobId: string; txHash: string }>
+const result = await paymentManager.createSessionJobWithUSDC(
+  '0x4594F755F593B517Bb3194F4DeC20C48a3f04504',
+  '2', // $2 USDC
+  {
+    pricePerToken: 200,
+    duration: 3600,
+    proofInterval: 100
+  }
+);
 ```
 
-Creates a new USDC-paid session job.
+### createSessionJobWithETH
 
-**Parameters:**
-- `hostAddress`: Address of the compute host
-- `tokenAddress`: USDC token contract address
-- `amount`: USDC amount (e.g., '100' for 100 USDC)
-- `pricePerToken`: Price per token in smallest token unit
-- `duration`: Job duration in seconds
-- `proofInterval`: Proof submission interval in seconds
-
-**Returns:** Object with jobId and transaction hash
-
-### completeSessionJob
+Creates a session job with ETH payment.
 
 ```typescript
-completeSessionJob(jobId: string): Promise<string>
+async createSessionJobWithETH(
+  provider: string,
+  amount: string,         // Amount in ETH (e.g., "0.001")
+  config: {
+    pricePerToken: number;
+    duration: number;
+    proofInterval: number;
+  }
+): Promise<{
+    sessionId: bigint;
+    txHash: string;
+}>
 ```
 
-Completes a session job and triggers payment distribution.
+### getUSDCBalance
 
-**Parameters:**
-- `jobId`: The job ID to complete
-
-**Returns:** Transaction hash
-
-## StorageManager
-
-Interfaces with S5 storage for data persistence.
-
-### initialize
+Gets USDC balance for an address.
 
 ```typescript
-initialize(authManager: AuthManager): Promise<void>
+async getUSDCBalance(address: string): Promise<string>
 ```
 
-Initializes the storage manager with authentication. Usually called automatically.
+### fundSubAccount
 
-### storeData
+Funds a sub-account from main account.
 
 ```typescript
-storeData(key: string, data: any, metadata?: Record<string, any>): Promise<string>
+async fundSubAccount(
+  fromAddress: string,
+  toAddress: string,
+  amount: string
+): Promise<string>
 ```
 
-Stores data in S5 storage.
+## Model Governance
 
-**Parameters:**
-- `key`: Storage key
-- `data`: Data to store (will be JSON serialized)
-- `metadata`: Optional metadata
+The ModelManager handles model validation and governance.
 
-**Returns:** Content identifier (CID)
-
-### retrieveData
+### Get ModelManager
 
 ```typescript
-retrieveData(key: string): Promise<any>
+const modelManager = sdk.getModelManager();
 ```
 
-Retrieves data from S5 storage.
+### getModelId
 
-**Parameters:**
-- `key`: Storage key
-
-**Returns:** Stored data (JSON parsed)
-
-### listUserData
+Generates deterministic model ID from Hugging Face repo and file.
 
 ```typescript
-listUserData(): Promise<Array<{ key: string; cid: string; timestamp: number }>>
+async getModelId(
+  huggingfaceRepo: string,
+  fileName: string
+): Promise<string>
 ```
 
-Lists all data stored by the current user.
-
-**Returns:** Array of stored data records
-
-### isInitialized
-
+**Example:**
 ```typescript
-isInitialized(): boolean
+const modelId = await modelManager.getModelId(
+  'meta-llama/Llama-2-7b-hf',
+  'model.safetensors'
+);
 ```
 
-Returns whether the storage manager is initialized.
+### isModelApproved
 
-## DiscoveryManager
-
-Handles P2P node discovery and communication.
-
-### createNode
+Checks if a model is approved for use.
 
 ```typescript
-createNode(options?: DiscoveryOptions): Promise<string>
+async isModelApproved(modelId: string): Promise<boolean>
 ```
 
-Creates and starts a P2P node.
+### getModelDetails
 
-**Parameters:**
-- `options`: Node configuration options
-
-**Options:**
-```typescript
-interface DiscoveryOptions {
-  listen?: string[];     // Listen addresses
-  bootstrap?: string[];  // Bootstrap node addresses
-}
-```
-
-**Returns:** Node's peer ID
-
-### connectToPeer
+Gets detailed information about a model.
 
 ```typescript
-connectToPeer(multiaddr: string): Promise<void>
-```
-
-Connects to a peer by multiaddress.
-
-**Parameters:**
-- `multiaddr`: Peer's multiaddress (e.g., '/ip4/127.0.0.1/tcp/4001/p2p/12D3...')
-
-### getConnectedPeers
-
-```typescript
-getConnectedPeers(): string[]
-```
-
-Returns list of connected peer IDs.
-
-### sendMessage
-
-```typescript
-sendMessage(peerId: string, message: any): Promise<void>
-```
-
-Sends a message to a connected peer.
-
-**Parameters:**
-- `peerId`: Target peer ID
-- `message`: Message to send (will be JSON serialized)
-
-### onMessage
-
-```typescript
-onMessage(handler: (message: any) => void): void
-```
-
-Registers a message handler for incoming messages.
-
-**Parameters:**
-- `handler`: Function to handle incoming messages
-
-### stop
-
-```typescript
-stop(): Promise<void>
-```
-
-Stops the P2P node.
-
-### isRunning
-
-```typescript
-isRunning(): boolean
-```
-
-Returns whether the P2P node is running.
-
-### findHost
-
-```typescript
-findHost(criteria: any): Promise<string>
-```
-
-Finds a suitable host based on criteria.
-
-**Parameters:**
-- `criteria`: Host selection criteria
-
-**Returns:** Host address
-
-## SessionManager
-
-Orchestrates complete session workflows.
-
-### createSession
-
-```typescript
-createSession(options: SessionOptions): Promise<SessionResult>
-```
-
-Creates a new compute session.
-
-**Parameters:**
-```typescript
-interface SessionOptions {
-  paymentType: 'ETH' | 'USDC';  // Payment type
-  amount: string;                // Payment amount
-  pricePerToken?: number;        // Price per token (default: 5000)
-  duration?: number;             // Duration in seconds (default: 3600)
-  proofInterval?: number;        // Proof interval in seconds (default: 300)
-  hostAddress?: string;          // Specific host address
-  tokenAddress?: string;         // Token address (for USDC)
-  hostCriteria?: any;           // Host selection criteria
-}
+async getModelDetails(modelId: string): Promise<ModelInfo | null>
 ```
 
 **Returns:**
 ```typescript
-interface SessionResult {
-  sessionId: string;     // Unique session ID
-  jobId: string;        // Blockchain job ID
-  hostAddress: string;  // Selected host address
-  txHash: string;       // Transaction hash
+interface ModelInfo {
+  id: string;
+  huggingfaceRepo: string;
+  fileName: string;
+  modelHash: string;
+  size: bigint;
+  approved: boolean;
+  metadata?: {
+    name?: string;
+    description?: string;
+    tags?: string[];
+  };
 }
 ```
 
-### submitProof
+### getAllApprovedModels
+
+Gets all approved models in the registry.
 
 ```typescript
-submitProof(sessionId: string, proofData: any): Promise<string>
+async getAllApprovedModels(): Promise<ModelInfo[]>
 ```
 
-Submits a proof for a session.
+### validateModel
 
-**Parameters:**
-- `sessionId`: Session ID
-- `proofData`: Proof data
-
-**Returns:** Storage CID
-
-### completeSession
+Validates a model specification and optionally verifies file hash.
 
 ```typescript
-completeSession(sessionId: string): Promise<{ 
-  txHash: string; 
-  paymentDistribution: PaymentDistribution 
+async validateModel(
+  modelSpec: ModelSpec,
+  fileContent?: ArrayBuffer
+): Promise<ModelValidation>
+```
+
+**Parameters:**
+```typescript
+interface ModelSpec {
+  huggingfaceRepo: string;
+  fileName: string;
+  modelHash: string;
+}
+
+interface ModelValidation {
+  isValid: boolean;
+  isApproved: boolean;
+  hashMatches?: boolean;
+  errors: string[];
+}
+```
+
+### verifyModelHash
+
+Verifies a model file's hash.
+
+```typescript
+async verifyModelHash(
+  fileContent: ArrayBuffer,
+  expectedHash: string
+): Promise<boolean>
+```
+
+## Host Management
+
+The HostManagerEnhanced provides advanced host management with model support.
+
+### Get HostManagerEnhanced
+
+```typescript
+const hostManager = sdk.getHostManagerEnhanced();
+```
+
+### registerHostWithModels
+
+Registers a host with supported models.
+
+```typescript
+async registerHostWithModels(
+  request: HostRegistrationWithModels
+): Promise<string>
+```
+
+**Parameters:**
+```typescript
+interface HostRegistrationWithModels {
+  metadata: HostMetadata;
+  supportedModels: ModelSpec[];
+  stake?: string;           // Optional stake amount
+  apiUrl?: string;          // Host API endpoint
+}
+
+interface HostMetadata {
+  hardware: {
+    gpu: string;
+    vram: number;
+    ram: number;
+  };
+  capabilities: string[];   // e.g., ['streaming', 'batch']
+  location: string;
+  maxConcurrent: number;
+  costPerToken: number;
+}
+```
+
+### findHostsForModel
+
+Finds hosts that support a specific model.
+
+```typescript
+async findHostsForModel(modelId: string): Promise<HostInfo[]>
+```
+
+**Returns:**
+```typescript
+interface HostInfo {
+  address: string;
+  metadata: HostMetadata;
+  supportedModels: string[];
+  isActive: boolean;
+  stake: bigint;
+  reputation: number;
+  apiUrl?: string;
+}
+```
+
+### updateHostModels
+
+Updates the models supported by the current host.
+
+```typescript
+async updateHostModels(newModels: ModelSpec[]): Promise<string>
+```
+
+### getHostStatus
+
+Gets comprehensive status of a host.
+
+```typescript
+async getHostStatus(hostAddress: string): Promise<{
+  isActive: boolean;
+  isRegistered: boolean;
+  supportedModels: string[];
+  metadata: HostMetadata;
+  earnings: string;
+  reputation: number;
 }>
 ```
 
-Completes a session and distributes payments.
+### discoverAllActiveHostsWithModels
 
-**Parameters:**
-- `sessionId`: Session ID to complete
-
-**Returns:** Transaction hash and payment distribution
-
-### storeSessionData
+Discovers all active hosts with their supported models.
 
 ```typescript
-storeSessionData(sessionId: string, data: any): Promise<string>
+async discoverAllActiveHostsWithModels(): Promise<HostInfo[]>
 ```
 
-Stores session-specific data.
+### hostSupportsModel
 
-**Parameters:**
-- `sessionId`: Session ID
-- `data`: Data to store
-
-**Returns:** Storage CID
-
-### getSessionData
+Checks if a host supports a specific model.
 
 ```typescript
-getSessionData(sessionId: string): Promise<any>
+async hostSupportsModel(
+  hostAddress: string,
+  modelId: string
+): Promise<boolean>
 ```
 
-Retrieves session data.
+### updateApiUrl
 
-**Parameters:**
-- `sessionId`: Session ID
-
-**Returns:** Session data
-
-### getActiveSessions
+Updates the host's API endpoint URL.
 
 ```typescript
-getActiveSessions(): Promise<string[]>
+async updateApiUrl(apiUrl: string): Promise<string>
 ```
 
-Returns list of active session IDs.
+### withdrawEarnings
 
-### getSessionStatus
+Withdraws accumulated earnings for a host.
 
 ```typescript
-getSessionStatus(sessionId: string): Promise<'active' | 'completed' | 'failed'>
+async withdrawEarnings(tokenAddress: string): Promise<string>
 ```
 
-Gets the status of a session.
+## Storage Management
 
-**Parameters:**
-- `sessionId`: Session ID
+Handles S5 decentralized storage operations.
 
-**Returns:** Session status
-
-## Error Handling
-
-The SDK uses custom error types with specific error codes:
+### Get StorageManager
 
 ```typescript
-interface SDKError extends Error {
-  code?: string;
-  details?: any;
+const storageManager = await sdk.getStorageManager();
+```
+
+### storeConversation
+
+Stores a conversation in S5.
+
+```typescript
+async storeConversation(
+  sessionId: string,
+  messages: Array<{
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+    timestamp: number;
+  }>
+): Promise<string>
+```
+
+### retrieveConversation
+
+Retrieves a stored conversation.
+
+```typescript
+async retrieveConversation(sessionId: string): Promise<{
+  messages: Array<{
+    role: string;
+    content: string;
+    timestamp: number;
+  }>;
+  metadata?: any;
+}>
+```
+
+### storeSessionMetadata
+
+Stores session metadata.
+
+```typescript
+async storeSessionMetadata(
+  sessionId: string,
+  metadata: {
+    model: string;
+    provider: string;
+    startTime: number;
+    config: SessionConfig;
+  }
+): Promise<string>
+```
+
+## Treasury Management
+
+Manages treasury operations and fee distribution.
+
+### Get TreasuryManager
+
+```typescript
+const treasuryManager = sdk.getTreasuryManager();
+```
+
+### getTreasuryInfo
+
+Gets treasury information.
+
+```typescript
+async getTreasuryInfo(): Promise<TreasuryInfo>
+```
+
+**Returns:**
+```typescript
+interface TreasuryInfo {
+  address: string;
+  balance: string;
+  feePercentage: number;
+  totalCollected: string;
 }
 ```
 
-### Common Error Codes
+### getTreasuryBalance
 
-- `AUTH_FAILED`: Authentication failure
-- `MANAGER_NOT_INITIALIZED`: Manager not initialized
-- `MANAGER_NOT_AUTHENTICATED`: Manager requires authentication
-- `INSUFFICIENT_BALANCE`: Insufficient token balance
-- `TRANSACTION_FAILED`: Blockchain transaction failed
-- `STORAGE_ERROR`: S5 storage error
-- `P2P_CONNECTION_ERROR`: P2P connection error
-- `SESSION_NOT_FOUND`: Session not found
+Gets treasury balance for a specific token.
+
+```typescript
+async getTreasuryBalance(tokenAddress: string): Promise<string>
+```
+
+### withdrawTreasuryFunds
+
+Withdraws funds from treasury (admin only).
+
+```typescript
+async withdrawTreasuryFunds(
+  tokenAddress: string,
+  amount: string
+): Promise<string>
+```
+
+## WebSocket Communication
+
+Real-time communication for streaming responses.
+
+### WebSocketClient
+
+```typescript
+import { WebSocketClient } from '@fabstir/sdk-core';
+```
+
+### Constructor
+
+```typescript
+new WebSocketClient(url: string, options?: WebSocketOptions)
+```
+
+**Options:**
+```typescript
+interface WebSocketOptions {
+  reconnect?: boolean;
+  reconnectInterval?: number;
+  maxReconnectAttempts?: number;
+  heartbeatInterval?: number;
+}
+```
+
+### connect
+
+Establishes WebSocket connection.
+
+```typescript
+async connect(): Promise<void>
+```
+
+### send
+
+Sends a message through WebSocket.
+
+```typescript
+send(message: any): void
+```
+
+### onMessage
+
+Registers a message handler.
+
+```typescript
+onMessage(handler: (data: any) => void): void
+```
+
+### onError
+
+Registers an error handler.
+
+```typescript
+onError(handler: (error: Error) => void): void
+```
+
+### close
+
+Closes the WebSocket connection.
+
+```typescript
+close(): void
+```
+
+**Example:**
+```typescript
+const ws = new WebSocketClient('ws://localhost:8080');
+await ws.connect();
+
+ws.onMessage((data) => {
+  console.log('Received:', data);
+});
+
+ws.send({
+  type: 'inference',
+  sessionId: '123',
+  prompt: 'Hello'
+});
+```
+
+## Contract Integration
+
+### SessionJobManager
+
+Direct contract interaction for session jobs.
+
+```typescript
+const sessionJobManager = sdk.getSessionJobManager();
+```
+
+#### createSessionJob
+
+Creates a session job directly on the blockchain.
+
+```typescript
+async createSessionJob(params: SessionJobParams): Promise<SessionResult>
+```
+
+**Parameters:**
+```typescript
+interface SessionJobParams {
+  provider: string;
+  signer: ethers.Signer;
+  tokenAddress: string;     // USDC address
+  depositAmount: string;     // Amount in smallest units
+  sessionConfig: {
+    pricePerToken: bigint;
+    duration: bigint;
+    proofInterval: bigint;
+  };
+}
+
+interface SessionResult {
+  sessionId: bigint;
+  txHash: string;
+  receipt: TransactionReceipt;
+}
+```
+
+#### submitCheckpointProof
+
+Submits checkpoint proof as provider.
+
+```typescript
+async submitCheckpointProof(
+  sessionId: bigint,
+  checkpointNumber: number,
+  tokensUsed: number,
+  proofData: string
+): Promise<string>
+```
+
+#### completeSessionJob
+
+Completes a session job.
+
+```typescript
+async completeSessionJob(
+  sessionId: bigint,
+  conversationCID: string
+): Promise<string>
+```
+
+## Services
+
+### ProofVerifier
+
+Verifies cryptographic proofs.
+
+```typescript
+const proofVerifier = new ProofVerifier();
+```
+
+#### verifyCheckpointProof
+
+Verifies a checkpoint proof.
+
+```typescript
+async verifyCheckpointProof(
+  proof: string,
+  expectedData: {
+    sessionId: bigint;
+    checkpointNumber: number;
+    tokensUsed: number;
+  }
+): Promise<boolean>
+```
+
+#### generateProof
+
+Generates a proof for checkpoint.
+
+```typescript
+async generateProof(
+  data: {
+    sessionId: bigint;
+    checkpointNumber: number;
+    tokensUsed: number;
+    timestamp: number;
+  }
+): Promise<string>
+```
+
+### EnvironmentDetector
+
+Detects runtime environment capabilities.
+
+```typescript
+import { EnvironmentDetector } from '@fabstir/sdk-core';
+
+const detector = new EnvironmentDetector();
+const capabilities = detector.getCapabilities();
+
+if (capabilities.hasP2P) {
+  // P2P features available
+}
+if (capabilities.hasWebSockets) {
+  // WebSocket features available
+}
+```
+
+## Error Handling
+
+The SDK uses typed errors with specific codes.
+
+### Error Codes
+
+```typescript
+enum SDKErrorCode {
+  // Authentication
+  AUTH_FAILED = 'AUTH_FAILED',
+  AUTH_REQUIRED = 'AUTH_REQUIRED',
+  INVALID_SIGNER = 'INVALID_SIGNER',
+
+  // Managers
+  MANAGER_NOT_INITIALIZED = 'MANAGER_NOT_INITIALIZED',
+  MANAGER_NOT_AUTHENTICATED = 'MANAGER_NOT_AUTHENTICATED',
+
+  // Transactions
+  INSUFFICIENT_BALANCE = 'INSUFFICIENT_BALANCE',
+  TRANSACTION_FAILED = 'TRANSACTION_FAILED',
+  APPROVAL_FAILED = 'APPROVAL_FAILED',
+
+  // Sessions
+  SESSION_NOT_FOUND = 'SESSION_NOT_FOUND',
+  SESSION_EXPIRED = 'SESSION_EXPIRED',
+  INVALID_SESSION_STATE = 'INVALID_SESSION_STATE',
+
+  // Models
+  MODEL_NOT_APPROVED = 'MODEL_NOT_APPROVED',
+  MODEL_VALIDATION_FAILED = 'MODEL_VALIDATION_FAILED',
+  INVALID_MODEL_HASH = 'INVALID_MODEL_HASH',
+
+  // Storage
+  STORAGE_ERROR = 'STORAGE_ERROR',
+  S5_CONNECTION_FAILED = 'S5_CONNECTION_FAILED',
+
+  // WebSocket
+  WEBSOCKET_CONNECTION_FAILED = 'WEBSOCKET_CONNECTION_FAILED',
+  WEBSOCKET_MESSAGE_FAILED = 'WEBSOCKET_MESSAGE_FAILED',
+
+  // Proofs
+  INVALID_PROOF = 'INVALID_PROOF',
+  PROOF_VERIFICATION_FAILED = 'PROOF_VERIFICATION_FAILED'
+}
+```
 
 ### Error Handling Example
 
 ```typescript
 try {
   await sdk.authenticate(privateKey);
-  const sessionManager = await sdk.getSessionManager();
-  const session = await sessionManager.createSession({
-    paymentType: 'ETH',
-    amount: '0.005',
-    hostAddress: '0x...'
-  });
+  const sessionManager = sdk.getSessionManager();
+
+  const { sessionId } = await sessionManager.startSession(
+    modelId,
+    provider,
+    config
+  );
 } catch (error) {
-  if (error.code === 'AUTH_FAILED') {
-    console.error('Authentication failed:', error.message);
-  } else if (error.code === 'INSUFFICIENT_BALANCE') {
-    console.error('Insufficient balance:', error.details);
-  } else {
-    console.error('Unexpected error:', error);
+  switch (error.code) {
+    case SDKErrorCode.AUTH_FAILED:
+      console.error('Authentication failed:', error.message);
+      break;
+    case SDKErrorCode.INSUFFICIENT_BALANCE:
+      console.error('Insufficient USDC balance');
+      break;
+    case SDKErrorCode.MODEL_NOT_APPROVED:
+      console.error('Model not approved for use');
+      break;
+    default:
+      console.error('Unexpected error:', error);
   }
 }
 ```
@@ -597,119 +1026,556 @@ try {
 ### Core Types
 
 ```typescript
-// Authentication
-interface AuthResult {
-  signer: ethers.Signer;
-  userAddress: string;
-  s5Seed: string;
-  network?: {
-    chainId: number;
-    name: string;
-  };
-}
-
 // SDK Configuration
-interface SDKConfig {
+interface FabstirSDKCoreConfig {
   rpcUrl?: string;
-  s5PortalUrl?: string;
-  contractAddresses?: {
-    jobMarketplace?: string;
-    nodeRegistry?: string;
-    fabToken?: string;
-    usdcToken?: string;
-  };
+  chainId?: number;
+  contractAddresses?: ContractAddresses;
+  s5Config?: S5Config;
 }
 
 // Session Management
-interface SessionOptions {
-  paymentType: 'ETH' | 'USDC';
-  amount: string;
-  pricePerToken?: number;
-  duration?: number;
-  proofInterval?: number;
-  hostAddress?: string;
-  tokenAddress?: string;
-  hostCriteria?: any;
+interface SessionConfig {
+  depositAmount: bigint;
+  pricePerToken: bigint;
+  duration: bigint;
+  proofInterval: bigint;
 }
 
-interface SessionResult {
+interface SessionJob {
+  id: bigint;
+  jobId: bigint;
+  client: string;
+  provider: string;
+  model: string;
+  depositAmount: bigint;
+  pricePerToken: bigint;
+  tokensUsed: bigint;
+  status: 'active' | 'completed' | 'failed';
+  startTime: bigint;
+  endTime?: bigint;
+  checkpoints: CheckpointProof[];
+}
+
+interface CheckpointProof {
+  checkpointNumber: number;
+  tokensUsed: number;
+  proofData: string;
+  timestamp: number;
+}
+
+// Model Governance
+interface ModelInfo {
+  id: string;
+  huggingfaceRepo: string;
+  fileName: string;
+  modelHash: string;
+  size: bigint;
+  approved: boolean;
+  metadata?: ModelMetadata;
+}
+
+interface ModelSpec {
+  huggingfaceRepo: string;
+  fileName: string;
+  modelHash: string;
+}
+
+interface ModelValidation {
+  isValid: boolean;
+  isApproved: boolean;
+  hashMatches?: boolean;
+  errors: string[];
+}
+
+// Host Management
+interface HostInfo {
+  address: string;
+  metadata: HostMetadata;
+  supportedModels: string[];
+  isActive: boolean;
+  stake: bigint;
+  reputation: number;
+  apiUrl?: string;
+}
+
+interface HostMetadata {
+  hardware: {
+    gpu: string;
+    vram: number;
+    ram: number;
+  };
+  capabilities: string[];
+  location: string;
+  maxConcurrent: number;
+  costPerToken: number;
+}
+
+// Chat/Conversation Types
+interface ChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: number;
+  tokens?: number;
+}
+
+interface ConversationData {
   sessionId: string;
-  jobId: string;
-  hostAddress: string;
-  txHash: string;
+  messages: ChatMessage[];
+  metadata: {
+    model: string;
+    provider: string;
+    totalTokens: number;
+    totalCost: number;
+  };
 }
+```
 
-interface PaymentDistribution {
-  host: string;
-  treasury: string;
+## Usage Examples
+
+### Complete USDC Payment Flow with Context Preservation
+
+```typescript
+import { FabstirSDKCore } from '@fabstir/sdk-core';
+import { createBaseAccountSDK } from "@base-org/account";
+import { ethers } from 'ethers';
+
+async function chatWithContext() {
+  // 1. Initialize SDK
+  const sdk = new FabstirSDKCore({
+    rpcUrl: process.env.RPC_URL_BASE_SEPOLIA,
+    contractAddresses: {
+      jobMarketplace: '0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944',
+      usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+    }
+  });
+
+  // 2. Setup Base Account Kit for gasless transactions
+  const baseAccountSDK = await createBaseAccountSDK({
+    chainId: 84532,
+    jsonRpcUrl: process.env.RPC_URL,
+    bundlerUrl: process.env.BUNDLER_URL,
+    paymasterUrl: process.env.PAYMASTER_URL
+  });
+
+  // 3. Create sub-account for auto-spend
+  const subAccount = await baseAccountSDK.createSubAccount({
+    spender: {
+      address: sdk.getContractAddress('jobMarketplace'),
+      token: sdk.getContractAddress('usdcToken'),
+      allowance: parseUnits('10', 6) // $10 USDC allowance
+    }
+  });
+
+  // 4. Authenticate with sub-account
+  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+  const signer = new ethers.Wallet(subAccount.privateKey, provider);
+  await sdk.authenticate(signer);
+
+  // 5. Get managers
+  const sessionManager = sdk.getSessionManager();
+  const storageManager = await sdk.getStorageManager();
+
+  // 6. Start session with USDC payment
+  const { sessionId } = await sessionManager.startSession(
+    '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced',
+    '0x4594F755F593B517Bb3194F4DeC20C48a3f04504',
+    {
+      depositAmount: BigInt(2000000), // $2 USDC
+      pricePerToken: BigInt(200),
+      duration: BigInt(3600),
+      proofInterval: BigInt(100)
+    }
+  );
+
+  console.log('Session started:', sessionId.toString());
+
+  // 7. Conversation with context preservation
+  const conversation: ChatMessage[] = [];
+
+  // First prompt
+  let prompt = "What is the capital of France?";
+  let response = await sessionManager.sendPrompt(sessionId, prompt);
+
+  conversation.push(
+    { role: 'user', content: prompt, timestamp: Date.now() },
+    { role: 'assistant', content: response, timestamp: Date.now(), tokens: 15 }
+  );
+
+  // Second prompt with context
+  const context = conversation.map(msg =>
+    `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+  ).join('\n');
+
+  prompt = "Tell me more about that city";
+  const fullPrompt = `${context}\nUser: ${prompt}\nAssistant:`;
+  response = await sessionManager.sendPrompt(sessionId, fullPrompt);
+
+  conversation.push(
+    { role: 'user', content: prompt, timestamp: Date.now() },
+    { role: 'assistant', content: response, timestamp: Date.now(), tokens: 95 }
+  );
+
+  // 8. Store conversation in S5
+  const cid = await storageManager.storeConversation(
+    sessionId.toString(),
+    conversation
+  );
+  console.log('Conversation stored:', cid);
+
+  // 9. Submit checkpoint proof
+  const totalTokens = conversation.reduce((sum, msg) => sum + (msg.tokens || 0), 0);
+  const checkpointProof = {
+    checkpointNumber: 1,
+    tokensUsed: totalTokens,
+    proofData: '0x' + '00'.repeat(64), // 64-byte proof
+    timestamp: Date.now()
+  };
+
+  await sessionManager.submitCheckpoint(sessionId, checkpointProof);
+
+  // 10. Complete session
+  const finalProof = '0x' + 'ff'.repeat(64);
+  const txHash = await sessionManager.completeSession(
+    sessionId,
+    totalTokens,
+    finalProof
+  );
+
+  console.log('Session completed:', txHash);
+}
+```
+
+### Model Discovery and Validation
+
+```typescript
+async function discoverAndValidateModels() {
+  const sdk = new FabstirSDKCore();
+  await sdk.authenticate(privateKey);
+
+  const modelManager = sdk.getModelManager();
+  const hostManager = sdk.getHostManagerEnhanced();
+
+  // 1. Get all approved models
+  const approvedModels = await modelManager.getAllApprovedModels();
+  console.log(`Found ${approvedModels.length} approved models`);
+
+  // 2. Find a specific model
+  const modelId = await modelManager.getModelId(
+    'meta-llama/Llama-2-7b-hf',
+    'model.safetensors'
+  );
+
+  // 3. Check if model is approved
+  const isApproved = await modelManager.isModelApproved(modelId);
+  if (!isApproved) {
+    throw new Error('Model not approved for use');
+  }
+
+  // 4. Get model details
+  const modelInfo = await modelManager.getModelDetails(modelId);
+  console.log('Model info:', modelInfo);
+
+  // 5. Find hosts supporting this model
+  const hosts = await hostManager.findHostsForModel(modelId);
+  console.log(`Found ${hosts.length} hosts supporting this model`);
+
+  // 6. Select best host based on criteria
+  const bestHost = hosts.reduce((best, host) => {
+    if (!best || host.metadata.costPerToken < best.metadata.costPerToken) {
+      return host;
+    }
+    return best;
+  }, hosts[0]);
+
+  console.log('Selected host:', bestHost.address);
+  console.log('Cost per token:', bestHost.metadata.costPerToken);
+  console.log('Hardware:', bestHost.metadata.hardware);
+
+  return { modelId, hostAddress: bestHost.address };
+}
+```
+
+### Streaming Responses with WebSocket
+
+```typescript
+async function streamingChat() {
+  const sdk = new FabstirSDKCore();
+  await sdk.authenticate(privateKey);
+
+  const sessionManager = sdk.getSessionManager();
+
+  // Start session
+  const { sessionId } = await sessionManager.startSession(
+    modelId,
+    providerAddress,
+    config
+  );
+
+  // Send prompt with streaming
+  let fullResponse = '';
+
+  await sessionManager.sendPromptStreaming(
+    sessionId,
+    "Write a story about a robot",
+    (chunk) => {
+      // Handle each chunk as it arrives
+      process.stdout.write(chunk);
+      fullResponse += chunk;
+    },
+    () => {
+      // Streaming complete
+      console.log('\n\nStreaming complete!');
+      console.log('Total response length:', fullResponse.length);
+    },
+    (error) => {
+      // Handle errors
+      console.error('Streaming error:', error);
+    }
+  );
+}
+```
+
+### Host Registration with Models
+
+```typescript
+async function registerAsHost() {
+  const sdk = new FabstirSDKCore();
+  await sdk.authenticate(hostPrivateKey);
+
+  const hostManager = sdk.getHostManagerEnhanced();
+  const modelManager = sdk.getModelManager();
+
+  // Define supported models
+  const supportedModels: ModelSpec[] = [
+    {
+      huggingfaceRepo: 'meta-llama/Llama-2-7b-hf',
+      fileName: 'model.safetensors',
+      modelHash: '0x...'
+    },
+    {
+      huggingfaceRepo: 'mistralai/Mistral-7B-v0.1',
+      fileName: 'model.safetensors',
+      modelHash: '0x...'
+    }
+  ];
+
+  // Validate models are approved
+  for (const model of supportedModels) {
+    const validation = await modelManager.validateModel(model);
+    if (!validation.isApproved) {
+      throw new Error(`Model not approved: ${model.huggingfaceRepo}`);
+    }
+  }
+
+  // Register host with models
+  const txHash = await hostManager.registerHostWithModels({
+    metadata: {
+      hardware: {
+        gpu: 'NVIDIA RTX 4090',
+        vram: 24,
+        ram: 64
+      },
+      capabilities: ['streaming', 'batch', 'context-8k'],
+      location: 'us-east',
+      maxConcurrent: 5,
+      costPerToken: 150 // 150 units per token
+    },
+    supportedModels,
+    stake: '100', // 100 FAB tokens
+    apiUrl: 'https://my-llm-node.example.com'
+  });
+
+  console.log('Host registered:', txHash);
+
+  // Update API URL if needed
+  await hostManager.updateApiUrl('https://new-api.example.com');
+
+  // Check earnings
+  const status = await hostManager.getHostStatus(hostAddress);
+  console.log('Earnings:', status.earnings);
+
+  // Withdraw earnings
+  if (parseFloat(status.earnings) > 0) {
+    const withdrawTx = await hostManager.withdrawEarnings(USDC_ADDRESS);
+    console.log('Earnings withdrawn:', withdrawTx);
+  }
+}
+```
+
+### Error Recovery and Retry Logic
+
+```typescript
+async function robustSession() {
+  const sdk = new FabstirSDKCore();
+  const maxRetries = 3;
+
+  // Authenticate with retry
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      await sdk.authenticate(privateKey);
+      break;
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+    }
+  }
+
+  const sessionManager = sdk.getSessionManager();
+  let sessionId: bigint;
+
+  // Start session with proper error handling
+  try {
+    const result = await sessionManager.startSession(
+      modelId,
+      providerAddress,
+      config
+    );
+    sessionId = result.sessionId;
+  } catch (error) {
+    if (error.code === SDKErrorCode.INSUFFICIENT_BALANCE) {
+      // Handle insufficient balance
+      console.error('Please fund your account with USDC');
+      return;
+    }
+    if (error.code === SDKErrorCode.MODEL_NOT_APPROVED) {
+      // Try alternative model
+      const alternativeModel = await findAlternativeModel();
+      const result = await sessionManager.startSession(
+        alternativeModel,
+        providerAddress,
+        config
+      );
+      sessionId = result.sessionId;
+    } else {
+      throw error;
+    }
+  }
+
+  // Send prompts with retry on WebSocket failures
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await sessionManager.sendPrompt(
+        sessionId,
+        "Hello, how are you?"
+      );
+      console.log('Response:', response);
+      break;
+    } catch (error) {
+      if (error.code === SDKErrorCode.WEBSOCKET_CONNECTION_FAILED && i < maxRetries - 1) {
+        // Wait and retry
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        continue;
+      }
+      throw error;
+    }
+  }
 }
 ```
 
 ## Constants
 
-### Default Values
-
 ```typescript
-// Payment defaults
-MIN_ETH_PAYMENT = '0.005'              // 0.005 ETH minimum
-DEFAULT_PRICE_PER_TOKEN = 5000         // 5000 wei per token
-DEFAULT_DURATION = 3600                // 1 hour
-DEFAULT_PROOF_INTERVAL = 300           // 5 minutes
-TOKENS_PER_PROOF = 1000               // Tokens per proof submission
+// Network Configuration
+export const BASE_SEPOLIA_CHAIN_ID = 84532;
+export const BASE_SEPOLIA_CHAIN_HEX = "0x14a34";
 
-// Payment distribution
-PAYMENT_SPLIT = { 
-  host: 0.9,      // 90% to host
-  treasury: 0.1   // 10% to treasury
-}
+// Payment Configuration
+export const MIN_USDC_DEPOSIT = "2";           // $2 minimum
+export const DEFAULT_PRICE_PER_TOKEN = 200;    // 200 units per token
+export const DEFAULT_SESSION_DURATION = 3600;  // 1 hour
+export const DEFAULT_PROOF_INTERVAL = 100;     // 100 seconds
 
-// Network defaults
-BASE_SEPOLIA_CHAIN_ID = 84532
-DEFAULT_S5_PORTAL = 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p'
+// Proof Requirements
+export const MIN_PROOF_LENGTH = 64;            // 64 bytes minimum
+export const PROOF_VERIFICATION_GAS = 200000;  // Gas for proof verification
+
+// Rate Limiting
+export const TOKEN_GENERATION_RATE = 10;       // 10 tokens per second
+export const TOKEN_BURST_MULTIPLIER = 2;       // 2x burst allowed
+
+// Payment Distribution
+export const HOST_PAYMENT_PERCENTAGE = 90;     // 90% to host
+export const TREASURY_FEE_PERCENTAGE = 10;     // 10% to treasury
+
+// WebSocket Configuration
+export const WS_RECONNECT_INTERVAL = 5000;     // 5 seconds
+export const WS_MAX_RECONNECT_ATTEMPTS = 5;
+export const WS_HEARTBEAT_INTERVAL = 30000;    // 30 seconds
+
+// S5 Storage Configuration
+export const DEFAULT_S5_PORTAL = 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p';
+export const S5_UPLOAD_TIMEOUT = 60000;        // 60 seconds
+export const S5_DOWNLOAD_TIMEOUT = 30000;      // 30 seconds
 ```
 
-## Complete Example
+## Troubleshooting
+
+### Common Issues
+
+#### 1. "chainId must be a hex encoded integer"
+**Solution:** Use `CHAIN_HEX = "0x14a34"` instead of decimal chain ID in wallet_sendCalls.
+
+#### 2. "Insufficient USDC balance"
+**Solution:**
+- Check sub-account balance, not primary account
+- Ensure $2 minimum deposit amount
+- Fund sub-account from primary account if needed
+
+#### 3. "Invalid proof" error
+**Solution:**
+- Ensure proof is minimum 64 bytes
+- Use proper proof format: `'0x' + '00'.repeat(64)`
+- Wait for token accumulation before submitting proof
+
+#### 4. WebSocket connection failures
+**Solution:**
+- Check if host API URL is accessible
+- Verify WebSocket endpoint format (ws:// or wss://)
+- Implement retry logic with exponential backoff
+
+#### 5. Model not approved
+**Solution:**
+- Use `modelManager.getAllApprovedModels()` to find approved models
+- Verify model hash matches registry
+- Contact governance for model approval
+
+#### 6. Transaction timeout
+**Solution:**
+- Use `tx.wait(3)` for proper confirmations
+- Don't use arbitrary setTimeout delays
+- Check network congestion and gas prices
+
+### Browser vs Node.js Differences
+
+| Feature | Browser | Node.js |
+|---------|---------|---------|
+| P2P Networking | ❌ Not available | ✅ Full libp2p support |
+| WebSocket | ✅ Native support | ✅ With ws package |
+| S5 Storage | ✅ With IndexedDB | ✅ With polyfill |
+| Crypto operations | ✅ Web Crypto API | ✅ Node crypto |
+| File system | ❌ Not available | ✅ Full access |
+
+### Debug Mode
+
+Enable debug logging:
 
 ```typescript
-import { FabstirSDK } from '@fabstir/llm-sdk';
+const sdk = new FabstirSDKCore({
+  debug: true,
+  logLevel: 'verbose'
+});
 
-async function main() {
-  // Initialize SDK
-  const sdk = new FabstirSDK({
-    rpcUrl: process.env.RPC_URL_BASE_SEPOLIA,
-    s5PortalUrl: process.env.S5_PORTAL_URL
-  });
-
-  // Authenticate
-  await sdk.authenticate(process.env.PRIVATE_KEY!);
-  
-  // Get managers
-  const sessionManager = await sdk.getSessionManager();
-  const storageManager = await sdk.getStorageManager();
-  
-  // Create a session
-  const session = await sessionManager.createSession({
-    paymentType: 'ETH',
-    amount: '0.005',
-    pricePerToken: 5000,
-    duration: 3600,
-    hostAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7'
-  });
-  
-  console.log('Session created:', session.sessionId);
-  
-  // Store session data
-  const cid = await storageManager.storeData(
-    `session-${session.sessionId}`,
-    { prompt: 'Hello, AI!', timestamp: Date.now() }
-  );
-  
-  console.log('Data stored with CID:', cid);
-  
-  // Complete session
-  const completion = await sessionManager.completeSession(session.sessionId);
-  console.log('Session completed. Payments distributed:', completion.paymentDistribution);
-}
-
-main().catch(console.error);
+// Or set environment variable
+process.env.FABSTIR_SDK_DEBUG = 'true';
 ```
+
+## Support
+
+- GitHub Issues: https://github.com/fabstir/fabstir-llm-sdk/issues
+- Documentation: https://docs.fabstir.com
+- Discord: https://discord.gg/fabstir
+
+## License
+
+MIT License - See LICENSE file for details.
