@@ -146,12 +146,8 @@ export class SessionJobManager {
       jobMarketplaceAddress,
       amountToUse
     );
-    const approveReceipt = await approveTx.wait();
+    const approveReceipt = await approveTx.wait(3); // Wait for 3 confirmations
     console.log('USDC approval complete:', approveReceipt.hash);
-
-    // Wait for blockchain confirmation - Base Sepolia needs more time
-    console.log('Waiting for Base Sepolia blockchain confirmation (15 seconds)...');
-    await new Promise(resolve => setTimeout(resolve, 15000)); // 15 seconds initial wait
 
     // Verify the allowance was set - try multiple times with longer waits
     newAllowance = BigInt(0);
@@ -215,12 +211,8 @@ export class SessionJobManager {
     );
 
     console.log('Transaction sent, waiting for confirmation...');
-    const receipt = await tx.wait();
+    const receipt = await tx.wait(3); // Wait for 3 confirmations
     console.log('Transaction confirmed:', receipt.hash);
-
-    // Give Base Sepolia extra time to fully process
-    console.log('Waiting 5 seconds for Base Sepolia to fully process...');
-    await new Promise(resolve => setTimeout(resolve, 5000));
     
     // Parse events to get job ID (which is also the session ID for session jobs)
     const sessionCreatedEvent = receipt.logs.find(
@@ -266,7 +258,7 @@ export class SessionJobManager {
       tokensGenerated  // tokensInBatch
     );
 
-    const receipt = await tx.wait();
+    const receipt = await tx.wait(3); // Wait for 3 confirmations
     return receipt.hash;
   }
 
@@ -297,7 +289,7 @@ export class SessionJobManager {
       proofData  // proof (bytes)
     );
 
-    const receipt = await tx.wait();
+    const receipt = await tx.wait(3); // Wait for 3 confirmations
     return receipt.hash;
   }
 
@@ -320,7 +312,7 @@ export class SessionJobManager {
     const conversationCID = ''; // Optional conversation CID for S5 storage
     const tx = await jobMarketplace.completeSessionJob(sessionId, conversationCID);
 
-    const receipt = await tx.wait();
+    const receipt = await tx.wait(3); // Wait for 3 confirmations
     return receipt.hash;
   }
 
