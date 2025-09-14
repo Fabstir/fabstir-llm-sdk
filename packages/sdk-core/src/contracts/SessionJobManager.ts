@@ -109,50 +109,52 @@ export class SessionJobManager {
     console.log('USDC token address:', usdcAddress);
     console.log('User address:', userAddress);
 
+    // Always refresh allowance check right before transaction
     const currentAllowance = await usdcToken.allowance(
       userAddress,
       jobMarketplaceAddress
     ) as bigint;
-    
+
     console.log('Current USDC allowance:', ethers.formatUnits(currentAllowance, 6));
     console.log('Required deposit:', ethers.formatUnits(depositAmount, 6));
 
-    // Only approve if current allowance is insufficient
+    // Note: Even if allowance shows as sufficient, it might have been consumed
+    // by a previous transaction that hasn't been fully processed yet.
+
     let newAllowance = currentAllowance;
-    if (currentAllowance < amountToUse) {
-      console.log('Setting USDC approval for amount:', ethers.formatUnits(amountToUse, 6));
-      const approveTx = await usdcToken.approve(
-        jobMarketplaceAddress,
-        amountToUse
-      );
-      const approveReceipt = await approveTx.wait();
-      console.log('USDC approval complete:', approveReceipt.hash);
 
-      // Wait for blockchain confirmation - Base Sepolia needs more time
-      console.log('Waiting for Base Sepolia blockchain confirmation (15 seconds)...');
-      await new Promise(resolve => setTimeout(resolve, 15000)); // 15 seconds initial wait
+    // Always approve to ensure fresh allowance for each transaction
+    // This prevents issues where previous transactions consumed the allowance
+    console.log('Setting fresh USDC approval for this transaction...');
+    const approveTx = await usdcToken.approve(
+      jobMarketplaceAddress,
+      amountToUse
+    );
+    const approveReceipt = await approveTx.wait();
+    console.log('USDC approval complete:', approveReceipt.hash);
 
-      // Verify the allowance was set - try multiple times with longer waits
-      newAllowance = BigInt(0);
-      for (let i = 0; i < 5; i++) {
-        newAllowance = await usdcToken.allowance(
-          userAddress,
-          jobMarketplaceAddress
-        ) as bigint;
-        console.log(`Attempt ${i+1}/5 - New USDC allowance after approval:`, ethers.formatUnits(newAllowance, 6));
+    // Wait for blockchain confirmation - Base Sepolia needs more time
+    console.log('Waiting for Base Sepolia blockchain confirmation (15 seconds)...');
+    await new Promise(resolve => setTimeout(resolve, 15000)); // 15 seconds initial wait
 
-        if (newAllowance >= amountToUse) {
-          console.log('✅ Allowance confirmed on-chain');
-          break;
-        }
+    // Verify the allowance was set - try multiple times with longer waits
+    newAllowance = BigInt(0);
+    for (let i = 0; i < 5; i++) {
+      newAllowance = await usdcToken.allowance(
+        userAddress,
+        jobMarketplaceAddress
+      ) as bigint;
+      console.log(`Attempt ${i+1}/5 - New USDC allowance after approval:`, ethers.formatUnits(newAllowance, 6));
 
-        if (i < 4) {
-          console.log(`Allowance not yet updated, waiting 10 more seconds... (${(i+2)*10} seconds total)`);
-          await new Promise(resolve => setTimeout(resolve, 10000)); // 10 seconds between checks
-        }
+      if (newAllowance >= amountToUse) {
+        console.log('✅ Allowance confirmed on-chain');
+        break;
       }
-    } else {
-      console.log('Sufficient allowance already exists, skipping approval');
+
+      if (i < 4) {
+        console.log(`Allowance not yet updated, waiting 10 more seconds... (${(i+2)*10} seconds total)`);
+        await new Promise(resolve => setTimeout(resolve, 10000)); // 10 seconds between checks
+      }
     }
 
     if (newAllowance < amountToUse) {

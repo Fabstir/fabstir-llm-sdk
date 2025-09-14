@@ -288,31 +288,34 @@ const EnhancedSDKFeaturesTest: React.FC = () => {
       const sessionManager = sdk.getSessionManager();
       const paymentManager = sdk.getPaymentManager();
       
+      // Use the actual approved model ID for TinyVicuna-1B
+      const TINY_VICUNA_MODEL_ID = '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced';
       const jobTx = await paymentManager.createSessionJob(
-        'tiny-vicuna-1b', // model
+        TINY_VICUNA_MODEL_ID, // Correct TinyVicuna model ID
         selectedHost!, // provider (discovered host address)
         '2', // depositAmount ($2.00 USDC - will be converted to 6 decimals internally)
         2000, // pricePerToken
         10, // proofInterval (tokens between proofs)
         3600 // duration (1 hour)
       );
-      addLog(`✅ Session job created`);
-      
-      // Start session with discovered endpoint
-      const sessionId = await sessionManager.startSession({
-        model: 'tiny-vicuna-1b',
-        provider: selectedHost!,
-        endpoint: apiUrl, // Use discovered API URL
-        sessionConfig: {
-          maxTokens: 1000,
-          temperature: 0.7,
-          topP: 0.9,
-          frequencyPenalty: 0,
-          presencePenalty: 0,
-          proofInterval: 10,
-          pricePerToken: 2000
-        }
-      });
+      addLog(`✅ Session job created: ${jobTx.txHash}`);
+
+      // Start session with correct parameters (matching WebSocket test)
+      const sessionConfig = {
+        depositAmount: BigInt(2000000), // 2 USDC in smallest units
+        pricePerToken: BigInt(2000),
+        proofInterval: BigInt(10),
+        duration: BigInt(3600)
+      };
+
+      const session = await sessionManager.startSession(
+        TINY_VICUNA_MODEL_ID, // Use the correct model ID
+        selectedHost!,
+        sessionConfig,
+        apiUrl || 'http://localhost:8080' // Use discovered API URL or fallback
+      );
+
+      const sessionId = session.sessionId;
       
       addLog(`✅ Session started with discovered host`);
       
