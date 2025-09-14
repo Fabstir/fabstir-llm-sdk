@@ -192,7 +192,7 @@ export class HostManagerEnhanced {
       // Step 2: Approve FAB tokens for the NodeRegistry contract
       console.log(`Approving ${ethers.formatEther(stakeAmount)} FAB tokens for NodeRegistry...`);
       const approveTx = await fabToken.approve(this.nodeRegistryAddress, stakeAmount);
-      await approveTx.wait();
+      await approveTx.wait(3); // Wait for 3 confirmations as per CLAUDE.local.md
       console.log('FAB token approval successful');
 
       // Verify approval
@@ -210,7 +210,7 @@ export class HostManagerEnhanced {
         }
       );
 
-      await tx.wait();
+      await tx.wait(3); // Wait for 3 confirmations
       console.log('Node registration successful');
 
       // Step 4: Stake FAB tokens (separate transaction after registration)
@@ -222,7 +222,7 @@ export class HostManagerEnhanced {
         gasLimit: 500000n  // Increased gas limit for stake operation
       });
 
-      const receipt = await stakeTx.wait();
+      const receipt = await stakeTx.wait(3); // Wait for 3 confirmations
 
       if (!receipt || receipt.status !== 1) {
         throw new ModelRegistryError(

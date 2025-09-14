@@ -32,7 +32,7 @@ const NodeManagementEnhanced: React.FC = () => {
     description: 'A test node on Base Sepolia',
     region: 'us-west-2',
     capabilities: ['gpt-4', 'claude-3'],
-    models: ['tiny-vicuna-1b']
+    models: ['CohereForAI/TinyVicuna-1B-32k-GGUF/tiny-vicuna-1b.q4_k_m.gguf']
   }, null, 2));
   const [stakeAmount, setStakeAmount] = useState('1000');
   const [apiUrl, setApiUrl] = useState('http://localhost:8080');
@@ -342,7 +342,7 @@ const NodeManagementEnhanced: React.FC = () => {
         metaObj = {
           name: "Test Node",
           description: "A test node on Base Sepolia",
-          models: ["tiny-vicuna-1b"]
+          models: ["CohereForAI/TinyVicuna-1B-32k-GGUF/tiny-vicuna-1b.q4_k_m.gguf"]
         };
       }
 
@@ -355,8 +355,8 @@ const NodeManagementEnhanced: React.FC = () => {
         apiUrl: apiUrl,
         supportedModels: [
           {
-            repo: "tiny-vicuna-1b",  // This should match what's in the ModelRegistry
-            file: "model.gguf"      // This should match what's in the ModelRegistry
+            repo: "CohereForAI/TinyVicuna-1B-32k-GGUF",  // Correct repo for approved model
+            file: "tiny-vicuna-1b.q4_k_m.gguf"           // Correct file for approved model
           }
         ],
         metadata: {

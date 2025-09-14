@@ -353,6 +353,24 @@ const EnhancedSDKFeaturesTest: React.FC = () => {
     <div style={{ padding: '20px', fontFamily: 'monospace' }}>
       <h1>Enhanced SDK Features Test</h1>
 
+      <div style={{
+        marginBottom: '20px',
+        padding: '15px',
+        backgroundColor: '#fff3cd',
+        borderRadius: '4px',
+        border: '1px solid #ffc107'
+      }}>
+        <strong>⚠️ Important:</strong> This page tests SDK features from a <strong>USER's perspective</strong>.
+        <br />
+        Please connect with a <strong>USER ACCOUNT</strong> (not a host account) to:
+        <ul style={{ marginTop: '10px', marginBottom: '0' }}>
+          <li>Discover available hosts</li>
+          <li>Create and pay for AI inference jobs</li>
+          <li>Test WebSocket streaming sessions</li>
+        </ul>
+        For host operations (registration, staking, etc.), use the <a href="/node-management-enhanced" style={{ color: '#0052cc' }}>Node Management</a> page instead.
+      </div>
+
       {connectedWallet && (
         <div style={{
           marginBottom: '20px',
