@@ -79,16 +79,14 @@ export class SessionManager implements ISessionManager {
 
     try {
       // Create session job with payment
-      // Convert BigInt values to appropriate types for PaymentManager
-      // Format depositAmount from smallest units (2000000) to decimal units ("2")
-      const formattedDeposit = ethers.formatUnits(config.depositAmount, 6);
+      // depositAmount is already a string like "0.2" or "2", no conversion needed
       const result = await this.paymentManager.createSessionJob(
         model,
         provider,
-        formattedDeposit, // Pass as decimal string "2" instead of "2000000"
-        Number(config.pricePerToken), // Convert BigInt to number
-        Number(config.proofInterval), // Convert BigInt to number
-        Number(config.duration) // Convert BigInt to number
+        config.depositAmount, // Already a string like "0.2"
+        config.pricePerToken, // Already a number
+        config.proofInterval, // Already a number
+        config.duration       // Already a number
       );
 
       // Create session state
@@ -409,8 +407,9 @@ export class SessionManager implements ISessionManager {
 
     try {
       // Submit checkpoint to contract
+      // For session jobs, use sessionId not jobId
       const txHash = await this.paymentManager.submitCheckpoint(
-        session.jobId,
+        sessionId,
         proof.tokensGenerated,
         proof.proofData
       );
@@ -460,8 +459,9 @@ export class SessionManager implements ISessionManager {
 
     try {
       // Submit final completion to contract
+      // For session jobs, use sessionId not jobId
       const txHash = await this.paymentManager.completeSession(
-        session.jobId,
+        sessionId,
         totalTokens,
         finalProof
       );

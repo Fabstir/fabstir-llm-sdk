@@ -113,7 +113,7 @@ export class HostManager implements IHostManager {
             stakeAmount,
             { gasLimit: 100000n }
           );
-          await approveTx.wait();
+          await approveTx.wait(3); // Wait for 3 confirmations
         }
       }
 
@@ -145,7 +145,7 @@ export class HostManager implements IHostManager {
         );
       }
       
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Registration failed', 'REGISTRATION_FAILED');
       }
@@ -189,7 +189,7 @@ export class HostManager implements IHostManager {
       // Unregister
       const tx = await registry['unregisterNode']({ gasLimit: 200000n });
       
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Unregistration failed', 'UNREGISTRATION_FAILED');
       }
@@ -223,7 +223,7 @@ export class HostManager implements IHostManager {
 
       const tx = await registry['updateMetadata'](metadata, { gasLimit: 150000n });
       
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Metadata update failed', 'UPDATE_FAILED');
       }
@@ -270,7 +270,7 @@ export class HostManager implements IHostManager {
       console.log('Contract has method?:', typeof registry['updateApiUrl']);
       const tx = await registry['updateApiUrl'](apiUrl, { gasLimit: 200000n });
       
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Update API URL failed', 'UPDATE_API_URL_FAILED');
       }
@@ -315,13 +315,13 @@ export class HostManager implements IHostManager {
           stakeAmount,
           { gasLimit: 100000n }
         );
-        await approveTx.wait();
+        await approveTx.wait(3); // Wait for 3 confirmations
       }
 
       // Add stake
       const tx = await registry['addStake'](stakeAmount, { gasLimit: 200000n });
       
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Add stake failed', 'ADD_STAKE_FAILED');
       }
@@ -357,7 +357,7 @@ export class HostManager implements IHostManager {
       // Remove stake
       const tx = await registry['removeStake'](stakeAmount, { gasLimit: 200000n });
       
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Remove stake failed', 'REMOVE_STAKE_FAILED');
       }
@@ -638,7 +638,7 @@ export class HostManager implements IHostManager {
       // Use withdrawAll to withdraw all accumulated earnings for the token
       const tx = await earnings.withdrawAll(tokenAddress);
       
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Withdrawal failed', 'WITHDRAWAL_FAILED');
       }
@@ -671,7 +671,7 @@ export class HostManager implements IHostManager {
 
       const tx = await registry['setNodeStatus'](active, { gasLimit: 150000n });
       
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Status update failed', 'STATUS_UPDATE_FAILED');
       }

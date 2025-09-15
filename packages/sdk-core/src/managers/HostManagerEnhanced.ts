@@ -315,7 +315,7 @@ export class HostManagerEnhanced {
         gasLimit: 300000n
       });
 
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new ModelRegistryError(
           'Model update transaction failed',
@@ -586,7 +586,7 @@ export class HostManagerEnhanced {
         { gasLimit: 500000n }
       );
 
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
 
       if (!receipt || receipt.status !== 1) {
         throw new ModelRegistryError(
@@ -651,7 +651,7 @@ export class HostManagerEnhanced {
         { gasLimit: 300000n }
       );
 
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
 
       if (!receipt || receipt.status !== 1) {
         throw new ModelRegistryError(
@@ -694,7 +694,7 @@ export class HostManagerEnhanced {
       // Use withdrawAll to withdraw all accumulated earnings for the token
       const tx = await earnings.withdrawAll(tokenAddress);
 
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Withdrawal failed', 'WITHDRAWAL_FAILED');
       }

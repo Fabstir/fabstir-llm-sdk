@@ -178,8 +178,8 @@ export class ProofBridgeClient implements IProofService {
       );
       
       // Wait for confirmation
-      const receipt = await tx.wait();
-      
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+
       // Update status
       const proofId = this.generateProofIdFromSession(sessionId.toString());
       if (this.pendingProofs.has(proofId)) {

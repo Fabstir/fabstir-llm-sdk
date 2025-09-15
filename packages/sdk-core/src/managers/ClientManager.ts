@@ -282,7 +282,7 @@ export class ClientManager {
           );
         }
 
-        const receipt = await tx.wait();
+        const receipt = await tx.wait(3); // Wait for 3 confirmations
 
         // Extract job ID from events
         const event = receipt.events?.find((e: any) => e.event === 'JobCreated');

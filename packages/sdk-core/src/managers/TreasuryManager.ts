@@ -99,7 +99,7 @@ export class TreasuryManager implements ITreasuryManager {
           to: treasuryInfo.address,
           value: amount
         });
-        await tx.wait();
+        await tx.wait(3); // Wait for 3 confirmations
         return tx.hash;
       }
 
@@ -111,8 +111,8 @@ export class TreasuryManager implements ITreasuryManager {
       
       const treasuryInfo = await this.getTreasuryInfo();
       const tx = await token.transfer(treasuryInfo.address, amount);
-      await tx.wait();
-      
+      await tx.wait(3); // Wait for 3 confirmations
+
       return tx.hash;
     } catch (error: any) {
       throw new SDKError(
@@ -155,8 +155,8 @@ export class TreasuryManager implements ITreasuryManager {
       // Withdraw through contract
       // Note: withdrawTreasuryTokens sends to the treasury address configured in contract
       const tx = await jobMarketplace.withdrawTreasuryTokens(tokenAddress);
-      await tx.wait();
-      
+      await tx.wait(3); // Wait for 3 confirmations
+
       return tx.hash;
     } catch (error: any) {
       if (error instanceof SDKError) throw error;
@@ -254,8 +254,8 @@ export class TreasuryManager implements ITreasuryManager {
       );
 
       const tx = await jobMarketplace.setPlatformFeePercentage(percentage);
-      await tx.wait();
-      
+      await tx.wait(3); // Wait for 3 confirmations
+
       return tx.hash;
     } catch (error: any) {
       throw new SDKError(
@@ -424,8 +424,8 @@ export class TreasuryManager implements ITreasuryManager {
       
       // Withdraw treasury tokens (this sends to the configured treasury address)
       const tx = await jobMarketplace.withdrawTreasuryTokens(usdcAddress);
-      await tx.wait();
-      
+      await tx.wait(3); // Wait for 3 confirmations
+
       return tx.hash;
     } catch (error: any) {
       if (error instanceof SDKError) throw error;

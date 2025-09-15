@@ -58,7 +58,7 @@ export class TransactionHelper {
       await contract.getAddress(),
       params.amount
     );
-    await approveTx.wait();
+    await approveTx.wait(3); // Wait for 3 confirmations
 
     // Then create the job
     const tx = await contract.createJobWithToken(

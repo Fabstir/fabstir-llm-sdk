@@ -163,10 +163,7 @@ export class SessionJobManager {
         break;
       }
 
-      if (i < 4) {
-        console.log(`Allowance not yet updated, waiting 10 more seconds... (${(i+2)*10} seconds total)`);
-        await new Promise(resolve => setTimeout(resolve, 10000)); // 10 seconds between checks
-      }
+      // No need for additional waiting - tx.wait(3) ensures confirmations
     }
 
     if (newAllowance < amountToUse) {
@@ -249,13 +246,13 @@ export class SessionJobManager {
     }
 
     const jobMarketplace = this.contractManager.getJobMarketplace();
-    
-    // The contract method is actually submitProofOfWork
-    // It takes: jobId, ekzlProof (bytes), tokensInBatch
+
+    // The contract method is submitProofOfWork
+    // Correct parameter order: jobId, tokensClaimed, proof
     const tx = await jobMarketplace.submitProofOfWork(
       sessionId,  // jobId
-      proofData,  // ekzlProof
-      tokensGenerated  // tokensInBatch
+      tokensGenerated,  // tokensClaimed
+      proofData  // proof (bytes)
     );
 
     const receipt = await tx.wait(3); // Wait for 3 confirmations
@@ -283,9 +280,10 @@ export class SessionJobManager {
     );
     
     // Submit proof as host
+    // submitProofOfWork expects: jobId, tokensClaimed, proof (in that order)
     const tx = await jobMarketplaceAsHost.submitProofOfWork(
       sessionId,  // jobId
-      tokensGenerated,  // tokensClaimed (must be uint256 BEFORE proof)
+      tokensGenerated,  // tokensClaimed
       proofData  // proof (bytes)
     );
 
@@ -369,8 +367,8 @@ export class SessionJobManager {
     const amountWei = ethers.parseUnits(amount, 6);
     
     const tx = await usdcToken.transfer(toAddress, amountWei);
-    const receipt = await tx.wait();
-    
+    const receipt = await tx.wait(3); // Wait for 3 confirmations
+
     return receipt.hash;
   }
 
@@ -421,8 +419,8 @@ export class SessionJobManager {
 
     const hostEarnings = this.contractManager.getHostEarnings();
     const tx = await hostEarnings.withdrawEarnings(tokenAddress);
-    const receipt = await tx.wait();
-    
+    const receipt = await tx.wait(3); // Wait for 3 confirmations
+
     return receipt.hash;
   }
 }

@@ -114,7 +114,7 @@ export class PaymentManager implements IPaymentManager {
       }
     );
     
-    const receipt = await tx.wait();
+    const receipt = await tx.wait(3); // Wait for 3 confirmations
     if (!receipt || receipt.status !== 1) {
       throw new SDKError('Transaction failed', 'TRANSACTION_FAILED');
     }
@@ -183,7 +183,7 @@ export class PaymentManager implements IPaymentManager {
       { gasLimit: 500000n }
     );
     
-    const receipt = await tx.wait();
+    const receipt = await tx.wait(3); // Wait for 3 confirmations
     if (!receipt || receipt.status !== 1) {
       throw new SDKError('Transaction failed', 'TRANSACTION_FAILED');
     }
@@ -290,7 +290,7 @@ export class PaymentManager implements IPaymentManager {
         { gasLimit: 100000n }
       );
       
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Approval failed', 'APPROVAL_FAILED');
       }
@@ -381,14 +381,14 @@ export class PaymentManager implements IPaymentManager {
     }
 
     try {
-      const jobMarketplace = this.contractManager.getContract('jobMarketplace');
+      const jobMarketplace = this.contractManager.getJobMarketplace();
       
       const tx = await jobMarketplace['claimPayment'](
         jobId,
         { gasLimit: 300000n }
       );
       
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Claim failed', 'CLAIM_FAILED');
       }
@@ -496,7 +496,7 @@ export class PaymentManager implements IPaymentManager {
   }
 
   /**
-   * Get job status
+   * Get job status (supports both regular jobs and session jobs)
    */
   async getJobStatus(jobId: bigint): Promise<any> {
     if (!this.initialized) {
@@ -504,19 +504,90 @@ export class PaymentManager implements IPaymentManager {
     }
 
     try {
-      const jobMarketplace = this.contractManager.getContract('jobMarketplace');
-      const job = await jobMarketplace['jobs'](jobId);
-      
-      return {
-        requester: job.requester,
-        provider: job.provider,
-        model: job.model,
-        prompt: job.prompt,
-        result: job.result,
-        status: job.status,
-        payment: job.payment?.toString(),
-        timestamp: job.timestamp?.toString()
-      };
+      const jobMarketplace = this.contractManager.getJobMarketplace();
+
+      // Debug: Log the actual contract address being used
+      const contractAddress = await jobMarketplace.getAddress();
+      console.log(`PaymentManager.getJobStatus: Reading from JobMarketplace at ${contractAddress}`);
+
+      // IMPORTANT: In the current contract, ALL IDs use sessionJobs mapping
+      // The 10000+ convention was for P2P jobs, but contract sessions start from 1
+      // Always use sessionJobs for now since we're dealing with session-based system
+      if (true) {  // Always use sessionJobs mapping
+        // Session job - use sessionJobs mapping
+        // Force fresh read without cache as recommended by contract developer
+        console.log(`Reading sessionJobs[${jobId}]`);
+
+        // Use provider directly to ensure fresh read
+        let sessionJob;
+        try {
+          const provider = this.contractManager.getProvider();
+          const latestBlock = await provider.getBlockNumber();
+          console.log(`Current block number: ${latestBlock}`);
+
+          sessionJob = await jobMarketplace['sessionJobs'](jobId);
+        } catch (innerError: any) {
+          console.error(`Error reading sessionJobs[${jobId}]:`, innerError);
+          console.error('Error details:', {
+            message: innerError.message,
+            code: innerError.code,
+            data: innerError.data
+          });
+          throw innerError;
+        }
+
+        // Debug: Log the raw data - check all fields
+        console.log(`Raw sessionJob data:`, sessionJob);
+        console.log(`Parsed sessionJob fields:`, {
+          id: sessionJob.id ? Number(sessionJob.id) : 0,
+          tokensUsed: sessionJob.tokensUsed ? Number(sessionJob.tokensUsed) : 0,
+          tokensUsedHex: sessionJob.tokensUsed ? '0x' + sessionJob.tokensUsed.toString(16) : 'null',
+          status: sessionJob.status,
+          host: sessionJob.host,
+          requester: sessionJob.requester,
+          deposit: sessionJob.deposit ? Number(sessionJob.deposit) : 0,
+          pricePerToken: sessionJob.pricePerToken ? Number(sessionJob.pricePerToken) : 0
+        });
+
+        // As explained by contracts developer:
+        // provenTokens is a field used in the ProofSystem for tracking total proven tokens
+        // For session jobs, the contract uses tokensUsed to track consumed tokens
+        // There is no provenTokens field in the sessionJobs struct
+        return {
+          id: sessionJob.id,
+          requester: sessionJob.requester,
+          host: sessionJob.host,
+          paymentToken: sessionJob.paymentToken,
+          deposit: sessionJob.deposit,
+          pricePerToken: sessionJob.pricePerToken,
+          tokensUsed: sessionJob.tokensUsed ? Number(sessionJob.tokensUsed) : 0,
+          // Note: provenTokens doesn't exist in sessionJobs struct, it's in ProofSystem
+          // We return tokensUsed for compatibility but this is the actual consumed amount
+          provenTokens: sessionJob.tokensUsed ? Number(sessionJob.tokensUsed) : 0,
+          maxDuration: sessionJob.maxDuration,
+          startTime: sessionJob.startTime,
+          lastProofTime: sessionJob.lastProofTime,
+          proofInterval: sessionJob.proofInterval,
+          status: sessionJob.status,
+          withdrawnByHost: sessionJob.withdrawnByHost,
+          refundedToUser: sessionJob.refundedToUser,
+          conversationCID: sessionJob.conversationCID
+        };
+      } else {
+        // Regular job - use jobs mapping
+        const job = await jobMarketplace['jobs'](jobId);
+
+        return {
+          requester: job.requester,
+          provider: job.provider,
+          model: job.model,
+          prompt: job.prompt,
+          result: job.result,
+          status: job.status,
+          payment: job.payment?.toString(),
+          timestamp: job.timestamp?.toString()
+        };
+      }
     } catch (error: any) {
       throw new SDKError(
         `Failed to get job status: ${error.message}`,
@@ -562,7 +633,7 @@ export class PaymentManager implements IPaymentManager {
         gasLimit: 21000n
       });
       
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Transaction failed', 'TRANSACTION_FAILED');
       }
@@ -614,7 +685,7 @@ export class PaymentManager implements IPaymentManager {
       
       const tx = await tokenContract['transfer'](to, amount, { gasLimit: 100000n });
       
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Transfer failed', 'TRANSFER_FAILED');
       }
@@ -755,14 +826,14 @@ export class PaymentManager implements IPaymentManager {
     }
 
     try {
-      const jobMarketplace = this.contractManager.getContract('jobMarketplace');
+      const jobMarketplace = this.contractManager.getJobMarketplace();
       
       const tx = await jobMarketplace['cancelJob'](
         jobId,
         { gasLimit: 200000n }
       );
       
-      const receipt = await tx.wait();
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Cancel failed', 'CANCEL_FAILED');
       }

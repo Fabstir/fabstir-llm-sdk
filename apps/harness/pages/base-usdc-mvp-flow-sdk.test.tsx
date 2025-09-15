@@ -49,6 +49,7 @@ const TEST_HOST_1_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_1_ADDRESS!;
 const TEST_HOST_1_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_HOST_1_PRIVATE_KEY!;
 const TEST_HOST_1_URL = process.env.NEXT_PUBLIC_TEST_HOST_1_URL!;
 const TEST_HOST_2_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_2_ADDRESS!;
+const TEST_HOST_2_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_HOST_2_PRIVATE_KEY!;
 const TEST_TREASURY_ADDRESS = process.env.NEXT_PUBLIC_TEST_TREASURY_ADDRESS!;
 const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_KEY!;
 
@@ -551,7 +552,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
       }
 
       const selectedModel = selectedHost.models[0];
-      const hostEndpoint = selectedHost.endpoint || TEST_HOST_1_URL;
+      const hostEndpoint = selectedHost.endpoint;
+      if (!hostEndpoint) {
+        throw new Error(`Host ${selectedHost.address} does not have an API endpoint configured. Cannot proceed with this host.`);
+      }
 
       addLog(`Using host: ${selectedHost.address}`);
       addLog(`Using model: ${selectedModel}`);
@@ -816,9 +820,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
       const totalCost = BigInt(tokensUsed * PRICE_PER_TOKEN);
       const hostEarnings = (totalCost * 90n) / 100n; // 90% to host
 
-      // Record earnings via HostManager
+      // Record earnings via HostManager for the selected host
+      const selectedHostForEarnings = (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS;
       await hostManager.recordEarnings(
-        TEST_HOST_1_ADDRESS,
+        selectedHostForEarnings,
         hostEarnings
       );
 
@@ -901,7 +906,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
         ])).flat(),
         metadata: {
           model: 'tiny-vicuna-1b', // Use the actual model name
-          provider: TEST_HOST_1_ADDRESS,
+          provider: (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS,
           jobId: jobId?.toString(),
           totalTokens: 42
         },
@@ -1471,7 +1476,13 @@ export default function BaseUsdcMvpFlowSDKTest() {
         throw new Error('No active hosts found. Please ensure hosts are registered and online.');
       }
 
-      const selectedHost = hosts[0];
+      // Randomly select a host from available hosts
+      const randomIndex = Math.floor(Math.random() * hosts.length);
+      const selectedHost = hosts[randomIndex];
+      addLog(`Randomly selected host ${randomIndex + 1} of ${hosts.length}: ${selectedHost.address}`);
+
+      // Store selected host info for later use in checkpoint submission
+      (window as any).__selectedHostAddress = selectedHost.address;
 
       // Check if host has models
       let selectedModel: string;
@@ -1483,7 +1494,11 @@ export default function BaseUsdcMvpFlowSDKTest() {
         throw new Error(`Host ${selectedHost.address} does not support any models. Host must register models before accepting sessions.`);
       }
 
-      const hostEndpoint = selectedHost.apiUrl || selectedHost.endpoint || TEST_HOST_1_URL;
+      // Each host must have its own API URL - no fallbacks
+      const hostEndpoint = selectedHost.apiUrl || selectedHost.endpoint;
+      if (!hostEndpoint) {
+        throw new Error(`Host ${selectedHost.address} does not have an API endpoint configured. Cannot proceed with this host.`);
+      }
       addLog(`Using host: ${selectedHost.address}`);
       addLog(`Using endpoint: ${hostEndpoint}`);
 
@@ -1555,7 +1570,12 @@ export default function BaseUsdcMvpFlowSDKTest() {
         ["bytes32", "bytes32"],
         [uniqueHash, ethers.id("mock_ezkl_padding")]
       );
-      const tokensGenerated = 100; // Must match proofInterval from session config
+
+      // Get actual token count from session, but ensure minimum of 100
+      const sessionDetails = await sm.getSessionDetails(result.sessionId);
+      const actualTokens = sessionDetails.tokensUsed || 100;
+      const tokensGenerated = Math.max(actualTokens, 100); // Minimum 100 tokens for billing
+      addLog(`Using ${tokensGenerated} tokens for checkpoint (actual: ${actualTokens})`)
       
       try {
         // REQUIRED: Wait for token accumulation (ProofSystem enforces 10 tokens/sec generation rate)
@@ -1563,9 +1583,23 @@ export default function BaseUsdcMvpFlowSDKTest() {
         addLog("Waiting 5 seconds for token accumulation (required by ProofSystem rate limits)...");
         await new Promise(resolve => setTimeout(resolve, 5000));
 
+        // Determine which host's private key to use based on the selected host
+        const selectedHostAddress = (window as any).__selectedHostAddress;
+        let hostPrivateKey: string;
+
+        if (selectedHostAddress?.toLowerCase() === TEST_HOST_1_ADDRESS.toLowerCase()) {
+          hostPrivateKey = TEST_HOST_1_PRIVATE_KEY;
+          addLog(`Using TEST_HOST_1 private key for checkpoint submission`);
+        } else if (selectedHostAddress?.toLowerCase() === TEST_HOST_2_ADDRESS.toLowerCase()) {
+          hostPrivateKey = TEST_HOST_2_PRIVATE_KEY;
+          addLog(`Using TEST_HOST_2 private key for checkpoint submission`);
+        } else {
+          throw new Error(`Unknown host address for checkpoint submission: ${selectedHostAddress}`);
+        }
+
         // Create host signer for proof submission
         const hostProvider = new ethers.JsonRpcProvider(RPC_URL);
-        const hostSigner = new ethers.Wallet(TEST_HOST_1_PRIVATE_KEY, hostProvider);
+        const hostSigner = new ethers.Wallet(hostPrivateKey, hostProvider);
         addLog(`Using host signer: ${await hostSigner.getAddress()}`);
 
         // Use PaymentManager's submitCheckpointAsHost method
@@ -1576,9 +1610,24 @@ export default function BaseUsdcMvpFlowSDKTest() {
           hostSigner
         );
         addLog(`✅ Checkpoint proof submitted by host - TX: ${checkpointTx}`);
-        
+
         // Transaction confirmation is handled by submitCheckpointProofAsHost
         addLog("✅ Checkpoint proof submitted and confirmed");
+
+        // Check if proof was actually accepted by reading session details
+        try {
+          const sessionDetails = await pm.getJobStatus(result.sessionId);
+          // As explained by contracts developer:
+          // For session jobs, the contract uses tokensUsed to track consumed tokens
+          // There is no provenTokens field in the sessionJobs struct
+          addLog(`📊 Session tokensUsed after checkpoint: ${sessionDetails.tokensUsed || 0}`);
+          if (!sessionDetails.tokensUsed || sessionDetails.tokensUsed === 0) {
+            addLog("⚠️ WARNING: Proof was submitted but tokensUsed is still 0!");
+            addLog("This means the contract didn't accept the proof as valid.");
+          }
+        } catch (e) {
+          addLog("⚠️ Could not read session details to verify proof acceptance");
+        }
         
       } catch (error: any) {
         addLog(`⚠️ Checkpoint submission failed: ${error.message}`);
@@ -1633,10 +1682,12 @@ export default function BaseUsdcMvpFlowSDKTest() {
       
       // Read balances before completion (including sub-account!)
       addLog("Reading balances before session completion...");
+      // Get the selected host address from window storage
+      const selectedHostAddr = (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS;
       const balancesBefore = {
         user: await readBalanceViem(TEST_USER_1_ADDRESS),
         subAccount: subAccount ? await readBalanceViem(subAccount) : 0n,
-        host: await readBalanceViem(TEST_HOST_1_ADDRESS),
+        host: await readBalanceViem(selectedHostAddr),
         treasury: await readBalanceViem(TEST_TREASURY_ADDRESS)
       };
       addLog(`Before completion:`);
@@ -1648,19 +1699,26 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog(`  Treasury: $${ethers.formatUnits(balancesBefore.treasury, 6)}`);
       
       addLog("📝 Completing session (triggers automatic payment distribution)...");
+
+      // Get actual token count from session, ensuring minimum of 100
+      const sessionDetailsForCompletion = await sm.getSessionDetails(result.sessionId);
+      const completionTokens = Math.max(sessionDetailsForCompletion.tokensUsed || 100, 100);
+
       const finalProof = "0x" + "00".repeat(32);
-      const txHash = await sm.completeSession(result.sessionId, 100, finalProof); // Use 100 tokens to match checkpoint
-      addLog(`✅ Session marked as completed - TX: ${txHash}`);
+      const txHash = await sm.completeSession(result.sessionId, completionTokens, finalProof); // Use actual tokens (min 100)
+      addLog(`✅ Session marked as completed with ${completionTokens} tokens - TX: ${txHash}`);
       
       // Transaction confirmation is handled by completeSessionJob
       addLog("✅ Session completed and payments distributed on-chain");
       
       // Read balances after completion
       addLog("Reading balances after session completion...");
+      // Get the selected host address from window storage
+      const selectedHostAddress = (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS;
       const balancesAfter = {
         user: await readBalanceViem(TEST_USER_1_ADDRESS),
         subAccount: subAccount ? await readBalanceViem(subAccount) : 0n,
-        host: await readBalanceViem(TEST_HOST_1_ADDRESS),
+        host: await readBalanceViem(selectedHostAddress),
         treasury: await readBalanceViem(TEST_TREASURY_ADDRESS)
       };
       addLog(`After completion:`);
@@ -1733,7 +1791,17 @@ export default function BaseUsdcMvpFlowSDKTest() {
         
         // Create host's SDK instance with signer authentication
         const hostProvider = new ethers.JsonRpcProvider(RPC_URL);
-        const hostWallet = new ethers.Wallet(TEST_HOST_1_PRIVATE_KEY, hostProvider);
+        // Use the selected host's private key
+        const selectedHostAddr = (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS;
+        let hostPrivateKey: string;
+        if (selectedHostAddr.toLowerCase() === TEST_HOST_1_ADDRESS.toLowerCase()) {
+          hostPrivateKey = TEST_HOST_1_PRIVATE_KEY;
+        } else if (selectedHostAddr.toLowerCase() === TEST_HOST_2_ADDRESS.toLowerCase()) {
+          hostPrivateKey = TEST_HOST_2_PRIVATE_KEY;
+        } else {
+          throw new Error(`Unknown host address: ${selectedHostAddr}`);
+        }
+        const hostWallet = new ethers.Wallet(hostPrivateKey, hostProvider);
         
         const hostSdk = new FabstirSDKCore({
           mode: 'production',
