@@ -4,6 +4,8 @@
 
 This guide helps UI developers quickly integrate the Fabstir SDK into web applications. The SDK provides a decentralized LLM marketplace with USDC payments, real-time streaming, and conversation persistence.
 
+**📝 Working Example**: See `/workspace/apps/harness/pages/chat-context-demo.tsx` for a complete, production-ready implementation with Base Account Kit integration, payment distribution, and conversation persistence.
+
 ## Table of Contents
 - [What You Need to Know](#what-you-need-to-know)
 - [Prerequisites](#prerequisites)
@@ -127,10 +129,10 @@ async function startChatSession() {
     '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced', // Model ID
     process.env.NEXT_PUBLIC_TEST_HOST_1_ADDRESS, // Host address
     {
-      depositAmount: BigInt(2000000), // $2 USDC (minimum)
-      pricePerToken: BigInt(200),     // 200 units per token
-      duration: BigInt(3600),         // 1 hour
-      proofInterval: BigInt(100)      // Checkpoint every 100 seconds
+      depositAmount: "1.0",      // $1 USDC (minimum deposit)
+      pricePerToken: 200,        // 200 units per token
+      duration: 3600,            // 1 hour
+      proofInterval: 100         // Checkpoint every 100 tokens
     }
   );
 
@@ -247,10 +249,10 @@ export default function ChatApp() {
         '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced',
         process.env.NEXT_PUBLIC_TEST_HOST_1_ADDRESS!,
         {
-          depositAmount: BigInt(2000000), // $2 USDC
-          pricePerToken: BigInt(200),
-          duration: BigInt(3600),
-          proofInterval: BigInt(100)
+          depositAmount: "1.0",      // $1 USDC
+          pricePerToken: 200,
+          duration: 3600,
+          proofInterval: 100
         }
       );
 
@@ -417,10 +419,11 @@ Sub-Account (Auto-spend for marketplace)
 ```
 
 ### 2. Payment Flow
-1. User deposits USDC to start session ($2 minimum)
+1. User deposits USDC to start session ($1 minimum)
 2. Tokens are consumed as conversation progresses
-3. Checkpoint proofs submitted periodically
-4. Payment distributed to host (90%) and treasury (10%) on completion
+3. Checkpoint proofs submitted after minimum 100 tokens
+4. Payment distributed immediately: host (90%) and treasury (10%)
+5. Unused deposit refunded to sub-account for future sessions
 
 ### 3. Context Preservation
 - Build full conversation history
@@ -431,7 +434,7 @@ Sub-Account (Auto-spend for marketplace)
 ### 4. Token Economics
 - **Price per token**: Set by host (e.g., 200 units)
 - **Token generation**: ~10 tokens per second max
-- **Checkpoint interval**: Proof every 100 seconds
+- **Checkpoint interval**: Proof every 100 tokens
 - **Cost calculation**: `tokens * pricePerToken / 1000000` USDC
 
 ## Common UI Patterns
@@ -539,9 +542,9 @@ async function checkAndFundAccount(subAccount: string) {
   const balance = await sessionJobManager.getUSDCBalance(subAccount);
   const balanceNum = parseFloat(ethers.formatUnits(balance, 6));
 
-  if (balanceNum < 2.0) {
+  if (balanceNum < 1.0) {
     // Need to fund account
-    const needed = 2.0 - balanceNum;
+    const needed = 1.0 - balanceNum;
 
     // Show funding UI
     return (
@@ -555,6 +558,31 @@ async function checkAndFundAccount(subAccount: string) {
   }
 
   return null; // Sufficient balance
+}
+```
+
+### Payment Distribution & Settlement
+
+When a session ends with checkpoint submission:
+
+```tsx
+async function handleEndSession() {
+  const sessionManager = sdk.getSessionManager();
+
+  // Submit checkpoint with minimum 100 tokens
+  // SDK automatically waits 5 seconds before submission
+  const receipt = await sessionManager.endSession(sessionId);
+
+  // Payment distribution happens automatically:
+  // - Host receives 90% of consumed tokens value
+  // - Treasury receives 10% of consumed tokens value
+  // - Unused deposit stays in sub-account for future sessions
+
+  // Host can withdraw earnings
+  const hostEarnings = await paymentManager.getHostEarnings(hostAddress);
+  if (hostEarnings > 0) {
+    await paymentManager.withdrawHostEarnings();
+  }
 }
 ```
 
@@ -732,12 +760,12 @@ export const TEST_CONFIG = {
   hostUrl: 'http://localhost:8080',
 
   // Test amounts
-  depositAmount: BigInt(2000000), // $2 USDC
-  pricePerToken: BigInt(200),
+  depositAmount: "1.0",         // $1 USDC
+  pricePerToken: 200,
 
   // Test timeouts
-  sessionDuration: BigInt(3600),
-  proofInterval: BigInt(100)
+  duration: 3600,                // 1 hour session
+  proofInterval: 100             // Checkpoint every 100 tokens
 };
 ```
 

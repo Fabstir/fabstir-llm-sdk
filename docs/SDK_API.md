@@ -79,6 +79,50 @@ import { FabstirSDKCore } from '@fabstir/sdk-core';
 4. Improved session management with streaming
 5. USDC payment flows with Base Account Kit
 
+### ⚠️ Breaking Changes (Latest)
+
+#### SessionConfig Interface Change
+The `SessionConfig` interface has been updated to use more appropriate types:
+
+**Old Format (DEPRECATED):**
+```typescript
+interface SessionConfig {
+  depositAmount: bigint;  // e.g., 2000000n for $2
+  pricePerToken: bigint;
+  proofInterval: bigint;
+  duration: bigint;
+}
+```
+
+**New Format (CURRENT):**
+```typescript
+interface SessionConfig {
+  depositAmount: string;  // e.g., "1.0" for $1 USDC
+  pricePerToken: number;  // e.g., 200
+  proofInterval: number;  // e.g., 100
+  duration: number;       // e.g., 3600
+}
+```
+
+**Migration Example:**
+```typescript
+// Old way (will cause errors)
+const config = {
+  depositAmount: parseUnits("2", 6),  // Returns BigInt
+  pricePerToken: BigInt(200),
+  proofInterval: BigInt(100),
+  duration: BigInt(3600)
+};
+
+// New way (correct)
+const config = {
+  depositAmount: "1.0",  // String with decimal notation
+  pricePerToken: 200,    // Regular number
+  proofInterval: 100,    // Regular number
+  duration: 3600         // Regular number
+};
+```
+
 ## Core SDK
 
 ### FabstirSDKCore
@@ -152,26 +196,70 @@ await sdk.authenticate('0x...');
 import { createBaseAccountSDK } from "@base-org/account";
 
 // Create Base Account SDK
-const baseAccountSDK = await createBaseAccountSDK({
-  chainId: 84532, // Base Sepolia
-  jsonRpcUrl: RPC_URL,
-  bundlerUrl: 'https://api.developer.coinbase.com/rpc/v1/base-sepolia/...',
-  paymasterUrl: 'https://api.developer.coinbase.com/rpc/v1/base-sepolia/...'
-});
-
-// Create sub-account for auto-spend
-const subAccount = await baseAccountSDK.createSubAccount({
-  spender: {
-    address: JOB_MARKETPLACE_ADDRESS,
-    token: USDC_ADDRESS,
-    allowance: parseUnits('1000', 6) // 1000 USDC allowance
+const baseAccountSDK = createBaseAccountSDK({
+  appName: "Your App Name",
+  appChainIds: [84532], // Base Sepolia
+  subAccounts: {
+    unstable_enableAutoSpendPermissions: true // Enable auto-spend
   }
 });
 
+// Get provider and connect
+const provider = await baseAccountSDK.getProvider();
+const accounts = await provider.request({
+  method: "eth_requestAccounts",
+  params: []
+});
+
+const primaryAccount = accounts[0]; // Primary account holds main funds
+const subAccount = accounts[1];     // Sub-account for gasless transactions
+
+// Create custom signer for sub-account
+const subAccountSigner = {
+  provider: new ethers.BrowserProvider(provider),
+
+  async getAddress(): Promise<string> {
+    return subAccount;
+  },
+
+  async signMessage(message: string): Promise<string> {
+    return provider.request({
+      method: 'personal_sign',
+      params: [message, subAccount]
+    });
+  },
+
+  async sendTransaction(tx: any): Promise<any> {
+    // Base Account Kit handles this with auto-spend from primary
+    return provider.request({
+      method: 'eth_sendTransaction',
+      params: [{ ...tx, from: subAccount }]
+    });
+  }
+};
+
 // Authenticate SDK with sub-account signer
-const signer = new ethers.Wallet(subAccountPrivateKey, provider);
-await sdk.authenticate(signer);
+await sdk.authenticate('signer', { signer: subAccountSigner });
 ```
+
+### Base Account Kit Architecture
+
+#### Primary/Sub-Account Model
+- **Primary Account**: Holds user's USDC balance (e.g., $7.30)
+- **Sub-Account**: Used for gasless transactions with auto-spend permissions
+- **Auto-Spend**: Sub-account can pull funds from primary automatically
+- **No Popups**: After initial setup, no approval popups for transactions
+
+#### Benefits
+- ✅ **Gasless Experience**: No ETH needed for gas fees
+- ✅ **No Approval Popups**: Auto-spend permissions eliminate transaction popups
+- ✅ **Security**: Funds remain in primary account, minimal in sub-account
+- ✅ **Efficiency**: Only transfer what's needed per session ($1 instead of full balance)
+
+#### Current Limitations
+- SDK doesn't fully understand Base Account Kit's spend permissions
+- Workaround: Transfer $1 per session from primary to sub-account
+- Future: Direct spend from primary without transfers
 
 ## Session Management
 
@@ -201,11 +289,10 @@ async startSession(
 **Parameters:**
 ```typescript
 interface SessionConfig {
-  depositAmount: bigint;     // USDC amount in smallest units (e.g., 2000000 for $2)
-  pricePerToken: bigint;     // Price per token (e.g., 200)
-  duration: bigint;          // Session duration in seconds (e.g., 3600)
-  proofInterval: bigint;     // Checkpoint interval in seconds (e.g., 100)
-}
+  depositAmount: string;     // USDC amount as string (e.g., "1.0" for $1)
+  pricePerToken: number;     // Price per token (e.g., 200)
+  duration: number;          // Session duration in seconds (e.g., 3600)
+  proofInterval: number;     // Checkpoint interval in tokens (e.g., 100)
 ```
 
 **Example:**
@@ -214,11 +301,12 @@ const { sessionId, jobId } = await sessionManager.startSession(
   '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced', // Model hash
   '0x4594F755F593B517Bb3194F4DeC20C48a3f04504', // Provider address
   {
-    depositAmount: BigInt(2000000), // $2 USDC
-    pricePerToken: BigInt(200),
-    duration: BigInt(3600),
-    proofInterval: BigInt(100)
-  }
+    depositAmount: "1.0",    // $1 USDC (minimum per session)
+    pricePerToken: 200,      // 0.0002 USDC per token
+    duration: 3600,          // 1 hour
+    proofInterval: 100       // Checkpoint every 100 tokens
+  },
+  'http://localhost:8080'   // Optional: Host endpoint
 );
 ```
 
@@ -410,6 +498,46 @@ async fundSubAccount(
   amount: string
 ): Promise<string>
 ```
+
+### Payment Distribution Model
+
+The SDK implements a transparent payment distribution system:
+
+#### Deposit Model
+- **Minimum Deposit**: $1.00 USDC per session (reduced from $2.00)
+- **Actual Usage**: Typically $0.02-0.03 per session
+- **Refunds**: Unused funds remain in sub-account for future sessions
+- **Auto-reuse**: Subsequent sessions use existing balance (no new deposit needed)
+
+#### Distribution Split
+When a session ends and checkpoint is submitted:
+- **Host (Provider)**: Receives 90% of consumed tokens value
+- **Treasury**: Receives 10% as platform fee
+- **User**: Gets refund of unused deposit to sub-account
+
+#### Example Payment Flow
+```typescript
+// User deposits $1.00 for session
+// Session uses 150 tokens at 0.0002 USDC per token = $0.03
+// Distribution:
+// - Host receives: $0.027 (90% of $0.03)
+// - Treasury receives: $0.003 (10% of $0.03)
+// - User refund: $0.97 (stays in sub-account)
+// User can run ~32 more sessions without new deposit
+```
+
+#### Checkpoint Submission
+```typescript
+async submitCheckpoint(
+  sessionId: bigint,
+  tokensGenerated: number
+): Promise<string>
+```
+
+**Important Notes:**
+- Minimum 100 tokens must be submitted per checkpoint
+- 5-second wait required before submission (ProofSystem rate limit)
+- Checkpoint triggers automatic payment distribution
 
 ## Model Governance
 
@@ -1036,10 +1164,10 @@ interface FabstirSDKCoreConfig {
 
 // Session Management
 interface SessionConfig {
-  depositAmount: bigint;
-  pricePerToken: bigint;
-  duration: bigint;
-  proofInterval: bigint;
+  depositAmount: string;  // USDC amount as decimal string
+  pricePerToken: number;  // Price per token in smallest units
+  duration: number;       // Session duration in seconds
+  proofInterval: number;  // Checkpoint interval in tokens
 }
 
 interface SessionJob {

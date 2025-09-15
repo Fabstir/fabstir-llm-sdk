@@ -563,10 +563,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
       // Create session using SessionManager
       const sessionConfig = {
-        depositAmount: parseUnits(SESSION_DEPOSIT_AMOUNT, 6), // 2 USDC
-        pricePerToken: BigInt(selectedHost.pricePerToken || PRICE_PER_TOKEN),
-        proofInterval: BigInt(PROOF_INTERVAL),
-        duration: BigInt(SESSION_DURATION)
+        depositAmount: SESSION_DEPOSIT_AMOUNT, // "2" string format
+        pricePerToken: Number(selectedHost.pricePerToken || PRICE_PER_TOKEN),
+        proofInterval: PROOF_INTERVAL,
+        duration: SESSION_DURATION
       };
 
       console.log("Session config:", sessionConfig);
@@ -1503,10 +1503,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog(`Using endpoint: ${hostEndpoint}`);
 
       const sessionConfig = {
-        depositAmount: 2000000n, // 2 USDC in smallest units
-        pricePerToken: 2000n,
-        proofInterval: 100n,
-        duration: 86400n
+        depositAmount: "2", // 2 USDC as string
+        pricePerToken: 2000,
+        proofInterval: 100,
+        duration: 86400
       };
 
       const result = await sm.startSession(
