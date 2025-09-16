@@ -239,6 +239,73 @@ Deliver a production-ready CLI tool that:
 
 ## Phase 3: SDK Integration
 
+### Sub-phase 3.0: SDK Discovery and Setup
+
+**Goal**: Prepare to use the real @fabstir/sdk-core package (FabstirSDKCore) that already exists in the workspace
+
+#### Context
+- The correct SDK is `FabstirSDKCore` from `@fabstir/sdk-core`, NOT the old FabstirSDK from workspace root
+- Reference implementation: `/workspace/apps/harness/pages/chat-context-demo.tsx` shows correct usage
+- SDK is already built at `/workspace/packages/sdk-core/dist/`
+- SDK has hard dependency on `@s5-dev/s5js` that must be resolved
+
+#### Tasks
+- [x] Verify @fabstir/sdk-core is built and available
+- [ ] Create S5.js symlink for dependency resolution
+- [ ] Update SDK config to match FabstirSDKCore requirements
+- [ ] Import FabstirSDKCore (not old FabstirSDK)
+- [ ] Create thin wrapper around FabstirSDKCore
+- [ ] Test SDK can connect to Base Sepolia testnet
+- [ ] Verify all contract addresses work
+- [ ] Test authentication with test wallet
+
+**Test Files:**
+- `tests/integration/sdk-setup.test.ts` (max 150 lines) - Verify SDK availability
+- `tests/integration/testnet-connection.test.ts` (max 150 lines) - Test real connection
+
+**Implementation Files:**
+- `src/sdk/config.ts` (max 100 lines) - SDK configuration matching FabstirSDKCore
+- `src/sdk/secrets.ts` (max 100 lines) - Private key management (env vars)
+- `src/sdk/client.ts` (max 150 lines) - Thin wrapper around FabstirSDKCore
+
+**Required Config Structure:**
+```typescript
+{
+  chainId: number,  // 84532 for Base Sepolia
+  rpcUrl: string,
+  contractAddresses: {
+    jobMarketplace: string,
+    nodeRegistry: string,
+    proofSystem: string,
+    hostEarnings: string,
+    fabToken: string,
+    usdcToken: string,
+    modelRegistry: string
+  },
+  s5Config: {
+    portalUrl: string,
+    seedPhrase?: string
+  },
+  mode: 'production'
+}
+```
+
+**Success Criteria:**
+- FabstirSDKCore from @fabstir/sdk-core imports successfully
+- S5.js dependency properly resolved via symlink
+- Config matches SDK's expected structure
+- Can connect to Base Sepolia testnet (chainId: 84532)
+- Can authenticate and get managers
+- No mocking - using real SDK
+- Works in Docker/CI environment
+
+**Key Differences from Failed Attempt:**
+- Use FabstirSDKCore, not old FabstirSDK
+- Correct config structure with chainId
+- Properly handle S5 dependency
+- Match harness demo implementation
+- No excessive mocking
+
 ### Sub-phase 3.1: SDK Initialization
 
 **Goal**: Integrate with @fabstir/sdk-core for blockchain operations

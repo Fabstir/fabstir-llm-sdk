@@ -73,3 +73,6 @@ dist/
 !vitest.config.js
 test-reports/
 *.cjs
+
+# External mount - enhanced S5.js repository
+packages/s5js/

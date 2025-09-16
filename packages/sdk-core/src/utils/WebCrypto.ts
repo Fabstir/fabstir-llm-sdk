@@ -27,9 +27,9 @@ export function getRandomHex(length: number): string {
  */
 export async function sha256(data: string | Uint8Array): Promise<string> {
   const encoder = new TextEncoder();
-  const dataBuffer = typeof data === 'string' ? encoder.encode(data) : data;
-  
-  const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
+  const dataBuffer = typeof data === 'string' ? encoder.encode(data) : data as Uint8Array;
+
+  const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer as BufferSource);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -40,9 +40,9 @@ export async function sha256(data: string | Uint8Array): Promise<string> {
  */
 export async function sha512(data: string | Uint8Array): Promise<string> {
   const encoder = new TextEncoder();
-  const dataBuffer = typeof data === 'string' ? encoder.encode(data) : data;
-  
-  const hashBuffer = await crypto.subtle.digest('SHA-512', dataBuffer);
+  const dataBuffer = typeof data === 'string' ? encoder.encode(data) : data as Uint8Array;
+
+  const hashBuffer = await crypto.subtle.digest('SHA-512', dataBuffer as BufferSource);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -169,7 +169,7 @@ export async function encrypt(
   const encrypted = await crypto.subtle.encrypt(
     {
       name: 'AES-GCM',
-      iv
+      iv: iv as BufferSource
     },
     key,
     encoder.encode(data)

@@ -21,7 +21,7 @@ import { SessionManager } from './managers/SessionManager';
 import { HostManagerEnhanced } from './managers/HostManagerEnhanced';
 import { ModelManager } from './managers/ModelManager';
 import { TreasuryManager } from './managers/TreasuryManager';
-import { ContractManager } from './contracts/ContractManager';
+import { ContractManager, ContractAddresses } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 import { SDKConfig, SDKError } from './types';
 import { getOrGenerateS5Seed, hasCachedSeed } from './utils/s5-seed-derivation';
@@ -66,7 +66,7 @@ export interface FabstirSDKCoreConfig {
 
 export class FabstirSDKCore {
   private config: FabstirSDKCoreConfig;
-  private provider?: ethers.BrowserProvider;
+  private provider?: ethers.BrowserProvider | ethers.JsonRpcProvider;
   private signer?: ethers.Signer;
   private contractManager?: ContractManager;
   private bridgeClient?: UnifiedBridgeClient;
@@ -162,7 +162,7 @@ export class FabstirSDKCore {
       console.log('Creating ContractManager...');
       this.contractManager = new ContractManager(
         this.provider!,
-        this.config.contractAddresses!
+        this.config.contractAddresses! as ContractAddresses
       );
       console.log('Setting signer on ContractManager...');
       await this.contractManager.setSigner(this.signer!);
@@ -575,7 +575,7 @@ export class FabstirSDKCore {
   /**
    * Get current provider
    */
-  getProvider(): ethers.BrowserProvider | undefined {
+  getProvider(): ethers.BrowserProvider | ethers.JsonRpcProvider | undefined {
     return this.provider;
   }
   
