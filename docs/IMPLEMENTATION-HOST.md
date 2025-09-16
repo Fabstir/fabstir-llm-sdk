@@ -518,7 +518,7 @@ Deliver a production-ready CLI tool that:
 - Auto-restart functions
 - Logs capture output
 
-### Sub-phase 5.2: WebSocket Integration
+### Sub-phase 5.2: WebSocket Integration ✅
 
 **Goal**: Connect to fabstir-llm-node WebSocket for session monitoring
 
@@ -552,21 +552,21 @@ Deliver a production-ready CLI tool that:
 - Reconnection works automatically
 - No messages lost during disconnection
 
-### Sub-phase 5.3: Proof Submission
+### Sub-phase 5.3: Proof Submission ✅
 
 **Goal**: Submit checkpoint proofs for completed work
 
 #### Tasks
-- [ ] Write tests for proof submission
-- [ ] Write tests for checkpoint logic
-- [ ] Track token accumulation per session
-- [ ] Implement 100-token checkpoint threshold
-- [ ] Get proof from fabstir-llm-node
-- [ ] Submit proof using HostManager
-- [ ] Handle proof rejection
-- [ ] Retry failed submissions
-- [ ] Track successful proofs
-- [ ] Update earning calculations
+- [x] Write tests for proof submission
+- [x] Write tests for checkpoint logic
+- [x] Track token accumulation per session
+- [x] Implement 100-token checkpoint threshold
+- [x] Get proof from fabstir-llm-node
+- [x] Submit proof using HostManager
+- [x] Handle proof rejection
+- [x] Retry failed submissions
+- [x] Track successful proofs
+- [x] Update earning calculations
 
 **Test Files:**
 - `tests/proof/submission.test.ts` (max 300 lines) - Submission tests
@@ -578,6 +578,7 @@ Deliver a production-ready CLI tool that:
 - `src/proof/checkpoint.ts` (max 250 lines) - Checkpoint logic
 - `src/proof/tracker.ts` (max 200 lines) - Proof tracking
 - `src/proof/retry.ts` (max 200 lines) - Retry mechanism
+- `src/proof/integration.ts` (added) - WebSocket/proof system integration
 
 **Success Criteria:**
 - Proofs submit at correct intervals
