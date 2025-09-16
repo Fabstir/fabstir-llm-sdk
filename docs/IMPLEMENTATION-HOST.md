@@ -135,17 +135,17 @@ Deliver a production-ready CLI tool that:
 **Goal**: Implement secure wallet creation and storage
 
 #### Tasks
-- [ ] Write tests for wallet generation
-- [ ] Write tests for wallet import
-- [ ] Write tests for secure storage
-- [ ] Implement wallet generation using ethers.js
-- [ ] Implement private key import with validation
-- [ ] Implement keytar integration for secure OS keychain storage
-- [ ] Add encryption for wallet backup
-- [ ] Implement wallet recovery from mnemonic
-- [ ] Add password protection for wallet access
-- [ ] Test wallet operations don't expose private keys
-- [ ] Add wallet address display functionality
+- [x] Write tests for wallet generation
+- [x] Write tests for wallet import
+- [x] Write tests for secure storage
+- [x] Implement wallet generation using ethers.js
+- [x] Implement private key import with validation
+- [x] Implement keytar integration for secure OS keychain storage
+- [x] Add encryption for wallet backup
+- [x] Implement wallet recovery from mnemonic
+- [x] Add password protection for wallet access
+- [x] Test wallet operations don't expose private keys
+- [x] Add wallet address display functionality
 
 **Test Files:**
 - `tests/wallet/generation.test.ts` (max 200 lines) - Wallet creation tests
