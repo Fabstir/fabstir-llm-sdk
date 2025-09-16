@@ -484,21 +484,21 @@ Deliver a production-ready CLI tool that:
 
 ## Phase 5: Inference Server Integration
 
-### Sub-phase 5.1: Process Management
+### Sub-phase 5.1: Process Management ✅
 
 **Goal**: Manage fabstir-llm-node Rust process lifecycle
 
 #### Tasks
-- [ ] Write tests for process spawning
-- [ ] Write tests for process monitoring
-- [ ] Check if fabstir-llm-node is installed
-- [ ] Implement process spawning with child_process
-- [ ] Pass configuration to Rust process
-- [ ] Monitor process health
-- [ ] Implement graceful shutdown
-- [ ] Handle process crashes
-- [ ] Add auto-restart capability
-- [ ] Log process output to file
+- [x] Write tests for process spawning
+- [x] Write tests for process monitoring
+- [x] Check if fabstir-llm-node is installed
+- [x] Implement process spawning with child_process
+- [x] Pass configuration to Rust process
+- [x] Monitor process health
+- [x] Implement graceful shutdown
+- [x] Handle process crashes
+- [x] Add auto-restart capability
+- [x] Log process output to file
 
 **Test Files:**
 - `tests/process/spawn.test.ts` (max 250 lines) - Spawning tests
