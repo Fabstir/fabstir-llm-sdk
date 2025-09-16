@@ -6,6 +6,7 @@
  */
 
 import { Command } from 'commander';
+import { registerInitCommand } from './commands/init';
 
 const program = new Command();
 
@@ -14,13 +15,8 @@ program
   .description('CLI tool for managing Fabstir host nodes')
   .version('1.0.0');
 
-// Placeholder commands - will be implemented in later phases
-program
-  .command('init')
-  .description('Initialize host configuration')
-  .action(() => {
-    console.log('Init command - to be implemented');
-  });
+// Register init command
+registerInitCommand(program);
 
 program
   .command('start')

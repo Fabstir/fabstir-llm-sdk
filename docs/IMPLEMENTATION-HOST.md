@@ -171,18 +171,18 @@ Deliver a production-ready CLI tool that:
 **Goal**: Create interactive setup wizard for host configuration
 
 #### Tasks
-- [ ] Write tests for configuration flow
-- [ ] Write tests for configuration validation
-- [ ] Implement inquirer prompts for wallet setup
-- [ ] Implement network selection (Base Mainnet/Sepolia)
-- [ ] Implement RPC URL configuration
-- [ ] Implement inference port configuration
-- [ ] Implement public URL configuration
-- [ ] Implement model selection interface
-- [ ] Implement pricing configuration
-- [ ] Save configuration to ~/.fabstir/config.json
-- [ ] Validate configuration completeness
-- [ ] Add configuration migration for updates
+- [x] Write tests for configuration flow
+- [x] Write tests for configuration validation
+- [x] Implement inquirer prompts for wallet setup
+- [x] Implement network selection (Base Mainnet/Sepolia)
+- [x] Implement RPC URL configuration
+- [x] Implement inference port configuration
+- [x] Implement public URL configuration
+- [x] Implement model selection interface
+- [x] Implement pricing configuration
+- [x] Save configuration to ~/.fabstir/config.json
+- [x] Validate configuration completeness
+- [x] Add configuration migration for updates
 
 **Test Files:**
 - `tests/config/wizard.test.ts` (max 300 lines) - Wizard flow tests
