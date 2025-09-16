@@ -66,15 +66,15 @@ Deliver a production-ready CLI tool that:
 **Goal**: Create the basic project structure and configure build tools
 
 #### Tasks
-- [ ] Create packages/host-cli directory structure
-- [ ] Initialize package.json with proper dependencies
-- [ ] Configure TypeScript (tsconfig.json) for Node.js CLI
-- [ ] Setup build scripts (build, dev, test)
-- [ ] Configure ESLint and Prettier
-- [ ] Add commander, inquirer, chalk dependencies
-- [ ] Setup bin entry point for global installation
-- [ ] Create basic CLI entry file (src/index.ts)
-- [ ] Test global installation works with `npm link`
+- [x] Create packages/host-cli directory structure
+- [x] Initialize package.json with proper dependencies
+- [x] Configure TypeScript (tsconfig.json) for Node.js CLI
+- [x] Setup build scripts (build, dev, test)
+- [x] Configure ESLint and Prettier
+- [x] Add commander, inquirer, chalk dependencies
+- [x] Setup bin entry point for global installation
+- [x] Create basic CLI entry file (src/index.ts)
+- [x] Test global installation works with `npm link`
 
 **Test Files:**
 - `tests/setup/package.test.ts` (max 150 lines) - Package configuration tests
@@ -98,16 +98,16 @@ Deliver a production-ready CLI tool that:
 **Goal**: Implement the command structure and help system
 
 #### Tasks
-- [ ] Write tests for CLI command parsing
-- [ ] Implement main command with version and description
-- [ ] Add init command placeholder
-- [ ] Add start command placeholder
-- [ ] Add status command placeholder
+- [x] Write tests for CLI command parsing
+- [x] Implement main command with version and description
+- [x] Add init command placeholder
+- [x] Add start command placeholder
+- [x] Add status command placeholder
 - [ ] Add withdraw command placeholder
-- [ ] Add stop command placeholder
-- [ ] Implement help text for all commands
-- [ ] Test command routing works correctly
-- [ ] Add error handling for unknown commands
+- [x] Add stop command placeholder
+- [x] Implement help text for all commands
+- [x] Test command routing works correctly
+- [x] Add error handling for unknown commands
 
 **Test Files:**
 - `tests/cli/commands.test.ts` (max 200 lines) - Command parsing tests
