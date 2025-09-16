@@ -412,21 +412,21 @@ Deliver a production-ready CLI tool that:
 - Errors handled gracefully
 - State persists locally
 
-### Sub-phase 4.2: Status and Monitoring
+### Sub-phase 4.2: Status and Monitoring ✅
 
 **Goal**: Implement status checking and monitoring commands
 
 #### Tasks
-- [ ] Write tests for status command
-- [ ] Write tests for earnings checking
-- [ ] Implement registration status checking
-- [ ] Implement staking amount display
-- [ ] Implement earnings balance checking
-- [ ] Implement session count tracking
-- [ ] Display uptime information
-- [ ] Show recent session history
-- [ ] Calculate profitability metrics
-- [ ] Add JSON output format option
+- [x] Write tests for status command
+- [x] Write tests for earnings checking
+- [x] Implement registration status checking
+- [x] Implement staking amount display
+- [x] Implement earnings balance checking
+- [x] Implement session count tracking
+- [x] Display uptime information
+- [x] Show recent session history
+- [x] Calculate profitability metrics
+- [x] Add JSON output format option
 
 **Test Files:**
 - `tests/status/command.test.ts` (max 250 lines) - Status command tests
