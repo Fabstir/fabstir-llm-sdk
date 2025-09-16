@@ -340,20 +340,20 @@ Deliver a production-ready CLI tool that:
 - Retry works on network failures
 - Status reflects connection state
 
-### Sub-phase 3.2: Balance and Requirements Checking
+### Sub-phase 3.2: Balance and Requirements Checking ✅
 
 **Goal**: Verify host has required tokens and ETH
 
 #### Tasks
-- [ ] Write tests for balance checking
-- [ ] Write tests for requirement validation
-- [ ] Implement ETH balance checking
-- [ ] Implement FAB token balance checking
-- [ ] Implement staking status checking
-- [ ] Display balance information clearly
-- [ ] Check minimum requirements (0.015 ETH, 1000 FAB)
-- [ ] Provide clear error messages for insufficient funds
-- [ ] Add balance monitoring functionality
+- [x] Write tests for balance checking
+- [x] Write tests for requirement validation
+- [x] Implement ETH balance checking
+- [x] Implement FAB token balance checking
+- [x] Implement staking status checking
+- [x] Display balance information clearly
+- [x] Check minimum requirements (0.015 ETH, 1000 FAB)
+- [x] Provide clear error messages for insufficient funds
+- [x] Add balance monitoring functionality
 
 **Test Files:**
 - `tests/balance/eth.test.ts` (max 150 lines) - ETH balance tests
@@ -377,21 +377,22 @@ Deliver a production-ready CLI tool that:
 
 ## Phase 4: Host Operations
 
-### Sub-phase 4.1: Registration and Staking
+### Sub-phase 4.1: Registration and Staking ✅
 
 **Goal**: Implement host registration and FAB token staking
 
 #### Tasks
-- [ ] Write tests for registration flow
-- [ ] Write tests for staking operations
-- [ ] Implement FAB token approval
-- [ ] Implement host registration with metadata
-- [ ] Implement API URL registration
-- [ ] Implement staking transaction
-- [ ] Handle registration errors
-- [ ] Add transaction confirmation waiting
-- [ ] Display registration success info
-- [ ] Store registration state locally
+- [x] Write tests for registration flow
+- [x] Write tests for staking operations
+- [x] Write tests for error handling
+- [x] Implement FAB token approval
+- [x] Implement host registration with metadata
+- [x] Implement API URL registration
+- [x] Implement staking transaction
+- [x] Handle registration errors
+- [x] Add transaction confirmation waiting
+- [x] Display registration success info
+- [x] Store registration state locally
 
 **Test Files:**
 - `tests/registration/flow.test.ts` (max 300 lines) - Registration flow tests

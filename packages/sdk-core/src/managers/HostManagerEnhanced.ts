@@ -395,9 +395,9 @@ export class HostManagerEnhanced {
 
       return {
         isRegistered: true,
-        isActive: info[1],
+        isActive: info[2],  // Fixed: was info[1]
         supportedModels: info[5],
-        stake: info[2],
+        stake: info[1],      // Fixed: was info[2]
         metadata,
         apiUrl: info[4]
       };
@@ -407,7 +407,7 @@ export class HostManagerEnhanced {
         isRegistered: false,
         isActive: false,
         supportedModels: [],
-        stake: BigNumber.from(0)
+        stake: 0n  // Fixed: was BigNumber.from(0)
       };
     }
   }

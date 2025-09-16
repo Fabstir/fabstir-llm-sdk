@@ -2,7 +2,7 @@
  * Model-related type definitions for the Fabstir SDK
  */
 
-import { BigNumber } from 'ethers';
+// BigNumber import removed - using bigint instead
 
 /**
  * Represents an approved model specification
@@ -51,7 +51,7 @@ export interface HostInfo {
   metadata: HostMetadata;     // Host metadata
   supportedModels: string[];  // Array of model IDs
   isActive: boolean;          // Is host active
-  stake: BigNumber;           // Staked amount
+  stake: bigint;              // Staked amount
 }
 
 /**
