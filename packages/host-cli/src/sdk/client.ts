@@ -4,8 +4,26 @@
  */
 
 import { FabstirSDKCore } from '@fabstir/sdk-core';
-import { createSDKConfig, SDKConfig } from './config';
+import { createSDKConfig, SDKConfig, validateConfig } from './config';
 import { getPrivateKey } from './secrets';
+import {
+  setConnectionStatus,
+  getConnectionStatus,
+  ConnectionStatus,
+  resetStatus
+} from './status';
+import {
+  setAuthSDK,
+  authenticate as authAuthenticate,
+  isAuthenticated as authIsAuthenticated,
+  getAuthenticatedAddress as authGetAddress,
+  clearAuthentication as authClear,
+  resetAuth
+} from './auth';
+import { withRetry, createRetryPolicy } from './retry';
+
+// Export status types
+export { ConnectionStatus, getConnectionStatus };
 
 // Singleton instance
 let sdkInstance: FabstirSDKCore | null = null;
@@ -18,13 +36,27 @@ export async function initializeSDK(network: 'base-mainnet' | 'base-sepolia' = '
     return sdkInstance;
   }
 
-  // Create config from environment
-  const config = createSDKConfig(network);
+  try {
+    // Create config from environment
+    const config = createSDKConfig(network);
 
-  // Create SDK instance
-  sdkInstance = new FabstirSDKCore(config);
+    // Validate configuration
+    validateConfig(config);
 
-  return sdkInstance;
+    // Create SDK instance
+    sdkInstance = new FabstirSDKCore(config);
+
+    // Set SDK for auth manager
+    setAuthSDK(sdkInstance);
+
+    // Set initial status
+    setConnectionStatus(ConnectionStatus.DISCONNECTED);
+
+    return sdkInstance;
+  } catch (error) {
+    setConnectionStatus(ConnectionStatus.ERROR, error as Error);
+    throw error;
+  }
 }
 
 /**
@@ -46,26 +78,25 @@ export async function authenticateSDK(privateKey?: string): Promise<void> {
   // Get private key from various sources if not provided
   const key = privateKey || await getPrivateKey();
 
-  // Authenticate with the SDK
-  await sdk.authenticate('privatekey', { privateKey: key });
+  // Use auth module with retry
+  const authFn = async () => {
+    await authAuthenticate({ method: 'privatekey', privateKey: key });
 
-  // Verify authentication
-  if (!sdk.isAuthenticated()) {
-    throw new Error('SDK authentication failed');
-  }
+    // Verify authentication
+    if (!authIsAuthenticated()) {
+      throw new Error('SDK authentication failed');
+    }
+  };
+
+  // Apply retry logic
+  await withRetry(authFn, createRetryPolicy('auth'));
 }
 
 /**
  * Get the authenticated wallet address
  */
 export function getAuthenticatedAddress(): string | null {
-  const sdk = getSDK();
-
-  if (!sdk.isAuthenticated()) {
-    return null;
-  }
-
-  return sdk.signer ? sdk.signer.address : null;
+  return authGetAddress();
 }
 
 /**
@@ -105,7 +136,7 @@ export async function connectToBlockchain(): Promise<boolean> {
 export function getHostManager() {
   const sdk = getSDK();
 
-  if (!sdk.isAuthenticated()) {
+  if (!authIsAuthenticated()) {
     throw new Error('SDK not authenticated. Call authenticateSDK() first.');
   }
 
@@ -118,7 +149,7 @@ export function getHostManager() {
 export function getPaymentManager() {
   const sdk = getSDK();
 
-  if (!sdk.isAuthenticated()) {
+  if (!authIsAuthenticated()) {
     throw new Error('SDK not authenticated. Call authenticateSDK() first.');
   }
 
@@ -131,11 +162,24 @@ export function getPaymentManager() {
 export function getSessionManager() {
   const sdk = getSDK();
 
-  if (!sdk.isAuthenticated()) {
+  if (!authIsAuthenticated()) {
     throw new Error('SDK not authenticated. Call authenticateSDK() first.');
   }
 
   return sdk.getSessionManager();
+}
+
+/**
+ * Get the Treasury Manager
+ */
+export function getTreasuryManager() {
+  const sdk = getSDK();
+
+  if (!authIsAuthenticated()) {
+    throw new Error('SDK not authenticated. Call authenticateSDK() first.');
+  }
+
+  return sdk.getTreasuryManager();
 }
 
 /**
@@ -149,4 +193,8 @@ export async function cleanupSDK(): Promise<void> {
     }
     sdkInstance = null;
   }
+
+  // Reset auth and status managers
+  resetAuth();
+  resetStatus();
 }
