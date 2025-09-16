@@ -446,21 +446,21 @@ Deliver a production-ready CLI tool that:
 - JSON output works
 - History displays properly
 
-### Sub-phase 4.3: Withdrawal Operations
+### Sub-phase 4.3: Withdrawal Operations ✅
 
 **Goal**: Implement earnings withdrawal functionality
 
 #### Tasks
-- [ ] Write tests for withdrawal command
-- [ ] Write tests for treasury withdrawal
-- [ ] Implement host earnings checking
-- [ ] Implement withdrawal transaction
-- [ ] Display gas cost estimates
-- [ ] Add withdrawal confirmation prompt
-- [ ] Handle withdrawal errors
-- [ ] Show transaction receipt
-- [ ] Update local earning records
-- [ ] Add withdrawal history tracking
+- [x] Write tests for withdrawal command
+- [x] Write tests for treasury withdrawal
+- [x] Implement host earnings checking
+- [x] Implement withdrawal transaction
+- [x] Display gas cost estimates
+- [x] Add withdrawal confirmation prompt
+- [x] Handle withdrawal errors
+- [x] Show transaction receipt
+- [x] Update local earning records
+- [x] Add withdrawal history tracking
 
 **Test Files:**
 - `tests/withdrawal/command.test.ts` (max 250 lines) - Withdrawal tests
