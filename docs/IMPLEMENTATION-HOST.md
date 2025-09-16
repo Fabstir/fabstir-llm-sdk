@@ -523,16 +523,16 @@ Deliver a production-ready CLI tool that:
 **Goal**: Connect to fabstir-llm-node WebSocket for session monitoring
 
 #### Tasks
-- [ ] Write tests for WebSocket connection
-- [ ] Write tests for message handling
-- [ ] Implement WebSocket client connection
-- [ ] Handle session-request events
-- [ ] Handle inference-complete events
-- [ ] Track token generation
-- [ ] Monitor session progress
-- [ ] Handle connection drops
-- [ ] Implement reconnection logic
-- [ ] Queue messages during disconnection
+- [x] Write tests for WebSocket connection
+- [x] Write tests for message handling
+- [x] Implement WebSocket client connection
+- [x] Handle session-request events
+- [x] Handle inference-complete events
+- [x] Track token generation
+- [x] Monitor session progress
+- [x] Handle connection drops
+- [x] Implement reconnection logic
+- [x] Queue messages during disconnection
 
 **Test Files:**
 - `tests/websocket/connection.test.ts` (max 250 lines) - Connection tests
