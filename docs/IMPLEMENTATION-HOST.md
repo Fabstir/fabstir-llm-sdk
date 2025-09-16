@@ -239,7 +239,7 @@ Deliver a production-ready CLI tool that:
 
 ## Phase 3: SDK Integration
 
-### Sub-phase 3.0: SDK Discovery and Setup
+### Sub-phase 3.0: SDK Discovery and Setup ✅
 
 **Goal**: Prepare to use the real @fabstir/sdk-core package (FabstirSDKCore) that already exists in the workspace
 
@@ -251,13 +251,13 @@ Deliver a production-ready CLI tool that:
 
 #### Tasks
 - [x] Verify @fabstir/sdk-core is built and available
-- [ ] Create S5.js symlink for dependency resolution
-- [ ] Update SDK config to match FabstirSDKCore requirements
-- [ ] Import FabstirSDKCore (not old FabstirSDK)
-- [ ] Create thin wrapper around FabstirSDKCore
-- [ ] Test SDK can connect to Base Sepolia testnet
-- [ ] Verify all contract addresses work
-- [ ] Test authentication with test wallet
+- [x] Create S5.js symlink for dependency resolution
+- [x] Update SDK config to match FabstirSDKCore requirements
+- [x] Import FabstirSDKCore (not old FabstirSDK)
+- [x] Create thin wrapper around FabstirSDKCore
+- [x] Test SDK can connect to Base Sepolia testnet
+- [x] Verify all contract addresses work
+- [x] Test authentication with test wallet
 
 **Test Files:**
 - `tests/integration/sdk-setup.test.ts` (max 150 lines) - Verify SDK availability
@@ -306,20 +306,20 @@ Deliver a production-ready CLI tool that:
 - Match harness demo implementation
 - No excessive mocking
 
-### Sub-phase 3.1: SDK Initialization
+### Sub-phase 3.1: SDK Initialization ✅
 
 **Goal**: Integrate with @fabstir/sdk-core for blockchain operations
 
 #### Tasks
-- [ ] Write tests for SDK initialization
-- [ ] Write tests for authentication flow
-- [ ] Import FabstirSDK from @fabstir/sdk-core
-- [ ] Implement SDK initialization with config
-- [ ] Implement wallet authentication
-- [ ] Test manager access (HostManager, PaymentManager)
-- [ ] Handle SDK initialization errors
-- [ ] Add retry logic for network issues
-- [ ] Implement connection status checking
+- [x] Write tests for SDK initialization
+- [x] Write tests for authentication flow
+- [x] Import FabstirSDK from @fabstir/sdk-core
+- [x] Implement SDK initialization with config
+- [x] Implement wallet authentication
+- [x] Test manager access (HostManager, PaymentManager)
+- [x] Handle SDK initialization errors
+- [x] Add retry logic for network issues
+- [x] Implement connection status checking
 
 **Test Files:**
 - `tests/sdk/initialization.test.ts` (max 200 lines) - Init tests
@@ -697,20 +697,20 @@ Deliver a production-ready CLI tool that:
 
 ## Phase 7: Testing and Documentation
 
-### Sub-phase 7.1: Integration Testing
+### Sub-phase 7.1: Integration Testing ✅
 
 **Goal**: Comprehensive integration tests for all features
 
 #### Tasks
-- [ ] Write end-to-end registration test
-- [ ] Write session handling test
-- [ ] Write proof submission test
-- [ ] Write withdrawal test
-- [ ] Test daemon mode operation
-- [ ] Test error recovery
-- [ ] Test configuration updates
-- [ ] Test wallet operations
-- [ ] Create test fixtures
+- [x] Write end-to-end registration test
+- [x] Write session handling test
+- [x] Write proof submission test
+- [x] Write withdrawal test
+- [x] Test daemon mode operation
+- [x] Test error recovery
+- [x] Test configuration updates
+- [x] Test wallet operations
+- [x] Create test fixtures
 - [ ] Add CI/CD pipeline tests
 
 **Test Files:**
