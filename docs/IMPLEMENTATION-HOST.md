@@ -625,21 +625,21 @@ Deliver a production-ready CLI tool that:
 - Metrics track performance
 - Daily summaries generate
 
-### Sub-phase 6.2: Daemon Mode and Service Management
+### Sub-phase 6.2: Daemon Mode and Service Management ✅
 
 **Goal**: Enable running as background service
 
 #### Tasks
-- [ ] Write tests for daemon mode
-- [ ] Implement --daemon flag for start command
-- [ ] Create PID file management
-- [ ] Implement `fabstir-host stop` command
-- [ ] Add systemd service file generation
-- [ ] Implement health checks
-- [ ] Add automatic restart on failure
-- [ ] Create uptime tracking
-- [ ] Implement graceful reload
-- [ ] Add service status reporting
+- [x] Write tests for daemon mode
+- [x] Implement --daemon flag for start command
+- [x] Create PID file management
+- [x] Implement `fabstir-host stop` command
+- [x] Add systemd service file generation
+- [x] Implement health checks
+- [x] Add automatic restart on failure
+- [x] Create uptime tracking
+- [x] Implement graceful reload
+- [x] Add service status reporting
 
 **Test Files:**
 - `tests/daemon/mode.test.ts` (max 250 lines) - Daemon mode tests

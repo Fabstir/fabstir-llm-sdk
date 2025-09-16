@@ -57,7 +57,7 @@ The host-cli is a TypeScript CLI tool for Fabstir LLM marketplace hosts to manag
   - Process logging with rotation (10MB default max size)
   - Graceful shutdown: SIGTERM with 10s timeout, then SIGKILL
 
-- **Sub-phase 5.2**: WebSocket Integration ✅ - 39 tests (1 skipped)
+- **Sub-phase 5.2**: WebSocket Integration ✅ - 40 tests
   - WebSocket client with ws module
   - Handles session-request, session-start, inference-complete events
   - Token generation tracking and session statistics
@@ -67,6 +67,32 @@ The host-cli is a TypeScript CLI tool for Fabstir LLM marketplace hosts to manag
   - Health check scheduling
   - Binary message support
   - Event-driven architecture with wildcard handlers
+  - **FIX**: Non-blocking promise handling in circuit breaker tests to avoid fake timer deadlock
+
+- **Sub-phase 5.3**: Proof Submission ✅ - 51 tests
+  - ProofSubmitter with mock injection for testing
+  - CheckpointTracker for 100-token threshold monitoring
+  - ProofRetryManager with exponential backoff
+  - ProofTracker for submission history and statistics
+  - ProofIntegration coordinates WebSocket and proof systems
+  - Event-driven architecture for all components
+  - Batch submission and gas estimation support
+  - **FIX**: Added `setMockSubmitFunction()` for test injection instead of SDK mocking
+  - **FIX**: Corrected retry statistics expectations in tests
+
+### Phase 6: Production Features
+- **Sub-phase 6.1**: Logging and Monitoring ✅ - 50 tests
+  - Winston logger with daily rotation using winston-daily-rotate-file
+  - Log rotation with size/date triggers and compression support
+  - Comprehensive logs command for viewing, filtering, and exporting
+  - Performance metrics collection (CPU, memory, sessions)
+  - Daily summary generation with statistics
+  - Real-time log following with file watchers
+  - Log levels: error, warn, info, debug
+  - Component-specific child loggers
+  - **FIX**: Rotation logic keeps oldest files (1,2,3) not newest
+  - **FIX**: Added error handling in follow() for deleted files
+  - **FIX**: Improved test cleanup with async afterEach and watcher closing
 
 ## Key Architecture Patterns
 
@@ -113,10 +139,37 @@ packages/host-cli/
 │   ├── monitoring/    # Status tracking and metrics
 │   ├── withdrawal/    # Earnings withdrawal
 │   ├── process/       # Process lifecycle management
+│   ├── websocket/     # WebSocket client and reconnection
+│   ├── proof/         # Proof submission and retry logic
+│   ├── logging/       # Winston logger and rotation
 │   └── commands/      # CLI command implementations
 └── tests/
     └── [matching structure with .test.ts files]
 ```
+
+## Next Phase To Implement
+
+### Sub-phase 6.2: Daemon Mode and Service Management
+From `docs/IMPLEMENTATION-HOST.md` - Ready to implement:
+- Implement --daemon flag for start command
+- Create PID file management
+- Implement `fabstir-host stop` command
+- Add systemd service file generation
+- Implement health checks
+- Add automatic restart on failure
+- Create uptime tracking
+- Implement graceful reload
+- Add service status reporting
+
+### Sub-phase 6.3: Configuration Management
+- Implement config file system
+- Add environment-based configs
+- Create config validation
+- Support config hot-reload
+- Add config migration system
+- Implement secrets management
+- Create config templates
+- Add config backup/restore
 
 ## Important Technical Details
 
@@ -145,6 +198,36 @@ const amount = 1000n;
 const amount = BigInt(1000);
 const zero = BigInt(0);
 ```
+
+## Key Libraries and Dependencies
+
+### Production Dependencies
+- **@fabstir/sdk-core**: Browser-compatible SDK for blockchain interactions
+- **ethers**: Ethereum library for contract interactions
+- **winston** & **winston-daily-rotate-file**: Logging with rotation
+- **ws**: WebSocket client for real-time communication
+- **commander**: CLI framework
+- **inquirer**: Interactive command line prompts
+- **chalk**: Terminal string styling
+- **dotenv**: Environment variable management
+
+### Testing Stack
+- **vitest**: Test runner with ES modules support
+- **@vitest/ui**: UI for test visualization
+- **@types/node**: TypeScript Node.js types
+
+## Common Issues and Solutions
+
+### TypeScript Compilation
+- Target ES2020, no BigInt literals (use BigInt() constructor)
+- Use NodeNext module resolution for package.json exports
+- Timer types differ between Node and DOM (use NodeJS.Timeout)
+
+### Test Flakiness
+- File watchers need explicit cleanup in afterEach hooks
+- Use async afterEach with delays for proper cleanup
+- Mock injection pattern for testing (setMockSubmitFunction)
+- Fake timers can deadlock with async operations - use non-blocking promises
 
 ### Process Management Architecture
 ```typescript
