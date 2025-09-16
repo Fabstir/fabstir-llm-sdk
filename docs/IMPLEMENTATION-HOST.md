@@ -207,15 +207,15 @@ Deliver a production-ready CLI tool that:
 **Goal**: Implement commands to view and modify configuration
 
 #### Tasks
-- [ ] Write tests for config get command
-- [ ] Write tests for config set command
-- [ ] Implement `fabstir-host config get <key>`
-- [ ] Implement `fabstir-host config set <key> <value>`
-- [ ] Implement `fabstir-host config list`
-- [ ] Implement `fabstir-host config reset`
-- [ ] Add validation for configuration changes
-- [ ] Implement config backup and restore
-- [ ] Add environment variable override support
+- [x] Write tests for config get command
+- [x] Write tests for config set command
+- [x] Implement `fabstir-host config get <key>`
+- [x] Implement `fabstir-host config set <key> <value>`
+- [x] Implement `fabstir-host config list`
+- [x] Implement `fabstir-host config reset`
+- [x] Add validation for configuration changes
+- [x] Implement config backup and restore
+- [x] Add environment variable override support
 
 **Test Files:**
 - `tests/config/commands.test.ts` (max 250 lines) - Config command tests

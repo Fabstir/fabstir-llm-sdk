@@ -7,6 +7,7 @@
 
 import { Command } from 'commander';
 import { registerInitCommand } from './commands/init';
+import { registerConfigCommand } from './commands/config';
 
 const program = new Command();
 
@@ -15,8 +16,9 @@ program
   .description('CLI tool for managing Fabstir host nodes')
   .version('1.0.0');
 
-// Register init command
+// Register commands
 registerInitCommand(program);
+registerConfigCommand(program);
 
 program
   .command('start')
