@@ -8,6 +8,14 @@
 import { Command } from 'commander';
 import { registerInitCommand } from './commands/init';
 import { registerConfigCommand } from './commands/config';
+import { registerWalletCommand } from './commands/wallet';
+import { registerStartCommand } from './commands/start';
+import { registerRegisterCommand } from './commands/register';
+import { registerUnregisterCommand } from './commands/unregister';
+import { registerStatusCommand } from './commands/status';
+import { registerWithdrawCommand } from './commands/withdraw';
+import { registerLogsCommand } from './commands/logs';
+import { registerStopCommand } from './commands/stop';
 
 const program = new Command();
 
@@ -19,27 +27,14 @@ program
 // Register commands
 registerInitCommand(program);
 registerConfigCommand(program);
-
-program
-  .command('start')
-  .description('Start the host node')
-  .action(() => {
-    console.log('Start command - to be implemented');
-  });
-
-program
-  .command('stop')
-  .description('Stop the host node')
-  .action(() => {
-    console.log('Stop command - to be implemented');
-  });
-
-program
-  .command('status')
-  .description('Check host status')
-  .action(() => {
-    console.log('Status command - to be implemented');
-  });
+registerWalletCommand(program);
+registerStartCommand(program);
+registerRegisterCommand(program);
+registerUnregisterCommand(program);
+registerStatusCommand(program);
+registerWithdrawCommand(program);
+registerLogsCommand(program);
+registerStopCommand(program);
 
 // Show help if no command provided
 if (!process.argv.slice(2).length) {

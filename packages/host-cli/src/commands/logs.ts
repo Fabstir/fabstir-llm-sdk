@@ -1,8 +1,36 @@
+import { Command } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as zlib from 'zlib';
 import chalk from 'chalk';
 import { promisify } from 'util';
+
+/**
+ * Register the logs command with the CLI
+ */
+export function registerLogsCommand(program: Command): void {
+  program
+    .command('logs')
+    .description('View and manage host logs')
+    .option('-n, --lines <number>', 'Number of lines to display', '100')
+    .option('-f, --follow', 'Follow log output')
+    .option('--level <level>', 'Filter by log level (error, warn, info, debug)')
+    .option('--component <component>', 'Filter by component')
+    .option('--export <path>', 'Export logs to file')
+    .action(async (options) => {
+      try {
+        // Simplified implementation for now
+        console.log(chalk.yellow('⚠️  Logs command not fully implemented'));
+        console.log(chalk.gray(`Would show ${options.lines} lines of logs`));
+        if (options.follow) {
+          console.log(chalk.gray('Would follow log output'));
+        }
+      } catch (error: any) {
+        console.error(chalk.red('❌ Error:'), error.message);
+        process.exit(1);
+      }
+    });
+}
 
 const gzip = promisify(zlib.gzip);
 

@@ -7,7 +7,7 @@
 // Import all ABIs from local folder
 import JobMarketplaceABI from './JobMarketplaceWithModels-CLIENT-ABI.json';
 import HostEarningsABI from './HostEarnings-CLIENT-ABI.json';
-import NodeRegistryABI from './NodeRegistryFAB-CLIENT-ABI.json';
+import NodeRegistryABI from './NodeRegistry.json';
 import ProofSystemABI from './ProofSystem-CLIENT-ABI.json';
 import ERC20ABI from './ERC20-ABI.json';
 import BaseAccountFactoryABI from './BaseAccountFactory-ABI.json';
@@ -40,7 +40,10 @@ export const HostEarningsFragments = {
 };
 
 export const NodeRegistryFragments = {
-  registerNode: 'function registerNode(string memory url, uint256 stake) returns (bool)',
-  unregisterNode: 'function unregisterNode() returns (bool)',
-  getNodeInfo: 'function getNodeInfo(address node) returns (tuple(string url, uint256 stake, bool isActive))'
+  registerNode: 'function registerNode(string metadata, string apiUrl, bytes32[] modelIds)',
+  unregisterNode: 'function unregisterNode()',
+  stake: 'function stake(uint256 amount)',
+  nodes: 'function nodes(address) view returns (address operator, uint256 stakedAmount, bool active, string metadata, string apiUrl)',
+  getNodeModels: 'function getNodeModels(address nodeAddress) view returns (bytes32[])',
+  isActiveNode: 'function isActiveNode(address operator) view returns (bool)'
 };

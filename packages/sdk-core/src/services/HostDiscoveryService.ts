@@ -6,7 +6,7 @@
  */
 
 import { ethers } from 'ethers';
-import NodeRegistryABI from '../contracts/abis/NodeRegistryFAB-CLIENT-ABI.json';
+import NodeRegistryABI from '../contracts/abis/NodeRegistry.json';
 
 export interface NodeInfo {
   nodeAddress: string;

@@ -5,7 +5,7 @@
 
 import { ethers, Contract, ContractInterface, Signer } from 'ethers';
 import JobMarketplaceABI from './abis/JobMarketplaceFABWithS5-CLIENT-ABI.json';
-import NodeRegistryABI from './abis/NodeRegistryFAB-CLIENT-ABI.json';
+import NodeRegistryABI from './abis/NodeRegistry.json';
 import HostEarningsABI from './abis/HostEarnings-CLIENT-ABI.json';
 import PaymentEscrowABI from './abis/PaymentEscrowWithEarnings-CLIENT-ABI.json';
 import ProofSystemABI from './abis/ProofSystem-CLIENT-ABI.json';

@@ -113,21 +113,24 @@ const NodeManagementEnhanced: React.FC = () => {
       
       // Small delay to ensure state is set
       await new Promise(resolve => setTimeout(resolve, 100));
-      
+
       // Now check registration with the SDK instance directly
       if (sdkInstance) {
         await checkRegistrationStatusWithSDK(address, sdkInstance);
       }
-      
+
     } catch (error: any) {
       addLog(`❌ Wallet connection failed: ${error.message}`);
+    } finally {
+      // Always set isConnecting to false when done
+      setIsConnecting(false);
     }
   };
 
   // 1b. DISCONNECT WALLET
   const disconnectWallet = () => {
     addLog('🔌 Disconnecting wallet...');
-    
+
     // Reset all state
     setWalletConnected(false);
     setWalletAddress('');
@@ -140,10 +143,11 @@ const NodeManagementEnhanced: React.FC = () => {
     setWsConnected(false);
     setWsClient(null);
     setStreamedTokens('');
-    
+    setIsConnecting(false);  // Reset connecting state
+
     // Clear logs but add disconnect message
     setLogs(['Wallet disconnected. Connect a wallet to continue.']);
-    
+
     addLog('✅ Wallet disconnected');
   };
 
@@ -185,7 +189,7 @@ const NodeManagementEnhanced: React.FC = () => {
   const checkRegistrationStatusWithSDK = async (address: string, sdkInstance: FabstirSDKCore) => {
     try {
       addLog(`🔍 Checking registration status for ${address}...`);
-      
+
       const hostManager = sdkInstance.getHostManager();
       addLog(`🔍 Calling getHostInfo for ${address}...`);
       const info = await hostManager.getHostInfo(address);
@@ -193,10 +197,27 @@ const NodeManagementEnhanced: React.FC = () => {
       // Log the full info for debugging
       console.log('Host status:', info);
       addLog(`📊 Registration check result: isRegistered=${info.isRegistered}, isActive=${info.isActive}`);
-      if (info.stakedAmount) {
-        addLog(`💰 Staked amount: ${ethers.formatUnits(info.stakedAmount, 18)} FAB`);
+
+      // Direct contract call to get accurate staked amount
+      let actualStakedAmount = '0';
+      try {
+        const nodeRegistryAddress = '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218';
+        const nodeRegistryAbi = [
+          'function nodes(address) view returns (address operator, uint256 stakedAmount, bool active, string metadata, string apiUrl)'
+        ];
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const nodeRegistry = new ethers.Contract(nodeRegistryAddress, nodeRegistryAbi, provider);
+        const nodeData = await nodeRegistry.nodes(address);
+        actualStakedAmount = ethers.formatUnits(nodeData.stakedAmount, 18);
+        addLog(`💰 Staked amount (from contract): ${actualStakedAmount} FAB`);
+      } catch (error) {
+        console.error('Failed to get staked amount directly:', error);
+        if (info.stakedAmount) {
+          actualStakedAmount = ethers.formatUnits(info.stakedAmount, 18);
+          addLog(`💰 Staked amount (from SDK): ${actualStakedAmount} FAB`);
+        }
       }
-      
+
       setIsRegistered(info.isRegistered);
       
       if (info.isRegistered) {
@@ -233,7 +254,7 @@ const NodeManagementEnhanced: React.FC = () => {
         setNodeInfo({
           address: address,
           isActive: info.isActive,
-          stakedAmount: info.stakedAmount ? ethers.formatUnits(info.stakedAmount, 18) : '0',
+          stakedAmount: actualStakedAmount,
           metadata: typeof info.metadata === 'object' ? JSON.stringify(info.metadata, null, 2) : (info.metadata || 'None'),
           supportedModels: info.supportedModels || []
         });
@@ -266,8 +287,25 @@ const NodeManagementEnhanced: React.FC = () => {
       // Log the full info for debugging
       console.log('Host info:', info);
       addLog(`📊 Registration check result: isRegistered=${info.isRegistered}, isActive=${info.isActive}`);
-      if (info.stakedAmount) {
-        addLog(`💰 Staked amount: ${ethers.formatUnits(info.stakedAmount, 18)} FAB`);
+
+      // Direct contract call to get accurate staked amount
+      let actualStakedAmount = '0';
+      try {
+        const nodeRegistryAddress = '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218';
+        const nodeRegistryAbi = [
+          'function nodes(address) view returns (address operator, uint256 stakedAmount, bool active, string metadata, string apiUrl)'
+        ];
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const nodeRegistry = new ethers.Contract(nodeRegistryAddress, nodeRegistryAbi, provider);
+        const nodeData = await nodeRegistry.nodes(address);
+        actualStakedAmount = ethers.formatUnits(nodeData.stakedAmount, 18);
+        addLog(`💰 Staked amount (from contract): ${actualStakedAmount} FAB`);
+      } catch (error) {
+        console.error('Failed to get staked amount directly:', error);
+        if (info.stakedAmount) {
+          actualStakedAmount = ethers.formatUnits(info.stakedAmount, 18);
+          addLog(`💰 Staked amount (from SDK): ${actualStakedAmount} FAB`);
+        }
       }
       
       setIsRegistered(info.isRegistered);
@@ -306,7 +344,7 @@ const NodeManagementEnhanced: React.FC = () => {
         setNodeInfo({
           address: address,
           isActive: info.isActive,
-          stakedAmount: info.stakedAmount ? ethers.formatUnits(info.stakedAmount, 18) : '0',
+          stakedAmount: actualStakedAmount,
           metadata: typeof info.metadata === 'object' ? JSON.stringify(info.metadata, null, 2) : (info.metadata || 'None'),
           supportedModels: info.supportedModels || []
         });

@@ -1,10 +1,34 @@
+import { Command } from 'commander';
 import { PIDManager } from '../daemon/pid';
 import { DaemonManager } from '../daemon/manager';
+import chalk from 'chalk';
 
 interface StopOptions {
   pidFile?: string;
   force?: boolean;
   timeout?: number;
+}
+
+/**
+ * Register the stop command with the CLI
+ */
+export function registerStopCommand(program: Command): void {
+  program
+    .command('stop')
+    .description('Stop the running host node')
+    .option('--force', 'Force stop without cleanup')
+    .option('--timeout <ms>', 'Shutdown timeout in milliseconds', '10000')
+    .action(async (options) => {
+      try {
+        await stopCommand.action({
+          force: options.force,
+          timeout: parseInt(options.timeout) || 10000
+        });
+      } catch (error: any) {
+        console.error(chalk.red('❌ Error:'), error.message);
+        process.exit(1);
+      }
+    });
 }
 
 export const stopCommand = {

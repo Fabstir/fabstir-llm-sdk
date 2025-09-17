@@ -20,7 +20,7 @@ import { SDKError } from '../errors';
 import { ContractManager } from '../contracts/ContractManager';
 import { ModelManager } from './ModelManager';
 import { HostDiscoveryService } from '../services/HostDiscoveryService';
-import { NodeRegistryWithModelsABI } from '../contracts/abis';
+import { NodeRegistryABI } from '../contracts/abis';
 
 export interface HostRegistrationWithModels {
   metadata: HostMetadata;
@@ -67,7 +67,7 @@ export class HostManagerEnhanced {
 
     this.nodeRegistry = new Contract(
       nodeRegistryAddress,
-      NodeRegistryWithModelsABI,
+      NodeRegistryABI,
       signer
     );
 
@@ -704,6 +704,34 @@ export class HostManagerEnhanced {
       throw new SDKError(
         `Failed to withdraw earnings: ${error.message}`,
         'WITHDRAWAL_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Unregister the host from the NodeRegistry contract
+   * This will return any staked FAB tokens back to the host
+   */
+  async unregisterHost(): Promise<string> {
+    if (!this.initialized || !this.signer || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      // Call the unregisterNode function on the NodeRegistry contract
+      const tx = await this.nodeRegistry.unregisterNode();
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+      if (!receipt || receipt.status !== 1) {
+        throw new SDKError('Unregistration failed', 'UNREGISTRATION_FAILED');
+      }
+
+      return receipt.hash;
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to unregister host: ${error.message}`,
+        'UNREGISTRATION_ERROR',
         { originalError: error }
       );
     }

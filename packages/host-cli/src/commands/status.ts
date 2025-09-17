@@ -3,11 +3,35 @@
  * Displays comprehensive host status information
  */
 
+import { Command } from 'commander';
 import { getHostStatus, HostStatus } from '../monitoring/tracker';
 import { getEarningsInfo, EarningsInfo } from '../monitoring/metrics';
 import { formatStatusDisplay, formatJSON } from '../monitoring/display';
 import { getSDK, getAuthenticatedAddress } from '../sdk/client';
 import chalk from 'chalk';
+
+/**
+ * Register the status command with the CLI
+ */
+export function registerStatusCommand(program: Command): void {
+  program
+    .command('status')
+    .description('Display current host status and statistics')
+    .option('--detailed', 'Show detailed information')
+    .option('--metrics', 'Include performance metrics')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      try {
+        await executeStatus({
+          json: options.json,
+          verbose: options.detailed || options.metrics
+        });
+      } catch (error: any) {
+        console.error(chalk.red('❌ Error:'), error.message);
+        process.exit(1);
+      }
+    });
+}
 
 /**
  * Status command options

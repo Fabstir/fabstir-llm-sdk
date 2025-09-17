@@ -3,6 +3,7 @@
  * Handles earnings withdrawal for hosts and treasury
  */
 
+import { Command } from 'commander';
 import { getSDK, getAuthenticatedAddress } from '../sdk/client';
 import { estimateWithdrawalGas, getGasPrice } from '../withdrawal/gas';
 import { processWithdrawal, checkWithdrawableBalance } from '../withdrawal/manager';
@@ -10,6 +11,30 @@ import { addWithdrawalRecord } from '../withdrawal/history';
 import { ethers } from 'ethers';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
+
+/**
+ * Register the withdraw command with the CLI
+ */
+export function registerWithdrawCommand(program: Command): void {
+  program
+    .command('withdraw')
+    .description('Withdraw accumulated earnings')
+    .option('--amount <amount>', 'Amount to withdraw (in FAB or "all")', 'all')
+    .option('--type <type>', 'Type of withdrawal (host or treasury)', 'host')
+    .option('--force', 'Skip confirmation prompt')
+    .action(async (options) => {
+      try {
+        await executeWithdraw({
+          amount: options.amount,
+          type: options.type,
+          skipConfirmation: options.force
+        });
+      } catch (error: any) {
+        console.error(chalk.red('❌ Error:'), error.message);
+        process.exit(1);
+      }
+    });
+}
 
 /**
  * Withdrawal command options

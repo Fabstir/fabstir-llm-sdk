@@ -3,6 +3,7 @@
  * Handles the host registration CLI command
  */
 
+import { Command } from 'commander';
 import { registerHost, checkRegistrationStatus, RegistrationConfig } from '../registration/manager';
 import { handleRegistrationError } from '../registration/errors';
 import { displayRequirements } from '../balance/display';
@@ -10,6 +11,34 @@ import { validateRegistrationRequirements } from '../registration/manager';
 import { initializeSDK, authenticateSDK } from '../sdk/client';
 import { ethers } from 'ethers';
 import chalk from 'chalk';
+
+/**
+ * Register the register command with the CLI
+ */
+export function registerRegisterCommand(program: Command): void {
+  program
+    .command('register')
+    .description('Register as a host on the blockchain')
+    .option('--stake <amount>', 'Stake amount in FAB (default: 1000)', '1000')
+    .option('--models <models>', 'Comma-separated list of supported models')
+    .option('--url <url>', 'Public URL for your host')
+    .option('--force', 'Skip confirmation prompts')
+    .action(async (options) => {
+      try {
+        const config: RegistrationConfig = {
+          stakeAmount: ethers.parseEther(options.stake),
+          apiUrl: options.url || 'http://localhost:8080',
+          models: options.models ? options.models.split(',') : ['gpt-3.5-turbo'],
+          skipConfirmation: options.force
+        };
+
+        await executeRegistration(config);
+      } catch (error: any) {
+        console.error(chalk.red('❌ Registration failed:'), error.message);
+        process.exit(1);
+      }
+    });
+}
 
 /**
  * Execute registration command

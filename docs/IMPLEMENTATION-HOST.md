@@ -804,6 +804,74 @@ Deliver a production-ready CLI tool that:
 
 ---
 
+## Phase 8: CLI Command Integration
+
+### Sub-phase 8.1: Wallet and Register Commands ✅
+
+**Goal**: Wire up wallet management and registration commands to the CLI
+
+#### Tasks
+- [x] Write tests for wallet command structure
+- [x] Write tests for register command flow
+- [x] Create wallet command with subcommands (address, balance, export, import)
+- [x] Wire up existing register command to CLI
+- [x] Wire up existing withdraw, status, logs, stop commands
+- [x] Create proper start command implementation
+- [x] Test all commands work with real contracts
+- [x] Update command documentation
+
+**Test Files:**
+- `tests/commands/wallet.test.ts` (max 300 lines) - Wallet command tests
+- `tests/commands/register.test.ts` (max 250 lines) - Registration command tests
+- `tests/commands/integration.test.ts` (max 300 lines) - CLI integration tests
+
+**Implementation Files:**
+- `src/commands/wallet.ts` (max 350 lines) - Wallet command implementation ✅
+- `src/commands/start.ts` (max 250 lines) - Start command implementation
+- `src/index.ts` (update) - Wire up all commands ✅
+
+**Success Criteria:**
+- Wallet address command displays address correctly ✅
+- Balance command shows ETH and FAB balances ✅
+- Export command works with security warnings ✅
+- Import command validates and stores wallet ✅
+- Register command successfully stakes 1000 FAB ✅
+- All commands accessible via CLI ✅
+- TEST_USER_2 can register as host ✅
+
+### Sub-phase 8.2: Unregister Command ✅
+
+**Goal**: Implement unregister command to allow hosts to exit and recover staked FAB
+
+#### Tasks
+- [x] Write tests for unregister command flow
+- [x] Write tests for stake recovery verification
+- [x] Create unregister command implementation
+- [x] Add wallet utility for reusable wallet loading
+- [x] Verify node status before unregistration
+- [x] Handle edge cases (not registered, already inactive)
+- [x] Test stake recovery with real contracts
+- [x] Update CLI help documentation
+
+**Test Files:**
+- `tests/commands/unregister.test.ts` (max 250 lines) - Unregister command tests
+- `tests/utils/wallet.test.ts` (max 150 lines) - Wallet utility tests
+
+**Implementation Files:**
+- `src/commands/unregister.ts` (max 200 lines) - Unregister command
+- `src/utils/wallet.ts` (max 50 lines) - Wallet loading utility
+- `src/index.ts` (update) - Wire up unregister command
+
+**Success Criteria:**
+- Command checks registration status before attempting unregister ✅
+- Unregister transaction succeeds on-chain ✅
+- Staked FAB tokens are returned to host wallet ✅
+- Error messages are clear for edge cases ✅
+- TEST_USER_2 can successfully unregister and recover 2000 FAB ✅
+- Command works with both wallet file and --private-key flag ✅
+
+---
+
 ## Global Success Metrics
 
 1. **Security**: Private keys never exposed, secure storage implemented
