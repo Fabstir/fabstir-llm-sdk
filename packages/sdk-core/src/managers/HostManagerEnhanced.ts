@@ -736,4 +736,85 @@ export class HostManagerEnhanced {
       );
     }
   }
+
+  /**
+   * Update the metadata for the host
+   */
+  async updateMetadata(metadata: string): Promise<string> {
+    // Ensure initialized
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new ModelRegistryError('Not initialized', this.nodeRegistryAddress);
+    }
+
+    try {
+      console.log('Updating metadata...');
+
+      // Call updateMetadata on the NodeRegistry contract
+      const tx = await this.nodeRegistry.updateMetadata(
+        metadata,
+        { gasLimit: 300000n }
+      );
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Failed to update metadata',
+          this.nodeRegistry.address
+        );
+      }
+
+      console.log('Successfully updated metadata');
+      return receipt.hash;
+    } catch (error: any) {
+      throw new ModelRegistryError(
+        `Failed to update metadata: ${error.message}`,
+        this.nodeRegistry?.address,
+        error
+      );
+    }
+  }
+
+  /**
+   * Add additional stake to the host registration
+   */
+  async addStake(amount: bigint): Promise<string> {
+    // Ensure initialized
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      console.log('Adding stake:', ethers.formatUnits(amount, 18), 'FAB');
+
+      // Call stake on the NodeRegistry contract
+      const tx = await this.nodeRegistry.stake(
+        amount,
+        { gasLimit: 200000n }
+      );
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+
+      if (!receipt || receipt.status !== 1) {
+        throw new SDKError('Failed to add stake', 'STAKE_FAILED');
+      }
+
+      console.log('Successfully added stake');
+      return receipt.hash;
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to add stake: ${error.message}`,
+        'STAKE_ERROR',
+        { originalError: error }
+      );
+    }
+  }
 }

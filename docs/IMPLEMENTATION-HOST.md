@@ -900,19 +900,21 @@ Deliver a production-ready CLI tool that:
 
 ### Sub-phase 8.4: Update Commands
 
+**Status:** ✅ Completed
+
 **Goal**: Implement commands to update host configuration without re-registering
 
 #### Tasks
-- [ ] Write tests for update-url command
-- [ ] Write tests for update-models command
-- [ ] Write tests for add-stake command
-- [ ] Add updateMetadata method to HostManagerEnhanced
-- [ ] Add addStake method to HostManagerEnhanced
-- [ ] Create update-url command implementation
-- [ ] Create update-models command implementation
-- [ ] Create add-stake command implementation
-- [ ] Test all update operations with real contracts
-- [ ] Verify gas costs and optimization
+- [x] Write tests for update-url command
+- [x] Write tests for update-models command
+- [x] Write tests for add-stake command
+- [x] Add updateMetadata method to HostManagerEnhanced
+- [x] Add addStake method to HostManagerEnhanced
+- [x] Create update-url command implementation
+- [x] Create update-models command implementation
+- [x] Create add-stake command implementation
+- [x] Test all update operations with real contracts
+- [x] Verify gas costs and optimization
 
 **Test Files:**
 - `tests/commands/update-url.test.ts` (max 200 lines) - Update URL tests
