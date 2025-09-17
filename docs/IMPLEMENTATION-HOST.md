@@ -971,6 +971,88 @@ Deliver a production-ready CLI tool that:
 - Templates help new hosts
 - Size limits are enforced
 
+### Sub-phase 8.6: SDK Configuration Validation
+
+**Status:** ✅ Completed
+
+**Goal**: Remove environment variable fallbacks and enforce explicit configuration
+
+#### Tasks
+- [x] Write tests for configuration validation
+- [x] Write tests for contract address validation
+- [x] Remove all process.env fallbacks from FabstirSDKCore
+- [x] Add validation for Ethereum address format
+- [x] Add validation for non-zero addresses
+- [x] Ensure all required contracts are validated
+- [x] Test error messages are clear and actionable
+
+**Test Files:**
+- `tests/core/config-validation.test.ts` (max 200 lines) - Configuration tests
+- `tests/core/address-validation.test.ts` (max 150 lines) - Address validation tests
+
+**Implementation Files:**
+- `packages/sdk-core/src/FabstirSDKCore.ts` (update) - Remove fallbacks, add validation
+- `packages/sdk-core/src/utils/validation.ts` (new, max 100 lines) - Validation helpers
+
+**Success Criteria:**
+- No environment variable fallbacks
+- All contract addresses validated
+- Clear errors for missing config
+- Zero address detection
+- Invalid address format detection
+
+### Sub-phase 8.7: Fix Mock Returns and Fallbacks
+
+**Goal**: Replace mock implementations with real functionality or proper errors
+
+#### Tasks
+- [ ] Write tests for HostManager.recordEarnings
+- [ ] Write tests for FabstirSDKCompat.findHost
+- [ ] Implement recordEarnings with HostEarnings contract
+- [ ] Implement findHost to query NodeRegistry for active hosts
+- [ ] Remove getPeerId or rename to getClientId
+- [ ] Remove hardcoded TEST_USER_1 addresses
+- [ ] Test all error cases
+
+**Test Files:**
+- `tests/managers/host-manager-earnings.test.ts` (max 200 lines) - Earnings tests
+- `tests/compat/sdk-compat-fixes.test.ts` (max 200 lines) - Compat layer tests
+
+**Implementation Files:**
+- `packages/sdk-core/src/managers/HostManager.ts` (update) - Implement recordEarnings
+- `packages/sdk-core/src/compat/FabstirSDKCompat.ts` (update) - Fix findHost, remove/fix getPeerId
+- `packages/sdk-core/src/contracts/SessionJobManager.ts` (update) - Remove test addresses
+
+**Success Criteria:**
+- recordEarnings calls actual contract
+- findHost returns random active host from NodeRegistry
+- No mock transaction hashes
+- No hardcoded addresses
+- Clear errors instead of fallbacks
+
+### Sub-phase 8.8: Complete S5 Integration
+
+**Goal**: Finish S5 seed phrase integration for proper storage
+
+#### Tasks
+- [ ] Write tests for S5 seed derivation
+- [ ] Research S5's actual seed phrase API
+- [ ] Implement proper seed derivation
+- [ ] Test with actual S5 portal
+- [ ] Document S5 configuration
+
+**Test Files:**
+- `tests/utils/s5-seed.test.ts` (max 150 lines) - Seed derivation tests
+
+**Implementation Files:**
+- `packages/sdk-core/src/utils/s5-seed-derivation.ts` (update) - Complete integration
+
+**Success Criteria:**
+- S5 seed properly derived from wallet
+- Works with S5 portal
+- No TODO comments remaining
+- Proper error handling
+
 ---
 
 ## Global Success Metrics

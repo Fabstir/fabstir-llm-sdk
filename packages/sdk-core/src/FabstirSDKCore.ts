@@ -6,7 +6,7 @@
  */
 
 import { ethers } from 'ethers';
-import { 
+import {
   IAuthManager,
   IPaymentManager,
   IStorageManager,
@@ -18,6 +18,11 @@ import { AuthManager } from './managers/AuthManager';
 import { PaymentManager } from './managers/PaymentManager';
 import { StorageManager } from './managers/StorageManager';
 import { SessionManager } from './managers/SessionManager';
+import {
+  validateRpcUrl,
+  validateRequiredAddresses,
+  validateOptionalAddress
+} from './utils/validation';
 import { HostManagerEnhanced } from './managers/HostManagerEnhanced';
 import { ModelManager } from './managers/ModelManager';
 import { TreasuryManager } from './managers/TreasuryManager';
@@ -92,44 +97,52 @@ export class FabstirSDKCore {
    * Validate and normalize configuration
    */
   private validateConfig(config: FabstirSDKCoreConfig): FabstirSDKCoreConfig {
-    // Use environment variables as defaults (in browser, these would be build-time injected)
+    // Validate RPC URL - NO fallback to environment variables
+    validateRpcUrl(config.rpcUrl);
+
+    // Build configuration without environment variable fallbacks
     const defaultConfig: FabstirSDKCoreConfig = {
       mode: config.mode || 'production',
-      rpcUrl: config.rpcUrl || process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA,
-      chainId: config.chainId || 84532, // Base Sepolia
-      
+      rpcUrl: config.rpcUrl, // Required, no fallback
+      chainId: config.chainId || 84532, // Base Sepolia default
+
       contractAddresses: {
-        jobMarketplace: config.contractAddresses?.jobMarketplace || process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE,
-        nodeRegistry: config.contractAddresses?.nodeRegistry || process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY,
-        proofSystem: config.contractAddresses?.proofSystem || process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM,
-        hostEarnings: config.contractAddresses?.hostEarnings || process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS,
-        fabToken: config.contractAddresses?.fabToken || process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN,
-        usdcToken: config.contractAddresses?.usdcToken || process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN,
-        modelRegistry: config.contractAddresses?.modelRegistry || process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY
+        // Required addresses - no fallbacks
+        jobMarketplace: config.contractAddresses?.jobMarketplace,
+        nodeRegistry: config.contractAddresses?.nodeRegistry,
+        proofSystem: config.contractAddresses?.proofSystem,
+        hostEarnings: config.contractAddresses?.hostEarnings,
+        usdcToken: config.contractAddresses?.usdcToken,
+        // Optional addresses
+        fabToken: config.contractAddresses?.fabToken,
+        modelRegistry: config.contractAddresses?.modelRegistry
       },
-      
+
       s5Config: {
-        portalUrl: config.s5Config?.portalUrl || process.env.NEXT_PUBLIC_S5_PORTAL_URL,
+        portalUrl: config.s5Config?.portalUrl,
         ...config.s5Config
       },
-      
+
       bridgeConfig: {
-        url: config.bridgeConfig?.url || process.env.NEXT_PUBLIC_BRIDGE_URL || 'http://localhost:3000',
+        url: config.bridgeConfig?.url || 'http://localhost:3000',
         autoConnect: config.bridgeConfig?.autoConnect ?? false
       },
-      
+
       smartWallet: config.smartWallet
     };
-    
-    // Validate required fields
-    if (!defaultConfig.contractAddresses?.jobMarketplace) {
-      throw new SDKError(
-        'JobMarketplace contract address not configured',
-        'CONFIG_MISSING_CONTRACT'
-      );
+
+    // Validate all required contract addresses
+    validateRequiredAddresses(defaultConfig.contractAddresses as any);
+
+    // Validate optional addresses if provided
+    if (defaultConfig.contractAddresses?.fabToken) {
+      validateOptionalAddress(defaultConfig.contractAddresses.fabToken, 'fabToken');
     }
-    
-    return { ...defaultConfig, ...config };
+    if (defaultConfig.contractAddresses?.modelRegistry) {
+      validateOptionalAddress(defaultConfig.contractAddresses.modelRegistry, 'modelRegistry');
+    }
+
+    return defaultConfig;
   }
   
   /**
@@ -635,12 +648,19 @@ export class FabstirSDKCore {
   }
   
   /**
+   * Get chain ID
+   */
+  getChainId(): number {
+    return this.config.chainId || 84532;
+  }
+
+  /**
    * Get SDK version
    */
   getVersion(): string {
     return '1.0.0-browser';
   }
-  
+
   /**
    * Get SDK environment
    */
