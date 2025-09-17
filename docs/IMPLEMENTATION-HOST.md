@@ -870,6 +870,103 @@ Deliver a production-ready CLI tool that:
 - TEST_USER_2 can successfully unregister and recover 2000 FAB ✅
 - Command works with both wallet file and --private-key flag ✅
 
+### Sub-phase 8.3: Host Information Command ✅
+
+**Goal**: Implement read-only info command to display complete host information
+
+#### Tasks
+- [x] Write tests for info command structure
+- [x] Write tests for data formatting and display
+- [x] Create info command implementation
+- [x] Add method to retrieve complete node info from chain
+- [x] Format and display metadata JSON properly
+- [x] Show all host details (stake, models, URL, status)
+- [x] Test with registered and unregistered hosts
+- [x] Add help documentation
+
+**Test Files:**
+- `tests/commands/info.test.ts` (max 200 lines) - Info command tests
+
+**Implementation Files:**
+- `src/commands/info.ts` (max 250 lines) - Info command implementation
+- `src/index.ts` (update) - Wire up info command
+
+**Success Criteria:**
+- Command displays all host information clearly ✅
+- Metadata JSON is properly formatted ✅
+- Shows API URL, models, stake amount ✅
+- Handles unregistered hosts gracefully ✅
+- Works with both wallet file and --private-key flag ✅
+
+### Sub-phase 8.4: Update Commands
+
+**Goal**: Implement commands to update host configuration without re-registering
+
+#### Tasks
+- [ ] Write tests for update-url command
+- [ ] Write tests for update-models command
+- [ ] Write tests for add-stake command
+- [ ] Add updateMetadata method to HostManagerEnhanced
+- [ ] Add addStake method to HostManagerEnhanced
+- [ ] Create update-url command implementation
+- [ ] Create update-models command implementation
+- [ ] Create add-stake command implementation
+- [ ] Test all update operations with real contracts
+- [ ] Verify gas costs and optimization
+
+**Test Files:**
+- `tests/commands/update-url.test.ts` (max 200 lines) - Update URL tests
+- `tests/commands/update-models.test.ts` (max 200 lines) - Update models tests
+- `tests/commands/add-stake.test.ts` (max 200 lines) - Add stake tests
+- `tests/managers/host-manager-updates.test.ts` (max 250 lines) - SDK method tests
+
+**Implementation Files:**
+- `src/commands/update-url.ts` (max 200 lines) - Update URL command
+- `src/commands/update-models.ts` (max 250 lines) - Update models command
+- `src/commands/add-stake.ts` (max 200 lines) - Add stake command
+- `packages/sdk-core/src/managers/HostManagerEnhanced.ts` (update) - Add new methods
+- `src/index.ts` (update) - Wire up new commands
+
+**Success Criteria:**
+- update-url changes API endpoint on-chain
+- update-models updates supported model list
+- add-stake increases staked amount
+- All commands emit proper events
+- Transaction confirmations work correctly
+- Error handling for insufficient funds/gas
+
+### Sub-phase 8.5: Update Metadata Command
+
+**Goal**: Implement metadata update functionality for host details
+
+#### Tasks
+- [ ] Write tests for update-metadata command
+- [ ] Write tests for metadata validation
+- [ ] Create metadata builder/validator utility
+- [ ] Create update-metadata command with interactive mode
+- [ ] Add JSON file input support
+- [ ] Implement metadata merge strategies
+- [ ] Test metadata size limits on-chain
+- [ ] Add metadata templates
+
+**Test Files:**
+- `tests/commands/update-metadata.test.ts` (max 250 lines) - Metadata update tests
+- `tests/utils/metadata-validator.test.ts` (max 150 lines) - Validation tests
+
+**Implementation Files:**
+- `src/commands/update-metadata.ts` (max 300 lines) - Update metadata command
+- `src/utils/metadata-validator.ts` (max 150 lines) - Metadata validation
+- `src/templates/metadata-templates.ts` (max 100 lines) - Example templates
+- `src/index.ts` (update) - Wire up command
+
+**Success Criteria:**
+- Metadata updates successfully on-chain
+- JSON validation prevents invalid metadata
+- Interactive mode guides users
+- File input works for complex metadata
+- Templates help new hosts
+- Size limits are enforced
+
 ---
 
 ## Global Success Metrics
