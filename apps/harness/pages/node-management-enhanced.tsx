@@ -166,6 +166,7 @@ const NodeManagementEnhanced: React.FC = () => {
         contractAddresses: {
           jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE,
           nodeRegistry: nodeRegistryAddress,
+          proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM, // REQUIRED - was missing!
           fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN,
           hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS,
           usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN,

@@ -603,16 +603,57 @@ export class HostManager implements IHostManager {
   /**
    * Record earnings for a host
    */
-  async recordEarnings(hostAddress: string, amount: bigint): Promise<string> {
+  async recordEarnings(sessionId: string, hostAddress: string, amount: bigint): Promise<string> {
     if (!this.initialized || !this.signer) {
       throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
     }
 
-    // For now, just log the earnings as this would require a specific contract method
-    console.log(`Recording earnings for host ${hostAddress}: ${amount}`);
-    
-    // Return a mock transaction hash
-    return `0x${Math.random().toString(16).substring(2)}${Math.random().toString(16).substring(2)}`;
+    // Validate inputs
+    if (!sessionId || sessionId.trim() === '') {
+      throw new SDKError('Invalid session ID', 'INVALID_SESSION_ID');
+    }
+
+    if (!ethers.isAddress(hostAddress)) {
+      throw new SDKError('Invalid host address', 'INVALID_ADDRESS');
+    }
+
+    if (amount <= 0n) {
+      throw new SDKError('Amount must be greater than zero', 'INVALID_AMOUNT');
+    }
+
+    if (!this.hostEarningsAddress) {
+      throw new SDKError('Host earnings contract not configured', 'NO_EARNINGS_CONTRACT');
+    }
+
+    try {
+      const hostEarningsABI = await this.contractManager.getContractABI('hostEarnings');
+      const earnings = new ethers.Contract(
+        this.hostEarningsAddress,
+        hostEarningsABI,
+        this.signer
+      );
+
+      // Get USDC token address (assuming USDC for now, could be made configurable)
+      const usdcAddress = await this.contractManager.getContractAddress('usdcToken');
+
+      // Call creditEarnings on the contract
+      const tx = await earnings['creditEarnings'](hostAddress, amount, usdcAddress);
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+      if (!receipt || receipt.status !== 1) {
+        throw new SDKError('Recording earnings failed', 'RECORD_EARNINGS_FAILED');
+      }
+
+      return receipt.hash;
+    } catch (error: any) {
+      if (error instanceof SDKError) {
+        throw error;
+      }
+      throw new SDKError(
+        `Failed to record earnings: ${error.message}`,
+        'RECORD_EARNINGS_ERROR'
+      );
+    }
   }
 
   /**

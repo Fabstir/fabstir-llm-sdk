@@ -1,7 +1,7 @@
 # Host CLI SDK Integration Context
 
-## Last Updated: 2024-01-16
-## Current Status: Phase 7 (Testing and Documentation) COMPLETE
+## Last Updated: 2024-01-17
+## Current Status: Phase 8 (Host CLI Enhancements) - Sub-phase 8.6 COMPLETE
 
 ## Project Overview
 The host-cli is a TypeScript CLI tool for Fabstir LLM marketplace hosts to manage their node operations, including registration, staking, earnings, and process management.
@@ -147,13 +147,146 @@ USDCToken: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
 - Host: 0x4594F755F593B517Bb3194F4DeC20C48a3f04504 (5000+ FAB)
 - User: 0x45E3D7c678B5Cc5978766348d3AaE364EB5194Ba
 
-## Next Steps (Phase 8)
+## Phase 8: Host CLI Enhancements (NEW PHASE)
 
-### Potential Sub-phases:
-1. **Performance Optimization**
-   - Connection pooling
-   - Caching layer
-   - Batch operations
+### Sub-phase 8.1: Wallet Management Commands ✅
+- Import/export wallet functionality
+- Wallet balance checking
+- Key management with keytar
+- Recovery seed phrase support
+
+### Sub-phase 8.2: Unregister Command ✅
+- Full host unregistration with stake return
+- All tests passing with real contracts
+- Proper cleanup of node data
+
+### Sub-phase 8.3: Host Information Command ✅
+- Display complete host details from blockchain
+- Show registration status, stake, models, metadata
+- ETH and FAB balance display
+- JSON output format support
+
+### Sub-phase 8.4: Update Commands ✅
+- **update-url**: Change host API endpoint on-chain
+- **update-models**: Update supported models list
+- **add-stake**: Add additional FAB stake
+- All tested on Base Sepolia with confirmed transactions
+
+### Sub-phase 8.5: Update Metadata Command ✅
+- Comprehensive metadata management
+- JSON file input, inline JSON, templates, interactive mode
+- Validation with size limits and required fields
+- Sanitization of sensitive data
+- Merge strategies for preserving existing data
+- 5 templates: basic, professional, minimal, performance, budget
+
+### Sub-phase 8.6: SDK Configuration Validation ✅
+**BREAKING CHANGE: SDK requires explicit configuration (no env fallbacks)**
+- Removed ALL process.env fallbacks from FabstirSDKCore
+- Added comprehensive address validation utilities
+- All 5 required contracts must be provided explicitly
+- Clear error messages for missing/invalid configuration
+- 31 tests for validation logic
+
+### Sub-phase 8.7: Fix Mock Returns and Fallbacks ✅
+- Implemented HostManager.recordEarnings with HostEarnings contract
+- Fixed FabstirSDKCompat.findHost to query NodeRegistry for active hosts
+- Removed hardcoded TEST_USER_1 addresses from SessionJobManager
+- Replaced mock-peer-id with actual client ID generation
+- All mock returns now use real contract calls or throw proper errors
+
+### Sub-phase 8.8: Complete S5 Integration (PLANNED)
+- Finish S5 seed phrase derivation
+- Complete integration with S5 portal
+- Remove TODO comments
+
+## Critical SDK Issues Found & Fixed
+
+### 1. Configuration Validation (Sub-phase 8.6) ✅
+**Problem**: SDK silently fell back to process.env variables, causing "works on my machine" bugs
+**Solution**: Now requires explicit configuration, validates all addresses, clear errors
+
+### 2. Mock Returns (Sub-phase 8.7) ✅
+**Issues Fixed**:
+- `HostManager.recordEarnings()` now calls creditEarnings on HostEarnings contract
+- `FabstirSDKCompat.findHost()` queries NodeRegistry for active hosts with stake
+- `FabstirSDKCompat.createNode()` returns client ID from authenticated address
+- `SessionJobManager.ts` hardcoded TEST_USER_1 debugging removed
+
+### 3. Harness Page Status
+**Fixed**:
+- `node-management-enhanced.tsx` - Added missing `proofSystem` ✅
+
+**Already Correct**:
+- `chat-context-demo.tsx` - Passes all env vars explicitly ✅
+- `base-usdc-mvp-flow-sdk.test.tsx` - Passes all env vars explicitly ✅
+- `model-management.tsx` - Doesn't use SDK ✅
+
+## Key Learnings & Patterns
+
+### SDK Configuration Pattern (MUST FOLLOW)
+```typescript
+// CORRECT - Explicit configuration
+const sdk = new FabstirSDKCore({
+  rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA,
+  contractAddresses: {
+    jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE,
+    nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY,
+    proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM, // REQUIRED
+    hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS,
+    usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN,
+    fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN, // Optional
+    modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY // Optional
+  }
+});
+```
+
+### Required vs Optional Contracts
+**Required (SDK will throw error if missing)**:
+- jobMarketplace
+- nodeRegistry
+- proofSystem
+- hostEarnings
+- usdcToken
+
+**Optional**:
+- fabToken
+- modelRegistry
+
+## Commands Added in Phase 8
+
+### New Commands (all functional and tested):
+```bash
+# Wallet management
+fabstir-host wallet import <private-key>
+fabstir-host wallet export
+fabstir-host wallet balance
+
+# Host information
+fabstir-host info [--json]
+
+# Unregister from network
+fabstir-host unregister
+
+# Update commands
+fabstir-host update-url <new-url>
+fabstir-host update-models [models...] [-f file.json]
+fabstir-host add-stake <amount>
+fabstir-host update-metadata [-f file.json] [-j json] [-i interactive] [-t template]
+```
+
+### Confirmed Transactions on Base Sepolia
+- Wallet management: ✅ Multiple successful imports/exports
+- Unregister: ✅ tx 0xf6ad5cbff96c26c1bfbbee893ea0fe95ba979abc63e20e96f1f87f96aebc0e8d
+- Update URL: ✅ tx 0xca045a6fdf530a6d6b3188725872019ac25f3f2320b6d11be12beb30c6030283
+- Add Stake: ✅ tx 0xccc3babc93f310a52c550dc48d2cb7ca00dbe11811db9c30a4acc5d6e9e96379
+- Update Models: ✅ tx 0xd0550ba48d313e7b2a4465a53391de516213de49b100c552153804359339a0b1
+- Update Metadata: ✅ Multiple successful updates with templates and merge
+
+## Next Steps
+1. ✅ **COMPLETE: Fixed `node-management-enhanced.tsx`** - Added missing proofSystem
+2. ✅ **COMPLETE: Implemented Sub-phase 8.7** - Removed all mock returns and fallbacks
+3. **TODO: Complete Sub-phase 8.8** - Finish S5 integration
 
 2. **Multi-Model Support**
    - Model routing

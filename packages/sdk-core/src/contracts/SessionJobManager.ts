@@ -82,18 +82,7 @@ export class SessionJobManager {
     // Check USDC balance
     const userAddress = await this.signer.getAddress();
     console.log(`SessionJobManager: Checking balance for address: ${userAddress}`);
-    console.log(`SessionJobManager: Expected TEST_USER_1: 0xE93150462F96d60901f5132a5f396e3eF4706269`);
     console.log(`SessionJobManager: Signer type: ${this.signer.constructor.name}`);
-
-    // Debug: Check if this might be a sub-account
-    if (userAddress.toLowerCase().startsWith('0x999')) {
-      console.log(`SessionJobManager: This appears to be a sub-account (starts with 0x999)`);
-    }
-
-    // Check if this is the main user account
-    if (userAddress.toLowerCase() === '0xe93150462f96d60901f5132a5f396e3ef4706269') {
-      console.log(`SessionJobManager: WARNING - Using TEST_USER_1 address, not sub-account!`);
-    }
 
     const balance = await usdcToken.balanceOf(userAddress) as bigint;
     console.log(`SessionJobManager: Balance for ${userAddress}: ${ethers.formatUnits(balance, 6)} USDC`);

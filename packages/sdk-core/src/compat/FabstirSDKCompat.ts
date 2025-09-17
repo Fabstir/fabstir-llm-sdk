@@ -144,7 +144,13 @@ export class FabstirSDK {
         }
         const p2p = bridge.getP2PClient();
         await p2p.connect(bridge['config'].bridgeUrl);
-        return 'mock-peer-id';
+        // Return actual client ID from authenticated address
+        const signer = this.core.getSigner();
+        if (signer) {
+          const address = await signer.getAddress();
+          return `client-${address.slice(2, 10)}`; // Use first 8 chars of address
+        }
+        throw new SDKError('Not authenticated', 'NOT_AUTHENTICATED');
       },
       
       discoverPeers: async () => {
@@ -160,15 +166,53 @@ export class FabstirSDK {
         return result.nodes;
       },
       
-      findHost: async (criteria: any) => {
-        const bridge = this.core.getBridgeClient();
-        if (!bridge) {
-          // Fallback to mock
-          return '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7';
+      findHost: async (criteria?: any) => {
+        // Query NodeRegistry contract for active hosts
+        try {
+          const provider = this.core.getProvider();
+          const contractAddresses = (this.core as any).contractAddresses;
+
+          if (!contractAddresses?.nodeRegistry) {
+            throw new SDKError('NodeRegistry contract address not configured', 'NO_NODE_REGISTRY');
+          }
+
+          // Import ethers and ABI
+          const { ethers } = await import('ethers');
+          const nodeRegistryABI = await import('../contracts/abis/NodeRegistry-CLIENT-ABI.json');
+
+          // Create contract instance
+          const nodeRegistry = new ethers.Contract(
+            contractAddresses.nodeRegistry,
+            nodeRegistryABI.default || nodeRegistryABI,
+            provider
+          );
+
+          // Get all hosts
+          const hosts = await nodeRegistry['getAllHosts']();
+
+          // Filter for active hosts with stake
+          const activeHosts = hosts.filter((host: any) => {
+            return host.isActive && BigInt(host.stake.toString()) > 0n;
+          });
+
+          if (activeHosts.length === 0) {
+            throw new SDKError('No active hosts available', 'NO_ACTIVE_HOSTS');
+          }
+
+          // Return random active host
+          const randomIndex = Math.floor(Math.random() * activeHosts.length);
+          return activeHosts[randomIndex].hostAddress;
+        } catch (error: any) {
+          // If it's already an SDKError, re-throw it
+          if (error instanceof SDKError) {
+            throw error;
+          }
+          // Otherwise wrap it
+          throw new SDKError(
+            `Failed to find host: ${error.message}`,
+            'FIND_HOST_ERROR'
+          );
         }
-        const p2p = bridge.getP2PClient();
-        const result = await p2p.discoverNodes(criteria);
-        return result.nodes[0]?.address || '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7';
       }
     };
   }

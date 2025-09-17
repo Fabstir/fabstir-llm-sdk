@@ -1001,18 +1001,18 @@ Deliver a production-ready CLI tool that:
 - Zero address detection
 - Invalid address format detection
 
-### Sub-phase 8.7: Fix Mock Returns and Fallbacks
+### Sub-phase 8.7: Fix Mock Returns and Fallbacks ✅
 
 **Goal**: Replace mock implementations with real functionality or proper errors
 
 #### Tasks
-- [ ] Write tests for HostManager.recordEarnings
-- [ ] Write tests for FabstirSDKCompat.findHost
-- [ ] Implement recordEarnings with HostEarnings contract
-- [ ] Implement findHost to query NodeRegistry for active hosts
-- [ ] Remove getPeerId or rename to getClientId
-- [ ] Remove hardcoded TEST_USER_1 addresses
-- [ ] Test all error cases
+- [x] Write tests for HostManager.recordEarnings
+- [x] Write tests for FabstirSDKCompat.findHost
+- [x] Implement recordEarnings with HostEarnings contract
+- [x] Implement findHost to query NodeRegistry for active hosts
+- [x] Remove getPeerId or rename to getClientId
+- [x] Remove hardcoded TEST_USER_1 addresses
+- [x] Test all error cases
 
 **Test Files:**
 - `tests/managers/host-manager-earnings.test.ts` (max 200 lines) - Earnings tests
