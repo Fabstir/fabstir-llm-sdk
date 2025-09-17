@@ -939,17 +939,19 @@ Deliver a production-ready CLI tool that:
 
 ### Sub-phase 8.5: Update Metadata Command
 
+**Status:** ✅ Completed
+
 **Goal**: Implement metadata update functionality for host details
 
 #### Tasks
-- [ ] Write tests for update-metadata command
-- [ ] Write tests for metadata validation
-- [ ] Create metadata builder/validator utility
-- [ ] Create update-metadata command with interactive mode
-- [ ] Add JSON file input support
-- [ ] Implement metadata merge strategies
-- [ ] Test metadata size limits on-chain
-- [ ] Add metadata templates
+- [x] Write tests for update-metadata command
+- [x] Write tests for metadata validation
+- [x] Create metadata builder/validator utility
+- [x] Create update-metadata command with interactive mode
+- [x] Add JSON file input support
+- [x] Implement metadata merge strategies
+- [x] Test metadata size limits on-chain
+- [x] Add metadata templates
 
 **Test Files:**
 - `tests/commands/update-metadata.test.ts` (max 250 lines) - Metadata update tests
