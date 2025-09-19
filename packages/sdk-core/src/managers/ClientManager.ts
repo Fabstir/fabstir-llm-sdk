@@ -2,7 +2,7 @@
  * ClientManager - Handles client-side model operations and host selection
  */
 
-import { ethers, BigNumber } from 'ethers';
+import { ethers } from 'ethers';
 import {
   HostInfo,
   ModelSpec,
@@ -115,9 +115,9 @@ export class ClientManager {
       if (costDiff !== 0) return costDiff;
 
       // Compare stakes if costs are equal
-      const stakeA = BigNumber.from(a.stake);
-      const stakeB = BigNumber.from(b.stake);
-      return stakeB.gt(stakeA) ? 1 : -1;
+      const stakeA = BigInt(a.stake);
+      const stakeB = BigInt(b.stake);
+      return stakeB > stakeA ? 1 : -1;
     });
 
     return suitableHosts[0];
@@ -347,8 +347,8 @@ export class ClientManager {
       }
 
       if (requirements.minStake) {
-        const minStake = BigNumber.from(requirements.minStake);
-        if (BigNumber.from(host.stake).lt(minStake)) {
+        const minStake = BigInt(requirements.minStake);
+        if (BigInt(host.stake) < minStake) {
           return false;
         }
       }
