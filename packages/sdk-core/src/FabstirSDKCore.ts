@@ -26,6 +26,7 @@ import {
 import { HostManagerEnhanced } from './managers/HostManagerEnhanced';
 import { ModelManager } from './managers/ModelManager';
 import { TreasuryManager } from './managers/TreasuryManager';
+import { ClientManager } from './managers/ClientManager';
 import { ContractManager, ContractAddresses } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 import { SDKConfig, SDKError } from './types';
@@ -83,6 +84,7 @@ export class FabstirSDKCore {
   private sessionManager?: ISessionManager;
   private hostManager?: IHostManager;
   private modelManager?: ModelManager;
+  private clientManager?: ClientManager;
   private treasuryManager?: ITreasuryManager;
   
   private authenticated = false;
@@ -470,7 +472,18 @@ export class FabstirSDKCore {
       console.log('Initializing HostManagerEnhanced...');
       await (this.hostManager as any).initialize();
       console.log('HostManagerEnhanced initialized');
-      
+
+      // Create ClientManager after ModelManager and HostManagerEnhanced are available
+      console.log('Creating ClientManager...');
+      this.clientManager = new ClientManager(
+        this.modelManager,
+        this.hostManager as HostManagerEnhanced,
+        this.contractManager!
+      );
+      console.log('Initializing ClientManager...');
+      await this.clientManager.initialize(this.signer);
+      console.log('ClientManager initialized');
+
       console.log('Initializing TreasuryManager...');
       await (this.treasuryManager as any).initialize(this.signer);
       console.log('TreasuryManager initialized');
@@ -563,7 +576,29 @@ export class FabstirSDKCore {
     this.ensureAuthenticated();
     return this.treasuryManager!;
   }
-  
+
+  /**
+   * Get model manager
+   */
+  getModelManager(): ModelManager {
+    this.ensureAuthenticated();
+    if (!this.modelManager) {
+      throw new SDKError('ModelManager not initialized', 'MANAGER_NOT_INITIALIZED');
+    }
+    return this.modelManager;
+  }
+
+  /**
+   * Get client manager
+   */
+  getClientManager(): ClientManager {
+    this.ensureAuthenticated();
+    if (!this.clientManager) {
+      throw new SDKError('ClientManager not initialized', 'MANAGER_NOT_INITIALIZED');
+    }
+    return this.clientManager;
+  }
+
   /**
    * Get bridge client for P2P and proof operations
    */
@@ -638,6 +673,8 @@ export class FabstirSDKCore {
     this.storageManager = undefined;
     this.sessionManager = undefined;
     this.hostManager = undefined;
+    this.modelManager = undefined;
+    this.clientManager = undefined;
     this.treasuryManager = undefined;
     
     // Clear auth state
