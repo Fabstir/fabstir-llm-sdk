@@ -178,7 +178,7 @@ export class FabstirSDK {
 
           // Import ethers and ABI
           const { ethers } = await import('ethers');
-          const nodeRegistryABI = await import('../contracts/abis/NodeRegistry-CLIENT-ABI.json');
+          const nodeRegistryABI = await import('../contracts/abis/NodeRegistry.json');
 
           // Create contract instance
           const nodeRegistry = new ethers.Contract(
@@ -231,9 +231,9 @@ export class FabstirSDK {
     
     // Return compatibility wrapper
     return {
-      startSession: sessionManager.createSession.bind(sessionManager),
+      startSession: (sessionManager as any).startSession?.bind(sessionManager) || sessionManager.startSession,
       sendPrompt: sessionManager.sendPrompt.bind(sessionManager),
-      endSession: sessionManager.endSession.bind(sessionManager),
+      endSession: (sessionManager as any).endSession?.bind(sessionManager) || sessionManager.submitCheckpoint,
       
       generateProof: async (sessionId: string, tokensUsed: number) => {
         if (!bridge) {

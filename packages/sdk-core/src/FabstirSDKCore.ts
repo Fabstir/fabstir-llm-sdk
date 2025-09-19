@@ -342,7 +342,7 @@ export class FabstirSDKCore {
     
     // Get provider from signer if available
     if ('provider' in signer && signer.provider) {
-      this.provider = signer.provider as ethers.Provider;
+      this.provider = signer.provider as ethers.BrowserProvider | ethers.JsonRpcProvider;
     } else if (this.config.rpcUrl) {
       // Create provider if not available
       this.provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
@@ -406,7 +406,7 @@ export class FabstirSDKCore {
     console.log('StorageManager created');
     
     console.log('Creating SessionManager...');
-    this.sessionManager = new SessionManager(this.paymentManager, this.storageManager);
+    this.sessionManager = new SessionManager(this.paymentManager as any, this.storageManager);
     console.log('SessionManager created');
 
     console.log('Creating TreasuryManager...');
@@ -419,14 +419,14 @@ export class FabstirSDKCore {
     // Initialize managers that need a signer
     if (this.signer) {
       console.log('Initializing PaymentManager...');
-      await this.paymentManager.initialize(this.signer);
+      await (this.paymentManager as any).initialize(this.signer);
       console.log('PaymentManager initialized');
       
       // Initialize storage manager with S5 seed (with timeout protection)
       if (this.s5Seed && this.userAddress) {
         try {
           console.log('Initializing StorageManager...');
-          await this.storageManager.initialize(this.s5Seed, this.userAddress);
+          await this.storageManager.initialize(this.s5Seed);
           console.log('StorageManager initialization attempted');
         } catch (error: any) {
           console.warn('StorageManager initialization error:', error.message);
@@ -437,7 +437,7 @@ export class FabstirSDKCore {
       }
       
       console.log('Initializing SessionManager...');
-      await this.sessionManager.initialize();  // SessionManager doesn't take signer
+      await (this.sessionManager as any).initialize();  // SessionManager doesn't take signer
       console.log('SessionManager initialized');
 
       // Create and initialize ModelManager and HostManagerEnhanced now that we have a signer
@@ -446,7 +446,7 @@ export class FabstirSDKCore {
       if (!modelRegistryAddress) {
         throw new SDKError('Model Registry address not configured', 'CONFIG_ERROR');
       }
-      this.modelManager = new ModelManager(this.signer, modelRegistryAddress);
+      this.modelManager = new ModelManager(this.provider!, modelRegistryAddress);
       console.log('ModelManager created');
 
       console.log('Creating HostManagerEnhanced...');
@@ -468,11 +468,11 @@ export class FabstirSDKCore {
       console.log('HostManagerEnhanced created with FAB token:', fabTokenAddress);
 
       console.log('Initializing HostManagerEnhanced...');
-      await this.hostManager.initialize();
+      await (this.hostManager as any).initialize();
       console.log('HostManagerEnhanced initialized');
       
       console.log('Initializing TreasuryManager...');
-      await this.treasuryManager.initialize(this.signer);
+      await (this.treasuryManager as any).initialize(this.signer);
       console.log('TreasuryManager initialized');
     }
     

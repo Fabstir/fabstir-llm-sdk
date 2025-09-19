@@ -79,22 +79,18 @@ import { FabstirSDKCore } from '@fabstir/sdk-core';
 4. Improved session management with streaming
 5. USDC payment flows with Base Account Kit
 
-### ⚠️ Breaking Changes (Latest)
+### ⚠️ Breaking Changes (Latest - Phase 8 Complete)
 
-#### SessionConfig Interface Change
-The `SessionConfig` interface has been updated to use more appropriate types:
+#### 1. No Environment Variable Fallbacks
+**SDK now requires ALL contract addresses to be provided explicitly:**
+- No automatic fallback to process.env variables
+- All 5 required contracts MUST be provided in configuration
+- Clear error messages for missing/invalid configuration
 
-**Old Format (DEPRECATED):**
-```typescript
-interface SessionConfig {
-  depositAmount: bigint;  // e.g., 2000000n for $2
-  pricePerToken: bigint;
-  proofInterval: bigint;
-  duration: bigint;
-}
-```
+#### 2. SessionConfig Interface
+The `SessionConfig` interface uses string for amounts and numbers for other fields:
 
-**New Format (CURRENT):**
+**Current Format:**
 ```typescript
 interface SessionConfig {
   depositAmount: string;  // e.g., "1.0" for $1 USDC
@@ -103,6 +99,12 @@ interface SessionConfig {
   duration: number;       // e.g., 3600
 }
 ```
+
+#### 3. S5 Seed Generation
+- Proper deterministic 15-word seed phrases (13 seed + 2 checksum)
+- Generated from wallet signature
+- Cached in localStorage for performance
+- No more hardcoded test phrases
 
 **Migration Example:**
 ```typescript
@@ -142,33 +144,52 @@ new FabstirSDKCore(config?: FabstirSDKCoreConfig)
 **Configuration:**
 ```typescript
 interface FabstirSDKCoreConfig {
-  rpcUrl?: string;                    // Blockchain RPC URL
+  rpcUrl: string;                     // REQUIRED: Blockchain RPC URL
   chainId?: number;                   // Chain ID (default: Base Sepolia)
-  contractAddresses?: {
-    jobMarketplace?: string;
-    nodeRegistry?: string;
-    proofSystem?: string;
-    hostEarnings?: string;
-    fabToken?: string;
-    usdcToken?: string;
-    modelRegistry?: string;
+  contractAddresses: {                // REQUIRED: All 5 core contracts
+    jobMarketplace: string;           // REQUIRED
+    nodeRegistry: string;             // REQUIRED
+    proofSystem: string;              // REQUIRED
+    hostEarnings: string;             // REQUIRED
+    usdcToken: string;                // REQUIRED
+    fabToken?: string;                // Optional
+    modelRegistry?: string;           // Optional
   };
-  s5Config?: {
+  s5Config?: {                        // Optional: S5 storage config
     portalUrl?: string;
-    seedPhrase?: string;
+    seedPhrase?: string;              // Will be auto-generated if not provided
   };
 }
 ```
 
-**Example:**
+**⚠️ IMPORTANT:** The SDK will throw clear errors if any required contract addresses are missing.
+
+**Example (REQUIRED Configuration):**
 ```typescript
 const sdk = new FabstirSDKCore({
-  rpcUrl: process.env.RPC_URL_BASE_SEPOLIA,
+  rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!,
   contractAddresses: {
-    jobMarketplace: '0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944',
-    usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+    // ALL 5 REQUIRED - SDK will throw error if any missing
+    jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!,
+    nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY!,
+    proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM!,
+    hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS!,
+    usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
+    // Optional contracts
+    fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN,
+    modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY
   }
 });
+```
+
+**Current Contract Addresses (Base Sepolia):**
+```
+JobMarketplace: 0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944
+NodeRegistry: 0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218
+ProofSystem: 0x2ACcc60893872A499700908889B38C5420CBcFD1
+HostEarnings: 0x908962e8c6CE72610021586f85ebDE09aAc97776
+USDCToken: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
+FABToken: 0xC78949004B4EB6dEf2D66e49Cd81231472612D62
 ```
 
 ## Authentication
@@ -239,7 +260,7 @@ const subAccountSigner = {
 };
 
 // Authenticate SDK with sub-account signer
-await sdk.authenticate('signer', { signer: subAccountSigner });
+await sdk.authenticate(subAccountSigner);
 ```
 
 ### Base Account Kit Architecture
@@ -301,12 +322,12 @@ const { sessionId, jobId } = await sessionManager.startSession(
   '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced', // Model hash
   '0x4594F755F593B517Bb3194F4DeC20C48a3f04504', // Provider address
   {
-    depositAmount: "1.0",    // $1 USDC (minimum per session)
-    pricePerToken: 200,      // 0.0002 USDC per token
-    duration: 3600,          // 1 hour
+    depositAmount: "1.0",    // $1 USDC minimum per session
+    pricePerToken: 200,      // 0.0002 USDC per token (0.02 cents)
+    duration: 3600,          // 1 hour session timeout
     proofInterval: 100       // Checkpoint every 100 tokens
   },
-  'http://localhost:8080'   // Optional: Host endpoint
+  'http://localhost:8080'   // Optional: Host WebSocket endpoint
 );
 ```
 
@@ -485,6 +506,12 @@ Gets USDC balance for an address.
 
 ```typescript
 async getUSDCBalance(address: string): Promise<string>
+```
+
+**Example:**
+```typescript
+const balance = await paymentManager.getUSDCBalance(userAddress);
+console.log(`USDC Balance: $${balance}`);
 ```
 
 ### fundSubAccount
@@ -770,13 +797,18 @@ async withdrawEarnings(tokenAddress: string): Promise<string>
 
 ## Storage Management
 
-Handles S5 decentralized storage operations.
+Handles S5 decentralized storage operations with deterministic seed generation.
 
 ### Get StorageManager
 
 ```typescript
 const storageManager = await sdk.getStorageManager();
 ```
+
+**Note:** S5 seed phrases are now automatically generated deterministically from your wallet signature. The SDK:
+- Generates a unique 15-word seed phrase per wallet
+- Caches the seed in localStorage for performance
+- No longer requires manual seed phrase configuration
 
 ### storeConversation
 
@@ -1269,12 +1301,16 @@ import { createBaseAccountSDK } from "@base-org/account";
 import { ethers } from 'ethers';
 
 async function chatWithContext() {
-  // 1. Initialize SDK
+  // 1. Initialize SDK with ALL required contracts
   const sdk = new FabstirSDKCore({
-    rpcUrl: process.env.RPC_URL_BASE_SEPOLIA,
+    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!,
     contractAddresses: {
-      jobMarketplace: '0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944',
-      usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+      // ALL 5 REQUIRED
+      jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!,
+      nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY!,
+      proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM!,
+      hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS!,
+      usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!
     }
   });
 
@@ -1309,10 +1345,10 @@ async function chatWithContext() {
     '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced',
     '0x4594F755F593B517Bb3194F4DeC20C48a3f04504',
     {
-      depositAmount: BigInt(2000000), // $2 USDC
-      pricePerToken: BigInt(200),
-      duration: BigInt(3600),
-      proofInterval: BigInt(100)
+      depositAmount: "1.0",        // $1 USDC minimum deposit
+      pricePerToken: 200,          // 0.0002 USDC per token
+      duration: 3600,              // 1 hour timeout
+      proofInterval: 100           // Checkpoint every 100 tokens
     }
   );
 
@@ -1609,7 +1645,7 @@ export const BASE_SEPOLIA_CHAIN_ID = 84532;
 export const BASE_SEPOLIA_CHAIN_HEX = "0x14a34";
 
 // Payment Configuration
-export const MIN_USDC_DEPOSIT = "2";           // $2 minimum
+export const MIN_USDC_DEPOSIT = "1";           // $1 minimum (reduced from $2)
 export const DEFAULT_PRICE_PER_TOKEN = 200;    // 200 units per token
 export const DEFAULT_SESSION_DURATION = 3600;  // 1 hour
 export const DEFAULT_PROOF_INTERVAL = 100;     // 100 seconds
@@ -1622,7 +1658,7 @@ export const PROOF_VERIFICATION_GAS = 200000;  // Gas for proof verification
 export const TOKEN_GENERATION_RATE = 10;       // 10 tokens per second
 export const TOKEN_BURST_MULTIPLIER = 2;       // 2x burst allowed
 
-// Payment Distribution
+// Payment Distribution (from smart contracts)
 export const HOST_PAYMENT_PERCENTAGE = 90;     // 90% to host
 export const TREASURY_FEE_PERCENTAGE = 10;     // 10% to treasury
 

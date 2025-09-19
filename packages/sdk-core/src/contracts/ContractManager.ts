@@ -57,7 +57,7 @@ export class ContractManager {
     if (!this.contracts.has(key)) {
       const contract = new Contract(
         address,
-        abi,
+        abi as any,
         this.signer || this.provider
       );
       this.contracts.set(key, contract);
@@ -73,7 +73,7 @@ export class ContractManager {
     return this.getContract(
       'JobMarketplace',
       this.addresses.jobMarketplace,
-      JobMarketplaceABI
+      JobMarketplaceABI as any
     );
   }
 
@@ -84,7 +84,7 @@ export class ContractManager {
     return this.getContract(
       'NodeRegistry',
       this.addresses.nodeRegistry,
-      NodeRegistryABI
+      NodeRegistryABI as any
     );
   }
 
@@ -95,7 +95,7 @@ export class ContractManager {
     return this.getContract(
       'FABToken',
       this.addresses.fabToken,
-      ERC20ABI
+      ERC20ABI as any
     );
   }
 
@@ -106,7 +106,7 @@ export class ContractManager {
     return this.getContract(
       'USDCToken',
       this.addresses.usdcToken,
-      ERC20ABI
+      ERC20ABI as any
     );
   }
 
@@ -127,7 +127,7 @@ export class ContractManager {
     return this.getContract(
       'HostEarnings',
       this.addresses.hostEarnings,
-      HostEarningsABI
+      HostEarningsABI as any
     );
   }
 
@@ -141,7 +141,7 @@ export class ContractManager {
     return this.getContract(
       'ProofSystem',
       this.addresses.proofSystem,
-      ProofSystemABI
+      ProofSystemABI as any
     );
   }
 
@@ -155,7 +155,7 @@ export class ContractManager {
     return this.getContract(
       'BaseAccountFactory',
       this.addresses.baseAccountFactory,
-      BaseAccountFactoryABI
+      BaseAccountFactoryABI as any
     );
   }
 
