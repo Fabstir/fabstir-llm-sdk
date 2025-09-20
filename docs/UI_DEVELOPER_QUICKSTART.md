@@ -16,15 +16,19 @@ import { FabstirSDK } from '@fabstir/llm-sdk';  // Old SDK
 import { FabstirSDK } from '../src/FabstirSDK';  // Obsolete
 ```
 
-### 2. ALL 5 Contract Addresses Required
-The SDK will **throw errors** if any required contract is missing:
+### 2. ALL 7 Contract Addresses Required
+The SDK will **throw errors** if any required contract is missing.
+
+**Note:** All 7 contracts must be provided. The SDK does not have fallback addresses and will fail to initialize if any are missing.
+
+Required contracts:
 - `jobMarketplace` ✅ Required
 - `nodeRegistry` ✅ Required
 - `proofSystem` ✅ Required
 - `hostEarnings` ✅ Required
 - `usdcToken` ✅ Required
-- `fabToken` ⚪ Optional
-- `modelRegistry` ⚪ Optional
+- `fabToken` ✅ Required
+- `modelRegistry` ✅ Required
 
 ## 📦 Installation
 
@@ -52,7 +56,8 @@ NEXT_PUBLIC_CONTRACT_HOST_EARNINGS=0x908962e8c6CE72610021586f85ebDE09aAc97776
 NEXT_PUBLIC_CONTRACT_USDC_TOKEN=0x036CbD53842c5426634e7929541eC2318f3dCF7e
 NEXT_PUBLIC_CONTRACT_FAB_TOKEN=0xC78949004B4EB6dEf2D66e49Cd81231472612D62
 
-# S5 Storage (Optional - will auto-generate seed)
+# S5 Storage (Optional - SDK will work without it, but storage operations will throw errors)
+# If not provided, storage features are disabled but all other SDK features work normally
 NEXT_PUBLIC_S5_PORTAL_URL=wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p
 ```
 
@@ -85,6 +90,8 @@ await sdk.authenticate(signer);
 ```
 
 ### Step 4: Start LLM Session
+
+#### Option A: Manual host selection
 ```typescript
 const sessionManager = sdk.getSessionManager();
 
@@ -96,6 +103,37 @@ const { sessionId, jobId } = await sessionManager.startSession(
     pricePerToken: 200,     // 0.02 cents per token
     duration: 3600,         // 1 hour timeout
     proofInterval: 100      // Checkpoint interval
+  }
+);
+```
+
+#### Option B: Automatic host selection (recommended)
+```typescript
+const clientManager = sdk.getClientManager();
+const modelManager = sdk.getModelManager();
+
+// Get approved model
+const modelId = await modelManager.getModelId(
+  'meta-llama/Llama-2-7b-hf',
+  'model.safetensors'
+);
+
+// Select optimal host
+const host = await clientManager.selectHostForModel(modelId, {
+  maxCostPerToken: 250,
+  requiredCapabilities: ['streaming'],
+  minReputation: 75
+});
+
+// Create inference job
+const result = await clientManager.createInferenceJob(
+  { repo: 'meta-llama/Llama-2-7b-hf', fileName: 'model.safetensors' },
+  host.address,
+  {
+    depositAmount: "1.0",
+    pricePerToken: host.metadata.costPerToken,
+    duration: 3600,
+    proofInterval: 100
   }
 );
 ```
@@ -113,6 +151,164 @@ await sessionManager.sendPromptStreaming(
   () => console.log("Done"),      // Complete callback
   (err) => console.error(err)     // Error handler
 );
+```
+
+## 📦 Understanding S5 Storage Behavior
+
+**IMPORTANT:** S5 storage configuration is optional, but there's a key distinction:
+
+### Initialization vs Usage (Critical Distinction)
+
+1. **At SDK Initialization:**
+   - If S5 is not configured or connection fails, the SDK **continues to work normally**
+   - A warning is logged: "StorageManager not initialized - session persistence disabled"
+   - This is "graceful degradation" at initialization time
+   - **The SDK does NOT crash or throw errors during initialization**
+
+2. **When Using Storage Features:**
+   - If you call storage methods without S5 initialized, they **WILL throw errors immediately**
+   - Error code: `STORAGE_NOT_INITIALIZED`
+   - This includes: `storeConversation()`, `retrieveConversation()`, `listSessions()`, etc.
+   - **This is NOT graceful degradation - storage operations will fail hard**
+
+### Checking Storage Availability
+
+Always check if storage is available before using storage features:
+
+```typescript
+const storageManager = sdk.getStorageManager();
+
+// Check if storage is initialized
+if (storageManager.isInitialized()) {
+  // Safe to use storage features
+  const cid = await storageManager.storeConversation(sessionId, messages);
+} else {
+  console.log('Storage not available - S5 not configured');
+  // Handle without storage (e.g., use local storage as fallback)
+}
+```
+
+### Error Handling for Storage Operations
+
+```typescript
+try {
+  // Attempt to store conversation
+  const cid = await storageManager.storeConversation(
+    sessionId.toString(),
+    conversation
+  );
+  console.log('Conversation stored:', cid);
+} catch (error: any) {
+  if (error.code === 'STORAGE_NOT_INITIALIZED') {
+    // S5 storage not available
+    console.log('S5 storage not configured - using local storage fallback');
+    localStorage.setItem(`conversation-${sessionId}`, JSON.stringify(conversation));
+  } else {
+    // Other storage error
+    console.error('Storage error:', error);
+  }
+}
+```
+
+### What Works Without S5
+
+All these features work perfectly without S5 configuration:
+- ✅ Authentication and wallet connection
+- ✅ Session creation and management
+- ✅ Sending prompts and receiving responses
+- ✅ Payment processing and token tracking
+- ✅ Host discovery and selection
+- ✅ Model validation
+- ✅ WebSocket streaming
+
+### What Requires S5
+
+These features require S5 to be configured and will throw errors if not:
+- ❌ Storing conversations to decentralized storage
+- ❌ Retrieving previous conversations
+- ❌ Listing user's session history
+- ❌ Exporting conversation data
+- ❌ Cross-device conversation sync
+
+### Recommendation
+
+- **For MVP/Testing:** Skip S5 configuration, use local storage for persistence
+- **For Production:** Configure S5 for decentralized, permanent storage
+- **Hybrid Approach:** Use S5 when available, fallback to local storage
+
+## 🎯 Smart Host & Model Selection
+
+The SDK provides ClientManager and ModelManager for intelligent host and model selection:
+
+```typescript
+// Get the managers after authentication
+const clientManager = sdk.getClientManager();
+const modelManager = sdk.getModelManager();
+const hostManager = sdk.getHostManagerEnhanced();
+
+// 1. Discover all approved models
+const approvedModels = await modelManager.getAllApprovedModels();
+console.log(`Found ${approvedModels.length} approved models`);
+
+// 2. Find hosts for a specific model
+const modelId = '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced';
+const hosts = await clientManager.getHostsByModel(modelId);
+
+// 3. Select optimal host based on criteria
+const optimalHost = await clientManager.selectHostForModel(modelId, {
+  maxCostPerToken: 250,      // Maximum price willing to pay
+  requiredCapabilities: ['streaming', 'batch'],
+  minReputation: 80,         // Minimum reputation score
+  maxResponseTime: 1000      // Maximum response time in ms
+});
+
+// 4. Estimate job cost before starting
+const estimate = await clientManager.estimateJobCost(
+  modelId,
+  1000,  // Expected tokens
+  optimalHost.address
+);
+console.log(`Estimated cost: $${estimate.estimatedCost}`);
+
+// 5. Create inference job with validation
+const job = await clientManager.createInferenceJob(
+  {
+    repo: 'CohereForAI/TinyVicuna-1B-32k-GGUF',
+    fileName: 'tiny-vicuna-1b.q4_k_m.gguf'
+  },
+  optimalHost.address,
+  {
+    depositAmount: estimate.estimatedCost,
+    pricePerToken: estimate.pricePerToken,
+    duration: 3600,
+    proofInterval: 100
+  }
+);
+```
+
+### Host Discovery Patterns
+
+```typescript
+// Pattern 1: Find cheapest host
+const hosts = await clientManager.getHostsByModel(modelId);
+const cheapest = hosts.sort((a, b) =>
+  a.metadata.costPerToken - b.metadata.costPerToken
+)[0];
+
+// Pattern 2: Find fastest host
+const fastest = hosts.sort((a, b) =>
+  a.metadata.avgResponseTime - b.metadata.avgResponseTime
+)[0];
+
+// Pattern 3: Balance cost and performance
+const balanced = hosts.sort((a, b) => {
+  const scoreA = a.metadata.costPerToken * 0.5 + a.metadata.avgResponseTime * 0.5;
+  const scoreB = b.metadata.costPerToken * 0.5 + b.metadata.avgResponseTime * 0.5;
+  return scoreA - scoreB;
+})[0];
+
+// Pattern 4: Filter by location
+const usHosts = hosts.filter(h => h.metadata.location === 'us-east');
 ```
 
 ## 💰 Coinbase Smart Wallet Integration (Gasless)
@@ -895,6 +1091,48 @@ function LiveTokenCounter({ sessionId }: { sessionId: bigint }) {
 - [ ] Verify payment distribution (90/10 split)
 - [ ] Check gasless transaction execution
 - [ ] Confirm no MetaMask popups after setup
+
+## ⚡ WebSocket Client Updates
+
+The WebSocketClient API has been updated. Here's the correct usage:
+
+```typescript
+import { WebSocketClient } from '@fabstir/sdk-core';
+
+// Create WebSocket client
+const ws = new WebSocketClient('ws://localhost:8080', {
+  reconnect: true,
+  reconnectInterval: 5000,
+  maxReconnectAttempts: 5,
+  heartbeatInterval: 30000
+});
+
+// Connect to server
+await ws.connect();
+
+// Register message handler (returns unsubscribe function)
+const unsubscribe = ws.onMessage((data) => {
+  console.log('Received:', data);
+});
+
+// Send message and wait for response
+const response = await ws.sendMessage({
+  type: 'prompt',
+  sessionId: sessionId.toString(),
+  prompt: 'Hello'
+});
+
+// Check connection
+if (ws.isConnected()) {
+  console.log('Connected');
+}
+
+// Clean up
+unsubscribe();
+await ws.disconnect();
+```
+
+**Note:** The WebSocketClient no longer has `onError` or `onConnect` methods. Use the promise returned by `connect()` for connection handling and try-catch for error handling.
 
 ## 🚨 Common Errors & Solutions
 

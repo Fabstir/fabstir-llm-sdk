@@ -1,12 +1,15 @@
 /**
  * S5 Seed Derivation Utility
- * 
+ *
  * Provides deterministic S5 seed phrase generation from wallet signatures
  * with caching support to eliminate repeated signing popups.
+ *
+ * IMPORTANT: Now uses Blake3 checksums for S5.js compatibility
  */
 
 import { ethers } from 'ethers';
 import { s5Wordlist } from './s5-wordlist';
+import { blake3 } from '@noble/hashes/blake3';
 
 // S5 constants (matching S5.js implementation)
 const SEED_LENGTH = 16; // S5 uses 16 bytes of entropy
@@ -116,14 +119,13 @@ function entropyToSeedWords(entropy: Uint8Array): Uint16Array {
 
 /**
  * Generate checksum words from seed using Blake3 hash
- * Matches S5.js implementation
+ * Exactly matches S5.js implementation from seed_phrase.ts
  */
-async function generateChecksumWords(seed: Uint8Array): Promise<Uint16Array> {
-  // Use Web Crypto API for hashing (browser-compatible)
-  const hashBuffer = await crypto.subtle.digest('SHA-256', seed);
-  const h = new Uint8Array(hashBuffer);
+function generateChecksumWords(seed: Uint8Array): Uint16Array {
+  // Use Blake3 hash as required by S5.js
+  const h = blake3(seed);
 
-  // Convert hash to checksum words (matching S5.js logic)
+  // Convert hash to checksum words (exact S5.js logic)
   let word1 = h[0] << 8;
   word1 += h[1];
   word1 >>= 6;
@@ -139,9 +141,10 @@ async function generateChecksumWords(seed: Uint8Array): Promise<Uint16Array> {
 /**
  * Converts entropy bytes to S5 seed phrase format
  * This creates a deterministic mapping from entropy to a valid S5 phrase
+ * Now uses Blake3 checksums for full S5.js compatibility
  *
  * @param entropy - 16 bytes of entropy
- * @returns A valid S5 seed phrase
+ * @returns A valid S5 seed phrase with Blake3 checksums
  */
 export function entropyToS5Phrase(entropy: Uint8Array): string {
   if (entropy.length !== SEED_LENGTH) {
@@ -151,39 +154,24 @@ export function entropyToS5Phrase(entropy: Uint8Array): string {
   // Convert entropy to seed words
   const seedWords = entropyToSeedWords(entropy);
 
-  // Generate checksum synchronously using a simple hash
-  // Note: S5.js uses Blake3, but for browser compatibility we use a simpler approach
-  // The checksum is deterministic based on the seed bytes
+  // Convert seed words back to seed bytes (required for checksum)
   const seedBytes = seedWordsToSeed(seedWords);
 
-  // Simple checksum generation (deterministic but not Blake3)
-  // This ensures compatibility while maintaining deterministic output
-  let checksum1 = 0;
-  let checksum2 = 0;
-
-  for (let i = 0; i < seedBytes.length; i++) {
-    checksum1 = (checksum1 + seedBytes[i] * (i + 1)) & 0x3ff; // 10 bits
-    checksum2 = (checksum2 + seedBytes[i] * (i + 17)) & 0x3ff; // 10 bits
-  }
+  // Generate Blake3 checksum words (S5.js requirement)
+  const checksumWords = generateChecksumWords(seedBytes);
 
   // Build the phrase
   const phraseWords: string[] = [];
 
   // Add seed words
   for (let i = 0; i < SEED_WORDS_LENGTH; i++) {
-    let index = seedWords[i];
-    // For the 13th word, only first 256 words are valid
-    if (i === LAST_WORD_INDEX) {
-      index = index % 256;
-    } else {
-      index = index % 1024;
-    }
-    phraseWords.push(s5Wordlist[index]);
+    phraseWords.push(s5Wordlist[seedWords[i]]);
   }
 
   // Add checksum words
-  phraseWords.push(s5Wordlist[checksum1]);
-  phraseWords.push(s5Wordlist[checksum2]);
+  for (let i = 0; i < CHECKSUM_WORDS_LENGTH; i++) {
+    phraseWords.push(s5Wordlist[checksumWords[i]]);
+  }
 
   return phraseWords.join(' ');
 }

@@ -12,6 +12,7 @@
 - [Host Management](#host-management)
 - [Storage Management](#storage-management)
 - [Treasury Management](#treasury-management)
+- [Client Manager](#client-manager)
 - [WebSocket Communication](#websocket-communication)
 - [Contract Integration](#contract-integration)
 - [Services](#services)
@@ -182,7 +183,7 @@ const sdk = new FabstirSDKCore({
 });
 ```
 
-**Current Contract Addresses (Base Sepolia):**
+**Current Contract Addresses (Base Sepolia - from .env.test):**
 ```
 JobMarketplace: 0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944
 NodeRegistry: 0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218
@@ -190,6 +191,7 @@ ProofSystem: 0x2ACcc60893872A499700908889B38C5420CBcFD1
 HostEarnings: 0x908962e8c6CE72610021586f85ebDE09aAc97776
 USDCToken: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
 FABToken: 0xC78949004B4EB6dEf2D66e49Cd81231472612D62
+ModelRegistry: 0x92b2De840bB2171203011A6dBA928d855cA8183E
 ```
 
 ## Authentication
@@ -358,21 +360,21 @@ Sends a prompt and receives streaming response via WebSocket.
 async sendPromptStreaming(
   sessionId: bigint,
   prompt: string,
-  onChunk: (chunk: string) => void,
-  onComplete?: () => void,
-  onError?: (error: Error) => void
-): Promise<void>
+  onToken?: (token: string) => void
+): Promise<string>
 ```
 
 **Example:**
 ```typescript
-await sessionManager.sendPromptStreaming(
+const response = await sessionManager.sendPromptStreaming(
   sessionId,
   "Tell me a story",
-  (chunk) => console.log(chunk),
-  () => console.log("Complete"),
-  (error) => console.error(error)
+  (token) => {
+    // Handle each token as it arrives
+    process.stdout.write(token);
+  }
 );
+console.log('\nFull response:', response);
 ```
 
 ### submitCheckpoint
@@ -500,30 +502,67 @@ async createSessionJobWithETH(
 }>
 ```
 
-### getUSDCBalance
+### getTokenBalance
 
-Gets USDC balance for an address.
+Gets token balance for an address.
 
 ```typescript
-async getUSDCBalance(address: string): Promise<string>
+async getTokenBalance(
+  tokenAddress: string,
+  address: string
+): Promise<bigint>
 ```
 
 **Example:**
 ```typescript
-const balance = await paymentManager.getUSDCBalance(userAddress);
-console.log(`USDC Balance: $${balance}`);
+const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
+const balance = await paymentManager.getTokenBalance(usdcAddress, userAddress);
+console.log(`USDC Balance: $${ethers.formatUnits(balance, 6)}`);
 ```
 
-### fundSubAccount
+### sendToken
 
-Funds a sub-account from main account.
+Sends tokens from one address to another.
 
 ```typescript
-async fundSubAccount(
-  fromAddress: string,
+async sendToken(
+  tokenAddress: string,
   toAddress: string,
   amount: string
-): Promise<string>
+): Promise<TransactionResult>
+```
+
+**Example:**
+```typescript
+const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
+const tx = await paymentManager.sendToken(
+  usdcAddress,
+  subAccount,
+  ethers.parseUnits("1.0", 6).toString()
+);
+```
+
+### approveToken
+
+Approves a spender to use tokens.
+
+```typescript
+async approveToken(
+  tokenAddress: string,
+  spender: string,
+  amount: string
+): Promise<TransactionResult>
+```
+
+**Example:**
+```typescript
+const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
+const marketplaceAddress = sdk.contractManager.getAddress('jobMarketplace');
+const tx = await paymentManager.approveToken(
+  usdcAddress,
+  marketplaceAddress,
+  ethers.parseUnits("10.0", 6).toString()
+);
 ```
 
 ### Payment Distribution Model
@@ -575,6 +614,8 @@ The ModelManager handles model validation and governance.
 ```typescript
 const modelManager = sdk.getModelManager();
 ```
+
+**Note:** As of the latest SDK update, ModelManager is now directly accessible via the `getModelManager()` getter method on the SDK instance. This requires prior authentication.
 
 ### getModelId
 
@@ -903,6 +944,123 @@ async withdrawTreasuryFunds(
 ): Promise<string>
 ```
 
+## Client Manager
+
+The ClientManager provides client-side operations for model selection, host discovery, and job management.
+
+### Get ClientManager
+
+```typescript
+const clientManager = sdk.getClientManager();
+```
+
+**Note:** ClientManager requires authentication before use. Added in latest SDK update.
+
+### selectHostForModel
+
+Selects the best host for a specific model based on requirements.
+
+```typescript
+async selectHostForModel(
+  modelId: string,
+  requirements?: {
+    maxCostPerToken?: number;
+    minReputation?: number;
+    requiredCapabilities?: string[];
+    preferredLocation?: string;
+  }
+): Promise<HostInfo | null>
+```
+
+**Example:**
+```typescript
+const host = await clientManager.selectHostForModel(
+  '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced',
+  {
+    maxCostPerToken: 300,
+    minReputation: 80,
+    requiredCapabilities: ['streaming']
+  }
+);
+```
+
+### getModelAvailability
+
+Gets availability information for a specific model across the network.
+
+```typescript
+async getModelAvailability(modelId: string): Promise<{
+  totalHosts: number;
+  activeHosts: number;
+  averageCostPerToken: number;
+  locations: string[];
+}>
+```
+
+### estimateJobCost
+
+Estimates the cost for a job based on expected token usage.
+
+```typescript
+async estimateJobCost(
+  modelId: string,
+  expectedTokens: number,
+  hostAddress?: string
+): Promise<{
+  estimatedCost: string;
+  pricePerToken: number;
+  hostAddress: string;
+}>
+```
+
+**Example:**
+```typescript
+const estimate = await clientManager.estimateJobCost(
+  modelId,
+  1000, // Expected 1000 tokens
+  hostAddress
+);
+console.log(`Estimated cost: $${estimate.estimatedCost}`);
+```
+
+### createInferenceJob
+
+Creates an inference job with automatic model and host validation.
+
+```typescript
+async createInferenceJob(
+  modelSpec: {
+    repo: string;
+    fileName: string;
+  },
+  hostAddress: string,
+  config: SessionConfig
+): Promise<{
+  sessionId: bigint;
+  jobId: bigint;
+  txHash: string;
+}>
+```
+
+### getHostsByModel
+
+Gets all hosts that support a specific model.
+
+```typescript
+async getHostsByModel(modelId: string): Promise<HostInfo[]>
+```
+
+**Example:**
+```typescript
+const hosts = await clientManager.getHostsByModel(modelId);
+console.log(`Found ${hosts.length} hosts supporting this model`);
+
+// Sort by cost
+const sortedHosts = hosts.sort((a, b) =>
+  a.metadata.costPerToken - b.metadata.costPerToken
+);
+```
+
 ## WebSocket Communication
 
 Real-time communication for streaming responses.
@@ -937,36 +1095,44 @@ Establishes WebSocket connection.
 async connect(): Promise<void>
 ```
 
-### send
+### sendMessage
 
-Sends a message through WebSocket.
+Sends a message through WebSocket and waits for response.
 
 ```typescript
-send(message: any): void
+async sendMessage(message: WebSocketMessage): Promise<string>
 ```
 
 ### onMessage
 
-Registers a message handler.
+Registers a message handler and returns unsubscribe function.
 
 ```typescript
-onMessage(handler: (data: any) => void): void
+onMessage(handler: (data: any) => void): () => void
 ```
 
-### onError
+### disconnect
 
-Registers an error handler.
+Closes the WebSocket connection gracefully.
 
 ```typescript
-onError(handler: (error: Error) => void): void
+async disconnect(): Promise<void>
 ```
 
-### close
+### isConnected
 
-Closes the WebSocket connection.
+Check if WebSocket is connected.
 
 ```typescript
-close(): void
+isConnected(): boolean
+```
+
+### getReadyState
+
+Get WebSocket connection state.
+
+```typescript
+getReadyState(): number
 ```
 
 **Example:**
@@ -974,15 +1140,26 @@ close(): void
 const ws = new WebSocketClient('ws://localhost:8080');
 await ws.connect();
 
-ws.onMessage((data) => {
+// Register message handler (returns unsubscribe function)
+const unsubscribe = ws.onMessage((data) => {
   console.log('Received:', data);
 });
 
-ws.send({
+// Send message and wait for response
+const response = await ws.sendMessage({
   type: 'inference',
   sessionId: '123',
   prompt: 'Hello'
 });
+
+// Check connection status
+if (ws.isConnected()) {
+  console.log('WebSocket is connected');
+}
+
+// Clean up
+unsubscribe();
+await ws.disconnect();
 ```
 
 ## Contract Integration
@@ -1148,7 +1325,16 @@ enum SDKErrorCode {
 
   // Proofs
   INVALID_PROOF = 'INVALID_PROOF',
-  PROOF_VERIFICATION_FAILED = 'PROOF_VERIFICATION_FAILED'
+  PROOF_VERIFICATION_FAILED = 'PROOF_VERIFICATION_FAILED',
+
+  // Client Manager
+  CLIENT_MANAGER_ERROR = 'CLIENT_MANAGER_ERROR',
+  HOST_NOT_FOUND = 'HOST_NOT_FOUND',
+  HOST_SELECTION_FAILED = 'HOST_SELECTION_FAILED',
+
+  // Configuration
+  INVALID_CONFIGURATION = 'INVALID_CONFIGURATION',
+  MISSING_CONTRACT_ADDRESS = 'MISSING_CONTRACT_ADDRESS'
 }
 ```
 
@@ -1410,11 +1596,62 @@ async function chatWithContext() {
 }
 ```
 
+### Using ClientManager for Model and Host Selection
+
+```typescript
+async function selectOptimalHostForJob() {
+  const sdk = new FabstirSDKCore(config);
+  await sdk.authenticate(privateKey);
+
+  const clientManager = sdk.getClientManager();
+  const modelManager = sdk.getModelManager();
+
+  // Find best host for a specific model
+  const modelId = '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced';
+
+  // Select host based on requirements
+  const host = await clientManager.selectHostForModel(modelId, {
+    maxCostPerToken: 250,
+    requiredCapabilities: ['streaming'],
+    minReputation: 75
+  });
+
+  if (!host) {
+    throw new Error('No suitable host found for model');
+  }
+
+  // Estimate job cost
+  const estimate = await clientManager.estimateJobCost(
+    modelId,
+    500, // Expected 500 tokens
+    host.address
+  );
+
+  console.log(`Selected host: ${host.address}`);
+  console.log(`Estimated cost: $${estimate.estimatedCost}`);
+  console.log(`Price per token: ${estimate.pricePerToken}`);
+
+  // Create inference job
+  const result = await clientManager.createInferenceJob(
+    { repo: 'CohereForAI/TinyVicuna-1B-32k-GGUF', fileName: 'tiny-vicuna-1b.q4_k_m.gguf' },
+    host.address,
+    {
+      depositAmount: "1.0",
+      pricePerToken: estimate.pricePerToken,
+      duration: 3600,
+      proofInterval: 100
+    }
+  );
+
+  return result;
+}
+```
+
 ### Model Discovery and Validation
 
 ```typescript
 async function discoverAndValidateModels() {
-  const sdk = new FabstirSDKCore();
+  const sdk = new FabstirSDKCore(config);
   await sdk.authenticate(privateKey);
 
   const modelManager = sdk.getModelManager();
@@ -1477,26 +1714,17 @@ async function streamingChat() {
   );
 
   // Send prompt with streaming
-  let fullResponse = '';
-
-  await sessionManager.sendPromptStreaming(
+  const response = await sessionManager.sendPromptStreaming(
     sessionId,
     "Write a story about a robot",
-    (chunk) => {
-      // Handle each chunk as it arrives
-      process.stdout.write(chunk);
-      fullResponse += chunk;
-    },
-    () => {
-      // Streaming complete
-      console.log('\n\nStreaming complete!');
-      console.log('Total response length:', fullResponse.length);
-    },
-    (error) => {
-      // Handle errors
-      console.error('Streaming error:', error);
+    (token) => {
+      // Handle each token as it arrives
+      process.stdout.write(token);
     }
   );
+
+  console.log('\n\nStreaming complete!');
+  console.log('Total response length:', response.length);
 }
 ```
 

@@ -47,6 +47,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@noble/hashes": "^1.8.0",
     "ethers": "^6.9.0",
     "@s5-dev/s5js": "file:../../packages/s5js"
   },
