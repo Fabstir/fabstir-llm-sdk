@@ -4,11 +4,12 @@
  * Provides deterministic S5 seed phrase generation from wallet signatures
  * with caching support to eliminate repeated signing popups.
  *
- * IMPORTANT: Now uses Blake3 checksums for S5.js compatibility
+ * IMPORTANT: Uses @noble/hashes blake3 - same as S5.js
  */
 
 import { ethers } from 'ethers';
-import { s5Wordlist } from './s5-wordlist';
+// Use the CORRECT S5.js wordlist - must be exactly 1024 words!
+import { wordlist as s5Wordlist } from './s5-wordlist-correct';
 import { blake3 } from '@noble/hashes/blake3';
 
 // S5 constants (matching S5.js implementation)
@@ -80,7 +81,8 @@ function seedWordsToSeed(seedWords: Uint16Array): Uint8Array {
 
 /**
  * Converts entropy to seed words (10-bit values)
- * Inverse of seedWordsToSeed
+ * Must exactly match the inverse of S5.js seedWordsToSeed
+ * Total: 12 words × 10 bits + 1 word × 8 bits = 128 bits
  */
 function entropyToSeedWords(entropy: Uint8Array): Uint16Array {
   if (entropy.length !== SEED_LENGTH) {
@@ -92,7 +94,7 @@ function entropyToSeedWords(entropy: Uint8Array): Uint16Array {
 
   for (let i = 0; i < SEED_WORDS_LENGTH; i++) {
     let wordBits = 10;
-    if (i === LAST_WORD_INDEX) {
+    if (i === SEED_WORDS_LENGTH - 1) { // Use SEED_WORDS_LENGTH - 1, not LAST_WORD_INDEX
       wordBits = 8; // Last word only 8 bits
     }
 
@@ -151,14 +153,21 @@ export function entropyToS5Phrase(entropy: Uint8Array): string {
     throw new Error(`Entropy must be ${SEED_LENGTH} bytes, got ${entropy.length}`);
   }
 
+  console.log('[S5 Phrase Generation] Starting with entropy:',
+    Array.from(entropy).map(b => b.toString(16).padStart(2, '0')).join(' '));
+
   // Convert entropy to seed words
   const seedWords = entropyToSeedWords(entropy);
+  console.log('[S5 Phrase Generation] Seed words:', Array.from(seedWords));
 
   // Convert seed words back to seed bytes (required for checksum)
   const seedBytes = seedWordsToSeed(seedWords);
+  console.log('[S5 Phrase Generation] Seed bytes for checksum:',
+    Array.from(seedBytes).map(b => b.toString(16).padStart(2, '0')).join(' '));
 
   // Generate Blake3 checksum words (S5.js requirement)
   const checksumWords = generateChecksumWords(seedBytes);
+  console.log('[S5 Phrase Generation] Checksum words:', Array.from(checksumWords));
 
   // Build the phrase
   const phraseWords: string[] = [];
@@ -173,7 +182,12 @@ export function entropyToS5Phrase(entropy: Uint8Array): string {
     phraseWords.push(s5Wordlist[checksumWords[i]]);
   }
 
-  return phraseWords.join(' ');
+  const phrase = phraseWords.join(' ');
+  console.log('[S5 Phrase Generation] Final phrase (first 3 words):',
+    phraseWords.slice(0, 3).join(' ') + '...');
+  console.log('[S5 Phrase Generation] Total words:', phraseWords.length);
+
+  return phrase;
 }
 
 /**
