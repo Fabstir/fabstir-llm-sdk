@@ -4,7 +4,6 @@
  */
 
 import { ethers } from 'ethers';
-import { S5 } from '@s5-dev/s5js';
 import { connectMetaMask, connectCoinbaseWallet, isMetaMaskInstalled } from '../utils/BrowserProvider';
 
 export interface AuthResult {
@@ -197,18 +196,21 @@ export class AuthManager {
   /**
    * Initialize S5 client with browser-compatible seed
    */
-  async initializeS5(): Promise<S5> {
+  async initializeS5(): Promise<any> {
     if (!this.s5Seed) {
       throw new Error('Not authenticated - S5 seed not available');
     }
 
+    // Dynamically import S5 when needed
+    const { S5 } = await import('@s5-dev/s5js');
+
     // S5.js is already browser-compatible
     const s5 = new S5();
-    
+
     // Initialize with seed (S5.js handles the rest)
     // Note: S5.js initialization might vary - check their docs
     await s5.init(this.s5Seed);
-    
+
     return s5;
   }
 

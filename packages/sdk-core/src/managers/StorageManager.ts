@@ -5,9 +5,9 @@
  * which is fully browser-compatible. No Node.js dependencies.
  */
 
-import { S5 } from '@s5-dev/s5js';
+// Dynamic import for S5 - loaded when needed
 import { IStorageManager } from '../interfaces';
-import { 
+import {
   SDKError,
   StorageOptions,
   StorageResult,
@@ -72,51 +72,71 @@ export class StorageManager implements IStorageManager {
     try {
       this.userSeed = seed;
       this.userAddress = userAddress || '';
-      
-      console.log('StorageManager.initialize: Creating S5 client with timeout...');
+
+      console.log('StorageManager.initialize: Dynamically loading S5...');
+
+      // Dynamically import S5 when needed
+      let S5: any;
+      try {
+        const s5Module = await import('@s5-dev/s5js');
+        S5 = s5Module.S5;
+        console.log('✅ S5 module loaded successfully');
+      } catch (importError: any) {
+        console.error('❌ Failed to import S5:', importError.message);
+        throw new SDKError(
+          `Failed to load S5 module: ${importError.message}`,
+          'STORAGE_MODULE_ERROR',
+          { originalError: importError }
+        );
+      }
+
+      console.log('StorageManager.initialize: Creating S5 instance with timeout...');
       console.log('StorageManager.initialize: Using portal URL:', this.s5PortalUrl);
-      
-      // Wrap S5 creation in a timeout to avoid hanging
-      // Use empty array to skip default peers and only use our portal
+
+      // Use the correct portal URL or empty array to skip default peers
       const peersToUse = this.s5PortalUrl ? [this.s5PortalUrl] : [];
       console.log('StorageManager.initialize: Peers to use:', peersToUse);
-      
-      const s5CreatePromise = S5.create({ 
+
+      // Create S5 instance with timeout protection
+      const s5CreatePromise = S5.create({
         initialPeers: peersToUse,
         // No Node.js specific options
       });
-      
+
       // Add a 5-second timeout
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => reject(new Error('S5 client creation timed out after 5 seconds')), 5000);
       });
-      
+
+      let s5Instance: any;
       try {
-        this.s5Client = await Promise.race([s5CreatePromise, timeoutPromise]);
-        console.log('✅ StorageManager.initialize: S5 client created SUCCESSFULLY!');
-        console.log('✅ S5 is connected and ready to use');
+        s5Instance = await Promise.race([s5CreatePromise, timeoutPromise]);
+        console.log('✅ StorageManager.initialize: S5 instance created SUCCESSFULLY!');
       } catch (timeoutError: any) {
-        console.warn('⚠️ StorageManager.initialize: S5 client creation failed or timed out:', timeoutError.message);
+        console.warn('⚠️ StorageManager.initialize: S5 instance creation failed or timed out:', timeoutError.message);
         console.warn('⚠️ StorageManager: Continuing without S5 storage (operations will fail gracefully)');
         this.initialized = false;
         return;
       }
-      
+
       console.log('🔐 Recovering identity from seed phrase...');
-      await this.s5Client.recoverIdentityFromSeedPhrase(this.userSeed);
+      await s5Instance.recoverIdentityFromSeedPhrase(this.userSeed);
       console.log('✅ Identity recovered successfully');
+
+      // Store the S5 instance - we'll use s5Instance.fs for file operations
+      this.s5Client = s5Instance;
       
       // Optional portal registration
       try {
         console.log('📡 Attempting portal registration...');
-        await this.s5Client.registerOnNewPortal('https://s5.vup.cx');
+        await s5Instance.registerOnNewPortal('https://s5.vup.cx');
         console.log('✅ Portal registration successful');
       } catch (error) {
         console.log('ℹ️ Portal registration skipped (optional)');
       }
-      
+
       console.log('🔧 Ensuring identity is initialized...');
-      await this.s5Client.fs.ensureIdentityInitialized();
+      await s5Instance.fs.ensureIdentityInitialized();
       this.initialized = true;
       console.log('🎉 StorageManager fully initialized and ready!');
     } catch (error: any) {

@@ -177,7 +177,7 @@ export class SessionJobManager {
     const jobMarketplaceWithSigner = jobMarketplace.connect(this.signer);
 
     // Log the actual contract address being used
-    const actualContractAddress = await jobMarketplaceWithSigner.getAddress();
+    const actualContractAddress = jobMarketplaceWithSigner.target as string;
     console.log('Actual JobMarketplace contract address being used:', actualContractAddress);
     console.log('Expected JobMarketplace address:', jobMarketplaceAddress);
 
@@ -187,7 +187,7 @@ export class SessionJobManager {
       console.error('Actual:', actualContractAddress);
     }
 
-    const tx = await jobMarketplaceWithSigner.createSessionJobWithToken(
+    const tx = await (jobMarketplaceWithSigner as any)['createSessionJobWithToken'](
       params.provider, // host address
       usdcAddress, // token address (USDC) - use the already obtained address
       amountToUse, // deposit amount (may be less than full $2 if using existing balance)
@@ -238,7 +238,8 @@ export class SessionJobManager {
 
     // The contract method is submitProofOfWork
     // Correct parameter order: jobId, tokensClaimed, proof
-    const tx = await jobMarketplace.submitProofOfWork(
+    const jobMarketplaceWithSigner = jobMarketplace.connect(this.signer);
+    const tx = await jobMarketplaceWithSigner['submitProofOfWork'](
       sessionId,  // jobId
       tokensGenerated,  // tokensClaimed
       proofData  // proof (bytes)
@@ -259,8 +260,9 @@ export class SessionJobManager {
     hostSigner: Signer
   ): Promise<string> {
     // Create a new contract instance with host signer
-    const jobMarketplaceAddress = await this.contractManager.getJobMarketplace().getAddress();
-    const jobMarketplaceAbi = this.contractManager.getJobMarketplace().interface;
+    const jobMarketplace = this.contractManager.getJobMarketplace();
+    const jobMarketplaceAddress = jobMarketplace.target as string;
+    const jobMarketplaceAbi = jobMarketplace.interface;
     
     const jobMarketplaceAsHost = new Contract(
       jobMarketplaceAddress,
@@ -270,7 +272,7 @@ export class SessionJobManager {
     
     // Submit proof as host
     // submitProofOfWork expects: jobId, tokensClaimed, proof (in that order)
-    const tx = await jobMarketplaceAsHost.submitProofOfWork(
+    const tx = await jobMarketplaceAsHost['submitProofOfWork'](
       sessionId,  // jobId
       tokensGenerated,  // tokensClaimed
       proofData  // proof (bytes)
@@ -297,7 +299,7 @@ export class SessionJobManager {
     // The contract's completeSessionJob takes jobId and conversationCID
     // We'll pass an empty string for conversationCID if not needed
     const conversationCID = ''; // Optional conversation CID for S5 storage
-    const tx = await jobMarketplace.completeSessionJob(sessionId, conversationCID);
+    const tx = await jobMarketplace['completeSessionJob'](sessionId, conversationCID);
 
     const receipt = await tx.wait(3); // Wait for 3 confirmations
     return receipt.hash;
@@ -392,7 +394,7 @@ export class SessionJobManager {
     const hostEarnings = this.contractManager.getHostEarnings();
     const earnings = await hostEarnings.getAccumulatedEarnings(
       provider,
-      await this.contractManager.getUsdcToken().getAddress()
+      this.contractManager.getUsdcToken().target as string
     ) as bigint;
     
     return ethers.formatUnits(earnings, 6);
