@@ -296,10 +296,13 @@ export class SessionJobManager {
 
     const jobMarketplace = this.contractManager.getJobMarketplace();
 
+    // Ensure the contract has a signer by connecting it explicitly
+    const jobMarketplaceWithSigner = jobMarketplace.connect(this.signer);
+
     // The contract's completeSessionJob takes jobId and conversationCID
     // We'll pass an empty string for conversationCID if not needed
     const conversationCID = ''; // Optional conversation CID for S5 storage
-    const tx = await jobMarketplace['completeSessionJob'](sessionId, conversationCID);
+    const tx = await jobMarketplaceWithSigner['completeSessionJob'](sessionId, conversationCID);
 
     const receipt = await tx.wait(3); // Wait for 3 confirmations
     return receipt.hash;

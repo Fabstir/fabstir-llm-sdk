@@ -1,6 +1,6 @@
 {
   "name": "@fabstir/sdk-node",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Server-side extensions for Fabstir SDK with P2P and proof capabilities",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -34,8 +34,8 @@
   "scripts": {
     "build": "pnpm run build:clean && pnpm run build:esm && pnpm run build:cjs && pnpm run build:types",
     "build:clean": "rimraf dist",
-    "build:esm": "esbuild src/index.ts --bundle --format=esm --platform=node --target=node18 --outfile=dist/index.mjs --external:@fabstir/sdk-core --external:libp2p --external:@libp2p/* --external:@chainsafe/* --external:ethers --external:crypto --external:zlib",
-    "build:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=node --target=node18 --outfile=dist/index.js --external:@fabstir/sdk-core --external:libp2p --external:@libp2p/* --external:@chainsafe/* --external:ethers --external:crypto --external:zlib",
+    "build:esm": "esbuild src/index.ts --bundle --format=esm --platform=node --target=node18 --outfile=dist/index.mjs --external:@fabstir/sdk-core --external:libp2p --external:@libp2p/* --external:@chainsafe/* --external:ethers --external:crypto --external:zlib --external:express",
+    "build:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=node --target=node18 --outfile=dist/index.js --external:@fabstir/sdk-core --external:libp2p --external:@libp2p/* --external:@chainsafe/* --external:ethers --external:crypto --external:zlib --external:express",
     "build:types": "tsc --emitDeclarationOnly --declaration --declarationMap",
     "dev": "tsc --watch",
     "test": "vitest",

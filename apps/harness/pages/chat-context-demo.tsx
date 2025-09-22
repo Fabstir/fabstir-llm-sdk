@@ -492,8 +492,17 @@ export default function ChatContextDemo() {
 
   // Helper: Create sub-account signer (EXACT copy from working test)
   function createSubAccountSigner(provider: any, subAccount: string, primaryAccount: string) {
-    return {
-      provider: new ethers.BrowserProvider(provider),
+    const ethersProvider = new ethers.BrowserProvider(provider);
+
+    // Create a wrapper that properly exposes both signer and provider methods
+    const signer = {
+      // Expose the provider properly for contract calls
+      provider: ethersProvider,
+
+      // Also provide getProvider method for compatibility
+      getProvider(): ethers.BrowserProvider {
+        return ethersProvider;
+      },
 
       async getAddress(): Promise<string> {
         console.log(`[SubAccountSigner] getAddress() called, returning: ${subAccount}`);
@@ -614,6 +623,8 @@ export default function ChatContextDemo() {
         return txResponse;
       }
     };
+
+    return signer;
   }
 
   // Start chat session
@@ -647,8 +658,86 @@ export default function ChatContextDemo() {
     setStatus("Starting session...");
 
     try {
-      // Discover active hosts
-      const hosts = await (hostManager as any).discoverAllActiveHostsWithModels();
+      // Workaround: Base Account Kit provider doesn't handle read calls properly
+      // So we'll discover hosts using a standard provider instead
+      let hosts: any[] = [];
+
+      try {
+        // Try the normal SDK method first
+        hosts = await (hostManager as any).discoverAllActiveHostsWithModels();
+        console.log("SDK method succeeded, found hosts:", hosts);
+      } catch (sdkError: any) {
+        console.log("SDK host discovery failed with Base Account Kit, error:", sdkError.message);
+        console.log("Now trying direct provider fallback...");
+      }
+
+      // If no hosts found (either from error or empty array), try direct approach
+      if (hosts.length === 0) {
+        console.log("No hosts found via SDK, checking TEST_HOST_1 directly...");
+
+        // Fallback: Use a standard JSON-RPC provider for read-only calls
+        const readOnlyProvider = new ethers.JsonRpcProvider(RPC_URL);
+        const nodeRegistryAddress = process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY!;
+        const nodeRegistryAbi = [
+          'function getAllActiveNodes() view returns (address[])',
+          'function getNodeFullInfo(address) view returns (address, uint256, bool, string, string, bytes32[])'
+        ];
+
+        const nodeRegistry = new ethers.Contract(nodeRegistryAddress, nodeRegistryAbi, readOnlyProvider);
+
+        // First, let's try the simpler approach that node-management-enhanced uses
+        // Just check if TEST_HOST_1 is registered
+        const simpleAbi = [
+          'function nodes(address) view returns (address operator, uint256 stakedAmount, bool active, string metadata, string apiUrl)'
+        ];
+        const simpleRegistry = new ethers.Contract(nodeRegistryAddress, simpleAbi, readOnlyProvider);
+
+        try {
+          // Check if TEST_HOST_1 is registered (this works in node-management-enhanced)
+          const testHost1 = TEST_HOST_1_ADDRESS;
+          console.log("Checking TEST_HOST_1 at address:", testHost1);
+          const nodeData = await simpleRegistry.nodes(testHost1);
+          console.log("TEST_HOST_1 node data:", nodeData);
+
+          if (nodeData.active) {
+            // If TEST_HOST_1 is active, use it
+            hosts.push({
+              address: testHost1,
+              apiUrl: nodeData.apiUrl,
+              metadata: JSON.parse(nodeData.metadata),
+              supportedModels: [], // We don't have this from the simple call
+              isActive: nodeData.active,
+              stake: nodeData.stakedAmount
+            });
+            console.log("Using TEST_HOST_1 as it's active");
+          } else {
+            console.log("TEST_HOST_1 is not active, trying getAllActiveNodes...");
+            // Try getAllActiveNodes if available
+            try {
+              const activeNodes = await nodeRegistry.getAllActiveNodes();
+              console.log("Found active nodes via getAllActiveNodes:", activeNodes);
+
+              // Get full info for each node
+              for (const nodeAddress of activeNodes) {
+                const info = await nodeRegistry.getNodeFullInfo(nodeAddress);
+                hosts.push({
+                  address: nodeAddress,
+                  apiUrl: info[4],
+                  metadata: JSON.parse(info[3]),
+                  supportedModels: info[5],
+                  isActive: info[2],
+                  stake: info[1]
+                });
+              }
+            } catch (e) {
+              console.error("getAllActiveNodes failed:", e);
+            }
+          }
+        } catch (directError: any) {
+          console.error("Direct provider also failed:", directError);
+          throw new Error("Unable to discover hosts");
+        }
+      }
 
       if (hosts.length === 0) {
         throw new Error("No active hosts available");
@@ -1108,24 +1197,22 @@ export default function ChatContextDemo() {
     setStatus("Ending session...");
 
     try {
-      // Step 1: Submit final checkpoint if there are unsubmitted tokens OR if we haven't submitted any checkpoint yet
-      const unsubmittedTokens = totalTokens - lastCheckpointTokens;
-      const MIN_CHECKPOINT_TOKENS = 100;
+      // IMPORTANT: Session ending flow with node v5:
+      // 1. When user clicks "End Session", they call completeSessionJob to trigger payment distribution
+      // 2. The host (node) detects WebSocket close and automatically:
+      //    - Submits any pending checkpoints (submitProofOfWork)
+      //    - Also calls completeSessionJob as backup
+      // 3. Either party can call completeSessionJob - it's safe and idempotent
+      // 4. User should NOT try to submit checkpoints (only host can do that)
 
-      // Always submit at least one checkpoint to ensure payment
-      if (unsubmittedTokens > 0 || lastCheckpointTokens === 0) {
-        const actualTokens = unsubmittedTokens > 0 ? unsubmittedTokens : totalTokens;
-        const tokensToSubmit = Math.max(actualTokens, MIN_CHECKPOINT_TOKENS);
-
-        console.log(`Submitting final checkpoint for ${tokensToSubmit} tokens (actual: ${actualTokens})`);
-        setStatus("Submitting final checkpoint...");
-        addMessage('system', `📤 Submitting checkpoint for ${tokensToSubmit} tokens to ensure payment...`);
-
-        // Force checkpoint submission (will use minimum if needed)
-        await submitCheckpoint(true);
-
-        // Wait a bit for checkpoint to be processed
-        await new Promise(resolve => setTimeout(resolve, 2000));
+      // Step 1: Store conversation to S5 before ending
+      if (storageManager && messages.length > 0) {
+        try {
+          await storeConversation();
+          addMessage('system', '💾 Conversation stored to S5');
+        } catch (e) {
+          console.warn("Failed to store conversation:", e);
+        }
       }
 
       // Step 2: Read balances before completion
@@ -1139,20 +1226,20 @@ export default function ChatContextDemo() {
       });
 
       // Step 3: Complete the session
+      // Note: The host (node v5) handles final checkpoint submission automatically
+      // The user just triggers payment distribution via completeSessionJob
       setStatus("Completing session and distributing payments...");
-      const finalProof = "0x" + "00".repeat(32);
-      // Use the actual token count, but ensure at least minimum
-      const completionTokens = Math.max(totalTokens, MIN_CHECKPOINT_TOKENS);
-      console.log(`Completing session with:`, {
-        sessionId: sessionId.toString(),
-        tokens: completionTokens,
-        actualTokens: totalTokens,
-        finalProof: finalProof.slice(0, 10) + "..."
-      });
+
+      console.log(`Completing session ${sessionId.toString()}`);
+      addMessage('system', '📝 Triggering payment distribution...');
+
+      // completeSession will call completeSessionJob on the contract
+      // This distributes payments: 97.5% to host, 2.5% to treasury, refund to user
+      const finalProof = "0x" + "00".repeat(32); // Dummy proof, not used in session model
       const txHash = await sessionManager.completeSession(
         sessionId,
-        completionTokens,
-        finalProof
+        totalTokens,  // Pass actual token count for record keeping
+        finalProof    // Not used but required by interface
       );
       console.log("Session completion TX:", txHash);
 

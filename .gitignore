@@ -76,3 +76,5 @@ test-reports/
 
 # External mount - enhanced S5.js repository
 packages/s5js/
+
+images/

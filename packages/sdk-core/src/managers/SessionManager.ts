@@ -452,9 +452,43 @@ export class SessionManager implements ISessionManager {
       throw new SDKError('SessionManager not initialized', 'SESSION_NOT_INITIALIZED');
     }
 
-    const session = this.sessions.get(sessionId.toString());
+    const sessionIdStr = sessionId.toString();
+    let session = this.sessions.get(sessionIdStr);
+
+    // If session not in memory, try to load from storage (handles page refresh case)
+    if (!session && this.storageManager) {
+      console.log(`Session ${sessionIdStr} not in memory, attempting to load from storage...`);
+      try {
+        const conversation = await this.storageManager.loadConversation(sessionIdStr);
+        if (conversation && conversation.metadata) {
+          // Reconstruct minimal session state from storage
+          session = {
+            sessionId: sessionId,
+            jobId: BigInt(conversation.metadata.jobId || sessionId),
+            model: conversation.metadata.model || '',
+            provider: conversation.metadata.provider || '',
+            status: conversation.metadata.status || 'active',
+            prompts: [],
+            responses: [],
+            checkpoints: [],
+            totalTokens: conversation.metadata.totalTokens || 0,
+            startTime: conversation.metadata.startTime || Date.now()
+          } as SessionState;
+
+          // Add to memory for this session
+          this.sessions.set(sessionIdStr, session);
+          console.log(`Session ${sessionIdStr} restored from storage`);
+        }
+      } catch (err) {
+        console.warn(`Could not load session ${sessionIdStr} from storage:`, err);
+      }
+    }
+
+    // If still no session, it might already be completed by host
     if (!session) {
-      throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
+      console.log(`Session ${sessionIdStr} not found - may already be completed by host`);
+      // Don't throw error - just try to complete it anyway
+      // The contract will handle if it's already completed
     }
 
     try {
@@ -466,10 +500,15 @@ export class SessionManager implements ISessionManager {
         finalProof
       );
 
-      // Update session state
-      session.status = 'completed';
-      session.totalTokens = totalTokens;
-      session.endTime = Date.now();
+      // Update session state if we have it
+      const sessionAfterTx = this.sessions.get(sessionIdStr);
+      if (sessionAfterTx) {
+        sessionAfterTx.status = 'completed';
+        sessionAfterTx.totalTokens = totalTokens;
+        sessionAfterTx.endTime = Date.now();
+      } else {
+        console.log(`Session ${sessionIdStr} not in memory after transaction - likely completed by host`);
+      }
       
       // Clean up WebSocket connection if active
       if (this.wsClient && this.wsClient.isConnected()) {
@@ -478,11 +517,11 @@ export class SessionManager implements ISessionManager {
       }
 
       // Update storage
-      const conversation = await this.storageManager.loadConversation(sessionId.toString());
+      const conversation = await this.storageManager.loadConversation(sessionIdStr);
       if (conversation) {
         conversation.metadata['status'] = 'completed';
         conversation.metadata['totalTokens'] = totalTokens;
-        conversation.metadata['endTime'] = session.endTime;
+        conversation.metadata['endTime'] = sessionAfterTx?.endTime || Date.now();
         conversation.updatedAt = Date.now();
         await this.storageManager.saveConversation(conversation);
       }
