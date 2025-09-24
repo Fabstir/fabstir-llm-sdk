@@ -48,13 +48,14 @@ Create `.env.local` file:
 # RPC URL (Alchemy recommended)
 NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/YOUR_KEY
 
-# Contract Addresses (Base Sepolia - Current as of Jan 2025)
+# Contract Addresses (Base Sepolia - Current as of Sep 2025)
 NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE=0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944
 NEXT_PUBLIC_CONTRACT_NODE_REGISTRY=0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218
 NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM=0x2ACcc60893872A499700908889B38C5420CBcFD1
 NEXT_PUBLIC_CONTRACT_HOST_EARNINGS=0x908962e8c6CE72610021586f85ebDE09aAc97776
 NEXT_PUBLIC_CONTRACT_USDC_TOKEN=0x036CbD53842c5426634e7929541eC2318f3dCF7e
 NEXT_PUBLIC_CONTRACT_FAB_TOKEN=0xC78949004B4EB6dEf2D66e49Cd81231472612D62
+NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY=0x92b2De840bB2171203011A6dBA928d855cA8183E
 
 # S5 Storage (Optional - SDK will work without it, but storage operations will throw errors)
 # If not provided, storage features are disabled but all other SDK features work normally
@@ -68,12 +69,14 @@ import { FabstirSDKCore } from '@fabstir/sdk-core';
 const sdk = new FabstirSDKCore({
   rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!,
   contractAddresses: {
-    // ALL 5 REQUIRED - No fallbacks!
+    // ALL 7 REQUIRED - No fallbacks!
     jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!,
     nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY!,
     proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM!,
     hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS!,
     usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
+    fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN!,
+    modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY!
   }
 });
 ```
@@ -386,12 +389,14 @@ export default function ChatApp() {
     const initSDK = new FabstirSDKCore({
       rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!,
       contractAddresses: {
-        // ALL 5 REQUIRED - SDK will throw if any missing
+        // ALL 7 REQUIRED - SDK will throw if any missing
         jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!,
         nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY!,
         proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM!,
         hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS!,
         usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
+        fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN!,
+        modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY!,
       },
       mode: 'production' as const
     });
@@ -747,9 +752,10 @@ Sub-Account (gasless transactions)
 ### 2. Payment Flow
 1. User deposits $1 USDC to start session (minimum)
 2. Tokens consumed as conversation progresses (~0.02 cents per token)
-3. Checkpoint proofs submitted after 100+ tokens
-4. Payment distributed: host (90%) and treasury (10%)
-5. Unused deposit stays in sub-account for next session
+3. Checkpoint proofs submitted by host every 100+ tokens (host pays gas)
+4. Payment distributed on session end: host (90%) and treasury (10%)
+5. User pays gas for session completion (~100k gas)
+6. Unused deposit refunded to user (or stays in sub-account for gasless wallets)
 
 ### 3. Context Preservation
 - Build full conversation history
@@ -921,8 +927,8 @@ function PaymentDistribution({ sessionId, tokensUsed }: {
   tokensUsed: number;
 }) {
   const totalCost = tokensUsed * 0.0002; // USDC
-  const hostEarnings = totalCost * 0.9;
-  const treasuryFee = totalCost * 0.1;
+  const hostEarnings = totalCost * 0.9; // 90%
+  const treasuryFee = totalCost * 0.1; // 10%
 
   return (
     <div className="bg-gray-50 p-4 rounded-lg">
@@ -1134,6 +1140,19 @@ await ws.disconnect();
 
 **Note:** The WebSocketClient no longer has `onError` or `onConnect` methods. Use the promise returned by `connect()` for connection handling and try-catch for error handling.
 
+## ⚠️ Gas Payment Responsibilities
+
+### Who Pays Gas When:
+
+1. **Session Creation**: User pays (~200k gas)
+2. **Checkpoint Submissions**: Host pays (~30k gas each)
+3. **Session Completion**: User pays (~100k gas)
+   - Note: Users may abandon session to avoid this gas cost
+   - Host can call `claimAbandonedSession` after 24 hours (host pays gas)
+
+### Incentive Alignment Issue:
+The current design has an economic flaw where users are incentivized to abandon sessions rather than properly complete them to save gas fees. Hosts should price their services accordingly to cover potential completion gas costs.
+
 ## 🚨 Common Errors & Solutions
 
 ### "Missing required contract address"
@@ -1146,7 +1165,7 @@ const sdk = new FabstirSDKCore({
   }
 });
 
-// ✅ Correct - All 5 required
+// ✅ Correct - All 7 required
 const sdk = new FabstirSDKCore({
   rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!,
   contractAddresses: {
@@ -1154,7 +1173,9 @@ const sdk = new FabstirSDKCore({
     nodeRegistry: '0x...',
     proofSystem: '0x...',
     hostEarnings: '0x...',
-    usdcToken: '0x...'
+    usdcToken: '0x...',
+    fabToken: '0x...',
+    modelRegistry: '0x...'
   }
 });
 ```
@@ -1386,6 +1407,8 @@ NEXT_PUBLIC_CONTRACT_NODE_REGISTRY=0x...
 3. **Monitor Costs**: $1 deposit lasts ~30+ sessions typically
 4. **Handle Errors**: Always wrap SDK calls in try-catch
 5. **Cache Sessions**: Reuse sessions to save on gas fees
+6. **Price Accordingly**: Hosts should factor in checkpoint gas costs
+7. **Monitor Abandonment**: Track sessions that users don't complete
 
 ## 🆘 Getting Help
 

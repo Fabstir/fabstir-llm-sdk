@@ -1,14 +1,18 @@
 # JobMarketplace Contract Documentation
 
-## Current Implementation: JobMarketplaceFABWithS5
+## Current Implementation: JobMarketplaceWithModels
 
-**Current Contract Address (Base Sepolia)**: `0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b` ✅ (Treasury + Host Accumulation - Jan 5, 2025)
+**Contract Address**: `0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944`
+**Network**: Base Sepolia
+**Status**: ✅ ACTIVE - FULLY WORKING with creditEarnings and model governance
+**Last Updated**: January 13, 2025
 
 ### Key Features
-- **Treasury Fee Accumulation**: Treasury fees accumulate for batch withdrawals (NEW)
-- **Host Earnings Accumulation**: Via HostEarnings contract integration
-- **Session Jobs**: Multi-prompt AI inference with proof checkpoints
-- **Direct Payments**: Internal `_sendPayments()` function, no external escrow
+- **Model Governance**: Integration with ModelRegistry for approved models only
+- **Session-Based Jobs**: Uses `sessionJobs` mapping (NOT `jobs` mapping)
+- **Treasury Fee Accumulation**: Treasury fees accumulate for batch withdrawals
+- **Host Earnings Accumulation**: Via HostEarnings contract with proper creditEarnings
+- **Streaming Payments**: Proof-of-work based token consumption model
 - **Multi-Token Support**: ETH and USDC (Base Sepolia: 0x036CbD53842c5426634e7929541eC2318f3dCF7e)
 - **EZKL Proof Verification**: Integration with ProofSystem contract
 - **Economic Minimums**: MIN_DEPOSIT (0.0002 ETH), MIN_PROVEN_TOKENS (100)
@@ -17,13 +21,14 @@
 ### Contract Architecture
 
 ```solidity
-contract JobMarketplaceFABWithS5 {
+contract JobMarketplaceWithModels {
     // Core components
-    NodeRegistryFAB public nodeRegistry;
+    NodeRegistryWithModels public nodeRegistry;
     IProofSystem public proofSystem;
     HostEarnings public hostEarnings;
-    
-    // Treasury accumulation (NEW)
+    ModelRegistry public modelRegistry;
+
+    // Treasury accumulation
     uint256 public accumulatedTreasuryETH;
     mapping(address => uint256) public accumulatedTreasuryTokens;
     

@@ -1,5 +1,15 @@
 # Session Jobs: Continuous AI Inference on Blockchain
 
+*Last Updated: January 2025*
+
+## Current Deployment
+
+- **JobMarketplaceWithModels**: `0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944`
+- **ProofSystem**: `0x2ACcc60893872A499700908889B38C5420CBcFD1`
+- **HostEarnings**: `0x908962e8c6CE72610021586f85ebDE09aAc97776`
+- **Network**: Base Sepolia
+- **Storage**: `sessionJobs` mapping (NOT `sessions` or `jobs`)
+
 ## Overview
 
 Session jobs represent a revolutionary approach to blockchain-based AI inference, enabling continuous interaction between users and AI models while minimizing transaction costs. Unlike traditional per-prompt payment models, session jobs use a checkpoint-based proof system that reduces blockchain transactions by 85-95%.
@@ -215,13 +225,18 @@ This creates an immutable chain of proofs that can be verified later.
 
 ```solidity
 createSessionJob(
-    host,           // Assigned GPU provider
-    deposit,        // Total funds (e.g., 1 ETH)
+    host,           // Assigned GPU provider (must have supported models)
     pricePerToken,  // Rate (e.g., 0.0001 ETH/token)
     maxDuration,    // Time limit (e.g., 24 hours)
     proofInterval   // Checkpoint frequency (e.g., 500)
 )
+// Deposit sent as msg.value for ETH, or pre-approved for tokens
 ```
+
+**Requirements**:
+- Host must be registered in NodeRegistryWithModels
+- Host must support approved models from ModelRegistry
+- Minimum deposit: 0.0002 ETH or 0.80 USDC
 
 **Gas cost**: ~200,000 gas
 
@@ -259,22 +274,26 @@ claimAbandonedSession(jobId)    // User abandoned
 
 ## Payment Flows
 
-### Direct Payment Model
+### Payment Model with Accumulation
 
-Session jobs use direct transfers, bypassing external escrow contracts:
+Session jobs use an accumulation pattern for gas efficiency:
 
 ```solidity
-function _sendPayments(job, host, payment, fee, refund) {
-    if (job.paymentToken != address(0)) {
+function _sendPayments(host, user, amount, treasuryFee, token, refund) {
+    if (token != address(0)) {
         // ERC20 tokens (e.g., USDC)
-        token.transfer(host, payment);
-        token.transfer(treasury, fee);
-        token.transfer(user, refund);
+        IERC20(token).transfer(host, amount);
+        accumulatedTreasuryTokens[token] += treasuryFee;
+        if (refund > 0) {
+            IERC20(token).transfer(user, refund);
+        }
     } else {
-        // Native ETH
-        payable(host).transfer(payment);
-        payable(treasury).transfer(fee);
-        payable(user).transfer(refund);
+        // Native ETH via HostEarnings
+        hostEarnings.creditEarnings{value: amount}(host, address(0), amount);
+        accumulatedTreasuryETH += treasuryFee;
+        if (refund > 0) {
+            payable(user).transfer(refund);
+        }
     }
 }
 ```
@@ -494,7 +513,7 @@ Session jobs require minimal trust:
 ## Common Pitfalls & Troubleshooting
 
 ### Host Not Getting Paid?
-1. **Check if proofs were submitted**: Query `sessions[jobId].provenTokens`
+1. **Check if proofs were submitted**: Query `sessionJobs[jobId].provenTokens`
 2. **Verify proof submission frequency**: Must be at checkpoint intervals
 3. **Ensure proofs are valid**: Invalid proofs don't update `provenTokens`
 4. **Check session status**: Can't submit proofs after session ends

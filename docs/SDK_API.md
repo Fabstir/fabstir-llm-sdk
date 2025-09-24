@@ -94,10 +94,10 @@ The `SessionConfig` interface uses string for amounts and numbers for other fiel
 **Current Format:**
 ```typescript
 interface SessionConfig {
-  depositAmount: string;  // e.g., "1.0" for $1 USDC
-  pricePerToken: number;  // e.g., 200
-  proofInterval: number;  // e.g., 100
-  duration: number;       // e.g., 3600
+  depositAmount: string;  // e.g., "1.0" for $1 USDC minimum
+  pricePerToken: number;  // e.g., 200 (0.02 cents per token)
+  proofInterval: number;  // e.g., 100 (checkpoint every 100 tokens)
+  duration: number;       // e.g., 3600 (1 hour timeout)
 }
 ```
 
@@ -147,14 +147,14 @@ new FabstirSDKCore(config?: FabstirSDKCoreConfig)
 interface FabstirSDKCoreConfig {
   rpcUrl: string;                     // REQUIRED: Blockchain RPC URL
   chainId?: number;                   // Chain ID (default: Base Sepolia)
-  contractAddresses: {                // REQUIRED: All 5 core contracts
+  contractAddresses: {                // REQUIRED: All 7 contracts
     jobMarketplace: string;           // REQUIRED
     nodeRegistry: string;             // REQUIRED
     proofSystem: string;              // REQUIRED
     hostEarnings: string;             // REQUIRED
     usdcToken: string;                // REQUIRED
-    fabToken?: string;                // Optional
-    modelRegistry?: string;           // Optional
+    fabToken: string;                 // REQUIRED (was optional, now required)
+    modelRegistry: string;            // REQUIRED (was optional, now required)
   };
   s5Config?: {                        // Optional: S5 storage config
     portalUrl?: string;
@@ -170,15 +170,14 @@ interface FabstirSDKCoreConfig {
 const sdk = new FabstirSDKCore({
   rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!,
   contractAddresses: {
-    // ALL 5 REQUIRED - SDK will throw error if any missing
+    // ALL 7 REQUIRED - SDK will throw error if any missing
     jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!,
     nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY!,
     proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM!,
     hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS!,
     usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
-    // Optional contracts
-    fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN,
-    modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY
+    fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN!,
+    modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY!
   }
 });
 ```
@@ -1961,6 +1960,32 @@ const sdk = new FabstirSDKCore({
 // Or set environment variable
 process.env.FABSTIR_SDK_DEBUG = 'true';
 ```
+
+## Gas Payment Responsibilities
+
+Understanding who pays gas fees in the Fabstir marketplace:
+
+### Payment Model
+
+| Operation | Who Pays | Estimated Gas | Description |
+|-----------|----------|---------------|-------------|
+| Session Creation | User | ~200,000 gas | Initial session setup and deposit |
+| Checkpoint Proofs | Host | ~30,000 gas each | Every `proofInterval` tokens |
+| Session Completion | User | ~100,000 gas | Final settlement and refunds |
+| Abandoned Session Claim | Host | ~100,000 gas | After 24 hour timeout |
+
+### Economic Implications
+
+1. **User Incentive Issue**: Users may abandon sessions to avoid paying completion gas
+2. **Host Cost Consideration**: Hosts must factor checkpoint gas costs into pricing
+3. **Future Solutions**: Exploring gasless completion via account abstraction
+
+### Payment Distribution
+
+Based on treasury configuration (.env.test):
+- **Host**: 90% of payment (HOST_EARNINGS_PERCENTAGE)
+- **Treasury**: 10% of payment (TREASURY_FEE_PERCENTAGE)
+- **User**: Refund of unused deposit
 
 ## Support
 

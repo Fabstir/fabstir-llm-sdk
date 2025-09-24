@@ -5,34 +5,53 @@ This guide provides a complete reference for integrating the Fabstir LLM SDK int
 ## Quick Start
 
 ```typescript
-import { FabstirSDK } from 'fabstir-llm-sdk';
+import { FabstirSDKCore } from '@fabstir/sdk-core';
 
-// Initialize SDK
-const sdk = new FabstirSDK({
+// Initialize SDK - ALL 7 contract addresses required!
+const sdk = new FabstirSDKCore({
   rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/YOUR_KEY',
-  s5PortalUrl: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p'
+  contractAddresses: {
+    jobMarketplace: '0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944',
+    nodeRegistry: '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
+    proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
+    hostEarnings: '0x908962e8c6CE72610021586f85ebDE09aAc97776',
+    modelRegistry: '0x92b2De840bB2171203011A6dBA928d855cA8183E',
+    usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62'
+  },
+  s5Config: {
+    portalUrl: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p'
+  }
 });
 
-// Authenticate user
-await sdk.authenticate(privateKey);
+// Authenticate user (multiple options)
+// Option 1: Private key
+await sdk.authenticate('privateKey', { privateKey: '0x...' });
 
-// Access managers
+// Option 2: Ethers signer (recommended for browser)
+const provider = new ethers.BrowserProvider(window.ethereum);
+const signer = await provider.getSigner();
+await sdk.authenticate('signer', { signer });
+
+// Access managers (all synchronous after authentication)
 const paymentManager = sdk.getPaymentManager();
-const storageManager = await sdk.getStorageManager(); // Note: await required!
+const storageManager = sdk.getStorageManager();
 const sessionManager = sdk.getSessionManager();
-const inferenceManager = sdk.getInferenceManager();
-const discoveryManager = sdk.getDiscoveryManager();
+const clientManager = sdk.getClientManager();
+const modelManager = sdk.getModelManager();
+const hostManager = sdk.getHostManagerEnhanced();
 ```
 
 ## Manager Architecture
 
 The SDK uses a manager-based architecture where each manager handles a specific domain:
 
-- **PaymentManager**: Payment processing, cost calculation, validation
-- **StorageManager**: Conversation persistence, session metadata
-- **SessionManager**: Session lifecycle, job management
-- **InferenceManager**: LLM inference, streaming responses
-- **DiscoveryManager**: P2P node discovery, host selection
+- **PaymentManager**: Payment processing, USDC/ETH transactions
+- **StorageManager**: S5 conversation persistence, session metadata
+- **SessionManager**: Session lifecycle, streaming responses, context management
+- **ClientManager**: Host selection, job creation, cost estimation
+- **ModelManager**: Model governance, validation, approval
+- **HostManager**: Host discovery, capabilities, metadata
 
 ## PaymentManager API
 
@@ -233,55 +252,94 @@ await inferenceManager.resumeSessionWithHistory(
 ```jsx
 function ChatInterface({ sdk }) {
   const [messages, setMessages] = useState([]);
-  const [sessionId] = useState(`session-${Date.now()}`);
+  const [sessionId, setSessionId] = useState(null);
   const [loading, setLoading] = useState(false);
-  
-  useEffect(() => {
-    loadConversation();
-  }, []);
-  
-  const loadConversation = async () => {
-    const storageManager = await sdk.getStorageManager();
-    const conversation = await storageManager.loadConversation(sessionId);
-    setMessages(conversation);
-  };
-  
-  const sendMessage = async (prompt) => {
+
+  // Start session with host discovery
+  const startSession = async () => {
     setLoading(true);
-    
+    try {
+      const sessionManager = sdk.getSessionManager();
+      const clientManager = sdk.getClientManager();
+
+      // Discover hosts
+      const hosts = await clientManager.discoverHosts();
+      if (hosts.length === 0) throw new Error('No hosts available');
+
+      // Select best host
+      const host = hosts[0]; // Or use selection criteria
+
+      // Start session with $1 USDC
+      const { sessionId: newSessionId } = await sessionManager.startSession(
+        host.modelHash,
+        host.address,
+        {
+          depositAmount: "1.0", // $1 USDC
+          pricePerToken: 200,   // 0.02 cents per token
+          duration: 3600,       // 1 hour
+          proofInterval: 100    // Checkpoint every 100 tokens
+        },
+        host.apiUrl
+      );
+
+      setSessionId(newSessionId);
+      setMessages([{
+        role: 'system',
+        content: 'Session started! You can now send messages.'
+      }]);
+    } catch (error) {
+      console.error('Failed to start session:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const sendMessage = async (prompt) => {
+    if (!sessionId) return;
+
+    setLoading(true);
+
     // Add user message
     const userMessage = { role: 'user', content: prompt };
-    const updatedMessages = [...messages, userMessage];
-    setMessages(updatedMessages);
-    
-    // Start inference
-    const inferenceManager = sdk.getInferenceManager();
-    const stream = await inferenceManager.startInference({
-      prompt,
-      model: 'llama-2-7b',
-      temperature: 0.7
-    });
-    
-    let response = '';
-    
-    stream.on('token', (token) => {
-      response += token;
-      // Update UI with streaming response
-      setMessages([
-        ...updatedMessages,
-        { role: 'assistant', content: response }
-      ]);
-    });
-    
-    stream.on('complete', async () => {
-      // Save complete conversation
-      const storageManager = await sdk.getStorageManager();
-      await storageManager.saveConversation(sessionId, [
-        ...updatedMessages,
-        { role: 'assistant', content: response }
-      ]);
+    setMessages(prev => [...prev, userMessage]);
+
+    try {
+      const sessionManager = sdk.getSessionManager();
+
+      // Send prompt with streaming
+      let response = '';
+      await sessionManager.sendPromptStreaming(
+        sessionId,
+        prompt,
+        (chunk) => {
+          response += chunk;
+          // Update UI with streaming response
+          setMessages(prev => {
+            const msgs = [...prev];
+            if (msgs[msgs.length - 1]?.role === 'assistant') {
+              msgs[msgs.length - 1].content = response;
+            } else {
+              msgs.push({ role: 'assistant', content: response });
+            }
+            return msgs;
+          });
+        },
+        () => {
+          // Complete - save to S5 if available
+          const storageManager = sdk.getStorageManager();
+          if (storageManager.isInitialized()) {
+            storageManager.storeConversation(sessionId.toString(), messages);
+          }
+        },
+        (error) => {
+          console.error('Streaming error:', error);
+        }
+      );
+    } catch (error) {
+      console.error('Failed to send message:', error);
+    } finally {
       setLoading(false);
-    });
+    }
   };
   
   return (
@@ -473,9 +531,14 @@ try {
 RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/YOUR_KEY
 S5_PORTAL_URL=wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p
 
-# Contract addresses (Base Sepolia)
-CONTRACT_JOB_MARKETPLACE=0xD937c594682Fe74E6e3d06239719805C04BE804A
+# Contract addresses (Base Sepolia) - From .env.test
+CONTRACT_JOB_MARKETPLACE=0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944
+CONTRACT_NODE_REGISTRY=0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218
+CONTRACT_PROOF_SYSTEM=0x2ACcc60893872A499700908889B38C5420CBcFD1
+CONTRACT_HOST_EARNINGS=0x908962e8c6CE72610021586f85ebDE09aAc97776
+CONTRACT_MODEL_REGISTRY=0x92b2De840bB2171203011A6dBA928d855cA8183E
 CONTRACT_USDC_TOKEN=0x036CbD53842c5426634e7929541eC2318f3dCF7e
+CONTRACT_FAB_TOKEN=0xC78949004B4EB6dEf2D66e49Cd81231472612D62
 ```
 
 ## Testing Your Integration
@@ -509,6 +572,80 @@ const testStorage = async () => {
   console.assert(loaded.length === 1);
 };
 ```
+
+## Gas Payment Responsibilities
+
+Understanding who pays gas is critical for UX design:
+
+| Operation | Who Pays | Gas Cost | Notes |
+|-----------|----------|----------|-------|
+| Session Creation | User | ~200k gas | Initial session setup |
+| Checkpoint Proofs | Host | ~30k gas each | Every 100 tokens |
+| Session Completion | User | ~100k gas | Payment distribution |
+
+### Design Considerations
+
+1. **Users may abandon sessions** to avoid completion gas
+2. **Hosts should price accordingly** to cover checkpoint costs
+3. **Consider gasless options** via Base Account Kit
+
+## Base Account Kit Integration (Gasless Transactions)
+
+Enable gasless transactions with Coinbase Smart Wallet:
+
+```typescript
+// Custom signer for gasless transactions
+const createGaslessSigner = (primaryAccount, subAccount, provider) => {
+  return {
+    async getAddress() {
+      return subAccount;
+    },
+
+    async signMessage(message) {
+      // Use primary for signing
+      return provider.request({
+        method: 'personal_sign',
+        params: [message, primaryAccount]
+      });
+    },
+
+    async sendTransaction(tx) {
+      // Use wallet_sendCalls for gasless
+      const calls = [{
+        to: tx.to,
+        data: tx.data,
+        value: tx.value ? `0x${BigInt(tx.value).toString(16)}` : undefined
+      }];
+
+      const response = await provider.request({
+        method: "wallet_sendCalls",
+        params: [{
+          from: subAccount,
+          calls: calls,
+          capabilities: {
+            atomic: { required: true }
+          }
+        }]
+      });
+
+      // Wait for confirmation
+      // ... polling logic
+      return tx;
+    }
+  };
+};
+
+// Use with SDK
+const signer = createGaslessSigner(primaryAccount, subAccount, provider);
+await sdk.authenticate('signer', { signer });
+```
+
+## Payment Distribution
+
+Current distribution model (from treasury configuration):
+- **Host**: 90% of payment
+- **Treasury**: 10% of payment
+- **User**: Refund of unused deposit
 
 ## Support
 

@@ -286,7 +286,7 @@ The Host Discovery system interacts with the following smart contracts:
 
 ### NodeRegistry Contract
 
-- **Address**: Deployed on Base Sepolia (check .env.local for current address)
+- **Address**: `0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218` (Base Sepolia)
 - **Key Functions**:
   - `registerNodeWithUrl(metadata, apiUrl)`: Register node with API URL
   - `updateApiUrl(apiUrl)`: Update node's API URL

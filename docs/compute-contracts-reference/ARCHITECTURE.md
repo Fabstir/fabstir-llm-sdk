@@ -32,7 +32,7 @@ User → JobMarketplace → PaymentEscrow → Host
 For session-based jobs (long-running AI inference sessions), the architecture was simplified:
 
 ```
-User → JobMarketplaceFABWithS5 → Host
+User → JobMarketplaceWithModels → Host
            (self-contained)
 ```
 
@@ -45,7 +45,7 @@ User → JobMarketplaceFABWithS5 → Host
 
 ## Current Hybrid Architecture
 
-The `JobMarketplaceFABWithS5` contract now implements both models:
+The `JobMarketplaceWithModels` contract now implements both models:
 
 ### 1. Legacy Single-Prompt Jobs
 - May still use external PaymentEscrow/HostEarnings contracts
@@ -60,12 +60,12 @@ The `JobMarketplaceFABWithS5` contract now implements both models:
 
 ## Key Components
 
-### JobMarketplaceFABWithS5
+### JobMarketplaceWithModels
 
 The main contract that handles both job types:
 
 ```solidity
-contract JobMarketplaceFABWithS5 {
+contract JobMarketplaceWithModels {
     // Legacy external contracts (optional)
     IPaymentEscrow public paymentEscrow;
     HostEarnings public hostEarnings;

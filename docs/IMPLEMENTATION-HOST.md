@@ -274,13 +274,13 @@ Deliver a production-ready CLI tool that:
   chainId: number,  // 84532 for Base Sepolia
   rpcUrl: string,
   contractAddresses: {
-    jobMarketplace: string,
-    nodeRegistry: string,
+    jobMarketplace: string,  // See .env.test for current addresses
+    nodeRegistry: string,    // 0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218
     proofSystem: string,
-    hostEarnings: string,
+    hostEarnings: string,    // 0x908962e8c6CE72610021586f85ebDE09aAc97776
     fabToken: string,
     usdcToken: string,
-    modelRegistry: string
+    modelRegistry: string    // 0x92b2De840bB2171203011A6dBA928d855cA8183E
   },
   s5Config: {
     portalUrl: string,
@@ -289,6 +289,8 @@ Deliver a production-ready CLI tool that:
   mode: 'production'
 }
 ```
+
+**Note**: All contract addresses must be sourced from `.env.test`. Payment distribution is 90% to hosts, 10% to treasury (TREASURY_FEE_PERCENTAGE=10, HOST_EARNINGS_PERCENTAGE=90).
 
 **Success Criteria:**
 - FabstirSDKCore from @fabstir/sdk-core imports successfully

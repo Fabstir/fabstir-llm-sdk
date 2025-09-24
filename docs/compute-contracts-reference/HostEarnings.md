@@ -2,7 +2,10 @@
 
 ## Current Implementation
 
-**Current Contract Address (Base Sepolia)**: `0x908962e8c6CE72610021586f85ebDE09aAc97776` ✅ (Active - Jan 5, 2025)
+**Contract Address**: `0x908962e8c6CE72610021586f85ebDE09aAc97776`
+**Network**: Base Sepolia
+**Status**: ✅ ACTIVE - ETH & USDC accumulation
+**Last Updated**: January 13, 2025
 
 ### Overview
 

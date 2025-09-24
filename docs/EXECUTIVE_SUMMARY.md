@@ -71,8 +71,8 @@ A decentralized marketplace that connects GPU providers directly with users need
 
 ### For Users (Clients)
 
-1. **Connect Wallet** - Use any Ethereum wallet
-2. **Deposit USDC** - Minimum $2 to start a session
+1. **Connect Wallet** - Use any Ethereum wallet (Coinbase Smart Wallet recommended)
+2. **Deposit USDC** - Minimum $1 to start a session
 3. **Select Model** - Choose from approved models
 4. **Send Prompts** - Get responses in real-time
 5. **Pay for Usage** - Only pay for tokens consumed
@@ -83,7 +83,7 @@ A decentralized marketplace that connects GPU providers directly with users need
 2. **List Models** - Declare supported models
 3. **Set Pricing** - Competitive token pricing
 4. **Serve Requests** - Automatic job matching
-5. **Earn Revenue** - 90% of payments, instant settlement
+5. **Earn Revenue** - 90% of payments, settlement on session completion
 
 ### Technical Flow
 
@@ -198,7 +198,7 @@ Client → Smart Contract → Host Discovery → P2P Connection → Inference �
 - Instant settlement
 - No payment delays
 - Transparent pricing
-- Fair revenue distribution (90% to providers)
+- Fair revenue distribution (90% to hosts, 10% to treasury)
 
 ### 5. **Technical Innovation**
 - Cryptographic proof verification
@@ -256,25 +256,25 @@ Client → Smart Contract → Host Discovery → P2P Connection → Inference �
 
 ## Roadmap
 
-### Q1 2025 - Beta Launch
+### Q4 2025 - Beta Launch
 - [ ] Public beta on Base Sepolia
 - [ ] 10+ verified models
 - [ ] 50+ active hosts
 - [ ] Web application launch
 
-### Q2 2025 - Mainnet Preparation
+### Q1 2026 - Mainnet Preparation
 - [ ] Security audits
 - [ ] Base mainnet deployment
 - [ ] FAB token launch
 - [ ] Enterprise partnerships
 
-### Q3 2025 - Scale Phase
+### Q2 2026 - Scale Phase
 - [ ] 100+ models available
 - [ ] 1,000+ hosts
 - [ ] Mobile applications
 - [ ] API gateway service
 
-### Q4 2025 - Ecosystem Expansion
+### Q3 2026 - Ecosystem Expansion
 - [ ] Cross-chain support
 - [ ] Model training marketplace
 - [ ] Data marketplace integration
@@ -350,10 +350,49 @@ Client → Smart Contract → Host Discovery → P2P Connection → Inference �
    - Multiple revenue streams
 
 5. **Aligned Incentives**
-   - Hosts earn 90% of revenue
+   - Hosts earn 90% of revenue (10% to treasury)
    - Users get competitive pricing
    - Protocol captures sustainable fees
    - Community governance model
+
+## Gas Payment Responsibilities
+
+### Economic Design
+
+The marketplace uses a hybrid gas payment model:
+
+| Operation | Who Pays | Gas Cost | Rationale |
+|-----------|----------|----------|-----------|
+| Session Creation | User | ~200k gas | User initiates service |
+| Checkpoint Proofs | Host | ~30k gas each | Host secures payment |
+| Session Completion | User | ~100k gas | User triggers settlement |
+
+### Automatic Settlement Innovation
+
+The system now features **gasless session ending for users** through automatic settlement:
+- When users end a session, they simply close the WebSocket connection
+- The host node (v5+) automatically detects disconnection and calls `completeSessionJob()`
+- Hosts pay the gas for settlement (they're incentivized to get their payment)
+- Users receive their refund without paying any gas fees
+- This eliminates the previous incentive misalignment completely
+
+## Technical Specifications
+
+### Contract Addresses (Base Sepolia)
+
+```
+JobMarketplace: 0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944
+ProofSystem: 0x2ACcc60893872A499700908889B38C5420CBcFD1
+NodeRegistry: 0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218
+HostEarnings: 0x908962e8c6CE72610021586f85ebDE09aAc97776
+ModelRegistry: 0x92b2De840bB2171203011A6dBA928d855cA8183E
+USDC Token: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
+FAB Token: 0xC78949004B4EB6dEf2D66e49Cd81231472612D62
+```
+
+### SDK Requirements
+
+All 7 contract addresses must be provided - no fallbacks or defaults.
 
 ## Risk Mitigation
 

@@ -56,16 +56,20 @@ interface AuthResult {
 ### Using FabstirSDK with Authentication
 
 ```typescript
-import { FabstirSDK } from '@fabstir/llm-sdk';
+import { FabstirSDKCore } from '@fabstir/sdk-core';
 
 // Initialize SDK
-const sdk = new FabstirSDK({
+const sdk = new FabstirSDKCore({
   rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/your-key',
   s5PortalUrl: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p',
   contractAddresses: {
-    jobMarketplace: '0xD937c594682Fe74E6e3d06239719805C04BE804A',
-    nodeRegistry: '0x87516C13Ea2f99de598665e14cab64E191A0f8c4',
-    usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+    jobMarketplace: '0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944',
+    nodeRegistry: '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
+    proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
+    hostEarnings: '0x908962e8c6CE72610021586f85ebDE09aAc97776',
+    modelRegistry: '0x92b2De840bB2171203011A6dBA928d855cA8183E',
+    usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62'
   }
 });
 
@@ -88,7 +92,7 @@ If you're building a custom authentication module for the SDK:
 
 ```typescript
 import { ethers } from 'ethers';
-import { AuthManager } from '@fabstir/llm-sdk';
+import { AuthManager } from '@fabstir/sdk-core';
 
 export class CustomAuthProvider {
   private authManager: AuthManager;

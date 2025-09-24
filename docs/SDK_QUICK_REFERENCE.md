@@ -7,17 +7,17 @@ Quick reference guide for the Fabstir LLM SDK with manager-based architecture.
 ### Development (npm link)
 ```bash
 # In SDK directory
-cd ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-sdk
+cd packages/sdk-core
+pnpm build
 npm link
 
-# In UI directory
-cd ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-ui
-npm link @fabstir/llm-sdk
+# In your application
+npm link @fabstir/sdk-core
 ```
 
 ### Production
 ```bash
-npm install @fabstir/llm-sdk ethers
+npm install @fabstir/sdk-core ethers
 ```
 
 ## Quick Start
@@ -25,10 +25,10 @@ npm install @fabstir/llm-sdk ethers
 ### Basic SDK Usage
 
 ```typescript
-import { FabstirSDK } from '@fabstir/llm-sdk';
+import { FabstirSDKCore } from '@fabstir/sdk-core';
 
 // Initialize SDK
-const sdk = new FabstirSDK({
+const sdk = new FabstirSDKCore({
   rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/your-key',
   s5PortalUrl: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p'
 });
@@ -43,7 +43,7 @@ const storageManager = await sdk.getStorageManager();
 
 ## Manager Pattern
 
-The SDK uses a manager-based architecture with 5 specialized managers:
+The SDK uses a manager-based architecture with 8 specialized managers:
 
 ### 1. AuthManager
 ```typescript
@@ -214,10 +214,14 @@ BASE_SEPOLIA_CHAIN_ID = 84532
 ## Contract Addresses (Base Sepolia)
 
 ```typescript
-// Latest deployment (January 2025)
-JobMarketplace: 0xD937c594682Fe74E6e3d06239719805C04BE804A
-NodeRegistry: 0x87516C13Ea2f99de598665e14cab64E191A0f8c4
+// Latest deployment (from .env.test)
+JobMarketplace: 0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944
+NodeRegistry: 0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218
+ProofSystem: 0x2ACcc60893872A499700908889B38C5420CBcFD1
+HostEarnings: 0x908962e8c6CE72610021586f85ebDE09aAc97776
+ModelRegistry: 0x92b2De840bB2171203011A6dBA928d855cA8183E
 USDC Token: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
+FAB Token: 0xC78949004B4EB6dEf2D66e49Cd81231472612D62
 ```
 
 ## Environment Variables
@@ -227,22 +231,26 @@ USDC Token: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
 PRIVATE_KEY=0x...
 RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/your-key
 S5_PORTAL_URL=wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p
-CONTRACT_JOB_MARKETPLACE=0xD937c594682Fe74E6e3d06239719805C04BE804A
-CONTRACT_NODE_REGISTRY=0x87516C13Ea2f99de598665e14cab64E191A0f8c4
+CONTRACT_JOB_MARKETPLACE=0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944
+CONTRACT_NODE_REGISTRY=0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218
+CONTRACT_PROOF_SYSTEM=0x2ACcc60893872A499700908889B38C5420CBcFD1
+CONTRACT_HOST_EARNINGS=0x908962e8c6CE72610021586f85ebDE09aAc97776
+CONTRACT_MODEL_REGISTRY=0x92b2De840bB2171203011A6dBA928d855cA8183E
 CONTRACT_USDC_TOKEN=0x036CbD53842c5426634e7929541eC2318f3dCF7e
+CONTRACT_FAB_TOKEN=0xC78949004B4EB6dEf2D66e49Cd81231472612D62
 ```
 
 ## Full Example
 
 ```typescript
-import { FabstirSDK } from '@fabstir/llm-sdk';
+import { FabstirSDKCore } from '@fabstir/sdk-core';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
 
 async function main() {
   // Initialize and authenticate
-  const sdk = new FabstirSDK();
+  const sdk = new FabstirSDKCore();
   await sdk.authenticate(process.env.PRIVATE_KEY!);
   
   // Get managers

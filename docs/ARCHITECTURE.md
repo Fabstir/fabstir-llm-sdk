@@ -1,494 +1,329 @@
 # Fabstir LLM SDK Architecture
 
-This document provides a comprehensive overview of the Fabstir LLM SDK's manager-based architecture, system components, and design principles.
+## Overview
 
-## Table of Contents
+The Fabstir LLM SDK is a modular TypeScript/JavaScript SDK that enables applications to interact with the Fabstir P2P LLM marketplace. The SDK has been refactored into a browser-compatible core package with a manager-based architecture for clean separation of concerns.
 
-- [System Overview](#system-overview)
-- [Manager-Based Architecture](#manager-based-architecture)
-- [Architecture Diagram](#architecture-diagram)
-- [Core Components](#core-components)
-- [Manager Components](#manager-components)
-- [Payment System](#payment-system)
-- [P2P Discovery Process](#p2p-discovery-process)
-- [Session Lifecycle](#session-lifecycle)
-- [Contract Interaction Flow](#contract-interaction-flow)
-- [Storage Architecture](#storage-architecture)
-- [Security Architecture](#security-architecture)
-- [Performance Considerations](#performance-considerations)
-
-## System Overview
-
-The Fabstir LLM SDK uses a manager-based architecture that provides clean separation of concerns while enabling decentralized LLM access. The system leverages:
-
-- **Manager Pattern** for modular functionality (Auth, Payment, Storage, Discovery, Session)
-- **libp2p** for P2P networking and node discovery
-- **Ethereum smart contracts** for trustless payments (ETH/USDC) and job coordination
-- **S5 Network** for decentralized storage of conversations and session data
-- **WebSocket** for real-time communication
-- **Session-based jobs** for efficient multi-turn conversations
-
-### Key Design Principles
-
-1. **Modularity**: Each manager handles a specific domain
-2. **Decentralization**: No central servers or control points
-3. **Authentication-First**: All operations require wallet authentication
-4. **Flexible Payments**: Support for ETH and USDC payments
-5. **Trustless**: Smart contracts ensure fair payment distribution
-6. **Scalable**: P2P architecture scales with network growth
-7. **Privacy-Preserving**: Direct peer connections and encrypted storage
-
-## Manager-Based Architecture
-
-The SDK uses five specialized managers, each responsible for a specific aspect of functionality:
+## Package Structure
 
 ```
-┌─────────────────────────────────────────┐
-│           FabstirSDK (Main)             │
-│                                         │
-│  ┌─────────────────────────────────┐   │
-│  │        AuthManager              │   │
-│  │  - Wallet authentication        │   │
-│  │  - S5 seed generation           │   │
-│  └─────────────────────────────────┘   │
-│                                         │
-│  ┌─────────────────────────────────┐   │
-│  │        PaymentManager           │   │
-│  │  - ETH/USDC payments           │   │
-│  │  - Job creation                │   │
-│  │  - Token approvals             │   │
-│  └─────────────────────────────────┘   │
-│                                         │
-│  ┌─────────────────────────────────┐   │
-│  │        StorageManager           │   │
-│  │  - S5 network integration      │   │
-│  │  - Data persistence            │   │
-│  │  - Conversation storage        │   │
-│  └─────────────────────────────────┘   │
-│                                         │
-│  ┌─────────────────────────────────┐   │
-│  │        DiscoveryManager         │   │
-│  │  - P2P node creation           │   │
-│  │  - Host discovery              │   │
-│  │  - Peer messaging              │   │
-│  └─────────────────────────────────┘   │
-│                                         │
-│  ┌─────────────────────────────────┐   │
-│  │        SessionManager           │   │
-│  │  - Session orchestration       │   │
-│  │  - Proof submission            │   │
-│  │  - Payment distribution        │   │
-│  └─────────────────────────────────┘   │
-└─────────────────────────────────────────┘
+/workspace/
+├── packages/
+│   ├── sdk-core/        # Browser-compatible core SDK
+│   ├── sdk-node/        # Node.js specific features (P2P, libp2p)
+│   ├── sdk-client/      # Client utilities
+│   ├── host-cli/        # CLI for host providers
+│   └── s5js/            # Enhanced S5 storage (symlinked)
+├── apps/
+│   └── harness/         # Test harness Next.js application
+├── tests/               # Formal test suite
+├── scripts/             # Development and debugging scripts
+└── docs/                # Documentation
 ```
 
-## Architecture Diagram
+## Core Architecture
 
-```mermaid
-graph TB
-    subgraph Client Application
-        APP[Application]
-        UI[UI Layer]
-    end
-    
-    subgraph FabstirSDK
-        MAIN[FabstirSDK Main]
-        AUTH[AuthManager]
-        PAY[PaymentManager]
-        STORE[StorageManager]
-        DISC[DiscoveryManager]
-        SESS[SessionManager]
-    end
-    
-    subgraph External Systems
-        ETH[Ethereum/Base]
-        S5[S5 Network]
-        P2P[libp2p Network]
-        HOST[Compute Hosts]
-    end
-    
-    APP --> MAIN
-    MAIN --> AUTH
-    MAIN --> PAY
-    MAIN --> STORE
-    MAIN --> DISC
-    MAIN --> SESS
-    
-    AUTH --> ETH
-    PAY --> ETH
-    STORE --> S5
-    DISC --> P2P
-    SESS --> HOST
-    
-    SESS --> PAY
-    SESS --> STORE
-    SESS --> DISC
+### 1. SDK Core (`@fabstir/sdk-core`)
+
+The main browser-compatible SDK package with a manager-based architecture.
+
+#### Entry Point
+```typescript
+// packages/sdk-core/src/index.ts
+export { FabstirSDKCore } from './FabstirSDKCore';
 ```
 
-## Core Components
+#### Core Components
 
-### FabstirSDK
+**FabstirSDKCore** - Main SDK class that orchestrates all managers
+- Handles authentication (private key, signer, or wallet provider)
+- Manages contract initialization
+- Provides access to all manager instances
+- Supports multiple authentication methods
 
-The main SDK class that:
-- Manages SDK configuration
-- Handles authentication flow
-- Provides access to all managers
-- Maintains singleton manager instances
+### 2. Manager Architecture
+
+The SDK uses a manager pattern where each manager handles a specific domain:
+
+#### **AuthManager** (`/managers/AuthManager.ts`)
+- Wallet authentication and connection
+- S5 seed phrase generation from wallet signature
+- Support for multiple wallet types (EOA, Smart Wallets)
+- Key Features:
+  - Deterministic seed generation
+  - Secure signature-based authentication
+  - Multi-wallet support
+
+#### **PaymentManager** (`/managers/PaymentManager.ts`)
+- USDC and ETH payment processing
+- Approval and deposit handling
+- Balance checking and validation
+- Session job creation with payments
+- Key Features:
+  - Multi-token support (USDC, ETH)
+  - Gas-efficient approval patterns
+  - Payment validation and error handling
+
+#### **SessionManager** (`/managers/SessionManager.ts`)
+- Session lifecycle management
+- WebSocket connection to host nodes
+- Streaming response handling
+- Context preservation across prompts
+- Key Features:
+  - Gasless session ending (host pays gas)
+  - Automatic checkpoint handling
+  - Session recovery from S5 storage
+  - Real-time streaming support
+
+#### **StorageManager** (`/managers/StorageManager.ts`)
+- S5 decentralized storage integration
+- Conversation persistence
+- Session metadata storage
+- File upload/download capabilities
+- Key Features:
+  - Encrypted storage with S5
+  - Conversation history management
+  - Metadata persistence
+  - CID-based content addressing
+
+#### **ClientManager** (`/managers/ClientManager.ts`)
+- Host discovery and selection
+- Job submission and negotiation
+- Cost estimation
+- Model availability checking
+- Key Features:
+  - Dynamic host discovery
+  - Best host selection algorithms
+  - Job lifecycle management
+
+#### **HostManagerEnhanced** (`/managers/HostManagerEnhanced.ts`)
+- Enhanced host registration and management
+- Model listing and capabilities
+- Metadata management
+- Host status tracking
+- Key Features:
+  - JSON metadata support
+  - Model validation
+  - Multi-model registration
+
+#### **ModelManager** (`/managers/ModelManager.ts`)
+- Model governance and validation
+- Approved model registry
+- Model hash verification
+- Tier management (Standard, Premium, Enterprise)
+- Key Features:
+  - On-chain model registry
+  - SHA-256 hash validation
+  - Model approval workflows
+
+#### **TreasuryManager** (`/managers/TreasuryManager.ts`)
+- Treasury operations and analytics
+- Fee collection tracking
+- Revenue distribution
+- Protocol metrics
+- Key Features:
+  - Treasury balance monitoring
+  - Fee percentage management (10% treasury, 90% host)
+  - Withdrawal capabilities
+
+### 3. Contract Integration
+
+The SDK interacts with smart contracts deployed on Base Sepolia (and future chains):
 
 ```typescript
-class FabstirSDK {
-  constructor(config: SDKConfig)
-  authenticate(privateKey: string): Promise<AuthResult>
-  getAuthManager(): AuthManager
-  getPaymentManager(): PaymentManager
-  getStorageManager(): Promise<StorageManager>
-  getDiscoveryManager(): DiscoveryManager
-  getSessionManager(): Promise<SessionManager>
+// Contract addresses from .env.test
+{
+  jobMarketplace: "0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944",
+  nodeRegistry: "0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218",
+  proofSystem: "0x2ACcc60893872A499700908889B38C5420CBcFD1",
+  hostEarnings: "0x908962e8c6CE72610021586f85ebDE09aAc97776",
+  modelRegistry: "0x92b2De840bB2171203011A6dBA928d855cA8183E",
+  usdcToken: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  fabToken: "0xC78949004B4EB6dEf2D66e49Cd81231472612D62"
 }
 ```
 
-### SDKConfig
+### 4. WebSocket Architecture
 
-Configuration for the SDK:
+Direct WebSocket connections to host nodes for real-time inference:
+
+```
+User → SDK → WebSocket → Host Node (fabstir-llm-node)
+                ↓
+        Streaming Responses
+```
+
+**Key Innovation**: Gasless session ending
+- User closes WebSocket connection
+- Host node automatically calls `completeSessionJob()`
+- Host pays gas to receive payment
+- User gets refund without gas fees
+
+### 5. Storage Architecture (S5 Integration)
+
+Enhanced S5.js integration for decentralized storage:
 
 ```typescript
-interface SDKConfig {
-  rpcUrl?: string;              // Ethereum RPC endpoint
-  s5PortalUrl?: string;         // S5 storage portal
-  contractAddresses?: {
-    jobMarketplace?: string;
-    nodeRegistry?: string;
-    usdcToken?: string;
-  };
-}
+// Symlinked at node_modules/@s5-dev/s5js → /workspace/packages/s5js
+import { S5 } from '@s5-dev/s5js';
 ```
 
-## Manager Components
+Features:
+- Conversation persistence
+- Session metadata storage
+- Deterministic seed phrases from wallet signatures
+- CID-based content addressing
 
-### 1. AuthManager
-
-Handles all authentication-related operations:
-
-- **Wallet Integration**: Supports private key authentication
-- **Signer Management**: Provides ethers.js signer for transactions
-- **S5 Seed Generation**: Derives deterministic seed from wallet signature
-- **Network Detection**: Identifies and validates chain ID
-
-Key Methods:
-- `authenticate()`: Authenticate with provider
-- `getSigner()`: Get ethers signer
-- `getS5Seed()`: Get S5 storage seed
-- `getUserAddress()`: Get wallet address
-- `isAuthenticated()`: Check auth status
-
-### 2. PaymentManager
-
-Manages all payment operations:
-
-- **ETH Payments**: Direct ETH transfers for jobs
-- **USDC Payments**: ERC20 token payments with approval
-- **Job Creation**: Creates session jobs on smart contracts
-- **Gas Estimation**: Calculates transaction costs
-- **Payment Tracking**: Monitors payment status
-
-Key Methods:
-- `createETHSessionJob()`: Create ETH-funded job
-- `approveUSDC()`: Approve USDC spending
-- `createUSDCSessionJob()`: Create USDC-funded job
-- `completeSessionJob()`: Complete job and release payment
-
-### 3. StorageManager
-
-Interfaces with S5 decentralized storage:
-
-- **S5 Client**: Manages S5 network connection
-- **Data Persistence**: Stores conversation data
-- **Content Addressing**: Uses CIDs for data retrieval
-- **Metadata Support**: Attaches metadata to stored data
-- **User Data Management**: Lists and manages user's data
-
-Key Methods:
-- `initialize()`: Setup S5 client with auth
-- `storeData()`: Store data with optional metadata
-- `retrieveData()`: Retrieve data by key
-- `listUserData()`: List all user's stored data
-
-### 4. DiscoveryManager
-
-Handles P2P networking and discovery:
-
-- **libp2p Integration**: Full libp2p v2.x support
-- **Node Creation**: Creates and manages P2P nodes
-- **Peer Discovery**: DHT-based peer discovery
-- **Direct Messaging**: Peer-to-peer messaging
-- **Host Selection**: Finds suitable compute hosts
-
-Key Methods:
-- `createNode()`: Start P2P node
-- `connectToPeer()`: Connect to specific peer
-- `getConnectedPeers()`: List connected peers
-- `sendMessage()`: Send message to peer
-- `findHost()`: Find host matching criteria
-- `stop()`: Shutdown P2P node
-
-### 5. SessionManager
-
-Orchestrates complete session workflows:
-
-- **Session Creation**: Coordinates job creation with discovery
-- **Proof Management**: Handles proof submission
-- **Payment Distribution**: Manages 90/10 payment split
-- **Session Storage**: Persists session data
-- **Status Tracking**: Monitors session lifecycle
-
-Key Methods:
-- `createSession()`: Create new compute session
-- `submitProof()`: Submit computation proof
-- `completeSession()`: Complete and distribute payments
-- `storeSessionData()`: Store session-specific data
-- `getSessionData()`: Retrieve session data
-- `getSessionStatus()`: Check session status
-
-## Payment System
-
-### Payment Flow
-
-1. **Job Creation**: User creates job with payment (ETH or USDC)
-2. **Escrow**: Payment held in smart contract
-3. **Execution**: Host performs computation
-4. **Proof Submission**: Host submits proof of work
-5. **Payment Release**: Contract distributes payment (90% host, 10% treasury)
-
-### ETH Payment
-
-```typescript
-// Direct ETH transfer with job creation
-await paymentManager.createETHSessionJob(
-  hostAddress,
-  '0.005',  // ETH amount
-  5000,     // price per token
-  3600,     // duration
-  300       // proof interval
-);
-```
-
-### USDC Payment
-
-```typescript
-// Requires approval first
-await paymentManager.approveUSDC(usdcAddress, '100');
-await paymentManager.createUSDCSessionJob(
-  hostAddress,
-  usdcAddress,
-  '100',    // USDC amount
-  5000,     // price per token
-  3600,     // duration
-  300       // proof interval
-);
-```
-
-## P2P Discovery Process
-
-1. **Node Initialization**
-   ```typescript
-   await discoveryManager.createNode({
-     listen: ['/ip4/0.0.0.0/tcp/4001'],
-     bootstrap: [...]
-   });
-   ```
-
-2. **DHT Population**
-   - Node connects to bootstrap peers
-   - DHT routing tables populate
-   - Peer capabilities advertised
-
-3. **Host Discovery**
-   ```typescript
-   const host = await discoveryManager.findHost({
-     minReputation: 100,
-     requiredModels: ['llama-3.2-1b']
-   });
-   ```
-
-4. **Direct Communication**
-   - Establish direct connection to selected host
-   - Exchange job details and negotiate terms
-   - Begin computation
-
-## Session Lifecycle
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant SessionManager
-    participant PaymentManager
-    participant DiscoveryManager
-    participant StorageManager
-    participant Host
-    
-    User->>SessionManager: createSession()
-    SessionManager->>DiscoveryManager: findHost()
-    DiscoveryManager->>Host: discover
-    Host-->>DiscoveryManager: capabilities
-    DiscoveryManager-->>SessionManager: hostAddress
-    SessionManager->>PaymentManager: createJob()
-    PaymentManager-->>SessionManager: jobId
-    SessionManager->>StorageManager: storeMetadata()
-    SessionManager-->>User: sessionId
-    
-    loop During Computation
-        Host->>SessionManager: submitProof()
-        SessionManager->>StorageManager: storeProof()
-    end
-    
-    User->>SessionManager: completeSession()
-    SessionManager->>PaymentManager: completeJob()
-    PaymentManager-->>Host: payment (90%)
-    PaymentManager-->>Treasury: fee (10%)
-    SessionManager-->>User: completion
-```
-
-## Contract Interaction Flow
-
-### Smart Contract Architecture
+### 6. Authentication Flow
 
 ```
-┌──────────────────────────┐
-│   JobMarketplaceFABWithS5│
-│                          │
-│  - createSessionJobETH() │
-│  - createSessionJobToken()│
-│  - completeSessionJob()  │
-│  - submitProof()         │
-└──────────────────────────┘
-            │
-            ├──────────────┐
-            │              │
-    ┌───────▼────┐  ┌──────▼──────┐
-    │NodeRegistry│  │ProofSystem  │
-    │            │  │             │
-    │ - register │  │ - verify    │
-    │ - lookup   │  │ - store     │
-    └────────────┘  └─────────────┘
+1. User provides credentials
+   ├─ Private Key
+   ├─ Ethers Signer
+   └─ Wallet Provider (future)
+
+2. SDK authenticates
+   ├─ Creates wallet instance
+   ├─ Generates S5 seed phrase
+   └─ Initializes managers
+
+3. Managers become available
+   └─ All operations now authorized
 ```
 
-### Contract Addresses (Base Sepolia - Jan 2025)
-
-- JobMarketplace: `0xD937c594682Fe74E6e3d06239719805C04BE804A`
-- NodeRegistry: `0x87516C13Ea2f99de598665e14cab64E191A0f8c4`
-- ProofSystem: `0x2ACcc60893872A499700908889B38C5420CBcFD1`
-- USDC Token: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
-
-## Storage Architecture
-
-### S5 Network Integration
+### 7. Session Flow
 
 ```
-┌─────────────────┐
-│  StorageManager │
-└────────┬────────┘
-         │
-    ┌────▼────┐
-    │S5 Client│
-    └────┬────┘
-         │
-┌────────▼────────┐
-│   S5 Network    │
-│                 │
-│ - Decentralized │
-│ - Content-based │
-│ - Encrypted     │
-└─────────────────┘
+1. Start Session
+   ├─ Discover hosts (ClientManager)
+   ├─ Create session job (PaymentManager)
+   └─ Connect WebSocket (SessionManager)
+
+2. Send Prompts
+   ├─ Stream over WebSocket
+   ├─ Receive token streaming
+   └─ Store in S5 (StorageManager)
+
+3. End Session (GASLESS!)
+   ├─ Close WebSocket only
+   ├─ Host submits completion
+   └─ Automatic settlement
 ```
 
-### Data Types Stored
+## Data Flow
 
-1. **Session Metadata**: Job details, timestamps, participants
-2. **Conversation Data**: Messages, prompts, responses
-3. **Proof Data**: Computation proofs, checkpoints
-4. **User Preferences**: Settings, model preferences
+### Request Flow
+```
+UI → SDK Core → Manager → Contract/WebSocket → Host Node
+```
 
-## Security Architecture
+### Response Flow
+```
+Host Node → WebSocket → SessionManager → Event Emitter → UI
+```
 
-### Authentication Security
+### Storage Flow
+```
+SessionManager → StorageManager → S5 Network → CID
+```
 
-- Private keys never leave client
-- S5 seed derived from wallet signature
-- All managers require authentication
+## Key Design Principles
 
-### Payment Security
+1. **Browser-First**: Core SDK works in browsers without Node.js dependencies
+2. **Manager Pattern**: Clean separation of concerns with dedicated managers
+3. **Gasless UX**: Session ending doesn't require user gas payments
+4. **Event-Driven**: Extensive use of events for async operations
+5. **Streaming-First**: Real-time token streaming over WebSocket
+6. **Decentralized Storage**: S5 for persistence without central servers
 
-- Smart contract escrow
-- Atomic payment distribution
-- No trust required between parties
+## Testing Architecture
 
-### Data Security
+```
+/workspace/tests/
+├── integration/         # End-to-end integration tests
+├── unit/               # Unit tests for components
+├── managers/           # Manager-specific tests
+└── contracts/          # Smart contract interaction tests
+```
 
-- End-to-end encryption in S5
-- Content-addressed storage
-- User-controlled access
+Test Stack:
+- Vitest for test runner
+- Real contract interactions (no mocks)
+- Polyfills for browser APIs in Node.js
 
-### Network Security
+## Future Architecture (Multi-Chain/Multi-Wallet)
 
-- libp2p encryption (Noise protocol)
-- Peer identity verification
-- DHT security features
+See `/workspace/docs/IMPLEMENTATION-MULTI.md` for planned architecture supporting:
+- Multiple blockchains (Base, opBNB, etc.)
+- Multiple wallet types (EOA, Smart Wallets)
+- Wallet abstraction layer
+- Chain-agnostic operations
+
+## Environment Configuration
+
+Required environment variables:
+```bash
+# RPC and Chain
+RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/YOUR_KEY
+
+# All 7 contracts required (no fallbacks)
+CONTRACT_JOB_MARKETPLACE=0x...
+CONTRACT_NODE_REGISTRY=0x...
+CONTRACT_PROOF_SYSTEM=0x...
+CONTRACT_HOST_EARNINGS=0x...
+CONTRACT_MODEL_REGISTRY=0x...
+CONTRACT_USDC_TOKEN=0x...
+CONTRACT_FAB_TOKEN=0x...
+
+# S5 Storage
+S5_SEED_PHRASE="..." # Auto-generated if not provided
+```
 
 ## Performance Considerations
 
-### Optimization Strategies
+- WebSocket connections are reused for efficiency
+- S5 storage operations are async and non-blocking
+- Contract calls are batched where possible
+- Streaming responses enable real-time UX
+- Manager instances are cached after initialization
 
-1. **Connection Pooling**: Reuse P2P connections
-2. **Caching**: Cache discovery results
-3. **Batch Operations**: Batch storage operations
-4. **Lazy Loading**: Initialize managers on-demand
-5. **Stream Processing**: Use streaming for large responses
+## Security Architecture
 
-### Benchmarks
+- Private keys never leave the client
+- S5 seed phrases derived from wallet signatures
+- Contract interactions validated before submission
+- Model governance ensures only approved models
+- Host verification through on-chain registry
 
-| Operation | Expected Time | Notes |
-|-----------|--------------|-------|
-| Authentication | < 1s | Wallet signature |
-| Session Creation | 3-5s | Including discovery |
-| S5 Store (1KB) | 1-2s | Depends on network |
-| P2P Discovery | 2-5s | First discovery |
-| Job Creation | 3-5s | Blockchain tx |
-| USDC Approval | 2-4s | One-time per token |
+## Error Handling
 
-### Scalability Factors
+Hierarchical error system:
+- `FabstirError` - Base error class
+- `AuthenticationError` - Auth failures
+- `PaymentError` - Payment issues
+- `SessionError` - Session problems
+- `StorageError` - S5 storage errors
+- `ContractError` - Blockchain issues
 
-- **P2P Network Size**: More peers improve discovery
-- **S5 Network Load**: Distributed storage scales well
-- **Blockchain Congestion**: Affects transaction times
-- **Host Availability**: More hosts reduce wait times
+## Deployment Architecture
 
-## Future Enhancements
+- **SDK**: Published to npm as `@fabstir/sdk-core`
+- **Contracts**: Deployed on Base Sepolia
+- **Host Nodes**: Run `fabstir-llm-node` instances
+- **S5 Network**: Decentralized storage layer
+- **Test Harness**: Next.js app at `localhost:3000`
 
-### Planned Features
+## Dependencies
 
-1. **Multi-Model Sessions**: Single session, multiple models
-2. **Batch Job Processing**: Multiple prompts in one transaction
-3. **Advanced Routing**: Intelligent host selection
-4. **Cross-Chain Support**: Expand beyond Base
-5. **Privacy Features**: Zero-knowledge proofs
-6. **Model Marketplace**: Direct model trading
+Core dependencies:
+- `ethers` v6.x - Blockchain interactions
+- `@s5-dev/s5js` - Decentralized storage
+- `ws` - WebSocket client
+- `events` - Event emitter
+- `buffer` - Buffer polyfill for browsers
 
-### Architecture Evolution
+## Version History
 
-- Enhanced manager modularity
-- Plugin system for custom managers
-- WebAssembly support for compute
-- IPFS integration alongside S5
-- Layer 2 scaling solutions
-
-## See Also
-
-- [SDK API Reference](SDK_API.md)
-- [Manager Documentation](SDK_QUICK_REFERENCE.md)
-- [P2P Configuration](P2P_CONFIGURATION.md)
-- [Setup Guide](SETUP_GUIDE.md)
-- [Integration Testing](INTEGRATED_TESTING.md)
-
----
-
-*Last updated: January 2025 - Manager-Based Architecture v2.0*
+- **v1.0.10** - Current version with gasless session ending
+- **v1.0.0** - Initial refactored architecture
+- **v0.x** - Legacy monolithic SDK (deprecated)
