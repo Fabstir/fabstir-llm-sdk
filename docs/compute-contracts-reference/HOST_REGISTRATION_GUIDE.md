@@ -32,10 +32,12 @@ Before registering as a host, you need:
 
 ## Contract Information
 
-**NodeRegistryWithModels Contract**: `0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218`
-**ModelRegistry Contract**: `0x92b2De840bB2171203011A6dBA928d855cA8183E`
-**FAB Token Contract**: `0xC78949004B4EB6dEf2D66e49Cd81231472612D62`
-**Network**: Base Sepolia (Chain ID: 84532)
+**JobMarketplaceWithModels**: `0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f` (Multi-chain support)
+**NodeRegistryWithModels**: `0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218`
+**ModelRegistry**: `0x92b2De840bB2171203011A6dBA928d855cA8183E`
+**HostEarnings**: `0x908962e8c6CE72610021586f85ebDE09aAc97776`
+**FAB Token**: `0xC78949004B4EB6dEf2D66e49Cd81231472612D62`
+**Network**: Base Sepolia (Chain ID: 84532) | opBNB support planned post-MVP
 
 ## Registration Process
 
@@ -457,9 +459,18 @@ Once registered, you can:
 1. Be selected for jobs by renters
 2. Submit proofs of work
 3. Earn payments for completed inference tasks
-4. Build reputation in the system
+4. Complete sessions to claim payment faster
+5. Build reputation in the system
 
-The JobMarketplace contract (`0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944`) verifies your registration and model support before allowing you to claim jobs.
+The JobMarketplace contract (`0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f`) verifies your registration and model support before allowing you to serve sessions.
+
+### Host Earnings
+
+Hosts accumulate earnings in the HostEarnings contract (`0x908962e8c6CE72610021586f85ebDE09aAc97776`):
+- Payments accumulate for batch withdrawals
+- 90% of session payment goes to host (10% treasury fee)
+- Supports both native tokens (ETH/BNB) and ERC20 tokens
+- Anyone can complete sessions - enabling gasless UX
 
 ## Support
 

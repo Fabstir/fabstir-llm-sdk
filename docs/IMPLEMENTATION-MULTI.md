@@ -1,8 +1,17 @@
-# Fabstir SDK Multi-Chain/Multi-Wallet Implementation Plan
+# Fabstir SDK Multi-Chain/Multi-Wallet Implementation Plan (v2.0)
 
 ## Overview
 
-Systematic upgrade of the Fabstir SDK (`@fabstir/sdk-core`) to support multiple blockchain networks and wallet providers while maintaining backward compatibility. Implementation follows strict TDD bounded autonomy approach with incremental sub-phases.
+Systematic upgrade of the Fabstir SDK (`@fabstir/sdk-core`) to support multiple blockchain networks (Base Sepolia, opBNB) and wallet providers (EOA, Smart Contract wallets) while maintaining backward compatibility. Integrates with the new JobMarketplaceWithModels contract that supports deposit/withdrawal pattern for gasless operations.
+
+## Current System Context
+
+Based on latest documentation:
+- **New Contract**: JobMarketplaceWithModels at `0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f` (Base Sepolia)
+- **Deposit/Withdrawal Pattern**: Users can pre-fund accounts for gasless operations
+- **Chain-Agnostic Functions**: `depositNative()`, `withdrawNative()` work with ETH/BNB
+- **Node Requirements**: All requests MUST include `chain_id` parameter
+- **Auth Integration**: AuthManager supports multi-chain with `chainId` in all operations
 
 ## Key Principles
 
@@ -11,781 +20,551 @@ Systematic upgrade of the Fabstir SDK (`@fabstir/sdk-core`) to support multiple 
 3. **Incremental Progress**: Build on previous sub-phases without breaking them
 4. **Backward Compatibility**: Existing code must continue working
 5. **No Mocks**: Use real implementations, no mocking allowed
+6. **Chain_ID Required**: Every operation must specify target chain
 
 ## Development Constraints
 
-- **Max Lines Per File**: Specified for each sub-phase (typically 50-150 lines)
+- **Max Lines Per File**: Specified for each sub-phase (typically 50-200 lines)
 - **Test First**: Tests must be written before implementation
 - **Single Responsibility**: Each sub-phase does ONE thing
 - **No Side Effects**: Don't modify files outside sub-phase scope
 - **Clear Boundaries**: Each sub-phase is independently verifiable
+- **Real Contracts**: Use actual deployed contracts on Base Sepolia for testing
 
-## Phase 1: Core Abstractions (Foundation)
+## Phase 1: Core Chain Infrastructure
 
-### Sub-phase 1.1: Wallet Provider Interface
-**Goal**: Define the contract all wallet providers must implement
+### Sub-phase 1.1: Chain Configuration Registry
+**Goal**: Central registry of all supported chains with current contract addresses
 
 **Tasks**:
-- [ ] Write tests in `tests/interfaces/wallet-provider.test.ts` (100 lines)
-- [ ] Create `packages/sdk-core/src/interfaces/IWalletProvider.ts` (50 lines max)
-- [ ] Create `packages/sdk-core/src/types/wallet.types.ts` (30 lines max)
-- [ ] Verify all tests pass
-- [ ] Verify TypeScript compilation succeeds
+- [ ] Write tests in `tests/config/chain-registry.test.ts` (150 lines)
+- [ ] Create `packages/sdk-core/src/config/ChainRegistry.ts` (200 lines max)
+- [ ] Create `packages/sdk-core/src/types/chain.types.ts` (50 lines max)
+- [ ] Verify Base Sepolia addresses match new deployment
+- [ ] Verify opBNB testnet configuration is complete
+- [ ] Add chain_id to all config structures
 
 **Test Requirements**:
 ```typescript
 // Tests must verify:
-- Interface has all required methods
-- Type definitions are exported
-- WalletType enum has correct values
-- WalletCapabilities structure is correct
-- TransactionRequest/Response types are compatible
+- Base Sepolia chainId = 84532
+- opBNB testnet chainId = 5611
+- JobMarketplace address = 0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f (Base Sepolia)
+- NodeRegistry = 0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218
+- Native tokens: ETH for Base, BNB for opBNB
+- getChainConfig(chainId) returns correct config
+- isChainSupported(chainId) works correctly
 ```
 
-**Claude Code Prompt**:
-```
-Create IWalletProvider interface with all required methods.
-Write tests FIRST in tests/interfaces/wallet-provider.test.ts
-Interface max 50 lines, types max 30 lines.
-No implementation, just interface definition.
+**Configuration Structure**:
+```typescript
+interface ChainConfig {
+  chainId: number;
+  name: string;
+  nativeToken: 'ETH' | 'BNB';
+  rpcUrl: string;
+  contracts: {
+    jobMarketplace: string;
+    nodeRegistry: string;
+    proofSystem: string;
+    hostEarnings: string;
+    modelRegistry: string;
+    usdcToken: string;
+    fabToken?: string;
+  };
+  minDeposit: string; // 0.0002 ETH for Base
+  blockExplorer: string;
+}
 ```
 
-### Sub-phase 1.2: Chain Configuration Registry
-**Goal**: Central registry of all supported chains and their configurations
+### Sub-phase 1.2: Wallet Provider Interface
+**Goal**: Define the contract all wallet providers must implement with deposit support
 
 **Tasks**:
-- [ ] Write tests in `tests/config/chains.test.ts` (150 lines)
-- [ ] Create `packages/sdk-core/src/config/chains.ts` (150 lines max)
-- [ ] Create `packages/sdk-core/src/config/contracts.ts` (100 lines max)
-- [ ] Verify Base Sepolia config matches .env.test
-- [ ] Verify opBNB testnet config is complete
-- [ ] Verify all tests pass
+- [ ] Write tests in `tests/interfaces/iwallet-provider.test.ts` (120 lines)
+- [ ] Create `packages/sdk-core/src/interfaces/IWalletProvider.ts` (80 lines max)
+- [ ] Include deposit/withdrawal account methods
+- [ ] Include chain switching capabilities
+- [ ] Add gasless transaction support flags
 
-**Test Requirements**:
+**Interface Requirements**:
 ```typescript
-// Tests must verify:
-- Base Sepolia configuration is correct
-- opBNB testnet configuration is correct
-- Contract addresses match .env.test for Base Sepolia
-- Native currency configs are correct (ETH vs BNB)
-- Chain IDs and hex values are accurate
+interface IWalletProvider {
+  // Core wallet functions
+  connect(chainId?: number): Promise<void>;
+  disconnect(): Promise<void>;
+  isConnected(): boolean;
+
+  // Account management
+  getAddress(): Promise<string>;
+  getDepositAccount(): Promise<string>; // For gasless ops
+
+  // Chain management
+  getCurrentChainId(): Promise<number>;
+  switchChain(chainId: number): Promise<void>;
+  getSupportedChains(): number[];
+
+  // Transaction handling
+  sendTransaction(tx: TransactionRequest): Promise<TransactionResponse>;
+  signMessage(message: string): Promise<string>;
+
+  // Balance queries
+  getBalance(token?: string): Promise<string>;
+
+  // Provider capabilities
+  getCapabilities(): WalletCapabilities;
+}
+
+interface WalletCapabilities {
+  supportsGaslessTransactions: boolean;
+  supportsChainSwitching: boolean;
+  supportsSmartAccounts: boolean;
+  requiresDepositAccount: boolean;
+}
 ```
 
-**Claude Code Prompt**:
-```
-Create chain configuration registry with Base Sepolia and opBNB testnet.
-Write tests FIRST in tests/config/chains.test.ts
-Use contract addresses from .env.test for Base Sepolia.
-Max 150 lines for chains.ts, 100 for contracts.ts
-```
-
-### Sub-phase 1.3: Error Definitions
-**Goal**: Define all multi-chain/wallet specific errors
+### Sub-phase 1.3: Chain-Aware Error System
+**Goal**: Comprehensive error handling for multi-chain scenarios
 
 **Tasks**:
-- [ ] Write tests in `tests/errors/multi-chain.test.ts` (80 lines)
-- [ ] Create `packages/sdk-core/src/errors/multi-chain.errors.ts` (50 lines max)
-- [ ] Implement UnsupportedChainError
-- [ ] Implement WalletNotConnectedError
-- [ ] Implement ChainMismatchError
-- [ ] Verify all tests pass
+- [ ] Write tests in `tests/errors/chain-errors.test.ts` (100 lines)
+- [ ] Create `packages/sdk-core/src/errors/ChainErrors.ts` (80 lines max)
+- [ ] Include chain_id in all error messages
+- [ ] Add deposit-related errors
+- [ ] Add node communication errors
 
-**Test Requirements**:
+**Error Types**:
 ```typescript
-// Tests must verify:
-- UnsupportedChainError has proper structure
-- WalletNotConnectedError includes wallet type
-- ChainMismatchError shows expected vs actual
-- All errors extend base Error class
+- UnsupportedChainError(chainId, supportedChains)
+- ChainMismatchError(expected, actual, operation)
+- InsufficientDepositError(required, available, chainId)
+- NodeChainMismatchError(nodeChainId, sdkChainId)
+- DepositAccountNotAvailableError(walletType)
 ```
 
-**Claude Code Prompt**:
-```
-Create error classes for multi-chain/wallet scenarios.
-Write tests FIRST in tests/errors/multi-chain.test.ts
-Max 50 lines for error definitions.
-Include helpful error messages.
+## Phase 2: Contract Integration Updates
+
+### Sub-phase 2.1: JobMarketplace Multi-Chain Wrapper
+**Goal**: Update contract wrappers to use new JobMarketplaceWithModels
+
+**Tasks**:
+- [ ] Write tests in `tests/contracts/job-marketplace-multi.test.ts` (250 lines)
+- [ ] Update `packages/sdk-core/src/contracts/JobMarketplace.ts` (200 lines max)
+- [ ] Add depositNative() and withdrawNative() methods
+- [ ] Add createSessionFromDeposit() method
+- [ ] Update all methods to use chain-specific addresses
+- [ ] Test with real contract on Base Sepolia
+
+**Key Methods to Update**:
+```typescript
+class JobMarketplaceWrapper {
+  constructor(chainId: number, signer: Signer);
+
+  // Deposit/Withdrawal (NEW)
+  async depositNative(amount: string): Promise<TransactionResponse>;
+  async withdrawNative(amount: string): Promise<TransactionResponse>;
+  async depositToken(token: string, amount: string): Promise<TransactionResponse>;
+  async withdrawToken(token: string, amount: string): Promise<TransactionResponse>;
+  async getDepositBalance(account: string, token?: string): Promise<string>;
+
+  // Session creation with deposits (NEW)
+  async createSessionFromDeposit(params: {
+    host: string;
+    paymentToken: string; // address(0) for native
+    deposit: string;
+    pricePerToken: number;
+    duration: number;
+    proofInterval: number;
+  }): Promise<number>;
+
+  // Existing methods (update to be chain-aware)
+  async createSessionJob(...): Promise<number>;
+  async completeSessionJob(jobId: number, cid: string): Promise<TransactionResponse>;
+}
 ```
 
-## Phase 2: Wallet Provider Implementations
+### Sub-phase 2.2: Chain-Aware Manager Updates
+**Goal**: Update all managers to support multi-chain operations
 
-### Sub-phase 2.1: Base EOA Provider
-**Goal**: Implement provider for standard EOA wallets (MetaMask, Rainbow, etc.)
+**Tasks**:
+- [ ] Write tests in `tests/managers/payment-manager-multi.test.ts` (200 lines)
+- [ ] Update `packages/sdk-core/src/managers/PaymentManager.ts` (250 lines max)
+- [ ] Add chainId parameter to all methods
+- [ ] Add deposit management methods
+- [ ] Update to use chain-specific contract addresses
+
+**PaymentManager Updates**:
+```typescript
+class PaymentManager {
+  // Deposit management (NEW)
+  async depositNative(amount: string, chainId?: number): Promise<TransactionResponse>;
+  async withdrawNative(amount: string, chainId?: number): Promise<TransactionResponse>;
+  async getDepositBalance(chainId?: number): Promise<DepositBalances>;
+
+  // Session creation with chain selection
+  async createSessionJob(params: {
+    host: string;
+    amount: string;
+    pricePerToken: number;
+    duration: number;
+    chainId?: number; // Default to current chain
+    useDeposit?: boolean; // Use pre-funded deposit
+  }): Promise<number>;
+}
+```
+
+## Phase 3: Wallet Provider Implementations
+
+### Sub-phase 3.1: EOA Provider (MetaMask, Rainbow)
+**Goal**: Implement provider for standard EOA wallets
 
 **Tasks**:
 - [ ] Write tests in `tests/providers/eoa-provider.test.ts` (200 lines)
-- [ ] Create `packages/sdk-core/src/providers/EOAProvider.ts` (150 lines max)
-- [ ] Implement connect() method
-- [ ] Implement getAddress() and getDepositAccount()
-- [ ] Implement sendTransaction() with signer
-- [ ] Implement getBalance() for native and tokens
-- [ ] Verify all tests pass
+- [ ] Create `packages/sdk-core/src/providers/EOAProvider.ts` (180 lines max)
+- [ ] Test with real MetaMask on Base Sepolia
+- [ ] Verify chain switching works
+- [ ] No gasless support (EOA pays gas)
 
-**Test Requirements**:
+**Implementation Notes**:
 ```typescript
-// Tests must verify:
-- connect() requests accounts
-- getAddress() returns correct address
-- getDepositAccount() returns same as getAddress()
-- sendTransaction() uses signer
-- getBalance() works for native and tokens
-- switchChain() changes network
-- No gas in EOA transactions
+class EOAProvider implements IWalletProvider {
+  constructor(provider: any); // window.ethereum
+
+  async connect(chainId?: number): Promise<void> {
+    // Request accounts
+    // Switch to chainId if provided
+  }
+
+  getDepositAccount(): Promise<string> {
+    // Same as getAddress() for EOA
+    return this.getAddress();
+  }
+
+  getCapabilities(): WalletCapabilities {
+    return {
+      supportsGaslessTransactions: false,
+      supportsChainSwitching: true,
+      supportsSmartAccounts: false,
+      requiresDepositAccount: false
+    };
+  }
+}
 ```
 
-**Claude Code Prompt**:
-```
-Implement EOAProvider class implementing IWalletProvider.
-Write tests FIRST in tests/providers/eoa-provider.test.ts
-Max 150 lines for implementation.
-Use ethers.BrowserProvider for web3 interactions.
-Deposit account same as user account for EOA.
-```
-
-### Sub-phase 2.2: Base Account Kit Provider Core
-**Goal**: Implement Base Account Kit provider with smart accounts
+### Sub-phase 3.2: Smart Account Provider (Base Account Kit)
+**Goal**: Implement provider for smart contract wallets with gasless support
 
 **Tasks**:
-- [ ] Write tests in `tests/providers/base-account-kit.test.ts` (250 lines)
-- [ ] Create `packages/sdk-core/src/providers/BaseAccountKitProvider.ts` (200 lines max)
-- [ ] Implement connect() with sub-account creation
-- [ ] Implement getDepositAccount() returning primary account
-- [ ] Implement sendTransaction() with wallet_sendCalls
-- [ ] Implement gasless capability flags
-- [ ] Verify all tests pass
+- [ ] Write tests in `tests/providers/smart-account-provider.test.ts` (250 lines)
+- [ ] Create `packages/sdk-core/src/providers/SmartAccountProvider.ts` (200 lines max)
+- [ ] Implement gasless transaction support
+- [ ] Support deposit account separation
+- [ ] Test on Base Sepolia with paymaster
 
-**Test Requirements**:
+**Implementation Notes**:
 ```typescript
-// Tests must verify:
-- connect() creates/gets sub-account
-- getDepositAccount() returns primary account
-- Sub-account has spend permissions
-- wallet_sendCalls used for transactions
-- Gasless capability is true
-- Batch transaction capability is true
+class SmartAccountProvider implements IWalletProvider {
+  private smartAccount: any;
+  private bundlerClient: any;
+
+  async getDepositAccount(): Promise<string> {
+    // Smart account address (different from EOA)
+    return this.smartAccount.address;
+  }
+
+  async sendTransaction(tx: TransactionRequest): Promise<TransactionResponse> {
+    // Use bundler for gasless execution
+    return this.bundlerClient.sendUserOperation(tx);
+  }
+
+  getCapabilities(): WalletCapabilities {
+    return {
+      supportsGaslessTransactions: true,
+      supportsChainSwitching: false, // Limited in v1
+      supportsSmartAccounts: true,
+      requiresDepositAccount: true
+    };
+  }
+}
 ```
 
-**Claude Code Prompt**:
-```
-Implement BaseAccountKitProvider with sub-account creation.
-Write tests FIRST in tests/providers/base-account-kit.test.ts
-Max 200 lines for implementation.
-Primary account holds deposits, sub-account executes.
-Must handle wallet_sendCalls for gasless transactions.
-```
+## Phase 4: SDK Core Integration
 
-### Sub-phase 2.3: Provider Transaction Handling
-**Goal**: Implement transaction submission and monitoring
+### Sub-phase 4.1: Multi-Chain SDK Initialization
+**Goal**: Update FabstirSDKCore to support chain selection
 
 **Tasks**:
-- [ ] Write tests in `tests/providers/transaction-handler.test.ts` (150 lines)
-- [ ] Create `packages/sdk-core/src/providers/transaction-handler.ts` (100 lines max)
-- [ ] Handle EOA standard transactions
-- [ ] Handle Base Account Kit wallet_sendCalls
-- [ ] Implement transaction polling
-- [ ] Add error handling
-- [ ] Verify all tests pass
+- [ ] Write tests in `tests/sdk/sdk-multi-chain.test.ts` (200 lines)
+- [ ] Update `packages/sdk-core/src/FabstirSDKCore.ts` (add 100 lines max)
+- [ ] Add setChain() method
+- [ ] Update initialize() to accept chainId
+- [ ] Make all managers chain-aware
 
-**Test Requirements**:
+**SDK Updates**:
 ```typescript
-// Tests must verify:
-- EOA uses standard eth_sendTransaction
-- Base Account Kit uses wallet_sendCalls
-- Transaction polling for Base Account Kit
-- Error handling for failed transactions
-- Correct response format returned
+class FabstirSDKCore {
+  private currentChainId: number;
+  private walletProvider: IWalletProvider;
+
+  constructor(config: SDKConfig) {
+    // Accept chainId in config
+    this.currentChainId = config.chainId || 84532; // Default Base Sepolia
+  }
+
+  async initialize(walletProvider: IWalletProvider): Promise<void> {
+    this.walletProvider = walletProvider;
+    await walletProvider.connect(this.currentChainId);
+  }
+
+  async switchChain(chainId: number): Promise<void> {
+    if (!this.isChainSupported(chainId)) {
+      throw new UnsupportedChainError(chainId);
+    }
+    await this.walletProvider.switchChain(chainId);
+    this.currentChainId = chainId;
+    // Reinitialize managers with new chain
+  }
+
+  getCurrentChain(): ChainConfig {
+    return ChainRegistry.getChain(this.currentChainId);
+  }
+}
 ```
 
-**Claude Code Prompt**:
-```
-Create transaction handler for different provider types.
-Write tests FIRST in tests/providers/transaction-handler.test.ts
-Max 100 lines for handler.
-Must support both standard and wallet_sendCalls methods.
-```
-
-## Phase 3: SDK Core Updates
-
-### Sub-phase 3.1: SDK Authentication Refactor
-**Goal**: Update SDK to accept wallet providers instead of just signers
+### Sub-phase 4.2: Wallet Provider Factory
+**Goal**: Simplify wallet provider selection and initialization
 
 **Tasks**:
-- [ ] Write tests in `tests/sdk/authentication.test.ts` (200 lines)
-- [ ] Update authenticate() to accept IWalletProvider
-- [ ] Maintain backward compatibility with ethers.Signer
-- [ ] Auto-detect chain from wallet provider
-- [ ] Reinitialize managers on authentication
-- [ ] Add getCurrentChain() method
-- [ ] Verify all tests pass
+- [ ] Write tests in `tests/factories/wallet-factory.test.ts` (150 lines)
+- [ ] Create `packages/sdk-core/src/factories/WalletProviderFactory.ts` (120 lines max)
+- [ ] Auto-detect available providers
+- [ ] Return appropriate provider instance
+- [ ] Handle provider not available errors
 
-**Test Requirements**:
+**Factory Implementation**:
 ```typescript
-// Tests must verify:
-- authenticate() accepts IWalletProvider
-- authenticate() still accepts ethers.Signer (backward compat)
-- Chain config auto-detected from wallet
-- Managers reinitialize on chain change
-- getCurrentChain() returns correct config
+class WalletProviderFactory {
+  static async createProvider(type: 'metamask' | 'base-account-kit' | 'auto'): Promise<IWalletProvider> {
+    if (type === 'auto') {
+      // Auto-detect available provider
+      if (window.ethereum) return new EOAProvider(window.ethereum);
+      return new SmartAccountProvider();
+    }
+
+    switch(type) {
+      case 'metamask':
+        if (!window.ethereum) throw new Error('MetaMask not available');
+        return new EOAProvider(window.ethereum);
+      case 'base-account-kit':
+        return new SmartAccountProvider();
+    }
+  }
+}
 ```
 
-**Claude Code Prompt**:
-```
-Update FabstirSDKCore.authenticate() to accept IWalletProvider.
-Write tests FIRST in tests/sdk/authentication.test.ts
-Maintain backward compatibility with ethers.Signer.
-Auto-detect chain from wallet provider.
-Max 100 new lines in FabstirSDKCore.ts
-```
+## Phase 5: Session Management Updates
 
-### Sub-phase 3.2: Chain Switching
-**Goal**: Implement chain switching functionality
+### Sub-phase 5.1: Chain-Aware Session Manager
+**Goal**: Update SessionManager to handle multi-chain sessions
 
 **Tasks**:
-- [ ] Write tests in `tests/sdk/chain-switching.test.ts` (150 lines)
-- [ ] Add switchChain() method to FabstirSDKCore
-- [ ] Call wallet provider's switchChain()
-- [ ] Reinitialize managers with new chain
-- [ ] Update contract addresses
-- [ ] Handle unsupported chains
-- [ ] Verify all tests pass
+- [ ] Write tests in `tests/managers/session-manager-multi.test.ts` (200 lines)
+- [ ] Update `packages/sdk-core/src/managers/SessionManager.ts` (add 100 lines)
+- [ ] Add chainId to all session operations
+- [ ] Update WebSocket messages to include chain_id
+- [ ] Store chain info in session metadata
 
-**Test Requirements**:
+**Session Updates**:
 ```typescript
-// Tests must verify:
-- switchChain() calls wallet provider method
-- Managers reinitialize with new chain config
-- Contract addresses update correctly
-- Native token changes (ETH to BNB)
-- Error thrown for unsupported chains
+interface SessionConfig {
+  chainId: number; // Required
+  host: string;
+  modelId: string;
+  paymentMethod: 'deposit' | 'direct';
+  // ... other fields
+}
+
+class SessionManager {
+  async startSession(config: SessionConfig): Promise<Session> {
+    // Verify chain is supported
+    // Include chain_id in WebSocket init
+    const initMessage = {
+      type: 'session_init',
+      chain_id: config.chainId, // REQUIRED by node
+      session_id: sessionId,
+      job_id: jobId,
+      user_address: address
+    };
+  }
+}
 ```
 
-**Claude Code Prompt**:
-```
-Add switchChain() method to FabstirSDKCore.
-Write tests FIRST in tests/sdk/chain-switching.test.ts
-Must reinitialize all managers with new chain config.
-Max 50 new lines in FabstirSDKCore.ts
-```
-
-### Sub-phase 3.3: Deposit Account Management
-**Goal**: Add deposit account awareness to SDK
+### Sub-phase 5.2: Node Discovery with Chain Filtering
+**Goal**: Update ClientManager to discover nodes by chain
 
 **Tasks**:
-- [ ] Write tests in `tests/sdk/deposit-account.test.ts` (100 lines)
-- [ ] Add getDepositAccount() to FabstirSDKCore
-- [ ] Delegate to wallet provider
-- [ ] Handle EOA (same as user account)
-- [ ] Handle Base Account Kit (primary account)
-- [ ] Add error handling
-- [ ] Verify all tests pass
+- [ ] Write tests in `tests/managers/client-manager-multi.test.ts` (150 lines)
+- [ ] Update `packages/sdk-core/src/managers/ClientManager.ts` (add 80 lines)
+- [ ] Add chain filtering to node discovery
+- [ ] Verify nodes support target chain
+- [ ] Update health checks with chain validation
 
-**Test Requirements**:
+**Discovery Updates**:
 ```typescript
-// Tests must verify:
-- getDepositAccount() returns wallet provider value
-- EOA returns user account
-- Base Account Kit returns primary account
-- Error if not authenticated
+class ClientManager {
+  async discoverNodes(chainId: number): Promise<NodeInfo[]> {
+    // Query nodes that support specific chain
+    const response = await fetch(`${nodeUrl}/v1/models?chain_id=${chainId}`);
+    // Filter nodes by chain support
+  }
+
+  async getNodeChains(nodeUrl: string): Promise<number[]> {
+    // Get list of chains node supports
+    const response = await fetch(`${nodeUrl}/v1/chains`);
+    return response.chains.map(c => c.chain_id);
+  }
+}
 ```
 
-**Claude Code Prompt**:
-```
-Add getDepositAccount() method to FabstirSDKCore.
-Write tests FIRST in tests/sdk/deposit-account.test.ts
-Delegates to wallet provider's getDepositAccount().
-Max 30 new lines.
-```
+## Phase 6: Testing & Validation
 
-## Phase 4: Manager Updates
-
-### Sub-phase 4.1: PaymentManager Multi-Chain Core
-**Goal**: Update PaymentManager for multi-chain support
+### Sub-phase 6.1: Multi-Chain Integration Tests
+**Goal**: Comprehensive testing across chains
 
 **Tasks**:
-- [ ] Write tests in `tests/managers/payment-manager-v2.test.ts` (300 lines)
-- [ ] Create `packages/sdk-core/src/managers/PaymentManagerV2.ts` (200 lines max)
-- [ ] Implement depositNative() for ETH/BNB
-- [ ] Implement depositToken() with chain configs
-- [ ] Use chain-specific contract addresses
-- [ ] Handle token decimals correctly
-- [ ] Query deposit account for balances
-- [ ] Verify all tests pass
+- [ ] Write integration tests for Base Sepolia (200 lines)
+- [ ] Write integration tests for opBNB testnet (200 lines)
+- [ ] Test deposit/withdrawal flows
+- [ ] Test chain switching during session
+- [ ] Test gasless transactions with smart accounts
 
-**Test Requirements**:
+**Test Scenarios**:
 ```typescript
-// Tests must verify:
-- depositNative() works with ETH and BNB
-- depositToken() handles chain-specific tokens
-- Contract addresses from chain config
-- Correct decimals for each token
-- getDepositBalance() queries right account
-```
+// Base Sepolia Tests
+- Create session with ETH payment
+- Deposit ETH and create session from deposit
+- Switch from MetaMask to Base Account Kit
+- Complete session with gasless transaction
 
-**Claude Code Prompt**:
-```
-Create PaymentManagerV2 with multi-chain support.
-Write tests FIRST in tests/managers/payment-manager-v2.test.ts
-depositNative() deposits ETH on Base, BNB on opBNB.
-Use chain config for contracts and tokens.
-Max 200 lines.
-```
-
-### Sub-phase 4.2: PaymentManager Deposit Pattern
-**Goal**: Implement deposit-then-create session pattern
-
-**Tasks**:
-- [ ] Write tests in `tests/managers/deposit-pattern.test.ts` (200 lines)
-- [ ] Add createSessionFromDeposit() method
-- [ ] Use pre-deposited funds
-- [ ] Support native and token deposits
-- [ ] Extract sessionId from events
-- [ ] Parse transaction receipts
-- [ ] Verify all tests pass
-
-**Test Requirements**:
-```typescript
-// Tests must verify:
-- createSessionFromDeposit() uses deposit balance
-- Works with both native and token deposits
-- Correct payment token address used
-- Session ID extracted from events
-- Transaction receipt properly parsed
-```
-
-**Claude Code Prompt**:
-```
-Add createSessionFromDeposit() to PaymentManagerV2.
-Write tests FIRST in tests/managers/deposit-pattern.test.ts
-Must work with pre-deposited funds.
-Extract sessionId from transaction events.
-Max 100 new lines.
-```
-
-### Sub-phase 4.3: SessionManager WebSocket Integration
-**Goal**: Implement WebSocket connection to host nodes
-
-**Tasks**:
-- [ ] Write tests in `tests/managers/session-manager-v2.test.ts` (300 lines)
-- [ ] Create `packages/sdk-core/src/managers/SessionManagerV2.ts` (250 lines max)
-- [ ] Implement connectToHost() with WebSocket
-- [ ] Implement sendPrompt() over WebSocket
-- [ ] Handle streaming responses
-- [ ] Track connection state
-- [ ] Propagate error events
-- [ ] Verify all tests pass
-
-**Test Requirements**:
-```typescript
-// Tests must verify:
-- connectToHost() establishes WebSocket
-- sendPrompt() sends over WebSocket
-- Stream chunks handled properly
-- Connection state tracked
-- Error events propagated
-```
-
-**Claude Code Prompt**:
-```
-Create SessionManagerV2 with WebSocket support.
-Write tests FIRST in tests/managers/session-manager-v2.test.ts
-Connect directly to host nodes via WebSocket.
-Handle streaming responses.
-Max 250 lines.
-```
-
-### Sub-phase 4.4: Gasless Session Ending
-**Goal**: Implement gasless session ending via WebSocket close
-
-**Tasks**:
-- [ ] Write tests in `tests/managers/gasless-ending.test.ts` (150 lines)
-- [ ] Add endSession() that only closes WebSocket
-- [ ] Ensure NO blockchain transaction in endSession()
-- [ ] Clear session state on close
-- [ ] Add emergencyCompleteSession() as fallback
-- [ ] Test WebSocket close code is 1000
-- [ ] Verify all tests pass
-
-**Test Requirements**:
-```typescript
-// Tests must verify:
-- endSession() just closes WebSocket
-- NO blockchain transaction sent
-- WebSocket close code is 1000
-- Session state cleared
-- emergencyCompleteSession() does send transaction
-```
-
-**Claude Code Prompt**:
-```
-Add endSession() to SessionManagerV2 that's GASLESS.
-Write tests FIRST in tests/managers/gasless-ending.test.ts
-Just close WebSocket, host handles blockchain.
-Add emergencyCompleteSession() as fallback.
-Max 50 new lines.
-CRITICAL: endSession() must NOT call blockchain!
-```
-
-## Phase 5: Factory and Integration
-
-### Sub-phase 5.1: Wallet Factory
-**Goal**: Factory for creating wallet providers
-
-**Tasks**:
-- [ ] Write tests in `tests/factories/wallet-factory.test.ts` (200 lines)
-- [ ] Create `packages/sdk-core/src/factories/WalletFactory.ts` (150 lines max)
-- [ ] Implement create() static method
-- [ ] Implement detectWalletType() method
-- [ ] Support EOA and Base Account Kit
-- [ ] Handle unsupported wallet types
-- [ ] Verify all tests pass
-
-**Test Requirements**:
-```typescript
-// Tests must verify:
-- create() returns correct provider type
-- EOA requires provider parameter
-- Base Account Kit auto-creates
-- detectWalletType() identifies wallets
-- Unsupported types throw errors
-```
-
-**Claude Code Prompt**:
-```
-Create WalletFactory for provider creation.
-Write tests FIRST in tests/factories/wallet-factory.test.ts
-Static methods for create() and detectWalletType().
-Max 150 lines.
-```
-
-### Sub-phase 5.2: Manager Factory Updates
-**Goal**: Update manager creation to use wallet providers
-
-**Tasks**:
-- [ ] Write tests in `tests/sdk/manager-creation.test.ts` (150 lines)
-- [ ] Update manager creation in FabstirSDKCore
-- [ ] Pass wallet provider to managers
-- [ ] Pass chain config to managers
-- [ ] Create custom signer wrapper
-- [ ] Reinitialize on chain switch
-- [ ] Verify all tests pass
-
-**Test Requirements**:
-```typescript
-// Tests must verify:
-- Managers receive wallet provider
-- Managers receive chain config
-- Managers reinitialize on chain switch
-- Custom signer created from provider
-- All managers accessible after auth
-```
-
-**Claude Code Prompt**:
-```
-Update manager creation in FabstirSDKCore.
-Write tests FIRST in tests/sdk/manager-creation.test.ts
-Pass wallet provider and chain config to managers.
-Create custom signer wrapper.
-Max 50 modified lines.
-```
-
-## Phase 6: Testing and Migration
-
-### Sub-phase 6.1: Integration Tests
-**Goal**: End-to-end tests for multi-chain/wallet scenarios
-
-**Tasks**:
-- [ ] Create `tests/integration/multi-chain-flow.test.ts` (300 lines)
-- [ ] Test Base Sepolia with EOA wallet
-- [ ] Test opBNB with EOA wallet
-- [ ] Test Base Account Kit flow
-- [ ] Test chain switching mid-session
-- [ ] Test gasless session ending
-- [ ] Verify all integration tests pass
-
-**Test Requirements**:
-```typescript
-// Tests must verify:
-- Complete flow on Base Sepolia with EOA
-- Complete flow on opBNB with EOA
-- Complete flow with Base Account Kit
-- Chain switching mid-session
-- Gasless session ending
-```
-
-**Claude Code Prompt**:
-```
-Create integration tests for multi-chain/wallet.
-Test complete user flows.
-Include chain switching.
-Verify gasless operations.
-Max 300 lines per test file.
+// opBNB Testnet Tests
+- Create session with BNB payment
+- Deposit BNB and create session from deposit
+- Verify correct contract addresses used
+- Test cross-chain session management
 ```
 
 ### Sub-phase 6.2: Backward Compatibility Tests
-**Goal**: Ensure old code still works
+**Goal**: Ensure existing code continues working
 
 **Tasks**:
-- [ ] Create `tests/compatibility/legacy-sdk.test.ts` (200 lines)
-- [ ] Test old authentication with signer
-- [ ] Test old payment methods
-- [ ] Test old session management
-- [ ] Verify no breaking changes
-- [ ] Ensure all legacy patterns work
+- [ ] Test existing single-chain code paths
+- [ ] Verify default chain (Base Sepolia) works without changes
+- [ ] Test that missing chainId defaults correctly
+- [ ] Ensure no breaking changes to public API
 
-**Test Requirements**:
-```typescript
-// Tests must verify:
-- Old authentication with signer works
-- Old payment methods work
-- Old session management works
-- No breaking changes in API
-```
+## Phase 7: Documentation & Migration
 
-**Claude Code Prompt**:
-```
-Create backward compatibility tests.
-Verify old SDK usage patterns still work.
-Test with ethers.Signer authentication.
-Max 200 lines.
-```
-
-### Sub-phase 6.3: Migration Helpers
-**Goal**: Tools to help users migrate
+### Sub-phase 7.1: Migration Guide
+**Goal**: Help users upgrade to multi-chain SDK
 
 **Tasks**:
-- [ ] Write tests in `tests/migration/helpers.test.ts` (150 lines)
-- [ ] Create `packages/sdk-core/src/migration/helpers.ts` (100 lines max)
-- [ ] Implement signer to provider conversion
-- [ ] Add config migration helper
-- [ ] Add deprecation warnings
-- [ ] Test migration examples
-- [ ] Verify all tests pass
+- [ ] Create `MIGRATION_GUIDE_MULTI_CHAIN.md`
+- [ ] Document breaking changes (if any)
+- [ ] Provide code examples for each chain
+- [ ] Include troubleshooting section
 
-**Test Requirements**:
-```typescript
-// Tests must verify:
-- Signer to wallet provider conversion
-- Config migration helper
-- Deprecation warnings work
-- Migration guide examples work
-```
-
-**Claude Code Prompt**:
-```
-Create migration helper utilities.
-Write tests FIRST in tests/migration/helpers.test.ts
-Convert old configs to new format.
-Max 100 lines.
-```
-
-## Phase 7: Documentation and Cleanup
-
-### Sub-phase 7.1: API Documentation
-**Goal**: Update SDK documentation
+### Sub-phase 7.2: API Documentation Updates
+**Goal**: Update all documentation for multi-chain
 
 **Tasks**:
-- [ ] Create `docs/multi-chain-api.md` (500 lines max)
-- [ ] Create `docs/migration-guide.md` (300 lines max)
-- [ ] Document all wallet types
-- [ ] Document chain configurations
-- [ ] Explain gasless session ending
-- [ ] Add code examples
-- [ ] Review for completeness
+- [ ] Update SDK_API.md with chain parameters
+- [ ] Update examples to show chain selection
+- [ ] Document deposit/withdrawal pattern
+- [ ] Add chain-specific configuration guide
 
-**Claude Code Prompt**:
-```
-Create comprehensive API documentation.
-Include code examples for each wallet type.
-Show multi-chain usage.
-Explain gasless session ending.
-```
+## Implementation Schedule
 
-### Sub-phase 7.2: Code Cleanup
-**Goal**: Remove deprecated code and optimize
+**Week 1**: Phase 1 (Core Infrastructure)
+- Day 1-2: Chain Configuration Registry
+- Day 3: Wallet Provider Interface
+- Day 4: Error System
+- Day 5: Integration testing
 
-**Tasks**:
-- [ ] Create `tests/cleanup.test.ts` (100 lines)
-- [ ] Remove hardcoded addresses
-- [ ] Remove unused imports
-- [ ] Remove console.logs
-- [ ] Address all TODOs
-- [ ] Run final test suite
-- [ ] Verify TypeScript compilation
+**Week 2**: Phase 2-3 (Contracts & Providers)
+- Day 1-2: JobMarketplace wrapper
+- Day 3: Manager updates
+- Day 4-5: Provider implementations
 
-**Test Requirements**:
-```typescript
-// Tests must verify:
-- No unused imports
-- No hardcoded addresses
-- No console.logs in production
-- All TODOs addressed
-```
+**Week 3**: Phase 4-5 (SDK Integration)
+- Day 1-2: SDK core updates
+- Day 3: Session management
+- Day 4: Node discovery
+- Day 5: Integration testing
 
-**Claude Code Prompt**:
-```
-Clean up SDK code.
-Remove hardcoded addresses.
-Remove unused imports.
-Ensure all tests pass.
-```
-
-## Overall Progress Tracking
-
-### Phase Completion Status
-- [ ] **Phase 1: Core Abstractions** (3 sub-phases)
-  - [ ] Sub-phase 1.1: Wallet Provider Interface
-  - [ ] Sub-phase 1.2: Chain Configuration Registry
-  - [ ] Sub-phase 1.3: Error Definitions
-- [ ] **Phase 2: Wallet Provider Implementations** (3 sub-phases)
-  - [ ] Sub-phase 2.1: Base EOA Provider
-  - [ ] Sub-phase 2.2: Base Account Kit Provider Core
-  - [ ] Sub-phase 2.3: Provider Transaction Handling
-- [ ] **Phase 3: SDK Core Updates** (3 sub-phases)
-  - [ ] Sub-phase 3.1: SDK Authentication Refactor
-  - [ ] Sub-phase 3.2: Chain Switching
-  - [ ] Sub-phase 3.3: Deposit Account Management
-- [ ] **Phase 4: Manager Updates** (4 sub-phases)
-  - [ ] Sub-phase 4.1: PaymentManager Multi-Chain Core
-  - [ ] Sub-phase 4.2: PaymentManager Deposit Pattern
-  - [ ] Sub-phase 4.3: SessionManager WebSocket Integration
-  - [ ] Sub-phase 4.4: Gasless Session Ending
-- [ ] **Phase 5: Factory and Integration** (2 sub-phases)
-  - [ ] Sub-phase 5.1: Wallet Factory
-  - [ ] Sub-phase 5.2: Manager Factory Updates
-- [ ] **Phase 6: Testing and Migration** (3 sub-phases)
-  - [ ] Sub-phase 6.1: Integration Tests
-  - [ ] Sub-phase 6.2: Backward Compatibility Tests
-  - [ ] Sub-phase 6.3: Migration Helpers
-- [ ] **Phase 7: Documentation and Cleanup** (2 sub-phases)
-  - [ ] Sub-phase 7.1: API Documentation
-  - [ ] Sub-phase 7.2: Code Cleanup
-
-### Implementation Schedule
-
-#### Week 1: Foundation
-- [ ] Days 1-2: Phase 1 (Core Abstractions)
-- [ ] Days 3-5: Phase 2 (Wallet Providers)
-
-#### Week 2: Core Updates
-- [ ] Days 6-7: Phase 3 (SDK Core)
-- [ ] Days 8-10: Phase 4 (Managers)
-
-#### Week 3: Integration
-- [ ] Days 11-12: Phase 5 (Factory)
-- [ ] Days 13-14: Phase 6 (Testing)
-- [ ] Day 15: Phase 7 (Documentation)
+**Week 4**: Phase 6-7 (Testing & Documentation)
+- Day 1-3: Comprehensive testing
+- Day 4-5: Documentation and migration guide
 
 ## Success Criteria
 
-### Technical Requirements
-- [ ] All tests pass (100% of new tests)
-- [ ] Backward compatibility maintained
-- [ ] No hardcoded addresses
-- [ ] Gasless session ending works
-- [ ] Multi-chain support verified
-- [ ] All TypeScript compilation succeeds
-- [ ] No runtime errors in integration tests
+1. **Base Sepolia Support**: All existing functionality works
+2. **opBNB Support**: Full feature parity with Base Sepolia
+3. **Gasless Operations**: Smart accounts can operate without gas
+4. **Deposit Pattern**: Users can pre-fund for better UX
+5. **Chain Switching**: Seamless transition between chains
+6. **Backward Compatibility**: No breaking changes for existing users
+7. **Node Compatibility**: SDK works with updated multi-chain nodes
+8. **Test Coverage**: >90% coverage for new code
 
-### Code Quality
-- [ ] Each file within line limits
-- [ ] Clear separation of concerns
-- [ ] No mock implementations
-- [ ] Proper error handling
-- [ ] TypeScript strict mode compliance
-- [ ] No console.logs in production code
-- [ ] All TODOs addressed
+## Risk Mitigation
 
-### User Experience
-- [ ] Chain switching is seamless
-- [ ] Wallet detection automatic
-- [ ] No gas popups for session ending
-- [ ] Clear error messages
-- [ ] Migration path documented
-- [ ] Examples work out of the box
-- [ ] Performance not degraded
+1. **Contract Address Changes**: Use configuration registry, never hardcode
+2. **Chain ID Confusion**: Always validate and include in requests
+3. **Node Incompatibility**: Check node version and capabilities
+4. **Gas Estimation**: Account for chain-specific gas costs
+5. **Provider Availability**: Graceful fallbacks when providers unavailable
 
-## Critical Implementation Notes
+## Appendix: Chain Configurations
 
-### 1. Gasless Session Ending
-**MOST IMPORTANT**: The `endSession()` method must ONLY close the WebSocket connection. It must NOT call any blockchain methods. The host node (v5+) automatically calls `completeSessionJob()` when detecting disconnect.
-
-```typescript
-// ✅ CORRECT - Gasless
-async endSession() {
-  this.ws.close(1000, 'User ended session');
-  // NO blockchain calls here!
-}
-
-// ❌ WRONG - User pays gas
-async endSession() {
-  await contract.completeSessionJob(sessionId); // NO!
+### Base Sepolia (Chain ID: 84532)
+```javascript
+{
+  chainId: 84532,
+  name: "Base Sepolia",
+  nativeToken: "ETH",
+  contracts: {
+    jobMarketplace: "0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f",
+    nodeRegistry: "0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218",
+    proofSystem: "0x2ACcc60893872A499700908889B38C5420CBcFD1",
+    hostEarnings: "0x908962e8c6CE72610021586f85ebDE09aAc97776",
+    modelRegistry: "0x92b2De840bB2171203011A6dBA928d855cA8183E",
+    usdcToken: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    fabToken: "0xC78949004B4EB6dEf2D66e49Cd81231472612D62"
+  }
 }
 ```
 
-### 2. Native Token Abstraction
-Functions must be chain-agnostic:
-- `depositNative()` - deposits ETH on Base, BNB on opBNB
-- `withdrawNative()` - withdraws ETH on Base, BNB on opBNB
-- Same function names, different behaviors per chain
-
-### 3. Deposit Account Pattern
-Different wallet types have different deposit accounts:
-- **EOA**: Deposit account = User account
-- **Base Account Kit**: Deposit account = Primary account (not sub-account)
-- Always use `getDepositAccount()` for deposits
-
-### 4. Chain Configuration
-Never hardcode addresses. Always use chain registry:
-```typescript
-const config = CHAIN_CONFIGS[chainId];
-const marketplace = config.contracts.jobMarketplace;
+### opBNB Testnet (Chain ID: 5611)
+```javascript
+{
+  chainId: 5611,
+  name: "opBNB Testnet",
+  nativeToken: "BNB",
+  contracts: {
+    // To be deployed
+  }
+}
 ```
 
-### 5. Testing Without Mocks
-All tests must use real implementations:
-- Real WebSocket connections (can use local server)
-- Real contract instances (can use test contracts)
-- Real wallet provider implementations
-- No jest.mock() or sinon stubs
+## Notes
 
-## Rollback Plan
+- This plan incorporates the latest contract updates (JobMarketplaceWithModels)
+- Deposit/withdrawal pattern enables gasless operations
+- Chain_id is REQUIRED in all node communications
+- Smart accounts provide better UX but aren't required
+- Base Sepolia is primary chain, opBNB is secondary
 
-If issues arise during implementation:
+---
 
-1. **Phase Isolation**: Each phase can be rolled back independently
-2. **Feature Flags**: Use environment variables to toggle features
-3. **Version Tags**: Tag each successful phase completion
-4. **Parallel Development**: Keep v1 and v2 managers side-by-side
-5. **Gradual Migration**: Users can opt-in to new features
-
-## Post-Implementation
-
-### Monitoring
-- Track chain switching events
-- Monitor gasless transaction success rate
-- Log wallet type distribution
-- Measure session ending patterns
-
-### Optimization
-- Cache chain configurations
-- Pool WebSocket connections
-- Optimize transaction polling
-- Reduce bundle size
-
-### Future Enhancements
-- Add more chains (Arbitrum, Optimism, etc.)
-- Support for Particle/Biconomy wallets
-- Advanced session recovery
-- Multi-chain aggregation
-
-## Conclusion
-
-This implementation plan provides a systematic approach to upgrading the SDK for multi-chain and multi-wallet support. By following the TDD bounded autonomy approach with strict sub-phases, we ensure:
-
-1. **Quality**: Tests written first ensure correctness
-2. **Incrementalism**: Small, manageable changes
-3. **Compatibility**: Existing code continues working
-4. **Clarity**: Each sub-phase has clear boundaries
-5. **Gasless UX**: Users don't pay for session ending
-
-The key innovation is making session ending gasless by leveraging the host node's automatic settlement, eliminating a major UX friction point while maintaining security and proper payment distribution.
+*Last Updated: January 2025*
+*Based on latest contract deployment and node v5+ requirements*

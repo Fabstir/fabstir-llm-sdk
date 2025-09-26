@@ -39,7 +39,7 @@ await marketplace.claimWithProof(jobId);
 
 **What happens**:
 - Calculates payment: `provenTokens * pricePerToken`
-- Deducts 10% treasury fee
+- Deducts TREASURY_FEE_PERCENTAGE treasury fee (configurable via env)
 - Sends payment to host (via HostEarnings or direct)
 - Marks session as completed
 - Refunds unused deposit to renter

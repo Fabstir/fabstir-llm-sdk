@@ -3,20 +3,22 @@
 ## Current Implementation
 
 **Contract Address**: `0x908962e8c6CE72610021586f85ebDE09aAc97776`
-**Network**: Base Sepolia
-**Status**: ✅ ACTIVE - ETH & USDC accumulation
-**Last Updated**: January 13, 2025
+**Network**: Base Sepolia | opBNB support planned post-MVP
+**Status**: ✅ ACTIVE - Multi-chain native token & ERC20 accumulation
+**Last Updated**: January 25, 2025
 
 ### Overview
 
 The HostEarnings contract provides a gas-efficient earnings accumulation system for Fabstir marketplace hosts. Instead of receiving direct payments on each job completion, hosts' earnings accumulate in this contract and can be withdrawn in batch, saving ~70% in gas costs.
 
 ### Key Features
-- **Multi-token Support**: Accumulates ETH and any ERC20 token (primarily USDC)
+- **Multi-chain Support**: Works with native tokens (ETH on Base, BNB on opBNB)
+- **Multi-token Support**: Accumulates native tokens and any ERC20 (USDC, DAI, etc.)
 - **Batch Withdrawals**: Withdraw all tokens in a single transaction
 - **Gas Efficiency**: 70% reduction in gas costs for hosts
 - **Authorization System**: Only authorized contracts can credit earnings
 - **Transparent Tracking**: View accumulated balances anytime
+- **Anyone-Can-Complete**: Sessions can be completed by any address, host still gets paid
 - **Emergency Recovery**: Owner can recover stuck funds
 
 ### Architecture
@@ -38,13 +40,14 @@ contract HostEarnings {
 
 ### Integration with JobMarketplace
 
-The HostEarnings contract works in tandem with JobMarketplaceFABWithS5:
+The HostEarnings contract works in tandem with JobMarketplaceWithModels (`0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f`):
 
-1. **Job Completion**: User completes a session job
+1. **Session Completion**: Anyone completes a session (user, host, or third party)
 2. **Payment Calculation**: Marketplace calculates 90% host / 10% treasury split
 3. **Credit Earnings**: Marketplace calls `creditEarnings()` on HostEarnings
-4. **Accumulation**: Host's earnings accumulate across multiple jobs
+4. **Accumulation**: Host's earnings accumulate across multiple sessions
 5. **Batch Withdrawal**: Host withdraws all earnings when convenient
+6. **Multi-chain**: Works identically on Base (ETH) and future opBNB (BNB)
 
 ### Key Functions
 
@@ -119,13 +122,20 @@ The accumulation pattern provides significant gas savings:
 
 ### Token Support
 
-The contract supports any ERC20 token, with special handling for:
+The contract supports any ERC20 token and native tokens across chains:
 
+#### Base Sepolia (Current)
 | Token | Address | Usage |
 |-------|---------|-------|
 | ETH | `address(0)` | Native currency |
 | USDC | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` | Primary stablecoin |
 | FAB | `0xC78949004B4EB6dEf2D66e49Cd81231472612D62` | Governance token |
+
+#### opBNB (Future)
+| Token | Address | Usage |
+|-------|---------|-------|
+| BNB | `address(0)` | Native currency |
+| USDC | TBD | Stablecoin on opBNB |
 
 ### Events
 

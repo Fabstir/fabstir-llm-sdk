@@ -42,8 +42,8 @@ This proof-based system is what makes session jobs trustless and prevents either
    
 5. CONTRACT CALCULATES & DISTRIBUTES (automatic)
    - Payment = provenTokens × pricePerToken
-   - Host receives: 90% of payment
-   - Treasury receives: 10% of payment  
+   - Host receives: HOST_EARNINGS_PERCENTAGE of payment (configurable via env)
+   - Treasury receives: TREASURY_FEE_PERCENTAGE of payment (configurable via env)  
    - User receives: Refund of unused deposit
 ```
 
@@ -159,7 +159,7 @@ struct SessionDetails {
 
 ```
 Payment = provenTokens × pricePerToken
-Treasury Fee = Payment × 10%
+Treasury Fee = Payment × TREASURY_FEE_PERCENTAGE
 Host Receives = Payment - Treasury Fee
 ```
 
@@ -400,7 +400,7 @@ marketplace.on("ProofSubmitted", (jobId, tokens) => {
 // 4. Complete session when done (on-chain)
 await marketplace.completeSessionJob(jobId);
 // Payment automatically calculated from provenTokens
-// Host gets 90%, treasury gets 10%, user gets refund
+// Host gets HOST_EARNINGS_PERCENTAGE, treasury gets TREASURY_FEE_PERCENTAGE, user gets refund
 ```
 
 ### For Host Operators
@@ -438,7 +438,7 @@ if (tokenCount > 0) {
 ## Economic Benefits
 
 ### For Users
-- 90% reduction in transaction fees
+- Up to 90% reduction in transaction fees
 - No interruptions during conversation
 - Pay only for tokens actually used
 - Automatic refunds for unused deposits

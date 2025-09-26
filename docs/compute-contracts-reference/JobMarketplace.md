@@ -1,21 +1,25 @@
 # JobMarketplace Contract Documentation
 
-## Current Implementation: JobMarketplaceWithModels
+## Current Implementation: JobMarketplaceWithModels (Multi-Chain)
 
-**Contract Address**: `0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944`
-**Network**: Base Sepolia
-**Status**: ✅ ACTIVE - FULLY WORKING with creditEarnings and model governance
-**Last Updated**: January 13, 2025
+**Contract Address**: `0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f`
+**Network**: Base Sepolia (ETH) | opBNB support planned post-MVP
+**Status**: ✅ ACTIVE - Multi-chain/Multi-wallet support with deposit/withdrawal pattern
+**Last Updated**: January 25, 2025
 
 ### Key Features
+- **Multi-Chain Support**: Native token agnostic (ETH on Base, BNB on opBNB)
+- **Wallet Agnostic**: Works with EOA and Smart Contract wallets
+- **Deposit/Withdrawal Pattern**: Pre-fund accounts for gasless operations
+- **Anyone-Can-Complete**: Any address can complete sessions for gasless UX
 - **Model Governance**: Integration with ModelRegistry for approved models only
 - **Session-Based Jobs**: Uses `sessionJobs` mapping (NOT `jobs` mapping)
 - **Treasury Fee Accumulation**: Treasury fees accumulate for batch withdrawals
 - **Host Earnings Accumulation**: Via HostEarnings contract with proper creditEarnings
 - **Streaming Payments**: Proof-of-work based token consumption model
-- **Multi-Token Support**: ETH and USDC (Base Sepolia: 0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+- **Multi-Token Support**: Native tokens and ERC20 (USDC: 0x036CbD53842c5426634e7929541eC2318f3dCF7e)
 - **EZKL Proof Verification**: Integration with ProofSystem contract
-- **Economic Minimums**: MIN_DEPOSIT (0.0002 ETH), MIN_PROVEN_TOKENS (100)
+- **Economic Minimums**: MIN_DEPOSIT (0.0002 ETH on Base), MIN_PROVEN_TOKENS (100)
 - **Gas Savings**: ~80% reduction through dual accumulation
 
 ### Contract Architecture
@@ -26,15 +30,24 @@ contract JobMarketplaceWithModels {
     NodeRegistryWithModels public nodeRegistry;
     IProofSystem public proofSystem;
     HostEarnings public hostEarnings;
-    ModelRegistry public modelRegistry;
 
-    // Treasury accumulation
-    uint256 public accumulatedTreasuryETH;
-    mapping(address => uint256) public accumulatedTreasuryTokens;
-    
+    // Multi-chain configuration
+    struct ChainConfig {
+        address nativeWrapper;      // WETH/WBNB address
+        address stablecoin;         // USDC address
+        uint256 minDeposit;         // Min deposit in native token
+        string nativeTokenSymbol;   // "ETH" or "BNB"
+    }
+    ChainConfig public chainConfig;
+
+    // User deposits (wallet agnostic)
+    mapping(address => uint256) public userDepositsNative;
+    mapping(address => mapping(address => uint256)) public userDepositsToken;
+
     // Session management
-    mapping(uint256 => Session) public sessions;
-    mapping(uint256 => Job) public jobs;
+    mapping(uint256 => SessionJob) public sessionJobs;
+    mapping(address => uint256[]) public userSessions;
+    mapping(address => uint256[]) public hostSessions;
 }
 ```
 
@@ -43,30 +56,48 @@ contract JobMarketplaceWithModels {
 1. **Creation**: User creates session with deposit
 2. **Active**: Host submits periodic proofs of work
 3. **Completion**: User or host completes, payments distributed
-4. **Settlement**: 90% to host (accumulated), 10% to treasury (accumulated)
+4. **Settlement**: HOST_EARNINGS_PERCENTAGE to host (accumulated), TREASURY_FEE_PERCENTAGE to treasury (accumulated)
 
 ### Key Functions
 
+#### Deposit/Withdrawal Functions (Multi-Chain)
+```solidity
+// Deposit native token (ETH/BNB)
+function depositNative() external payable
+
+// Deposit ERC20 token
+function depositToken(address token, uint256 amount) external
+
+// Withdraw native token
+function withdrawNative(uint256 amount) external
+
+// Withdraw ERC20 token
+function withdrawToken(address token, uint256 amount) external
+
+// Query balances
+function getUserBalances(address user, address[] calldata tokens)
+    external view returns (uint256[] memory)
+```
+
 #### Session Management
 ```solidity
-// Create ETH-based session
+// Create session with inline payment (backward compatible)
 function createSessionJob(
     address host,
-    uint256 deposit,
     uint256 pricePerToken,
     uint256 maxDuration,
     uint256 proofInterval
 ) external payable returns (uint256 jobId)
 
-// Create token-based session
-function createSessionJobWithToken(
+// Create session from deposits (gasless-friendly)
+function createSessionFromDeposit(
     address host,
-    address token,
+    address token,  // address(0) for native
     uint256 deposit,
     uint256 pricePerToken,
-    uint256 maxDuration,
+    uint256 duration,
     uint256 proofInterval
-) external returns (uint256 jobId)
+) external returns (uint256)
 
 // Submit proof of work
 function submitProofOfWork(
@@ -75,8 +106,11 @@ function submitProofOfWork(
     uint256 tokensInBatch
 ) external returns (bool verified)
 
-// Complete session
-function completeSessionJob(uint256 jobId) external
+// Complete session (anyone can call)
+function completeSessionJob(
+    uint256 jobId,
+    string memory conversationCID
+) external
 ```
 
 #### Treasury Functions (NEW - January 5, 2025)
@@ -101,7 +135,7 @@ function accumulatedTreasuryTokens(address token) external view returns (uint256
 |-----------|-------|-------------|
 | MIN_DEPOSIT | 0.0002 ETH | Minimum session deposit |
 | MIN_PROVEN_TOKENS | 100 | Minimum tokens per proof |
-| TREASURY_FEE_PERCENT | 10% | Platform fee |
+| TREASURY_FEE_PERCENT | Configurable via env | Treasury fee percentage |
 | MIN_SESSION_DURATION | 600 seconds | Minimum session length |
 | ABANDONMENT_TIMEOUT | 24 hours | Timeout for inactive sessions |
 | DISPUTE_WINDOW | 1 hour | Time to dispute after completion |
@@ -161,41 +195,60 @@ event EarningsCredited(address indexed host, uint256 amount, address token)
 
 | Date | Address | Features |
 |------|---------|----------|
-| Jan 5, 2025 | `0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b` | Treasury accumulation added |
-| Jan 4, 2025 | `0x9A945fFBe786881AaD92C462Ad0bd8aC177A8069` | Host accumulation only |
-| Jan 4, 2025 | `0xD937c594682Fe74E6e3d06239719805C04BE804A` | USDC fixes, no accumulation |
-| Dec 2024 | Various | Earlier versions with bugs |
+| Jan 24, 2025 | `0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f` | ✅ CURRENT - Multi-chain/wallet support |
+| Jan 13, 2025 | `0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944` | Deprecated - Single chain only |
+| Jan 5, 2025 | `0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b` | Deprecated - Treasury accumulation |
+| Jan 4, 2025 | `0x9A945fFBe786881AaD92C462Ad0bd8aC177A8069` | Deprecated - Host accumulation |
+| Dec 2024 | Various | Earlier versions |
 
-### Migration from Old Contracts
+### Multi-Chain Configuration
 
-If migrating from non-accumulation contracts:
+#### Base Sepolia (Current)
+```javascript
+{
+    nativeWrapper: "0x4200000000000000000000000000000000000006", // WETH
+    stablecoin: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",   // USDC
+    minDeposit: 0.0002 ETH,
+    nativeTokenSymbol: "ETH"
+}
+```
 
-1. Deploy new JobMarketplaceFABWithS5
-2. Deploy new HostEarnings
-3. Configure treasury address
-4. Update ProofSystem reference
-5. No migration of existing jobs needed (clean slate)
+#### opBNB (Future - Post-MVP)
+```javascript
+{
+    nativeWrapper: "TBD", // WBNB
+    stablecoin: "TBD",    // USDC on opBNB
+    minDeposit: 0.01 BNB,
+    nativeTokenSymbol: "BNB"
+}
+```
 
 ### Best Practices
 
 1. **For Users**:
-   - Create sessions with sufficient deposit for expected usage
-   - Complete sessions promptly to release unused funds
-   - Monitor proof submissions for quality
+   - Pre-fund deposits for gasless operations
+   - Use `createSessionFromDeposit()` for better gas efficiency
+   - Let hosts complete sessions to avoid gas costs
+   - Works with both EOA and Smart Wallets
 
 2. **For Hosts**:
+   - Complete sessions to claim payment faster
    - Submit proofs regularly at checkpoint intervals
    - Withdraw accumulated earnings periodically
    - Maintain sufficient FAB stake
 
-3. **For Treasury**:
-   - Use `withdrawAllTreasuryFees()` for batch withdrawals
-   - Monitor accumulated fees regularly
-   - Consider automatic withdrawal triggers
+3. **For Integrators**:
+   - Support both inline payment and pre-funded patterns
+   - Track `depositor` field, not just `msg.sender`
+   - Enable anyone-can-complete for better UX
+   - Test with different wallet types
 
 ### References
 
-- [SESSION_JOBS.md](../../SESSION_JOBS.md) - Comprehensive session job guide
-- [CURRENT_STATUS.md](../../CURRENT_STATUS.md) - Latest deployment info
-- [Source Code](../../../src/JobMarketplaceFABWithS5.sol) - Contract implementation
-- [Tests](../../../test/JobMarketplace/SessionJobs/) - 340+ test cases
+- [MULTI_CHAIN_DEPLOYMENT.md](../../MULTI_CHAIN_DEPLOYMENT.md) - Multi-chain deployment guide
+- [WALLET_AGNOSTIC_GUIDE.md](../../WALLET_AGNOSTIC_GUIDE.md) - Wallet compatibility patterns
+- [MULTI_CHAIN_USAGE_EXAMPLES.md](../../MULTI_CHAIN_USAGE_EXAMPLES.md) - Code examples
+- [SESSION_JOBS.md](../../SESSION_JOBS.md) - Session job guide
+- [CONTRACT_ADDRESSES.md](../../../CONTRACT_ADDRESSES.md) - Latest addresses
+- [Source Code](../../../src/JobMarketplaceWithModels.sol) - Contract implementation
+- [Tests](../../../test/JobMarketplace/MultiChain/) - Multi-chain test suite

@@ -242,7 +242,8 @@ await registry.updateMetadata(JSON.stringify({
 
 - **NodeRegistryWithModels**: `0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218` (ACTIVE - with API URLs)
 - **ModelRegistry**: `0x92b2De840bB2171203011A6dBA928d855cA8183E` (Model governance)
-- **JobMarketplaceWithModels**: `0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944` (Uses new registry)
+- **JobMarketplaceWithModels**: `0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f` (Multi-chain support)
+- **HostEarnings**: `0x908962e8c6CE72610021586f85ebDE09aAc97776` (Earnings accumulation)
 
 ## Testing
 
