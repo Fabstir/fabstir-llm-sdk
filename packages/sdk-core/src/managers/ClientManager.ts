@@ -404,4 +404,87 @@ export class ClientManager {
   getHostManager(): HostManagerEnhanced {
     return this.hostManager;
   }
+
+  /**
+   * Discover nodes that support a specific chain
+   */
+  async discoverNodes(chainId: number): Promise<any[]> {
+    // For now, use a discovery endpoint (could be configurable)
+    const discoveryUrl = process.env.NODE_DISCOVERY_URL || 'http://localhost:8080';
+
+    try {
+      const response = await fetch(`${discoveryUrl}/v1/models?chain_id=${chainId}`);
+      if (!response.ok) {
+        throw new SDKError(`Failed to discover nodes: ${response.statusText}`, 'NODE_DISCOVERY_ERROR');
+      }
+
+      const data = await response.json();
+      const nodes = data.nodes || [];
+
+      // Filter nodes by chain support if chain info is available
+      if (chainId) {
+        return nodes.filter((node: any) => {
+          // If node has no chain info, assume it supports the requested chain
+          if (!node.chains || node.chains.length === 0) {
+            return true;
+          }
+          // Otherwise check if it explicitly supports the chain
+          return node.chains.includes(chainId);
+        });
+      }
+
+      return nodes;
+    } catch (error: any) {
+      throw new SDKError(`Node discovery failed: ${error.message}`, 'NODE_DISCOVERY_ERROR', { chainId, error });
+    }
+  }
+
+  /**
+   * Get list of chains a node supports
+   */
+  async getNodeChains(nodeUrl: string): Promise<number[]> {
+    try {
+      const response = await fetch(`${nodeUrl}/v1/chains`);
+      if (!response.ok) {
+        throw new SDKError(`Failed to get node chains: ${response.statusText}`, 'NODE_CHAINS_ERROR');
+      }
+
+      const data = await response.json();
+      const chains = data.chains || [];
+
+      // Extract chain IDs from the response
+      return chains.map((chain: any) => chain.chain_id || chain);
+    } catch (error: any) {
+      throw new SDKError(`Failed to get node chains: ${error.message}`, 'NODE_CHAINS_ERROR', { nodeUrl, error });
+    }
+  }
+
+  /**
+   * Check node health with chain validation
+   */
+  async checkNodeHealth(nodeUrl: string, chainId?: number): Promise<boolean> {
+    try {
+      const response = await fetch(`${nodeUrl}/v1/health`);
+      if (!response.ok) {
+        return false;
+      }
+
+      const data = await response.json();
+
+      // Check basic health
+      if (!data.healthy) {
+        return false;
+      }
+
+      // If chainId is specified, validate the node supports it
+      if (chainId && data.chain_id && data.chain_id !== chainId) {
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      // Network errors or other issues mean node is not healthy
+      return false;
+    }
+  }
 }

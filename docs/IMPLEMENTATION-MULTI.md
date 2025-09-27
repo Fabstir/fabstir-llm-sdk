@@ -404,11 +404,11 @@ class SessionManager {
 **Goal**: Update ClientManager to discover nodes by chain
 
 **Tasks**:
-- [ ] Write tests in `tests/managers/client-manager-multi.test.ts` (150 lines)
-- [ ] Update `packages/sdk-core/src/managers/ClientManager.ts` (add 80 lines)
-- [ ] Add chain filtering to node discovery
-- [ ] Verify nodes support target chain
-- [ ] Update health checks with chain validation
+- [x] Write tests in `tests/managers/client-manager-multi.test.ts` (150 lines)
+- [x] Update `packages/sdk-core/src/managers/ClientManager.ts` (add 80 lines)
+- [x] Add chain filtering to node discovery
+- [x] Verify nodes support target chain
+- [x] Update health checks with chain validation
 
 **Discovery Updates**:
 ```typescript
