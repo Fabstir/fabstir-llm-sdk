@@ -352,6 +352,10 @@ export class TreasuryManager implements ITreasuryManager {
 
   /**
    * Add admin (admin only)
+   *
+   * NOTE: The JobMarketplace contract uses single-owner architecture.
+   * Multi-admin functionality is not supported by the current contract.
+   * Only the contract owner has administrative privileges.
    */
   async addAdmin(address: string): Promise<string> {
     if (!this.initialized || !this.signer) {
@@ -359,22 +363,60 @@ export class TreasuryManager implements ITreasuryManager {
     }
 
     throw new SDKError(
-      'Multi-admin not yet implemented in contract',
-      'NOT_IMPLEMENTED'
+      'Multi-admin not supported by contract. Only the contract owner has admin privileges',
+      'CONTRACT_LIMITATION',
+      {
+        details: 'The JobMarketplace contract uses Ownable pattern with a single owner. ' +
+                 'To change ownership, the contract would need to be upgraded to support ' +
+                 'multi-admin functionality or use transferOwnership (if available).'
+      }
     );
   }
 
   /**
    * Remove admin (admin only)
+   *
+   * NOTE: The JobMarketplace contract uses single-owner architecture.
+   * The contract owner cannot be removed, only transferred (if supported).
    */
   async removeAdmin(address: string): Promise<string> {
     if (!this.initialized || !this.signer) {
       throw new SDKError('TreasuryManager not initialized', 'TREASURY_NOT_INITIALIZED');
     }
 
+    // Check if trying to remove the owner
+    try {
+      const jobMarketplaceAddress = await this.contractManager.getContractAddress('jobMarketplace');
+      const jobMarketplaceABI = await this.contractManager.getContractABI('jobMarketplace');
+      const jobMarketplace = new ethers.Contract(
+        jobMarketplaceAddress,
+        jobMarketplaceABI,
+        this.signer.provider
+      );
+
+      const owner = await jobMarketplace.owner();
+      if (address.toLowerCase() === owner.toLowerCase()) {
+        throw new SDKError(
+          'Multi-admin not supported by contract. The contract owner cannot be removed',
+          'CONTRACT_LIMITATION',
+          {
+            details: 'The contract owner cannot be removed, only ownership can be ' +
+                     'transferred using transferOwnership() if available in the contract.'
+          }
+        );
+      }
+    } catch (error: any) {
+      if (error instanceof SDKError) throw error;
+      // If we can't check owner, throw the general error
+    }
+
     throw new SDKError(
-      'Multi-admin not yet implemented in contract',
-      'NOT_IMPLEMENTED'
+      'Multi-admin not supported by contract. Only the contract owner has admin privileges',
+      'CONTRACT_LIMITATION',
+      {
+        details: 'The JobMarketplace contract uses Ownable pattern with a single owner. ' +
+                 'There are no other admins to remove.'
+      }
     );
   }
 
