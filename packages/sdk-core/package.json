@@ -47,18 +47,19 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@fabstir/llm-auth": "file:../../../fabstir-llm-auth",
     "@noble/hashes": "^1.8.0",
-    "ethers": "^6.9.0",
-    "@s5-dev/s5js": "file:../../packages/s5js"
+    "@s5-dev/s5js": "file:../../packages/s5js",
+    "ethers": "^6.9.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.5",
+    "@vitest/ui": "^1.1.0",
     "esbuild": "^0.19.10",
+    "jsdom": "^23.0.1",
     "rimraf": "^5.0.5",
     "typescript": "^5.3.3",
-    "vitest": "^1.1.0",
-    "@vitest/ui": "^1.1.0",
-    "jsdom": "^23.0.1"
+    "vitest": "^1.1.0"
   },
   "peerDependencies": {
     "ethers": "^6.9.0"
