@@ -24,7 +24,6 @@ export interface EnvironmentCapabilities {
   // Wallet capabilities
   wallet: {
     hasMetaMask: boolean;
-    hasWalletConnect: boolean;
     hasInjectedProvider: boolean;
     providerName?: string;
   };
@@ -174,7 +173,6 @@ export class EnvironmentDetector {
   private static detectWalletCapabilities(): EnvironmentCapabilities['wallet'] {
     const caps: EnvironmentCapabilities['wallet'] = {
       hasMetaMask: false,
-      hasWalletConnect: false,
       hasInjectedProvider: false
     };
     
@@ -191,8 +189,6 @@ export class EnvironmentDetector {
           caps.providerName = 'MetaMask';
         } else if ((window as any).ethereum.isCoinbaseWallet) {
           caps.providerName = 'Coinbase Wallet';
-        } else if ((window as any).ethereum.isWalletConnect) {
-          caps.providerName = 'WalletConnect';
         } else if ((window as any).ethereum.isBraveWallet) {
           caps.providerName = 'Brave Wallet';
         } else {

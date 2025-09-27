@@ -61,7 +61,7 @@ export interface AuthOptions {
   paymasterUrl?: string;
 }
 
-export type WalletProvider = 'metamask' | 'coinbase' | 'walletconnect' | 'private-key';
+export type WalletProvider = 'metamask' | 'coinbase' | 'private-key';
 
 // ============= Payment Types =============
 

@@ -635,18 +635,26 @@ throw new SDKError('Proof service not available', 'PROOF_SERVICE_UNAVAILABLE');
 // Never accept proofs starting with 0x000000...
 ```
 
-### Sub-phase 8.3: Implement WalletConnect Authentication
+### Sub-phase 8.3: Implement WalletConnect Authentication ✅ COMPLETE
 **Goal**: Add real WalletConnect support or remove it entirely
 
 **Tasks**:
-- [ ] Write tests in `tests/auth/walletconnect.test.ts` (200 lines)
-- [ ] Implement WalletConnect in `FabstirSDKCore.authenticate()` (100 lines max)
-- [ ] Add WalletConnect provider configuration
-- [ ] Handle QR code generation for pairing
-- [ ] Test with real WalletConnect wallet
-- [ ] OR: Remove WalletConnect from auth options if not needed
+- [x] Write tests in `tests/auth/walletconnect.test.ts` (200 lines)
+- [x] Decision: Remove WalletConnect from auth options (not needed for MVP)
+- [x] Remove WalletConnect from `FabstirSDKCore.authenticate()`
+- [x] Remove WalletConnect from `AuthManager`
+- [x] Remove WalletConnect from type definitions
+- [x] Remove WalletConnect from `BrowserProvider` and `EnvironmentDetector`
+- [x] Update documentation to reflect removal
+- [x] Test all changes work correctly
 
-**Decision Point**: If WalletConnect not needed for MVP, remove instead of implementing
+**Completed**:
+- Analyzed requirements and determined WalletConnect not required for MVP
+- Alternative auth methods available (MetaMask, private key, signer)
+- Would require additional dependencies (@walletconnect/web3-provider)
+- Removed all WalletConnect references from codebase
+- Created comprehensive test suite verifying removal (all tests passing)
+- Updated documentation and types
 
 ### Sub-phase 8.4: Implement Payment History
 **Goal**: Query real blockchain events for transaction history

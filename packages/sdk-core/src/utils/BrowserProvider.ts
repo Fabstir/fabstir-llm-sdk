@@ -53,18 +53,6 @@ export async function connectMetaMask(): Promise<WalletInfo> {
 }
 
 /**
- * Connect to WalletConnect
- */
-export async function connectWalletConnect(rpcUrl: string): Promise<WalletInfo> {
-  // This would require @walletconnect/web3-provider
-  // For now, we'll throw an informative error
-  throw new Error(
-    'WalletConnect support requires additional setup. ' +
-    'Please install @walletconnect/web3-provider'
-  );
-}
-
-/**
  * Connect to Coinbase Wallet
  */
 export async function connectCoinbaseWallet(): Promise<WalletInfo> {

@@ -40,7 +40,7 @@ export class AuthManager {
    * Authenticate with various providers
    */
   async authenticate(
-    provider: 'metamask' | 'coinbase' | 'walletconnect' | 'private-key',
+    provider: 'metamask' | 'coinbase' | 'private-key',
     options?: AuthOptions
   ): Promise<AuthResult> {
     switch (provider) {
@@ -48,8 +48,6 @@ export class AuthManager {
         return this.authenticateWithMetaMask();
       case 'coinbase':
         return this.authenticateWithCoinbase();
-      case 'walletconnect':
-        return this.authenticateWithWalletConnect(options);
       case 'private-key':
         return this.authenticateWithPrivateKey(options);
       default:
@@ -106,19 +104,7 @@ export class AuthManager {
     };
   }
 
-  /**
-   * Connect via WalletConnect
-   */
-  private async authenticateWithWalletConnect(options?: AuthOptions): Promise<AuthResult> {
-    // This would require @walletconnect/web3-provider package
-    // For now, provide informative error
-    throw new Error(
-      'WalletConnect support requires additional setup. ' +
-      'Please install @walletconnect/web3-provider and configure'
-    );
-  }
-
-  /**
+/**
    * Authenticate with private key (for testing/development)
    * SECURITY WARNING: Never use private keys in production browser apps!
    */

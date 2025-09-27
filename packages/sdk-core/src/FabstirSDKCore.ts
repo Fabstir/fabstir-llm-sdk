@@ -166,12 +166,10 @@ export class FabstirSDKCore extends EventEmitter {
   /**
    * Authenticate with wallet
    */
-  async authenticate(method: 'metamask' | 'walletconnect' | 'privatekey' | 'signer' = 'metamask', options?: any): Promise<void> {
+  async authenticate(method: 'metamask' | 'privatekey' | 'signer' = 'metamask', options?: any): Promise<void> {
     try {
       if (method === 'metamask') {
         await this.authenticateWithMetaMask();
-      } else if (method === 'walletconnect') {
-        await this.authenticateWithWalletConnect(options);
       } else if (method === 'privatekey') {
         if (!options || !options.privateKey) {
           throw new SDKError('Private key required in options', 'PRIVATE_KEY_MISSING');
@@ -316,14 +314,6 @@ export class FabstirSDKCore extends EventEmitter {
     }
   }
   
-  /**
-   * Authenticate with WalletConnect
-   */
-  private async authenticateWithWalletConnect(options?: any): Promise<void> {
-    // WalletConnect implementation would go here
-    // This requires additional dependencies that should be optional
-    throw new SDKError('WalletConnect not yet implemented', 'NOT_IMPLEMENTED');
-  }
   
   /**
    * Authenticate with private key (for testing)
