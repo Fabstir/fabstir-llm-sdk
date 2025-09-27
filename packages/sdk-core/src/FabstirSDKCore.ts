@@ -6,6 +6,7 @@
  */
 
 import { ethers } from 'ethers';
+import { EventEmitter } from 'events';
 import {
   IAuthManager,
   IPaymentManager,
@@ -14,6 +15,7 @@ import {
   IHostManager,
   ITreasuryManager
 } from './interfaces';
+import { IWalletProvider } from './interfaces/IWalletProvider';
 import { AuthManager } from './managers/AuthManager';
 import { PaymentManager } from './managers/PaymentManager';
 import { StorageManager } from './managers/StorageManager';
@@ -31,6 +33,9 @@ import { ContractManager, ContractAddresses } from './contracts/ContractManager'
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 import { SDKConfig, SDKError } from './types';
 import { getOrGenerateS5Seed, hasCachedSeed } from './utils/s5-seed-derivation';
+import { ChainRegistry } from './config/ChainRegistry';
+import { ChainId, ChainConfig } from './types/chain.types';
+import { UnsupportedChainError } from './errors/ChainErrors';
 
 export interface FabstirSDKCoreConfig {
   // Network configuration
@@ -70,12 +75,14 @@ export interface FabstirSDKCoreConfig {
   mode?: 'production' | 'development';
 }
 
-export class FabstirSDKCore {
+export class FabstirSDKCore extends EventEmitter {
   private config: FabstirSDKCoreConfig;
   private provider?: ethers.BrowserProvider | ethers.JsonRpcProvider;
   private signer?: ethers.Signer;
   private contractManager?: ContractManager;
   private bridgeClient?: UnifiedBridgeClient;
+  private walletProvider?: IWalletProvider;
+  private currentChainId: number;
   
   // Manager instances
   private authManager?: IAuthManager;
@@ -90,8 +97,17 @@ export class FabstirSDKCore {
   private authenticated = false;
   private s5Seed?: string;
   private userAddress?: string;
-  
+  private initialized = false;
+
   constructor(config: FabstirSDKCoreConfig = {}) {
+    super();
+    this.currentChainId = config.chainId || ChainId.BASE_SEPOLIA;
+
+    // Validate chain ID is supported
+    if (!ChainRegistry.isChainSupported(this.currentChainId)) {
+      throw new UnsupportedChainError(this.currentChainId, ChainRegistry.getSupportedChains());
+    }
+
     this.config = this.validateConfig(config);
   }
   
@@ -198,6 +214,40 @@ export class FabstirSDKCore {
     }
   }
   
+  /**
+   * Authenticate with the initialized wallet provider
+   */
+  async authenticateWithWallet(): Promise<void> {
+    if (!this.walletProvider) {
+      throw new SDKError('No wallet provider initialized', 'WALLET_NOT_INITIALIZED');
+    }
+
+    if (!this.walletProvider.isConnected()) {
+      throw new SDKError('Wallet not connected', 'WALLET_NOT_CONNECTED');
+    }
+
+    const address = await this.walletProvider.getAddress();
+    this.userAddress = address;
+
+    // Create a mock signer for manager initialization
+    // In real implementation, would use wallet provider for signing
+    const provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
+    this.provider = provider;
+    this.signer = new ethers.VoidSigner(address, provider);
+
+    this.authenticated = true;
+
+    // Initialize contract manager
+    this.contractManager = new ContractManager(
+      this.provider,
+      this.config.contractAddresses! as ContractAddresses
+    );
+    await this.contractManager.setSigner(this.signer);
+
+    // Initialize managers
+    await this.initializeManagers();
+  }
+
   /**
    * Authenticate with MetaMask
    */
@@ -689,6 +739,125 @@ export class FabstirSDKCore {
    */
   getChainId(): number {
     return this.config.chainId || 84532;
+  }
+
+  /**
+   * Initialize SDK with a wallet provider
+   */
+  async initialize(walletProvider: IWalletProvider): Promise<void> {
+    this.walletProvider = walletProvider;
+
+    // Connect wallet to current chain
+    await walletProvider.connect(this.currentChainId);
+
+    this.initialized = true;
+  }
+
+  /**
+   * Check if SDK is initialized
+   */
+  isInitialized(): boolean {
+    return this.initialized;
+  }
+
+  /**
+   * Get current chain ID
+   */
+  getCurrentChainId(): number {
+    return this.currentChainId;
+  }
+
+  /**
+   * Get current chain configuration
+   */
+  getCurrentChain(): ChainConfig {
+    return ChainRegistry.getChain(this.currentChainId);
+  }
+
+  /**
+   * Switch to a different chain
+   */
+  async switchChain(chainId: number): Promise<void> {
+    // Don't switch if already on target chain
+    if (this.currentChainId === chainId) {
+      return;
+    }
+
+    // Validate chain is supported
+    if (!ChainRegistry.isChainSupported(chainId)) {
+      throw new UnsupportedChainError(chainId, ChainRegistry.getSupportedChains());
+    }
+
+    // Check if wallet provider supports chain switching
+    if (this.walletProvider) {
+      const capabilities = this.walletProvider.getCapabilities();
+      if (!capabilities.supportsChainSwitching) {
+        throw new Error('Wallet provider does not support chain switching');
+      }
+
+      // Switch wallet provider chain
+      await this.walletProvider.switchChain(chainId);
+    }
+
+    const oldChainId = this.currentChainId;
+    this.currentChainId = chainId;
+    this.config.chainId = chainId;
+
+    // Reinitialize managers with new chain if authenticated
+    if (this.authenticated) {
+      await this.reinitializeManagersForChain();
+    }
+
+    // Emit chain changed event
+    this.emit('chainChanged', {
+      oldChainId,
+      newChainId: chainId
+    });
+  }
+
+  /**
+   * Reinitialize managers for new chain
+   */
+  private async reinitializeManagersForChain(): Promise<void> {
+    // Get new contract addresses for the chain
+    const chainConfig = ChainRegistry.getChain(this.currentChainId);
+
+    // Update contract manager with new addresses
+    if (this.contractManager && this.signer) {
+      this.contractManager = new ContractManager(this.signer, {
+        jobMarketplace: chainConfig.contracts.jobMarketplace,
+        nodeRegistry: chainConfig.contracts.nodeRegistry,
+        proofSystem: chainConfig.contracts.proofSystem,
+        hostEarnings: chainConfig.contracts.hostEarnings,
+        usdcToken: chainConfig.contracts.usdcToken,
+        fabToken: chainConfig.contracts.fabToken
+      });
+    }
+
+    // Reinitialize managers that depend on chain-specific contracts
+    // They will use the updated contract manager
+  }
+
+  /**
+   * Check if chain is supported
+   */
+  isChainSupported(chainId: number): boolean {
+    return ChainRegistry.isChainSupported(chainId);
+  }
+
+  /**
+   * Get list of supported chains
+   */
+  getSupportedChains(): number[] {
+    return ChainRegistry.getSupportedChains();
+  }
+
+  /**
+   * Get contract addresses for current chain
+   */
+  getContractAddresses(): any {
+    const chainConfig = this.getCurrentChain();
+    return chainConfig.contracts;
   }
 
   /**

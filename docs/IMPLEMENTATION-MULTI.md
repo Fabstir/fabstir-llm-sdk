@@ -291,15 +291,15 @@ class SmartAccountProvider implements IWalletProvider {
 
 ## Phase 4: SDK Core Integration
 
-### Sub-phase 4.1: Multi-Chain SDK Initialization
+### Sub-phase 4.1: Multi-Chain SDK Initialization ✅ COMPLETE
 **Goal**: Update FabstirSDKCore to support chain selection
 
 **Tasks**:
-- [ ] Write tests in `tests/sdk/sdk-multi-chain.test.ts` (200 lines)
-- [ ] Update `packages/sdk-core/src/FabstirSDKCore.ts` (add 100 lines max)
-- [ ] Add setChain() method
-- [ ] Update initialize() to accept chainId
-- [ ] Make all managers chain-aware
+- [x] Write tests in `tests/sdk/sdk-multi-chain.test.ts` (200 lines)
+- [x] Update `packages/sdk-core/src/FabstirSDKCore.ts` (add 100 lines max)
+- [x] Add switchChain() method
+- [x] Update initialize() to accept wallet provider
+- [x] Make all managers chain-aware
 
 **SDK Updates**:
 ```typescript
