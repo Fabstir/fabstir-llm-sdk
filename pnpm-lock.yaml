@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@base-org/account':
-        specifier: ^2.1.0
-        version: 2.2.0(@types/react@18.3.24)(bufferutil@4.0.9)(react@18.3.1)(typescript@5.9.2)(use-sync-external-store@1.4.0(react@18.3.1))(utf-8-validate@5.0.10)(zod@3.25.76)
+        specifier: ^2.3.1
+        version: 2.3.1(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(use-sync-external-store@1.4.0(react@18.3.1))(utf-8-validate@5.0.10)(zod@3.25.76)
       '@chainsafe/libp2p-noise':
         specifier: ^16.0.0
         version: 16.1.4
@@ -92,7 +92,10 @@ importers:
         version: 2.3.1(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(use-sync-external-store@1.4.0(react@18.3.1))(utf-8-validate@5.0.10)(zod@3.25.76)
       '@fabstir/sdk-core':
         specifier: file:../../packages/sdk-core
-        version: file:packages/sdk-core(@types/react@18.3.24)(bufferutil@4.0.9)(ethers@6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(use-sync-external-store@1.4.0(react@18.3.1))(utf-8-validate@5.0.10)(zod@3.25.76)
+        version: link:../../packages/sdk-core
+      bs58:
+        specifier: ^6.0.0
+        version: 6.0.0
       ethers:
         specifier: ^6.15.0
         version: 6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10)
@@ -410,9 +413,6 @@ packages:
 
   '@base-org/account@1.1.1':
     resolution: {integrity: sha512-IfVJPrDPhHfqXRDb89472hXkpvJuQQR7FDI9isLPHEqSYt/45whIoBxSPgZ0ssTt379VhQo4+87PWI1DoLSfAQ==}
-
-  '@base-org/account@2.2.0':
-    resolution: {integrity: sha512-kuraXax6wKf1YF9n2SGxzQuYDLxvojo4RVElCo+/lbRtWPB3jlKXXczDPm4ngRcfwxKkxKfS2a5BJVuROuPJwQ==}
 
   '@base-org/account@2.3.1':
     resolution: {integrity: sha512-EfDEkyZxZCRLceDZnxV2AnXuPmncD+vjPsDZ8vVVa396s3n9ppF4PIwuf9RtV2C4wW9ZJuOTQUWwv/FCGR+DmQ==}
@@ -952,12 +952,6 @@ packages:
   '@fabstir/llm-auth@file:../fabstir-llm-auth':
     resolution: {directory: ../fabstir-llm-auth, type: directory}
     engines: {node: '>=16.0.0'}
-
-  '@fabstir/sdk-core@file:packages/sdk-core':
-    resolution: {directory: packages/sdk-core, type: directory}
-    engines: {node: '>=18.0.0'}
-    peerDependencies:
-      ethers: ^6.9.0
 
   '@gemini-wallet/core@0.2.0':
     resolution: {integrity: sha512-vv9aozWnKrrPWQ3vIFcWk7yta4hQW1Ie0fsNNPeXnjAxkbXr2hqMagEptLuMxpEP2W3mnRu05VDNKzcvAuuZDw==}
@@ -5289,26 +5283,6 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@base-org/account@2.2.0(@types/react@18.3.24)(bufferutil@4.0.9)(react@18.3.1)(typescript@5.9.2)(use-sync-external-store@1.4.0(react@18.3.1))(utf-8-validate@5.0.10)(zod@3.25.76)':
-    dependencies:
-      '@noble/hashes': 1.4.0
-      clsx: 1.2.1
-      eventemitter3: 5.0.1
-      idb-keyval: 6.2.1
-      ox: 0.6.9(typescript@5.9.2)(zod@3.25.76)
-      preact: 10.24.2
-      viem: 2.37.5(bufferutil@4.0.9)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
-      zustand: 5.0.3(@types/react@18.3.24)(react@18.3.1)(use-sync-external-store@1.4.0(react@18.3.1))
-    transitivePeerDependencies:
-      - '@types/react'
-      - bufferutil
-      - immer
-      - react
-      - typescript
-      - use-sync-external-store
-      - utf-8-validate
-      - zod
-
   '@base-org/account@2.3.1(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(use-sync-external-store@1.4.0(react@18.3.1))(utf-8-validate@5.0.10)(zod@3.25.76)':
     dependencies:
       '@coinbase/cdp-sdk': 1.38.3(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.2)(utf-8-validate@5.0.10)
@@ -6065,26 +6039,6 @@ snapshots:
       - fastestsmallesttextencoderdecoder
       - immer
       - react
-      - typescript
-      - use-sync-external-store
-      - utf-8-validate
-      - zod
-
-  '@fabstir/sdk-core@file:packages/sdk-core(@types/react@18.3.24)(bufferutil@4.0.9)(ethers@6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(use-sync-external-store@1.4.0(react@18.3.1))(utf-8-validate@5.0.10)(zod@3.25.76)':
-    dependencies:
-      '@fabstir/llm-auth': file:../fabstir-llm-auth(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(use-sync-external-store@1.4.0(react@18.3.1))(utf-8-validate@5.0.10)(zod@3.25.76)
-      '@noble/hashes': 1.8.0
-      '@s5-dev/s5js': s5@file:packages/s5js(bufferutil@4.0.9)(utf-8-validate@5.0.10)
-      ethers: 6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10)
-    transitivePeerDependencies:
-      - '@types/react'
-      - bufferutil
-      - debug
-      - encoding
-      - fastestsmallesttextencoderdecoder
-      - immer
-      - react
-      - supports-color
       - typescript
       - use-sync-external-store
       - utf-8-validate

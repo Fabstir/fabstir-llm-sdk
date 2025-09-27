@@ -149,6 +149,29 @@ export class HostManagerEnhanced {
         costPerToken: request.metadata.costPerToken || 0.0001
       });
 
+      // Check if node is already registered
+      const signerAddress = await this.signer.getAddress();
+      console.log('Checking registration for address:', signerAddress);
+
+      const nodeInfo = await this.nodeRegistry['nodes'](signerAddress);
+      console.log('Node info from contract:', {
+        operator: nodeInfo[0],
+        stakedAmount: nodeInfo[1]?.toString(),
+        active: nodeInfo[2],
+        hasOperator: nodeInfo[0] !== ethers.ZeroAddress
+      });
+
+      const isAlreadyRegistered = nodeInfo[0] !== ethers.ZeroAddress; // operator address at index 0
+
+      if (isAlreadyRegistered) {
+        console.log('Node is already registered with operator:', nodeInfo[0]);
+        throw new ModelRegistryError(
+          'Node is already registered. Use updateNodeInfo to modify metadata or addStake to increase stake.',
+          this.nodeRegistry?.address
+        );
+      }
+      console.log('Node is not registered, proceeding with registration');
+
       // Get FAB token contract address
       console.log('FAB token address from constructor:', this.fabTokenAddress);
       if (!this.fabTokenAddress) {
@@ -178,7 +201,6 @@ export class HostManagerEnhanced {
       );
 
       // Check FAB token balance
-      const signerAddress = await this.signer.getAddress();
       const fabBalance = await fabToken.balanceOf(signerAddress);
       console.log(`FAB token balance: ${ethers.formatEther(fabBalance)} FAB`);
 
@@ -782,7 +804,7 @@ export class HostManagerEnhanced {
   /**
    * Add additional stake to the host registration
    */
-  async addStake(amount: bigint): Promise<string> {
+  async addStake(amount: string | bigint): Promise<string> {
     // Ensure initialized
     if (!this.initialized) {
       await this.initialize();
@@ -793,11 +815,21 @@ export class HostManagerEnhanced {
     }
 
     try {
-      console.log('Adding stake:', ethers.formatUnits(amount, 18), 'FAB');
+      // Convert amount to wei if it's a string (FAB amount)
+      // If it's already a bigint, assume it's already in wei
+      let stakeAmountWei: bigint;
+      if (typeof amount === 'string') {
+        // Convert FAB to wei (18 decimals)
+        stakeAmountWei = ethers.parseEther(amount);
+        console.log('Adding stake:', amount, 'FAB (', stakeAmountWei.toString(), 'wei)');
+      } else {
+        stakeAmountWei = amount;
+        console.log('Adding stake:', ethers.formatEther(stakeAmountWei), 'FAB');
+      }
 
       // Call stake on the NodeRegistry contract
       const tx = await this.nodeRegistry.stake(
-        amount,
+        stakeAmountWei,
         { gasLimit: 200000n }
       );
 

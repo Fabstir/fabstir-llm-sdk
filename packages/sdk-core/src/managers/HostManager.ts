@@ -308,23 +308,60 @@ export class HostManager implements IHostManager {
         this.signer
       );
 
-      const stakeAmount = ethers.parseUnits(amount, 18);
+      // Get FAB token contract
+      const fabToken = this.contractManager.getERC20Contract(this.fabTokenAddress!);
+
+      console.log('[HostManager] addStake called with amount:', amount);
+
+      // CRITICAL FIX: The contract might expect FAB amount, not wei!
+      // Let's try both approaches and see which works
+      const stakeAmountInWei = ethers.parseUnits(amount, 18);
+      const stakeAmountInFAB = ethers.parseUnits(amount, 0); // Just the number, no decimals
+
+      console.log('[HostManager] Amount in FAB (no decimals):', stakeAmountInFAB.toString());
+      console.log('[HostManager] Amount in wei (18 decimals):', stakeAmountInWei.toString());
+
+      // For now, let's use wei since that's standard for ERC20
+      const stakeAmount = stakeAmountInWei;
+
       const hostAddress = await this.signer.getAddress();
 
       // Approve FAB tokens
       if (this.fabTokenAddress) {
-        const fabToken = this.contractManager.getERC20Contract(this.fabTokenAddress);
-        
+        // Check current balance
+        const balance = await fabToken['balanceOf'](hostAddress);
+        console.log('[HostManager] Current FAB balance:', ethers.formatUnits(balance, 18), 'FAB');
+
+        if (balance < stakeAmount) {
+          throw new SDKError(
+            `Insufficient FAB balance. Have ${ethers.formatEther(balance)} FAB, need ${amount} FAB`,
+            'INSUFFICIENT_BALANCE'
+          );
+        }
+
+        // Check current allowance
+        const currentAllowance = await fabToken['allowance'](hostAddress, this.nodeRegistryAddress);
+        console.log('[HostManager] Current allowance:', ethers.formatUnits(currentAllowance, 18), 'FAB');
+
+        // Approve the NodeRegistry to spend our FAB tokens
+        console.log('[HostManager] Approving:', ethers.formatUnits(stakeAmount, 18), 'FAB');
         const approveTx = await fabToken['approve'](
           this.nodeRegistryAddress,
           stakeAmount,
           { gasLimit: 100000n }
         );
-        await approveTx.wait(3); // Wait for 3 confirmations
+        await approveTx.wait(3);
+        console.log('[HostManager] Approval complete');
+      } else {
+        throw new SDKError('FAB token address not configured', 'NO_FAB_TOKEN');
       }
 
-      // Add stake
-      const tx = await registry['addStake'](stakeAmount, { gasLimit: 200000n });
+      // Call stake function on NodeRegistry contract
+      // Pass the amount in wei
+      console.log('[HostManager] Calling stake() with amount:', stakeAmount.toString(), 'wei');
+      console.log('[HostManager] Which is:', ethers.formatUnits(stakeAmount, 18), 'FAB');
+      const tx = await registry['stake'](stakeAmount, { gasLimit: 300000n });
+      console.log('[HostManager] Transaction hash:', tx.hash);
       
       const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {

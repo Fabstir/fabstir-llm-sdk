@@ -1,0 +1,1358 @@
+/**
+ * Node Management Client Component
+ * This component ONLY runs on the client side and loads SDK dynamically
+ */
+
+import React, { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
+
+// Chain ID constants (matching sdk-core)
+const ChainId = {
+  BASE_SEPOLIA: 84532,
+  OPBNB_TESTNET: 5611
+} as const;
+
+// Chain configurations
+const CHAINS = {
+  [ChainId.BASE_SEPOLIA]: {
+    id: ChainId.BASE_SEPOLIA,
+    name: 'Base Sepolia',
+    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA || 'https://sepolia.base.org',
+    nativeToken: 'ETH',
+    explorer: 'https://sepolia.basescan.org'
+  },
+  [ChainId.OPBNB_TESTNET]: {
+    id: ChainId.OPBNB_TESTNET,
+    name: 'opBNB Testnet',
+    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_OPBNB || 'https://opbnb-testnet-rpc.bnbchain.org',
+    nativeToken: 'BNB',
+    explorer: 'https://testnet.opbnbscan.com'
+  }
+};
+
+// Test accounts from .env
+const TEST_ACCOUNTS = {
+  TEST_USER_1: {
+    address: process.env.NEXT_PUBLIC_TEST_USER_1_ADDRESS,
+    privateKey: process.env.NEXT_PUBLIC_TEST_USER_1_PRIVATE_KEY,
+    name: 'Test User 1'
+  },
+  TEST_HOST_1: {
+    address: process.env.NEXT_PUBLIC_TEST_HOST_1_ADDRESS,
+    privateKey: process.env.NEXT_PUBLIC_TEST_HOST_1_PRIVATE_KEY,
+    name: 'Test Host 1',
+    apiUrl: process.env.NEXT_PUBLIC_TEST_HOST_1_URL || 'http://localhost:8080'
+  },
+  TEST_HOST_2: {
+    address: process.env.NEXT_PUBLIC_TEST_HOST_2_ADDRESS,
+    privateKey: process.env.NEXT_PUBLIC_TEST_HOST_2_PRIVATE_KEY,
+    name: 'Test Host 2',
+    apiUrl: process.env.NEXT_PUBLIC_TEST_HOST_2_URL || 'http://localhost:8081'
+  }
+};
+
+type WalletType = 'metamask' | 'private-key';
+
+declare global {
+  interface Window {
+    ethereum: any;
+  }
+}
+
+const NodeManagementClient: React.FC = () => {
+  // SDK Module state (loaded dynamically)
+  const [SDKModule, setSDKModule] = useState<any>(null);
+  const [sdkLoading, setSdkLoading] = useState(true);
+  const [sdkError, setSdkError] = useState<string>('');
+
+  // Chain state
+  const [selectedChain, setSelectedChain] = useState<number>(ChainId.BASE_SEPOLIA);
+  const [chainSwitching, setChainSwitching] = useState(false);
+
+  // Wallet state
+  const [walletType, setWalletType] = useState<WalletType | null>(null);
+  const [walletConnected, setWalletConnected] = useState(false);
+  const [walletAddress, setWalletAddress] = useState<string>('');
+  const [signer, setSigner] = useState<ethers.Signer | null>(null);
+  const [selectedTestAccount, setSelectedTestAccount] = useState<string>('TEST_USER_1');
+
+  // Node state
+  const [isRegistered, setIsRegistered] = useState(false);
+  const [nodeInfo, setNodeInfo] = useState<any>(null);
+  const [discoveredApiUrl, setDiscoveredApiUrl] = useState<string>('');
+
+  // Form inputs - metadata structure expected by NodeRegistry contract
+  // Note: models are passed separately to registerNode(), not in metadata
+  const [metadata, setMetadata] = useState(JSON.stringify({
+    hardware: {
+      gpu: 'NVIDIA RTX 4090',
+      vram: 24,  // GB
+      ram: 64    // GB
+    },
+    capabilities: ['streaming', 'batch'],  // Array of supported capabilities
+    location: 'us-east-1',  // Datacenter location
+    maxConcurrent: 5,       // Max concurrent sessions
+    costPerToken: 0.0001    // Price per token in USD
+  }, null, 2));
+  const [stakeAmount, setStakeAmount] = useState('1000');
+  const [additionalStakeAmount, setAdditionalStakeAmount] = useState('100');
+  const [apiUrl, setApiUrl] = useState('http://localhost:8080');
+  const [supportedModels, setSupportedModels] = useState('0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced'); // tiny-vicuna model ID
+
+  // UI state
+  const [logs, setLogs] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [healthStatus, setHealthStatus] = useState<string>('⚫ Unknown');
+  const [discoveredNodes, setDiscoveredNodes] = useState<any[]>([]);
+
+  // WebSocket state
+  const [wsConnected, setWsConnected] = useState(false);
+  const [wsClient, setWsClient] = useState<any>(null);
+  const [streamedTokens, setStreamedTokens] = useState<string>('');
+
+  // SDK instance
+  const [sdk, setSdk] = useState<any>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
+
+  // Load SDK module dynamically on client side only
+  useEffect(() => {
+    const loadSDK = async () => {
+      try {
+        setSdkLoading(true);
+        // Only load SDK on client side
+        if (typeof window !== 'undefined') {
+          const module = await import('@fabstir/sdk-core');
+          setSDKModule(module);
+          addLog('✅ SDK module loaded successfully');
+        }
+      } catch (error: any) {
+        setSdkError(`Failed to load SDK: ${error.message}`);
+        addLog(`❌ SDK loading failed: ${error.message}`);
+      } finally {
+        setSdkLoading(false);
+      }
+    };
+
+    loadSDK();
+  }, []);
+
+  // Helper: Add log message
+  const addLog = (message: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const logMessage = `[${timestamp}] ${message}`;
+    console.log(logMessage);
+    setLogs(prev => [...prev, logMessage]);
+  };
+
+  // Get chain-specific contract addresses
+  const getContractAddresses = (chainId: number) => {
+    if (chainId === ChainId.BASE_SEPOLIA) {
+      return {
+        jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE || '0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944',
+        nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY || '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
+        proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM || '0x2ACcc60893872A499700908889B38C5420CBcFD1',
+        fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN || '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
+        hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS || '0x908962e8c6CE72610021586f85ebDE09aAc97776',
+        usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN || '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY || '0x92b2De840bB2171203011A6dBA928d855cA8183E'
+      };
+    } else {
+      return {
+        jobMarketplace: '0x0000000000000000000000000000000000000001',
+        nodeRegistry: '0x0000000000000000000000000000000000000002',
+        proofSystem: '0x0000000000000000000000000000000000000003',
+        fabToken: '0x0000000000000000000000000000000000000007',
+        hostEarnings: '0x0000000000000000000000000000000000000004',
+        usdcToken: '0x0000000000000000000000000000000000000006',
+        modelRegistry: '0x0000000000000000000000000000000000000005'
+      };
+    }
+  };
+
+  // Connect Wallet
+  const connectWallet = async (type: WalletType) => {
+    if (isConnecting || !SDKModule) {
+      addLog('⏳ SDK not ready or connection in progress...');
+      return;
+    }
+
+    try {
+      setIsConnecting(true);
+      addLog(`🔌 Connecting via ${type}...`);
+
+      let walletSigner: ethers.Signer | null = null;
+      let address: string = '';
+
+      if (type === 'metamask') {
+        if (!window.ethereum) {
+          throw new Error('MetaMask not found! Please install MetaMask.');
+        }
+
+        const accounts = await window.ethereum.request({
+          method: 'eth_requestAccounts'
+        });
+
+        if (accounts.length === 0) {
+          throw new Error('No accounts found');
+        }
+
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        walletSigner = await provider.getSigner();
+        address = await walletSigner.getAddress();
+
+      } else if (type === 'private-key') {
+        const testAccount = TEST_ACCOUNTS[selectedTestAccount as keyof typeof TEST_ACCOUNTS];
+        if (!testAccount || !testAccount.privateKey) {
+          throw new Error('Invalid test account selected');
+        }
+
+        const provider = new ethers.JsonRpcProvider(CHAINS[selectedChain].rpcUrl);
+        walletSigner = new ethers.Wallet(testAccount.privateKey, provider);
+        address = await walletSigner.getAddress();
+
+        addLog(`✅ Connected with test account: ${testAccount.name} (${address})`);
+      }
+
+      if (!walletSigner || !address) {
+        throw new Error('Failed to connect wallet');
+      }
+
+      setWalletType(type);
+      setSigner(walletSigner);
+      setWalletAddress(address);
+      setWalletConnected(true);
+
+      addLog(`✅ Wallet connected: ${address}`);
+      addLog(`🔗 Chain: ${CHAINS[selectedChain].name}`);
+
+      // Initialize SDK with connected wallet
+      const sdkInstance = await initializeSDK(walletSigner);
+      if (sdkInstance) {
+        // Check registration status with the correct address and signer
+        await checkRegistrationStatus(sdkInstance, address, walletSigner);
+      }
+
+    } catch (error: any) {
+      addLog(`❌ Wallet connection failed: ${error.message}`);
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  // Initialize SDK
+  const initializeSDK = async (walletSigner: ethers.Signer) => {
+    try {
+      if (!SDKModule) {
+        addLog('❌ SDK module not loaded');
+        return;
+      }
+
+      addLog('🔧 Initializing SDK...');
+      addLog(`📊 Chain: ${CHAINS[selectedChain].name} (${selectedChain})`);
+
+      const { FabstirSDKCore } = SDKModule;
+      const contractAddresses = getContractAddresses(selectedChain);
+
+      const sdkInstance = new FabstirSDKCore({
+        mode: 'production',
+        chainId: selectedChain,
+        rpcUrl: CHAINS[selectedChain].rpcUrl,
+        contractAddresses
+      });
+
+      await sdkInstance.authenticate('signer', { signer: walletSigner });
+
+      setSdk(sdkInstance);
+      addLog('✅ SDK initialized');
+      return sdkInstance;
+
+    } catch (error: any) {
+      addLog(`❌ SDK initialization failed: ${error.message}`);
+      return null;
+    }
+  };
+
+  // Check Registration Status
+  const checkRegistrationStatus = async (sdkInstance?: any, addressToCheck?: string, signerToUse?: ethers.Signer) => {
+    const targetSdk = sdkInstance || sdk;
+    if (!targetSdk) {
+      addLog('❌ SDK not initialized');
+      return;
+    }
+
+    const checkAddress = addressToCheck || walletAddress;
+    if (!checkAddress) {
+      addLog('❌ No wallet address to check');
+      return;
+    }
+
+    // Use provided signer, fall back to state signer
+    const currentSigner = signerToUse || signer;
+
+    try {
+      addLog(`🔍 Checking registration for ${checkAddress.slice(0, 10)}... on ${CHAINS[selectedChain].name}...`);
+
+      const hostManager = targetSdk.getHostManager();
+      const info = await hostManager.getHostInfo(checkAddress);
+
+      console.log('Host status for', checkAddress, ':', info);
+      addLog(`📊 Registration: ${info.isRegistered ? '✅' : '❌'}, Active: ${info.isActive ? '✅' : '❌'}`);
+
+      // Query staked amount directly from the contract if registered
+      let stakedAmountDisplay = '0';
+
+      if (info.isRegistered && currentSigner) {
+        try {
+          // Direct contract call to get staked amount
+          const nodeRegistryAddress = getContractAddresses(selectedChain).nodeRegistry;
+          const nodeRegistryABI = [
+            'function nodes(address) view returns (address operator, uint256 stakedAmount, bool active, string memory metadata, string memory apiUrl)'
+          ];
+
+          const nodeRegistry = new ethers.Contract(
+            nodeRegistryAddress,
+            nodeRegistryABI,
+            currentSigner
+          );
+
+          // Query the nodes mapping directly
+          const nodeInfo = await nodeRegistry.nodes(checkAddress);
+          console.log('Direct contract query result:', nodeInfo);
+
+          // stakedAmount is the second element (index 1)
+          const stakedAmountWei = nodeInfo[1];
+          console.log('Staked amount in wei:', stakedAmountWei.toString());
+
+          // Convert from wei to FAB (18 decimals)
+          stakedAmountDisplay = ethers.formatEther(stakedAmountWei);
+          console.log('Staked amount in FAB:', stakedAmountDisplay);
+
+          // Load metadata from blockchain if available
+          const nodeMetadata = nodeInfo[3]; // metadata is at index 3
+          if (nodeMetadata && nodeMetadata !== '') {
+            try {
+              const parsedMeta = JSON.parse(nodeMetadata);
+              setMetadata(JSON.stringify(parsedMeta, null, 2));
+              addLog('📝 Loaded node metadata from blockchain');
+            } catch (e) {
+              console.error('Failed to parse node metadata:', e);
+            }
+          }
+
+          addLog(`💰 Staked: ${stakedAmountDisplay} FAB`);
+        } catch (e) {
+          console.error('Error querying staked amount from contract:', e);
+
+          // Fallback to SDK value if direct query fails
+          if (info.stakedAmount !== undefined && info.stakedAmount !== null && info.stakedAmount !== 0n) {
+            try {
+              const amountBigInt = typeof info.stakedAmount === 'bigint'
+                ? info.stakedAmount
+                : BigInt(info.stakedAmount.toString());
+              stakedAmountDisplay = ethers.formatUnits(amountBigInt.toString(), 18);
+            } catch (e2) {
+              console.error('Error formatting SDK staked amount:', e2);
+            }
+          }
+          addLog(`💰 Staked: ${stakedAmountDisplay} FAB`);
+        }
+      } else if (info.isRegistered && !currentSigner) {
+        // Node is registered but we don't have signer yet for direct query
+        addLog('⏳ Signer not ready for staked balance query - click refresh to update');
+      }
+
+      setIsRegistered(info.isRegistered);
+
+      if (info.isRegistered) {
+        addLog('✅ Node registered on this chain!');
+
+        if (info.apiUrl) {
+          setDiscoveredApiUrl(info.apiUrl);
+          addLog(`📍 API URL: ${info.apiUrl}`);
+        }
+
+        // Include formatted stake amount in node info
+        setNodeInfo({
+          ...info,
+          stakedAmount: info.stakedAmount,
+          stakedAmountFormatted: stakedAmountDisplay
+        });
+      } else {
+        addLog(`ℹ️ Not registered on ${CHAINS[selectedChain].name}`);
+        setNodeInfo(null);
+        setDiscoveredApiUrl('');
+      }
+
+    } catch (error: any) {
+      addLog(`❌ Registration check failed: ${error.message}`);
+      if (selectedChain === ChainId.OPBNB_TESTNET) {
+        addLog('⚠️ opBNB contracts not yet deployed');
+      }
+      setIsRegistered(false);
+      setNodeInfo(null);
+    }
+  };
+
+  // Disconnect Wallet
+  const disconnectWallet = () => {
+    addLog('🔌 Disconnecting wallet...');
+    setWalletConnected(false);
+    setWalletAddress('');
+    setSigner(null);
+    setSdk(null);
+    setIsRegistered(false);
+    setNodeInfo(null);
+    setDiscoveredApiUrl('');
+    setHealthStatus('⚫ Unknown');
+    setWsConnected(false);
+    setWsClient(null);
+    setStreamedTokens('');
+    setWalletType(null);
+    setLogs(['Wallet disconnected. Connect a wallet to continue.']);
+  };
+
+  // Switch Chain
+  const switchChain = async (chainId: number) => {
+    try {
+      setChainSwitching(true);
+      addLog(`🔄 Switching to ${CHAINS[chainId].name}...`);
+
+      // Store the old chain temporarily
+      const oldChain = selectedChain;
+
+      // Update the selected chain first
+      setSelectedChain(chainId);
+
+      // Reset registration state while checking
+      setIsRegistered(false);
+      setNodeInfo(null);
+      setDiscoveredApiUrl('');
+
+      if (walletConnected && signer && walletAddress) {
+        // Need to wait for state update
+        setTimeout(async () => {
+          const sdkInstance = await initializeSDKForChain(signer, chainId);
+          if (sdkInstance) {
+            await checkRegistrationStatus(sdkInstance, walletAddress, signer);
+          }
+          setChainSwitching(false);
+        }, 100);
+      } else {
+        setChainSwitching(false);
+      }
+
+      addLog(`✅ Switched to ${CHAINS[chainId].name}`);
+    } catch (error: any) {
+      addLog(`❌ Chain switch failed: ${error.message}`);
+      setChainSwitching(false);
+    }
+  };
+
+  // Initialize SDK for specific chain
+  const initializeSDKForChain = async (walletSigner: ethers.Signer, chainId: number) => {
+    try {
+      if (!SDKModule) {
+        addLog('❌ SDK module not loaded');
+        return null;
+      }
+
+      addLog('🔧 Initializing SDK...');
+      addLog(`📊 Chain: ${CHAINS[chainId].name} (${chainId})`);
+
+      const { FabstirSDKCore } = SDKModule;
+      const contractAddresses = getContractAddresses(chainId);
+
+      const sdkInstance = new FabstirSDKCore({
+        mode: 'production',
+        chainId: chainId,
+        rpcUrl: CHAINS[chainId].rpcUrl,
+        contractAddresses
+      });
+
+      await sdkInstance.authenticate('signer', { signer: walletSigner });
+
+      setSdk(sdkInstance);
+      addLog('✅ SDK initialized');
+      return sdkInstance;
+
+    } catch (error: any) {
+      addLog(`❌ SDK initialization failed: ${error.message}`);
+      return null;
+    }
+  };
+
+  // Register Node
+  const registerNode = async () => {
+    if (!sdk) {
+      addLog('❌ SDK not initialized');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog(`📝 Registering node on ${CHAINS[selectedChain].name}...`);
+
+      const hostManager = sdk.getHostManager() as any;
+
+      const txHash = await hostManager.registerHostWithModels({
+        apiUrl: apiUrl,
+        supportedModels: [
+          {
+            repo: "CohereForAI/TinyVicuna-1B-32k-GGUF",
+            file: "tiny-vicuna-1b.q4_k_m.gguf"
+          }
+        ],
+        metadata: JSON.parse(metadata)
+      });
+
+      addLog(`✅ Node registered! TX: ${txHash}`);
+      await checkRegistrationStatus();
+
+    } catch (error: any) {
+      addLog(`❌ Registration failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Unregister Node
+  const unregisterNode = async () => {
+    if (!sdk) {
+      addLog('❌ SDK not initialized');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog(`📝 Unregistering from ${CHAINS[selectedChain].name}...`);
+
+      const hostManager = sdk.getHostManager();
+      const txHash = await hostManager.unregisterHost();
+
+      addLog(`✅ Unregistered! TX: ${txHash}`);
+      await checkRegistrationStatus();
+
+    } catch (error: any) {
+      addLog(`❌ Unregister failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Add Stake
+  const addStake = async () => {
+    if (!sdk) {
+      addLog('❌ SDK not initialized');
+      return;
+    }
+
+    if (!additionalStakeAmount || parseFloat(additionalStakeAmount) <= 0) {
+      addLog('❌ Please enter a valid stake amount');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog(`💰 Adding ${additionalStakeAmount} FAB to stake...`);
+      addLog(`📊 Current chain: ${CHAINS[selectedChain].name}`);
+
+      const hostManager = sdk.getHostManager();
+
+      if (!hostManager) {
+        addLog('❌ Host manager not available');
+        setLoading(false);
+        return;
+      }
+
+      addLog(`📝 Calling hostManager.addStake() with amount: ${additionalStakeAmount} FAB`);
+
+      // Debug: Check what we're sending
+      console.log('Sending to addStake:', additionalStakeAmount, typeof additionalStakeAmount);
+
+      // Call addStake function from the SDK - it expects amount as a string in FAB units
+      const txHash = await hostManager.addStake(additionalStakeAmount);
+
+      addLog(`✅ Transaction submitted: ${txHash}`);
+      addLog(`🔗 View on explorer: ${CHAINS[selectedChain].explorer}/tx/${txHash}`);
+
+      // Wait for transaction confirmation
+      addLog('⏳ Waiting for blockchain confirmation...');
+
+      // Refresh status after a delay to allow blockchain to update
+      setTimeout(async () => {
+        addLog('🔄 Refreshing node status...');
+        await checkRegistrationStatus();
+        setAdditionalStakeAmount(''); // Clear the input
+        addLog(`✅ Stake added successfully! New balance should be reflected.`);
+      }, 5000);
+
+    } catch (error: any) {
+      addLog(`❌ Add stake failed: ${error.message || error}`);
+      console.error('Add stake error - full details:', error);
+
+      // Log more details about the error
+      if (error.code) {
+        addLog(`Error code: ${error.code}`);
+      }
+      if (error.data) {
+        addLog(`Error data: ${JSON.stringify(error.data)}`);
+      }
+      if (error.reason) {
+        addLog(`Error reason: ${error.reason}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Withdraw Earnings
+  const withdrawEarnings = async () => {
+    if (!sdk) {
+      addLog('❌ SDK not initialized');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog('💸 Withdrawing earnings...');
+
+      const hostManager = sdk.getHostManager();
+      const contractAddresses = getContractAddresses(selectedChain);
+      const txHash = await hostManager.withdrawEarnings(contractAddresses.usdcToken);
+
+      addLog(`✅ Withdrawn! TX: ${txHash}`);
+
+    } catch (error: any) {
+      addLog(`❌ Withdrawal failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Update Models
+  const updateModels = async () => {
+    if (!sdk) {
+      addLog('❌ SDK not initialized');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog('📝 Updating supported models...');
+
+      // Parse model IDs from input (comma-separated)
+      const modelIds = supportedModels.split(',').map(id => id.trim()).filter(id => id);
+
+      if (modelIds.length === 0) {
+        addLog('❌ No model IDs provided');
+        setLoading(false);
+        return;
+      }
+
+      addLog(`📋 Updating models: ${modelIds.length} model(s)`);
+      const hostManager = sdk.getHostManager() as any;
+      const txHash = await hostManager.updateSupportedModels(modelIds);
+
+      addLog(`✅ Models updated! TX: ${txHash}`);
+      await checkRegistrationStatus();
+
+    } catch (error: any) {
+      addLog(`❌ Update failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Update Metadata
+  const updateMetadata = async () => {
+    if (!sdk) {
+      addLog('❌ SDK not initialized');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog('📝 Updating node metadata...');
+
+      // Validate JSON
+      let parsedMetadata;
+      try {
+        parsedMetadata = JSON.parse(metadata);
+      } catch (e) {
+        addLog('❌ Invalid JSON in metadata field');
+        setLoading(false);
+        return;
+      }
+
+      const hostManager = sdk.getHostManager() as any;
+      // updateMetadata only takes the metadata JSON, not the API URL
+      const txHash = await hostManager.updateMetadata(JSON.stringify(parsedMetadata));
+
+      addLog(`✅ Metadata updated! TX: ${txHash}`);
+      await checkRegistrationStatus();
+
+    } catch (error: any) {
+      addLog(`❌ Metadata update failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Discover All Nodes
+  const discoverAllNodes = async () => {
+    if (!sdk) {
+      addLog('❌ SDK not initialized');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog(`🔍 Discovering nodes on ${CHAINS[selectedChain].name}...`);
+
+      const hostManager = sdk.getHostManager();
+      const nodes = await hostManager.discoverAllActiveHosts();
+
+      if (nodes.length > 0) {
+        addLog(`✅ Found ${nodes.length} active nodes:`);
+        nodes.forEach(node => {
+          addLog(`  📍 ${node.nodeAddress.slice(0, 8)}...${node.nodeAddress.slice(-6)}: ${node.apiUrl}`);
+        });
+        setDiscoveredNodes(nodes);
+      } else {
+        addLog('ℹ️ No active nodes found');
+        setDiscoveredNodes([]);
+      }
+
+    } catch (error: any) {
+      addLog(`❌ Discovery failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Check Health
+  const checkHealth = async () => {
+    if (!discoveredApiUrl) {
+      addLog('❌ No API URL discovered');
+      return;
+    }
+
+    try {
+      addLog(`🏥 Checking health at ${discoveredApiUrl}...`);
+
+      const healthUrl = `${discoveredApiUrl}/health`;
+      const response = await fetch(healthUrl, {
+        method: 'GET',
+        signal: AbortSignal.timeout(5000)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setHealthStatus(`🟢 Online`);
+        addLog(`✅ Node healthy! Chain: ${data.chain_id || 'unknown'}`);
+      } else {
+        setHealthStatus('🔴 Offline');
+        addLog(`❌ Node unhealthy: HTTP ${response.status}`);
+      }
+
+    } catch (error: any) {
+      setHealthStatus('🔴 Offline');
+      addLog(`❌ Health check failed: ${error.message}`);
+    }
+  };
+
+  // Connect WebSocket
+  const connectWebSocket = async () => {
+    try {
+      if (!discoveredApiUrl) {
+        addLog('❌ No API URL discovered');
+        return;
+      }
+
+      addLog(`🔌 Connecting WebSocket (chain: ${selectedChain})...`);
+
+      const wsUrl = discoveredApiUrl
+        .replace('http://', 'ws://')
+        .replace('https://', 'wss://') + '/v1/ws';
+
+      addLog(`Connecting to ${wsUrl}...`);
+
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        addLog('✅ WebSocket connected!');
+        setWsConnected(true);
+
+        // Send initial session init with chain_id
+        ws.send(JSON.stringify({
+          type: 'session_init',
+          chain_id: selectedChain,
+          session_id: `test_${Date.now()}`,
+          user_address: walletAddress
+        }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'connected') {
+            addLog(`🎉 ${data.message}`);
+          } else if (data.type === 'stream_chunk') {
+            if (data.content) {
+              setStreamedTokens(prev => prev + data.content);
+            }
+          } else if (data.type === 'stream_end') {
+            addLog('✅ Streaming complete!');
+          } else {
+            addLog(`📨 Message: ${JSON.stringify(data).slice(0, 100)}...`);
+          }
+        } catch (e) {
+          addLog(`📨 Raw: ${event.data}`);
+        }
+      };
+
+      const client = {
+        ws,
+        sendMessage: (msg: any) => {
+          const messageWithChain = { ...msg, chain_id: selectedChain };
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(messageWithChain));
+          }
+        },
+        disconnect: () => ws.close()
+      };
+
+      setWsClient(client as any);
+
+      ws.onerror = (error) => {
+        addLog(`❌ WebSocket error: ${error}`);
+        setWsConnected(false);
+      };
+
+      ws.onclose = (event) => {
+        addLog(`WebSocket closed: ${event.code} ${event.reason}`);
+        setWsConnected(false);
+        addLog('ℹ️ Host will handle settlement on disconnect');
+      };
+
+    } catch (error: any) {
+      addLog(`❌ WebSocket failed: ${error.message}`);
+      setWsConnected(false);
+    }
+  };
+
+  // Disconnect WebSocket
+  const disconnectWebSocket = async () => {
+    try {
+      if (wsClient) {
+        await wsClient.disconnect();
+        setWsClient(null);
+        setWsConnected(false);
+        addLog('✅ WebSocket disconnected');
+        addLog('ℹ️ Host will complete session on chain');
+      }
+    } catch (error: any) {
+      addLog(`❌ Disconnect failed: ${error.message}`);
+    }
+  };
+
+  // Test WebSocket Streaming
+  const testWebSocketStreaming = async () => {
+    try {
+      if (!wsClient || !wsConnected) {
+        addLog('❌ WebSocket not connected');
+        return;
+      }
+
+      addLog('🚀 Testing streaming...');
+      setStreamedTokens('');
+
+      await wsClient.sendMessage({
+        type: 'inference',
+        chain_id: selectedChain,
+        request: {
+          prompt: 'Hello! Please respond with exactly 5 words.',
+          model: 'llama-2-7b',
+          stream: true,
+          temperature: 0.7,
+          max_tokens: 20
+        }
+      });
+
+      addLog('📤 Sent inference request...');
+
+    } catch (error: any) {
+      addLog(`❌ Streaming failed: ${error.message}`);
+    }
+  };
+
+  // Initial setup message
+  useEffect(() => {
+    addLog('👋 Multi-Chain Node Management Ready!');
+    addLog('🔗 Loading SDK module...');
+  }, []);
+
+  // Show loading state while SDK loads
+  if (sdkLoading) {
+    return (
+      <div style={{ padding: '20px', fontFamily: 'monospace' }}>
+        <h2>Loading Node Management...</h2>
+        <p>Initializing SDK module...</p>
+      </div>
+    );
+  }
+
+  // Show error if SDK failed to load
+  if (sdkError) {
+    return (
+      <div style={{ padding: '20px', fontFamily: 'monospace' }}>
+        <h2>❌ Failed to Load</h2>
+        <p>{sdkError}</p>
+        <button onClick={() => window.location.reload()}>Reload Page</button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '20px', fontFamily: 'monospace', maxWidth: '1200px', margin: '0 auto' }}>
+      <h1>🚀 Multi-Chain Node Management</h1>
+      <p style={{ color: '#666' }}>Multi-chain support with MetaMask and test accounts</p>
+
+      {/* Chain Selector */}
+      <div style={{
+        marginBottom: '20px',
+        padding: '15px',
+        backgroundColor: '#f0f8ff',
+        borderRadius: '5px'
+      }}>
+        <h3>🔗 Select Chain</h3>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          {Object.values(CHAINS).map(chain => (
+            <button
+              key={chain.id}
+              onClick={() => switchChain(chain.id)}
+              disabled={chainSwitching || chain.id === selectedChain}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: chain.id === selectedChain ? '#007bff' : '#e9ecef',
+                color: chain.id === selectedChain ? 'white' : '#495057',
+                border: 'none',
+                borderRadius: '5px',
+                cursor: chain.id === selectedChain ? 'default' : 'pointer',
+                fontWeight: chain.id === selectedChain ? 'bold' : 'normal'
+              }}
+            >
+              {chain.name}
+              {chain.id === ChainId.OPBNB_TESTNET && ' (Soon)'}
+            </button>
+          ))}
+          <span style={{ marginLeft: '20px', color: '#666' }}>
+            Current: <strong>{CHAINS[selectedChain].name}</strong> ({CHAINS[selectedChain].nativeToken})
+          </span>
+        </div>
+      </div>
+
+      {/* Wallet Connection */}
+      {!walletConnected ? (
+        <div style={{
+          padding: '30px',
+          border: '2px solid #007bff',
+          borderRadius: '10px',
+          marginBottom: '20px'
+        }}>
+          <h2>Connect Wallet</h2>
+
+          <div style={{ marginBottom: '20px' }}>
+            <h3>Select Wallet Type:</h3>
+            <button
+              onClick={() => connectWallet('metamask')}
+              disabled={isConnecting || !SDKModule}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: '#f6851b',
+                color: 'white',
+                border: 'none',
+                borderRadius: '5px',
+                cursor: (isConnecting || !SDKModule) ? 'not-allowed' : 'pointer',
+                marginRight: '10px'
+              }}
+            >
+              🦊 MetaMask
+            </button>
+          </div>
+
+          <div style={{
+            marginTop: '20px',
+            padding: '15px',
+            backgroundColor: '#fff3cd',
+            borderRadius: '5px'
+          }}>
+            <h3>🧪 Test Accounts (Private Key):</h3>
+            <select
+              value={selectedTestAccount}
+              onChange={(e) => setSelectedTestAccount(e.target.value)}
+              style={{ padding: '8px', marginRight: '10px' }}
+            >
+              {Object.entries(TEST_ACCOUNTS).map(([key, account]) => (
+                <option key={key} value={key}>
+                  {account.name} - {account.address?.slice(0, 10)}...
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => connectWallet('private-key')}
+              disabled={isConnecting || !SDKModule}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '5px',
+                cursor: (isConnecting || !SDKModule) ? 'not-allowed' : 'pointer'
+              }}
+            >
+              Connect Test Account
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div style={{
+            marginBottom: '20px',
+            padding: '15px',
+            backgroundColor: '#e8f4fd',
+            borderRadius: '5px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <div>
+                <strong>Wallet:</strong> {walletAddress.slice(0, 10)}...{walletAddress.slice(-8)}
+                <br />
+                <strong>Type:</strong> {walletType}
+                <br />
+                <strong>Chain:</strong> {CHAINS[selectedChain].name}
+                <br />
+                <strong>Status:</strong> {isRegistered ? '✅ Registered' : '❌ Not Registered'}
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  onClick={() => checkRegistrationStatus()}
+                  disabled={loading || !sdk}
+                  style={{
+                    padding: '5px 10px',
+                    backgroundColor: '#17a2b8',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '3px',
+                    cursor: (loading || !sdk) ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  🔄 Refresh
+                </button>
+                <button
+                  onClick={disconnectWallet}
+                  style={{
+                    padding: '5px 10px',
+                    backgroundColor: '#dc3545',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '3px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Disconnect
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {!isRegistered && (
+            <div style={{
+              marginBottom: '20px',
+              padding: '15px',
+              border: '1px solid #28a745',
+              borderRadius: '5px',
+              backgroundColor: '#f0fff0'
+            }}>
+              <h3>📝 Register Node</h3>
+              <div style={{ marginBottom: '10px' }}>
+                <label>API URL:</label><br />
+                <input
+                  type="text"
+                  value={apiUrl}
+                  onChange={(e) => setApiUrl(e.target.value)}
+                  style={{ padding: '5px', width: '100%' }}
+                  placeholder='http://localhost:8080'
+                />
+                {walletType === 'private-key' && selectedTestAccount.startsWith('TEST_HOST') && (
+                  <button
+                    onClick={() => setApiUrl(TEST_ACCOUNTS[selectedTestAccount as keyof typeof TEST_ACCOUNTS].apiUrl!)}
+                    style={{ marginTop: '5px', padding: '3px 8px', fontSize: '12px' }}
+                  >
+                    Use Test Host URL
+                  </button>
+                )}
+              </div>
+
+              <div style={{ marginBottom: '10px' }}>
+                <label>Metadata:</label><br />
+                <textarea
+                  value={metadata}
+                  onChange={(e) => setMetadata(e.target.value)}
+                  style={{ width: '100%', height: '80px', fontFamily: 'monospace', fontSize: '12px' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '10px' }}>
+                <label>Stake Amount (FAB):</label><br />
+                <input
+                  type="text"
+                  value={stakeAmount}
+                  onChange={(e) => setStakeAmount(e.target.value)}
+                  style={{ padding: '5px', width: '200px' }}
+                />
+              </div>
+
+              <button
+                onClick={registerNode}
+                disabled={loading || selectedChain === ChainId.OPBNB_TESTNET}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: selectedChain === ChainId.OPBNB_TESTNET ? '#6c757d' : '#28a745',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '5px',
+                  cursor: (loading || selectedChain === ChainId.OPBNB_TESTNET) ? 'not-allowed' : 'pointer'
+                }}
+              >
+                Register Node
+                {selectedChain === ChainId.OPBNB_TESTNET && ' (Not Available)'}
+              </button>
+            </div>
+          )}
+
+          {/* Node Management - for registered nodes */}
+          {isRegistered && nodeInfo && (
+            <div style={{
+              marginBottom: '20px',
+              padding: '15px',
+              border: '1px solid #17a2b8',
+              borderRadius: '5px',
+              backgroundColor: '#f0f8ff'
+            }}>
+              <h3>⚙️ Node Management</h3>
+
+              <div style={{ marginBottom: '15px', fontSize: '14px' }}>
+                <div>Chain: {CHAINS[selectedChain].name}</div>
+                <div>Active: {nodeInfo.isActive ? '✅' : '❌'}</div>
+                <div>Staked: {nodeInfo.stakedAmountFormatted || '0'} FAB</div>
+                <div>API URL: {nodeInfo.apiUrl || discoveredApiUrl || 'Not set'}</div>
+              </div>
+
+              {/* Metadata Editor */}
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ fontSize: '14px', marginBottom: '5px', display: 'block' }}>
+                  Node Metadata (JSON):
+                </label>
+                <textarea
+                  value={metadata}
+                  onChange={(e) => setMetadata(e.target.value)}
+                  style={{
+                    width: '100%',
+                    height: '120px',
+                    fontFamily: 'monospace',
+                    fontSize: '12px',
+                    padding: '8px',
+                    border: '1px solid #ccc',
+                    borderRadius: '3px'
+                  }}
+                  disabled={loading}
+                />
+                <small style={{ color: '#666', fontSize: '12px' }}>
+                  Update your node's metadata including hardware specs and capabilities
+                </small>
+              </div>
+
+              {/* Supported Models */}
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ fontSize: '14px', marginBottom: '5px', display: 'block' }}>
+                  Supported Model IDs (comma-separated):
+                </label>
+                <input
+                  type="text"
+                  value={supportedModels}
+                  onChange={(e) => setSupportedModels(e.target.value)}
+                  placeholder="0x0b75a2..., 0x123abc..."
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    border: '1px solid #ccc',
+                    borderRadius: '3px',
+                    fontSize: '14px',
+                    fontFamily: 'monospace'
+                  }}
+                  disabled={loading}
+                />
+                <small style={{ color: '#666', fontSize: '12px' }}>
+                  Enter model IDs as hex strings (e.g., tiny-vicuna: 0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced)
+                </small>
+              </div>
+
+              {/* Additional Stake Input */}
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ fontSize: '14px', marginBottom: '5px', display: 'block' }}>
+                  Additional Stake Amount (FAB):
+                </label>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    value={additionalStakeAmount}
+                    onChange={(e) => setAdditionalStakeAmount(e.target.value)}
+                    placeholder="0"
+                    style={{
+                      padding: '8px',
+                      width: '150px',
+                      border: '1px solid #ccc',
+                      borderRadius: '3px',
+                      fontSize: '14px'
+                    }}
+                    disabled={loading}
+                  />
+                  <button
+                    onClick={addStake}
+                    disabled={loading || !additionalStakeAmount || parseFloat(additionalStakeAmount) <= 0}
+                    style={{
+                      padding: '8px 15px',
+                      backgroundColor: (loading || !additionalStakeAmount || parseFloat(additionalStakeAmount) <= 0) ? '#ccc' : '#28a745',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '3px',
+                      cursor: (loading || !additionalStakeAmount || parseFloat(additionalStakeAmount) <= 0) ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    Add Stake
+                  </button>
+                </div>
+                <small style={{ color: '#666', fontSize: '12px' }}>
+                  Enter amount of FAB tokens to add to your current stake
+                </small>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                <button onClick={updateModels} disabled={loading}>Update Models</button>
+                <button onClick={withdrawEarnings} disabled={loading}>Withdraw Earnings</button>
+                <button onClick={updateMetadata} disabled={loading}>Update Metadata</button>
+                <button onClick={() => checkRegistrationStatus()} disabled={loading}>Refresh Status</button>
+              </div>
+
+              <div style={{ marginTop: '10px' }}>
+                <button
+                  onClick={unregisterNode}
+                  disabled={loading}
+                  style={{
+                    backgroundColor: '#dc3545',
+                    color: 'white',
+                    border: 'none',
+                    padding: '8px 15px',
+                    borderRadius: '3px',
+                    cursor: loading ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  Unregister Node
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Node Testing */}
+          {isRegistered && discoveredApiUrl && (
+            <div style={{
+              marginBottom: '20px',
+              padding: '15px',
+              border: '1px solid #6c757d',
+              borderRadius: '5px'
+            }}>
+              <h3>🧪 Node Testing</h3>
+
+              <div style={{ marginBottom: '10px' }}>
+                <strong>Health:</strong> {healthStatus}
+                <br />
+                <strong>WebSocket:</strong> {wsConnected ? '✅ Connected' : '❌ Disconnected'}
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <button onClick={checkHealth} disabled={loading}>Check Health</button>
+                <button onClick={connectWebSocket} disabled={loading || wsConnected}>Connect WS</button>
+                <button onClick={disconnectWebSocket} disabled={loading || !wsConnected}>Disconnect WS</button>
+                <button onClick={testWebSocketStreaming} disabled={loading || !wsConnected}>Test Stream</button>
+              </div>
+
+              {streamedTokens && (
+                <div style={{
+                  marginTop: '10px',
+                  padding: '10px',
+                  backgroundColor: '#f0f0f0',
+                  borderRadius: '3px'
+                }}>
+                  <strong>Output:</strong> {streamedTokens}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Network Discovery */}
+          <div style={{
+            marginBottom: '20px',
+            padding: '15px',
+            border: '1px solid #ffc107',
+            borderRadius: '5px',
+            backgroundColor: '#fffef0'
+          }}>
+            <h3>🔍 Network Discovery</h3>
+
+            <button
+              onClick={discoverAllNodes}
+              disabled={loading}
+              style={{ marginBottom: '10px' }}
+            >
+              Discover Nodes on {CHAINS[selectedChain].name}
+            </button>
+
+            {discoveredNodes.length > 0 && (
+              <div>
+                <strong>Found {discoveredNodes.length} nodes:</strong>
+                {discoveredNodes.map((node, i) => (
+                  <div key={i} style={{ padding: '5px', fontSize: '12px' }}>
+                    {node.nodeAddress.slice(0, 10)}... - {node.apiUrl || 'No API URL'}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Logs */}
+      <div style={{
+        padding: '15px',
+        border: '1px solid #ddd',
+        borderRadius: '5px',
+        backgroundColor: '#f5f5f5'
+      }}>
+        <h3>📜 Activity Log</h3>
+        <div style={{
+          maxHeight: '300px',
+          overflowY: 'auto',
+          fontSize: '12px',
+          fontFamily: 'monospace'
+        }}>
+          {logs.map((log, i) => (
+            <div key={i}>{log}</div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default NodeManagementClient;
