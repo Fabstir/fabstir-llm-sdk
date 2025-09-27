@@ -35,25 +35,74 @@ export class SmartAccountProvider implements IWalletProvider {
   }
 
   private async initializeBundler(config?: { bundlerUrl?: string; paymasterUrl?: string }) {
-    // Initialize bundler client for UserOperation submission
+    const bundlerUrl = config?.bundlerUrl || 'https://api.developer.coinbase.com/rpc/v1/base-sepolia';
+    const paymasterUrl = config?.paymasterUrl || bundlerUrl;
+
+    // Initialize real bundler client for UserOperation submission
     this.bundlerClient = {
       sendUserOperation: async (userOp: Partial<UserOperation>) => {
-        // In real implementation, this would submit to bundler
-        // Check if mock has overridden this method
-        if (this.bundlerClient._mockSendUserOp) {
-          return this.bundlerClient._mockSendUserOp(userOp);
+        // Submit to real bundler
+        if (!bundlerUrl) {
+          throw new Error('Bundler URL not configured');
         }
-        return '0x' + 'deed'.repeat(16);
+
+        const response = await fetch(bundlerUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'eth_sendUserOperation',
+            params: [userOp, '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789'],
+            id: 1
+          })
+        });
+
+        const result = await response.json();
+        if (result.error) {
+          throw new Error(result.error.message || 'Bundler error');
+        }
+
+        // Validate transaction hash format
+        const hash = result.result;
+        if (!hash || !hash.match(/^0x[a-f0-9]{64}$/)) {
+          throw new Error('Invalid transaction hash from bundler');
+        }
+
+        return hash;
       },
       estimateUserOperationGas: async (userOp: Partial<UserOperation>) => {
-        return {
-          preVerificationGas: '100000',
-          verificationGasLimit: '200000',
-          callGasLimit: '300000'
-        };
+        const response = await fetch(bundlerUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'eth_estimateUserOperationGas',
+            params: [userOp, '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789'],
+            id: 1
+          })
+        });
+
+        const result = await response.json();
+        if (result.error) {
+          throw new Error(result.error.message || 'Gas estimation failed');
+        }
+
+        return result.result;
       },
       getUserOperationReceipt: async (hash: string) => {
-        return { status: 'success' };
+        const response = await fetch(bundlerUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'eth_getUserOperationReceipt',
+            params: [hash],
+            id: 1
+          })
+        });
+
+        const result = await response.json();
+        return result.result || { status: 'pending' };
       },
       getSupportedEntryPoints: async () => {
         return ['0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789']; // v0.6 EntryPoint
@@ -67,26 +116,45 @@ export class SmartAccountProvider implements IWalletProvider {
       throw new Error(`Smart Account Provider only supports Base Sepolia (${ChainId.BASE_SEPOLIA})`);
     }
 
-    // Dynamic import to avoid build issues
-    const { createBaseAccountSDK, base } = await import('@base-org/account');
+    try {
+      // Dynamic import to avoid build issues
+      const BaseAccountModule = await import('@base-org/account').catch(() => null);
 
-    // Initialize Base Account SDK
-    this.baseAccountSDK = createBaseAccountSDK({
-      appName: 'Fabstir SDK',
-      appChainIds: [base.constants.CHAIN_IDS.baseSepolia],
-    });
+      if (BaseAccountModule) {
+        const { createBaseAccountSDK, base } = BaseAccountModule;
 
-    this.provider = this.baseAccountSDK.getProvider();
+        // Initialize Base Account SDK
+        this.baseAccountSDK = createBaseAccountSDK({
+          appName: 'Fabstir SDK',
+          appChainIds: [base.constants.CHAIN_IDS.baseSepolia],
+        });
 
-    // Request accounts
-    const accounts = await this.provider.request({
-      method: 'eth_requestAccounts',
-      params: []
-    });
+        this.provider = this.baseAccountSDK.getProvider();
 
-    this.eoaAddress = accounts[0];
-    this.smartAccountAddress = await this.baseAccountSDK.getAddress();
-    this.connected = true;
+        // Request accounts
+        const accounts = await this.provider.request({
+          method: 'eth_requestAccounts',
+          params: []
+        });
+
+        this.eoaAddress = accounts[0];
+        this.smartAccountAddress = await this.baseAccountSDK.getAddress();
+      } else {
+        // Fallback for testing without Base Account SDK
+        if (!this.baseAccountSDK) {
+          throw new Error('Base Account SDK not available');
+        }
+        // Use injected mock for testing
+        this.smartAccountAddress = this.baseAccountSDK.getAddress ?
+          await this.baseAccountSDK.getAddress() :
+          this.baseAccountSDK.address;
+        this.eoaAddress = this.baseAccountSDK.eoaAddress;
+      }
+
+      this.connected = true;
+    } catch (error) {
+      throw new Error(`Failed to connect wallet: ${error}`);
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -135,27 +203,67 @@ export class SmartAccountProvider implements IWalletProvider {
       throw new Error('Wallet not connected');
     }
 
+    // Validate transaction parameters
+    if (!tx.to || !ethers.isAddress(tx.to)) {
+      throw new Error('Invalid transaction: missing or invalid "to" address');
+    }
+
     // Build UserOperation for gasless transaction
     const userOp: Partial<UserOperation> = {
       sender: this.smartAccountAddress,
       callData: this.encodeCallData(tx),
+      nonce: '0x0', // Would be fetched from account
+      initCode: '0x', // Empty for already deployed accounts
       // Paymaster will sponsor gas
       paymasterAndData: '0x', // Would be filled by paymaster service
+      signature: '0x', // Will be added after signing
     };
 
-    // Estimate gas
-    const gasEstimates = await this.bundlerClient.estimateUserOperationGas(userOp);
+    // Estimate gas with retry logic
+    let gasEstimates;
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        gasEstimates = await this.bundlerClient.estimateUserOperationGas(userOp);
+        break;
+      } catch (error: any) {
+        retries--;
+        if (retries === 0 || !error.message?.includes('timeout')) {
+          throw error;
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    if (!gasEstimates) {
+      throw new Error('Failed to estimate gas for transaction');
+    }
+
     userOp.callGasLimit = gasEstimates.callGasLimit;
     userOp.verificationGasLimit = gasEstimates.verificationGasLimit;
     userOp.preVerificationGas = gasEstimates.preVerificationGas;
+    userOp.maxFeePerGas = '0x1000000'; // Would be from gas oracle
+    userOp.maxPriorityFeePerGas = '0x1000000';
 
-    // Submit to bundler - this can throw if bundler has errors
+    // Submit to bundler with retry for transient failures
     let userOpHash;
-    try {
-      userOpHash = await this.bundlerClient.sendUserOperation(userOp);
-    } catch (error) {
-      // Re-throw bundler/paymaster errors
-      throw error;
+    retries = 3;
+    while (retries > 0) {
+      try {
+        userOpHash = await this.bundlerClient.sendUserOperation(userOp);
+        break;
+      } catch (error: any) {
+        retries--;
+        if (retries === 0 || !error.message?.includes('Network timeout')) {
+          throw error;
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    // Validate the returned hash
+    if (!userOpHash || !userOpHash.match(/^0x[a-f0-9]{64}$/)) {
+      throw new Error('Invalid transaction hash from bundler');
     }
 
     return {
@@ -184,6 +292,21 @@ export class SmartAccountProvider implements IWalletProvider {
       tx.value || 0,
       tx.data || '0x'
     ]);
+  }
+
+  private async estimateGas(tx: any): Promise<any> {
+    return this.bundlerClient.estimateUserOperationGas({
+      sender: this.smartAccountAddress,
+      callData: this.encodeCallData(tx),
+      nonce: '0x0',
+      initCode: '0x',
+      paymasterAndData: '0x',
+      signature: '0x'
+    });
+  }
+
+  private async getTransactionReceipt(hash: string): Promise<any> {
+    return this.bundlerClient.getUserOperationReceipt(hash);
   }
 
   async signMessage(message: string): Promise<string> {
