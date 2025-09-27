@@ -369,11 +369,11 @@ class WalletProviderFactory {
 **Goal**: Update SessionManager to handle multi-chain sessions
 
 **Tasks**:
-- [ ] Write tests in `tests/managers/session-manager-multi.test.ts` (200 lines)
-- [ ] Update `packages/sdk-core/src/managers/SessionManager.ts` (add 100 lines)
-- [ ] Add chainId to all session operations
-- [ ] Update WebSocket messages to include chain_id
-- [ ] Store chain info in session metadata
+- [x] Write tests in `tests/managers/session-manager-multi.test.ts` (200 lines)
+- [x] Update `packages/sdk-core/src/managers/SessionManager.ts` (add 100 lines)
+- [x] Add chainId to all session operations
+- [x] Update WebSocket messages to include chain_id
+- [x] Store chain info in session metadata
 
 **Session Updates**:
 ```typescript

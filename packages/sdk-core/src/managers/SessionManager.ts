@@ -16,10 +16,13 @@ import {
 import { PaymentManager } from './PaymentManager';
 import { StorageManager } from './StorageManager';
 import { WebSocketClient } from '../websocket/WebSocketClient';
+import { ChainRegistry } from '../config/ChainRegistry';
+import { UnsupportedChainError } from '../errors/ChainErrors';
 
 export interface SessionState {
   sessionId: bigint;
   jobId: bigint;
+  chainId: number; // Added for multi-chain support
   model: string;
   provider: string;
   endpoint?: string; // WebSocket endpoint URL
@@ -30,6 +33,15 @@ export interface SessionState {
   totalTokens: number;
   startTime: number;
   endTime?: number;
+}
+
+// Extended SessionConfig with chainId
+export interface ExtendedSessionConfig extends SessionConfig {
+  chainId: number;
+  host: string;
+  modelId: string;
+  paymentMethod: 'deposit' | 'direct';
+  depositAmount?: ethers.BigNumberish;
 }
 
 export class SessionManager implements ISessionManager {
@@ -62,13 +74,10 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Start a new session
+   * Start a new session with chain awareness
    */
   async startSession(
-    model: string,
-    provider: string,
-    config: SessionConfig,
-    endpoint?: string
+    config: ExtendedSessionConfig | any
   ): Promise<{
     sessionId: bigint;
     jobId: bigint;
@@ -76,6 +85,20 @@ export class SessionManager implements ISessionManager {
     if (!this.initialized) {
       throw new SDKError('SessionManager not initialized', 'SESSION_NOT_INITIALIZED');
     }
+
+    // Validate chainId
+    if (!config.chainId) {
+      throw new SDKError('Chain ID is required', 'MISSING_CHAIN_ID');
+    }
+
+    if (!ChainRegistry.isChainSupported(config.chainId)) {
+      throw new UnsupportedChainError(config.chainId, ChainRegistry.getSupportedChains());
+    }
+
+    // Extract parameters for backward compatibility
+    const model = config.modelId || config.model;
+    const provider = config.host || config.provider;
+    const endpoint = config.endpoint;
 
     try {
       // Create session job with payment
@@ -93,6 +116,7 @@ export class SessionManager implements ISessionManager {
       const sessionState: SessionState = {
         sessionId: result.sessionId,
         jobId: result.jobId,
+        chainId: config.chainId,
         model,
         provider,
         endpoint,
@@ -112,14 +136,15 @@ export class SessionManager implements ISessionManager {
         id: result.sessionId.toString(),
         messages: [],
         metadata: {
+          chainId: config.chainId,
           model,
           provider,
           jobId: result.jobId.toString(),
           config: {
-            depositAmount: config.depositAmount.toString(),
-            pricePerToken: config.pricePerToken.toString(),
-            proofInterval: config.proofInterval.toString(),
-            duration: config.duration.toString()
+            depositAmount: config.depositAmount?.toString() || '',
+            pricePerToken: config.pricePerToken?.toString() || '',
+            proofInterval: config.proofInterval?.toString() || '',
+            duration: config.duration?.toString() || ''
           }
         },
         createdAt: sessionState.startTime,
@@ -140,7 +165,41 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Send prompt in session
+   * Get session by ID
+   */
+  getSession(sessionId: string): SessionState | undefined {
+    return this.sessions.get(sessionId);
+  }
+
+  /**
+   * Resume a paused session with chain validation
+   */
+  async resumeSessionWithChain(sessionId: string, chainId: number): Promise<SessionState> {
+    // Try to get from storage if available
+    let session = null;
+    if (this.storageManager.getSession) {
+      session = await this.storageManager.getSession(sessionId);
+    }
+
+    if (!session) {
+      throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
+    }
+
+    if (session.chainId && session.chainId !== chainId) {
+      throw new SDKError(
+        `Session chain mismatch: expected ${session.chainId}, got ${chainId}`,
+        'CHAIN_MISMATCH'
+      );
+    }
+
+    // Restore session to memory
+    this.sessions.set(sessionId, session as SessionState);
+
+    return session as SessionState;
+  }
+
+  /**
+   * Send prompt in session with chain awareness
    */
   async sendPrompt(
     sessionId: bigint,
@@ -280,11 +339,17 @@ export class SessionManager implements ISessionManager {
 
       // Initialize WebSocket client if not already connected
       if (!this.wsClient || !this.wsClient.isConnected()) {
-        this.wsClient = new WebSocketClient(wsUrl);
+        this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
         await this.wsClient.connect();
 
-        // Try simpler inference protocol first
-        // TODO: Switch to session_init once node supports it
+        // Send session_init with chain_id
+        await this.wsClient.send({
+          type: 'session_init',
+          chain_id: session.chainId,
+          session_id: sessionId.toString(),
+          job_id: session.jobId.toString(),
+          user_address: await this.paymentManager.getSessionJobManager().getSigner().getAddress()
+        });
       }
 
       // Collect full response
@@ -304,7 +369,9 @@ export class SessionManager implements ISessionManager {
         // Send message and wait for response
         // Try simpler inference format that the node might support
         const response = await this.wsClient.sendMessage({
-          type: 'inference',
+          type: 'prompt',
+          chain_id: session.chainId,
+          prompt: prompt,
           request: {
             model: 'tiny-vicuna',  // Use tiny-vicuna as confirmed by node developer
             prompt: prompt,
@@ -346,7 +413,9 @@ export class SessionManager implements ISessionManager {
       } else {
         // Non-streaming mode
         const response = await this.wsClient.sendMessage({
-          type: 'inference',
+          type: 'prompt',
+          chain_id: session.chainId,
+          prompt: prompt,
           request: {
             model: 'tiny-vicuna',  // Use tiny-vicuna as confirmed by node developer
             prompt: prompt,
