@@ -579,6 +579,199 @@ class ClientManager {
 }
 ```
 
+## Phase 8: Production Readiness - Remove Mocks & Implement Real Code
+
+### Sub-phase 8.1: Critical Transaction Fixes
+**Goal**: Fix transaction handling that returns fake hashes or invalid proofs
+
+**Tasks**:
+- [ ] Write tests in `tests/providers/smart-account-real.test.ts` (200 lines)
+- [ ] Fix `SmartAccountProvider.sendTransaction()` to use real bundler (150 lines max)
+- [ ] Remove mock transaction hash generation (`0xdeed...`)
+- [ ] Implement proper UserOperation submission
+- [ ] Add bundler response validation
+- [ ] Test with real Base Account Kit on testnet
+
+**Test Requirements**:
+```typescript
+// Tests must verify:
+- Real transaction hashes returned from bundler
+- UserOperation properly formatted and submitted
+- Transaction receipts retrievable on-chain
+- Gas estimation returns real values
+- Error handling for bundler failures
+```
+
+### Sub-phase 8.2: Remove Mock Proof Fallbacks
+**Goal**: Eliminate invalid proof generation that would fail on-chain
+
+**Tasks**:
+- [ ] Write tests in `tests/services/proof-verifier-real.test.ts` (150 lines)
+- [ ] Update `FabstirSDKCompat.generateProof()` to fail explicitly (50 lines max)
+- [ ] Remove `'0x' + '00'.repeat(256)` fallback
+- [ ] Remove mock proof type from `IProofService`
+- [ ] Update `ProofVerifier` to reject mock proofs
+- [ ] Add proper error messages for missing proof service
+
+**Implementation Notes**:
+```typescript
+// Instead of returning mock proof:
+throw new SDKError('Proof service not available', 'PROOF_SERVICE_UNAVAILABLE');
+// Never accept proofs starting with 0x000000...
+```
+
+### Sub-phase 8.3: Implement WalletConnect Authentication
+**Goal**: Add real WalletConnect support or remove it entirely
+
+**Tasks**:
+- [ ] Write tests in `tests/auth/walletconnect.test.ts` (200 lines)
+- [ ] Implement WalletConnect in `FabstirSDKCore.authenticate()` (100 lines max)
+- [ ] Add WalletConnect provider configuration
+- [ ] Handle QR code generation for pairing
+- [ ] Test with real WalletConnect wallet
+- [ ] OR: Remove WalletConnect from auth options if not needed
+
+**Decision Point**: If WalletConnect not needed for MVP, remove instead of implementing
+
+### Sub-phase 8.4: Implement Payment History
+**Goal**: Query real blockchain events for transaction history
+
+**Tasks**:
+- [ ] Write tests in `tests/managers/payment-history.test.ts` (200 lines)
+- [ ] Implement `PaymentManager.getPaymentHistory()` (150 lines max)
+- [ ] Query JobMarketplace contract events
+- [ ] Parse SessionJobCreated events
+- [ ] Parse SessionJobCompleted events
+- [ ] Format history with timestamps and amounts
+- [ ] Add pagination support for large histories
+
+**Event Parsing**:
+```typescript
+// Query these events from contract:
+- SessionJobCreated(jobId, user, host, deposit)
+- SessionJobCompleted(jobId, provenTokens, userRefund)
+- UserDepositedNative(user, amount)
+- UserWithdrewNative(user, amount)
+```
+
+### Sub-phase 8.5: Implement Admin Management
+**Goal**: Add treasury admin functions or document as unsupported
+
+**Tasks**:
+- [ ] Write tests in `tests/managers/treasury-admin.test.ts` (150 lines)
+- [ ] Check if contract supports multi-admin
+- [ ] If yes: Implement `addAdmin()` and `removeAdmin()` (100 lines max)
+- [ ] If no: Document single-admin limitation
+- [ ] Update error messages to be informative
+- [ ] Test with treasury contract on Base Sepolia
+
+**Contract Check**:
+```typescript
+// First verify if contract has these functions:
+- addAdmin(address)
+- removeAdmin(address)
+// If not, document limitation instead of NOT_IMPLEMENTED
+```
+
+### Sub-phase 8.6: Remove opBNB Placeholder Configuration
+**Goal**: Remove non-functional chain or add real contract addresses
+
+**Tasks**:
+- [ ] Write tests in `tests/config/chain-validation.test.ts` (100 lines)
+- [ ] Remove opBNB from `ChainRegistry` (20 lines max)
+- [ ] OR: Get real opBNB contract addresses from deployment
+- [ ] Update documentation to reflect supported chains
+- [ ] Add validation to reject placeholder addresses
+- [ ] Test chain switching only uses valid chains
+
+**Validation Logic**:
+```typescript
+// Reject any contract address that matches placeholder pattern:
+if (address.match(/^0x0+[1-9]$/)) {
+  throw new Error('Invalid placeholder contract address');
+}
+```
+
+### Sub-phase 8.7: Remove Hardcoded Seeds & Test Data
+**Goal**: Eliminate security risks from predictable test data
+
+**Tasks**:
+- [ ] Write tests in `tests/security/seed-generation.test.ts` (150 lines)
+- [ ] Remove hardcoded seed phrase from `FabstirSDKCore` (50 lines max)
+- [ ] Require proper seed generation or user input
+- [ ] Remove test private keys from source code
+- [ ] Add entropy validation for generated seeds
+- [ ] Document secure seed management
+
+**Security Requirements**:
+```typescript
+// Never use hardcoded seeds:
+// BAD: this.s5Seed = 'yield organic score...'
+// GOOD: this.s5Seed = await generateSecureSeed();
+// BETTER: this.s5Seed = userProvidedSeed || await promptForSeed();
+```
+
+### Sub-phase 8.8: Implement Host Metrics
+**Goal**: Add real metrics submission or remove from interface
+
+**Tasks**:
+- [ ] Write tests in `tests/managers/host-metrics.test.ts` (150 lines)
+- [ ] Design metrics data structure (50 lines)
+- [ ] Implement `HostManager.submitMetrics()` (100 lines max)
+- [ ] Store metrics in contract or off-chain service
+- [ ] Add metrics retrieval methods
+- [ ] OR: Remove if not needed for MVP
+
+**Metrics Structure**:
+```typescript
+interface HostMetrics {
+  jobsCompleted: number;
+  tokensProcessed: number;
+  averageLatency: number;
+  uptime: number;
+  timestamp: number;
+}
+```
+
+### Sub-phase 8.9: Integration Testing
+**Goal**: Verify all mock removals work in production environment
+
+**Tasks**:
+- [ ] Write end-to-end tests without any mocks (300 lines)
+- [ ] Test complete user flow on Base Sepolia
+- [ ] Test smart account with real bundler
+- [ ] Verify proof generation and verification
+- [ ] Test payment history retrieval
+- [ ] Validate all error paths
+- [ ] Document any remaining limitations
+
+**Test Scenarios**:
+```typescript
+// Must test these production scenarios:
+- Create session with real smart account
+- Submit real proofs to contract
+- Query real blockchain events
+- Handle real network errors
+- Validate real gas costs
+```
+
+## Success Criteria for Phase 8
+
+1. **No Mock Returns**: Zero hardcoded transaction hashes or proof values
+2. **Real Blockchain Integration**: All contract calls work on testnet
+3. **Proper Error Handling**: Explicit errors instead of silent mocks
+4. **Security**: No hardcoded seeds or private keys
+5. **Documentation**: Clear about what's implemented vs unsupported
+6. **Test Coverage**: 100% coverage of production code paths
+7. **Chain Validation**: Only functional chains in registry
+
+## Implementation Order
+
+1. **Week 1**: Critical fixes (8.1-8.2) - Stop returning fake data
+2. **Week 2**: Feature implementation (8.3-8.5) - Add missing features
+3. **Week 3**: Security & cleanup (8.6-8.8) - Remove test data
+4. **Week 4**: Integration testing (8.9) - Validate production readiness
+
 ## Notes
 
 - This plan incorporates the latest contract updates (JobMarketplaceWithModels)
