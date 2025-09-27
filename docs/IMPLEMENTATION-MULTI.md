@@ -336,11 +336,11 @@ class FabstirSDKCore {
 **Goal**: Simplify wallet provider selection and initialization
 
 **Tasks**:
-- [ ] Write tests in `tests/factories/wallet-factory.test.ts` (150 lines)
-- [ ] Create `packages/sdk-core/src/factories/WalletProviderFactory.ts` (120 lines max)
-- [ ] Auto-detect available providers
-- [ ] Return appropriate provider instance
-- [ ] Handle provider not available errors
+- [x] Write tests in `tests/factories/wallet-factory.test.ts` (150 lines)
+- [x] Create `packages/sdk-core/src/factories/WalletProviderFactory.ts` (120 lines max)
+- [x] Auto-detect available providers
+- [x] Return appropriate provider instance
+- [x] Handle provider not available errors
 
 **Factory Implementation**:
 ```typescript
