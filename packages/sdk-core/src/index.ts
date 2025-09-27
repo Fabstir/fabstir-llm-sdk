@@ -44,6 +44,8 @@ export { ProofVerifier } from './services/ProofVerifier';
 export * from './contracts';
 export { TransactionHelper } from './contracts/TransactionHelper';
 export { ContractManager } from './contracts/ContractManager';
+export { JobMarketplaceWrapper } from './contracts/JobMarketplace';
+export type { SessionCreationParams, DirectSessionParams, SessionJob } from './contracts/JobMarketplace';
 
 // Export types
 export * from './types';

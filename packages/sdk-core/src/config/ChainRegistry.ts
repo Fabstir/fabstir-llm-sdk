@@ -35,14 +35,14 @@ export class ChainRegistry {
         nativeToken: 'BNB' as NativeToken,
         rpcUrl: 'https://opbnb-testnet-rpc.bnbchain.org',
         contracts: {
-          // To be deployed - using empty addresses for now
-          jobMarketplace: '',
-          nodeRegistry: '',
-          proofSystem: '',
-          hostEarnings: '',
-          modelRegistry: '',
-          usdcToken: '',
-          fabToken: '',
+          // To be deployed - using placeholder addresses for now
+          jobMarketplace: '0x0000000000000000000000000000000000000001',
+          nodeRegistry: '0x0000000000000000000000000000000000000002',
+          proofSystem: '0x0000000000000000000000000000000000000003',
+          hostEarnings: '0x0000000000000000000000000000000000000004',
+          modelRegistry: '0x0000000000000000000000000000000000000005',
+          usdcToken: '0x0000000000000000000000000000000000000006',
+          fabToken: '0x0000000000000000000000000000000000000007',
         },
         minDeposit: '0.001', // Placeholder value for BNB
         blockExplorer: 'https://testnet.opbnbscan.com',

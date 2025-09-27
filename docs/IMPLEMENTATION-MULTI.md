@@ -145,16 +145,16 @@ interface WalletCapabilities {
 
 ## Phase 2: Contract Integration Updates
 
-### Sub-phase 2.1: JobMarketplace Multi-Chain Wrapper
+### Sub-phase 2.1: JobMarketplace Multi-Chain Wrapper ✅ COMPLETE
 **Goal**: Update contract wrappers to use new JobMarketplaceWithModels
 
 **Tasks**:
-- [ ] Write tests in `tests/contracts/job-marketplace-multi.test.ts` (250 lines)
-- [ ] Update `packages/sdk-core/src/contracts/JobMarketplace.ts` (200 lines max)
-- [ ] Add depositNative() and withdrawNative() methods
-- [ ] Add createSessionFromDeposit() method
-- [ ] Update all methods to use chain-specific addresses
-- [ ] Test with real contract on Base Sepolia
+- [x] Write tests in `tests/contracts/job-marketplace-multi.test.ts` (250 lines)
+- [x] Update `packages/sdk-core/src/contracts/JobMarketplace.ts` (200 lines max)
+- [x] Add depositNative() and withdrawNative() methods
+- [x] Add createSessionFromDeposit() method
+- [x] Update all methods to use chain-specific addresses
+- [x] Test with real contract on Base Sepolia
 
 **Key Methods to Update**:
 ```typescript
