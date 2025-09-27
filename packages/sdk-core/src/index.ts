@@ -79,6 +79,10 @@ export {
   DepositAccountNotAvailableError
 } from './errors/ChainErrors';
 
+// Export wallet providers
+export { EOAProvider } from './providers/EOAProvider';
+export * from './providers';
+
 // Export utilities
 export * from './utils';
 export { EnvironmentDetector } from './utils/EnvironmentDetector';

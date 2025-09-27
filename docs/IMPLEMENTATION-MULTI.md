@@ -216,15 +216,15 @@ class PaymentManager {
 
 ## Phase 3: Wallet Provider Implementations
 
-### Sub-phase 3.1: EOA Provider (MetaMask, Rainbow)
+### Sub-phase 3.1: EOA Provider (MetaMask, Rainbow) ✅ COMPLETE
 **Goal**: Implement provider for standard EOA wallets
 
 **Tasks**:
-- [ ] Write tests in `tests/providers/eoa-provider.test.ts` (200 lines)
-- [ ] Create `packages/sdk-core/src/providers/EOAProvider.ts` (180 lines max)
-- [ ] Test with real MetaMask on Base Sepolia
-- [ ] Verify chain switching works
-- [ ] No gasless support (EOA pays gas)
+- [x] Write tests in `tests/providers/eoa-provider.test.ts` (200 lines)
+- [x] Create `packages/sdk-core/src/providers/EOAProvider.ts` (180 lines max)
+- [x] Test with real MetaMask on Base Sepolia
+- [x] Verify chain switching works
+- [x] No gasless support (EOA pays gas)
 
 **Implementation Notes**:
 ```typescript
