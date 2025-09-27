@@ -48,6 +48,11 @@ export { ContractManager } from './contracts/ContractManager';
 // Export types
 export * from './types';
 export * from './types/models';
+export * from './types/chain.types';
+
+// Export chain configuration
+export { ChainRegistry } from './config/ChainRegistry';
+export { ChainId, type ChainConfig, type ChainContracts, type NativeToken } from './types/chain.types';
 
 // Export interfaces
 export * from './interfaces';
