@@ -656,23 +656,32 @@ throw new SDKError('Proof service not available', 'PROOF_SERVICE_UNAVAILABLE');
 - Created comprehensive test suite verifying removal (all tests passing)
 - Updated documentation and types
 
-### Sub-phase 8.4: Implement Payment History
+### Sub-phase 8.4: Implement Payment History ✅ COMPLETE
 **Goal**: Query real blockchain events for transaction history
 
 **Tasks**:
-- [ ] Write tests in `tests/managers/payment-history.test.ts` (200 lines)
-- [ ] Implement `PaymentManager.getPaymentHistory()` (150 lines max)
-- [ ] Query JobMarketplace contract events
-- [ ] Parse SessionJobCreated events
-- [ ] Parse SessionJobCompleted events
-- [ ] Format history with timestamps and amounts
-- [ ] Add pagination support for large histories
+- [x] Write tests in `tests/managers/payment-history.test.ts` (200 lines)
+- [x] Implement `PaymentManager.getPaymentHistory()` (150 lines max)
+- [x] Query JobMarketplace contract events
+- [x] Parse SessionJobCreated events
+- [x] Parse SessionCompleted events (fixed event name)
+- [x] Format history with timestamps and amounts
+- [x] Add pagination support for large histories
+
+**Completed**:
+- Implemented chunked querying to avoid RPC limits (10 blocks per request)
+- Fixed event name from SessionJobCompleted to SessionCompleted
+- Added proper error handling for invalid addresses
+- Implemented pagination with fromBlock/toBlock parameters
+- Added support for both ETH and token payment events
+- Created comprehensive test suite with 15+ tests
+- Default queries last 10000 blocks for performance
 
 **Event Parsing**:
 ```typescript
 // Query these events from contract:
 - SessionJobCreated(jobId, user, host, deposit)
-- SessionJobCompleted(jobId, provenTokens, userRefund)
+- SessionCompleted(jobId, totalTokensUsed, userRefund)
 - UserDepositedNative(user, amount)
 - UserWithdrewNative(user, amount)
 ```

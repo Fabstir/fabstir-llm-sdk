@@ -807,14 +807,195 @@ export class PaymentManager implements IPaymentManager {
    */
   async getPaymentHistory(
     userAddress: string,
-    limit?: number
+    limit: number = 100,
+    options?: {
+      fromBlock?: number | string;
+      toBlock?: number | string;
+    }
   ): Promise<any[]> {
-    // This would require event filtering which is browser-compatible
-    // Implementation depends on specific requirements
-    throw new SDKError(
-      'Payment history not yet implemented',
-      'NOT_IMPLEMENTED'
-    );
+    if (!this.initialized) {
+      throw new SDKError('PaymentManager not initialized', 'PAYMENT_NOT_INITIALIZED');
+    }
+
+    // Validate address
+    if (!ethers.isAddress(userAddress)) {
+      throw new SDKError('Invalid address', 'INVALID_ADDRESS');
+    }
+
+    try {
+      const jobMarketplace = this.contractManager.getJobMarketplace();
+      const provider = jobMarketplace.runner?.provider;
+
+      if (!provider) {
+        throw new SDKError('No provider available', 'NO_PROVIDER');
+      }
+
+      // Get current block number if toBlock is 'latest'
+      let currentBlock: number;
+      if (options?.toBlock === 'latest' || !options?.toBlock) {
+        currentBlock = await provider.getBlockNumber();
+      } else {
+        currentBlock = typeof options.toBlock === 'string' ?
+          parseInt(options.toBlock) : options.toBlock;
+      }
+
+      // Set from block - default to recent blocks for better performance
+      const startBlock = options?.fromBlock !== undefined ?
+        (typeof options.fromBlock === 'string' ? parseInt(options.fromBlock) : options.fromBlock) :
+        Math.max(0, currentBlock - 10000);  // Default to last 10000 blocks
+
+      // Array to store all events
+      const allEvents: any[] = [];
+
+      // Query in chunks of 10 blocks to avoid RPC limits on free tier
+      const CHUNK_SIZE = 10;
+
+      for (let fromBlock = startBlock; fromBlock <= currentBlock; fromBlock += CHUNK_SIZE) {
+        const toBlock = Math.min(fromBlock + CHUNK_SIZE - 1, currentBlock);
+
+        // Query SessionJobCreated events
+        const sessionCreatedFilter = jobMarketplace.filters.SessionJobCreated(
+          null, // jobId
+          userAddress, // user
+          null, // host
+          null  // deposit
+        );
+
+        const sessionCreatedEvents = await jobMarketplace.queryFilter(
+          sessionCreatedFilter,
+          fromBlock,
+          toBlock
+        );
+
+        // Process SessionJobCreated events
+        for (const event of sessionCreatedEvents) {
+          const block = await event.getBlock();
+          allEvents.push({
+            type: 'SessionJobCreated',
+            jobId: event.args?.jobId?.toString(),
+            user: event.args?.requester,  // Event uses 'requester' not 'user'
+            host: event.args?.host,
+            deposit: event.args?.deposit?.toString(),
+            paymentToken: event.args?.paymentToken,
+            transactionHash: event.transactionHash,
+            blockNumber: event.blockNumber,
+            timestamp: block.timestamp
+          });
+        }
+
+        // Query SessionCompleted events
+        const sessionCompletedFilter = jobMarketplace.filters.SessionCompleted(
+          null // jobId
+        );
+
+        const sessionCompletedEvents = await jobMarketplace.queryFilter(
+          sessionCompletedFilter,
+          fromBlock,
+          toBlock
+        );
+
+        // Process SessionCompleted events - check if user is involved
+        for (const event of sessionCompletedEvents) {
+          // Get the job details to check if this user was involved
+          const jobId = event.args?.jobId;
+          if (jobId !== undefined) {
+            // Check if this job belongs to the user by looking at created events
+            const relatedCreate = allEvents.find(
+              e => e.type === 'SessionJobCreated' && e.jobId === jobId.toString()
+            );
+
+            if (relatedCreate && relatedCreate.user === userAddress) {
+              const block = await event.getBlock();
+              allEvents.push({
+                type: 'SessionCompleted',
+                jobId: jobId.toString(),
+                totalTokensUsed: event.args?.totalTokensUsed?.toString() || event.args?.tokensUsed?.toString(),
+                hostEarnings: event.args?.hostEarnings?.toString() || event.args?.paymentAmount?.toString(),
+                userRefund: event.args?.userRefund?.toString() || event.args?.refundAmount?.toString(),
+                transactionHash: event.transactionHash,
+                blockNumber: event.blockNumber,
+                timestamp: block.timestamp
+              });
+            }
+          }
+        }
+
+        // Query DepositReceived events
+        const depositedFilter = jobMarketplace.filters.DepositReceived(
+          userAddress, // depositor
+          null, // amount
+          null  // token
+        );
+
+        const depositedEvents = await jobMarketplace.queryFilter(
+          depositedFilter,
+          fromBlock,
+          toBlock
+        );
+
+        // Process DepositReceived events
+        for (const event of depositedEvents) {
+          const block = await event.getBlock();
+          allEvents.push({
+            type: 'DepositReceived',
+            depositor: event.args?.depositor,
+            amount: event.args?.amount?.toString(),
+            token: event.args?.token,
+            transactionHash: event.transactionHash,
+            blockNumber: event.blockNumber,
+            timestamp: block.timestamp
+          });
+        }
+
+        // Query WithdrawalProcessed events
+        const withdrewFilter = jobMarketplace.filters.WithdrawalProcessed(
+          userAddress, // depositor
+          null, // amount
+          null  // token
+        );
+
+        const withdrewEvents = await jobMarketplace.queryFilter(
+          withdrewFilter,
+          fromBlock,
+          toBlock
+        );
+
+        // Process WithdrawalProcessed events
+        for (const event of withdrewEvents) {
+          const block = await event.getBlock();
+          allEvents.push({
+            type: 'WithdrawalProcessed',
+            depositor: event.args?.depositor,
+            amount: event.args?.amount?.toString(),
+            token: event.args?.token,
+            transactionHash: event.transactionHash,
+            blockNumber: event.blockNumber,
+            timestamp: block.timestamp
+          });
+        }
+
+        // Early exit if we have enough events
+        if (allEvents.length >= limit) {
+          break;
+        }
+      }
+
+      // Sort by block number descending (newest first)
+      allEvents.sort((a, b) => b.blockNumber - a.blockNumber);
+
+      // Apply limit
+      if (limit && limit > 0) {
+        return allEvents.slice(0, limit);
+      }
+
+      return allEvents;
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to get payment history: ${error.message}`,
+        'PAYMENT_HISTORY_ERROR',
+        { originalError: error }
+      );
+    }
   }
 
   /**
