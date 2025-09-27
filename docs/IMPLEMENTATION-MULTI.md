@@ -184,15 +184,15 @@ class JobMarketplaceWrapper {
 }
 ```
 
-### Sub-phase 2.2: Chain-Aware Manager Updates
+### Sub-phase 2.2: Chain-Aware Manager Updates ✅ COMPLETE
 **Goal**: Update all managers to support multi-chain operations
 
 **Tasks**:
-- [ ] Write tests in `tests/managers/payment-manager-multi.test.ts` (200 lines)
-- [ ] Update `packages/sdk-core/src/managers/PaymentManager.ts` (250 lines max)
-- [ ] Add chainId parameter to all methods
-- [ ] Add deposit management methods
-- [ ] Update to use chain-specific contract addresses
+- [x] Write tests in `tests/managers/payment-manager-multi.test.ts` (200 lines)
+- [x] Update `packages/sdk-core/src/managers/PaymentManager.ts` (250 lines max)
+- [x] Add chainId parameter to all methods
+- [x] Add deposit management methods
+- [x] Update to use chain-specific contract addresses
 
 **PaymentManager Updates**:
 ```typescript

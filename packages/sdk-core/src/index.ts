@@ -24,6 +24,7 @@ export type { FabstirSDKCoreConfig } from './FabstirSDKCore';
 // Export browser-compatible managers
 export { AuthManager } from './managers/AuthManager';
 export { PaymentManager } from './managers/PaymentManager';
+export { PaymentManager as PaymentManagerMultiChain } from './managers/PaymentManagerMultiChain';
 export { StorageManager } from './managers/StorageManager';
 export { SessionManager } from './managers/SessionManager';
 export { HostManager } from './managers/HostManager';
@@ -46,6 +47,7 @@ export { TransactionHelper } from './contracts/TransactionHelper';
 export { ContractManager } from './contracts/ContractManager';
 export { JobMarketplaceWrapper } from './contracts/JobMarketplace';
 export type { SessionCreationParams, DirectSessionParams, SessionJob } from './contracts/JobMarketplace';
+export type { SessionJobParams, DepositBalances } from './managers/PaymentManagerMultiChain';
 
 // Export types
 export * from './types';
