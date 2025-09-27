@@ -715,8 +715,10 @@ throw new SDKError('Proof service not available', 'PROOF_SERVICE_UNAVAILABLE');
 - Added clear documentation of limitations
 ```
 
-### Sub-phase 8.6: Remove opBNB Placeholder Configuration
+### Sub-phase 8.6: Remove opBNB Placeholder Configuration 🔄 DEFERRED (Post-MVP)
 **Goal**: Remove non-functional chain or add real contract addresses
+
+**Status**: DEFERRED - MVP will launch on Base Sepolia first. opBNB deployment will come after MVP.
 
 **Tasks**:
 - [ ] Write tests in `tests/config/chain-validation.test.ts` (100 lines)
