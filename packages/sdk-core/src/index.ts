@@ -56,6 +56,12 @@ export { ChainId, type ChainConfig, type ChainContracts, type NativeToken } from
 
 // Export interfaces
 export * from './interfaces';
+export {
+  type IWalletProvider,
+  type WalletCapabilities,
+  type TransactionRequest,
+  type TransactionResponse
+} from './interfaces/IWalletProvider';
 
 // Export model constants
 export * from './constants/models';

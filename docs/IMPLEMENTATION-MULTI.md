@@ -78,15 +78,15 @@ interface ChainConfig {
 }
 ```
 
-### Sub-phase 1.2: Wallet Provider Interface
+### Sub-phase 1.2: Wallet Provider Interface ✅ COMPLETE
 **Goal**: Define the contract all wallet providers must implement with deposit support
 
 **Tasks**:
-- [ ] Write tests in `tests/interfaces/iwallet-provider.test.ts` (120 lines)
-- [ ] Create `packages/sdk-core/src/interfaces/IWalletProvider.ts` (80 lines max)
-- [ ] Include deposit/withdrawal account methods
-- [ ] Include chain switching capabilities
-- [ ] Add gasless transaction support flags
+- [x] Write tests in `tests/interfaces/iwallet-provider.test.ts` (120 lines)
+- [x] Create `packages/sdk-core/src/interfaces/IWalletProvider.ts` (80 lines max)
+- [x] Include deposit/withdrawal account methods
+- [x] Include chain switching capabilities
+- [x] Add gasless transaction support flags
 
 **Interface Requirements**:
 ```typescript
