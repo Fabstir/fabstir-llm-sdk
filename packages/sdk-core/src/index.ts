@@ -81,6 +81,7 @@ export {
 
 // Export wallet providers
 export { EOAProvider } from './providers/EOAProvider';
+export { SmartAccountProvider } from './providers/SmartAccountProvider';
 export * from './providers';
 
 // Export utilities

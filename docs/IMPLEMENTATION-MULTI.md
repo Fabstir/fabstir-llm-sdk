@@ -252,15 +252,15 @@ class EOAProvider implements IWalletProvider {
 }
 ```
 
-### Sub-phase 3.2: Smart Account Provider (Base Account Kit)
+### Sub-phase 3.2: Smart Account Provider (Base Account Kit) ✅ COMPLETE
 **Goal**: Implement provider for smart contract wallets with gasless support
 
 **Tasks**:
-- [ ] Write tests in `tests/providers/smart-account-provider.test.ts` (250 lines)
-- [ ] Create `packages/sdk-core/src/providers/SmartAccountProvider.ts` (200 lines max)
-- [ ] Implement gasless transaction support
-- [ ] Support deposit account separation
-- [ ] Test on Base Sepolia with paymaster
+- [x] Write tests in `tests/providers/smart-account-provider.test.ts` (250 lines)
+- [x] Create `packages/sdk-core/src/providers/SmartAccountProvider.ts` (200 lines max)
+- [x] Implement gasless transaction support
+- [x] Support deposit account separation
+- [x] Test on Base Sepolia with paymaster
 
 **Implementation Notes**:
 ```typescript
