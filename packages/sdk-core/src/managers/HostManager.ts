@@ -11,7 +11,11 @@ import {
   SDKError,
   HostInfo,
   HostRegistrationRequest,
-  NodeMetrics
+  NodeMetrics,
+  HostMetrics,
+  StoredHostMetrics,
+  AggregatedHostMetrics,
+  MetricsSubmitResult
 } from '../types';
 import { ContractManager } from '../contracts/ContractManager';
 import { HostDiscoveryService } from '../services/HostDiscoveryService';
@@ -24,6 +28,7 @@ export class HostManager implements IHostManager {
   private hostEarningsAddress?: string;
   private fabTokenAddress?: string;
   private discoveryService?: HostDiscoveryService;
+  private metricsStorage: Map<string, StoredHostMetrics[]> = new Map();
 
   constructor(contractManager: ContractManager) {
     this.contractManager = contractManager;
@@ -743,16 +748,121 @@ export class HostManager implements IHostManager {
   /**
    * Submit performance metrics
    */
-  async submitMetrics(metrics: NodeMetrics): Promise<string> {
+  async submitMetrics(metrics: HostMetrics): Promise<MetricsSubmitResult> {
     if (!this.initialized || !this.signer) {
       throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
     }
 
-    // Metrics submission requires off-chain service integration
-    throw new SDKError(
-      'Metrics submission requires off-chain metrics service integration',
-      'NOT_IMPLEMENTED'
-    );
+    // Validate metrics
+    this.validateMetrics(metrics);
+
+    // Add timestamp if not provided
+    const timestamp = metrics.timestamp || Date.now();
+
+    // Get host address
+    const hostAddress = await this.signer.getAddress();
+
+    // Create stored metrics object
+    const storedMetrics: StoredHostMetrics = {
+      ...metrics,
+      hostAddress,
+      timestamp
+    };
+
+    // Store metrics locally
+    if (!this.metricsStorage.has(hostAddress)) {
+      this.metricsStorage.set(hostAddress, []);
+    }
+
+    const hostMetrics = this.metricsStorage.get(hostAddress)!;
+    hostMetrics.push(storedMetrics);
+
+    // Keep only last 1000 metrics entries per host
+    if (hostMetrics.length > 1000) {
+      hostMetrics.shift();
+    }
+
+    // Return result indicating local storage
+    return {
+      stored: true,
+      location: 'local',
+      timestamp
+    };
+  }
+
+  /**
+   * Validate metrics data
+   */
+  private validateMetrics(metrics: HostMetrics): void {
+    if (metrics.jobsCompleted < 0) {
+      throw new SDKError('Invalid metrics: jobsCompleted cannot be negative', 'INVALID_METRICS');
+    }
+
+    if (metrics.tokensProcessed < 0) {
+      throw new SDKError('Invalid metrics: tokensProcessed cannot be negative', 'INVALID_METRICS');
+    }
+
+    if (metrics.averageLatency < 0) {
+      throw new SDKError('Invalid metrics: averageLatency cannot be negative', 'INVALID_METRICS');
+    }
+
+    if (metrics.uptime < 0 || metrics.uptime > 1) {
+      throw new SDKError('Invalid metrics: uptime must be between 0 and 1', 'INVALID_METRICS');
+    }
+  }
+
+  /**
+   * Get stored metrics for a host
+   */
+  async getStoredMetrics(hostAddress: string, limit?: number): Promise<StoredHostMetrics[]> {
+    const metrics = this.metricsStorage.get(hostAddress) || [];
+
+    if (limit && limit > 0) {
+      // Return most recent metrics up to limit
+      return metrics.slice(-limit);
+    }
+
+    return metrics;
+  }
+
+  /**
+   * Get aggregated metrics for a host
+   */
+  async getAggregatedMetrics(hostAddress: string): Promise<AggregatedHostMetrics> {
+    const metrics = await this.getStoredMetrics(hostAddress);
+
+    if (metrics.length === 0) {
+      return {
+        totalJobs: 0,
+        totalTokens: 0,
+        averageUptime: 0,
+        averageLatency: 0
+      };
+    }
+
+    const totalJobs = metrics.reduce((sum, m) => sum + m.jobsCompleted, 0);
+    const totalTokens = metrics.reduce((sum, m) => sum + m.tokensProcessed, 0);
+    const averageUptime = metrics.reduce((sum, m) => sum + m.uptime, 0) / metrics.length;
+    const averageLatency = metrics.reduce((sum, m) => sum + m.averageLatency, 0) / metrics.length;
+
+    const periodStart = Math.min(...metrics.map(m => m.timestamp));
+    const periodEnd = Math.max(...metrics.map(m => m.timestamp));
+
+    return {
+      totalJobs,
+      totalTokens,
+      averageUptime,
+      averageLatency,
+      periodStart,
+      periodEnd
+    };
+  }
+
+  /**
+   * Clear metrics for a host
+   */
+  async clearMetrics(hostAddress: string): Promise<void> {
+    this.metricsStorage.delete(hostAddress);
   }
 
   /**

@@ -181,6 +181,35 @@ export interface NodeMetrics {
   totalTokensGenerated?: number;
 }
 
+export interface HostMetrics {
+  jobsCompleted: number;
+  tokensProcessed: number;
+  averageLatency: number;
+  uptime: number;
+  timestamp?: number;
+}
+
+export interface StoredHostMetrics extends HostMetrics {
+  hostAddress: string;
+  timestamp: number;
+}
+
+export interface AggregatedHostMetrics {
+  totalJobs: number;
+  totalTokens: number;
+  averageUptime: number;
+  averageLatency: number;
+  periodStart?: number;
+  periodEnd?: number;
+}
+
+export interface MetricsSubmitResult {
+  stored: boolean;
+  location: 'local' | 'contract' | 'service';
+  timestamp: number;
+  transactionHash?: string;
+}
+
 // ============= Treasury Types =============
 
 export interface TreasuryInfo {

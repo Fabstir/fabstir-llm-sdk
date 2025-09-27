@@ -768,16 +768,23 @@ await sdk.validateSeed(); // Throws on weak/test seeds
 // BETTER: this.s5Seed = userProvidedSeed || await promptForSeed();
 ```
 
-### Sub-phase 8.8: Implement Host Metrics
+### Sub-phase 8.8: Implement Host Metrics ✅ COMPLETE
 **Goal**: Add real metrics submission or remove from interface
 
-**Tasks**:
-- [ ] Write tests in `tests/managers/host-metrics.test.ts` (150 lines)
-- [ ] Design metrics data structure (50 lines)
-- [ ] Implement `HostManager.submitMetrics()` (100 lines max)
-- [ ] Store metrics in contract or off-chain service
-- [ ] Add metrics retrieval methods
-- [ ] OR: Remove if not needed for MVP
+**Completed**:
+- ✅ Wrote comprehensive tests in `tests/managers/host-metrics.test.ts` (270 lines)
+- ✅ Designed HostMetrics data structure with validation
+- ✅ Implemented `HostManager.submitMetrics()` with local storage
+- ✅ Added in-memory metrics storage (no contract needed for MVP)
+- ✅ Added metrics retrieval methods (`getStoredMetrics`, `getAggregatedMetrics`, `clearMetrics`)
+- ✅ All 13 tests passing
+
+**Implementation Details**:
+- Local in-memory storage for MVP (can add contract/service later)
+- Automatic timestamp generation if not provided
+- Validation for negative values and uptime range (0-1)
+- Aggregation methods for analytics
+- Keeps last 1000 metrics entries per host
 
 **Metrics Structure**:
 ```typescript
@@ -786,7 +793,7 @@ interface HostMetrics {
   tokensProcessed: number;
   averageLatency: number;
   uptime: number;
-  timestamp: number;
+  timestamp?: number;
 }
 ```
 
