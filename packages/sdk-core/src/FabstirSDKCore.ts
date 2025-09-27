@@ -18,6 +18,7 @@ import {
 import { IWalletProvider } from './interfaces/IWalletProvider';
 import { AuthManager } from './managers/AuthManager';
 import { PaymentManager } from './managers/PaymentManager';
+import { PaymentManager as PaymentManagerMultiChain } from './managers/PaymentManagerMultiChain';
 import { StorageManager } from './managers/StorageManager';
 import { SessionManager } from './managers/SessionManager';
 import {
@@ -453,7 +454,8 @@ export class FabstirSDKCore extends EventEmitter {
     
     // Create other managers
     console.log('Creating PaymentManager...');
-    this.paymentManager = new PaymentManager(this.contractManager!);
+    // Use PaymentManagerMultiChain for deposit/withdrawal support
+    this.paymentManager = new PaymentManagerMultiChain(undefined, this.currentChainId);
     console.log('PaymentManager created');
     
     console.log('Creating StorageManager...');

@@ -82,6 +82,13 @@ export class PaymentManager implements IPaymentManager {
     this.initializeWrapper(this.currentChainId);
   }
 
+  /**
+   * Check if manager is initialized
+   */
+  isInitialized(): boolean {
+    return this.initialized;
+  }
+
   private initializeWrapper(chainId: number): void {
     if (!this.signer) {
       throw new Error('Signer not initialized');
