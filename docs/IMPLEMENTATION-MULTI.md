@@ -581,16 +581,23 @@ class ClientManager {
 
 ## Phase 8: Production Readiness - Remove Mocks & Implement Real Code
 
-### Sub-phase 8.1: Critical Transaction Fixes
+### Sub-phase 8.1: Critical Transaction Fixes ✅ COMPLETE
 **Goal**: Fix transaction handling that returns fake hashes or invalid proofs
 
 **Tasks**:
-- [ ] Write tests in `tests/providers/smart-account-real.test.ts` (200 lines)
-- [ ] Fix `SmartAccountProvider.sendTransaction()` to use real bundler (150 lines max)
-- [ ] Remove mock transaction hash generation (`0xdeed...`)
-- [ ] Implement proper UserOperation submission
-- [ ] Add bundler response validation
-- [ ] Test with real Base Account Kit on testnet
+- [x] Write tests in `tests/providers/smart-account-real.test.ts` (200 lines)
+- [x] Fix `SmartAccountProvider.sendTransaction()` to use real bundler (150 lines max)
+- [x] Remove mock transaction hash generation (`0xdeed...`)
+- [x] Implement proper UserOperation submission
+- [x] Add bundler response validation
+- [x] Test with real Base Account Kit on testnet
+
+**Completed**:
+- Replaced hardcoded `0xdeed...` with real bundler integration
+- Implemented JSON-RPC calls to bundler for UserOperation submission
+- Added transaction hash validation (must be valid 0x + 64 hex chars)
+- Added retry logic for transient network failures
+- Created comprehensive test suite with 11 tests (all passing)
 
 **Test Requirements**:
 ```typescript
@@ -602,16 +609,24 @@ class ClientManager {
 - Error handling for bundler failures
 ```
 
-### Sub-phase 8.2: Remove Mock Proof Fallbacks
+### Sub-phase 8.2: Remove Mock Proof Fallbacks ✅ COMPLETE
 **Goal**: Eliminate invalid proof generation that would fail on-chain
 
 **Tasks**:
-- [ ] Write tests in `tests/services/proof-verifier-real.test.ts` (150 lines)
-- [ ] Update `FabstirSDKCompat.generateProof()` to fail explicitly (50 lines max)
-- [ ] Remove `'0x' + '00'.repeat(256)` fallback
-- [ ] Remove mock proof type from `IProofService`
-- [ ] Update `ProofVerifier` to reject mock proofs
-- [ ] Add proper error messages for missing proof service
+- [x] Write tests in `tests/services/proof-verifier-real.test.ts` (150 lines)
+- [x] Update `FabstirSDKCompat.generateProof()` to fail explicitly (50 lines max)
+- [x] Remove `'0x' + '00'.repeat(256)` fallback
+- [x] Remove mock proof type from `IProofService`
+- [x] Update `ProofVerifier` to reject mock proofs
+- [x] Add proper error messages for missing proof service
+
+**Completed**:
+- Removed mock proof fallback from FabstirSDKCompat
+- Now throws `PROOF_SERVICE_UNAVAILABLE` error
+- Removed 'mock' from ProofResult.proofType enum
+- Enhanced ProofVerifier with pattern detection and entropy validation
+- Detects all-zero proofs, repeating patterns (deed, beef, cafe)
+- Created test suite with 17 tests (all passing)
 
 **Implementation Notes**:
 ```typescript
