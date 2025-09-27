@@ -18,7 +18,7 @@ export interface ProofResult {
   publicInputs?: string[];
   verified: boolean;
   timestamp: number;
-  proofType: 'ezkl' | 'mock';
+  proofType: 'ezkl'; // Only real proof types allowed
 }
 
 export interface ProofStatus {

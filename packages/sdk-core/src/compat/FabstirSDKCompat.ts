@@ -237,18 +237,30 @@ export class FabstirSDK {
       
       generateProof: async (sessionId: string, tokensUsed: number) => {
         if (!bridge) {
-          // Return mock proof
-          return '0x' + '00'.repeat(256);
+          // No mock proofs in production - throw explicit error
+          throw new SDKError(
+            'Proof service not available. Bridge connection required for proof generation.',
+            'PROOF_SERVICE_UNAVAILABLE'
+          );
         }
-        
+
         const proofClient = bridge.getProofClient();
         const proofId = await proofClient.requestProof({
           sessionId,
           jobId: sessionId,
           tokensUsed
         });
-        
+
         const result = await proofClient.getProofResult(proofId);
+
+        // Validate proof is not a mock
+        if (result.proof === '0x' + '00'.repeat(256)) {
+          throw new SDKError(
+            'Invalid proof received: mock proofs not allowed',
+            'INVALID_PROOF'
+          );
+        }
+
         return result.proof;
       }
     };

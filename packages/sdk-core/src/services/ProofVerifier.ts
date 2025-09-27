@@ -14,35 +14,50 @@ export class ProofVerifier {
     try {
       // Remove 0x prefix if present
       const proofHex = proof.startsWith('0x') ? proof.slice(2) : proof;
-      
-      // Check minimum length
-      if (proofHex.length < 128) {
+
+      // Check minimum length (real proofs are at least 512 hex chars = 256 bytes)
+      if (proofHex.length < 512) {
         return false;
       }
-      
+
+      // Detect mock proofs (all zeros)
+      if (proofHex === '00'.repeat(256)) {
+        return false;
+      }
+
+      // Detect proofs with too many consecutive zeros (likely mock)
+      const consecutiveZeros = proofHex.match(/(00)+/g);
+      if (consecutiveZeros) {
+        const maxConsecutive = Math.max(...consecutiveZeros.map(z => z.length));
+        if (maxConsecutive >= 128) { // 64 bytes of zeros is suspicious
+          return false;
+        }
+      }
+
+      // Detect repeating patterns (sign of mock/test data)
+      const patterns = ['deed', 'dead', 'beef', 'cafe', '1234', 'abcd', 'ffff', '0000'];
+      for (const pattern of patterns) {
+        const regex = new RegExp(`(${pattern}){8,}`, 'i');
+        if (regex.test(proofHex)) {
+          return false;
+        }
+      }
+
       // Try to decode
       const proofBytes = this.hexToBytes(proofHex);
-      if (!proofBytes || proofBytes.length === 0) {
+      if (!proofBytes || proofBytes.length < 256) {
         return false;
       }
-      
-      // Try to parse as JSON (for mock proofs)
-      try {
-        const proofJson = new TextDecoder().decode(proofBytes);
-        const proofData = JSON.parse(proofJson);
-        
-        // Check for required fields
-        if (proofData.a && proofData.b && proofData.c) {
-          return true;
-        }
-      } catch {
-        // Not JSON, might be binary proof
-        // Just check it has reasonable structure
-        return proofBytes.length >= 256;
+
+      // Calculate entropy (real proofs should have high entropy)
+      const entropy = this.calculateEntropy(proofBytes);
+      if (entropy < 3.0) { // Low entropy suggests mock data
+        return false;
       }
-      
+
+      // Valid proof structure
       return true;
-      
+
     } catch (error) {
       console.error('Proof structure verification failed:', error);
       return false;
@@ -111,12 +126,41 @@ export class ProofVerifier {
     if (hex.length % 2 !== 0) {
       throw new SDKError('Invalid hex string', 'INVALID_HEX');
     }
-    
+
     const bytes = new Uint8Array(hex.length / 2);
     for (let i = 0; i < bytes.length; i++) {
-      bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+      const byte = parseInt(hex.substr(i * 2, 2), 16);
+      if (isNaN(byte)) {
+        throw new SDKError('Invalid hex character', 'INVALID_HEX');
+      }
+      bytes[i] = byte;
     }
-    
+
     return bytes;
+  }
+
+  /**
+   * Calculate Shannon entropy of bytes to detect mock data
+   */
+  private calculateEntropy(bytes: Uint8Array): number {
+    const freqMap = new Map<number, number>();
+
+    // Count byte frequencies
+    for (const byte of bytes) {
+      freqMap.set(byte, (freqMap.get(byte) || 0) + 1);
+    }
+
+    // Calculate entropy
+    let entropy = 0;
+    const total = bytes.length;
+
+    for (const freq of freqMap.values()) {
+      const p = freq / total;
+      if (p > 0) {
+        entropy -= p * Math.log2(p);
+      }
+    }
+
+    return entropy;
   }
 }
