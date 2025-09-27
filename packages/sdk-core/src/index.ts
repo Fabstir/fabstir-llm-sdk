@@ -66,6 +66,15 @@ export {
 // Export model constants
 export * from './constants/models';
 
+// Export chain-aware errors
+export {
+  UnsupportedChainError,
+  ChainMismatchError,
+  InsufficientDepositError,
+  NodeChainMismatchError,
+  DepositAccountNotAvailableError
+} from './errors/ChainErrors';
+
 // Export utilities
 export * from './utils';
 export { EnvironmentDetector } from './utils/EnvironmentDetector';

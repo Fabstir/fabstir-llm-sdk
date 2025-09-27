@@ -124,15 +124,15 @@ interface WalletCapabilities {
 }
 ```
 
-### Sub-phase 1.3: Chain-Aware Error System
+### Sub-phase 1.3: Chain-Aware Error System ✅ COMPLETE
 **Goal**: Comprehensive error handling for multi-chain scenarios
 
 **Tasks**:
-- [ ] Write tests in `tests/errors/chain-errors.test.ts` (100 lines)
-- [ ] Create `packages/sdk-core/src/errors/ChainErrors.ts` (80 lines max)
-- [ ] Include chain_id in all error messages
-- [ ] Add deposit-related errors
-- [ ] Add node communication errors
+- [x] Write tests in `tests/errors/chain-errors.test.ts` (100 lines)
+- [x] Create `packages/sdk-core/src/errors/ChainErrors.ts` (80 lines max)
+- [x] Include chain_id in all error messages
+- [x] Add deposit-related errors
+- [x] Add node communication errors
 
 **Error Types**:
 ```typescript
