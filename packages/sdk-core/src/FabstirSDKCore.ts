@@ -228,11 +228,17 @@ export class FabstirSDKCore extends EventEmitter {
     const address = await this.walletProvider.getAddress();
     this.userAddress = address;
 
-    // Create a mock signer for manager initialization
-    // In real implementation, would use wallet provider for signing
+    // VoidSigner cannot sign transactions - it's read-only
+    // This is a critical issue that must be fixed
     const provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
     this.provider = provider;
-    this.signer = new ethers.VoidSigner(address, provider);
+
+    // CRITICAL: VoidSigner cannot sign transactions
+    // Production code must use a real signer
+    throw new SDKError(
+      'Cannot create signer from wallet provider. Use authenticateWithPrivateKey or authenticateWithMetaMask for transaction signing',
+      'SIGNER_NOT_AVAILABLE'
+    );
 
     this.authenticated = true;
 
@@ -303,20 +309,11 @@ export class FabstirSDKCore extends EventEmitter {
     } catch (error: any) {
       console.warn('[S5 Seed] Failed to generate deterministic seed:', error);
       
-      // Fallback to config or default
-      if (this.config.s5Config?.seedPhrase) {
-        this.s5Seed = this.config.s5Config.seedPhrase;
-        console.log('[S5 Seed] Using seed phrase from config as fallback');
-      } else if (this.config.mode === 'development') {
-        // Allow test seed only in development mode
-        this.s5Seed = await this.generateSecureSeed();
-        console.warn('[S5 Seed] Generated temporary seed for development mode');
-      } else {
-        throw new SDKError(
-          'S5 seed phrase required in production mode. Provide via config.s5Config.seedPhrase',
-          'SEED_REQUIRED'
-        );
-      }
+      // No fallbacks in production - seed must be explicitly provided
+      throw new SDKError(
+        `Failed to generate S5 seed: ${error.message}. S5 seed phrase must be provided via config.s5Config.seedPhrase or user authentication`,
+        'SEED_GENERATION_FAILED'
+      );
     }
   }
   
@@ -366,20 +363,11 @@ export class FabstirSDKCore extends EventEmitter {
     } catch (error: any) {
       console.error('[S5 Seed] Failed to generate deterministic seed:', error);
       
-      // Fallback to config or default
-      if (this.config.s5Config?.seedPhrase) {
-        this.s5Seed = this.config.s5Config.seedPhrase;
-        console.log('[S5 Seed] Using seed phrase from config as fallback');
-      } else if (this.config.mode === 'development') {
-        // Allow test seed only in development mode
-        this.s5Seed = await this.generateSecureSeed();
-        console.warn('[S5 Seed] Generated temporary seed for development mode');
-      } else {
-        throw new SDKError(
-          'S5 seed phrase required in production mode. Provide via config.s5Config.seedPhrase',
-          'SEED_REQUIRED'
-        );
-      }
+      // No fallbacks in production - seed must be explicitly provided
+      throw new SDKError(
+        `Failed to generate S5 seed: ${error.message}. S5 seed phrase must be provided via config.s5Config.seedPhrase or user authentication`,
+        'SEED_GENERATION_FAILED'
+      );
     }
   }
   
@@ -426,20 +414,11 @@ export class FabstirSDKCore extends EventEmitter {
     } catch (error: any) {
       console.error('[S5 Seed] Failed to generate deterministic seed:', error);
       
-      // Fallback to config or default
-      if (this.config.s5Config?.seedPhrase) {
-        this.s5Seed = this.config.s5Config.seedPhrase;
-        console.log('[S5 Seed] Using seed phrase from config as fallback');
-      } else if (this.config.mode === 'development') {
-        // Allow test seed only in development mode
-        this.s5Seed = await this.generateSecureSeed();
-        console.warn('[S5 Seed] Generated temporary seed for development mode');
-      } else {
-        throw new SDKError(
-          'S5 seed phrase required in production mode. Provide via config.s5Config.seedPhrase',
-          'SEED_REQUIRED'
-        );
-      }
+      // No fallbacks in production - seed must be explicitly provided
+      throw new SDKError(
+        `Failed to generate S5 seed: ${error.message}. S5 seed phrase must be provided via config.s5Config.seedPhrase or user authentication`,
+        'SEED_GENERATION_FAILED'
+      );
     }
   }
   

@@ -1,6 +1,7 @@
 import { IWalletProvider, WalletCapabilities, TransactionRequest, TransactionResponse } from '../interfaces/IWalletProvider';
 import { ethers } from 'ethers';
 import { ChainId } from '../types/chain.types';
+import { getBaseSepolia } from '../config/environment';
 
 // Types for bundler operations
 interface UserOperation {
@@ -38,6 +39,9 @@ export class SmartAccountProvider implements IWalletProvider {
     const bundlerUrl = config?.bundlerUrl || 'https://api.developer.coinbase.com/rpc/v1/base-sepolia';
     const paymasterUrl = config?.paymasterUrl || bundlerUrl;
 
+    // Get EntryPoint address from environment
+    const entryPointAddress = getBaseSepolia().entryPoint;
+
     // Initialize real bundler client for UserOperation submission
     this.bundlerClient = {
       sendUserOperation: async (userOp: Partial<UserOperation>) => {
@@ -52,7 +56,7 @@ export class SmartAccountProvider implements IWalletProvider {
           body: JSON.stringify({
             jsonrpc: '2.0',
             method: 'eth_sendUserOperation',
-            params: [userOp, '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789'],
+            params: [userOp, entryPointAddress],
             id: 1
           })
         });
@@ -77,7 +81,7 @@ export class SmartAccountProvider implements IWalletProvider {
           body: JSON.stringify({
             jsonrpc: '2.0',
             method: 'eth_estimateUserOperationGas',
-            params: [userOp, '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789'],
+            params: [userOp, entryPointAddress],
             id: 1
           })
         });
@@ -105,7 +109,7 @@ export class SmartAccountProvider implements IWalletProvider {
         return result.result || { status: 'pending' };
       },
       getSupportedEntryPoints: async () => {
-        return ['0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789']; // v0.6 EntryPoint
+        return [entryPointAddress]; // v0.6 EntryPoint
       }
     };
   }
@@ -140,15 +144,10 @@ export class SmartAccountProvider implements IWalletProvider {
         this.eoaAddress = accounts[0];
         this.smartAccountAddress = await this.baseAccountSDK.getAddress();
       } else {
-        // Fallback for testing without Base Account SDK
-        if (!this.baseAccountSDK) {
-          throw new Error('Base Account SDK not available');
-        }
-        // Use injected mock for testing
-        this.smartAccountAddress = this.baseAccountSDK.getAddress ?
-          await this.baseAccountSDK.getAddress() :
-          this.baseAccountSDK.address;
-        this.eoaAddress = this.baseAccountSDK.eoaAddress;
+        // No fallback to mocks - Base Account SDK is required
+        throw new Error(
+          'Base Account SDK not available. Cannot proceed without proper smart account support. Please ensure @base-org/account is installed and available'
+        );
       }
 
       this.connected = true;

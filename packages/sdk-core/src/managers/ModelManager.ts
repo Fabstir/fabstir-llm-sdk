@@ -57,18 +57,19 @@ export class ModelManager {
       // Verify contract is accessible by checking if it has code
       const code = await this.modelRegistry.runner?.provider?.getCode(await this.modelRegistry.getAddress());
       if (!code || code === '0x') {
-        console.warn(`ModelRegistry contract not deployed at ${await this.modelRegistry.getAddress()}, running in mock mode`);
-        this.initialized = true;
-        return;
+        throw new Error(
+          `ModelRegistry contract not deployed at ${await this.modelRegistry.getAddress()}. Cannot proceed without contract deployment`
+        );
       }
 
       // Try to call a view function to verify the contract interface
       await this.modelRegistry.APPROVAL_THRESHOLD();
       this.initialized = true;
     } catch (error) {
-      console.warn(`ModelManager initialization warning: ${error.message}`);
-      // Continue anyway - might be wrong network or contract not deployed
-      this.initialized = true;
+      // No fallback - throw error if initialization fails
+      throw new Error(
+        `ModelManager initialization failed: ${error.message}. Ensure ModelRegistry contract is deployed and accessible`
+      );
     }
   }
 
@@ -217,39 +218,10 @@ export class ModelManager {
     } catch (error) {
       console.error('Error fetching approved models:', error);
 
-      // Fallback: try to get some basic info if getAllModels fails
-      try {
-        console.log('Trying fallback approach...');
-        const knownModels: ModelInfo[] = [];
-
-        // Try a few known model IDs (you can expand this)
-        // This is just for testing - in production getAllModels should work
-        for (let i = 0; i < 10; i++) {
-          try {
-            const testId = `0x${i.toString().padStart(64, '0')}`;
-            const model = await this.modelRegistry.models(testId);
-            if (model.huggingfaceRepo && model.huggingfaceRepo !== '') {
-              knownModels.push({
-                modelId: testId,
-                huggingfaceRepo: model.huggingfaceRepo,
-                fileName: model.fileName,
-                sha256Hash: model.sha256Hash,
-                approvalTier: Number(model.approvalTier),
-                active: model.active,
-                timestamp: Number(model.timestamp),
-                approved: await this.modelRegistry.isModelApproved(testId)
-              });
-            }
-          } catch (e) {
-            // This model ID doesn't exist, continue
-          }
-        }
-
-        return knownModels;
-      } catch (fallbackError) {
-        console.error('Fallback also failed:', fallbackError);
-        return [];
-      }
+      // No fallback approaches - if getAllModels fails, throw error
+      throw new Error(
+        `Failed to list models: ${error.message}. Ensure ModelRegistry contract is properly deployed and accessible`
+      );
     }
   }
 

@@ -1,61 +1,62 @@
 import { ChainConfig, ChainId, NativeToken } from '../types/chain.types';
+import { getBaseSepolia, getOpBNBTestnet } from './environment';
 
 /**
  * Central registry for all supported blockchain configurations
  */
 export class ChainRegistry {
-  private static readonly chains: Map<number, ChainConfig> = new Map([
-    // Base Sepolia Configuration
-    [
-      ChainId.BASE_SEPOLIA,
-      {
-        chainId: 84532,
-        name: 'Base Sepolia',
-        nativeToken: 'ETH' as NativeToken,
-        rpcUrl: 'https://sepolia.base.org',
-        contracts: {
-          jobMarketplace: '0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f',
-          nodeRegistry: '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
-          proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
-          hostEarnings: '0x908962e8c6CE72610021586f85ebDE09aAc97776',
-          modelRegistry: '0x92b2De840bB2171203011A6dBA928d855cA8183E',
-          usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-          fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
+  private static chains: Map<number, ChainConfig> | undefined;
+
+  /**
+   * Initialize the chains map lazily to ensure environment variables are loaded
+   */
+  private static initializeChains(): Map<number, ChainConfig> {
+    if (this.chains) {
+      return this.chains;
+    }
+
+    const baseSepolia = getBaseSepolia();
+    const opBNB = getOpBNBTestnet();
+
+    this.chains = new Map([
+      // Base Sepolia Configuration (from .env.test)
+      [
+        ChainId.BASE_SEPOLIA,
+        {
+          chainId: baseSepolia.chainId,
+          name: 'Base Sepolia',
+          nativeToken: 'ETH' as NativeToken,
+          rpcUrl: baseSepolia.rpcUrl,
+          contracts: baseSepolia.contracts,
+          minDeposit: '0.0002',
+          blockExplorer: 'https://sepolia.basescan.org',
         },
-        minDeposit: '0.0002',
-        blockExplorer: 'https://sepolia.basescan.org',
-      },
-    ],
-    // opBNB Testnet Configuration
-    [
-      ChainId.OPBNB_TESTNET,
-      {
-        chainId: 5611,
-        name: 'opBNB Testnet',
-        nativeToken: 'BNB' as NativeToken,
-        rpcUrl: 'https://opbnb-testnet-rpc.bnbchain.org',
-        contracts: {
-          // To be deployed - using placeholder addresses for now
-          jobMarketplace: '0x0000000000000000000000000000000000000001',
-          nodeRegistry: '0x0000000000000000000000000000000000000002',
-          proofSystem: '0x0000000000000000000000000000000000000003',
-          hostEarnings: '0x0000000000000000000000000000000000000004',
-          modelRegistry: '0x0000000000000000000000000000000000000005',
-          usdcToken: '0x0000000000000000000000000000000000000006',
-          fabToken: '0x0000000000000000000000000000000000000007',
+      ],
+      // opBNB Testnet Configuration (placeholder until deployment)
+      [
+        ChainId.OPBNB_TESTNET,
+        {
+          chainId: opBNB.chainId,
+          name: 'opBNB Testnet',
+          nativeToken: 'BNB' as NativeToken,
+          rpcUrl: opBNB.rpcUrl,
+          contracts: opBNB.contracts,
+          minDeposit: '0.001', // Placeholder value for BNB
+          blockExplorer: 'https://testnet.opbnbscan.com',
         },
-        minDeposit: '0.001', // Placeholder value for BNB
-        blockExplorer: 'https://testnet.opbnbscan.com',
-      },
-    ],
-  ]);
+      ],
+    ]);
+
+    return this.chains;
+  }
 
   /**
    * Get chain configuration by ChainId enum
    * @throws Error if chain is not supported
    */
   public static getChain(chainId: ChainId): ChainConfig {
-    const config = this.chains.get(chainId);
+    const chains = this.initializeChains();
+    const config = chains.get(chainId);
     if (!config) {
       throw new Error(`Unsupported chain ID: ${chainId}`);
     }
@@ -67,42 +68,48 @@ export class ChainRegistry {
    * @returns ChainConfig or undefined if not found
    */
   public static getChainConfig(chainId: number): ChainConfig | undefined {
-    return this.chains.get(chainId);
+    const chains = this.initializeChains();
+    return chains.get(chainId);
   }
 
   /**
    * Check if a chain is supported
    */
   public static isChainSupported(chainId: number): boolean {
-    return this.chains.has(chainId);
+    const chains = this.initializeChains();
+    return chains.has(chainId);
   }
 
   /**
    * Get list of all supported chain IDs
    */
   public static getSupportedChains(): number[] {
-    return Array.from(this.chains.keys());
+    const chains = this.initializeChains();
+    return Array.from(chains.keys());
   }
 
   /**
    * Get all chain configurations
    */
   public static getAllChainConfigs(): ChainConfig[] {
-    return Array.from(this.chains.values());
+    const chains = this.initializeChains();
+    return Array.from(chains.values());
   }
 
   /**
    * Add or update a chain configuration (useful for testing)
    */
   public static setChain(chainId: number, config: ChainConfig): void {
-    this.chains.set(chainId, config);
+    const chains = this.initializeChains();
+    chains.set(chainId, config);
   }
 
   /**
    * Remove a chain configuration (useful for testing)
    */
   public static removeChain(chainId: number): void {
-    this.chains.delete(chainId);
+    const chains = this.initializeChains();
+    chains.delete(chainId);
   }
 
   /**
@@ -116,7 +123,8 @@ export class ChainRegistry {
    * Get chain by native token type
    */
   public static getChainsByNativeToken(token: NativeToken): ChainConfig[] {
-    return Array.from(this.chains.values()).filter(
+    const chains = this.initializeChains();
+    return Array.from(chains.values()).filter(
       config => config.nativeToken === token
     );
   }
@@ -132,21 +140,24 @@ export class ChainRegistry {
    * Get chain name by ID
    */
   public static getChainName(chainId: number): string | undefined {
-    return this.chains.get(chainId)?.name;
+    const chains = this.initializeChains();
+    return chains.get(chainId)?.name;
   }
 
   /**
    * Get RPC URL for a chain
    */
   public static getRpcUrl(chainId: number): string | undefined {
-    return this.chains.get(chainId)?.rpcUrl;
+    const chains = this.initializeChains();
+    return chains.get(chainId)?.rpcUrl;
   }
 
   /**
    * Get block explorer URL for a chain
    */
   public static getBlockExplorerUrl(chainId: number): string | undefined {
-    return this.chains.get(chainId)?.blockExplorer;
+    const chains = this.initializeChains();
+    return chains.get(chainId)?.blockExplorer;
   }
 
   /**
@@ -171,20 +182,23 @@ export class ChainRegistry {
    * Get native token symbol for a chain
    */
   public static getNativeToken(chainId: number): NativeToken | undefined {
-    return this.chains.get(chainId)?.nativeToken;
+    const chains = this.initializeChains();
+    return chains.get(chainId)?.nativeToken;
   }
 
   /**
    * Get minimum deposit for a chain
    */
   public static getMinDeposit(chainId: number): string | undefined {
-    return this.chains.get(chainId)?.minDeposit;
+    const chains = this.initializeChains();
+    return chains.get(chainId)?.minDeposit;
   }
 
   /**
    * Get contract addresses for a chain
    */
   public static getContracts(chainId: number): ChainConfig['contracts'] | undefined {
-    return this.chains.get(chainId)?.contracts;
+    const chains = this.initializeChains();
+    return chains.get(chainId)?.contracts;
   }
 }
