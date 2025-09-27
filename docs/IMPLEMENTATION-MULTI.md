@@ -34,16 +34,16 @@ Based on latest documentation:
 
 ## Phase 1: Core Chain Infrastructure
 
-### Sub-phase 1.1: Chain Configuration Registry
+### Sub-phase 1.1: Chain Configuration Registry ✅ COMPLETE
 **Goal**: Central registry of all supported chains with current contract addresses
 
 **Tasks**:
-- [ ] Write tests in `tests/config/chain-registry.test.ts` (150 lines)
-- [ ] Create `packages/sdk-core/src/config/ChainRegistry.ts` (200 lines max)
-- [ ] Create `packages/sdk-core/src/types/chain.types.ts` (50 lines max)
-- [ ] Verify Base Sepolia addresses match new deployment
-- [ ] Verify opBNB testnet configuration is complete
-- [ ] Add chain_id to all config structures
+- [x] Write tests in `tests/config/chain-registry.test.ts` (150 lines)
+- [x] Create `packages/sdk-core/src/config/ChainRegistry.ts` (200 lines max)
+- [x] Create `packages/sdk-core/src/types/chain.types.ts` (50 lines max)
+- [x] Verify Base Sepolia addresses match new deployment
+- [x] Verify opBNB testnet configuration is complete
+- [x] Add chain_id to all config structures
 
 **Test Requirements**:
 ```typescript
