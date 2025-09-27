@@ -306,10 +306,15 @@ export class FabstirSDKCore extends EventEmitter {
       if (this.config.s5Config?.seedPhrase) {
         this.s5Seed = this.config.s5Config.seedPhrase;
         console.log('[S5 Seed] Using seed phrase from config as fallback');
+      } else if (this.config.mode === 'development') {
+        // Allow test seed only in development mode
+        this.s5Seed = await this.generateSecureSeed();
+        console.warn('[S5 Seed] Generated temporary seed for development mode');
       } else {
-        // Use test seed phrase as last resort
-        this.s5Seed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
-        console.log('[S5 Seed] Using default test seed phrase as fallback');
+        throw new SDKError(
+          'S5 seed phrase required in production mode. Provide via config.s5Config.seedPhrase',
+          'SEED_REQUIRED'
+        );
       }
     }
   }
@@ -364,10 +369,15 @@ export class FabstirSDKCore extends EventEmitter {
       if (this.config.s5Config?.seedPhrase) {
         this.s5Seed = this.config.s5Config.seedPhrase;
         console.log('[S5 Seed] Using seed phrase from config as fallback');
+      } else if (this.config.mode === 'development') {
+        // Allow test seed only in development mode
+        this.s5Seed = await this.generateSecureSeed();
+        console.warn('[S5 Seed] Generated temporary seed for development mode');
       } else {
-        // Use test seed phrase as last resort
-        this.s5Seed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
-        console.log('[S5 Seed] Using default test seed phrase as fallback');
+        throw new SDKError(
+          'S5 seed phrase required in production mode. Provide via config.s5Config.seedPhrase',
+          'SEED_REQUIRED'
+        );
       }
     }
   }
@@ -419,10 +429,15 @@ export class FabstirSDKCore extends EventEmitter {
       if (this.config.s5Config?.seedPhrase) {
         this.s5Seed = this.config.s5Config.seedPhrase;
         console.log('[S5 Seed] Using seed phrase from config as fallback');
+      } else if (this.config.mode === 'development') {
+        // Allow test seed only in development mode
+        this.s5Seed = await this.generateSecureSeed();
+        console.warn('[S5 Seed] Generated temporary seed for development mode');
       } else {
-        // Use test seed phrase as last resort
-        this.s5Seed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
-        console.log('[S5 Seed] Using default test seed phrase as fallback');
+        throw new SDKError(
+          'S5 seed phrase required in production mode. Provide via config.s5Config.seedPhrase',
+          'SEED_REQUIRED'
+        );
       }
     }
   }
@@ -681,12 +696,101 @@ export class FabstirSDKCore extends EventEmitter {
     if (!this.signer) return undefined;
     return await this.signer.getAddress();
   }
-  
+
   /**
    * Check if authenticated
    */
   isAuthenticated(): boolean {
     return this.authenticated;
+  }
+
+  /**
+   * Generate a cryptographically secure seed phrase
+   */
+  private async generateSecureSeed(): Promise<string> {
+    // Generate 16 bytes of entropy (128 bits for 12-word mnemonic)
+    const entropy = ethers.randomBytes(16);
+    const mnemonic = ethers.Mnemonic.fromEntropy(entropy);
+    return mnemonic.phrase;
+  }
+
+  /**
+   * Validate seed phrase entropy and format
+   */
+  async validateSeed(): Promise<boolean> {
+    if (!this.s5Seed) {
+      throw new SDKError('No seed phrase set', 'SEED_MISSING');
+    }
+
+    // Check for known test seed
+    const knownTestSeed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+    if (this.s5Seed === knownTestSeed) {
+      if (this.config.mode === 'production') {
+        throw new SDKError(
+          'Test seed phrase not allowed in production mode',
+          'WEAK_SEED'
+        );
+      }
+      // Allow test seed in development without further validation
+      return true;
+    }
+
+    // Validate seed format (12 or 24 words)
+    const words = this.s5Seed.split(' ');
+    if (words.length !== 12 && words.length !== 24) {
+      throw new SDKError(
+        'Invalid seed phrase format. Must be 12 or 24 words',
+        'INVALID_SEED_FORMAT'
+      );
+    }
+
+    // Check for weak entropy (all same words)
+    const uniqueWords = new Set(words);
+    if (uniqueWords.size < words.length * 0.5) {
+      throw new SDKError(
+        'Weak seed phrase detected. Too many repeated words',
+        'WEAK_SEED'
+      );
+    }
+
+    return true;
+  }
+
+  /**
+   * Initialize SDK (for testing without wallet provider)
+   */
+  async initializeForTesting(): Promise<void> {
+    if (this.initialized) return;
+
+    // In production, require seed validation
+    if (this.config.mode === 'production') {
+      if (!this.s5Seed && !this.config.s5Config?.seedPhrase) {
+        throw new SDKError(
+          'S5 seed phrase required in production mode',
+          'SEED_REQUIRED'
+        );
+      }
+
+      if (this.s5Seed) {
+        await this.validateSeed();
+      }
+    }
+
+    this.initialized = true;
+  }
+
+  /**
+   * Set S5 seed phrase
+   */
+  setS5Seed(seed: string): void {
+    this.s5Seed = seed;
+  }
+
+  /**
+   * Get S5 seed (for testing only)
+   */
+  getS5Seed(): string | undefined {
+    return this.s5Seed;
   }
   
   /**

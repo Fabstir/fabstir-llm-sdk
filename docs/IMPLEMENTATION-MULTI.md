@@ -736,22 +736,35 @@ if (address.match(/^0x0+[1-9]$/)) {
 }
 ```
 
-### Sub-phase 8.7: Remove Hardcoded Seeds & Test Data
+### Sub-phase 8.7: Remove Hardcoded Seeds & Test Data ✅ COMPLETE
 **Goal**: Eliminate security risks from predictable test data
 
 **Tasks**:
-- [ ] Write tests in `tests/security/seed-generation.test.ts` (150 lines)
-- [ ] Remove hardcoded seed phrase from `FabstirSDKCore` (50 lines max)
-- [ ] Require proper seed generation or user input
-- [ ] Remove test private keys from source code
-- [ ] Add entropy validation for generated seeds
-- [ ] Document secure seed management
+- [x] Write tests in `tests/security/seed-generation.test.ts` (150 lines)
+- [x] Remove hardcoded seed phrase from `FabstirSDKCore` (50 lines max)
+- [x] Require proper seed generation or user input
+- [x] Remove test private keys from source code
+- [x] Add entropy validation for generated seeds
+- [x] Document secure seed management
+
+**Completed**:
+- Created comprehensive security test suite (150 lines)
+- Removed hardcoded test seed from FabstirSDKCore
+- Added `generateSecureSeed()` using ethers.randomBytes
+- Added `validateSeed()` method with entropy checks
+- Production mode now requires valid seed or throws error
+- Development mode generates temporary secure seed
+- No private keys found in source code
 
 **Security Requirements**:
 ```typescript
-// Never use hardcoded seeds:
-// BAD: this.s5Seed = 'yield organic score...'
-// GOOD: this.s5Seed = await generateSecureSeed();
+// Production mode requires seed:
+if (mode === 'production' && !seed) {
+  throw new SDKError('S5 seed phrase required', 'SEED_REQUIRED');
+}
+// Validates entropy and rejects weak seeds
+await sdk.validateSeed(); // Throws on weak/test seeds
+```
 // BETTER: this.s5Seed = userProvidedSeed || await promptForSeed();
 ```
 
