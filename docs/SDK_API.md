@@ -32,6 +32,49 @@ The Fabstir SDK provides a comprehensive interface for interacting with the Fabs
 - WebSocket real-time streaming
 - S5 decentralized storage integration
 - Base Account Kit for gasless transactions
+- Multi-chain support (Base Sepolia, opBNB testnet)
+- Chain-aware wallet providers (EOA and Smart Accounts)
+
+## Multi-Chain Support
+
+The SDK now provides comprehensive multi-chain support, allowing seamless operation across different blockchain networks.
+
+### Supported Chains
+
+| Chain | Chain ID | Native Token | Status | Min Deposit |
+|-------|----------|--------------|--------|-------------|
+| Base Sepolia | 84532 | ETH | Production | 0.0002 ETH |
+| opBNB Testnet | 5611 | BNB | Development | 0.001 BNB |
+
+### Chain Configuration
+
+Each chain has its own configuration including contract addresses, RPC endpoints, and network-specific parameters:
+
+```typescript
+interface ChainConfig {
+  chainId: number;
+  name: string;
+  nativeToken: 'ETH' | 'BNB';
+  rpcUrl: string;
+  contracts: {
+    jobMarketplace: string;
+    nodeRegistry: string;
+    proofSystem: string;
+    hostEarnings: string;
+    modelRegistry: string;
+    usdcToken: string;
+    fabToken?: string;
+  };
+  minDeposit: string;
+  blockExplorer: string;
+}
+```
+
+### Default Chain Behavior
+
+- The SDK defaults to Base Sepolia (chainId: 84532) when no chain is specified
+- All operations are chain-aware and validate the target chain
+- Smart contract addresses are automatically selected based on the active chain
 
 ## Installation
 
@@ -146,7 +189,7 @@ new FabstirSDKCore(config?: FabstirSDKCoreConfig)
 ```typescript
 interface FabstirSDKCoreConfig {
   rpcUrl: string;                     // REQUIRED: Blockchain RPC URL
-  chainId?: number;                   // Chain ID (default: Base Sepolia)
+  chainId?: number;                   // Optional: Chain ID (default: 84532 - Base Sepolia)
   contractAddresses: {                // REQUIRED: All 7 contracts
     jobMarketplace: string;           // REQUIRED
     nodeRegistry: string;             // REQUIRED
@@ -182,9 +225,44 @@ const sdk = new FabstirSDKCore({
 });
 ```
 
-**Current Contract Addresses (Base Sepolia - from .env.test):**
+**Multi-Chain Configuration Examples:**
+
+```typescript
+// Base Sepolia Configuration (Default)
+const baseSepolia = new FabstirSDKCore({
+  rpcUrl: 'https://sepolia.base.org',
+  chainId: 84532, // Optional, this is the default
+  contractAddresses: {
+    jobMarketplace: '0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f',
+    nodeRegistry: '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
+    proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
+    hostEarnings: '0x908962e8c6CE72610021586f85ebDE09aAc97776',
+    usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
+    modelRegistry: '0x92b2De840bB2171203011A6dBA928d855cA8183E'
+  }
+});
+
+// opBNB Testnet Configuration
+const opBNBTestnet = new FabstirSDKCore({
+  rpcUrl: 'https://opbnb-testnet-rpc.bnbchain.org',
+  chainId: 5611, // Required for opBNB
+  contractAddresses: {
+    // Note: These are placeholder addresses for opBNB testnet
+    jobMarketplace: '0x0000000000000000000000000000000000000001',
+    nodeRegistry: '0x0000000000000000000000000000000000000002',
+    proofSystem: '0x0000000000000000000000000000000000000003',
+    hostEarnings: '0x0000000000000000000000000000000000000004',
+    usdcToken: '0x0000000000000000000000000000000000000006',
+    modelRegistry: '0x0000000000000000000000000000000000000005',
+    fabToken: '0x0000000000000000000000000000000000000007'
+  }
+});
 ```
-JobMarketplace: 0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944
+
+**Current Contract Addresses (Base Sepolia):**
+```
+JobMarketplace: 0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f
 NodeRegistry: 0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218
 ProofSystem: 0x2ACcc60893872A499700908889B38C5420CBcFD1
 HostEarnings: 0x908962e8c6CE72610021586f85ebDE09aAc97776
@@ -282,6 +360,176 @@ await sdk.authenticate(subAccountSigner);
 - SDK doesn't fully understand Base Account Kit's spend permissions
 - Workaround: Transfer $1 per session from primary to sub-account
 - Future: Direct spend from primary without transfers
+
+## Chain Management
+
+The SDK provides methods to manage and switch between different blockchain networks.
+
+### initialize
+
+Initialize the SDK with a wallet provider for multi-chain support.
+
+```typescript
+async initialize(walletProvider: IWalletProvider): Promise<void>
+```
+
+**Parameters:**
+- `walletProvider`: Wallet provider implementing IWalletProvider interface
+
+**Example:**
+```typescript
+import { EOAProvider } from '@fabstir/sdk-core';
+
+const provider = new EOAProvider(window.ethereum);
+await sdk.initialize(provider);
+```
+
+### getCurrentChainId
+
+Returns the current active chain ID.
+
+```typescript
+getCurrentChainId(): number
+```
+
+**Returns:** Current chain ID (e.g., 84532 for Base Sepolia)
+
+**Example:**
+```typescript
+const chainId = sdk.getCurrentChainId();
+console.log('Current chain:', chainId); // 84532
+```
+
+### getCurrentChain
+
+Returns the full configuration for the current chain.
+
+```typescript
+getCurrentChain(): ChainConfig
+```
+
+**Returns:** Complete chain configuration object
+
+**Example:**
+```typescript
+const chain = sdk.getCurrentChain();
+console.log('Chain name:', chain.name); // "Base Sepolia"
+console.log('Native token:', chain.nativeToken); // "ETH"
+console.log('Min deposit:', chain.minDeposit); // "0.0002"
+```
+
+### switchChain
+
+Switch to a different supported chain.
+
+```typescript
+async switchChain(chainId: number): Promise<void>
+```
+
+**Parameters:**
+- `chainId`: Target chain ID to switch to
+
+**Throws:**
+- `UnsupportedChainError`: If chain is not supported
+- Error if wallet provider doesn't support chain switching
+
+**Example:**
+```typescript
+// Switch from Base Sepolia to opBNB testnet
+await sdk.switchChain(5611);
+
+// Managers automatically reinitialize for the new chain
+const paymentManager = sdk.getPaymentManager();
+// Now operates on opBNB
+```
+
+## Wallet Providers
+
+The SDK supports multiple wallet provider types through the IWalletProvider interface.
+
+### IWalletProvider Interface
+
+```typescript
+interface IWalletProvider {
+  // Connection management
+  connect(chainId?: number): Promise<void>;
+  disconnect(): Promise<void>;
+  isConnected(): boolean;
+
+  // Account management
+  getAddress(): Promise<string>;
+  getDepositAccount(): Promise<string>;
+
+  // Chain management
+  getCurrentChainId(): Promise<number>;
+  switchChain(chainId: number): Promise<void>;
+  getSupportedChains(): number[];
+
+  // Transactions
+  sendTransaction(tx: TransactionRequest): Promise<TransactionResponse>;
+  signMessage(message: string): Promise<string>;
+
+  // Capabilities
+  getCapabilities(): WalletCapabilities;
+}
+```
+
+### EOAProvider (MetaMask/Rainbow)
+
+Standard Ethereum wallet provider for browser extensions.
+
+```typescript
+import { EOAProvider } from '@fabstir/sdk-core';
+
+const provider = new EOAProvider(window.ethereum);
+await provider.connect(84532); // Connect to Base Sepolia
+
+const capabilities = provider.getCapabilities();
+// {
+//   supportsGaslessTransactions: false,
+//   supportsChainSwitching: true,
+//   supportsSmartAccounts: false,
+//   requiresDepositAccount: false
+// }
+```
+
+### SmartAccountProvider
+
+Smart contract wallet provider with gasless transaction support.
+
+```typescript
+import { SmartAccountProvider } from '@fabstir/sdk-core';
+
+const provider = new SmartAccountProvider({
+  bundlerUrl: 'https://bundler.base.org',
+  paymasterUrl: 'https://paymaster.base.org'
+});
+
+await provider.connect();
+
+const capabilities = provider.getCapabilities();
+// {
+//   supportsGaslessTransactions: true,
+//   supportsChainSwitching: false,
+//   supportsSmartAccounts: true,
+//   requiresDepositAccount: true
+// }
+```
+
+### WalletProviderFactory
+
+Factory for auto-detecting and creating wallet providers.
+
+```typescript
+import { WalletProviderFactory } from '@fabstir/sdk-core';
+
+// Auto-detect available provider
+const provider = await WalletProviderFactory.createProvider('eoa');
+
+// Or specify type
+const eoaProvider = await WalletProviderFactory.createProvider('eoa', window.ethereum);
+const smartProvider = await WalletProviderFactory.createProvider('smart-account', config);
+```
 
 ## Session Management
 
@@ -518,6 +766,86 @@ const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
 const balance = await paymentManager.getTokenBalance(usdcAddress, userAddress);
 console.log(`USDC Balance: $${ethers.formatUnits(balance, 6)}`);
 ```
+
+### depositNative
+
+Deposits native tokens (ETH/BNB) for gasless session operations.
+
+```typescript
+async depositNative(
+  amount: string,
+  chainId?: number
+): Promise<TransactionResponse>
+```
+
+**Parameters:**
+- `amount`: Amount to deposit in native token (e.g., "0.001" for 0.001 ETH/BNB)
+- `chainId`: Optional chain ID (uses current chain if not specified)
+
+**Example:**
+```typescript
+// Deposit ETH on Base Sepolia
+const tx = await paymentManager.depositNative("0.001");
+await tx.wait(3);
+
+// Deposit BNB on opBNB
+await sdk.switchChain(5611);
+const bnbTx = await paymentManager.depositNative("0.002");
+await bnbTx.wait(3);
+```
+
+### withdrawNative
+
+Withdraws native tokens from deposited balance.
+
+```typescript
+async withdrawNative(
+  amount: string,
+  chainId?: number
+): Promise<TransactionResponse>
+```
+
+**Parameters:**
+- `amount`: Amount to withdraw in native token
+- `chainId`: Optional chain ID (uses current chain if not specified)
+
+**Example:**
+```typescript
+// Withdraw ETH from Base Sepolia
+const tx = await paymentManager.withdrawNative("0.0005");
+await tx.wait(3);
+```
+
+### getDepositBalance
+
+Gets the deposited balance for the current account.
+
+```typescript
+async getDepositBalance(
+  chainId?: number
+): Promise<{
+  native: string;
+  usdc: string;
+}>
+```
+
+**Returns:** Balance object with native and USDC amounts
+
+**Example:**
+```typescript
+const balances = await paymentManager.getDepositBalance();
+console.log('ETH deposited:', balances.native);
+console.log('USDC deposited:', balances.usdc);
+```
+
+### Chain-Specific Minimum Deposits
+
+Different chains have different minimum deposit requirements:
+
+| Chain | Minimum Deposit | Native Token |
+|-------|----------------|--------------|
+| Base Sepolia | 0.0002 ETH | ETH |
+| opBNB Testnet | 0.001 BNB | BNB |
 
 ### sendToken
 
@@ -1333,7 +1661,34 @@ enum SDKErrorCode {
 
   // Configuration
   INVALID_CONFIGURATION = 'INVALID_CONFIGURATION',
-  MISSING_CONTRACT_ADDRESS = 'MISSING_CONTRACT_ADDRESS'
+  MISSING_CONTRACT_ADDRESS = 'MISSING_CONTRACT_ADDRESS',
+
+  // Multi-chain
+  UNSUPPORTED_CHAIN = 'UNSUPPORTED_CHAIN',
+  CHAIN_MISMATCH = 'CHAIN_MISMATCH',
+  INSUFFICIENT_DEPOSIT = 'INSUFFICIENT_DEPOSIT',
+  NODE_CHAIN_MISMATCH = 'NODE_CHAIN_MISMATCH',
+  DEPOSIT_ACCOUNT_UNAVAILABLE = 'DEPOSIT_ACCOUNT_UNAVAILABLE'
+}
+```
+
+### Multi-Chain Error Types
+
+```typescript
+class UnsupportedChainError extends Error {
+  constructor(chainId: number, supportedChains: number[]);
+}
+
+class ChainMismatchError extends Error {
+  constructor(expected: number, actual: number, operation: string);
+}
+
+class InsufficientDepositError extends Error {
+  constructor(required: string, available: string, chainId: number);
+}
+
+class NodeChainMismatchError extends Error {
+  constructor(nodeChainId: number, sdkChainId: number);
 }
 ```
 
@@ -1901,6 +2256,189 @@ export const S5_DOWNLOAD_TIMEOUT = 30000;      // 30 seconds
 ```
 
 ## Troubleshooting
+
+## Multi-Chain Usage Examples
+
+### Multi-Chain Initialization
+
+```typescript
+import { FabstirSDKCore, EOAProvider, WalletProviderFactory } from '@fabstir/sdk-core';
+import { ChainId } from '@fabstir/sdk-core/types';
+
+// Initialize SDK with specific chain
+const sdk = new FabstirSDKCore({
+  rpcUrl: 'https://sepolia.base.org',
+  chainId: ChainId.BASE_SEPOLIA, // 84532
+  contractAddresses: {
+    // Base Sepolia addresses
+    jobMarketplace: '0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f',
+    nodeRegistry: '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
+    proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
+    hostEarnings: '0x908962e8c6CE72610021586f85ebDE09aAc97776',
+    usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
+    modelRegistry: '0x92b2De840bB2171203011A6dBA928d855cA8183E'
+  }
+});
+
+// Initialize with wallet provider
+const provider = new EOAProvider(window.ethereum);
+await sdk.initialize(provider);
+await sdk.authenticate('privatekey', { privateKey: process.env.PRIVATE_KEY });
+```
+
+### Chain Switching Example
+
+```typescript
+// Start on Base Sepolia
+console.log('Current chain:', sdk.getCurrentChainId()); // 84532
+
+// Create a session on Base Sepolia
+const sessionManager = sdk.getSessionManager();
+const baseSession = await sessionManager.startSession(
+  modelId,
+  hostAddress,
+  {
+    chainId: ChainId.BASE_SEPOLIA,
+    depositAmount: "0.001", // ETH
+    pricePerToken: 200,
+    duration: 3600,
+    proofInterval: 100
+  }
+);
+
+// Switch to opBNB testnet
+await sdk.switchChain(ChainId.OPBNB_TESTNET); // 5611
+console.log('Switched to:', sdk.getCurrentChain().name); // "opBNB Testnet"
+
+// Create a session on opBNB
+const opbnbSession = await sessionManager.startSession(
+  modelId,
+  hostAddress,
+  {
+    chainId: ChainId.OPBNB_TESTNET,
+    depositAmount: "0.002", // BNB
+    pricePerToken: 200,
+    duration: 3600,
+    proofInterval: 100
+  }
+);
+```
+
+### Deposit Flow on Multiple Chains
+
+```typescript
+// Deposit ETH on Base Sepolia
+const paymentManager = sdk.getPaymentManager();
+
+// Check minimum deposit for Base Sepolia
+const baseChain = sdk.getCurrentChain();
+console.log('Min deposit:', baseChain.minDeposit); // 0.0002 ETH
+
+// Deposit ETH
+const ethTx = await paymentManager.depositNative("0.001");
+await ethTx.wait(3);
+
+// Check balance
+let balance = await paymentManager.getDepositBalance();
+console.log('ETH deposited:', balance.native);
+
+// Switch to opBNB and deposit BNB
+await sdk.switchChain(ChainId.OPBNB_TESTNET);
+
+const opbnbChain = sdk.getCurrentChain();
+console.log('Min deposit:', opbnbChain.minDeposit); // 0.001 BNB
+
+// Deposit BNB
+const bnbTx = await paymentManager.depositNative("0.002");
+await bnbTx.wait(3);
+
+balance = await paymentManager.getDepositBalance();
+console.log('BNB deposited:', balance.native);
+```
+
+### Chain-Aware Node Discovery
+
+```typescript
+const clientManager = sdk.getClientManager();
+
+// Discover nodes for Base Sepolia
+const baseNodes = await clientManager.discoverNodes(ChainId.BASE_SEPOLIA);
+console.log('Base Sepolia nodes:', baseNodes.length);
+
+// Check if a node supports specific chain
+const nodeChains = await clientManager.getNodeChains('http://node1.base');
+if (nodeChains.includes(ChainId.BASE_SEPOLIA)) {
+  console.log('Node supports Base Sepolia');
+}
+
+// Discover nodes for opBNB
+const opbnbNodes = await clientManager.discoverNodes(ChainId.OPBNB_TESTNET);
+console.log('opBNB nodes:', opbnbNodes.length);
+```
+
+### Error Handling for Multi-Chain
+
+```typescript
+import { UnsupportedChainError, ChainMismatchError } from '@fabstir/sdk-core/errors';
+
+try {
+  // Try to switch to unsupported chain
+  await sdk.switchChain(999999);
+} catch (error) {
+  if (error instanceof UnsupportedChainError) {
+    console.error('Chain not supported:', error.chainId);
+    console.log('Supported chains:', error.supportedChains);
+  }
+}
+
+try {
+  // Try to create session on wrong chain
+  await sessionManager.startSession(modelId, hostAddress, {
+    chainId: ChainId.BASE_SEPOLIA,
+    // ... config
+  });
+} catch (error) {
+  if (error instanceof ChainMismatchError) {
+    console.error(`Expected chain ${error.expected}, got ${error.actual}`);
+  }
+}
+```
+
+### Cross-Chain Session Management
+
+```typescript
+// Track sessions across chains
+const sessions = new Map();
+
+// Create session on Base Sepolia
+await sdk.switchChain(ChainId.BASE_SEPOLIA);
+const baseSessionId = await sessionManager.startSession(modelId, host, {
+  chainId: ChainId.BASE_SEPOLIA,
+  depositAmount: "0.001",
+  pricePerToken: 200,
+  duration: 3600,
+  proofInterval: 100
+});
+sessions.set(ChainId.BASE_SEPOLIA, baseSessionId);
+
+// Create session on opBNB
+await sdk.switchChain(ChainId.OPBNB_TESTNET);
+const opbnbSessionId = await sessionManager.startSession(modelId, host, {
+  chainId: ChainId.OPBNB_TESTNET,
+  depositAmount: "0.002",
+  pricePerToken: 200,
+  duration: 3600,
+  proofInterval: 100
+});
+sessions.set(ChainId.OPBNB_TESTNET, opbnbSessionId);
+
+// Resume session on specific chain
+await sdk.switchChain(ChainId.BASE_SEPOLIA);
+const baseSession = await sessionManager.resumeSession(
+  sessions.get(ChainId.BASE_SEPOLIA)
+);
+```
 
 ### Common Issues
 
