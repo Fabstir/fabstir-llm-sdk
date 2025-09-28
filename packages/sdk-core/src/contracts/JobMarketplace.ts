@@ -221,23 +221,56 @@ export class JobMarketplaceWrapper {
     return event ? Number(event.args[0]) : (params.paymentToken === ethers.ZeroAddress ? 1 : 2);
   }
 
-  async createSessionJob(params: DirectSessionParams): Promise<number> {
+  async createSessionJob(params: DirectSessionParams & { paymentToken?: string }): Promise<number> {
     await this.verifyChain();
 
-    const value = ethers.parseEther(params.paymentAmount);
-    const tx = await this.contract.createSessionJob(
-      params.host,
-      params.pricePerToken,
-      params.duration,
-      params.proofInterval,
-      { value }
-    );
+    // Check if we're using USDC or ETH
+    const isUSDC = params.paymentToken && params.paymentToken !== ethers.ZeroAddress;
 
-    const receipt = await tx.wait();
-    const event = receipt.logs.find((log: any) =>
-      log.fragment?.name === 'SessionJobCreated'
-    );
-    return event ? Number(event.args[0]) : 0;
+    if (isUSDC) {
+      // For USDC, use createSessionJobWithToken (no ETH value needed)
+      const amountInUSDC = ethers.parseUnits(params.paymentAmount, 6); // USDC has 6 decimals
+      const tx = await this.contract.createSessionJobWithToken(
+        params.host,
+        params.paymentToken,  // token address
+        amountInUSDC,         // deposit amount
+        params.pricePerToken,
+        params.duration,
+        params.proofInterval
+      );
+
+      const receipt = await tx.wait();
+      const event = receipt.logs.find((log: any) =>
+        log.fragment?.name === 'SessionJobCreated'
+      );
+      return event ? Number(event.args[0]) : 0;
+    } else {
+      // For ETH, use the original method with ETH value
+      const value = ethers.parseEther(params.paymentAmount);
+
+      console.log('[JobMarketplace] Creating ETH session job:');
+      console.log('  Host:', params.host);
+      console.log('  Payment amount:', params.paymentAmount, 'ETH');
+      console.log('  Payment amount in wei:', value.toString());
+      console.log('  Price per token:', params.pricePerToken);
+      console.log('  Price per token type:', typeof params.pricePerToken);
+      console.log('  Duration:', params.duration);
+      console.log('  Proof interval:', params.proofInterval);
+
+      const tx = await this.contract.createSessionJob(
+        params.host,
+        params.pricePerToken,
+        params.duration,
+        params.proofInterval,
+        { value }
+      );
+
+      const receipt = await tx.wait();
+      const event = receipt.logs.find((log: any) =>
+        log.fragment?.name === 'SessionJobCreated'
+      );
+      return event ? Number(event.args[0]) : 0;
+    }
   }
 
   async completeSessionJob(jobId: number, conversationCID: string): Promise<any> {

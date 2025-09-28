@@ -1,18 +1,18 @@
 /**
- * USDC Direct Payment Flow Test Page - Multi-Chain Support
- * This test page demonstrates the direct USDC payment flow (approval pattern)
+ * ETH Direct Payment Flow Test Page - Multi-Chain Support
+ * This test page demonstrates the direct ETH payment flow
  *
  * Key Features:
  * 1. Multi-chain support (Base Sepolia default, opBNB Testnet option)
- * 2. Direct USDC approval pattern (like Uniswap/OpenSea)
- * 3. One approval for multiple sessions - funds stay in user wallet
+ * 2. Direct ETH payments (no token approvals needed)
+ * 3. Native currency payments from user wallet
  * 4. Random host selection from active hosts
  * 5. Session completion triggers automatic payment settlement
  *
  * Payment Distribution (via JobMarketplace contract):
  * - Host receives: 90% of consumed tokens
  * - Treasury receives: 10% of consumed tokens
- * - User keeps remaining USDC in their wallet
+ * - User receives refund of unused ETH
  */
 
 import { useState, useEffect, useRef } from 'react';
@@ -47,11 +47,12 @@ const TEST_TREASURY_ADDRESS = process.env.NEXT_PUBLIC_TEST_TREASURY_ADDRESS!;
 const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_KEY!;
 
 // Session configuration
-const SESSION_DEPOSIT_AMOUNT = '2'; // $2 USDC
-const PRICE_PER_TOKEN = 1; // 0.000001 USDC per token (1 unit in 6-decimal USDC)
+const SESSION_DEPOSIT_AMOUNT = '0.0006'; // ~$2.40 ETH deposit (same value as USDC test)
+const PRICE_PER_TOKEN = '0.000005'; // 0.000005 ETH per token
 const PROOF_INTERVAL = 100; // Proof every 100 tokens
 const SESSION_DURATION = 86400; // 1 day
 const EXPECTED_TOKENS = 100; // Expected tokens to generate in test
+// Contract now accepts: 0.0006 ETH deposit, 0.000005 ETH/token, covers 120 tokens
 
 // ERC20 ABIs
 const erc20BalanceOfAbi = [{
@@ -89,8 +90,8 @@ interface StepStatus {
 
 // We'll create publicClient dynamically based on selected chain
 
-export default function BaseUsdcMvpFlowSDKTest() {
-  const [status, setStatus] = useState("Ready to start multi-chain USDC payment flow");
+export default function BaseEthMvpFlowSDKTest() {
+  const [status, setStatus] = useState("Ready to start multi-chain ETH payment flow");
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedChainId, setSelectedChainId] = useState<number>(DEFAULT_CHAIN_ID);
   const [userAddress, setUserAddress] = useState<string>("");
@@ -210,35 +211,27 @@ export default function BaseUsdcMvpFlowSDKTest() {
       if (sdk) {
         const contracts = getContractAddresses();
 
-        // For USDC balances, we need to read directly from the USDC token contract
-        // since PaymentManager only tracks deposits, not regular balances
-        try {
-          // Create USDC contract instance
-          const usdcContract = new ethers.Contract(
-            contracts.USDC,
-            ['function balanceOf(address) view returns (uint256)'],
-            sdk.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS])
-          );
+        // Get provider - define it at the top level of the function
+        const provider = sdk.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS]);
 
-          // Read USDC balances directly from token contract
-          newBalances.testUser1 = ethers.formatUnits(
-            await usdcContract.balanceOf(TEST_USER_1_ADDRESS),
-            6
+        // Read ETH balances directly from provider
+        try {
+
+          // Read ETH balances
+          newBalances.testUser1 = ethers.formatEther(
+            await provider.getBalance(TEST_USER_1_ADDRESS)
           );
-          newBalances.host1 = ethers.formatUnits(
-            await usdcContract.balanceOf(TEST_HOST_1_ADDRESS),
-            6
+          newBalances.host1 = ethers.formatEther(
+            await provider.getBalance(TEST_HOST_1_ADDRESS)
           );
-          newBalances.host2 = ethers.formatUnits(
-            await usdcContract.balanceOf(TEST_HOST_2_ADDRESS),
-            6
+          newBalances.host2 = ethers.formatEther(
+            await provider.getBalance(TEST_HOST_2_ADDRESS)
           );
-          newBalances.treasury = ethers.formatUnits(
-            await usdcContract.balanceOf(TEST_TREASURY_ADDRESS),
-            6
+          newBalances.treasury = ethers.formatEther(
+            await provider.getBalance(TEST_TREASURY_ADDRESS)
           );
         } catch (err) {
-          console.log('Error reading USDC balances:', err);
+          console.log('Error reading ETH balances:', err);
           // Set defaults if reading fails
           newBalances.testUser1 = '...';
           newBalances.host1 = '0';
@@ -257,7 +250,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
               // The balance should already be formatted, but ensure it's in the right format
               newBalances.userDeposit = usdcDeposit.includes('.') ? usdcDeposit : ethers.formatUnits(BigInt(usdcDeposit), 6);
-              console.log(`User deposit balance: ${newBalances.userDeposit} USDC`);
+              console.log(`User deposit balance: ${newBalances.userDeposit} ETH`);
             } else {
               console.log('PaymentManager not available or missing getDepositBalances method');
               newBalances.userDeposit = '0';
@@ -270,38 +263,53 @@ export default function BaseUsdcMvpFlowSDKTest() {
           newBalances.userDeposit = '0';
         }
 
-        // Read accumulated earnings for selected host (if method exists)
-        if (selectedHost && hostManager) {
+        // Read accumulated ETH earnings directly from contracts
+        // Note: For direct ETH payments, hosts receive ETH immediately upon session completion
+        // The accumulated balance would be in the host's wallet, not in the HostEarnings contract
+        if (selectedHost) {
           try {
-            if (hostManager.getAccumulatedEarnings) {
-              const hostEarnings = await hostManager.getAccumulatedEarnings(selectedHost.address);
-              newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
-            } else if (hostManager.getEarnings) {
-              const hostEarnings = await hostManager.getEarnings(selectedHost.address);
-              newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
-            } else {
-              newBalances.hostAccumulated = '0';
-            }
+            // For ETH payments, the host receives ETH directly to their wallet
+            // Check the host's ETH balance instead of contract accumulation
+            const hostBalance = await provider.getBalance(selectedHost.address);
+            console.log(`Host ${selectedHost.address} ETH balance:`, ethers.formatEther(hostBalance));
+
+            // The HostEarnings contract tracks token earnings, not ETH
+            // For display purposes, we'll show 0 for accumulated since ETH is paid directly
+            newBalances.hostAccumulated = '0'; // ETH is paid directly, not accumulated
+
+            // Note: If you want to track historical earnings, you'd need to:
+            // 1. Query SessionCompleted events for this host
+            // 2. Sum up the hostEarnings amounts from those events
           } catch (err) {
-            console.log('Could not read host accumulated earnings');
+            console.log('Could not read host balance:', err);
             newBalances.hostAccumulated = '0';
           }
         }
 
-        // Read treasury accumulated balance (if method exists)
-        if (treasuryManager) {
+        // Read treasury accumulated native balance (ETH on Base Sepolia)
+        try {
+          // New contract uses accumulatedTreasuryNative for multi-chain support
+          const jobMarketplaceContract = new ethers.Contract(
+            JOB_MARKETPLACE,
+            ['function accumulatedTreasuryNative() view returns (uint256)'],
+            provider
+          );
+          const treasuryBalance = await jobMarketplaceContract.accumulatedTreasuryNative();
+          newBalances.treasuryAccumulated = ethers.formatEther(treasuryBalance);
+          console.log('Treasury accumulated ETH:', newBalances.treasuryAccumulated);
+        } catch (err) {
+          console.log('Could not read treasury accumulated native balance:', err);
+          // Try fallback to old method name
           try {
-            if (treasuryManager.getAccumulatedBalance) {
-              const treasuryBalance = await treasuryManager.getAccumulatedBalance();
-              newBalances.treasuryAccumulated = ethers.formatUnits(treasuryBalance, 6);
-            } else if (treasuryManager.getFees) {
-              const treasuryBalance = await treasuryManager.getFees();
-              newBalances.treasuryAccumulated = ethers.formatUnits(treasuryBalance, 6);
-            } else {
-              newBalances.treasuryAccumulated = '0';
-            }
-          } catch (err) {
-            console.log('Could not read treasury accumulated balance');
+            const jobMarketplaceContract = new ethers.Contract(
+              JOB_MARKETPLACE,
+              ['function accumulatedTreasuryETH() view returns (uint256)'],
+              provider
+            );
+            const treasuryBalance = await jobMarketplaceContract.accumulatedTreasuryETH();
+            newBalances.treasuryAccumulated = ethers.formatEther(treasuryBalance);
+          } catch (err2) {
+            console.log('Fallback also failed:', err2);
             newBalances.treasuryAccumulated = '0';
           }
         }
@@ -352,22 +360,19 @@ export default function BaseUsdcMvpFlowSDKTest() {
       setUserAddress(TEST_USER_1_ADDRESS);
       addLog(`✅ Using primary account: ${TEST_USER_1_ADDRESS}`);
 
-      // Check USDC balance
-      const contracts = getContractAddresses();
+      // Check ETH balance
       try {
-        // PaymentManagerMultiChain getBalance returns { eth: string, usdc: string }
-        if (pm.getBalance) {
-          const balances = await pm.getBalance();
-          const usdcBalance = balances.usdc;
-          // Convert string to BigInt for formatting (already in decimal format)
-          const usdcBalanceWei = ethers.parseUnits(usdcBalance, 6);
-          addLog(`TEST_USER_1 USDC balance: ${usdcBalance} USDC`);
+        const provider = sdk.getProvider();
+        if (provider) {
+          const balance = await provider.getBalance(userAddress);
+          const ethBalance = ethers.formatEther(balance);
+          addLog(`TEST_USER_1 ETH balance: ${ethBalance} ETH`);
         } else {
-          addLog(`Payment manager doesn't have balance checking methods`);
+          addLog(`Provider not available for balance check`);
         }
       } catch (err) {
-        console.log('Could not check USDC balance:', err);
-        addLog(`Could not check initial USDC balance`);
+        console.log('Could not check ETH balance:', err);
+        addLog(`Could not check initial ETH balance`);
       }
 
       // Read all balances
@@ -388,17 +393,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
     }
   }
 
-  // Step 2: Verify USDC Balance
-  async function step2ApproveUSDC() {
+  // Step 2: Verify ETH Balance
+  async function step2CheckETHBalance() {
     if (!sdk) {
       setError("SDK not initialized");
-      return;
-    }
-
-    // Get managers directly from SDK to avoid React state delay issues
-    const pm = sdk.getPaymentManager();
-    if (!pm) {
-      setError("PaymentManager not available from SDK");
       return;
     }
 
@@ -406,95 +404,45 @@ export default function BaseUsdcMvpFlowSDKTest() {
     setStepStatus(prev => ({ ...prev, 2: 'in-progress' }));
 
     try {
-      addLog("Step 2: Starting - Approve USDC for direct payments");
-      const contracts = getContractAddresses();
+      addLog("Step 2: Starting - Check ETH balance for direct payments");
 
-      // Check user's USDC balance
-      try {
-        const usdcContract = new ethers.Contract(
-          contracts.USDC,
-          ['function balanceOf(address account) view returns (uint256)'],
-          sdk.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS])
-        );
-
-        const userBalance = await usdcContract.balanceOf(userAddress);
-        const userBalanceFormatted = ethers.formatUnits(userBalance, 6);
-        addLog(`User USDC balance: ${userBalanceFormatted} USDC`);
-
-        if (parseFloat(userBalanceFormatted) < parseFloat(SESSION_DEPOSIT_AMOUNT)) {
-          throw new Error(`Insufficient USDC balance. Have: ${userBalanceFormatted}, Need: ${SESSION_DEPOSIT_AMOUNT}`);
-        }
-      } catch (err: any) {
-        if (err.message?.includes('Insufficient')) {
-          throw err;
-        }
-        console.log('Could not check USDC balance:', err);
-      }
-
-      // Get PaymentManager for all token operations
-      const pm = sdk.getPaymentManager();
-      if (!pm) {
-        throw new Error("PaymentManager not available from SDK");
-      }
-
-      // First, we need to approve the JobMarketplace contract to spend our USDC
+      // Get signer to check balance
       const signer = sdk.getSigner();
       if (!signer) {
         throw new Error("Signer not available from SDK");
       }
 
-      // Create USDC contract instance
-      const usdcContract = new ethers.Contract(
-        contracts.USDC,
-        [
-          'function approve(address spender, uint256 amount) returns (bool)',
-          'function allowance(address owner, address spender) view returns (uint256)'
-        ],
-        signer
-      );
-
-      // Get the actual JobMarketplace address from the PaymentManager
-      // The PaymentManager uses JobMarketplaceWrapper which gets the address from ChainRegistry
-      const jobMarketplaceAddress = contracts.JOB_MARKETPLACE;
-
-      // Check current allowance first
-      const currentAllowance = await usdcContract.allowance(
-        await signer.getAddress(),
-        jobMarketplaceAddress
-      );
-      addLog(`Current USDC allowance: ${ethers.formatUnits(currentAllowance, 6)} USDC`);
-
-      // Approve JobMarketplace to spend USDC (approve larger amount for multiple sessions)
-      const approveMultiplier = 5; // Approve 5x for multiple sessions (total $10)
-      const totalApprovalAmount = ethers.parseUnits(SESSION_DEPOSIT_AMOUNT, 6) * BigInt(approveMultiplier);
-
-      if (currentAllowance < ethers.parseUnits(SESSION_DEPOSIT_AMOUNT, 6)) {
-        addLog(`Approving JobMarketplace (${jobMarketplaceAddress}) to spend ${ethers.formatUnits(totalApprovalAmount, 6)} USDC (for multiple sessions)...`);
-        const approveTx = await usdcContract.approve(jobMarketplaceAddress, totalApprovalAmount);
-        await approveTx.wait(2); // Wait for 2 confirmations
-        addLog(`✅ USDC approval complete. TX: ${approveTx.hash}`);
-
-        // Verify the allowance was set
-        const newAllowance = await usdcContract.allowance(
-          await signer.getAddress(),
-          jobMarketplaceAddress
-        );
-        addLog(`New USDC allowance: ${ethers.formatUnits(newAllowance, 6)} USDC`);
-      } else {
-        addLog(`✅ Already have sufficient allowance: ${ethers.formatUnits(currentAllowance, 6)} USDC`);
+      const provider = sdk.getProvider();
+      if (!provider) {
+        throw new Error("Provider not available from SDK");
       }
 
-      // With direct payments, no deposit needed - funds stay in user wallet
-      addLog(`✅ USDC approval complete. Funds will be paid directly from wallet during session.`);
-      addLog(`Your USDC stays in your wallet and is spent as you use the service.`);
+      // Check ETH balance
+      const userAddr = await signer.getAddress();
+      const balance = await provider.getBalance(userAddr);
+      const balanceInEth = ethers.formatEther(balance);
 
-      // The depositToken method should already wait for confirmations
-      // Just read updated balances immediately
+      addLog(`User ETH balance: ${balanceInEth} ETH`);
+
+      // Check if user has enough ETH (including some for gas)
+      const requiredAmount = ethers.parseEther(SESSION_DEPOSIT_AMOUNT);
+      const gasBuffer = ethers.parseEther("0.001"); // Extra for gas fees
+      const totalRequired = requiredAmount + gasBuffer;
+
+      if (balance < totalRequired) {
+        const totalRequiredEth = ethers.formatEther(totalRequired);
+        throw new Error(`Insufficient ETH balance. Have: ${balanceInEth} ETH, Need: ${totalRequiredEth} ETH (including gas)`);
+      }
+
+      addLog(`✅ Sufficient ETH balance for session (${SESSION_DEPOSIT_AMOUNT} ETH + gas)`);
+      addLog(`ETH will be sent directly with the transaction - no approvals needed!`);
+
+      // Read updated balances
       await readAllBalances();
 
       setStepStatus(prev => ({ ...prev, 2: 'completed' }));
       setCurrentStep(2);
-      setStatus("✅ Step 2 Complete: USDC approved for direct payments");
+      setStatus("✅ Step 2 Complete: ETH balance verified for direct payments");
     } catch (error: any) {
       console.error("Step 2 failed:", error);
       setError(`Step 2 failed: ${error.message}`);
@@ -589,7 +537,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
     setStepStatus(prev => ({ ...prev, 4: 'in-progress' }));
 
     try {
-      addLog("Step 4: Starting - Create Session with direct USDC payment");
+      addLog("Step 4: Starting - Create Session with direct ETH payment");
       console.log("Step 4: Creating session...");
 
       // Get contract addresses
@@ -616,24 +564,29 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog(`Using model: ${selectedModel}`);
       addLog(`Using endpoint: ${hostEndpoint}`);
 
-      // Create session using direct USDC payment
-      // Step 2 already approved the contract, so payments are automatic
+      // Create session using direct ETH payment
+      // No approvals needed - ETH is sent directly with the transaction
+      // Convert price per token to wei for the contract
+      const pricePerTokenInWei = ethers.parseEther(PRICE_PER_TOKEN).toString();
+      console.log('Price per token:', PRICE_PER_TOKEN, 'ETH');
+      console.log('Price per token in wei:', pricePerTokenInWei);
+
       const sessionConfig = {
-        depositAmount: SESSION_DEPOSIT_AMOUNT, // Amount for this session
-        pricePerToken: Number(hostToUse.pricePerToken || PRICE_PER_TOKEN),
+        depositAmount: SESSION_DEPOSIT_AMOUNT, // Amount for this session in ETH
+        pricePerToken: pricePerTokenInWei, // Price per token in wei (as string to avoid precision issues)
         proofInterval: PROOF_INTERVAL,
         duration: SESSION_DURATION,
-        paymentToken: contracts.USDC,  // Using USDC with direct payment
-        useDeposit: false,  // Use direct payment with approval pattern
+        // No paymentToken specified means using native ETH
+        useDeposit: false,  // Use direct payment
         chainId: selectedChainId  // REQUIRED: Chain ID for multi-chain support
       };
 
       console.log("Session config:", sessionConfig);
 
-      // No additional approval needed - already approved in Step 2!
-      addLog(`Creating session with direct USDC payment (automatic from approval)...`);
+      // ETH payments don't need approval - sent directly with transaction
+      addLog(`Creating session with direct ETH payment (${SESSION_DEPOSIT_AMOUNT} ETH)...`);
 
-      // Now create the session with USDC payment
+      // Now create the session with ETH payment
       console.log("Calling sessionManager.startSession with:", {
         model: selectedModel,
         provider: hostToUse.address,
@@ -653,7 +606,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
       console.log("Full session config:", fullSessionConfig);
       console.log("Host address:", hostToUse.address);
-      console.log("Payment token:", contracts.USDC);
+      console.log("Payment type: Native ETH");
       console.log("Chain ID:", selectedChainId);
 
       // Call startSession with the complete config
@@ -2032,8 +1985,8 @@ export default function BaseUsdcMvpFlowSDKTest() {
       // Small delay for UI visibility only
       await new Promise(resolve => setTimeout(resolve, 500));
 
-      // Step 2: Approve USDC (skip if already approved)
-      addLog("=== Running Step 2: Approve USDC ===");
+      // Step 2: Check ETH balance
+      addLog("=== Running Step 2: Check ETH Balance ===");
 
       // Check allowance directly from contract
       let shouldApprove = true;
@@ -2051,7 +2004,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
         const allowanceFormatted = ethers.formatUnits(allowance, 6);
 
         if (parseFloat(allowanceFormatted) >= parseFloat(SESSION_DEPOSIT_AMOUNT)) {
-          addLog(`✅ Already have ${allowanceFormatted} USDC approved, skipping approval step`);
+          addLog(`✅ ETH balance check completed`);
           setStepStatus(prev => ({ ...prev, 2: 'completed' }));
           setCurrentStep(2);
           shouldApprove = false;
@@ -2061,7 +2014,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
       }
 
       if (shouldApprove) {
-        await step2ApproveUSDC();
+        await step2CheckETHBalance();
         // Check if step failed by checking error state
         const latestError = await new Promise<string>(resolve => {
           setTimeout(() => {
@@ -2140,8 +2093,8 @@ export default function BaseUsdcMvpFlowSDKTest() {
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">Multi-Chain USDC Payment Flow Test</h1>
-        <p className="text-gray-600">Using primary account directly with approval pattern</p>
+        <h1 className="text-3xl font-bold mb-2">Multi-Chain ETH Payment Flow Test</h1>
+        <p className="text-gray-600">Using primary account directly with native ETH payments</p>
       </div>
 
       {/* Chain Selector */}
@@ -2181,15 +2134,18 @@ export default function BaseUsdcMvpFlowSDKTest() {
         <div className="p-4 border rounded">
           <h3 className="font-bold mb-2">Account Balances</h3>
           <div className="space-y-1 text-sm">
-            <div>User (TEST_USER_1): {balances.testUser1 || '...'} USDC</div>
+            <div>User (TEST_USER_1): {balances.testUser1 || '...'} ETH</div>
           </div>
         </div>
         <div className="p-4 border rounded">
           <h3 className="font-bold mb-2">Accumulated Earnings</h3>
           <div className="space-y-1 text-sm">
-            <div>Host Accumulated: {balances.hostAccumulated || '0'} USDC</div>
+            <div>Host Accumulated: {balances.hostAccumulated || '0'} ETH</div>
+            <div className="text-xs text-gray-600">
+              Note: ETH payments go directly to host wallet (see Host 1 Balance above)
+            </div>
             <div className="text-xs text-gray-600">HostEarnings Contract: 0x908962e8c6CE72610021586f85ebDE09aAc97776</div>
-            <div className="mt-2">Treasury Accumulated: {balances.treasuryAccumulated || '0'} USDC</div>
+            <div className="mt-2">Treasury Accumulated: {balances.treasuryAccumulated || '0'} ETH</div>
             <div className="text-xs text-gray-600">JobMarketplace Contract: {process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE}</div>
           </div>
         </div>
@@ -2226,11 +2182,11 @@ export default function BaseUsdcMvpFlowSDKTest() {
         </button>
 
         <button
-          onClick={step2ApproveUSDC}
+          onClick={step2CheckETHBalance}
           disabled={loading || currentStep < 1 || currentStep >= 2}
           className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
         >
-          Step 2: Approve USDC
+          Step 2: Check ETH Balance
         </button>
 
         <button

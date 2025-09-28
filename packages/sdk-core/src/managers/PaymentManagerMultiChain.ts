@@ -272,6 +272,16 @@ export class PaymentManager implements IPaymentManager {
     const duration = params.duration || PaymentManager.DEFAULT_DURATION;
     const proofInterval = params.proofInterval || PaymentManager.DEFAULT_PROOF_INTERVAL;
 
+    console.log('[PaymentManager] createSessionJob params:', {
+      host: params.host,
+      amount: params.amount,
+      pricePerToken: pricePerToken,
+      duration: duration,
+      proofInterval: proofInterval,
+      paymentToken: params.paymentToken,
+      useDeposit: params.useDeposit
+    });
+
     // Create from deposit or direct payment
     if (params.useDeposit) {
       // Create session from pre-funded deposit
@@ -290,7 +300,8 @@ export class PaymentManager implements IPaymentManager {
         pricePerToken,
         duration,
         proofInterval,
-        paymentAmount: params.amount
+        paymentAmount: params.amount,
+        paymentToken: params.paymentToken || ethers.ZeroAddress
       });
     }
   }
