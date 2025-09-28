@@ -1,24 +1,31 @@
 /**
- * USDC Payment Flow Test Page - Multi-Chain Support
- * This test page demonstrates the complete USDC payment flow with multi-chain support
+ * Base Account Kit USDC Payment Flow Test Page
+ * This test page demonstrates USDC payments with Base Account Kit integration
  *
  * Key Features:
- * 1. Multi-chain support (Base Sepolia default, opBNB Testnet option)
- * 2. Direct primary account usage (no sub-accounts)
- * 3. User deposits USDC to contract before session
- * 4. Random host selection from active hosts
- * 5. Session completion triggers automatic payment settlement
+ * 1. Base Account Kit for account abstraction (smart wallets)
+ * 2. Sponsored gas on Base Sepolia (Coinbase pays gas fees)
+ * 3. Direct USDC approval pattern (like Uniswap/OpenSea)
+ * 4. One approval for multiple sessions - funds stay in user wallet
+ * 5. Random host selection from active hosts
+ * 6. Session completion triggers automatic payment settlement
  *
  * Payment Distribution (via JobMarketplace contract):
  * - Host receives: 90% of consumed tokens
  * - Treasury receives: 10% of consumed tokens
- * - Remaining deposit stays in contract for future sessions
+ * - User keeps remaining USDC in their wallet
+ *
+ * Base Account Kit Benefits:
+ * - No ETH needed for gas fees (sponsored by Coinbase)
+ * - Smart wallet features (batch transactions, session keys, etc.)
+ * - Enhanced security with account abstraction
  */
 
 import { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
 import { FabstirSDKCore, getOrGenerateS5Seed, ChainRegistry, ChainId } from '@fabstir/sdk-core';
 import { cacheSeed, hasCachedSeed } from '../../../packages/sdk-core/src/utils/s5-seed-derivation';
+import { createSDK, connectWallet as connectBaseWallet, getAccountInfo, getSDK } from '../lib/base-account';
 
 // Get configuration from environment variables
 const DEFAULT_CHAIN_ID = ChainId.BASE_SEPOLIA; // Default to Base Sepolia
@@ -75,6 +82,8 @@ const erc20TransferAbi = [{
 
 interface Balances {
   testUser1?: string;
+  eoaWallet?: string;  // EOA balance when using Base Account Kit
+  smartWallet?: string;  // Primary smart wallet balance
   userDeposit?: string;
   hostAccumulated?: string;
   treasuryAccumulated?: string;
@@ -90,10 +99,12 @@ interface StepStatus {
 // We'll create publicClient dynamically based on selected chain
 
 export default function BaseUsdcMvpFlowSDKTest() {
-  const [status, setStatus] = useState("Ready to start multi-chain USDC payment flow");
+  const [status, setStatus] = useState("Ready to start Base Account Kit USDC payment flow");
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedChainId, setSelectedChainId] = useState<number>(DEFAULT_CHAIN_ID);
   const [userAddress, setUserAddress] = useState<string>("");
+  const [smartWalletAddress, setSmartWalletAddress] = useState<string>("");
+  const [isUsingBaseAccount, setIsUsingBaseAccount] = useState<boolean>(false);
   const [sessionId, setSessionId] = useState<bigint | null>(null);
   const [jobId, setJobId] = useState<bigint | null>(null);
   const [selectedHost, setSelectedHost] = useState<any>(null);
@@ -270,22 +281,92 @@ export default function BaseUsdcMvpFlowSDKTest() {
           newBalances.userDeposit = '0';
         }
 
-        // Read accumulated earnings for selected host (if method exists)
-        if (selectedHost && hostManager) {
+        // Create USDC contract instance for balance reads
+        const usdcContract = new ethers.Contract(
+          contracts.USDC,
+          ['function balanceOf(address) view returns (uint256)'],
+          sdk?.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS])
+        );
+
+        // Read smart wallet balance if available
+        // Also check the known Base Account Kit smart wallet address
+        const knownSmartWallet = '0xd8C80f89179dfe0a6E4241074a7095F17CEeD8dD';
+        const walletToCheck = smartWalletAddress || knownSmartWallet;
+
+        if (walletToCheck) {
           try {
-            if (hostManager.getAccumulatedEarnings) {
-              const hostEarnings = await hostManager.getAccumulatedEarnings(selectedHost.address);
-              newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
-            } else if (hostManager.getEarnings) {
-              const hostEarnings = await hostManager.getEarnings(selectedHost.address);
-              newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
-            } else {
-              newBalances.hostAccumulated = '0';
+            console.log(`Reading balance for smart wallet: ${walletToCheck}`);
+            const smartWalletBalance = await usdcContract.balanceOf(walletToCheck);
+            newBalances.smartWallet = ethers.formatUnits(smartWalletBalance, 6);
+            console.log(`Primary smart wallet balance for ${walletToCheck}: ${newBalances.smartWallet} USDC`);
+
+            // If we found a balance for the known wallet but smartWalletAddress isn't set, set it
+            if (!smartWalletAddress && walletToCheck === knownSmartWallet && newBalances.smartWallet !== '0') {
+              console.log('Setting smart wallet address to known wallet:', knownSmartWallet);
+              setSmartWalletAddress(knownSmartWallet);
             }
           } catch (err) {
-            console.log('Could not read host accumulated earnings');
+            console.error('Error reading smart wallet balance:', err);
+            newBalances.smartWallet = '0';
+          }
+        } else {
+          console.log('No smart wallet address set, skipping smart wallet balance');
+          newBalances.smartWallet = '0';
+        }
+
+        // Read EOA balance if using Base Account Kit
+        if (userAddress && smartWalletAddress && userAddress !== smartWalletAddress && usdcContract) {
+          try {
+            const eoaBalance = await usdcContract.balanceOf(userAddress);
+            newBalances.eoaWallet = ethers.formatUnits(eoaBalance, 6);
+            console.log(`EOA balance for ${userAddress}: ${newBalances.eoaWallet} USDC`);
+          } catch (err) {
+            console.log('Error reading EOA balance:', err);
+            newBalances.eoaWallet = '0';
+          }
+        }
+
+        // Read accumulated earnings for TEST_HOST_1 (the actual host receiving payments)
+        if (hostManager || sdk) {
+          try {
+            // Always check TEST_HOST_1_ADDRESS since that's the host actually running
+            const hostAddress = TEST_HOST_1_ADDRESS;
+            console.log(`[DEBUG] Reading host earnings for address: ${hostAddress}`);
+            console.log(`[DEBUG] HostManager available: ${!!hostManager}`);
+            console.log(`[DEBUG] SDK available: ${!!sdk}`);
+
+            if (hostManager && hostManager.getAccumulatedEarnings) {
+              console.log(`[DEBUG] Using hostManager.getAccumulatedEarnings`);
+              const hostEarnings = await hostManager.getAccumulatedEarnings(hostAddress);
+              newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
+              console.log(`Host accumulated earnings for ${hostAddress}: ${newBalances.hostAccumulated} USDC`);
+            } else if (hostManager && hostManager.getEarnings) {
+              console.log(`[DEBUG] Using hostManager.getEarnings`);
+              const hostEarnings = await hostManager.getEarnings(hostAddress);
+              newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
+              console.log(`Host earnings for ${hostAddress}: ${newBalances.hostAccumulated} USDC`);
+            } else {
+              // Always try reading directly from HostEarnings contract as fallback
+              console.log(`[DEBUG] Reading directly from HostEarnings contract at ${contracts.HOST_EARNINGS}`);
+              console.log(`[DEBUG] USDC token address: ${contracts.USDC}`);
+              const provider = sdk?.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS]);
+              const hostEarningsContract = new ethers.Contract(
+                contracts.HOST_EARNINGS,
+                ['function getBalance(address host, address token) view returns (uint256)'],
+                provider
+              );
+              // getBalance requires both host address and token address (USDC)
+              const earnings = await hostEarningsContract.getBalance(hostAddress, contracts.USDC);
+              newBalances.hostAccumulated = ethers.formatUnits(earnings, 6);
+              console.log(`Host earnings (direct contract) for ${hostAddress}: ${newBalances.hostAccumulated} USDC (raw: ${earnings.toString()})`);
+            }
+          } catch (err) {
+            console.log('Error reading host accumulated earnings:', err);
             newBalances.hostAccumulated = '0';
           }
+        } else {
+          console.log(`[DEBUG] No hostManager or SDK available yet`);
+          newBalances.hostAccumulated = '0';
         }
 
         // Read treasury accumulated balance (if method exists)
@@ -316,7 +397,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
     }
   }
 
-  // Step 1: Authenticate with primary account
+  // Step 1: Authenticate with Base Account Kit
   async function step1Authenticate() {
     if (!sdk) {
       setError("SDK not initialized");
@@ -325,14 +406,69 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
     setLoading(true);
     setStepStatus(prev => ({ ...prev, 1: 'in-progress' }));
-    
-    try {
-      addLog("Step 1: Starting - Connect Base Account & Fund");
 
-      // Authenticate SDK with TEST_USER_1 private key
-      addLog("Authenticating SDK with TEST_USER_1...");
-      await sdk.authenticate('privatekey', { privateKey: TEST_USER_1_PRIVATE_KEY });
-      
+    try {
+      addLog("Step 1: Starting - Connect Base Account Kit");
+
+      // Option 1: Try to use Base Account Kit first
+      let useBaseAccount = false;
+      let walletAddress: string | null = null;
+      let smartWallet: string | null = null;
+
+      try {
+        // Create Base Account SDK
+        const baseSDK = createSDK();
+        addLog("Base Account SDK created");
+
+        // Connect wallet using Base Account Kit
+        addLog("Connecting wallet with Base Account Kit...");
+        const accounts = await connectBaseWallet();
+
+        if (accounts && accounts.length > 0) {
+          walletAddress = accounts[0];
+          const accountInfo = await getAccountInfo(walletAddress);
+          smartWallet = accountInfo.smartAccount || walletAddress;
+
+          // If we get a smart account address, use it
+          if (accountInfo.smartAccount) {
+            console.log("Base Account Kit connected - Smart Account:", accountInfo.smartAccount);
+          }
+
+          addLog(`✅ Connected to Base Account Kit`);
+          addLog(`  EOA (Controller): ${walletAddress}`);
+          addLog(`  Primary Smart Account: ${smartWallet}`);
+
+          // Use the Base Account Kit provider with the SDK
+          const baseProvider = baseSDK.getProvider();
+
+          // Create a signer from the Base Account Kit provider
+          // This enables sponsored gas transactions
+          const baseSigner = new ethers.BrowserProvider(baseProvider).getSigner(smartWallet);
+
+          // Authenticate SDK with the Base Account Kit signer
+          await sdk.authenticate('signer', {
+            signer: await baseSigner
+          });
+
+          useBaseAccount = true;
+          setIsUsingBaseAccount(true);
+          setSmartWalletAddress(smartWallet);
+        }
+      } catch (baseError) {
+        addLog(`Base Account Kit not available or user cancelled: ${baseError}`);
+        addLog("Falling back to standard authentication...");
+      }
+
+      // Option 2: Fallback to standard authentication with test key
+      if (!useBaseAccount) {
+        addLog("Using standard authentication with TEST_USER_1...");
+        await sdk.authenticate('privatekey', { privateKey: TEST_USER_1_PRIVATE_KEY });
+        walletAddress = TEST_USER_1_ADDRESS;
+        // Clear smart wallet address since we're not using Base Account Kit
+        setSmartWalletAddress("");
+        setIsUsingBaseAccount(false);
+      }
+
       // Get managers after authentication
       const pm = sdk.getPaymentManager();
       const sm = sdk.getSessionManager();
@@ -348,9 +484,15 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
       addLog("✅ SDK authenticated and managers initialized");
 
-      // Set user address to TEST_USER_1 (no sub-accounts)
-      setUserAddress(TEST_USER_1_ADDRESS);
-      addLog(`✅ Using primary account: ${TEST_USER_1_ADDRESS}`);
+      // Set user address - for Base Account Kit, walletAddress is EOA, smartWallet is primary account
+      setUserAddress(walletAddress!);
+
+      if (useBaseAccount && smartWallet) {
+        addLog(`✅ Using primary account: ${smartWallet} (via Base Account Kit)`);
+        addLog(`  EOA controller: ${walletAddress}`);
+      } else {
+        addLog(`✅ Using test account: ${walletAddress} (standard authentication)`);
+      }
 
       // Check USDC balance
       const contracts = getContractAddresses();
@@ -361,7 +503,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
           const usdcBalance = balances.usdc;
           // Convert string to BigInt for formatting (already in decimal format)
           const usdcBalanceWei = ethers.parseUnits(usdcBalance, 6);
-          addLog(`TEST_USER_1 USDC balance: ${usdcBalance} USDC`);
+          addLog(`Account USDC balance: ${usdcBalance} USDC`);
         } else {
           addLog(`Payment manager doesn't have balance checking methods`);
         }
@@ -389,7 +531,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
   }
 
   // Step 2: Verify USDC Balance
-  async function step2DepositUSDC() {
+  async function step2ApproveUSDC() {
     if (!sdk) {
       setError("SDK not initialized");
       return;
@@ -406,36 +548,29 @@ export default function BaseUsdcMvpFlowSDKTest() {
     setStepStatus(prev => ({ ...prev, 2: 'in-progress' }));
 
     try {
-      addLog("Step 2: Starting - Deposit USDC to contract");
+      addLog("Step 2: Starting - Approve USDC for direct payments");
       const contracts = getContractAddresses();
 
-      // First check if user already has deposit in contract
+      // Check user's USDC balance
       try {
-        const jobMarketplaceContract = new ethers.Contract(
-          contracts.JOB_MARKETPLACE,
-          ['function userDepositsToken(address user, address token) view returns (uint256)'],
+        const usdcContract = new ethers.Contract(
+          contracts.USDC,
+          ['function balanceOf(address account) view returns (uint256)'],
           sdk.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS])
         );
 
-        const existingDeposit = await jobMarketplaceContract.userDepositsToken(userAddress, contracts.USDC);
-        const existingDepositFormatted = ethers.formatUnits(existingDeposit, 6);
+        const userBalance = await usdcContract.balanceOf(userAddress);
+        const userBalanceFormatted = ethers.formatUnits(userBalance, 6);
+        addLog(`User USDC balance: ${userBalanceFormatted} USDC`);
 
-        if (parseFloat(existingDepositFormatted) >= parseFloat(SESSION_DEPOSIT_AMOUNT)) {
-          addLog(`✅ Already have ${existingDepositFormatted} USDC deposited in contract`);
-          addLog(`Skipping deposit step - sufficient balance already deposited`);
-
-          // Update balances and mark complete
-          await readAllBalances();
-          setStepStatus(prev => ({ ...prev, 2: 'completed' }));
-          setCurrentStep(2);
-          setStatus("✅ Step 2 Complete: Using existing USDC deposit");
-          return;
-        } else if (parseFloat(existingDepositFormatted) > 0) {
-          addLog(`Found existing deposit: ${existingDepositFormatted} USDC`);
-          addLog(`Need to deposit additional ${parseFloat(SESSION_DEPOSIT_AMOUNT) - parseFloat(existingDepositFormatted)} USDC`);
+        if (parseFloat(userBalanceFormatted) < parseFloat(SESSION_DEPOSIT_AMOUNT)) {
+          throw new Error(`Insufficient USDC balance. Have: ${userBalanceFormatted}, Need: ${SESSION_DEPOSIT_AMOUNT}`);
         }
-      } catch (err) {
-        console.log('Could not check existing deposit:', err);
+      } catch (err: any) {
+        if (err.message?.includes('Insufficient')) {
+          throw err;
+        }
+        console.log('Could not check USDC balance:', err);
       }
 
       // Get PaymentManager for all token operations
@@ -471,33 +606,29 @@ export default function BaseUsdcMvpFlowSDKTest() {
       );
       addLog(`Current USDC allowance: ${ethers.formatUnits(currentAllowance, 6)} USDC`);
 
-      // Approve JobMarketplace to spend USDC
-      addLog(`Approving JobMarketplace (${jobMarketplaceAddress}) to spend ${SESSION_DEPOSIT_AMOUNT} USDC...`);
-      const approveAmount = ethers.parseUnits(SESSION_DEPOSIT_AMOUNT, 6); // USDC has 6 decimals
-      const approveTx = await usdcContract.approve(jobMarketplaceAddress, approveAmount);
-      await approveTx.wait(2); // Wait for 2 confirmations
-      addLog(`✅ USDC approval complete. TX: ${approveTx.hash}`);
+      // Approve JobMarketplace to spend USDC (approve larger amount for multiple sessions)
+      const approveMultiplier = 5; // Approve 5x for multiple sessions (total $10)
+      const totalApprovalAmount = ethers.parseUnits(SESSION_DEPOSIT_AMOUNT, 6) * BigInt(approveMultiplier);
 
-      // Verify the allowance was set
-      const newAllowance = await usdcContract.allowance(
-        await signer.getAddress(),
-        jobMarketplaceAddress
-      );
-      addLog(`New USDC allowance: ${ethers.formatUnits(newAllowance, 6)} USDC`);
+      if (currentAllowance < ethers.parseUnits(SESSION_DEPOSIT_AMOUNT, 6)) {
+        addLog(`Approving JobMarketplace (${jobMarketplaceAddress}) to spend ${ethers.formatUnits(totalApprovalAmount, 6)} USDC (for multiple sessions)...`);
+        const approveTx = await usdcContract.approve(jobMarketplaceAddress, totalApprovalAmount);
+        await approveTx.wait(2); // Wait for 2 confirmations
+        addLog(`✅ USDC approval complete. TX: ${approveTx.hash}`);
 
-      // Now deposit the USDC to the contract
-      addLog(`Depositing ${SESSION_DEPOSIT_AMOUNT} USDC to contract...`);
-      const depositResult = await pm.depositToken(
-        contracts.USDC,
-        SESSION_DEPOSIT_AMOUNT
-      );
-
-      if (!depositResult || !depositResult.transactionHash) {
-        throw new Error("Deposit failed - no transaction hash returned");
+        // Verify the allowance was set
+        const newAllowance = await usdcContract.allowance(
+          await signer.getAddress(),
+          jobMarketplaceAddress
+        );
+        addLog(`New USDC allowance: ${ethers.formatUnits(newAllowance, 6)} USDC`);
+      } else {
+        addLog(`✅ Already have sufficient allowance: ${ethers.formatUnits(currentAllowance, 6)} USDC`);
       }
 
-      addLog(`✅ USDC deposited successfully. TX: ${depositResult.transactionHash}`);
-      addLog(`Your $${SESSION_DEPOSIT_AMOUNT} is now in the contract for gasless sessions!`);
+      // With direct payments, no deposit needed - funds stay in user wallet
+      addLog(`✅ USDC approval complete. Funds will be paid directly from wallet during session.`);
+      addLog(`Your USDC stays in your wallet and is spent as you use the service.`);
 
       // The depositToken method should already wait for confirmations
       // Just read updated balances immediately
@@ -505,7 +636,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
       setStepStatus(prev => ({ ...prev, 2: 'completed' }));
       setCurrentStep(2);
-      setStatus("✅ Step 2 Complete: USDC deposited to contract");
+      setStatus("✅ Step 2 Complete: USDC approved for direct payments");
     } catch (error: any) {
       console.error("Step 2 failed:", error);
       setError(`Step 2 failed: ${error.message}`);
@@ -580,7 +711,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
     }
   }
 
-  // Step 4: Create Session from deposit
+  // Step 4: Create Session with direct payment
   async function step4CreateSession() {
     // Get managers directly from SDK instead of relying on state
     const sm = sdk?.getSessionManager();
@@ -596,11 +727,37 @@ export default function BaseUsdcMvpFlowSDKTest() {
       return;
     }
 
+    // Close any existing session before creating a new one
+    if (sessionId) {
+      try {
+        addLog(`Closing existing session ${sessionId} before creating new one...`);
+        await sm.endSession(sessionId);
+      } catch (err) {
+        console.log("Error closing previous session (may be already closed):", err);
+      }
+      setSessionId(null);
+      setJobId(null);
+    }
+
+    // Force the SessionManager to reset its internal state
+    // This ensures a fresh WebSocket connection for the new session
+    try {
+      addLog("Resetting SessionManager state for new session...");
+      // @ts-ignore - Access internal method if available
+      if (sm.resetConnection) {
+        await sm.resetConnection();
+      }
+      // Small delay to ensure cleanup
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (err) {
+      console.log("Could not reset SessionManager connection:", err);
+    }
+
     setLoading(true);
     setStepStatus(prev => ({ ...prev, 4: 'in-progress' }));
 
     try {
-      addLog("Step 4: Starting - Create Session with USDC deposit");
+      addLog("Step 4: Starting - Create Session with direct USDC payment");
       console.log("Step 4: Creating session...");
 
       // Get contract addresses
@@ -627,22 +784,22 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog(`Using model: ${selectedModel}`);
       addLog(`Using endpoint: ${hostEndpoint}`);
 
-      // Create session using the deposited USDC funds
-      // Step 2 already deposited the funds, so we can create sessions without popups
+      // Create session using direct USDC payment
+      // Step 2 already approved the contract, so payments are automatic
       const sessionConfig = {
-        depositAmount: SESSION_DEPOSIT_AMOUNT, // Use from deposited funds
+        depositAmount: SESSION_DEPOSIT_AMOUNT, // Amount for this session
         pricePerToken: Number(hostToUse.pricePerToken || PRICE_PER_TOKEN),
         proofInterval: PROOF_INTERVAL,
         duration: SESSION_DURATION,
-        paymentToken: contracts.USDC,  // Using USDC from deposit
-        useDeposit: true,  // Use deposited funds, not direct payment
+        paymentToken: contracts.USDC,  // Using USDC with direct payment
+        useDeposit: false,  // Use direct payment with approval pattern
         chainId: selectedChainId  // REQUIRED: Chain ID for multi-chain support
       };
 
       console.log("Session config:", sessionConfig);
 
-      // No approval needed - we're using deposited funds!
-      addLog(`Creating session using deposited USDC (no transaction popup!)...`);
+      // No additional approval needed - already approved in Step 2!
+      addLog(`Creating session with direct USDC payment (automatic from approval)...`);
 
       // Now create the session with USDC payment
       console.log("Calling sessionManager.startSession with:", {
@@ -667,22 +824,91 @@ export default function BaseUsdcMvpFlowSDKTest() {
       console.log("Payment token:", contracts.USDC);
       console.log("Chain ID:", selectedChainId);
 
+      // Check balance before attempting to create session
+      const sessionCost = 2; // 2 USDC for the session
+      const accountAddress = smartWalletAddress || userAddress || TEST_USER_1_ADDRESS;
+
+      // Get current balance directly from the chain
+      let currentBalance = 0;
+      try {
+        const contracts = getContractAddresses();
+        const provider = sdk.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS]);
+        const usdcContract = new ethers.Contract(
+          contracts.USDC,
+          ['function balanceOf(address) view returns (uint256)'],
+          provider
+        );
+
+        const balanceWei = await usdcContract.balanceOf(accountAddress);
+        currentBalance = parseFloat(ethers.formatUnits(balanceWei, 6));
+        addLog(`Balance check: ${accountAddress} has ${currentBalance.toFixed(6)} USDC`);
+      } catch (err) {
+        console.error("Error checking balance:", err);
+        addLog(`⚠️ Could not verify balance for ${accountAddress}`);
+      }
+
+      if (currentBalance < sessionCost) {
+        const errorMsg = `Insufficient USDC balance in ${accountAddress}. Need ${sessionCost} USDC but only have ${currentBalance.toFixed(6)} USDC. ` +
+          `Please transfer USDC to this address or ensure your smart wallet has sufficient funds.`;
+        setError(errorMsg);
+        addLog(`❌ ${errorMsg}`);
+        setStepStatus(prev => ({ ...prev, 4: 'failed' }));
+        setLoading(false);
+        return;
+      }
+
+      addLog(`✅ Balance check passed: ${currentBalance.toFixed(2)} USDC available (need ${sessionCost} USDC)`);
+
       // Call startSession with the complete config
+      addLog("Creating session on blockchain and establishing WebSocket connection...");
       const result = await sm.startSession(fullSessionConfig);
 
       console.log("Session created successfully:", result);
 
-      setSessionId(result.sessionId);
-      setJobId(result.jobId);
+      // Ensure we have both sessionId and jobId
+      if (!result.sessionId || !result.jobId) {
+        throw new Error(`Session creation incomplete - sessionId: ${result.sessionId}, jobId: ${result.jobId}`);
+      }
 
-      addLog(`✅ Session created - ID: ${result.sessionId}, Job ID: ${result.jobId}`);
-      
-      // Read balances to see deposit deducted
+      // CRITICAL: Update state immediately and verify
+      const newSessionId = result.sessionId;
+      const newJobId = result.jobId;
+      setSessionId(newSessionId);
+      setJobId(newJobId);
+
+      // CRITICAL: Store the new session ID in a way that persists for the next step
+      // Use window object as a temporary workaround for React state async issues
+      (window as any).__currentSessionId = newSessionId;
+      (window as any).__currentJobId = newJobId;
+
+      addLog(`✅ Session created - ID: ${newSessionId}, Job ID: ${newJobId}`);
+      addLog(`  Host: ${hostToUse.address}`);
+      addLog(`  WebSocket URL: ${hostToUse.url}/ws`);
+
+      // CRITICAL: Wait for WebSocket connection to be fully established
+      addLog("Waiting for WebSocket connection to initialize with node...");
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Try to verify the session is active on the node
+      try {
+        addLog("Verifying session is active on node...");
+        // The session should now be registered with the node
+        // If not, the next step (sending prompt) will fail
+      } catch (err) {
+        console.error("Warning: Could not verify session on node:", err);
+      }
+
+      // Read balances to see payment made
       await readAllBalances();
 
       setStepStatus(prev => ({ ...prev, 4: 'completed' }));
       setCurrentStep(4);
-      setStatus("✅ Step 4 Complete: Session created from deposit");
+
+      // CRITICAL: Store the new session ID in a way that persists for the next step
+      // Use window object as a temporary workaround for React state async issues
+      (window as any).__currentSessionId = newSessionId;
+      (window as any).__currentJobId = newJobId;
+      setStatus("✅ Step 4 Complete: Session created with direct payment");
 
     } catch (error: any) {
       console.error("Step 4 failed:", error);
@@ -698,7 +924,11 @@ export default function BaseUsdcMvpFlowSDKTest() {
   async function step5SendPrompt() {
     const sm = sdk?.getSessionManager();
 
-    if (!sm || !sessionId) {
+    // Use the session ID from window object to avoid React state async issues
+    const currentSessionId = (window as any).__currentSessionId || sessionId;
+    const currentJobId = (window as any).__currentJobId || jobId;
+
+    if (!sm || !currentSessionId) {
       setError("SessionManager not initialized or no active session");
       return;
     }
@@ -709,11 +939,16 @@ export default function BaseUsdcMvpFlowSDKTest() {
     try {
       addLog("Step 5: Starting - Send inference prompt");
 
+      // Add a delay to ensure WebSocket is fully connected
+      addLog("Waiting for WebSocket connection to stabilize...");
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
       const prompt = "What is the capital of France? Please provide a brief answer.";
       addLog(`Sending prompt: "${prompt}"`);
+      addLog(`Using session ID: ${currentSessionId}, Job ID: ${currentJobId}`);
 
       // Send prompt via SessionManager using WebSocket for proper settlement
-      const response = await sm.sendPromptStreaming(sessionId, prompt);
+      const response = await sm.sendPromptStreaming(currentSessionId, prompt);
 
       addLog(`✅ Prompt sent successfully`);
       addLog(`📝 Full LLM Response: "${response}"`);
@@ -2033,46 +2268,77 @@ export default function BaseUsdcMvpFlowSDKTest() {
     setLogs([]);
     setCurrentStep(0);
     setStepStatus({});
+    setSessionId(null);  // Reset session ID from previous runs
+    setJobId(null);      // Reset job ID from previous runs
+
+    // Clear window session IDs to avoid using stale values
+    (window as any).__currentSessionId = null;
+    (window as any).__currentJobId = null;
+
     setStatus("Starting full multi-chain USDC payment flow...");
 
     try {
-      // Step 1: Authenticate
+      // CRITICAL FIX: Force re-authentication to get fresh managers
+      // This ensures the SessionManager creates new WebSocket connections
+      addLog("=== Reinitializing SDK for fresh session ===");
+      if (sdk) {
+        // Force re-authentication even if already authenticated
+        addLog("Re-authenticating SDK to ensure fresh connections...");
+        await sdk.authenticate('privatekey', { privateKey: TEST_USER_1_PRIVATE_KEY });
+
+        // Get fresh managers
+        const pm = sdk.getPaymentManager();
+        const sm = sdk.getSessionManager();
+        const hm = sdk.getHostManager();
+        const stm = sdk.getStorageManager();
+        const tm = sdk.getTreasuryManager();
+
+        setPaymentManager(pm);
+        setSessionManager(sm);
+        setHostManager(hm);
+        setStorageManager(stm);
+        setTreasuryManager(tm);
+
+        addLog("✅ SDK re-initialized with fresh managers");
+      }
+
+      // Step 1: Authenticate (will skip if already authenticated above)
       addLog("=== Running Step 1: Authenticate ===");
       await step1Authenticate();
 
       // Small delay for UI visibility only
       await new Promise(resolve => setTimeout(resolve, 500));
 
-      // Step 2: Deposit USDC (skip if already have deposit)
-      addLog("=== Running Step 2: Deposit USDC ===");
+      // Step 2: Approve USDC (skip if already approved)
+      addLog("=== Running Step 2: Approve USDC ===");
 
-      // Check deposit balance directly from contract
-      let shouldDeposit = true;
+      // Check allowance directly from contract
+      let shouldApprove = true;
       try {
         const contracts = getContractAddresses();
         const signer = await sdk.getSigner();
-        const jobMarketplaceContract = new ethers.Contract(
-          contracts.JOB_MARKETPLACE,
-          ['function userDepositsToken(address user, address token) view returns (uint256)'],
+        const usdcContract = new ethers.Contract(
+          contracts.USDC,
+          ['function allowance(address owner, address spender) view returns (uint256)'],
           signer || sdk.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS])
         );
 
         const userAddr = await signer.getAddress();
-        const depositBalance = await jobMarketplaceContract.userDepositsToken(userAddr, contracts.USDC);
-        const depositFormatted = ethers.formatUnits(depositBalance, 6);
+        const allowance = await usdcContract.allowance(userAddr, contracts.JOB_MARKETPLACE);
+        const allowanceFormatted = ethers.formatUnits(allowance, 6);
 
-        if (parseFloat(depositFormatted) >= parseFloat(SESSION_DEPOSIT_AMOUNT)) {
-          addLog(`✅ Already have ${depositFormatted} USDC deposited, skipping deposit step`);
+        if (parseFloat(allowanceFormatted) >= parseFloat(SESSION_DEPOSIT_AMOUNT)) {
+          addLog(`✅ Already have ${allowanceFormatted} USDC approved, skipping approval step`);
           setStepStatus(prev => ({ ...prev, 2: 'completed' }));
           setCurrentStep(2);
-          shouldDeposit = false;
+          shouldApprove = false;
         }
       } catch (err) {
-        console.log('Could not check deposit balance:', err);
+        console.log('Could not check allowance:', err);
       }
 
-      if (shouldDeposit) {
-        await step2DepositUSDC();
+      if (shouldApprove) {
+        await step2ApproveUSDC();
         // Check if step failed by checking error state
         const latestError = await new Promise<string>(resolve => {
           setTimeout(() => {
@@ -2151,8 +2417,9 @@ export default function BaseUsdcMvpFlowSDKTest() {
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">Multi-Chain USDC Payment Flow Test</h1>
-        <p className="text-gray-600">Using primary account directly with deposit pattern</p>
+        <h1 className="text-3xl font-bold mb-2">Base Account Kit USDC Payment Flow Test</h1>
+        <p className="text-gray-600">Smart wallets with sponsored gas on Base Sepolia</p>
+        <p className="text-sm text-gray-500 mt-1">Experience gasless transactions - Coinbase pays the gas fees!</p>
       </div>
 
       {/* Chain Selector */}
@@ -2178,6 +2445,44 @@ export default function BaseUsdcMvpFlowSDKTest() {
           <span className="text-lg font-medium">{status}</span>
           <span className="text-sm text-gray-500">Step {currentStep}/6</span>
         </div>
+
+        {/* Base Account Kit Status */}
+        {isUsingBaseAccount && (
+          <div className="mt-3 p-2 bg-green-100 rounded">
+            <div className="flex items-center gap-2">
+              <span className="text-green-600">✓</span>
+              <span className="text-sm font-semibold text-green-800">Base Account Kit Active</span>
+            </div>
+            <div className="text-xs text-green-700 mt-1">Gas sponsored by Coinbase - no ETH needed!</div>
+          </div>
+        )}
+
+        {/* Account Information */}
+        {userAddress && (
+          <div className="mt-3 space-y-1">
+            <div className="text-sm">
+              <span className="font-semibold">Account:</span> {userAddress.slice(0, 6)}...{userAddress.slice(-4)}
+              {isUsingBaseAccount && (
+                <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">Smart Wallet</span>
+              )}
+            </div>
+            {smartWalletAddress && smartWalletAddress !== userAddress && (
+              <div className="text-sm">
+                <span className="font-semibold">Smart Account:</span> {smartWalletAddress.slice(0, 6)}...{smartWalletAddress.slice(-4)}
+              </div>
+            )}
+            {sessionId && (
+              <div className="text-sm">
+                <span className="font-semibold">Session ID:</span> {sessionId.toString()}
+              </div>
+            )}
+            {jobId && (
+              <div className="text-sm">
+                <span className="font-semibold">Job ID:</span> {jobId.toString()}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Error Display */}
@@ -2191,9 +2496,47 @@ export default function BaseUsdcMvpFlowSDKTest() {
       <div className="mb-6 grid grid-cols-2 gap-4">
         <div className="p-4 border rounded">
           <h3 className="font-bold mb-2">Account Balances</h3>
-          <div className="space-y-1 text-sm">
-            <div>User (TEST_USER_1): {balances.testUser1 || '...'} USDC</div>
-            <div>User Deposit in Contract: {balances.userDeposit || '0'} USDC</div>
+          <div className="space-y-2 text-sm">
+            {smartWalletAddress ? (
+              <>
+                <div>
+                  <div className="font-medium">Primary Account (Smart Contract):</div>
+                  <div className="text-xs text-gray-600">{smartWalletAddress}</div>
+                  <div>Balance: {balances.smartWallet || '0'} USDC</div>
+                  <div className="text-xs text-blue-600 mt-1">
+                    ✓ Gasless transactions enabled via Coinbase sponsorship
+                  </div>
+                </div>
+                {userAddress && userAddress !== smartWalletAddress && (
+                  <div className="mt-2 pt-2 border-t">
+                    <div className="font-medium">EOA (Controller Wallet):</div>
+                    <div className="text-xs text-gray-600">{userAddress}</div>
+                    <div>Balance: {balances.eoaWallet || '0'} USDC</div>
+                    <div className="text-xs text-gray-500 text-[10px] mt-1">
+                      This wallet controls the smart account above
+                    </div>
+                  </div>
+                )}
+                {TEST_USER_1_ADDRESS && (
+                  <div className="mt-2 pt-2 border-t">
+                    <div className="font-medium">Test Account (for comparison):</div>
+                    <div className="text-xs text-gray-600">{TEST_USER_1_ADDRESS}</div>
+                    <div>Balance: {balances.testUser1 || '...'} USDC</div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div>
+                <div className="font-medium">Test Account:</div>
+                <div className="text-xs text-gray-600">{TEST_USER_1_ADDRESS}</div>
+                <div>Balance: {balances.testUser1 || '...'} USDC</div>
+              </div>
+            )}
+            <div className="mt-2 pt-2 border-t">
+              <div className="font-medium">Deposit in JobMarketplace:</div>
+              <div>{balances.userDeposit || '0'} USDC</div>
+              <div className="text-xs text-gray-600">(Available for sessions)</div>
+            </div>
           </div>
         </div>
         <div className="p-4 border rounded">
@@ -2219,6 +2562,32 @@ export default function BaseUsdcMvpFlowSDKTest() {
         </div>
       )}
 
+      {/* Balance Warning */}
+      {(smartWalletAddress || userAddress) && (
+        (() => {
+          const accountAddr = smartWalletAddress || userAddress || TEST_USER_1_ADDRESS;
+          const currentBalance = parseFloat(balances.smartWallet || balances.testUser1 || '0');
+          const sessionCost = 2;
+          const hasInsufficientBalance = currentBalance < sessionCost;
+
+          if (hasInsufficientBalance) {
+            return (
+              <div className="mb-4 p-4 bg-yellow-100 border border-yellow-400 text-yellow-700 rounded">
+                <div className="font-semibold">⚠️ Insufficient USDC Balance</div>
+                <div className="text-sm mt-1">
+                  Your {smartWalletAddress ? 'smart wallet' : 'account'} has only {currentBalance.toFixed(6)} USDC.
+                  You need at least {sessionCost} USDC to create a session.
+                </div>
+                <div className="text-xs mt-2">
+                  Transfer USDC to: {accountAddr}
+                </div>
+              </div>
+            );
+          }
+          return null;
+        })()
+      )}
+
       {/* Action Buttons */}
       <div className="mb-6 flex flex-wrap gap-2">
         <button
@@ -2229,6 +2598,49 @@ export default function BaseUsdcMvpFlowSDKTest() {
           {loading ? 'Processing...' : 'Run Full Flow'}
         </button>
 
+        {/* Add Transfer Button when smart wallet has insufficient funds */}
+        {smartWalletAddress && parseFloat(balances.smartWallet || '0') < 2 && parseFloat(balances.testUser1 || '0') > 2 && (
+          <button
+            onClick={async () => {
+              try {
+                setLoading(true);
+                addLog("Transferring 2 USDC from Test Account to Primary Account...");
+
+                const contracts = getContractAddresses();
+                const provider = new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS]);
+                const testWallet = new ethers.Wallet(TEST_USER_1_PRIVATE_KEY, provider);
+
+                // Create USDC contract instance
+                const usdcContract = new ethers.Contract(
+                  contracts.USDC,
+                  ['function transfer(address to, uint256 amount) returns (bool)'],
+                  testWallet
+                );
+
+                // Transfer 2 USDC to the smart wallet
+                const amountToTransfer = ethers.parseUnits('2', 6); // 2 USDC with 6 decimals
+                const tx = await usdcContract.transfer(smartWalletAddress, amountToTransfer);
+                addLog(`Transfer transaction sent: ${tx.hash}`);
+
+                await tx.wait();
+                addLog(`✅ Successfully transferred 2 USDC to ${smartWalletAddress}`);
+
+                // Refresh balances
+                await readAllBalances();
+              } catch (error: any) {
+                addLog(`❌ Transfer failed: ${error.message}`);
+                console.error("Transfer error:", error);
+              } finally {
+                setLoading(false);
+              }
+            }}
+            disabled={loading}
+            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
+          >
+            {loading ? 'Transferring...' : 'Transfer 2 USDC to Smart Wallet'}
+          </button>
+        )}
+
         <button
           onClick={step1Authenticate}
           disabled={loading || currentStep >= 1}
@@ -2238,11 +2650,11 @@ export default function BaseUsdcMvpFlowSDKTest() {
         </button>
 
         <button
-          onClick={step2DepositUSDC}
+          onClick={step2ApproveUSDC}
           disabled={loading || currentStep < 1 || currentStep >= 2}
           className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
         >
-          Step 2: Deposit USDC
+          Step 2: Approve USDC
         </button>
 
         <button
@@ -2258,7 +2670,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
           disabled={loading || currentStep < 3 || currentStep >= 4}
           className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
         >
-          Step 4: Create Session (from deposit)
+          Step 4: Create Session
         </button>
 
         <button
@@ -2279,10 +2691,58 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
         <button
           onClick={readAllBalances}
-          disabled={loading}
+          disabled={loading || !sdk || currentStep < 1}
           className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 disabled:bg-gray-300"
+          title={!sdk || currentStep < 1 ? "Please authenticate first" : "Refresh all balances"}
         >
           Refresh Balances
+        </button>
+
+        <button
+          onClick={async () => {
+            try {
+              setLoading(true);
+              addLog("Withdrawing host earnings from HostEarnings contract...");
+
+              const contracts = getContractAddresses();
+              const signer = sdk?.getSigner();
+
+              if (!signer) {
+                addLog("❌ No signer available. Please authenticate first.");
+                return;
+              }
+
+              // Create HostEarnings contract instance
+              const hostEarningsContract = new ethers.Contract(
+                contracts.HOST_EARNINGS,
+                ['function withdrawAll() external'],
+                signer
+              );
+
+              // Call withdrawAll to transfer all accumulated earnings to the host's EOA
+              const tx = await hostEarningsContract.withdrawAll();
+              addLog(`📤 Withdraw transaction sent: ${tx.hash}`);
+
+              // Wait for confirmation
+              const receipt = await tx.wait(3);
+              addLog(`✅ Withdrawal complete! Gas used: ${receipt.gasUsed.toString()}`);
+
+              // Refresh balances to show the updated amounts
+              await readAllBalances();
+              addLog("💰 Host earnings withdrawn to EOA successfully!");
+
+            } catch (error: any) {
+              console.error("Withdrawal failed:", error);
+              addLog(`❌ Withdrawal failed: ${error.message}`);
+            } finally {
+              setLoading(false);
+            }
+          }}
+          disabled={loading || !sdk || currentStep < 1}
+          className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-gray-300"
+          title={!sdk || currentStep < 1 ? "Please authenticate first" : "Withdraw accumulated host earnings to EOA"}
+        >
+          Withdraw Host Earnings (Host Only)
         </button>
       </div>
 
