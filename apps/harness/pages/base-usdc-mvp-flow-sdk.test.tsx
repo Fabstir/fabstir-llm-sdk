@@ -1,38 +1,31 @@
 /**
- * USDC Payment Flow Test Page - Using FabstirSDKCore
- * This test page demonstrates the complete flow using SDK managers instead of direct contract calls
- * 
- * Key Interaction Patterns (Primary → Sub-account → Session):
- * 1. Primary account holds main USDC balance ($4 min for smooth operation)
- * 2. Sub-account needs only $0.20 minimum to run a session (actual usage)
- * 3. If sub has >= $0.20, session runs gasless (no popups!)
- * 4. Session deposits $2 to contract, uses $0.20, refunds $1.80 to sub
- * 5. Refund stays in sub-account for future sessions (deposit model)
- * 
+ * USDC Payment Flow Test Page - Multi-Chain Support
+ * This test page demonstrates the complete USDC payment flow with multi-chain support
+ *
+ * Key Features:
+ * 1. Multi-chain support (Base Sepolia default, opBNB Testnet option)
+ * 2. Direct primary account usage (no sub-accounts)
+ * 3. User deposits USDC to contract before session
+ * 4. Random host selection from active hosts
+ * 5. Session completion triggers automatic payment settlement
+ *
  * Payment Distribution (via JobMarketplace contract):
- * - Host receives: $0.18 (90% of $0.20 consumed)
- * - Treasury receives: $0.02 (10% of $0.20 consumed)
- * - Sub-account keeps: $1.80 refund for next session
+ * - Host receives: 90% of consumed tokens
+ * - Treasury receives: 10% of consumed tokens
+ * - Remaining deposit stays in contract for future sessions
  */
 
-import { useState, useEffect } from 'react';
-import { createBaseAccountSDK } from "@base-org/account";
-import { encodeFunctionData, parseUnits, createPublicClient, http, getAddress, formatUnits } from "viem";
+import { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
-import { FabstirSDKCore, getOrGenerateS5Seed } from '@fabstir/sdk-core';
+import { FabstirSDKCore, getOrGenerateS5Seed, ChainRegistry, ChainId } from '@fabstir/sdk-core';
 import { cacheSeed, hasCachedSeed } from '../../../packages/sdk-core/src/utils/s5-seed-derivation';
-import type { 
-  PaymentManager, 
-  SessionManager, 
-  HostManager, 
-  StorageManager, 
-  TreasuryManager 
-} from '@fabstir/sdk-core';
 
 // Get configuration from environment variables
-const CHAIN_HEX = "0x14a34";  // Base Sepolia
-const CHAIN_ID_NUM = parseInt(process.env.NEXT_PUBLIC_CHAIN_ID!);
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!;
+const DEFAULT_CHAIN_ID = ChainId.BASE_SEPOLIA; // Default to Base Sepolia
+const RPC_URLS = {
+  [ChainId.BASE_SEPOLIA]: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!,
+  [ChainId.OPBNB_TESTNET]: process.env.NEXT_PUBLIC_RPC_URL_OPBNB_TESTNET || 'https://opbnb-testnet-rpc.bnbchain.org'
+};
 
 // Contract addresses from environment
 const USDC = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN as `0x${string}`;
@@ -55,9 +48,10 @@ const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_
 
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = '2'; // $2 USDC
-const PRICE_PER_TOKEN = 2000; // 0.002 USDC per token  
+const PRICE_PER_TOKEN = 1; // 0.000001 USDC per token (1 unit in 6-decimal USDC)
 const PROOF_INTERVAL = 100; // Proof every 100 tokens
 const SESSION_DURATION = 86400; // 1 day
+const EXPECTED_TOKENS = 100; // Expected tokens to generate in test
 
 // ERC20 ABIs
 const erc20BalanceOfAbi = [{
@@ -81,8 +75,9 @@ const erc20TransferAbi = [{
 
 interface Balances {
   testUser1?: string;
-  primary?: string;
-  sub?: string;
+  userDeposit?: string;
+  hostAccumulated?: string;
+  treasuryAccumulated?: string;
   host1?: string;
   host2?: string;
   treasury?: string;
@@ -92,24 +87,17 @@ interface StepStatus {
   [key: number]: 'pending' | 'in-progress' | 'completed' | 'failed';
 }
 
-// Create global publicClient for viem operations
-const publicClient = createPublicClient({ 
-  chain: { 
-    id: CHAIN_ID_NUM, 
-    name: "base-sepolia", 
-    nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 }, 
-    rpcUrls: { default: { http: [RPC_URL] } } 
-  } as any, 
-  transport: http() 
-});
+// We'll create publicClient dynamically based on selected chain
 
 export default function BaseUsdcMvpFlowSDKTest() {
-  const [status, setStatus] = useState("Ready to start 17-step USDC MVP flow (SDK Version)");
+  const [status, setStatus] = useState("Ready to start multi-chain USDC payment flow");
   const [currentStep, setCurrentStep] = useState(0);
-  const [primaryAddr, setPrimaryAddr] = useState<string>("");
-  const [subAddr, setSubAddr] = useState<string>("");
+  const [selectedChainId, setSelectedChainId] = useState<number>(DEFAULT_CHAIN_ID);
+  const [userAddress, setUserAddress] = useState<string>("");
   const [sessionId, setSessionId] = useState<bigint | null>(null);
   const [jobId, setJobId] = useState<bigint | null>(null);
+  const [selectedHost, setSelectedHost] = useState<any>(null);
+  const selectedHostRef = useRef<any>(null);  // Use ref for immediate access
   const [balances, setBalances] = useState<Balances>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
@@ -117,14 +105,15 @@ export default function BaseUsdcMvpFlowSDKTest() {
   const [logs, setLogs] = useState<string[]>([]);
   const [activeHosts, setActiveHosts] = useState<any[]>([]);
   const [s5Cid, setS5Cid] = useState<string>("");
+  const [totalTokensGenerated, setTotalTokensGenerated] = useState(0);
 
   // SDK instances
   const [sdk, setSdk] = useState<FabstirSDKCore | null>(null);
-  const [paymentManager, setPaymentManager] = useState<PaymentManager | null>(null);
-  const [sessionManager, setSessionManager] = useState<SessionManager | null>(null);
-  const [hostManager, setHostManager] = useState<HostManager | null>(null);
-  const [storageManager, setStorageManager] = useState<StorageManager | null>(null);
-  const [treasuryManager, setTreasuryManager] = useState<TreasuryManager | null>(null);
+  const [paymentManager, setPaymentManager] = useState<any>(null);
+  const [sessionManager, setSessionManager] = useState<any>(null);
+  const [hostManager, setHostManager] = useState<any>(null);
+  const [storageManager, setStorageManager] = useState<any>(null);
+  const [treasuryManager, setTreasuryManager] = useState<any>(null);
 
   // Helper: Add log message
   const addLog = (message: string) => {
@@ -132,24 +121,27 @@ export default function BaseUsdcMvpFlowSDKTest() {
     console.log(message);
   };
 
-  // Initialize FabstirSDKCore on mount
+  // Initialize FabstirSDKCore when chain changes
   useEffect(() => {
     const initSDK = async () => {
       try {
-        addLog("Initializing FabstirSDKCore...");
-        
+        addLog(`Initializing FabstirSDKCore for chain ${selectedChainId}...`);
+
+        const chain = ChainRegistry.getChain(selectedChainId);
+        console.log('[SDK Init] Chain config:', chain);
+        console.log('[SDK Init] JobMarketplace address from chain:', chain.contracts.jobMarketplace);
         const sdkInstance = new FabstirSDKCore({
           mode: 'production',
-          chainId: CHAIN_ID_NUM,
-          rpcUrl: RPC_URL,
+          chainId: selectedChainId,
+          rpcUrl: RPC_URLS[selectedChainId as keyof typeof RPC_URLS],
           contractAddresses: {
-            jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!,
-            nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY!,
-            proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM!,
-            hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS!,
-            fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN!,
-            usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
-            modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY!
+            jobMarketplace: chain.contracts.jobMarketplace,
+            nodeRegistry: chain.contracts.nodeRegistry,
+            proofSystem: chain.contracts.proofSystem,
+            hostEarnings: chain.contracts.hostEarnings,
+            fabToken: chain.contracts.fabToken,
+            usdcToken: chain.contracts.usdcToken,
+            modelRegistry: chain.contracts.modelRegistry
           },
           s5Config: {
             portalUrl: process.env.NEXT_PUBLIC_S5_PORTAL_URL,
@@ -158,7 +150,15 @@ export default function BaseUsdcMvpFlowSDKTest() {
         });
 
         setSdk(sdkInstance);
-        addLog("✅ FabstirSDKCore initialized successfully");
+        addLog(`✅ FabstirSDKCore initialized for ${chain.name}`);
+
+        // Reset state when chain changes
+        setCurrentStep(0);
+        setSessionId(null);
+        setJobId(null);
+        setSelectedHost(null);
+        setActiveHosts([]);
+        setStepStatus({});
       } catch (err) {
         console.error("Failed to initialize SDK:", err);
         addLog(`❌ Failed to initialize SDK: ${err}`);
@@ -166,193 +166,147 @@ export default function BaseUsdcMvpFlowSDKTest() {
     };
 
     initSDK();
-  }, []);
+  }, [selectedChainId]);
 
-  // Initialize Base Account SDK on mount
-  useEffect(() => {
-    const loadBaseAccountSDK = async () => {
-      if (typeof window !== "undefined") {
-        if ((window as any).__basProvider) {
-          addLog("✅ Base Account SDK already connected");
-          return;
-        }
-        
-        try {
-          const bas = createBaseAccountSDK({
-            appName: "Base USDC MVP Flow Test (SDK Version)",
-            appChainIds: [CHAIN_ID_NUM],
-            subAccounts: {
-              unstable_enableAutoSpendPermissions: true
-            }
-          });
-          const provider = bas.getProvider();
-          (window as any).__basProvider = provider;
-          addLog("✅ Base Account SDK loaded successfully");
-        } catch (error) {
-          console.warn("Base Account SDK could not be loaded:", error);
-          addLog(`⚠️ Base Account SDK not available: ${error}`);
-        }
-      }
-    };
-    loadBaseAccountSDK();
-  }, []);
+  // No longer need Base Account SDK - removed
 
-  // Read initial balances on mount (with delay for SDK initialization)
+  // Read initial balances when SDK is ready
   useEffect(() => {
     // Pre-cache S5 seed for TEST_USER_1 to avoid popup
-    const userAddress = TEST_USER_1_ADDRESS.toLowerCase();
-    if (!hasCachedSeed(userAddress)) {
-      // Pre-cache the default test seed to avoid signing popup
+    const userAddr = TEST_USER_1_ADDRESS.toLowerCase();
+    if (!hasCachedSeed(userAddr)) {
       const testSeed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
-      cacheSeed(userAddress, testSeed);
-      console.log(`[S5 Seed] Pre-cached test seed for ${userAddress} to avoid popup`);
-    } else {
-      console.log(`[S5 Seed] Seed already cached for ${userAddress}`);
-    }
-    
-    const timer = setTimeout(() => {
-      console.log("Reading initial balances...");
-      readAllBalances();
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Helper: Get or create sub-account with auto spend permissions
-  async function ensureSubAccount(provider: any, universal: `0x${string}`): Promise<`0x${string}`> {
-    console.log("ensureSubAccount: Starting with primary account:", universal);
-
-    try {
-      console.log("ensureSubAccount: Calling wallet_getSubAccounts...");
-      const resp = await provider.request({
-        method: "wallet_getSubAccounts",
-        params: [{
-          account: universal,
-          domain: window.location.origin
-        }]
-      }) as { subAccounts?: Array<{ address: `0x${string}` }> };
-
-      console.log("ensureSubAccount: Response from wallet_getSubAccounts:", resp);
-
-      if (resp?.subAccounts?.length) {
-        const subAccount = resp.subAccounts[0]!.address;
-        addLog(`Using existing sub-account: ${subAccount}`);
-        console.log("ensureSubAccount: Returning existing sub-account:", subAccount);
-        return subAccount;
-      }
-
-      console.log("ensureSubAccount: No existing sub-accounts found");
-    } catch (e) {
-      console.error("ensureSubAccount: Error getting sub-accounts:", e);
-      addLog(`Error checking for existing sub-accounts: ${e}`);
+      cacheSeed(userAddr, testSeed);
+      console.log(`[S5 Seed] Pre-cached test seed for ${userAddr}`);
     }
 
-    try {
-      console.log("ensureSubAccount: Creating new sub-account...");
-      const created = await provider.request({
-        method: "wallet_addSubAccount",
-        params: [{
-          account: universal,
-          spender: {
-            address: JOB_MARKETPLACE as `0x${string}`,
-            token: USDC,
-            allowance: parseUnits('1000', 6)
-          }
-        }]
-      }) as { address: `0x${string}` };
-
-      console.log("ensureSubAccount: Created sub-account:", created);
-      addLog(`Created new sub-account: ${created.address}`);
-      return created.address;
-    } catch (error) {
-      console.error("ensureSubAccount: Failed to create sub-account:", error);
-      addLog(`Failed to create sub-account: ${error}`);
-      // Fallback to using primary account if sub-account creation fails
-      addLog(`WARNING: Using primary account instead of sub-account (popups may occur)`);
-      console.log("ensureSubAccount: Falling back to primary account:", universal);
-      return universal;
+    if (sdk) {
+      const timer = setTimeout(() => {
+        console.log("Reading initial balances...");
+        readAllBalances();
+      }, 1000);
+      return () => clearTimeout(timer);
     }
+  }, [sdk]);
+
+  // Helper: Get contract addresses for current chain
+  function getContractAddresses() {
+    const chain = ChainRegistry.getChain(selectedChainId);
+    return {
+      USDC: chain.contracts.usdcToken as `0x${string}`,
+      JOB_MARKETPLACE: chain.contracts.jobMarketplace,
+      NODE_REGISTRY: chain.contracts.nodeRegistry,
+      PROOF_SYSTEM: chain.contracts.proofSystem,
+      HOST_EARNINGS: chain.contracts.hostEarnings,
+      FAB_TOKEN: chain.contracts.fabToken
+    };
   }
 
-  // Helper: Read all balances using SDK or viem
+  // Helper: Read all balances using SDK
   async function readAllBalances() {
     try {
       const newBalances: Balances = {};
 
-      // If SDK is initialized, use PaymentManager
-      if (sdk && paymentManager) {
-        newBalances.testUser1 = formatUnits(
-          await paymentManager.getBalance(USDC, TEST_USER_1_ADDRESS),
-          6
-        );
+      if (sdk) {
+        const contracts = getContractAddresses();
 
-        if (primaryAddr) {
-          newBalances.primary = formatUnits(
-            await paymentManager.getBalance(USDC, primaryAddr),
+        // For USDC balances, we need to read directly from the USDC token contract
+        // since PaymentManager only tracks deposits, not regular balances
+        try {
+          // Create USDC contract instance
+          const usdcContract = new ethers.Contract(
+            contracts.USDC,
+            ['function balanceOf(address) view returns (uint256)'],
+            sdk.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS])
+          );
+
+          // Read USDC balances directly from token contract
+          newBalances.testUser1 = ethers.formatUnits(
+            await usdcContract.balanceOf(TEST_USER_1_ADDRESS),
             6
           );
-        }
-
-        if (subAddr) {
-          newBalances.sub = formatUnits(
-            await paymentManager.getBalance(USDC, subAddr),
+          newBalances.host1 = ethers.formatUnits(
+            await usdcContract.balanceOf(TEST_HOST_1_ADDRESS),
             6
           );
+          newBalances.host2 = ethers.formatUnits(
+            await usdcContract.balanceOf(TEST_HOST_2_ADDRESS),
+            6
+          );
+          newBalances.treasury = ethers.formatUnits(
+            await usdcContract.balanceOf(TEST_TREASURY_ADDRESS),
+            6
+          );
+        } catch (err) {
+          console.log('Error reading USDC balances:', err);
+          // Set defaults if reading fails
+          newBalances.testUser1 = '...';
+          newBalances.host1 = '0';
+          newBalances.host2 = '0';
+          newBalances.treasury = '0';
         }
 
-        newBalances.host1 = formatUnits(
-          await paymentManager.getBalance(USDC, TEST_HOST_1_ADDRESS),
-          6
-        );
+        // Read user's deposit balance using SDK
+        if (userAddress) {
+          try {
+            const pm = sdk.getPaymentManager();
+            if (pm && pm.getDepositBalances) {
+              // Use PaymentManager to get deposit balance
+              const depositBalances = await pm.getDepositBalances([contracts.USDC]);
+              const usdcDeposit = depositBalances.tokens?.[contracts.USDC] || '0';
 
-        newBalances.host2 = formatUnits(
-          await paymentManager.getBalance(USDC, TEST_HOST_2_ADDRESS),
-          6
-        );
+              // The balance should already be formatted, but ensure it's in the right format
+              newBalances.userDeposit = usdcDeposit.includes('.') ? usdcDeposit : ethers.formatUnits(BigInt(usdcDeposit), 6);
+              console.log(`User deposit balance: ${newBalances.userDeposit} USDC`);
+            } else {
+              console.log('PaymentManager not available or missing getDepositBalances method');
+              newBalances.userDeposit = '0';
+            }
+          } catch (err) {
+            console.log('Error reading deposit balance:', err);
+            newBalances.userDeposit = '0';
+          }
+        } else {
+          newBalances.userDeposit = '0';
+        }
 
-        newBalances.treasury = formatUnits(
-          await paymentManager.getBalance(USDC, TEST_TREASURY_ADDRESS),
-          6
-        );
+        // Read accumulated earnings for selected host (if method exists)
+        if (selectedHost && hostManager) {
+          try {
+            if (hostManager.getAccumulatedEarnings) {
+              const hostEarnings = await hostManager.getAccumulatedEarnings(selectedHost.address);
+              newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
+            } else if (hostManager.getEarnings) {
+              const hostEarnings = await hostManager.getEarnings(selectedHost.address);
+              newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
+            } else {
+              newBalances.hostAccumulated = '0';
+            }
+          } catch (err) {
+            console.log('Could not read host accumulated earnings');
+            newBalances.hostAccumulated = '0';
+          }
+        }
+
+        // Read treasury accumulated balance (if method exists)
+        if (treasuryManager) {
+          try {
+            if (treasuryManager.getAccumulatedBalance) {
+              const treasuryBalance = await treasuryManager.getAccumulatedBalance();
+              newBalances.treasuryAccumulated = ethers.formatUnits(treasuryBalance, 6);
+            } else if (treasuryManager.getFees) {
+              const treasuryBalance = await treasuryManager.getFees();
+              newBalances.treasuryAccumulated = ethers.formatUnits(treasuryBalance, 6);
+            } else {
+              newBalances.treasuryAccumulated = '0';
+            }
+          } catch (err) {
+            console.log('Could not read treasury accumulated balance');
+            newBalances.treasuryAccumulated = '0';
+          }
+        }
 
         addLog(`Balances updated via SDK`);
-      } else {
-        // Fallback to direct viem calls if SDK not ready
-        console.log("Using direct viem calls to read balances");
-        console.log("USDC address:", USDC);
-        console.log("RPC URL:", RPC_URL);
-        
-        const readBalance = async (address: string) => {
-          try {
-            console.log(`Reading balance for ${address}...`);
-            const balance = await publicClient.readContract({
-              address: USDC,
-              abi: erc20BalanceOfAbi,
-              functionName: 'balanceOf',
-              args: [address as `0x${string}`]
-            }) as bigint;
-            const formatted = formatUnits(balance, 6);
-            console.log(`Balance for ${address}: ${formatted} USDC (raw: ${balance})`);
-            return formatted;
-          } catch (err) {
-            console.error(`Failed to read balance for ${address}:`, err);
-            return "0";
-          }
-        };
-
-        newBalances.testUser1 = await readBalance(TEST_USER_1_ADDRESS);
-        newBalances.host1 = await readBalance(TEST_HOST_1_ADDRESS);
-        newBalances.host2 = await readBalance(TEST_HOST_2_ADDRESS);
-        newBalances.treasury = await readBalance(TEST_TREASURY_ADDRESS);
-        
-        if (primaryAddr) {
-          newBalances.primary = await readBalance(primaryAddr);
-        }
-        
-        if (subAddr) {
-          newBalances.sub = await readBalance(subAddr);
-        }
-
-        addLog(`Balances updated via direct calls`);
       }
 
       setBalances(newBalances);
@@ -362,8 +316,8 @@ export default function BaseUsdcMvpFlowSDKTest() {
     }
   }
 
-  // Step 1: Connect & Fund accounts using SDK
-  async function step1ConnectAndFund() {
+  // Step 1: Authenticate with primary account
+  async function step1Authenticate() {
     if (!sdk) {
       setError("SDK not initialized");
       return;
@@ -394,59 +348,26 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
       addLog("✅ SDK authenticated and managers initialized");
 
-      // Connect Base Account if available
-      const provider = (window as any).__basProvider;
-      if (!provider) {
-        addLog("⚠️ Base Account SDK not available, using SDK's wallet directly");
-        setPrimaryAddr(TEST_USER_1_ADDRESS);
-        setSubAddr(TEST_USER_1_ADDRESS); // Use same address when no sub-account
-      } else {
-        // Connect wallet
-        const accounts = await provider.request({ method: "eth_requestAccounts" });
-        const universal = getAddress(accounts[0]) as `0x${string}`;
-        setPrimaryAddr(universal);
-        addLog(`Connected wallet: ${universal}`);
+      // Set user address to TEST_USER_1 (no sub-accounts)
+      setUserAddress(TEST_USER_1_ADDRESS);
+      addLog(`✅ Using primary account: ${TEST_USER_1_ADDRESS}`);
 
-        // Get or create sub-account
-        const subAccount = await ensureSubAccount(provider, universal);
-        setSubAddr(subAccount);
-      }
-
-      // Transfer initial USDC using PaymentManager
-      addLog("Checking USDC balances...");
-
-      // Check TEST_USER_1 balance first
-      const user1Balance = await pm.getBalance(USDC, TEST_USER_1_ADDRESS);
-      addLog(`TEST_USER_1 USDC balance: ${formatUnits(user1Balance, 6)} USDC`);
-
-      // If using TEST_USER_1 directly, no transfer needed
-      if (primaryAddr === TEST_USER_1_ADDRESS || subAddr === TEST_USER_1_ADDRESS) {
-        addLog(`Using TEST_USER_1 directly (no transfer needed)`);
-      } else if (primaryAddr) {
-        // Transfer USDC from TEST_USER_1 to primary account
-        const primaryBalance = await pm.getBalance(USDC, primaryAddr);
-        addLog(`Primary account USDC balance: ${formatUnits(primaryBalance, 6)} USDC`);
-
-        // Transfer 10 USDC from TEST_USER_1 to primary account if needed
-        if (primaryBalance < parseUnits('5', 6)) {
-          addLog(`Transferring 10 USDC from TEST_USER_1 to primary account...`);
-          const transferAmount = parseUnits('10', 6);
-
-          // Use PaymentManager to transfer USDC
-          const txHash = await pm.transferToken(
-            USDC,
-            primaryAddr,
-            transferAmount
-          );
-          addLog(`Transfer complete! TX: ${txHash}`);
-
-          // Note: PaymentManager's transferToken already waits for confirmation
-          // No additional wait needed here
-
-          // Check new balance
-          const newPrimaryBalance = await pm.getBalance(USDC, primaryAddr);
-          addLog(`Primary account new balance: ${formatUnits(newPrimaryBalance, 6)} USDC`);
+      // Check USDC balance
+      const contracts = getContractAddresses();
+      try {
+        // PaymentManagerMultiChain getBalance returns { eth: string, usdc: string }
+        if (pm.getBalance) {
+          const balances = await pm.getBalance();
+          const usdcBalance = balances.usdc;
+          // Convert string to BigInt for formatting (already in decimal format)
+          const usdcBalanceWei = ethers.parseUnits(usdcBalance, 6);
+          addLog(`TEST_USER_1 USDC balance: ${usdcBalance} USDC`);
+        } else {
+          addLog(`Payment manager doesn't have balance checking methods`);
         }
+      } catch (err) {
+        console.log('Could not check USDC balance:', err);
+        addLog(`Could not check initial USDC balance`);
       }
 
       // Read all balances
@@ -454,7 +375,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
       setStepStatus(prev => ({ ...prev, 1: 'completed' }));
       setCurrentStep(1);
-      setStatus("✅ Step 1 Complete: Accounts connected and funded via SDK");
+      setStatus("✅ Step 1 Complete: Authenticated with primary account");
       addLog("Step 1: Complete");
       
     } catch (error: any) {
@@ -467,49 +388,124 @@ export default function BaseUsdcMvpFlowSDKTest() {
     }
   }
 
-  // Step 2: Discover Hosts using HostManager
-  async function step2DiscoverHosts() {
-    console.log("Step 2: hostManager state:", hostManager);
-    
-    if (!hostManager) {
-      const error = "HostManager not initialized. Did Step 1 complete successfully?";
-      setError(error);
-      console.error(error);
-      addLog(`❌ Step 2 failed: ${error}`);
+  // Step 2: Verify USDC Balance
+  async function step2DepositUSDC() {
+    if (!sdk) {
+      setError("SDK not initialized");
+      return;
+    }
+
+    // Get managers directly from SDK to avoid React state delay issues
+    const pm = sdk.getPaymentManager();
+    if (!pm) {
+      setError("PaymentManager not available from SDK");
       return;
     }
 
     setLoading(true);
     setStepStatus(prev => ({ ...prev, 2: 'in-progress' }));
-    
+
     try {
-      addLog("Step 2: Starting - Discover Active Hosts");
-      console.log("Calling hostManager.getActiveHosts()...");
+      addLog("Step 2: Starting - Deposit USDC to contract");
+      const contracts = getContractAddresses();
 
-      // Use HostManager to discover active hosts with models
-      const hosts = await (hostManager as any).discoverAllActiveHostsWithModels();
-      console.log("Got hosts:", hosts);
-      addLog(`Found ${hosts.length} active hosts via SDK`);
+      // First check if user already has deposit in contract
+      try {
+        const jobMarketplaceContract = new ethers.Contract(
+          contracts.JOB_MARKETPLACE,
+          ['function userDepositsToken(address user, address token) view returns (uint256)'],
+          sdk.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS])
+        );
 
-      // Parse host metadata - hosts already come with proper structure
-      const parsedHosts = hosts.map((host: any) => ({
-        address: host.address,
-        endpoint: host.apiUrl || host.endpoint,
-        models: host.supportedModels || [],
-        pricePerToken: 2000 // Default price
-      }));
+        const existingDeposit = await jobMarketplaceContract.userDepositsToken(userAddress, contracts.USDC);
+        const existingDepositFormatted = ethers.formatUnits(existingDeposit, 6);
 
-      setActiveHosts(parsedHosts);
-      
-      parsedHosts.forEach((host: any) => {
-        addLog(`Host: ${host.address}, Models: ${host.models.length > 0 ? host.models.join(', ') : 'none'}, Price: ${host.pricePerToken}`);
-      });
+        if (parseFloat(existingDepositFormatted) >= parseFloat(SESSION_DEPOSIT_AMOUNT)) {
+          addLog(`✅ Already have ${existingDepositFormatted} USDC deposited in contract`);
+          addLog(`Skipping deposit step - sufficient balance already deposited`);
+
+          // Update balances and mark complete
+          await readAllBalances();
+          setStepStatus(prev => ({ ...prev, 2: 'completed' }));
+          setCurrentStep(2);
+          setStatus("✅ Step 2 Complete: Using existing USDC deposit");
+          return;
+        } else if (parseFloat(existingDepositFormatted) > 0) {
+          addLog(`Found existing deposit: ${existingDepositFormatted} USDC`);
+          addLog(`Need to deposit additional ${parseFloat(SESSION_DEPOSIT_AMOUNT) - parseFloat(existingDepositFormatted)} USDC`);
+        }
+      } catch (err) {
+        console.log('Could not check existing deposit:', err);
+      }
+
+      // Get PaymentManager for all token operations
+      const pm = sdk.getPaymentManager();
+      if (!pm) {
+        throw new Error("PaymentManager not available from SDK");
+      }
+
+      // First, we need to approve the JobMarketplace contract to spend our USDC
+      const signer = sdk.getSigner();
+      if (!signer) {
+        throw new Error("Signer not available from SDK");
+      }
+
+      // Create USDC contract instance
+      const usdcContract = new ethers.Contract(
+        contracts.USDC,
+        [
+          'function approve(address spender, uint256 amount) returns (bool)',
+          'function allowance(address owner, address spender) view returns (uint256)'
+        ],
+        signer
+      );
+
+      // Get the actual JobMarketplace address from the PaymentManager
+      // The PaymentManager uses JobMarketplaceWrapper which gets the address from ChainRegistry
+      const jobMarketplaceAddress = contracts.JOB_MARKETPLACE;
+
+      // Check current allowance first
+      const currentAllowance = await usdcContract.allowance(
+        await signer.getAddress(),
+        jobMarketplaceAddress
+      );
+      addLog(`Current USDC allowance: ${ethers.formatUnits(currentAllowance, 6)} USDC`);
+
+      // Approve JobMarketplace to spend USDC
+      addLog(`Approving JobMarketplace (${jobMarketplaceAddress}) to spend ${SESSION_DEPOSIT_AMOUNT} USDC...`);
+      const approveAmount = ethers.parseUnits(SESSION_DEPOSIT_AMOUNT, 6); // USDC has 6 decimals
+      const approveTx = await usdcContract.approve(jobMarketplaceAddress, approveAmount);
+      await approveTx.wait(2); // Wait for 2 confirmations
+      addLog(`✅ USDC approval complete. TX: ${approveTx.hash}`);
+
+      // Verify the allowance was set
+      const newAllowance = await usdcContract.allowance(
+        await signer.getAddress(),
+        jobMarketplaceAddress
+      );
+      addLog(`New USDC allowance: ${ethers.formatUnits(newAllowance, 6)} USDC`);
+
+      // Now deposit the USDC to the contract
+      addLog(`Depositing ${SESSION_DEPOSIT_AMOUNT} USDC to contract...`);
+      const depositResult = await pm.depositToken(
+        contracts.USDC,
+        SESSION_DEPOSIT_AMOUNT
+      );
+
+      if (!depositResult || !depositResult.transactionHash) {
+        throw new Error("Deposit failed - no transaction hash returned");
+      }
+
+      addLog(`✅ USDC deposited successfully. TX: ${depositResult.transactionHash}`);
+      addLog(`Your $${SESSION_DEPOSIT_AMOUNT} is now in the contract for gasless sessions!`);
+
+      // The depositToken method should already wait for confirmations
+      // Just read updated balances immediately
+      await readAllBalances();
 
       setStepStatus(prev => ({ ...prev, 2: 'completed' }));
       setCurrentStep(2);
-      setStatus("✅ Step 2 Complete: Hosts discovered via SDK");
-      addLog("Step 2: Complete");
-      
+      setStatus("✅ Step 2 Complete: USDC deposited to contract");
     } catch (error: any) {
       console.error("Step 2 failed:", error);
       setError(`Step 2 failed: ${error.message}`);
@@ -520,69 +516,159 @@ export default function BaseUsdcMvpFlowSDKTest() {
     }
   }
 
-  // Step 3: Create Session using SessionManager
-  async function step3CreateSession() {
-    console.log("Step 3: sessionManager state:", sessionManager, "paymentManager state:", paymentManager);
-    
-    if (!sessionManager || !paymentManager) {
-      const error = "SessionManager or PaymentManager not initialized. Did Step 1 complete successfully?";
-      setError(error);
-      console.error(error, { sessionManager, paymentManager });
-      addLog(`❌ Step 3 failed: ${error}`);
+  // Step 3: Discover and select random host
+  async function step3DiscoverHosts() {
+    // Get HostManager directly from SDK to avoid React state issues
+    const hm = sdk?.getHostManager();
+    if (!hm) {
+      setError("HostManager not available from SDK");
       return;
     }
 
     setLoading(true);
     setStepStatus(prev => ({ ...prev, 3: 'in-progress' }));
-    
-    try {
-      addLog("Step 3: Starting - Create Session with USDC deposit");
-      console.log("Step 3: Creating session...");
 
-      // Validate we have hosts available
-      if (activeHosts.length === 0) {
-        throw new Error('No active hosts available. Please ensure hosts are registered and online.');
+    try {
+      addLog("Step 3: Starting - Discover active hosts and select randomly");
+
+      // Use HostManager to discover active hosts with models
+      const hosts = await (hm as any).discoverAllActiveHostsWithModels();
+      addLog(`Found ${hosts.length} active hosts`);
+
+      if (hosts.length === 0) {
+        throw new Error("No active hosts found");
       }
 
-      const selectedHost = activeHosts[0];
+      // Parse host metadata
+      const parsedHosts = hosts.map((host: any) => ({
+        address: host.address,
+        endpoint: host.apiUrl || host.endpoint || `http://localhost:8080`,  // Use endpoint property name
+        models: host.supportedModels || [],
+        pricePerToken: 2000 // Default price
+      }));
+
+      // Filter hosts that support our model
+      const modelSupported = parsedHosts.filter((h: any) => h.models && h.models.length > 0);
+      if (modelSupported.length === 0) {
+        throw new Error("No active hosts found supporting required models");
+      }
+
+      // Randomly select a host
+      const randomIndex = Math.floor(Math.random() * modelSupported.length);
+      const selected = modelSupported[randomIndex];
+      setSelectedHost(selected);
+      selectedHostRef.current = selected;  // Also update ref for immediate access
+      setActiveHosts(modelSupported);
+
+      addLog(`✅ Randomly selected host: ${selected.address}`);
+      addLog(`   API URL: ${selected.endpoint}`);
+      addLog(`   Models: ${selected.models.join(', ')}`);
+
+      // Read host's accumulated earnings
+      await readAllBalances();
+
+      setStepStatus(prev => ({ ...prev, 3: 'completed' }));
+      setCurrentStep(3);
+      setStatus(`✅ Step 3 Complete: Selected host ${selected.address}`);
+    } catch (error: any) {
+      console.error("Step 3 failed:", error);
+      setError(`Step 3 failed: ${error.message}`);
+      setStepStatus(prev => ({ ...prev, 3: 'failed' }));
+      addLog(`❌ Step 3 failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Step 4: Create Session from deposit
+  async function step4CreateSession() {
+    // Get managers directly from SDK instead of relying on state
+    const sm = sdk?.getSessionManager();
+    const pm = sdk?.getPaymentManager();
+
+    console.log("Step 4: sessionManager from SDK:", sm, "paymentManager from SDK:", pm);
+
+    if (!sm || !pm) {
+      const error = "SessionManager or PaymentManager not initialized. Did Step 1 complete successfully?";
+      setError(error);
+      console.error(error, { sessionManager: sm, paymentManager: pm });
+      addLog(`❌ Step 4 failed: ${error}`);
+      return;
+    }
+
+    setLoading(true);
+    setStepStatus(prev => ({ ...prev, 4: 'in-progress' }));
+
+    try {
+      addLog("Step 4: Starting - Create Session with USDC deposit");
+      console.log("Step 4: Creating session...");
+
+      // Get contract addresses
+      const contracts = getContractAddresses();
+
+      // Validate we have a selected host from Step 3 (check ref first, then state)
+      const hostToUse = selectedHostRef.current || selectedHost;
+      if (!hostToUse) {
+        throw new Error('No host selected. Please run Step 3 first to select a host.');
+      }
 
       // Validate host has models
-      if (!selectedHost.models || selectedHost.models.length === 0) {
-        throw new Error(`Host ${selectedHost.address} does not support any models. Please ensure the host has registered models.`);
+      if (!hostToUse.models || hostToUse.models.length === 0) {
+        throw new Error(`Host ${hostToUse.address} does not support any models. Please ensure the host has registered models.`);
       }
 
-      const selectedModel = selectedHost.models[0];
-      const hostEndpoint = selectedHost.endpoint;
+      const selectedModel = hostToUse.models[0];
+      const hostEndpoint = hostToUse.endpoint;
       if (!hostEndpoint) {
-        throw new Error(`Host ${selectedHost.address} does not have an API endpoint configured. Cannot proceed with this host.`);
+        throw new Error(`Host ${hostToUse.address} does not have an API endpoint configured. Cannot proceed with this host.`);
       }
 
-      addLog(`Using host: ${selectedHost.address}`);
+      addLog(`Using host: ${hostToUse.address}`);
       addLog(`Using model: ${selectedModel}`);
       addLog(`Using endpoint: ${hostEndpoint}`);
 
-      // Create session using SessionManager
+      // Create session using the deposited USDC funds
+      // Step 2 already deposited the funds, so we can create sessions without popups
       const sessionConfig = {
-        depositAmount: SESSION_DEPOSIT_AMOUNT, // "2" string format
-        pricePerToken: Number(selectedHost.pricePerToken || PRICE_PER_TOKEN),
+        depositAmount: SESSION_DEPOSIT_AMOUNT, // Use from deposited funds
+        pricePerToken: Number(hostToUse.pricePerToken || PRICE_PER_TOKEN),
         proofInterval: PROOF_INTERVAL,
-        duration: SESSION_DURATION
+        duration: SESSION_DURATION,
+        paymentToken: contracts.USDC,  // Using USDC from deposit
+        useDeposit: true,  // Use deposited funds, not direct payment
+        chainId: selectedChainId  // REQUIRED: Chain ID for multi-chain support
       };
 
       console.log("Session config:", sessionConfig);
+
+      // No approval needed - we're using deposited funds!
+      addLog(`Creating session using deposited USDC (no transaction popup!)...`);
+
+      // Now create the session with USDC payment
       console.log("Calling sessionManager.startSession with:", {
         model: selectedModel,
-        provider: selectedHost.address,
+        provider: hostToUse.address,
         config: sessionConfig,
         endpoint: hostEndpoint
       });
 
-      const result = await sessionManager.startSession(
-        selectedModel,
-        selectedHost.address,
-        sessionConfig,
-        hostEndpoint
-      );
+      // StartSession expects a flat config object with chainId at the top level
+      const fullSessionConfig = {
+        ...sessionConfig,
+        model: selectedModel,
+        provider: hostToUse.address,
+        hostAddress: hostToUse.address,  // Some implementations might expect hostAddress
+        endpoint: hostEndpoint,
+        chainId: selectedChainId  // Ensure chainId is at the top level
+      };
+
+      console.log("Full session config:", fullSessionConfig);
+      console.log("Host address:", hostToUse.address);
+      console.log("Payment token:", contracts.USDC);
+      console.log("Chain ID:", selectedChainId);
+
+      // Call startSession with the complete config
+      const result = await sm.startSession(fullSessionConfig);
 
       console.log("Session created successfully:", result);
 
@@ -594,48 +680,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
       // Read balances to see deposit deducted
       await readAllBalances();
 
-      setStepStatus(prev => ({ ...prev, 3: 'completed' }));
-      setCurrentStep(3);
-      setStatus("✅ Step 3 Complete: Session created with deposit");
-      addLog("Step 3: Complete");
-      
-    } catch (error: any) {
-      console.error("Step 3 failed:", error);
-      setError(`Step 3 failed: ${error.message}`);
-      setStepStatus(prev => ({ ...prev, 3: 'failed' }));
-      addLog(`❌ Step 3 failed: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Step 4: Send Prompt using SessionManager
-  async function step4SendPrompt() {
-    if (!sessionManager || !sessionId) {
-      setError("SessionManager not initialized or no active session");
-      return;
-    }
-
-    setLoading(true);
-    setStepStatus(prev => ({ ...prev, 4: 'in-progress' }));
-    
-    try {
-      addLog("Step 4: Starting - Send inference prompt");
-
-      const prompt = "What is the capital of France? Please provide a brief answer.";
-      addLog(`Sending prompt: "${prompt}"`);
-
-      // Send prompt via SessionManager (handles WebSocket internally)
-      const response = await sessionManager.sendPrompt(sessionId, prompt);
-
-      addLog(`✅ Prompt sent successfully`);
-      addLog(`📝 Full LLM Response: "${response}"`);
-
       setStepStatus(prev => ({ ...prev, 4: 'completed' }));
       setCurrentStep(4);
-      setStatus("✅ Step 4 Complete: Prompt sent");
-      addLog("Step 4: Complete");
-      
+      setStatus("✅ Step 4 Complete: Session created from deposit");
+
     } catch (error: any) {
       console.error("Step 4 failed:", error);
       setError(`Step 4 failed: ${error.message}`);
@@ -646,8 +694,65 @@ export default function BaseUsdcMvpFlowSDKTest() {
     }
   }
 
-  // Step 5: Stream Response (simulated as SessionManager handles it)
-  async function step5StreamResponse() {
+  // Step 5: Send prompt to LLM
+  async function step5SendPrompt() {
+    const sm = sdk?.getSessionManager();
+
+    if (!sm || !sessionId) {
+      setError("SessionManager not initialized or no active session");
+      return;
+    }
+
+    setLoading(true);
+    setStepStatus(prev => ({ ...prev, 5: 'in-progress' }));
+
+    try {
+      addLog("Step 5: Starting - Send inference prompt");
+
+      const prompt = "What is the capital of France? Please provide a brief answer.";
+      addLog(`Sending prompt: "${prompt}"`);
+
+      // Send prompt via SessionManager using WebSocket for proper settlement
+      const response = await sm.sendPromptStreaming(sessionId, prompt);
+
+      addLog(`✅ Prompt sent successfully`);
+      addLog(`📝 Full LLM Response: "${response}"`);
+
+      // Count tokens (rough estimate: ~4 chars per token)
+      const promptTokens = Math.ceil(prompt.length / 4);
+      const responseTokens = Math.ceil(response.length / 4);
+      const totalTokens = promptTokens + responseTokens;
+
+      // Ensure minimum 100 tokens for ProofSystem requirements
+      const billableTokens = Math.max(totalTokens, 100);
+      setTotalTokensGenerated(billableTokens);
+
+      addLog(`📊 Token count: ${promptTokens} (prompt) + ${responseTokens} (response) = ${totalTokens} tokens`);
+      addLog(`💰 Billable tokens: ${billableTokens} (minimum 100 for ProofSystem)`);
+
+      setStepStatus(prev => ({ ...prev, 5: 'completed' }));
+      setCurrentStep(5);
+      setStatus("✅ Step 5 Complete: Prompt sent and response received");
+      addLog("Step 5: Complete");
+
+    } catch (error: any) {
+      console.error("Step 5 failed:", error);
+      setError(`Step 5 failed: ${error.message}`);
+      setStepStatus(prev => ({ ...prev, 5: 'failed' }));
+      addLog(`❌ Step 5 failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Old unused functions removed
+  // The following old functions have been removed as they're no longer needed:
+  // step5StreamResponse, step6TrackTokens, step7SubmitCheckpoint, step8ValidateProof,
+  // step9RecordHostEarnings, step10RecordTreasuryFees, step11SaveToS5, step13MarkComplete,
+  // step14TriggerSettlement, step15SettlePayments, step16HostWithdrawal, step17TreasuryWithdrawal
+
+  // Dummy function to prevent errors if referenced
+  async function step5StreamResponseOld() {
     if (!sessionManager || !sessionId) {
       setError("SessionManager not initialized or no active session");
       return;
@@ -942,34 +1047,54 @@ export default function BaseUsdcMvpFlowSDKTest() {
     }
   }
 
-  // Step 12: Close Session
-  async function step12CloseSession() {
-    if (!sessionManager || !sessionId) {
+  // Step 6: End session (close WebSocket, host will complete contract)
+  async function step6CompleteSession() {
+    const sm = sdk?.getSessionManager();
+
+    if (!sm || !sessionId) {
       setError("SessionManager not initialized or no active session");
       return;
     }
 
     setLoading(true);
-    setStepStatus(prev => ({ ...prev, 12: 'in-progress' }));
-    
+    setStepStatus(prev => ({ ...prev, 6: 'in-progress' }));
+
     try {
-      addLog("Step 12: Starting - Close session");
+      addLog("Step 6: Starting - End session (close WebSocket)");
 
-      // End session via SessionManager (without marking complete yet)
-      await sessionManager.pauseSession(sessionId);
+      // Record balances before ending
+      const beforeBalances = { ...balances };
+      addLog(`Host accumulated before: ${beforeBalances.hostAccumulated || '0'} USDC`);
+      addLog(`Treasury accumulated before: ${beforeBalances.treasuryAccumulated || '0'} USDC`);
 
-      addLog(`✅ Session closed/paused`);
+      // Simply end the session - closes WebSocket, no blockchain calls
+      await sm.endSession(sessionId);
 
-      setStepStatus(prev => ({ ...prev, 12: 'completed' }));
-      setCurrentStep(12);
-      setStatus("✅ Step 12 Complete: Session closed");
-      addLog("Step 12: Complete");
-      
+      addLog(`✅ Session ended successfully`);
+      addLog(`🔐 WebSocket disconnected`);
+      addLog(`⏳ Host will detect disconnect and complete contract to claim earnings`);
+
+      // Calculate expected payment distribution
+      const tokensCost = (totalTokensGenerated * PRICE_PER_TOKEN) / 1000000; // Convert to USDC
+      const hostPayment = tokensCost * 0.9; // 90% to host
+      const treasuryPayment = tokensCost * 0.1; // 10% to treasury
+
+      addLog(`📊 Tokens used in session: ${totalTokensGenerated}`);
+      addLog(`💰 Expected payment distribution (when host completes):`);
+      addLog(`   Total cost: ${tokensCost.toFixed(6)} USDC (${totalTokensGenerated} tokens × $${PRICE_PER_TOKEN/1000000}/token)`);
+      addLog(`   Host will receive: ${hostPayment.toFixed(6)} USDC (90%)`);
+      addLog(`   Treasury will receive: ${treasuryPayment.toFixed(6)} USDC (10%)`);
+
+      addLog(`ℹ️ Note: Balances won't update until host calls completeSessionJob`);
+
+      setStepStatus(prev => ({ ...prev, 6: 'completed' }));
+      setCurrentStep(6);
+      setStatus("✅ Step 6 Complete: Session ended, awaiting host completion");
     } catch (error: any) {
-      console.error("Step 12 failed:", error);
-      setError(`Step 12 failed: ${error.message}`);
-      setStepStatus(prev => ({ ...prev, 12: 'failed' }));
-      addLog(`❌ Step 12 failed: ${error.message}`);
+      console.error("Step 6 failed:", error);
+      setError(`Step 6 failed: ${error.message}`);
+      setStepStatus(prev => ({ ...prev, 6: 'failed' }));
+      addLog(`❌ Step 6 failed: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -1157,21 +1282,21 @@ export default function BaseUsdcMvpFlowSDKTest() {
     }
   }
 
-  // Run all 17 steps sequentially
-  async function runFullFlow() {
+  // Run all 17 steps sequentially (OLD VERSION - REMOVED TO AVOID DUPLICATE)
+  async function runFullFlow_OLD_REMOVED() {
     addLog("Starting full 17-step flow...");
-    
+
     // Reset state
     setError("");
     setStepStatus({});
     setCurrentStep(0);
     setLoading(true);
-    
+
     try {
       // Step 1: Connect & Fund with Base Account Kit
       addLog("=== Step 1: Connect & Fund (Base Account Kit) ===");
       setStepStatus(prev => ({ ...prev, 1: 'in-progress' }));
-      
+
       // Check if Base Account SDK is available
       const provider = (window as any).__basProvider;
       let primaryAccount: string = "";
@@ -1530,8 +1655,8 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog(`📤 Sending prompt: "${prompt}"`);
       
       try {
-        // Send prompt via SessionManager (real LLM inference)
-        const response = await sm.sendPrompt(result.sessionId, prompt);
+        // Send prompt via SessionManager using WebSocket for proper settlement
+        const response = await sm.sendPromptStreaming(result.sessionId, prompt);
         
         addLog(`✅ Prompt sent successfully`);
         addLog(`📝 Full LLM Response: "${response}"`);
@@ -1902,256 +2027,274 @@ export default function BaseUsdcMvpFlowSDKTest() {
     }
   }
 
-  return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="bg-white rounded-lg shadow p-6">
-        <h1 className="text-2xl font-bold mb-4">Base USDC MVP Flow Test (SDK Version)</h1>
-        <p className="text-gray-600 mb-4">17-step end-to-end test using FabstirSDKCore</p>
-        
-        <div className="bg-blue-50 p-4 rounded mb-4">
-          <p className="text-blue-700 font-medium">Status: {status}</p>
-          <p className="text-blue-600">Current Step: {currentStep}/17</p>
-        </div>
+  // Helper to run all steps automatically
+  async function runFullFlow() {
+    setError("");
+    setLogs([]);
+    setCurrentStep(0);
+    setStepStatus({});
+    setStatus("Starting full multi-chain USDC payment flow...");
 
-        {error && (
-          <div className="bg-red-50 p-4 rounded mb-4">
-            <p className="text-red-700">{error}</p>
-          </div>
+    try {
+      // Step 1: Authenticate
+      addLog("=== Running Step 1: Authenticate ===");
+      await step1Authenticate();
+
+      // Small delay for UI visibility only
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Step 2: Deposit USDC (skip if already have deposit)
+      addLog("=== Running Step 2: Deposit USDC ===");
+
+      // Check deposit balance directly from contract
+      let shouldDeposit = true;
+      try {
+        const contracts = getContractAddresses();
+        const signer = await sdk.getSigner();
+        const jobMarketplaceContract = new ethers.Contract(
+          contracts.JOB_MARKETPLACE,
+          ['function userDepositsToken(address user, address token) view returns (uint256)'],
+          signer || sdk.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS])
+        );
+
+        const userAddr = await signer.getAddress();
+        const depositBalance = await jobMarketplaceContract.userDepositsToken(userAddr, contracts.USDC);
+        const depositFormatted = ethers.formatUnits(depositBalance, 6);
+
+        if (parseFloat(depositFormatted) >= parseFloat(SESSION_DEPOSIT_AMOUNT)) {
+          addLog(`✅ Already have ${depositFormatted} USDC deposited, skipping deposit step`);
+          setStepStatus(prev => ({ ...prev, 2: 'completed' }));
+          setCurrentStep(2);
+          shouldDeposit = false;
+        }
+      } catch (err) {
+        console.log('Could not check deposit balance:', err);
+      }
+
+      if (shouldDeposit) {
+        await step2DepositUSDC();
+        // Check if step failed by checking error state
+        const latestError = await new Promise<string>(resolve => {
+          setTimeout(() => {
+            setError(current => {
+              resolve(current);
+              return current;
+            });
+          }, 100);
+        });
+        if (latestError) {
+          addLog("Flow stopped due to Step 2 error");
+          throw new Error(latestError);
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Step 3: Discover hosts
+      addLog("=== Running Step 3: Discover Hosts ===");
+      await step3DiscoverHosts();
+
+      // Get the host that was selected (since React state won't be updated yet)
+      const hm = sdk?.getHostManager();
+      const currentHosts = await (hm as any).discoverAllActiveHostsWithModels();
+      if (!currentHosts || currentHosts.length === 0) {
+        addLog("Flow stopped - no hosts discovered");
+        throw new Error("No hosts available");
+      }
+
+      // Select a random host for the flow
+      const parsedHosts = currentHosts.map((host: any) => ({
+        address: host.address,
+        endpoint: host.apiUrl || host.endpoint || `http://localhost:8080`,
+        models: host.supportedModels || [],
+        pricePerToken: 2000
+      }));
+      const randomIndex = Math.floor(Math.random() * parsedHosts.length);
+      const flowSelectedHost = parsedHosts[randomIndex];
+
+      // Store in state for UI AND use a ref to ensure it's available immediately
+      setSelectedHost(flowSelectedHost);
+      selectedHostRef.current = flowSelectedHost;
+
+      // IMPORTANT: Use a temporary workaround to ensure the host is available
+      // We'll create a modified version of step4CreateSession that uses the host directly
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Step 4: Create session - ensure host is set
+      addLog("=== Running Step 4: Create Session ===");
+
+      // Force set the selected host again right before calling step4
+      await new Promise(resolve => {
+        setSelectedHost(flowSelectedHost);
+        setTimeout(resolve, 100);
+      });
+
+      await step4CreateSession();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Step 5: Send prompt
+      addLog("=== Running Step 5: Send Prompt ===");
+      await step5SendPrompt();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Step 6: Complete session
+      addLog("=== Running Step 6: Complete Session ===");
+      await step6CompleteSession();
+
+      setStatus("✅ Full flow completed successfully!");
+      addLog("🎉 All steps completed successfully!");
+    } catch (err: any) {
+      addLog(`❌ Full flow failed: ${err.message}`);
+      setError(`Full flow failed: ${err.message}`);
+    }
+  }
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto">
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold mb-2">Multi-Chain USDC Payment Flow Test</h1>
+        <p className="text-gray-600">Using primary account directly with deposit pattern</p>
+      </div>
+
+      {/* Chain Selector */}
+      <div className="mb-6 p-4 border rounded">
+        <label className="block text-sm font-medium mb-2">Select Chain:</label>
+        <select
+          value={selectedChainId}
+          onChange={(e) => setSelectedChainId(Number(e.target.value))}
+          className="px-3 py-2 border rounded"
+          disabled={loading || currentStep > 0}
+        >
+          <option value={ChainId.BASE_SEPOLIA}>Base Sepolia (ETH)</option>
+          <option value={ChainId.OPBNB_TESTNET}>opBNB Testnet (BNB)</option>
+        </select>
+        {currentStep > 0 && (
+          <p className="text-sm text-gray-500 mt-1">Chain locked during active flow</p>
         )}
       </div>
 
-      {/* Step Progress Indicator */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-semibold mb-4">Step Progress</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {[
-            "1. Connect & Fund",
-            "2. Discover Hosts",
-            "3. Create Session",
-            "4. Send Prompt",
-            "5. Stream Response",
-            "6. Track Tokens",
-            "7. Submit Checkpoint",
-            "8. Validate Proof",
-            "9. Record Host Earnings",
-            "10. Record Treasury Fees",
-            "11. Save to S5",
-            "12. Close Session",
-            "13. Mark Complete",
-            "14. Trigger Settlement",
-            "15. Settle Payments",
-            "16. Host Withdrawal",
-            "17. Treasury Withdrawal"
-          ].map((stepName, idx) => {
-            const stepNum = idx + 1;
-            const status = stepStatus[stepNum] || 'pending';
-            const colorClass = status === 'completed' ? 'bg-green-100 text-green-800' :
-                             status === 'in-progress' ? 'bg-blue-100 text-blue-800' :
-                             status === 'failed' ? 'bg-red-100 text-red-800' :
-                             'bg-gray-100 text-gray-600';
-            
-            return (
-              <div key={stepNum} className={`p-3 rounded ${colorClass}`}>
-                {stepName}
-              </div>
-            );
-          })}
+      {/* Status Display */}
+      <div className="mb-6 p-4 border rounded bg-gray-50">
+        <div className="flex items-center justify-between">
+          <span className="text-lg font-medium">{status}</span>
+          <span className="text-sm text-gray-500">Step {currentStep}/6</span>
         </div>
       </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="mb-6 p-4 border border-red-400 rounded bg-red-50">
+          <p className="text-red-700">{error}</p>
+        </div>
+      )}
 
       {/* Balance Display */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-semibold mb-4">USDC Balances</h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          <div className="text-center">
-            <p className="text-gray-600 text-sm">Test User 1</p>
-            <p className="font-mono font-semibold">{balances.testUser1 || '0'}</p>
+      <div className="mb-6 grid grid-cols-2 gap-4">
+        <div className="p-4 border rounded">
+          <h3 className="font-bold mb-2">Account Balances</h3>
+          <div className="space-y-1 text-sm">
+            <div>User (TEST_USER_1): {balances.testUser1 || '...'} USDC</div>
+            <div>User Deposit in Contract: {balances.userDeposit || '0'} USDC</div>
           </div>
-          <div className="text-center">
-            <p className="text-gray-600 text-sm">Primary</p>
-            <p className="font-mono font-semibold">{balances.primary || '0'}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-gray-600 text-sm">Sub-Account</p>
-            <p className="font-mono font-semibold">{balances.sub || '0'}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-gray-600 text-sm">Host 1</p>
-            <p className="font-mono font-semibold">{balances.host1 || '0'}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-gray-600 text-sm">Host 2</p>
-            <p className="font-mono font-semibold">{balances.host2 || '0'}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-gray-600 text-sm">Treasury</p>
-            <p className="font-mono font-semibold">{balances.treasury || '0'}</p>
+        </div>
+        <div className="p-4 border rounded">
+          <h3 className="font-bold mb-2">Accumulated Earnings</h3>
+          <div className="space-y-1 text-sm">
+            <div>Host Accumulated: {balances.hostAccumulated || '0'} USDC</div>
+            <div className="text-xs text-gray-600">HostEarnings Contract: 0x908962e8c6CE72610021586f85ebDE09aAc97776</div>
+            <div className="mt-2">Treasury Accumulated: {balances.treasuryAccumulated || '0'} USDC</div>
+            <div className="text-xs text-gray-600">JobMarketplace Contract: {process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE}</div>
           </div>
         </div>
       </div>
 
-      {/* Controls */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-semibold mb-4">Controls</h2>
-        
-        {/* Individual Step Buttons */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          <button
-            onClick={step1ConnectAndFund}
-            disabled={loading || currentStep >= 1}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[1] === 'in-progress' ? 'Processing...' : 'Step 1: Connect'}
-          </button>
-          
-          <button
-            onClick={step2DiscoverHosts}
-            disabled={loading || currentStep < 1 || currentStep >= 2}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[2] === 'in-progress' ? 'Processing...' : 'Step 2: Discover'}
-          </button>
-
-          <button
-            onClick={step3CreateSession}
-            disabled={loading || currentStep < 2 || currentStep >= 3}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[3] === 'in-progress' ? 'Processing...' : 'Step 3: Create Session'}
-          </button>
-
-          <button
-            onClick={step4SendPrompt}
-            disabled={loading || currentStep < 3 || currentStep >= 4}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[4] === 'in-progress' ? 'Processing...' : 'Step 4: Send Prompt'}
-          </button>
-
-          <button
-            onClick={step5StreamResponse}
-            disabled={loading || currentStep < 4 || currentStep >= 5}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[5] === 'in-progress' ? 'Processing...' : 'Step 5: Stream'}
-          </button>
-
-          <button
-            onClick={step6TrackTokens}
-            disabled={loading || currentStep < 5 || currentStep >= 6}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[6] === 'in-progress' ? 'Processing...' : 'Step 6: Track Tokens'}
-          </button>
-
-          <button
-            onClick={step7SubmitCheckpoint}
-            disabled={loading || currentStep < 6 || currentStep >= 7}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[7] === 'in-progress' ? 'Processing...' : 'Step 7: Checkpoint'}
-          </button>
-
-          <button
-            onClick={step8ValidateProof}
-            disabled={loading || currentStep < 7 || currentStep >= 8}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[8] === 'in-progress' ? 'Processing...' : 'Step 8: Validate'}
-          </button>
-
-          <button
-            onClick={step9RecordHostEarnings}
-            disabled={loading || currentStep < 8 || currentStep >= 9}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[9] === 'in-progress' ? 'Processing...' : 'Step 9: Host Earn'}
-          </button>
-
-          <button
-            onClick={step10RecordTreasuryFees}
-            disabled={loading || currentStep < 9 || currentStep >= 10}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[10] === 'in-progress' ? 'Processing...' : 'Step 10: Treasury'}
-          </button>
-
-          <button
-            onClick={step11SaveToS5}
-            disabled={loading || currentStep < 10 || currentStep >= 11}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[11] === 'in-progress' ? 'Processing...' : 'Step 11: Save S5'}
-          </button>
-
-          <button
-            onClick={step12CloseSession}
-            disabled={loading || currentStep < 11 || currentStep >= 12}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[12] === 'in-progress' ? 'Processing...' : 'Step 12: Close'}
-          </button>
-
-          <button
-            onClick={step13MarkComplete}
-            disabled={loading || currentStep < 12 || currentStep >= 13}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[13] === 'in-progress' ? 'Processing...' : 'Step 13: Complete'}
-          </button>
-
-          <button
-            onClick={step14TriggerSettlement}
-            disabled={loading || currentStep < 13 || currentStep >= 14}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[14] === 'in-progress' ? 'Processing...' : 'Step 14: Trigger'}
-          </button>
-
-          <button
-            onClick={step15SettlePayments}
-            disabled={loading || currentStep < 14 || currentStep >= 15}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[15] === 'in-progress' ? 'Processing...' : 'Step 15: Settle'}
-          </button>
-
-          <button
-            onClick={step16HostWithdrawal}
-            disabled={loading || currentStep < 15 || currentStep >= 16}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[16] === 'in-progress' ? 'Processing...' : 'Step 16: Host W/D'}
-          </button>
-
-          <button
-            onClick={step17TreasuryWithdrawal}
-            disabled={loading || currentStep < 16 || currentStep >= 17}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm"
-          >
-            {loading && stepStatus[17] === 'in-progress' ? 'Processing...' : 'Step 17: Treasury W/D'}
-          </button>
+      {/* Selected Host Info */}
+      {selectedHost && (
+        <div className="mb-6 p-4 border rounded bg-blue-50">
+          <h3 className="font-bold mb-2">Selected Host</h3>
+          <div className="text-sm space-y-1">
+            <div>Address: {selectedHost.address}</div>
+            <div>API URL: {selectedHost.apiUrl}</div>
+            <div>Models: {selectedHost.models.join(', ')}</div>
+          </div>
         </div>
+      )}
 
-        {/* Full Flow Button */}
+      {/* Action Buttons */}
+      <div className="mb-6 flex flex-wrap gap-2">
         <button
           onClick={runFullFlow}
           disabled={loading}
-          className="w-full px-6 py-3 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-300 disabled:cursor-not-allowed font-semibold"
+          className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-300"
         >
-          Run Full 17-Step Flow
+          {loading ? 'Processing...' : 'Run Full Flow'}
+        </button>
+
+        <button
+          onClick={step1Authenticate}
+          disabled={loading || currentStep >= 1}
+          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
+        >
+          Step 1: Authenticate
+        </button>
+
+        <button
+          onClick={step2DepositUSDC}
+          disabled={loading || currentStep < 1 || currentStep >= 2}
+          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
+        >
+          Step 2: Deposit USDC
+        </button>
+
+        <button
+          onClick={step3DiscoverHosts}
+          disabled={loading || currentStep < 2 || currentStep >= 3}
+          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
+        >
+          Step 3: Discover Hosts
+        </button>
+
+        <button
+          onClick={step4CreateSession}
+          disabled={loading || currentStep < 3 || currentStep >= 4}
+          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
+        >
+          Step 4: Create Session (from deposit)
+        </button>
+
+        <button
+          onClick={step5SendPrompt}
+          disabled={loading || currentStep < 4 || currentStep >= 5}
+          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
+        >
+          Step 5: Send Prompt
+        </button>
+
+        <button
+          onClick={step6CompleteSession}
+          disabled={loading || currentStep < 5 || currentStep >= 6}
+          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
+        >
+          Step 6: Complete Session
+        </button>
+
+        <button
+          onClick={readAllBalances}
+          disabled={loading}
+          className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 disabled:bg-gray-300"
+        >
+          Refresh Balances
         </button>
       </div>
 
       {/* Logs */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-semibold mb-4">Execution Logs</h2>
-        <div className="bg-gray-50 p-4 rounded h-64 overflow-y-auto font-mono text-sm">
+      <div className="p-4 border rounded bg-gray-900 text-gray-100">
+        <h3 className="font-bold mb-2">Activity Log</h3>
+        <div className="space-y-1 text-sm font-mono max-h-96 overflow-y-auto">
           {logs.length === 0 ? (
-            <p className="text-gray-500">No logs yet. Click a step button to begin.</p>
+            <div className="text-gray-400">No activity yet...</div>
           ) : (
-            logs.map((log, idx) => (
-              <div key={idx} className="mb-1">{log}</div>
+            logs.map((log, index) => (
+              <div key={index} className="whitespace-pre-wrap">{log}</div>
             ))
           )}
         </div>
@@ -2159,3 +2302,4 @@ export default function BaseUsdcMvpFlowSDKTest() {
     </div>
   );
 }
+

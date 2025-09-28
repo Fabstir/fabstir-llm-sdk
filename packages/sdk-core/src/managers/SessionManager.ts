@@ -102,20 +102,30 @@ export class SessionManager implements ISessionManager {
 
     try {
       // Create session job with payment
-      // depositAmount is already a string like "0.2" or "2", no conversion needed
-      const result = await this.paymentManager.createSessionJob(
-        model,
-        provider,
-        config.depositAmount, // Already a string like "0.2"
-        config.pricePerToken, // Already a number
-        config.proofInterval, // Already a number
-        config.duration       // Already a number
-      );
+      // PaymentManagerMultiChain expects a SessionJobParams object with 'amount' field
+      const sessionJobParams = {
+        host: provider,
+        model: model,
+        amount: config.depositAmount,  // PaymentManagerMultiChain expects 'amount', not 'depositAmount'
+        pricePerToken: config.pricePerToken,
+        proofInterval: config.proofInterval,
+        duration: config.duration,
+        chainId: config.chainId,
+        paymentToken: config.paymentToken,
+        useDeposit: config.useDeposit
+      };
+
+      const result = await this.paymentManager.createSessionJob(sessionJobParams);
+
+      // PaymentManagerMultiChain returns just the job ID as a number
+      // We'll use the job ID as both session ID and job ID for now
+      const jobId = typeof result === 'number' ? BigInt(result) : result.jobId || result;
+      const sessionId = typeof result === 'number' ? BigInt(result) : result.sessionId || jobId;
 
       // Create session state
       const sessionState: SessionState = {
-        sessionId: result.sessionId,
-        jobId: result.jobId,
+        sessionId: sessionId,
+        jobId: jobId,
         chainId: config.chainId,
         model,
         provider,
@@ -129,17 +139,17 @@ export class SessionManager implements ISessionManager {
       };
 
       // Store in memory
-      this.sessions.set(result.sessionId.toString(), sessionState);
+      this.sessions.set(sessionId.toString(), sessionState);
 
       // Persist to storage (convert BigInt values to strings for JSON serialization)
       await this.storageManager.storeConversation({
-        id: result.sessionId.toString(),
+        id: sessionId.toString(),
         messages: [],
         metadata: {
           chainId: config.chainId,
           model,
           provider,
-          jobId: result.jobId.toString(),
+          jobId: jobId.toString(),
           config: {
             depositAmount: config.depositAmount?.toString() || '',
             pricePerToken: config.pricePerToken?.toString() || '',
@@ -152,8 +162,8 @@ export class SessionManager implements ISessionManager {
       });
 
       return {
-        sessionId: result.sessionId,
-        jobId: result.jobId
+        sessionId: sessionId,
+        jobId: jobId
       };
     } catch (error: any) {
       throw new SDKError(
@@ -343,12 +353,15 @@ export class SessionManager implements ISessionManager {
         await this.wsClient.connect();
 
         // Send session_init with chain_id
-        await this.wsClient.send({
+        // Get user address from payment manager's signer
+        const userAddress = await (this.paymentManager as any).signer?.getAddress() || '0x0000000000000000000000000000000000000000';
+
+        await this.wsClient.sendMessage({
           type: 'session_init',
           chain_id: session.chainId,
           session_id: sessionId.toString(),
-          job_id: session.jobId.toString(),
-          user_address: await this.paymentManager.getSessionJobManager().getSigner().getAddress()
+          jobId: session.jobId.toString(),
+          user_address: userAddress
         });
       }
 
@@ -358,11 +371,18 @@ export class SessionManager implements ISessionManager {
       // Set up streaming handler
       if (onToken) {
         const unsubscribe = this.wsClient.onMessage((data: any) => {
+          // Log ALL messages to see what the host is sending
+          console.log(`[SessionManager] WebSocket message received:`, JSON.stringify(data));
+
           if (data.type === 'stream_chunk' && data.content) {
             onToken(data.content);
             fullResponse += data.content;
           } else if (data.type === 'response') {
             fullResponse = data.content || fullResponse;
+          } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
+            console.log(`[SessionManager] PROOF SUBMITTED by host:`, data);
+          } else if (data.type === 'session_completed') {
+            console.log(`[SessionManager] SESSION COMPLETED by host:`, data);
           }
         });
 
@@ -371,6 +391,7 @@ export class SessionManager implements ISessionManager {
         const response = await this.wsClient.sendMessage({
           type: 'prompt',
           chain_id: session.chainId,
+          jobId: session.jobId.toString(),  // Include jobId for settlement tracking
           prompt: prompt,
           request: {
             model: 'tiny-vicuna',  // Use tiny-vicuna as confirmed by node developer
@@ -415,6 +436,7 @@ export class SessionManager implements ISessionManager {
         const response = await this.wsClient.sendMessage({
           type: 'prompt',
           chain_id: session.chainId,
+          jobId: session.jobId.toString(),  // Include jobId for settlement tracking
           prompt: prompt,
           request: {
             model: 'tiny-vicuna',  // Use tiny-vicuna as confirmed by node developer
@@ -605,6 +627,47 @@ export class SessionManager implements ISessionManager {
       throw new SDKError(
         `Failed to complete session: ${error.message}`,
         'SESSION_COMPLETE_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * End session cleanly (user-initiated)
+   * Just closes WebSocket - host will handle contract completion
+   */
+  async endSession(sessionId: bigint): Promise<void> {
+    const sessionIdStr = sessionId.toString();
+
+    try {
+      // Close WebSocket connection if active
+      if (this.wsClient && this.wsClient.isConnected()) {
+        console.log(`Closing WebSocket connection for session ${sessionIdStr}`);
+        await this.wsClient.disconnect();
+        this.wsClient = undefined;
+      }
+
+      // Update session state in memory
+      const session = this.sessions.get(sessionIdStr);
+      if (session) {
+        session.status = 'ended';
+        session.endTime = Date.now();
+      }
+
+      // Update storage to mark session as ended
+      const conversation = await this.storageManager.loadConversation(sessionIdStr);
+      if (conversation) {
+        conversation.metadata['status'] = 'ended';
+        conversation.metadata['endTime'] = Date.now();
+        conversation.updatedAt = Date.now();
+        await this.storageManager.saveConversation(conversation);
+      }
+
+      console.log(`Session ${sessionIdStr} ended by user - host will complete contract`);
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to end session: ${error.message}`,
+        'SESSION_END_ERROR',
         { originalError: error }
       );
     }

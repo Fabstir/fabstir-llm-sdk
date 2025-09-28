@@ -15,5 +15,5 @@ export { default as ERC20ABI } from './abis/ERC20-ABI.json';
 export { default as BaseAccountFactoryABI } from './abis/BaseAccountFactory-ABI.json';
 export { default as BaseSmartAccountABI } from './abis/BaseSmartAccount-ABI.json';
 
-// Export deployment info
-export { default as DEPLOYMENT_INFO } from './abis/DEPLOYMENT_INFO.json';
+// Note: DEPLOYMENT_INFO.json is for reference only and should not be imported
+// All contract addresses must come from environment variables

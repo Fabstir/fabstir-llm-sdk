@@ -854,6 +854,281 @@ interface HostMetrics {
 3. **Week 3**: Security & cleanup (8.6-8.8) - Remove test data
 4. **Week 4**: Integration testing (8.9) - Validate production readiness
 
+## Phase 9: Host CLI Multi-Chain Support & Bug Fixes
+
+### Sub-phase 9.1: Multi-Chain Configuration for CLI
+**Goal**: Add full multi-chain support to host-cli with chain selection
+
+**Tasks**:
+- [ ] Write tests in `tests/config/multi-chain-cli.test.ts` (200 lines)
+- [ ] Update `packages/host-cli/src/sdk/config.ts` to support opBNB (100 lines max)
+- [ ] Add `--chain` flag to all commands
+- [ ] Create chain configuration loader with validation
+- [ ] Support chain switching during runtime
+- [ ] Add chain ID validation for all operations
+
+**Implementation Notes**:
+```typescript
+// Add to SDKConfig
+interface SDKConfig {
+  chainId: number; // Support 84532 (Base Sepolia) and 5611 (opBNB)
+  chainName: 'base-sepolia' | 'opbnb-testnet';
+  // Remove hardcoded chain ID from line 59
+}
+
+// Update all commands to accept chain
+.option('--chain <chain>', 'Target chain (base-sepolia, opbnb-testnet)', 'base-sepolia')
+```
+
+### Sub-phase 9.2: Fix Registration Flow & Duplicate Check
+**Goal**: Prevent registration failures when node already registered
+
+**Tasks**:
+- [ ] Write tests in `tests/registration/duplicate-check.test.ts` (150 lines)
+- [ ] Update `packages/host-cli/src/registration/manager.ts` (add 50 lines)
+- [ ] Add pre-registration check before attempting registration
+- [ ] Handle separate registerNode + stake flow properly
+- [ ] Add recovery for partial registration (registered but not staked)
+- [ ] Improve error messages for registration states
+
+**Key Fix**:
+```typescript
+// Check registration BEFORE approval/registration attempt
+const nodeInfo = await nodeRegistry.nodes(address);
+if (nodeInfo[0] !== ethers.ZeroAddress) {
+  throw new RegistrationError('Node already registered. Use add-stake or update commands.');
+}
+```
+
+### Sub-phase 9.3: Direct Contract Queries for Status
+**Goal**: Get accurate registration status directly from blockchain
+
+**Tasks**:
+- [ ] Write tests in `tests/registration/direct-query.test.ts` (180 lines)
+- [ ] Update `packages/host-cli/src/registration/manager.ts` (add 80 lines)
+- [ ] Implement direct contract query for registration status
+- [ ] Query staked amount directly from NodeRegistry
+- [ ] Add fallback to SDK methods if direct query fails
+- [ ] Cache status for performance
+
+**Implementation**:
+```typescript
+// Direct contract query like we did in UI
+const nodeRegistryABI = ['function nodes(address) view returns (...)'];
+const nodeRegistry = new ethers.Contract(address, nodeRegistryABI, provider);
+const nodeInfo = await nodeRegistry.nodes(hostAddress);
+const stakedAmount = ethers.formatEther(nodeInfo[1]);
+```
+
+### Sub-phase 9.4: Fix Stake Amount Conversion
+**Goal**: Properly handle stake amounts as strings and bigints
+
+**Tasks**:
+- [ ] Write tests in `tests/registration/stake-conversion.test.ts` (150 lines)
+- [ ] Update `packages/host-cli/src/registration/staking.ts` (add 40 lines)
+- [ ] Fix string to wei conversion (handle "100" → 100 * 10^18 wei)
+- [ ] Add validation for stake amount inputs
+- [ ] Support both string and bigint inputs
+- [ ] Add clear logging of amounts in both FAB and wei
+
+**Critical Fix**:
+```typescript
+// Convert string FAB to wei properly
+async function prepareStakeAmount(amount: string | bigint): Promise<bigint> {
+  if (typeof amount === 'string') {
+    // User inputs "100" meaning 100 FAB, convert to wei
+    return ethers.parseEther(amount);
+  }
+  return amount;
+}
+```
+
+### Sub-phase 9.5: Enhanced Metadata Management
+**Goal**: Improve metadata handling with validation and updates
+
+**Tasks**:
+- [ ] Write tests in `tests/commands/metadata-update.test.ts` (200 lines)
+- [ ] Update `packages/host-cli/src/commands/update-metadata.ts` (add 100 lines)
+- [ ] Add metadata structure validation
+- [ ] Support loading metadata from file
+- [ ] Add metadata merge capability (partial updates)
+- [ ] Validate hardware configuration requirements
+- [ ] Add metadata preview before submission
+
+**Metadata Structure**:
+```typescript
+interface NodeMetadata {
+  hardware: {
+    gpu: string;
+    vram: number; // GB
+    ram: number;  // GB
+  };
+  capabilities: string[];
+  location: string;
+  maxConcurrent: number;
+  costPerToken: number;
+}
+```
+
+### Sub-phase 9.6: Add Chain Context to All Commands
+**Goal**: Make every command chain-aware
+
+**Tasks**:
+- [ ] Write tests in `tests/commands/chain-aware.test.ts` (250 lines)
+- [ ] Update all command files in `packages/host-cli/src/commands/` (20 lines each)
+- [ ] Pass chainId through to SDK for every operation
+- [ ] Update command help text with chain information
+- [ ] Add chain validation before command execution
+- [ ] Show current chain in status outputs
+
+**Commands to Update**:
+- register, unregister, info, status
+- add-stake, withdraw
+- update-url, update-models, update-metadata
+- start, stop, logs
+
+### Sub-phase 9.7: opBNB Testnet Support
+**Goal**: Add full support for opBNB testnet operations
+
+**Tasks**:
+- [ ] Write tests in `tests/integration/opbnb-cli.test.ts` (200 lines)
+- [ ] Add opBNB configuration to `packages/host-cli/src/sdk/config.ts` (50 lines)
+- [ ] Add BNB balance checking for opBNB
+- [ ] Update gas estimation for opBNB network
+- [ ] Test registration flow on opBNB testnet
+- [ ] Document opBNB-specific requirements
+
+**Configuration**:
+```typescript
+case 'opbnb-testnet':
+  return {
+    chainId: 5611,
+    rpcUrl: process.env.RPC_URL_OPBNB_TESTNET,
+    nativeToken: 'BNB',
+    contracts: { /* opBNB addresses */ }
+  };
+```
+
+### Sub-phase 9.8: Improved Error Handling & Recovery
+**Goal**: Better error messages and recovery options
+
+**Tasks**:
+- [ ] Write tests in `tests/errors/recovery-flow.test.ts` (180 lines)
+- [ ] Create `packages/host-cli/src/recovery/manager.ts` (150 lines max)
+- [ ] Add recovery for partial registration states
+- [ ] Implement retry logic with exponential backoff
+- [ ] Add transaction confirmation tracking
+- [ ] Create recovery wizard for failed operations
+- [ ] Add rollback capabilities where possible
+
+**Recovery Scenarios**:
+```typescript
+// Handle common failure states
+- Registered but not staked
+- Approved but not registered
+- Transaction pending for too long
+- Network switch during operation
+- Insufficient balance after approval
+```
+
+### Sub-phase 9.9: CLI Integration Testing
+**Goal**: Comprehensive testing of all CLI commands across chains
+
+**Tasks**:
+- [ ] Write integration tests for Base Sepolia (300 lines)
+- [ ] Write integration tests for opBNB testnet (300 lines)
+- [ ] Test complete registration flow end-to-end
+- [ ] Test chain switching during operations
+- [ ] Test error recovery scenarios
+- [ ] Test all update commands
+- [ ] Performance testing with timeouts
+
+**Test Matrix**:
+```
+Commands × Chains × Wallet Types:
+- register: Base Sepolia (private key, keyfile)
+- register: opBNB testnet (private key, keyfile)
+- add-stake: Both chains, both wallet types
+- update-*: All update commands on both chains
+- status/info: Query commands on both chains
+```
+
+### Sub-phase 9.10: CLI Documentation & Examples
+**Goal**: Comprehensive CLI documentation for multi-chain usage
+
+**Tasks**:
+- [ ] Update README.md with multi-chain examples (200 lines)
+- [ ] Create MULTI_CHAIN_GUIDE.md (500 lines)
+- [ ] Add troubleshooting guide for common issues
+- [ ] Document chain-specific requirements
+- [ ] Add example scripts for common workflows
+- [ ] Create video tutorial scripts
+
+**Documentation Sections**:
+- Quick start for each chain
+- Chain selection and switching
+- Registration workflow with examples
+- Metadata management guide
+- Error recovery procedures
+- Best practices for production
+
+### Sub-phase 9.11: Transaction Management
+**Goal**: Better transaction tracking and confirmation
+
+**Tasks**:
+- [ ] Write tests in `tests/transaction/management.test.ts` (200 lines)
+- [ ] Create `packages/host-cli/src/transaction/manager.ts` (150 lines)
+- [ ] Add transaction queue management
+- [ ] Implement nonce management for sequential operations
+- [ ] Add gas price optimization per chain
+- [ ] Show transaction progress with spinners
+- [ ] Add transaction history command
+
+### Sub-phase 9.12: Monitoring & Logging
+**Goal**: Production-ready logging and monitoring
+
+**Tasks**:
+- [ ] Write tests in `tests/logging/production.test.ts` (150 lines)
+- [ ] Update `packages/host-cli/src/logging/logger.ts` (100 lines)
+- [ ] Add structured logging with levels
+- [ ] Create log rotation for long-running operations
+- [ ] Add metrics collection for CLI usage
+- [ ] Implement health check command
+- [ ] Add performance profiling options
+
+## Success Criteria for Phase 9
+
+1. **Multi-Chain Support**: CLI works on Base Sepolia and opBNB
+2. **Registration Reliability**: No duplicate registration failures
+3. **Accurate Status**: Direct contract queries for real-time data
+4. **Proper Conversions**: Stake amounts handled correctly
+5. **Metadata Management**: Full CRUD for node metadata
+6. **Error Recovery**: Graceful handling of all failure states
+7. **Documentation**: Complete guide for operators
+8. **Test Coverage**: >95% coverage for CLI code
+
+## Implementation Schedule for Phase 9
+
+**Week 1**: Core Multi-Chain Support (9.1-9.3)
+- Day 1-2: Multi-chain configuration
+- Day 3-4: Registration flow fixes
+- Day 5: Direct contract queries
+
+**Week 2**: Bug Fixes & Features (9.4-9.6)
+- Day 1-2: Stake amount conversion
+- Day 3: Metadata management
+- Day 4-5: Chain context for commands
+
+**Week 3**: Platform Support (9.7-9.9)
+- Day 1-2: opBNB integration
+- Day 3: Error recovery
+- Day 4-5: Integration testing
+
+**Week 4**: Polish & Documentation (9.10-9.12)
+- Day 1-2: Documentation
+- Day 3: Transaction management
+- Day 4-5: Monitoring and final testing
+
 ## Notes
 
 - This plan incorporates the latest contract updates (JobMarketplaceWithModels)
@@ -861,6 +1136,7 @@ interface HostMetrics {
 - Chain_id is REQUIRED in all node communications
 - Smart accounts provide better UX but aren't required
 - Base Sepolia is primary chain, opBNB is secondary
+- Phase 9 brings host-cli to feature parity with improved harness UI
 
 ---
 

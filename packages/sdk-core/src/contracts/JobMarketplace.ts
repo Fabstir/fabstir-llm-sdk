@@ -135,12 +135,35 @@ export class JobMarketplaceWrapper {
       const balance = await this.contract.userDepositsNative(account);
       return ethers.formatEther(balance);
     } else {
-      const balance = await this.contract.userDepositsToken(account, token);
-      const chain = ChainRegistry.getChain(this.chainId);
-      const isUSDC = token.toLowerCase() === chain.contracts.usdcToken.toLowerCase();
-      return isUSDC
-        ? ethers.formatUnits(balance, 6)
-        : ethers.formatUnits(balance, 18);
+      console.log('[JobMarketplace] Getting deposit balance:');
+      console.log('  Account:', account);
+      console.log('  Token:', token);
+      console.log('  Contract address:', this.contractAddress);
+      console.log('  Chain ID:', this.chainId);
+
+      try {
+        const balance = await this.contract.userDepositsToken(account, token);
+        console.log('[JobMarketplace] Raw balance from contract:', balance);
+
+        // Handle null or undefined balance (no deposit)
+        if (balance === null || balance === undefined) {
+          console.log('[JobMarketplace] No deposit found, returning "0"');
+          return "0";
+        }
+
+        const chain = ChainRegistry.getChain(this.chainId);
+        const isUSDC = token.toLowerCase() === chain.contracts.usdcToken.toLowerCase();
+        const formattedBalance = isUSDC
+          ? ethers.formatUnits(balance, 6)
+          : ethers.formatUnits(balance, 18);
+
+        console.log('[JobMarketplace] Formatted balance:', formattedBalance);
+        return formattedBalance;
+      } catch (error: any) {
+        console.error('[JobMarketplace] Error getting deposit balance:', error.message);
+        console.error('  Error code:', error.code);
+        throw error;
+      }
     }
   }
 

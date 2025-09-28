@@ -16,7 +16,6 @@ export class ChainRegistry {
     }
 
     const baseSepolia = getBaseSepolia();
-    const opBNB = getOpBNBTestnet();
 
     this.chains = new Map([
       // Base Sepolia Configuration (from .env.test)
@@ -32,20 +31,24 @@ export class ChainRegistry {
           blockExplorer: 'https://sepolia.basescan.org',
         },
       ],
-      // opBNB Testnet Configuration (placeholder until deployment)
-      [
-        ChainId.OPBNB_TESTNET,
-        {
-          chainId: opBNB.chainId,
-          name: 'opBNB Testnet',
-          nativeToken: 'BNB' as NativeToken,
-          rpcUrl: opBNB.rpcUrl,
-          contracts: opBNB.contracts,
-          minDeposit: '0.001', // Placeholder value for BNB
-          blockExplorer: 'https://testnet.opbnbscan.com',
-        },
-      ],
     ]);
+
+    // Only add opBNB if environment variables are configured (post-MVP)
+    try {
+      const opBNB = getOpBNBTestnet();
+      this.chains.set(ChainId.OPBNB_TESTNET, {
+        chainId: opBNB.chainId,
+        name: 'opBNB Testnet',
+        nativeToken: 'BNB' as NativeToken,
+        rpcUrl: opBNB.rpcUrl,
+        contracts: opBNB.contracts,
+        minDeposit: '0.001',
+        blockExplorer: 'https://testnet.opbnbscan.com',
+      });
+    } catch (error) {
+      // opBNB not configured yet - skip for MVP
+      console.debug('opBNB Testnet not configured - will be available post-MVP');
+    }
 
     return this.chains;
   }

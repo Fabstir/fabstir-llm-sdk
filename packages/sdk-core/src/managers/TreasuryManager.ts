@@ -124,6 +124,45 @@ export class TreasuryManager implements ITreasuryManager {
   }
 
   /**
+   * Get accumulated treasury balance in JobMarketplace contract
+   */
+  async getAccumulatedBalance(): Promise<bigint> {
+    if (!this.initialized || !this.signer) {
+      throw new SDKError('TreasuryManager not initialized', 'TREASURY_NOT_INITIALIZED');
+    }
+
+    try {
+      // Get USDC token address from ContractManager
+      const usdcAddress = this.contractManager.getUsdcToken();
+
+      // Get JobMarketplace contract address
+      const jobMarketplaceAddress = this.contractManager.getJobMarketplace();
+
+      // JobMarketplace ABI for reading accumulated treasury tokens
+      const jobMarketplaceABI = [
+        'function accumulatedTreasuryTokens(address token) view returns (uint256)'
+      ];
+
+      const jobMarketplace = new ethers.Contract(
+        jobMarketplaceAddress,
+        jobMarketplaceABI,
+        this.signer
+      );
+
+      // Query accumulated USDC treasury fees
+      const balance = await jobMarketplace.accumulatedTreasuryTokens(usdcAddress);
+
+      return BigInt(balance.toString());
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to get accumulated treasury balance: ${error.message}`,
+        'TREASURY_BALANCE_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
    * Withdraw from treasury (admin only)
    */
   async withdraw(

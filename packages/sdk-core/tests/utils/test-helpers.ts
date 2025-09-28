@@ -32,12 +32,13 @@ export function createTestWallet(chainId: number) {
 }
 
 export function verifyContractAddress(chainId: number, contractType: string, address: string): boolean {
+  // Use environment variables if available, fallback to new contract addresses
   const expectedAddresses: Record<number, Record<string, string>> = {
     [ChainId.BASE_SEPOLIA]: {
-      jobMarketplace: '0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f',
-      nodeRegistry: '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
-      proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
-      usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+      jobMarketplace: process.env.CONTRACT_JOB_MARKETPLACE || '0xCDfbb2f1756f9F6281AeE504EBCD4883d5dafB19',
+      nodeRegistry: process.env.CONTRACT_NODE_REGISTRY || '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
+      proofSystem: process.env.CONTRACT_PROOF_SYSTEM || '0x2ACcc60893872A499700908889B38C5420CBcFD1',
+      usdcToken: process.env.CONTRACT_USDC_TOKEN || '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
     },
     [ChainId.OPBNB_TESTNET]: {
       jobMarketplace: '0x0000000000000000000000000000000000000001',

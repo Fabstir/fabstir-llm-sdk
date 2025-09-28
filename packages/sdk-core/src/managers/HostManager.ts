@@ -82,7 +82,7 @@ export class HostManager implements IHostManager {
       // Check if already registered
       const hostAddress = await this.signer.getAddress();
       const nodeInfo = await registry['nodes'](hostAddress);
-      const isRegistered = nodeInfo.operator !== '0x0000000000000000000000000000000000000000';
+      const isRegistered = nodeInfo.operator !== ethers.ZeroAddress;
       
       if (isRegistered) {
         throw new SDKError('Host is already registered', 'HOST_ALREADY_REGISTERED');
@@ -185,7 +185,7 @@ export class HostManager implements IHostManager {
       // Check if registered
       const hostAddress = await this.signer.getAddress();
       const nodeInfo = await registry['nodes'](hostAddress);
-      const isRegistered = nodeInfo.operator !== '0x0000000000000000000000000000000000000000';
+      const isRegistered = nodeInfo.operator !== ethers.ZeroAddress;
       
       if (!isRegistered) {
         throw new SDKError('Host is not registered', 'HOST_NOT_REGISTERED');
@@ -262,7 +262,7 @@ export class HostManager implements IHostManager {
       // Check if registered
       const hostAddress = await this.signer.getAddress();
       const nodeInfo = await registry['nodes'](hostAddress);
-      const isRegistered = nodeInfo.operator !== '0x0000000000000000000000000000000000000000';
+      const isRegistered = nodeInfo.operator !== ethers.ZeroAddress;
       
       if (!isRegistered) {
         throw new SDKError('Host is not registered', 'HOST_NOT_REGISTERED');
@@ -432,7 +432,7 @@ export class HostManager implements IHostManager {
       );
 
       const nodeInfo = await registry['nodes'](address);
-      const isRegistered = nodeInfo.operator !== '0x0000000000000000000000000000000000000000';
+      const isRegistered = nodeInfo.operator !== ethers.ZeroAddress;
 
       // Parse models from metadata
       const models = this.parseHostModels(nodeInfo.metadata || '');
@@ -637,6 +637,42 @@ export class HostManager implements IHostManager {
       throw new SDKError(
         `Failed to check earnings: ${error.message}`,
         'CHECK_EARNINGS_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Get accumulated earnings for a specific host address
+   */
+  async getAccumulatedEarnings(hostAddress: string): Promise<bigint> {
+    if (!this.initialized || !this.signer) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    if (!this.hostEarningsAddress) {
+      throw new SDKError('Host earnings contract not configured', 'NO_EARNINGS_CONTRACT');
+    }
+
+    try {
+      const hostEarningsABI = await this.contractManager.getContractABI('hostEarnings');
+      const earnings = new ethers.Contract(
+        this.hostEarningsAddress,
+        hostEarningsABI,
+        this.signer
+      );
+
+      // Get USDC token address from ContractManager
+      const usdcAddress = this.contractManager.getUsdcToken();
+
+      // Query accumulated earnings for this host in USDC
+      const balance = await earnings['earnings'](hostAddress, usdcAddress);
+
+      return BigInt(balance.toString());
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to get accumulated earnings: ${error.message}`,
+        'GET_EARNINGS_ERROR',
         { originalError: error }
       );
     }

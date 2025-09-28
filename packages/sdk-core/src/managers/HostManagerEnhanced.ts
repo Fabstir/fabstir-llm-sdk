@@ -394,7 +394,7 @@ export class HostManagerEnhanced {
       const info = await this.nodeRegistry['getNodeFullInfo'](hostAddress);
 
       // Check if registered (operator address will be non-zero)
-      const isRegistered = info[0] !== '0x0000000000000000000000000000000000000000';
+      const isRegistered = info[0] !== ethers.ZeroAddress;
 
       if (!isRegistered) {
         return {

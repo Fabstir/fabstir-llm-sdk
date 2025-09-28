@@ -48,7 +48,7 @@ export class PaymentManager implements IPaymentManager {
   static readonly DEFAULT_PROOF_INTERVAL = 300;
   private static readonly USDC_DECIMALS = 6;
 
-  private signer: Signer;
+  private signer?: Signer;
   private currentChainId: number;
   private marketplaceWrappers: Map<number, JobMarketplaceWrapper>;
   private initialized = false;
@@ -95,7 +95,7 @@ export class PaymentManager implements IPaymentManager {
     }
 
     if (!this.marketplaceWrappers.has(chainId)) {
-      const wrapper = new JobMarketplaceWrapper(chainId, this.signer);
+      const wrapper = new JobMarketplaceWrapper(chainId, this.signer!);
       this.marketplaceWrappers.set(chainId, wrapper);
     }
   }
@@ -208,6 +208,9 @@ export class PaymentManager implements IPaymentManager {
    */
   async getDepositBalance(chainId?: number): Promise<DepositBalances> {
     const wrapper = this.getWrapper(chainId);
+    if (!this.signer) {
+      throw new Error('Signer not initialized');
+    }
     const address = await this.signer.getAddress();
     const nativeBalance = await wrapper.getDepositBalance(address);
 
@@ -221,6 +224,9 @@ export class PaymentManager implements IPaymentManager {
    */
   async getDepositBalances(tokens: string[], chainId?: number): Promise<DepositBalances> {
     const wrapper = this.getWrapper(chainId);
+    if (!this.signer) {
+      throw new Error('Signer not initialized');
+    }
     const address = await this.signer.getAddress();
 
     const nativeBalance = await wrapper.getDepositBalance(address);
@@ -248,7 +254,7 @@ export class PaymentManager implements IPaymentManager {
     }
 
     // Verify chain if specified
-    if (params.chainId) {
+    if (params.chainId && this.signer) {
       const provider = this.signer.provider;
       if (provider) {
         const network = await provider.getNetwork();
@@ -302,6 +308,13 @@ export class PaymentManager implements IPaymentManager {
       transactionHash: tx.hash,
       chainId: wrapper.getChainId()
     };
+  }
+
+  /**
+   * Complete session (alias for completeSessionJob for compatibility)
+   */
+  async completeSession(jobId: number, conversationCID: string, chainId?: number): Promise<TransactionResult> {
+    return this.completeSessionJob(jobId, conversationCID, chainId);
   }
 
   /**
@@ -359,7 +372,7 @@ export class PaymentManager implements IPaymentManager {
     const chain = this.getChainConfig();
 
     const usdcBalance = await this.getWrapper().getDepositBalance(
-      await this.signer.getAddress(),
+      await this.signer!.getAddress(),
       chain.contracts.usdcToken
     );
 
