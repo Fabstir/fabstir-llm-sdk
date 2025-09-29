@@ -263,27 +263,48 @@ export default function BaseEthMvpFlowSDKTest() {
           newBalances.userDeposit = '0';
         }
 
-        // Read accumulated ETH earnings directly from contracts
-        // Note: For direct ETH payments, hosts receive ETH immediately upon session completion
-        // The accumulated balance would be in the host's wallet, not in the HostEarnings contract
-        if (selectedHost) {
+        // Read accumulated ETH earnings from HostEarnings contract (only if host is selected)
+        if ((selectedHost || (window as any).__selectedHostAddress) && (hostManager || sdk)) {
           try {
-            // For ETH payments, the host receives ETH directly to their wallet
-            // Check the host's ETH balance instead of contract accumulation
-            const hostBalance = await provider.getBalance(selectedHost.address);
-            console.log(`Host ${selectedHost.address} ETH balance:`, ethers.formatEther(hostBalance));
+            // Use the selected host address if available
+            const hostAddress = selectedHost?.address ||
+                               (window as any).__selectedHostAddress;
+            console.log(`[DEBUG] Reading host ETH earnings for address: ${hostAddress}`);
+            console.log(`[DEBUG] HostManager available: ${!!hostManager}`);
+            console.log(`[DEBUG] SDK available: ${!!sdk}`);
 
-            // The HostEarnings contract tracks token earnings, not ETH
-            // For display purposes, we'll show 0 for accumulated since ETH is paid directly
-            newBalances.hostAccumulated = '0'; // ETH is paid directly, not accumulated
-
-            // Note: If you want to track historical earnings, you'd need to:
-            // 1. Query SessionCompleted events for this host
-            // 2. Sum up the hostEarnings amounts from those events
+            if (hostManager && hostManager.getAccumulatedEarnings) {
+              console.log(`[DEBUG] Using hostManager.getAccumulatedEarnings`);
+              const hostEarnings = await hostManager.getAccumulatedEarnings(hostAddress);
+              newBalances.hostAccumulated = ethers.formatEther(hostEarnings);
+              console.log(`Host accumulated ETH earnings for ${hostAddress}: ${newBalances.hostAccumulated} ETH`);
+            } else if (hostManager && hostManager.getEarnings) {
+              console.log(`[DEBUG] Using hostManager.getEarnings`);
+              const hostEarnings = await hostManager.getEarnings(hostAddress);
+              newBalances.hostAccumulated = ethers.formatEther(hostEarnings);
+              console.log(`Host ETH earnings for ${hostAddress}: ${newBalances.hostAccumulated} ETH`);
+            } else {
+              // Always try reading directly from HostEarnings contract as fallback
+              const contracts = getContractAddresses();
+              console.log(`[DEBUG] Reading directly from HostEarnings contract at ${contracts.HOST_EARNINGS}`);
+              const hostEarningsContract = new ethers.Contract(
+                contracts.HOST_EARNINGS,
+                ['function getBalance(address host, address token) view returns (uint256)'],
+                provider
+              );
+              // For native ETH, use address(0) as the token address
+              const ETH_ADDRESS = '0x0000000000000000000000000000000000000000';
+              const earnings = await hostEarningsContract.getBalance(hostAddress, ETH_ADDRESS);
+              newBalances.hostAccumulated = ethers.formatEther(earnings);
+              console.log(`Host ETH earnings (direct contract) for ${hostAddress}: ${newBalances.hostAccumulated} ETH (raw: ${earnings.toString()})`);
+            }
           } catch (err) {
-            console.log('Could not read host balance:', err);
+            console.log('Error reading host accumulated ETH earnings:', err);
             newBalances.hostAccumulated = '0';
           }
+        } else {
+          console.log(`[DEBUG] No host selected or no manager available`);
+          newBalances.hostAccumulated = '0';
         }
 
         // Read treasury accumulated native balance (ETH on Base Sepolia)
@@ -496,6 +517,9 @@ export default function BaseEthMvpFlowSDKTest() {
       setSelectedHost(selected);
       selectedHostRef.current = selected;  // Also update ref for immediate access
       setActiveHosts(modelSupported);
+
+      // Store selected host address in window for use across React renders
+      (window as any).__selectedHostAddress = selected.address;
 
       addLog(`✅ Randomly selected host: ${selected.address}`);
       addLog(`   API URL: ${selected.endpoint}`);
@@ -868,7 +892,10 @@ export default function BaseEthMvpFlowSDKTest() {
       const hostEarnings = (totalCost * 90n) / 100n; // 90% to host
 
       // Record earnings via HostManager for the selected host
-      const selectedHostForEarnings = (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS;
+      const selectedHostForEarnings = (window as any).__selectedHostAddress;
+      if (!selectedHostForEarnings) {
+        throw new Error("No host selected for recording earnings");
+      }
       await hostManager.recordEarnings(
         selectedHostForEarnings,
         hostEarnings
@@ -953,7 +980,7 @@ export default function BaseEthMvpFlowSDKTest() {
         ])).flat(),
         metadata: {
           model: 'tiny-vicuna-1b', // Use the actual model name
-          provider: (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS,
+          provider: (window as any).__selectedHostAddress || "unknown",
           jobId: jobId?.toString(),
           totalTokens: 42
         },
@@ -1750,7 +1777,10 @@ export default function BaseEthMvpFlowSDKTest() {
       // Read balances before completion (including sub-account!)
       addLog("Reading balances before session completion...");
       // Get the selected host address from window storage
-      const selectedHostAddr = (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS;
+      const selectedHostAddr = (window as any).__selectedHostAddress;
+      if (!selectedHostAddr) {
+        throw new Error("No host selected for balance reading");
+      }
       const balancesBefore = {
         user: await readBalanceViem(TEST_USER_1_ADDRESS),
         subAccount: subAccount ? await readBalanceViem(subAccount) : 0n,
@@ -1781,7 +1811,10 @@ export default function BaseEthMvpFlowSDKTest() {
       // Read balances after completion
       addLog("Reading balances after session completion...");
       // Get the selected host address from window storage
-      const selectedHostAddress = (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS;
+      const selectedHostAddress = (window as any).__selectedHostAddress;
+      if (!selectedHostAddress) {
+        throw new Error("No host selected for balance reading");
+      }
       const balancesAfter = {
         user: await readBalanceViem(TEST_USER_1_ADDRESS),
         subAccount: subAccount ? await readBalanceViem(subAccount) : 0n,
@@ -1859,7 +1892,10 @@ export default function BaseEthMvpFlowSDKTest() {
         // Create host's SDK instance with signer authentication
         const hostProvider = new ethers.JsonRpcProvider(RPC_URL);
         // Use the selected host's private key
-        const selectedHostAddr = (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS;
+        const selectedHostAddr = (window as any).__selectedHostAddress;
+        if (!selectedHostAddr) {
+          throw new Error("No host selected for checkpoint submission");
+        }
         let hostPrivateKey: string;
         if (selectedHostAddr.toLowerCase() === TEST_HOST_1_ADDRESS.toLowerCase()) {
           hostPrivateKey = TEST_HOST_1_PRIVATE_KEY;

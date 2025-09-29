@@ -1259,7 +1259,10 @@ export default function ChatContextDemo() {
       try {
         // Create host's SDK instance with signer authentication
         const hostProvider = new ethers.JsonRpcProvider(RPC_URL);
-        const selectedHostAddr = activeHost?.address || (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS;
+        const selectedHostAddr = activeHost?.address || (window as any).__selectedHostAddress;
+        if (!selectedHostAddr) {
+          throw new Error("No host selected for checkpoint submission");
+        }
         let hostPrivateKey: string;
 
         if (selectedHostAddr.toLowerCase() === TEST_HOST_1_ADDRESS.toLowerCase()) {

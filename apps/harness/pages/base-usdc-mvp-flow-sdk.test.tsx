@@ -326,11 +326,12 @@ export default function BaseUsdcMvpFlowSDKTest() {
           }
         }
 
-        // Read accumulated earnings for TEST_HOST_1 (the actual host receiving payments)
-        if (hostManager || sdk) {
+        // Read accumulated earnings for the selected host (only if one is selected)
+        if ((selectedHost || (window as any).__selectedHostAddress) && (hostManager || sdk)) {
           try {
-            // Always check TEST_HOST_1_ADDRESS since that's the host actually running
-            const hostAddress = TEST_HOST_1_ADDRESS;
+            // Use the selected host address if available
+            const hostAddress = selectedHost?.address ||
+                               (window as any).__selectedHostAddress;
             console.log(`[DEBUG] Reading host earnings for address: ${hostAddress}`);
             console.log(`[DEBUG] HostManager available: ${!!hostManager}`);
             console.log(`[DEBUG] SDK available: ${!!sdk}`);
@@ -690,6 +691,9 @@ export default function BaseUsdcMvpFlowSDKTest() {
       setSelectedHost(selected);
       selectedHostRef.current = selected;  // Also update ref for immediate access
       setActiveHosts(modelSupported);
+
+      // Store selected host address in window for use across React renders
+      (window as any).__selectedHostAddress = selected.address;
 
       addLog(`✅ Randomly selected host: ${selected.address}`);
       addLog(`   API URL: ${selected.endpoint}`);
@@ -1161,7 +1165,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
       const hostEarnings = (totalCost * 90n) / 100n; // 90% to host
 
       // Record earnings via HostManager for the selected host
-      const selectedHostForEarnings = (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS;
+      const selectedHostForEarnings = (window as any).__selectedHostAddress;
+      if (!selectedHostForEarnings) {
+        throw new Error("No host selected for recording earnings");
+      }
       await hostManager.recordEarnings(
         selectedHostForEarnings,
         hostEarnings
@@ -1246,7 +1253,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
         ])).flat(),
         metadata: {
           model: 'tiny-vicuna-1b', // Use the actual model name
-          provider: (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS,
+          provider: (window as any).__selectedHostAddress || "unknown",
           jobId: jobId?.toString(),
           totalTokens: 42
         },
@@ -2043,7 +2050,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
       // Read balances before completion (including sub-account!)
       addLog("Reading balances before session completion...");
       // Get the selected host address from window storage
-      const selectedHostAddr = (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS;
+      const selectedHostAddr = (window as any).__selectedHostAddress;
+      if (!selectedHostAddr) {
+        throw new Error("No host selected for balance reading");
+      }
       const balancesBefore = {
         user: await readBalanceViem(TEST_USER_1_ADDRESS),
         subAccount: subAccount ? await readBalanceViem(subAccount) : 0n,
@@ -2074,7 +2084,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
       // Read balances after completion
       addLog("Reading balances after session completion...");
       // Get the selected host address from window storage
-      const selectedHostAddress = (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS;
+      const selectedHostAddress = (window as any).__selectedHostAddress;
+      if (!selectedHostAddress) {
+        throw new Error("No host selected for balance reading");
+      }
       const balancesAfter = {
         user: await readBalanceViem(TEST_USER_1_ADDRESS),
         subAccount: subAccount ? await readBalanceViem(subAccount) : 0n,
@@ -2152,7 +2165,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
         // Create host's SDK instance with signer authentication
         const hostProvider = new ethers.JsonRpcProvider(RPC_URL);
         // Use the selected host's private key
-        const selectedHostAddr = (window as any).__selectedHostAddress || TEST_HOST_1_ADDRESS;
+        const selectedHostAddr = (window as any).__selectedHostAddress;
+        if (!selectedHostAddr) {
+          throw new Error("No host selected for checkpoint submission");
+        }
         let hostPrivateKey: string;
         if (selectedHostAddr.toLowerCase() === TEST_HOST_1_ADDRESS.toLowerCase()) {
           hostPrivateKey = TEST_HOST_1_PRIVATE_KEY;
@@ -2271,9 +2287,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
     setSessionId(null);  // Reset session ID from previous runs
     setJobId(null);      // Reset job ID from previous runs
 
-    // Clear window session IDs to avoid using stale values
+    // Clear window stored values to avoid using stale data
     (window as any).__currentSessionId = null;
     (window as any).__currentJobId = null;
+    (window as any).__selectedHostAddress = null;
 
     setStatus("Starting full multi-chain USDC payment flow...");
 
