@@ -689,12 +689,11 @@ export default function BaseEthMvpFlowSDKTest() {
       const responseTokens = Math.ceil(response.length / 4);
       const totalTokens = promptTokens + responseTokens;
 
-      // Ensure minimum 100 tokens for ProofSystem requirements
-      const billableTokens = Math.max(totalTokens, 100);
-      setTotalTokensGenerated(billableTokens);
+      // Use actual token count - node handles padding if needed
+      setTotalTokensGenerated(totalTokens);
 
       addLog(`📊 Token count: ${promptTokens} (prompt) + ${responseTokens} (response) = ${totalTokens} tokens`);
-      addLog(`💰 Billable tokens: ${billableTokens} (minimum 100 for ProofSystem)`);
+      addLog(`💰 Actual tokens used: ${totalTokens} (node will pad first checkpoint to 100 if needed)`);
 
       setStepStatus(prev => ({ ...prev, 5: 'completed' }));
       setCurrentStep(5);
@@ -1665,11 +1664,10 @@ export default function BaseEthMvpFlowSDKTest() {
         [uniqueHash, ethers.id("mock_ezkl_padding")]
       );
 
-      // Get actual token count from session, but ensure minimum of 100
+      // Get actual token count from session
       const sessionDetails = await sm.getSessionDetails(result.sessionId);
-      const actualTokens = sessionDetails.tokensUsed || 100;
-      const tokensGenerated = Math.max(actualTokens, 100); // Minimum 100 tokens for billing
-      addLog(`Using ${tokensGenerated} tokens for checkpoint (actual: ${actualTokens})`)
+      const tokensGenerated = sessionDetails.tokensUsed || 0;
+      addLog(`Using ${tokensGenerated} actual tokens for checkpoint`)
       
       try {
         // REQUIRED: Wait for token accumulation (ProofSystem enforces 10 tokens/sec generation rate)
@@ -1797,13 +1795,13 @@ export default function BaseEthMvpFlowSDKTest() {
       
       addLog("📝 Completing session (triggers automatic payment distribution)...");
 
-      // Get actual token count from session, ensuring minimum of 100
+      // Get actual token count from session
       const sessionDetailsForCompletion = await sm.getSessionDetails(result.sessionId);
-      const completionTokens = Math.max(sessionDetailsForCompletion.tokensUsed || 100, 100);
+      const completionTokens = sessionDetailsForCompletion.tokensUsed || 0;
 
       const finalProof = "0x" + "00".repeat(32);
-      const txHash = await sm.completeSession(result.sessionId, completionTokens, finalProof); // Use actual tokens (min 100)
-      addLog(`✅ Session marked as completed with ${completionTokens} tokens - TX: ${txHash}`);
+      const txHash = await sm.completeSession(result.sessionId, completionTokens, finalProof); // Use actual tokens - node handles padding
+      addLog(`✅ Session marked as completed with ${completionTokens} actual tokens - TX: ${txHash}`);
       
       // Transaction confirmation is handled by completeSessionJob
       addLog("✅ Session completed and payments distributed on-chain");

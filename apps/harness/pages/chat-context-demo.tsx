@@ -1,55 +1,74 @@
 /**
- * Chat Context Demo - Demonstrates conversation context preservation with Fabstir LLM SDK
+ * Chat Context Demo - Production-Ready Conversational UI with Base Account Kit
  *
- * This harness page shows how to:
- * - Maintain conversation history across multiple prompts
- * - Send full context with each request
- * - Store conversations in S5 for persistence
- * - Track token usage and costs
- * - Handle session lifecycle with USDC payments
+ * This demonstrates:
+ * - Base Account Kit with Auto Spend Permissions (gasless transactions)
+ * - Multi-chain support (Base Sepolia, opBNB Testnet)
+ * - Direct USDC payments from primary account via spend permissions
+ * - Conversation context preservation across multiple prompts
+ * - Session management with automated payment settlement
+ * - S5 storage for conversation persistence
+ *
+ * Key Features:
+ * 1. User deposits USDC to Primary Account (Base smart account) ONCE
+ * 2. User starts new session - sub-account automatically spends USDC directly from primary account
+ * 3. Transactions execute without popups (after initial spend permission approval)
+ * 4. Multiple chat sessions without popups until primary account runs out of funds
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import { ethers } from 'ethers';
-import { parseUnits, formatUnits, getAddress, createPublicClient, http } from 'viem';
-import { baseSepolia } from 'viem/chains';
-import { createBaseAccountSDK } from "@base-org/account";
-import { FabstirSDKCore } from '@fabstir/sdk-core';
-import { cacheSeed, hasCachedSeed } from '../../../packages/sdk-core/src/utils/s5-seed-derivation';
+import React, { useState, useEffect, useRef } from "react";
+import { ethers } from "ethers";
+import { parseUnits, formatUnits } from "viem";
+import { FabstirSDKCore, ChainRegistry, ChainId } from "@fabstir/sdk-core";
+import {
+  cacheSeed,
+  hasCachedSeed,
+} from "../../../packages/sdk-core/src/utils/s5-seed-derivation";
+import {
+  createSDK,
+  connectWallet as connectBaseWallet,
+  getAccountInfo,
+} from "../lib/base-account";
 import type {
   PaymentManager,
   SessionManager,
   StorageManager,
   HostManager,
-  TreasuryManager
-} from '@fabstir/sdk-core';
+  TreasuryManager,
+} from "@fabstir/sdk-core";
 
-// Environment variables (from .env.local)
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!;
-const CHAIN_HEX = "0x14a34";  // Base Sepolia
-const CHAIN_ID = process.env.NEXT_PUBLIC_CHAIN_ID!;
-const CHAIN_ID_NUM = parseInt(CHAIN_ID, 16);
-const JOB_MARKETPLACE = process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!;
-const USDC = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
-// Note: User's private key should NEVER be exposed in frontend code
-// Users will connect via wallet (Base Account Kit or MetaMask)
+// Environment configuration
+const DEFAULT_CHAIN_ID = ChainId.BASE_SEPOLIA;
+const RPC_URLS = {
+  [ChainId.BASE_SEPOLIA]: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!,
+  [ChainId.OPBNB_TESTNET]:
+    process.env.NEXT_PUBLIC_RPC_URL_OPBNB_TESTNET ||
+    "https://opbnb-testnet-rpc.bnbchain.org",
+};
+const CHAIN_HEX = "0x14a34"; // Base Sepolia
+
+// Test accounts from environment
+const TEST_USER_1_ADDRESS = process.env.NEXT_PUBLIC_TEST_USER_1_ADDRESS!;
+const TEST_USER_1_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_USER_1_PRIVATE_KEY!;
 const TEST_HOST_1_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_1_ADDRESS!;
-const TEST_HOST_1_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_HOST_1_PRIVATE_KEY!;
+const TEST_HOST_1_PRIVATE_KEY =
+  process.env.NEXT_PUBLIC_TEST_HOST_1_PRIVATE_KEY!;
 const TEST_HOST_2_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_2_ADDRESS!;
-const TEST_HOST_2_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_HOST_2_PRIVATE_KEY!;
+const TEST_HOST_2_PRIVATE_KEY =
+  process.env.NEXT_PUBLIC_TEST_HOST_2_PRIVATE_KEY!;
 const TEST_TREASURY_ADDRESS = process.env.NEXT_PUBLIC_TEST_TREASURY_ADDRESS!;
-const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_KEY!;
-const TEST_HOST_1_URL = process.env.NEXT_PUBLIC_TEST_HOST_1_URL || 'http://localhost:8080';
+const TEST_TREASURY_PRIVATE_KEY =
+  process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_KEY!;
 
-// Constants
-const SESSION_DEPOSIT_AMOUNT = "2"; // $2 USDC deposit
-const PRICE_PER_TOKEN = 200; // 200 units per token
+// Session configuration
+const SESSION_DEPOSIT_AMOUNT = "2"; // $2 USDC
+const PRICE_PER_TOKEN = 2000; // 0.002 USDC per token
 const PROOF_INTERVAL = 100; // Checkpoint every 100 tokens
-const SESSION_DURATION = 3600; // 1 hour session
+const SESSION_DURATION = 86400; // 1 day
 
 // Message type for chat
 interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
+  role: "user" | "assistant" | "system";
   content: string;
   timestamp: number;
   tokens?: number;
@@ -65,20 +84,34 @@ declare global {
 export default function ChatContextDemo() {
   // SDK State
   const [sdk, setSdk] = useState<FabstirSDKCore | null>(null);
-  const [sessionManager, setSessionManager] = useState<SessionManager | null>(null);
-  const [paymentManager, setPaymentManager] = useState<PaymentManager | null>(null);
-  const [storageManager, setStorageManager] = useState<StorageManager | null>(null);
+  const [sessionManager, setSessionManager] = useState<SessionManager | null>(
+    null
+  );
+  const [paymentManager, setPaymentManager] = useState<PaymentManager | null>(
+    null
+  );
+  const [storageManager, setStorageManager] = useState<StorageManager | null>(
+    null
+  );
   const [hostManager, setHostManager] = useState<HostManager | null>(null);
+  const [treasuryManager, setTreasuryManager] =
+    useState<TreasuryManager | null>(null);
 
   // Wallet State
+  const [selectedChainId, setSelectedChainId] =
+    useState<number>(DEFAULT_CHAIN_ID);
+  const [eoaAddress, setEoaAddress] = useState<string>(""); // EOA controller address (for Base Account Kit)
   const [primaryAccount, setPrimaryAccount] = useState<string>("");
   const [subAccount, setSubAccount] = useState<string>("");
   const [isConnected, setIsConnected] = useState(false);
+  const [isUsingBaseAccount, setIsUsingBaseAccount] = useState(false);
+  const [baseAccountSDK, setBaseAccountSDK] = useState<any>(null);
 
   // Session State
   const [sessionId, setSessionId] = useState<bigint | null>(null);
-  // Note: In session-based model, we use sessionId for everything. No separate jobId needed.
+  const [jobId, setJobId] = useState<bigint | null>(null);
   const [activeHost, setActiveHost] = useState<any>(null);
+  const activeHostRef = useRef<any>(null);
 
   // Chat State
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -87,6 +120,19 @@ export default function ChatContextDemo() {
   const [totalTokens, setTotalTokens] = useState(0);
   const [totalCost, setTotalCost] = useState(0);
   const [lastCheckpointTokens, setLastCheckpointTokens] = useState(0);
+
+  // Balance State
+  const [balances, setBalances] = useState({
+    eoaWallet: "0",
+    smartWallet: "0",
+    subAccount: "0",
+    hostAccumulated: "0",
+    treasuryAccumulated: "0",
+    host1: "0",
+    host2: "0",
+    treasury: "0",
+  });
+  const [depositAmount, setDepositAmount] = useState("10"); // Default $10 USDC
 
   // UI State
   const [status, setStatus] = useState("Initializing...");
@@ -98,53 +144,74 @@ export default function ChatContextDemo() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Initialize SDK on mount
+  // Initialize SDK when chain changes
   useEffect(() => {
     initializeSDK();
-  }, []);
+  }, [selectedChainId]);
+
+  // Refresh balances when connected or when managers are available
+  useEffect(() => {
+    if (isConnected && sdk) {
+      readAllBalances();
+
+      // Auto-refresh balances every 10 seconds
+      const interval = setInterval(() => {
+        readAllBalances();
+      }, 10000);
+
+      return () => clearInterval(interval);
+    }
+  }, [isConnected, sdk, hostManager, treasuryManager, activeHost]);
 
   // Helper: Add message to chat
-  const addMessage = (role: ChatMessage['role'], content: string, tokens?: number) => {
+  const addMessage = (
+    role: ChatMessage["role"],
+    content: string,
+    tokens?: number
+  ) => {
     const message: ChatMessage = {
       role,
       content,
       timestamp: Date.now(),
-      tokens
+      tokens,
     };
 
-    setMessages(prev => [...prev, message]);
+    setMessages((prev) => [...prev, message]);
 
     if (tokens) {
-      setTotalTokens(prev => prev + tokens);
-      setTotalCost(prev => prev + (tokens * PRICE_PER_TOKEN / 1000000)); // Convert to USDC
+      setTotalTokens((prev) => prev + tokens);
+      setTotalCost((prev) => prev + (tokens * PRICE_PER_TOKEN) / 1000000); // Convert to USDC
     }
   };
 
-  // Helper: Create viem public client for balance reading
-  const publicClient = createPublicClient({
-    chain: baseSepolia,
-    transport: http(RPC_URL)
-  });
+  // Helper: Get contract addresses for current chain
+  function getContractAddresses() {
+    const chain = ChainRegistry.getChain(selectedChainId);
+    return {
+      USDC: chain.contracts.usdcToken as `0x${string}`,
+      JOB_MARKETPLACE: chain.contracts.jobMarketplace,
+      NODE_REGISTRY: chain.contracts.nodeRegistry,
+      PROOF_SYSTEM: chain.contracts.proofSystem,
+      HOST_EARNINGS: chain.contracts.hostEarnings,
+      FAB_TOKEN: chain.contracts.fabToken,
+    };
+  }
 
   // Helper: Read USDC balance for an address
   const readUSDCBalance = async (address: string): Promise<bigint> => {
-    const erc20BalanceOfAbi = [
-      {
-        inputs: [{ name: 'account', type: 'address' }],
-        name: 'balanceOf',
-        outputs: [{ name: '', type: 'uint256' }],
-        stateMutability: 'view',
-        type: 'function'
-      }
-    ] as const;
-
     try {
-      const balance = await publicClient.readContract({
-        address: USDC as `0x${string}`,
-        abi: erc20BalanceOfAbi,
-        functionName: 'balanceOf',
-        args: [address as `0x${string}`]
-      });
+      const contracts = getContractAddresses();
+      const provider =
+        sdk?.getProvider() ||
+        new ethers.JsonRpcProvider(
+          RPC_URLS[selectedChainId as keyof typeof RPC_URLS]
+        );
+      const usdcContract = new ethers.Contract(
+        contracts.USDC,
+        ["function balanceOf(address) view returns (uint256)"],
+        provider
+      );
+      const balance = await usdcContract.balanceOf(address);
       return balance;
     } catch (error) {
       console.error(`Failed to read balance for ${address}:`, error);
@@ -152,43 +219,128 @@ export default function ChatContextDemo() {
     }
   };
 
-  // Helper: Read all relevant balances
+  // Helper: Read all relevant balances and update state
   const readAllBalances = async () => {
-    const selectedHostAddr = activeHost?.address || (window as any).__selectedHostAddress;
+    try {
+      const contracts = getContractAddresses();
+      // Always use JsonRpcProvider for reading balances (Base Account Kit provider doesn't work well with ethers.Contract)
+      const provider = new ethers.JsonRpcProvider(
+        RPC_URLS[selectedChainId as keyof typeof RPC_URLS]
+      );
 
-    const balances = {
-      user: primaryAccount ? await readUSDCBalance(primaryAccount) : 0n,
-      subAccount: subAccount ? await readUSDCBalance(subAccount) : 0n,
-      host: selectedHostAddr ? await readUSDCBalance(selectedHostAddr) : 0n,
-      treasury: TEST_TREASURY_ADDRESS ? await readUSDCBalance(TEST_TREASURY_ADDRESS) : 0n
-    };
+      const usdcContract = new ethers.Contract(
+        contracts.USDC,
+        ["function balanceOf(address) view returns (uint256)"],
+        provider
+      );
 
-    return balances;
+      const newBalances = { ...balances };
+
+      // Read EOA balance (if using Base Account Kit)
+      if (eoaAddress && baseAccountSDK) {
+        try {
+          const eoaBalance = await usdcContract.balanceOf(eoaAddress);
+          newBalances.eoaWallet = ethers.formatUnits(eoaBalance, 6);
+        } catch (e) {
+          console.log("Error reading EOA balance:", e);
+        }
+      }
+
+      // Read primary smart wallet balance
+      if (primaryAccount) {
+        console.log("Reading balance for primary account:", primaryAccount);
+        const smartBalance = await usdcContract.balanceOf(primaryAccount);
+        console.log("Primary account balance (raw):", smartBalance.toString());
+        newBalances.smartWallet = ethers.formatUnits(smartBalance, 6);
+        console.log("Primary account balance (formatted):", newBalances.smartWallet);
+      }
+
+      // Read sub-account balance
+      if (subAccount && subAccount !== primaryAccount) {
+        const subBalance = await usdcContract.balanceOf(subAccount);
+        newBalances.subAccount = ethers.formatUnits(subBalance, 6);
+      }
+
+      // Read host accumulated earnings (if host selected)
+      const selectedHostAddr =
+        activeHost?.address || (window as any).__selectedHostAddress;
+      if (selectedHostAddr && hostManager) {
+        try {
+          const hostEarnings = await hostManager.getAccumulatedEarnings(
+            selectedHostAddr
+          );
+          newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
+        } catch (e) {
+          console.log("Error reading host accumulated:", e);
+        }
+      }
+
+      // Read treasury accumulated earnings
+      if (treasuryManager) {
+        try {
+          const treasuryEarnings =
+            await treasuryManager.getAccumulatedBalance();
+          newBalances.treasuryAccumulated = ethers.formatUnits(
+            treasuryEarnings,
+            6
+          );
+        } catch (e) {
+          console.log("Error reading treasury accumulated:", e);
+        }
+      }
+
+      // Read host wallet balances
+      if (TEST_HOST_1_ADDRESS) {
+        const host1Balance = await usdcContract.balanceOf(TEST_HOST_1_ADDRESS);
+        newBalances.host1 = ethers.formatUnits(host1Balance, 6);
+      }
+      if (TEST_HOST_2_ADDRESS) {
+        const host2Balance = await usdcContract.balanceOf(TEST_HOST_2_ADDRESS);
+        newBalances.host2 = ethers.formatUnits(host2Balance, 6);
+      }
+
+      // Read treasury wallet balance
+      if (TEST_TREASURY_ADDRESS) {
+        const treasuryBalance = await usdcContract.balanceOf(
+          TEST_TREASURY_ADDRESS
+        );
+        newBalances.treasury = ethers.formatUnits(treasuryBalance, 6);
+      }
+
+      setBalances(newBalances);
+      return newBalances;
+    } catch (error) {
+      console.error("Error reading balances:", error);
+      return balances;
+    }
   };
 
   // Helper: Build context from message history
   const buildContext = (): string => {
     // Only include previous messages, not the current one being sent
-    const previousMessages = messages.filter(m => m.role !== 'system');
-    if (previousMessages.length === 0) return '';
+    const previousMessages = messages.filter((m) => m.role !== "system");
+    if (previousMessages.length === 0) return "";
 
     return previousMessages
-      .map(m => {
+      .map((m) => {
         // For assistant messages, make sure we're not including repetitive content
         let content = m.content;
 
-        // Limit length and clean up any repetitive patterns that slipped through
-        if (m.role === 'assistant' && content.includes('\n') && content.includes('A:')) {
-          // If it looks like a repetitive response, just take the first line
-          content = content.split('\n')[0].trim();
+        // Limit length and clean up any repetitive patterns
+        if (
+          m.role === "assistant" &&
+          content.includes("\n") &&
+          content.includes("A:")
+        ) {
+          content = content.split("\n")[0].trim();
         }
 
         // Also limit overall length
         content = content.substring(0, 200);
 
-        return `${m.role === 'user' ? 'User' : 'Assistant'}: ${content}`;
+        return `${m.role === "user" ? "User" : "Assistant"}: ${content}`;
       })
-      .join('\n');
+      .join("\n");
   };
 
   // Initialize SDK
@@ -196,31 +348,38 @@ export default function ChatContextDemo() {
     try {
       setStatus("Initializing SDK...");
 
+      const chain = ChainRegistry.getChain(selectedChainId);
+      console.log("[SDK Init] Chain config:", chain);
+
       const sdkConfig = {
-        chainId: CHAIN_ID_NUM,
-        rpcUrl: RPC_URL,
+        mode: "production" as const,
+        chainId: selectedChainId,
+        rpcUrl: RPC_URLS[selectedChainId as keyof typeof RPC_URLS],
         contractAddresses: {
-          jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!,
-          nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY!,
-          proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM!,
-          hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS!,
-          fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN!,
-          usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
-          modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY!
+          jobMarketplace: chain.contracts.jobMarketplace,
+          nodeRegistry: chain.contracts.nodeRegistry,
+          proofSystem: chain.contracts.proofSystem,
+          hostEarnings: chain.contracts.hostEarnings,
+          fabToken: chain.contracts.fabToken,
+          usdcToken: chain.contracts.usdcToken,
+          modelRegistry: chain.contracts.modelRegistry,
         },
         s5Config: {
           portalUrl: process.env.NEXT_PUBLIC_S5_PORTAL_URL,
-          seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE
+          seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE,
         },
-        mode: 'production' as const
       };
 
       const newSdk = new FabstirSDKCore(sdkConfig);
       setSdk(newSdk);
 
-      setStatus("SDK initialized. Click 'Connect Wallet' to start.");
-      addMessage('system', 'Chat system initialized. Connect your wallet to begin.');
-
+      setStatus(
+        `SDK initialized for ${chain.name}. Click 'Connect Wallet' to start.`
+      );
+      addMessage(
+        "system",
+        `Chat system initialized for ${chain.name}. Connect your wallet to begin.`
+      );
     } catch (error: any) {
       console.error("SDK initialization failed:", error);
       setError(`Failed to initialize SDK: ${error.message}`);
@@ -234,132 +393,158 @@ export default function ChatContextDemo() {
       return;
     }
 
-    setIsLoading(true);
-    setStatus("Connecting wallet...");
-
     try {
-      // Try to use Base Account Kit first
-      const provider = await initializeBaseAccountKit();
+      // CRITICAL: Call Base Account SDK IMMEDIATELY without any state updates
+      // This ensures the popup opens within the user interaction context
+      const bas = createSDK();
+      const accounts = await connectBaseWallet(); // This MUST be called synchronously
 
-      if (provider) {
-        // Use Base Account Kit for gasless transactions
-        await connectWithBaseAccount(provider);
-      } else {
-        // Fallback to regular wallet provider (MetaMask, etc.)
-        await connectWithWalletProvider();
-      }
+      // Now that popup is done, we can do state updates
+      setIsLoading(true);
+      setStatus("Connecting wallet...");
+      setBaseAccountSDK(bas);
+      addMessage("system", "🔐 Base Account Kit connected");
+
+      const result = { provider: bas.getProvider(), accounts };
+
+      // Use Base Account Kit for gasless transactions
+      await connectWithBaseAccount(result);
 
       // Get managers
       const pm = sdk.getPaymentManager();
       const sm = sdk.getSessionManager();
       const hm = sdk.getHostManager();
       const stm = sdk.getStorageManager();
+      const tm = sdk.getTreasuryManager();
 
       setPaymentManager(pm);
       setSessionManager(sm);
       setHostManager(hm);
       setStorageManager(stm);
+      setTreasuryManager(tm);
 
       // Mark as connected - wallet connection is successful
       setIsConnected(true);
       setStatus("Wallet connected. Ready to start chat session.");
-      addMessage('system', '✅ Wallet connected successfully.');
-
+      addMessage("system", "✅ Wallet connected successfully.");
     } catch (error: any) {
       console.error("Wallet connection failed:", error);
       setError(`Failed to connect wallet: ${error.message}`);
+
+      // Fallback to regular wallet provider (MetaMask, etc.)
+      try {
+        setIsLoading(true);
+        await connectWithWalletProvider();
+
+        // Get managers for fallback connection
+        const pm = sdk.getPaymentManager();
+        const sm = sdk.getSessionManager();
+        const hm = sdk.getHostManager();
+        const stm = sdk.getStorageManager();
+        const tm = sdk.getTreasuryManager();
+
+        setPaymentManager(pm);
+        setSessionManager(sm);
+        setHostManager(hm);
+        setStorageManager(stm);
+        setTreasuryManager(tm);
+
+        setIsConnected(true);
+        setStatus("Wallet connected. Ready to start chat session.");
+        addMessage("system", "✅ Wallet connected successfully.");
+      } catch (fallbackError: any) {
+        console.error("Fallback connection failed:", fallbackError);
+        setError(`Failed to connect wallet: ${fallbackError.message}`);
+      }
     } finally {
       setIsLoading(false);
     }
   }
 
-  // Initialize Base Account Kit
-  async function initializeBaseAccountKit() {
-    try {
-      const bas = createBaseAccountSDK({
-        appName: "Chat Context Demo",
-        appChainIds: [CHAIN_ID_NUM],
-        subAccounts: {
-          unstable_enableAutoSpendPermissions: true
-        }
-      });
-
-      return bas.getProvider();
-    } catch (error) {
-      console.warn("Base Account Kit not available, using fallback");
-      return null;
-    }
-  }
-
   // Connect with Base Account Kit
-  async function connectWithBaseAccount(provider: any) {
-    // Connect to Base Account
-    const accounts = await provider.request({
-      method: "eth_requestAccounts",
-      params: []
-    }) as `0x${string}`[];
+  async function connectWithBaseAccount(result: {
+    provider: any;
+    accounts: string[];
+  }) {
+    // Use accounts from initialization (no second call to connectBaseWallet)
+    const accounts = result.accounts;
 
-    const primary = accounts[0]!;
-    setPrimaryAccount(primary);
+    if (!accounts || accounts.length === 0) {
+      throw new Error("No accounts returned from Base Account Kit");
+    }
 
-    // Get or create sub-account
-    const sub = await ensureSubAccount(provider, primary);
+    const walletAddress = accounts[0]!;
+    const accountInfo = await getAccountInfo(walletAddress);
+    const smartWallet = accountInfo.smartAccount || walletAddress;
+
+    // Store both EOA and smart wallet addresses
+    setEoaAddress(walletAddress); // The passkey-controlled EOA
+    setPrimaryAccount(smartWallet); // The smart contract wallet
+
+    // Get or create sub-account with Auto Spend Permissions
+    // This may trigger a popup for user approval
+    addMessage(
+      "system",
+      "🔍 Checking for sub-account with Auto Spend Permissions..."
+    );
+    const sub = await ensureSubAccount(
+      result.provider,
+      smartWallet as `0x${string}`
+    );
     setSubAccount(sub);
 
-    // Pre-cache seed for sub-account to avoid popup
+    // Pre-cache seed for sub-account to avoid S5 popup
     const subAccountLower = sub.toLowerCase();
     if (!hasCachedSeed(subAccountLower)) {
-      const testSeed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+      const testSeed =
+        "yield organic score bishop free juice atop village video element unless sneak care rock update";
       cacheSeed(subAccountLower, testSeed);
-      addMessage('system', 'Pre-cached S5 seed for sub-account to avoid popup');
+      console.log("[S5 Seed] Pre-cached test seed for sub-account");
+      addMessage("system", "💾 Pre-cached S5 seed (no popup)");
     }
 
-    // Create custom signer for sub-account with primary account
-    const subAccountSigner = createSubAccountSigner(provider, sub, primary);
+    // Use the Base Account Kit provider with the SDK
+    const baseProvider = result.provider;
 
-    // Authenticate SDK with sub-account signer FIRST
-    await sdk!.authenticate('signer', { signer: subAccountSigner as any });
+    // Create a signer from the Base Account Kit provider using the primary smart wallet
+    const baseSigner = await new ethers.BrowserProvider(baseProvider).getSigner(
+      smartWallet
+    );
 
-    addMessage('system', `Connected with Base Account Kit. Sub-account: ${sub.slice(0, 6)}...${sub.slice(-4)}`);
-    addMessage('system', '✅ SDK authenticated with sub-account signer (no S5 popup!)');
-    addMessage('system', '🎉 Transactions will use sub-account auto-spend (no popups!)');
+    // Authenticate SDK with the Base Account Kit signer
+    await sdk!.authenticate("signer", {
+      signer: baseSigner,
+    });
 
-    // Check if Base Account primary needs funding from MetaMask
-    const ethersProvider = new ethers.JsonRpcProvider(RPC_URL);
-    const usdcContract = new ethers.Contract(USDC, [
-      "function balanceOf(address) view returns (uint256)"
-    ], ethersProvider);
-
-    const primaryBalance = await usdcContract.balanceOf(primary);
-    console.log(`Base Account primary balance: $${formatUnits(primaryBalance, 6)}`);
-
-    if (primaryBalance < parseUnits("2", 6)) {
-      // Primary account needs funding from MetaMask
-      const needed = parseUnits("2", 6) - primaryBalance;
-      console.log(`Base Account primary needs $${formatUnits(needed, 6)} more USDC`);
-
-      try {
-        await fundPrimaryAccountFromUserWallet(primary, needed);
-      } catch (error: any) {
-        console.log('Unable to auto-fund Base Account primary:', error.message);
-        // Connection successful but needs manual funding
-        addMessage('system', '⚠️ Base Account needs funding to start sessions');
-      }
-    } else {
-      addMessage('system', `✅ Base Account has sufficient USDC balance: $${formatUnits(primaryBalance, 6)}`);
-    }
+    addMessage("system", `✅ Connected with Base Account Kit`);
+    addMessage(
+      "system",
+      `  EOA (Controller): ${walletAddress.slice(0, 6)}...${walletAddress.slice(
+        -4
+      )}`
+    );
+    addMessage(
+      "system",
+      `  Smart Wallet: ${smartWallet.slice(0, 6)}...${smartWallet.slice(-4)}`
+    );
+    addMessage("system", "🎉 SDK authenticated with Base Account Kit!");
+    setIsUsingBaseAccount(true);
   }
 
   // Connect with wallet provider (MetaMask or other wallet)
   async function connectWithWalletProvider() {
     if (!window.ethereum) {
-      setError("No wallet provider found. Please install MetaMask or use Base Account Kit.");
+      setError(
+        "No wallet provider found. Please install MetaMask or use Base Account Kit."
+      );
       return;
     }
 
     try {
       // Request account access
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      const accounts = await window.ethereum.request({
+        method: "eth_requestAccounts",
+      });
       const userAddress = accounts[0];
 
       // Create a provider and signer from the wallet
@@ -367,131 +552,205 @@ export default function ChatContextDemo() {
       const signer = await provider.getSigner();
 
       // Authenticate SDK with the signer
-      await sdk!.authenticate('signer', { signer });
+      await sdk!.authenticate("signer", { signer });
       setPrimaryAccount(userAddress);
       setSubAccount(userAddress); // In this mode, primary and sub are the same
 
-      addMessage('system', `Connected with wallet: ${userAddress.slice(0, 6)}...${userAddress.slice(-4)}`);
+      addMessage(
+        "system",
+        `✅ Connected with wallet: ${userAddress.slice(
+          0,
+          6
+        )}...${userAddress.slice(-4)}`
+      );
     } catch (error: any) {
       setError(`Failed to connect wallet: ${error.message}`);
     }
   }
 
-  // Helper: Get or create sub-account
-  async function ensureSubAccount(provider: any, universal: `0x${string}`): Promise<`0x${string}`> {
-    console.log("ensureSubAccount: Starting with primary account:", universal);
+  // Deposit USDC to primary smart wallet from TEST_USER_1 faucet
+  async function depositUSDC() {
+    if (!primaryAccount || !sdk) {
+      setError("Wallet not connected");
+      return;
+    }
+
+    const amount = parseFloat(depositAmount);
+    if (isNaN(amount) || amount <= 0) {
+      setError("Invalid deposit amount");
+      return;
+    }
+
+    setIsLoading(true);
+    setStatus("Depositing USDC...");
 
     try {
-      console.log("ensureSubAccount: Calling wallet_getSubAccounts...");
-      const resp = await provider.request({
-        method: "wallet_getSubAccounts",
-        params: [{
-          account: universal,
-          domain: window.location.origin
-        }]
-      }) as { subAccounts?: Array<{ address: `0x${string}` }> };
+      const contracts = getContractAddresses();
+      const amountWei = parseUnits(depositAmount, 6);
 
-      console.log("ensureSubAccount: Response from wallet_getSubAccounts:", resp);
+      // Use TEST_USER_1 as faucet to fund the primary smart wallet
+      const provider = new ethers.JsonRpcProvider(
+        RPC_URLS[selectedChainId as keyof typeof RPC_URLS]
+      );
+      const faucetWallet = new ethers.Wallet(TEST_USER_1_PRIVATE_KEY, provider);
+
+      const usdcContract = new ethers.Contract(
+        contracts.USDC,
+        [
+          "function transfer(address to, uint256 amount) returns (bool)",
+          "function balanceOf(address) view returns (uint256)",
+        ],
+        faucetWallet
+      );
+
+      // Check faucet has enough USDC
+      const faucetBalance = await usdcContract.balanceOf(TEST_USER_1_ADDRESS);
+
+      if (faucetBalance < amountWei) {
+        throw new Error(
+          `Test faucet insufficient USDC. Has ${formatUnits(
+            faucetBalance,
+            6
+          )} USDC, need ${depositAmount} USDC`
+        );
+      }
+
+      console.log("Depositing to primary account:", primaryAccount);
+      addMessage(
+        "system",
+        `💸 Transferring ${depositAmount} USDC from faucet to ${primaryAccount.slice(0, 10)}...${primaryAccount.slice(-8)}`
+      );
+
+      // Transfer USDC from faucet to primary account
+      const tx = await usdcContract.transfer(primaryAccount, amountWei);
+      console.log("Transfer TX:", tx.hash);
+      console.log("Transfer to address:", primaryAccount);
+      addMessage("system", `⏳ Waiting for transaction confirmation...`);
+
+      await tx.wait(3); // Wait for 3 confirmations
+
+      addMessage(
+        "system",
+        `✅ Successfully deposited ${depositAmount} USDC to primary account!`
+      );
+      setStatus("Deposit complete");
+
+      // Refresh balances
+      await readAllBalances();
+    } catch (error: any) {
+      console.error("Deposit failed:", error);
+      setError(`Deposit failed: ${error.message}`);
+      addMessage("system", `❌ Deposit failed: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  // Helper: Get or create sub-account with Auto Spend Permissions
+  async function ensureSubAccount(
+    provider: any,
+    universal: `0x${string}`
+  ): Promise<`0x${string}`> {
+    console.log("ensureSubAccount: Starting with primary account:", universal);
+    const contracts = getContractAddresses();
+
+    try {
+      // 1) Look up existing sub-accounts for THIS origin
+      console.log("ensureSubAccount: Calling wallet_getSubAccounts...");
+      const resp = (await provider.request({
+        method: "wallet_getSubAccounts",
+        params: [
+          {
+            account: universal,
+            domain: window.location.origin, // e.g. "http://localhost:3000"
+          },
+        ],
+      })) as { subAccounts?: Array<{ address: `0x${string}` }> };
+
+      console.log(
+        "ensureSubAccount: Response from wallet_getSubAccounts:",
+        resp
+      );
 
       if (resp?.subAccounts?.length) {
         const subAccount = resp.subAccounts[0]!.address;
-        addMessage('system', `Using existing sub-account: ${subAccount}`);
-        console.log("ensureSubAccount: Returning existing sub-account:", subAccount);
+        addMessage(
+          "system",
+          `✅ Using existing sub-account: ${subAccount.slice(
+            0,
+            6
+          )}...${subAccount.slice(-4)}`
+        );
+        addMessage(
+          "system",
+          "🎉 Auto Spend Permissions already configured - no popups for transactions!"
+        );
+        console.log(
+          "ensureSubAccount: Returning existing sub-account:",
+          subAccount
+        );
         return subAccount;
       }
 
       console.log("ensureSubAccount: No existing sub-accounts found");
     } catch (e) {
       console.error("ensureSubAccount: Error getting sub-accounts:", e);
-      addMessage('system', `Error checking for existing sub-accounts: ${e}`);
+      addMessage("system", `⚠️ Error checking for existing sub-accounts: ${e}`);
     }
 
     try {
+      // 2) Create a sub-account (SPEC-CORRECT: no spender object here)
       console.log("ensureSubAccount: Creating new sub-account...");
-      const created = await provider.request({
+      addMessage("system", "🔐 Creating sub-account...");
+      addMessage(
+        "system",
+        "📝 Spend permission will be requested on first transaction"
+      );
+
+      const created = (await provider.request({
         method: "wallet_addSubAccount",
-        params: [{
-          account: universal,
-          spender: {
-            address: JOB_MARKETPLACE as `0x${string}`,
-            token: USDC,
-            allowance: parseUnits('1000', 6)
-          }
-        }]
-      }) as { address: `0x${string}` };
+        params: [
+          {
+            account: { type: "create" }, // <-- CORRECT: no spender, no allowance here
+          },
+        ],
+      })) as { address: `0x${string}` };
 
       console.log("ensureSubAccount: Created sub-account:", created);
-      addMessage('system', `Created new sub-account: ${created.address}`);
+      addMessage(
+        "system",
+        `✅ Sub-account created: ${created.address.slice(
+          0,
+          6
+        )}...${created.address.slice(-4)}`
+      );
+      addMessage(
+        "system",
+        "🎉 Auto Spend Permissions will activate on first transaction!"
+      );
       return created.address;
     } catch (error) {
       console.error("ensureSubAccount: Failed to create sub-account:", error);
-      addMessage('system', `Failed to create sub-account: ${error}`);
+      addMessage("system", `❌ Failed to create sub-account: ${error}`);
       // Fallback to using primary account if sub-account creation fails
-      addMessage('system', `WARNING: Using primary account instead of sub-account (popups may occur)`);
-      console.log("ensureSubAccount: Falling back to primary account:", universal);
+      addMessage(
+        "system",
+        `⚠️ WARNING: Using primary account instead (transaction popups will occur)`
+      );
+      console.log(
+        "ensureSubAccount: Falling back to primary account:",
+        universal
+      );
       return universal;
     }
   }
 
-  // Helper: Fund Base Account Kit primary account from user's actual wallet
-  async function fundPrimaryAccountFromUserWallet(primaryAccount: string, amountNeeded: bigint) {
-    // Request user to approve USDC transfer from their wallet
-    addMessage('system', `💳 Base Account needs $${formatUnits(amountNeeded, 6)} USDC`);
-    addMessage('system', `📍 Please approve the transfer in your wallet`);
-
-    try {
-      // Get the wallet provider (MetaMask or other)
-      const walletProvider = window.ethereum;
-      if (!walletProvider) {
-        throw new Error('No wallet provider found. Please install MetaMask or another wallet.');
-      }
-
-      // Request accounts
-      const accounts = await walletProvider.request({ method: 'eth_requestAccounts' });
-      const userWalletAddress = accounts[0];
-
-      // Create provider and signer
-      const ethersProvider = new ethers.BrowserProvider(walletProvider);
-      const signer = await ethersProvider.getSigner(userWalletAddress);
-
-      // Create USDC contract instance with user's signer
-      const usdcContract = new ethers.Contract(USDC, [
-        "function transfer(address to, uint256 amount) returns (bool)",
-        "function balanceOf(address) view returns (uint256)"
-      ], signer);
-
-      // Check user's wallet balance
-      const userBalance = await usdcContract.balanceOf(userWalletAddress);
-      console.log(`User wallet balance: $${formatUnits(userBalance, 6)}`);
-
-      if (userBalance < amountNeeded) {
-        throw new Error(`Insufficient USDC in wallet. Need $${formatUnits(amountNeeded, 6)}, have $${formatUnits(userBalance, 6)}`);
-      }
-
-      // Request transfer - this will trigger wallet popup
-      console.log(`Requesting transfer of $${formatUnits(amountNeeded, 6)} from ${userWalletAddress} to Base Account ${primaryAccount}`);
-      const tx = await usdcContract.transfer(primaryAccount, amountNeeded);
-
-      addMessage('system', `⏳ Transaction submitted. Waiting for confirmation...`);
-      const receipt = await tx.wait(3);
-      console.log(`Transfer confirmed in block ${receipt.blockNumber}`);
-
-      const newBalance = await usdcContract.balanceOf(primaryAccount);
-      addMessage('system', `✅ Base Account funded with $${formatUnits(amountNeeded, 6)} USDC`);
-      addMessage('system', `💰 New balance: $${formatUnits(newBalance, 6)} USDC`);
-
-      return newBalance;
-    } catch (error: any) {
-      if (error.code === 4001 || error.message?.includes('rejected')) {
-        addMessage('system', `❌ Transaction rejected by user`);
-        throw new Error('Transaction rejected by user');
-      }
-      throw error;
-    }
-  }
-
   // Helper: Create sub-account signer (EXACT copy from working test)
-  function createSubAccountSigner(provider: any, subAccount: string, primaryAccount: string) {
+  function createSubAccountSigner(
+    provider: any,
+    subAccount: string,
+    primaryAccount: string
+  ) {
     const ethersProvider = new ethers.BrowserProvider(provider);
 
     // Create a wrapper that properly exposes both signer and provider methods
@@ -505,7 +764,9 @@ export default function ChatContextDemo() {
       },
 
       async getAddress(): Promise<string> {
-        console.log(`[SubAccountSigner] getAddress() called, returning: ${subAccount}`);
+        console.log(
+          `[SubAccountSigner] getAddress() called, returning: ${subAccount}`
+        );
         return subAccount;
       },
 
@@ -515,82 +776,92 @@ export default function ChatContextDemo() {
 
       async signMessage(message: string | Uint8Array): Promise<string> {
         // Check if this is for S5 seed generation
-        const messageStr = typeof message === 'string' ? message : ethers.toUtf8String(message);
-        if (messageStr.includes('Generate S5 seed')) {
+        const messageStr =
+          typeof message === "string" ? message : ethers.toUtf8String(message);
+        if (messageStr.includes("Generate S5 seed")) {
           // If we have a cached seed, return a deterministic mock signature
-          // This avoids the popup since the SDK will use the cached seed anyway
           const subAccountLower = subAccount.toLowerCase();
           if (hasCachedSeed(subAccountLower)) {
-            console.log('[S5 Seed] Returning mock signature - seed is already cached');
-            // Return a deterministic "signature" that will be ignored since we have cache
-            return '0x' + '0'.repeat(130); // Valid signature format
+            console.log(
+              "[S5 Seed] Returning mock signature - seed is already cached"
+            );
+            return "0x" + "0".repeat(130); // Valid signature format
           }
         }
 
         // For other messages or if no cache, use the primary account
-        // This is used for S5 seed generation
         const signature = await provider.request({
           method: "personal_sign",
           params: [
-            typeof message === 'string' ? message : ethers.hexlify(message),
-            primaryAccount
-          ]
+            typeof message === "string" ? message : ethers.hexlify(message),
+            primaryAccount,
+          ],
         });
         return signature;
       },
 
-      async sendTransaction(tx: ethers.TransactionRequest): Promise<ethers.TransactionResponse> {
+      async sendTransaction(
+        tx: ethers.TransactionRequest
+      ): Promise<ethers.TransactionResponse> {
         // Use wallet_sendCalls with sub-account as from address
-        const calls = [{
-          to: tx.to as `0x${string}`,
-          data: tx.data as `0x${string}`,
-          value: tx.value ? `0x${BigInt(tx.value).toString(16)}` : undefined
-        }];
+        const calls = [
+          {
+            to: tx.to as `0x${string}`,
+            data: tx.data as `0x${string}`,
+            value: tx.value ? `0x${BigInt(tx.value).toString(16)}` : undefined,
+          },
+        ];
 
-        console.log('Sending transaction via wallet_sendCalls:', {
+        console.log("Sending transaction via wallet_sendCalls:", {
           from: subAccount,
           to: tx.to,
-          data: tx.data?.slice(0, 10) + '...' // Log function selector
+          data: tx.data?.slice(0, 10) + "...",
         });
 
         const response = await provider.request({
           method: "wallet_sendCalls",
-          params: [{
-            version: "2.0.0",
-            chainId: CHAIN_HEX,
-            from: subAccount as `0x${string}`,
-            calls: calls,
-            capabilities: {
-              atomic: { required: true }
-            }
-          }]
+          params: [
+            {
+              version: "2.0.0",
+              chainId: CHAIN_HEX,
+              from: subAccount as `0x${string}`,
+              calls: calls,
+              capabilities: {
+                atomic: { required: true },
+              },
+            },
+          ],
         });
 
-        const bundleId = typeof response === 'string' ? response : (response as any).id;
-        console.log('Bundle ID:', bundleId);
+        const bundleId =
+          typeof response === "string" ? response : (response as any).id;
+        console.log("Bundle ID:", bundleId);
 
         // Wait for the bundle to be confirmed and get the real transaction hash
         let realTxHash: string | undefined;
         for (let i = 0; i < 30; i++) {
           try {
-            const res = await provider.request({
+            const res = (await provider.request({
               method: "wallet_getCallsStatus",
-              params: [bundleId]
-            }) as { status: number | string, receipts?: any[] };
+              params: [bundleId],
+            })) as { status: number | string; receipts?: any[] };
 
             const ok =
-              (typeof res.status === "number" && res.status >= 200 && res.status < 300) ||
-              (typeof res.status === "string" && (res.status === "CONFIRMED" || res.status.startsWith("2")));
+              (typeof res.status === "number" &&
+                res.status >= 200 &&
+                res.status < 300) ||
+              (typeof res.status === "string" &&
+                (res.status === "CONFIRMED" || res.status.startsWith("2")));
 
             if (ok && res.receipts?.[0]?.transactionHash) {
               realTxHash = res.receipts[0].transactionHash;
-              console.log('Transaction confirmed with hash:', realTxHash);
+              console.log("Transaction confirmed with hash:", realTxHash);
               break;
             }
           } catch (err) {
             // Continue polling
           }
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise((r) => setTimeout(r, 1000));
         }
 
         if (!realTxHash) {
@@ -612,16 +883,18 @@ export default function ChatContextDemo() {
             nonce: 0,
             gasLimit: 0n,
             gasPrice: 0n,
-            chainId: CHAIN_ID_NUM,
+            chainId: selectedChainId,
             wait: async () => {
-              const receipt = await ethersProvider.getTransactionReceipt(realTxHash);
-              return receipt || { status: 1, hash: realTxHash } as any;
-            }
+              const receipt = await ethersProvider.getTransactionReceipt(
+                realTxHash
+              );
+              return receipt || ({ status: 1, hash: realTxHash } as any);
+            },
           } as any;
         }
 
         return txResponse;
-      }
+      },
     };
 
     return signer;
@@ -629,7 +902,11 @@ export default function ChatContextDemo() {
 
   // Start chat session
   async function startSession() {
-    if (!sessionManager || !hostManager) {
+    const sm = sdk?.getSessionManager();
+    const hm = sdk?.getHostManager();
+    const pm = sdk?.getPaymentManager();
+
+    if (!sm || !hm || !pm) {
       setError("Managers not initialized");
       return;
     }
@@ -637,300 +914,238 @@ export default function ChatContextDemo() {
     // Check if wallet is connected
     if (!isConnected || !sdk) {
       setError("Wallet not connected. Please connect wallet first.");
-      addMessage('system', '⚠️ Wallet not connected. Please click "Connect Wallet" first.');
+      addMessage(
+        "system",
+        '⚠️ Wallet not connected. Please click "Connect Wallet" first.'
+      );
       return;
     }
 
     // Clear previous session messages but keep system messages about wallet connection
-    setMessages(prev => prev.filter(m =>
-      m.role === 'system' && (
-        m.content.includes('Connected with') ||
-        m.content.includes('SDK authenticated') ||
-        m.content.includes('Transactions will use')
+    setMessages((prev) =>
+      prev.filter(
+        (m) =>
+          m.role === "system" &&
+          (m.content.includes("Connected with") ||
+            m.content.includes("SDK authenticated") ||
+            m.content.includes("Auto Spend") ||
+            m.content.includes("Primary account funded"))
       )
-    ));
+    );
 
     // Reset session-specific state
     setTotalTokens(0);
     setLastCheckpointTokens(0);
 
+    // Close any existing session before creating a new one
+    if (sessionId) {
+      try {
+        addMessage("system", `Closing existing session ${sessionId}...`);
+        await sm.endSession(sessionId);
+      } catch (err) {
+        console.log(
+          "Error closing previous session (may be already closed):",
+          err
+        );
+      }
+      setSessionId(null);
+      setJobId(null);
+    }
+
     setIsLoading(true);
-    setStatus("Starting session...");
+    setStatus("Discovering hosts...");
 
     try {
-      // Workaround: Base Account Kit provider doesn't handle read calls properly
-      // So we'll discover hosts using a standard provider instead
+      const contracts = getContractAddresses();
+
+      // Discover hosts using HostManager
+      addMessage("system", "🔍 Discovering active hosts...");
       let hosts: any[] = [];
 
       try {
-        // Try the normal SDK method first
-        hosts = await (hostManager as any).discoverAllActiveHostsWithModels();
-        console.log("SDK method succeeded, found hosts:", hosts);
+        hosts = await (hm as any).discoverAllActiveHostsWithModels();
+        console.log("Found hosts:", hosts);
       } catch (sdkError: any) {
-        console.log("SDK host discovery failed with Base Account Kit, error:", sdkError.message);
-        console.log("Now trying direct provider fallback...");
-      }
-
-      // If no hosts found (either from error or empty array), try direct approach
-      if (hosts.length === 0) {
-        console.log("No hosts found via SDK, checking TEST_HOST_1 directly...");
-
-        // Fallback: Use a standard JSON-RPC provider for read-only calls
-        const readOnlyProvider = new ethers.JsonRpcProvider(RPC_URL);
-        const nodeRegistryAddress = process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY!;
-        const nodeRegistryAbi = [
-          'function getAllActiveNodes() view returns (address[])',
-          'function getNodeFullInfo(address) view returns (address, uint256, bool, string, string, bytes32[])'
-        ];
-
-        const nodeRegistry = new ethers.Contract(nodeRegistryAddress, nodeRegistryAbi, readOnlyProvider);
-
-        // First, let's try the simpler approach that node-management-enhanced uses
-        // Just check if TEST_HOST_1 is registered
-        const simpleAbi = [
-          'function nodes(address) view returns (address operator, uint256 stakedAmount, bool active, string metadata, string apiUrl)'
-        ];
-        const simpleRegistry = new ethers.Contract(nodeRegistryAddress, simpleAbi, readOnlyProvider);
-
-        try {
-          // Check if TEST_HOST_1 is registered (this works in node-management-enhanced)
-          const testHost1 = TEST_HOST_1_ADDRESS;
-          console.log("Checking TEST_HOST_1 at address:", testHost1);
-          const nodeData = await simpleRegistry.nodes(testHost1);
-          console.log("TEST_HOST_1 node data:", nodeData);
-
-          if (nodeData.active) {
-            // If TEST_HOST_1 is active, use it
-            hosts.push({
-              address: testHost1,
-              apiUrl: nodeData.apiUrl,
-              metadata: JSON.parse(nodeData.metadata),
-              supportedModels: [], // We don't have this from the simple call
-              isActive: nodeData.active,
-              stake: nodeData.stakedAmount
-            });
-            console.log("Using TEST_HOST_1 as it's active");
-          } else {
-            console.log("TEST_HOST_1 is not active, trying getAllActiveNodes...");
-            // Try getAllActiveNodes if available
-            try {
-              const activeNodes = await nodeRegistry.getAllActiveNodes();
-              console.log("Found active nodes via getAllActiveNodes:", activeNodes);
-
-              // Get full info for each node
-              for (const nodeAddress of activeNodes) {
-                const info = await nodeRegistry.getNodeFullInfo(nodeAddress);
-                hosts.push({
-                  address: nodeAddress,
-                  apiUrl: info[4],
-                  metadata: JSON.parse(info[3]),
-                  supportedModels: info[5],
-                  isActive: info[2],
-                  stake: info[1]
-                });
-              }
-            } catch (e) {
-              console.error("getAllActiveNodes failed:", e);
-            }
-          }
-        } catch (directError: any) {
-          console.error("Direct provider also failed:", directError);
-          throw new Error("Unable to discover hosts");
-        }
+        console.log("SDK host discovery failed, error:", sdkError.message);
+        throw new Error("Unable to discover hosts");
       }
 
       if (hosts.length === 0) {
         throw new Error("No active hosts available");
       }
 
-      // Randomly select a host from available hosts
-      const randomIndex = Math.floor(Math.random() * hosts.length);
-      const host = hosts[randomIndex];
-      console.log(`Randomly selected host ${randomIndex + 1} of ${hosts.length}: ${host.address}`);
+      // Parse host metadata
+      const parsedHosts = hosts.map((host: any) => ({
+        address: host.address,
+        endpoint: host.apiUrl || host.endpoint,
+        models: host.supportedModels || [],
+        pricePerToken: PRICE_PER_TOKEN,
+      }));
+
+      // Filter hosts that support models
+      const modelSupported = parsedHosts.filter(
+        (h: any) => h.models && h.models.length > 0
+      );
+      if (modelSupported.length === 0) {
+        throw new Error("No active hosts found supporting required models");
+      }
+
+      // Randomly select a host
+      const randomIndex = Math.floor(Math.random() * modelSupported.length);
+      const host = modelSupported[randomIndex];
+      console.log(
+        `Randomly selected host ${randomIndex + 1} of ${
+          modelSupported.length
+        }: ${host.address}`
+      );
 
       setActiveHost(host);
+      activeHostRef.current = host;
       // Store selected host address for later use
       (window as any).__selectedHostAddress = host.address;
 
       // Display which host we're connecting to
-      addMessage('system', `🎲 Randomly selected host ${randomIndex + 1} of ${hosts.length}`);
-      addMessage('system', `📡 Connecting to host: ${host.address.slice(0, 6)}...${host.address.slice(-4)}`);
-      if (host.models && host.models.length > 0) {
-        addMessage('system', `🤖 Using model: ${host.models[0]}`);
-      }
+      addMessage(
+        "system",
+        `🎲 Randomly selected host ${randomIndex + 1} of ${
+          modelSupported.length
+        }`
+      );
+      addMessage(
+        "system",
+        `📡 Host: ${host.address.slice(0, 6)}...${host.address.slice(-4)}`
+      );
+      addMessage("system", `🤖 Model: ${host.models[0]}`);
+      addMessage("system", `🌐 Endpoint: ${host.endpoint}`);
 
-      // Check sub-account balance and fund if needed
-      const subAccountBalance = subAccount ? await readUSDCBalance(subAccount) : 0n;
-      const minSessionCost = parseUnits("1.0", 6); // Minimum needed to run a session ($1)
-      // Only transfer what's needed for this session, not the full $2
-      // In ideal world with spend permissions, we wouldn't transfer at all
-      const transferAmount = minSessionCost; // Transfer only $1.00 per session
+      setStatus("Checking USDC balance...");
 
-      // Determine the session configuration based on balance
-      let sessionConfig: any;
+      // Check primary account has sufficient funds
+      const accountToCheck = primaryAccount;
+      const accountBalance = await readUSDCBalance(accountToCheck);
+      const sessionCost = parseUnits(SESSION_DEPOSIT_AMOUNT, 6);
 
-      if (subAccountBalance >= minSessionCost) {
-        console.log(`Sub-account has sufficient balance ($${formatUnits(subAccountBalance, 6)}) for session`);
-        addMessage('system', `💰 Using existing sub-account balance: $${formatUnits(subAccountBalance, 6)} - Running gasless!`);
-
-        // Show how many more sessions can be run with current balance
-        const sessionsRemaining = Math.floor(Number(subAccountBalance) / Number(minSessionCost));
-        if (sessionsRemaining > 1) {
-          addMessage('system', `📊 Can run ${sessionsRemaining} more sessions with current balance`);
-        }
-
-        // Use only what's needed for the session (minimum $0.20)
-        // This prevents unnecessary large deposits in sub-account
-        const depositToUse = minSessionCost;
-
-        // Create session configuration
-        // The SDK expects string for depositAmount, numbers for the rest
-        sessionConfig = {
-          depositAmount: "1.0",  // Will be parsed as 1.0 USDC in SessionJobManager
-          pricePerToken: PRICE_PER_TOKEN,  // number, not BigInt
-          proofInterval: PROOF_INTERVAL,    // number, not BigInt
-          duration: SESSION_DURATION        // number, not BigInt
-        };
-      } else {
-        console.log(`Sub-account balance ($${formatUnits(subAccountBalance, 6)}) too low for session`);
-        addMessage('system', `⚠️ Sub-account balance too low ($${formatUnits(subAccountBalance, 6)})`);
-
-        // Check primary account balance
-        const ethersProvider = new ethers.BrowserProvider((window as any).__basProvider || window.ethereum);
-        const usdcContract = new ethers.Contract(USDC, [
-          "function balanceOf(address) view returns (uint256)",
-          "function transfer(address to, uint256 amount) returns (bool)"
-        ], ethersProvider);
-
-        const primaryBalance = await usdcContract.balanceOf(primaryAccount);
-        console.log(`Primary account balance: $${formatUnits(primaryBalance, 6)}`);
-
-        if (primaryBalance >= transferAmount) {
-          // Primary has funds - transfer minimum needed to sub-account
-          // NOTE: This is a workaround because the SDK doesn't understand Base Account Kit's auto-spend
-          // Ideally, sub-account would spend directly from primary using spend permissions
-          addMessage('system', `💰 Primary account has $${formatUnits(primaryBalance, 6)} USDC`);
-          addMessage('system', `💳 Transferring $${formatUnits(transferAmount, 6)} from primary to sub-account for this session...`);
-
-          try {
-            // Don't use SDK signer here - we need to use the wallet directly
-            // The signer is for the sub-account, but we need to transfer from primary
-            // In Base Account Kit, the sub-account can initiate transfers from primary via spend permissions
-            // But for now, let's use a direct transfer approach
-
-            // Request user to transfer funds from their wallet
-            addMessage('system', `💳 Requesting $${formatUnits(transferAmount, 6)} USDC transfer to sub-account...`);
-            addMessage('system', `📍 Please approve the transaction in your wallet`);
-            addMessage('system', `💡 Note: With proper spend permissions, this transfer wouldn't be needed`);
-
-            // Get the connected wallet signer (this will trigger wallet popup)
-            const walletProvider = (window as any).__basProvider || window.ethereum;
-            if (!walletProvider) {
-              throw new Error('No wallet provider found');
-            }
-
-            // Request accounts if needed
-            const accounts = await walletProvider.request({ method: 'eth_requestAccounts' });
-            const userAccount = accounts[0];
-
-            // Create a new provider and signer for the user's primary account
-            const walletEthersProvider = new ethers.BrowserProvider(walletProvider);
-            const userSigner = await walletEthersProvider.getSigner(userAccount);
-            const usdcWithUserSigner = new ethers.Contract(USDC, [
-              "function transfer(address to, uint256 amount) returns (bool)",
-              "function balanceOf(address) view returns (uint256)"
-            ], userSigner);
-
-            // Request transfer from user's wallet to sub-account
-            // This will trigger MetaMask/wallet popup for user approval
-            console.log(`Requesting transfer of $${formatUnits(transferAmount, 6)} from ${userAccount} to ${subAccount}`);
-
-            try {
-              const tx = await usdcWithUserSigner.transfer(subAccount, transferAmount);
-              addMessage('system', `⏳ Transaction submitted. Waiting for confirmation...`);
-
-              const receipt = await tx.wait(3); // Wait for 3 confirmations
-              console.log(`Transfer confirmed in block ${receipt.blockNumber}`);
-
-              // Wait a bit for chain state to update
-              await new Promise(resolve => setTimeout(resolve, 2000));
-
-              // Verify the balance
-              const newSubBalance = await usdcContract.balanceOf(subAccount);
-              console.log(`Sub-account new balance: $${formatUnits(newSubBalance, 6)}`);
-
-              if (newSubBalance < minSessionCost) {
-                throw new Error(`Transfer confirmed but insufficient balance. Got $${formatUnits(newSubBalance, 6)}`);
-              }
-
-              addMessage('system', `✅ Sub-account funded! Balance: $${formatUnits(newSubBalance, 6)}`);
-            } catch (error: any) {
-              if (error.code === 4001 || error.message?.includes('rejected')) {
-                throw new Error('Transaction rejected by user');
-              }
-              throw error;
-            }
-
-            // Now we can use the minimum session amount
-            sessionConfig = {
-              depositAmount: "1.0",  // Will be parsed as 1.0 USDC in SessionJobManager
-              pricePerToken: PRICE_PER_TOKEN,  // number, not BigInt
-              proofInterval: PROOF_INTERVAL,    // number, not BigInt
-              duration: SESSION_DURATION        // number, not BigInt
-            };
-          } catch (error: any) {
-            console.error('Failed to fund sub-account:', error);
-            addMessage('system', `❌ Failed to fund sub-account: ${error.message}`);
-            throw error;
-          }
-        } else {
-          // Not enough balance in primary account
-          addMessage('system', `❌ Insufficient USDC in primary account`);
-          addMessage('system', `💡 You need at least $${formatUnits(transferAmount, 6)} USDC in your Base Account (${primaryAccount.slice(0, 6)}...${primaryAccount.slice(-4)})`);
-          addMessage('system', `💡 Current balance: $${formatUnits(primaryBalance, 6)} USDC`);
-          throw new Error(`Insufficient USDC balance. Need $${formatUnits(transferAmount, 6)}, have $${formatUnits(primaryBalance, 6)}`);
-        }
-      }
-
-      // Each host must have its own API URL - no fallbacks
-      const hostEndpoint = host.apiUrl || host.endpoint;
-      if (!hostEndpoint) {
-        throw new Error(`Host ${host.address} does not have an API endpoint configured. Cannot proceed with this host.`);
-      }
-
-      // Log the final session config for debugging
-      console.log('Starting session with config:', {
-        model: host.supportedModels?.[0] || "gpt-3.5-turbo",
-        host: host.address,
-        endpoint: hostEndpoint,
-        depositAmount: sessionConfig.depositAmount,
-        pricePerToken: sessionConfig.pricePerToken,
-        proofInterval: sessionConfig.proofInterval,
-        duration: sessionConfig.duration
-      });
-
-      // Start session with the configuration determined above
-      const result = await sessionManager.startSession(
-        host.supportedModels?.[0] || "gpt-3.5-turbo",
-        host.address,
-        sessionConfig,
-        hostEndpoint
+      addMessage(
+        "system",
+        `💰 Primary account balance: ${formatUnits(accountBalance, 6)} USDC`
       );
 
-      setSessionId(result.sessionId);
-      // Session started - sessionId is what we use for all operations
-      setLastCheckpointTokens(0); // Reset checkpoint tracking for new session
+      if (accountBalance < sessionCost) {
+        throw new Error(
+          `Insufficient USDC. Need ${SESSION_DEPOSIT_AMOUNT} USDC but only have ${formatUnits(
+            accountBalance,
+            6
+          )} USDC. Please transfer USDC to your primary account.`
+        );
+      }
 
-      const hostLabel = host.address.toLowerCase() === TEST_HOST_1_ADDRESS.toLowerCase() ? "Host 1" :
-                        host.address.toLowerCase() === TEST_HOST_2_ADDRESS.toLowerCase() ? "Host 2" :
-                        "Unknown Host";
+      setStatus("Creating session...");
 
-      setStatus(`Session active with ${hostLabel}. You can start chatting!`);
-      addMessage('system', `✅ Session started with ${hostLabel} (${host.address.slice(0, 6)}...${host.address.slice(-4)}). Session ID: ${result.sessionId}`);
+      // Validate host endpoint
+      const hostEndpoint = host.endpoint;
+      if (!hostEndpoint) {
+        throw new Error(
+          `Host ${host.address} does not have an API endpoint configured`
+        );
+      }
 
+      // Create session configuration with direct payment
+      const sessionConfig = {
+        depositAmount: SESSION_DEPOSIT_AMOUNT,
+        pricePerToken: Number(host.pricePerToken || PRICE_PER_TOKEN),
+        proofInterval: PROOF_INTERVAL,
+        duration: SESSION_DURATION,
+        paymentToken: contracts.USDC,
+        useDeposit: false, // Use direct payment with Auto Spend Permissions
+        chainId: selectedChainId, // REQUIRED for multi-chain
+      };
+
+      // Approve USDC for JobMarketplace contract
+      addMessage("system", "💰 Approving USDC for payment...");
+      const provider = baseAccountSDK
+        ? baseAccountSDK.getProvider()
+        : window.ethereum;
+      const ethersProvider = new ethers.BrowserProvider(provider);
+      const signer = await ethersProvider.getSigner();
+
+      const usdcContract = new ethers.Contract(
+        contracts.USDC,
+        [
+          "function approve(address spender, uint256 amount) returns (bool)",
+          "function allowance(address owner, address spender) view returns (uint256)",
+        ],
+        signer
+      );
+
+      // Check current allowance
+      const currentAllowance = await usdcContract.allowance(
+        primaryAccount,
+        contracts.JOB_MARKETPLACE
+      );
+      const depositAmountWei = parseUnits(SESSION_DEPOSIT_AMOUNT, 6);
+
+      if (currentAllowance < depositAmountWei) {
+        addMessage("system", "🔐 Requesting USDC approval (popup may appear)...");
+        const approveTx = await usdcContract.approve(
+          contracts.JOB_MARKETPLACE,
+          parseUnits("1000", 6) // Approve 1000 USDC for multiple sessions
+        );
+        await approveTx.wait(3);
+        addMessage("system", "✅ USDC approved for JobMarketplace");
+      } else {
+        addMessage("system", "✅ USDC already approved");
+      }
+
+      // Start session - with Auto Spend Permissions, payment happens automatically without popups!
+      addMessage(
+        "system",
+        isUsingBaseAccount
+          ? "🎉 Starting session with Auto Spend Permissions"
+          : "📝 Starting session..."
+      );
+
+      const fullSessionConfig = {
+        ...sessionConfig,
+        model: host.models[0],
+        provider: host.address,
+        hostAddress: host.address,
+        endpoint: hostEndpoint,
+        chainId: selectedChainId,
+      };
+
+      console.log("Starting session with config:", fullSessionConfig);
+
+      const result = await sm.startSession(fullSessionConfig);
+
+      // Store session IDs immediately and in window object
+      const newSessionId = result.sessionId;
+      const newJobId = result.jobId;
+      setSessionId(newSessionId);
+      setJobId(newJobId);
+      (window as any).__currentSessionId = newSessionId;
+      (window as any).__currentJobId = newJobId;
+
+      addMessage("system", `✅ Session created - ID: ${newSessionId}`);
+      if (newJobId) {
+        addMessage("system", `  Job ID: ${newJobId}`);
+      }
+      addMessage(
+        "system",
+        isUsingBaseAccount
+          ? "🎉 Payment processed via Auto Spend Permission - no popup!"
+          : "✅ Session payment completed"
+      );
+
+      // Wait for WebSocket connection
+      setStatus("Establishing WebSocket connection...");
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      setStatus("Session active. You can start chatting!");
+      addMessage("system", "✅ Ready to chat! Send a message to begin.");
     } catch (error: any) {
       console.error("Failed to start session:", error);
       setError(`Failed to start session: ${error.message}`);
+      addMessage("system", `❌ Error: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -938,7 +1153,12 @@ export default function ChatContextDemo() {
 
   // Send message to LLM
   async function sendMessage() {
-    if (!sessionManager || !sessionId || !inputMessage.trim()) {
+    const sm = sdk?.getSessionManager();
+
+    // Use window object to avoid React state async issues
+    const currentSessionId = (window as any).__currentSessionId || sessionId;
+
+    if (!sm || !currentSessionId || !inputMessage.trim()) {
       return;
     }
 
@@ -947,7 +1167,7 @@ export default function ChatContextDemo() {
     setIsLoading(true);
 
     // Add user message to chat
-    addMessage('user', userMessage);
+    addMessage("user", userMessage);
 
     try {
       // Build prompt with full context
@@ -955,7 +1175,6 @@ export default function ChatContextDemo() {
       let fullPrompt: string;
 
       if (context) {
-        // Add a clearer instruction format for the model
         fullPrompt = `${context}\nUser: ${userMessage}\nAssistant:`;
       } else {
         fullPrompt = `User: ${userMessage}\nAssistant:`;
@@ -967,30 +1186,24 @@ export default function ChatContextDemo() {
 
       // Send to LLM
       setStatus("Sending message...");
-      const response = await sessionManager.sendPrompt(sessionId, fullPrompt);
+      const response = await sm.sendPromptStreaming(
+        currentSessionId,
+        fullPrompt
+      );
 
       // Clean up the response to remove any repetitive patterns
       console.log("Raw response from LLM:", response);
       let cleanedResponse = response;
 
-      // Handle the specific repetitive pattern from this model
-      // The model returns: "\n\nA: 1 + 1 = 2\n\nA: 1 + 1 = 2\n\nA: ..."
-
-      // First, check if response contains "A:" pattern
+      // Handle repetitive pattern from model
       if (response.includes("A:")) {
-        // Split by "A:" and take the first non-empty answer
         const parts = response.split(/A:\s*/);
-        console.log("Parts after splitting by 'A:':", parts);
-
-        // Find the first meaningful answer (not just punctuation)
-        for (let i = 1; i < parts.length; i++) {  // Start from 1 to skip anything before first "A:"
+        for (let i = 1; i < parts.length; i++) {
           const cleaned = parts[i].trim();
-          if (cleaned && cleaned.length > 1) {  // Must be more than just punctuation
-            // Extract just the answer before any newline
-            const answer = cleaned.split('\n')[0].trim();
+          if (cleaned && cleaned.length > 1) {
+            const answer = cleaned.split("\n")[0].trim();
             if (answer && answer.length > 1) {
               cleanedResponse = answer;
-              console.log("Extracted answer:", cleanedResponse);
               break;
             }
           }
@@ -998,14 +1211,15 @@ export default function ChatContextDemo() {
       }
 
       // Final cleanup - remove any remaining "A:" prefix
-      cleanedResponse = cleanedResponse.replace(/^A:\s*/, '').trim();
-      console.log("Final cleaned response:", cleanedResponse);
+      cleanedResponse = cleanedResponse.replace(/^A:\s*/, "").trim();
 
       // Estimate tokens (rough estimate: 1 token per 4 characters)
-      const estimatedTokens = Math.ceil((fullPrompt.length + cleanedResponse.length) / 4);
+      const estimatedTokens = Math.ceil(
+        (fullPrompt.length + cleanedResponse.length) / 4
+      );
 
       // Add assistant response
-      addMessage('assistant', cleanedResponse, estimatedTokens);
+      addMessage("assistant", cleanedResponse, estimatedTokens);
 
       // Store conversation in S5 if storage manager is available
       if (storageManager && storageManager.isInitialized()) {
@@ -1014,14 +1228,11 @@ export default function ChatContextDemo() {
 
       setStatus("Session active");
 
-      // Submit checkpoint periodically (every 5 messages)
-      if (messages.length % 10 === 0) {
-        await submitCheckpoint();
-      }
-
+      // Note: Checkpoints are submitted automatically by the node via WebSocket
+      // No manual checkpoint submission needed in session job model
     } catch (error: any) {
       console.error("Failed to send message:", error);
-      addMessage('system', `Error: ${error.message}`);
+      addMessage("system", `❌ Error: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -1034,17 +1245,17 @@ export default function ChatContextDemo() {
     try {
       await storageManager.storeConversation({
         id: sessionId.toString(),
-        messages: messages.map(m => ({
+        messages: messages.map((m) => ({
           role: m.role,
           content: m.content,
-          timestamp: m.timestamp
+          timestamp: m.timestamp,
         })),
         metadata: {
           totalTokens,
           totalCost,
-          model: activeHost?.supportedModels?.[0] || "unknown",
-          provider: activeHost?.address || "unknown"
-        }
+          model: activeHost?.models?.[0] || "unknown",
+          provider: activeHost?.address || "unknown",
+        },
       });
     } catch (error) {
       console.warn("Failed to store conversation:", error);
@@ -1054,26 +1265,31 @@ export default function ChatContextDemo() {
   // Submit checkpoint proof (for payment)
   async function submitCheckpoint(forceSubmit: boolean = false) {
     if (!paymentManager || !sessionId) {
-      console.error("Cannot submit checkpoint: missing paymentManager or sessionId");
+      console.error(
+        "Cannot submit checkpoint: missing paymentManager or sessionId"
+      );
       return;
     }
 
     // Calculate tokens to submit
     let tokensToSubmit = totalTokens - lastCheckpointTokens;
 
-    // Contract requires minimum tokens (appears to be around 100 based on the config)
+    // Contract requires minimum tokens
     const MIN_CHECKPOINT_TOKENS = 100;
 
     // Skip if we don't have enough tokens (unless forced for final submission)
     if (tokensToSubmit < MIN_CHECKPOINT_TOKENS && !forceSubmit) {
-      console.log(`Skipping checkpoint: only ${tokensToSubmit} tokens (minimum ${MIN_CHECKPOINT_TOKENS} required)`);
+      console.log(
+        `Skipping checkpoint: only ${tokensToSubmit} tokens (minimum ${MIN_CHECKPOINT_TOKENS} required)`
+      );
       return;
     }
 
     // For final submission, ensure at least minimum tokens
-    // This ensures host gets paid even for short sessions
     if (forceSubmit && tokensToSubmit < MIN_CHECKPOINT_TOKENS) {
-      console.log(`Adjusting tokens from ${tokensToSubmit} to minimum ${MIN_CHECKPOINT_TOKENS} for payment`);
+      console.log(
+        `Adjusting tokens from ${tokensToSubmit} to minimum ${MIN_CHECKPOINT_TOKENS} for payment`
+      );
       tokensToSubmit = MIN_CHECKPOINT_TOKENS;
     }
 
@@ -1081,115 +1297,90 @@ export default function ChatContextDemo() {
       setStatus("Submitting checkpoint...");
 
       // Create host signer for proof submission
-      const hostProvider = new ethers.JsonRpcProvider(RPC_URL);
+      const hostProvider = new ethers.JsonRpcProvider(
+        RPC_URLS[selectedChainId as keyof typeof RPC_URLS]
+      );
 
       // Determine which host's private key to use based on the selected host
-      const selectedHostAddress = activeHost?.address || (window as any).__selectedHostAddress;
+      const selectedHostAddress =
+        activeHost?.address || (window as any).__selectedHostAddress;
+      if (!selectedHostAddress) {
+        throw new Error("No host selected for checkpoint submission");
+      }
+
       let hostPrivateKey: string;
 
-      if (selectedHostAddress?.toLowerCase() === TEST_HOST_1_ADDRESS.toLowerCase()) {
+      if (
+        selectedHostAddress.toLowerCase() === TEST_HOST_1_ADDRESS.toLowerCase()
+      ) {
         hostPrivateKey = TEST_HOST_1_PRIVATE_KEY;
-        console.log(`Using TEST_HOST_1 private key for checkpoint submission`);
-      } else if (selectedHostAddress?.toLowerCase() === TEST_HOST_2_ADDRESS.toLowerCase()) {
+      } else if (
+        selectedHostAddress.toLowerCase() === TEST_HOST_2_ADDRESS.toLowerCase()
+      ) {
         hostPrivateKey = TEST_HOST_2_PRIVATE_KEY;
-        console.log(`Using TEST_HOST_2 private key for checkpoint submission`);
       } else {
-        throw new Error(`Unknown host address for checkpoint submission: ${selectedHostAddress}`);
+        throw new Error(
+          `Unknown host address for checkpoint submission: ${selectedHostAddress}`
+        );
       }
 
       const hostSigner = new ethers.Wallet(hostPrivateKey, hostProvider);
       console.log(`Using host signer: ${await hostSigner.getAddress()}`);
 
-      // Generate a unique proof each time to prevent replay attack
+      // Generate a unique proof
       const timestamp = Date.now();
-      const uniqueHash = ethers.keccak256(ethers.toUtf8Bytes(`job_${sessionId}_${timestamp}`));
+      const uniqueHash = ethers.keccak256(
+        ethers.toUtf8Bytes(`job_${sessionId}_${timestamp}`)
+      );
 
-      // Create a structured 64-byte proof (minimum required)
+      // Create a structured 64-byte proof
       const proofData = ethers.AbiCoder.defaultAbiCoder().encode(
         ["bytes32", "bytes32"],
         [uniqueHash, ethers.id("mock_ezkl_padding")]
       );
 
-      // tokensToSubmit already calculated at the beginning of the function
+      // Wait for token accumulation (ProofSystem enforces rate limits)
+      console.log("Waiting 5 seconds for token accumulation...");
+      addMessage("system", "⏳ Waiting for token accumulation...");
+      await new Promise((resolve) => setTimeout(resolve, 5000));
 
-      // REQUIRED: Wait for token accumulation (ProofSystem enforces 10 tokens/sec generation rate)
-      // With 100 tokens claimed and 2x burst allowance, we need at least 5 seconds
-      console.log("Waiting 5 seconds for token accumulation (required by ProofSystem rate limits)...");
-      addMessage('system', "⏳ Waiting 5 seconds for token accumulation (ProofSystem rate limit)...");
-      await new Promise(resolve => setTimeout(resolve, 5000));
-
-      // Use PaymentManager's submitCheckpointAsHost method with sessionId
-      // In session model, sessionId identifies the entire conversation
-      console.log("Submitting checkpoint with parameters:", {
+      console.log("Submitting checkpoint:", {
         sessionId: sessionId.toString(),
         tokensToSubmit,
         proofDataLength: proofData.length,
-        proofDataHex: proofData,
-        hostSignerAddress: await hostSigner.getAddress()
       });
 
-      let checkpointTx;
-      try {
-        checkpointTx = await paymentManager.submitCheckpointAsHost(
-          sessionId,
-          tokensToSubmit,
-          proofData,
-          hostSigner
-        );
-      } catch (submitError: any) {
-        console.error("ERROR submitting checkpoint:", submitError);
-        console.error("Error details:", {
-          message: submitError.message,
-          code: submitError.code,
-          data: submitError.data,
-          transaction: submitError.transaction
-        });
-        throw submitError;
-      }
+      const checkpointTx = await paymentManager.submitCheckpointAsHost(
+        sessionId,
+        tokensToSubmit,
+        proofData,
+        hostSigner
+      );
 
       console.log("Checkpoint submitted:", checkpointTx);
       setStatus("Session active");
-      addMessage('system', `✅ Checkpoint submitted for ${tokensToSubmit} tokens. TX: ${checkpointTx.slice(0, 10)}...`);
+      addMessage(
+        "system",
+        `✅ Checkpoint submitted for ${tokensToSubmit} tokens`
+      );
 
-      // Note: The checkpoint transaction waits for 3 confirmations, but blockchain state
-      // may take additional time to be fully indexed for reading
-      console.log("Checkpoint transaction confirmed. State will update shortly...");
-
-      // Optional: Check if the update is visible yet (may show 0 initially due to indexing delay)
-      try {
-        // Small delay to allow initial indexing
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        console.log(`DEBUG: About to call getJobStatus with sessionId:`, sessionId, typeof sessionId);
-        const sessionDetails = await paymentManager.getJobStatus(sessionId);
-        console.log(`DEBUG: Full session details returned:`, sessionDetails);
-        // As explained by contracts developer:
-        // For session jobs, the contract uses tokensUsed to track consumed tokens
-        console.log(`Session tokensUsed (immediate check):`, sessionDetails?.tokensUsed || 0);
-
-        if (!sessionDetails?.tokensUsed || sessionDetails.tokensUsed === 0 || sessionDetails.tokensUsed === 0n) {
-          console.error("❌ ERROR: tokensUsed is 0 after checkpoint! This indicates a bug in PaymentManager.");
-          console.error("The contract should have recorded tokens. Check PaymentManager.getJobStatus implementation.");
-          addMessage('system', "❌ ERROR: Checkpoint submission failed - tokensUsed is 0!");
-        } else {
-          console.log(`✅ Checkpoint confirmed: ${sessionDetails.tokensUsed} tokens recorded`);
-          addMessage('system', `✅ Checkpoint confirmed: ${sessionDetails.tokensUsed} tokens recorded`);
-        }
-      } catch (e) {
-        console.warn("Could not read session details to verify proof acceptance:", e);
-      }
-
-      // Update last checkpoint tokens to avoid duplicate submissions
+      // Update last checkpoint tokens
       setLastCheckpointTokens(totalTokens);
-
     } catch (error) {
       console.warn("Checkpoint submission failed:", error);
+      addMessage("system", `⚠️ Checkpoint submission failed: ${error}`);
     }
   }
 
   // End session and complete payment
   async function endSession() {
-    if (!sessionManager || !sessionId) {
+    const sm = sdk?.getSessionManager();
+    const pm = sdk?.getPaymentManager();
+
+    // Use window object for session ID
+    const currentSessionId = (window as any).__currentSessionId || sessionId;
+
+    if (!sm || !currentSessionId) {
       return;
     }
 
@@ -1197,229 +1388,133 @@ export default function ChatContextDemo() {
     setStatus("Ending session...");
 
     try {
-      // IMPORTANT: Session ending flow with node v5:
-      // 1. When user clicks "End Session", they call completeSessionJob to trigger payment distribution
-      // 2. The host (node) detects WebSocket close and automatically:
-      //    - Submits any pending checkpoints (submitProofOfWork)
-      //    - Also calls completeSessionJob as backup
-      // 3. Either party can call completeSessionJob - it's safe and idempotent
-      // 4. User should NOT try to submit checkpoints (only host can do that)
-
       // Step 1: Store conversation to S5 before ending
       if (storageManager && messages.length > 0) {
         try {
           await storeConversation();
-          addMessage('system', '💾 Conversation stored to S5');
+          addMessage("system", "💾 Conversation stored to S5");
         } catch (e) {
           console.warn("Failed to store conversation:", e);
         }
       }
 
-      // Step 2: Read balances before completion
-      setStatus("Reading balances before completion...");
+      // Step 2: Read balances before ending
+      setStatus("Reading balances before ending...");
       const balancesBefore = await readAllBalances();
-      console.log("Balances before completion:", {
-        user: formatUnits(balancesBefore.user, 6),
-        subAccount: formatUnits(balancesBefore.subAccount, 6),
-        host: formatUnits(balancesBefore.host, 6),
-        treasury: formatUnits(balancesBefore.treasury, 6)
-      });
+      console.log("Balances before ending:", balancesBefore);
+      addMessage("system", `Host accumulated before: ${balancesBefore.hostAccumulated || '0'} USDC`);
+      addMessage("system", `Treasury accumulated before: ${balancesBefore.treasuryAccumulated || '0'} USDC`);
 
-      // Step 3: Complete the session
-      // Note: The host (node v5) handles final checkpoint submission automatically
-      // The user just triggers payment distribution via completeSessionJob
-      setStatus("Completing session and distributing payments...");
+      // Step 3: End the session (close WebSocket)
+      setStatus("Closing WebSocket connection...");
+      await sm.endSession(currentSessionId);
 
-      console.log(`Completing session ${sessionId.toString()}`);
-      addMessage('system', '📝 Triggering payment distribution...');
+      addMessage("system", "✅ Session ended successfully");
+      addMessage("system", "🔐 WebSocket disconnected");
+      addMessage("system", "⏳ Host will detect disconnect and complete contract to claim earnings");
 
-      // completeSession will call completeSessionJob on the contract
-      // This distributes payments: 97.5% to host, 2.5% to treasury, refund to user
-      const finalProof = "0x" + "00".repeat(32); // Dummy proof, not used in session model
-      const txHash = await sessionManager.completeSession(
-        sessionId,
-        totalTokens,  // Pass actual token count for record keeping
-        finalProof    // Not used but required by interface
-      );
-      console.log("Session completion TX:", txHash);
+      // Calculate expected payment distribution
+      const tokensCost = (totalTokens * PRICE_PER_TOKEN) / 1000000; // Convert to USDC
+      const hostPayment = tokensCost * 0.9; // 90% to host
+      const treasuryPayment = tokensCost * 0.1; // 10% to treasury
 
-      // Verify session was marked as completed
+      addMessage("system", `📊 Tokens used in session: ${totalTokens}`);
+      addMessage("system", `💰 Expected payment distribution (when host completes):`);
+      addMessage("system", `   Total cost: ${tokensCost.toFixed(6)} USDC (${totalTokens} tokens × $${PRICE_PER_TOKEN/1000000}/token)`);
+      addMessage("system", `   Host will receive: ${hostPayment.toFixed(6)} USDC (90%)`);
+      addMessage("system", `   Treasury will receive: ${treasuryPayment.toFixed(6)} USDC (10%)`);
+
+      addMessage("system", "ℹ️  Note: Balances won't update until host calls completeSessionJob");
+
+      // Step 4: Simulate host completing the session (in production, host does this)
+      setStatus("Simulating host completion...");
+      addMessage("system", "🔧 Simulating host calling completeSession (for demo purposes)...");
+
       try {
-        const sessionDetails = await paymentManager.getJobStatus(sessionId);
-        console.log("Session status after completion:", sessionDetails);
-      } catch (e) {
-        console.warn("Could not read session status after completion:", e);
-      }
+        const finalProof = "0x" + "00".repeat(32); // Dummy proof
+        const hostProvider = new ethers.JsonRpcProvider(
+          RPC_URLS[selectedChainId as keyof typeof RPC_URLS]
+        );
+        const selectedHostAddr =
+          activeHost?.address || (window as any).__selectedHostAddress;
 
-      // Step 4: Wait for transaction confirmation
-      await new Promise(resolve => setTimeout(resolve, 3000));
-
-      // Step 4.5: Withdraw host earnings from HostEarnings contract
-      setStatus("Withdrawing host earnings...");
-      try {
-        // Create host's SDK instance with signer authentication
-        const hostProvider = new ethers.JsonRpcProvider(RPC_URL);
-        const selectedHostAddr = activeHost?.address || (window as any).__selectedHostAddress;
         if (!selectedHostAddr) {
-          throw new Error("No host selected for checkpoint submission");
+          throw new Error("No host selected for completion");
         }
-        let hostPrivateKey: string;
 
+        let hostPrivateKey: string;
         if (selectedHostAddr.toLowerCase() === TEST_HOST_1_ADDRESS.toLowerCase()) {
           hostPrivateKey = TEST_HOST_1_PRIVATE_KEY;
         } else if (selectedHostAddr.toLowerCase() === TEST_HOST_2_ADDRESS.toLowerCase()) {
           hostPrivateKey = TEST_HOST_2_PRIVATE_KEY;
         } else {
-          throw new Error(`Unknown host address for withdrawal: ${selectedHostAddr}`);
+          throw new Error(`Unknown host address: ${selectedHostAddr}`);
         }
 
         const hostWallet = new ethers.Wallet(hostPrivateKey, hostProvider);
-        console.log(`Host withdrawing earnings with wallet: ${await hostWallet.getAddress()}`);
-
-        // Create a new SDK instance for the host
+        const chain = ChainRegistry.getChain(selectedChainId);
         const hostSdk = new FabstirSDKCore({
           walletAddress: await hostWallet.getAddress(),
           contractAddresses: {
-            jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!,
-            nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY!,
-            proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM!,
-            hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS!,
-            fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN!,
-            usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
-            modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY!
+            jobMarketplace: chain.contracts.jobMarketplace,
+            nodeRegistry: chain.contracts.nodeRegistry,
+            proofSystem: chain.contracts.proofSystem,
+            hostEarnings: chain.contracts.hostEarnings,
+            fabToken: chain.contracts.fabToken,
+            usdcToken: chain.contracts.usdcToken,
+            modelRegistry: chain.contracts.modelRegistry,
           },
           s5Config: {
-            seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE!
-          }
-        });
-
-        // Authenticate host SDK with the signer method
-        await hostSdk.authenticate('signer', { signer: hostWallet });
-
-        // Get HostManager and withdraw earnings
-        const hostManager = hostSdk.getHostManager();
-        const withdrawTx = await hostManager.withdrawEarnings(process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!);
-        console.log(`✅ Host withdrew earnings - TX: ${withdrawTx}`);
-        addMessage('system', `✅ Host withdrew earnings - TX: ${withdrawTx}`);
-
-        // Wait for withdrawal to be confirmed
-        await new Promise(resolve => setTimeout(resolve, 3000));
-
-      } catch (error: any) {
-        console.error(`Host withdrawal failed: ${error.message}`);
-        addMessage('system', `⚠️ Host withdrawal: ${error.message}`);
-        if (error.message.includes('No earnings')) {
-          console.error("No earnings to withdraw - checkpoint proof may have been rejected");
-        }
-      }
-
-      // Step 4.6: Withdraw treasury fees
-      setStatus("Withdrawing treasury fees...");
-      try {
-        // Treasury withdraws their fees using their own SDK instance
-        const treasuryProvider = new ethers.JsonRpcProvider(RPC_URL);
-        const treasuryWallet = new ethers.Wallet(TEST_TREASURY_PRIVATE_KEY, treasuryProvider);
-        console.log(`Treasury withdrawing fees with wallet: ${await treasuryWallet.getAddress()}`);
-
-        const treasurySdk = new FabstirSDKCore({
-          walletAddress: await treasuryWallet.getAddress(),
-          contractAddresses: {
-            jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!,
-            nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY!,
-            proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM!,
-            hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS!,
-            fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN!,
-            usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
-            modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY!
+            seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE!,
           },
-          s5Config: {
-            seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE!
-          }
         });
 
-        // Authenticate treasury SDK with the signer method
-        await treasurySdk.authenticate('signer', { signer: treasuryWallet });
+        await hostSdk.authenticate("signer", { signer: hostWallet });
+        const hostSm = hostSdk.getSessionManager();
 
-        // Get TreasuryManager and withdraw fees
-        const treasuryManager = treasurySdk.getTreasuryManager();
-        const treasuryWithdrawTx = await treasuryManager.withdrawFees();
-        console.log(`✅ Treasury withdrew fees - TX: ${treasuryWithdrawTx}`);
-        addMessage('system', `✅ Treasury withdrew fees - TX: ${treasuryWithdrawTx}`);
+        // Use actual token count - node handles padding if needed
+        addMessage("system", `📊 Completing with ${totalTokens} actual tokens`);
 
-        // Wait for withdrawal to be confirmed
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        const completionTx = await hostSm.completeSession(
+          currentSessionId,
+          totalTokens,
+          finalProof
+        );
+        console.log(`✅ Host completed session - TX: ${completionTx}`);
+        addMessage("system", `✅ Host completed session on blockchain`);
+
+        // Wait for confirmation
+        await new Promise((resolve) => setTimeout(resolve, 5000));
       } catch (error: any) {
-        console.error(`Treasury withdrawal failed: ${error.message}`);
-        addMessage('system', `⚠️ Treasury withdrawal: ${error.message}`);
-        if (error.message.includes('Only authorized')) {
-          console.error("Note: Only authorized treasury account can withdraw fees");
-        }
+        console.error(`Host completion failed: ${error.message}`);
+        addMessage("system", `⚠️ Host completion failed: ${error.message}`);
       }
 
-      // Step 5: Read balances after completion and withdrawals
-      setStatus("Reading balances after completion and withdrawal...");
+      // Step 5: Read balances after completion
+      setStatus("Reading final balances...");
       const balancesAfter = await readAllBalances();
-      console.log("Balances after completion:", {
-        user: formatUnits(balancesAfter.user, 6),
-        subAccount: formatUnits(balancesAfter.subAccount, 6),
-        host: formatUnits(balancesAfter.host, 6),
-        treasury: formatUnits(balancesAfter.treasury, 6)
-      });
+      console.log("Balances after session end:", balancesAfter);
 
-      // Step 6: Calculate payment distribution
-      const payments = {
-        hostPayment: balancesAfter.host - balancesBefore.host,
-        treasuryFee: balancesAfter.treasury - balancesBefore.treasury,
-        subAccountChange: balancesAfter.subAccount - balancesBefore.subAccount,
-        userRefund: balancesAfter.user - balancesBefore.user
-      };
+      // Step 6: Display final results
+      setStatus("Session ended successfully");
 
-      // Step 7: Display payment results
-      setStatus("Session ended. Payments distributed.");
-
-      let paymentSummary = `💰 Payment Distribution:\n`;
-
-      if (payments.hostPayment > 0n) {
-        paymentSummary += `✅ Host received: $${formatUnits(payments.hostPayment, 6)} (90% of work done)\n`;
-      } else {
-        paymentSummary += `❌ No payment to host (check if checkpoint was submitted)\n`;
-      }
-
-      if (payments.treasuryFee > 0n) {
-        paymentSummary += `✅ Treasury fee: $${formatUnits(payments.treasuryFee, 6)} (10% platform fee)\n`;
-      } else {
-        paymentSummary += `❌ No treasury fee collected\n`;
-      }
-
-      if (payments.subAccountChange !== 0n) {
-        const changeAmount = formatUnits(payments.subAccountChange > 0n ? payments.subAccountChange : -payments.subAccountChange, 6);
-        if (payments.subAccountChange > 0n) {
-          paymentSummary += `💵 Sub-account refund: $${changeAmount}\n`;
-          paymentSummary += `   💡 Deposit Model: This refund stays in sub-account\n`;
-          paymentSummary += `   💡 Next session will use this balance (no new deposit needed!)\n`;
-          const sessionsRemaining = Math.floor(Number(payments.subAccountChange) / 200000); // $0.20 per session
-          if (sessionsRemaining > 0) {
-            paymentSummary += `   💡 User can run ${sessionsRemaining} more sessions without depositing\n`;
-          }
-        } else {
-          paymentSummary += `💵 Sub-account paid: $${changeAmount}\n`;
-        }
-      }
-
-      addMessage('system', `Session completed. Total tokens: ${totalTokens}, Total cost: $${totalCost.toFixed(4)} USDC`);
-      addMessage('system', paymentSummary);
+      addMessage("system", "✅ Session ended successfully");
+      addMessage("system", "💰 Your final balance:");
+      addMessage("system", `  Smart Wallet: ${balancesAfter.smartWallet} USDC`);
 
       // Clear session state
       setSessionId(null);
-      // Session ended
+      setJobId(null);
       setActiveHost(null);
+      activeHostRef.current = null;
       setLastCheckpointTokens(0);
-      // Clear the stored host address
       delete (window as any).__selectedHostAddress;
-
+      delete (window as any).__currentSessionId;
+      delete (window as any).__currentJobId;
     } catch (error: any) {
       console.error("Failed to end session:", error);
       setError(`Failed to end session: ${error.message}`);
+      addMessage("system", `❌ Error ending session: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -1430,13 +1525,32 @@ export default function ChatContextDemo() {
     setMessages([]);
     setTotalTokens(0);
     setTotalCost(0);
-    addMessage('system', 'Conversation cleared. Session remains active.');
+    addMessage("system", "Conversation cleared. Session remains active.");
   }
 
   // Render UI
   return (
     <div className="max-w-6xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-4">Chat Context Demo</h1>
+
+      {/* Chain Selector */}
+      <div className="mb-4 p-3 bg-gray-100 rounded">
+        <label className="font-semibold mr-2">Chain:</label>
+        <select
+          value={selectedChainId}
+          onChange={(e) => setSelectedChainId(Number(e.target.value))}
+          className="px-3 py-1 border rounded"
+          disabled={isConnected}
+        >
+          <option value={ChainId.BASE_SEPOLIA}>Base Sepolia</option>
+          <option value={ChainId.OPBNB_TESTNET}>opBNB Testnet</option>
+        </select>
+        {isConnected && (
+          <span className="ml-2 text-sm text-gray-600">
+            (disconnect to change chain)
+          </span>
+        )}
+      </div>
 
       {/* Status Bar */}
       <div className="bg-gray-100 p-3 rounded mb-4">
@@ -1446,7 +1560,9 @@ export default function ChatContextDemo() {
           </div>
           <div className="text-sm text-gray-600">
             <span>Tokens: {totalTokens}</span>
-            <span style={{ marginLeft: '20px' }}>Cost: ${totalCost.toFixed(4)}</span>
+            <span style={{ marginLeft: "20px" }}>
+              Cost: ${totalCost.toFixed(4)}
+            </span>
           </div>
         </div>
         {sessionId && (
@@ -1454,9 +1570,12 @@ export default function ChatContextDemo() {
             <div>Session ID: {sessionId.toString()}</div>
             {activeHost && (
               <div className="text-xs text-green-600 font-semibold mt-1">
-                Connected to Host: {activeHost.address.slice(0, 6)}...{activeHost.address.slice(-4)}
-                {activeHost.address.toLowerCase() === TEST_HOST_1_ADDRESS.toLowerCase() && " (Host 1)"}
-                {activeHost.address.toLowerCase() === TEST_HOST_2_ADDRESS.toLowerCase() && " (Host 2)"}
+                Connected to Host: {activeHost.address.slice(0, 6)}...
+                {activeHost.address.slice(-4)}
+                {activeHost.address.toLowerCase() ===
+                  TEST_HOST_1_ADDRESS.toLowerCase() && " (Host 1)"}
+                {activeHost.address.toLowerCase() ===
+                  TEST_HOST_2_ADDRESS.toLowerCase() && " (Host 2)"}
               </div>
             )}
           </div>
@@ -1470,11 +1589,113 @@ export default function ChatContextDemo() {
         </div>
       )}
 
+      {/* Deposit Section */}
+      {isConnected && primaryAccount && (
+        <div className="bg-blue-50 p-4 rounded-lg mb-4">
+          <h3 className="font-semibold mb-2">💰 Deposit USDC</h3>
+          <div className="flex gap-2 items-center">
+            <input
+              type="number"
+              value={depositAmount}
+              onChange={(e) => setDepositAmount(e.target.value)}
+              placeholder="Amount (USDC)"
+              className="px-3 py-2 border rounded w-32"
+              disabled={isLoading}
+            />
+            <button
+              onClick={depositUSDC}
+              disabled={isLoading || !depositAmount}
+              className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-300"
+            >
+              {isLoading ? "Depositing..." : "Deposit to Primary Account"}
+            </button>
+            <button
+              onClick={readAllBalances}
+              disabled={isLoading}
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
+            >
+              Refresh Balances
+            </button>
+          </div>
+          <p className="text-xs text-gray-600 mt-2">
+            Request USDC from test faucet to your primary smart account
+          </p>
+        </div>
+      )}
+
+      {/* User Accounts Section */}
+      {isConnected && primaryAccount && (
+        <div className="bg-white border rounded-lg p-4 mb-4">
+          <h3 className="font-semibold mb-3">👤 User Accounts</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <span style={{ color: '#6b7280', marginRight: '20px' }}>
+                Primary Smart Wallet: {primaryAccount.slice(0, 10)}...{primaryAccount.slice(-8)}
+              </span>
+              <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>
+                {balances.smartWallet} USDC
+              </span>
+            </div>
+            {subAccount && subAccount !== primaryAccount && (
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <span style={{ color: '#6b7280', marginRight: '20px' }}>
+                  Sub-Account: {subAccount.slice(0, 10)}...{subAccount.slice(-8)}
+                </span>
+                <span style={{ fontFamily: 'monospace' }}>{balances.subAccount} USDC</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Host Earnings Section */}
+      {isConnected && (activeHost || (window as any).__selectedHostAddress) && (
+        <div className="bg-white border rounded-lg p-4 mb-4">
+          <h3 className="font-semibold mb-3">🖥️ Host Earnings</h3>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-600">Accumulated (Contract):</span>
+              <span className="font-mono text-orange-600">
+                {balances.hostAccumulated} USDC
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">Host 1 Wallet:</span>
+              <span className="font-mono">{balances.host1} USDC</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">Host 2 Wallet:</span>
+              <span className="font-mono">{balances.host2} USDC</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Treasury Section */}
+      {isConnected && (
+        <div className="bg-white border rounded-lg p-4 mb-4">
+          <h3 className="font-semibold mb-3">🏦 Treasury</h3>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-600">Accumulated (Contract):</span>
+              <span className="font-mono text-purple-600">
+                {balances.treasuryAccumulated} USDC
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">Treasury Wallet:</span>
+              <span className="font-mono">{balances.treasury} USDC</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Chat Messages */}
       <div className="bg-white border rounded-lg h-96 overflow-y-auto mb-8 p-4">
         {messages.length === 0 ? (
           <div className="text-gray-400 text-center mt-8">
-            No messages yet. Connect wallet and start a session to begin chatting.
+            No messages yet. Connect wallet and start a session to begin
+            chatting.
           </div>
         ) : (
           <div className="space-y-3">
@@ -1482,20 +1703,26 @@ export default function ChatContextDemo() {
               <div
                 key={idx}
                 className={`${
-                  msg.role === 'user'
-                    ? 'text-blue-600'
-                    : msg.role === 'assistant'
-                    ? 'text-green-600'
-                    : 'text-gray-500 italic'
+                  msg.role === "user"
+                    ? "text-blue-600"
+                    : msg.role === "assistant"
+                    ? "text-green-600"
+                    : "text-gray-500 italic"
                 }`}
               >
                 <span className="font-semibold">
-                  {msg.role === 'user' ? 'User' : msg.role === 'assistant' ? 'Assistant' : 'System'}:
-                </span>{' '}
+                  {msg.role === "user"
+                    ? "User"
+                    : msg.role === "assistant"
+                    ? "Assistant"
+                    : "System"}
+                  :
+                </span>{" "}
                 {msg.content}
                 {msg.tokens && (
                   <span className="text-xs text-gray-400 ml-2">
-                    {' '}({msg.tokens} tokens)
+                    {" "}
+                    ({msg.tokens} tokens)
                   </span>
                 )}
               </div>
@@ -1505,27 +1732,24 @@ export default function ChatContextDemo() {
         )}
       </div>
 
-      {/* Spacer */}
-      <div style={{ height: '20px' }}></div>
-
       {/* Input Area */}
       <div className="flex gap-2 mb-4">
         <input
           type="text"
           value={inputMessage}
           onChange={(e) => setInputMessage(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && !isLoading && sendMessage()}
+          onKeyPress={(e) => e.key === "Enter" && !isLoading && sendMessage()}
           placeholder="Type your message..."
           disabled={!sessionId || isLoading}
           className="flex-1 px-4 py-3 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-          style={{ minWidth: '500px' }}
+          style={{ minWidth: "500px" }}
         />
         <button
           onClick={sendMessage}
           disabled={!sessionId || isLoading || !inputMessage.trim()}
           className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
         >
-          {isLoading ? 'Sending...' : 'Send'}
+          {isLoading ? "Sending..." : "Send"}
         </button>
       </div>
 
@@ -1569,14 +1793,37 @@ export default function ChatContextDemo() {
 
       {/* Instructions */}
       <div className="mt-6 p-4 bg-blue-50 rounded-lg text-sm">
-        <h3 className="font-semibold mb-2">How this works:</h3>
+        <h3 className="font-semibold mb-2">
+          🎯 How Base Account Kit Auto Spend Permissions Work:
+        </h3>
         <ul className="list-disc list-inside space-y-1 text-gray-700">
-          <li>Connect wallet to authenticate with the SDK</li>
-          <li>Start a session to create an LLM job with USDC deposit</li>
-          <li>Send messages - full conversation context is included with each prompt</li>
-          <li>Responses accumulate tokens which are tracked for payment</li>
-          <li>Conversation is stored in S5 for persistence</li>
-          <li>End session to complete payment distribution to host and treasury</li>
+          <li>
+            <strong>First Time:</strong> Connect wallet → Approve spend
+            permission once ($1000 USDC allowance)
+          </li>
+          <li>
+            <strong>Subsequent Sessions:</strong> Just click "Start Session" -
+            NO transaction popups!
+          </li>
+          <li>
+            Sub-account automatically spends USDC from primary account via spend
+            permissions
+          </li>
+          <li>
+            All transactions are gasless (sponsored by Coinbase on Base Sepolia)
+          </li>
+          <li>
+            Multiple chat sessions without any popups until primary account runs
+            out of USDC
+          </li>
+          <li>
+            Conversation context is preserved across multiple prompts within a
+            session
+          </li>
+          <li>
+            Payments are automatically distributed to host (90%) and treasury
+            (10%) when session ends
+          </li>
         </ul>
       </div>
     </div>

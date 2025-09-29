@@ -55,7 +55,7 @@ const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_
 
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = '2'; // $2 USDC
-const PRICE_PER_TOKEN = 1; // 0.000001 USDC per token (1 unit in 6-decimal USDC)
+const PRICE_PER_TOKEN = 2000; // 0.002 USDC per token
 const PROOF_INTERVAL = 100; // Proof every 100 tokens
 const SESSION_DURATION = 86400; // 1 day
 const EXPECTED_TOKENS = 100; // Expected tokens to generate in test
@@ -962,12 +962,11 @@ export default function BaseUsdcMvpFlowSDKTest() {
       const responseTokens = Math.ceil(response.length / 4);
       const totalTokens = promptTokens + responseTokens;
 
-      // Ensure minimum 100 tokens for ProofSystem requirements
-      const billableTokens = Math.max(totalTokens, 100);
-      setTotalTokensGenerated(billableTokens);
+      // Use actual token count - node handles padding if needed
+      setTotalTokensGenerated(totalTokens);
 
       addLog(`📊 Token count: ${promptTokens} (prompt) + ${responseTokens} (response) = ${totalTokens} tokens`);
-      addLog(`💰 Billable tokens: ${billableTokens} (minimum 100 for ProofSystem)`);
+      addLog(`💰 Actual tokens used: ${totalTokens} (node will pad first checkpoint to 100 if needed)`);
 
       setStepStatus(prev => ({ ...prev, 5: 'completed' }));
       setCurrentStep(5);
@@ -2070,13 +2069,13 @@ export default function BaseUsdcMvpFlowSDKTest() {
       
       addLog("📝 Completing session (triggers automatic payment distribution)...");
 
-      // Get actual token count from session, ensuring minimum of 100
+      // Get actual token count from session
       const sessionDetailsForCompletion = await sm.getSessionDetails(result.sessionId);
-      const completionTokens = Math.max(sessionDetailsForCompletion.tokensUsed || 100, 100);
+      const completionTokens = sessionDetailsForCompletion.tokensUsed || 0;
 
       const finalProof = "0x" + "00".repeat(32);
-      const txHash = await sm.completeSession(result.sessionId, completionTokens, finalProof); // Use actual tokens (min 100)
-      addLog(`✅ Session marked as completed with ${completionTokens} tokens - TX: ${txHash}`);
+      const txHash = await sm.completeSession(result.sessionId, completionTokens, finalProof); // Use actual tokens - node handles padding
+      addLog(`✅ Session marked as completed with ${completionTokens} actual tokens - TX: ${txHash}`);
       
       // Transaction confirmation is handled by completeSessionJob
       addLog("✅ Session completed and payments distributed on-chain");
