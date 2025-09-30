@@ -33,10 +33,11 @@ import { ClientManager } from './managers/ClientManager';
 import { ContractManager, ContractAddresses } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 import { SDKConfig, SDKError } from './types';
-import { getOrGenerateS5Seed, hasCachedSeed } from './utils/s5-seed-derivation';
+import { getOrGenerateS5Seed, hasCachedSeed, cacheSeed } from './utils/s5-seed-derivation';
 import { ChainRegistry } from './config/ChainRegistry';
 import { ChainId, ChainConfig } from './types/chain.types';
 import { UnsupportedChainError } from './errors/ChainErrors';
+import { ensureSubAccount, createSubAccountSigner, SubAccountOptions } from './wallet';
 
 export interface FabstirSDKCoreConfig {
   // Network configuration
@@ -421,7 +422,122 @@ export class FabstirSDKCore extends EventEmitter {
       );
     }
   }
-  
+
+  /**
+   * Authenticate with Base Account Kit for popup-free transactions
+   *
+   * This method:
+   * 1. Creates or retrieves a sub-account with spend permissions
+   * 2. Creates a custom signer that uses wallet_sendCalls
+   * 3. Authenticates the SDK with this signer
+   * 4. Caches S5 seed to avoid signature popups
+   *
+   * @param options Configuration options
+   * @returns Sub-account address and whether it was newly created
+   */
+  async authenticateWithBaseAccount(options: {
+    provider: any;           // Base Account Kit provider
+    primaryAccount: string;  // Primary smart wallet address
+    chainId?: number;        // Override chain ID (defaults to config)
+    tokenAddress?: string;   // Token for spend permissions (defaults to USDC)
+    tokenDecimals?: number;  // Token decimals (defaults to 6)
+    maxAllowance?: string;   // Max allowance in token units (defaults to "1000000")
+    periodDays?: number;     // Permission period in days (defaults to 365)
+  }): Promise<{
+    subAccount: string;
+    isNewlyCreated: boolean;
+  }> {
+    const {
+      provider,
+      primaryAccount,
+      chainId = this.config.chainId!,
+      tokenAddress = this.config.contractAddresses?.usdcToken,
+      tokenDecimals = 6,
+      maxAllowance = '1000000',
+      periodDays = 365,
+    } = options;
+
+    if (!tokenAddress) {
+      throw new SDKError(
+        'Token address required for Base Account authentication. Provide tokenAddress or configure contractAddresses.usdcToken',
+        'TOKEN_ADDRESS_MISSING'
+      );
+    }
+
+    console.log('[BaseAccount Auth] Starting authentication with Base Account Kit');
+    console.log('[BaseAccount Auth] Primary account:', primaryAccount);
+    console.log('[BaseAccount Auth] Chain ID:', chainId);
+
+    // 1. Ensure sub-account exists with spend permissions
+    const subAccountResult = await ensureSubAccount(provider, primaryAccount, {
+      tokenAddress,
+      tokenDecimals,
+      maxAllowance,
+      periodDays,
+    });
+
+    console.log('[BaseAccount Auth] Sub-account:', subAccountResult.address);
+    console.log('[BaseAccount Auth] Is existing:', subAccountResult.isExisting);
+
+    // 2. Pre-cache S5 seed for sub-account to avoid signature popup
+    const subAccountLower = subAccountResult.address.toLowerCase();
+    if (!hasCachedSeed(subAccountLower)) {
+      // Use the configured S5 seed or a deterministic seed
+      const seedToCache = this.config.s5Config?.seedPhrase ||
+        'yield organic score bishop free juice atop village video element unless sneak care rock update';
+      cacheSeed(subAccountLower, seedToCache);
+      console.log('[BaseAccount Auth] Pre-cached S5 seed for sub-account');
+    }
+
+    // 3. Create custom signer that uses wallet_sendCalls
+    const customSigner = createSubAccountSigner({
+      provider,
+      subAccount: subAccountResult.address,
+      primaryAccount,
+      chainId,
+    });
+
+    console.log('[BaseAccount Auth] Created custom sub-account signer');
+
+    // 4. Authenticate SDK with the custom signer
+    await this.authenticate('signer', { signer: customSigner });
+
+    console.log('[BaseAccount Auth] SDK authenticated successfully');
+
+    // 5. Approve JobMarketplace to spend USDC from sub-account
+    // This is required for createSessionJob to work
+    if (this.config.contractAddresses?.jobMarketplace) {
+      try {
+        console.log('[BaseAccount Auth] Approving JobMarketplace to spend USDC...');
+        const ethersProvider = new ethers.BrowserProvider(provider);
+        const usdcContract = new ethers.Contract(
+          tokenAddress,
+          ['function approve(address spender, uint256 amount) returns (bool)'],
+          customSigner
+        );
+
+        // Approve a large amount (effectively unlimited)
+        const approvalAmount = ethers.parseUnits(maxAllowance, tokenDecimals);
+        const approveTx = await usdcContract.approve(
+          this.config.contractAddresses.jobMarketplace,
+          approvalAmount
+        );
+        await approveTx.wait(1);
+        console.log('[BaseAccount Auth] JobMarketplace approval complete');
+      } catch (error) {
+        console.warn('[BaseAccount Auth] Failed to approve JobMarketplace:', error);
+        // Don't throw - approval might already exist or can be done later
+      }
+    }
+
+    console.log('[BaseAccount Auth] All transactions will now be popup-free!');
+
+    return {
+      subAccount: subAccountResult.address,
+      isNewlyCreated: !subAccountResult.isExisting,
+    };
+  }
+
   /**
    * Initialize all managers
    */

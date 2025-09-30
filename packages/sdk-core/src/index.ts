@@ -89,6 +89,16 @@ export * from './utils';
 export { EnvironmentDetector } from './utils/EnvironmentDetector';
 export type { EnvironmentCapabilities } from './utils/EnvironmentDetector';
 
+// Export wallet utilities for Base Account Kit integration
+export {
+  ensureSubAccount,
+  getExistingSubAccount,
+  createSubAccountSigner,
+  type SubAccountOptions,
+  type SubAccountResult,
+  type SubAccountSignerOptions,
+} from './wallet';
+
 // Export WebSocket client
 export { WebSocketClient } from './websocket/WebSocketClient';
 
