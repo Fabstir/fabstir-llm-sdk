@@ -253,33 +253,29 @@ export default function ChatContextDemo() {
   const readAllBalances = async () => {
     try {
       const contracts = getContractAddresses();
-      // Always use JsonRpcProvider for reading balances (Base Account Kit provider doesn't work well with ethers.Contract)
-      const provider = new ethers.JsonRpcProvider(
-        RPC_URLS[selectedChainId as keyof typeof RPC_URLS]
-      );
+      const pm = paymentManager || sdk?.getPaymentManager();
 
-      const usdcContract = new ethers.Contract(
-        contracts.USDC,
-        ["function balanceOf(address) view returns (uint256)"],
-        provider
-      );
+      if (!pm) {
+        console.log("PaymentManager not available for balance reading");
+        return balances;
+      }
 
       const newBalances = { ...balances };
 
-      // Read EOA balance (if using Base Account Kit)
+      // Read EOA balance (if using Base Account Kit) - using SDK
       if (eoaAddress && baseAccountSDK) {
         try {
-          const eoaBalance = await usdcContract.balanceOf(eoaAddress);
+          const eoaBalance = await pm.getTokenBalance(eoaAddress, contracts.USDC);
           newBalances.eoaWallet = ethers.formatUnits(eoaBalance, 6);
         } catch (e) {
           console.log("Error reading EOA balance:", e);
         }
       }
 
-      // Read primary smart wallet balance
+      // Read primary smart wallet balance - using SDK
       if (primaryAccount) {
         console.log("Reading balance for primary account:", primaryAccount);
-        const smartBalance = await usdcContract.balanceOf(primaryAccount);
+        const smartBalance = await pm.getTokenBalance(primaryAccount, contracts.USDC);
         console.log("Primary account balance (raw):", smartBalance.toString());
         newBalances.smartWallet = ethers.formatUnits(smartBalance, 6);
         console.log(
@@ -288,9 +284,9 @@ export default function ChatContextDemo() {
         );
       }
 
-      // Read sub-account balance
+      // Read sub-account balance - using SDK
       if (subAccount && subAccount !== primaryAccount) {
-        const subBalance = await usdcContract.balanceOf(subAccount);
+        const subBalance = await pm.getTokenBalance(subAccount, contracts.USDC);
         newBalances.subAccount = ethers.formatUnits(subBalance, 6);
       }
 
@@ -322,21 +318,19 @@ export default function ChatContextDemo() {
         }
       }
 
-      // Read host wallet balances
+      // Read host wallet balances - using SDK
       if (TEST_HOST_1_ADDRESS) {
-        const host1Balance = await usdcContract.balanceOf(TEST_HOST_1_ADDRESS);
+        const host1Balance = await pm.getTokenBalance(TEST_HOST_1_ADDRESS, contracts.USDC);
         newBalances.host1 = ethers.formatUnits(host1Balance, 6);
       }
       if (TEST_HOST_2_ADDRESS) {
-        const host2Balance = await usdcContract.balanceOf(TEST_HOST_2_ADDRESS);
+        const host2Balance = await pm.getTokenBalance(TEST_HOST_2_ADDRESS, contracts.USDC);
         newBalances.host2 = ethers.formatUnits(host2Balance, 6);
       }
 
-      // Read treasury wallet balance
+      // Read treasury wallet balance - using SDK
       if (TEST_TREASURY_ADDRESS) {
-        const treasuryBalance = await usdcContract.balanceOf(
-          TEST_TREASURY_ADDRESS
-        );
+        const treasuryBalance = await pm.getTokenBalance(TEST_TREASURY_ADDRESS, contracts.USDC);
         newBalances.treasury = ethers.formatUnits(treasuryBalance, 6);
       }
 
@@ -909,25 +903,30 @@ export default function ChatContextDemo() {
         chainId: selectedChainId, // REQUIRED for multi-chain
       };
 
-      // Ensure JobMarketplace has approval to spend USDC from sub-account (one-time only)
+      // Ensure JobMarketplace has approval to spend USDC from sub-account (one-time only) - using SDK
       if (subAccount && !isApprovalDone) {
         try {
           addMessage("system", "🔍 Checking USDC approval for JobMarketplace...");
 
-          const usdcContract = new ethers.Contract(
-            contracts.USDC,
-            ['function allowance(address owner, address spender) view returns (uint256)', 'function approve(address spender, uint256 amount) returns (bool)'],
-            await sdk!.getSigner()
+          // Check allowance using SDK
+          const currentAllowance = await pm.checkAllowance(
+            subAccount,
+            contracts.JOB_MARKETPLACE,
+            contracts.USDC
           );
-
-          const currentAllowance = await usdcContract.allowance(subAccount, contracts.JOB_MARKETPLACE);
           const requiredAmount = parseUnits(sessionConfig.depositAmount, 6);
 
           if (currentAllowance < requiredAmount) {
             addMessage("system", "📝 Approving JobMarketplace (one-time, popup-free)...");
             const approvalAmount = parseUnits("1000000", 6);
-            const approveTx = await usdcContract.approve(contracts.JOB_MARKETPLACE, approvalAmount);
-            await approveTx.wait(1);
+
+            // Approve using SDK
+            await pm.approveToken(
+              contracts.JOB_MARKETPLACE,
+              approvalAmount,
+              contracts.USDC
+            );
+
             addMessage("system", "✅ Approval complete!");
             setIsApprovalDone(true);
           } else {

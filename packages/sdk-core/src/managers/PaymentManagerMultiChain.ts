@@ -413,4 +413,112 @@ export class PaymentManager implements IPaymentManager {
 
     return requestedAmount >= minDeposit;
   }
+
+  /**
+   * Get ERC20 token balance for an address
+   * @param address - Address to check balance for
+   * @param tokenAddress - ERC20 token contract address
+   * @returns Token balance as bigint (in token's smallest unit)
+   */
+  async getTokenBalance(address: string, tokenAddress: string): Promise<bigint> {
+    if (!this.signer) {
+      throw new SDKError('PaymentManager not initialized', 'NOT_INITIALIZED');
+    }
+
+    const provider = this.signer.provider;
+    if (!provider) {
+      throw new SDKError('No provider available', 'NO_PROVIDER');
+    }
+
+    const tokenContract = new ethers.Contract(
+      tokenAddress,
+      ['function balanceOf(address) view returns (uint256)'],
+      provider
+    );
+
+    const balance = await tokenContract.balanceOf(address);
+    return balance;
+  }
+
+  /**
+   * Get native token (ETH/BNB) balance for an address
+   * @param address - Address to check balance for
+   * @returns Native balance as bigint (in wei)
+   */
+  async getNativeBalance(address: string): Promise<bigint> {
+    if (!this.signer) {
+      throw new SDKError('PaymentManager not initialized', 'NOT_INITIALIZED');
+    }
+
+    const provider = this.signer.provider;
+    if (!provider) {
+      throw new SDKError('No provider available', 'NO_PROVIDER');
+    }
+
+    const balance = await provider.getBalance(address);
+    return balance;
+  }
+
+  /**
+   * Check ERC20 token allowance
+   * @param owner - Token owner address
+   * @param spender - Spender address (e.g., JobMarketplace)
+   * @param tokenAddress - ERC20 token contract address
+   * @returns Allowance amount as bigint (in token's smallest unit)
+   */
+  async checkAllowance(
+    owner: string,
+    spender: string,
+    tokenAddress: string
+  ): Promise<bigint> {
+    if (!this.signer) {
+      throw new SDKError('PaymentManager not initialized', 'NOT_INITIALIZED');
+    }
+
+    const provider = this.signer.provider;
+    if (!provider) {
+      throw new SDKError('No provider available', 'NO_PROVIDER');
+    }
+
+    const tokenContract = new ethers.Contract(
+      tokenAddress,
+      ['function allowance(address owner, address spender) view returns (uint256)'],
+      provider
+    );
+
+    const allowance = await tokenContract.allowance(owner, spender);
+    return allowance;
+  }
+
+  /**
+   * Approve ERC20 token spending
+   * @param spender - Spender address (e.g., JobMarketplace)
+   * @param amount - Amount to approve (in token's smallest unit)
+   * @param tokenAddress - ERC20 token contract address
+   * @returns Transaction receipt
+   */
+  async approveToken(
+    spender: string,
+    amount: bigint,
+    tokenAddress: string
+  ): Promise<ethers.TransactionReceipt> {
+    if (!this.signer) {
+      throw new SDKError('PaymentManager not initialized', 'NOT_INITIALIZED');
+    }
+
+    const tokenContract = new ethers.Contract(
+      tokenAddress,
+      ['function approve(address spender, uint256 amount) returns (bool)'],
+      this.signer
+    );
+
+    const tx = await tokenContract.approve(spender, amount);
+    const receipt = await tx.wait();
+
+    if (!receipt) {
+      throw new SDKError('Transaction failed - no receipt', 'TX_FAILED');
+    }
+
+    return receipt;
+  }
 }
