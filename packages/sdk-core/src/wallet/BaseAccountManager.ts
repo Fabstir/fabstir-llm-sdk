@@ -7,7 +7,7 @@
  * - Managing allowances and permission periods
  */
 
-import { parseUnits } from 'viem';
+import { ethers } from 'ethers';
 
 // Spend Permission Manager address on Base Sepolia
 const SPEND_PERMISSION_MANAGER = '0xf85210B21cC50302F477BA56686d2019dC9b67Ad';
@@ -77,7 +77,7 @@ export async function ensureSubAccount(
     // 2) Create a new sub-account with spend permission configured
     console.log('[BaseAccountManager] Creating new sub-account with spend permission...');
 
-    const maxAllowanceWei = parseUnits(maxAllowance, tokenDecimals);
+    const maxAllowanceWei = ethers.parseUnits(maxAllowance, tokenDecimals);
     const period = 86400 * periodDays; // Convert days to seconds
     const start = Math.floor(Date.now() / 1000);
     const end = start + period;

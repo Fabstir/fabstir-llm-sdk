@@ -36,7 +36,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ethers } from "ethers";
 import { parseUnits, formatUnits, encodeFunctionData } from "viem";
-import { FabstirSDKCore, ChainRegistry, ChainId, ensureSubAccount } from "@fabstir/sdk-core";
+import { FabstirSDKCore, ChainRegistry, ChainId, ensureSubAccount, createSubAccountSigner } from "@fabstir/sdk-core";
 import {
   cacheSeed,
   hasCachedSeed,
@@ -108,6 +108,9 @@ declare global {
 }
 
 export default function ChatContextDemo() {
+  // Version marker for cache busting
+  console.log('[PAGE VERSION] chat-context-popupfree-sdk-demo v2.0 - SDK wallet utilities');
+
   // SDK State
   const [sdk, setSdk] = useState<FabstirSDKCore | null>(null);
   const [sessionManager, setSessionManager] = useState<SessionManager | null>(
@@ -131,6 +134,7 @@ export default function ChatContextDemo() {
   const [subAccount, setSubAccount] = useState<string>("");
   const [isConnected, setIsConnected] = useState(false);
   const [isUsingBaseAccount, setIsUsingBaseAccount] = useState(false);
+  const [isApprovalDone, setIsApprovalDone] = useState(false);
   const [baseAccountSDK, setBaseAccountSDK] = useState<any>(null);
 
   // Session State
@@ -539,24 +543,32 @@ export default function ChatContextDemo() {
     // Use the Base Account Kit provider with the SDK
     const baseProvider = result.provider;
 
-    // Create custom sub-account signer that uses wallet_sendCalls
-    // This is the KEY to popup-free transactions!
-    // The signer intercepts all sendTransaction calls and converts them to wallet_sendCalls
-    const baseSigner = createSubAccountSigner(
-      baseProvider,
-      sub, // Use sub-account address
-      smartWallet // Primary account for signatures
-    );
+    // Create custom sub-account signer using SDK utility (popup-free!) [v2-rebuild]
+    console.log('[Auth] Creating sub-account signer with:', { sub, smartWallet, chainId: selectedChainId });
+    const baseSigner = createSubAccountSigner({
+      provider: baseProvider,
+      subAccount: sub,
+      primaryAccount: smartWallet,
+      chainId: selectedChainId
+    });
+    console.log('[Auth] Sub-account signer created:', baseSigner);
+    console.log('[Auth] Signer getAddress:', await baseSigner.getAddress());
 
     // Authenticate SDK with the custom sub-account signer
     // All transactions will now use wallet_sendCalls with the sub-account (popup-free!)
     await sdk!.authenticate("signer", {
       signer: baseSigner,
     });
+    console.log('[Auth] SDK authenticated with sub-account signer');
+
+    // Verify the signer was set correctly
+    const verifySign = await sdk!.getSigner();
+    console.log('[Auth] Verification - SDK signer after auth:', verifySign);
+    console.log('[Auth] Verification - Signer address:', await verifySign.getAddress());
 
     addMessage(
       "system",
-      "🎉 SDK authenticated with spend permissions enabled!"
+      "🎉 SDK authenticated with spend permissions (using SDK signer)!"
     );
 
     addMessage("system", `✅ Connected with Base Account Kit`);
@@ -693,281 +705,6 @@ export default function ChatContextDemo() {
   }
 
   // Helper: Get or create sub-account with Auto Spend Permissions
-  async function ensureSubAccount(
-    provider: any,
-    universal: `0x${string}`
-  ): Promise<`0x${string}`> {
-    console.log("ensureSubAccount: Starting with primary account:", universal);
-    const contracts = getContractAddresses();
-
-    try {
-      // 1) Look up existing sub-accounts for THIS origin
-      console.log("ensureSubAccount: Calling wallet_getSubAccounts...");
-      const resp = (await provider.request({
-        method: "wallet_getSubAccounts",
-        params: [
-          {
-            account: universal,
-            domain: window.location.origin, // e.g. "http://localhost:3000"
-          },
-        ],
-      })) as { subAccounts?: Array<{ address: `0x${string}` }> };
-
-      console.log(
-        "ensureSubAccount: Response from wallet_getSubAccounts:",
-        resp
-      );
-
-      if (resp?.subAccounts?.length) {
-        const subAccount = resp.subAccounts[0]!.address;
-        addMessage(
-          "system",
-          `✅ Using existing sub-account: ${subAccount.slice(
-            0,
-            6
-          )}...${subAccount.slice(-4)}`
-        );
-        console.log(
-          "ensureSubAccount: Found existing sub-account:",
-          subAccount
-        );
-
-        // Spend permission will be requested automatically on first SPM.spend() call
-        addMessage(
-          "system",
-          "✅ Sub-account ready for popup-free transactions!"
-        );
-        addMessage(
-          "system",
-          "💡 You may see ONE popup on first transaction to approve spending"
-        );
-
-        return subAccount;
-      }
-
-      console.log("ensureSubAccount: No existing sub-accounts found");
-    } catch (e) {
-      console.error("ensureSubAccount: Error getting sub-accounts:", e);
-      addMessage("system", `⚠️ Error checking for existing sub-accounts: ${e}`);
-    }
-
-    try {
-      // 2) Create a sub-account WITH spend permission configuration
-      console.log("ensureSubAccount: Creating new sub-account with SPM spender...");
-      addMessage("system", "🔐 Creating sub-account with spend permission...");
-
-      const USDC_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
-      const maxAllowance = parseUnits("1000000", 6); // 1M USDC max allowance
-      const period = 86400 * 365; // 1 year in seconds
-      const start = Math.floor(Date.now() / 1000);
-      const end = start + period;
-
-      const created = (await provider.request({
-        method: "wallet_addSubAccount",
-        params: [
-          {
-            account: { type: "create" },
-            spender: {
-              address: SPEND_PERMISSION_MANAGER as `0x${string}`,
-              token: USDC_ADDRESS as `0x${string}`,
-              allowance: maxAllowance.toString(),
-              period,
-              start,
-              end,
-            },
-          },
-        ],
-      })) as { address: `0x${string}` };
-
-      console.log("ensureSubAccount: Created sub-account with SPM:", created);
-      addMessage(
-        "system",
-        `✅ Sub-account created: ${created.address.slice(
-          0,
-          6
-        )}...${created.address.slice(-4)}`
-      );
-      addMessage(
-        "system",
-        "✅ Spend permission configured for SPM!"
-      );
-      addMessage(
-        "system",
-        "💡 You will see ONE popup on first transaction to approve spending"
-      );
-
-      return created.address;
-    } catch (error) {
-      console.error("ensureSubAccount: Failed to create sub-account:", error);
-      addMessage("system", `❌ Failed to create sub-account: ${error}`);
-      // Fallback to using primary account if sub-account creation fails
-      addMessage(
-        "system",
-        `⚠️ WARNING: Using primary account instead (transaction popups will occur)`
-      );
-      console.log(
-        "ensureSubAccount: Falling back to primary account:",
-        universal
-      );
-      return universal;
-    }
-  }
-
-  // Helper: Create sub-account signer (EXACT copy from working test)
-  function createSubAccountSigner(
-    provider: any,
-    subAccount: string,
-    primaryAccount: string
-  ) {
-    const ethersProvider = new ethers.BrowserProvider(provider);
-
-    // Create a wrapper that properly exposes both signer and provider methods
-    const signer = {
-      // Expose the provider properly for contract calls
-      provider: ethersProvider,
-
-      // Also provide getProvider method for compatibility
-      getProvider(): ethers.BrowserProvider {
-        return ethersProvider;
-      },
-
-      async getAddress(): Promise<string> {
-        console.log(
-          `[SubAccountSigner] getAddress() called, returning: ${subAccount}`
-        );
-        return subAccount;
-      },
-
-      async signTransaction(tx: ethers.TransactionRequest): Promise<string> {
-        throw new Error("signTransaction not supported - use sendTransaction");
-      },
-
-      async signMessage(message: string | Uint8Array): Promise<string> {
-        // Check if this is for S5 seed generation
-        const messageStr =
-          typeof message === "string" ? message : ethers.toUtf8String(message);
-        if (messageStr.includes("Generate S5 seed")) {
-          // If we have a cached seed, return a deterministic mock signature
-          const subAccountLower = subAccount.toLowerCase();
-          if (hasCachedSeed(subAccountLower)) {
-            console.log(
-              "[S5 Seed] Returning mock signature - seed is already cached"
-            );
-            return "0x" + "0".repeat(130); // Valid signature format
-          }
-        }
-
-        // For other messages or if no cache, use the primary account
-        const signature = await provider.request({
-          method: "personal_sign",
-          params: [
-            typeof message === "string" ? message : ethers.hexlify(message),
-            primaryAccount,
-          ],
-        });
-        return signature;
-      },
-
-      async sendTransaction(
-        tx: ethers.TransactionRequest
-      ): Promise<ethers.TransactionResponse> {
-        // Use wallet_sendCalls with sub-account as from address
-        const calls = [
-          {
-            to: tx.to as `0x${string}`,
-            data: tx.data as `0x${string}`,
-            value: tx.value ? `0x${BigInt(tx.value).toString(16)}` : undefined,
-          },
-        ];
-
-        console.log("Sending transaction via wallet_sendCalls:", {
-          from: subAccount,
-          to: tx.to,
-          data: tx.data?.slice(0, 10) + "...",
-        });
-
-        const response = await provider.request({
-          method: "wallet_sendCalls",
-          params: [
-            {
-              version: "2.0.0",
-              chainId: CHAIN_HEX,
-              from: subAccount as `0x${string}`,
-              calls: calls,
-              capabilities: {
-                atomic: { required: true },
-              },
-            },
-          ],
-        });
-
-        const bundleId =
-          typeof response === "string" ? response : (response as any).id;
-        console.log("Bundle ID:", bundleId);
-
-        // Wait for the bundle to be confirmed and get the real transaction hash
-        let realTxHash: string | undefined;
-        for (let i = 0; i < 30; i++) {
-          try {
-            const res = (await provider.request({
-              method: "wallet_getCallsStatus",
-              params: [bundleId],
-            })) as { status: number | string; receipts?: any[] };
-
-            const ok =
-              (typeof res.status === "number" &&
-                res.status >= 200 &&
-                res.status < 300) ||
-              (typeof res.status === "string" &&
-                (res.status === "CONFIRMED" || res.status.startsWith("2")));
-
-            if (ok && res.receipts?.[0]?.transactionHash) {
-              realTxHash = res.receipts[0].transactionHash;
-              console.log("Transaction confirmed with hash:", realTxHash);
-              break;
-            }
-          } catch (err) {
-            // Continue polling
-          }
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-
-        if (!realTxHash) {
-          throw new Error("Transaction failed to confirm");
-        }
-
-        // Return a proper transaction response with the real hash
-        const ethersProvider = new ethers.BrowserProvider(provider);
-        const txResponse = await ethersProvider.getTransaction(realTxHash);
-
-        if (!txResponse) {
-          // If we can't get the transaction, create a minimal response
-          return {
-            hash: realTxHash,
-            from: subAccount,
-            to: tx.to,
-            data: tx.data,
-            value: tx.value || 0n,
-            nonce: 0,
-            gasLimit: 0n,
-            gasPrice: 0n,
-            chainId: selectedChainId,
-            wait: async () => {
-              const receipt = await ethersProvider.getTransactionReceipt(
-                realTxHash
-              );
-              return receipt || ({ status: 1, hash: realTxHash } as any);
-            },
-          } as any;
-        }
-
-        return txResponse;
-      },
-    };
-
-    return signer;
-  }
-
   // Start chat session
   async function startSession() {
     const sm = sdk?.getSessionManager();
@@ -1172,8 +909,8 @@ export default function ChatContextDemo() {
         chainId: selectedChainId, // REQUIRED for multi-chain
       };
 
-      // Ensure JobMarketplace has approval to spend USDC from sub-account
-      if (subAccount) {
+      // Ensure JobMarketplace has approval to spend USDC from sub-account (one-time only)
+      if (subAccount && !isApprovalDone) {
         try {
           addMessage("system", "🔍 Checking USDC approval for JobMarketplace...");
 
@@ -1192,8 +929,10 @@ export default function ChatContextDemo() {
             const approveTx = await usdcContract.approve(contracts.JOB_MARKETPLACE, approvalAmount);
             await approveTx.wait(1);
             addMessage("system", "✅ Approval complete!");
+            setIsApprovalDone(true);
           } else {
             addMessage("system", "✅ Approval already exists");
+            setIsApprovalDone(true);
           }
         } catch (error: any) {
           console.error('[Approval Check] Failed:', error);
@@ -1219,6 +958,11 @@ export default function ChatContextDemo() {
       };
 
       console.log("Starting session with config:", fullSessionConfig);
+
+      // Check what signer the SDK is using
+      const currentSigner = await sdk!.getSigner();
+      console.log('[StartSession] Current SDK signer:', currentSigner);
+      console.log('[StartSession] Signer address:', await currentSigner.getAddress());
 
       // Start session using SDK (handles payment with Auto Spend Permissions)
       addMessage(
