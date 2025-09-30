@@ -171,6 +171,28 @@ const config = {
 
 ## Core SDK
 
+### Imports
+
+The SDK exports the main class and utility functions:
+
+```typescript
+// Main SDK class
+import { FabstirSDKCore } from '@fabstir/sdk-core';
+
+// Wallet utilities for Base Account Kit integration
+import {
+  ensureSubAccount,
+  createSubAccountSigner
+} from '@fabstir/sdk-core';
+
+// Types
+import type {
+  SubAccountOptions,
+  SubAccountResult,
+  SubAccountSignerOptions
+} from '@fabstir/sdk-core';
+```
+
 ### FabstirSDKCore
 
 The main SDK class for browser environments.
@@ -278,88 +300,377 @@ ModelRegistry: 0x92b2De840bB2171203011A6dBA928d855cA8183E
 Authenticates the SDK with various providers.
 
 ```typescript
-async authenticate(
-  privateKeyOrSigner: string | ethers.Signer
-): Promise<void>
+// Method 1: Authenticate with private key
+async authenticate(privateKey: string): Promise<void>
+
+// Method 2: Authenticate with method name and options
+async authenticate(method: string, options: AuthOptions): Promise<void>
 ```
 
 **Parameters:**
-- `privateKeyOrSigner`: Private key string or ethers.Signer instance
+- `privateKey`: Private key string (Method 1)
+- `method`: Authentication method - "signer" or "privateKey" (Method 2)
+- `options`: Authentication options including signer (Method 2)
 
-**Example with Private Key:**
+**Example 1: Private Key Authentication:**
 ```typescript
 await sdk.authenticate('0x...');
 ```
 
-**Example with Base Account Kit (Gasless):**
+**Example 2: Custom Signer Authentication (Base Account Kit):**
 ```typescript
+import { ensureSubAccount, createSubAccountSigner } from '@fabstir/sdk-core';
 import { createBaseAccountSDK } from "@base-org/account";
 
-// Create Base Account SDK
+// 1. Setup Base Account Kit
 const baseAccountSDK = createBaseAccountSDK({
   appName: "Your App Name",
   appChainIds: [84532], // Base Sepolia
   subAccounts: {
-    unstable_enableAutoSpendPermissions: true // Enable auto-spend
+    unstable_enableAutoSpendPermissions: true
   }
 });
 
-// Get provider and connect
+// 2. Login with passkey (one-time popup)
+const result = await baseAccountSDK.loginWithPasskey();
+const smartWallet = result.address;
+const baseProvider = result.provider;
+
+// 3. Get or create sub-account with spend permissions
+const subAccountResult = await ensureSubAccount(
+  baseProvider,
+  smartWallet as `0x${string}`,
+  {
+    tokenAddress: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
+    tokenDecimals: 6,
+    maxAllowance: "1000000",  // $1M max
+    periodDays: 365           // Valid for 1 year
+  }
+);
+
+const subAccount = subAccountResult.address;
+
+// 4. Create custom signer for popup-free transactions
+const baseSigner = createSubAccountSigner({
+  provider: baseProvider,
+  subAccount: subAccount,
+  primaryAccount: smartWallet,
+  chainId: 84532
+});
+
+// 5. Authenticate SDK with custom signer
+await sdk.authenticate("signer", {
+  signer: baseSigner,
+});
+```
+
+### Base Account Kit Integration
+
+#### Primary/Sub-Account Model
+- **Primary Account**: Smart wallet with passkey authentication, holds main USDC balance
+- **Sub-Account**: Session-specific account with spend permissions for popup-free transactions
+- **Spend Permissions**: Configured allowances let sub-account pull funds from primary automatically
+- **wallet_sendCalls**: EIP-5792 batch transactions enable atomic operations without popups
+
+#### Architecture Benefits
+- ✅ **One Popup Only**: Passkey authentication is the only popup required
+- ✅ **Popup-Free Transactions**: All approvals, deposits, and session operations work without popups
+- ✅ **Automatic Allowances**: Spend permissions auto-configured during sub-account creation
+- ✅ **Reusable Sub-Accounts**: Same sub-account works across multiple sessions
+- ✅ **SDK Utilities**: `ensureSubAccount()` and `createSubAccountSigner()` handle complexity
+- ✅ **Gasless Experience**: No ETH needed for gas fees (Base Account Kit handles gas)
+
+#### How It Works
+1. **Initial Setup**: User authenticates once with passkey (creates/accesses smart wallet)
+2. **Sub-Account Creation**: SDK creates sub-account with configured spend permissions
+3. **Spend Permissions**: Sub-account can pull up to configured amount from primary account
+4. **Popup-Free Operations**: All subsequent transactions use `wallet_sendCalls` (no popups)
+5. **Atomic Batching**: Multiple operations bundled into single atomic transaction
+6. **Session Reuse**: Same sub-account used for future sessions (no re-setup needed)
+
+## Base Account Kit Wallet Utilities
+
+The SDK provides comprehensive utilities for integrating Base Account Kit with popup-free transactions. These utilities simplify sub-account management and custom signer creation.
+
+### ensureSubAccount
+
+Creates or retrieves a sub-account with spend permissions configured.
+
+```typescript
+import { ensureSubAccount } from '@fabstir/sdk-core';
+
+async ensureSubAccount(
+  provider: any,
+  primaryAccount: `0x${string}`,
+  options: SubAccountOptions
+): Promise<SubAccountResult>
+```
+
+**Parameters:**
+```typescript
+interface SubAccountOptions {
+  tokenAddress: string;      // USDC or other ERC20 token
+  tokenDecimals: number;      // Token decimals (6 for USDC)
+  maxAllowance: string;       // Max allowance amount (e.g., "1000000" for $1M)
+  periodDays: number;         // Permission period in days (e.g., 365)
+}
+
+interface SubAccountResult {
+  address: string;            // Sub-account address
+  isExisting: boolean;        // Whether sub-account already existed
+}
+```
+
+**Example:**
+```typescript
+import { createBaseAccountSDK } from "@base-org/account";
+import { ensureSubAccount } from "@fabstir/sdk-core";
+
+// 1. Setup Base Account Kit
+const baseAccountSDK = createBaseAccountSDK({
+  appName: "Fabstir LLM",
+  appChainIds: [84532],
+  subAccounts: {
+    unstable_enableAutoSpendPermissions: true
+  }
+});
+
 const provider = await baseAccountSDK.getProvider();
 const accounts = await provider.request({
   method: "eth_requestAccounts",
   params: []
 });
 
-const primaryAccount = accounts[0]; // Primary account holds main funds
-const subAccount = accounts[1];     // Sub-account for gasless transactions
-
-// Create custom signer for sub-account
-const subAccountSigner = {
-  provider: new ethers.BrowserProvider(provider),
-
-  async getAddress(): Promise<string> {
-    return subAccount;
-  },
-
-  async signMessage(message: string): Promise<string> {
-    return provider.request({
-      method: 'personal_sign',
-      params: [message, subAccount]
-    });
-  },
-
-  async sendTransaction(tx: any): Promise<any> {
-    // Base Account Kit handles this with auto-spend from primary
-    return provider.request({
-      method: 'eth_sendTransaction',
-      params: [{ ...tx, from: subAccount }]
-    });
-  }
+const smartWallet = accounts[0]; // Primary account
+const contracts = {
+  USDC: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 };
 
-// Authenticate SDK with sub-account signer
-await sdk.authenticate(subAccountSigner);
+// 2. Ensure sub-account exists with spend permissions
+const subAccountResult = await ensureSubAccount(provider, smartWallet, {
+  tokenAddress: contracts.USDC,
+  tokenDecimals: 6,
+  maxAllowance: "1000000",  // $1M USDC max
+  periodDays: 365           // 1 year permission
+});
+
+console.log('Sub-account:', subAccountResult.address);
+console.log('Already existed:', subAccountResult.isExisting);
 ```
 
-### Base Account Kit Architecture
+**How It Works:**
+1. Checks for existing sub-accounts for the domain/origin
+2. If exists, returns existing sub-account address
+3. If not, creates new sub-account via `wallet_addSubAccount`
+4. Configures spend permission with specified token, allowance, and period
+5. Returns sub-account address and whether it was newly created
 
-#### Primary/Sub-Account Model
-- **Primary Account**: Holds user's USDC balance (e.g., $7.30)
-- **Sub-Account**: Used for gasless transactions with auto-spend permissions
-- **Auto-Spend**: Sub-account can pull funds from primary automatically
-- **No Popups**: After initial setup, no approval popups for transactions
+### createSubAccountSigner
 
-#### Benefits
-- ✅ **Gasless Experience**: No ETH needed for gas fees
-- ✅ **No Approval Popups**: Auto-spend permissions eliminate transaction popups
-- ✅ **Security**: Funds remain in primary account, minimal in sub-account
-- ✅ **Efficiency**: Only transfer what's needed per session ($1 instead of full balance)
+Creates a custom ethers-compatible signer that uses `wallet_sendCalls` for popup-free transactions.
 
-#### Current Limitations
-- SDK doesn't fully understand Base Account Kit's spend permissions
-- Workaround: Transfer $1 per session from primary to sub-account
-- Future: Direct spend from primary without transfers
+```typescript
+import { createSubAccountSigner } from '@fabstir/sdk-core';
+
+function createSubAccountSigner(
+  options: SubAccountSignerOptions
+): Signer
+```
+
+**Parameters:**
+```typescript
+interface SubAccountSignerOptions {
+  provider: any;              // Base Account Kit provider
+  subAccount: string;         // Sub-account address (from address)
+  primaryAccount: string;     // Primary smart wallet (for signatures)
+  chainId: number;           // Chain ID for wallet_sendCalls
+}
+```
+
+**Returns:** Custom signer compatible with ethers.js that:
+- Uses `wallet_sendCalls` (EIP-5792) instead of `eth_sendTransaction`
+- Polls `wallet_getCallsStatus` for transaction confirmation
+- Returns proper `TransactionResponse` objects
+- Avoids popup prompts after initial spend permission
+
+**Example:**
+```typescript
+import { createSubAccountSigner } from "@fabstir/sdk-core";
+import { FabstirSDKCore } from "@fabstir/sdk-core";
+
+// Create custom signer
+const baseSigner = createSubAccountSigner({
+  provider: baseProvider,
+  subAccount: subAccountAddress,
+  primaryAccount: smartWallet,
+  chainId: 84532  // Base Sepolia
+});
+
+// Authenticate SDK with custom signer
+const sdk = new FabstirSDKCore({ /* config */ });
+await sdk.authenticate("signer", {
+  signer: baseSigner,
+});
+
+// Now all SDK operations use popup-free transactions!
+const sessionManager = sdk.getSessionManager();
+const { sessionId } = await sessionManager.startSession(/* ... */);
+// ✅ No MetaMask popup!
+```
+
+**Key Features:**
+- **Popup-Free**: Transactions execute without approval prompts
+- **Atomic Batching**: Uses EIP-5792 `wallet_sendCalls` with atomic capability
+- **Confirmation Polling**: Automatically waits for transaction confirmation
+- **Ethers Compatible**: Works seamlessly with all ethers-based code
+- **S5 Seed Integration**: Detects cached seeds to avoid signature popups
+
+**Internal Implementation:**
+```typescript
+// The signer intercepts sendTransaction calls
+async sendTransaction(tx: TransactionRequest): Promise<TransactionResponse> {
+  // Convert to wallet_sendCalls format
+  const calls = [{
+    to: tx.to,
+    data: tx.data,
+    value: tx.value ? `0x${BigInt(tx.value).toString(16)}` : undefined,
+  }];
+
+  // Use wallet_sendCalls with sub-account
+  const bundleId = await provider.request({
+    method: 'wallet_sendCalls',
+    params: [{
+      version: '2.0.0',
+      chainId: CHAIN_HEX,
+      from: subAccount,
+      calls: calls,
+      capabilities: {
+        atomic: { required: true },
+      },
+    }],
+  });
+
+  // Poll for confirmation
+  const realTxHash = await pollForConfirmation(bundleId);
+
+  // Return proper TransactionResponse
+  return await ethersProvider.getTransaction(realTxHash);
+}
+```
+
+### Complete Popup-Free Flow Example
+
+```typescript
+import { FabstirSDKCore, ensureSubAccount, createSubAccountSigner } from "@fabstir/sdk-core";
+import { createBaseAccountSDK } from "@base-org/account";
+
+async function setupPopupFreeTransactions() {
+  // 1. Initialize SDK
+  const sdk = new FabstirSDKCore({
+    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!,
+    contractAddresses: { /* all contract addresses */ }
+  });
+
+  // 2. Setup Base Account Kit
+  const baseAccountSDK = createBaseAccountSDK({
+    appName: "Your App",
+    appChainIds: [84532],
+    subAccounts: {
+      unstable_enableAutoSpendPermissions: true  // Enable auto-spend
+    }
+  });
+
+  const baseProvider = await baseAccountSDK.getProvider();
+  const result = await baseProvider.request({
+    method: "eth_requestAccounts",
+    params: []
+  });
+
+  const smartWallet = result[0]; // Primary account with funds
+
+  // 3. Ensure sub-account with spend permissions (SDK utility)
+  const contracts = {
+    USDC: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+  };
+
+  const subAccountResult = await ensureSubAccount(baseProvider, smartWallet, {
+    tokenAddress: contracts.USDC,
+    tokenDecimals: 6,
+    maxAllowance: "1000000",  // $1M max allowance
+    periodDays: 365           // 1 year
+  });
+
+  const subAccount = subAccountResult.address;
+  console.log('Sub-account ready:', subAccount);
+
+  // 4. Create custom signer (SDK utility)
+  const baseSigner = createSubAccountSigner({
+    provider: baseProvider,
+    subAccount: subAccount,
+    primaryAccount: smartWallet,
+    chainId: 84532
+  });
+
+  // 5. Authenticate SDK with custom signer
+  await sdk.authenticate("signer", {
+    signer: baseSigner,
+  });
+
+  console.log('SDK authenticated with popup-free signer');
+
+  // 6. All operations now work without popups!
+  const sessionManager = sdk.getSessionManager();
+  const paymentManager = sdk.getPaymentManager();
+
+  // Check allowance (no popup)
+  const allowance = await paymentManager.checkAllowance(
+    subAccount,
+    contracts.JOB_MARKETPLACE,
+    contracts.USDC
+  );
+
+  // Approve if needed (popup-free!)
+  if (allowance < BigInt(1000000)) {
+    await paymentManager.approveToken(
+      contracts.JOB_MARKETPLACE,
+      BigInt(1000000),
+      contracts.USDC
+    );
+    console.log('✅ Approval complete (no popup!)');
+  }
+
+  // Start session (popup-free!)
+  const { sessionId } = await sessionManager.startSession(
+    modelHash,
+    hostAddress,
+    {
+      depositAmount: "1.0",
+      pricePerToken: 200,
+      duration: 3600,
+      proofInterval: 100
+    }
+  );
+
+  console.log('✅ Session started (no popup!)');
+
+  // Send prompts (popup-free!)
+  const response = await sessionManager.sendPrompt(
+    sessionId,
+    "Tell me a story"
+  );
+
+  console.log('Response:', response);
+
+  // Everything works without popups after initial setup! 🎉
+}
+```
+
+**Benefits of This Approach:**
+- ✅ **One-Time Setup**: Only ONE popup for initial spend permission
+- ✅ **Persistent Permissions**: Works across browser sessions
+- ✅ **Fully Composable**: Works with all SDK methods
+- ✅ **Native Integration**: No custom transaction handling needed
+- ✅ **Security**: Spend permissions limit risk exposure
 
 ## Chain Management
 
@@ -749,22 +1060,160 @@ async createSessionJobWithETH(
 }>
 ```
 
-### getTokenBalance
+### Token Balance and Allowance Methods
 
-Gets token balance for an address.
+The PaymentManager provides utility methods for reading token balances and managing approvals without requiring direct contract interactions.
+
+#### getTokenBalance
+
+Gets ERC20 token balance for an address.
 
 ```typescript
 async getTokenBalance(
-  tokenAddress: string,
-  address: string
+  address: string,
+  tokenAddress: string
 ): Promise<bigint>
 ```
+
+**Parameters:**
+- `address`: Address to check balance for
+- `tokenAddress`: ERC20 token contract address
+
+**Returns:** Token balance as bigint (in token's smallest unit)
 
 **Example:**
 ```typescript
 const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
-const balance = await paymentManager.getTokenBalance(usdcAddress, userAddress);
+const balance = await paymentManager.getTokenBalance(userAddress, usdcAddress);
 console.log(`USDC Balance: $${ethers.formatUnits(balance, 6)}`);
+```
+
+#### getNativeBalance
+
+Gets native token (ETH/BNB) balance for an address.
+
+```typescript
+async getNativeBalance(address: string): Promise<bigint>
+```
+
+**Parameters:**
+- `address`: Address to check balance for
+
+**Returns:** Native balance as bigint (in wei)
+
+**Example:**
+```typescript
+const ethBalance = await paymentManager.getNativeBalance(userAddress);
+console.log(`ETH Balance: ${ethers.formatEther(ethBalance)}`);
+```
+
+#### checkAllowance
+
+Checks ERC20 token allowance for a spender.
+
+```typescript
+async checkAllowance(
+  owner: string,
+  spender: string,
+  tokenAddress: string
+): Promise<bigint>
+```
+
+**Parameters:**
+- `owner`: Token owner address
+- `spender`: Spender address (e.g., JobMarketplace contract)
+- `tokenAddress`: ERC20 token contract address
+
+**Returns:** Allowance amount as bigint (in token's smallest unit)
+
+**Example:**
+```typescript
+const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
+const marketplaceAddress = sdk.contractManager.getAddress('jobMarketplace');
+
+const allowance = await paymentManager.checkAllowance(
+  userAddress,
+  marketplaceAddress,
+  usdcAddress
+);
+
+if (allowance < ethers.parseUnits("10.0", 6)) {
+  console.log('Need to approve more USDC');
+}
+```
+
+#### approveToken (Token Approval)
+
+Approves ERC20 token spending for a spender.
+
+```typescript
+async approveToken(
+  spender: string,
+  amount: bigint,
+  tokenAddress: string
+): Promise<ethers.TransactionReceipt>
+```
+
+**Parameters:**
+- `spender`: Spender address (e.g., JobMarketplace contract)
+- `amount`: Amount to approve as bigint (in token's smallest unit)
+- `tokenAddress`: ERC20 token contract address
+
+**Returns:** Transaction receipt
+
+**Example:**
+```typescript
+const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
+const marketplaceAddress = sdk.contractManager.getAddress('jobMarketplace');
+
+// Approve $100 USDC
+const receipt = await paymentManager.approveToken(
+  marketplaceAddress,
+  ethers.parseUnits("100.0", 6),
+  usdcAddress
+);
+
+console.log('Approval confirmed:', receipt.transactionHash);
+```
+
+**Complete Balance & Approval Flow:**
+```typescript
+// 1. Check current token balance
+const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
+const balance = await paymentManager.getTokenBalance(userAddress, usdcAddress);
+console.log('Balance:', ethers.formatUnits(balance, 6), 'USDC');
+
+// 2. Check current allowance
+const marketplaceAddress = sdk.contractManager.getAddress('jobMarketplace');
+const currentAllowance = await paymentManager.checkAllowance(
+  userAddress,
+  marketplaceAddress,
+  usdcAddress
+);
+
+// 3. Approve if needed
+const requiredAmount = ethers.parseUnits("10.0", 6);
+if (currentAllowance < requiredAmount) {
+  console.log('Approving USDC...');
+  const receipt = await paymentManager.approveToken(
+    marketplaceAddress,
+    requiredAmount,
+    usdcAddress
+  );
+  console.log('Approved:', receipt.transactionHash);
+}
+
+// 4. Create session (will use approved tokens)
+const { sessionId } = await sessionManager.startSession(
+  modelHash,
+  hostAddress,
+  {
+    depositAmount: "1.0",
+    pricePerToken: 200,
+    duration: 3600,
+    proofInterval: 100
+  }
+);
 ```
 
 ### depositNative
@@ -846,51 +1295,6 @@ Different chains have different minimum deposit requirements:
 |-------|----------------|--------------|
 | Base Sepolia | 0.0002 ETH | ETH |
 | opBNB Testnet | 0.001 BNB | BNB |
-
-### sendToken
-
-Sends tokens from one address to another.
-
-```typescript
-async sendToken(
-  tokenAddress: string,
-  toAddress: string,
-  amount: string
-): Promise<TransactionResult>
-```
-
-**Example:**
-```typescript
-const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
-const tx = await paymentManager.sendToken(
-  usdcAddress,
-  subAccount,
-  ethers.parseUnits("1.0", 6).toString()
-);
-```
-
-### approveToken
-
-Approves a spender to use tokens.
-
-```typescript
-async approveToken(
-  tokenAddress: string,
-  spender: string,
-  amount: string
-): Promise<TransactionResult>
-```
-
-**Example:**
-```typescript
-const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
-const marketplaceAddress = sdk.contractManager.getAddress('jobMarketplace');
-const tx = await paymentManager.approveToken(
-  usdcAddress,
-  marketplaceAddress,
-  ethers.parseUnits("10.0", 6).toString()
-);
-```
 
 ### Payment Distribution Model
 
@@ -1835,8 +2239,10 @@ interface ConversationData {
 
 ### Complete USDC Payment Flow with Context Preservation
 
+This example shows the complete flow with popup-free transactions using Base Account Kit:
+
 ```typescript
-import { FabstirSDKCore } from '@fabstir/sdk-core';
+import { FabstirSDKCore, ensureSubAccount, createSubAccountSigner } from '@fabstir/sdk-core';
 import { createBaseAccountSDK } from "@base-org/account";
 import { ethers } from 'ethers';
 
@@ -1854,33 +2260,77 @@ async function chatWithContext() {
     }
   });
 
-  // 2. Setup Base Account Kit for gasless transactions
-  const baseAccountSDK = await createBaseAccountSDK({
-    chainId: 84532,
-    jsonRpcUrl: process.env.RPC_URL,
-    bundlerUrl: process.env.BUNDLER_URL,
-    paymasterUrl: process.env.PAYMASTER_URL
-  });
-
-  // 3. Create sub-account for auto-spend
-  const subAccount = await baseAccountSDK.createSubAccount({
-    spender: {
-      address: sdk.getContractAddress('jobMarketplace'),
-      token: sdk.getContractAddress('usdcToken'),
-      allowance: parseUnits('10', 6) // $10 USDC allowance
+  // 2. Setup Base Account Kit for popup-free transactions
+  const baseAccountSDK = createBaseAccountSDK({
+    appName: "Fabstir Chat",
+    appChainIds: [84532],
+    subAccounts: {
+      unstable_enableAutoSpendPermissions: true
     }
   });
 
-  // 4. Authenticate with sub-account
-  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
-  const signer = new ethers.Wallet(subAccount.privateKey, provider);
-  await sdk.authenticate(signer);
+  // 3. Authenticate user with passkey (one-time popup)
+  const result = await baseAccountSDK.loginWithPasskey();
+  const smartWallet = result.address;
+  const baseProvider = result.provider;
 
-  // 5. Get managers
+  // 4. Create sub-account with spend permissions (SDK utility)
+  const subAccountResult = await ensureSubAccount(
+    baseProvider,
+    smartWallet as `0x${string}`,
+    {
+      tokenAddress: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
+      tokenDecimals: 6,
+      maxAllowance: "1000000",    // $1M max allowance
+      periodDays: 365             // Valid for 1 year
+    }
+  );
+
+  const subAccount = subAccountResult.address;
+  console.log(subAccountResult.isExisting
+    ? 'Using existing sub-account'
+    : 'Created new sub-account');
+
+  // 5. Create custom signer for popup-free transactions (SDK utility)
+  const baseSigner = createSubAccountSigner({
+    provider: baseProvider,
+    subAccount: subAccount,
+    primaryAccount: smartWallet,
+    chainId: 84532
+  });
+
+  // 6. Authenticate SDK with custom signer
+  await sdk.authenticate("signer", {
+    signer: baseSigner,
+  });
+
+  // 7. Get managers
   const sessionManager = sdk.getSessionManager();
   const storageManager = await sdk.getStorageManager();
+  const paymentManager = sdk.getPaymentManager();
 
-  // 6. Start session with USDC payment
+  // 8. Check and approve USDC if needed (no popup!)
+  const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
+  const marketplaceAddress = sdk.contractManager.getAddress('jobMarketplace');
+
+  const allowance = await paymentManager.checkAllowance(
+    subAccount,
+    marketplaceAddress,
+    usdcAddress
+  );
+
+  const requiredAmount = ethers.parseUnits("10.0", 6);
+  if (allowance < requiredAmount) {
+    console.log('Approving USDC...');
+    await paymentManager.approveToken(
+      marketplaceAddress,
+      requiredAmount,
+      usdcAddress
+    );
+    console.log('USDC approved - no popup required!');
+  }
+
+  // 9. Start session with USDC payment (no popup!)
   const { sessionId } = await sessionManager.startSession(
     '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced',
     '0x4594F755F593B517Bb3194F4DeC20C48a3f04504',
@@ -1892,9 +2342,9 @@ async function chatWithContext() {
     }
   );
 
-  console.log('Session started:', sessionId.toString());
+  console.log('Session started (no popup!):', sessionId.toString());
 
-  // 7. Conversation with context preservation
+  // 10. Conversation with context preservation
   const conversation: ChatMessage[] = [];
 
   // First prompt
@@ -1920,14 +2370,14 @@ async function chatWithContext() {
     { role: 'assistant', content: response, timestamp: Date.now(), tokens: 95 }
   );
 
-  // 8. Store conversation in S5
+  // 11. Store conversation in S5
   const cid = await storageManager.storeConversation(
     sessionId.toString(),
     conversation
   );
   console.log('Conversation stored:', cid);
 
-  // 9. Submit checkpoint proof
+  // 12. Submit checkpoint proof
   const totalTokens = conversation.reduce((sum, msg) => sum + (msg.tokens || 0), 0);
   const checkpointProof = {
     checkpointNumber: 1,
@@ -1938,7 +2388,7 @@ async function chatWithContext() {
 
   await sessionManager.submitCheckpoint(sessionId, checkpointProof);
 
-  // 10. Complete session
+  // 13. Complete session (no popup!)
   const finalProof = '0x' + 'ff'.repeat(64);
   const txHash = await sessionManager.completeSession(
     sessionId,
@@ -1946,9 +2396,16 @@ async function chatWithContext() {
     finalProof
   );
 
-  console.log('Session completed:', txHash);
+  console.log('Session completed (no popup!):', txHash);
 }
 ```
+
+**Key Benefits:**
+- ✅ Only ONE popup for passkey authentication
+- ✅ NO popups for approvals, deposits, or session operations
+- ✅ Automatic spend permissions with configurable limits
+- ✅ Sub-account reused across sessions
+- ✅ Full SDK integration with custom signer
 
 ### Using ClientManager for Model and Host Selection
 
