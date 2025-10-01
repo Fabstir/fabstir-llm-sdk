@@ -1176,6 +1176,40 @@ const receipt = await paymentManager.approveToken(
 console.log('Approval confirmed:', receipt.transactionHash);
 ```
 
+#### sendToken
+
+Sends ERC20 tokens to another address.
+
+```typescript
+async sendToken(
+  to: string,
+  amount: bigint,
+  tokenAddress: string
+): Promise<ethers.TransactionReceipt>
+```
+
+**Parameters:**
+- `to`: Recipient address
+- `amount`: Amount to send as bigint (in token's smallest unit)
+- `tokenAddress`: ERC20 token contract address
+
+**Returns:** Transaction receipt
+
+**Example:**
+```typescript
+const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
+const recipientAddress = '0x123...';
+
+// Send $50 USDC
+const receipt = await paymentManager.sendToken(
+  recipientAddress,
+  ethers.parseUnits("50.0", 6),
+  usdcAddress
+);
+
+console.log('Transfer confirmed:', receipt.transactionHash);
+```
+
 **Complete Balance & Approval Flow:**
 ```typescript
 // 1. Check current token balance
@@ -1203,7 +1237,17 @@ if (currentAllowance < requiredAmount) {
   console.log('Approved:', receipt.transactionHash);
 }
 
-// 4. Create session (will use approved tokens)
+// 4. Send tokens if needed
+const recipientAddress = '0x...';
+const sendAmount = ethers.parseUnits("5.0", 6);
+const receipt = await paymentManager.sendToken(
+  recipientAddress,
+  sendAmount,
+  usdcAddress
+);
+console.log('Sent:', receipt.transactionHash);
+
+// 5. Create session (will use approved tokens)
 const { sessionId } = await sessionManager.startSession(
   modelHash,
   hostAddress,
@@ -1559,6 +1603,38 @@ Updates the host's API endpoint URL.
 async updateApiUrl(apiUrl: string): Promise<string>
 ```
 
+### getHostEarnings
+
+Gets accumulated earnings for a specific host and token.
+
+```typescript
+async getHostEarnings(
+  hostAddress: string,
+  tokenAddress: string
+): Promise<bigint>
+```
+
+**Parameters:**
+- `hostAddress`: Host address to check earnings for
+- `tokenAddress`: Token address (use `ethers.ZeroAddress` or `'0x0000000000000000000000000000000000000000'` for native ETH/BNB)
+
+**Returns:** Accumulated earnings as bigint (in token's smallest unit)
+
+**Example:**
+```typescript
+const hostManager = sdk.getHostManager();
+
+// Get ETH earnings
+const ETH_ADDRESS = ethers.ZeroAddress;
+const ethEarnings = await hostManager.getHostEarnings(hostAddress, ETH_ADDRESS);
+console.log('ETH Earnings:', ethers.formatEther(ethEarnings));
+
+// Get USDC earnings
+const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
+const usdcEarnings = await hostManager.getHostEarnings(hostAddress, usdcAddress);
+console.log('USDC Earnings:', ethers.formatUnits(usdcEarnings, 6));
+```
+
 ### withdrawEarnings
 
 Withdraws accumulated earnings for a host.
@@ -1663,6 +1739,26 @@ Gets treasury balance for a specific token.
 ```typescript
 async getTreasuryBalance(tokenAddress: string): Promise<string>
 ```
+
+### getAccumulatedNative
+
+Gets accumulated native token (ETH/BNB) treasury balance from JobMarketplace contract.
+
+```typescript
+async getAccumulatedNative(): Promise<bigint>
+```
+
+**Returns:** Accumulated native treasury balance as bigint (in wei)
+
+**Example:**
+```typescript
+const treasuryManager = sdk.getTreasuryManager();
+
+const nativeBalance = await treasuryManager.getAccumulatedNative();
+console.log('Treasury ETH:', ethers.formatEther(nativeBalance));
+```
+
+**Note:** This method automatically handles fallback to old contract method names (`accumulatedTreasuryETH`) for backward compatibility.
 
 ### withdrawTreasuryFunds
 

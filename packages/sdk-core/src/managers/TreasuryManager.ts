@@ -163,6 +163,41 @@ export class TreasuryManager implements ITreasuryManager {
   }
 
   /**
+   * Get accumulated native token (ETH/BNB) treasury balance in JobMarketplace contract
+   * @returns Accumulated native treasury balance as bigint (in wei)
+   */
+  async getAccumulatedNative(): Promise<bigint> {
+    if (!this.initialized) {
+      throw new SDKError('TreasuryManager not initialized', 'TREASURY_NOT_INITIALIZED');
+    }
+
+    try {
+      // Get JobMarketplace contract address
+      const jobMarketplaceAddress = this.contractManager.getJobMarketplace();
+      const provider = this.signer?.provider || await this.contractManager.getProvider();
+
+      const minimalABI = [
+        'function accumulatedTreasuryNative() view returns (uint256)'
+      ];
+
+      const jobMarketplace = new ethers.Contract(
+        jobMarketplaceAddress,
+        minimalABI,
+        provider
+      );
+
+      const balance = await jobMarketplace.accumulatedTreasuryNative();
+      return balance;
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to get accumulated native treasury balance: ${error.message}`,
+        'TREASURY_NATIVE_BALANCE_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
    * Withdraw from treasury (admin only)
    */
   async withdraw(

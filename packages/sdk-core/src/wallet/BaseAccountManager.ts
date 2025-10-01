@@ -112,12 +112,7 @@ export async function ensureSubAccount(
     };
   } catch (error) {
     console.error('[BaseAccountManager] Failed to create sub-account:', error);
-    // Fallback to using primary account (will cause popups)
-    console.warn('[BaseAccountManager] Falling back to primary account');
-    return {
-      address: primaryAccount,
-      isExisting: true,
-    };
+    throw new Error(`Failed to create sub-account: ${error}`);
   }
 }
 

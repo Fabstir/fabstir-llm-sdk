@@ -220,32 +220,24 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
       if (sdk) {
         const contracts = getContractAddresses();
+        const pm = sdk.getPaymentManager();
 
-        // For USDC balances, we need to read directly from the USDC token contract
-        // since PaymentManager only tracks deposits, not regular balances
+        // Read USDC balances via SDK
         try {
-          // Create USDC contract instance
-          const usdcContract = new ethers.Contract(
-            contracts.USDC,
-            ['function balanceOf(address) view returns (uint256)'],
-            sdk.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS])
-          );
-
-          // Read USDC balances directly from token contract
           newBalances.testUser1 = ethers.formatUnits(
-            await usdcContract.balanceOf(TEST_USER_1_ADDRESS),
+            await pm.getTokenBalance(TEST_USER_1_ADDRESS, contracts.USDC),
             6
           );
           newBalances.host1 = ethers.formatUnits(
-            await usdcContract.balanceOf(TEST_HOST_1_ADDRESS),
+            await pm.getTokenBalance(TEST_HOST_1_ADDRESS, contracts.USDC),
             6
           );
           newBalances.host2 = ethers.formatUnits(
-            await usdcContract.balanceOf(TEST_HOST_2_ADDRESS),
+            await pm.getTokenBalance(TEST_HOST_2_ADDRESS, contracts.USDC),
             6
           );
           newBalances.treasury = ethers.formatUnits(
-            await usdcContract.balanceOf(TEST_TREASURY_ADDRESS),
+            await pm.getTokenBalance(TEST_TREASURY_ADDRESS, contracts.USDC),
             6
           );
         } catch (err) {
@@ -281,14 +273,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
           newBalances.userDeposit = '0';
         }
 
-        // Create USDC contract instance for balance reads
-        const usdcContract = new ethers.Contract(
-          contracts.USDC,
-          ['function balanceOf(address) view returns (uint256)'],
-          sdk?.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS])
-        );
-
-        // Read smart wallet balance if available
+        // Read smart wallet balance if available via SDK
         // Also check the known Base Account Kit smart wallet address
         const knownSmartWallet = '0xd8C80f89179dfe0a6E4241074a7095F17CEeD8dD';
         const walletToCheck = smartWalletAddress || knownSmartWallet;
@@ -296,7 +281,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
         if (walletToCheck) {
           try {
             console.log(`Reading balance for smart wallet: ${walletToCheck}`);
-            const smartWalletBalance = await usdcContract.balanceOf(walletToCheck);
+            const smartWalletBalance = await pm.getTokenBalance(walletToCheck, contracts.USDC);
             newBalances.smartWallet = ethers.formatUnits(smartWalletBalance, 6);
             console.log(`Primary smart wallet balance for ${walletToCheck}: ${newBalances.smartWallet} USDC`);
 
@@ -314,10 +299,10 @@ export default function BaseUsdcMvpFlowSDKTest() {
           newBalances.smartWallet = '0';
         }
 
-        // Read EOA balance if using Base Account Kit
-        if (userAddress && smartWalletAddress && userAddress !== smartWalletAddress && usdcContract) {
+        // Read EOA balance if using Base Account Kit via SDK
+        if (userAddress && smartWalletAddress && userAddress !== smartWalletAddress) {
           try {
-            const eoaBalance = await usdcContract.balanceOf(userAddress);
+            const eoaBalance = await pm.getTokenBalance(userAddress, contracts.USDC);
             newBalances.eoaWallet = ethers.formatUnits(eoaBalance, 6);
             console.log(`EOA balance for ${userAddress}: ${newBalances.eoaWallet} USDC`);
           } catch (err) {
@@ -336,31 +321,9 @@ export default function BaseUsdcMvpFlowSDKTest() {
             console.log(`[DEBUG] HostManager available: ${!!hostManager}`);
             console.log(`[DEBUG] SDK available: ${!!sdk}`);
 
-            if (hostManager && hostManager.getAccumulatedEarnings) {
-              console.log(`[DEBUG] Using hostManager.getAccumulatedEarnings`);
-              const hostEarnings = await hostManager.getAccumulatedEarnings(hostAddress);
-              newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
-              console.log(`Host accumulated earnings for ${hostAddress}: ${newBalances.hostAccumulated} USDC`);
-            } else if (hostManager && hostManager.getEarnings) {
-              console.log(`[DEBUG] Using hostManager.getEarnings`);
-              const hostEarnings = await hostManager.getEarnings(hostAddress);
-              newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
-              console.log(`Host earnings for ${hostAddress}: ${newBalances.hostAccumulated} USDC`);
-            } else {
-              // Always try reading directly from HostEarnings contract as fallback
-              console.log(`[DEBUG] Reading directly from HostEarnings contract at ${contracts.HOST_EARNINGS}`);
-              console.log(`[DEBUG] USDC token address: ${contracts.USDC}`);
-              const provider = sdk?.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS]);
-              const hostEarningsContract = new ethers.Contract(
-                contracts.HOST_EARNINGS,
-                ['function getBalance(address host, address token) view returns (uint256)'],
-                provider
-              );
-              // getBalance requires both host address and token address (USDC)
-              const earnings = await hostEarningsContract.getBalance(hostAddress, contracts.USDC);
-              newBalances.hostAccumulated = ethers.formatUnits(earnings, 6);
-              console.log(`Host earnings (direct contract) for ${hostAddress}: ${newBalances.hostAccumulated} USDC (raw: ${earnings.toString()})`);
-            }
+            const hostEarnings = await hostManager.getHostEarnings(hostAddress, contracts.USDC);
+            newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
+            console.log(`Host earnings for ${hostAddress}: ${newBalances.hostAccumulated} USDC (raw: ${hostEarnings.toString()})`);
           } catch (err) {
             console.log('Error reading host accumulated earnings:', err);
             newBalances.hostAccumulated = '0';
@@ -370,18 +333,11 @@ export default function BaseUsdcMvpFlowSDKTest() {
           newBalances.hostAccumulated = '0';
         }
 
-        // Read treasury accumulated balance (if method exists)
+        // Read treasury accumulated balance via SDK
         if (treasuryManager) {
           try {
-            if (treasuryManager.getAccumulatedBalance) {
-              const treasuryBalance = await treasuryManager.getAccumulatedBalance();
-              newBalances.treasuryAccumulated = ethers.formatUnits(treasuryBalance, 6);
-            } else if (treasuryManager.getFees) {
-              const treasuryBalance = await treasuryManager.getFees();
-              newBalances.treasuryAccumulated = ethers.formatUnits(treasuryBalance, 6);
-            } else {
-              newBalances.treasuryAccumulated = '0';
-            }
+            const treasuryBalance = await treasuryManager.getAccumulatedBalance();
+            newBalances.treasuryAccumulated = ethers.formatUnits(treasuryBalance, 6);
           } catch (err) {
             console.log('Could not read treasury accumulated balance');
             newBalances.treasuryAccumulated = '0';
@@ -552,15 +508,15 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog("Step 2: Starting - Approve USDC for direct payments");
       const contracts = getContractAddresses();
 
-      // Check user's USDC balance
-      try {
-        const usdcContract = new ethers.Contract(
-          contracts.USDC,
-          ['function balanceOf(address account) view returns (uint256)'],
-          sdk.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS])
-        );
+      // Get PaymentManager for all token operations
+      const pm = sdk.getPaymentManager();
+      if (!pm) {
+        throw new Error("PaymentManager not available from SDK");
+      }
 
-        const userBalance = await usdcContract.balanceOf(userAddress);
+      // Check user's USDC balance via SDK
+      try {
+        const userBalance = await pm.getTokenBalance(userAddress, contracts.USDC);
         const userBalanceFormatted = ethers.formatUnits(userBalance, 6);
         addLog(`User USDC balance: ${userBalanceFormatted} USDC`);
 
@@ -574,36 +530,20 @@ export default function BaseUsdcMvpFlowSDKTest() {
         console.log('Could not check USDC balance:', err);
       }
 
-      // Get PaymentManager for all token operations
-      const pm = sdk.getPaymentManager();
-      if (!pm) {
-        throw new Error("PaymentManager not available from SDK");
-      }
-
-      // First, we need to approve the JobMarketplace contract to spend our USDC
+      // Get signer and addresses for approval
       const signer = sdk.getSigner();
       if (!signer) {
         throw new Error("Signer not available from SDK");
       }
 
-      // Create USDC contract instance
-      const usdcContract = new ethers.Contract(
-        contracts.USDC,
-        [
-          'function approve(address spender, uint256 amount) returns (bool)',
-          'function allowance(address owner, address spender) view returns (uint256)'
-        ],
-        signer
-      );
-
-      // Get the actual JobMarketplace address from the PaymentManager
-      // The PaymentManager uses JobMarketplaceWrapper which gets the address from ChainRegistry
       const jobMarketplaceAddress = contracts.JOB_MARKETPLACE;
+      const ownerAddress = await signer.getAddress();
 
-      // Check current allowance first
-      const currentAllowance = await usdcContract.allowance(
-        await signer.getAddress(),
-        jobMarketplaceAddress
+      // Check current allowance via SDK
+      const currentAllowance = await pm.checkAllowance(
+        ownerAddress,
+        jobMarketplaceAddress,
+        contracts.USDC
       );
       addLog(`Current USDC allowance: ${ethers.formatUnits(currentAllowance, 6)} USDC`);
 
@@ -613,14 +553,18 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
       if (currentAllowance < ethers.parseUnits(SESSION_DEPOSIT_AMOUNT, 6)) {
         addLog(`Approving JobMarketplace (${jobMarketplaceAddress}) to spend ${ethers.formatUnits(totalApprovalAmount, 6)} USDC (for multiple sessions)...`);
-        const approveTx = await usdcContract.approve(jobMarketplaceAddress, totalApprovalAmount);
-        await approveTx.wait(2); // Wait for 2 confirmations
-        addLog(`✅ USDC approval complete. TX: ${approveTx.hash}`);
+        const approveResult = await pm.approveToken(
+          jobMarketplaceAddress,
+          totalApprovalAmount,
+          contracts.USDC
+        );
+        addLog(`✅ USDC approval complete. TX: ${approveResult.hash}`);
 
-        // Verify the allowance was set
-        const newAllowance = await usdcContract.allowance(
-          await signer.getAddress(),
-          jobMarketplaceAddress
+        // Verify the allowance was set via SDK
+        const newAllowance = await pm.checkAllowance(
+          ownerAddress,
+          jobMarketplaceAddress,
+          contracts.USDC
         );
         addLog(`New USDC allowance: ${ethers.formatUnits(newAllowance, 6)} USDC`);
       } else {
@@ -832,18 +776,13 @@ export default function BaseUsdcMvpFlowSDKTest() {
       const sessionCost = 2; // 2 USDC for the session
       const accountAddress = smartWalletAddress || userAddress || TEST_USER_1_ADDRESS;
 
-      // Get current balance directly from the chain
+      // Get current balance via SDK
       let currentBalance = 0;
       try {
         const contracts = getContractAddresses();
-        const provider = sdk.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS]);
-        const usdcContract = new ethers.Contract(
-          contracts.USDC,
-          ['function balanceOf(address) view returns (uint256)'],
-          provider
-        );
+        const pm = sdk.getPaymentManager();
 
-        const balanceWei = await usdcContract.balanceOf(accountAddress);
+        const balanceWei = await pm.getTokenBalance(accountAddress, contracts.USDC);
         currentBalance = parseFloat(ethers.formatUnits(balanceWei, 6));
         addLog(`Balance check: ${accountAddress} has ${currentBalance.toFixed(6)} USDC`);
       } catch (err) {
@@ -1563,37 +1502,48 @@ export default function BaseUsdcMvpFlowSDKTest() {
         primaryAccount = accounts[0]!;
         setPrimaryAddr(primaryAccount);
         addLog(`Connected to primary account: ${primaryAccount}`);
-        
-        // Set up ethers wallet for funding operations
+
+
+        // Set up SDK for funding operations (using TEST_USER_1 wallet)
         const ethersProvider = new ethers.JsonRpcProvider(RPC_URL);
         const wallet = new ethers.Wallet(TEST_USER_1_PRIVATE_KEY, ethersProvider);
-        
-        const usdcContract = new ethers.Contract(USDC, [
-          "function transfer(address to, uint256 amount) returns (bool)",
-          "function balanceOf(address) view returns (uint256)"
-        ], wallet);
-        
-        // Check primary account balance
-        const primaryBalance = await usdcContract.balanceOf(primaryAccount);
+
+        const fundingSdk = new FabstirSDKCore({
+          mode: 'production',
+          chainId: selectedChainId,
+          rpcUrl: RPC_URL,
+          contractAddresses: {
+            jobMarketplace: JOB_MARKETPLACE,
+            nodeRegistry: NODE_REGISTRY,
+            proofSystem: PROOF_SYSTEM,
+            hostEarnings: HOST_EARNINGS,
+            fabToken: FAB_TOKEN,
+            usdcToken: USDC,
+            modelRegistry: ethers.ZeroAddress
+          }
+        });
+
+        await fundingSdk.authenticate('signer', { signer: wallet });
+        const fundingPm = fundingSdk.getPaymentManager();
+
+        // Check primary account balance via SDK
+        const primaryBalance = await fundingPm.getTokenBalance(primaryAccount, USDC);
         const primaryBalanceFormatted = formatUnits(primaryBalance, 6);
         addLog(`Primary balance: $${primaryBalanceFormatted} USDC`);
-        
+
         // Ensure primary has enough for multiple runs ($4 min)
         const minBalance = parseUnits("4", 6);
-        const primaryBalanceBig = BigInt(primaryBalance.toString());
-        const minBalanceBig = BigInt(minBalance.toString());
-        
-        if (primaryBalanceBig < minBalanceBig) {
+
+        if (primaryBalance < minBalance) {
           // Top up primary from user account
-          const topUpAmount = minBalanceBig - primaryBalanceBig;
+          const topUpAmount = minBalance - primaryBalance;
           const topUpFormatted = formatUnits(topUpAmount, 6);
-          
+
           addLog(`📤 Topping up primary with $${topUpFormatted} USDC...`);
           addLog(`(This enables multiple gasless runs)`);
-          
-          const tx = await usdcContract.transfer(primaryAccount, topUpAmount);
-          await tx.wait(3); // Wait for 3 confirmations
-          addLog(`✅ Primary topped up to $4.00 USDC`);
+
+          const receipt = await fundingPm.sendToken(primaryAccount, topUpAmount, USDC);
+          addLog(`✅ Primary topped up to $4.00 USDC (TX: ${receipt.hash})`);
         } else {
           addLog(`✅ Primary has sufficient funds for multiple runs`);
           addLog(`🎉 No popup needed - running gasless!`);
@@ -1605,20 +1555,15 @@ export default function BaseUsdcMvpFlowSDKTest() {
         setSubAddr(subAccount);
         addLog(`Sub-account: ${subAccount}`);
         
-        // Check sub-account balance and fund if needed
-        const subBalance = await usdcContract.balanceOf(subAccount);
+        // Check sub-account balance and fund if needed via SDK
+        const subBalance = await fundingPm.getTokenBalance(subAccount, USDC);
         const subBalanceFormatted = formatUnits(subBalance, 6);
         addLog(`Sub-account balance: $${subBalanceFormatted} USDC`);
-        
+
         // We need $2.00 for the deposit (even though only $0.20 is consumed)
-        const minSessionFunds = parseUnits("0.20", 6);  // Actual usage per session
-        const idealFunds = parseUnits("2", 6);           // Deposit amount for contract
+        const idealFunds = parseUnits("2", 6);
 
-        const subBalanceBig = BigInt(subBalance.toString());
-        const minSessionFundsBig = BigInt(minSessionFunds.toString());
-        const idealFundsBig = BigInt(idealFunds.toString());
-
-        if (subBalanceBig >= idealFundsBig) {
+        if (subBalance >= idealFunds) {
           // Has enough for full deposit - no transfer needed!
           addLog(`✅ Sub has funds for deposit ($${subBalanceFormatted} >= $2.00)`);
           addLog(`🎉 Running gasless - no transfers needed!`);
@@ -1626,7 +1571,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
           addLog(`   Refund after session: $1.80 (for future use)`);
         } else {
           // Smart wallet needs funding from TEST_USER_1 to reach ideal balance
-          const neededAmount = idealFundsBig - subBalanceBig;
+          const neededAmount = idealFunds - subBalance;
           const neededFormatted = formatUnits(neededAmount, 6);
 
           addLog(`📤 Funding smart wallet with $${neededFormatted} USDC from TEST_USER_1...`);
@@ -1634,17 +1579,16 @@ export default function BaseUsdcMvpFlowSDKTest() {
           addLog(`   Target balance: $2.00`);
           addLog(`   Actual session usage: $0.20`);
 
-          // Transfer from TEST_USER_1 to the sub-account using ethers wallet
-          const tx = await usdcContract.transfer(subAccount, neededAmount);
+          // Transfer from TEST_USER_1 to the sub-account via SDK
+          const receipt = await fundingPm.sendToken(subAccount, neededAmount, USDC);
           addLog(`Waiting for 3 blockchain confirmations...`);
-          await tx.wait(3); // Wait for 3 confirmations
 
           // Verify the new balance
-          const newBalance = await usdcContract.balanceOf(subAccount);
+          const newBalance = await fundingPm.getTokenBalance(subAccount, USDC);
           const newBalanceFormatted = formatUnits(newBalance, 6);
-          addLog(`✅ Sub-account funded! New balance: $${newBalanceFormatted} USDC`);
+          addLog(`✅ Sub-account funded! New balance: $${newBalanceFormatted} USDC (TX: ${receipt.hash})`);
 
-          if (BigInt(newBalance.toString()) < idealFundsBig) {
+          if (newBalance < idealFunds) {
             throw new Error(`Funding failed! Balance is still ${newBalanceFormatted}, expected 2.00`);
           }
 
@@ -2328,19 +2272,19 @@ export default function BaseUsdcMvpFlowSDKTest() {
       // Step 2: Approve USDC (skip if already approved)
       addLog("=== Running Step 2: Approve USDC ===");
 
-      // Check allowance directly from contract
+      // Check allowance via SDK
       let shouldApprove = true;
       try {
         const contracts = getContractAddresses();
+        const pm = sdk.getPaymentManager();
         const signer = await sdk.getSigner();
-        const usdcContract = new ethers.Contract(
-          contracts.USDC,
-          ['function allowance(address owner, address spender) view returns (uint256)'],
-          signer || sdk.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS])
-        );
-
         const userAddr = await signer.getAddress();
-        const allowance = await usdcContract.allowance(userAddr, contracts.JOB_MARKETPLACE);
+
+        const allowance = await pm.checkAllowance(
+          userAddr,
+          contracts.JOB_MARKETPLACE,
+          contracts.USDC
+        );
         const allowanceFormatted = ethers.formatUnits(allowance, 6);
 
         if (parseFloat(allowanceFormatted) >= parseFloat(SESSION_DEPOSIT_AMOUNT)) {
@@ -2626,19 +2570,29 @@ export default function BaseUsdcMvpFlowSDKTest() {
                 const provider = new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS]);
                 const testWallet = new ethers.Wallet(TEST_USER_1_PRIVATE_KEY, provider);
 
-                // Create USDC contract instance
-                const usdcContract = new ethers.Contract(
-                  contracts.USDC,
-                  ['function transfer(address to, uint256 amount) returns (bool)'],
-                  testWallet
-                );
+                // Create funding SDK with TEST_USER_1 wallet
+                const fundingSdk = new FabstirSDKCore({
+                  mode: 'production',
+                  chainId: selectedChainId,
+                  rpcUrl: RPC_URLS[selectedChainId as keyof typeof RPC_URLS],
+                  contractAddresses: {
+                    jobMarketplace: contracts.JOB_MARKETPLACE,
+                    nodeRegistry: contracts.NODE_REGISTRY,
+                    proofSystem: contracts.PROOF_SYSTEM,
+                    hostEarnings: contracts.HOST_EARNINGS,
+                    fabToken: contracts.FAB_TOKEN,
+                    usdcToken: contracts.USDC,
+                    modelRegistry: ethers.ZeroAddress
+                  }
+                });
 
-                // Transfer 2 USDC to the smart wallet
+                await fundingSdk.authenticate('signer', { signer: testWallet });
+                const fundingPm = fundingSdk.getPaymentManager();
+
+                // Transfer 2 USDC to the smart wallet via SDK
                 const amountToTransfer = ethers.parseUnits('2', 6); // 2 USDC with 6 decimals
-                const tx = await usdcContract.transfer(smartWalletAddress, amountToTransfer);
-                addLog(`Transfer transaction sent: ${tx.hash}`);
-
-                await tx.wait();
+                const receipt = await fundingPm.sendToken(smartWalletAddress, amountToTransfer, contracts.USDC);
+                addLog(`Transfer transaction sent: ${receipt.hash}`);
                 addLog(`✅ Successfully transferred 2 USDC to ${smartWalletAddress}`);
 
                 // Refresh balances
@@ -2718,30 +2672,20 @@ export default function BaseUsdcMvpFlowSDKTest() {
           onClick={async () => {
             try {
               setLoading(true);
-              addLog("Withdrawing host earnings from HostEarnings contract...");
+              addLog("Withdrawing host earnings via SDK...");
 
               const contracts = getContractAddresses();
-              const signer = sdk?.getSigner();
+              const hm = sdk?.getHostManager();
 
-              if (!signer) {
-                addLog("❌ No signer available. Please authenticate first.");
+              if (!hm) {
+                addLog("❌ HostManager not available. Please authenticate first.");
                 return;
               }
 
-              // Create HostEarnings contract instance
-              const hostEarningsContract = new ethers.Contract(
-                contracts.HOST_EARNINGS,
-                ['function withdrawAll() external'],
-                signer
-              );
-
-              // Call withdrawAll to transfer all accumulated earnings to the host's EOA
-              const tx = await hostEarningsContract.withdrawAll();
-              addLog(`📤 Withdraw transaction sent: ${tx.hash}`);
-
-              // Wait for confirmation
-              const receipt = await tx.wait(3);
-              addLog(`✅ Withdrawal complete! Gas used: ${receipt.gasUsed.toString()}`);
+              // Withdraw all USDC earnings via SDK
+              const txHash = await hm.withdrawEarnings(contracts.USDC);
+              addLog(`📤 Withdraw transaction sent: ${txHash}`);
+              addLog(`✅ Withdrawal complete!`);
 
               // Refresh balances to show the updated amounts
               await readAllBalances();

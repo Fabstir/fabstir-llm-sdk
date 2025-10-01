@@ -521,4 +521,36 @@ export class PaymentManager implements IPaymentManager {
 
     return receipt;
   }
+
+  /**
+   * Send ERC20 tokens to another address
+   * @param to - Recipient address
+   * @param amount - Amount to send as bigint (in token's smallest unit)
+   * @param tokenAddress - ERC20 token contract address
+   * @returns Transaction receipt
+   */
+  async sendToken(
+    to: string,
+    amount: bigint,
+    tokenAddress: string
+  ): Promise<ethers.TransactionReceipt> {
+    if (!this.signer) {
+      throw new SDKError('PaymentManager not initialized', 'NOT_INITIALIZED');
+    }
+
+    const tokenContract = new ethers.Contract(
+      tokenAddress,
+      ['function transfer(address to, uint256 amount) returns (bool)'],
+      this.signer
+    );
+
+    const tx = await tokenContract.transfer(to, amount);
+    const receipt = await tx.wait();
+
+    if (!receipt) {
+      throw new SDKError('Transaction failed - no receipt', 'TX_FAILED');
+    }
+
+    return receipt;
+  }
 }

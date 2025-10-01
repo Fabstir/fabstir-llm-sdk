@@ -53,83 +53,51 @@ export class HostDiscoveryService {
     }
 
     try {
-      // Try to get full node info first for complete metadata
-      try {
-        const nodeFullInfo = await this.contract.getNodeFullInfo(nodeAddress);
-        // Returns: [nodeOperator, stakedAmount, active, metadata, apiUrl]
+      const nodeFullInfo = await this.contract.getNodeFullInfo(nodeAddress);
+      // Returns: [nodeOperator, stakedAmount, active, metadata, apiUrl]
 
-        // Check if node is active (index 2)
-        if (!nodeFullInfo[2]) {
-          throw new Error(`Node ${nodeAddress} is not active`);
-        }
-
-        const apiUrl = nodeFullInfo[4]; // apiUrl is at index 4
-        if (!apiUrl || apiUrl === '') {
-          throw new Error(`Node ${nodeAddress} has no API URL registered`);
-        }
-
-        // Parse metadata for additional info (index 3)
-        let parsedMetadata: any = {};
-        try {
-          if (nodeFullInfo[3] && nodeFullInfo[3].startsWith('{')) {
-            parsedMetadata = JSON.parse(nodeFullInfo[3]);
-          }
-        } catch (e) {
-          // Ignore parse errors
-        }
-
-        // Cache the complete result
-        const info: NodeInfo = {
-          nodeAddress: nodeAddress.toLowerCase(),
-          address: nodeAddress.toLowerCase(),
-          operator: nodeFullInfo[0], // nodeOperator
-          isActive: nodeFullInfo[2], // active bool
-          isRegistered: true,
-          stakedAmount: nodeFullInfo[1], // stakedAmount
-          metadata: nodeFullInfo[3], // metadata string
-          apiUrl: apiUrl,
-          endpoint: apiUrl,
-          supportedModels: parsedMetadata.supportedModels || [],
-          models: parsedMetadata.models || [],
-          region: parsedMetadata.region || '',
-          reputation: parsedMetadata.reputation || 95,
-          pricePerToken: parsedMetadata.pricePerToken || 2000
-        };
-
-        this.nodeCache.set(nodeAddress.toLowerCase(), info);
-        this.lastCacheTime = Date.now();
-
-        return apiUrl;
-      } catch (e) {
-        // Fallback to direct getNodeApiUrl if getNodeFullInfo not available
-        const apiUrl = await this.contract.getNodeApiUrl(nodeAddress);
-
-        if (!apiUrl || apiUrl === '') {
-          throw new Error(`Node ${nodeAddress} has no API URL registered`);
-        }
-
-        // Check if node is active
-        const isActive = await this.contract.isNodeActive(nodeAddress);
-        if (!isActive) {
-          throw new Error(`Node ${nodeAddress} is not active`);
-        }
-
-        // Cache minimal result
-        const info: NodeInfo = {
-          nodeAddress: nodeAddress.toLowerCase(),
-          address: nodeAddress.toLowerCase(),
-          apiUrl: apiUrl,
-          endpoint: apiUrl,
-          region: '',
-          isActive: true,
-          isRegistered: true
-        };
-
-        this.nodeCache.set(nodeAddress.toLowerCase(), info);
-        this.lastCacheTime = Date.now();
-
-        return apiUrl;
+      // Check if node is active (index 2)
+      if (!nodeFullInfo[2]) {
+        throw new Error(`Node ${nodeAddress} is not active`);
       }
+
+      const apiUrl = nodeFullInfo[4]; // apiUrl is at index 4
+      if (!apiUrl || apiUrl === '') {
+        throw new Error(`Node ${nodeAddress} has no API URL registered`);
+      }
+
+      // Parse metadata for additional info (index 3)
+      let parsedMetadata: any = {};
+      try {
+        if (nodeFullInfo[3] && nodeFullInfo[3].startsWith('{')) {
+          parsedMetadata = JSON.parse(nodeFullInfo[3]);
+        }
+      } catch (e) {
+        // Ignore parse errors
+      }
+
+      // Cache the complete result
+      const info: NodeInfo = {
+        nodeAddress: nodeAddress.toLowerCase(),
+        address: nodeAddress.toLowerCase(),
+        operator: nodeFullInfo[0], // nodeOperator
+        isActive: nodeFullInfo[2], // active bool
+        isRegistered: true,
+        stakedAmount: nodeFullInfo[1], // stakedAmount
+        metadata: nodeFullInfo[3], // metadata string
+        apiUrl: apiUrl,
+        endpoint: apiUrl,
+        supportedModels: parsedMetadata.supportedModels || [],
+        models: parsedMetadata.models || [],
+        region: parsedMetadata.region || '',
+        reputation: parsedMetadata.reputation || 95,
+        pricePerToken: parsedMetadata.pricePerToken || 2000
+      };
+
+      this.nodeCache.set(nodeAddress.toLowerCase(), info);
+      this.lastCacheTime = Date.now();
+
+      return apiUrl;
     } catch (error: any) {
       throw new Error(`Failed to discover node ${nodeAddress}: ${error.message}`);
     }
@@ -158,22 +126,7 @@ export class HostDiscoveryService {
           try {
             nodeFullInfo = await this.contract.getNodeFullInfo(address);
           } catch (e) {
-            console.warn(`getNodeFullInfo not available, falling back to individual calls for ${address}`);
-            // Fallback to individual calls if getNodeFullInfo is not available
-            const apiUrl = await this.contract.getNodeApiUrl(address);
-            const isActive = await this.contract.isNodeActive(address);
-
-            if (!isActive) continue;
-
-            activeNodes.push({
-              nodeAddress: address.toLowerCase(),
-              address: address.toLowerCase(),
-              apiUrl: apiUrl || '',
-              endpoint: apiUrl || '',
-              region: '',
-              isActive: true,
-              isRegistered: true
-            });
+            console.warn(`Failed to get node info for ${address}:`, e);
             continue;
           }
 

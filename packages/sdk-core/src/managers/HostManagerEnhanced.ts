@@ -694,6 +694,42 @@ export class HostManagerEnhanced {
   }
 
   /**
+   * Get host accumulated earnings for a specific token
+   * @param hostAddress - Host address to check earnings for
+   * @param tokenAddress - Token address (use ethers.ZeroAddress for native ETH/BNB)
+   * @returns Accumulated earnings as bigint (in token's smallest unit)
+   */
+  async getHostEarnings(hostAddress: string, tokenAddress: string): Promise<bigint> {
+    if (!this.initialized) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    if (!this.hostEarningsAddress) {
+      throw new SDKError('Host earnings contract not configured', 'NO_EARNINGS_CONTRACT');
+    }
+
+    try {
+      const hostEarningsABI = await this.contractManager.getContractABI('hostEarnings');
+      const provider = this.signer?.provider || await this.contractManager.getProvider();
+
+      const earnings = new ethers.Contract(
+        this.hostEarningsAddress,
+        hostEarningsABI,
+        provider
+      );
+
+      const balance = await earnings.getBalance(hostAddress, tokenAddress);
+      return balance;
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to get host earnings: ${error.message}`,
+        'GET_EARNINGS_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
    * Withdraw earnings from HostEarnings contract
    */
   async withdrawEarnings(tokenAddress: string): Promise<string> {

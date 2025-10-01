@@ -65,7 +65,15 @@ export interface IHostManager {
    * Check host earnings
    */
   checkEarnings(tokenAddress: string): Promise<bigint>;
-  
+
+  /**
+   * Get host accumulated earnings for a specific token
+   * @param hostAddress - Host address to check earnings for
+   * @param tokenAddress - Token address (use ethers.ZeroAddress for native ETH/BNB)
+   * @returns Accumulated earnings as bigint (in token's smallest unit)
+   */
+  getHostEarnings(hostAddress: string, tokenAddress: string): Promise<bigint>;
+
   /**
    * Withdraw earnings
    */

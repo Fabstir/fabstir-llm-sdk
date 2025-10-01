@@ -264,75 +264,48 @@ export default function BaseEthMvpFlowSDKTest() {
         }
 
         // Read accumulated ETH earnings from HostEarnings contract (only if host is selected)
-        if ((selectedHost || (window as any).__selectedHostAddress) && (hostManager || sdk)) {
+        if ((selectedHost || (window as any).__selectedHostAddress) && sdk) {
           try {
             // Use the selected host address if available
             const hostAddress = selectedHost?.address ||
                                (window as any).__selectedHostAddress;
             console.log(`[DEBUG] Reading host ETH earnings for address: ${hostAddress}`);
-            console.log(`[DEBUG] HostManager available: ${!!hostManager}`);
-            console.log(`[DEBUG] SDK available: ${!!sdk}`);
 
-            if (hostManager && hostManager.getAccumulatedEarnings) {
-              console.log(`[DEBUG] Using hostManager.getAccumulatedEarnings`);
-              const hostEarnings = await hostManager.getAccumulatedEarnings(hostAddress);
-              newBalances.hostAccumulated = ethers.formatEther(hostEarnings);
-              console.log(`Host accumulated ETH earnings for ${hostAddress}: ${newBalances.hostAccumulated} ETH`);
-            } else if (hostManager && hostManager.getEarnings) {
-              console.log(`[DEBUG] Using hostManager.getEarnings`);
-              const hostEarnings = await hostManager.getEarnings(hostAddress);
-              newBalances.hostAccumulated = ethers.formatEther(hostEarnings);
-              console.log(`Host ETH earnings for ${hostAddress}: ${newBalances.hostAccumulated} ETH`);
-            } else {
-              // Always try reading directly from HostEarnings contract as fallback
-              const contracts = getContractAddresses();
-              console.log(`[DEBUG] Reading directly from HostEarnings contract at ${contracts.HOST_EARNINGS}`);
-              const hostEarningsContract = new ethers.Contract(
-                contracts.HOST_EARNINGS,
-                ['function getBalance(address host, address token) view returns (uint256)'],
-                provider
-              );
-              // For native ETH, use address(0) as the token address
-              const ETH_ADDRESS = '0x0000000000000000000000000000000000000000';
-              const earnings = await hostEarningsContract.getBalance(hostAddress, ETH_ADDRESS);
+            // Get HostManager directly from SDK
+            const hm = sdk.getHostManager();
+            console.log('[DEBUG] HostManager:', hm);
+            console.log('[DEBUG] HostManager methods:', hm ? Object.getOwnPropertyNames(Object.getPrototypeOf(hm)) : 'N/A');
+            console.log('[DEBUG] Has getHostEarnings?', hm && typeof hm.getHostEarnings === 'function');
+            if (hm && hm.getHostEarnings) {
+              // Use new SDK method for reading host earnings
+              console.log(`[DEBUG] Using hostManager.getHostEarnings (SDK method)`);
+              const ETH_ADDRESS = ethers.ZeroAddress;
+              const earnings = await hm.getHostEarnings(hostAddress, ETH_ADDRESS);
               newBalances.hostAccumulated = ethers.formatEther(earnings);
-              console.log(`Host ETH earnings (direct contract) for ${hostAddress}: ${newBalances.hostAccumulated} ETH (raw: ${earnings.toString()})`);
+              console.log(`Host ETH earnings (SDK) for ${hostAddress}: ${newBalances.hostAccumulated} ETH (raw: ${earnings.toString()})`);
+            } else {
+              console.warn('[WARN] HostManager.getHostEarnings method not available');
+              newBalances.hostAccumulated = '0';
             }
           } catch (err) {
             console.log('Error reading host accumulated ETH earnings:', err);
+            console.error(err);
             newBalances.hostAccumulated = '0';
           }
         } else {
-          console.log(`[DEBUG] No host selected or no manager available`);
+          console.log(`[DEBUG] No host selected or SDK not available`);
           newBalances.hostAccumulated = '0';
         }
 
-        // Read treasury accumulated native balance (ETH on Base Sepolia)
+        // Read treasury accumulated native balance (ETH on Base Sepolia) - using SDK
         try {
-          // New contract uses accumulatedTreasuryNative for multi-chain support
-          const jobMarketplaceContract = new ethers.Contract(
-            JOB_MARKETPLACE,
-            ['function accumulatedTreasuryNative() view returns (uint256)'],
-            provider
-          );
-          const treasuryBalance = await jobMarketplaceContract.accumulatedTreasuryNative();
+          const treasuryManager = sdk.getTreasuryManager();
+          const treasuryBalance = await treasuryManager.getAccumulatedNative();
           newBalances.treasuryAccumulated = ethers.formatEther(treasuryBalance);
-          console.log('Treasury accumulated ETH:', newBalances.treasuryAccumulated);
+          console.log('Treasury accumulated ETH (SDK):', newBalances.treasuryAccumulated);
         } catch (err) {
           console.log('Could not read treasury accumulated native balance:', err);
-          // Try fallback to old method name
-          try {
-            const jobMarketplaceContract = new ethers.Contract(
-              JOB_MARKETPLACE,
-              ['function accumulatedTreasuryETH() view returns (uint256)'],
-              provider
-            );
-            const treasuryBalance = await jobMarketplaceContract.accumulatedTreasuryETH();
-            newBalances.treasuryAccumulated = ethers.formatEther(treasuryBalance);
-          } catch (err2) {
-            console.log('Fallback also failed:', err2);
-            newBalances.treasuryAccumulated = '0';
-          }
+          newBalances.treasuryAccumulated = '0';
         }
 
         addLog(`Balances updated via SDK`);
@@ -1761,14 +1734,10 @@ export default function BaseEthMvpFlowSDKTest() {
       addLog("=== Step 13: Mark Complete ===");
       setStepStatus(prev => ({ ...prev, 13: 'in-progress' }));
       
-      // Helper function to read balance using viem
+      // Helper function to read balance using SDK
       const readBalanceViem = async (address: string): Promise<bigint> => {
-        const balance = await publicClient.readContract({
-          address: USDC,
-          abi: erc20BalanceOfAbi,
-          functionName: 'balanceOf',
-          args: [address as `0x${string}`]
-        }) as bigint;
+        const paymentManager = sdk.getPaymentManager();
+        const balance = await paymentManager.getTokenBalance(address, USDC);
         return balance;
       };
       
@@ -2022,19 +1991,19 @@ export default function BaseEthMvpFlowSDKTest() {
       // Step 2: Check ETH balance
       addLog("=== Running Step 2: Check ETH Balance ===");
 
-      // Check allowance directly from contract
+      // Check allowance using SDK
       let shouldApprove = true;
       try {
         const contracts = getContractAddresses();
         const signer = await sdk.getSigner();
-        const usdcContract = new ethers.Contract(
-          contracts.USDC,
-          ['function allowance(address owner, address spender) view returns (uint256)'],
-          signer || sdk.getProvider() || new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS])
-        );
+        const paymentManager = sdk.getPaymentManager();
 
         const userAddr = await signer.getAddress();
-        const allowance = await usdcContract.allowance(userAddr, contracts.JOB_MARKETPLACE);
+        const allowance = await paymentManager.checkAllowance(
+          userAddr,
+          contracts.JOB_MARKETPLACE,
+          contracts.USDC
+        );
         const allowanceFormatted = ethers.formatUnits(allowance, 6);
 
         if (parseFloat(allowanceFormatted) >= parseFloat(SESSION_DEPOSIT_AMOUNT)) {
