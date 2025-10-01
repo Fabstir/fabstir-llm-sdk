@@ -1,6 +1,15 @@
 /**
  * Browser-compatible Host Manager
- * 
+ *
+ * @deprecated Use HostManagerEnhanced instead. This class will be removed in v2.0.0.
+ *
+ * HostManagerEnhanced provides the same core functionality plus model management.
+ * The metrics functionality from this class is not currently used in the SDK and
+ * will be re-evaluated for future inclusion based on user demand.
+ *
+ * Migration: Replace `new HostManager(...)` with `new HostManagerEnhanced(...)`
+ * or use `sdk.getHostManager()` which returns HostManagerEnhanced.
+ *
  * Manages host/node operations including registration, staking,
  * metadata management, and earnings withdrawal in browser environments.
  */
@@ -20,6 +29,9 @@ import {
 import { ContractManager } from '../contracts/ContractManager';
 import { HostDiscoveryService } from '../services/HostDiscoveryService';
 
+/**
+ * @deprecated Use HostManagerEnhanced instead. Will be removed in v2.0.0.
+ */
 export class HostManager implements IHostManager {
   private contractManager: ContractManager;
   private signer?: ethers.Signer;
@@ -735,6 +747,42 @@ export class HostManager implements IHostManager {
   }
 
   /**
+   * Get host accumulated earnings for a specific token
+   * @param hostAddress - Host address to check earnings for
+   * @param tokenAddress - Token address (use ethers.ZeroAddress for native ETH/BNB)
+   * @returns Accumulated earnings as bigint (in token's smallest unit)
+   */
+  async getHostEarnings(hostAddress: string, tokenAddress: string): Promise<bigint> {
+    if (!this.initialized) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    if (!this.hostEarningsAddress) {
+      throw new SDKError('Host earnings contract not configured', 'NO_EARNINGS_CONTRACT');
+    }
+
+    try {
+      const hostEarningsABI = await this.contractManager.getContractABI('hostEarnings');
+      const provider = this.signer?.provider || await this.contractManager.getProvider();
+
+      const earnings = new ethers.Contract(
+        this.hostEarningsAddress,
+        hostEarningsABI,
+        provider
+      );
+
+      const balance = await earnings.getBalance(hostAddress, tokenAddress);
+      return balance;
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to get host earnings: ${error.message}`,
+        'GET_EARNINGS_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
    * Withdraw earnings
    */
   async withdrawEarnings(tokenAddress: string): Promise<string> {
@@ -756,12 +804,12 @@ export class HostManager implements IHostManager {
 
       // Use withdrawAll to withdraw all accumulated earnings for the token
       const tx = await earnings.withdrawAll(tokenAddress);
-      
+
       const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Withdrawal failed', 'WITHDRAWAL_FAILED');
       }
-      
+
       return receipt.hash;
     } catch (error: any) {
       throw new SDKError(
