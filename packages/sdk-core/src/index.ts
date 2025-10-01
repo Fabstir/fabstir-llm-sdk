@@ -27,13 +27,11 @@ export { PaymentManager } from './managers/PaymentManager';
 export { PaymentManager as PaymentManagerMultiChain } from './managers/PaymentManagerMultiChain';
 export { StorageManager } from './managers/StorageManager';
 export { SessionManager } from './managers/SessionManager';
-/** @deprecated Use HostManagerEnhanced instead. Will be removed in v2.0.0 */
 export { HostManager } from './managers/HostManager';
 export { TreasuryManager } from './managers/TreasuryManager';
 
 // Model governance managers
 export { ModelManager } from './managers/ModelManager';
-export { HostManagerEnhanced } from './managers/HostManagerEnhanced';
 export { ClientManager } from './managers/ClientManager';
 
 // Services

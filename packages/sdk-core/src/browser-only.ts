@@ -8,7 +8,7 @@ export * from './constants/models';
 
 // Export managers that don't use S5
 export { ModelManager } from './managers/ModelManager';
-export { HostManagerEnhanced } from './managers/HostManagerEnhanced';
+export { HostManager } from './managers/HostManager';
 export { ClientManager } from './managers/ClientManager';
 
 // Export types

@@ -109,7 +109,7 @@ describe('Testnet Connection', () => {
 
       const hostManager = sdk.getHostManager();
       expect(hostManager).toBeDefined();
-      // Check for actual methods on HostManagerEnhanced
+      // Check for actual methods on HostManager
       expect(typeof hostManager.registerHostWithModels).toBe('function');
     });
 

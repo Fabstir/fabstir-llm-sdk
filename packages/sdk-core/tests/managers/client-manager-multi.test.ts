@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ClientManager } from '../../src/managers/ClientManager';
 import { ModelManager } from '../../src/managers/ModelManager';
-import { HostManagerEnhanced } from '../../src/managers/HostManagerEnhanced';
+import { HostManager } from '../../src/managers/HostManager';
 import { ContractManager } from '../../src/contracts/ContractManager';
 import { ChainId } from '../../src/types/chain.types';
 import { ethers } from 'ethers';
 
 // Mock dependencies
 vi.mock('../../src/managers/ModelManager');
-vi.mock('../../src/managers/HostManagerEnhanced');
+vi.mock('../../src/managers/HostManager');
 vi.mock('../../src/contracts/ContractManager');
 
 describe('ClientManager Multi-Chain Support', () => {

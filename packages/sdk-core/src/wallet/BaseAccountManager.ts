@@ -5,12 +5,27 @@
  * - Creating and retrieving sub-accounts
  * - Configuring spend permissions for popup-free transactions
  * - Managing allowances and permission periods
+ *
+ * IMPORTANT: Requires CONTRACT_SPEND_PERMISSION_MANAGER to be set in .env.test
+ * This is the Spend Permission Manager contract address (Base-specific infrastructure)
  */
 
 import { ethers } from 'ethers';
 
-// Spend Permission Manager address on Base Sepolia
-const SPEND_PERMISSION_MANAGER = '0xf85210B21cC50302F477BA56686d2019dC9b67Ad';
+/**
+ * Get Spend Permission Manager contract address from environment
+ * @throws Error if CONTRACT_SPEND_PERMISSION_MANAGER is not set
+ */
+function getSpendPermissionManager(): string {
+  const address = process.env.CONTRACT_SPEND_PERMISSION_MANAGER;
+  if (!address) {
+    throw new Error(
+      'CONTRACT_SPEND_PERMISSION_MANAGER not set in environment. ' +
+      'Please add this to .env.test with the Spend Permission Manager contract address.'
+    );
+  }
+  return address;
+}
 
 export interface SubAccountOptions {
   tokenAddress: string;
@@ -88,7 +103,7 @@ export async function ensureSubAccount(
         {
           account: { type: 'create' },
           spender: {
-            address: SPEND_PERMISSION_MANAGER as `0x${string}`,
+            address: getSpendPermissionManager() as `0x${string}`,
             token: tokenAddress as `0x${string}`,
             allowance: maxAllowanceWei.toString(),
             period,

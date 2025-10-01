@@ -354,7 +354,14 @@ export class SessionManager implements ISessionManager {
 
         // Send session_init with chain_id
         // Get user address from payment manager's signer
-        const userAddress = await (this.paymentManager as any).signer?.getAddress() || '0x0000000000000000000000000000000000000000';
+        const signer = (this.paymentManager as any).signer;
+        if (!signer) {
+          throw new Error('PaymentManager signer not available. Cannot initialize session without authenticated signer.');
+        }
+        const userAddress = await signer.getAddress();
+        if (!userAddress) {
+          throw new Error('Failed to get user address from signer. Cannot initialize session.');
+        }
 
         await this.wsClient.sendMessage({
           type: 'session_init',

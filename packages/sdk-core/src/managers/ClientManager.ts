@@ -18,12 +18,12 @@ import {
 } from '../errors/model-errors';
 import { SDKError } from '../errors';
 import { ModelManager } from './ModelManager';
-import { HostManagerEnhanced } from './HostManagerEnhanced';
+import { HostManager } from './HostManager';
 import { ContractManager } from '../contracts/ContractManager';
 
 export class ClientManager {
   private modelManager: ModelManager;
-  private hostManager: HostManagerEnhanced;
+  private hostManager: HostManager;
   private contractManager: ContractManager;
   private jobMarketplace?: ethers.Contract;
   private signer?: ethers.Signer;
@@ -31,7 +31,7 @@ export class ClientManager {
 
   constructor(
     modelManager: ModelManager,
-    hostManager: HostManagerEnhanced,
+    hostManager: HostManager,
     contractManager: ContractManager
   ) {
     this.modelManager = modelManager;
@@ -401,7 +401,7 @@ export class ClientManager {
   /**
    * Get host manager instance
    */
-  getHostManager(): HostManagerEnhanced {
+  getHostManager(): HostManager {
     return this.hostManager;
   }
 

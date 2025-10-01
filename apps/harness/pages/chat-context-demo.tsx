@@ -266,8 +266,10 @@ export default function ChatContextDemo() {
         activeHost?.address || (window as any).__selectedHostAddress;
       if (selectedHostAddr && hostManager) {
         try {
-          const hostEarnings = await hostManager.getAccumulatedEarnings(
-            selectedHostAddr
+          const contracts = getContractAddresses();
+          const hostEarnings = await hostManager.getHostEarnings(
+            selectedHostAddr,
+            contracts.USDC
           );
           newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
         } catch (e) {

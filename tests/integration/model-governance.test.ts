@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ethers } from 'ethers';
 import { ModelManager } from '../../packages/sdk-core/src/managers/ModelManager';
-import { HostManagerEnhanced } from '../../packages/sdk-core/src/managers/HostManagerEnhanced';
+import { HostManager } from '../../packages/sdk-core/src/managers/HostManager';
 import { ClientManager } from '../../packages/sdk-core/src/managers/ClientManager';
 import { APPROVED_MODELS } from '../../packages/sdk-core/src/constants/models';
 import { ModelSpec, HostMetadata } from '../../packages/sdk-core/src/types/models';
@@ -149,13 +149,13 @@ describe('Model Governance Integration', () => {
     });
   });
 
-  describe('HostManagerEnhanced', () => {
-    let hostManager: HostManagerEnhanced;
+  describe('HostManager', () => {
+    let hostManager: HostManager;
 
     beforeAll(async () => {
       const nodeRegistryAddress = process.env.NODE_REGISTRY_WITH_MODELS_ADDRESS ||
                                   '0xaa14Ed58c3EF9355501bc360E5F09Fb9EC8c1100';
-      hostManager = new HostManagerEnhanced(testWallet, nodeRegistryAddress, modelManager);
+      hostManager = new HostManager(testWallet, nodeRegistryAddress, modelManager);
       // Note: Not initializing for full functionality in read-only tests
     });
 
@@ -182,12 +182,12 @@ describe('Model Governance Integration', () => {
 
   describe('ClientManager', () => {
     let clientManager: ClientManager;
-    let hostManager: HostManagerEnhanced;
+    let hostManager: HostManager;
 
     beforeAll(async () => {
       const nodeRegistryAddress = process.env.NODE_REGISTRY_WITH_MODELS_ADDRESS ||
                                   '0xaa14Ed58c3EF9355501bc360E5F09Fb9EC8c1100';
-      hostManager = new HostManagerEnhanced(testWallet, nodeRegistryAddress, modelManager);
+      hostManager = new HostManager(testWallet, nodeRegistryAddress, modelManager);
       clientManager = new ClientManager(modelManager, hostManager, contractManager);
       await clientManager.initialize();
     });

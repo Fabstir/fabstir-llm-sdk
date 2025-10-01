@@ -863,15 +863,32 @@ export default function BaseEthMvpFlowSDKTest() {
       const totalCost = BigInt(tokensUsed * PRICE_PER_TOKEN);
       const hostEarnings = (totalCost * 90n) / 100n; // 90% to host
 
-      // Record earnings via HostManager for the selected host
+      // Record earnings via direct contract call for the selected host
       const selectedHostForEarnings = (window as any).__selectedHostAddress;
       if (!selectedHostForEarnings) {
         throw new Error("No host selected for recording earnings");
       }
-      await hostManager.recordEarnings(
-        selectedHostForEarnings,
-        hostEarnings
+
+      // Use SDK's contract manager to get HostEarnings ABI
+      const contractManager = (sdk as any).contractManager;
+      const hostEarningsABI = await contractManager.getContractABI('hostEarnings');
+      const contracts = getContractAddresses();
+      const signer = sdk.getSigner();
+
+      const hostEarningsContract = new ethers.Contract(
+        contracts.HOST_EARNINGS,
+        hostEarningsABI,
+        signer
       );
+
+      // Credit earnings to host (ETH address = 0x0000000000000000000000000000000000000000)
+      const ETH_ADDRESS = '0x0000000000000000000000000000000000000000';
+      const tx = await hostEarningsContract.creditEarnings(
+        selectedHostForEarnings,
+        hostEarnings,
+        ETH_ADDRESS
+      );
+      await tx.wait(3);
 
       addLog(`✅ Host earnings recorded: ${hostEarnings} (90% of total)`);
 

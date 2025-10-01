@@ -1,507 +1,441 @@
 /**
- * Browser-compatible Host Manager
+ * Host Manager with Model Governance Support
  *
- * @deprecated Use HostManagerEnhanced instead. This class will be removed in v2.0.0.
- *
- * HostManagerEnhanced provides the same core functionality plus model management.
- * The metrics functionality from this class is not currently used in the SDK and
- * will be re-evaluated for future inclusion based on user demand.
- *
- * Migration: Replace `new HostManager(...)` with `new HostManagerEnhanced(...)`
- * or use `sdk.getHostManager()` which returns HostManagerEnhanced.
- *
- * Manages host/node operations including registration, staking,
- * metadata management, and earnings withdrawal in browser environments.
+ * Manages host/node operations with model validation and registration
  */
 
-import { ethers } from 'ethers';
-import { IHostManager } from '../interfaces';
+import { ethers, Contract, Provider, Signer, isAddress } from 'ethers';
 import {
-  SDKError,
   HostInfo,
-  HostRegistrationRequest,
-  NodeMetrics,
-  HostMetrics,
-  StoredHostMetrics,
-  AggregatedHostMetrics,
-  MetricsSubmitResult
-} from '../types';
+  HostMetadata,
+  ModelSpec
+} from '../types/models';
+import {
+  ModelNotApprovedError,
+  InvalidModelIdError,
+  ModelRegistryError,
+  ModelValidationError
+} from '../errors/model-errors';
+import { SDKError } from '../errors';
 import { ContractManager } from '../contracts/ContractManager';
+import { ModelManager } from './ModelManager';
 import { HostDiscoveryService } from '../services/HostDiscoveryService';
+import { NodeRegistryABI } from '../contracts/abis';
 
-/**
- * @deprecated Use HostManagerEnhanced instead. Will be removed in v2.0.0.
- */
-export class HostManager implements IHostManager {
+export interface HostRegistrationWithModels {
+  metadata: HostMetadata;
+  apiUrl: string;
+  supportedModels: ModelSpec[];
+}
+
+export class HostManager {
   private contractManager: ContractManager;
-  private signer?: ethers.Signer;
+  private modelManager: ModelManager;
+  private nodeRegistry?: Contract;
+  private signer?: Signer;
   private initialized = false;
   private nodeRegistryAddress?: string;
-  private hostEarningsAddress?: string;
-  private fabTokenAddress?: string;
   private discoveryService?: HostDiscoveryService;
-  private metricsStorage: Map<string, StoredHostMetrics[]> = new Map();
+  private fabTokenAddress?: string;
+  private hostEarningsAddress?: string;
 
-  constructor(contractManager: ContractManager) {
+  constructor(
+    signer: Signer,
+    nodeRegistryAddress: string,
+    modelManager: ModelManager,
+    fabTokenAddress?: string,
+    hostEarningsAddress?: string,
+    contractManager?: any
+  ) {
+    if (!isAddress(nodeRegistryAddress)) {
+      throw new ModelRegistryError(
+        'Invalid node registry address',
+        nodeRegistryAddress
+      );
+    }
+
+    this.signer = signer;
+    this.nodeRegistryAddress = nodeRegistryAddress;
+    this.modelManager = modelManager;
+    this.fabTokenAddress = fabTokenAddress;
+    this.hostEarningsAddress = hostEarningsAddress;
     this.contractManager = contractManager;
+
+    // Initialize contract with full NodeRegistryWithModels ABI
+    console.log('Initializing NodeRegistry contract with full ABI');
+    console.log('Contract address:', nodeRegistryAddress);
+
+    this.nodeRegistry = new Contract(
+      nodeRegistryAddress,
+      NodeRegistryABI,
+      signer
+    );
+
+    // Verify the contract interface is loaded
+    if (this.nodeRegistry.interface) {
+      console.log('Contract interface initialized successfully');
+      const functions = Object.keys(this.nodeRegistry.interface.functions || {});
+      console.log(`Loaded ${functions.length} contract functions`);
+      console.log('Has updateSupportedModels?', functions.includes('updateSupportedModels(bytes32[])'));
+    } else {
+      console.error('Failed to initialize contract interface');
+    }
   }
 
   /**
-   * Initialize the host manager
+   * Initialize the enhanced host manager
    */
-  async initialize(signer: ethers.Signer): Promise<void> {
-    this.signer = signer;
-    await this.contractManager.setSigner(signer);
-    
-    // Get contract addresses
-    this.nodeRegistryAddress = await this.contractManager.getContractAddress('nodeRegistry');
-    this.fabTokenAddress = await this.contractManager.getContractAddress('fabToken');
-    
-    // Host earnings is optional
-    try {
-      this.hostEarningsAddress = await this.contractManager.getContractAddress('hostEarnings');
-    } catch {}
-    
+  async initialize(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+
+    await this.modelManager.initialize();
+
     // Initialize discovery service
-    const provider = await signer.provider;
+    const provider = this.signer?.provider;
     if (provider && this.nodeRegistryAddress) {
       this.discoveryService = new HostDiscoveryService(
         this.nodeRegistryAddress,
         provider
       );
+      // HostDiscoveryService doesn't need initialization - it's ready to use
     }
-    
+
     this.initialized = true;
   }
 
   /**
-   * Register as a host/node
+   * Register a host with validated models
    */
-  async registerHost(request: HostRegistrationRequest): Promise<string> {
-    if (!this.initialized || !this.signer) {
+  async registerHostWithModels(request: HostRegistrationWithModels): Promise<string> {
+    if (!this.initialized || !this.signer || !this.nodeRegistry) {
       throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
     }
 
     try {
-      // Get contracts
-      const nodeRegistryABI = await this.contractManager.getContractABI('nodeRegistry');
-      const registry = new ethers.Contract(
-        this.nodeRegistryAddress!,
-        nodeRegistryABI,
+      // Validate all models are approved
+      const modelIds: string[] = [];
+
+      for (const model of request.supportedModels) {
+        const modelId = await this.modelManager.getModelId(model.repo, model.file);
+        const isApproved = await this.modelManager.isModelApproved(modelId);
+
+        if (!isApproved) {
+          throw new ModelNotApprovedError(modelId, model.repo, model.file);
+        }
+
+        modelIds.push(modelId);
+      }
+
+      // Validate metadata structure
+      if (!request.metadata.hardware || !request.metadata.hardware.gpu) {
+        throw new ModelValidationError(
+          'Invalid metadata: hardware configuration required',
+          { metadata: request.metadata }
+        );
+      }
+
+      // Format metadata as JSON (new requirement)
+      const metadataJson = JSON.stringify({
+        hardware: {
+          gpu: request.metadata.hardware.gpu,
+          vram: request.metadata.hardware.vram || 8,
+          ram: request.metadata.hardware.ram || 16
+        },
+        capabilities: request.metadata.capabilities || { streaming: true },
+        location: request.metadata.location || 'us-east-1',
+        maxConcurrent: request.metadata.maxConcurrent || 5,
+        costPerToken: request.metadata.costPerToken || 0.0001
+      });
+
+      // Check if node is already registered
+      const signerAddress = await this.signer.getAddress();
+      console.log('Checking registration for address:', signerAddress);
+
+      const nodeInfo = await this.nodeRegistry['nodes'](signerAddress);
+      console.log('Node info from contract:', {
+        operator: nodeInfo[0],
+        stakedAmount: nodeInfo[1]?.toString(),
+        active: nodeInfo[2],
+        hasOperator: nodeInfo[0] !== ethers.ZeroAddress
+      });
+
+      const isAlreadyRegistered = nodeInfo[0] !== ethers.ZeroAddress; // operator address at index 0
+
+      if (isAlreadyRegistered) {
+        console.log('Node is already registered with operator:', nodeInfo[0]);
+        throw new ModelRegistryError(
+          'Node is already registered. Use updateNodeInfo to modify metadata or addStake to increase stake.',
+          this.nodeRegistry?.address
+        );
+      }
+      console.log('Node is not registered, proceeding with registration');
+
+      // Get FAB token contract address
+      console.log('FAB token address from constructor:', this.fabTokenAddress);
+      if (!this.fabTokenAddress) {
+        throw new ModelRegistryError(
+          'FAB token address not configured',
+          this.nodeRegistry?.address
+        );
+      }
+
+      // Check stake amount (FAB tokens, not ETH)
+      const stakeAmount = ethers.parseEther(
+        request.metadata.stakeAmount || '1000'
+      );
+
+      // Step 1: Create FAB token contract interface
+      console.log('Creating FAB token contract with address:', this.fabTokenAddress);
+      console.log('NodeRegistry address for operations:', this.nodeRegistryAddress);
+
+      const fabToken = new Contract(
+        this.fabTokenAddress,
+        [
+          'function approve(address spender, uint256 amount) returns (bool)',
+          'function allowance(address owner, address spender) view returns (uint256)',
+          'function balanceOf(address account) view returns (uint256)'
+        ],
         this.signer
       );
 
-      // Check if already registered
+      // Check FAB token balance
+      const fabBalance = await fabToken.balanceOf(signerAddress);
+      console.log(`FAB token balance: ${ethers.formatEther(fabBalance)} FAB`);
+
+      if (fabBalance < stakeAmount) {
+        throw new ModelRegistryError(
+          `Insufficient FAB balance. Required: ${ethers.formatEther(stakeAmount)}, Available: ${ethers.formatEther(fabBalance)}`,
+          this.fabTokenAddress
+        );
+      }
+
+      // Step 2: Approve FAB tokens for the NodeRegistry contract
+      console.log(`Approving ${ethers.formatEther(stakeAmount)} FAB tokens for NodeRegistry...`);
+      const approveTx = await fabToken.approve(this.nodeRegistryAddress, stakeAmount);
+      await approveTx.wait(3); // Wait for 3 confirmations as per CLAUDE.local.md
+      console.log('FAB token approval successful');
+
+      // Verify approval
+      const allowance = await fabToken.allowance(signerAddress, this.nodeRegistryAddress);
+      console.log(`Allowance after approval: ${ethers.formatEther(allowance)} FAB`);
+
+      // Step 3: Register node with models (no ETH value needed)
+      console.log('Registering node with models...');
+      const tx = await this.nodeRegistry['registerNode'](
+        metadataJson,
+        request.apiUrl,
+        modelIds,
+        {
+          gasLimit: 500000n
+        }
+      );
+
+      await tx.wait(3); // Wait for 3 confirmations
+      console.log('Node registration successful');
+
+      // Step 4: Stake FAB tokens (separate transaction after registration)
+      console.log(`Staking ${ethers.formatEther(stakeAmount)} FAB tokens...`);
+
+      // The stake function requires the node to be registered first
+      // It will transfer FAB tokens from the signer to the contract
+      const stakeTx = await this.nodeRegistry['stake'](stakeAmount, {
+        gasLimit: 500000n  // Increased gas limit for stake operation
+      });
+
+      const receipt = await stakeTx.wait(3); // Wait for 3 confirmations
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Host registration transaction failed',
+          this.nodeRegistry?.address
+        );
+      }
+
+      return receipt.hash;
+    } catch (error: any) {
+      if (error instanceof ModelNotApprovedError ||
+          error instanceof ModelValidationError ||
+          error instanceof ModelRegistryError) {
+        throw error;
+      }
+      throw new ModelRegistryError(
+        `Failed to register host: ${error.message}`,
+        this.nodeRegistry?.address
+      );
+    }
+  }
+
+  /**
+   * Get all hosts supporting a specific model
+   */
+  async findHostsForModel(modelId: string): Promise<HostInfo[]> {
+    if (!this.initialized || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      // Validate model ID format
+      if (!this.modelManager.isValidModelId(modelId)) {
+        throw new InvalidModelIdError(modelId);
+      }
+
+      // Get nodes supporting this model
+      const nodeAddresses = await this.nodeRegistry['getNodesForModel'](modelId);
+      const hosts: HostInfo[] = [];
+
+      for (const address of nodeAddresses) {
+        const info = await this.nodeRegistry['getNodeFullInfo'](address);
+
+        // Parse the returned data
+        const metadata = JSON.parse(info[3]); // metadata is at index 3
+
+        hosts.push({
+          address,
+          apiUrl: info[4],           // apiUrl at index 4
+          metadata: metadata,
+          supportedModels: info[5],   // model IDs array at index 5
+          isActive: info[1],          // isActive at index 1
+          stake: info[2]              // stake at index 2
+        });
+      }
+
+      return hosts;
+    } catch (error: any) {
+      console.error('Error finding hosts for model:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Update host's supported models
+   */
+  async updateHostModels(newModels: ModelSpec[]): Promise<string> {
+    if (!this.initialized || !this.signer || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
       const hostAddress = await this.signer.getAddress();
-      const nodeInfo = await registry['nodes'](hostAddress);
-      const isRegistered = nodeInfo.operator !== ethers.ZeroAddress;
-      
-      if (isRegistered) {
-        throw new SDKError('Host is already registered', 'HOST_ALREADY_REGISTERED');
-      }
+      const modelIds: string[] = [];
 
-      // Parse stake amount or use minimum
-      let stakeAmount: bigint;
-      if (request.stakeAmount) {
-        stakeAmount = ethers.parseUnits(request.stakeAmount, 18);
-      } else {
-        const minStake = await registry['MIN_STAKE']();
-        stakeAmount = BigInt(minStake.toString());
-      }
+      // Validate and collect model IDs
+      for (const model of newModels) {
+        const modelId = await this.modelManager.getModelId(model.repo, model.file);
+        const isApproved = await this.modelManager.isModelApproved(modelId);
 
-      // Check and approve FAB tokens if needed
-      if (this.fabTokenAddress) {
-        const fabToken = this.contractManager.getERC20Contract(this.fabTokenAddress);
-        
-        // Check balance
-        const balance = await fabToken['balanceOf'](hostAddress);
-        if (BigInt(balance.toString()) < stakeAmount) {
-          throw new SDKError(
-            `Insufficient FAB tokens. Need ${ethers.formatUnits(stakeAmount, 18)} FAB`,
-            'INSUFFICIENT_BALANCE'
-          );
+        if (!isApproved) {
+          throw new ModelNotApprovedError(modelId, model.repo, model.file);
         }
 
-        // Check and set allowance
-        const allowance = await fabToken['allowance'](hostAddress, this.nodeRegistryAddress);
-        if (BigInt(allowance.toString()) < stakeAmount) {
-          const approveTx = await fabToken['approve'](
-            this.nodeRegistryAddress,
-            stakeAmount,
-            { gasLimit: 100000n }
-          );
-          await approveTx.wait(3); // Wait for 3 confirmations
-        }
+        modelIds.push(modelId);
       }
 
-      // Extract API URL from metadata if it's JSON
-      let apiUrl = '';
+      // Update models on-chain
+      const tx = await this.nodeRegistry['updateNodeModels'](modelIds, {
+        gasLimit: 300000n
+      });
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Model update transaction failed',
+          this.nodeRegistry?.address
+        );
+      }
+
+      return receipt.hash;
+    } catch (error: any) {
+      if (error instanceof ModelNotApprovedError ||
+          error instanceof ModelRegistryError) {
+        throw error;
+      }
+      throw new ModelRegistryError(
+        `Failed to update host models: ${error.message}`,
+        this.nodeRegistry?.address
+      );
+    }
+  }
+
+  /**
+   * Get host's supported models
+   */
+  async getHostModels(hostAddress: string): Promise<string[]> {
+    if (!this.initialized || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      const info = await this.nodeRegistry['getNodeFullInfo'](hostAddress);
+      return info[5]; // Model IDs are at index 5
+    } catch (error: any) {
+      console.error('Error fetching host models:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get host registration status with models
+   */
+  async getHostStatus(hostAddress: string): Promise<{
+    isRegistered: boolean;
+    isActive: boolean;
+    supportedModels: string[];
+    stake: bigint;
+    metadata?: HostMetadata;
+    apiUrl?: string;
+  }> {
+    if (!this.initialized || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      const info = await this.nodeRegistry['getNodeFullInfo'](hostAddress);
+
+      // Check if registered (operator address will be non-zero)
+      const isRegistered = info[0] !== ethers.ZeroAddress;
+
+      if (!isRegistered) {
+        return {
+          isRegistered: false,
+          isActive: false,
+          supportedModels: [],
+          stake: 0n
+        };
+      }
+
+      // Parse metadata if available
+      let metadata: HostMetadata | undefined;
       try {
-        if (request.metadata && request.metadata.startsWith('{')) {
-          const metaObj = JSON.parse(request.metadata);
-          apiUrl = metaObj.apiUrl || metaObj.endpoint || '';
+        if (info[3]) {
+          metadata = JSON.parse(info[3]);
         }
       } catch (e) {
-        // Metadata is not JSON, that's okay
+        console.warn('Failed to parse metadata:', e);
       }
-
-      // Register host with URL if available
-      let tx;
-      if (apiUrl) {
-        // Use registerNodeWithUrl to set both metadata and API URL
-        tx = await registry['registerNodeWithUrl'](
-          request.metadata,
-          apiUrl,
-          { gasLimit: 300000n }
-        );
-      } else {
-        // Fallback to basic registration
-        tx = await registry['registerNode'](
-          request.metadata,
-          { gasLimit: 300000n }
-        );
-      }
-      
-      const receipt = await tx.wait(3); // Wait for 3 confirmations
-      if (!receipt || receipt.status !== 1) {
-        throw new SDKError('Registration failed', 'REGISTRATION_FAILED');
-      }
-      
-      return receipt.hash;
-    } catch (error: any) {
-      if (error instanceof SDKError) throw error;
-      throw new SDKError(
-        `Failed to register host: ${error.message}`,
-        'REGISTRATION_ERROR',
-        { originalError: error }
-      );
-    }
-  }
-
-  /**
-   * Unregister as a host
-   */
-  async unregisterHost(): Promise<string> {
-    if (!this.initialized || !this.signer) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
-    }
-
-    try {
-      const nodeRegistryABI = await this.contractManager.getContractABI('nodeRegistry');
-      const registry = new ethers.Contract(
-        this.nodeRegistryAddress!,
-        nodeRegistryABI,
-        this.signer
-      );
-
-      // Check if registered
-      const hostAddress = await this.signer.getAddress();
-      const nodeInfo = await registry['nodes'](hostAddress);
-      const isRegistered = nodeInfo.operator !== ethers.ZeroAddress;
-      
-      if (!isRegistered) {
-        throw new SDKError('Host is not registered', 'HOST_NOT_REGISTERED');
-      }
-
-      // Unregister
-      const tx = await registry['unregisterNode']({ gasLimit: 200000n });
-      
-      const receipt = await tx.wait(3); // Wait for 3 confirmations
-      if (!receipt || receipt.status !== 1) {
-        throw new SDKError('Unregistration failed', 'UNREGISTRATION_FAILED');
-      }
-      
-      return receipt.hash;
-    } catch (error: any) {
-      if (error instanceof SDKError) throw error;
-      throw new SDKError(
-        `Failed to unregister host: ${error.message}`,
-        'UNREGISTRATION_ERROR',
-        { originalError: error }
-      );
-    }
-  }
-
-  /**
-   * Update host metadata
-   */
-  async updateMetadata(metadata: string): Promise<string> {
-    if (!this.initialized || !this.signer) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
-    }
-
-    try {
-      const nodeRegistryABI = await this.contractManager.getContractABI('nodeRegistry');
-      const registry = new ethers.Contract(
-        this.nodeRegistryAddress!,
-        nodeRegistryABI,
-        this.signer
-      );
-
-      const tx = await registry['updateMetadata'](metadata, { gasLimit: 150000n });
-      
-      const receipt = await tx.wait(3); // Wait for 3 confirmations
-      if (!receipt || receipt.status !== 1) {
-        throw new SDKError('Metadata update failed', 'UPDATE_FAILED');
-      }
-      
-      return receipt.hash;
-    } catch (error: any) {
-      throw new SDKError(
-        `Failed to update metadata: ${error.message}`,
-        'UPDATE_ERROR',
-        { originalError: error }
-      );
-    }
-  }
-
-  /**
-   * Update host API URL
-   */
-  async updateApiUrl(apiUrl: string): Promise<string> {
-    if (!this.initialized || !this.signer) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
-    }
-
-    try {
-      const nodeRegistryABI = await this.contractManager.getContractABI('nodeRegistry');
-      const registry = new ethers.Contract(
-        this.nodeRegistryAddress!,
-        nodeRegistryABI,
-        this.signer
-      );
-
-      // Check if registered
-      const hostAddress = await this.signer.getAddress();
-      const nodeInfo = await registry['nodes'](hostAddress);
-      const isRegistered = nodeInfo.operator !== ethers.ZeroAddress;
-      
-      if (!isRegistered) {
-        throw new SDKError('Host is not registered', 'HOST_NOT_REGISTERED');
-      }
-
-      // Update API URL
-      console.log('Calling updateApiUrl with:', apiUrl);
-      console.log('Registry address:', this.nodeRegistryAddress);
-      console.log('ABI has updateApiUrl?:', nodeRegistryABI.find((item: any) => item.name === 'updateApiUrl'));
-      console.log('Contract has method?:', typeof registry['updateApiUrl']);
-      const tx = await registry['updateApiUrl'](apiUrl, { gasLimit: 200000n });
-      
-      const receipt = await tx.wait(3); // Wait for 3 confirmations
-      if (!receipt || receipt.status !== 1) {
-        throw new SDKError('Update API URL failed', 'UPDATE_API_URL_FAILED');
-      }
-      
-      return receipt.hash;
-    } catch (error: any) {
-      console.error('updateApiUrl error:', error);
-      if (error instanceof SDKError) throw error;
-      throw new SDKError(
-        `Failed to update API URL: ${error.message}`,
-        'UPDATE_API_URL_ERROR',
-        { originalError: error }
-      );
-    }
-  }
-
-  /**
-   * Add stake to host
-   */
-  async addStake(amount: string): Promise<string> {
-    if (!this.initialized || !this.signer) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
-    }
-
-    try {
-      const nodeRegistryABI = await this.contractManager.getContractABI('nodeRegistry');
-      const registry = new ethers.Contract(
-        this.nodeRegistryAddress!,
-        nodeRegistryABI,
-        this.signer
-      );
-
-      // Get FAB token contract
-      const fabToken = this.contractManager.getERC20Contract(this.fabTokenAddress!);
-
-      console.log('[HostManager] addStake called with amount:', amount);
-
-      // CRITICAL FIX: The contract might expect FAB amount, not wei!
-      // Let's try both approaches and see which works
-      const stakeAmountInWei = ethers.parseUnits(amount, 18);
-      const stakeAmountInFAB = ethers.parseUnits(amount, 0); // Just the number, no decimals
-
-      console.log('[HostManager] Amount in FAB (no decimals):', stakeAmountInFAB.toString());
-      console.log('[HostManager] Amount in wei (18 decimals):', stakeAmountInWei.toString());
-
-      // For now, let's use wei since that's standard for ERC20
-      const stakeAmount = stakeAmountInWei;
-
-      const hostAddress = await this.signer.getAddress();
-
-      // Approve FAB tokens
-      if (this.fabTokenAddress) {
-        // Check current balance
-        const balance = await fabToken['balanceOf'](hostAddress);
-        console.log('[HostManager] Current FAB balance:', ethers.formatUnits(balance, 18), 'FAB');
-
-        if (balance < stakeAmount) {
-          throw new SDKError(
-            `Insufficient FAB balance. Have ${ethers.formatEther(balance)} FAB, need ${amount} FAB`,
-            'INSUFFICIENT_BALANCE'
-          );
-        }
-
-        // Check current allowance
-        const currentAllowance = await fabToken['allowance'](hostAddress, this.nodeRegistryAddress);
-        console.log('[HostManager] Current allowance:', ethers.formatUnits(currentAllowance, 18), 'FAB');
-
-        // Approve the NodeRegistry to spend our FAB tokens
-        console.log('[HostManager] Approving:', ethers.formatUnits(stakeAmount, 18), 'FAB');
-        const approveTx = await fabToken['approve'](
-          this.nodeRegistryAddress,
-          stakeAmount,
-          { gasLimit: 100000n }
-        );
-        await approveTx.wait(3);
-        console.log('[HostManager] Approval complete');
-      } else {
-        throw new SDKError('FAB token address not configured', 'NO_FAB_TOKEN');
-      }
-
-      // Call stake function on NodeRegistry contract
-      // Pass the amount in wei
-      console.log('[HostManager] Calling stake() with amount:', stakeAmount.toString(), 'wei');
-      console.log('[HostManager] Which is:', ethers.formatUnits(stakeAmount, 18), 'FAB');
-      const tx = await registry['stake'](stakeAmount, { gasLimit: 300000n });
-      console.log('[HostManager] Transaction hash:', tx.hash);
-      
-      const receipt = await tx.wait(3); // Wait for 3 confirmations
-      if (!receipt || receipt.status !== 1) {
-        throw new SDKError('Add stake failed', 'ADD_STAKE_FAILED');
-      }
-      
-      return receipt.hash;
-    } catch (error: any) {
-      throw new SDKError(
-        `Failed to add stake: ${error.message}`,
-        'ADD_STAKE_ERROR',
-        { originalError: error }
-      );
-    }
-  }
-
-  /**
-   * Remove stake from host
-   */
-  async removeStake(amount: string): Promise<string> {
-    if (!this.initialized || !this.signer) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
-    }
-
-    try {
-      const nodeRegistryABI = await this.contractManager.getContractABI('nodeRegistry');
-      const registry = new ethers.Contract(
-        this.nodeRegistryAddress!,
-        nodeRegistryABI,
-        this.signer
-      );
-
-      const stakeAmount = ethers.parseUnits(amount, 18);
-
-      // Remove stake
-      const tx = await registry['removeStake'](stakeAmount, { gasLimit: 200000n });
-      
-      const receipt = await tx.wait(3); // Wait for 3 confirmations
-      if (!receipt || receipt.status !== 1) {
-        throw new SDKError('Remove stake failed', 'REMOVE_STAKE_FAILED');
-      }
-      
-      return receipt.hash;
-    } catch (error: any) {
-      throw new SDKError(
-        `Failed to remove stake: ${error.message}`,
-        'REMOVE_STAKE_ERROR',
-        { originalError: error }
-      );
-    }
-  }
-
-  /**
-   * Get host information
-   */
-  async getHostInfo(address: string): Promise<HostInfo> {
-    if (!this.initialized) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
-    }
-
-    try {
-      const nodeRegistryABI = await this.contractManager.getContractABI('nodeRegistry');
-      const provider = this.contractManager.getProvider();
-      const registry = new ethers.Contract(
-        this.nodeRegistryAddress!,
-        nodeRegistryABI,
-        provider
-      );
-
-      const nodeInfo = await registry['nodes'](address);
-      const isRegistered = nodeInfo.operator !== ethers.ZeroAddress;
-
-      // Parse models from metadata
-      const models = this.parseHostModels(nodeInfo.metadata || '');
-      const endpoint = this.parseHostEndpoint(nodeInfo.metadata || '');
 
       return {
-        address,
-        isRegistered,
-        isActive: nodeInfo.active || false,
-        stakedAmount: BigInt(nodeInfo.stakedAmount?.toString() || '0'),
-        metadata: nodeInfo.metadata || '',
-        models,
-        endpoint,
-        reputation: 0 // Would need separate reputation contract
+        isRegistered: true,
+        isActive: info[2],  // Fixed: was info[1]
+        supportedModels: info[5],
+        stake: info[1],      // Fixed: was info[2]
+        metadata,
+        apiUrl: info[4]
       };
     } catch (error: any) {
-      throw new SDKError(
-        `Failed to get host info: ${error.message}`,
-        'GET_INFO_ERROR',
-        { originalError: error }
-      );
-    }
-  }
-
-  /**
-   * List all active hosts
-   */
-  async listActiveHosts(): Promise<HostInfo[]> {
-    if (!this.initialized) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
-    }
-
-    try {
-      const nodeRegistryABI = await this.contractManager.getContractABI('nodeRegistry');
-      const provider = this.contractManager.getProvider();
-      const registry = new ethers.Contract(
-        this.nodeRegistryAddress!,
-        nodeRegistryABI,
-        provider
-      );
-
-      // Get all registered nodes (would need event filtering in production)
-      // For now, return empty array as this requires event log scanning
-      // which is complex in browser environments
-      return [];
-    } catch (error: any) {
-      throw new SDKError(
-        `Failed to list active hosts: ${error.message}`,
-        'LIST_HOSTS_ERROR',
-        { originalError: error }
-      );
+      console.error('Error fetching host status:', error);
+      return {
+        isRegistered: false,
+        isActive: false,
+        supportedModels: [],
+        stake: 0n  // Fixed: was BigNumber.from(0)
+      };
     }
   }
 
   /**
    * Get active hosts from blockchain
-   * Always queries real blockchain state - no hardcoded data
    */
   async getActiveHosts(): Promise<HostInfo[]> {
     try {
@@ -509,19 +443,20 @@ export class HostManager implements IHostManager {
         throw new SDKError('NodeRegistry address not configured', 'CONFIG_ERROR');
       }
 
-      // Always use HostDiscoveryService to get real hosts from blockchain
-      const provider = this.signer?.provider;
-      if (!provider) {
-        throw new SDKError('No provider available', 'PROVIDER_ERROR');
+      // Ensure discoveryService is initialized
+      if (!this.discoveryService) {
+        const provider = this.signer?.provider;
+        if (!provider) {
+          throw new SDKError('No provider available', 'PROVIDER_ERROR');
+        }
+        this.discoveryService = new HostDiscoveryService(
+          this.nodeRegistryAddress,
+          provider
+        );
       }
 
-      const discoveryService = new HostDiscoveryService(
-        this.nodeRegistryAddress,
-        provider
-      );
-
       // Get real hosts with full metadata from blockchain
-      const activeNodes = await discoveryService.getAllActiveNodes();
+      const activeNodes = await this.discoveryService.getAllActiveNodes();
 
       // Transform NodeInfo to HostInfo format
       return activeNodes.map(node => ({
@@ -546,26 +481,7 @@ export class HostManager implements IHostManager {
   }
 
   /**
-   * Discover API URL for a specific host from blockchain
-   */
-  async discoverHostApiUrl(hostAddress: string): Promise<string> {
-    if (!this.initialized || !this.discoveryService) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
-    }
-
-    try {
-      return await this.discoveryService.getNodeApiUrl(hostAddress);
-    } catch (error: any) {
-      throw new SDKError(
-        `Failed to discover host API URL: ${error.message}`,
-        'DISCOVERY_ERROR',
-        { originalError: error }
-      );
-    }
-  }
-
-  /**
-   * Discover all active hosts with their API URLs
+   * Discover all active hosts (simplified version for compatibility)
    */
   async discoverAllActiveHosts(): Promise<Array<{nodeAddress: string; apiUrl: string}>> {
     if (!this.initialized || !this.discoveryService) {
@@ -574,7 +490,10 @@ export class HostManager implements IHostManager {
 
     try {
       const nodes = await this.discoveryService.getAllActiveNodes();
-      return nodes.map(n => ({ nodeAddress: n.nodeAddress, apiUrl: n.apiUrl }));
+      return nodes.map(n => ({
+        nodeAddress: n.nodeAddress,
+        apiUrl: n.apiUrl
+      }));
     } catch (error: any) {
       throw new SDKError(
         `Failed to discover active hosts: ${error.message}`,
@@ -585,163 +504,191 @@ export class HostManager implements IHostManager {
   }
 
   /**
-   * Query hosts by model
+   * Discover all active hosts with model information
    */
-  async findHostsByModel(model: string): Promise<HostInfo[]> {
-    if (!this.initialized) {
+  async discoverAllActiveHostsWithModels(): Promise<HostInfo[]> {
+    if (!this.initialized || !this.nodeRegistry) {
       throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
     }
 
-    // This would require indexing or event log scanning
-    // For browser compatibility, would need a separate indexing service
-    return [];
+    try {
+      // Get all active nodes
+      const activeNodes = await this.nodeRegistry['getAllActiveNodes']();
+      const hosts: HostInfo[] = [];
+
+      for (const address of activeNodes) {
+        const info = await this.nodeRegistry['getNodeFullInfo'](address);
+
+        // Parse metadata
+        let metadata: HostMetadata;
+        try {
+          metadata = JSON.parse(info[3]);
+        } catch (e) {
+          console.warn(`Failed to parse metadata for ${address}:`, e);
+          continue;
+        }
+
+        hosts.push({
+          address,
+          apiUrl: info[4],
+          metadata,
+          supportedModels: info[5],
+          isActive: info[1],
+          stake: info[2]
+        });
+      }
+
+      return hosts;
+    } catch (error: any) {
+      console.error('Error discovering hosts:', error);
+      return [];
+    }
   }
 
   /**
-   * Get host metrics
+   * Check if host supports a specific model
    */
-  async getHostMetrics(address: string): Promise<NodeMetrics> {
+  async hostSupportsModel(hostAddress: string, modelId: string): Promise<boolean> {
+    const models = await this.getHostModels(hostAddress);
+    return models.includes(modelId);
+  }
+
+  /**
+   * Get the underlying discovery service
+   */
+  getDiscoveryService(): HostDiscoveryService | undefined {
+    return this.discoveryService;
+  }
+
+  /**
+   * Get the model manager instance
+   */
+  getModelManager(): ModelManager {
+    return this.modelManager;
+  }
+
+  /**
+   * Update host's supported models
+   */
+  async updateSupportedModels(modelIds: string[]): Promise<string> {
+    // Ensure initialized
     if (!this.initialized) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+      await this.initialize();
     }
 
-    // Metrics would typically come from off-chain monitoring
-    // Return basic metrics for now
-    const hostInfo = await this.getHostInfo(address);
-    
+    if (!this.signer || !this.nodeRegistry) {
+      throw new ModelRegistryError('Not initialized', this.nodeRegistryAddress);
+    }
+
+    try {
+      // Convert string model IDs to bytes32 format if needed
+      const modelIdsBytes32 = modelIds.map(id => {
+        // If it's already a hex string starting with 0x, use it
+        if (id.startsWith('0x')) {
+          return id;
+        }
+        // Otherwise, convert the number to bytes32
+        return ethers.zeroPadValue(ethers.toBeHex(BigInt(id)), 32);
+      });
+
+      console.log('Updating supported models with IDs:', modelIdsBytes32);
+      console.log('Contract address:', this.nodeRegistry.target || this.nodeRegistry.address);
+
+      // Ensure the contract interface has the function
+      if (!this.nodeRegistry.updateSupportedModels) {
+        console.error('updateSupportedModels function not found on contract');
+        console.log('Available functions:', Object.keys(this.nodeRegistry.functions || {}));
+        throw new Error('Contract method updateSupportedModels not found');
+      }
+
+      // Call updateSupportedModels on the NodeRegistry contract
+      console.log('Calling updateSupportedModels...');
+      const tx = await this.nodeRegistry.updateSupportedModels(
+        modelIdsBytes32,
+        { gasLimit: 500000n }
+      );
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Failed to update supported models',
+          this.nodeRegistry.address
+        );
+      }
+
+      console.log('Successfully updated supported models');
+      return receipt.hash;
+    } catch (error: any) {
+      throw new ModelRegistryError(
+        `Failed to update supported models: ${error.message}`,
+        this.nodeRegistry?.address,
+        error
+      );
+    }
+  }
+
+  /**
+   * Get host information (IHostManager interface compatibility)
+   */
+  async getHostInfo(address: string): Promise<HostInfo> {
+    const status = await this.getHostStatus(address);
+
     return {
-      online: hostInfo.isActive,
-      uptime: 0,
-      totalRequests: 0,
-      activeConnections: 0,
-      gpuUtilization: 0,
-      memoryUsage: 0,
-      averageResponseTime: 0,
-      totalTokensGenerated: 0
+      address,
+      isRegistered: status.isRegistered,
+      isActive: status.isActive,
+      apiUrl: status.apiUrl || '',
+      metadata: status.metadata || {
+        hardware: { gpu: '', vram: 0, ram: 0 },
+        capabilities: { streaming: false },
+        location: '',
+        maxConcurrent: 0,
+        costPerToken: 0
+      },
+      supportedModels: status.supportedModels || [],
+      stake: status.stake
     };
   }
 
   /**
-   * Check host earnings
+   * Update the API URL for the host
    */
-  async checkEarnings(tokenAddress: string): Promise<bigint> {
-    if (!this.initialized || !this.signer) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+  async updateApiUrl(apiUrl: string): Promise<string> {
+    // Ensure initialized
+    if (!this.initialized) {
+      await this.initialize();
     }
 
-    if (!this.hostEarningsAddress) {
-      throw new SDKError('Host earnings contract not configured', 'NO_EARNINGS_CONTRACT');
+    if (!this.signer || !this.nodeRegistry) {
+      throw new ModelRegistryError('Not initialized', this.nodeRegistryAddress);
     }
 
     try {
-      const hostEarningsABI = await this.contractManager.getContractABI('hostEarnings');
-      const earnings = new ethers.Contract(
-        this.hostEarningsAddress,
-        hostEarningsABI,
-        this.signer
+      console.log('Updating API URL to:', apiUrl);
+
+      // Call updateApiUrl on the NodeRegistry contract
+      const tx = await this.nodeRegistry.updateApiUrl(
+        apiUrl,
+        { gasLimit: 300000n }
       );
-
-      const hostAddress = await this.signer.getAddress();
-      const balance = await earnings['earnings'](hostAddress, tokenAddress);
-      
-      return BigInt(balance.toString());
-    } catch (error: any) {
-      throw new SDKError(
-        `Failed to check earnings: ${error.message}`,
-        'CHECK_EARNINGS_ERROR',
-        { originalError: error }
-      );
-    }
-  }
-
-  /**
-   * Get accumulated earnings for a specific host address
-   */
-  async getAccumulatedEarnings(hostAddress: string): Promise<bigint> {
-    if (!this.initialized || !this.signer) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
-    }
-
-    if (!this.hostEarningsAddress) {
-      throw new SDKError('Host earnings contract not configured', 'NO_EARNINGS_CONTRACT');
-    }
-
-    try {
-      const hostEarningsABI = await this.contractManager.getContractABI('hostEarnings');
-      const earnings = new ethers.Contract(
-        this.hostEarningsAddress,
-        hostEarningsABI,
-        this.signer
-      );
-
-      // Get USDC token address from ContractManager
-      const usdcAddress = this.contractManager.getUsdcToken();
-
-      // Query accumulated earnings for this host in USDC
-      const balance = await earnings['earnings'](hostAddress, usdcAddress);
-
-      return BigInt(balance.toString());
-    } catch (error: any) {
-      throw new SDKError(
-        `Failed to get accumulated earnings: ${error.message}`,
-        'GET_EARNINGS_ERROR',
-        { originalError: error }
-      );
-    }
-  }
-
-  /**
-   * Record earnings for a host
-   */
-  async recordEarnings(sessionId: string, hostAddress: string, amount: bigint): Promise<string> {
-    if (!this.initialized || !this.signer) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
-    }
-
-    // Validate inputs
-    if (!sessionId || sessionId.trim() === '') {
-      throw new SDKError('Invalid session ID', 'INVALID_SESSION_ID');
-    }
-
-    if (!ethers.isAddress(hostAddress)) {
-      throw new SDKError('Invalid host address', 'INVALID_ADDRESS');
-    }
-
-    if (amount <= 0n) {
-      throw new SDKError('Amount must be greater than zero', 'INVALID_AMOUNT');
-    }
-
-    if (!this.hostEarningsAddress) {
-      throw new SDKError('Host earnings contract not configured', 'NO_EARNINGS_CONTRACT');
-    }
-
-    try {
-      const hostEarningsABI = await this.contractManager.getContractABI('hostEarnings');
-      const earnings = new ethers.Contract(
-        this.hostEarningsAddress,
-        hostEarningsABI,
-        this.signer
-      );
-
-      // Get USDC token address (assuming USDC for now, could be made configurable)
-      const usdcAddress = await this.contractManager.getContractAddress('usdcToken');
-
-      // Call creditEarnings on the contract
-      const tx = await earnings['creditEarnings'](hostAddress, amount, usdcAddress);
 
       const receipt = await tx.wait(3); // Wait for 3 confirmations
+
       if (!receipt || receipt.status !== 1) {
-        throw new SDKError('Recording earnings failed', 'RECORD_EARNINGS_FAILED');
+        throw new ModelRegistryError(
+          'Failed to update API URL',
+          this.nodeRegistry.address
+        );
       }
 
+      console.log('Successfully updated API URL');
       return receipt.hash;
     } catch (error: any) {
-      if (error instanceof SDKError) {
-        throw error;
-      }
-      throw new SDKError(
-        `Failed to record earnings: ${error.message}`,
-        'RECORD_EARNINGS_ERROR'
+      throw new ModelRegistryError(
+        `Failed to update API URL: ${error.message}`,
+        this.nodeRegistry?.address,
+        error
       );
     }
   }
@@ -783,7 +730,7 @@ export class HostManager implements IHostManager {
   }
 
   /**
-   * Withdraw earnings
+   * Withdraw earnings from HostEarnings contract
    */
   async withdrawEarnings(tokenAddress: string): Promise<string> {
     if (!this.initialized || !this.signer) {
@@ -821,28 +768,184 @@ export class HostManager implements IHostManager {
   }
 
   /**
-   * Set host status (active/inactive)
+   * Unregister the host from the NodeRegistry contract
+   * This will return any staked FAB tokens back to the host
    */
-  async setHostStatus(active: boolean): Promise<string> {
-    if (!this.initialized || !this.signer) {
+  async unregisterHost(): Promise<string> {
+    if (!this.initialized || !this.signer || !this.nodeRegistry) {
       throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
     }
 
     try {
-      const nodeRegistryABI = await this.contractManager.getContractABI('nodeRegistry');
-      const registry = new ethers.Contract(
-        this.nodeRegistryAddress!,
-        nodeRegistryABI,
-        this.signer
+      // Call the unregisterNode function on the NodeRegistry contract
+      const tx = await this.nodeRegistry.unregisterNode();
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+      if (!receipt || receipt.status !== 1) {
+        throw new SDKError('Unregistration failed', 'UNREGISTRATION_FAILED');
+      }
+
+      return receipt.hash;
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to unregister host: ${error.message}`,
+        'UNREGISTRATION_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Update the metadata for the host
+   */
+  async updateMetadata(metadata: string): Promise<string> {
+    // Ensure initialized
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new ModelRegistryError('Not initialized', this.nodeRegistryAddress);
+    }
+
+    try {
+      console.log('Updating metadata...');
+
+      // Call updateMetadata on the NodeRegistry contract
+      const tx = await this.nodeRegistry.updateMetadata(
+        metadata,
+        { gasLimit: 300000n }
       );
 
-      const tx = await registry['setNodeStatus'](active, { gasLimit: 150000n });
-      
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Failed to update metadata',
+          this.nodeRegistry.address
+        );
+      }
+
+      console.log('Successfully updated metadata');
+      return receipt.hash;
+    } catch (error: any) {
+      throw new ModelRegistryError(
+        `Failed to update metadata: ${error.message}`,
+        this.nodeRegistry?.address,
+        error
+      );
+    }
+  }
+
+  /**
+   * Add additional stake to the host registration
+   */
+  async addStake(amount: string | bigint): Promise<string> {
+    // Ensure initialized
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      // Convert amount to wei if it's a string (FAB amount)
+      // If it's already a bigint, assume it's already in wei
+      let stakeAmountWei: bigint;
+      if (typeof amount === 'string') {
+        // Convert FAB to wei (18 decimals)
+        stakeAmountWei = ethers.parseEther(amount);
+        console.log('Adding stake:', amount, 'FAB (', stakeAmountWei.toString(), 'wei)');
+      } else {
+        stakeAmountWei = amount;
+        console.log('Adding stake:', ethers.formatEther(stakeAmountWei), 'FAB');
+      }
+
+      // Call stake on the NodeRegistry contract
+      const tx = await this.nodeRegistry.stake(
+        stakeAmountWei,
+        { gasLimit: 200000n }
+      );
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+
+      if (!receipt || receipt.status !== 1) {
+        throw new SDKError('Failed to add stake', 'STAKE_FAILED');
+      }
+
+      console.log('Successfully added stake');
+      return receipt.hash;
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to add stake: ${error.message}`,
+        'STAKE_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Remove stake from host
+   */
+  async removeStake(amount: string): Promise<string> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      const stakeAmount = ethers.parseUnits(amount, 18);
+
+      // Remove stake
+      const tx = await this.nodeRegistry.removeStake(stakeAmount, { gasLimit: 200000n });
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+      if (!receipt || receipt.status !== 1) {
+        throw new SDKError('Remove stake failed', 'REMOVE_STAKE_FAILED');
+      }
+
+      return receipt.hash;
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to remove stake: ${error.message}`,
+        'REMOVE_STAKE_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Withdraw stake (alias for removeStake, used by host-cli)
+   */
+  async withdrawStake(amount: string): Promise<string> {
+    return this.removeStake(amount);
+  }
+
+  /**
+   * Set host status (active/inactive)
+   */
+  async setHostStatus(active: boolean): Promise<string> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      const tx = await this.nodeRegistry.setNodeStatus(active, { gasLimit: 150000n });
+
       const receipt = await tx.wait(3); // Wait for 3 confirmations
       if (!receipt || receipt.status !== 1) {
         throw new SDKError('Status update failed', 'STATUS_UPDATE_FAILED');
       }
-      
+
       return receipt.hash;
     } catch (error: any) {
       throw new SDKError(
@@ -858,7 +961,7 @@ export class HostManager implements IHostManager {
    */
   async getReputation(address: string): Promise<number> {
     if (!this.initialized) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+      await this.initialize();
     }
 
     // Reputation would come from a separate reputation contract
@@ -867,123 +970,16 @@ export class HostManager implements IHostManager {
   }
 
   /**
-   * Submit performance metrics
+   * Query hosts by model
    */
-  async submitMetrics(metrics: HostMetrics): Promise<MetricsSubmitResult> {
-    if (!this.initialized || !this.signer) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+  async findHostsByModel(model: string): Promise<HostInfo[]> {
+    if (!this.initialized) {
+      await this.initialize();
     }
 
-    // Validate metrics
-    this.validateMetrics(metrics);
-
-    // Add timestamp if not provided
-    const timestamp = metrics.timestamp || Date.now();
-
-    // Get host address
-    const hostAddress = await this.signer.getAddress();
-
-    // Create stored metrics object
-    const storedMetrics: StoredHostMetrics = {
-      ...metrics,
-      hostAddress,
-      timestamp
-    };
-
-    // Store metrics locally
-    if (!this.metricsStorage.has(hostAddress)) {
-      this.metricsStorage.set(hostAddress, []);
-    }
-
-    const hostMetrics = this.metricsStorage.get(hostAddress)!;
-    hostMetrics.push(storedMetrics);
-
-    // Keep only last 1000 metrics entries per host
-    if (hostMetrics.length > 1000) {
-      hostMetrics.shift();
-    }
-
-    // Return result indicating local storage
-    return {
-      stored: true,
-      location: 'local',
-      timestamp
-    };
-  }
-
-  /**
-   * Validate metrics data
-   */
-  private validateMetrics(metrics: HostMetrics): void {
-    if (metrics.jobsCompleted < 0) {
-      throw new SDKError('Invalid metrics: jobsCompleted cannot be negative', 'INVALID_METRICS');
-    }
-
-    if (metrics.tokensProcessed < 0) {
-      throw new SDKError('Invalid metrics: tokensProcessed cannot be negative', 'INVALID_METRICS');
-    }
-
-    if (metrics.averageLatency < 0) {
-      throw new SDKError('Invalid metrics: averageLatency cannot be negative', 'INVALID_METRICS');
-    }
-
-    if (metrics.uptime < 0 || metrics.uptime > 1) {
-      throw new SDKError('Invalid metrics: uptime must be between 0 and 1', 'INVALID_METRICS');
-    }
-  }
-
-  /**
-   * Get stored metrics for a host
-   */
-  async getStoredMetrics(hostAddress: string, limit?: number): Promise<StoredHostMetrics[]> {
-    const metrics = this.metricsStorage.get(hostAddress) || [];
-
-    if (limit && limit > 0) {
-      // Return most recent metrics up to limit
-      return metrics.slice(-limit);
-    }
-
-    return metrics;
-  }
-
-  /**
-   * Get aggregated metrics for a host
-   */
-  async getAggregatedMetrics(hostAddress: string): Promise<AggregatedHostMetrics> {
-    const metrics = await this.getStoredMetrics(hostAddress);
-
-    if (metrics.length === 0) {
-      return {
-        totalJobs: 0,
-        totalTokens: 0,
-        averageUptime: 0,
-        averageLatency: 0
-      };
-    }
-
-    const totalJobs = metrics.reduce((sum, m) => sum + m.jobsCompleted, 0);
-    const totalTokens = metrics.reduce((sum, m) => sum + m.tokensProcessed, 0);
-    const averageUptime = metrics.reduce((sum, m) => sum + m.uptime, 0) / metrics.length;
-    const averageLatency = metrics.reduce((sum, m) => sum + m.averageLatency, 0) / metrics.length;
-
-    const periodStart = Math.min(...metrics.map(m => m.timestamp));
-    const periodEnd = Math.max(...metrics.map(m => m.timestamp));
-
-    return {
-      totalJobs,
-      totalTokens,
-      averageUptime,
-      averageLatency,
-      periodStart,
-      periodEnd
-    };
-  }
-
-  /**
-   * Clear metrics for a host
-   */
-  async clearMetrics(hostAddress: string): Promise<void> {
-    this.metricsStorage.delete(hostAddress);
+    // This would require indexing or event log scanning
+    // For browser compatibility, would need a separate indexing service
+    return [];
   }
 
   /**
@@ -991,20 +987,20 @@ export class HostManager implements IHostManager {
    */
   private parseHostModels(metadata: string): string[] {
     if (!metadata) return [];
-    
+
     // Parse comma-separated models from metadata
     const parts = metadata.split(',').map(s => s.trim());
-    
+
     // Filter out non-model entries
-    const models = parts.filter(part => 
-      part.includes('llama') || 
-      part.includes('gpt') || 
+    const models = parts.filter(part =>
+      part.includes('llama') ||
+      part.includes('gpt') ||
       part.includes('mistral') ||
       part.includes('claude') ||
       part.includes('gemma') ||
       part.includes('model')
     );
-    
+
     return models;
   }
 
@@ -1013,22 +1009,15 @@ export class HostManager implements IHostManager {
    */
   private parseHostEndpoint(metadata: string): string | undefined {
     if (!metadata) return undefined;
-    
+
     // Check if metadata contains URL format
-    if (metadata.includes('http://') || metadata.includes('https://') || 
+    if (metadata.includes('http://') || metadata.includes('https://') ||
         metadata.includes('ws://') || metadata.includes('wss://')) {
       // Extract URL from metadata
       const urlMatch = metadata.match(/(https?|wss?):\/\/[^\s,]+/);
       return urlMatch ? urlMatch[0] : undefined;
     }
-    
-    return undefined;
-  }
 
-  /**
-   * Check if HostManager is initialized
-   */
-  isInitialized(): boolean {
-    return this.initialized;
+    return undefined;
   }
 }

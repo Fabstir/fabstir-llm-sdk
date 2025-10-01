@@ -151,57 +151,8 @@ export interface CheckpointProof {
 }
 
 // ============= Host Types =============
-
-export interface HostInfo {
-  address: string;
-  isRegistered: boolean;
-  isActive: boolean;
-  stakedAmount: bigint;
-  metadata: string;
-  models: string[];
-  endpoint?: string;
-  reputation?: number;
-}
-
-export interface HostRegistrationRequest {
-  metadata: string;
-  stakeAmount: string;
-  models?: string[];
-  endpoint?: string;
-}
-
-export interface NodeMetrics {
-  online: boolean;
-  uptime: number;
-  totalRequests: number;
-  activeConnections: number;
-  gpuUtilization?: number;
-  memoryUsage?: number;
-  averageResponseTime?: number;
-  totalTokensGenerated?: number;
-}
-
-export interface HostMetrics {
-  jobsCompleted: number;
-  tokensProcessed: number;
-  averageLatency: number;
-  uptime: number;
-  timestamp?: number;
-}
-
-export interface StoredHostMetrics extends HostMetrics {
-  hostAddress: string;
-  timestamp: number;
-}
-
-export interface AggregatedHostMetrics {
-  totalJobs: number;
-  totalTokens: number;
-  averageUptime: number;
-  averageLatency: number;
-  periodStart?: number;
-  periodEnd?: number;
-}
+// NOTE: HostInfo and other host types have been moved to types/models.ts
+// to support the new model governance architecture. Import from there instead.
 
 export interface MetricsSubmitResult {
   stored: boolean;

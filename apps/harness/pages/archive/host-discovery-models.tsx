@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import {
   APPROVED_MODELS,
   ModelManager,
-  HostManagerEnhanced,
+  HostManager,
   ClientManager,
   type HostInfo,
   type ModelSpec
@@ -33,7 +33,7 @@ export default function HostDiscoveryModels() {
 
 
   // Managers
-  const [hostManager, setHostManager] = useState<HostManagerEnhanced | null>(null);
+  const [hostManager, setHostManager] = useState<HostManager | null>(null);
   const [modelManager, setModelManager] = useState<ModelManager | null>(null);
   const [clientManager, setClientManager] = useState<ClientManager | null>(null);
 
@@ -81,17 +81,17 @@ export default function HostDiscoveryModels() {
       }
 
       try {
-        const hm = new HostManagerEnhanced(
+        const hm = new HostManager(
           signer,
           nodeRegistryAddress,
           modelManager || new ModelManager(provider, modelRegistryAddress)
         );
-        console.log('HostManagerEnhanced created, initializing...');
+        console.log('HostManager created, initializing...');
         await hm.initialize();
         setHostManager(hm);
-        console.log('HostManagerEnhanced initialized');
+        console.log('HostManager initialized');
       } catch (hmError: any) {
-        console.error('HostManagerEnhanced initialization failed:', hmError);
+        console.error('HostManager initialization failed:', hmError);
         throw new Error(`HostManager init failed: ${hmError.message}`);
       }
 

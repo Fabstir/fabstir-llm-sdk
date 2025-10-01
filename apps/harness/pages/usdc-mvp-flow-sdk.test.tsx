@@ -901,10 +901,26 @@ export default function BaseUsdcMvpFlowSDKTest() {
       if (!selectedHostForEarnings) {
         throw new Error("No host selected for recording earnings");
       }
-      await hostManager.recordEarnings(
-        selectedHostForEarnings,
-        hostEarnings
+
+      // Use SDK's contract manager to get HostEarnings ABI
+      const contractManager = (sdk as any).contractManager;
+      const hostEarningsABI = await contractManager.getContractABI('hostEarnings');
+      const contracts = getContractAddresses();
+      const signer = sdk.getSigner();
+
+      const hostEarningsContract = new ethers.Contract(
+        contracts.HOST_EARNINGS,
+        hostEarningsABI,
+        signer
       );
+
+      // Credit earnings to host (USDC)
+      const tx = await hostEarningsContract.creditEarnings(
+        selectedHostForEarnings,
+        hostEarnings,
+        contracts.USDC
+      );
+      await tx.wait(3);
 
       addLog(`✅ Host earnings recorded: ${hostEarnings} (90% of total)`);
 

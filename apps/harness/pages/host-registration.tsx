@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import {
-  HostManagerEnhanced,
+  HostManager,
   ModelManager,
   APPROVED_MODELS,
   ModelSpec
@@ -18,7 +18,7 @@ export default function HostRegistration() {
   const [availableModels, setAvailableModels] = useState<SelectedModel[]>([]);
   const [isRegistering, setIsRegistering] = useState(false);
   const [registrationResult, setRegistrationResult] = useState<any>(null);
-  const [hostManager, setHostManager] = useState<HostManagerEnhanced | null>(null);
+  const [hostManager, setHostManager] = useState<HostManager | null>(null);
   const [modelManager, setModelManager] = useState<ModelManager | null>(null);
   const [connected, setConnected] = useState(false);
   const [walletAddress, setWalletAddress] = useState<string>('');
@@ -70,7 +70,7 @@ export default function HostRegistration() {
       );
       setModelManager(mm);
 
-      const hm = new HostManagerEnhanced(
+      const hm = new HostManager(
         signer,
         process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY_WITH_MODELS!,
         mm

@@ -26,7 +26,7 @@ import {
   validateRequiredAddresses,
   validateOptionalAddress
 } from './utils/validation';
-import { HostManagerEnhanced } from './managers/HostManagerEnhanced';
+import { HostManager } from './managers/HostManager';
 import { ModelManager } from './managers/ModelManager';
 import { TreasuryManager } from './managers/TreasuryManager';
 import { ClientManager } from './managers/ClientManager';
@@ -567,15 +567,15 @@ export class FabstirSDKCore extends EventEmitter {
     this.treasuryManager = new TreasuryManager(this.contractManager!);
     console.log('TreasuryManager created');
 
-    // Note: HostManagerEnhanced and ModelManager will be created after authentication
+    // Note: HostManager and ModelManager will be created after authentication
     // when we have a signer available
-    
+
     // Initialize managers that need a signer
     if (this.signer) {
       console.log('Initializing PaymentManager...');
       await (this.paymentManager as any).initialize(this.signer);
       console.log('PaymentManager initialized');
-      
+
       // Initialize storage manager with S5 seed (with timeout protection)
       if (this.s5Seed && this.userAddress) {
         try {
@@ -589,12 +589,12 @@ export class FabstirSDKCore extends EventEmitter {
       } else {
         console.log('Skipping StorageManager initialization (no seed or address)');
       }
-      
+
       console.log('Initializing SessionManager...');
       await (this.sessionManager as any).initialize();  // SessionManager doesn't take signer
       console.log('SessionManager initialized');
 
-      // Create and initialize ModelManager and HostManagerEnhanced now that we have a signer
+      // Create and initialize ModelManager and HostManager now that we have a signer
       console.log('Creating ModelManager...');
       const modelRegistryAddress = this.config.contractAddresses?.modelRegistry;
       if (!modelRegistryAddress) {
@@ -603,7 +603,7 @@ export class FabstirSDKCore extends EventEmitter {
       this.modelManager = new ModelManager(this.provider!, modelRegistryAddress);
       console.log('ModelManager created');
 
-      console.log('Creating HostManagerEnhanced...');
+      console.log('Creating HostManager...');
       const nodeRegistryAddress = this.config.contractAddresses?.nodeRegistry;
       if (!nodeRegistryAddress) {
         throw new SDKError('Node Registry address not configured', 'CONFIG_ERROR');
@@ -611,7 +611,7 @@ export class FabstirSDKCore extends EventEmitter {
       const fabTokenAddress = this.config.contractAddresses?.fabToken;
       const hostEarningsAddress = this.config.contractAddresses?.hostEarnings;
       console.log('FAB token address from config:', fabTokenAddress);
-      this.hostManager = new HostManagerEnhanced(
+      this.hostManager = new HostManager(
         this.signer,
         nodeRegistryAddress,
         this.modelManager,
@@ -619,17 +619,17 @@ export class FabstirSDKCore extends EventEmitter {
         hostEarningsAddress,
         this.contractManager
       );
-      console.log('HostManagerEnhanced created with FAB token:', fabTokenAddress);
+      console.log('HostManager created with FAB token:', fabTokenAddress);
 
-      console.log('Initializing HostManagerEnhanced...');
+      console.log('Initializing HostManager...');
       await (this.hostManager as any).initialize();
-      console.log('HostManagerEnhanced initialized');
+      console.log('HostManager initialized');
 
-      // Create ClientManager after ModelManager and HostManagerEnhanced are available
+      // Create ClientManager after ModelManager and HostManager are available
       console.log('Creating ClientManager...');
       this.clientManager = new ClientManager(
         this.modelManager,
-        this.hostManager as HostManagerEnhanced,
+        this.hostManager as HostManager,
         this.contractManager!
       );
       console.log('Initializing ClientManager...');
