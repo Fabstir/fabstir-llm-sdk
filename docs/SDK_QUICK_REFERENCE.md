@@ -211,33 +211,31 @@ PAYMENT_SPLIT = {
 BASE_SEPOLIA_CHAIN_ID = 84532
 ```
 
-## Contract Addresses (Base Sepolia)
+## Contract Addresses
 
-```typescript
-// Latest deployment (from .env.test)
-JobMarketplace: 0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944
-NodeRegistry: 0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218
-ProofSystem: 0x2ACcc60893872A499700908889B38C5420CBcFD1
-HostEarnings: 0x908962e8c6CE72610021586f85ebDE09aAc97776
-ModelRegistry: 0x92b2De840bB2171203011A6dBA928d855cA8183E
-USDC Token: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
-FAB Token: 0xC78949004B4EB6dEf2D66e49Cd81231472612D62
-```
+**Source of Truth:** `.env.test`
+
+All contract addresses are maintained in the `.env.test` file at the repository root. This is the single source of truth for all contract deployments.
 
 ## Environment Variables
 
 ```bash
-# .env
+# .env.test (see repository root for current addresses)
 PRIVATE_KEY=0x...
 RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/your-key
 S5_PORTAL_URL=wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p
-CONTRACT_JOB_MARKETPLACE=0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944
-CONTRACT_NODE_REGISTRY=0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218
-CONTRACT_PROOF_SYSTEM=0x2ACcc60893872A499700908889B38C5420CBcFD1
-CONTRACT_HOST_EARNINGS=0x908962e8c6CE72610021586f85ebDE09aAc97776
-CONTRACT_MODEL_REGISTRY=0x92b2De840bB2171203011A6dBA928d855cA8183E
-CONTRACT_USDC_TOKEN=0x036CbD53842c5426634e7929541eC2318f3dCF7e
-CONTRACT_FAB_TOKEN=0xC78949004B4EB6dEf2D66e49Cd81231472612D62
+
+# Fabstir contract addresses - see .env.test for current deployments
+CONTRACT_JOB_MARKETPLACE=...
+CONTRACT_NODE_REGISTRY=...
+CONTRACT_PROOF_SYSTEM=...
+CONTRACT_HOST_EARNINGS=...
+CONTRACT_MODEL_REGISTRY=...
+CONTRACT_USDC_TOKEN=...
+CONTRACT_FAB_TOKEN=...
+
+# Base protocol contracts (not Fabstir contracts)
+BASE_CONTRACT_SPEND_PERMISSION_MANAGER=...  # Base Account Kit infrastructure
 ```
 
 ## Full Example

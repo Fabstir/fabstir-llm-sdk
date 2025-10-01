@@ -6,22 +6,22 @@
  * - Configuring spend permissions for popup-free transactions
  * - Managing allowances and permission periods
  *
- * IMPORTANT: Requires CONTRACT_SPEND_PERMISSION_MANAGER to be set in .env.test
- * This is the Spend Permission Manager contract address (Base-specific infrastructure)
+ * IMPORTANT: Requires BASE_CONTRACT_SPEND_PERMISSION_MANAGER to be set in .env.test
+ * This is Base's Spend Permission Manager contract (Base protocol infrastructure, not Fabstir)
  */
 
 import { ethers } from 'ethers';
 
 /**
- * Get Spend Permission Manager contract address from environment
- * @throws Error if CONTRACT_SPEND_PERMISSION_MANAGER is not set
+ * Get Base's Spend Permission Manager contract address from environment
+ * @throws Error if BASE_CONTRACT_SPEND_PERMISSION_MANAGER is not set
  */
 function getSpendPermissionManager(): string {
-  const address = process.env.CONTRACT_SPEND_PERMISSION_MANAGER;
+  const address = process.env.BASE_CONTRACT_SPEND_PERMISSION_MANAGER;
   if (!address) {
     throw new Error(
-      'CONTRACT_SPEND_PERMISSION_MANAGER not set in environment. ' +
-      'Please add this to .env.test with the Spend Permission Manager contract address.'
+      'BASE_CONTRACT_SPEND_PERMISSION_MANAGER not set in environment. ' +
+      'Please add this to .env.test with Base\'s Spend Permission Manager contract address.'
     );
   }
   return address;

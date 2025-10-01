@@ -3,7 +3,6 @@
 ## Table of Contents
 - [Overview](#overview)
 - [Installation](#installation)
-- [Migration Guide](#migration-guide)
 - [Core SDK](#core-sdk)
 - [Authentication](#authentication)
 - [Session Management](#session-management)
@@ -100,73 +99,6 @@ npm link
 
 # In your application
 npm link @fabstir/sdk-core
-```
-
-## Migration Guide
-
-### From `@fabstir/llm-sdk` to `@fabstir/sdk-core`
-
-**Old Import:**
-```typescript
-import { FabstirSDK } from '@fabstir/llm-sdk';
-```
-
-**New Import:**
-```typescript
-import { FabstirSDKCore } from '@fabstir/sdk-core';
-```
-
-### Key Changes
-1. P2P functionality moved to `@fabstir/sdk-node`
-2. Browser-first design with polyfills for Node.js
-3. Enhanced model governance system
-4. Improved session management with streaming
-5. USDC payment flows with Base Account Kit
-
-### ⚠️ Breaking Changes (Latest - Phase 8 Complete)
-
-#### 1. No Environment Variable Fallbacks
-**SDK now requires ALL contract addresses to be provided explicitly:**
-- No automatic fallback to process.env variables
-- All 5 required contracts MUST be provided in configuration
-- Clear error messages for missing/invalid configuration
-
-#### 2. SessionConfig Interface
-The `SessionConfig` interface uses string for amounts and numbers for other fields:
-
-**Current Format:**
-```typescript
-interface SessionConfig {
-  depositAmount: string;  // e.g., "1.0" for $1 USDC minimum
-  pricePerToken: number;  // e.g., 200 (0.02 cents per token)
-  proofInterval: number;  // e.g., 100 (checkpoint every 100 tokens)
-  duration: number;       // e.g., 3600 (1 hour timeout)
-}
-```
-
-#### 3. S5 Seed Generation
-- Proper deterministic 15-word seed phrases (13 seed + 2 checksum)
-- Generated from wallet signature
-- Cached in localStorage for performance
-- No more hardcoded test phrases
-
-**Migration Example:**
-```typescript
-// Old way (will cause errors)
-const config = {
-  depositAmount: parseUnits("2", 6),  // Returns BigInt
-  pricePerToken: BigInt(200),
-  proofInterval: BigInt(100),
-  duration: BigInt(3600)
-};
-
-// New way (correct)
-const config = {
-  depositAmount: "1.0",  // String with decimal notation
-  pricePerToken: 200,    // Regular number
-  proofInterval: 100,    // Regular number
-  duration: 3600         // Regular number
-};
 ```
 
 ## Core SDK
@@ -1492,12 +1424,12 @@ async verifyModelHash(
 
 ## Host Management
 
-The HostManagerEnhanced provides advanced host management with model support.
+The HostManager provides comprehensive host management with model governance support.
 
-### Get HostManagerEnhanced
+### Get HostManager
 
 ```typescript
-const hostManager = sdk.getHostManagerEnhanced();
+const hostManager = sdk.getHostManager();
 ```
 
 ### registerHostWithModels
@@ -1567,14 +1499,16 @@ Gets comprehensive status of a host.
 
 ```typescript
 async getHostStatus(hostAddress: string): Promise<{
-  isActive: boolean;
   isRegistered: boolean;
+  isActive: boolean;
   supportedModels: string[];
-  metadata: HostMetadata;
-  earnings: string;
-  reputation: number;
+  stake: bigint;
+  metadata?: HostMetadata;
+  apiUrl?: string;
 }>
 ```
+
+**Note:** This method returns registration and model information. To get earnings, use `getHostEarnings()` separately.
 
 ### discoverAllActiveHostsWithModels
 
@@ -2562,7 +2496,7 @@ async function discoverAndValidateModels() {
   await sdk.authenticate(privateKey);
 
   const modelManager = sdk.getModelManager();
-  const hostManager = sdk.getHostManagerEnhanced();
+  const hostManager = sdk.getHostManager();
 
   // 1. Get all approved models
   const approvedModels = await modelManager.getAllApprovedModels();
@@ -2642,7 +2576,7 @@ async function registerAsHost() {
   const sdk = new FabstirSDKCore();
   await sdk.authenticate(hostPrivateKey);
 
-  const hostManager = sdk.getHostManagerEnhanced();
+  const hostManager = sdk.getHostManager();
   const modelManager = sdk.getModelManager();
 
   // Define supported models

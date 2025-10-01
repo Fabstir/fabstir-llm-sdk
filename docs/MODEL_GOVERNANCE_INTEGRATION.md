@@ -145,46 +145,27 @@ pnpm test -- --grep "ModelManager"
 pnpm test -- --grep "HostManagerEnhanced"
 ```
 
-## Migration Guide
+## SDK Usage
 
-### For Host Operators
+### Initialize Managers
 
-1. **Update Registration Process**:
-   - Can only register with approved models
-   - Must use new JSON metadata format
-   - Model IDs replace string model names
+```typescript
+const sdk = new FabstirSDKCore(config);
+await sdk.authenticate(privateKey);
 
-2. **Model Selection**:
-   - Check approved models list before registration
-   - Validate model files match expected SHA-256 hashes
-   - Use exact repo/file names from approved list
+const modelManager = sdk.getModelManager();
+const hostManager = sdk.getHostManager();
+```
 
-### For SDK Users
+### Model-Aware Operations
 
-1. **Update SDK Import**:
-   ```typescript
-   // Old
-   import { HostManager } from '@fabstir/sdk-core/managers/HostManager';
+```typescript
+// Check model approval before use
+const isApproved = await modelManager.isModelApproved(modelId);
 
-   // New
-   import { HostManagerEnhanced } from '@fabstir/sdk-core/managers/HostManagerEnhanced';
-   import { ModelManager } from '@fabstir/sdk-core/managers/ModelManager';
-   ```
-
-2. **Initialize Managers**:
-   ```typescript
-   const modelManager = new ModelManager(provider, MODEL_REGISTRY_ADDRESS);
-   const hostManager = new HostManagerEnhanced(signer, NODE_REGISTRY_ADDRESS, modelManager);
-   ```
-
-3. **Model-Aware Operations**:
-   ```typescript
-   // Check model approval before use
-   const isApproved = await modelManager.isModelApproved(modelId);
-
-   // Find hosts for specific model
-   const hosts = await clientManager.findHostsWithModel(modelId);
-   ```
+// Find hosts for specific model
+const hosts = await clientManager.findHostsWithModel(modelId);
+```
 
 ## Security Considerations
 

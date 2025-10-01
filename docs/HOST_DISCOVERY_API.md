@@ -331,25 +331,6 @@ try {
 4. **Signature Verification**: Verify host signatures when applicable
 5. **Stake Verification**: Check stake amounts as a trust indicator
 
-## Migration Guide
-
-### From Hardcoded URLs
-
-Before:
-```typescript
-// Old approach with hardcoded URLs
-const wsClient = new WebSocketClient('ws://localhost:8080/v1/ws');
-```
-
-After:
-```typescript
-// New approach with discovery
-const hostManager = sdk.getHostManager();
-const hosts = await hostManager.discoverAllActiveHosts();
-const selectedHost = hosts[0];
-const wsClient = new WebSocketClient(`${selectedHost.apiUrl}/v1/ws`);
-```
-
 ## Related Documentation
 
 - [WebSocket Protocol Guide](./WEBSOCKET_PROTOCOL_GUIDE.md)

@@ -276,19 +276,6 @@ describe('Authentication', () => {
 });
 ```
 
-## Migration from Legacy Auth
-
-If migrating from older SDK versions:
-
-```typescript
-// Old pattern (direct signer)
-const sdk = new FabstirSDK(config, signer);
-
-// New pattern (authenticate method)
-const sdk = new FabstirSDK(config);
-await sdk.authenticate(privateKey);
-```
-
 ## See Also
 
 - [AuthManager API Reference](SDK_API.md#authmanager)
