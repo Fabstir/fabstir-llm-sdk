@@ -1,190 +1,380 @@
 # Commands Reference
 
-Complete reference for all Fabstir Host CLI commands.
+Complete reference for all Fabstir Host CLI commands. All commands use the `@fabstir/sdk-core` for blockchain interactions.
 
 ## Table of Contents
 - [Global Options](#global-options)
-- [Core Commands](#core-commands)
+- [Core Setup Commands](#core-setup-commands)
   - [init](#init)
-  - [start](#start)
-  - [stop](#stop)
-  - [status](#status)
-- [Registration Commands](#registration-commands)
+  - [config](#config)
+- [Wallet Commands](#wallet-commands)
+  - [wallet](#wallet)
+- [Host Lifecycle Commands](#host-lifecycle-commands)
   - [register](#register)
   - [unregister](#unregister)
-- [Wallet Commands](#wallet-commands)
-  - [wallet address](#wallet-address)
-  - [wallet balance](#wallet-balance)
-  - [wallet export](#wallet-export)
-  - [wallet import](#wallet-import)
-- [Configuration Commands](#configuration-commands)
-  - [config list](#config-list)
-  - [config get](#config-get)
-  - [config set](#config-set)
-  - [config reset](#config-reset)
-- [Session Commands](#session-commands)
-  - [session list](#session-list)
-  - [session info](#session-info)
-  - [session end](#session-end)
-- [Earnings Commands](#earnings-commands)
-  - [earnings balance](#earnings-balance)
-  - [earnings history](#earnings-history)
-- [Withdrawal Commands](#withdrawal-commands)
+  - [info](#info)
+  - [status](#status)
+- [Host Management Commands](#host-management-commands)
+  - [update-url](#update-url)
+  - [update-models](#update-models)
+  - [add-stake](#add-stake)
+  - [update-metadata](#update-metadata)
+- [Financial Commands](#financial-commands)
   - [withdraw](#withdraw)
-  - [withdraw history](#withdraw-history)
-  - [unstake](#unstake)
-- [Daemon Commands](#daemon-commands)
-  - [daemon start](#daemon-start)
-  - [daemon stop](#daemon-stop)
-  - [daemon status](#daemon-status)
-- [Utility Commands](#utility-commands)
-  - [network test](#network-test)
-  - [inference test](#inference-test)
-  - [version](#version)
-  - [help](#help)
+- [Runtime Commands](#runtime-commands)
+  - [start](#start)
+  - [stop](#stop)
+  - [logs](#logs)
 
 ## Global Options
 
-Options available for all commands:
+Common options available for most commands:
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--config <path>` | `-c` | Custom config file path |
-| `--network <name>` | `-n` | Override network (base-sepolia, base-mainnet) |
-| `--verbose` | `-v` | Enable verbose output |
-| `--quiet` | `-q` | Suppress output |
-| `--json` | `-j` | Output in JSON format |
-| `--help` | `-h` | Show help |
+| `--private-key <key>` | `-k` | Private key for wallet authentication |
+| `--rpc-url <url>` | `-r` | RPC endpoint URL (Base Sepolia) |
+| `--help` | `-h` | Show command help |
 
-### Examples
-```bash
-# Use custom config
-fabstir-host --config ~/my-config.json start
+### Environment Variables
 
-# Verbose output
-fabstir-host -v status
-
-# JSON output
-fabstir-host --json wallet balance
-```
+Commands read contract addresses from `.env.test` at repository root:
+- `CONTRACT_JOB_MARKETPLACE`
+- `CONTRACT_NODE_REGISTRY`
+- `CONTRACT_PROOF_SYSTEM`
+- `CONTRACT_HOST_EARNINGS`
+- `CONTRACT_MODEL_REGISTRY`
+- `CONTRACT_FAB_TOKEN`
+- `CONTRACT_USDC_TOKEN`
+- `RPC_URL_BASE_SEPOLIA`
 
 ---
 
-## Core Commands
+## Core Setup Commands
 
 ### init
+
 Initialize host configuration with interactive wizard.
 
 ```bash
-fabstir-host init [options]
+pnpm host init [options]
 ```
+
+#### Description
+Interactive setup wizard that guides you through initial configuration. This command helps you set up wallet credentials, network settings, and basic host configuration.
 
 #### Options
 | Option | Description |
 |--------|-------------|
 | `--force` | Overwrite existing configuration |
-| `--minimal` | Skip optional configuration |
-| `--import <key>` | Import existing private key |
 
 #### Examples
 ```bash
 # Interactive setup
-fabstir-host init
+pnpm host init
 
 # Force reinitialize
-fabstir-host init --force
-
-# Import existing wallet
-fabstir-host init --import 0x123...
+pnpm host init --force
 ```
 
-#### Interactive Prompts
-- Wallet setup (create/import)
-- Network selection
-- RPC endpoint
-- Host port and URL
-- Model selection
-- Pricing configuration
+#### Implementation Note
+Uses SDK configuration via `createSDKConfig()` to set up environment-based config (not JSON files).
 
 ---
 
-### start
-Start the host node and begin accepting jobs.
+### config
+
+Manage configuration settings.
 
 ```bash
-fabstir-host start [options]
+pnpm host config <subcommand> [options]
 ```
+
+#### Subcommands
+- `list` - Display all configuration values
+- `get <key>` - Get a specific configuration value
+- `set <key> <value>` - Set a configuration value
+- `reset` - Reset configuration to defaults
+
+#### Examples
+```bash
+# List all config
+pnpm host config list
+
+# Get single value
+pnpm host config get host.port
+
+# Set value
+pnpm host config set host.port 8080
+
+# Reset config
+pnpm host config reset
+```
+
+#### Implementation Note
+Configuration is managed through environment variables in `.env.test`, not traditional config files.
+
+---
+
+## Wallet Commands
+
+### wallet
+
+Wallet management and information.
+
+```bash
+pnpm host wallet [subcommand] [options]
+```
+
+#### Subcommands
+- `address` - Display wallet address
+- `balance` - Check wallet balances (ETH, FAB, USDC)
+- `export` - Export encrypted wallet backup
+- `import <source>` - Import wallet from private key or backup
 
 #### Options
 | Option | Description |
 |--------|-------------|
-| `--daemon` | Run in background |
-| `--port <port>` | Override port |
-| `--test` | Run in test mode |
-| `--dry-run` | Validate without starting |
+| `--private-key <key>` | Private key for wallet operations |
+| `--rpc-url <url>` | RPC endpoint URL |
+| `--token <address>` | Check specific token balance |
+| `--all` | Show all known tokens |
 
 #### Examples
 ```bash
-# Start normally
-fabstir-host start
+# Show address
+pnpm host wallet address --private-key 0x...
 
-# Start as daemon
-fabstir-host start --daemon
+# Check balances
+pnpm host wallet balance --private-key 0x... --rpc-url https://...
 
-# Test mode
-fabstir-host start --test
+# Check all tokens
+pnpm host wallet balance --all --private-key 0x... --rpc-url https://...
 
-# Custom port
-fabstir-host start --port 9090
+# Export wallet
+pnpm host wallet export --output wallet-backup.json
+
+# Import wallet
+pnpm host wallet import 0x123... --rpc-url https://...
+```
+
+#### SDK Integration
+Uses `PaymentManagerMultiChain` for token balance queries:
+```typescript
+const paymentManager = sdk.getPaymentManager();
+const balance = await paymentManager.getBalance(address, tokenAddress);
+```
+
+---
+
+## Host Lifecycle Commands
+
+### register
+
+Register as a host on the blockchain network.
+
+```bash
+pnpm host register [options]
+```
+
+#### Description
+Registers your node as a host in the Fabstir marketplace. This involves:
+1. Checking FAB token balance
+2. Approving token spending
+3. Staking FAB tokens
+4. Registering node information on-chain
+
+#### Options
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--private-key <key>` | Private key for registration | - |
+| `--rpc-url <url>` | RPC endpoint URL | - |
+| `--stake <amount>` | Stake amount in FAB | 1000 |
+| `--url <url>` | Public URL for host | - |
+| `--models <models>` | Comma-separated model list | - |
+
+#### Examples
+```bash
+# Basic registration
+pnpm host register \
+  --private-key 0x... \
+  --rpc-url https://base-sepolia.g.alchemy.com/v2/YOUR_KEY \
+  --stake 1000
+
+# Registration with details
+pnpm host register \
+  --private-key 0x... \
+  --rpc-url https://... \
+  --stake 5000 \
+  --url http://my-host.example.com:8080 \
+  --models llama-3,gpt-4
+```
+
+#### SDK Integration
+Uses `HostManager.registerHost()`:
+```typescript
+await initializeSDK('base-sepolia');
+await authenticateSDK(privateKey);
+const hostManager = getHostManager();
+const txHash = await hostManager.registerHost(stakeAmount, url, models);
 ```
 
 #### Output
 ```
-Starting Fabstir Host...
-✓ Configuration loaded
-✓ Wallet connected: 0x742d...bEb7
-✓ Network: Base Sepolia (84532)
-✓ LLM backend connected: Ollama
-✓ WebSocket server started on port 8080
-✓ Registered with blockchain
-Host is running. Press Ctrl+C to stop.
+✓ SDK initialized
+✓ Wallet authenticated: 0x742d...bEb7
+✓ Checking FAB balance...
+  Balance: 10,000 FAB
+✓ Approving token spending...
+  Transaction: 0xabc123...
+✓ Registering host...
+  Transaction: 0xdef456...
+✓ Host registered successfully!
+  Stake: 1000 FAB
+  Status: Active
 ```
 
 ---
 
-### stop
-Stop the running host node.
+### unregister
+
+Unregister from the network and unstake tokens.
 
 ```bash
-fabstir-host stop [options]
+pnpm host unregister [options]
 ```
+
+#### Description
+Unregisters your host from the marketplace and returns staked FAB tokens. This operation:
+1. Checks current registration status
+2. Displays staked amount
+3. Unregisters the node
+4. Returns stake to your wallet
 
 #### Options
 | Option | Description |
 |--------|-------------|
-| `--force` | Force stop without cleanup |
-| `--timeout <ms>` | Shutdown timeout |
+| `--private-key <key>` | Private key for authentication |
+| `--rpc-url <url>` | RPC endpoint URL |
 
 #### Examples
 ```bash
-# Graceful stop
-fabstir-host stop
+# Unregister and unstake
+pnpm host unregister \
+  --private-key 0x... \
+  --rpc-url https://...
+```
 
-# Force stop
-fabstir-host stop --force
+#### SDK Integration
+Uses `HostManager.unregisterHost()`:
+```typescript
+await initializeSDK('base-sepolia');
+await authenticateSDK(privateKey);
+const hostManager = getHostManager();
 
-# Custom timeout
-fabstir-host stop --timeout 10000
+// Check status first
+const status = await hostManager.getHostStatus(address);
+console.log(`Staked amount: ${ethers.formatUnits(status.stake, 18)} FAB`);
+
+// Unregister
+const txHash = await hostManager.unregisterHost();
+
+// Verify
+const updatedStatus = await hostManager.getHostStatus(address);
+console.log(`Status: ${updatedStatus.isActive ? 'Active' : 'Inactive'}`);
+```
+
+#### Output
+```
+Current staked amount: 1000.00 FAB
+
+Unregistering host...
+✓ Transaction confirmed: 0x789abc...
+✓ Node status: Inactive
+✓ Stake returned to wallet
+```
+
+---
+
+### info
+
+Display host information and status.
+
+```bash
+pnpm host info [options]
+```
+
+#### Description
+Shows comprehensive information about your host registration including:
+- Registration status
+- Staked amount
+- Supported models
+- API URL
+- Accumulated earnings
+
+#### Options
+| Option | Description |
+|--------|-------------|
+| `--private-key <key>` | Private key for authentication |
+| `--rpc-url <url>` | RPC endpoint URL |
+
+#### Examples
+```bash
+# View host info
+pnpm host info \
+  --private-key 0x... \
+  --rpc-url https://...
+```
+
+#### SDK Integration
+Uses `HostManager.getHostStatus()`:
+```typescript
+const hostManager = getHostManager();
+const status = await hostManager.getHostStatus(address);
+// Returns: {
+//   isRegistered: boolean,
+//   isActive: boolean,
+//   stake: bigint,
+//   apiUrl: string,
+//   supportedModels: string[]
+// }
+```
+
+#### Output
+```
+Host Information:
+  Address: 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7
+  Status: Active
+  Registered: Yes
+
+Stake:
+  Amount: 1000.00 FAB
+
+Models:
+  - llama-3
+  - gpt-4
+  - mistral-7b
+
+API:
+  URL: http://localhost:8080
+
+Earnings:
+  Accumulated: 45.67 FAB
+  Available to withdraw: 45.67 FAB
 ```
 
 ---
 
 ### status
-Display current host status and statistics.
+
+Show current host status and statistics.
 
 ```bash
-fabstir-host status [options]
+pnpm host status [options]
 ```
+
+#### Description
+Displays runtime status and performance metrics for the running host node.
 
 #### Options
 | Option | Description |
@@ -195,678 +385,470 @@ fabstir-host status [options]
 #### Examples
 ```bash
 # Basic status
-fabstir-host status
+pnpm host status
 
 # Detailed view
-fabstir-host status --detailed
+pnpm host status --detailed
 
 # With metrics
-fabstir-host status --metrics
+pnpm host status --metrics
 ```
 
 #### Output
 ```
 Host Status: RUNNING
-Address: 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7
-Network: Base Sepolia
 Uptime: 2 hours 15 minutes
-
-Sessions:
-  Active: 3
-  Completed: 127
-  Failed: 2
-
-Earnings:
-  Total: 1,234.56 FAB
-  Pending: 45.67 FAB
+Active Sessions: 3
 ```
 
 ---
 
-## Registration Commands
+## Host Management Commands
 
-### register
-Register as a host on the blockchain.
+### update-url
+
+Update host API URL.
 
 ```bash
-fabstir-host register [options]
+pnpm host update-url <url> [options]
 ```
+
+#### Description
+Updates the public URL where your host accepts WebSocket connections. The URL must be accessible from the internet for clients to connect.
 
 #### Options
 | Option | Description |
 |--------|-------------|
-| `--stake <amount>` | Stake amount (default: 1000 FAB) |
-| `--models <models>` | Comma-separated model list |
-| `--url <url>` | Public URL |
+| `--private-key <key>` | Private key for authentication |
+| `--rpc-url <url>` | RPC endpoint URL |
 
 #### Examples
 ```bash
-# Default registration
-fabstir-host register
+# Update URL
+pnpm host update-url http://my-host.example.com:8080 \
+  --private-key 0x... \
+  --rpc-url https://...
 
-# Custom stake
-fabstir-host register --stake 5000
-
-# Specify models
-fabstir-host register --models gpt-4,claude-3
+# Update to localhost (testing)
+pnpm host update-url http://localhost:8080 \
+  --private-key 0x... \
+  --rpc-url https://...
 ```
 
-#### Process
-1. Check FAB balance
-2. Approve token spending
-3. Stake tokens
-4. Register node information
-5. Emit registration event
+#### SDK Integration
+Uses `HostManager.updateApiUrl()`:
+```typescript
+await initializeSDK('base-sepolia');
+await authenticateSDK(privateKey);
+const hostManager = getHostManager();
 
----
+// Validate URL format
+if (!url.startsWith('http://') && !url.startsWith('https://')) {
+  throw new Error('Invalid URL format');
+}
 
-### unregister
-Unregister from the network and unstake tokens.
+// Update URL
+const txHash = await hostManager.updateApiUrl(url);
 
-```bash
-fabstir-host unregister [options]
-```
-
-#### Options
-| Option | Description |
-|--------|-------------|
-| `--force` | Skip confirmation |
-| `--keep-stake` | Don't unstake tokens |
-
-#### Examples
-```bash
-# Unregister and unstake
-fabstir-host unregister
-
-# Keep stake
-fabstir-host unregister --keep-stake
-```
-
----
-
-## Wallet Commands
-
-### wallet address
-Display wallet address.
-
-```bash
-fabstir-host wallet address [options]
-```
-
-#### Options
-| Option | Description |
-|--------|-------------|
-| `--qr` | Display as QR code |
-
-#### Examples
-```bash
-# Show address
-fabstir-host wallet address
-
-# With QR code
-fabstir-host wallet address --qr
-```
-
----
-
-### wallet balance
-Check wallet balances.
-
-```bash
-fabstir-host wallet balance [options]
-```
-
-#### Options
-| Option | Description |
-|--------|-------------|
-| `--token <address>` | Check specific token |
-| `--all` | Show all known tokens |
-
-#### Examples
-```bash
-# Basic balances
-fabstir-host wallet balance
-
-# All tokens
-fabstir-host wallet balance --all
-
-# Specific token
-fabstir-host wallet balance --token 0x123...
+// Verify update
+const status = await hostManager.getHostStatus(address);
+console.log(`New URL: ${status.apiUrl}`);
 ```
 
 #### Output
 ```
-Wallet Balances:
-  ETH: 0.0234
-  FAB: 5,678.90
-  USDC: 100.00
-  Staked FAB: 1,000.00
+Current URL: http://old-host.example.com:8080
+New URL: http://new-host.example.com:8080
+
+Updating API URL...
+✓ Transaction confirmed: 0x123abc...
+✓ URL updated successfully!
 ```
+
+#### Implementation Details
+After SDK refactoring (Oct 2024):
+- **Lines reduced**: 101 → 72 (29 lines removed)
+- **Removed**: ABI imports, manual wallet/provider setup
+- **Added**: SDK initialization and manager methods
 
 ---
 
-### wallet export
-Export encrypted wallet backup.
+### update-models
+
+Update supported model list.
 
 ```bash
-fabstir-host wallet export [options]
+pnpm host update-models <models> [options]
 ```
+
+#### Description
+Updates the list of LLM models your host supports. Models should be comma-separated (no spaces).
 
 #### Options
 | Option | Description |
 |--------|-------------|
-| `--output <file>` | Output file path |
-| `--format <type>` | Format: keystore, mnemonic |
+| `--private-key <key>` | Private key for authentication |
+| `--rpc-url <url>` | RPC endpoint URL |
 
 #### Examples
 ```bash
-# Export to file
-fabstir-host wallet export --output wallet-backup.json
+# Update models
+pnpm host update-models llama-3,gpt-4,mistral-7b \
+  --private-key 0x... \
+  --rpc-url https://...
 
-# Export mnemonic
-fabstir-host wallet export --format mnemonic
+# Single model
+pnpm host update-models claude-3 \
+  --private-key 0x... \
+  --rpc-url https://...
 ```
 
----
+#### SDK Integration
+Uses `HostManager.updateSupportedModels()`:
+```typescript
+await initializeSDK('base-sepolia');
+await authenticateSDK(privateKey);
+const hostManager = getHostManager();
 
-### wallet import
-Import wallet from backup or private key.
+// Parse models
+const modelArray = models.split(',').map(m => m.trim());
 
-```bash
-fabstir-host wallet import <source> [options]
-```
+// Update models
+const txHash = await hostManager.updateSupportedModels(modelArray);
 
-#### Options
-| Option | Description |
-|--------|-------------|
-| `--type <type>` | Import type: key, keystore, mnemonic |
-| `--password` | Prompt for password |
-
-#### Examples
-```bash
-# Import private key
-fabstir-host wallet import 0x123...
-
-# Import keystore
-fabstir-host wallet import wallet.json --type keystore
-
-# Import mnemonic
-fabstir-host wallet import "word1 word2..." --type mnemonic
-```
-
----
-
-## Configuration Commands
-
-### config list
-Display all configuration values.
-
-```bash
-fabstir-host config list [options]
-```
-
-#### Options
-| Option | Description |
-|--------|-------------|
-| `--section <name>` | Show specific section |
-| `--sensitive` | Include sensitive values |
-
-#### Examples
-```bash
-# Show all config
-fabstir-host config list
-
-# Show host section
-fabstir-host config list --section host
-```
-
----
-
-### config get
-Get a specific configuration value.
-
-```bash
-fabstir-host config get <key> [options]
-```
-
-#### Examples
-```bash
-# Get single value
-fabstir-host config get host.port
-
-# Get nested value
-fabstir-host config get network.rpcUrl
-```
-
----
-
-### config set
-Set a configuration value.
-
-```bash
-fabstir-host config set <key> <value> [options]
-```
-
-#### Options
-| Option | Description |
-|--------|-------------|
-| `--validate` | Validate before setting |
-
-#### Examples
-```bash
-# Set port
-fabstir-host config set host.port 8080
-
-# Set model list
-fabstir-host config set host.models '["gpt-4","claude-3"]'
-
-# Set with validation
-fabstir-host config set network.chainId 84532 --validate
-```
-
----
-
-### config reset
-Reset configuration to defaults.
-
-```bash
-fabstir-host config reset [options]
-```
-
-#### Options
-| Option | Description |
-|--------|-------------|
-| `--section <name>` | Reset specific section |
-| `--backup` | Create backup first |
-
-#### Examples
-```bash
-# Reset all
-fabstir-host config reset
-
-# Reset with backup
-fabstir-host config reset --backup
-
-# Reset section
-fabstir-host config reset --section host
-```
-
----
-
-## Session Commands
-
-### session list
-List active and recent sessions.
-
-```bash
-fabstir-host session list [options]
-```
-
-#### Options
-| Option | Description |
-|--------|-------------|
-| `--active` | Show only active sessions |
-| `--limit <n>` | Limit results |
-| `--since <date>` | Sessions since date |
-
-#### Examples
-```bash
-# List all sessions
-fabstir-host session list
-
-# Active only
-fabstir-host session list --active
-
-# Last 10
-fabstir-host session list --limit 10
+// Verify update
+const status = await hostManager.getHostStatus(address);
+console.log(`Updated models: ${status.supportedModels.join(', ')}`);
 ```
 
 #### Output
 ```
-Active Sessions:
-ID      User          Model         Tokens    Started
-12345   0x123...456   gpt-4         234/1000  5 min ago
-12346   0x789...abc   claude-3      567/2000  2 min ago
+Current models: llama-3, gpt-4
+New models: llama-3, gpt-4, mistral-7b, claude-3
 
-Recent Completed:
-12344   0x456...def   gpt-3.5       890       15 min ago
+Updating supported models...
+✓ Transaction confirmed: 0x456def...
+✓ Models updated successfully!
 ```
+
+#### Implementation Details
+After SDK refactoring (Oct 2024):
+- **Lines reduced**: 98 → 70 (28 lines removed)
+- **Removed**: Direct NodeRegistry contract calls
+- **Added**: SDK HostManager integration
 
 ---
 
-### session info
-Display detailed session information.
+### add-stake
+
+Add additional stake to your host registration.
 
 ```bash
-fabstir-host session info <session-id> [options]
+pnpm host add-stake <amount> [options]
 ```
+
+#### Description
+Increases the amount of FAB tokens staked with your host registration. This may improve your host's reputation in the marketplace.
 
 #### Options
 | Option | Description |
 |--------|-------------|
-| `--checkpoints` | Show checkpoint history |
-| `--messages` | Include message count |
+| `--private-key <key>` | Private key for authentication |
+| `--rpc-url <url>` | RPC endpoint URL |
 
 #### Examples
 ```bash
-# Basic info
-fabstir-host session info 12345
-
-# With checkpoints
-fabstir-host session info 12345 --checkpoints
+# Add 500 FAB to stake
+pnpm host add-stake 500 \
+  --private-key 0x... \
+  --rpc-url https://...
 ```
 
----
-
-### session end
-End a session (admin only).
-
-```bash
-fabstir-host session end <session-id> [options]
-```
-
-#### Options
-| Option | Description |
-|--------|-------------|
-| `--reason <text>` | End reason |
-| `--refund` | Process refund |
-
-#### Examples
-```bash
-# End session
-fabstir-host session end 12345
-
-# With reason
-fabstir-host session end 12345 --reason "Maintenance"
-```
-
----
-
-## Earnings Commands
-
-### earnings balance
-Check current earnings balance.
-
-```bash
-fabstir-host earnings balance [options]
-```
-
-#### Options
-| Option | Description |
-|--------|-------------|
-| `--breakdown` | Show earnings breakdown |
-| `--period <days>` | Earnings for period |
-
-#### Examples
-```bash
-# Current balance
-fabstir-host earnings balance
-
-# With breakdown
-fabstir-host earnings balance --breakdown
-
-# Last 7 days
-fabstir-host earnings balance --period 7
+#### SDK Integration
+Uses `HostManager.addStake()`:
+```typescript
+const hostManager = getHostManager();
+const stakeAmount = ethers.parseUnits(amount, 18);
+const txHash = await hostManager.addStake(stakeAmount);
 ```
 
 #### Output
 ```
-Earnings Balance:
-  Available: 1,234.56 FAB
-  Pending: 45.67 FAB
-  Total: 1,280.23 FAB
+Current stake: 1000.00 FAB
+Adding: 500.00 FAB
+New total: 1500.00 FAB
 
-Breakdown:
-  Sessions: 1,000.00 FAB
-  Proofs: 234.56 FAB
-  Bonuses: 45.67 FAB
+Adding stake...
+✓ Transaction confirmed: 0x789ghi...
+✓ Stake increased successfully!
 ```
 
 ---
 
-### earnings history
-View earnings history.
+### update-metadata
+
+Update host metadata.
 
 ```bash
-fabstir-host earnings history [options]
+pnpm host update-metadata [options]
 ```
+
+#### Description
+Updates additional metadata associated with your host registration, such as description, contact info, or custom properties.
 
 #### Options
 | Option | Description |
 |--------|-------------|
-| `--limit <n>` | Number of records |
-| `--export <file>` | Export to CSV |
+| `--private-key <key>` | Private key for authentication |
+| `--rpc-url <url>` | RPC endpoint URL |
+| `--key <key>` | Metadata key to update |
+| `--value <value>` | Metadata value |
 
 #### Examples
 ```bash
-# View history
-fabstir-host earnings history
-
-# Export to CSV
-fabstir-host earnings history --export earnings.csv
+# Update metadata
+pnpm host update-metadata \
+  --key description \
+  --value "High-performance LLM host" \
+  --private-key 0x... \
+  --rpc-url https://...
 ```
 
 ---
 
-## Withdrawal Commands
+## Financial Commands
 
 ### withdraw
-Withdraw available earnings.
+
+Withdraw accumulated earnings.
 
 ```bash
-fabstir-host withdraw [amount] [options]
+pnpm host withdraw [options]
 ```
+
+#### Description
+Withdraws accumulated earnings from completed sessions. Earnings are held in the HostEarnings contract until withdrawn.
 
 #### Options
-| Option | Description |
-|--------|-------------|
-| `--all` | Withdraw all available |
-| `--to <address>` | Withdrawal address |
-| `--gas-price <gwei>` | Gas price override |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--private-key <key>` | Private key for authentication | - |
+| `--rpc-url <url>` | RPC endpoint URL | - |
+| `--token <address>` | Token to withdraw (FAB/USDC) | FAB |
+| `--all` | Withdraw all available earnings | true |
 
 #### Examples
 ```bash
-# Withdraw all
-fabstir-host withdraw --all
+# Withdraw all FAB earnings
+pnpm host withdraw \
+  --private-key 0x... \
+  --rpc-url https://...
 
-# Withdraw specific amount
-fabstir-host withdraw 100
-
-# To different address
-fabstir-host withdraw 100 --to 0x123...
+# Withdraw USDC earnings
+pnpm host withdraw \
+  --token 0x... \
+  --private-key 0x... \
+  --rpc-url https://...
 ```
 
----
+#### SDK Integration
+Uses `HostManager.withdrawEarnings()`:
+```typescript
+const hostManager = getHostManager();
 
-### withdraw history
-View withdrawal history.
+// Check balance first
+const balance = await hostManager.getAccumulatedEarnings(
+  address,
+  tokenAddress
+);
+console.log(`Available: ${ethers.formatUnits(balance, 18)} FAB`);
 
-```bash
-fabstir-host withdraw history [options]
-```
-
-#### Examples
-```bash
-# View history
-fabstir-host withdraw history
-
-# Last 10
-fabstir-host withdraw history --limit 10
-```
-
----
-
-### unstake
-Unstake tokens from registry.
-
-```bash
-fabstir-host unstake [amount] [options]
-```
-
-#### Options
-| Option | Description |
-|--------|-------------|
-| `--all` | Unstake all |
-| `--force` | Skip cooldown check |
-
-#### Examples
-```bash
-# Unstake all
-fabstir-host unstake --all
-
-# Partial unstake
-fabstir-host unstake 500
-```
-
----
-
-## Daemon Commands
-
-### daemon start
-Start host as background daemon.
-
-```bash
-fabstir-host daemon start [options]
-```
-
-#### Options
-| Option | Description |
-|--------|-------------|
-| `--pid-file <path>` | PID file location |
-| `--log-file <path>` | Log file location |
-
-#### Examples
-```bash
-# Start daemon
-fabstir-host daemon start
-
-# Custom PID file
-fabstir-host daemon start --pid-file /var/run/fabstir.pid
-```
-
----
-
-### daemon stop
-Stop background daemon.
-
-```bash
-fabstir-host daemon stop [options]
-```
-
-#### Examples
-```bash
-# Stop daemon
-fabstir-host daemon stop
-```
-
----
-
-### daemon status
-Check daemon status.
-
-```bash
-fabstir-host daemon status [options]
-```
-
-#### Examples
-```bash
-# Check status
-fabstir-host daemon status
-```
-
----
-
-## Utility Commands
-
-### network test
-Test network connectivity.
-
-```bash
-fabstir-host network test [options]
-```
-
-#### Examples
-```bash
-# Test network
-fabstir-host network test
+// Withdraw
+const txHash = await hostManager.withdrawEarnings(tokenAddress);
 ```
 
 #### Output
 ```
-Network Test:
-  ✓ RPC connection successful
-  ✓ Block number: 12345678
-  ✓ Chain ID: 84532
-  ✓ Contract connectivity verified
+Current earnings: 45.67 FAB
+Available to withdraw: 45.67 FAB
+
+Withdrawing earnings...
+✓ Transaction confirmed: 0xjkl012...
+✓ Earnings withdrawn successfully!
+  Amount: 45.67 FAB
+  New balance: 0.00 FAB
 ```
 
 ---
 
-### inference test
-Test LLM backend connection.
+## Runtime Commands
+
+### start
+
+Start the host node.
 
 ```bash
-fabstir-host inference test [options]
+pnpm host start [options]
 ```
+
+#### Description
+Starts the host node and begins accepting jobs from the marketplace. This starts:
+- WebSocket server for client connections
+- LLM backend connection
+- Session management
+- Proof submission
 
 #### Options
 | Option | Description |
 |--------|-------------|
-| `--prompt <text>` | Test prompt |
-| `--model <name>` | Test specific model |
+| `--daemon` | Run in background |
+| `--port <port>` | Override WebSocket port |
 
 #### Examples
 ```bash
-# Basic test
-fabstir-host inference test
+# Start normally
+pnpm host start
 
-# With prompt
-fabstir-host inference test --prompt "Hello, world!"
+# Start as daemon
+pnpm host start --daemon
 
-# Test model
-fabstir-host inference test --model gpt-4
+# Custom port
+pnpm host start --port 9090
+```
+
+#### Output
+```
+Starting Fabstir Host...
+✓ Configuration loaded
+✓ SDK initialized (Base Sepolia)
+✓ Wallet connected: 0x742d...bEb7
+✓ Network: Base Sepolia (84532)
+✓ WebSocket server started on port 8080
+✓ Host registered and active
+
+Host is running. Press Ctrl+C to stop.
 ```
 
 ---
 
-### version
-Display version information.
+### stop
+
+Stop the running host node.
 
 ```bash
-fabstir-host version [options]
+pnpm host stop [options]
 ```
+
+#### Description
+Gracefully stops the running host node, completing active sessions before shutdown.
 
 #### Options
 | Option | Description |
 |--------|-------------|
-| `--check-update` | Check for updates |
+| `--force` | Force stop without cleanup |
+| `--timeout <ms>` | Shutdown timeout |
 
 #### Examples
 ```bash
-# Show version
-fabstir-host version
+# Graceful stop
+pnpm host stop
 
-# Check updates
-fabstir-host version --check-update
+# Force stop
+pnpm host stop --force
 ```
 
 ---
 
-### help
-Display help information.
+### logs
+
+View host logs.
 
 ```bash
-fabstir-host help [command]
+pnpm host logs [options]
 ```
 
+#### Description
+Displays logs from the running or stopped host node.
+
+#### Options
+| Option | Description |
+|--------|-------------|
+| `--follow` | Follow log output (like tail -f) |
+| `--lines <n>` | Number of lines to show |
+| `--level <level>` | Filter by log level (error, warn, info, debug) |
+
 #### Examples
+```bash
+# View logs
+pnpm host logs
+
+# Follow logs
+pnpm host logs --follow
+
+# Last 50 lines
+pnpm host logs --lines 50
+
+# Error logs only
+pnpm host logs --level error
+```
+
+---
+
+## SDK Architecture
+
+All commands use the `@fabstir/sdk-core` SDK for blockchain interactions. The typical flow is:
+
+```typescript
+// 1. Initialize SDK with environment-based config
+await initializeSDK('base-sepolia');
+
+// 2. Authenticate with private key
+await authenticateSDK(privateKey);
+
+// 3. Get appropriate manager
+const hostManager = getHostManager();
+const paymentManager = getPaymentManager();
+const sessionManager = getSessionManager();
+
+// 4. Call SDK methods (not direct contract calls)
+const txHash = await hostManager.updateApiUrl(url);
+
+// 5. SDK handles:
+//    - Transaction submission
+//    - Waiting for confirmations (3 blocks)
+//    - Error handling
+//    - Event parsing
+```
+
+### Benefits of SDK Integration
+
+✅ **No ABI imports** - SDK provides contract interfaces
+✅ **Consistent errors** - Typed SDK errors
+✅ **Automatic retries** - Built-in resilience
+✅ **Type safety** - Full TypeScript support
+✅ **Less code** - 59% reduction in boilerplate
+
+See [SDK-INTEGRATION.md](SDK-INTEGRATION.md) for detailed architecture documentation.
+
+---
+
+## Getting Help
+
 ```bash
 # General help
-fabstir-host help
+pnpm host --help
 
-# Command help
-fabstir-host help register
+# Command-specific help
+pnpm host register --help
+pnpm host update-url --help
 
-# Short form
-fabstir-host -h
+# View this reference
+cat packages/host-cli/docs/COMMANDS.md
 ```
+
+## See Also
+
+- [README.md](../README.md) - Quick start and overview
+- [SDK-INTEGRATION.md](SDK-INTEGRATION.md) - SDK architecture details
+- [CONFIGURATION.md](CONFIGURATION.md) - Environment variable configuration
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues and solutions
