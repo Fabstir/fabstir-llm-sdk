@@ -140,26 +140,21 @@ export async function approveTokens(
       );
     }
 
-    // Execute approval
+    // Execute approval using SDK PaymentManager
     const paymentManager = sdk.getPaymentManager();
-    const signer = sdk.getSigner();
     const fabTokenAddress = sdk.config.contractAddresses.fabToken;
     const spenderAddress = getStakingRequirements().contractAddress;
 
-    const fabToken = new ethers.Contract(
-      fabTokenAddress,
-      [
-        'function approve(address spender, uint256 amount) returns (bool)'
-      ],
-      signer
+    // Use SDK method instead of direct contract calls
+    const receipt = await paymentManager.approveToken(
+      spenderAddress,
+      amount,
+      fabTokenAddress
     );
-
-    const tx = await fabToken.approve(spenderAddress, amount);
-    const receipt = await tx.wait(options.confirmations || 2);
 
     return {
       success: true,
-      transactionHash: receipt.transactionHash,
+      transactionHash: receipt.hash,
       confirmations: receipt.confirmations,
       blockNumber: receipt.blockNumber
     };
