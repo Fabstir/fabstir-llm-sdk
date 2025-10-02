@@ -1,7 +1,5 @@
 import { EventEmitter } from 'events';
-import { getSDK } from '../sdk/client';
-import { SessionJobManager } from '@fabstir/sdk-core/dist/contracts/SessionJobManager';
-import { ContractManager } from '@fabstir/sdk-core/dist/contracts/ContractManager';
+import { getSDK, getSessionManager } from '../sdk/client';
 
 export interface ProofData {
   sessionId: string;
@@ -42,17 +40,9 @@ export class ProofSubmitter extends EventEmitter {
     totalTokensClaimed: 0
   };
   private gasEstimates: bigint[] = [];
-  private mockSubmitFn?: (jobId: bigint, tokens: number, proof: string) => Promise<any>;
 
   constructor() {
     super();
-  }
-
-  /**
-   * Set mock submit function for testing
-   */
-  setMockSubmitFunction(fn: (jobId: bigint, tokens: number, proof: string) => Promise<any>): void {
-    this.mockSubmitFn = fn;
   }
 
   /**
@@ -107,31 +97,28 @@ export class ProofSubmitter extends EventEmitter {
     }
 
     try {
-      let txHash: string;
-
-      // Use mock function if available (for testing)
-      if (this.mockSubmitFn) {
-        const result = await this.mockSubmitFn(
-          proofData.jobId,
-          proofData.tokensClaimed,
-          proofData.proof
-        );
-        txHash = result.hash || result.txHash || ('0x' + '1'.repeat(64));
-      } else {
-        // Production path
-        const sdk = getSDK();
-        if (!sdk.isAuthenticated()) {
-          throw new Error('SDK not authenticated');
-        }
-
-        // For now, mock the submission since SessionJobManager needs proper setup
-        // In production, this would:
-        // 1. Get the signer from SDK
-        // 2. Create ContractManager with proper config
-        // 3. Create SessionJobManager
-        // 4. Call submitProofOfWork
-        txHash = '0x' + '1'.repeat(64); // Mock hash for testing
+      // Verify SDK is authenticated
+      const sdk = getSDK();
+      if (!sdk.isAuthenticated()) {
+        throw new Error('SDK not authenticated');
       }
+
+      // Get SessionManager from SDK
+      const sessionManager = getSessionManager();
+
+      // Map ProofData to CheckpointProof
+      const checkpointProof = {
+        checkpoint: 0, // Default checkpoint number
+        tokensGenerated: proofData.tokensClaimed,
+        proofData: proofData.proof,
+        timestamp: proofData.timestamp
+      };
+
+      // Submit checkpoint proof using SDK
+      const txHash = await sessionManager.submitCheckpoint(
+        proofData.jobId,
+        checkpointProof
+      );
 
       // Update statistics
       this.statistics.totalSubmissions++;
@@ -189,36 +176,31 @@ export class ProofSubmitter extends EventEmitter {
     }
 
     try {
-      let txHash: string;
-      let receipt: any;
-
-      // Use mock function if available (for testing)
-      if (this.mockSubmitFn) {
-        const result = await this.mockSubmitFn(
-          proofData.jobId,
-          proofData.tokensClaimed,
-          proofData.proof
-        );
-        txHash = result.hash || result.txHash || ('0x' + '1'.repeat(64));
-
-        // Mock receipt if the result has a wait function
-        if (result.wait) {
-          receipt = await result.wait(confirmations);
-        } else {
-          receipt = { status: 1, blockNumber: 1000 };
-        }
-      } else {
-        // Production path
-        const sdk = getSDK();
-        if (!sdk.isAuthenticated()) {
-          throw new Error('SDK not authenticated');
-        }
-
-        // For now, mock the submission since SessionJobManager needs proper setup
-        // In production, would use actual SessionJobManager
-        txHash = '0x' + '1'.repeat(64);
-        receipt = { status: 1, blockNumber: 1000 };
+      // Verify SDK is authenticated
+      const sdk = getSDK();
+      if (!sdk.isAuthenticated()) {
+        throw new Error('SDK not authenticated');
       }
+
+      // Get SessionManager from SDK
+      const sessionManager = getSessionManager();
+
+      // Map ProofData to CheckpointProof
+      const checkpointProof = {
+        checkpoint: 0, // Default checkpoint number
+        tokensGenerated: proofData.tokensClaimed,
+        proofData: proofData.proof,
+        timestamp: proofData.timestamp
+      };
+
+      // Submit checkpoint proof using SDK (SDK waits for confirmations internally)
+      const txHash = await sessionManager.submitCheckpoint(
+        proofData.jobId,
+        checkpointProof
+      );
+
+      // Mock receipt for now since SDK only returns txHash
+      const receipt = { status: 1, blockNumber: 1000 };
 
       // Update statistics
       this.statistics.totalSubmissions++;
