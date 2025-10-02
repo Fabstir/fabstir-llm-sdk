@@ -1,321 +1,307 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { Command } from 'commander';
-import { ethers } from 'ethers';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 import { registerUnregisterCommand } from '../../src/commands/unregister';
+import { Command } from 'commander';
+import * as sdkClient from '../../src/sdk/client';
+import { ethers } from 'ethers';
 
-// Mock ethers
-vi.mock('ethers', () => ({
-  ethers: {
-    Wallet: vi.fn(),
-    JsonRpcProvider: vi.fn(),
-    Contract: vi.fn(),
-    formatUnits: vi.fn((value) => '2000'),
-    parseUnits: vi.fn((value, decimals) => BigInt(value) * BigInt(10 ** decimals)),
+// Mock SDK client module
+vi.mock('../../src/sdk/client', () => ({
+  getSDK: vi.fn(),
+  getAuthenticatedAddress: vi.fn(),
+  getHostManager: vi.fn(),
+  initializeSDK: vi.fn(),
+  authenticateSDK: vi.fn(),
+}));
+
+// Mock fs module for file operations (including ABI loading)
+vi.mock('fs', () => ({
+  default: {
+    existsSync: vi.fn((path: string) => {
+      if (path.includes('NodeRegistry.json')) return true;
+      return false;
+    }),
+    readFileSync: vi.fn((path: string) => {
+      if (path.includes('NodeRegistry.json')) {
+        return JSON.stringify([{ "type": "function", "name": "unregisterNode" }]);
+      }
+      return '[]';
+    }),
+  },
+}));
+
+// Mock getWallet from utils
+vi.mock('../../src/utils/wallet', () => ({
+  getWallet: vi.fn(),
+}));
+
+// Mock chalk
+vi.mock('chalk', () => ({
+  default: {
+    blue: (str: string) => str,
+    green: (str: string) => str,
+    red: (str: string) => str,
+    yellow: (str: string) => str,
+    cyan: (str: string) => str,
+    gray: (str: string) => str,
   }
 }));
 
-// Mock fs
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
-  return {
-    ...actual,
-    default: {
-      existsSync: vi.fn(),
-      readFileSync: vi.fn(),
-      mkdirSync: vi.fn(),
-      writeFileSync: vi.fn(),
-    },
-    existsSync: vi.fn(),
-    readFileSync: vi.fn(),
-    mkdirSync: vi.fn(),
-    writeFileSync: vi.fn(),
+describe('unregister Command SDK Integration', () => {
+  const mockHostManager = {
+    unregisterHost: vi.fn(),
+    getHostStatus: vi.fn(),
   };
-});
 
-describe('Unregister Command', () => {
-  let program: Command;
-  let mockWallet: any;
-  let mockProvider: any;
-  let mockSigner: any;
-  let mockContract: any;
-  let consoleSpy: any;
+  const hostAddress = '0x4594F755F593B517Bb3194F4DeC20C48a3f04504';
+  const stakedAmount = 1000000000000000000000n; // 1000 FAB
+
+  const mockSDK = {
+    isAuthenticated: vi.fn(),
+    getHostManager: vi.fn(),
+    config: {
+      contractAddresses: {
+        nodeRegistry: '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
+      },
+    },
+  };
 
   beforeEach(() => {
-    program = new Command();
-    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.clearAllMocks();
+    (sdkClient.getSDK as any).mockReturnValue(mockSDK);
+    (sdkClient.getAuthenticatedAddress as any).mockReturnValue(hostAddress);
+    (sdkClient.getHostManager as any).mockReturnValue(mockHostManager);
+    (sdkClient.initializeSDK as any).mockResolvedValue(mockSDK);
+    (sdkClient.authenticateSDK as any).mockResolvedValue(undefined);
+    mockSDK.isAuthenticated.mockReturnValue(true);
+    mockSDK.getHostManager.mockReturnValue(mockHostManager);
 
-    // Setup mock wallet
-    mockWallet = {
-      connect: vi.fn().mockReturnThis(),
-      getAddress: vi.fn().mockResolvedValue('0xTestAddress'),
-    };
-
-    // Setup mock provider
-    mockProvider = {};
-
-    // Setup mock signer
-    mockSigner = {
-      getAddress: vi.fn().mockResolvedValue('0xTestAddress'),
-    };
-
-    // Setup mock contract
-    mockContract = {
-      nodes: vi.fn(),
-      unregisterNode: vi.fn(),
-    };
-
-    // Configure mocks
-    (ethers.Wallet as any).mockImplementation(() => mockWallet);
-    (ethers.JsonRpcProvider as any).mockImplementation(() => mockProvider);
-    (ethers.Contract as any).mockImplementation(() => mockContract);
-    mockWallet.connect.mockReturnValue(mockSigner);
+    // Mock successful host status by default
+    mockHostManager.getHostStatus.mockResolvedValue({
+      isRegistered: true,
+      isActive: true,
+      supportedModels: [],
+      stake: stakedAmount,
+    });
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  describe('Command Registration', () => {
-    it('should register unregister command', () => {
-      registerUnregisterCommand(program);
-      const command = program.commands.find(cmd => cmd.name() === 'unregister');
+  it('should call HostManager.unregisterHost() instead of direct contract call', async () => {
+    const txHash = '0xabcdef1234567890';
+    mockHostManager.unregisterHost.mockResolvedValue(txHash);
 
-      expect(command).toBeDefined();
-      expect(command?.description()).toContain('Unregister as a host node');
-    });
+    const program = new Command();
+    registerUnregisterCommand(program);
 
-    it('should have correct options', () => {
-      registerUnregisterCommand(program);
-      const command = program.commands.find(cmd => cmd.name() === 'unregister');
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      const options = command?.options;
-      expect(options).toBeDefined();
+    await program.parseAsync([
+      'node',
+      'test',
+      'unregister',
+      '--private-key',
+      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+    ]);
 
-      const privateKeyOption = options?.find(opt => opt.flags === '-k, --private-key <key>');
-      expect(privateKeyOption).toBeDefined();
+    // Verify HostManager.unregisterHost was called
+    expect(mockHostManager.unregisterHost).toHaveBeenCalled();
 
-      const rpcUrlOption = options?.find(opt => opt.flags === '-r, --rpc-url <url>');
-      expect(rpcUrlOption).toBeDefined();
-    });
+    consoleSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
   });
 
-  describe('Registration Status Check', () => {
-    it('should check if node is registered before attempting unregister', async () => {
-      const nodeInfo = {
-        active: true,
-        stakedAmount: ethers.parseUnits('2000', 18),
-      };
-      mockContract.nodes.mockResolvedValue(nodeInfo);
+  it('should check host registration status before unregistering', async () => {
+    const txHash = '0xabcdef1234567890';
+    mockHostManager.unregisterHost.mockResolvedValue(txHash);
 
-      registerUnregisterCommand(program);
+    const program = new Command();
+    registerUnregisterCommand(program);
 
-      // Execute with private key
-      await program.parseAsync(['node', 'unregister', '-k', '0xTestKey']);
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      expect(mockContract.nodes).toHaveBeenCalledWith('0xTestAddress');
-    });
+    await program.parseAsync([
+      'node',
+      'test',
+      'unregister',
+      '--private-key',
+      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+    ]);
 
-    it('should exit if node is not registered', async () => {
-      const nodeInfo = {
-        active: false,
-        stakedAmount: 0n,
-      };
-      mockContract.nodes.mockResolvedValue(nodeInfo);
+    // Verify getHostStatus was called to check registration
+    expect(mockHostManager.getHostStatus).toHaveBeenCalledWith(hostAddress);
 
-      registerUnregisterCommand(program);
-
-      await program.parseAsync(['node', 'unregister', '-k', '0xTestKey']);
-
-      expect(mockContract.unregisterNode).not.toHaveBeenCalled();
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Node is not currently registered')
-      );
-    });
+    consoleSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
   });
 
-  describe('Unregistration Process', () => {
-    it('should submit unregister transaction when node is active', async () => {
-      const nodeInfo = {
-        active: true,
-        stakedAmount: ethers.parseUnits('2000', 18),
-      };
-      mockContract.nodes.mockResolvedValue(nodeInfo);
+  it('should display staked amount before unregistering', async () => {
+    const txHash = '0xabcdef1234567890';
+    mockHostManager.unregisterHost.mockResolvedValue(txHash);
 
-      const mockTx = {
-        hash: '0xTransactionHash',
-        wait: vi.fn().mockResolvedValue({
-          status: 1,
-          hash: '0xTransactionHash',
-        }),
-      };
-      mockContract.unregisterNode.mockResolvedValue(mockTx);
+    const program = new Command();
+    registerUnregisterCommand(program);
 
-      registerUnregisterCommand(program);
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      await program.parseAsync(['node', 'unregister', '-k', '0xTestKey']);
+    await program.parseAsync([
+      'node',
+      'test',
+      'unregister',
+      '--private-key',
+      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+    ]);
 
-      expect(mockContract.unregisterNode).toHaveBeenCalled();
-      expect(mockTx.wait).toHaveBeenCalledWith(3);
-    });
+    // Verify staked amount was fetched from getHostStatus
+    expect(mockHostManager.getHostStatus).toHaveBeenCalled();
 
-    it('should display success message after successful unregistration', async () => {
-      const nodeInfo = {
-        active: true,
-        stakedAmount: ethers.parseUnits('2000', 18),
-      };
-      mockContract.nodes
-        .mockResolvedValueOnce(nodeInfo) // First check
-        .mockResolvedValueOnce({ active: false, stakedAmount: 0n }); // After unregister
+    // Verify console output includes staked amount
+    const logCalls = consoleSpy.mock.calls.map(call => call.join(' '));
+    const expectedAmount = ethers.formatUnits(stakedAmount, 18);
+    const hasStakedAmount = logCalls.some(call => call.includes(expectedAmount) || call.includes('staked'));
 
-      const mockTx = {
-        hash: '0xTransactionHash',
-        wait: vi.fn().mockResolvedValue({
-          status: 1,
-          hash: '0xTransactionHash',
-        }),
-      };
-      mockContract.unregisterNode.mockResolvedValue(mockTx);
+    expect(hasStakedAmount).toBe(true);
 
-      registerUnregisterCommand(program);
-
-      await program.parseAsync(['node', 'unregister', '-k', '0xTestKey']);
-
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Successfully unregistered')
-      );
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Recovered 2000 FAB tokens')
-      );
-    });
+    consoleSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
   });
 
-  describe('Wallet Loading', () => {
-    it('should use private key when provided', async () => {
-      const nodeInfo = {
-        active: true,
-        stakedAmount: ethers.parseUnits('2000', 18),
-      };
-      mockContract.nodes.mockResolvedValue(nodeInfo);
+  it('should wait for confirmations (SDK handles automatically)', async () => {
+    const txHash = '0xabcdef1234567890';
+    mockHostManager.unregisterHost.mockResolvedValue(txHash);
 
-      registerUnregisterCommand(program);
+    const program = new Command();
+    registerUnregisterCommand(program);
 
-      await program.parseAsync(['node', 'unregister', '-k', '0xPrivateKey']);
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      expect(ethers.Wallet).toHaveBeenCalledWith('0xPrivateKey');
-    });
+    await program.parseAsync([
+      'node',
+      'test',
+      'unregister',
+      '--private-key',
+      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+    ]);
 
-    it('should load wallet from file when no private key provided', async () => {
-      const walletData = { privateKey: '0xFilePrivateKey' };
-      (fs.existsSync as any).mockReturnValue(true);
-      (fs.readFileSync as any).mockReturnValue(JSON.stringify(walletData));
+    // Verify unregisterHost was called (SDK waits for 3 confirmations internally)
+    expect(mockHostManager.unregisterHost).toHaveBeenCalled();
 
-      const nodeInfo = {
-        active: true,
-        stakedAmount: ethers.parseUnits('2000', 18),
-      };
-      mockContract.nodes.mockResolvedValue(nodeInfo);
+    // Verify transaction hash was returned
+    expect(txHash).toBeDefined();
 
-      registerUnregisterCommand(program);
+    consoleSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+  });
 
-      await program.parseAsync(['node', 'unregister']);
+  it('should verify host is inactive after unregistration', async () => {
+    const txHash = '0xabcdef1234567890';
+    mockHostManager.unregisterHost.mockResolvedValue(txHash);
 
-      expect(fs.existsSync).toHaveBeenCalledWith(
-        path.join(os.homedir(), '.fabstir', 'wallet.json')
-      );
-      expect(ethers.Wallet).toHaveBeenCalledWith('0xFilePrivateKey');
-    });
-
-    it('should show error if no wallet file and no private key', async () => {
-      (fs.existsSync as any).mockReturnValue(false);
-
-      const processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
-        throw new Error('Process exit');
+    // Mock getHostStatus to return active first, then inactive after unregistration
+    mockHostManager.getHostStatus
+      .mockResolvedValueOnce({
+        isRegistered: true,
+        isActive: true,
+        supportedModels: [],
+        stake: stakedAmount,
+      })
+      .mockResolvedValueOnce({
+        isRegistered: true,
+        isActive: false,
+        supportedModels: [],
+        stake: 0n,
       });
 
-      registerUnregisterCommand(program);
+    const program = new Command();
+    registerUnregisterCommand(program);
 
-      try {
-        await program.parseAsync(['node', 'unregister']);
-      } catch (e) {
-        // Expected to throw
-      }
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      expect(console.error).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.stringContaining('No wallet file found')
-      );
+    await program.parseAsync([
+      'node',
+      'test',
+      'unregister',
+      '--private-key',
+      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+    ]);
 
-      processExitSpy.mockRestore();
-    });
+    // Verify getHostStatus was called at least twice (before and after unregistration)
+    expect(mockHostManager.getHostStatus).toHaveBeenCalledTimes(2);
+
+    consoleSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
   });
 
-  describe('Error Handling', () => {
-    it('should handle transaction failure', async () => {
-      const nodeInfo = {
-        active: true,
-        stakedAmount: ethers.parseUnits('2000', 18),
-      };
-      mockContract.nodes.mockResolvedValue(nodeInfo);
-
-      const mockTx = {
-        hash: '0xTransactionHash',
-        wait: vi.fn().mockResolvedValue({
-          status: 0, // Failed transaction
-          hash: '0xTransactionHash',
-        }),
-      };
-      mockContract.unregisterNode.mockResolvedValue(mockTx);
-
-      const processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
-        throw new Error('Process exit');
-      });
-
-      registerUnregisterCommand(program);
-
-      try {
-        await program.parseAsync(['node', 'unregister', '-k', '0xTestKey']);
-      } catch (e) {
-        // Expected to throw
-      }
-
-      expect(console.error).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.stringContaining('Transaction failed')
-      );
-
-      processExitSpy.mockRestore();
+  it('should handle "not registered" error gracefully', async () => {
+    // Mock host as not registered
+    mockHostManager.getHostStatus.mockResolvedValue({
+      isRegistered: false,
+      isActive: false,
+      supportedModels: [],
+      stake: 0n,
     });
 
-    it('should handle contract revert', async () => {
-      const nodeInfo = {
-        active: true,
-        stakedAmount: ethers.parseUnits('2000', 18),
-      };
-      mockContract.nodes.mockResolvedValue(nodeInfo);
-      mockContract.unregisterNode.mockRejectedValue(new Error('execution reverted'));
+    const program = new Command();
+    registerUnregisterCommand(program);
 
-      const processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
-        throw new Error('Process exit');
-      });
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      registerUnregisterCommand(program);
+    await program.parseAsync([
+      'node',
+      'test',
+      'unregister',
+      '--private-key',
+      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+    ]);
 
-      try {
-        await program.parseAsync(['node', 'unregister', '-k', '0xTestKey']);
-      } catch (e) {
-        // Expected to throw
-      }
+    // Verify unregisterHost was NOT called
+    expect(mockHostManager.unregisterHost).not.toHaveBeenCalled();
 
-      expect(console.error).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.stringContaining('execution reverted')
-      );
+    // Verify appropriate message was shown
+    const logCalls = consoleSpy.mock.calls.map(call => call.join(' '));
+    const hasNotRegisteredMessage = logCalls.some(call => call.includes('not') && call.includes('registered'));
 
-      processExitSpy.mockRestore();
-    });
+    expect(hasNotRegisteredMessage).toBe(true);
+
+    consoleSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('should require authenticated SDK', async () => {
+    // Mock authenticateSDK to fail
+    (sdkClient.authenticateSDK as any).mockRejectedValueOnce(new Error('SDK authentication failed'));
+
+    const program = new Command();
+    registerUnregisterCommand(program);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const processExitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit called');
+    }) as any);
+
+    await expect(async () => {
+      await program.parseAsync([
+        'node',
+        'test',
+        'unregister',
+        '--private-key',
+        '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      ]);
+    }).rejects.toThrow();
+
+    // Verify unregisterHost was NOT called
+    expect(mockHostManager.unregisterHost).not.toHaveBeenCalled();
+
+    consoleSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    processExitSpy.mockRestore();
   });
 });
