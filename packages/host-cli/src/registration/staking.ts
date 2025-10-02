@@ -76,17 +76,14 @@ export async function checkAllowance(): Promise<bigint> {
     const fabTokenAddress = sdk.config.contractAddresses.fabToken;
     const spenderAddress = getStakingRequirements().contractAddress;
 
-    const provider = sdk.getProvider();
-    const fabToken = new ethers.Contract(
-      fabTokenAddress,
-      [
-        'function allowance(address owner, address spender) view returns (uint256)'
-      ],
-      provider
+    // Use SDK PaymentManager instead of direct contract calls
+    const allowance = await paymentManager.checkAllowance(
+      address,
+      spenderAddress,
+      fabTokenAddress
     );
 
-    const allowance = await fabToken.allowance(address, spenderAddress);
-    return BigInt(allowance.toString());
+    return allowance;
   } catch (error: any) {
     throw new RegistrationError(
       `Failed to check allowance: ${error.message}`,

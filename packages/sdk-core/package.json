@@ -1,6 +1,6 @@
 {
   "name": "@fabstir/sdk-core",
-  "version": "1.0.10",
+  "version": "1.1.2",
   "description": "Browser-compatible core SDK for Fabstir P2P LLM marketplace",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -35,8 +35,8 @@
     "prepare": "pnpm run build",
     "build": "pnpm run build:clean && pnpm run build:esm && pnpm run build:cjs && pnpm run build:types",
     "build:clean": "rimraf dist",
-    "build:esm": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2020 --outfile=dist/index.mjs --external:ethers --external:@s5-dev/s5js --external:@base-org/account",
-    "build:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=node --target=es2020 --outfile=dist/index.js --external:ethers --external:@s5-dev/s5js --external:@base-org/account",
+    "build:esm": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2020 --supported:class-private-field=false --supported:bigint=true --outfile=dist/index.mjs --external:ethers --external:@base-org/account --external:url --external:path --external:node:* --external:crypto --external:fs --external:stream --external:http --external:https --external:zlib --external:net --external:tls --external:assert",
+    "build:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=node --target=es2020 --outfile=dist/index.js --external:ethers --external:@base-org/account",
     "build:browser": "pnpm run build:browser:esm && pnpm run build:browser:cjs",
     "build:browser:esm": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2020 --outfile=dist/browser.mjs --minify",
     "build:browser:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=browser --target=es2020 --outfile=dist/browser.js --minify",
