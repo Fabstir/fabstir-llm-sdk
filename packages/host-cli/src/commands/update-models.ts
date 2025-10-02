@@ -1,18 +1,8 @@
 import { Command } from 'commander';
 import { ethers } from 'ethers';
 import chalk from 'chalk';
-import dotenv from 'dotenv';
-import path from 'path';
 import fs from 'fs';
-import { getWallet } from '../utils/wallet';
-
-// Load NodeRegistry ABI - read from file system
-const abiPath = path.resolve(__dirname, '../../../sdk-core/src/contracts/abis/NodeRegistry.json');
-const NodeRegistryABI = JSON.parse(fs.readFileSync(abiPath, 'utf-8'));
-
-// Load environment variables
-const envPath = path.resolve(process.cwd(), '.env.test');
-dotenv.config({ path: envPath });
+import { initializeSDK, authenticateSDK, getHostManager, getAuthenticatedAddress } from '../sdk/client';
 
 export function registerUpdateModelsCommand(program: Command): void {
   program
@@ -26,6 +16,18 @@ export function registerUpdateModelsCommand(program: Command): void {
     .action(async (modelArgs: string[], options) => {
       try {
         console.log(chalk.blue('\n🔄 Updating supported models...\n'));
+
+        // Initialize and authenticate SDK
+        await initializeSDK('base-sepolia');
+        await authenticateSDK(options.privateKey);
+
+        const address = getAuthenticatedAddress();
+        if (!address) {
+          throw new Error('Failed to authenticate SDK');
+        }
+
+        console.log(chalk.cyan(`📍 Address: ${address}`));
+        console.log(chalk.cyan(`🌐 Network: Base Sepolia`));
 
         // Get model IDs from arguments or file
         let modelIds: string[] = [];
@@ -67,41 +69,20 @@ export function registerUpdateModelsCommand(program: Command): void {
           return ethers.zeroPadValue(ethers.toBeHex(BigInt(id)), 32);
         });
 
-        // Get the wallet
-        const wallet = await getWallet(options.privateKey);
+        // Get HostManager from SDK
+        const hostManager = getHostManager();
 
-        // Connect to provider
-        const provider = new ethers.JsonRpcProvider(options.rpcUrl);
-        const signer = wallet.connect(provider);
-        const address = await signer.getAddress();
-
-        console.log(chalk.cyan(`📍 Address: ${address}`));
-        console.log(chalk.cyan(`🌐 Network: Base Sepolia`));
-
-        // Get NodeRegistry contract
-        const nodeRegistryAddress = process.env.CONTRACT_NODE_REGISTRY;
-        if (!nodeRegistryAddress) {
-          throw new Error('CONTRACT_NODE_REGISTRY not found in environment');
-        }
-
-        const nodeRegistry = new ethers.Contract(
-          nodeRegistryAddress,
-          NodeRegistryABI,
-          signer
-        );
-
-        // Check if the node is registered
-        const nodeInfo = await nodeRegistry.nodes(address);
-        if (!nodeInfo.active) {
+        // Check if the host is registered
+        const hostStatus = await hostManager.getHostStatus(address);
+        if (!hostStatus.isRegistered || !hostStatus.isActive) {
           throw new Error('This address is not registered as a host node');
         }
 
         // Get current models
         let currentModels: string[] = [];
         try {
-          currentModels = await nodeRegistry.getNodeModels(address);
+          currentModels = await hostManager.getHostModels(address);
         } catch (e) {
-          // Method might not exist in older contracts
           console.log(chalk.yellow('⚠️  Could not fetch current models'));
         }
 
@@ -118,40 +99,24 @@ export function registerUpdateModelsCommand(program: Command): void {
           console.log(chalk.cyan(`  ${i + 1}. ${model}`));
         });
 
-        // Validate models if not skipped
-        if (!options.skipValidation && process.env.CONTRACT_MODEL_REGISTRY) {
-          console.log(chalk.blue('\n🔍 Validating models...'));
-
-          // Note: Model validation would go here if ModelRegistry contract is available
-          // For now, we'll skip this as it may not be deployed
-        }
-
-        // Update the models
+        // Update the models using SDK
         console.log(chalk.blue('\n📝 Submitting transaction...'));
-        const tx = await nodeRegistry.updateSupportedModels(formattedModelIds);
+        const txHash = await hostManager.updateSupportedModels(formattedModelIds);
 
-        console.log(chalk.cyan(`📋 Transaction hash: ${tx.hash}`));
-        console.log(chalk.blue('⏳ Waiting for confirmation...'));
+        console.log(chalk.cyan(`📋 Transaction hash: ${txHash}`));
+        console.log(chalk.green('\n✅ Successfully updated supported models!'));
+        console.log(chalk.cyan(`🔗 Transaction: ${txHash}`));
+        console.log(chalk.green(`✓ Now supporting ${formattedModelIds.length} model(s)`));
 
-        const receipt = await tx.wait(3);
-
-        if (receipt && receipt.status === 1) {
-          console.log(chalk.green('\n✅ Successfully updated supported models!'));
-          console.log(chalk.cyan(`🔗 Transaction: ${receipt.hash}`));
-          console.log(chalk.green(`✓ Now supporting ${formattedModelIds.length} model(s)`));
-
-          // Verify the update
-          try {
-            const updatedModels = await nodeRegistry.getNodeModels(address);
-            console.log(chalk.gray('\nVerified models:'));
-            updatedModels.forEach((model: string, i: number) => {
-              console.log(chalk.green(`  ${i + 1}. ${model}`));
-            });
-          } catch (e) {
-            // Verification might fail on older contracts
-          }
-        } else {
-          throw new Error('Transaction failed');
+        // Verify the update
+        try {
+          const updatedModels = await hostManager.getHostModels(address);
+          console.log(chalk.gray('\nVerified models:'));
+          updatedModels.forEach((model: string, i: number) => {
+            console.log(chalk.green(`  ${i + 1}. ${model}`));
+          });
+        } catch (e) {
+          // Verification might fail on older contracts
         }
 
       } catch (error: any) {
