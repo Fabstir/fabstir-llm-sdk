@@ -1,18 +1,6 @@
 import { Command } from 'commander';
-import { ethers } from 'ethers';
 import chalk from 'chalk';
-import dotenv from 'dotenv';
-import path from 'path';
-import fs from 'fs';
-import { getWallet } from '../utils/wallet';
-
-// Load NodeRegistry ABI - read from file system
-const abiPath = path.resolve(__dirname, '../../../sdk-core/src/contracts/abis/NodeRegistry.json');
-const NodeRegistryABI = JSON.parse(fs.readFileSync(abiPath, 'utf-8'));
-
-// Load environment variables
-const envPath = path.resolve(process.cwd(), '.env.test');
-dotenv.config({ path: envPath });
+import { initializeSDK, authenticateSDK, getHostManager, getAuthenticatedAddress } from '../sdk/client';
 
 export function registerUpdateUrlCommand(program: Command): void {
   program
@@ -32,58 +20,42 @@ export function registerUpdateUrlCommand(program: Command): void {
 
         console.log(chalk.blue('\n🔄 Updating API URL...\n'));
 
-        // Get the wallet
-        const wallet = await getWallet(options.privateKey);
+        // Initialize and authenticate SDK
+        await initializeSDK('base-sepolia');
+        await authenticateSDK(options.privateKey);
 
-        // Connect to provider
-        const provider = new ethers.JsonRpcProvider(options.rpcUrl);
-        const signer = wallet.connect(provider);
-        const address = await signer.getAddress();
+        const address = getAuthenticatedAddress();
+        if (!address) {
+          throw new Error('Failed to authenticate SDK');
+        }
 
         console.log(chalk.cyan(`📍 Address: ${address}`));
         console.log(chalk.cyan(`🌐 Network: Base Sepolia`));
 
-        // Get NodeRegistry contract
-        const nodeRegistryAddress = process.env.CONTRACT_NODE_REGISTRY;
-        if (!nodeRegistryAddress) {
-          throw new Error('CONTRACT_NODE_REGISTRY not found in environment');
-        }
+        // Get HostManager from SDK
+        const hostManager = getHostManager();
 
-        const nodeRegistry = new ethers.Contract(
-          nodeRegistryAddress,
-          NodeRegistryABI,
-          signer
-        );
-
-        // Check if the node is registered
-        const nodeInfo = await nodeRegistry.nodes(address);
-        if (!nodeInfo.active) {
+        // Check if the host is registered
+        const hostStatus = await hostManager.getHostStatus(address);
+        if (!hostStatus.isRegistered || !hostStatus.isActive) {
           throw new Error('This address is not registered as a host node');
         }
 
         // Display current and new URLs
-        console.log(chalk.gray(`\nCurrent URL: ${nodeInfo.apiUrl}`));
+        console.log(chalk.gray(`\nCurrent URL: ${hostStatus.apiUrl || 'Not set'}`));
         console.log(chalk.cyan(`New URL:     ${url}`));
 
-        // Update the API URL
+        // Update the API URL using SDK
         console.log(chalk.blue('\n📝 Submitting transaction...'));
-        const tx = await nodeRegistry.updateApiUrl(url);
+        const txHash = await hostManager.updateApiUrl(url);
 
-        console.log(chalk.cyan(`📋 Transaction hash: ${tx.hash}`));
-        console.log(chalk.blue('⏳ Waiting for confirmation...'));
+        console.log(chalk.cyan(`📋 Transaction hash: ${txHash}`));
+        console.log(chalk.green('\n✅ Successfully updated API URL!'));
+        console.log(chalk.cyan(`🔗 Transaction: ${txHash}`));
 
-        const receipt = await tx.wait(3);
-
-        if (receipt && receipt.status === 1) {
-          console.log(chalk.green('\n✅ Successfully updated API URL!'));
-          console.log(chalk.cyan(`🔗 Transaction: ${receipt.hash}`));
-
-          // Verify the update
-          const updatedNodeInfo = await nodeRegistry.nodes(address);
-          console.log(chalk.green(`✓ New URL: ${updatedNodeInfo.apiUrl}`));
-        } else {
-          throw new Error('Transaction failed');
-        }
+        // Verify the update
+        const updatedStatus = await hostManager.getHostStatus(address);
+        console.log(chalk.green(`✓ New URL: ${updatedStatus.apiUrl}`));
 
       } catch (error: any) {
         console.error(chalk.red('\n❌ Update failed:'), error.message);
