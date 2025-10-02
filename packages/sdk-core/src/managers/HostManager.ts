@@ -232,19 +232,11 @@ export class HostManager {
         }
       );
 
-      await tx.wait(3); // Wait for 3 confirmations
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
       console.log('Node registration successful');
 
-      // Step 4: Stake FAB tokens (separate transaction after registration)
-      console.log(`Staking ${ethers.formatEther(stakeAmount)} FAB tokens...`);
-
-      // The stake function requires the node to be registered first
-      // It will transfer FAB tokens from the signer to the contract
-      const stakeTx = await this.nodeRegistry['stake'](stakeAmount, {
-        gasLimit: 500000n  // Increased gas limit for stake operation
-      });
-
-      const receipt = await stakeTx.wait(3); // Wait for 3 confirmations
+      // NodeRegistryWithModels automatically handles staking during registerNode()
+      // No separate stake() call needed
 
       if (!receipt || receipt.status !== 1) {
         throw new ModelRegistryError(

@@ -86,8 +86,9 @@ class AuthManager extends EventEmitter {
       this.authenticated = this.sdk.isAuthenticated();
       this.authMethod = options.method;
 
-      if (this.sdk.signer) {
-        this.walletAddress = this.sdk.signer.address;
+      const signer = this.sdk.getSigner();
+      if (signer) {
+        this.walletAddress = await signer.getAddress();
       }
 
       setConnectionStatus(ConnectionStatus.CONNECTED);

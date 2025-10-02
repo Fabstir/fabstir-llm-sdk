@@ -78,3 +78,11 @@ test-reports/
 packages/s5js/
 
 images/
+
+check-approved-models.mjs
+check-revert.mjs
+check-test-host-1.mjs
+check-test-user-2.mjs
+find-model-combo.mjs
+register-test-user-2.mjs
+test-register-cli.sh

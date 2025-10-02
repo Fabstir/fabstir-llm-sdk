@@ -49,7 +49,46 @@ export interface RequirementsResult {
 }
 
 /**
- * Check all requirements at once
+ * Check requirements for new registration (wallet balances only)
+ */
+export async function checkRegistrationRequirements(): Promise<RequirementsResult> {
+  const sdk = getSDK();
+  if (!sdk.isAuthenticated()) {
+    throw new Error('SDK not authenticated');
+  }
+
+  const errors: string[] = [];
+
+  // Check ETH balance for gas
+  const ethCheck = await checkMinimumETH(MINIMUM_REQUIREMENTS.ETH);
+  if (!ethCheck.hasMinimum) {
+    errors.push(`Insufficient ETH: need ${formatETHBalance(ethCheck.shortfall, 4)}`);
+  }
+
+  // Check FAB balance for staking
+  const fabCheck = await checkMinimumFAB(MINIMUM_REQUIREMENTS.FAB);
+  if (!fabCheck.hasMinimum) {
+    errors.push(`Insufficient FAB: need ${formatFABBalance(fabCheck.shortfall, 0)}`);
+  }
+
+  // For new registrations, we don't check staking status (staking happens during registration)
+  const stakingStatus = {
+    isStaked: false,
+    stakedAmount: 0n,
+    requiredStake: MINIMUM_REQUIREMENTS.STAKING
+  };
+
+  return {
+    meetsAll: errors.length === 0,
+    eth: ethCheck,
+    fab: fabCheck,
+    staking: stakingStatus,
+    errors
+  };
+}
+
+/**
+ * Check all requirements at once (for existing hosts)
  */
 export async function checkAllRequirements(): Promise<RequirementsResult> {
   const sdk = getSDK();
@@ -71,7 +110,7 @@ export async function checkAllRequirements(): Promise<RequirementsResult> {
     errors.push(`Insufficient FAB: need ${formatFABBalance(fabCheck.shortfall, 0)}`);
   }
 
-  // Check staking status
+  // Check staking status (only for existing hosts)
   const stakingStatus = await getStakingStatus();
   if (!stakingStatus.isStaked) {
     const needed = stakingStatus.requiredStake - stakingStatus.stakedAmount;

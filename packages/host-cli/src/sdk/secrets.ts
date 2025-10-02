@@ -6,7 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { prompt } from 'inquirer';
+import inquirer from 'inquirer';
 
 /**
  * Get private key from various sources
@@ -36,12 +36,12 @@ export async function getPrivateKey(): Promise<string> {
   }
 
   // 3. Interactive prompt as last resort
-  const answer = await prompt([{
+  const answer = await inquirer.prompt([{
     type: 'password',
     name: 'privateKey',
     message: 'Enter your private key:',
     mask: '*',
-    validate: (input) => {
+    validate: (input: string) => {
       if (!input) return 'Private key is required';
       if (!isValidPrivateKey(input)) return 'Invalid private key format';
       return true;

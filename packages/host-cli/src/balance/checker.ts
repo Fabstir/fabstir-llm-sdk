@@ -36,10 +36,13 @@ export async function getETHBalance(forceRefresh = false): Promise<bigint> {
 
   try {
     const provider = sdk.getProvider();
+    if (!provider) {
+      throw new Error('Provider not initialized');
+    }
     const balance = await provider.getBalance(address);
 
-    // Convert to bigint (ethers v6 returns bigint directly)
-    const balanceValue = typeof balance === 'bigint' ? balance : BigInt(balance.toString());
+    // ethers v6 returns bigint directly
+    const balanceValue = BigInt(balance);
 
     // Update cache
     balanceCache.set(cacheKey, {
@@ -132,20 +135,24 @@ export async function getFABBalance(forceRefresh = false): Promise<bigint> {
     const paymentManager = sdk.getPaymentManager();
 
     // Get FAB token address from config
-    const fabTokenAddress = sdk.config.contractAddresses.fabToken;
+    const contractAddresses = sdk.getContractAddresses();
+    const fabTokenAddress = contractAddresses.fabToken;
     if (!fabTokenAddress) {
       throw new Error('FAB token address not configured');
     }
 
-    const balance = await paymentManager.getBalance(fabTokenAddress, userAddress);
+    const balance = await paymentManager.getTokenBalance(userAddress, fabTokenAddress);
+
+    // getTokenBalance returns bigint directly
+    const balanceValue = balance;
 
     // Update cache
     balanceCache.set(cacheKey, {
-      value: balance,
+      value: balanceValue,
       timestamp: Date.now()
     });
 
-    return balance;
+    return balanceValue;
   } catch (error: any) {
     throw new Error(`Failed to get FAB balance: ${error.message}`);
   }

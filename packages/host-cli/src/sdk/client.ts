@@ -107,19 +107,20 @@ export async function connectToBlockchain(): Promise<boolean> {
 
   try {
     // The SDK should have a provider after initialization
-    if (!sdk.provider) {
+    const provider = sdk.getProvider();
+    if (!provider) {
       throw new Error('SDK provider not initialized');
     }
 
     // Test the connection by getting the block number
-    const blockNumber = await sdk.provider.getBlockNumber();
+    const blockNumber = await provider.getBlockNumber();
     console.log(`Connected to blockchain at block ${blockNumber}`);
 
     // Verify network
-    const network = await sdk.provider.getNetwork();
-    const expectedChainId = sdk.config.chainId;
+    const network = await provider.getNetwork();
+    const expectedChainId = sdk.getChainId();
 
-    if (network.chainId !== expectedChainId) {
+    if (Number(network.chainId) !== expectedChainId) {
       throw new Error(`Wrong network. Expected chainId ${expectedChainId}, got ${network.chainId}`);
     }
 

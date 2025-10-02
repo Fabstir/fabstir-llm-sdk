@@ -23,13 +23,18 @@ export function registerRegisterCommand(program: Command): void {
     .option('--models <models>', 'Comma-separated list of supported models')
     .option('--url <url>', 'Public URL for your host')
     .option('--force', 'Skip confirmation prompts')
+    .option('-k, --private-key <key>', 'Private key to use (otherwise uses wallet file)')
+    .option('-r, --rpc-url <url>', 'RPC URL', process.env.RPC_URL_BASE_SEPOLIA)
     .action(async (options) => {
       try {
+        // Initialize and authenticate SDK
+        await initializeSDK('base-sepolia');
+        await authenticateSDK(options.privateKey);
+
         const config: RegistrationConfig = {
           stakeAmount: ethers.parseEther(options.stake),
           apiUrl: options.url || 'http://localhost:8080',
-          models: options.models ? options.models.split(',') : ['gpt-3.5-turbo'],
-          skipConfirmation: options.force
+          models: options.models ? options.models.split(',') : ['gpt-3.5-turbo']
         };
 
         await executeRegistration(config);
@@ -51,12 +56,8 @@ export async function executeRegistration(
   hostInfo: any;
 }> {
   try {
-    // Ensure SDK is initialized
+    // SDK is already initialized and authenticated in the action handler
     const sdk = await initializeSDK();
-
-    if (!sdk.isAuthenticated()) {
-      throw new Error('Please authenticate first using "fabstir-host auth"');
-    }
 
     // Check if already registered
     console.log(chalk.blue('Checking registration status...'));

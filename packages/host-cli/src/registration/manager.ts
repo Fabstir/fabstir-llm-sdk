@@ -62,8 +62,9 @@ export async function validateRegistrationRequirements(): Promise<{
   errors: string[];
 }> {
   try {
-    // Check balance requirements
-    const requirements = await checkAllRequirements();
+    // Check balance requirements (wallet balances only, not staking status)
+    const { checkRegistrationRequirements } = await import('../balance/requirements');
+    const requirements = await checkRegistrationRequirements();
 
     if (!requirements.meetsAll) {
       return {
@@ -324,8 +325,8 @@ function validateRegistrationConfig(config: RegistrationConfig): void {
     );
   }
 
-  // Validate model names
-  const validModelPattern = /^[a-zA-Z0-9-_.]+$/;
+  // Validate model names (allow repo/file or repo:file formats)
+  const validModelPattern = /^[a-zA-Z0-9-_./: ]+$/;
   for (const model of config.models) {
     if (!model || !validModelPattern.test(model)) {
       throw new RegistrationError(

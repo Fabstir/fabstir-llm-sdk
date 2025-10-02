@@ -37,6 +37,11 @@ const TEST_ACCOUNTS = {
     privateKey: process.env.NEXT_PUBLIC_TEST_USER_1_PRIVATE_KEY,
     name: 'Test User 1'
   },
+  TEST_USER_2: {
+    address: process.env.NEXT_PUBLIC_TEST_USER_2_ADDRESS,
+    privateKey: process.env.NEXT_PUBLIC_TEST_USER_2_PRIVATE_KEY,
+    name: 'Test User 2'
+  },
   TEST_HOST_1: {
     address: process.env.NEXT_PUBLIC_TEST_HOST_1_ADDRESS,
     privateKey: process.env.NEXT_PUBLIC_TEST_HOST_1_PRIVATE_KEY,

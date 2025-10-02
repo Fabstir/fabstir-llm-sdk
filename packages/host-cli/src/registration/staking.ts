@@ -269,7 +269,7 @@ export async function stakeTokens(config: StakingConfig): Promise<StakingResult>
       const estimatedGas = BigInt(500000); // Typical gas for registration
       const provider = sdk.getProvider();
       const feeData = await provider.getFeeData();
-      const gasPrice = config.gasPrice || feeData.gasPrice || ethers.parseUnits('20', 'gwei');
+      const gasPrice = config.gasPrice || feeData.gasPrice || ethers.parseUnits('0.001', 'gwei');
 
       return {
         success: false,
@@ -283,24 +283,58 @@ export async function stakeTokens(config: StakingConfig): Promise<StakingResult>
     // Execute registration with staking
     const hostManager = sdk.getHostManager();
 
-    // Register host with models and stake
-    const tx = await hostManager.registerHostWithModels(
-      config.models,
-      config.apiUrl,
-      {
-        gasLimit: config.gasLimit,
-        gasPrice: config.gasPrice
+    // Parse model strings to ModelSpec format
+    // Supports "repo:file" or "repo/file" format, defaults to common HuggingFace repo
+    const supportedModels = config.models.map(modelStr => {
+      if (modelStr.includes(':')) {
+        const [repo, file] = modelStr.split(':');
+        return { repo, file };
+      } else if (modelStr.includes('/')) {
+        // If it's "org/repo/file", split appropriately
+        const parts = modelStr.split('/');
+        if (parts.length >= 3) {
+          return {
+            repo: `${parts[0]}/${parts[1]}`,
+            file: parts.slice(2).join('/')
+          };
+        }
+        // If just "repo/file"
+        const [repo, file] = modelStr.split('/');
+        return { repo, file };
+      } else {
+        // Default to common HuggingFace repo for backwards compatibility
+        return {
+          repo: 'TheBloke/tiny-vicuna-1B-GGUF',
+          file: modelStr
+        };
       }
-    );
+    });
 
-    const receipt = await tx.wait(3);
+    // Construct HostMetadata from config
+    const metadata = {
+      hardware: {
+        gpu: config.metadata?.hardware?.gpu || 'NVIDIA RTX 4090',
+        vram: config.metadata?.hardware?.vram || 24,
+        ram: config.metadata?.hardware?.ram || 64
+      },
+      capabilities: config.metadata?.capabilities || ['streaming'],
+      location: config.metadata?.location || 'us-east-1',
+      maxConcurrent: config.metadata?.maxConcurrent || 5,
+      costPerToken: config.metadata?.costPerToken || 0.0001
+    };
 
+    // Register host with models using correct SDK signature
+    const txHash = await hostManager.registerHostWithModels({
+      metadata,
+      apiUrl: config.apiUrl,
+      supportedModels
+    });
+
+    // SDK already waits for transaction confirmation and returns hash
     return {
       success: true,
-      transactionHash: receipt.transactionHash,
-      stakedAmount: config.amount,
-      blockNumber: receipt.blockNumber,
-      gasUsed: BigInt(receipt.gasUsed.toString())
+      transactionHash: txHash,
+      stakedAmount: config.amount
     };
   } catch (error: any) {
     if (error instanceof RegistrationError) {
@@ -358,14 +392,13 @@ export async function withdrawStake(amount?: bigint): Promise<{
 
     const withdrawAmount = amount || currentStake;
 
-    // Execute withdrawal
-    const tx = await hostManager.withdrawStake?.(withdrawAmount);
-    const receipt = await tx.wait(3);
+    // Execute withdrawal - SDK returns transaction hash after confirmation
+    const txHash = await hostManager.withdrawStake(ethers.formatUnits(withdrawAmount, 18));
 
     return {
       success: true,
-      transactionHash: receipt.transactionHash,
-      withdrawnAmount
+      transactionHash: txHash,
+      withdrawnAmount: withdrawAmount
     };
   } catch (error: any) {
     if (error instanceof RegistrationError) {
