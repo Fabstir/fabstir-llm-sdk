@@ -59,11 +59,19 @@ export class StorageManager implements IStorageManager {
   static readonly REGISTRY_PREFIX = 'fabstir-llm';
   static readonly CONVERSATION_PATH = 'home/conversations';
   static readonly SESSIONS_PATH = 'home/sessions';
-  
+
   private s5Client?: any;
   private userSeed?: string;
   private userAddress?: string;
   private initialized = false;
+
+  // User settings cache
+  private settingsCache: {
+    data: UserSettings | null;
+    timestamp: number;
+  } | null = null;
+
+  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   constructor(private s5PortalUrl: string = StorageManager.DEFAULT_S5_PORTAL) {}
 
@@ -760,10 +768,21 @@ export class StorageManager implements IStorageManager {
   /**
    * Load user settings from S5 storage
    * Returns null if no settings exist (first-time user)
+   * Uses in-memory cache with 5-minute TTL
    */
   async getUserSettings(): Promise<UserSettings | null> {
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+
+    // Check cache first
+    if (this.settingsCache) {
+      const age = Date.now() - this.settingsCache.timestamp;
+      if (age < this.CACHE_TTL) {
+        console.log('[StorageManager] Cache hit for user settings');
+        return this.settingsCache.data;
+      }
+      console.log('[StorageManager] Cache expired, fetching from S5');
     }
 
     const settingsPath = 'home/user/settings.json';
@@ -774,6 +793,11 @@ export class StorageManager implements IStorageManager {
 
       // Return null if no settings file exists (first-time user)
       if (!settings) {
+        // Update cache with null (first-time user)
+        this.settingsCache = {
+          data: null,
+          timestamp: Date.now(),
+        };
         return null;
       }
 
@@ -785,10 +809,21 @@ export class StorageManager implements IStorageManager {
         );
       }
 
+      // Update cache
+      this.settingsCache = {
+        data: settings as UserSettings,
+        timestamp: Date.now(),
+      };
+
       return settings as UserSettings;
     } catch (error: any) {
       // Return null for "not found" errors (first-time user)
       if (error.message?.includes('not found') || error.message?.includes('does not exist')) {
+        // Update cache with null
+        this.settingsCache = {
+          data: null,
+          timestamp: Date.now(),
+        };
         return null;
       }
 

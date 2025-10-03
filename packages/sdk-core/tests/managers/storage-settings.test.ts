@@ -394,4 +394,108 @@ describe('StorageManager - User Settings', () => {
       );
     });
   });
+
+  describe('Cache with TTL', () => {
+    it('should return cached value within TTL', async () => {
+      const settings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'cached-model',
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(settings);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      // First call - should hit S5
+      const firstResult = await storageManager.getUserSettings();
+      expect(mockGet).toHaveBeenCalledTimes(1);
+
+      // Second call within TTL - should use cache
+      const secondResult = await storageManager.getUserSettings();
+      expect(mockGet).toHaveBeenCalledTimes(1); // Still 1, not 2
+      expect(secondResult).toEqual(firstResult);
+    });
+
+    it('should expire cache after 5 minutes', async () => {
+      const settings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'test-model',
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(settings);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      // First call
+      await storageManager.getUserSettings();
+      expect(mockGet).toHaveBeenCalledTimes(1);
+
+      // Manually expire cache by setting old timestamp
+      const cache = (storageManager as any).settingsCache;
+      if (cache) {
+        cache.timestamp = Date.now() - (6 * 60 * 1000); // 6 minutes ago
+      }
+
+      // Second call should fetch from S5 again
+      await storageManager.getUserSettings();
+      expect(mockGet).toHaveBeenCalledTimes(2);
+    });
+
+    it('should reduce S5 calls with cache hits', async () => {
+      const settings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'test-model',
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(settings);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      // Make 5 calls
+      for (let i = 0; i < 5; i++) {
+        await storageManager.getUserSettings();
+      }
+
+      // Should only call S5 once (other 4 are cache hits)
+      expect(mockGet).toHaveBeenCalledTimes(1);
+    });
+
+    it('should call S5 on cache miss', async () => {
+      const settings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'test-model',
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(settings);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      // Ensure no cache
+      (storageManager as any).settingsCache = null;
+
+      // Should call S5
+      await storageManager.getUserSettings();
+      expect(mockGet).toHaveBeenCalledTimes(1);
+    });
+
+    it('should cache null for first-time user', async () => {
+      const mockGet = vi.fn().mockResolvedValue(undefined);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      // First call
+      const firstResult = await storageManager.getUserSettings();
+      expect(firstResult).toBeNull();
+      expect(mockGet).toHaveBeenCalledTimes(1);
+
+      // Second call should use cached null
+      const secondResult = await storageManager.getUserSettings();
+      expect(secondResult).toBeNull();
+      expect(mockGet).toHaveBeenCalledTimes(1); // Still 1
+    });
+  });
 });

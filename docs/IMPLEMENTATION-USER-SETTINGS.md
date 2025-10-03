@@ -63,7 +63,7 @@ Add user settings storage to `StorageManager` with:
 | 2 | 2.2 | ✅ Complete | getUserSettings() implementation |
 | 2 | 2.3 | ✅ Complete | updateUserSettings() implementation |
 | 2 | 2.4 | ✅ Complete | clearUserSettings() implementation |
-| 3 | 3.1 | ⏳ Pending | In-memory cache with TTL |
+| 3 | 3.1 | ✅ Complete | In-memory cache with TTL |
 | 3 | 3.2 | ⏳ Pending | Cache invalidation strategy |
 | 4 | 4.1 | ⏳ Pending | S5 unavailable error handling |
 | 4 | 4.2 | ⏳ Pending | Offline mode support |
@@ -481,20 +481,20 @@ async clearUserSettings(): Promise<void> {
 
 **Tasks:**
 
-- [ ] Add private `settingsCache` property
-- [ ] Add private `CACHE_TTL` constant (5 minutes)
-- [ ] Modify `getUserSettings()` to check cache first
-- [ ] Update cache on successful load
-- [ ] Add cache hit/miss logging for debugging
+- [x] Add private `settingsCache` property
+- [x] Add private `CACHE_TTL` constant (5 minutes)
+- [x] Modify `getUserSettings()` to check cache first
+- [x] Update cache on successful load
+- [x] Add cache hit/miss logging for debugging
 
 **Test Requirements (WRITE FIRST):**
 
 Update `packages/sdk-core/tests/managers/storage-settings.test.ts` (+50 lines):
-- [ ] Test cache returns cached value within TTL
-- [ ] Test cache expires after 5 minutes
-- [ ] Test cache hit reduces S5 calls
-- [ ] Test cache miss calls S5
-- [ ] Test concurrent calls use same cached value
+- [x] Test cache returns cached value within TTL
+- [x] Test cache expires after 5 minutes
+- [x] Test cache hit reduces S5 calls
+- [x] Test cache miss calls S5
+- [x] Test concurrent calls use same cached value
 
 **Expected Implementation:**
 
