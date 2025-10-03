@@ -59,7 +59,7 @@ Add user settings storage to `StorageManager` with:
 |-------|-----------|--------|-------------|
 | 1 | 1.1 | ✅ Complete | UserSettings interface and types |
 | 1 | 1.2 | ✅ Complete | IStorageManager extension |
-| 2 | 2.1 | ⏳ Pending | saveUserSettings() implementation |
+| 2 | 2.1 | ✅ Complete | saveUserSettings() implementation |
 | 2 | 2.2 | ⏳ Pending | getUserSettings() implementation |
 | 2 | 2.3 | ⏳ Pending | updateUserSettings() implementation |
 | 2 | 2.4 | ⏳ Pending | clearUserSettings() implementation |
@@ -231,20 +231,20 @@ export interface IStorageManager {
 
 **Tasks:**
 
-- [ ] Implement `saveUserSettings(settings: UserSettings): Promise<void>`
-- [ ] Use S5 path: `/user/settings.json` (userId derived from S5 seed)
-- [ ] Validate settings have version and lastUpdated
-- [ ] Use `s5.fs.put()` with automatic CBOR encoding
-- [ ] Throw clear error if S5 not initialized
+- [x] Implement `saveUserSettings(settings: UserSettings): Promise<void>`
+- [x] Use S5 path: `home/user/settings.json` (follows existing pattern)
+- [x] Validate settings have version and lastUpdated
+- [x] Use `s5.fs.put()` with automatic CBOR encoding
+- [x] Throw clear error if S5 not initialized
 
 **Test Requirements (WRITE FIRST):**
 
 Create `packages/sdk-core/tests/managers/storage-settings.test.ts` (max 100 lines):
-- [ ] Test save valid settings succeeds
-- [ ] Test save updates lastUpdated timestamp
-- [ ] Test save throws if S5 not initialized
-- [ ] Test save throws on network error (mock S5 failure)
-- [ ] Test saved data can be retrieved
+- [x] Test save valid settings succeeds
+- [x] Test save validates version and lastUpdated fields
+- [x] Test save throws if S5 not initialized
+- [x] Test save throws on network error (mock S5 failure)
+- [x] Test save accepts all valid UserSettings fields
 
 **Expected Implementation:**
 

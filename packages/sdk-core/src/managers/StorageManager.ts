@@ -12,7 +12,9 @@ import {
   StorageOptions,
   StorageResult,
   ConversationData,
-  Message
+  Message,
+  UserSettings,
+  PartialUserSettings
 } from '../types';
 
 export interface Exchange {
@@ -718,6 +720,39 @@ export class StorageManager implements IStorageManager {
     } catch (error: any) {
       console.debug('listSessions error:', error.message);
       return [];
+    }
+  }
+
+  // ============= User Settings Methods =============
+
+  /**
+   * Save complete user settings to S5 storage
+   * Path: home/user/settings.json
+   */
+  async saveUserSettings(settings: UserSettings): Promise<void> {
+    if (!this.initialized) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+
+    // Validate required fields
+    if (!settings.version || !settings.lastUpdated) {
+      throw new SDKError(
+        'UserSettings must have version and lastUpdated fields',
+        'INVALID_SETTINGS'
+      );
+    }
+
+    const settingsPath = 'home/user/settings.json';
+
+    try {
+      // S5 automatically encodes object as CBOR
+      await this.s5Client.fs.put(settingsPath, settings);
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to save user settings: ${error.message}`,
+        'STORAGE_SAVE_ERROR',
+        { originalError: error }
+      );
     }
   }
 }
