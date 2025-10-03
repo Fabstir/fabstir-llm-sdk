@@ -303,67 +303,41 @@ const NodeManagementClient: React.FC = () => {
       console.log('Host status for', checkAddress, ':', info);
       addLog(`📊 Registration: ${info.isRegistered ? '✅' : '❌'}, Active: ${info.isActive ? '✅' : '❌'}`);
 
-      // Query staked amount directly from the contract if registered
+      // Update supported models from blockchain if available
+      if (info.supportedModels && info.supportedModels.length > 0) {
+        const modelsString = info.supportedModels.join(',');
+        setSupportedModels(modelsString);
+        addLog(`📚 Loaded ${info.supportedModels.length} supported model(s) from blockchain`);
+      }
+
+      // Get staked amount from SDK (no direct contract calls)
       let stakedAmountDisplay = '0';
 
-      if (info.isRegistered && currentSigner) {
-        try {
-          // Direct contract call to get staked amount
-          const nodeRegistryAddress = getContractAddresses(selectedChain).nodeRegistry;
-          const nodeRegistryABI = [
-            'function nodes(address) view returns (address operator, uint256 stakedAmount, bool active, string memory metadata, string memory apiUrl)'
-          ];
-
-          const nodeRegistry = new ethers.Contract(
-            nodeRegistryAddress,
-            nodeRegistryABI,
-            currentSigner
-          );
-
-          // Query the nodes mapping directly
-          const nodeInfo = await nodeRegistry.nodes(checkAddress);
-          console.log('Direct contract query result:', nodeInfo);
-
-          // stakedAmount is the second element (index 1)
-          const stakedAmountWei = nodeInfo[1];
-          console.log('Staked amount in wei:', stakedAmountWei.toString());
-
-          // Convert from wei to FAB (18 decimals)
-          stakedAmountDisplay = ethers.formatEther(stakedAmountWei);
-          console.log('Staked amount in FAB:', stakedAmountDisplay);
-
-          // Load metadata from blockchain if available
-          const nodeMetadata = nodeInfo[3]; // metadata is at index 3
-          if (nodeMetadata && nodeMetadata !== '') {
-            try {
-              const parsedMeta = JSON.parse(nodeMetadata);
-              setMetadata(JSON.stringify(parsedMeta, null, 2));
-              addLog('📝 Loaded node metadata from blockchain');
-            } catch (e) {
-              console.error('Failed to parse node metadata:', e);
-            }
+      if (info.isRegistered) {
+        // Use stake from SDK HostInfo
+        if (info.stake !== undefined && info.stake !== null && info.stake !== 0n) {
+          try {
+            const stakeAmount = typeof info.stake === 'bigint'
+              ? info.stake
+              : BigInt(info.stake.toString());
+            stakedAmountDisplay = ethers.formatUnits(stakeAmount.toString(), 18);
+            console.log('Staked amount in FAB (from SDK):', stakedAmountDisplay);
+          } catch (e) {
+            console.error('Error formatting staked amount:', e);
           }
-
-          addLog(`💰 Staked: ${stakedAmountDisplay} FAB`);
-        } catch (e) {
-          console.error('Error querying staked amount from contract:', e);
-
-          // Fallback to SDK value if direct query fails
-          if (info.stakedAmount !== undefined && info.stakedAmount !== null && info.stakedAmount !== 0n) {
-            try {
-              const amountBigInt = typeof info.stakedAmount === 'bigint'
-                ? info.stakedAmount
-                : BigInt(info.stakedAmount.toString());
-              stakedAmountDisplay = ethers.formatUnits(amountBigInt.toString(), 18);
-            } catch (e2) {
-              console.error('Error formatting SDK staked amount:', e2);
-            }
-          }
-          addLog(`💰 Staked: ${stakedAmountDisplay} FAB`);
         }
-      } else if (info.isRegistered && !currentSigner) {
-        // Node is registered but we don't have signer yet for direct query
-        addLog('⏳ Signer not ready for staked balance query - click refresh to update');
+
+        // Load metadata from SDK HostInfo
+        if (info.metadata) {
+          try {
+            setMetadata(JSON.stringify(info.metadata, null, 2));
+            addLog('📝 Loaded node metadata from SDK');
+          } catch (e) {
+            console.error('Failed to format node metadata:', e);
+          }
+        }
+
+        addLog(`💰 Staked: ${stakedAmountDisplay} FAB`);
       }
 
       setIsRegistered(info.isRegistered);

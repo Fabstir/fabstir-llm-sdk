@@ -50,7 +50,7 @@ This document describes the current state of the fabstir-llm-node WebSocket API 
 
 ### ✅ Phase 8.13: Automatic Payment Settlement on Disconnect (v5+, September 2024)
 - **Automatic Settlement**: WebSocket disconnect triggers `completeSessionJob()`
-- **Payment Distribution**: Host receives 97.5%, Treasury 2.5%, User gets refund
+- **Payment Distribution**: Host receives 90%, Treasury 10%, User gets refund
 - **No User Action Required**: Payments settle even on unexpected disconnects
 - **Session Cleanup**: Token trackers and state cleared after settlement
 - **Blockchain Integration**: Direct contract calls to JobMarketplace (0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944)
@@ -267,8 +267,8 @@ The node automatically:
 1. Submits any pending checkpoints (100+ token batches)
 2. Calls `completeSessionJob()` on the blockchain
 3. Triggers payment distribution:
-   - 97.5% to HostEarnings contract (0x908962e8c6CE72610021586f85ebDE09aAc97776)
-   - 2.5% to Treasury (0xbeaBB2a5AEd358aA0bd442dFFd793411519Bdc11)
+   - 90% to HostEarnings contract (0x908962e8c6CE72610021586f85ebDE09aAc97776)
+   - 10% to Treasury (0xbeaBB2a5AEd358aA0bd442dFFd793411519Bdc11)
    - Unused deposit back to user
 
 **SDK Implications:**
@@ -290,7 +290,7 @@ jobMarketplace.on(filter, (jobId, host, tokensUsed, event) => {
 **Requirements:**
 - Node must have `HOST_PRIVATE_KEY` configured
 - Node version v5-payment-settlement or later
-- JobMarketplace contract: 0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944
+- JobMarketplace contract: 0xdEa1B47872C27458Bb7331Ade99099761C4944Dc
 
 ## Compression Support
 
