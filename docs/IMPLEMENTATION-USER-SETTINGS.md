@@ -57,7 +57,7 @@ Add user settings storage to `StorageManager` with:
 
 | Phase | Sub-phase | Status | Description |
 |-------|-----------|--------|-------------|
-| 1 | 1.1 | ⏳ Pending | UserSettings interface and types |
+| 1 | 1.1 | ✅ Complete | UserSettings interface and types |
 | 1 | 1.2 | ⏳ Pending | IStorageManager extension |
 | 2 | 2.1 | ⏳ Pending | saveUserSettings() implementation |
 | 2 | 2.2 | ⏳ Pending | getUserSettings() implementation |
@@ -95,19 +95,19 @@ Add user settings storage to `StorageManager` with:
 
 **Tasks:**
 
-- [ ] Create `packages/sdk-core/src/types/settings.types.ts`
-- [ ] Define `UserSettings` interface (model, host, payment, UI prefs)
-- [ ] Define `UserSettingsVersion` enum (starting with V1)
-- [ ] Add JSDoc comments for all fields
-- [ ] Export types from `packages/sdk-core/src/types/index.ts`
+- [x] Create `packages/sdk-core/src/types/settings.types.ts`
+- [x] Define `UserSettings` interface (model, host, payment, UI prefs)
+- [x] Define `UserSettingsVersion` enum (starting with V1)
+- [x] Add JSDoc comments for all fields
+- [x] Export types from `packages/sdk-core/src/types/index.ts`
 
 **Test Requirements (WRITE FIRST):**
 
 Create `packages/sdk-core/tests/types/settings.test.ts` (max 60 lines):
-- [ ] Test UserSettings type structure
-- [ ] Test version enum values
-- [ ] Test partial settings type
-- [ ] Test schema validation (runtime check)
+- [x] Test UserSettings type structure
+- [x] Test version enum values
+- [x] Test partial settings type
+- [x] Test schema validation (runtime check)
 
 **Expected Interface Structure:**
 

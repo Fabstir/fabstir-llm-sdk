@@ -262,3 +262,7 @@ export function isValidAddress(address: string): boolean {
 export function isValidTransactionHash(hash: string): boolean {
   return /^0x[a-fA-F0-9]{64}$/.test(hash);
 }
+
+// ============= User Settings Types =============
+
+export * from './settings.types';
