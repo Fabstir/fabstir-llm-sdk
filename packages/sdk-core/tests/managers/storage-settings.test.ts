@@ -643,4 +643,142 @@ describe('StorageManager - User Settings', () => {
       expect(mockGet).toHaveBeenCalledTimes(0);
     });
   });
+
+  describe('Error Handling', () => {
+    it('should throw error with code when S5 not initialized', async () => {
+      const settings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'test-model',
+      };
+
+      // Don't initialize - s5Client is undefined
+      try {
+        await storageManager.saveUserSettings(settings);
+        expect.fail('Should have thrown error');
+      } catch (error: any) {
+        expect(error.code).toBe('STORAGE_NOT_INITIALIZED');
+        expect(error.message).toContain('not initialized');
+      }
+    });
+
+    it('should include error code in save failures', async () => {
+      const settings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'test-model',
+      };
+
+      const mockPut = vi.fn().mockRejectedValue(new Error('S5 connection failed'));
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { put: mockPut } };
+
+      try {
+        await storageManager.saveUserSettings(settings);
+        expect.fail('Should have thrown error');
+      } catch (error: any) {
+        expect(error.code).toBe('STORAGE_SAVE_ERROR');
+        expect(error.message).toContain('Failed to save user settings');
+        expect(error.details?.originalError).toBeDefined();
+      }
+    });
+
+    it('should include error code in load failures', async () => {
+      const mockGet = vi.fn().mockRejectedValue(new Error('Network timeout'));
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      try {
+        await storageManager.getUserSettings();
+        expect.fail('Should have thrown error');
+      } catch (error: any) {
+        expect(error.code).toBe('STORAGE_LOAD_ERROR');
+        expect(error.message).toContain('Failed to load user settings');
+        expect(error.details?.originalError).toBeDefined();
+      }
+    });
+
+    it('should include error code for invalid settings structure', async () => {
+      const invalidSettings = {
+        selectedModel: 'test-model',
+        // Missing version and lastUpdated
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(invalidSettings);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      try {
+        await storageManager.getUserSettings();
+        expect.fail('Should have thrown error');
+      } catch (error: any) {
+        expect(error.code).toBe('INVALID_SETTINGS_STRUCTURE');
+        expect(error.message).toContain('Invalid UserSettings structure');
+      }
+    });
+
+    it('should include error code in update failures', async () => {
+      const mockGet = vi.fn().mockRejectedValue(new Error('Connection refused'));
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      try {
+        await storageManager.updateUserSettings({ selectedModel: 'new-model' });
+        expect.fail('Should have thrown error');
+      } catch (error: any) {
+        expect(error.code).toBe('STORAGE_UPDATE_ERROR');
+        expect(error.message).toContain('Failed to update user settings');
+      }
+    });
+
+    it('should include error code in clear failures', async () => {
+      const mockDelete = vi.fn().mockRejectedValue(new Error('Permission denied'));
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { delete: mockDelete } };
+
+      try {
+        await storageManager.clearUserSettings();
+        expect.fail('Should have thrown error');
+      } catch (error: any) {
+        expect(error.code).toBe('STORAGE_CLEAR_ERROR');
+        expect(error.message).toContain('Failed to clear user settings');
+      }
+    });
+
+    it('should preserve original error in details', async () => {
+      const originalError = new Error('S5 network timeout');
+      const mockPut = vi.fn().mockRejectedValue(originalError);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { put: mockPut } };
+
+      const settings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'test-model',
+      };
+
+      try {
+        await storageManager.saveUserSettings(settings);
+        expect.fail('Should have thrown error');
+      } catch (error: any) {
+        expect(error.details?.originalError).toBe(originalError);
+        expect(error.message).toContain('S5 network timeout');
+      }
+    });
+
+    it('should provide user-friendly error messages', async () => {
+      const mockGet = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      try {
+        await storageManager.getUserSettings();
+        expect.fail('Should have thrown error');
+      } catch (error: any) {
+        // Error message should be descriptive, not just raw error
+        expect(error.message).toContain('Failed to load user settings');
+        expect(error.code).toBe('STORAGE_LOAD_ERROR');
+      }
+    });
+  });
 });

@@ -65,7 +65,7 @@ Add user settings storage to `StorageManager` with:
 | 2 | 2.4 | ✅ Complete | clearUserSettings() implementation |
 | 3 | 3.1 | ✅ Complete | In-memory cache with TTL |
 | 3 | 3.2 | ✅ Complete | Cache invalidation strategy |
-| 4 | 4.1 | ⏳ Pending | S5 unavailable error handling |
+| 4 | 4.1 | ✅ Complete | S5 unavailable error handling |
 | 4 | 4.2 | ⏳ Pending | Offline mode support |
 | 5 | 5.1 | ⏳ Pending | Version migration system |
 | 5 | 5.2 | ⏳ Pending | Migration tests |
@@ -669,18 +669,21 @@ async clearUserSettings(): Promise<void> {
 
 **Tasks:**
 
-- [ ] Define error codes enum (S5_UNAVAILABLE, NETWORK_ERROR, INVALID_SETTINGS)
-- [ ] Wrap all S5 calls in try-catch with error code detection
-- [ ] Add error code to thrown errors
-- [ ] Document expected errors in JSDoc
+- [x] Define error codes enum (S5_UNAVAILABLE, NETWORK_ERROR, INVALID_SETTINGS)
+  - Note: Used existing SDKError with codes (STORAGE_NOT_INITIALIZED, INVALID_SETTINGS, etc.)
+- [x] Wrap all S5 calls in try-catch with error code detection
+- [x] Add error code to thrown errors
+- [x] Document expected errors in JSDoc
 
 **Test Requirements (WRITE FIRST):**
 
-Update `packages/sdk-core/tests/managers/storage-settings.test.ts` (+40 lines):
-- [ ] Test S5 unavailable throws with S5_UNAVAILABLE code
-- [ ] Test network error throws with NETWORK_ERROR code
-- [ ] Test invalid settings throws with INVALID_SETTINGS code
-- [ ] Test error messages are user-friendly
+Update `packages/sdk-core/tests/managers/storage-settings.test.ts` (+138 lines):
+- [x] Test S5 unavailable throws with STORAGE_NOT_INITIALIZED code
+- [x] Test network error throws with appropriate error code
+- [x] Test invalid settings throws with INVALID_SETTINGS code
+- [x] Test error messages are user-friendly
+- [x] Test original errors preserved in details
+- [x] Test all operations (save, get, update, clear) have error codes
 
 **Expected Error Codes:**
 
