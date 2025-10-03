@@ -64,7 +64,7 @@ Add user settings storage to `StorageManager` with:
 | 2 | 2.3 | ✅ Complete | updateUserSettings() implementation |
 | 2 | 2.4 | ✅ Complete | clearUserSettings() implementation |
 | 3 | 3.1 | ✅ Complete | In-memory cache with TTL |
-| 3 | 3.2 | ⏳ Pending | Cache invalidation strategy |
+| 3 | 3.2 | ✅ Complete | Cache invalidation strategy |
 | 4 | 4.1 | ⏳ Pending | S5 unavailable error handling |
 | 4 | 4.2 | ⏳ Pending | Offline mode support |
 | 5 | 5.1 | ⏳ Pending | Version migration system |
@@ -586,18 +586,18 @@ export class StorageManager implements IStorageManager {
 
 **Tasks:**
 
-- [ ] Modify `saveUserSettings()` to update cache
-- [ ] Modify `updateUserSettings()` to update cache
-- [ ] Modify `clearUserSettings()` to invalidate cache
-- [ ] Add cache invalidation logging
+- [x] Modify `saveUserSettings()` to update cache
+- [x] Modify `updateUserSettings()` to update cache
+- [x] Modify `clearUserSettings()` to invalidate cache
+- [x] Add cache invalidation logging
 
 **Test Requirements (WRITE FIRST):**
 
 Update `packages/sdk-core/tests/managers/storage-settings.test.ts` (+40 lines):
-- [ ] Test save invalidates cache
-- [ ] Test update invalidates cache
-- [ ] Test clear invalidates cache
-- [ ] Test subsequent get uses new cache
+- [x] Test save invalidates cache
+- [x] Test update invalidates cache
+- [x] Test clear invalidates cache
+- [x] Test subsequent get uses new cache
 
 **Expected Implementation:**
 

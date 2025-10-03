@@ -756,6 +756,13 @@ export class StorageManager implements IStorageManager {
     try {
       // S5 automatically encodes object as CBOR
       await this.s5Client.fs.put(settingsPath, settings);
+
+      // Update cache
+      this.settingsCache = {
+        data: settings,
+        timestamp: Date.now(),
+      };
+      console.log('[StorageManager] Cache updated after save');
     } catch (error: any) {
       throw new SDKError(
         `Failed to save user settings: ${error.message}`,
@@ -905,6 +912,10 @@ export class StorageManager implements IStorageManager {
       // S5 delete() returns boolean - true if deleted, false if didn't exist
       await this.s5Client.fs.delete(settingsPath);
       // No error thrown if file doesn't exist (returns false)
+
+      // Invalidate cache
+      this.settingsCache = null;
+      console.log('[StorageManager] Cache invalidated after clear');
     } catch (error: any) {
       throw new SDKError(
         `Failed to clear user settings: ${error.message}`,

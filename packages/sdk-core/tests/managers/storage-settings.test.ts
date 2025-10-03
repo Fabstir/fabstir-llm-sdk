@@ -498,4 +498,149 @@ describe('StorageManager - User Settings', () => {
       expect(mockGet).toHaveBeenCalledTimes(1); // Still 1
     });
   });
+
+  describe('Cache Invalidation', () => {
+    it('should update cache after save', async () => {
+      const settings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'saved-model',
+      };
+
+      const mockPut = vi.fn().mockResolvedValue(undefined);
+      const mockGet = vi.fn().mockResolvedValue(settings);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { put: mockPut, get: mockGet } };
+
+      // Save settings
+      await storageManager.saveUserSettings(settings);
+
+      // Get should use cache (not call S5)
+      const retrieved = await storageManager.getUserSettings();
+      expect(retrieved).toEqual(settings);
+      expect(mockGet).toHaveBeenCalledTimes(0); // Should NOT call S5, use cache
+    });
+
+    it('should update cache after update', async () => {
+      const initialSettings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now() - 1000,
+        selectedModel: 'old-model',
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(initialSettings);
+      const mockPut = vi.fn().mockResolvedValue(undefined);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: mockPut } };
+
+      // Update settings
+      await storageManager.updateUserSettings({ selectedModel: 'new-model' });
+
+      // Reset mock call count
+      mockGet.mockClear();
+
+      // Get should use cache (not call S5 again)
+      const retrieved = await storageManager.getUserSettings();
+      expect(retrieved?.selectedModel).toBe('new-model');
+      expect(mockGet).toHaveBeenCalledTimes(0); // Should use cache
+    });
+
+    it('should invalidate cache after clear', async () => {
+      const settings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'test-model',
+      };
+
+      const mockDelete = vi.fn().mockResolvedValue(true);
+      const mockGet = vi.fn()
+        .mockResolvedValueOnce(settings) // First get
+        .mockResolvedValueOnce(undefined); // After clear
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { delete: mockDelete, get: mockGet } };
+
+      // Get settings to populate cache
+      await storageManager.getUserSettings();
+      expect(mockGet).toHaveBeenCalledTimes(1);
+
+      // Clear settings
+      await storageManager.clearUserSettings();
+
+      // Verify cache is null
+      const cache = (storageManager as any).settingsCache;
+      expect(cache).toBeNull();
+
+      // Next get should fetch from S5 (cache miss)
+      await storageManager.getUserSettings();
+      expect(mockGet).toHaveBeenCalledTimes(2); // Called again after clear
+    });
+
+    it('should use new cache after save', async () => {
+      const settings1: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'model-1',
+      };
+
+      const settings2: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'model-2',
+      };
+
+      const mockPut = vi.fn().mockResolvedValue(undefined);
+      const mockGet = vi.fn().mockResolvedValue(settings1);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { put: mockPut, get: mockGet } };
+
+      // Save first settings
+      await storageManager.saveUserSettings(settings1);
+
+      // Get should return settings1 from cache
+      let retrieved = await storageManager.getUserSettings();
+      expect(retrieved?.selectedModel).toBe('model-1');
+
+      // Save second settings
+      await storageManager.saveUserSettings(settings2);
+
+      // Get should return settings2 from NEW cache
+      retrieved = await storageManager.getUserSettings();
+      expect(retrieved?.selectedModel).toBe('model-2');
+      expect(mockGet).toHaveBeenCalledTimes(0); // Never called S5 get
+    });
+
+    it('should use new cache after update', async () => {
+      const initialSettings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now() - 1000,
+        selectedModel: 'initial-model',
+        theme: 'dark',
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(initialSettings);
+      const mockPut = vi.fn().mockResolvedValue(undefined);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: mockPut } };
+
+      // First update
+      await storageManager.updateUserSettings({ selectedModel: 'updated-model-1' });
+      mockGet.mockClear();
+
+      // Get should use cache
+      let retrieved = await storageManager.getUserSettings();
+      expect(retrieved?.selectedModel).toBe('updated-model-1');
+      expect(retrieved?.theme).toBe('dark'); // Preserved
+      expect(mockGet).toHaveBeenCalledTimes(0);
+
+      // Second update
+      await storageManager.updateUserSettings({ theme: 'light' });
+      mockGet.mockClear();
+
+      // Get should use NEW cache
+      retrieved = await storageManager.getUserSettings();
+      expect(retrieved?.selectedModel).toBe('updated-model-1'); // Still preserved
+      expect(retrieved?.theme).toBe('light'); // Updated
+      expect(mockGet).toHaveBeenCalledTimes(0);
+    });
+  });
 });
