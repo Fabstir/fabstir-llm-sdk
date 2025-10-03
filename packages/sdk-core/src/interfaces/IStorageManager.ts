@@ -4,6 +4,7 @@
  */
 
 import { StorageOptions, StorageResult, ConversationData, Message } from '../types';
+import { UserSettings, PartialUserSettings } from '../types/settings.types';
 
 export interface IStorageManager {
   /**
@@ -70,4 +71,71 @@ export interface IStorageManager {
    * Clear all local cache
    */
   clearCache(): Promise<void>;
+
+  // ============= User Settings Methods =============
+
+  /**
+   * Save complete user settings to S5 storage
+   * Path: /user/settings.json
+   *
+   * @param settings - Complete UserSettings object with version and lastUpdated
+   * @throws Error if S5 not initialized or save fails
+   * @example
+   * ```typescript
+   * await storageManager.saveUserSettings({
+   *   version: UserSettingsVersion.V1,
+   *   lastUpdated: Date.now(),
+   *   selectedModel: 'tiny-vicuna-1b.q4_k_m.gguf',
+   *   preferredPaymentToken: 'USDC'
+   * });
+   * ```
+   */
+  saveUserSettings(settings: UserSettings): Promise<void>;
+
+  /**
+   * Load user settings from S5 storage
+   * Returns cached value if available within 5-minute TTL
+   *
+   * @returns UserSettings object if found, null if no settings exist (first-time user)
+   * @throws Error if S5 not initialized or network error (when no cache available)
+   * @example
+   * ```typescript
+   * const settings = await storageManager.getUserSettings();
+   * if (settings) {
+   *   console.log('Model:', settings.selectedModel);
+   * } else {
+   *   console.log('First-time user');
+   * }
+   * ```
+   */
+  getUserSettings(): Promise<UserSettings | null>;
+
+  /**
+   * Update specific settings without overwriting entire object
+   * Merges partial update with existing settings
+   *
+   * @param partial - Partial settings to merge (version/lastUpdated managed by SDK)
+   * @throws Error if S5 not initialized or update fails
+   * @example
+   * ```typescript
+   * await storageManager.updateUserSettings({
+   *   selectedModel: 'mistral-7b.q4_k_m.gguf'
+   * });
+   * // Other settings remain unchanged
+   * ```
+   */
+  updateUserSettings(partial: PartialUserSettings): Promise<void>;
+
+  /**
+   * Delete all user settings from S5 storage
+   * Useful for "Reset Preferences" functionality
+   *
+   * @throws Error if S5 not initialized or delete fails
+   * @example
+   * ```typescript
+   * await storageManager.clearUserSettings();
+   * // Subsequent getUserSettings() will return null
+   * ```
+   */
+  clearUserSettings(): Promise<void>;
 }

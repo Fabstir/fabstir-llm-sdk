@@ -58,7 +58,7 @@ Add user settings storage to `StorageManager` with:
 | Phase | Sub-phase | Status | Description |
 |-------|-----------|--------|-------------|
 | 1 | 1.1 | ✅ Complete | UserSettings interface and types |
-| 1 | 1.2 | ⏳ Pending | IStorageManager extension |
+| 1 | 1.2 | ✅ Complete | IStorageManager extension |
 | 2 | 2.1 | ⏳ Pending | saveUserSettings() implementation |
 | 2 | 2.2 | ⏳ Pending | getUserSettings() implementation |
 | 2 | 2.3 | ⏳ Pending | updateUserSettings() implementation |
@@ -161,18 +161,18 @@ export type PartialUserSettings = Partial<Omit<UserSettings, 'version' | 'lastUp
 
 **Tasks:**
 
-- [ ] Add `saveUserSettings(settings: UserSettings): Promise<void>`
-- [ ] Add `getUserSettings(): Promise<UserSettings | null>`
-- [ ] Add `updateUserSettings(partial: PartialUserSettings): Promise<void>`
-- [ ] Add `clearUserSettings(): Promise<void>`
-- [ ] Add JSDoc comments for all methods
+- [x] Add `saveUserSettings(settings: UserSettings): Promise<void>`
+- [x] Add `getUserSettings(): Promise<UserSettings | null>`
+- [x] Add `updateUserSettings(partial: PartialUserSettings): Promise<void>`
+- [x] Add `clearUserSettings(): Promise<void>`
+- [x] Add JSDoc comments for all methods
 
 **Test Requirements (WRITE FIRST):**
 
-Update `packages/sdk-core/tests/interfaces/storage-manager.test.ts` (max 40 lines):
-- [ ] Test interface has all required methods
-- [ ] Test method signatures match spec
-- [ ] Test return types are correct
+Create `packages/sdk-core/tests/interfaces/storage-manager.test.ts` (max 40 lines):
+- [x] Test interface has all required methods
+- [x] Test method signatures match spec
+- [x] Test return types are correct
 
 **Expected Interface Addition:**
 
