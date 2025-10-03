@@ -60,7 +60,7 @@ Add user settings storage to `StorageManager` with:
 | 1 | 1.1 | ✅ Complete | UserSettings interface and types |
 | 1 | 1.2 | ✅ Complete | IStorageManager extension |
 | 2 | 2.1 | ✅ Complete | saveUserSettings() implementation |
-| 2 | 2.2 | ⏳ Pending | getUserSettings() implementation |
+| 2 | 2.2 | ✅ Complete | getUserSettings() implementation |
 | 2 | 2.3 | ⏳ Pending | updateUserSettings() implementation |
 | 2 | 2.4 | ⏳ Pending | clearUserSettings() implementation |
 | 3 | 3.1 | ⏳ Pending | In-memory cache with TTL |
@@ -290,20 +290,20 @@ async saveUserSettings(settings: UserSettings): Promise<void> {
 
 **Tasks:**
 
-- [ ] Implement `getUserSettings(): Promise<UserSettings | null>`
-- [ ] Use S5 path: `/user/settings.json`
-- [ ] Return `null` if settings file doesn't exist (first-time user)
-- [ ] Use `s5.fs.get()` with automatic CBOR decoding
-- [ ] Validate returned data has required fields
+- [x] Implement `getUserSettings(): Promise<UserSettings | null>`
+- [x] Use S5 path: `home/user/settings.json` (follows existing pattern)
+- [x] Return `null` if settings file doesn't exist (first-time user)
+- [x] Use `s5.fs.get()` with automatic CBOR decoding
+- [x] Validate returned data has required fields
 
 **Test Requirements (WRITE FIRST):**
 
-Update `packages/sdk-core/tests/managers/storage-settings.test.ts` (+40 lines):
-- [ ] Test get returns saved settings
-- [ ] Test get returns null for first-time user
-- [ ] Test get throws if S5 not initialized
-- [ ] Test get throws on network error
-- [ ] Test get validates settings structure
+Update `packages/sdk-core/tests/managers/storage-settings.test.ts` (+89 lines):
+- [x] Test get returns saved settings
+- [x] Test get returns null for first-time user
+- [x] Test get throws if S5 not initialized
+- [x] Test get throws on network error (non "not found" errors)
+- [x] Test get validates settings structure (version and lastUpdated)
 
 **Expected Implementation:**
 

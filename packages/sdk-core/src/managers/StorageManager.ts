@@ -755,4 +755,53 @@ export class StorageManager implements IStorageManager {
       );
     }
   }
+
+  /**
+   * Load user settings from S5 storage
+   * Returns null if no settings exist (first-time user)
+   */
+  async getUserSettings(): Promise<UserSettings | null> {
+    if (!this.initialized) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+
+    const settingsPath = 'home/user/settings.json';
+
+    try {
+      // S5 automatically decodes CBOR to object
+      const settings = await this.s5Client.fs.get(settingsPath);
+
+      // Return null if no settings file exists (first-time user)
+      if (!settings) {
+        return null;
+      }
+
+      // Validate structure
+      if (!settings.version || !settings.lastUpdated) {
+        throw new SDKError(
+          'Invalid UserSettings structure in S5 storage',
+          'INVALID_SETTINGS_STRUCTURE'
+        );
+      }
+
+      return settings as UserSettings;
+    } catch (error: any) {
+      // Return null for "not found" errors (first-time user)
+      if (error.message?.includes('not found') || error.message?.includes('does not exist')) {
+        return null;
+      }
+
+      // Re-throw validation errors
+      if (error.code === 'INVALID_SETTINGS_STRUCTURE') {
+        throw error;
+      }
+
+      // Wrap other errors
+      throw new SDKError(
+        `Failed to load user settings: ${error.message}`,
+        'STORAGE_LOAD_ERROR',
+        { originalError: error }
+      );
+    }
+  }
 }

@@ -114,4 +114,92 @@ describe('StorageManager - User Settings', () => {
       expect(mockPut).toHaveBeenCalledWith('home/user/settings.json', settings);
     });
   });
+
+  describe('getUserSettings()', () => {
+    it('should throw error if not initialized', async () => {
+      await expect(storageManager.getUserSettings()).rejects.toThrow(
+        'StorageManager not initialized'
+      );
+    });
+
+    it('should return null for first-time user (no settings file)', async () => {
+      const mockGet = vi.fn().mockResolvedValue(undefined);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      const result = await storageManager.getUserSettings();
+
+      expect(result).toBeNull();
+      expect(mockGet).toHaveBeenCalledWith('home/user/settings.json');
+    });
+
+    it('should return saved settings', async () => {
+      const savedSettings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'tiny-vicuna-1b.q4_k_m.gguf',
+        preferredPaymentToken: 'USDC',
+        theme: 'dark',
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(savedSettings);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      const result = await storageManager.getUserSettings();
+
+      expect(result).toEqual(savedSettings);
+      expect(mockGet).toHaveBeenCalledWith('home/user/settings.json');
+    });
+
+    it('should return null if settings file not found', async () => {
+      const mockGet = vi.fn().mockRejectedValue(new Error('File not found'));
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      const result = await storageManager.getUserSettings();
+
+      expect(result).toBeNull();
+    });
+
+    it('should throw error if settings missing version field', async () => {
+      const invalidSettings = {
+        lastUpdated: Date.now(),
+        selectedModel: 'test-model',
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(invalidSettings);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      await expect(storageManager.getUserSettings()).rejects.toThrow(
+        'Invalid UserSettings structure'
+      );
+    });
+
+    it('should throw error if settings missing lastUpdated field', async () => {
+      const invalidSettings = {
+        version: UserSettingsVersion.V1,
+        selectedModel: 'test-model',
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(invalidSettings);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      await expect(storageManager.getUserSettings()).rejects.toThrow(
+        'Invalid UserSettings structure'
+      );
+    });
+
+    it('should throw error on network error (not "not found")', async () => {
+      const mockGet = vi.fn().mockRejectedValue(new Error('Network timeout'));
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      await expect(storageManager.getUserSettings()).rejects.toThrow(
+        'Failed to load user settings'
+      );
+    });
+  });
 });
