@@ -339,4 +339,59 @@ describe('StorageManager - User Settings', () => {
       expect(savedSettings.lastUpdated).toBeGreaterThan(existingSettings.lastUpdated);
     });
   });
+
+  describe('clearUserSettings()', () => {
+    it('should throw error if not initialized', async () => {
+      await expect(storageManager.clearUserSettings()).rejects.toThrow(
+        'StorageManager not initialized'
+      );
+    });
+
+    it('should delete settings file', async () => {
+      const mockDelete = vi.fn().mockResolvedValue(true);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { delete: mockDelete } };
+
+      await storageManager.clearUserSettings();
+
+      expect(mockDelete).toHaveBeenCalledWith('home/user/settings.json');
+    });
+
+    it('should not throw if settings file does not exist', async () => {
+      const mockDelete = vi.fn().mockResolvedValue(false); // Returns false when file doesn't exist
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { delete: mockDelete } };
+
+      await expect(storageManager.clearUserSettings()).resolves.toBeUndefined();
+      expect(mockDelete).toHaveBeenCalledWith('home/user/settings.json');
+    });
+
+    it('should result in getUserSettings returning null after clear', async () => {
+      const mockDelete = vi.fn().mockResolvedValue(true);
+      const mockGet = vi.fn().mockResolvedValue(undefined);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = {
+        fs: {
+          delete: mockDelete,
+          get: mockGet
+        }
+      };
+
+      await storageManager.clearUserSettings();
+      const settings = await storageManager.getUserSettings();
+
+      expect(mockDelete).toHaveBeenCalledWith('home/user/settings.json');
+      expect(settings).toBeNull();
+    });
+
+    it('should throw error on network failure', async () => {
+      const mockDelete = vi.fn().mockRejectedValue(new Error('Network error'));
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { delete: mockDelete } };
+
+      await expect(storageManager.clearUserSettings()).rejects.toThrow(
+        'Failed to clear user settings'
+      );
+    });
+  });
 });

@@ -854,4 +854,28 @@ export class StorageManager implements IStorageManager {
       );
     }
   }
+
+  /**
+   * Delete all user settings from S5 storage
+   * Used for "Reset Preferences" functionality
+   */
+  async clearUserSettings(): Promise<void> {
+    if (!this.initialized) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+
+    const settingsPath = 'home/user/settings.json';
+
+    try {
+      // S5 delete() returns boolean - true if deleted, false if didn't exist
+      await this.s5Client.fs.delete(settingsPath);
+      // No error thrown if file doesn't exist (returns false)
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to clear user settings: ${error.message}`,
+        'STORAGE_CLEAR_ERROR',
+        { originalError: error }
+      );
+    }
+  }
 }

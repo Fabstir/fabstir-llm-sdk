@@ -62,7 +62,7 @@ Add user settings storage to `StorageManager` with:
 | 2 | 2.1 | ✅ Complete | saveUserSettings() implementation |
 | 2 | 2.2 | ✅ Complete | getUserSettings() implementation |
 | 2 | 2.3 | ✅ Complete | updateUserSettings() implementation |
-| 2 | 2.4 | ⏳ Pending | clearUserSettings() implementation |
+| 2 | 2.4 | ✅ Complete | clearUserSettings() implementation |
 | 3 | 3.1 | ⏳ Pending | In-memory cache with TTL |
 | 3 | 3.2 | ⏳ Pending | Cache invalidation strategy |
 | 4 | 4.1 | ⏳ Pending | S5 unavailable error handling |
@@ -427,18 +427,19 @@ async updateUserSettings(partial: PartialUserSettings): Promise<void> {
 
 **Tasks:**
 
-- [ ] Implement `clearUserSettings(): Promise<void>`
-- [ ] Use `s5.fs.delete()` to remove settings file
-- [ ] Don't throw if settings file doesn't exist
-- [ ] Log operation for debugging
+- [x] Implement `clearUserSettings(): Promise<void>`
+- [x] Use `s5.fs.delete()` to remove settings file
+- [x] Don't throw if settings file doesn't exist (delete returns false)
+- [x] Error handling with SDKError
 
 **Test Requirements (WRITE FIRST):**
 
-Update `packages/sdk-core/tests/managers/storage-settings.test.ts` (+30 lines):
-- [ ] Test clear removes settings file
-- [ ] Test subsequent get returns null after clear
-- [ ] Test clear doesn't throw if no settings exist
-- [ ] Test clear throws on network error
+Update `packages/sdk-core/tests/managers/storage-settings.test.ts` (+54 lines):
+- [x] Test clear removes settings file
+- [x] Test subsequent get returns null after clear
+- [x] Test clear doesn't throw if no settings exist
+- [x] Test clear throws on network error
+- [x] Test clear throws if not initialized
 
 **Expected Implementation:**
 
