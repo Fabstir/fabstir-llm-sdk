@@ -61,7 +61,7 @@ Add user settings storage to `StorageManager` with:
 | 1 | 1.2 | ✅ Complete | IStorageManager extension |
 | 2 | 2.1 | ✅ Complete | saveUserSettings() implementation |
 | 2 | 2.2 | ✅ Complete | getUserSettings() implementation |
-| 2 | 2.3 | ⏳ Pending | updateUserSettings() implementation |
+| 2 | 2.3 | ✅ Complete | updateUserSettings() implementation |
 | 2 | 2.4 | ⏳ Pending | clearUserSettings() implementation |
 | 3 | 3.1 | ⏳ Pending | In-memory cache with TTL |
 | 3 | 3.2 | ⏳ Pending | Cache invalidation strategy |
@@ -359,21 +359,23 @@ async getUserSettings(): Promise<UserSettings | null> {
 
 **Tasks:**
 
-- [ ] Implement `updateUserSettings(partial: PartialUserSettings): Promise<void>`
-- [ ] Load current settings
-- [ ] Merge partial update
-- [ ] Update lastUpdated timestamp
-- [ ] Save merged result
-- [ ] Handle case where no settings exist yet
+- [x] Implement `updateUserSettings(partial: PartialUserSettings): Promise<void>`
+- [x] Load current settings via getUserSettings()
+- [x] Merge partial update with existing settings
+- [x] Update lastUpdated timestamp
+- [x] Save merged result via saveUserSettings()
+- [x] Handle case where no settings exist (create new)
 
 **Test Requirements (WRITE FIRST):**
 
-Update `packages/sdk-core/tests/managers/storage-settings.test.ts` (+50 lines):
-- [ ] Test update merges with existing settings
-- [ ] Test update preserves unchanged fields
-- [ ] Test update updates lastUpdated timestamp
-- [ ] Test update creates new settings if none exist
-- [ ] Test update throws on network error
+Update `packages/sdk-core/tests/managers/storage-settings.test.ts` (+137 lines):
+- [x] Test update merges with existing settings
+- [x] Test update preserves unchanged fields
+- [x] Test update updates lastUpdated timestamp
+- [x] Test update creates new settings if none exist
+- [x] Test update throws on network error
+- [x] Test update handles empty partial
+- [x] Test update throws if not initialized
 
 **Expected Implementation:**
 

@@ -202,4 +202,141 @@ describe('StorageManager - User Settings', () => {
       );
     });
   });
+
+  describe('updateUserSettings()', () => {
+    it('should throw error if not initialized', async () => {
+      const partial: PartialUserSettings = { selectedModel: 'new-model' };
+
+      await expect(storageManager.updateUserSettings(partial)).rejects.toThrow(
+        'StorageManager not initialized'
+      );
+    });
+
+    it('should merge partial update with existing settings', async () => {
+      const existingSettings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now() - 1000,
+        selectedModel: 'old-model',
+        preferredPaymentToken: 'USDC',
+        theme: 'dark',
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(existingSettings);
+      const mockPut = vi.fn().mockResolvedValue(undefined);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: mockPut } };
+
+      const partial: PartialUserSettings = { selectedModel: 'new-model' };
+
+      await storageManager.updateUserSettings(partial);
+
+      expect(mockGet).toHaveBeenCalledWith('home/user/settings.json');
+      expect(mockPut).toHaveBeenCalledTimes(1);
+
+      const savedSettings = mockPut.mock.calls[0][1];
+      expect(savedSettings.selectedModel).toBe('new-model');
+      expect(savedSettings.preferredPaymentToken).toBe('USDC'); // Preserved
+      expect(savedSettings.theme).toBe('dark'); // Preserved
+      expect(savedSettings.version).toBe(UserSettingsVersion.V1);
+      expect(savedSettings.lastUpdated).toBeGreaterThan(existingSettings.lastUpdated);
+    });
+
+    it('should preserve unchanged fields', async () => {
+      const existingSettings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now() - 1000,
+        selectedModel: 'model-1',
+        lastUsedModels: ['model-a', 'model-b'],
+        preferredPaymentToken: 'ETH',
+        autoApproveAmount: '5.0',
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(existingSettings);
+      const mockPut = vi.fn().mockResolvedValue(undefined);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: mockPut } };
+
+      const partial: PartialUserSettings = { theme: 'light' };
+
+      await storageManager.updateUserSettings(partial);
+
+      const savedSettings = mockPut.mock.calls[0][1];
+      expect(savedSettings.selectedModel).toBe('model-1'); // Unchanged
+      expect(savedSettings.lastUsedModels).toEqual(['model-a', 'model-b']); // Unchanged
+      expect(savedSettings.preferredPaymentToken).toBe('ETH'); // Unchanged
+      expect(savedSettings.autoApproveAmount).toBe('5.0'); // Unchanged
+      expect(savedSettings.theme).toBe('light'); // Updated
+    });
+
+    it('should update lastUpdated timestamp', async () => {
+      const oldTimestamp = Date.now() - 5000;
+      const existingSettings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: oldTimestamp,
+        selectedModel: 'test-model',
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(existingSettings);
+      const mockPut = vi.fn().mockResolvedValue(undefined);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: mockPut } };
+
+      await storageManager.updateUserSettings({ theme: 'dark' });
+
+      const savedSettings = mockPut.mock.calls[0][1];
+      expect(savedSettings.lastUpdated).toBeGreaterThan(oldTimestamp);
+    });
+
+    it('should create new settings if none exist', async () => {
+      const mockGet = vi.fn().mockResolvedValue(null);
+      const mockPut = vi.fn().mockResolvedValue(undefined);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: mockPut } };
+
+      const partial: PartialUserSettings = {
+        selectedModel: 'first-model',
+        preferredPaymentToken: 'USDC',
+      };
+
+      await storageManager.updateUserSettings(partial);
+
+      expect(mockPut).toHaveBeenCalledTimes(1);
+      const savedSettings = mockPut.mock.calls[0][1];
+      expect(savedSettings.version).toBe(UserSettingsVersion.V1);
+      expect(savedSettings.selectedModel).toBe('first-model');
+      expect(savedSettings.preferredPaymentToken).toBe('USDC');
+      expect(savedSettings.lastUpdated).toBeDefined();
+    });
+
+    it('should throw error on network failure', async () => {
+      const mockGet = vi.fn().mockRejectedValue(new Error('Network error'));
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      const partial: PartialUserSettings = { selectedModel: 'new-model' };
+
+      await expect(storageManager.updateUserSettings(partial)).rejects.toThrow(
+        'Failed to update user settings'
+      );
+    });
+
+    it('should handle empty partial update', async () => {
+      const existingSettings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now() - 1000,
+        selectedModel: 'test-model',
+      };
+
+      const mockGet = vi.fn().mockResolvedValue(existingSettings);
+      const mockPut = vi.fn().mockResolvedValue(undefined);
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: mockPut } };
+
+      await storageManager.updateUserSettings({});
+
+      const savedSettings = mockPut.mock.calls[0][1];
+      expect(savedSettings.selectedModel).toBe('test-model'); // Unchanged
+      expect(savedSettings.lastUpdated).toBeGreaterThan(existingSettings.lastUpdated);
+    });
+  });
 });

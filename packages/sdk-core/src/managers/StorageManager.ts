@@ -14,7 +14,8 @@ import {
   ConversationData,
   Message,
   UserSettings,
-  PartialUserSettings
+  PartialUserSettings,
+  UserSettingsVersion
 } from '../types';
 
 export interface Exchange {
@@ -800,6 +801,55 @@ export class StorageManager implements IStorageManager {
       throw new SDKError(
         `Failed to load user settings: ${error.message}`,
         'STORAGE_LOAD_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Update specific user settings without overwriting entire object
+   * Merges partial update with existing settings
+   */
+  async updateUserSettings(partial: PartialUserSettings): Promise<void> {
+    if (!this.initialized) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+
+    try {
+      // Load current settings
+      const current = await this.getUserSettings();
+
+      // If settings exist, merge with partial update
+      if (current) {
+        const merged: UserSettings = {
+          ...current,
+          ...partial,
+          version: current.version, // Preserve version
+          lastUpdated: Date.now(), // Always update timestamp
+        };
+
+        await this.saveUserSettings(merged);
+      } else {
+        // No settings exist - create new with required fields
+        const newSettings: UserSettings = {
+          version: UserSettingsVersion.V1,
+          lastUpdated: Date.now(),
+          selectedModel: '', // Default required field
+          ...partial, // Apply partial update
+        };
+
+        await this.saveUserSettings(newSettings);
+      }
+    } catch (error: any) {
+      // Re-throw validation errors (these should bubble up)
+      if (error.code === 'INVALID_SETTINGS' || error.code === 'INVALID_SETTINGS_STRUCTURE') {
+        throw error;
+      }
+
+      // Wrap all other errors (including SDK errors from load/save)
+      throw new SDKError(
+        `Failed to update user settings: ${error.message}`,
+        'STORAGE_UPDATE_ERROR',
         { originalError: error }
       );
     }
