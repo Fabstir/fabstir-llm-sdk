@@ -781,4 +781,107 @@ describe('StorageManager - User Settings', () => {
       }
     });
   });
+
+  describe('Offline Mode Support', () => {
+    it('should return stale cache on network error', async () => {
+      const cachedSettings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now() - (10 * 60 * 1000), // 10 minutes old (expired)
+        selectedModel: 'cached-model',
+      };
+
+      const mockGet = vi.fn().mockRejectedValue(new Error('Network timeout'));
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      // Pre-populate cache with expired data
+      (storageManager as any).settingsCache = {
+        data: cachedSettings,
+        timestamp: Date.now() - (10 * 60 * 1000), // Expired (older than 5 min TTL)
+      };
+
+      // Should return stale cache instead of throwing
+      const result = await storageManager.getUserSettings();
+      expect(result).toEqual(cachedSettings);
+      expect(result?.selectedModel).toBe('cached-model');
+    });
+
+    it('should throw error on network failure with no cache', async () => {
+      const mockGet = vi.fn().mockRejectedValue(new Error('Network timeout'));
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      // No cache
+      (storageManager as any).settingsCache = null;
+
+      try {
+        await storageManager.getUserSettings();
+        expect.fail('Should have thrown error');
+      } catch (error: any) {
+        expect(error.code).toBe('STORAGE_LOAD_ERROR');
+        expect(error.message).toContain('Failed to load user settings');
+      }
+    });
+
+    it('should use stale cache on connection refused error', async () => {
+      const cachedSettings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now() - (8 * 60 * 1000), // 8 minutes old
+        selectedModel: 'offline-model',
+        theme: 'dark',
+      };
+
+      const mockGet = vi.fn().mockRejectedValue(new Error('Connection refused'));
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      // Pre-populate cache
+      (storageManager as any).settingsCache = {
+        data: cachedSettings,
+        timestamp: Date.now() - (8 * 60 * 1000),
+      };
+
+      const result = await storageManager.getUserSettings();
+      expect(result).toEqual(cachedSettings);
+      expect(result?.theme).toBe('dark');
+    });
+
+    it('should use stale cache for null (first-time user) on network error', async () => {
+      const mockGet = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      // Cache has null (first-time user, expired)
+      (storageManager as any).settingsCache = {
+        data: null,
+        timestamp: Date.now() - (10 * 60 * 1000),
+      };
+
+      const result = await storageManager.getUserSettings();
+      expect(result).toBeNull();
+    });
+
+    it('should prioritize fresh cache over network error fallback', async () => {
+      const cachedSettings: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'fresh-cached-model',
+      };
+
+      const mockGet = vi.fn().mockRejectedValue(new Error('Network error'));
+      (storageManager as any).initialized = true;
+      (storageManager as any).s5Client = { fs: { get: mockGet } };
+
+      // Fresh cache (within 5-min TTL)
+      (storageManager as any).settingsCache = {
+        data: cachedSettings,
+        timestamp: Date.now() - (2 * 60 * 1000), // 2 minutes old
+      };
+
+      // Should return cache WITHOUT calling S5 (cache hit, no network call)
+      const result = await storageManager.getUserSettings();
+      expect(result).toEqual(cachedSettings);
+      expect(mockGet).toHaveBeenCalledTimes(0); // Should NOT call S5
+    });
+  });
 });

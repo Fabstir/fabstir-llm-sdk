@@ -839,6 +839,18 @@ export class StorageManager implements IStorageManager {
         throw error;
       }
 
+      // Network error - return stale cache if available (offline mode)
+      if (error.message?.includes('network') ||
+          error.message?.includes('timeout') ||
+          error.message?.includes('Connection refused') ||
+          error.message?.includes('ECONNREFUSED')) {
+        if (this.settingsCache) {
+          console.warn('[StorageManager] Using stale cache due to network error');
+          return this.settingsCache.data;
+        }
+        // No cache available - throw error
+      }
+
       // Wrap other errors
       throw new SDKError(
         `Failed to load user settings: ${error.message}`,
