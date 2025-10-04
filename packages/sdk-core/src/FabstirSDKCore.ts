@@ -576,18 +576,16 @@ export class FabstirSDKCore extends EventEmitter {
       await (this.paymentManager as any).initialize(this.signer);
       console.log('PaymentManager initialized');
 
-      // Initialize storage manager with S5 seed (with timeout protection)
+      // Initialize storage manager with S5 seed (required - fail fast if unavailable)
       if (this.s5Seed && this.userAddress) {
-        try {
-          console.log('Initializing StorageManager...');
-          await this.storageManager.initialize(this.s5Seed);
-          console.log('StorageManager initialization attempted');
-        } catch (error: any) {
-          console.warn('StorageManager initialization error:', error.message);
-          console.warn('Continuing without S5 storage');
-        }
+        console.log('Initializing StorageManager...');
+        await this.storageManager.initialize(this.s5Seed);
+        console.log('StorageManager initialized successfully');
       } else {
-        console.log('Skipping StorageManager initialization (no seed or address)');
+        throw new SDKError(
+          'S5 seed and user address required for StorageManager initialization',
+          'STORAGE_INIT_FAILED'
+        );
       }
 
       console.log('Initializing SessionManager...');
