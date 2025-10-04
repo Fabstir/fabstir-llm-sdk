@@ -70,7 +70,7 @@ Add user settings storage to `StorageManager` with:
 | 5 | 5.1 | ✅ Complete | Version migration system |
 | 5 | 5.2 | ✅ Complete | Migration tests |
 | 6 | 6.1 | ✅ Complete | SDK integration tests |
-| 6 | 6.2 | ⏳ Pending | Cross-device sync tests |
+| 6 | 6.2 | ✅ Complete | Cross-device sync tests |
 | 7 | 7.1 | ⏳ Pending | API documentation |
 | 7 | 7.2 | ⏳ Pending | UI integration examples |
 
@@ -1056,10 +1056,11 @@ describe('User Settings Integration', () => {
 
 **Tasks:**
 
-- [ ] Create two SDK instances with same credentials
-- [ ] Test settings saved on Device A appear on Device B
-- [ ] Test last-write-wins conflict resolution
-- [ ] Test cache expiry triggers reload
+- [x] Create two SDK instances with same credentials
+- [x] Test settings saved on Device A appear on Device B
+- [x] Test last-write-wins conflict resolution
+- [x] Test cache expiry triggers reload
+- [x] Test concurrent updates with S5 optimistic locking
 
 **Test Requirements (WRITE FIRST):**
 

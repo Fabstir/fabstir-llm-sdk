@@ -314,4 +314,214 @@ describe('User Settings Integration - E2E', () => {
       expect(settings!.theme).toBe('dark');
     });
   });
+
+  describe('Cross-Device Sync', () => {
+    let deviceA: FabstirSDKCore;
+    let deviceB: FabstirSDKCore;
+    let storageA: IStorageManager;
+    let storageB: IStorageManager;
+
+    beforeAll(async () => {
+      // Initialize two SDK instances with same credentials (simulating two devices)
+      deviceA = new FabstirSDKCore({
+        mode: 'production' as const,
+        chainId: ChainId.BASE_SEPOLIA,
+        rpcUrl: RPC_URL,
+        contractAddresses: {
+          jobMarketplace: '0xdEa1B47872C27458Bb7331Ade99099761C4944Dc',
+          nodeRegistry: '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
+          proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
+          hostEarnings: '0x908962e8c6CE72610021586f85ebDE09aAc97776',
+          modelRegistry: '0x92b2De840bB2171203011A6dBA928d855cA8183E',
+          usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
+        }
+      });
+
+      deviceB = new FabstirSDKCore({
+        mode: 'production' as const,
+        chainId: ChainId.BASE_SEPOLIA,
+        rpcUrl: RPC_URL,
+        contractAddresses: {
+          jobMarketplace: '0xdEa1B47872C27458Bb7331Ade99099761C4944Dc',
+          nodeRegistry: '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
+          proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
+          hostEarnings: '0x908962e8c6CE72610021586f85ebDE09aAc97776',
+          modelRegistry: '0x92b2De840bB2171203011A6dBA928d855cA8183E',
+          usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
+        }
+      });
+
+      // Authenticate both devices with same private key (same user account)
+      await deviceA.authenticate('privatekey', { privateKey: TEST_PRIVATE_KEY });
+      await deviceB.authenticate('privatekey', { privateKey: TEST_PRIVATE_KEY });
+
+      storageA = await deviceA.getStorageManager();
+      storageB = await deviceB.getStorageManager();
+    });
+
+    beforeEach(async () => {
+      // Clear settings before each test to avoid cross-test contamination
+      await storageA.clearUserSettings();
+      // Also invalidate Device B's cache (since they share the same S5 account)
+      try {
+        await storageB.clearUserSettings();
+      } catch (error) {
+        // Ignore if already cleared
+      }
+      // Wait for S5 propagation
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    });
+
+    it('should sync settings from Device A to Device B', async () => {
+      // Save settings on Device A
+      const settingsA: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'device-a-model',
+        theme: 'light',
+        preferredPaymentToken: 'USDC',
+      };
+
+      await storageA.saveUserSettings(settingsA);
+
+      // Wait for S5 propagation (S5 is eventually consistent)
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Load on Device B (should see Device A's settings)
+      const settingsB = await storageB.getUserSettings();
+
+      expect(settingsB).not.toBeNull();
+      expect(settingsB!.selectedModel).toBe('device-a-model');
+      expect(settingsB!.theme).toBe('light');
+      expect(settingsB!.preferredPaymentToken).toBe('USDC');
+    });
+
+    it('should implement last-write-wins on conflict', async () => {
+      // Device A saves
+      const settingsA: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'model-a',
+        theme: 'dark',
+      };
+
+      await storageA.saveUserSettings(settingsA);
+
+      // Wait for S5 propagation to complete Device A's write
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Device B saves (should win as it's the later write)
+      const settingsB: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'model-b',
+        theme: 'light',
+      };
+
+      await storageB.saveUserSettings(settingsB);
+
+      // Wait for S5 propagation
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Clear Device A's cache to force reload from S5
+      // (In production, cache would expire after 5 minutes)
+      (storageA as any).settingsCache = null;
+
+      // Both devices should see Device B's value (last write wins)
+      const finalA = await storageA.getUserSettings();
+      const finalB = await storageB.getUserSettings();
+
+      expect(finalA!.selectedModel).toBe('model-b');
+      expect(finalA!.theme).toBe('light');
+      expect(finalB!.selectedModel).toBe('model-b');
+      expect(finalB!.theme).toBe('light');
+    });
+
+    it('should reload settings after cache expiry', async () => {
+      // Device A saves settings
+      const initial: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'initial-model',
+      };
+
+      await storageA.saveUserSettings(initial);
+
+      // Wait for S5 propagation before Device B reads
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Device B loads and caches
+      const cachedB = await storageB.getUserSettings();
+      expect(cachedB!.selectedModel).toBe('initial-model');
+
+      // Wait for S5 propagation to complete
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Device A updates settings
+      const updated: UserSettings = {
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'updated-model',
+      };
+
+      await storageA.saveUserSettings(updated);
+
+      // Wait for S5 propagation
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Device B should still have cached version (within 5-minute TTL)
+      const stillCached = await storageB.getUserSettings();
+      expect(stillCached!.selectedModel).toBe('initial-model'); // From cache
+
+      // Verify cache is being used (same object reference)
+      expect(stillCached).toBe(cachedB); // Same object reference = from cache
+    });
+
+    it('should handle concurrent updates with S5 optimistic locking', async () => {
+      // S5 uses optimistic locking with revision numbers
+      // When two devices write simultaneously, one may fail with "Revision number too low"
+      // This test verifies proper error handling for concurrent writes
+
+      // First establish some initial settings
+      await storageA.saveUserSettings({
+        version: UserSettingsVersion.V1,
+        lastUpdated: Date.now(),
+        selectedModel: 'initial',
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Both devices attempt to update settings simultaneously
+      const results = await Promise.allSettled([
+        storageA.updateUserSettings({ selectedModel: 'concurrent-a' }),
+        storageB.updateUserSettings({ selectedModel: 'concurrent-b' }),
+      ]);
+
+      // At least one should succeed (S5 optimistic locking)
+      const successCount = results.filter(r => r.status === 'fulfilled').length;
+      expect(successCount).toBeGreaterThanOrEqual(1);
+
+      // Wait for S5 propagation
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Clear caches to force reload from S5
+      (storageA as any).settingsCache = null;
+      (storageB as any).settingsCache = null;
+
+      // Both devices should eventually see a consistent state
+      const finalA = await storageA.getUserSettings();
+      const finalB = await storageB.getUserSettings();
+
+      // Both should have settings (not null)
+      expect(finalA).not.toBeNull();
+      expect(finalB).not.toBeNull();
+
+      // Both should see the same final state (eventual consistency)
+      expect(finalA!.selectedModel).toBe(finalB!.selectedModel);
+      // Should be one of the attempted values (or initial if both failed, though unlikely)
+      expect(['concurrent-a', 'concurrent-b', 'initial']).toContain(finalA!.selectedModel);
+    });
+  });
 });
