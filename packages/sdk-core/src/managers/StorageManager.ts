@@ -17,6 +17,7 @@ import {
   PartialUserSettings,
   UserSettingsVersion
 } from '../types';
+import { migrateUserSettings } from './migrations/user-settings';
 
 export interface Exchange {
   prompt: string;
@@ -808,21 +809,16 @@ export class StorageManager implements IStorageManager {
         return null;
       }
 
-      // Validate structure
-      if (!settings.version || !settings.lastUpdated) {
-        throw new SDKError(
-          'Invalid UserSettings structure in S5 storage',
-          'INVALID_SETTINGS_STRUCTURE'
-        );
-      }
+      // Migrate settings to current version
+      const migratedSettings = migrateUserSettings(settings);
 
-      // Update cache
+      // Update cache with migrated settings
       this.settingsCache = {
-        data: settings as UserSettings,
+        data: migratedSettings,
         timestamp: Date.now(),
       };
 
-      return settings as UserSettings;
+      return migratedSettings;
     } catch (error: any) {
       // Return null for "not found" errors (first-time user)
       if (error.message?.includes('not found') || error.message?.includes('does not exist')) {
@@ -834,9 +830,20 @@ export class StorageManager implements IStorageManager {
         return null;
       }
 
-      // Re-throw validation errors
+      // Re-throw validation and migration errors
       if (error.code === 'INVALID_SETTINGS_STRUCTURE') {
         throw error;
+      }
+
+      // Re-throw migration errors (missing version, unsupported version, missing required fields)
+      if (error.message?.includes('missing version field') ||
+          error.message?.includes('missing lastUpdated field') ||
+          error.message?.includes('Unsupported UserSettings version')) {
+        throw new SDKError(
+          'Invalid UserSettings structure in S5 storage',
+          'INVALID_SETTINGS_STRUCTURE',
+          { originalError: error }
+        );
       }
 
       // Network error - return stale cache if available (offline mode)
