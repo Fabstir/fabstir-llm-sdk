@@ -69,7 +69,7 @@ Add user settings storage to `StorageManager` with:
 | 4 | 4.2 | ✅ Complete | Offline mode support |
 | 5 | 5.1 | ✅ Complete | Version migration system |
 | 5 | 5.2 | ✅ Complete | Migration tests |
-| 6 | 6.1 | ⏳ Pending | SDK integration tests |
+| 6 | 6.1 | ✅ Complete | SDK integration tests |
 | 6 | 6.2 | ⏳ Pending | Cross-device sync tests |
 | 7 | 7.1 | ⏳ Pending | API documentation |
 | 7 | 7.2 | ⏳ Pending | UI integration examples |
@@ -967,11 +967,11 @@ describe('UserSettings Migration', () => {
 
 **Tasks:**
 
-- [ ] Create integration test with real S5 instance
-- [ ] Test full workflow: save → get → update → clear
-- [ ] Test cross-device sync simulation
-- [ ] Test cache behavior
-- [ ] Test error scenarios
+- [x] Create integration test with real S5 instance
+- [x] Test full workflow: save → get → update → clear
+- [x] Test cross-device sync simulation (deferred to 6.2)
+- [x] Test cache behavior
+- [x] Test error scenarios (covered in unit tests)
 
 **Test Requirements (WRITE FIRST):**
 
