@@ -23,6 +23,7 @@ A professional chat application with:
 - ✅ Cost tracking with beautiful charts (Recharts)
 - ✅ Toast notifications for all user feedback
 - ✅ S5 decentralized storage for conversation persistence
+- ✅ Persistent user settings with cross-device sync
 - ✅ Responsive design (mobile + desktop)
 - ✅ Professional loading states and error handling
 
@@ -1844,6 +1845,51 @@ getHostEarnings(hostAddress: string, tokenAddress: string): Promise<bigint>
 getHostStatus(hostAddress: string): Promise<HostStatus>
 ```
 
+### StorageManager Methods
+
+```typescript
+// Store conversation
+storeConversation(data: {
+  sessionId: string;
+  messages: Array<{role: string; content: string; timestamp: number}>;
+}): Promise<string>
+
+// Retrieve conversation
+retrieveConversation(sessionId: string): Promise<{messages: Array<any>; metadata?: any}>
+
+// User Settings (cross-device sync, 5-minute cache)
+import { UserSettings, UserSettingsVersion } from '@fabstir/sdk-core';
+
+// Save settings
+saveUserSettings(settings: UserSettings): Promise<void>
+
+// Get settings (null for first-time users)
+getUserSettings(): Promise<UserSettings | null>
+
+// Update specific settings
+updateUserSettings(partial: PartialUserSettings): Promise<void>
+
+// Clear all settings
+clearUserSettings(): Promise<void>
+
+// Example: Save user preferences
+await storageManager.saveUserSettings({
+  version: UserSettingsVersion.V1,
+  lastUpdated: Date.now(),
+  selectedModel: 'tiny-vicuna-1b.q4_k_m.gguf',
+  preferredPaymentToken: 'USDC',
+  theme: 'dark'
+});
+
+// Example: Get settings
+const settings = await storageManager.getUserSettings();
+if (settings) {
+  console.log('Model preference:', settings.selectedModel);
+} else {
+  console.log('First-time user - show setup wizard');
+}
+```
+
 ---
 
 ## 🔧 Troubleshooting
@@ -1884,6 +1930,7 @@ getHostStatus(hostAddress: string): Promise<HostStatus>
 ## 📖 Resources
 
 - SDK API: `/workspace/docs/SDK_API.md`
+- UI Developer Settings Guide: `/workspace/docs/UI_DEVELOPER_SETTINGS_GUIDE.md`
 - Reference Implementation: `/workspace/apps/harness/pages/chat-context-demo.tsx`
 - shadcn/ui: https://ui.shadcn.com
 - RainbowKit: https://rainbowkit.com

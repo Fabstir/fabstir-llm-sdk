@@ -98,6 +98,32 @@ const data = await storageManager.retrieveData('my-key');
 
 // List user data
 const userDataList = await storageManager.listUserData();
+
+// User Settings (cross-device sync)
+import { UserSettings, UserSettingsVersion } from '@fabstir/sdk-core';
+
+// Save settings
+await storageManager.saveUserSettings({
+  version: UserSettingsVersion.V1,
+  lastUpdated: Date.now(),
+  selectedModel: 'tiny-vicuna-1b.q4_k_m.gguf',
+  preferredPaymentToken: 'USDC',
+  theme: 'dark'
+});
+
+// Get settings (cached for 5 minutes)
+const settings = await storageManager.getUserSettings();
+if (settings) {
+  console.log('Model:', settings.selectedModel);
+}
+
+// Update specific settings
+await storageManager.updateUserSettings({
+  theme: 'light'
+});
+
+// Clear all settings
+await storageManager.clearUserSettings();
 ```
 
 ### 4. DiscoveryManager
@@ -286,6 +312,8 @@ main().catch(console.error);
 ## See Also
 
 - [Full API Reference](SDK_API.md)
+- [UI Developer Chat Guide](UI_DEVELOPER_CHAT_GUIDE.md)
+- [UI Developer Settings Guide](UI_DEVELOPER_SETTINGS_GUIDE.md)
 - [Architecture Overview](ARCHITECTURE.md)
 - [Integration Tests](INTEGRATED_TESTING.md)
 - [Examples Directory](../examples/)
