@@ -10,6 +10,7 @@
 - [Model Governance](#model-governance)
 - [Host Management](#host-management)
 - [Storage Management](#storage-management)
+  - [User Settings Storage](#user-settings-storage)
 - [Treasury Management](#treasury-management)
 - [Client Manager](#client-manager)
 - [WebSocket Communication](#websocket-communication)
@@ -1638,6 +1639,281 @@ async storeSessionMetadata(
 ): Promise<string>
 ```
 
+### User Settings Storage
+
+The StorageManager provides persistent user settings storage via S5 decentralized storage. Settings sync automatically across devices and are cached in-memory for performance.
+
+**Features:**
+- **Cross-device synchronization** - Settings stored on S5 are accessible from any device
+- **In-memory caching** - 5-minute TTL reduces S5 reads and improves performance
+- **Offline mode support** - Returns stale cache when network is unavailable
+- **Schema versioning** - Automatic migration system for future schema changes
+- **Last-write-wins** - Simple conflict resolution for concurrent updates
+
+#### saveUserSettings(settings: UserSettings): Promise<void>
+
+Save complete user settings object to S5 storage. This overwrites any existing settings.
+
+**Parameters:**
+- `settings` (UserSettings) - Complete settings object with all required fields
+
+**Required Fields:**
+- `version` - Schema version (use `UserSettingsVersion.V1`)
+- `lastUpdated` - Unix timestamp in milliseconds
+- `selectedModel` - Currently selected model name
+
+**Throws:**
+- `SDKError` with code `STORAGE_NOT_INITIALIZED` - StorageManager not initialized
+- `SDKError` with code `INVALID_SETTINGS` - Missing required fields (version, lastUpdated)
+- `SDKError` with code `STORAGE_SAVE_ERROR` - Failed to save to S5
+
+**Cache Behavior:**
+- Updates in-memory cache immediately after successful save
+- Cache is valid for 5 minutes
+
+**Example:**
+```typescript
+import { UserSettings, UserSettingsVersion } from '@fabstir/sdk-core';
+
+const storageManager = await sdk.getStorageManager();
+
+const settings: UserSettings = {
+  version: UserSettingsVersion.V1,
+  lastUpdated: Date.now(),
+  selectedModel: 'tiny-vicuna-1b.q4_k_m.gguf',
+  preferredPaymentToken: 'USDC',
+  theme: 'dark',
+  lastUsedModels: ['tiny-vicuna-1b.q4_k_m.gguf', 'mistral-7b.q4_k_m.gguf'],
+  advancedSettingsExpanded: false
+};
+
+try {
+  await storageManager.saveUserSettings(settings);
+  console.log('Settings saved successfully');
+} catch (error) {
+  if (error.code === 'STORAGE_SAVE_ERROR') {
+    console.error('Failed to save settings:', error.message);
+  }
+}
+```
+
+#### getUserSettings(): Promise<UserSettings | null>
+
+Load user settings from S5 storage. Returns cached value if available within 5-minute TTL.
+
+**Returns:**
+- `UserSettings` object if settings exist
+- `null` if no settings found (first-time user)
+
+**Throws:**
+- `SDKError` with code `STORAGE_NOT_INITIALIZED` - StorageManager not initialized
+- `SDKError` with code `INVALID_SETTINGS_STRUCTURE` - Settings schema is invalid or migration failed
+- `SDKError` with code `STORAGE_LOAD_ERROR` - Failed to load from S5 and no cache available
+
+**Cache Behavior:**
+- Returns cached value if age < 5 minutes
+- Fetches from S5 if cache expired or missing
+- Caches result (including null for first-time users)
+
+**Offline Mode:**
+- Returns stale cache on network errors (even if expired)
+- Throws error only if no cache available
+
+**Example:**
+```typescript
+const storageManager = await sdk.getStorageManager();
+
+try {
+  const settings = await storageManager.getUserSettings();
+
+  if (settings) {
+    console.log('Last used model:', settings.selectedModel);
+    console.log('Theme:', settings.theme || 'default');
+    console.log('Payment token:', settings.preferredPaymentToken || 'not set');
+  } else {
+    console.log('First-time user, no settings found');
+    // Initialize with defaults
+    await storageManager.saveUserSettings({
+      version: UserSettingsVersion.V1,
+      lastUpdated: Date.now(),
+      selectedModel: 'tiny-vicuna-1b.q4_k_m.gguf', // Default model
+      theme: 'auto'
+    });
+  }
+} catch (error) {
+  if (error.code === 'INVALID_SETTINGS_STRUCTURE') {
+    console.error('Settings corrupted, resetting:', error.message);
+    await storageManager.clearUserSettings();
+  }
+}
+```
+
+#### updateUserSettings(partial: PartialUserSettings): Promise<void>
+
+Update specific settings without overwriting the entire object. Merges partial update with existing settings.
+
+**Parameters:**
+- `partial` (PartialUserSettings) - Partial settings object (version and lastUpdated excluded)
+
+**Behavior:**
+- If settings exist: Merges partial with current settings
+- If no settings exist: Creates new settings with partial values
+- Always updates `lastUpdated` timestamp
+- Preserves `version` field
+
+**Throws:**
+- `SDKError` with code `STORAGE_NOT_INITIALIZED` - StorageManager not initialized
+- `SDKError` with code `STORAGE_UPDATE_ERROR` - Failed to update settings
+
+**Example:**
+```typescript
+const storageManager = await sdk.getStorageManager();
+
+// Update only model preference
+await storageManager.updateUserSettings({
+  selectedModel: 'mistral-7b.q4_k_m.gguf'
+});
+
+// Update multiple fields
+await storageManager.updateUserSettings({
+  theme: 'dark',
+  preferredPaymentToken: 'ETH',
+  advancedSettingsExpanded: true
+});
+
+// Add to recently used models list
+const settings = await storageManager.getUserSettings();
+const recentModels = settings?.lastUsedModels || [];
+await storageManager.updateUserSettings({
+  lastUsedModels: [...new Set([newModel, ...recentModels])].slice(0, 5)
+});
+```
+
+#### clearUserSettings(): Promise<void>
+
+Delete all user settings from S5 storage. Used for "Reset Preferences" functionality.
+
+**Behavior:**
+- Deletes settings file from S5
+- Invalidates in-memory cache
+- No error if settings don't exist
+
+**Throws:**
+- `SDKError` with code `STORAGE_NOT_INITIALIZED` - StorageManager not initialized
+- `SDKError` with code `STORAGE_CLEAR_ERROR` - Failed to clear settings
+
+**Example:**
+```typescript
+const storageManager = await sdk.getStorageManager();
+
+// Reset all preferences
+try {
+  await storageManager.clearUserSettings();
+  console.log('Settings reset successfully');
+
+  // Settings are now null
+  const settings = await storageManager.getUserSettings();
+  console.log(settings); // null
+} catch (error) {
+  console.error('Failed to reset settings:', error.message);
+}
+```
+
+#### Cache Behavior
+
+User settings use an in-memory cache with 5-minute TTL for optimal performance:
+
+**Cache Lifecycle:**
+1. **First load** - Fetches from S5, caches result
+2. **Subsequent loads** - Returns cached value if age < 5 minutes
+3. **After 5 minutes** - Cache expired, fetches from S5
+4. **After save** - Cache updated immediately
+5. **After clear** - Cache invalidated (set to null)
+
+**Cross-Device Sync:**
+- Device A saves settings → S5 updated immediately
+- Device B reads settings → May see stale cache for up to 5 minutes
+- After cache expires → Device B sees Device A's changes
+
+**Manual Cache Bypass:**
+```typescript
+// Clear cache to force reload from S5
+await storageManager.clearUserSettings();
+await storageManager.saveUserSettings(newSettings); // This also updates cache
+```
+
+#### Offline Mode
+
+The SDK gracefully handles offline scenarios:
+
+**Network Error Handling:**
+```typescript
+try {
+  const settings = await storageManager.getUserSettings();
+  // Success: either from cache or S5
+} catch (error) {
+  // Only throws if network error AND no cache available
+  console.error('Offline and no cached settings');
+}
+```
+
+**Behavior:**
+- Network available → Fetch from S5, update cache
+- Network error + cache available → Return stale cache (warn in console)
+- Network error + no cache → Throw STORAGE_LOAD_ERROR
+
+**Detected Network Errors:**
+- Contains "network"
+- Contains "timeout"
+- Contains "Connection refused"
+- Contains "ECONNREFUSED"
+
+#### Schema Versioning
+
+The SDK supports schema migrations for future UserSettings versions:
+
+**Current Version:**
+```typescript
+export enum UserSettingsVersion {
+  V1 = 1  // Initial version
+}
+```
+
+**Migration System:**
+- Automatic migration on load via `getUserSettings()`
+- Migrations are transparent to the application
+- Always migrates to latest version
+- Migration failures throw `INVALID_SETTINGS_STRUCTURE`
+
+**Future Migration Example (V1 → V2):**
+```typescript
+// If V2 adds new fields, migration automatically:
+// 1. Detects V1 settings
+// 2. Adds new V2 fields with defaults
+// 3. Updates version to V2
+// 4. Returns migrated settings
+```
+
+**Handling Migration Errors:**
+```typescript
+try {
+  const settings = await storageManager.getUserSettings();
+} catch (error) {
+  if (error.code === 'INVALID_SETTINGS_STRUCTURE') {
+    // Corrupt or unsupported version
+    console.error('Settings migration failed:', error.message);
+
+    // Reset to defaults
+    await storageManager.clearUserSettings();
+    await storageManager.saveUserSettings({
+      version: UserSettingsVersion.V1,
+      lastUpdated: Date.now(),
+      selectedModel: 'default-model'
+    });
+  }
+}
+```
+
 ## Treasury Management
 
 Manages treasury operations and fee distribution.
@@ -2079,6 +2355,13 @@ enum SDKErrorCode {
   // Storage
   STORAGE_ERROR = 'STORAGE_ERROR',
   S5_CONNECTION_FAILED = 'S5_CONNECTION_FAILED',
+  STORAGE_NOT_INITIALIZED = 'STORAGE_NOT_INITIALIZED',
+  INVALID_SETTINGS = 'INVALID_SETTINGS',
+  INVALID_SETTINGS_STRUCTURE = 'INVALID_SETTINGS_STRUCTURE',
+  STORAGE_SAVE_ERROR = 'STORAGE_SAVE_ERROR',
+  STORAGE_LOAD_ERROR = 'STORAGE_LOAD_ERROR',
+  STORAGE_UPDATE_ERROR = 'STORAGE_UPDATE_ERROR',
+  STORAGE_CLEAR_ERROR = 'STORAGE_CLEAR_ERROR',
 
   // WebSocket
   WEBSOCKET_CONNECTION_FAILED = 'WEBSOCKET_CONNECTION_FAILED',
