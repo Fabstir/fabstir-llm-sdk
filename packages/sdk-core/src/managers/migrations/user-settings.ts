@@ -20,7 +20,8 @@ export function migrateUserSettings(settings: any): UserSettings {
     throw new Error('UserSettings missing version field');
   }
 
-  if (!settings.lastUpdated) {
+  // Check for undefined/null, but allow 0 (valid Unix timestamp)
+  if (settings.lastUpdated === undefined || settings.lastUpdated === null) {
     throw new Error('UserSettings missing lastUpdated field');
   }
 
