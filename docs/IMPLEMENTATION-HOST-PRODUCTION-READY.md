@@ -734,16 +734,26 @@ async function executeRegistration(config: RegistrationConfig): Promise<{
 }
 ```
 
-### Sub-phase 4.2: Registration Validation
+### Sub-phase 4.2: Registration Validation ✅ COMPLETED
 **Goal**: Comprehensive pre-flight checks before registration
 
 **Tasks**:
-- [ ] Write tests in `tests/registration/validation.test.ts` (150 lines)
-- [ ] Create `packages/host-cli/src/registration/validation.ts` (120 lines max)
-- [ ] Implement validatePublicUrl(url) - Checks URL format
-- [ ] Implement checkBinaryAvailable() - Verifies fabstir-llm-node exists
-- [ ] Implement checkPortAvailable(port) - Ensures port not in use
-- [ ] Implement validateModels(models) - Checks model format
+- [x] Write tests in `tests/registration/validation.test.ts` (192 lines, 26 tests)
+- [x] Create `packages/host-cli/src/registration/validation.ts` (113 lines)
+- [x] Implement validatePublicUrl(url) - Checks URL format
+- [x] Implement checkBinaryAvailable() - Verifies fabstir-llm-node exists
+- [x] Implement checkPortAvailable(port) - Ensures port not in use
+- [x] Implement validateModels(models) - Checks model format
+
+**Implementation Notes**:
+- Tests written first (RED phase): All tests failed (module didn't exist)
+- Implementation (GREEN phase): All 26 tests now passing in 915ms
+- validatePublicUrl validates http/https protocol and explicit port
+- Handles standard ports (80, 443) correctly
+- checkBinaryAvailable uses ProcessManager to locate binary
+- checkPortAvailable uses net.createServer() to test port binding
+- validateModels checks "repo:file" format with character validation
+- All functions return clear error messages for debugging
 
 **Test Requirements**:
 ```typescript
