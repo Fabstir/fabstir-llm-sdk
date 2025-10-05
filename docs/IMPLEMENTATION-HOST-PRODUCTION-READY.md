@@ -535,16 +535,25 @@ export interface ConfigData {
 }
 ```
 
-### Sub-phase 3.2: PID File Management
+### Sub-phase 3.2: PID File Management ✅ COMPLETED
 **Goal**: Robust PID tracking for process lifecycle
 
 **Tasks**:
-- [ ] Write tests in `tests/daemon/pid-manager.test.ts` (100 lines)
-- [ ] Update `packages/host-cli/src/daemon/pid.ts` (add 50 lines max)
-- [ ] Add savePIDWithUrl(pid, url) method
-- [ ] Add getPIDInfo() to return { pid, url, startTime }
-- [ ] Add cleanupStalePID() to remove invalid PIDs
-- [ ] Validate PID on load (check if process still running)
+- [x] Write tests in `tests/daemon/pid-manager.test.ts` (175 lines, 14 tests)
+- [x] Update `packages/host-cli/src/daemon/pid.ts` (added 57 lines)
+- [x] Add savePIDWithUrl(pid, url) method
+- [x] Add getPIDInfo() to return { pid, url, startTime }
+- [x] Add cleanupStalePID() to remove invalid PIDs
+- [x] Validate PID on load (check if process still running)
+
+**Implementation Notes**:
+- Tests written first (RED phase): All 14 tests failed with "is not a function"
+- Implementation (GREEN phase): All 14 tests now passing in 931ms
+- Added PIDInfo interface export for type safety
+- savePIDWithUrl stores JSON with pid, publicUrl, and ISO timestamp
+- getPIDInfo validates process is still running before returning data
+- cleanupStalePID removes stale files and returns cleanup status
+- Backward compatible with existing PID file usage
 
 **Test Requirements**:
 ```typescript

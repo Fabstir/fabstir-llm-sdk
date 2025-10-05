@@ -2,6 +2,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+/**
+ * PID information with metadata (Sub-phase 3.2)
+ */
+export interface PIDInfo {
+  pid: number;
+  publicUrl: string;
+  startTime: string;
+}
+
 export class PIDManager {
   private pidPath: string;
 
@@ -77,5 +86,60 @@ export class PIDManager {
 
   getPath(): string {
     return this.pidPath;
+  }
+
+  /**
+   * Save PID with metadata (Sub-phase 3.2)
+   */
+  savePIDWithUrl(pid: number, publicUrl: string): void {
+    const dir = path.dirname(this.pidPath);
+
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    const info: PIDInfo = {
+      pid,
+      publicUrl,
+      startTime: new Date().toISOString(),
+    };
+
+    fs.writeFileSync(this.pidPath, JSON.stringify(info, null, 2), 'utf8');
+  }
+
+  /**
+   * Get PID info with validation (Sub-phase 3.2)
+   */
+  getPIDInfo(): PIDInfo | null {
+    if (!fs.existsSync(this.pidPath)) {
+      return null;
+    }
+
+    try {
+      const content = fs.readFileSync(this.pidPath, 'utf8');
+      const info: PIDInfo = JSON.parse(content);
+
+      // Validate process is still running
+      if (!this.isProcessRunning(info.pid)) {
+        return null; // Stale PID
+      }
+
+      return info;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Remove stale PID files (Sub-phase 3.2)
+   */
+  cleanupStalePID(): boolean {
+    const info = this.getPIDInfo();
+    if (!info) {
+      this.removePID();
+      return true;
+    }
+    return false;
   }
 }
