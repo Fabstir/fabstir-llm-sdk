@@ -83,16 +83,23 @@ Running `fabstir-host register` creates a blockchain entry but doesn't start the
 
 ## Phase 1: Network Utilities & Validation
 
-### Sub-phase 1.1: Public Endpoint Verification
+### Sub-phase 1.1: Public Endpoint Verification ✅ COMPLETED
 **Goal**: Create utilities to verify a host URL is accessible from the internet
 
 **Tasks**:
-- [ ] Write tests in `tests/utils/network.test.ts` (150 lines)
-- [ ] Create `packages/host-cli/src/utils/network.ts` (120 lines max)
-- [ ] Implement verifyPublicEndpoint(url) - Tests /health from outside
-- [ ] Implement isLocalhostUrl(url) - Detects localhost/127.0.0.1
-- [ ] Implement warnIfLocalhost(url) - Shows production warning
-- [ ] Implement extractHostPort(url) - Parses URL to host:port
+- [x] Write tests in `tests/utils/network.test.ts` (247 lines - 37 tests)
+- [x] Create `packages/host-cli/src/utils/network.ts` (123 lines)
+- [x] Implement verifyPublicEndpoint(url) - Tests /health from outside
+- [x] Implement isLocalhostUrl(url) - Detects localhost/127.0.0.1
+- [x] Implement warnIfLocalhost(url) - Shows production warning
+- [x] Implement extractHostPort(url) - Parses URL to host:port
+
+**Implementation Notes**:
+- All 37 tests passing ✅
+- Handles IPv6 addresses with bracket stripping
+- Handles explicit ports even when they match protocol defaults (e.g., :443 for https)
+- Uses AbortController for timeout handling in fetch
+- Provides chalk-colored warnings for localhost URLs
 
 **Test Requirements**:
 ```typescript
