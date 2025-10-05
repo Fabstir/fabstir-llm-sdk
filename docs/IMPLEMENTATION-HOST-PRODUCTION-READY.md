@@ -480,16 +480,23 @@ private async waitForReady(handle: ProcessHandle): Promise<void> {
 
 ## Phase 3: Configuration Management
 
-### Sub-phase 3.1: Add Process Tracking to Config
+### Sub-phase 3.1: Add Process Tracking to Config ✅ COMPLETED
 **Goal**: Extend ConfigData to track running process PID and URL
 
 **Tasks**:
-- [ ] Write tests in `tests/config/config-types.test.ts` (80 lines)
-- [ ] Update `packages/host-cli/src/config/types.ts` (add 20 lines max)
-- [ ] Add processPid?: number field
-- [ ] Add nodeStartTime?: string field
-- [ ] Add publicUrl: string field (required)
-- [ ] Update saveConfig/loadConfig to handle new fields
+- [x] Write tests in `tests/config/config-types.test.ts` (212 lines, 9 tests)
+- [x] Update `packages/host-cli/src/config/types.ts` (added 3 lines)
+- [x] Add processPid?: number field
+- [x] Add nodeStartTime?: string field
+- [x] Add publicUrl: string field (already existed, tests verify preservation)
+- [x] Update saveConfig/loadConfig to handle new fields (no changes needed - JSON serialization handles it)
+
+**Implementation Notes**:
+- Tests verify type safety and serialization/deserialization
+- All 9 tests passing immediately (JSON serialization is schema-agnostic)
+- Added formal type definitions for IntelliSense and type checking
+- Backward compatible with existing configs (fields are optional)
+- publicUrl field already existed in ConfigData, tests confirm it's preserved
 
 **Test Requirements**:
 ```typescript

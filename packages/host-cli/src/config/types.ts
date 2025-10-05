@@ -10,6 +10,11 @@ export interface ConfigData {
   pricePerToken: number;
   minSessionDeposit?: number; // Made optional
   minJobDeposit?: number; // Added for compatibility
+
+  // Process tracking (Sub-phase 3.1)
+  processPid?: number;        // PID of running fabstir-llm-node
+  nodeStartTime?: string;     // ISO timestamp when node started
+
   contracts?: {
     jobMarketplace?: string;
     nodeRegistry?: string;
