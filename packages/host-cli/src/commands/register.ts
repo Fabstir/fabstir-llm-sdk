@@ -11,6 +11,10 @@ import { validateRegistrationRequirements } from '../registration/manager';
 import { initializeSDK, authenticateSDK } from '../sdk/client';
 import { ethers } from 'ethers';
 import chalk from 'chalk';
+import { spawnInferenceServer, stopInferenceServer, ProcessHandle } from '../process/manager';
+import { extractHostPort, verifyPublicEndpoint, warnIfLocalhost } from '../utils/network';
+import { showNetworkTroubleshooting } from '../utils/diagnostics';
+import { saveConfig, loadConfig } from '../config/storage';
 
 /**
  * Register the register command with the CLI
@@ -114,20 +118,48 @@ export async function executeRegistration(
       };
     }
 
-    // Execute registration
-    console.log(chalk.blue('\n🚀 Starting registration...'));
-    const result = await registerHost(config);
+    // Start node before registration (Sub-phase 4.1)
+    let processHandle: ProcessHandle | null = null;
+    try {
+      processHandle = await startNodeBeforeRegistration({
+        apiUrl: config.apiUrl || 'http://localhost:8080',
+        models: config.models || [],
+      });
 
-    // Show success
-    console.log(chalk.green('\n✅ Registration successful!'));
-    console.log(chalk.gray(`Transaction: ${result.transactionHash}`));
-    console.log(chalk.gray(`Host Address: ${result.hostInfo.hostAddress}`));
-    console.log(chalk.gray(`Staked Amount: ${ethers.formatUnits(result.hostInfo.stakedAmount, 18)} FAB`));
+      // Execute registration
+      console.log(chalk.blue('\n🚀 Starting registration...'));
+      const result = await registerHost(config);
 
-    console.log(chalk.blue('\n🎉 You are now registered as a Fabstir host!'));
-    console.log(chalk.gray('You can now start accepting AI inference jobs.'));
+      // Save PID to config (Sub-phase 4.1)
+      const currentConfig = await loadConfig();
+      if (currentConfig) {
+        await saveConfig({
+          ...currentConfig,
+          processPid: processHandle.pid,
+          nodeStartTime: new Date().toISOString(),
+          publicUrl: config.apiUrl,
+        });
+      }
 
-    return result;
+      // Show success
+      console.log(chalk.green('\n✅ Registration successful!'));
+      console.log(chalk.gray(`Transaction: ${result.transactionHash}`));
+      console.log(chalk.gray(`Host Address: ${result.hostInfo.hostAddress}`));
+      console.log(chalk.gray(`Staked Amount: ${ethers.formatUnits(result.hostInfo.stakedAmount, 18)} FAB`));
+      console.log(chalk.gray(`Node PID: ${processHandle.pid}`));
+
+      console.log(chalk.blue('\n🎉 You are now registered as a Fabstir host!'));
+      console.log(chalk.gray('You can now start accepting AI inference jobs.'));
+
+      return result;
+    } catch (error) {
+      // Rollback: Stop node if it was started (Sub-phase 4.1)
+      if (processHandle) {
+        console.log(chalk.yellow('\n⚠️  Rolling back: stopping node...'));
+        await stopInferenceServer(processHandle, true);
+      }
+      throw error;
+    }
   } catch (error: any) {
     // Handle error
     const handled = handleRegistrationError(error);
@@ -197,6 +229,56 @@ export async function prepareRegistrationData(
     stakeAmount: config.stakeAmount || 1000000000000000000000n, // Default 1000 FAB
     hostAddress: address
   };
+}
+
+/**
+ * Start fabstir-llm-node before registration (Sub-phase 4.1)
+ */
+export async function startNodeBeforeRegistration(config: {
+  apiUrl: string;
+  models: string[];
+}): Promise<ProcessHandle> {
+  // Warn if localhost URL
+  warnIfLocalhost(config.apiUrl);
+
+  // Extract port from URL
+  const { port } = extractHostPort(config.apiUrl);
+
+  console.log(chalk.blue('🚀 Starting inference node...'));
+
+  let processHandle: ProcessHandle | null = null;
+  try {
+    // Start node
+    processHandle = await spawnInferenceServer({
+      port,
+      host: '0.0.0.0',
+      publicUrl: config.apiUrl,
+      models: config.models,
+      logLevel: 'info',
+    });
+
+    console.log(chalk.green(` ✅ Node started (PID: ${processHandle.pid})`));
+
+    // Verify public accessibility
+    console.log(chalk.gray(`  Verifying ${config.apiUrl}...`));
+    const isAccessible = await verifyPublicEndpoint(config.apiUrl);
+
+    if (!isAccessible) {
+      showNetworkTroubleshooting(config.apiUrl);
+      throw new Error(`Node not accessible at public URL: ${config.apiUrl}`);
+    }
+
+    console.log(chalk.green(' ✅ Public URL verified'));
+
+    return processHandle;
+  } catch (error) {
+    // Rollback: Stop node if it was started
+    if (processHandle) {
+      console.log(chalk.yellow('\n⚠️  Rolling back: stopping node...'));
+      await stopInferenceServer(processHandle, true);
+    }
+    throw error;
+  }
 }
 
 /**

@@ -622,18 +622,28 @@ export class PIDManager {
 
 ## Phase 4: Register Command Enhancement
 
-### Sub-phase 4.1: Pre-Registration Node Startup
+### Sub-phase 4.1: Pre-Registration Node Startup ✅ COMPLETED
 **Goal**: Start fabstir-llm-node BEFORE blockchain registration
 
 **Tasks**:
-- [ ] Write tests in `tests/commands/register-integration.test.ts` (250 lines)
-- [ ] Update `packages/host-cli/src/commands/register.ts` (add 150 lines max)
-- [ ] Add startNodeBeforeRegistration() helper
-- [ ] Warn if URL is localhost
-- [ ] Start node with ProcessManager
-- [ ] Verify public URL accessibility
-- [ ] Save PID to config after successful start
-- [ ] Rollback (stop node) if registration fails
+- [x] Write tests in `tests/commands/register-integration.test.ts` (334 lines, 9 tests)
+- [x] Update `packages/host-cli/src/commands/register.ts` (added ~90 lines)
+- [x] Add startNodeBeforeRegistration() helper
+- [x] Warn if URL is localhost
+- [x] Start node with ProcessManager
+- [x] Verify public URL accessibility
+- [x] Save PID to config after successful start
+- [x] Rollback (stop node) if registration fails
+
+**Implementation Notes**:
+- Tests written first (RED phase): 8/9 tests failed initially
+- Implementation (GREEN phase): All 9 tests now passing in 660ms
+- Added startNodeBeforeRegistration() function (48 lines)
+- Updated executeRegistration() to start node before blockchain registration
+- Node startup happens after requirements check, before registration tx
+- PID, nodeStartTime, and publicUrl saved to config on success
+- Automatic rollback stops node if registration fails
+- Uses extractHostPort, verifyPublicEndpoint, warnIfLocalhost utilities
 
 **Test Requirements**:
 ```typescript
