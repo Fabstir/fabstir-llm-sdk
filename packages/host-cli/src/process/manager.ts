@@ -8,6 +8,7 @@ import { existsSync } from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
 import { ProcessLogger } from './logger';
+import { verifyPublicEndpoint } from '../utils/network';
 
 /**
  * Process configuration
@@ -15,6 +16,7 @@ import { ProcessLogger } from './logger';
 export interface ProcessConfig {
   port: number;
   host: string;
+  publicUrl?: string;        // NEW: Public URL for verification
   models: string[];
   maxConnections?: number;
   logLevel?: 'error' | 'warn' | 'info' | 'debug';
@@ -184,6 +186,42 @@ export class ProcessManager extends EventEmitter {
   async stopAll(force: boolean = false): Promise<void> {
     const handles = Array.from(this.handles.values());
     await Promise.all(handles.map(handle => this.stop(handle, force)));
+  }
+
+  /**
+   * Verify public URL is accessible (NEW for Sub-phase 2.1)
+   * @param handle - Process handle to verify
+   * @returns true if public URL is accessible or no URL to verify
+   */
+  async verifyPublicAccess(handle: ProcessHandle): Promise<boolean> {
+    if (!handle.config.publicUrl) {
+      return true; // No public URL to verify
+    }
+    return await verifyPublicEndpoint(handle.config.publicUrl);
+  }
+
+  /**
+   * Get running node information (NEW for Sub-phase 2.1)
+   * @param handle - Process handle to get info from
+   * @returns Node information including pid, port, uptime, status
+   */
+  getNodeInfo(handle: ProcessHandle): {
+    pid: number;
+    port: number;
+    publicUrl?: string;
+    uptime: number;
+    status: string;
+  } {
+    const startTime = handle.startTime.getTime();
+    const uptime = Math.floor((Date.now() - startTime) / 1000);
+
+    return {
+      pid: handle.pid,
+      port: handle.config.port,
+      publicUrl: handle.config.publicUrl,
+      uptime,
+      status: handle.status
+    };
   }
 
   /**
@@ -395,8 +433,8 @@ export async function stopInferenceServer(handle: ProcessHandle, force: boolean 
 export function getDefaultProcessConfig(): ProcessConfig {
   return {
     port: 8080,
-    host: '127.0.0.1',
-    models: ['llama-2-7b'],
+    host: '0.0.0.0',      // Bind to all interfaces for production
+    models: [],           // Empty by default - user must specify
     maxConnections: 10,
     logLevel: 'info'
   };

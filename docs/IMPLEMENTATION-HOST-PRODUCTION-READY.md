@@ -263,16 +263,23 @@ async spawn(config: ProcessConfig): Promise<ProcessHandle> {
 }
 ```
 
-### Sub-phase 2.1: Update ProcessManager for Production
+### Sub-phase 2.1: Update ProcessManager for Production ✅ COMPLETED
 **Goal**: Modify ProcessManager to use environment variables and track public URLs
 
 **Tasks**:
-- [ ] Write tests in `tests/process/manager-production.test.ts` (200 lines)
-- [ ] Update `packages/host-cli/src/process/manager.ts` (add 80 lines max)
-- [ ] Change default host from '127.0.0.1' to '0.0.0.0'
-- [ ] Add publicUrl field to ProcessConfig
-- [ ] Add verifyPublicAccess() method using network utils
-- [ ] Add getNodeInfo() to retrieve running node details
+- [x] Write tests in `tests/process/manager-production.test.ts` (290 lines, 17 tests)
+- [x] Update `packages/host-cli/src/process/manager.ts` (added ~40 lines to existing 430-line file)
+- [x] Change default host from '127.0.0.1' to '0.0.0.0'
+- [x] Add publicUrl field to ProcessConfig
+- [x] Add verifyPublicAccess() method using network utils
+- [x] Add getNodeInfo() to retrieve running node details
+
+**Implementation Notes**:
+- Tests written first (RED phase): 10/17 tests failed initially
+- Implementation (GREEN phase): All 17 tests now passing
+- Changed default models from ['llama-2-7b'] to [] (user must specify)
+- Imported verifyPublicEndpoint from '../utils/network'
+- Fixed vi.mock hoisting by using vi.mocked() pattern after import
 
 **Test Requirements**:
 ```typescript
