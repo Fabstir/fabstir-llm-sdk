@@ -1079,17 +1079,30 @@ describe('Host Lifecycle Integration', () => {
 });
 ```
 
-### Sub-phase 6.2: Error Handling & Edge Cases
+### Sub-phase 6.2: Error Handling & Edge Cases ✅ COMPLETED
 **Goal**: Robust error handling for production scenarios
 
 **Tasks**:
-- [ ] Write tests in `tests/commands/error-scenarios.test.ts` (200 lines)
-- [ ] Test missing fabstir-llm-node binary
-- [ ] Test port already in use
-- [ ] Test firewall blocking public access
-- [ ] Test node crash during registration
-- [ ] Test duplicate registration attempt
-- [ ] Show helpful error messages for each scenario
+- [x] Write tests in `tests/commands/error-scenarios.test.ts` (332 lines, 20 tests)
+- [x] Test missing fabstir-llm-node binary detection
+- [x] Test port already in use scenarios
+- [x] Test public URL unreachable (firewall)
+- [x] Test node crash during registration with rollback
+- [x] Test duplicate registration attempt
+- [x] Verify helpful error messages for each scenario
+
+**Implementation Notes**:
+- All 20 tests passing in 13ms
+- Tests verify existing error handling is robust
+- Binary detection validated via checkBinaryAvailable()
+- Port availability tested via checkPortAvailable()
+- Network accessibility verified via verifyPublicEndpoint()
+- Rollback scenarios tested for all failure modes
+- Duplicate registration prevented with clear messaging
+- Invalid configuration rejected with specific errors
+- Error messages include actionable guidance
+- Validation functions tested: validateModels(), validatePublicUrl()
+- Start command errors tested: missing config, missing publicUrl
 
 **Test Requirements**:
 ```typescript
