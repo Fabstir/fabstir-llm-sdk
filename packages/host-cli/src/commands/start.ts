@@ -1,11 +1,16 @@
 /**
  * Start command implementation
  * Starts the host node
+ *
+ * Sub-phase 5.1: Implement Start Command
  */
 
 import { Command } from 'commander';
 import chalk from 'chalk';
 import * as ConfigStorage from '../config/storage';
+import { PIDManager } from '../daemon/pid';
+import { spawnInferenceServer } from '../process/manager';
+import { extractHostPort } from '../utils/network';
 
 /**
  * Register start command
@@ -15,9 +20,7 @@ export function registerStartCommand(program: Command): void {
     .command('start')
     .description('Start the host node')
     .option('-d, --daemon', 'Run in background as daemon')
-    .option('-p, --port <port>', 'Override inference port')
-    .option('--test', 'Run in test mode')
-    .option('--dry-run', 'Validate configuration without starting')
+    .option('--log-level <level>', 'Log level (error, warn, info, debug)')
     .action(async (options) => {
       try {
         await startHost(options);
@@ -29,54 +32,76 @@ export function registerStartCommand(program: Command): void {
 }
 
 /**
- * Start the host node
+ * Start the host node (Sub-phase 5.1)
+ * Exported for testing
  */
-async function startHost(options: any): Promise<void> {
-  // Load configuration
+export async function startHost(options: any): Promise<void> {
+  // 1. Load configuration
   const config = await ConfigStorage.loadConfig();
   if (!config) {
-    throw new Error('Configuration not found. Run "fabstir-host init" first');
+    throw new Error('No configuration found. Run "fabstir-host register" first.');
   }
 
-  if (!config.privateKey) {
-    throw new Error('Wallet not configured. Run "fabstir-host wallet import" first');
+  if (!config.publicUrl) {
+    throw new Error('No public URL configured. Re-register your host.');
   }
 
-  console.log(chalk.blue('\n🚀 Starting Fabstir Host...\n'));
-
-  // Validate configuration
-  console.log(chalk.gray('✓ Configuration loaded'));
-  console.log(chalk.gray(`✓ Wallet: ${config.walletAddress}`));
-  console.log(chalk.gray(`✓ Network: ${config.network}`));
-
-  const port = options.port || config.inferencePort || 8080;
-  console.log(chalk.gray(`✓ Inference port: ${port}`));
-
-  if (options.dryRun) {
-    console.log(chalk.green('\n✅ Configuration valid (dry run mode)'));
+  // 2. Check if already running
+  const pidManager = new PIDManager();
+  const existingPid = pidManager.getPIDInfo();
+  if (existingPid && pidManager.isProcessRunning(existingPid.pid)) {
+    console.log(chalk.yellow(`⚠️  Node already running (PID: ${existingPid.pid})`));
+    console.log(chalk.gray(`URL: ${existingPid.publicUrl}`));
     return;
   }
 
+  // Clean up stale PID
+  pidManager.cleanupStalePID();
+
+  // 3. Extract config
+  const { port } = extractHostPort(config.publicUrl);
+
+  console.log(chalk.blue('🚀 Starting Fabstir host node...'));
+  console.log(chalk.gray(`  URL: ${config.publicUrl}`));
+  console.log(chalk.gray(`  Models: ${config.models.join(', ')}`));
+
+  // 4. Start node
+  const handle = await spawnInferenceServer({
+    port,
+    host: '0.0.0.0',
+    publicUrl: config.publicUrl,
+    models: config.models,
+    logLevel: options.logLevel || 'info',
+  });
+
+  // 5. Save PID
+  pidManager.savePIDWithUrl(handle.pid, config.publicUrl);
+  await ConfigStorage.saveConfig({
+    ...config,
+    processPid: handle.pid,
+    nodeStartTime: new Date().toISOString(),
+  });
+
+  console.log(chalk.green(`\n✅ Node started successfully (PID: ${handle.pid})`));
+  console.log(chalk.gray(`Monitor logs: fabstir-host logs`));
+  console.log(chalk.gray(`Stop node: fabstir-host stop`));
+
+  // 6. Daemon vs foreground mode
   if (options.daemon) {
-    console.log(chalk.yellow('\n⚠️  Daemon mode not yet implemented'));
-    console.log(chalk.gray('Starting in foreground mode...'));
-  }
+    console.log(chalk.blue('\n🔄 Running in daemon mode'));
+    return; // Exit, node keeps running
+  } else {
+    console.log(chalk.blue('\n🔄 Running in foreground mode (Ctrl+C to stop)'));
 
-  // TODO: Implement actual host node startup
-  // This would:
-  // 1. Initialize SDK with configuration
-  // 2. Check registration status
-  // 3. Start WebSocket server
-  // 4. Begin accepting inference requests
-  // 5. Monitor for sessions
-  // 6. Submit proofs when needed
+    // Stream logs to console
+    handle.process.stdout?.on('data', (data) => {
+      process.stdout.write(data);
+    });
+    handle.process.stderr?.on('data', (data) => {
+      process.stderr.write(data);
+    });
 
-  console.log(chalk.green('\n✅ Host node started successfully'));
-  console.log(chalk.gray('Press Ctrl+C to stop'));
-
-  // For now, just keep the process alive
-  if (!options.test) {
-    console.log(chalk.yellow('\n⚠️  Full host node implementation pending'));
-    console.log(chalk.gray('This is a placeholder that validates configuration'));
+    // Wait forever (until Ctrl+C)
+    await new Promise(() => {});
   }
 }

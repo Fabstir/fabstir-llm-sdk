@@ -813,18 +813,28 @@ export async function checkPortAvailable(port: number): Promise<boolean> {
 
 ## Phase 5: Start/Stop Command Implementation
 
-### Sub-phase 5.1: Implement Start Command
+### Sub-phase 5.1: Implement Start Command ✅ COMPLETED
 **Goal**: Replace TODO in start.ts with full implementation
 
 **Tasks**:
-- [ ] Write tests in `tests/commands/start.test.ts` (180 lines)
-- [ ] Update `packages/host-cli/src/commands/start.ts` (replace 150 lines)
-- [ ] Load config and extract publicUrl, models, port
-- [ ] Check if already running via PID
-- [ ] Start node with saved configuration
-- [ ] Support --daemon flag for background mode
-- [ ] Show logs in foreground, detach in daemon mode
-- [ ] Update config with new PID
+- [x] Write tests in `tests/commands/start.test.ts` (238 lines, 12 tests)
+- [x] Update `packages/host-cli/src/commands/start.ts` (107 lines)
+- [x] Load config and extract publicUrl, models, port
+- [x] Check if already running via PID
+- [x] Start node with saved configuration
+- [x] Support --daemon flag for background mode
+- [x] Show logs in foreground, detach in daemon mode
+- [x] Update config with new PID
+
+**Implementation Notes**:
+- Tests written first (RED phase): All 12 tests failed initially
+- Implementation (GREEN phase): All 12 tests now passing in 22ms
+- Exported startHost() function for testing
+- Uses PIDManager.getPIDInfo() for already-running detection
+- Cleans up stale PIDs automatically before starting
+- Daemon mode returns immediately after saving PID
+- Foreground mode streams stdout/stderr and waits forever
+- Custom log level support via --log-level option
 
 **Test Requirements**:
 ```typescript
