@@ -2,6 +2,9 @@ import { Command } from 'commander';
 import { ethers } from 'ethers';
 import chalk from 'chalk';
 import { initializeSDK, authenticateSDK, getHostManager, getAuthenticatedAddress } from '../sdk/client';
+import { PIDManager } from '../daemon/pid';
+import { DaemonManager } from '../daemon/manager';
+import * as ConfigStorage from '../config/storage';
 
 export function registerUnregisterCommand(program: Command): void {
   const cmd = program
@@ -51,6 +54,34 @@ export function registerUnregisterCommand(program: Command): void {
         const updatedStatus = await hostManager.getHostStatus(address);
         if (!updatedStatus.isActive) {
           console.log(chalk.green('✓ Node status: Inactive'));
+        }
+
+        // Stop the node if it's running (lifecycle symmetry with register)
+        const config = await ConfigStorage.loadConfig();
+        if (config?.processPid) {
+          const pidManager = new PIDManager();
+          const pidInfo = pidManager.getPIDInfo();
+
+          if (pidInfo && pidManager.isProcessRunning(pidInfo.pid)) {
+            console.log(chalk.blue('\n🛑 Stopping node...'));
+            console.log(chalk.gray(`  PID: ${pidInfo.pid}`));
+
+            const daemonManager = new DaemonManager();
+            await daemonManager.stopDaemon(pidInfo.pid, {
+              timeout: 10000,
+              force: false
+            });
+
+            pidManager.removePID();
+
+            await ConfigStorage.saveConfig({
+              ...config,
+              processPid: undefined,
+              nodeStartTime: undefined
+            });
+
+            console.log(chalk.green('✓ Node stopped'));
+          }
         }
 
       } catch (error: any) {

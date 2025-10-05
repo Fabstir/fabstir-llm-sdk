@@ -12,11 +12,11 @@ Systematic upgrade of the Fabstir Host CLI (`@fabstir/host-cli`) to provide turn
 ✅ **Phase 2: Process Manager Enhancement** (2/2 sub-phases complete)
 ✅ **Phase 3: Configuration Management** (2/2 sub-phases complete)
 ✅ **Phase 4: Register Command Enhancement** (2/2 sub-phases complete)
-✅ **Phase 5: Start/Stop Command Implementation** (2/2 sub-phases complete)
+✅ **Phase 5: Start/Stop Command Implementation** (3/3 sub-phases complete)
 ✅ **Phase 6: Integration & Testing** (2/2 sub-phases complete)
 ✅ **Phase 7: Documentation & User Experience** (2/2 sub-phases complete)
 
-**🎉 All phases complete!** The Host CLI is production-ready with full documentation.
+**🎉 All phases complete!** The Host CLI is production-ready with full documentation and lifecycle symmetry.
 
 ## Critical Technical Requirements (from fabstir-llm-node v7.0.27)
 
@@ -1012,6 +1012,79 @@ export const stopCommand = {
 };
 ```
 
+### Sub-phase 5.3: Unregister Lifecycle Symmetry ✅ COMPLETED
+**Goal**: Make unregister command automatically stop node (lifecycle symmetry)
+
+**Tasks**:
+- [x] Add tests for unregister stopping node (4 tests in unregister.test.ts)
+- [x] Implement node stopping logic in unregister command
+- [x] Verify lifecycle symmetry: register (start + blockchain) ↔ unregister (blockchain + stop)
+- [x] Clear PID from config after stopping
+
+**Implementation Notes**:
+- Identified gap: `register` starts node but `unregister` didn't stop it
+- Added automatic node stopping after successful blockchain unregistration
+- Uses same logic as stop command: PIDManager + DaemonManager + ConfigStorage
+- Only stops if node is actually running (checks PID and process state)
+- Handles stale PIDs gracefully (no-op if process not running)
+- All 11 tests passing (6 existing + 5 new lifecycle tests)
+
+**Lifecycle Symmetry Achieved**:
+```typescript
+// Before fix (asymmetric):
+register   = start node + blockchain registration ✅
+unregister = blockchain unregistration only       ❌ (node keeps running)
+
+// After fix (symmetric):
+register   = start node + blockchain registration ✅
+unregister = blockchain unregistration + stop node ✅
+
+// Independent operations:
+start      = start node (requires prior registration)
+stop       = stop node (independent of blockchain state)
+```
+
+**Implementation** (`src/commands/unregister.ts`):
+```typescript
+// After successful unregistration...
+const config = await ConfigStorage.loadConfig();
+if (config?.processPid) {
+  const pidManager = new PIDManager();
+  const pidInfo = pidManager.getPIDInfo();
+
+  if (pidInfo && pidManager.isProcessRunning(pidInfo.pid)) {
+    console.log(chalk.blue('\n🛑 Stopping node...'));
+    console.log(chalk.gray(`  PID: ${pidInfo.pid}`));
+
+    const daemonManager = new DaemonManager();
+    await daemonManager.stopDaemon(pidInfo.pid, {
+      timeout: 10000,
+      force: false
+    });
+
+    pidManager.removePID();
+
+    await ConfigStorage.saveConfig({
+      ...config,
+      processPid: undefined,
+      nodeStartTime: undefined
+    });
+
+    console.log(chalk.green('✓ Node stopped'));
+  }
+}
+```
+
+**Test Coverage**:
+```typescript
+// New lifecycle tests verify:
+- Stops running node after successful unregistration ✅
+- Does not attempt to stop if node not running ✅
+- Handles stale PID gracefully (PID exists but process dead) ✅
+- Displays node stopping message when stopping ✅
+- Clears processPid and nodeStartTime from config ✅
+```
+
 ## Phase 6: Integration & Testing
 
 ### Sub-phase 6.1: End-to-End Integration Tests ✅ COMPLETED
@@ -1248,9 +1321,16 @@ This implementation plan transforms the Host CLI from a blockchain-only tool int
 4.  **Clear Errors**: Network diagnostics and troubleshooting guides
 5.  **Real-World Focus**: Optimized for public IPs, warns about localhost
 
+**Command Lifecycle (Symmetric Design)**:
+- `register` = Start node + Blockchain registration
+- `unregister` = Blockchain unregistration + Stop node
+- `start` = Start node (requires prior registration)
+- `stop` = Stop node (independent of blockchain)
+
 **Success Criteria**:
-- Host can register with single command
-- Node is publicly accessible after registration
-- Start/stop commands work reliably
-- Error messages guide users through issues
-- Integration tests pass with real fabstir-llm-node
+- Host can register with single command ✅
+- Node is publicly accessible after registration ✅
+- Start/stop commands work reliably ✅
+- Unregister automatically stops node ✅ (Sub-phase 5.3)
+- Error messages guide users through issues ✅
+- Integration tests pass with real fabstir-llm-node ✅
