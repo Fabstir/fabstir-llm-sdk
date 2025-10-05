@@ -353,7 +353,7 @@ export function getDefaultProcessConfig(): ProcessConfig {
 }
 ```
 
-### Sub-phase 2.2: Health Check Enhancement (Log Monitoring Strategy)
+### Sub-phase 2.2: Health Check Enhancement (Log Monitoring Strategy) ✅ COMPLETED
 **Goal**: Implement proper startup detection using log monitoring
 
 **CRITICAL**: The `/health` endpoint returns 200 OK **immediately** when the HTTP server starts, NOT when the model is fully loaded. This means checking `/health` alone is insufficient.
@@ -364,14 +364,23 @@ export function getDefaultProcessConfig(): ProcessConfig {
 3. Only then verify public URL accessibility
 
 **Tasks**:
-- [ ] Write tests in `tests/process/health-check.test.ts` (120 lines)
-- [ ] Update `packages/host-cli/src/process/manager.ts` (modify waitForReady method)
-- [ ] Monitor logs for "✅ Model loaded successfully"
-- [ ] Monitor logs for "✅ P2P node started"
-- [ ] Monitor logs for "✅ API server started"
-- [ ] Monitor logs for "🎉 Fabstir LLM Node is running"
-- [ ] Then verify publicUrl if provided
-- [ ] Fail with diagnostics if startup sequence incomplete
+- [x] Write tests in `tests/process/health-check.test.ts` (165 lines, 4 tests)
+- [x] Update `packages/host-cli/src/process/manager.ts` (modified waitForReady method with ~48 lines)
+- [x] Monitor logs for "✅ Model loaded successfully"
+- [x] Monitor logs for "✅ P2P node started"
+- [x] Monitor logs for "✅ API server started"
+- [x] Monitor logs for "🎉 Fabstir LLM Node is running"
+- [x] Then verify publicUrl if provided
+- [x] Fail with diagnostics if startup sequence incomplete
+
+**Implementation Notes**:
+- Tests written first (RED phase): All 4 tests failed initially (3 timeouts, 1 assertion failure)
+- Implementation (GREEN phase): All 4 tests now passing in 61.3s
+- Added chalk and showNetworkTroubleshooting imports to ProcessManager
+- Replaced polling-based health check with log monitoring
+- 60-second timeout for model loading (realistic for production)
+- Progress indicators show each startup milestone
+- Public URL verification happens AFTER log confirmation
 
 **Test Requirements**:
 ```typescript

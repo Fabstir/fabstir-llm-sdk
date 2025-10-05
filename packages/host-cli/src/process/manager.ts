@@ -9,6 +9,8 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { ProcessLogger } from './logger';
 import { verifyPublicEndpoint } from '../utils/network';
+import { showNetworkTroubleshooting } from '../utils/diagnostics';
+import chalk from 'chalk';
 
 /**
  * Process configuration
@@ -355,27 +357,54 @@ export class ProcessManager extends EventEmitter {
   }
 
   /**
-   * Wait for process to be ready
+   * Wait for process to be ready (log-based monitoring)
    */
   private async waitForReady(handle: ProcessHandle): Promise<void> {
-    const maxAttempts = 30;
-    const delay = 1000; // 1 second
+    const timeout = 60000; // 60 seconds for model loading
+    const { publicUrl } = handle.config;
 
-    for (let i = 0; i < maxAttempts; i++) {
-      try {
-        // Check if process is responding
-        const response = await fetch(`http://${handle.config.host}:${handle.config.port}/health`);
-        if (response.ok) {
-          return;
+    console.log(chalk.gray('  Waiting for node to start (monitoring logs)...'));
+
+    // Monitor logs for startup sequence
+    const logMonitor = new Promise<void>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error('Node startup timeout - model may not have loaded'));
+      }, timeout);
+
+      handle.process.stdout?.on('data', (data: Buffer) => {
+        const message = data.toString();
+
+        // Watch for specific startup messages
+        if (message.includes('Model loaded successfully')) {
+          console.log(chalk.green('   ✅ Model loaded'));
         }
-      } catch {
-        // Process not ready yet
+        if (message.includes('P2P node started')) {
+          console.log(chalk.green('   ✅ P2P started'));
+        }
+        if (message.includes('API server started')) {
+          console.log(chalk.green('   ✅ API started'));
+        }
+        if (message.includes('Fabstir LLM Node is running')) {
+          clearTimeout(timeoutId);
+          resolve();
+        }
+      });
+    });
+
+    await logMonitor;
+
+    // Now verify public URL if provided
+    if (publicUrl) {
+      console.log(chalk.gray(`  Verifying public access at ${publicUrl}...`));
+      const isAccessible = await verifyPublicEndpoint(publicUrl);
+
+      if (!isAccessible) {
+        showNetworkTroubleshooting(publicUrl);
+        throw new Error(`Node not accessible at public URL: ${publicUrl}`);
       }
 
-      await new Promise(resolve => setTimeout(resolve, delay));
+      console.log(chalk.green('   ✅ Public URL is accessible'));
     }
-
-    throw new Error('Process failed to start within timeout');
   }
 }
 
