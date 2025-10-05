@@ -226,6 +226,179 @@ fabstir-host config set network.rpcUrl https://base-sepolia.g.alchemy.com/v2/YOU
 
 ---
 
+### Public URL Not Accessible
+
+**Problem:** Node is running locally but not accessible from internet
+
+**Solutions:**
+
+1. **Verify node binds to 0.0.0.0 (not 127.0.0.1)**:
+   - fabstir-llm-node binds to 0.0.0.0:8080 by default
+   - Check logs for "API server started on 0.0.0.0:8080"
+
+2. **Test localhost first**:
+   ```bash
+   # From the host machine
+   curl http://localhost:8080/health
+
+   # Should return:
+   # {"status":"healthy"}
+   ```
+
+3. **Check firewall settings**:
+   ```bash
+   # Linux (UFW)
+   sudo ufw status
+   sudo ufw allow 8080/tcp
+
+   # Linux (iptables)
+   sudo iptables -L -n | grep 8080
+
+   # macOS
+   sudo pfctl -sr | grep 8080
+
+   # Windows
+   netsh advfirewall firewall show rule name="Fabstir Host"
+   ```
+
+4. **Test from external machine**:
+   ```bash
+   # From another computer
+   curl http://YOUR_PUBLIC_IP:8080/health
+
+   # Or use online tool
+   # https://www.portchecktool.com/
+   ```
+
+5. **Check NAT/Router configuration**:
+   - Port forwarding: External 8080 → Internal 8080
+   - DMZ: Enable for host machine (security risk)
+   - UPnP: Enable automatic port forwarding
+
+6. **Show troubleshooting steps**:
+   ```bash
+   # CLI shows network diagnostics automatically
+   fabstir-host register --url http://YOUR_IP:8080
+
+   # If verification fails, you'll see:
+   # 🔧 Troubleshooting Steps:
+   # 1. Check if node is running locally: curl http://localhost:8080/health
+   # 2. Check firewall allows incoming: sudo ufw allow 8080/tcp
+   # 3. Verify port is listening: netstat -tuln | grep 8080
+   # 4. Test from another machine: curl http://YOUR_IP:8080/health
+   ```
+
+---
+
+### Model Loading Failures
+
+**Problem:** Node starts but model not loaded
+
+**Symptoms:**
+- `/health` returns 200 but inference fails
+- Logs show errors during model loading
+- High memory usage but no model active
+
+**Solutions:**
+
+1. **Monitor startup logs** (CRITICAL - /health is NOT sufficient):
+   ```bash
+   # Watch logs for startup sequence
+   tail -f ~/.fabstir/logs/host.log
+
+   # Look for these messages in order:
+   # ✅ Model loaded successfully      <- Model is ready
+   # ✅ P2P node started               <- P2P layer ready
+   # ✅ API server started             <- HTTP ready
+   # 🎉 Fabstir LLM Node is running   <- Fully operational
+
+   # If you see "API server started" but NOT "Model loaded successfully",
+   # the model is still loading!
+   ```
+
+2. **Wait for full startup** (model loading takes time):
+   ```bash
+   # TinyVicuna-1B: ~30 seconds
+   # Llama-2-7B: ~60 seconds
+   # Llama-2-13B: ~120 seconds
+
+   # CLI waits for full startup automatically
+   fabstir-host start
+   # Will show:
+   # ✅ Model loaded
+   # ✅ P2P started
+   # ✅ API started
+   ```
+
+3. **Verify model file exists**:
+   ```bash
+   # Check MODEL_PATH environment variable
+   echo $MODEL_PATH
+
+   # Verify file exists
+   ls -lh ./models/your-model.gguf
+
+   # Check file size (should be > 100MB for most models)
+   du -h ./models/your-model.gguf
+   ```
+
+4. **Check available memory**:
+   ```bash
+   # Linux
+   free -h
+
+   # macOS
+   vm_stat
+
+   # Model memory requirements:
+   # - TinyVicuna Q4_K_M: ~700MB
+   # - Llama-2-7B Q4_K_M: ~4GB
+   # - Llama-2-13B Q4_K_M: ~8GB
+   ```
+
+5. **GPU layers configuration**:
+   ```bash
+   # Check GPU_LAYERS setting
+   echo $GPU_LAYERS
+
+   # If out of VRAM, reduce layers:
+   export GPU_LAYERS=20  # Default is 35
+
+   # Or disable GPU entirely:
+   export GPU_LAYERS=0
+   ```
+
+---
+
+### fabstir-llm-node Not Found
+
+**Problem:** "fabstir-llm-node binary not found"
+
+**Solutions:**
+
+1. **Install from source**:
+   ```bash
+   git clone https://github.com/fabstir/fabstir-llm-node
+   cd fabstir-llm-node
+   cargo build --release
+   sudo cp target/release/fabstir-llm-node /usr/local/bin/
+   ```
+
+2. **Download pre-built binary**:
+   ```bash
+   curl -L https://github.com/fabstir/fabstir-llm-node/releases/latest/download/fabstir-llm-node-linux-x64 \
+     -o /usr/local/bin/fabstir-llm-node
+   chmod +x /usr/local/bin/fabstir-llm-node
+   ```
+
+3. **Verify installation**:
+   ```bash
+   which fabstir-llm-node
+   fabstir-llm-node --version
+   ```
+
+---
+
 ### LLM backend unreachable
 
 **Problem:** "Cannot connect to inference endpoint"

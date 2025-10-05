@@ -1140,15 +1140,29 @@ if (!await checkPortAvailable(port)) {
 
 ## Phase 7: Documentation & User Experience
 
-### Sub-phase 7.1: Update CLI Help & Examples
+### Sub-phase 7.1: Update CLI Help & Examples ✅ COMPLETED
 **Goal**: Clear documentation for production deployment
 
 **Tasks**:
-- [ ] Update README with production examples
-- [ ] Add firewall configuration guide
-- [ ] Document public IP vs localhost usage
-- [ ] Create troubleshooting guide
-- [ ] Add example systemd service file
+- [x] Update README with production examples
+- [x] Add firewall configuration guide
+- [x] Document public IP vs localhost usage
+- [x] Create troubleshooting guide
+- [x] Add example systemd service file
+
+**Implementation Notes**:
+- Added comprehensive "Production Deployment" section to README
+- Documented public IP vs localhost distinction with warnings
+- Firewall configuration for Linux (UFW/iptables), macOS, Windows
+- Three deployment options: Systemd, PM2, Docker
+- Network troubleshooting with step-by-step diagnostics
+- Security best practices and reverse proxy example (Nginx)
+- Enhanced TROUBLESHOOTING.md with production-specific issues:
+  - Public URL accessibility problems
+  - Model loading failures (log monitoring required)
+  - fabstir-llm-node binary installation
+  - NAT/router configuration guidance
+- All documentation focuses on real-world production scenarios
 
 **Examples to Include**:
 ```bash

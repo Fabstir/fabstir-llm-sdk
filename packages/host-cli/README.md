@@ -259,6 +259,282 @@ packages/host-cli/
 └── docs/                  # Documentation
 ```
 
+## Production Deployment
+
+### 🌐 Public IP vs Localhost
+
+**IMPORTANT**: The CLI now distinguishes between development and production deployments.
+
+**Development/Testing (Localhost)**:
+```bash
+# Register with localhost URL
+fabstir-host register --url http://localhost:8080 --models "model1,model2"
+
+⚠️  WARNING: Using localhost URL
+   This host will NOT be accessible to real clients.
+   Use your public IP or domain for production.
+```
+
+**Production (Public IP/Domain)**:
+```bash
+# Register with public URL
+fabstir-host register \
+  --url http://203.0.113.45:8080 \
+  --models "CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf"
+
+🚀 Starting inference node on port 8080...
+🔍 Verifying node at http://203.0.113.45:8080/health...
+✅ Node is publicly accessible
+💰 Approving FAB tokens...
+📝 Registering on blockchain...
+✅ Registration successful!
+```
+
+### 🔥 Firewall Configuration
+
+After registration, ensure your firewall allows incoming connections:
+
+**Linux (UFW)**:
+```bash
+# Allow API port
+sudo ufw allow 8080/tcp
+
+# Allow P2P port (if using P2P discovery)
+sudo ufw allow 9000/tcp
+
+# Check status
+sudo ufw status
+```
+
+**Linux (iptables)**:
+```bash
+# Allow API port
+sudo iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
+sudo iptables-save
+```
+
+**macOS**:
+```bash
+# Disable firewall temporarily to test
+sudo pfctl -d
+
+# Or add rule permanently (advanced)
+# Edit /etc/pf.conf and add:
+# pass in proto tcp from any to any port 8080
+```
+
+**Windows**:
+```powershell
+# Add firewall rule
+netsh advfirewall firewall add rule name="Fabstir Host" dir=in action=allow protocol=TCP localport=8080
+
+# Check rule
+netsh advfirewall firewall show rule name="Fabstir Host"
+```
+
+### 🐳 Production Deployment Options
+
+#### Option 1: Systemd Service (Linux)
+
+Create `/etc/systemd/system/fabstir-host.service`:
+
+```ini
+[Unit]
+Description=Fabstir Host Node
+After=network.target
+
+[Service]
+Type=simple
+User=fabstir
+WorkingDirectory=/home/fabstir/fabstir-llm-sdk/packages/host-cli
+Environment="PATH=/home/fabstir/.nvm/versions/node/v18.0.0/bin:/usr/bin"
+ExecStart=/home/fabstir/.nvm/versions/node/v18.0.0/bin/pnpm host start --daemon
+Restart=on-failure
+RestartSec=10s
+StandardOutput=append:/var/log/fabstir-host.log
+StandardError=append:/var/log/fabstir-host-error.log
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+```bash
+# Reload systemd
+sudo systemctl daemon-reload
+
+# Enable on boot
+sudo systemctl enable fabstir-host
+
+# Start service
+sudo systemctl start fabstir-host
+
+# Check status
+sudo systemctl status fabstir-host
+
+# View logs
+sudo journalctl -u fabstir-host -f
+```
+
+#### Option 2: PM2 Process Manager
+
+```bash
+# Install PM2
+npm install -g pm2
+
+# Start with PM2
+pm2 start "pnpm host start" --name fabstir-host
+
+# Save configuration
+pm2 save
+
+# Enable startup on boot
+pm2 startup
+
+# Monitor
+pm2 monit
+
+# View logs
+pm2 logs fabstir-host
+```
+
+#### Option 3: Docker Deployment
+
+Create `Dockerfile`:
+
+```dockerfile
+FROM node:18-slim
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json pnpm-lock.yaml ./
+
+# Install pnpm and dependencies
+RUN npm install -g pnpm && pnpm install --frozen-lockfile
+
+# Copy source
+COPY . .
+
+# Build
+RUN pnpm build
+
+# Expose API port
+EXPOSE 8080
+
+# Start host
+CMD ["pnpm", "host", "start", "--daemon"]
+```
+
+Run:
+```bash
+# Build image
+docker build -t fabstir-host .
+
+# Run container
+docker run -d \
+  --name fabstir-host \
+  -p 8080:8080 \
+  -v ~/.fabstir:/root/.fabstir \
+  fabstir-host
+
+# View logs
+docker logs -f fabstir-host
+
+# Restart
+docker restart fabstir-host
+```
+
+### 📊 Network Troubleshooting
+
+**Test Local Accessibility**:
+```bash
+# Check if node is running locally
+curl http://localhost:8080/health
+
+# Expected response:
+# {"status":"healthy","model":"TinyVicuna-1B"}
+```
+
+**Test Public Accessibility**:
+```bash
+# From another machine or service
+curl http://YOUR_PUBLIC_IP:8080/health
+
+# Or use online tools:
+# https://www.portchecktool.com/
+```
+
+**Common Issues**:
+
+1. **"Connection Refused" from outside**:
+   - Node is binding to 127.0.0.1 instead of 0.0.0.0
+   - Firewall blocking port 8080
+   - NAT/router not forwarding port
+
+2. **"Port Already in Use"**:
+   ```bash
+   # Find process using port
+   lsof -i :8080  # Linux/macOS
+   netstat -ano | findstr :8080  # Windows
+
+   # Kill process
+   kill -9 <PID>  # Linux/macOS
+   taskkill /PID <PID> /F  # Windows
+   ```
+
+3. **"Health Check Timeout"**:
+   - fabstir-llm-node still loading model (check logs for "Model loaded successfully")
+   - Network latency too high
+   - Node crashed during startup
+
+**Debug Mode**:
+```bash
+# Start with debug logging
+fabstir-host start --log-level debug
+
+# Monitor logs
+tail -f ~/.fabstir/logs/host.log
+
+# Look for:
+# ✅ Model loaded successfully
+# ✅ P2P node started
+# ✅ API server started
+# 🎉 Fabstir LLM Node is running
+```
+
+### 🔐 Security Best Practices
+
+**Production Checklist**:
+- [ ] Use strong private key (never reuse test keys)
+- [ ] Secure `.env.test` with proper permissions (`chmod 600`)
+- [ ] Use HTTPS with reverse proxy (nginx/caddy)
+- [ ] Enable rate limiting on API
+- [ ] Monitor for unauthorized access
+- [ ] Regular backups of wallet/config
+- [ ] Keep fabstir-llm-node binary updated
+- [ ] Use dedicated server/VM for hosting
+
+**Reverse Proxy Example (Nginx)**:
+```nginx
+server {
+    listen 443 ssl;
+    server_name your-domain.com;
+
+    ssl_certificate /etc/ssl/certs/your-cert.pem;
+    ssl_certificate_key /etc/ssl/private/your-key.pem;
+
+    location / {
+        proxy_pass http://localhost:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
 ## Common Operations
 
 ### First-Time Host Setup
