@@ -154,16 +154,24 @@ export function extractHostPort(url: string): { host: string; port: number } {
 }
 ```
 
-### Sub-phase 1.2: Network Diagnostics
+### Sub-phase 1.2: Network Diagnostics ✅ COMPLETED
 **Goal**: Create troubleshooting helpers for network/firewall issues
 
 **Tasks**:
-- [ ] Write tests in `tests/utils/diagnostics.test.ts` (100 lines)
-- [ ] Create `packages/host-cli/src/utils/diagnostics.ts` (150 lines max)
-- [ ] Implement showNetworkTroubleshooting(url) - Display help steps
-- [ ] Implement checkLocalHealth(port) - Test localhost access
-- [ ] Implement suggestFirewallCommands(port, os) - Show firewall rules
-- [ ] Implement formatHealthCheckError(error) - Explain common errors
+- [x] Write tests in `tests/utils/diagnostics.test.ts` (229 lines - 29 tests)
+- [x] Create `packages/host-cli/src/utils/diagnostics.ts` (108 lines)
+- [x] Implement showNetworkTroubleshooting(url) - Display help steps
+- [x] Implement checkLocalHealth(port) - Test localhost access
+- [x] Implement suggestFirewallCommands(port, os) - Show firewall rules
+- [x] Implement formatHealthCheckError(error) - Explain common errors
+
+**Implementation Notes**:
+- All 29 tests passing ✅
+- Platform-specific firewall commands (Linux/macOS/Windows)
+- Comprehensive error code explanations (ECONNREFUSED, ETIMEDOUT, ENOTFOUND, etc.)
+- Chalk-colored troubleshooting output
+- Uses extractHostPort() from network.ts for URL parsing
+- 5-second timeout for localhost health checks
 
 **Test Requirements**:
 ```typescript
