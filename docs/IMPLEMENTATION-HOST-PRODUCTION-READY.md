@@ -1,8 +1,44 @@
 # Host CLI Production-Ready Implementation Plan (v1.0)
 
+**See also**: [HOST_CLI_NODE_PRODUCTION_READY.md](./HOST_CLI_NODE_PRODUCTION_READY.md) for a simplified overview of the integration approach.
+
 ## Overview
 
 Systematic upgrade of the Fabstir Host CLI (`@fabstir/host-cli`) to provide turnkey host node management for real-world deployment. Integrates fabstir-llm-node process lifecycle with blockchain registration, enabling hosts with public IP addresses to become marketplace providers with a single command.
+
+## Critical Technical Requirements (from fabstir-llm-node v7.0.27)
+
+**Node Execution**: The fabstir-llm-node binary uses **environment variables**, NOT command-line arguments:
+```bash
+# Required
+export MODEL_PATH=./models/model.gguf  # Must exist on disk
+
+# Optional but recommended
+export API_PORT=8080                    # Default: 8080
+export P2P_PORT=9000                    # Default: 9000
+export GPU_LAYERS=35                    # Default: 35
+
+# For payment features
+export HOST_PRIVATE_KEY=0x...
+export CONTRACT_JOB_MARKETPLACE=0x...
+export CONTRACT_NODE_REGISTRY=0x...
+export CONTRACT_HOST_EARNINGS=0x...
+export CONTRACT_PROOF_SYSTEM=0x...
+
+fabstir-llm-node  # No CLI arguments
+```
+
+**Health Check Limitation**: `/health` endpoint returns 200 OK **immediately** when HTTP server starts, NOT when model is loaded. Must monitor logs for startup sequence:
+- âœ… Model loaded successfully
+- âœ… P2P node started
+- âœ… API server started
+- ðŸŽ‰ Fabstir LLM Node is running
+
+**Model Handling**: Models must **pre-exist** on disk at `MODEL_PATH`. No automatic downloads.
+
+**Chain ID**: Hardcoded to `84532` (Base Sepolia) in the binary. Multi-chain support is at WebSocket/API layer only.
+
+**Network Binding**: Node **already binds to 0.0.0.0** by default (see main.rs:87).
 
 ## Current System Context
 
@@ -93,7 +129,7 @@ export function isLocalhostUrl(url: string): boolean {
  */
 export function warnIfLocalhost(url: string): void {
   if (isLocalhostUrl(url)) {
-    console.warn(chalk.yellow('   WARNING: Using localhost URL'));
+    console.warn(chalk.yellow('ï¿½  WARNING: Using localhost URL'));
     console.warn(chalk.yellow('   This host will NOT be accessible to clients.'));
     console.warn(chalk.yellow('   Use your public IP or domain for production.'));
   }
@@ -185,8 +221,35 @@ export function suggestFirewallCommands(port: number, platform: string): string 
 
 ## Phase 2: Process Manager Enhancement
 
+### CRITICAL: Node Uses Environment Variables
+The fabstir-llm-node binary does **NOT** accept command-line arguments. All configuration is via environment variables:
+
+**ProcessManager Implementation Must**:
+1. Build environment variable dictionary from ProcessConfig
+2. Pass env vars to spawn() options
+3. Do NOT build command-line arguments array
+4. Include MODEL_PATH (required), API_PORT, P2P_PORT, etc.
+
+**Example ProcessManager.spawn() implementation**:
+```typescript
+async spawn(config: ProcessConfig): Promise<ProcessHandle> {
+  const env = {
+    ...process.env,
+    MODEL_PATH: config.models[0],  // Required, must exist
+    API_PORT: config.port.toString(),
+    P2P_PORT: (config.port + 1).toString(),
+    RUST_LOG: config.logLevel || 'info',
+    GPU_LAYERS: config.gpuEnabled ? '35' : '0',
+    ...config.env  // User overrides
+  };
+
+  const childProcess = spawn('fabstir-llm-node', [], { env });  // No args!
+  // ...
+}
+```
+
 ### Sub-phase 2.1: Update ProcessManager for Production
-**Goal**: Modify ProcessManager to bind to 0.0.0.0 and track public URLs
+**Goal**: Modify ProcessManager to use environment variables and track public URLs
 
 **Tasks**:
 - [ ] Write tests in `tests/process/manager-production.test.ts` (200 lines)
@@ -268,16 +331,25 @@ export function getDefaultProcessConfig(): ProcessConfig {
 }
 ```
 
-### Sub-phase 2.2: Health Check Enhancement
-**Goal**: Improve health check to support both local and public URLs
+### Sub-phase 2.2: Health Check Enhancement (Log Monitoring Strategy)
+**Goal**: Implement proper startup detection using log monitoring
+
+**CRITICAL**: The `/health` endpoint returns 200 OK **immediately** when the HTTP server starts, NOT when the model is fully loaded. This means checking `/health` alone is insufficient.
+
+**Proper Startup Detection Strategy**:
+1. Monitor process stdout/stderr for specific log messages
+2. Watch for startup sequence completion
+3. Only then verify public URL accessibility
 
 **Tasks**:
 - [ ] Write tests in `tests/process/health-check.test.ts` (120 lines)
 - [ ] Update `packages/host-cli/src/process/manager.ts` (modify waitForReady method)
-- [ ] Check localhost first for faster startup
+- [ ] Monitor logs for "âœ… Model loaded successfully"
+- [ ] Monitor logs for "âœ… P2P node started"
+- [ ] Monitor logs for "âœ… API server started"
+- [ ] Monitor logs for "ðŸŽ‰ Fabstir LLM Node is running"
 - [ ] Then verify publicUrl if provided
-- [ ] Show progress during health check wait
-- [ ] Fail with diagnostics if unreachable
+- [ ] Fail with diagnostics if startup sequence incomplete
 
 **Test Requirements**:
 ```typescript
@@ -320,6 +392,57 @@ private async waitForReady(handle: ProcessHandle): Promise<void> {
     }
 
     console.log(chalk.green('   Public URL is accessible'));
+  }
+}
+```
+
+**UPDATED Health Check Implementation (Use This Instead of Above)**:
+```typescript
+private async waitForReady(handle: ProcessHandle): Promise<void> {
+  const timeout = 60000;  // 60 seconds for model loading
+  const { publicUrl } = handle.config;
+
+  console.log(chalk.gray('  Waiting for node to start (monitoring logs)...'));
+
+  // Monitor logs for startup sequence - /health alone is NOT sufficient
+  const logMonitor = new Promise<void>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error('Node startup timeout - model may not have loaded'));
+    }, timeout);
+
+    handle.process.stdout?.on('data', (data: Buffer) => {
+      const message = data.toString();
+
+      // Watch for specific startup messages
+      if (message.includes('Model loaded successfully')) {
+        console.log(chalk.green('   âœ… Model loaded'));
+      }
+      if (message.includes('P2P node started')) {
+        console.log(chalk.green('   âœ… P2P started'));
+      }
+      if (message.includes('API server started')) {
+        console.log(chalk.green('   âœ… API started'));
+      }
+      if (message.includes('Fabstir LLM Node is running')) {
+        clearTimeout(timeoutId);
+        resolve();
+      }
+    });
+  });
+
+  await logMonitor;
+
+  // Now verify public URL if provided
+  if (publicUrl) {
+    console.log(chalk.gray(`  Verifying public access at ${publicUrl}...`));
+    const isAccessible = await verifyPublicEndpoint(publicUrl);
+
+    if (!isAccessible) {
+      showNetworkTroubleshooting(publicUrl);
+      throw new Error(`Node not accessible at public URL: ${publicUrl}`);
+    }
+
+    console.log(chalk.green('   âœ… Public URL is accessible'));
   }
 }
 ```
@@ -489,7 +612,7 @@ async function executeRegistration(config: RegistrationConfig): Promise<{
   warnIfLocalhost(config.apiUrl);
 
   // 2. Start inference node
-  console.log(chalk.blue('=€ Starting inference node...'));
+  console.log(chalk.blue('=ï¿½ Starting inference node...'));
   const { port } = extractHostPort(config.apiUrl);
 
   let processHandle: ProcessHandle | null = null;
@@ -522,7 +645,7 @@ async function executeRegistration(config: RegistrationConfig): Promise<{
     }
 
     // 5. Execute blockchain registration
-    console.log(chalk.blue('\n=° Approving FAB tokens...'));
+    console.log(chalk.blue('\n=ï¿½ Approving FAB tokens...'));
     const result = await registerHost(config);
 
     // 6. Save process info to config
@@ -546,7 +669,7 @@ async function executeRegistration(config: RegistrationConfig): Promise<{
   } catch (error: any) {
     // Rollback: Stop node if it was started
     if (processHandle) {
-      console.log(chalk.yellow('\n   Rolling back: stopping node...'));
+      console.log(chalk.yellow('\nï¿½  Rolling back: stopping node...'));
       await stopInferenceServer(processHandle, true);
     }
     throw error;
@@ -664,7 +787,7 @@ async function startHost(options: any): Promise<void> {
   const pidManager = new PIDManager();
   const existingPid = pidManager.getPIDInfo();
   if (existingPid && pidManager.isProcessRunning(existingPid.pid)) {
-    console.log(chalk.yellow(`   Node already running (PID: ${existingPid.pid})`));
+    console.log(chalk.yellow(`ï¿½  Node already running (PID: ${existingPid.pid})`));
     console.log(chalk.gray(`URL: ${existingPid.publicUrl}`));
     return;
   }
@@ -675,7 +798,7 @@ async function startHost(options: any): Promise<void> {
   // 3. Extract config
   const { port } = extractHostPort(config.publicUrl);
 
-  console.log(chalk.blue('=€ Starting Fabstir host node...'));
+  console.log(chalk.blue('=ï¿½ Starting Fabstir host node...'));
   console.log(chalk.gray(`  URL: ${config.publicUrl}`));
   console.log(chalk.gray(`  Models: ${config.models.join(', ')}`));
 
@@ -705,7 +828,7 @@ async function startHost(options: any): Promise<void> {
     console.log(chalk.blue('\n( Running in daemon mode'));
     return; // Exit, node keeps running
   } else {
-    console.log(chalk.blue('\n=Ê Running in foreground mode (Ctrl+C to stop)'));
+    console.log(chalk.blue('\n=ï¿½ Running in foreground mode (Ctrl+C to stop)'));
 
     // Stream logs to console
     handle.process.stdout?.on('data', (data) => {
@@ -761,7 +884,7 @@ export const stopCommand = {
       return;
     }
 
-    console.log(chalk.blue(`\n=Ñ Stopping host node...`));
+    console.log(chalk.blue(`\n=ï¿½ Stopping host node...`));
     console.log(chalk.gray(`  PID: ${pidInfo.pid}`));
     console.log(chalk.gray(`  URL: ${pidInfo.publicUrl}`));
 
@@ -796,7 +919,7 @@ export const stopCommand = {
 
 **Tasks**:
 - [ ] Write tests in `tests/integration/host-lifecycle.test.ts` (300 lines)
-- [ ] Test full register ’ start ’ stop ’ unregister flow
+- [ ] Test full register ï¿½ start ï¿½ stop ï¿½ unregister flow
 - [ ] Test with localhost URL (development)
 - [ ] Test error scenarios (port in use, binary missing, etc.)
 - [ ] Test daemon mode vs foreground mode
@@ -884,7 +1007,7 @@ describe('Host Lifecycle Integration', () => {
 // Handle missing binary
 if (!await checkBinaryAvailable()) {
   console.error(chalk.red('L fabstir-llm-node binary not found'));
-  console.log(chalk.yellow('\n=æ Installation options:'));
+  console.log(chalk.yellow('\n=ï¿½ Installation options:'));
   console.log(chalk.white('  1. Build from source:'));
   console.log(chalk.gray('     git clone https://github.com/fabstir/fabstir-llm-node'));
   console.log(chalk.gray('     cd fabstir-llm-node && cargo build --release'));

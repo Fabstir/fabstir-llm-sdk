@@ -1,5 +1,31 @@
 Host CLI Node Lifecycle Integration Plan (Production-Ready)
 
+**See also**: [IMPLEMENTATION-HOST-PRODUCTION-READY.md](./IMPLEMENTATION-HOST-PRODUCTION-READY.md) for detailed phase-by-phase implementation plan.
+
+## Critical Technical Facts (from fabstir-llm-node v7.0.27 Source Code)
+
+**Node Execution Method**: Uses **environment variables only**, NO command-line arguments
+```bash
+# Node expects these env vars:
+export MODEL_PATH=./models/model.gguf  # REQUIRED - must exist
+export API_PORT=8080
+export P2P_PORT=9000
+export HOST_PRIVATE_KEY=0x...
+fabstir-llm-node  # No arguments!
+```
+
+**Health Check Caveat**: `/health` returns 200 OK **immediately** when HTTP starts, NOT when model loads. Must monitor logs instead:
+- ✅ Model loaded successfully
+- ✅ P2P node started
+- ✅ API server started
+- 🎉 Fabstir LLM Node is running
+
+**Model Requirements**: Models must **pre-exist on disk** - no auto-download
+
+**Chain Configuration**: Hardcoded to 84532 (Base Sepolia) for blockchain ops
+
+**Network Binding**: Node already binds to 0.0.0.0 by default (main.rs:87)
+
 Architecture Understanding
 
 Real Host Deployment:
@@ -38,37 +64,52 @@ $ fabstir-host register \
 → Save PID + config to ~/.fabstir/config.json  
 → Run as daemon (background process)
 
-Code changes in src/commands/register.ts:  
-async function executeRegistration(config: RegistrationConfig) {  
- // 1. Parse the public URL to get port  
- const url = new URL(config.apiUrl);  
+Code changes in src/commands/register.ts:
+async function executeRegistration(config: RegistrationConfig) {
+ // 1. Parse the public URL to get port
+ const url = new URL(config.apiUrl);
  const port = parseInt(url.port) || 8080;
 
-// 2. Start node binding to 0.0.0.0 (all interfaces)  
- console.log(`🚀 Starting inference node on port ${port}...`);  
- const processHandle = await spawnInferenceServer({  
- port,  
- host: '0.0.0.0', // Accept connections from anywhere  
- models: config.models,  
- logLevel: 'info'  
+// 2. Start node using ENVIRONMENT VARIABLES (not CLI args!)
+ console.log(`🚀 Starting inference node on port ${port}...`);
+ const processHandle = await spawnInferenceServer({
+ port,
+ host: '0.0.0.0', // Node already binds to this, but kept for config
+ models: config.models,
+ logLevel: 'info',
+ env: {
+   MODEL_PATH: config.models[0],  // REQUIRED - must exist on disk!
+   API_PORT: port.toString(),
+   P2P_PORT: (port + 1).toString(),
+   HOST_PRIVATE_KEY: config.privateKey,
+   CONTRACT_JOB_MARKETPLACE: process.env.CONTRACT_JOB_MARKETPLACE,
+   CONTRACT_NODE_REGISTRY: process.env.CONTRACT_NODE_REGISTRY,
+   CONTRACT_HOST_EARNINGS: process.env.CONTRACT_HOST_EARNINGS,
+   CONTRACT_PROOF_SYSTEM: process.env.CONTRACT_PROOF_SYSTEM,
+   RUST_LOG: 'info'
+ }
  });
 
-// 3. Verify PUBLIC URL is accessible  
- console.log(`🔍 Verifying node at ${config.apiUrl}/health...`);  
+// 3. Wait for node startup by monitoring logs (not just /health!)
+ console.log(`⏳ Waiting for node startup (monitoring logs)...`);
+ await waitForStartupLogs(processHandle);  // Watches for "Fabstir LLM Node is running"
+
+// 4. Then verify PUBLIC URL is accessible
+ console.log(`🔍 Verifying node at ${config.apiUrl}/health...`);
  const isAccessible = await verifyPublicEndpoint(config.apiUrl);
 
-if (!isAccessible) {  
- await stopInferenceServer(processHandle);  
- throw new Error(  
- `Node started but not accessible at ${config.apiUrl}\n` +  
- `Check firewall rules and port forwarding.`  
- );  
+if (!isAccessible) {
+ await stopInferenceServer(processHandle);
+ throw new Error(
+ `Node started but not accessible at ${config.apiUrl}\n` +
+ `Check firewall rules and port forwarding.`
+ );
  }
 
-// 4. Proceed with blockchain registration  
+// 5. Proceed with blockchain registration
  console.log('✅ Node is publicly accessible');
 
-// ... existing blockchain registration code ...  
+// ... existing blockchain registration code ...
 }
 
 2. Add Public Endpoint Verification  
@@ -117,58 +158,90 @@ New file: src/utils/network.ts
   }  
 
 
-3. Update ProcessManager Binding  
+3. Update ProcessManager for Environment Variables
 
 
-Modify src/process/manager.ts:  
-// Ensure host defaults to 0.0.0.0 for production  
-export function getDefaultProcessConfig(): ProcessConfig {  
- return {  
- port: 8080,  
- host: '0.0.0.0', // Changed from 127.0.0.1  
- models: ['llama-2-7b'],  
- maxConnections: 10,  
- logLevel: 'info'  
- };  
+Modify src/process/manager.ts:
+// CRITICAL: fabstir-llm-node uses environment variables ONLY
+export function getDefaultProcessConfig(): ProcessConfig {
+ return {
+ port: 8080,
+ host: '0.0.0.0', // Node already binds to this by default
+ models: [],      // Will become MODEL_PATH env var
+ maxConnections: 10,
+ logLevel: 'info',
+ env: {}          // Custom env vars go here
+ };
+}
+
+// In ProcessManager.spawn():
+async spawn(config: ProcessConfig): Promise<ProcessHandle> {
+  const env = {
+    ...process.env,  // Inherit existing environment
+    MODEL_PATH: config.models[0],  // REQUIRED
+    API_PORT: config.port.toString(),
+    P2P_PORT: (config.port + 1).toString(),
+    RUST_LOG: config.logLevel || 'info',
+    ...config.env  // User overrides
+  };
+
+  // No CLI arguments! Only env vars
+  const childProcess = spawn('fabstir-llm-node', [], { env });
+  // ...
 }
 
 4. Update start Command  
 
 
-Replace TODO in src/commands/start.ts:  
-async function startHost(options: any): Promise<void> {  
- const config = await ConfigStorage.loadConfig();  
- if (!config || !config.apiUrl) {  
- throw new Error('No registration found. Run "fabstir-host register" first');  
+Replace TODO in src/commands/start.ts:
+async function startHost(options: any): Promise<void> {
+ const config = await ConfigStorage.loadConfig();
+ if (!config || !config.apiUrl) {
+ throw new Error('No registration found. Run "fabstir-host register" first');
  }
 
-// Parse registered URL to get port  
- const url = new URL(config.apiUrl);  
+// Parse registered URL to get port
+ const url = new URL(config.apiUrl);
  const port = parseInt(url.port) || 8080;
 
 console.log(chalk.blue(`🚀 Starting inference node on port ${port}...`));
 
-const handle = await spawnInferenceServer({  
- port,  
- host: '0.0.0.0',  
- models: config.models || [],  
- logLevel: options.logLevel || 'info'  
+// CRITICAL: Use environment variables, not CLI arguments
+const handle = await spawnInferenceServer({
+ port,
+ host: '0.0.0.0',
+ models: config.models || [],
+ logLevel: options.logLevel || 'info',
+ env: {
+   MODEL_PATH: config.models?.[0],  // REQUIRED - must exist!
+   API_PORT: port.toString(),
+   P2P_PORT: (port + 1).toString(),
+   HOST_PRIVATE_KEY: config.privateKey,
+   CONTRACT_JOB_MARKETPLACE: process.env.CONTRACT_JOB_MARKETPLACE,
+   CONTRACT_NODE_REGISTRY: process.env.CONTRACT_NODE_REGISTRY,
+   CONTRACT_HOST_EARNINGS: process.env.CONTRACT_HOST_EARNINGS,
+   CONTRACT_PROOF_SYSTEM: process.env.CONTRACT_PROOF_SYSTEM,
+   RUST_LOG: options.logLevel || 'info'
+ }
  });
 
-// Save PID for stop command  
- await ConfigStorage.saveConfig({  
- ...config,  
- processPid: handle.pid  
+// Wait for startup logs before considering it ready
+ await waitForStartupLogs(handle);
+
+// Save PID for stop command
+ await ConfigStorage.saveConfig({
+ ...config,
+ processPid: handle.pid
  });
 
 console.log(chalk.green(`✅ Node running at ${config.apiUrl}`));
 
 console.log(chalk.gray('Press Ctrl+C to stop'));
 
-// Keep alive in foreground mode  
- if (!options.daemon) {  
- await waitForever();  
- }  
+// Keep alive in foreground mode
+ if (!options.daemon) {
+ await waitForever();
+ }
 }
 
 5. Configuration Changes  
