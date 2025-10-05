@@ -1,6 +1,14 @@
+/**
+ * Stop command implementation
+ * Stops the running host node
+ *
+ * Sub-phase 5.2: Enhance Stop Command
+ */
+
 import { Command } from 'commander';
 import { PIDManager } from '../daemon/pid';
 import { DaemonManager } from '../daemon/manager';
+import * as ConfigStorage from '../config/storage';
 import chalk from 'chalk';
 
 interface StopOptions {
@@ -36,40 +44,41 @@ export const stopCommand = {
   description: 'Stop the Fabstir host daemon',
 
   async action(options: StopOptions = {}): Promise<void> {
-    try {
-      const pidManager = new PIDManager(options.pidFile);
-      const daemonManager = new DaemonManager();
+    const pidManager = new PIDManager(options.pidFile);
+    const daemonManager = new DaemonManager();
 
-      // Read PID from file
-      const pid = pidManager.readPID();
+    // Read PID info with metadata (Sub-phase 5.2)
+    const pidInfo = pidManager.getPIDInfo();
 
-      if (!pid) {
-        console.error('Host daemon is not running (no PID file found)');
-        return;
-      }
-
-      // Check if process is actually running
-      if (!pidManager.isProcessRunning(pid)) {
-        console.log('Host daemon is not running (stale PID file)');
-        pidManager.removePID();
-        return;
-      }
-
-      console.log(`Stopping host daemon (PID: ${pid})...`);
-
-      // Stop the daemon
-      await daemonManager.stopDaemon(pid, {
-        timeout: options.timeout || 10000,
-        force: options.force || false
-      });
-
-      // Remove PID file
-      pidManager.removePID();
-
-      console.log('Host daemon stopped successfully');
-    } catch (error: any) {
-      console.error(`Failed to stop host daemon: ${error.message}`);
-      process.exit(1);
+    if (!pidInfo) {
+      console.log(chalk.yellow('Host daemon is not running'));
+      pidManager.cleanupStalePID();
+      return;
     }
+
+    console.log(chalk.blue('\n🛑 Stopping host node...'));
+    console.log(chalk.gray(`  PID: ${pidInfo.pid}`));
+    console.log(chalk.gray(`  URL: ${pidInfo.publicUrl}`));
+
+    // Stop the daemon
+    await daemonManager.stopDaemon(pidInfo.pid, {
+      timeout: options.timeout || 10000,
+      force: options.force || false
+    });
+
+    // Remove PID file
+    pidManager.removePID();
+
+    // Clear PID from config (Sub-phase 5.2)
+    const config = await ConfigStorage.loadConfig();
+    if (config) {
+      await ConfigStorage.saveConfig({
+        ...config,
+        processPid: undefined,
+        nodeStartTime: undefined
+      });
+    }
+
+    console.log(chalk.green('\n✅ Node stopped successfully'));
   }
 };

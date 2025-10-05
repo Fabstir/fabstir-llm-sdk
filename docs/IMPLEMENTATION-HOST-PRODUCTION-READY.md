@@ -921,16 +921,27 @@ async function startHost(options: any): Promise<void> {
 }
 ```
 
-### Sub-phase 5.2: Enhance Stop Command
+### Sub-phase 5.2: Enhance Stop Command ✅ COMPLETED
 **Goal**: Verify stop command works with new PID tracking
 
 **Tasks**:
-- [ ] Write tests in `tests/commands/stop.test.ts` (120 lines)
-- [ ] Update `packages/host-cli/src/commands/stop.ts` (minimal changes)
-- [ ] Use PIDManager.getPIDInfo() instead of readPID()
-- [ ] Show node URL when stopping
-- [ ] Clear processPid from config after stop
-- [ ] Verify process actually stopped
+- [x] Write tests in `tests/commands/stop.test.ts` (351 lines, 11 tests)
+- [x] Update `packages/host-cli/src/commands/stop.ts` (84 lines)
+- [x] Use PIDManager.getPIDInfo() instead of readPID()
+- [x] Show node URL when stopping
+- [x] Clear processPid from config after stop
+- [x] Verify process actually stopped
+
+**Implementation Notes**:
+- Tests written first (RED phase): All 11 tests failed with "readPID is not a function"
+- Implementation (GREEN phase): All 11 tests now passing in 11ms
+- Uses getPIDInfo() to get PID with metadata (publicUrl, startTime)
+- Displays public URL when stopping node for clarity
+- Calls cleanupStalePID() when no PID found
+- Clears processPid and nodeStartTime from config after stop
+- Preserves all other config fields when clearing PID
+- Removed try-catch wrapper from action() - errors propagate to CLI handler
+- Force and timeout options passed through to DaemonManager
 
 **Test Requirements**:
 ```typescript
