@@ -4,6 +4,7 @@
  */
 
 import { spawn, ChildProcess } from 'child_process';
+import * as fs from 'fs';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
@@ -106,35 +107,25 @@ export class ProcessManager extends EventEmitter {
     const nodeEnv = this.buildEnvironment(config);
 
     // Build spawn options
-    // In daemon mode, fully ignore stdio to avoid keeping parent attached
+    // In daemon mode, redirect stdio to log files (needed for P2P initialization)
+    // In foreground mode, pipe stdout/stderr for live monitoring
+    const logDir = '/root/.fabstir/logs';
+    const logTimestamp = Date.now();
     const stdio = config.skipStartupWait
-      ? ['ignore', 'ignore', 'ignore']  // Daemon: ignore all stdio
-      : ['ignore', 'pipe', 'pipe'];      // Normal: pipe stdout/stderr for monitoring
+      ? ['ignore',
+         fs.openSync(`${logDir}/${logTimestamp}.out.log`, 'a'),
+         fs.openSync(`${logDir}/${logTimestamp}.err.log`, 'a')]
+      : ['ignore', 'pipe', 'pipe'];
 
-    // For true daemon mode, use setsid to create new session
-    let childProcess: ChildProcess;
-    if (config.skipStartupWait) {
-      // Use setsid to create a new session (survives parent exit)
-      const spawnOptions: any = {
-        env: { ...process.env, ...nodeEnv, ...config.env },
-        cwd: config.workingDir || process.cwd(),
-        detached: true,
-        stdio
-      };
+    const spawnOptions: any = {
+      env: { ...process.env, ...nodeEnv, ...config.env },
+      cwd: config.workingDir || process.cwd(),
+      detached: true,  // Always detached - creates new process group and session
+      stdio
+    };
 
-      // Wrap with setsid to create new session
-      childProcess = spawn('setsid', [execPath], spawnOptions);
-    } else {
-      const spawnOptions: any = {
-        env: { ...process.env, ...nodeEnv, ...config.env },
-        cwd: config.workingDir || process.cwd(),
-        detached: true,
-        stdio
-      };
-
-      // Normal foreground mode
-      childProcess = spawn(execPath, [], spawnOptions);
-    }
+    // Spawn directly (no setsid wrapper needed - detached:true handles it)
+    const childProcess = spawn(execPath, [], spawnOptions);
 
     if (!childProcess.pid) {
       throw new Error('Failed to spawn process');

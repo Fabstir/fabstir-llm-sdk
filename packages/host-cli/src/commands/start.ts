@@ -93,12 +93,15 @@ export async function startHost(options: any): Promise<void> {
     console.log(chalk.blue('\n🔄 Running in daemon mode'));
     console.log(chalk.gray('Node is running in background'));
     console.log(chalk.gray(`PID: ${handle.pid}`));
+    console.log(chalk.gray('Parent process will stay alive to keep daemon running'));
+    console.log(chalk.gray('(This is required in Docker containers)'));
 
-    // Fully detach from child process
+    // Detach from child process
     handle.process.unref();
 
-    // Exit parent - child runs in new session (via setsid) and survives
-    process.exit(0);
+    // Keep parent alive but idle - REQUIRED for child to survive in Docker
+    // The parent must not exit, but we don't need to do anything
+    await new Promise(() => {}); // Infinite wait (until killed externally)
   } else {
     console.log(chalk.blue('\n🔄 Running in foreground mode (Ctrl+C to stop)'));
 
