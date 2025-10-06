@@ -81,6 +81,14 @@ export class StorageManager implements IStorageManager {
    */
   async initialize(seed: string, userAddress?: string): Promise<void> {
     console.log('StorageManager.initialize: Starting...');
+
+    // Skip S5 initialization if explicitly disabled (e.g., for hosts)
+    if (process.env.SKIP_S5_STORAGE === 'true') {
+      console.log('⚠️ StorageManager: S5 storage disabled (SKIP_S5_STORAGE=true)');
+      this.initialized = true;
+      return;
+    }
+
     try {
       this.userSeed = seed;
       this.userAddress = userAddress || '';

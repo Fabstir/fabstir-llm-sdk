@@ -66,8 +66,9 @@ export class SessionManager implements ISessionManager {
     if (!this.paymentManager.isInitialized()) {
       throw new SDKError('PaymentManager not initialized', 'PAYMENT_NOT_INITIALIZED');
     }
-    // StorageManager is required for session persistence
-    if (!this.storageManager.isInitialized()) {
+    // StorageManager is required for session persistence (unless explicitly disabled for hosts)
+    const skipS5Storage = process.env.SKIP_S5_STORAGE === 'true';
+    if (!skipS5Storage && !this.storageManager.isInitialized()) {
       throw new SDKError('StorageManager not initialized - S5 storage is required', 'STORAGE_NOT_INITIALIZED');
     }
     this.initialized = true;

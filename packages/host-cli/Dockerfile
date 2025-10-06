@@ -8,13 +8,18 @@ FROM node:20-slim AS builder
 
 WORKDIR /build
 
-# Install pnpm
-RUN npm install -g pnpm@8
+# Install pnpm and TypeScript globally
+RUN npm install -g pnpm@8 typescript@5
 
 # Copy only the packages we need (not the full monorepo)
 COPY packages/sdk-core ./packages/sdk-core
 COPY packages/host-cli ./packages/host-cli
-COPY packages/s5js ./packages/s5js
+
+# Copy s5js tarball (includes package.json and dist) and extract
+COPY s5js-dist.tar.gz /tmp/
+RUN mkdir -p ./packages/s5js && \
+    tar xzf /tmp/s5js-dist.tar.gz -C ./packages/s5js/ && \
+    rm /tmp/s5js-dist.tar.gz
 
 # Create minimal pnpm-workspace.yaml for these packages
 RUN echo "packages:" > pnpm-workspace.yaml && \
@@ -24,7 +29,7 @@ RUN echo "packages:" > pnpm-workspace.yaml && \
 # We'll handle this differently for production
 RUN sed -i '/"@fabstir\/llm-auth":/d' packages/sdk-core/package.json
 
-# Install dependencies (skip prepare scripts to avoid premature builds)
+# Install ALL dependencies with --ignore-scripts (avoid premature builds)
 WORKDIR /build/packages/s5js
 RUN pnpm install --ignore-scripts
 
@@ -35,6 +40,7 @@ WORKDIR /build/packages/host-cli
 RUN pnpm install --ignore-scripts
 
 # Build packages in dependency order
+# (s5js already built and copied from host)
 
 # 1. Fix sdk-core build config to mark s5js and events as external
 # (s5js is read-only dependency, don't bundle it)
@@ -55,20 +61,28 @@ RUN npx tsc 2>&1 | tee build.log || true && \
 #######################
 # Stage 3: Runtime
 #######################
-FROM node:20-slim
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 
-# Install dependencies for fabstir-llm-node
+# Install Node.js 20 and dependencies for fabstir-llm-node
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
     wget \
+    gnupg \
+    libgomp1 \
+    libssl-dev \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory
 WORKDIR /app
 
-# Install pnpm
-RUN npm install -g pnpm@8
+# Install pnpm and browser API polyfills (needed for S5 in Node.js)
+RUN npm install -g pnpm@8 fake-indexeddb ws
 
 # Copy built packages as local dependencies
 COPY --from=builder /build/packages/sdk-core /tmp/deps/sdk-core
@@ -89,6 +103,13 @@ RUN sed -i 's|"@fabstir/sdk-core": "workspace:\*"|"@fabstir/sdk-core": "file:/tm
     sed -i 's|"inquirer": "\^9\.[0-9]*\.[0-9]*"|"inquirer": "^8.2.6"|g' package.json && \
     sed -i 's|"@types/inquirer": "\^9\.[0-9]*\.[0-9]*"|"@types/inquirer": "^8.2.10"|g' package.json && \
     pnpm install --prod --no-optional --shamefully-hoist
+
+# Create Node.js polyfill script for browser APIs (IndexedDB, WebSocket)
+RUN echo "// Browser API polyfills for S5 in Node.js\n\
+require('fake-indexeddb/auto');\n\
+const WebSocket = require('ws');\n\
+global.WebSocket = WebSocket;\n\
+" > /app/polyfills.js
 
 # Install fabstir-llm-node binary
 # NOTE: Replace this with actual binary installation when available
@@ -114,8 +135,9 @@ RUN sed -i 's|"@fabstir/sdk-core": "workspace:\*"|"@fabstir/sdk-core": "file:/tm
 RUN echo '#!/bin/bash\necho "fabstir-llm-node placeholder - mount actual binary at runtime"\nexit 1' > /usr/local/bin/fabstir-llm-node \
     && chmod +x /usr/local/bin/fabstir-llm-node
 
-# Create directories
-RUN mkdir -p /models /root/.fabstir/logs
+# Create directories and symlink for model access
+RUN mkdir -p /models /root/.fabstir/logs \
+    && ln -s /models /app/models
 
 # Expose ports
 EXPOSE 8080 9000
@@ -123,7 +145,9 @@ EXPOSE 8080 9000
 # Environment variables (can be overridden at runtime)
 ENV NODE_ENV=production
 ENV API_PORT=8080
+ENV INTERNAL_PORT=8080
 ENV P2P_PORT=9000
+ENV SKIP_S5_STORAGE=true
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
@@ -133,7 +157,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 WORKDIR /app
 
 # Entry point - allows running Host CLI commands
-ENTRYPOINT ["node", "dist/index.js"]
+# Preload browser API polyfills (IndexedDB, WebSocket) for S5 in Node.js
+ENTRYPOINT ["node", "--require", "/app/polyfills.js", "dist/index.js"]
 
 # Default command - keep container running
 CMD ["start", "--daemon"]

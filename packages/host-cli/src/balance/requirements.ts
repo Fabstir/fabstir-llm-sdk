@@ -18,8 +18,8 @@ import { getSDK, getAuthenticatedAddress } from '../sdk/client';
  * Minimum requirements for host operation
  */
 export const MINIMUM_REQUIREMENTS = {
-  ETH: 15000000000000000n,      // 0.015 ETH for gas
-  FAB: 1000000000000000000000n, // 1000 FAB tokens
+  ETH: 1000000000000000n,        // 0.001 ETH for gas (Base L2 has low fees)
+  FAB: 1000000000000000000000n,  // 1000 FAB tokens
   STAKING: 1000000000000000000000n // 1000 FAB staked
 };
 

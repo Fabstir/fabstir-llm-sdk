@@ -5,10 +5,14 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Build artifacts
-dist
-build
+# Build artifacts (exclude only host-cli's build output, not dependencies)
+packages/host-cli/dist
+packages/host-cli/build
 *.tsbuildinfo
+
+# Include s5js and sdk-core built files (needed for runtime)
+!packages/s5js/dist
+!packages/sdk-core/dist
 
 # Tests
 tests

@@ -58,11 +58,12 @@ export async function startHost(options: any): Promise<void> {
   // Clean up stale PID
   pidManager.cleanupStalePID();
 
-  // 3. Extract config
-  const { port } = extractHostPort(config.publicUrl);
+  // 3. Use inferencePort from config (internal container port, not public URL port)
+  const port = config.inferencePort;
 
   console.log(chalk.blue('🚀 Starting Fabstir host node...'));
-  console.log(chalk.gray(`  URL: ${config.publicUrl}`));
+  console.log(chalk.gray(`  Internal Port: ${port}`));
+  console.log(chalk.gray(`  Public URL: ${config.publicUrl}`));
   console.log(chalk.gray(`  Models: ${config.models.join(', ')}`));
 
   // 4. Start node
@@ -72,6 +73,7 @@ export async function startHost(options: any): Promise<void> {
     publicUrl: config.publicUrl,
     models: config.models,
     logLevel: options.logLevel || 'info',
+    skipStartupWait: options.daemon, // Skip log monitoring in daemon mode
   });
 
   // 5. Save PID
@@ -89,7 +91,14 @@ export async function startHost(options: any): Promise<void> {
   // 6. Daemon vs foreground mode
   if (options.daemon) {
     console.log(chalk.blue('\n🔄 Running in daemon mode'));
-    return; // Exit, node keeps running
+    console.log(chalk.gray('Node is running in background'));
+    console.log(chalk.gray(`PID: ${handle.pid}`));
+
+    // Fully detach from child process
+    handle.process.unref();
+
+    // Exit parent - child runs in new session (via setsid) and survives
+    process.exit(0);
   } else {
     console.log(chalk.blue('\n🔄 Running in foreground mode (Ctrl+C to stop)'));
 

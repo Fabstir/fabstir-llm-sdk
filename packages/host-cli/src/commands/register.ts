@@ -87,8 +87,8 @@ export async function executeRegistration(
         console.log(chalk.red(`  • ${error}`));
       });
 
-      // Show current balances
-      const balanceDisplay = await displayRequirements();
+      // Show current balances (for registration, don't check staking)
+      const balanceDisplay = await displayRequirements(false, true);
       console.log('\n' + balanceDisplay);
 
       const error = new Error('Registration requirements not met');
@@ -130,16 +130,27 @@ export async function executeRegistration(
       console.log(chalk.blue('\n🚀 Starting registration...'));
       const result = await registerHost(config);
 
-      // Save PID to config (Sub-phase 4.1)
+      // Save config (Sub-phase 4.1)
       const currentConfig = await loadConfig();
-      if (currentConfig) {
-        await saveConfig({
-          ...currentConfig,
-          processPid: processHandle.pid,
-          nodeStartTime: new Date().toISOString(),
-          publicUrl: config.apiUrl,
-        });
-      }
+      // Use INTERNAL_PORT env var if set (for Docker), otherwise extract from URL
+      const internalPort = process.env.INTERNAL_PORT
+        ? parseInt(process.env.INTERNAL_PORT, 10)
+        : extractHostPort(config.apiUrl).port;
+
+      const configData = {
+        version: '1.0',
+        network: 'base-sepolia',
+        rpcUrl: process.env.RPC_URL_BASE_SEPOLIA || '',
+        inferencePort: internalPort,
+        publicUrl: config.apiUrl,
+        models: config.models,
+        pricePerToken: 0.0001,
+        minJobDeposit: 0.01,
+        processPid: processHandle.pid,
+        nodeStartTime: new Date().toISOString(),
+        ...(currentConfig || {}), // Merge with existing config if it exists
+      };
+      await saveConfig(configData);
 
       // Show success
       console.log(chalk.green('\n✅ Registration successful!'));
@@ -241,8 +252,10 @@ export async function startNodeBeforeRegistration(config: {
   // Warn if localhost URL
   warnIfLocalhost(config.apiUrl);
 
-  // Extract port from URL
-  const { port } = extractHostPort(config.apiUrl);
+  // Use INTERNAL_PORT env var if set (for Docker), otherwise extract from URL
+  const port = process.env.INTERNAL_PORT
+    ? parseInt(process.env.INTERNAL_PORT, 10)
+    : extractHostPort(config.apiUrl).port;
 
   console.log(chalk.blue('🚀 Starting inference node...'));
 
@@ -259,16 +272,19 @@ export async function startNodeBeforeRegistration(config: {
 
     console.log(chalk.green(` ✅ Node started (PID: ${processHandle.pid})`));
 
-    // Verify public accessibility
-    console.log(chalk.gray(`  Verifying ${config.apiUrl}...`));
-    const isAccessible = await verifyPublicEndpoint(config.apiUrl);
+    // Verify accessibility (use internal port for Docker, public URL otherwise)
+    const verifyUrl = process.env.INTERNAL_PORT
+      ? `http://localhost:${port}`
+      : config.apiUrl;
+    console.log(chalk.gray(`  Verifying ${verifyUrl}...`));
+    const isAccessible = await verifyPublicEndpoint(verifyUrl);
 
     if (!isAccessible) {
-      showNetworkTroubleshooting(config.apiUrl);
-      throw new Error(`Node not accessible at public URL: ${config.apiUrl}`);
+      showNetworkTroubleshooting(verifyUrl);
+      throw new Error(`Node not accessible at: ${verifyUrl}`);
     }
 
-    console.log(chalk.green(' ✅ Public URL verified'));
+    console.log(chalk.green(' ✅ API verified'));
 
     return processHandle;
   } catch (error) {

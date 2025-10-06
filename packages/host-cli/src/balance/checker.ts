@@ -59,7 +59,7 @@ export async function getETHBalance(forceRefresh = false): Promise<bigint> {
 /**
  * Check if ETH balance meets minimum requirement
  */
-export async function checkMinimumETH(requiredAmount = 15000000000000000n): Promise<{
+export async function checkMinimumETH(requiredAmount = 1000000000000000n): Promise<{
   hasMinimum: boolean;
   balance: bigint;
   required: bigint;

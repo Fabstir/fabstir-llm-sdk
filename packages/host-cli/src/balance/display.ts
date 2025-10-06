@@ -79,7 +79,7 @@ export async function displayBalances(useColors = false): Promise<string> {
 /**
  * Display requirements status
  */
-export async function displayRequirements(useColors = false): Promise<string> {
+export async function displayRequirements(useColors = false, forRegistration = false): Promise<string> {
   const lines: string[] = [];
 
   // Header
@@ -92,12 +92,17 @@ export async function displayRequirements(useColors = false): Promise<string> {
   lines.push(colorize('Minimum Requirements:', colors.bright, useColors));
   lines.push(`  • Minimum ETH: ${formatETHBalance(MINIMUM_REQUIREMENTS.ETH, 4)}`);
   lines.push(`  • Minimum FAB: ${formatFABBalance(MINIMUM_REQUIREMENTS.FAB, 0)}`);
-  lines.push(`  • Required Stake: ${formatFABBalance(MINIMUM_REQUIREMENTS.STAKING, 0)}`);
+  if (!forRegistration) {
+    lines.push(`  • Required Stake: ${formatFABBalance(MINIMUM_REQUIREMENTS.STAKING, 0)}`);
+  }
   lines.push('');
 
   try {
-    // Check all requirements
-    const requirements = await checkAllRequirements();
+    // Check requirements (wallet balances only for registration, full check for existing hosts)
+    const { checkRegistrationRequirements } = await import('./requirements');
+    const requirements = forRegistration
+      ? await checkRegistrationRequirements()
+      : await checkAllRequirements();
 
     // Status line
     lines.push(colorize('Status:', colors.bright, useColors));

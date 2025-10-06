@@ -27,6 +27,7 @@ export interface ProcessConfig {
   env?: Record<string, string>;
   workingDir?: string;
   maxLogLines?: number;
+  skipStartupWait?: boolean; // Skip log monitoring for daemon mode
 }
 
 /**
@@ -105,13 +106,35 @@ export class ProcessManager extends EventEmitter {
     const nodeEnv = this.buildEnvironment(config);
 
     // Build spawn options
-    const spawnOptions: any = {
-      env: { ...process.env, ...nodeEnv, ...config.env },
-      cwd: config.workingDir || process.cwd()
-    };
+    // In daemon mode, fully ignore stdio to avoid keeping parent attached
+    const stdio = config.skipStartupWait
+      ? ['ignore', 'ignore', 'ignore']  // Daemon: ignore all stdio
+      : ['ignore', 'pipe', 'pipe'];      // Normal: pipe stdout/stderr for monitoring
 
-    // Spawn the process with NO CLI arguments (all config via env vars)
-    const childProcess = spawn(execPath, [], spawnOptions);
+    // For true daemon mode, use setsid to create new session
+    let childProcess: ChildProcess;
+    if (config.skipStartupWait) {
+      // Use setsid to create a new session (survives parent exit)
+      const spawnOptions: any = {
+        env: { ...process.env, ...nodeEnv, ...config.env },
+        cwd: config.workingDir || process.cwd(),
+        detached: true,
+        stdio
+      };
+
+      // Wrap with setsid to create new session
+      childProcess = spawn('setsid', [execPath], spawnOptions);
+    } else {
+      const spawnOptions: any = {
+        env: { ...process.env, ...nodeEnv, ...config.env },
+        cwd: config.workingDir || process.cwd(),
+        detached: true,
+        stdio
+      };
+
+      // Normal foreground mode
+      childProcess = spawn(execPath, [], spawnOptions);
+    }
 
     if (!childProcess.pid) {
       throw new Error('Failed to spawn process');
@@ -138,8 +161,13 @@ export class ProcessManager extends EventEmitter {
     // Store handle
     this.handles.set(handle.pid, handle);
 
-    // Wait for process to be ready
-    await this.waitForReady(handle);
+    // Wait for process to be ready (unless skipped for daemon mode)
+    if (!config.skipStartupWait) {
+      await this.waitForReady(handle);
+    } else {
+      // In daemon mode, just wait a moment to ensure spawn succeeded
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
 
     handle.status = 'running';
     this.emit('started', handle);
@@ -274,12 +302,25 @@ export class ProcessManager extends EventEmitter {
    * Note: fabstir-llm-node v7 uses environment variables, NOT CLI arguments
    */
   private buildEnvironment(config: ProcessConfig): Record<string, string> {
+    // Extract model filename from config.models
+    // Model format: "repo:filename" or just "filename"
+    let modelFilename = '';
+    if (config.models && config.models.length > 0) {
+      const modelSpec = config.models[0];
+      // If model has format "repo:filename", extract filename after colon
+      if (modelSpec.includes(':')) {
+        modelFilename = modelSpec.split(':')[1];
+      } else {
+        modelFilename = modelSpec;
+      }
+    }
+
     const env: Record<string, string> = {
       // Required: API port
       API_PORT: config.port.toString(),
 
-      // Model path (must be set externally via MODEL_PATH env var)
-      MODEL_PATH: process.env.MODEL_PATH || '',
+      // Model path (relative to /app working directory, symlinked to /models)
+      MODEL_PATH: modelFilename ? `./models/${modelFilename}` : '',
 
       // Optional: P2P port
       P2P_PORT: process.env.P2P_PORT || '9000',
@@ -289,6 +330,9 @@ export class ProcessManager extends EventEmitter {
 
       // Chain configuration
       CHAIN_ID: process.env.CHAIN_ID || '84532', // Default: Base Sepolia
+
+      // Host wallet private key (required for P2P)
+      HOST_PRIVATE_KEY: process.env.HOST_PRIVATE_KEY || '',
 
       // Contract addresses (from .env.test)
       CONTRACT_JOB_MARKETPLACE: process.env.CONTRACT_JOB_MARKETPLACE || '',
@@ -400,18 +444,17 @@ export class ProcessManager extends EventEmitter {
 
     await logMonitor;
 
-    // Now verify public URL if provided
-    if (publicUrl) {
-      console.log(chalk.gray(`  Verifying public access at ${publicUrl}...`));
-      const isAccessible = await verifyPublicEndpoint(publicUrl);
+    // Verify API is accessible on internal port (not publicUrl which may be host-mapped)
+    const internalUrl = `http://localhost:${handle.config.port}`;
+    console.log(chalk.gray(`  Verifying internal API at ${internalUrl}...`));
+    const isAccessible = await verifyPublicEndpoint(internalUrl);
 
-      if (!isAccessible) {
-        showNetworkTroubleshooting(publicUrl);
-        throw new Error(`Node not accessible at public URL: ${publicUrl}`);
-      }
-
-      console.log(chalk.green('   ✅ Public URL is accessible'));
+    if (!isAccessible) {
+      showNetworkTroubleshooting(internalUrl);
+      throw new Error(`Node not accessible at internal port: ${internalUrl}`);
     }
+
+    console.log(chalk.green('   ✅ API is accessible'));
   }
 }
 
