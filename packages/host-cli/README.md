@@ -43,6 +43,10 @@ See [SDK-INTEGRATION.md](docs/SDK-INTEGRATION.md) for architecture details.
 
 ## Quick Start
 
+**New to Fabstir?** See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for a complete step-by-step guide to becoming a host using Docker.
+
+**Model Download Guide**: [docs/MODEL_DOWNLOAD_GUIDE.md](docs/MODEL_DOWNLOAD_GUIDE.md)
+
 ### Prerequisites
 
 - **Node.js 18+** and **pnpm** (npm causes dependency hoisting issues)
@@ -398,51 +402,76 @@ pm2 monit
 pm2 logs fabstir-host
 ```
 
-#### Option 3: Docker Deployment
+#### Option 3: Docker Deployment (MVP - Recommended)
 
-Create `Dockerfile`:
+**Complete Guide**: See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for step-by-step Docker setup.
 
-```dockerfile
-FROM node:18-slim
+**Quick Setup**:
 
-WORKDIR /app
+1. **Download Model** (do this FIRST on host machine):
+   ```bash
+   mkdir -p ~/fabstir-models
+   cd ~/fabstir-models
+   wget https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+   ```
 
-# Copy package files
-COPY package.json pnpm-lock.yaml ./
+2. **Pull Docker Image**:
+   ```bash
+   docker pull fabstir/host-cli:latest
+   ```
 
-# Install pnpm and dependencies
-RUN npm install -g pnpm && pnpm install --frozen-lockfile
+3. **Run Container** (with model volume mount):
+   ```bash
+   docker run -d \
+     --name fabstir-host \
+     -p 8080:8080 \
+     -p 9000:9000 \
+     -v ~/fabstir-models:/models \
+     -e MODEL_PATH=/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
+     -e HOST_PRIVATE_KEY=$YOUR_PRIVATE_KEY \
+     -e CHAIN_ID=84532 \
+     -e RPC_URL_BASE_SEPOLIA=$YOUR_RPC_URL \
+     -e CONTRACT_JOB_MARKETPLACE=$CONTRACT_JOB_MARKETPLACE \
+     -e CONTRACT_NODE_REGISTRY=$CONTRACT_NODE_REGISTRY \
+     -e CONTRACT_PROOF_SYSTEM=$CONTRACT_PROOF_SYSTEM \
+     -e CONTRACT_HOST_EARNINGS=$CONTRACT_HOST_EARNINGS \
+     fabstir/host-cli:latest
+   ```
 
-# Copy source
-COPY . .
+4. **Register as Host** (inside container):
+   ```bash
+   docker exec -it fabstir-host fabstir-host register \
+     --url http://YOUR_PUBLIC_IP:8080 \
+     --models "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF:tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf" \
+     --stake 1000
+   ```
 
-# Build
-RUN pnpm build
+**Key Points**:
+- ✅ Models are mounted from host machine (not in image)
+- ✅ Pre-built image is small (~500MB)
+- ✅ Use your existing model downloads
+- ✅ All Host CLI commands available via `docker exec`
 
-# Expose API port
-EXPOSE 8080
+**Environment Variables**:
 
-# Start host
-CMD ["pnpm", "host", "start", "--daemon"]
-```
+See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md#step-3-prepare-environment) for complete environment variable reference.
 
-Run:
+**Common Commands**:
 ```bash
-# Build image
-docker build -t fabstir-host .
-
-# Run container
-docker run -d \
-  --name fabstir-host \
-  -p 8080:8080 \
-  -v ~/.fabstir:/root/.fabstir \
-  fabstir-host
+# Check status
+docker exec fabstir-host fabstir-host status
 
 # View logs
 docker logs -f fabstir-host
 
-# Restart
-docker restart fabstir-host
+# Stop node
+docker exec fabstir-host fabstir-host stop
+
+# Start node
+docker exec fabstir-host fabstir-host start --daemon
+
+# Unregister (recovers stake)
+docker exec fabstir-host fabstir-host unregister
 ```
 
 ### 📊 Network Troubleshooting

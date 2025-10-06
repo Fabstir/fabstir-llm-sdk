@@ -399,6 +399,390 @@ fabstir-host config set network.rpcUrl https://base-sepolia.g.alchemy.com/v2/YOU
 
 ---
 
+## Docker Deployment Issues
+
+### Model Not Found in Container
+
+**Problem:** `Model file not found: /models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf`
+
+**Symptoms:**
+- Node starts but immediately fails
+- Logs show "MODEL_PATH does not exist"
+- Container exits with error
+
+**Solutions:**
+
+1. **Verify volume mount**:
+   ```bash
+   # Check if volume is mounted correctly
+   docker inspect fabstir-host | grep -A 10 Mounts
+
+   # Should show:
+   # "Source": "/home/user/fabstir-models",
+   # "Destination": "/models"
+   ```
+
+2. **Check model exists on host**:
+   ```bash
+   # Outside container, on host machine
+   ls -lh ~/fabstir-models/
+   # Should show your .gguf file
+
+   # Verify file size
+   du -h ~/fabstir-models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+   # Should be ~700MB
+   ```
+
+3. **Check MODEL_PATH environment variable**:
+   ```bash
+   # Inside container
+   docker exec fabstir-host env | grep MODEL_PATH
+
+   # Should match volume mount path:
+   # MODEL_PATH=/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+   ```
+
+4. **Fix volume mount**:
+   ```bash
+   # Stop and remove container
+   docker stop fabstir-host
+   docker rm fabstir-host
+
+   # Re-run with correct mount
+   docker run -d \
+     --name fabstir-host \
+     -p 8080:8080 \
+     -p 9000:9000 \
+     -v ~/fabstir-models:/models \
+     -e MODEL_PATH=/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
+     fabstir/host-cli:latest
+   ```
+
+---
+
+### Volume Mount Permission Denied
+
+**Problem:** `Permission denied: /models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf`
+
+**Solutions:**
+
+1. **Fix file permissions on host**:
+   ```bash
+   # Make files readable
+   chmod 644 ~/fabstir-models/*.gguf
+
+   # Make directory executable
+   chmod 755 ~/fabstir-models
+   ```
+
+2. **Check file ownership**:
+   ```bash
+   # Check current ownership
+   ls -l ~/fabstir-models/
+
+   # If owned by root, fix it:
+   sudo chown $USER:$USER ~/fabstir-models/*.gguf
+   ```
+
+3. **Run container with user ID**:
+   ```bash
+   docker run -d \
+     --name fabstir-host \
+     --user $(id -u):$(id -g) \
+     -v ~/fabstir-models:/models \
+     fabstir/host-cli:latest
+   ```
+
+---
+
+### Container Cannot Access Environment Variables
+
+**Problem:** `CONTRACT_JOB_MARKETPLACE is undefined`
+
+**Solutions:**
+
+1. **Verify environment variables are set**:
+   ```bash
+   # Check if vars are exported
+   echo $CONTRACT_JOB_MARKETPLACE
+   echo $RPC_URL_BASE_SEPOLIA
+
+   # Export if not set
+   export CONTRACT_JOB_MARKETPLACE="0xdEa1B47872C27458Bb7331Ade99099761C4944Dc"
+   export RPC_URL_BASE_SEPOLIA="https://base-sepolia.g.alchemy.com/v2/YOUR_KEY"
+   ```
+
+2. **Pass all required environment variables**:
+   ```bash
+   docker run -d \
+     --name fabstir-host \
+     -e HOST_PRIVATE_KEY=$HOST_PRIVATE_KEY \
+     -e MODEL_PATH=/models/your-model.gguf \
+     -e CHAIN_ID=84532 \
+     -e RPC_URL_BASE_SEPOLIA=$RPC_URL_BASE_SEPOLIA \
+     -e CONTRACT_JOB_MARKETPLACE=$CONTRACT_JOB_MARKETPLACE \
+     -e CONTRACT_NODE_REGISTRY=$CONTRACT_NODE_REGISTRY \
+     -e CONTRACT_PROOF_SYSTEM=$CONTRACT_PROOF_SYSTEM \
+     -e CONTRACT_HOST_EARNINGS=$CONTRACT_HOST_EARNINGS \
+     fabstir/host-cli:latest
+   ```
+
+3. **Use env file**:
+   ```bash
+   # Create .env file
+   cat > docker.env <<EOF
+   HOST_PRIVATE_KEY=0x...
+   MODEL_PATH=/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+   CHAIN_ID=84532
+   RPC_URL_BASE_SEPOLIA=https://...
+   CONTRACT_JOB_MARKETPLACE=0x...
+   CONTRACT_NODE_REGISTRY=0x...
+   CONTRACT_PROOF_SYSTEM=0x...
+   CONTRACT_HOST_EARNINGS=0x...
+   EOF
+
+   # Run with env file
+   docker run -d --env-file docker.env fabstir/host-cli:latest
+   ```
+
+---
+
+### Container Ports Not Accessible
+
+**Problem:** Cannot access `http://YOUR_IP:8080` even though container is running
+
+**Solutions:**
+
+1. **Verify port mapping**:
+   ```bash
+   docker ps | grep fabstir-host
+   # Should show: 0.0.0.0:8080->8080/tcp
+   ```
+
+2. **Check if ports are exposed**:
+   ```bash
+   docker inspect fabstir-host | grep -A 5 ExposedPorts
+   # Should show: "8080/tcp": {} and "9000/tcp": {}
+   ```
+
+3. **Test from host machine first**:
+   ```bash
+   curl http://localhost:8080/health
+   # Should work from host
+
+   # Then test externally
+   curl http://YOUR_PUBLIC_IP:8080/health
+   ```
+
+4. **Check Docker network**:
+   ```bash
+   # See which network
+   docker inspect fabstir-host | grep NetworkMode
+
+   # For bridge network, check firewall allows forwarding
+   sudo iptables -L DOCKER-USER
+   ```
+
+---
+
+### Docker Container Exits Immediately
+
+**Problem:** Container starts but stops after a few seconds
+
+**Solutions:**
+
+1. **Check container logs**:
+   ```bash
+   docker logs fabstir-host
+
+   # Look for error messages at the end
+   docker logs --tail 50 fabstir-host
+   ```
+
+2. **Run container in foreground to see errors**:
+   ```bash
+   # Remove -d flag to see output
+   docker run -it \
+     --name fabstir-host-debug \
+     -p 8080:8080 \
+     -v ~/fabstir-models:/models \
+     -e MODEL_PATH=/models/your-model.gguf \
+     fabstir/host-cli:latest
+   ```
+
+3. **Common exit causes**:
+   - Missing MODEL_PATH
+   - Invalid contract addresses
+   - fabstir-llm-node binary not found
+   - Port 8080 already in use
+
+4. **Start with interactive shell**:
+   ```bash
+   docker run -it \
+     --name fabstir-host-debug \
+     -v ~/fabstir-models:/models \
+     fabstir/host-cli:latest \
+     /bin/bash
+
+   # Inside container, debug manually
+   ls -l /models
+   echo $MODEL_PATH
+   which fabstir-llm-node
+   ```
+
+---
+
+## Model Download Issues
+
+### Hugging Face Download Interrupted
+
+**Problem:** Download stops partway through
+
+**Solutions:**
+
+1. **Resume with wget**:
+   ```bash
+   # Resume interrupted download
+   wget -c https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+   ```
+
+2. **Use curl with resume**:
+   ```bash
+   curl -C - -L -o tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
+     https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+   ```
+
+3. **Use Hugging Face CLI with retry**:
+   ```bash
+   pip install huggingface-hub
+   huggingface-cli download \
+     TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF \
+     tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
+     --local-dir ~/fabstir-models \
+     --resume-download
+   ```
+
+---
+
+### Model File Corrupted
+
+**Problem:** Model downloads but fails to load
+
+**Solutions:**
+
+1. **Verify file size**:
+   ```bash
+   ls -lh ~/fabstir-models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+   # Should be ~700MB (731MB exactly)
+   ```
+
+2. **Check SHA256 hash**:
+   ```bash
+   sha256sum ~/fabstir-models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+   # Compare with hash on Hugging Face model card
+   ```
+
+3. **Re-download**:
+   ```bash
+   # Delete corrupted file
+   rm ~/fabstir-models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+
+   # Download fresh
+   wget https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+   ```
+
+---
+
+### Model Not Approved in ModelRegistry
+
+**Problem:** `Model not approved: {your-model-string}`
+
+**Symptoms:**
+- Registration fails with "Model not approved"
+- Error mentions ModelRegistry contract
+
+**Solutions:**
+
+1. **Use exact approved model string**:
+   ```bash
+   # ✅ CORRECT (approved)
+   "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF:tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+
+   # ❌ WRONG (missing repository)
+   "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+
+   # ❌ WRONG (missing filename)
+   "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF"
+
+   # ❌ WRONG (wrong separator)
+   "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+   ```
+
+2. **Check approved models**:
+   ```bash
+   # Query blockchain
+   docker exec fabstir-host fabstir-host list-models
+
+   # Currently approved:
+   # 1. TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF:tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+   # 2. CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf
+   ```
+
+3. **Verify format**:
+   ```bash
+   # Format must be: {repository}:{filename}
+   # - Repository: Hugging Face repo path
+   # - Filename: Exact .gguf file name
+   # - Separator: Single colon (:)
+   ```
+
+4. **See model guide**:
+   - [MODEL_DOWNLOAD_GUIDE.md](./MODEL_DOWNLOAD_GUIDE.md) for complete list
+   - [ModelRegistry contract](../../docs/compute-contracts-reference/ModelRegistry.md) for on-chain status
+
+---
+
+### Insufficient Disk Space for Model
+
+**Problem:** `No space left on device`
+
+**Solutions:**
+
+1. **Check available space**:
+   ```bash
+   df -h ~/fabstir-models
+
+   # Model requirements:
+   # - TinyLlama: 1GB
+   # - TinyVicuna: 1GB
+   # - Llama-2-7B: 5GB
+   # - Mixtral-8x7B: 30GB
+   ```
+
+2. **Clean up old models**:
+   ```bash
+   # Remove unused models
+   rm ~/fabstir-models/old-model.gguf
+
+   # Or move to external drive
+   mv ~/fabstir-models/large-model.gguf /mnt/external/
+   ```
+
+3. **Use different directory**:
+   ```bash
+   # Create on larger partition
+   mkdir -p /mnt/data/fabstir-models
+
+   # Download there
+   cd /mnt/data/fabstir-models
+   wget https://huggingface.co/.../your-model.gguf
+
+   # Update Docker mount
+   docker run -v /mnt/data/fabstir-models:/models ...
+   ```
+
+---
+
 ### LLM backend unreachable
 
 **Problem:** "Cannot connect to inference endpoint"
