@@ -48,7 +48,7 @@ docker build --no-cache -f packages/host-cli/Dockerfile -t fabstir-host-cli:loca
 - ✅ S5 storage polyfills (IndexedDB, WebSocket)
 - ✅ INTERNAL_PORT=8080 environment variable
 - ✅ Port 8080 → 8083 mapping support
-- ✅ Daemon mode with `setsid` for process survival
+- ✅ Daemon mode with parent-stays-alive fix for Docker
 
 ### Step 2: Start Container
 
@@ -165,33 +165,32 @@ docker exec fabstir-host-test curl -s http://localhost:8080/health
 
 ## Daemon Mode (Background)
 
-### Option 1: Docker Detached Exec (Recommended)
+To run the node in background mode, use the `--daemon` flag:
 
 ```bash
-# Start in Docker's background
-docker exec -d fabstir-host-test sh -c 'node --require /app/polyfills.js dist/index.js start > /var/log/fabstir.log 2>&1'
+# Start daemon mode
+docker exec -d fabstir-host-test sh -c 'cd /app && node --require /app/polyfills.js dist/index.js start --daemon'
 
-# Check if running
+# Verify it's running (wait a few seconds for startup)
+sleep 5
 docker exec fabstir-host-test ps aux | grep fabstir-llm-node
 
+# Check PID file
+docker exec fabstir-host-test cat /root/.fabstir/host.pid
+
 # View logs
-docker exec fabstir-host-test tail -f /var/log/fabstir.log
+docker exec fabstir-host-test sh -c 'tail -f /root/.fabstir/logs/*.out.log'
+
+# Stop daemon
+docker exec fabstir-host-test sh -c 'cd /app && node --require /app/polyfills.js dist/index.js stop'
 ```
 
-### Option 2: CLI Daemon Flag (Uses setsid)
-
-```bash
-# Start with --daemon flag
-docker exec fabstir-host-test sh -c 'node --require /app/polyfills.js dist/index.js start --daemon'
-
-# Process runs in new session (survives parent exit via setsid)
-```
-
-**How it works**:
-- `setsid` wraps fabstir-llm-node in a new session
-- Process becomes session leader, detached from parent
-- Parent Node.js process can safely exit
-- fabstir-llm-node continues running
+**How daemon mode works in Docker**:
+- Child process spawned with `detached: true` (creates new process group)
+- stdio redirected to log files at `/root/.fabstir/logs/` (required for P2P initialization)
+- **Parent process stays alive** - In Docker containers, even detached children die when parent exits
+- Parent waits indefinitely but remains idle, keeping child alive
+- PID tracked in `/root/.fabstir/host.pid` for stop command
 
 ## Common Commands
 
@@ -254,11 +253,18 @@ docker exec fabstir-host-test env | grep INTERNAL_PORT
 
 ### Daemon mode - Process dies immediately
 
-**Cause**: Old daemon implementation without `setsid`
+**Cause**: Parent process exited, killing detached child
 
-**Fix**: Rebuild Docker image (includes setsid fix):
+**Fix**: Ensure you're using the latest code with parent-stays-alive fix. Rebuild if needed:
 ```bash
+cd ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-sdk
 docker build --no-cache -f packages/host-cli/Dockerfile -t fabstir-host-cli:local .
+```
+
+Verify the fix is present:
+```bash
+docker exec fabstir-host-test grep -n "Parent process will stay alive" /app/dist/commands/start.js
+# Should show line with this message
 ```
 
 ## Files Reference

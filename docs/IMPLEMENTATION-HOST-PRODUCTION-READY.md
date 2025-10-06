@@ -1540,3 +1540,24 @@ This implementation plan transforms the Host CLI from a blockchain-only tool int
 - Integration tests pass with real fabstir-llm-node ✅
 - Complete onboarding documentation for new users ✅ (Sub-phase 7.3)
 - Docker-first workflow with model volume mounts ✅ (Sub-phase 7.3)
+
+## Post-Completion Fixes
+
+### Docker Daemon Mode Fix (October 2025)
+
+**Problem**: Daemon mode was failing in Docker containers - processes would die immediately after parent exit.
+
+**Root Cause**: In Docker environments, even detached child processes die when the parent exits. The original implementation used `setsid` wrapper approach which caused PID mismatches and didn't solve the Docker-specific issue.
+
+**Solution** (`packages/host-cli/src/process/manager.ts` & `src/commands/start.ts`):
+1. Removed `setsid` wrapper approach
+2. Use native `detached: true` for spawning
+3. Redirect stdio to log files instead of ignoring (required for P2P initialization)
+4. **Parent process stays alive** - waits indefinitely to keep detached child running
+
+**Files Updated**:
+- `packages/host-cli/src/process/manager.ts` - Removed setsid, added log file redirection
+- `packages/host-cli/src/commands/start.ts` - Parent stays alive with `await new Promise(() => {})`
+- `packages/host-cli/docs/DOCKER_DEPLOYMENT.md` - Updated daemon mode documentation
+
+**Validation**: Daemon mode now works correctly in Docker - process spawns, survives, loads model, initializes P2P, and stop command works cleanly.
