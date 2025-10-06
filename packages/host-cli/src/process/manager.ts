@@ -101,17 +101,17 @@ export class ProcessManager extends EventEmitter {
       throw new Error('fabstir-llm-node not found. Please install it first.');
     }
 
-    // Build command arguments
-    const args = this.buildArguments(config);
+    // Build environment variables (fabstir-llm-node v7 uses env vars, not CLI args)
+    const nodeEnv = this.buildEnvironment(config);
 
     // Build spawn options
     const spawnOptions: any = {
-      env: { ...process.env, ...config.env },
+      env: { ...process.env, ...nodeEnv, ...config.env },
       cwd: config.workingDir || process.cwd()
     };
 
-    // Spawn the process
-    const childProcess = spawn(execPath, args, spawnOptions);
+    // Spawn the process with NO CLI arguments (all config via env vars)
+    const childProcess = spawn(execPath, [], spawnOptions);
 
     if (!childProcess.pid) {
       throw new Error('Failed to spawn process');
@@ -270,35 +270,42 @@ export class ProcessManager extends EventEmitter {
   }
 
   /**
-   * Build command arguments
+   * Build environment variables for fabstir-llm-node
+   * Note: fabstir-llm-node v7 uses environment variables, NOT CLI arguments
    */
-  private buildArguments(config: ProcessConfig): string[] {
-    const args: string[] = [];
+  private buildEnvironment(config: ProcessConfig): Record<string, string> {
+    const env: Record<string, string> = {
+      // Required: API port
+      API_PORT: config.port.toString(),
 
-    args.push('--port', config.port.toString());
-    args.push('--host', config.host);
+      // Model path (must be set externally via MODEL_PATH env var)
+      MODEL_PATH: process.env.MODEL_PATH || '',
 
-    for (const model of config.models) {
-      args.push('--model', model);
+      // Optional: P2P port
+      P2P_PORT: process.env.P2P_PORT || '9000',
+
+      // Logging
+      RUST_LOG: config.logLevel || 'info',
+
+      // Chain configuration
+      CHAIN_ID: process.env.CHAIN_ID || '84532', // Default: Base Sepolia
+
+      // Contract addresses (from .env.test)
+      CONTRACT_JOB_MARKETPLACE: process.env.CONTRACT_JOB_MARKETPLACE || '',
+      CONTRACT_NODE_REGISTRY: process.env.CONTRACT_NODE_REGISTRY || '',
+      CONTRACT_PROOF_SYSTEM: process.env.CONTRACT_PROOF_SYSTEM || '',
+      CONTRACT_HOST_EARNINGS: process.env.CONTRACT_HOST_EARNINGS || '',
+
+      // RPC URL
+      RPC_URL: process.env.RPC_URL_BASE_SEPOLIA || '',
+    };
+
+    // Add GPU configuration if enabled
+    if (config.gpuEnabled && process.env.CUDA_VISIBLE_DEVICES) {
+      env.CUDA_VISIBLE_DEVICES = process.env.CUDA_VISIBLE_DEVICES;
     }
 
-    if (config.maxConnections) {
-      args.push('--max-connections', config.maxConnections.toString());
-    }
-
-    if (config.logLevel) {
-      args.push('--log-level', config.logLevel);
-    }
-
-    if (config.gpuEnabled) {
-      args.push('--gpu');
-    }
-
-    if (config.memoryLimit) {
-      args.push('--memory-limit', config.memoryLimit);
-    }
-
-    return args;
+    return env;
   }
 
   /**
