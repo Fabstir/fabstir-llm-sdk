@@ -1,8 +1,8 @@
-# Host CLI Management API Implementation Plan (v1.5)
+# Host CLI Management API Implementation Plan (v1.6)
 
 > Complete implementation plan for adding browser-based node management to Fabstir Host CLI
 >
-> **Status**: 🟢 In Progress (6/14 sub-phases complete) | **Target**: Local Docker Development | **Est. Time**: 16-22 hours
+> **Status**: 🟢 In Progress (7/14 sub-phases complete) | **Target**: Local Docker Development | **Est. Time**: 16-22 hours
 
 ## Overview
 
@@ -203,7 +203,7 @@ kill -9 $(lsof -t -i:3001)
 
 ✅ **Phase 1: Management API Server** (3/3 sub-phases complete)
 ✅ **Phase 2: WebSocket Log Streaming** (2/2 sub-phases complete)
-🟢 **Phase 3: Serve Command** (1/2 sub-phases complete)
+✅ **Phase 3: Serve Command** (2/2 sub-phases complete)
 ⬜ **Phase 4: Browser UI Integration** (0/3 sub-phases complete)
 ⬜ **Phase 5: Docker Integration** (0/2 sub-phases complete)
 ⬜ **Phase 6: Testing & Documentation** (0/2 sub-phases complete)
@@ -805,20 +805,22 @@ async function startServer(options: any): Promise<void> {
 
 ---
 
-### Sub-phase 3.2: Register Serve Command in CLI ⬜
+### Sub-phase 3.2: Register Serve Command in CLI ✅
 
 **Goal**: Wire up serve command to main CLI entry point
 
+**Status**: ✅ Complete (January 7, 2025)
+
 **Tasks**:
-- [ ] Write tests in `packages/host-cli/tests/integration/cli.test.ts` (+30 lines)
-  - [ ] Test: should show serve command in help output
-  - [ ] Test: should execute serve command
-  - [ ] Test: should pass options correctly
-- [ ] Update `packages/host-cli/src/index.ts` (+5 lines)
-  - [ ] Import registerServeCommand
-  - [ ] Call registerServeCommand(program)
-- [ ] Verify all tests pass
-- [ ] Verify acceptance criteria met
+- [x] Write tests in `packages/host-cli/tests/integration/cli.test.ts` (64 lines)
+  - [x] Test: should show serve command in help output
+  - [x] Test: should show serve command options in serve help
+  - [x] Test: should register serve command in program
+- [x] Update `packages/host-cli/src/index.ts` (+2 lines)
+  - [x] Import registerServeCommand
+  - [x] Call registerServeCommand(program)
+- [x] Verify all tests pass (3/3 ✅)
+- [x] Verify acceptance criteria met
 
 **Test Requirements**:
 ```typescript
