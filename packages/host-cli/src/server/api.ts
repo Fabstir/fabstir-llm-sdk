@@ -356,16 +356,29 @@ export class ManagementServer {
         return;
       }
 
-      this.server.close((error) => {
-        this.server = null;
-        this.startTime = 0;
+      const server = this.server;
+      this.server = null;
+      this.startTime = 0;
 
-        if (error) {
+      server.close((error: any) => {
+        // Ignore ERR_SERVER_NOT_RUNNING error (server already stopped)
+        if (error && error.code !== 'ERR_SERVER_NOT_RUNNING') {
           reject(error);
         } else {
           resolve();
         }
       });
     });
+  }
+
+  /**
+   * Get the HTTP server instance
+   * Used to attach WebSocket server to the same port
+   */
+  getHttpServer(): Server {
+    if (!this.server) {
+      throw new Error('Server not started. Call start() first.');
+    }
+    return this.server;
   }
 }

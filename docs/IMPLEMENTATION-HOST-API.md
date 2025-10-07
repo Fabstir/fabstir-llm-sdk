@@ -1,8 +1,8 @@
-# Host CLI Management API Implementation Plan (v1.4)
+# Host CLI Management API Implementation Plan (v1.5)
 
 > Complete implementation plan for adding browser-based node management to Fabstir Host CLI
 >
-> **Status**: 🟢 In Progress (5/14 sub-phases complete) | **Target**: Local Docker Development | **Est. Time**: 16-22 hours
+> **Status**: 🟢 In Progress (6/14 sub-phases complete) | **Target**: Local Docker Development | **Est. Time**: 16-22 hours
 
 ## Overview
 
@@ -203,7 +203,7 @@ kill -9 $(lsof -t -i:3001)
 
 ✅ **Phase 1: Management API Server** (3/3 sub-phases complete)
 ✅ **Phase 2: WebSocket Log Streaming** (2/2 sub-phases complete)
-⬜ **Phase 3: Serve Command** (0/2 sub-phases complete)
+🟢 **Phase 3: Serve Command** (1/2 sub-phases complete)
 ⬜ **Phase 4: Browser UI Integration** (0/3 sub-phases complete)
 ⬜ **Phase 5: Docker Integration** (0/2 sub-phases complete)
 ⬜ **Phase 6: Testing & Documentation** (0/2 sub-phases complete)
@@ -721,30 +721,39 @@ export class LogWebSocketServer {
 
 ## Phase 3: Serve Command
 
-### Sub-phase 3.1: Serve Command Implementation ⬜
+### Sub-phase 3.1: Serve Command Implementation ✅
 
 **Goal**: Create `fabstir-host serve` command to start management server
 
+**Status**: ✅ Complete (January 7, 2025)
+
 **Tasks**:
-- [ ] Write tests in `packages/host-cli/tests/commands/serve.test.ts` (100 lines)
-  - [ ] Test: should start server on default port 3001
-  - [ ] Test: should start server on custom port via --port flag
-  - [ ] Test: should load API key from config or env
-  - [ ] Test: should configure CORS origins
-  - [ ] Test: should handle port already in use
-  - [ ] Test: should gracefully shutdown on SIGTERM/SIGINT
-- [ ] Create `packages/host-cli/src/commands/serve.ts` (200 lines)
-  - [ ] Implement registerServeCommand() function
-  - [ ] Define command options (port, api-key, cors)
-  - [ ] Implement startServer() function
-  - [ ] Create ManagementServer instance
-  - [ ] Create LogWebSocketServer instance
-  - [ ] Start both servers
-  - [ ] Setup SIGTERM/SIGINT handlers
-  - [ ] Keep process alive
-  - [ ] Log server URL and status
-- [ ] Verify all tests pass
-- [ ] Verify acceptance criteria met
+- [x] Write tests in `packages/host-cli/tests/commands/serve.test.ts` (224 lines)
+  - [x] Test: should export registerServeCommand function
+  - [x] Test: should export startServer function
+  - [x] Test: should start server on default port 3001
+  - [x] Test: should start server on custom port via --port flag
+  - [x] Test: should load API key from environment variable
+  - [x] Test: should configure CORS origins from --cors flag
+  - [x] Test: should handle port already in use
+  - [x] Test: should gracefully shutdown on SIGTERM
+  - [x] Test: should gracefully shutdown on SIGINT
+- [x] Create `packages/host-cli/src/commands/serve.ts` (204 lines)
+  - [x] Implement registerServeCommand() function
+  - [x] Define command options (port, api-key, cors)
+  - [x] Implement startServer() function
+  - [x] Create ManagementServer instance
+  - [x] Create LogWebSocketServer instance (attached to same HTTP server)
+  - [x] Start both servers on single port
+  - [x] Setup SIGTERM/SIGINT handlers with cleanup
+  - [x] Keep process alive with keepAlive()
+  - [x] Log server URL and status
+  - [x] Implement cleanupServers() for testing
+- [x] Update `packages/host-cli/src/server/api.ts` (+9 lines)
+  - [x] Add getHttpServer() method for WebSocket attachment
+  - [x] Handle ERR_SERVER_NOT_RUNNING in stop() method
+- [x] Verify all tests pass (9/9 ✅)
+- [x] Verify acceptance criteria met
 
 **Test Requirements**:
 ```typescript
