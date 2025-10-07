@@ -1,5 +1,5 @@
 /**
- * Management API Server (Sub-phases 1.1 & 1.2)
+ * Management API Server (Sub-phases 1.1, 1.2 & 1.3)
  * Express server with health endpoint and CORS support
  */
 
@@ -7,6 +7,13 @@ import express, { type Request, type Response, type NextFunction, type Applicati
 import cors from 'cors';
 import type { Server } from 'http';
 import { PIDManager } from '../daemon/pid';
+import { startHost } from '../commands/start';
+import { stopCommand } from '../commands/stop';
+import { executeRegistration } from '../commands/register';
+import type { RegistrationConfig } from '../registration/manager';
+import { withdrawHostEarnings } from '../commands/withdraw';
+import { getSDK, getHostManager } from '../sdk/client';
+import { ethers } from 'ethers';
 
 /**
  * Server configuration interface
@@ -83,6 +90,19 @@ export class ManagementServer {
 
     // Node status endpoint (requires auth if enabled)
     this.app.get('/api/status', this.handleStatus.bind(this));
+
+    // Lifecycle control endpoints (Sub-phase 1.3)
+    this.app.post('/api/start', this.handleStart.bind(this));
+    this.app.post('/api/stop', this.handleStop.bind(this));
+    this.app.post('/api/register', this.handleRegister.bind(this));
+    this.app.post('/api/unregister', this.handleUnregister.bind(this));
+
+    // Host management endpoints (Sub-phase 1.3 - NEW)
+    this.app.post('/api/add-stake', this.handleAddStake.bind(this));
+    this.app.post('/api/withdraw-earnings', this.handleWithdrawEarnings.bind(this));
+    this.app.post('/api/update-models', this.handleUpdateModels.bind(this));
+    this.app.post('/api/update-metadata', this.handleUpdateMetadata.bind(this));
+    this.app.get('/api/discover-nodes', this.handleDiscoverNodes.bind(this));
   }
 
   /**
@@ -131,6 +151,178 @@ export class ManagementServer {
       res.json({
         status: 'stopped'
       });
+    }
+  }
+
+  /**
+   * Lifecycle control endpoint handlers (Sub-phase 1.3)
+   * Wire API endpoints to existing CLI command functions
+   */
+
+  private async handleStart(req: Request, res: Response): Promise<void> {
+    try {
+      const { daemon = true } = req.body;
+
+      // Call existing startHost command
+      await startHost({ daemon });
+
+      // If successful, get the PID info
+      const pidInfo = this.pidManager.getPIDInfo();
+      if (!pidInfo) {
+        res.status(500).json({ error: 'Node started but PID not found' });
+        return;
+      }
+
+      res.json({
+        status: 'running',
+        pid: pidInfo.pid,
+        publicUrl: pidInfo.publicUrl
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || 'Failed to start node' });
+    }
+  }
+
+  private async handleStop(req: Request, res: Response): Promise<void> {
+    try {
+      const { force = false, timeout = 10000 } = req.body;
+
+      // Call existing stop command
+      await stopCommand.action({ force, timeout });
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || 'Failed to stop node' });
+    }
+  }
+
+  private async handleRegister(req: Request, res: Response): Promise<void> {
+    try {
+      const { walletAddress, publicUrl, models, stakeAmount, metadata } = req.body;
+
+      // Validate required fields
+      if (!publicUrl || !models || !stakeAmount) {
+        res.status(400).json({
+          error: 'Missing required fields: publicUrl, models, stakeAmount'
+        });
+        return;
+      }
+
+      // Prepare registration config
+      const config: RegistrationConfig = {
+        apiUrl: publicUrl,
+        models: Array.isArray(models) ? models : [models],
+        stakeAmount: ethers.parseEther(stakeAmount.toString()),
+        metadata
+      };
+
+      // Call existing registration command
+      const result = await executeRegistration(config);
+
+      res.json({
+        transactionHash: result.transactionHash,
+        hostAddress: walletAddress,
+        success: result.success
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || 'Registration failed' });
+    }
+  }
+
+  private async handleUnregister(req: Request, res: Response): Promise<void> {
+    // TODO: Refactor commands/unregister.ts to export executeUnregister() function
+    // Current implementation has logic inside registerUnregisterCommand action
+    // Need to extract core logic into exportable async function similar to executeRegistration()
+    res.status(501).json({
+      error: 'Not Implemented',
+      message: 'Unregister endpoint requires CLI command refactoring to export callable function'
+    });
+  }
+
+  private async handleAddStake(req: Request, res: Response): Promise<void> {
+    // TODO: Refactor commands/add-stake.ts to export executeAddStake(amount, options) function
+    // Current implementation has logic inside registerAddStakeCommand action
+    // Need to extract core logic into exportable async function
+    res.status(501).json({
+      error: 'Not Implemented',
+      message: 'Add-stake endpoint requires CLI command refactoring to export callable function'
+    });
+  }
+
+  private async handleWithdrawEarnings(req: Request, res: Response): Promise<void> {
+    try {
+      const { amount } = req.body;
+
+      // Parse amount if provided, otherwise withdraw all
+      let amountBigInt: bigint | undefined;
+      if (amount && amount !== 'all') {
+        try {
+          amountBigInt = ethers.parseEther(amount.toString());
+        } catch {
+          res.status(400).json({ error: 'Invalid amount format' });
+          return;
+        }
+      }
+
+      // Call existing withdraw command
+      const result = await withdrawHostEarnings(amountBigInt);
+
+      if (result.success) {
+        res.json({
+          success: true,
+          amount: ethers.formatEther(result.actualAmount || 0n),
+          transactionHash: result.transactionHash
+        });
+      } else {
+        res.status(500).json({
+          error: result.error || 'Withdrawal failed'
+        });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || 'Failed to withdraw earnings' });
+    }
+  }
+
+  private async handleUpdateModels(req: Request, res: Response): Promise<void> {
+    // TODO: Refactor commands/update-models.ts to export executeUpdateModels(models, options) function
+    // Current implementation has logic inside registerUpdateModelsCommand action
+    // Need to extract core logic into exportable async function
+    res.status(501).json({
+      error: 'Not Implemented',
+      message: 'Update-models endpoint requires CLI command refactoring to export callable function'
+    });
+  }
+
+  private async handleUpdateMetadata(req: Request, res: Response): Promise<void> {
+    // TODO: Refactor commands/update-metadata.ts to export executeUpdateMetadata(metadata, options) function
+    // Current implementation has logic inside registerUpdateMetadataCommand action
+    // Need to extract core logic into exportable async function
+    res.status(501).json({
+      error: 'Not Implemented',
+      message: 'Update-metadata endpoint requires CLI command refactoring to export callable function'
+    });
+  }
+
+  private async handleDiscoverNodes(req: Request, res: Response): Promise<void> {
+    try {
+      // Get HostManager from SDK
+      const sdk = getSDK();
+      if (!sdk.isAuthenticated()) {
+        res.status(401).json({ error: 'SDK not authenticated' });
+        return;
+      }
+
+      const hostManager = getHostManager();
+
+      // Discover all active hosts
+      const hosts = await hostManager.discoverAllActiveHosts();
+
+      res.json({
+        hosts,
+        count: hosts.length
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || 'Failed to discover nodes' });
     }
   }
 
