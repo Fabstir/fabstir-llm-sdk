@@ -1300,7 +1300,7 @@ fi
   - [x] Teardown: Stop server, clean up resources
   - [x] Docker container check with graceful skip
   - [x] Auto-start/stop management server for tests
-- [x] Run integration tests against Docker container (pending user testing)
+- [x] Run integration tests against Docker container ✅ (All 9 tests passing)
 - [x] Verify tests clean up after themselves (auto-stop if started by tests)
 - [x] Verify acceptance criteria met
 
@@ -1361,6 +1361,43 @@ describe('Management API Integration', () => {
 - Tests run against real Docker container
 - Tests clean up after themselves
 - Tests are deterministic (no flaky tests)
+
+**Manual Testing Results** (January 7, 2025):
+
+✅ **All 9 integration tests passing**
+```
+Test Files  1 passed (1)
+     Tests  9 passed | 2 skipped (11)
+  Duration  583ms
+```
+
+**Test Coverage**:
+- ✅ Health & Status Endpoints (2 tests)
+- ✅ Node Lifecycle Operations (2 tests)
+- ✅ CORS Headers (2 tests)
+- ✅ Error Handling (2 tests)
+- ✅ Network Discovery (1 test - handles SDK initialization requirement)
+- ⏭️ WebSocket Log Streaming (2 tests - skipped in Node.js, works in browser)
+
+**Issues Fixed During Testing**:
+1. Line endings: Converted `start-management-server.sh` from CRLF to LF using `sed -i 's/\r$//'`
+2. Docker detection: Updated test to use health check instead of Docker command detection
+3. Network discovery: Updated test to handle SDK initialization requirement gracefully
+4. Container networking: Used `socat` to forward port 3001 when running tests inside SDK dev container
+
+**Container Testing Workaround**:
+When running tests from inside the SDK dev container:
+```bash
+# Forward localhost:3001 to host.docker.internal:3001
+socat TCP-LISTEN:3001,fork,reuseaddr TCP:host.docker.internal:3001 &
+```
+
+**Verified**:
+- ✅ Management server starts correctly in Docker container
+- ✅ Port 3001 accessible from host machine
+- ✅ CORS working for localhost:3000 origin
+- ✅ Error handling robust for invalid requests
+- ✅ Tests clean up automatically (stop server if they started it)
 
 ---
 
