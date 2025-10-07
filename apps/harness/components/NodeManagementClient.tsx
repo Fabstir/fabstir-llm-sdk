@@ -110,10 +110,16 @@ const NodeManagementClient: React.FC = () => {
   const [healthStatus, setHealthStatus] = useState<string>('⚫ Unknown');
   const [discoveredNodes, setDiscoveredNodes] = useState<any[]>([]);
 
-  // WebSocket state
+  // WebSocket state (for LLM streaming)
   const [wsConnected, setWsConnected] = useState(false);
   const [wsClient, setWsClient] = useState<any>(null);
   const [streamedTokens, setStreamedTokens] = useState<string>('');
+
+  // Management server WebSocket state (for log streaming)
+  const [mgmtWsClient, setMgmtWsClient] = useState<any>(null);
+  const [liveServerLogs, setLiveServerLogs] = useState<string[]>([]);
+  const [autoScrollLogs, setAutoScrollLogs] = useState(true);
+  const [logFilter, setLogFilter] = useState<'all' | 'stdout' | 'stderr'>('all');
 
   // SDK instance
   const [sdk, setSdk] = useState<any>(null);
@@ -141,12 +147,74 @@ const NodeManagementClient: React.FC = () => {
     loadSDK();
   }, []);
 
+  // Connect to management server WebSocket for live log streaming
+  useEffect(() => {
+    const connectMgmtWebSocket = async () => {
+      // Only connect on client side
+      if (typeof window === 'undefined') return;
+
+      try {
+        const { HostWsClient } = await import('../lib/hostWsClient');
+        const wsUrl = 'ws://localhost:3001/ws/logs';
+        const client = new HostWsClient(wsUrl);
+
+        // Setup callbacks before connecting
+        client.onLog((log: any) => {
+          const formattedLog = `[${new Date(log.timestamp).toLocaleTimeString()}] [${log.level}] ${log.message}`;
+          setLiveServerLogs(prev => [...prev, formattedLog]);
+        });
+
+        client.onHistory((logs: string[]) => {
+          setLiveServerLogs(prev => [...prev, ...logs]);
+        });
+
+        // Connect to WebSocket
+        await client.connect();
+        setMgmtWsClient(client);
+        addLog('✅ Connected to management server logs');
+      } catch (error: any) {
+        console.error('Failed to connect to management server WebSocket:', error);
+        addLog(`⚠️  Could not connect to management server logs: ${error.message}`);
+      }
+    };
+
+    connectMgmtWebSocket();
+
+    // Cleanup on unmount
+    return () => {
+      if (mgmtWsClient) {
+        mgmtWsClient.disconnect();
+      }
+    };
+  }, []);
+
+  // Auto-scroll logs when new log arrives
+  useEffect(() => {
+    if (autoScrollLogs) {
+      const logContainer = document.getElementById('live-logs-container');
+      if (logContainer) {
+        logContainer.scrollTop = logContainer.scrollHeight;
+      }
+    }
+  }, [liveServerLogs, autoScrollLogs]);
+
   // Helper: Add log message
   const addLog = (message: string) => {
     const timestamp = new Date().toLocaleTimeString();
     const logMessage = `[${timestamp}] ${message}`;
     console.log(logMessage);
     setLogs(prev => [...prev, logMessage]);
+  };
+
+  // Helper: Clear live server logs
+  const clearLiveServerLogs = () => {
+    setLiveServerLogs([]);
+  };
+
+  // Helper: Filter logs by level
+  const getFilteredLogs = () => {
+    if (logFilter === 'all') return liveServerLogs;
+    return liveServerLogs.filter(log => log.includes(`[${logFilter}]`));
   };
 
   // Get chain-specific contract addresses
@@ -1310,6 +1378,77 @@ const NodeManagementClient: React.FC = () => {
           </div>
         </>
       )}
+
+      {/* Live Server Logs */}
+      <div style={{
+        marginBottom: '20px',
+        padding: '15px',
+        border: '1px solid #17a2b8',
+        borderRadius: '5px',
+        backgroundColor: '#e7f9fc'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+          <h3>🔴 Live Server Logs {mgmtWsClient ? '(Connected)' : '(Disconnected)'}</h3>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <label style={{ fontSize: '14px' }}>
+              <input
+                type="checkbox"
+                checked={autoScrollLogs}
+                onChange={(e) => setAutoScrollLogs(e.target.checked)}
+              />
+              {' '}Auto-scroll
+            </label>
+            <select
+              value={logFilter}
+              onChange={(e) => setLogFilter(e.target.value as 'all' | 'stdout' | 'stderr')}
+              style={{ padding: '5px', fontSize: '12px' }}
+            >
+              <option value="all">All Logs</option>
+              <option value="stdout">stdout only</option>
+              <option value="stderr">stderr only</option>
+            </select>
+            <button
+              onClick={clearLiveServerLogs}
+              style={{ padding: '5px 10px', fontSize: '12px' }}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+        <div
+          id="live-logs-container"
+          style={{
+            maxHeight: '400px',
+            overflowY: 'auto',
+            fontSize: '12px',
+            fontFamily: 'monospace',
+            backgroundColor: '#1e1e1e',
+            color: '#d4d4d4',
+            padding: '10px',
+            borderRadius: '3px'
+          }}
+        >
+          {getFilteredLogs().length === 0 ? (
+            <div style={{ color: '#888' }}>
+              {mgmtWsClient
+                ? 'Waiting for server logs...'
+                : 'Disconnected from management server. Start the server with: fabstir-host serve'}
+            </div>
+          ) : (
+            getFilteredLogs().map((log, i) => (
+              <div
+                key={i}
+                style={{
+                  marginBottom: '2px',
+                  color: log.includes('[stderr]') ? '#f48771' : '#d4d4d4'
+                }}
+              >
+                {log}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
 
       {/* Logs */}
       <div style={{

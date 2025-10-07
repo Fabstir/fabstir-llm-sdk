@@ -204,7 +204,7 @@ kill -9 $(lsof -t -i:3001)
 ✅ **Phase 1: Management API Server** (3/3 sub-phases complete)
 ✅ **Phase 2: WebSocket Log Streaming** (2/2 sub-phases complete)
 ✅ **Phase 3: Serve Command** (2/2 sub-phases complete)
-🟡 **Phase 4: Browser UI Integration** (1/3 sub-phases complete)
+🟡 **Phase 4: Browser UI Integration** (2/3 sub-phases complete)
 ⬜ **Phase 5: Docker Integration** (0/2 sub-phases complete)
 ⬜ **Phase 6: Testing & Documentation** (0/2 sub-phases complete)
 
@@ -959,38 +959,41 @@ export class HostApiClient {
 
 ---
 
-### Sub-phase 4.2: WebSocket Log Viewer ⬜
+### Sub-phase 4.2: WebSocket Log Viewer ✅
 
 **Goal**: Add WebSocket connection and live log display to UI
 
+**Status**: ✅ Complete (January 7, 2025)
+
 **Tasks**:
-- [ ] Write tests in `apps/harness/lib/hostWsClient.test.ts` (80 lines)
-  - [ ] Test: should connect to WebSocket server
-  - [ ] Test: should receive log messages via onLog callback
-  - [ ] Test: should receive historical logs on connection
-  - [ ] Test: should handle disconnection gracefully
-  - [ ] Test: should reconnect on connection loss
-  - [ ] Test: should clean up on disconnect
-- [ ] Create `apps/harness/lib/hostWsClient.ts` (100 lines)
-  - [ ] Define LogMessage interface
-  - [ ] Implement HostWsClient class constructor
-  - [ ] Implement connect() method
-  - [ ] Implement disconnect() method
-  - [ ] Implement onLog(callback) method
-  - [ ] Implement onHistory(callback) method
-  - [ ] Add reconnection logic
-  - [ ] Add connection state tracking
-- [ ] Update `apps/harness/components/NodeManagementClient.tsx` (+150 lines)
-  - [ ] Add wsClient state variable
-  - [ ] Add liveLog state variable (string array)
-  - [ ] Add useEffect for WebSocket connection lifecycle
-  - [ ] Add Live Log Viewer panel component
-  - [ ] Add auto-scroll toggle functionality
-  - [ ] Add clear logs button
-  - [ ] Add log level filter (stdout/stderr)
-  - [ ] Style log viewer with monospace font and scrolling
-- [ ] Verify all tests pass
-- [ ] Verify acceptance criteria met
+- [x] Write tests in `apps/harness/lib/hostWsClient.test.ts` (219 lines)
+  - [x] Test: should connect to WebSocket server
+  - [x] Test: should receive log messages via onLog callback
+  - [x] Test: should receive historical logs on connection
+  - [x] Test: should handle disconnection gracefully
+  - [x] Test: should reconnect on connection loss
+  - [x] Test: should clean up on disconnect
+- [x] Create `apps/harness/lib/hostWsClient.ts` (158 lines)
+  - [x] Define LogMessage interface
+  - [x] Implement HostWsClient class constructor
+  - [x] Implement connect() method
+  - [x] Implement disconnect() method
+  - [x] Implement onLog(callback) method
+  - [x] Implement onHistory(callback) method
+  - [x] Add reconnection logic
+  - [x] Add connection state tracking
+- [x] Update `apps/harness/components/NodeManagementClient.tsx` (+139 lines)
+  - [x] Add mgmtWsClient state variable
+  - [x] Add liveServerLogs state variable (string array)
+  - [x] Add autoScrollLogs and logFilter state
+  - [x] Add useEffect for WebSocket connection lifecycle
+  - [x] Add Live Log Viewer panel component
+  - [x] Add auto-scroll toggle functionality
+  - [x] Add clear logs button
+  - [x] Add log level filter (all/stdout/stderr)
+  - [x] Style log viewer with monospace font and scrolling
+- [x] Verify all tests pass (10/10 ✅)
+- [x] Verify acceptance criteria met
 
 **Files to Update**:
 - `apps/harness/components/NodeManagementClient.tsx` (+150 lines)
