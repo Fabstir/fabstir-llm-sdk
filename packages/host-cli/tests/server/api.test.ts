@@ -1,10 +1,13 @@
 /**
- * Tests for Management API Server (Sub-phase 1.1)
+ * Tests for Management API Server (Sub-phases 1.1 & 1.2)
  * TDD: These tests are written FIRST and should FAIL until implementation is complete
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Server } from 'http';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 // Import the ManagementServer class (will be implemented)
 import { ManagementServer, type ServerConfig } from '../../src/server/api';
@@ -132,5 +135,164 @@ describe('ManagementServer - Core & Health Endpoint', () => {
     expect(connectionRefused).toBe(true);
 
     server = null; // Prevent double cleanup in afterEach
+  });
+});
+
+describe('ManagementServer - Node Status Endpoint (Sub-phase 1.2)', () => {
+  let server: ManagementServer | null = null;
+  const testPort = 3098; // Different port to avoid conflicts
+  const testPidDir = path.join(os.tmpdir(), '.fabstir-test-' + Date.now());
+  const testPidPath = path.join(testPidDir, 'host.pid');
+
+  beforeEach(() => {
+    // Create test PID directory
+    if (!fs.existsSync(testPidDir)) {
+      fs.mkdirSync(testPidDir, { recursive: true });
+    }
+  });
+
+  afterEach(async () => {
+    if (server) {
+      await server.stop();
+      server = null;
+    }
+
+    // Clean up test PID file
+    if (fs.existsSync(testPidPath)) {
+      fs.unlinkSync(testPidPath);
+    }
+    if (fs.existsSync(testPidDir)) {
+      fs.rmdirSync(testPidDir);
+    }
+  });
+
+  test('should return running status when node is active', async () => {
+    // Create a PID file with current process (which is running)
+    const pidInfo = {
+      pid: process.pid,
+      publicUrl: 'http://localhost:8080',
+      startTime: new Date(Date.now() - 5000).toISOString() // Started 5 seconds ago
+    };
+    fs.writeFileSync(testPidPath, JSON.stringify(pidInfo, null, 2), 'utf8');
+
+    const config: ServerConfig = {
+      port: testPort,
+      corsOrigins: ['http://localhost:3000'],
+      pidPath: testPidPath
+    };
+
+    server = new ManagementServer(config);
+    await server.start();
+
+    const response = await fetch(`http://localhost:${testPort}/api/status`);
+    expect(response.ok).toBe(true);
+
+    const data = await response.json();
+    expect(data.status).toBe('running');
+    expect(data.pid).toBe(process.pid);
+    expect(data.publicUrl).toBe('http://localhost:8080');
+    expect(data.startTime).toBe(pidInfo.startTime);
+    expect(typeof data.uptime).toBe('number');
+    expect(data.uptime).toBeGreaterThanOrEqual(4); // At least 4 seconds
+  });
+
+  test('should return stopped status when no PID file exists', async () => {
+    const config: ServerConfig = {
+      port: testPort,
+      corsOrigins: ['http://localhost:3000'],
+      pidPath: testPidPath
+    };
+
+    server = new ManagementServer(config);
+    await server.start();
+
+    const response = await fetch(`http://localhost:${testPort}/api/status`);
+    expect(response.ok).toBe(true);
+
+    const data = await response.json();
+    expect(data.status).toBe('stopped');
+    expect(data.pid).toBeUndefined();
+    expect(data.publicUrl).toBeUndefined();
+    expect(data.uptime).toBeUndefined();
+  });
+
+  test('should return stopped status when PID exists but process dead', async () => {
+    // Create a PID file with a dead process (PID 999999 is unlikely to exist)
+    const pidInfo = {
+      pid: 999999,
+      publicUrl: 'http://localhost:8080',
+      startTime: new Date().toISOString()
+    };
+    fs.writeFileSync(testPidPath, JSON.stringify(pidInfo, null, 2), 'utf8');
+
+    const config: ServerConfig = {
+      port: testPort,
+      corsOrigins: ['http://localhost:3000'],
+      pidPath: testPidPath
+    };
+
+    server = new ManagementServer(config);
+    await server.start();
+
+    const response = await fetch(`http://localhost:${testPort}/api/status`);
+    expect(response.ok).toBe(true);
+
+    const data = await response.json();
+    expect(data.status).toBe('stopped');
+    expect(data.pid).toBeUndefined();
+  });
+
+  test('should include PID, uptime, and publicUrl in response', async () => {
+    const startTime = new Date(Date.now() - 10000).toISOString(); // 10 seconds ago
+    const pidInfo = {
+      pid: process.pid,
+      publicUrl: 'http://example.com:8080',
+      startTime
+    };
+    fs.writeFileSync(testPidPath, JSON.stringify(pidInfo, null, 2), 'utf8');
+
+    const config: ServerConfig = {
+      port: testPort,
+      corsOrigins: ['http://localhost:3000'],
+      pidPath: testPidPath
+    };
+
+    server = new ManagementServer(config);
+    await server.start();
+
+    const response = await fetch(`http://localhost:${testPort}/api/status`);
+    const data = await response.json();
+
+    // Verify all required fields are present
+    expect(data).toHaveProperty('status');
+    expect(data).toHaveProperty('pid');
+    expect(data).toHaveProperty('uptime');
+    expect(data).toHaveProperty('publicUrl');
+    expect(data).toHaveProperty('startTime');
+
+    // Verify correct values
+    expect(data.pid).toBe(process.pid);
+    expect(data.publicUrl).toBe('http://example.com:8080');
+    expect(data.startTime).toBe(startTime);
+    expect(data.uptime).toBeGreaterThanOrEqual(9);
+  });
+
+  test('should handle missing config gracefully', async () => {
+    // No PID file exists, config is null scenario
+    const config: ServerConfig = {
+      port: testPort,
+      corsOrigins: ['http://localhost:3000'],
+      pidPath: testPidPath
+    };
+
+    server = new ManagementServer(config);
+    await server.start();
+
+    const response = await fetch(`http://localhost:${testPort}/api/status`);
+    expect(response.ok).toBe(true);
+
+    const data = await response.json();
+    expect(data.status).toBe('stopped');
+    // Should not crash, just return stopped status
   });
 });
