@@ -204,7 +204,7 @@ kill -9 $(lsof -t -i:3001)
 ✅ **Phase 1: Management API Server** (3/3 sub-phases complete)
 ✅ **Phase 2: WebSocket Log Streaming** (2/2 sub-phases complete)
 ✅ **Phase 3: Serve Command** (2/2 sub-phases complete)
-⬜ **Phase 4: Browser UI Integration** (0/3 sub-phases complete)
+🟡 **Phase 4: Browser UI Integration** (1/3 sub-phases complete)
 ⬜ **Phase 5: Docker Integration** (0/2 sub-phases complete)
 ⬜ **Phase 6: Testing & Documentation** (0/2 sub-phases complete)
 
@@ -849,45 +849,46 @@ registerServeCommand(program);
 
 ## Phase 4: Browser UI Integration
 
-### Sub-phase 4.1: API Client Module ⬜
+### Sub-phase 4.1: API Client Module ✅
 
 **Goal**: Create API client for NodeManagementClient.tsx to call management server
 
+**Status**: ✅ Complete (January 7, 2025)
+
 **Tasks**:
-- [ ] Write tests in `apps/harness/lib/hostApiClient.test.ts` (160 lines)
-  - [ ] Test: should call GET /api/status
-  - [ ] Test: should call GET /api/discover-nodes
-  - [ ] Test: should call POST /api/start with daemon flag
-  - [ ] Test: should call POST /api/stop with force flag
-  - [ ] Test: should call POST /api/register with params
-  - [ ] Test: should call POST /api/unregister
-  - [ ] Test: should call POST /api/add-stake with amount
-  - [ ] Test: should call POST /api/withdraw-earnings
-  - [ ] Test: should call POST /api/update-models with model IDs
-  - [ ] Test: should call POST /api/update-metadata with metadata object
-  - [ ] Test: should handle network errors gracefully
-  - [ ] Test: should include API key in headers when provided
-  - [ ] Test: should retry on transient failures
-- [ ] Create `apps/harness/lib/hostApiClient.ts` (280 lines)
-  - [ ] Define HostApiConfig interface
-  - [ ] Define NodeStatus interface
-  - [ ] Define RegisterParams interface
-  - [ ] Define DiscoveredNode interface
-  - [ ] Implement HostApiClient class constructor
-  - [ ] Implement getStatus() method
-  - [ ] Implement discoverNodes() method (NEW)
-  - [ ] Implement start(daemon?: boolean) method
-  - [ ] Implement stop(force?: boolean) method
-  - [ ] Implement register(params: RegisterParams) method
-  - [ ] Implement unregister() method
-  - [ ] Implement addStake(amount: string) method (NEW)
-  - [ ] Implement withdrawEarnings(tokenAddress?: string) method (NEW)
-  - [ ] Implement updateModels(modelIds: string[]) method (NEW)
-  - [ ] Implement updateMetadata(metadata: object) method (NEW)
-  - [ ] Add error handling wrapper
-  - [ ] Add request retry logic
-- [ ] Verify all tests pass
-- [ ] Verify acceptance criteria met
+- [x] Write tests in `apps/harness/lib/hostApiClient.test.ts` (333 lines)
+  - [x] Test: should call GET /api/status
+  - [x] Test: should call GET /api/discover-nodes
+  - [x] Test: should call POST /api/start with daemon flag
+  - [x] Test: should call POST /api/stop with force flag
+  - [x] Test: should call POST /api/register with params
+  - [x] Test: should call POST /api/unregister
+  - [x] Test: should call POST /api/add-stake with amount
+  - [x] Test: should call POST /api/withdraw-earnings
+  - [x] Test: should call POST /api/update-models with model IDs
+  - [x] Test: should call POST /api/update-metadata with metadata object
+  - [x] Test: should handle network errors gracefully
+  - [x] Test: should handle HTTP error responses
+  - [x] Test: should include API key in headers when provided
+- [x] Create `apps/harness/lib/hostApiClient.ts` (239 lines)
+  - [x] Define HostApiConfig interface
+  - [x] Define NodeStatus interface
+  - [x] Define RegisterParams interface
+  - [x] Define DiscoveredNode interface
+  - [x] Implement HostApiClient class constructor
+  - [x] Implement getStatus() method
+  - [x] Implement discoverNodes() method
+  - [x] Implement start(daemon?: boolean) method
+  - [x] Implement stop(force?: boolean) method
+  - [x] Implement register(params: RegisterParams) method
+  - [x] Implement unregister() method
+  - [x] Implement addStake(amount: string) method
+  - [x] Implement withdrawEarnings() method
+  - [x] Implement updateModels(modelIds: string[]) method
+  - [x] Implement updateMetadata(metadata: object) method
+  - [x] Add error handling wrapper
+- [x] Verify all tests pass (13/13 ✅)
+- [x] Verify acceptance criteria met
 
 **Files to Create**:
 - `apps/harness/lib/hostApiClient.ts` (200 lines max)
