@@ -1,8 +1,8 @@
-# Host CLI Management API Implementation Plan (v1.2)
+# Host CLI Management API Implementation Plan (v1.3)
 
 > Complete implementation plan for adding browser-based node management to Fabstir Host CLI
 >
-> **Status**: 🟢 In Progress (3/14 sub-phases complete) | **Target**: Local Docker Development | **Est. Time**: 16-22 hours
+> **Status**: 🟢 In Progress (4/14 sub-phases complete) | **Target**: Local Docker Development | **Est. Time**: 16-22 hours
 
 ## Overview
 
@@ -202,7 +202,7 @@ kill -9 $(lsof -t -i:3001)
 ## Implementation Status
 
 ✅ **Phase 1: Management API Server** (3/3 sub-phases complete)
-⬜ **Phase 2: WebSocket Log Streaming** (0/2 sub-phases complete)
+🟢 **Phase 2: WebSocket Log Streaming** (1/2 sub-phases complete)
 ⬜ **Phase 3: Serve Command** (0/2 sub-phases complete)
 ⬜ **Phase 4: Browser UI Integration** (0/3 sub-phases complete)
 ⬜ **Phase 5: Docker Integration** (0/2 sub-phases complete)
@@ -552,29 +552,31 @@ Response: {
 
 ## Phase 2: WebSocket Log Streaming
 
-### Sub-phase 2.1: WebSocket Server Setup ⬜
+### Sub-phase 2.1: WebSocket Server Setup ✅
 
 **Goal**: Add WebSocket server for real-time log streaming
 
+**Status**: ✅ Complete (January 7, 2025)
+
 **Tasks**:
-- [ ] Write tests in `packages/host-cli/tests/server/ws.test.ts` (80 lines)
-  - [ ] Test: should accept WebSocket connections
-  - [ ] Test: should authenticate connections via API key
-  - [ ] Test: should reject invalid authentication
-  - [ ] Test: should handle client disconnection
-  - [ ] Test: should broadcast messages to all connected clients
-- [ ] Create `packages/host-cli/src/server/ws.ts` (150 lines)
-  - [ ] Define LogWebSocketServer class
-  - [ ] Implement constructor with server and apiKey
-  - [ ] Implement start() method
-  - [ ] Implement stop() method
-  - [ ] Implement broadcast() method
-  - [ ] Implement handleConnection() private method
-  - [ ] Implement handleDisconnection() private method
-  - [ ] Add WebSocket authentication logic
-  - [ ] Manage clients Set<WebSocket>
-- [ ] Verify all tests pass
-- [ ] Verify acceptance criteria met
+- [x] Write tests in `packages/host-cli/tests/server/ws.test.ts` (162 lines)
+  - [x] Test: should accept WebSocket connections
+  - [x] Test: should authenticate connections via API key
+  - [x] Test: should reject invalid authentication
+  - [x] Test: should handle client disconnection
+  - [x] Test: should broadcast messages to all connected clients
+- [x] Create `packages/host-cli/src/server/ws.ts` (180 lines)
+  - [x] Define LogWebSocketServer class
+  - [x] Implement constructor with server and apiKey
+  - [x] Implement start() method with verifyClient for authentication
+  - [x] Implement stop() method
+  - [x] Implement broadcast() method
+  - [x] Implement handleConnection() private method
+  - [x] Implement handleDisconnection() private method
+  - [x] Add WebSocket authentication logic (query param & header)
+  - [x] Manage clients Set<WebSocket>
+- [x] Verify all tests pass (5/5 ✅)
+- [x] Verify acceptance criteria met
 
 **Test Requirements**:
 ```typescript
