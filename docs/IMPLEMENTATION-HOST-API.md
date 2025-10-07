@@ -1,8 +1,8 @@
-# Host CLI Management API Implementation Plan (v1.3)
+# Host CLI Management API Implementation Plan (v1.4)
 
 > Complete implementation plan for adding browser-based node management to Fabstir Host CLI
 >
-> **Status**: 🟢 In Progress (4/14 sub-phases complete) | **Target**: Local Docker Development | **Est. Time**: 16-22 hours
+> **Status**: 🟢 In Progress (5/14 sub-phases complete) | **Target**: Local Docker Development | **Est. Time**: 16-22 hours
 
 ## Overview
 
@@ -202,7 +202,7 @@ kill -9 $(lsof -t -i:3001)
 ## Implementation Status
 
 ✅ **Phase 1: Management API Server** (3/3 sub-phases complete)
-🟢 **Phase 2: WebSocket Log Streaming** (1/2 sub-phases complete)
+✅ **Phase 2: WebSocket Log Streaming** (2/2 sub-phases complete)
 ⬜ **Phase 3: Serve Command** (0/2 sub-phases complete)
 ⬜ **Phase 4: Browser UI Integration** (0/3 sub-phases complete)
 ⬜ **Phase 5: Docker Integration** (0/2 sub-phases complete)
@@ -622,29 +622,31 @@ export class LogWebSocketServer {
 
 ---
 
-### Sub-phase 2.2: Log Tailing & Broadcasting ⬜
+### Sub-phase 2.2: Log Tailing & Broadcasting ✅
 
 **Goal**: Tail log files and broadcast updates to connected WebSocket clients
 
+**Status**: ✅ Complete (January 7, 2025)
+
 **Tasks**:
-- [ ] Write tests in `packages/host-cli/tests/server/ws.test.ts` (+100 lines)
-  - [ ] Test: should tail stdout log file
-  - [ ] Test: should tail stderr log file
-  - [ ] Test: should broadcast new log lines to clients
-  - [ ] Test: should handle log file rotation
-  - [ ] Test: should stop tailing when all clients disconnect
-  - [ ] Test: should send historical logs on connection
-- [ ] Update `packages/host-cli/src/server/ws.ts` (+120 lines)
-  - [ ] Implement LogTailer class
-  - [ ] Implement tailFile() method with fs.watch()
-  - [ ] Implement readLastLines() method
-  - [ ] Integrate LogTailer into LogWebSocketServer
-  - [ ] Send historical logs on connection
-  - [ ] Broadcast new log lines in real-time
-  - [ ] Start/stop tailing based on client count
-  - [ ] Define log message format (type, timestamp, level, message)
-- [ ] Verify all tests pass
-- [ ] Verify acceptance criteria met
+- [x] Write tests in `packages/host-cli/tests/server/ws.test.ts` (+174 lines)
+  - [x] Test: should send historical logs on connection
+  - [x] Test: should tail stdout log file and broadcast new lines
+  - [x] Test: should tail stderr log file and broadcast new lines
+  - [x] Test: should broadcast new log lines to all connected clients
+  - [x] Test: should stop tailing when all clients disconnect
+  - [x] Test: should continue tailing existing log file
+- [x] Update `packages/host-cli/src/server/ws.ts` (+180 lines)
+  - [x] Implement LogTailer class with Tail library
+  - [x] Implement start() method with file watching
+  - [x] Implement readLastLines() method
+  - [x] Integrate LogTailer into LogWebSocketServer
+  - [x] Send historical logs on connection
+  - [x] Broadcast new log lines in real-time
+  - [x] Start/stop tailing based on client count
+  - [x] Define log message format (type, timestamp, level, message)
+- [x] Verify all tests pass (11/11 ✅)
+- [x] Verify acceptance criteria met
 
 **Test Requirements**:
 ```typescript
