@@ -22,6 +22,7 @@ export interface RegisterParams {
   models: string[];
   stakeAmount: string;
   metadata?: any;
+  privateKey: string;
 }
 
 export interface RegisterResponse {

@@ -102,7 +102,7 @@ const NodeManagementClient: React.FC = () => {
   const [stakeAmount, setStakeAmount] = useState('1000');
   const [additionalStakeAmount, setAdditionalStakeAmount] = useState('100');
   const [apiUrl, setApiUrl] = useState('http://localhost:8080');
-  const [supportedModels, setSupportedModels] = useState('0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced'); // tiny-vicuna model ID
+  const [supportedModels, setSupportedModels] = useState('CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf'); // Default approved model
 
   // UI state
   const [logs, setLogs] = useState<string[]>([]);
@@ -509,11 +509,14 @@ const NodeManagementClient: React.FC = () => {
       console.log('Host status for', checkAddress, ':', info);
       addLog(`📊 Registration: ${info.isRegistered ? '✅' : '❌'}, Active: ${info.isActive ? '✅' : '❌'}`);
 
-      // Update supported models from blockchain if available
-      if (info.supportedModels && info.supportedModels.length > 0) {
-        const modelsString = info.supportedModels.join(',');
-        setSupportedModels(modelsString);
+      // Update supported models from blockchain if available (only when registered)
+      if (info.isRegistered && info.supportedModels && info.supportedModels.length > 0) {
+        // Note: Blockchain returns model IDs (hashes), not repo:file format
+        // Don't overwrite the input field with hashes
         addLog(`📚 Loaded ${info.supportedModels.length} supported model(s) from blockchain`);
+      } else if (!info.isRegistered) {
+        // Reset to default repo:file format when not registered
+        setSupportedModels('CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf');
       }
 
       // Get staked amount from SDK (no direct contract calls)
@@ -668,29 +671,59 @@ const NodeManagementClient: React.FC = () => {
 
   // Register Node
   const registerNode = async () => {
-    if (!sdk) {
-      addLog('❌ SDK not initialized');
+    if (!mgmtApiClient) {
+      addLog('❌ Management API client not initialized');
+      return;
+    }
+
+    if (!walletAddress) {
+      addLog('❌ No wallet address available');
+      return;
+    }
+
+    // Get private key from selected test account (only for private key wallet type)
+    let privateKey: string | undefined;
+    if (walletType === 'private-key') {
+      const testAccount = TEST_ACCOUNTS[selectedTestAccount as keyof typeof TEST_ACCOUNTS];
+      if (!testAccount || !testAccount.privateKey) {
+        addLog('❌ No private key available for selected account');
+        return;
+      }
+      privateKey = testAccount.privateKey;
+    } else {
+      addLog('❌ Registration via Management API only supports private key wallet type');
       return;
     }
 
     setLoading(true);
     try {
-      addLog(`📝 Registering node on ${CHAINS[selectedChain].name}...`);
+      addLog(`📝 Registering node on ${CHAINS[selectedChain].name} via Management API...`);
 
-      const hostManager = sdk.getHostManager() as any;
+      // Parse supported models from input (format: repo:file)
+      const modelParts = supportedModels.trim().split(':');
+      if (modelParts.length !== 2) {
+        addLog('❌ Invalid model format. Use: repo:file');
+        setLoading(false);
+        return;
+      }
 
-      const txHash = await hostManager.registerHostWithModels({
-        apiUrl: apiUrl,
-        supportedModels: [
-          {
-            repo: "CohereForAI/TinyVicuna-1B-32k-GGUF",
-            file: "tiny-vicuna-1b.q4_k_m.gguf"
-          }
-        ],
-        metadata: JSON.parse(metadata)
+      const [repo, file] = modelParts;
+      const modelString = `${repo}:${file}`;
+      addLog(`📚 Model: ${modelString}`);
+
+      // Call management API /api/register endpoint
+      // This will create the config file AND register on blockchain
+      const result = await mgmtApiClient.register({
+        walletAddress: walletAddress,
+        publicUrl: apiUrl,
+        models: [modelString],
+        stakeAmount: stakeAmount,
+        metadata: JSON.parse(metadata),
+        privateKey: privateKey
       });
 
-      addLog(`✅ Node registered! TX: ${txHash}`);
+      addLog(`✅ Node registered! TX: ${result.transactionHash}`);
+      addLog(`📝 Config file created for address: ${result.hostAddress}`);
       await checkRegistrationStatus();
 
     } catch (error: any) {
@@ -1286,6 +1319,20 @@ const NodeManagementClient: React.FC = () => {
                   onChange={(e) => setMetadata(e.target.value)}
                   style={{ width: '100%', height: '80px', fontFamily: 'monospace', fontSize: '12px' }}
                 />
+              </div>
+
+              <div style={{ marginBottom: '10px' }}>
+                <label>Supported Models (format: repo:file):</label><br />
+                <input
+                  type="text"
+                  value={supportedModels}
+                  onChange={(e) => setSupportedModels(e.target.value)}
+                  style={{ padding: '5px', width: '100%', fontFamily: 'monospace', fontSize: '12px' }}
+                  placeholder="CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf"
+                />
+                <small style={{ color: '#666' }}>
+                  Format: repo:file (e.g., CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf)
+                </small>
               </div>
 
               <div style={{ marginBottom: '10px' }}>

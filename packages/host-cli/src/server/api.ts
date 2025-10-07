@@ -9,10 +9,9 @@ import type { Server } from 'http';
 import { PIDManager } from '../daemon/pid';
 import { startHost } from '../commands/start';
 import { stopCommand } from '../commands/stop';
-import { executeRegistration } from '../commands/register';
 import type { RegistrationConfig } from '../registration/manager';
 import { withdrawHostEarnings } from '../commands/withdraw';
-import { getSDK, getHostManager } from '../sdk/client';
+import { getSDK, getHostManager, authenticateSDK, initializeSDK } from '../sdk/client';
 import { ethers } from 'ethers';
 
 /**
@@ -163,8 +162,12 @@ export class ManagementServer {
     try {
       const { daemon = true } = req.body;
 
-      // Call existing startHost command
-      await startHost({ daemon });
+      // Call existing startHost command with skipWait to return immediately
+      await startHost({ daemon, skipWait: true });
+
+      // Wait for PID file to be written
+      // (startHost now verifies process is running before saving PID)
+      await new Promise(resolve => setTimeout(resolve, 2500));
 
       // If successful, get the PID info
       const pidInfo = this.pidManager.getPIDInfo();
@@ -198,7 +201,7 @@ export class ManagementServer {
 
   private async handleRegister(req: Request, res: Response): Promise<void> {
     try {
-      const { walletAddress, publicUrl, models, stakeAmount, metadata } = req.body;
+      const { walletAddress, publicUrl, models, stakeAmount, metadata, privateKey } = req.body;
 
       // Validate required fields
       if (!publicUrl || !models || !stakeAmount) {
@@ -208,21 +211,56 @@ export class ManagementServer {
         return;
       }
 
+      if (!privateKey) {
+        res.status(400).json({
+          error: 'Missing required field: privateKey (needed for registration)'
+        });
+        return;
+      }
+
+      // Initialize and authenticate SDK with provided private key
+      await initializeSDK('base-sepolia');
+      await authenticateSDK(privateKey);
+
+      // Import necessary functions
+      const { registerHost } = await import('../registration/manager');
+      const { saveConfig, loadConfig } = await import('../config/storage');
+      const { extractHostPort } = await import('../utils/network');
+
       // Prepare registration config
-      const config: RegistrationConfig = {
+      const registrationConfig: RegistrationConfig = {
         apiUrl: publicUrl,
         models: Array.isArray(models) ? models : [models],
         stakeAmount: ethers.parseEther(stakeAmount.toString()),
         metadata
       };
 
-      // Call existing registration command
-      const result = await executeRegistration(config);
+      // Register on blockchain (WITHOUT starting node)
+      const result = await registerHost(registrationConfig);
+
+      // Save config file (so node can start later)
+      const currentConfig = await loadConfig();
+      const internalPort = process.env.INTERNAL_PORT
+        ? parseInt(process.env.INTERNAL_PORT, 10)
+        : extractHostPort(publicUrl).port;
+
+      const configData = {
+        version: '1.0',
+        network: 'base-sepolia',
+        rpcUrl: process.env.RPC_URL_BASE_SEPOLIA || '',
+        inferencePort: internalPort,
+        publicUrl: publicUrl,
+        models: Array.isArray(models) ? models : [models],
+        pricePerToken: 0.0001,
+        minJobDeposit: 0.01,
+        ...(currentConfig || {}), // Merge with existing config if it exists
+      };
+      await saveConfig(configData);
 
       res.json({
         transactionHash: result.transactionHash,
         hostAddress: walletAddress,
-        success: result.success
+        success: true
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message || 'Registration failed' });

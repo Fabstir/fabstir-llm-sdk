@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import { getConfigDir } from '../config/paths';
 
 /**
  * PID information with metadata (Sub-phase 3.2)
@@ -15,7 +15,7 @@ export class PIDManager {
   private pidPath: string;
 
   constructor(pidPath?: string) {
-    this.pidPath = pidPath || path.join(os.homedir(), '.fabstir', 'host.pid');
+    this.pidPath = pidPath || path.join(getConfigDir(), 'node.pid');
   }
 
   writePID(pid: number): void {

@@ -1399,6 +1399,52 @@ socat TCP-LISTEN:3001,fork,reuseaddr TCP:host.docker.internal:3001 &
 - ✅ Error handling robust for invalid requests
 - ✅ Tests clean up automatically (stop server if they started it)
 
+**Browser UI Manual Testing Results** (January 7, 2025):
+
+✅ **Complete registration → start → test workflow successful**
+
+**Test Flow**:
+1. ✅ **Registration via Browser UI**
+   - Wallet: TEST_HOST_2 (0x20f2A5FCDf271A5E6b04383C2915Ea980a50948c)
+   - Model: `CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf`
+   - Stake: 1000 FAB
+   - TX: `0xe1264713d80d5187909e6bff64cee511f56da4d5f2b417d8c0bcd5c66b2cd595`
+   - Result: Config file created at `/root/.fabstir/host/config.json`
+
+2. ✅ **Start Node via Browser UI**
+   - Node started with PID 124
+   - PID file created at `/root/.fabstir/host/node.pid`
+   - **PID Match Verified**: Process PID (124) == PID file (124) == Config file (124)
+
+3. ✅ **Health Check**
+   - Endpoint: `http://localhost:8083/health`
+   - Status: Healthy
+
+4. ✅ **WebSocket Connection**
+   - Connected to: `ws://localhost:8083/v1/ws`
+   - Chain ID: 84532 (Base Sepolia)
+   - Session initialized successfully
+
+5. ✅ **Streaming Inference Test**
+   - Sent inference request
+   - Received streaming response
+   - Streaming completed successfully
+
+**Issues Fixed During Browser Testing**:
+1. **Config file directory**: Fixed hardcoded `.fabstir` path to use `getConfigDir()` (now saves to `/root/.fabstir/host/config.json`)
+2. **PID file directory**: Fixed hardcoded path to use `getConfigDir()` (now saves to `/root/.fabstir/host/node.pid`)
+3. **Registration without start**: Updated `/api/register` to only register + save config (node starts separately via `/api/start`)
+4. **PID verification**: Added 2-second delay to verify process is still running before saving PID (catches "address already in use" errors)
+5. **Start button hanging**: Added `skipWait: true` option to return immediately from daemon mode instead of infinite wait
+
+**Final State**:
+- ✅ Node running: PID 124 (fabstir-llm-node)
+- ✅ Config file: `/root/.fabstir/host/config.json` (correct location, correct settings)
+- ✅ PID file: `/root/.fabstir/host/node.pid` (correct location, correct PID)
+- ✅ All PIDs match (no more parent/child mismatch)
+- ✅ WebSocket streaming functional
+- ✅ Complete workflow: Register → Start → Test → Success
+
 ---
 
 ### Sub-phase 6.2: Documentation & User Guide ✅

@@ -1,18 +1,17 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import * as os from 'os';
 import { ConfigData } from './types';
+import { getConfigDir } from './paths';
 
-const CONFIG_DIR = '.fabstir';
 const CONFIG_FILE = 'config.json';
 
 export function getConfigPath(): string {
-  return path.join(os.homedir(), CONFIG_DIR, CONFIG_FILE);
+  return path.join(getConfigDir(), CONFIG_FILE);
 }
 
 export async function saveConfig(config: ConfigData): Promise<void> {
   try {
-    const configDir = path.join(os.homedir(), CONFIG_DIR);
+    const configDir = getConfigDir();
     const configPath = getConfigPath();
 
     // Create backup if file exists

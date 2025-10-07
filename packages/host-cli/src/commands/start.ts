@@ -50,8 +50,12 @@ export async function startHost(options: any): Promise<void> {
   const pidManager = new PIDManager();
   const existingPid = pidManager.getPIDInfo();
   if (existingPid && pidManager.isProcessRunning(existingPid.pid)) {
-    console.log(chalk.yellow(`⚠️  Node already running (PID: ${existingPid.pid})`));
+    const message = `Node already running (PID: ${existingPid.pid})`;
+    console.log(chalk.yellow(`⚠️  ${message}`));
     console.log(chalk.gray(`URL: ${existingPid.publicUrl}`));
+
+    // Don't throw error - this is not an error condition
+    // Just return early to prevent starting duplicate node
     return;
   }
 
@@ -76,7 +80,17 @@ export async function startHost(options: any): Promise<void> {
     skipStartupWait: options.daemon, // Skip log monitoring in daemon mode
   });
 
-  // 5. Save PID
+  // 5. Verify process is still running after spawn
+  // (catches immediate failures like "address already in use")
+  await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+
+  if (!pidManager.isProcessRunning(handle.pid)) {
+    throw new Error('Node process exited immediately after starting. Check logs for errors.');
+  }
+
+  // 6. Save PID (only if process is confirmed running)
+  console.log(chalk.gray(`  DEBUG: Spawned process PID: ${handle.pid}`));
+  console.log(chalk.gray(`  DEBUG: Process confirmed running, saving PID`));
   pidManager.savePIDWithUrl(handle.pid, config.publicUrl);
   await ConfigStorage.saveConfig({
     ...config,
@@ -98,6 +112,13 @@ export async function startHost(options: any): Promise<void> {
 
     // Detach from child process
     handle.process.unref();
+
+    // If called from API (skipWait option), return immediately
+    // If called from CLI, wait forever to keep container alive
+    if (options.skipWait) {
+      console.log(chalk.gray('API mode: returning immediately'));
+      return; // Return immediately for API calls
+    }
 
     // Keep parent alive but idle - REQUIRED for child to survive in Docker
     // The parent must not exit, but we don't need to do anything
