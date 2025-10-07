@@ -121,6 +121,15 @@ const NodeManagementClient: React.FC = () => {
   const [autoScrollLogs, setAutoScrollLogs] = useState(true);
   const [logFilter, setLogFilter] = useState<'all' | 'stdout' | 'stderr'>('all');
 
+  // Management API client state (for node lifecycle control)
+  const [mgmtApiClient, setMgmtApiClient] = useState<any>(null);
+  const [nodeStatus, setNodeStatus] = useState<'running' | 'stopped'>('stopped');
+  const [nodePid, setNodePid] = useState<number | null>(null);
+  const [nodeUptime, setNodeUptime] = useState<number>(0);
+  const [nodePublicUrl, setNodePublicUrl] = useState<string>('');
+  const [nodeStartTime, setNodeStartTime] = useState<string>('');
+  const [statusPollingActive, setStatusPollingActive] = useState(false);
+
   // SDK instance
   const [sdk, setSdk] = useState<any>(null);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -198,6 +207,39 @@ const NodeManagementClient: React.FC = () => {
     }
   }, [liveServerLogs, autoScrollLogs]);
 
+  // Initialize Management API Client for node lifecycle control
+  useEffect(() => {
+    const initMgmtApiClient = async () => {
+      if (typeof window === 'undefined') return;
+
+      try {
+        const { HostApiClient } = await import('../lib/hostApiClient');
+        const client = new HostApiClient({ baseUrl: 'http://localhost:3001' });
+        setMgmtApiClient(client);
+        addLog('✅ Management API client initialized');
+
+        // Refresh status immediately after initialization
+        refreshNodeStatus(client);
+      } catch (error: any) {
+        console.error('Failed to initialize management API client:', error);
+        addLog(`⚠️  Could not initialize management API: ${error.message}`);
+      }
+    };
+
+    initMgmtApiClient();
+  }, []);
+
+  // Status polling every 10 seconds when node is running
+  useEffect(() => {
+    if (!mgmtApiClient || !statusPollingActive) return;
+
+    const interval = setInterval(() => {
+      refreshNodeStatus(mgmtApiClient);
+    }, 10000); // 10 seconds
+
+    return () => clearInterval(interval);
+  }, [mgmtApiClient, statusPollingActive]);
+
   // Helper: Add log message
   const addLog = (message: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -215,6 +257,102 @@ const NodeManagementClient: React.FC = () => {
   const getFilteredLogs = () => {
     if (logFilter === 'all') return liveServerLogs;
     return liveServerLogs.filter(log => log.includes(`[${logFilter}]`));
+  };
+
+  // Helper: Format uptime seconds to human-readable string
+  const formatUptime = (seconds: number): string => {
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (minutes < 60) return `${minutes}m ${secs}s`;
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hours}h ${mins}m ${secs}s`;
+  };
+
+  // Node Control: Refresh node status from management API
+  const refreshNodeStatus = async (client?: any) => {
+    const apiClient = client || mgmtApiClient;
+    if (!apiClient) return;
+
+    try {
+      const status = await apiClient.getStatus();
+
+      if (status.status === 'running') {
+        setNodeStatus('running');
+        setNodePid(status.pid || null);
+        setNodePublicUrl(status.publicUrl || '');
+        setNodeStartTime(status.startTime || '');
+        setNodeUptime(status.uptime || 0);
+        setStatusPollingActive(true);
+      } else {
+        setNodeStatus('stopped');
+        setNodePid(null);
+        setNodePublicUrl('');
+        setNodeStartTime('');
+        setNodeUptime(0);
+        setStatusPollingActive(false);
+      }
+    } catch (error: any) {
+      console.error('Failed to refresh node status:', error);
+      // Don't spam logs with polling errors
+    }
+  };
+
+  // Node Control: Start node in daemon mode
+  const handleStartNode = async () => {
+    if (!mgmtApiClient) {
+      addLog('❌ Management API client not initialized');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog('🚀 Starting node via management API...');
+      const result = await mgmtApiClient.start(true); // daemon mode
+
+      setNodePid(result.pid);
+      setNodePublicUrl(result.publicUrl || '');
+
+      addLog(`✅ Node started (PID: ${result.pid})`);
+
+      // Refresh status after starting
+      await refreshNodeStatus();
+    } catch (error: any) {
+      addLog(`❌ Start failed: ${error.message}`);
+      console.error('Start node error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Node Control: Stop running node
+  const handleStopNode = async () => {
+    if (!mgmtApiClient) {
+      addLog('❌ Management API client not initialized');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog('⏸️  Stopping node via management API...');
+      await mgmtApiClient.stop(false); // graceful stop
+
+      setNodePid(null);
+      setNodePublicUrl('');
+      setNodeUptime(0);
+      setStatusPollingActive(false);
+
+      addLog('✅ Node stopped');
+
+      // Refresh status after stopping
+      await refreshNodeStatus();
+    } catch (error: any) {
+      addLog(`❌ Stop failed: ${error.message}`);
+      console.error('Stop node error:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Get chain-specific contract addresses
@@ -1378,6 +1516,116 @@ const NodeManagementClient: React.FC = () => {
           </div>
         </>
       )}
+
+      {/* Node Control Panel */}
+      <div style={{
+        marginBottom: '20px',
+        padding: '15px',
+        border: '1px solid #28a745',
+        borderRadius: '5px',
+        backgroundColor: '#e7f9f0'
+      }}>
+        <h3>🎮 Node Control {mgmtApiClient ? '(API Ready)' : '(Initializing...)'}</h3>
+
+        <div style={{
+          marginBottom: '15px',
+          padding: '10px',
+          backgroundColor: '#ffffff',
+          borderRadius: '3px',
+          border: '1px solid #ddd'
+        }}>
+          <div style={{ marginBottom: '5px' }}>
+            <strong>Status:</strong>{' '}
+            <span style={{
+              color: nodeStatus === 'running' ? '#28a745' : '#6c757d',
+              fontSize: '20px',
+              verticalAlign: 'middle'
+            }}>
+              ●
+            </span>{' '}
+            {nodeStatus === 'running' ? 'Running' : 'Stopped'}
+          </div>
+
+          {nodeStatus === 'running' && (
+            <>
+              <div style={{ marginBottom: '5px' }}>
+                <strong>PID:</strong> {nodePid || 'N/A'}
+              </div>
+              <div style={{ marginBottom: '5px' }}>
+                <strong>Uptime:</strong> {formatUptime(nodeUptime)}
+              </div>
+              <div style={{ marginBottom: '5px' }}>
+                <strong>URL:</strong> {nodePublicUrl || 'N/A'}
+              </div>
+            </>
+          )}
+
+          {nodeStatus === 'stopped' && (
+            <div style={{ color: '#6c757d', fontSize: '14px', marginTop: '5px' }}>
+              Node is not running. Click "Start Node" to begin.
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <button
+            onClick={handleStartNode}
+            disabled={loading || !mgmtApiClient || nodeStatus === 'running'}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: nodeStatus === 'running' ? '#6c757d' : '#28a745',
+              color: 'white',
+              border: 'none',
+              borderRadius: '3px',
+              cursor: (loading || !mgmtApiClient || nodeStatus === 'running') ? 'not-allowed' : 'pointer',
+              opacity: (loading || !mgmtApiClient || nodeStatus === 'running') ? 0.6 : 1
+            }}
+          >
+            {loading ? '⏳ Starting...' : '▶️ Start Node'}
+          </button>
+
+          <button
+            onClick={handleStopNode}
+            disabled={loading || !mgmtApiClient || nodeStatus === 'stopped'}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: nodeStatus === 'stopped' ? '#6c757d' : '#dc3545',
+              color: 'white',
+              border: 'none',
+              borderRadius: '3px',
+              cursor: (loading || !mgmtApiClient || nodeStatus === 'stopped') ? 'not-allowed' : 'pointer',
+              opacity: (loading || !mgmtApiClient || nodeStatus === 'stopped') ? 0.6 : 1
+            }}
+          >
+            {loading ? '⏳ Stopping...' : '⏹️ Stop Node'}
+          </button>
+
+          <button
+            onClick={() => refreshNodeStatus()}
+            disabled={loading || !mgmtApiClient}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '3px',
+              cursor: (loading || !mgmtApiClient) ? 'not-allowed' : 'pointer',
+              opacity: (loading || !mgmtApiClient) ? 0.6 : 1
+            }}
+          >
+            🔄 Refresh Status
+          </button>
+        </div>
+
+        <div style={{ marginTop: '10px', fontSize: '12px', color: '#6c757d' }}>
+          {statusPollingActive && nodeStatus === 'running' && (
+            <div>⏱️ Auto-refreshing status every 10 seconds</div>
+          )}
+          {!mgmtApiClient && (
+            <div>⚠️ Waiting for management API connection...</div>
+          )}
+        </div>
+      </div>
 
       {/* Live Server Logs */}
       <div style={{
