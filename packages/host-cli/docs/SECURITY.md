@@ -90,21 +90,21 @@ fabstir-host config set wallet.multisig.signers '["0x...", "0x..."]'
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 sudo ufw allow ssh
-sudo ufw allow 8080/tcp  # Host WebSocket
+sudo ufw allow 8083/tcp  # Host WebSocket
 sudo ufw enable
 
 # Limit connection rate
-sudo ufw limit 8080/tcp
+sudo ufw limit 8083/tcp
 ```
 
 #### iptables Rules
 ```bash
 # Rate limiting
-iptables -A INPUT -p tcp --dport 8080 -m state --state NEW -m recent --set
-iptables -A INPUT -p tcp --dport 8080 -m state --state NEW -m recent --update --seconds 60 --hitcount 10 -j DROP
+iptables -A INPUT -p tcp --dport 8083 -m state --state NEW -m recent --set
+iptables -A INPUT -p tcp --dport 8083 -m state --state NEW -m recent --update --seconds 60 --hitcount 10 -j DROP
 
 # DDoS protection
-iptables -A INPUT -p tcp --dport 8080 -m connlimit --connlimit-above 50 -j REJECT
+iptables -A INPUT -p tcp --dport 8083 -m connlimit --connlimit-above 50 -j REJECT
 ```
 
 ### SSL/TLS Configuration

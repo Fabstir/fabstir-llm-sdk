@@ -122,7 +122,7 @@ You should see the **Node Management Client** interface with:
 │                  │ spawns/controls                           │
 │                  ▼                                           │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │ fabstir-llm-node (Rust binary on :8080)                │ │
+│  │ fabstir-llm-node (Rust binary on :8083)                │ │
 │  │  - LLM inference                                        │ │
 │  │  - P2P networking                                       │ │
 │  │  - Health endpoint                                      │ │

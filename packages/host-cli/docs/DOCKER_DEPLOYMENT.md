@@ -46,8 +46,8 @@ docker build --no-cache -f packages/host-cli/Dockerfile -t fabstir-host-cli:loca
 **What this includes**:
 - ✅ Node.js 20 on NVIDIA CUDA 12.2 base (GPU support)
 - ✅ S5 storage polyfills (IndexedDB, WebSocket)
-- ✅ INTERNAL_PORT=8080 environment variable
-- ✅ Port 8080 → 8083 mapping support
+- ✅ INTERNAL_PORT=8083 environment variable
+- ✅ Direct port mapping (8083:8083, no translation)
 - ✅ Daemon mode with parent-stays-alive fix for Docker
 
 ### Step 2: Start Container
@@ -64,7 +64,7 @@ bash start-fabstir-docker.sh
 - Sources `.env.test` for all environment variables
 - Mounts fabstir-llm-node binary at `/usr/local/bin/fabstir-llm-node`
 - Mounts model directory at `/models`
-- Maps ports: `8083:8080` (host → container)
+- Maps ports: `8083:8083` (API), `9000:9000` (P2P), `3001:3001` (Management)
 - Sets `HOST_PRIVATE_KEY` from `TEST_HOST_2_PRIVATE_KEY`
 - Runs container in background with `while true; do sleep 3600; done`
 
@@ -77,11 +77,11 @@ bash register-host.sh
 **What happens**:
 1. Initializes SDK with Base Sepolia contracts
 2. Checks FAB/ETH balance (min: 1000 FAB, 0.001 ETH)
-3. Starts temporary node for verification (on port 8080 inside container)
-4. Verifies API is accessible at `http://localhost:8080` (internal)
+3. Starts temporary node for verification (on port 8083)
+4. Verifies API is accessible at `http://localhost:8083`
 5. Approves 1000 FAB for NodeRegistry contract
 6. Registers host with model: `CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf`
-7. Saves config to `/root/.fabstir/config.json` with `inferencePort: 8080`
+7. Saves config to `/root/.fabstir/config.json` with `inferencePort: 8083`
 8. Stops temporary node
 
 **Expected output**:
@@ -89,7 +89,7 @@ bash register-host.sh
 ✅ Model loaded
 ✅ P2P started
 ✅ API started
-Verifying internal API at http://localhost:8080...
+Verifying internal API at http://localhost:8083...
 ✅ API is accessible
 ✅ Node started (PID: 33)
 ✅ Registration successful!
@@ -107,14 +107,14 @@ docker exec -it fabstir-host-test sh -c 'node --require /app/polyfills.js dist/i
 **Expected output**:
 ```
 🚀 Starting Fabstir host node...
-  Internal Port: 8080
+  Internal Port: 8083
   Public URL: http://localhost:8083
   Models: CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf
   Waiting for node to start (monitoring logs)...
    ✅ Model loaded
    ✅ P2P started
    ✅ API started
-  Verifying internal API at http://localhost:8080...
+  Verifying internal API at http://localhost:8083...
    ✅ API is accessible
 
 ✅ Node started successfully (PID: 256)
@@ -134,8 +134,8 @@ In a **separate terminal**:
 # Test from host machine (mapped port)
 curl http://localhost:8083/health
 
-# Test from inside container (internal port)
-docker exec fabstir-host-test curl -s http://localhost:8080/health
+# Test from inside container
+docker exec fabstir-host-test curl -s http://localhost:8083/health
 ```
 
 **Expected response**:
@@ -147,24 +147,19 @@ docker exec fabstir-host-test curl -s http://localhost:8080/health
 }
 ```
 
-## Port Mapping Explained
+## Port Mapping
 
-| Location | Port | Description |
-|----------|------|-------------|
-| Host machine | 8083 | Public-facing port (you access via `localhost:8083`) |
-| Host machine | 3001 | Management API port (browser-based control) |
-| Docker container | 8080 | Internal port (fabstir-llm-node binds here) |
-| Docker container | 3001 | Management server port (HTTP + WebSocket) |
-| `INTERNAL_PORT` env var | 8080 | Tells CLI to use port 8080 inside container |
-| `publicUrl` in config | `http://localhost:8083` | External URL for registration |
-| `inferencePort` in config | 8080 | Internal port stored in config |
+| Service | Port | Description |
+|---------|------|-------------|
+| **fabstir-llm-node** | 8083 | Inference API (internal & external) |
+| **P2P networking** | 9000 | LibP2P communication |
+| **Management API** | 3001 | Browser-based control (HTTP + WebSocket) |
 
-**Why this matters**:
-- Docker maps `host:8083` → `container:8080`
-- Docker maps `host:3001` → `container:3001` (management server)
-- fabstir-llm-node must bind to **8080** inside container
-- CLI uses `INTERNAL_PORT` to determine which port to use
-- Without `INTERNAL_PORT`, CLI would try to bind to **8083** (from publicUrl) and fail
+**Port Configuration**:
+- All ports use **direct mapping** (no translation): `8083:8083`, `9000:9000`, `3001:3001`
+- `API_PORT=8083` - fabstir-llm-node binds to port 8083
+- `INTERNAL_PORT=8083` - CLI uses port 8083
+- `publicUrl=http://localhost:8083` - Registered URL (change to public IP for production)
 
 ## Daemon Mode (Background)
 
@@ -397,15 +392,15 @@ sleep 2
 
 ### API not accessible - "Connection refused"
 
-**Cause**: Node bound to wrong port (8083 instead of 8080)
+**Cause**: Node bound to wrong port or port mapping incorrect
 
 **Fix**:
 ```bash
 # Check what port the process is using
 docker exec fabstir-host-test cat /proc/$(docker exec fabstir-host-test pgrep fabstir-llm-node)/environ | tr '\0' '\n' | grep API_PORT
 
-# Should show: API_PORT=8080
-# If it shows 8083, config is wrong - rebuild Docker image
+# Should show: API_PORT=8083
+# If it shows a different port, rebuild Docker image with correct configuration
 ```
 
 ### Registration fails - "Node not accessible at public URL"
@@ -416,7 +411,7 @@ docker exec fabstir-host-test cat /proc/$(docker exec fabstir-host-test pgrep fa
 ```bash
 # Verify INTERNAL_PORT is set
 docker exec fabstir-host-test env | grep INTERNAL_PORT
-# Should show: INTERNAL_PORT=8080
+# Should show: INTERNAL_PORT=8083
 ```
 
 ### Daemon mode - Process dies immediately
@@ -451,8 +446,9 @@ set +a
 docker run -d \
   --name fabstir-host-test \
   --gpus all \
-  -p 8083:8080 \
+  -p 8083:8083 \
   -p 9000:9000 \
+  -p 3001:3001 \
   -v ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-node/models:/models \
   -v ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-node/target/release/fabstir-llm-node:/usr/local/bin/fabstir-llm-node:ro \
   -v ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-sdk/.env.test:/app/.env.test:ro \
@@ -479,8 +475,8 @@ The following environment variables are set in the container:
 
 | Variable | Value | Source |
 |----------|-------|--------|
-| `INTERNAL_PORT` | 8080 | Dockerfile |
-| `API_PORT` | 8080 | Dockerfile |
+| `INTERNAL_PORT` | 8083 | Dockerfile |
+| `API_PORT` | 8083 | Dockerfile |
 | `P2P_PORT` | 9000 | Dockerfile |
 | `SKIP_S5_STORAGE` | true | Dockerfile |
 | `HOST_PRIVATE_KEY` | `$TEST_HOST_2_PRIVATE_KEY` | start-fabstir-docker.sh |

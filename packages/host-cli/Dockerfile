@@ -140,18 +140,18 @@ RUN mkdir -p /models /root/.fabstir/logs \
     && ln -s /models /app/models
 
 # Expose ports
-EXPOSE 8080 9000 3001
+EXPOSE 8083 9000 3001
 
 # Environment variables (can be overridden at runtime)
 ENV NODE_ENV=production
-ENV API_PORT=8080
-ENV INTERNAL_PORT=8080
+ENV API_PORT=8083
+ENV INTERNAL_PORT=8083
 ENV P2P_PORT=9000
 ENV SKIP_S5_STORAGE=true
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD curl -f http://localhost:8083/health || exit 1
 
 # Set working directory
 WORKDIR /app

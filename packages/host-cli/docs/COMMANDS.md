@@ -105,7 +105,7 @@ pnpm host config list
 pnpm host config get host.port
 
 # Set value
-pnpm host config set host.port 8080
+pnpm host config set host.port 8083
 
 # Reset config
 pnpm host config reset
@@ -206,7 +206,7 @@ pnpm host register \
   --private-key 0x... \
   --rpc-url https://... \
   --stake 5000 \
-  --url http://my-host.example.com:8080 \
+  --url http://my-host.example.com:8083 \
   --models llama-3,gpt-4
 ```
 
@@ -356,7 +356,7 @@ Models:
   - mistral-7b
 
 API:
-  URL: http://localhost:8080
+  URL: http://localhost:8083
 
 Earnings:
   Accumulated: 45.67 FAB
@@ -425,12 +425,12 @@ Updates the public URL where your host accepts WebSocket connections. The URL mu
 #### Examples
 ```bash
 # Update URL
-pnpm host update-url http://my-host.example.com:8080 \
+pnpm host update-url http://my-host.example.com:8083 \
   --private-key 0x... \
   --rpc-url https://...
 
 # Update to localhost (testing)
-pnpm host update-url http://localhost:8080 \
+pnpm host update-url http://localhost:8083 \
   --private-key 0x... \
   --rpc-url https://...
 ```
@@ -457,8 +457,8 @@ console.log(`New URL: ${status.apiUrl}`);
 
 #### Output
 ```
-Current URL: http://old-host.example.com:8080
-New URL: http://new-host.example.com:8080
+Current URL: http://old-host.example.com:8083
+New URL: http://new-host.example.com:8083
 
 Updating API URL...
 ✓ Transaction confirmed: 0x123abc...
@@ -723,7 +723,7 @@ Starting Fabstir Host...
 ✓ SDK initialized (Base Sepolia)
 ✓ Wallet connected: 0x742d...bEb7
 ✓ Network: Base Sepolia (84532)
-✓ WebSocket server started on port 8080
+✓ WebSocket server started on port 8083
 ✓ Host registered and active
 
 Host is running. Press Ctrl+C to stop.

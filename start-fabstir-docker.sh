@@ -9,7 +9,7 @@ set +a
 docker run -d \
   --name fabstir-host-test \
   --gpus all \
-  -p 8083:8080 \
+  -p 8083:8083 \
   -p 9000:9000 \
   -p 3001:3001 \
   -v ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-node/models:/models \

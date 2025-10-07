@@ -31,7 +31,7 @@ docker pull fabstir/host-cli:latest
 # 3. Run container (replace YOUR_* placeholders)
 docker run -d \
   --name fabstir-host \
-  -p 8080:8080 -p 9000:9000 \
+  -p 8083:8083 -p 9000:9000 \
   -v ~/fabstir-models:/models \
   -e MODEL_PATH=/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
   -e HOST_PRIVATE_KEY=0xYOUR_PRIVATE_KEY \
@@ -45,7 +45,7 @@ docker run -d \
 
 # 4. Register as host
 docker exec -it fabstir-host fabstir-host register \
-  --url http://YOUR_PUBLIC_IP:8080 \
+  --url http://YOUR_PUBLIC_IP:8083 \
   --models "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF:tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf" \
   --stake 1000
 ```
@@ -64,7 +64,7 @@ Before starting, ensure you have:
 ### Required
 - **Public IP address or domain** (not localhost)
 - **Private key** with FAB tokens for staking
-- **Open firewall** for ports 8080 (API) and 9000 (P2P)
+- **Open firewall** for ports 8083 (API) and 9000 (P2P)
 - **Docker installed** (see Step 1)
 - **Minimum hardware**:
   - 4 CPU cores
@@ -210,14 +210,14 @@ export CONTRACT_USDC_TOKEN="0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 
 **Linux (UFW)**:
 ```bash
-sudo ufw allow 8080/tcp
+sudo ufw allow 8083/tcp
 sudo ufw allow 9000/tcp
 sudo ufw reload
 ```
 
 **Linux (iptables)**:
 ```bash
-sudo iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 8083 -j ACCEPT
 sudo iptables -A INPUT -p tcp --dport 9000 -j ACCEPT
 sudo iptables-save > /etc/iptables/rules.v4
 ```
@@ -232,7 +232,7 @@ sudo pfctl -d
 
 **Windows**:
 ```powershell
-netsh advfirewall firewall add rule name="Fabstir API" dir=in action=allow protocol=TCP localport=8080
+netsh advfirewall firewall add rule name="Fabstir API" dir=in action=allow protocol=TCP localport=8083
 netsh advfirewall firewall add rule name="Fabstir P2P" dir=in action=allow protocol=TCP localport=9000
 ```
 
@@ -249,7 +249,7 @@ docker pull fabstir/host-cli:latest
 # For TinyLlama model:
 docker run -d \
   --name fabstir-host \
-  -p 8080:8080 \
+  -p 8083:8083 \
   -p 9000:9000 \
   -v ~/fabstir-models:/models \
   -e MODEL_PATH=/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
@@ -285,7 +285,7 @@ docker exec -it fabstir-host bash
 
 # Inside container, register as host
 fabstir-host register \
-  --url http://YOUR_PUBLIC_IP:8080 \
+  --url http://YOUR_PUBLIC_IP:8083 \
   --models "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF:tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf" \
   --stake 1000
 ```
@@ -298,7 +298,7 @@ fabstir-host register \
    ✅ P2P started
    ✅ API started
    🎉 Fabstir LLM Node is running
-  Verifying public access at http://YOUR_PUBLIC_IP:8080...
+  Verifying public access at http://YOUR_PUBLIC_IP:8083...
    ✅ Public URL is accessible
 
 💰 Approving FAB tokens...
@@ -308,7 +308,7 @@ fabstir-host register \
    Transaction: 0x...
 
 ✅ Registration complete!
-Node: http://YOUR_PUBLIC_IP:8080
+Node: http://YOUR_PUBLIC_IP:8083
 PID: 123
 Transaction: 0x...
 ```
@@ -317,7 +317,7 @@ Transaction: 0x...
 ```bash
 # Run directly without entering container
 docker exec fabstir-host fabstir-host register \
-  --url http://YOUR_PUBLIC_IP:8080 \
+  --url http://YOUR_PUBLIC_IP:8083 \
   --models "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF:tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf" \
   --stake 1000 \
   --private-key $HOST_PRIVATE_KEY
@@ -328,7 +328,7 @@ docker exec fabstir-host fabstir-host register \
 ### Check Node Status
 ```bash
 # Test local health endpoint
-curl http://localhost:8080/health
+curl http://localhost:8083/health
 
 # Expected response:
 # {"status":"healthy"}
@@ -337,7 +337,7 @@ curl http://localhost:8080/health
 ### Test from External Machine
 ```bash
 # From another computer or online tool
-curl http://YOUR_PUBLIC_IP:8080/health
+curl http://YOUR_PUBLIC_IP:8083/health
 
 # Should return same response
 # If it fails, check firewall and NAT configuration
@@ -438,7 +438,7 @@ docker exec fabstir-host fabstir-host start --daemon
 docker exec fabstir-host fabstir-host unregister
 
 # Check health
-curl http://localhost:8080/health
+curl http://localhost:8083/health
 ```
 
 ### Environment Variables Reference
@@ -453,7 +453,7 @@ curl http://localhost:8080/health
 | `CONTRACT_NODE_REGISTRY` | Yes | NodeRegistry address | `0x2AA37...` |
 | `CONTRACT_PROOF_SYSTEM` | Yes | ProofSystem address | `0x2ACcc...` |
 | `CONTRACT_HOST_EARNINGS` | Yes | HostEarnings address | `0x908962...` |
-| `API_PORT` | No | API port (default: 8080) | `8080` |
+| `API_PORT` | No | API port (default: 8083) | `8083` |
 | `P2P_PORT` | No | P2P port (default: 9000) | `9000` |
 | `GPU_LAYERS` | No | GPU layers (default: 35) | `35` |
 
@@ -462,7 +462,7 @@ curl http://localhost:8080/health
 See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for detailed troubleshooting guides.
 
 **Quick checks**:
-- Port already in use: `lsof -i :8080`
+- Port already in use: `lsof -i :8083`
 - Firewall blocking: `sudo ufw status`
 - Model not found: Check volume mount `-v ~/fabstir-models:/models`
 - Registration fails: Verify you have FAB tokens in wallet

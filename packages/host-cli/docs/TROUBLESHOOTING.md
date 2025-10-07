@@ -29,8 +29,8 @@
 fabstir-host status
 
 # Check port usage
-lsof -i :8080  # Linux/macOS
-netstat -ano | findstr :8080  # Windows
+lsof -i :8083  # Linux/macOS
+netstat -ano | findstr :8083  # Windows
 
 # Kill existing process
 fabstir-host stop --force
@@ -107,28 +107,28 @@ fabstir-host config set network.name base-sepolia
 1. Check firewall settings:
 ```bash
 # Allow port (Linux)
-sudo ufw allow 8080/tcp
+sudo ufw allow 8083/tcp
 
 # Check firewall status
 sudo ufw status
 
 # Windows firewall
-netsh advfirewall firewall add rule name="Fabstir Host" dir=in action=allow protocol=TCP localport=8080
+netsh advfirewall firewall add rule name="Fabstir Host" dir=in action=allow protocol=TCP localport=8083
 ```
 
 2. Configure NAT/port forwarding:
 ```bash
 # Test port accessibility
-nc -zv your-public-ip 8080
+nc -zv your-public-ip 8083
 
 # Use ngrok for testing
-ngrok http 8080
+ngrok http 8083
 ```
 
 3. Update public URL:
 ```bash
 # Set correct public URL
-fabstir-host config set host.publicUrl https://your-domain.com:8080
+fabstir-host config set host.publicUrl https://your-domain.com:8083
 ```
 
 ---
@@ -233,13 +233,13 @@ fabstir-host config set network.rpcUrl https://base-sepolia.g.alchemy.com/v2/YOU
 **Solutions:**
 
 1. **Verify node binds to 0.0.0.0 (not 127.0.0.1)**:
-   - fabstir-llm-node binds to 0.0.0.0:8080 by default
-   - Check logs for "API server started on 0.0.0.0:8080"
+   - fabstir-llm-node binds to 0.0.0.0:8083 by default
+   - Check logs for "API server started on 0.0.0.0:8083"
 
 2. **Test localhost first**:
    ```bash
    # From the host machine
-   curl http://localhost:8080/health
+   curl http://localhost:8083/health
 
    # Should return:
    # {"status":"healthy"}
@@ -249,13 +249,13 @@ fabstir-host config set network.rpcUrl https://base-sepolia.g.alchemy.com/v2/YOU
    ```bash
    # Linux (UFW)
    sudo ufw status
-   sudo ufw allow 8080/tcp
+   sudo ufw allow 8083/tcp
 
    # Linux (iptables)
-   sudo iptables -L -n | grep 8080
+   sudo iptables -L -n | grep 8083
 
    # macOS
-   sudo pfctl -sr | grep 8080
+   sudo pfctl -sr | grep 8083
 
    # Windows
    netsh advfirewall firewall show rule name="Fabstir Host"
@@ -264,28 +264,28 @@ fabstir-host config set network.rpcUrl https://base-sepolia.g.alchemy.com/v2/YOU
 4. **Test from external machine**:
    ```bash
    # From another computer
-   curl http://YOUR_PUBLIC_IP:8080/health
+   curl http://YOUR_PUBLIC_IP:8083/health
 
    # Or use online tool
    # https://www.portchecktool.com/
    ```
 
 5. **Check NAT/Router configuration**:
-   - Port forwarding: External 8080 → Internal 8080
+   - Port forwarding: External 8083 → Internal 8083
    - DMZ: Enable for host machine (security risk)
    - UPnP: Enable automatic port forwarding
 
 6. **Show troubleshooting steps**:
    ```bash
    # CLI shows network diagnostics automatically
-   fabstir-host register --url http://YOUR_IP:8080
+   fabstir-host register --url http://YOUR_IP:8083
 
    # If verification fails, you'll see:
    # 🔧 Troubleshooting Steps:
-   # 1. Check if node is running locally: curl http://localhost:8080/health
-   # 2. Check firewall allows incoming: sudo ufw allow 8080/tcp
-   # 3. Verify port is listening: netstat -tuln | grep 8080
-   # 4. Test from another machine: curl http://YOUR_IP:8080/health
+   # 1. Check if node is running locally: curl http://localhost:8083/health
+   # 2. Check firewall allows incoming: sudo ufw allow 8083/tcp
+   # 3. Verify port is listening: netstat -tuln | grep 8083
+   # 4. Test from another machine: curl http://YOUR_IP:8083/health
    ```
 
 ---
@@ -451,7 +451,7 @@ fabstir-host config set network.rpcUrl https://base-sepolia.g.alchemy.com/v2/YOU
    # Re-run with correct mount
    docker run -d \
      --name fabstir-host \
-     -p 8080:8080 \
+     -p 8083:8083 \
      -p 9000:9000 \
      -v ~/fabstir-models:/models \
      -e MODEL_PATH=/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
@@ -549,29 +549,29 @@ fabstir-host config set network.rpcUrl https://base-sepolia.g.alchemy.com/v2/YOU
 
 ### Container Ports Not Accessible
 
-**Problem:** Cannot access `http://YOUR_IP:8080` even though container is running
+**Problem:** Cannot access `http://YOUR_IP:8083` even though container is running
 
 **Solutions:**
 
 1. **Verify port mapping**:
    ```bash
    docker ps | grep fabstir-host
-   # Should show: 0.0.0.0:8080->8080/tcp
+   # Should show: 0.0.0.0:8083->8083/tcp
    ```
 
 2. **Check if ports are exposed**:
    ```bash
    docker inspect fabstir-host | grep -A 5 ExposedPorts
-   # Should show: "8080/tcp": {} and "9000/tcp": {}
+   # Should show: "8083/tcp": {} and "9000/tcp": {}
    ```
 
 3. **Test from host machine first**:
    ```bash
-   curl http://localhost:8080/health
+   curl http://localhost:8083/health
    # Should work from host
 
    # Then test externally
-   curl http://YOUR_PUBLIC_IP:8080/health
+   curl http://YOUR_PUBLIC_IP:8083/health
    ```
 
 4. **Check Docker network**:
@@ -604,7 +604,7 @@ fabstir-host config set network.rpcUrl https://base-sepolia.g.alchemy.com/v2/YOU
    # Remove -d flag to see output
    docker run -it \
      --name fabstir-host-debug \
-     -p 8080:8080 \
+     -p 8083:8083 \
      -v ~/fabstir-models:/models \
      -e MODEL_PATH=/models/your-model.gguf \
      fabstir/host-cli:latest
@@ -614,7 +614,7 @@ fabstir-host config set network.rpcUrl https://base-sepolia.g.alchemy.com/v2/YOU
    - Missing MODEL_PATH
    - Invalid contract addresses
    - fabstir-llm-node binary not found
-   - Port 8080 already in use
+   - Port 8083 already in use
 
 4. **Start with interactive shell**:
    ```bash
@@ -885,7 +885,7 @@ grep "session" ~/.fabstir/logs/host.log | tail -50
 2. Verify WebSocket health:
 ```bash
 # Test WebSocket
-wscat -c ws://localhost:8080/ws/session
+wscat -c ws://localhost:8083/ws/session
 ```
 
 3. Check checkpoint submissions:

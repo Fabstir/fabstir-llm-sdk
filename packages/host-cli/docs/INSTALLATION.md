@@ -264,7 +264,7 @@ pnpm host register \
   --private-key 0xYOUR_PRIVATE_KEY \
   --rpc-url https://... \
   --stake 1000 \
-  --url http://localhost:8080
+  --url http://localhost:8083
 ```
 
 ### Development Workflow
