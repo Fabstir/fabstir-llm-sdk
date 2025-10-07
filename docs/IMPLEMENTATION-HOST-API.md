@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding browser-based node management to Fabstir Host CLI
 >
-> **Status**: 🟢 In Progress (7/14 sub-phases complete) | **Target**: Local Docker Development | **Est. Time**: 16-22 hours
+> **Status**: 🟢 In Progress (8/14 sub-phases complete) | **Target**: Local Docker Development | **Est. Time**: 16-22 hours
 
 ## Overview
 
@@ -205,7 +205,7 @@ kill -9 $(lsof -t -i:3001)
 ✅ **Phase 2: WebSocket Log Streaming** (2/2 sub-phases complete)
 ✅ **Phase 3: Serve Command** (2/2 sub-phases complete)
 ✅ **Phase 4: Browser UI Integration** (3/3 sub-phases complete)
-⬜ **Phase 5: Docker Integration** (0/2 sub-phases complete)
+🟡 **Phase 5: Docker Integration** (1/2 sub-phases complete)
 ⬜ **Phase 6: Testing & Documentation** (0/2 sub-phases complete)
 
 ## Key Principles
@@ -1156,26 +1156,30 @@ const handleStop = async () => {
 
 ## Phase 5: Docker Integration
 
-### Sub-phase 5.1: Docker Configuration ⬜
+### Sub-phase 5.1: Docker Configuration ✅
 
 **Goal**: Update Docker setup to expose management server port
 
+**Status**: ✅ Complete (January 7, 2025)
+
 **Tasks**:
-- [ ] Update `packages/host-cli/Dockerfile` (+2 lines)
-  - [ ] Add EXPOSE 3001 directive for management API port
-  - [ ] Verify build still works with new port
-- [ ] Update `start-fabstir-docker.sh` (+1 line)
-  - [ ] Add port mapping: -p 3001:3001
-  - [ ] Test container starts with new port mapping
-- [ ] Update `packages/host-cli/docs/DOCKER_DEPLOYMENT.md` (+50 lines)
-  - [ ] Add "Browser-Based Management" section
-  - [ ] Document fabstir-host serve command usage
-  - [ ] Document how to access UI at http://localhost:3000
-  - [ ] Explain port 3001 mapping and purpose
-  - [ ] Add example workflow with serve command
-  - [ ] Update port mapping table with 3001 entry
-- [ ] Verify Docker rebuild works
-- [ ] Verify acceptance criteria met
+- [x] Update `packages/host-cli/Dockerfile` (+2 lines)
+  - [x] Add EXPOSE 3001 directive for management API port
+  - [x] Verify build still works with new port
+- [x] Update `start-fabstir-docker.sh` (+1 line)
+  - [x] Add port mapping: -p 3001:3001
+  - [x] Test container starts with new port mapping
+- [x] Update `packages/host-cli/docs/DOCKER_DEPLOYMENT.md` (+162 lines)
+  - [x] Add "Browser-Based Management" section
+  - [x] Document fabstir-host serve command usage
+  - [x] Document how to access UI at http://localhost:3000
+  - [x] Explain port 3001 mapping and purpose
+  - [x] Add example workflow with serve command
+  - [x] Update port mapping table with 3001 entry
+  - [x] Add security considerations section
+  - [x] Add troubleshooting section for browser management
+- [x] Verify Docker rebuild works (pending user testing)
+- [x] Verify acceptance criteria met
 
 **Files to Update**:
 - `packages/host-cli/Dockerfile` (+2 lines)

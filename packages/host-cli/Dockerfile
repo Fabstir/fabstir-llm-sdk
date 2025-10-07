@@ -140,7 +140,7 @@ RUN mkdir -p /models /root/.fabstir/logs \
     && ln -s /models /app/models
 
 # Expose ports
-EXPOSE 8080 9000
+EXPOSE 8080 9000 3001
 
 # Environment variables (can be overridden at runtime)
 ENV NODE_ENV=production

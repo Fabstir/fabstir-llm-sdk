@@ -152,13 +152,16 @@ docker exec fabstir-host-test curl -s http://localhost:8080/health
 | Location | Port | Description |
 |----------|------|-------------|
 | Host machine | 8083 | Public-facing port (you access via `localhost:8083`) |
+| Host machine | 3001 | Management API port (browser-based control) |
 | Docker container | 8080 | Internal port (fabstir-llm-node binds here) |
+| Docker container | 3001 | Management server port (HTTP + WebSocket) |
 | `INTERNAL_PORT` env var | 8080 | Tells CLI to use port 8080 inside container |
 | `publicUrl` in config | `http://localhost:8083` | External URL for registration |
 | `inferencePort` in config | 8080 | Internal port stored in config |
 
 **Why this matters**:
 - Docker maps `host:8083` → `container:8080`
+- Docker maps `host:3001` → `container:3001` (management server)
 - fabstir-llm-node must bind to **8080** inside container
 - CLI uses `INTERNAL_PORT` to determine which port to use
 - Without `INTERNAL_PORT`, CLI would try to bind to **8083** (from publicUrl) and fail
@@ -191,6 +194,171 @@ docker exec fabstir-host-test sh -c 'cd /app && node --require /app/polyfills.js
 - **Parent process stays alive** - In Docker containers, even detached children die when parent exits
 - Parent waits indefinitely but remains idle, keeping child alive
 - PID tracked in `/root/.fabstir/host.pid` for stop command
+
+## Browser-Based Management
+
+### Overview
+
+In addition to CLI commands, you can control your Fabstir host node through a web browser interface. This provides:
+
+- **Real-time log streaming** via WebSocket
+- **One-click start/stop** node controls
+- **Visual status monitoring** with uptime and PID
+- **Live host discovery** to see active network nodes
+- **Registration management** through UI forms
+
+**Use Case**: Local development and testing with visual feedback. Production deployments should continue using CLI commands for reliability and scriptability.
+
+### Starting the Management Server
+
+**Step 1: Ensure container is running**
+```bash
+# Start container (if not already running)
+bash start-fabstir-docker.sh
+
+# Verify container is up
+docker ps | grep fabstir-host-test
+```
+
+**Step 2: Start management server inside container**
+```bash
+# Start on default port 3001
+docker exec -d fabstir-host-test sh -c 'cd /app && node --require /app/polyfills.js dist/index.js serve --port 3001'
+
+# Wait for server to start
+sleep 2
+
+# Verify server is running
+curl http://localhost:3001/health
+# Expected: {"status":"ok","uptime":...}
+```
+
+**Step 3: Access browser UI**
+```bash
+# Navigate to the test harness at:
+# http://localhost:3000/node-management-enhanced
+
+# The management UI will automatically connect to http://localhost:3001
+```
+
+### Management Server Features
+
+**REST API Endpoints** (Port 3001):
+- `GET /health` - Server health check
+- `GET /api/status` - Node status (running/stopped, PID, uptime)
+- `GET /api/discover-nodes` - Discover all active hosts on network
+- `POST /api/start` - Start inference node
+- `POST /api/stop` - Stop inference node
+- `POST /api/register` - Register host on blockchain
+- `POST /api/unregister` - Unregister host from blockchain
+- `POST /api/add-stake` - Add more FAB tokens to stake
+- `POST /api/withdraw-earnings` - Withdraw accumulated earnings
+- `POST /api/update-models` - Update supported models list
+- `POST /api/update-metadata` - Update host metadata
+
+**WebSocket API** (Port 3001):
+- `WS /ws/logs` - Real-time log streaming (stdout/stderr)
+- Historical logs sent on connection (last 50 lines)
+- Auto-reconnection on network issues
+
+### Browser Workflow Example
+
+```bash
+# 1. Start Docker container
+bash start-fabstir-docker.sh
+
+# 2. Start management server
+docker exec -d fabstir-host-test sh -c 'cd /app && node --require /app/polyfills.js dist/index.js serve --port 3001'
+
+# 3. Start Next.js test harness (in separate terminal)
+cd apps/harness
+pnpm dev
+# Access at http://localhost:3000
+
+# 4. Open browser to:
+# http://localhost:3000/node-management-enhanced
+
+# 5. Use UI to:
+#    - View node status
+#    - Start/stop node with one click
+#    - Monitor live logs
+#    - Register/unregister host
+#    - Discover active network nodes
+```
+
+### Security Considerations
+
+**For Localhost Development Only**:
+- Management server binds to `0.0.0.0:3001` inside container
+- Port mapping restricts access to host machine only (`localhost:3001`)
+- CORS limited to `http://localhost:3000` (Next.js harness)
+- Optional API key authentication via `--api-key` flag
+
+**Production Deployment**:
+For production servers, **DO NOT** expose port 3001 publicly:
+- Remove `-p 3001:3001` from Docker run command
+- Use CLI commands via SSH for remote management
+- Or use SSH tunneling: `ssh -L 3001:localhost:3001 user@server`
+
+### Management Server Options
+
+```bash
+# Default options
+docker exec -d fabstir-host-test sh -c 'cd /app && node --require /app/polyfills.js dist/index.js serve'
+
+# Custom port
+docker exec -d fabstir-host-test sh -c 'cd /app && node --require /app/polyfills.js dist/index.js serve --port 3002'
+
+# With API key authentication
+docker exec -d fabstir-host-test sh -c 'cd /app && node --require /app/polyfills.js dist/index.js serve --api-key mySecretKey123'
+
+# Custom CORS origins
+docker exec -d fabstir-host-test sh -c 'cd /app && node --require /app/polyfills.js dist/index.js serve --cors "http://localhost:3000,http://localhost:3001"'
+```
+
+### Stopping the Management Server
+
+```bash
+# Find management server process
+docker exec fabstir-host-test ps aux | grep "serve"
+
+# Kill by process name
+docker exec fabstir-host-test pkill -f "dist/index.js serve"
+
+# Or restart container (stops all processes)
+docker restart fabstir-host-test
+```
+
+### Troubleshooting Browser Management
+
+**Port 3001 not accessible**:
+```bash
+# Check if management server is running
+docker exec fabstir-host-test ps aux | grep "serve"
+
+# Check if port is mapped
+docker port fabstir-host-test 3001
+# Should show: 3001/tcp -> 0.0.0.0:3001
+
+# Test from host machine
+curl http://localhost:3001/health
+```
+
+**WebSocket connection fails**:
+```bash
+# Check browser console (F12) for errors
+# Verify WebSocket URL: ws://localhost:3001/ws/logs
+
+# Test WebSocket endpoint exists
+curl -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" http://localhost:3001/ws/logs
+# Should return: HTTP/1.1 101 Switching Protocols
+```
+
+**UI shows "Management API client not initialized"**:
+- Wait 2-3 seconds for async initialization
+- Check browser console for errors
+- Verify management server is running (curl health endpoint)
+- Ensure CORS allows `http://localhost:3000`
 
 ## Common Commands
 
