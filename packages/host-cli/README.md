@@ -132,7 +132,7 @@ pnpm host unregister \
 
 ## Available Commands
 
-The CLI provides 15 commands organized by function:
+The CLI provides 16 commands organized by function:
 
 ### Core Setup
 - `init` - Initialize host configuration (interactive wizard)
@@ -160,8 +160,116 @@ The CLI provides 15 commands organized by function:
 - `start` - Start the host node
 - `stop` - Stop the running host node
 - `logs` - View host logs
+- `serve` - Start management API server for browser control
 
 See [COMMANDS.md](docs/COMMANDS.md) for detailed documentation of each command.
+
+## Browser-Based Management
+
+In addition to CLI commands, you can control your host node through a **visual web interface**. This provides real-time log streaming, one-click controls, and status monitoring—perfect for local development and testing.
+
+### Quick Start
+
+```bash
+# 1. Start Docker container
+./start-fabstir-docker.sh
+
+# 2. Start management server
+./start-management-server.sh
+
+# 3. Start Next.js test harness (separate terminal)
+cd apps/harness && pnpm dev
+
+# 4. Open browser
+# Navigate to: http://localhost:3000/node-management-enhanced
+```
+
+### Features
+
+- **🔴 Real-Time Log Streaming** - Watch node logs live via WebSocket
+- **🎮 One-Click Controls** - Start/stop node with visual confirmation
+- **📊 Status Monitoring** - Live PID, uptime, and connection status
+- **🔍 Host Discovery** - See all active nodes on the network
+- **📝 Registration Management** - Register/unregister through UI forms
+- **🌐 Multi-Chain Support** - Switch between Base Sepolia and opBNB Testnet
+
+### Management API
+
+The browser UI communicates with a **management server** running inside your Docker container:
+
+**REST Endpoints** (Port 3001):
+- `GET /health` - Server health check
+- `GET /api/status` - Node status (running/stopped, PID, uptime)
+- `POST /api/start` - Start inference node
+- `POST /api/stop` - Stop inference node
+- `POST /api/register` - Register host on blockchain
+- `GET /api/discover-nodes` - Discover all active hosts
+
+**WebSocket** (Port 3001):
+- `WS /ws/logs` - Real-time log streaming (stdout/stderr)
+
+### Architecture
+
+```
+Browser (localhost:3000)
+    ↓ HTTP/WebSocket
+Management Server (Docker :3001)
+    ↓ delegates to
+CLI Commands (single source of truth)
+    ↓ spawns/controls
+fabstir-llm-node (Rust binary :8080)
+```
+
+**Key Design**: The management server is just HTTP/WebSocket plumbing. All business logic remains in CLI commands—no code duplication!
+
+### Documentation
+
+- **[Browser Management Guide](docs/BROWSER_MANAGEMENT.md)** - Complete user guide with examples and troubleshooting
+- **[API Reference](docs/API_REFERENCE.md)** - REST and WebSocket API documentation with curl examples
+- **[Docker Deployment](docs/DOCKER_DEPLOYMENT.md)** - Docker setup with browser management section
+
+### Security
+
+**Localhost-Only by Design**:
+- Management server binds to port 3001 inside Docker
+- Port mapping restricts access to host machine only
+- CORS limited to `http://localhost:3000`
+- Perfect for local development/testing
+
+**For Production**: Use CLI commands via SSH. Don't expose port 3001 publicly!
+
+### serve Command
+
+Start the management server manually:
+
+```bash
+# Inside Docker container
+fabstir-host serve --port 3001
+
+# With optional API key authentication
+fabstir-host serve --port 3001 --api-key mySecretKey
+
+# Custom CORS origins
+fabstir-host serve --cors "http://localhost:3000,http://localhost:3001"
+```
+
+Or use the convenient startup script:
+
+```bash
+./start-management-server.sh
+```
+
+### When to Use
+
+| Scenario | CLI Commands | Browser UI |
+|----------|-------------|------------|
+| **Local Testing** | ⚠️ Good | ✅ Excellent |
+| **Production** | ✅ Recommended | ❌ Not for production |
+| **Automation** | ✅ Scriptable | ❌ Not scriptable |
+| **Visual Feedback** | ⚠️ Terminal only | ✅ Real-time UI |
+| **Remote Access** | ✅ via SSH | ⚠️ SSH tunnel only |
+
+**Recommendation**: Use browser UI for learning and debugging. Use CLI for production and scripts.
 
 ## SDK Integration Benefits
 
