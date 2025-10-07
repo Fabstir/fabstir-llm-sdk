@@ -1,8 +1,8 @@
-# Host CLI Management API Implementation Plan (v1.0)
+# Host CLI Management API Implementation Plan (v1.1)
 
 > Complete implementation plan for adding browser-based node management to Fabstir Host CLI
 >
-> **Status**: 🟡 Not Started | **Target**: Local Docker Development | **Est. Time**: 12-17 hours
+> **Status**: 🟢 In Progress (2/14 sub-phases complete) | **Target**: Local Docker Development | **Est. Time**: 16-22 hours
 
 ## Overview
 
@@ -201,7 +201,7 @@ kill -9 $(lsof -t -i:3001)
 
 ## Implementation Status
 
-⬜ **Phase 1: Management API Server** (0/3 sub-phases complete)
+🟢 **Phase 1: Management API Server** (2/3 sub-phases complete)
 ⬜ **Phase 2: WebSocket Log Streaming** (0/2 sub-phases complete)
 ⬜ **Phase 3: Serve Command** (0/2 sub-phases complete)
 ⬜ **Phase 4: Browser UI Integration** (0/3 sub-phases complete)
@@ -229,28 +229,30 @@ kill -9 $(lsof -t -i:3001)
 
 ## Phase 1: Management API Server
 
-### Sub-phase 1.1: API Server Core & Health Endpoint ⬜
+### Sub-phase 1.1: API Server Core & Health Endpoint ✅
 
 **Goal**: Create Express server with basic health endpoint
 
+**Status**: ✅ Complete (January 7, 2025)
+
 **Tasks**:
-- [ ] Write tests in `packages/host-cli/tests/server/api.test.ts` (80 lines)
-  - [ ] Test: should start server on specified port
-  - [ ] Test: should respond to health check at GET /health
-  - [ ] Test: should enable CORS for localhost origins
-  - [ ] Test: should reject requests without API key (if auth enabled)
-  - [ ] Test: should gracefully shutdown server
-- [ ] Create `packages/host-cli/src/server/api.ts` (120 lines)
-  - [ ] Define ServerConfig interface
-  - [ ] Implement ManagementServer class constructor
-  - [ ] Implement start() method
-  - [ ] Implement stop() method
-  - [ ] Implement setupRoutes() method
-  - [ ] Implement handleHealth() route handler
-  - [ ] Add CORS middleware
-  - [ ] Add optional API key authentication middleware
-- [ ] Verify all tests pass
-- [ ] Verify acceptance criteria met
+- [x] Write tests in `packages/host-cli/tests/server/api.test.ts` (137 lines)
+  - [x] Test: should start server on specified port
+  - [x] Test: should respond to health check at GET /health
+  - [x] Test: should enable CORS for localhost origins
+  - [x] Test: should reject requests without API key (if auth enabled)
+  - [x] Test: should gracefully shutdown server
+- [x] Create `packages/host-cli/src/server/api.ts` (130 lines)
+  - [x] Define ServerConfig interface
+  - [x] Implement ManagementServer class constructor
+  - [x] Implement start() method
+  - [x] Implement stop() method
+  - [x] Implement setupRoutes() method
+  - [x] Implement handleHealth() route handler
+  - [x] Add CORS middleware
+  - [x] Add optional API key authentication middleware
+- [x] Verify all tests pass (5/5 ✅)
+- [x] Verify acceptance criteria met
 
 **Implementation Requirements**:
 ```typescript
@@ -309,25 +311,27 @@ Tests:       5 passed, 5 total
 
 ---
 
-### Sub-phase 1.2: Node Status Endpoint ⬜
+### Sub-phase 1.2: Node Status Endpoint ✅
 
 **Goal**: Add GET /api/status endpoint that reads PID file and checks process
 
+**Status**: ✅ Complete (January 7, 2025)
+
 **Tasks**:
-- [ ] Write tests in `packages/host-cli/tests/server/api.test.ts` (+50 lines)
-  - [ ] Test: should return running status when node is active
-  - [ ] Test: should return stopped status when no PID file exists
-  - [ ] Test: should return stopped status when PID exists but process dead
-  - [ ] Test: should include PID, uptime, and publicUrl in response
-  - [ ] Test: should handle missing config gracefully
-- [ ] Update `packages/host-cli/src/server/api.ts` (+60 lines)
-  - [ ] Implement handleStatus() route handler
-  - [ ] Integrate PIDManager to read PID file
-  - [ ] Integrate loadConfig() to get publicUrl
-  - [ ] Calculate uptime from startTime
-  - [ ] Add GET /api/status route
-- [ ] Verify all tests pass
-- [ ] Verify acceptance criteria met
+- [x] Write tests in `packages/host-cli/tests/server/api.test.ts` (+162 lines)
+  - [x] Test: should return running status when node is active
+  - [x] Test: should return stopped status when no PID file exists
+  - [x] Test: should return stopped status when PID exists but process dead
+  - [x] Test: should include PID, uptime, and publicUrl in response
+  - [x] Test: should handle missing config gracefully
+- [x] Update `packages/host-cli/src/server/api.ts` (+60 lines)
+  - [x] Implement handleStatus() route handler
+  - [x] Integrate PIDManager to read PID file
+  - [x] Add pidPath to ServerConfig interface
+  - [x] Calculate uptime from startTime
+  - [x] Add GET /api/status route
+- [x] Verify all tests pass (10/10 ✅)
+- [x] Verify acceptance criteria met
 
 **Test Requirements**:
 ```typescript
