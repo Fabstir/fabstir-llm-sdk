@@ -89,16 +89,33 @@ export class DaemonManager {
     const { timeout = 10000, force = false } = options;
 
     try {
-      // Send SIGTERM for graceful shutdown
-      process.kill(pid, 'SIGTERM');
+      // Send SIGTERM to process group (detached process)
+      // Use negative PID to kill entire process group
+      try {
+        process.kill(-pid, 'SIGTERM');
+      } catch (killError: any) {
+        // If process group kill fails, try single process
+        if (killError.code === 'ESRCH') {
+          // Process doesn't exist
+          this.startTimes.delete(pid);
+          return;
+        }
+        // Fallback to killing single process
+        process.kill(pid, 'SIGTERM');
+      }
 
       // Wait for process to stop
       const startTime = Date.now();
       while (this.isDaemonRunning(pid)) {
         if (Date.now() - startTime > timeout) {
           if (force) {
-            // Force kill if timeout exceeded
-            process.kill(pid, 'SIGKILL');
+            // Force kill process group if timeout exceeded
+            try {
+              process.kill(-pid, 'SIGKILL');
+            } catch {
+              // Fallback to single process
+              process.kill(pid, 'SIGKILL');
+            }
             await new Promise(resolve => setTimeout(resolve, 100));
             break;
           }

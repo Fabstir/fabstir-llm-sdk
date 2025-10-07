@@ -46,7 +46,7 @@ const TEST_ACCOUNTS = {
     address: process.env.NEXT_PUBLIC_TEST_HOST_1_ADDRESS,
     privateKey: process.env.NEXT_PUBLIC_TEST_HOST_1_PRIVATE_KEY,
     name: 'Test Host 1',
-    apiUrl: process.env.NEXT_PUBLIC_TEST_HOST_1_URL || 'http://localhost:8080'
+    apiUrl: process.env.NEXT_PUBLIC_TEST_HOST_1_URL || 'http://localhost:8083'
   },
   TEST_HOST_2: {
     address: process.env.NEXT_PUBLIC_TEST_HOST_2_ADDRESS,
@@ -101,7 +101,7 @@ const NodeManagementClient: React.FC = () => {
   }, null, 2));
   const [stakeAmount, setStakeAmount] = useState('1000');
   const [additionalStakeAmount, setAdditionalStakeAmount] = useState('100');
-  const [apiUrl, setApiUrl] = useState('http://localhost:8080');
+  const [apiUrl, setApiUrl] = useState('http://localhost:8083');
   const [supportedModels, setSupportedModels] = useState('CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf'); // Default approved model
 
   // UI state
@@ -700,9 +700,21 @@ const NodeManagementClient: React.FC = () => {
       addLog(`📝 Registering node on ${CHAINS[selectedChain].name} via Management API...`);
 
       // Parse supported models from input (format: repo:file)
-      const modelParts = supportedModels.trim().split(':');
+      const trimmedModel = supportedModels.trim();
+
+      // Check if user entered a hex hash (not supported during registration)
+      if (trimmedModel.startsWith('0x')) {
+        addLog('❌ Model IDs (0x...hashes) cannot be used during registration');
+        addLog('   Use repo:file format (e.g., CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf)');
+        addLog('   You can update to use model IDs after registering via "Update Models"');
+        setLoading(false);
+        return;
+      }
+
+      const modelParts = trimmedModel.split(':');
       if (modelParts.length !== 2) {
         addLog('❌ Invalid model format. Use: repo:file');
+        addLog('   Example: CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf');
         setLoading(false);
         return;
       }
@@ -740,6 +752,11 @@ const NodeManagementClient: React.FC = () => {
       return;
     }
 
+    if (!mgmtApiClient) {
+      addLog('❌ Management API client not initialized');
+      return;
+    }
+
     setLoading(true);
     try {
       addLog(`📝 Unregistering from ${CHAINS[selectedChain].name}...`);
@@ -748,6 +765,28 @@ const NodeManagementClient: React.FC = () => {
       const txHash = await hostManager.unregisterHost();
 
       addLog(`✅ Unregistered! TX: ${txHash}`);
+
+      // Automatically stop the node if it's running
+      if (nodeStatus === 'running') {
+        addLog('⏸️  Stopping node automatically...');
+        try {
+          await mgmtApiClient.stop(false); // graceful stop
+
+          setNodePid(null);
+          setNodePublicUrl('');
+          setNodeUptime(0);
+          setStatusPollingActive(false);
+
+          addLog('✅ Node stopped');
+
+          // Refresh status after stopping
+          await refreshNodeStatus();
+        } catch (stopError: any) {
+          addLog(`⚠️  Failed to stop node: ${stopError.message}`);
+          addLog('   You may need to stop it manually using "Stop Node" button');
+        }
+      }
+
       await checkRegistrationStatus();
 
     } catch (error: any) {
@@ -858,16 +897,37 @@ const NodeManagementClient: React.FC = () => {
     try {
       addLog('📝 Updating supported models...');
 
-      // Parse model IDs from input (comma-separated)
-      const modelIds = supportedModels.split(',').map(id => id.trim()).filter(id => id);
+      // Parse and hash model inputs (supports both repo:file and 0x... formats)
+      const modelIds = supportedModels.split(',').map(input => {
+        const trimmed = input.trim();
+
+        if (!trimmed) return null;
+
+        // If already a hex hash, use as-is
+        if (trimmed.startsWith('0x')) {
+          addLog(`  • Using hash: ${trimmed.substring(0, 10)}...`);
+          return trimmed;
+        }
+
+        // Otherwise, treat as repo:file format and hash it
+        if (trimmed.includes(':')) {
+          const [repo, file] = trimmed.split(':');
+          const modelString = `${repo}/${file}`;
+          const hash = ethers.keccak256(ethers.toUtf8Bytes(modelString));
+          addLog(`  • ${trimmed} → ${hash.substring(0, 10)}...`);
+          return hash;
+        }
+
+        throw new Error(`Invalid model format: "${trimmed}". Use repo:file or 0x...hash`);
+      }).filter((id): id is string => id !== null);
 
       if (modelIds.length === 0) {
-        addLog('❌ No model IDs provided');
+        addLog('❌ No models provided');
         setLoading(false);
         return;
       }
 
-      addLog(`📋 Updating models: ${modelIds.length} model(s)`);
+      addLog(`📋 Updating ${modelIds.length} model(s)...`);
       const hostManager = sdk.getHostManager() as any;
       const txHash = await hostManager.updateSupportedModels(modelIds);
 
@@ -1300,7 +1360,7 @@ const NodeManagementClient: React.FC = () => {
                   value={apiUrl}
                   onChange={(e) => setApiUrl(e.target.value)}
                   style={{ padding: '5px', width: '100%' }}
-                  placeholder='http://localhost:8080'
+                  placeholder='http://localhost:8083'
                 />
                 {walletType === 'private-key' && selectedTestAccount.startsWith('TEST_HOST') && (
                   <button
@@ -1330,8 +1390,10 @@ const NodeManagementClient: React.FC = () => {
                   style={{ padding: '5px', width: '100%', fontFamily: 'monospace', fontSize: '12px' }}
                   placeholder="CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf"
                 />
-                <small style={{ color: '#666' }}>
+                <small style={{ color: '#666', display: 'block' }}>
                   Format: repo:file (e.g., CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf)
+                  <br />
+                  <strong>Note:</strong> Registration only accepts repo:file format. Use "Update Models" later to add models by hash.
                 </small>
               </div>
 
@@ -1408,13 +1470,13 @@ const NodeManagementClient: React.FC = () => {
               {/* Supported Models */}
               <div style={{ marginBottom: '15px' }}>
                 <label style={{ fontSize: '14px', marginBottom: '5px', display: 'block' }}>
-                  Supported Model IDs (comma-separated):
+                  Supported Models (comma-separated):
                 </label>
                 <input
                   type="text"
                   value={supportedModels}
                   onChange={(e) => setSupportedModels(e.target.value)}
-                  placeholder="0x0b75a2..., 0x123abc..."
+                  placeholder="repo:file or 0x...hash"
                   style={{
                     width: '100%',
                     padding: '8px',
@@ -1425,8 +1487,12 @@ const NodeManagementClient: React.FC = () => {
                   }}
                   disabled={loading}
                 />
-                <small style={{ color: '#666', fontSize: '12px' }}>
-                  Enter model IDs as hex strings (e.g., tiny-vicuna: 0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced)
+                <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '5px' }}>
+                  Enter model strings (repo:file) or hex hashes. Examples:
+                  <br />
+                  • CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf
+                  <br />
+                  • 0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced
                 </small>
               </div>
 
