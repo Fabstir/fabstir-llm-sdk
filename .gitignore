@@ -87,3 +87,4 @@ find-model-combo.mjs
 register-test-user-2.mjs
 test-register-cli.sh
 s5js-dist.tar.gz
+*.tar.gz
