@@ -16,6 +16,7 @@ import {
   ModelRegistryError,
   ModelValidationError
 } from '../errors/model-errors';
+import { PricingValidationError } from '../errors/pricing-errors';
 import { SDKError } from '../errors';
 import { ContractManager } from '../contracts/ContractManager';
 import { ModelManager } from './ModelManager';
@@ -140,6 +141,15 @@ export class HostManager {
         );
       }
 
+      // Validate pricing parameter early (before checking registration)
+      const minPrice = BigInt(request.minPricePerToken);
+      if (minPrice < 100n || minPrice > 100000n) {
+        throw new PricingValidationError(
+          `minPricePerToken must be between 100 and 100000, got ${minPrice}`,
+          minPrice
+        );
+      }
+
       // Format metadata as JSON (new requirement)
       const metadataJson = JSON.stringify({
         hardware: {
@@ -225,12 +235,14 @@ export class HostManager {
       const allowance = await fabToken.allowance(signerAddress, this.nodeRegistryAddress);
       console.log(`Allowance after approval: ${ethers.formatEther(allowance)} FAB`);
 
-      // Step 3: Register node with models (no ETH value needed)
+      // Step 3: Register node with models (no ETH value needed, pricing already validated)
       console.log('Registering node with models...');
+      console.log('Minimum price per token:', minPrice);
       const tx = await this.nodeRegistry['registerNode'](
         metadataJson,
         request.apiUrl,
         modelIds,
+        minPrice,  // NEW: 4th parameter for pricing
         {
           gasLimit: 500000n
         }
@@ -253,7 +265,8 @@ export class HostManager {
     } catch (error: any) {
       if (error instanceof ModelNotApprovedError ||
           error instanceof ModelValidationError ||
-          error instanceof ModelRegistryError) {
+          error instanceof ModelRegistryError ||
+          error instanceof PricingValidationError) {
         throw error;
       }
       throw new ModelRegistryError(
@@ -381,6 +394,7 @@ export class HostManager {
     stake: bigint;
     metadata?: HostMetadata;
     apiUrl?: string;
+    minPricePerToken?: bigint;
   }> {
     if (!this.initialized || !this.nodeRegistry) {
       throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
@@ -417,7 +431,8 @@ export class HostManager {
         supportedModels: info[5],
         stake: info[1],      // Fixed: was info[2]
         metadata,
-        apiUrl: info[4]
+        apiUrl: info[4],
+        minPricePerToken: info[6] || 0n  // NEW: 7th field from contract
       };
     } catch (error: any) {
       console.error('Error fetching host status:', error);
@@ -643,7 +658,8 @@ export class HostManager {
         costPerToken: 0
       },
       supportedModels: status.supportedModels || [],
-      stake: status.stake
+      stake: status.stake,
+      minPricePerToken: status.minPricePerToken || 0n  // NEW: Include pricing from contract
     };
   }
 
@@ -686,6 +702,81 @@ export class HostManager {
         this.nodeRegistry?.address,
         error
       );
+    }
+  }
+
+  /**
+   * Update host minimum pricing
+   * @param newMinPrice - New minimum price per token (100-100,000)
+   * @returns Transaction hash
+   */
+  async updatePricing(newMinPrice: string): Promise<string> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new ModelRegistryError('Not initialized', this.nodeRegistryAddress);
+    }
+
+    try {
+      const price = BigInt(newMinPrice);
+
+      // Validate price range
+      if (price < 100n || price > 100000n) {
+        throw new PricingValidationError(
+          `minPricePerToken must be between 100 and 100000, got ${price}`,
+          price
+        );
+      }
+
+      console.log('Updating pricing to:', price);
+
+      const tx = await this.nodeRegistry.updatePricing(
+        price,
+        { gasLimit: 200000n }
+      );
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Failed to update pricing',
+          this.nodeRegistry.address
+        );
+      }
+
+      console.log('Successfully updated pricing');
+      return receipt.hash;
+    } catch (error: any) {
+      if (error instanceof PricingValidationError) {
+        throw error;
+      }
+      console.error('Error updating pricing:', error);
+      throw new ModelRegistryError(
+        `Failed to update pricing: ${error.message}`,
+        this.nodeRegistry?.address
+      );
+    }
+  }
+
+  /**
+   * Get host minimum pricing
+   * @param hostAddress - Host address to query pricing for
+   * @returns Minimum price per token as bigint (0 if not registered)
+   */
+  async getPricing(hostAddress: string): Promise<bigint> {
+    if (!this.initialized || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      const pricing = await this.nodeRegistry.getNodePricing(hostAddress);
+      return pricing;
+    } catch (error: any) {
+      console.error('Error fetching pricing:', error);
+      // Return 0 for unregistered hosts or errors
+      return 0n;
     }
   }
 
