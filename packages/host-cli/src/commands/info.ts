@@ -27,6 +27,7 @@ interface NodeFullInfo {
   metadata: string;
   apiUrl: string;
   modelIds: string[];
+  minPricePerToken?: bigint;
 }
 
 interface HostDisplayInfo {
@@ -39,6 +40,7 @@ interface HostDisplayInfo {
   models: string[];
   ethBalance: string;
   fabBalance: string;
+  minPricePerToken?: string;
 }
 
 export function registerInfoCommand(program: Command): void {
@@ -93,7 +95,8 @@ export function registerInfoCommand(program: Command): void {
             active: result[2],
             metadata: result[3],
             apiUrl: result[4],
-            modelIds: result[5] || []
+            modelIds: result[5] || [],
+            minPricePerToken: result[6] || 0n
           };
         } catch (error) {
           // Fallback to basic node info if getNodeFullInfo is not available
@@ -146,7 +149,8 @@ export function registerInfoCommand(program: Command): void {
           metadata: parsedMetadata,
           models: nodeInfo.modelIds.map(id => id),
           ethBalance: ethers.formatEther(ethBalance),
-          fabBalance: ethers.formatUnits(fabBalance, 18)
+          fabBalance: ethers.formatUnits(fabBalance, 18),
+          minPricePerToken: nodeInfo.minPricePerToken ? nodeInfo.minPricePerToken.toString() : undefined
         };
 
         // Output results
@@ -206,6 +210,19 @@ function displayFormattedInfo(info: HostDisplayInfo, isOwnAddress: boolean) {
       console.log(chalk.gray('Models:       '), chalk.gray('None'));
     }
 
+    // Pricing
+    if (info.minPricePerToken) {
+      const priceNum = parseInt(info.minPricePerToken);
+      const pricePerToken = (priceNum / 1000000).toFixed(6);
+      const pricePer1K = (priceNum * 1000 / 1000000).toFixed(6);
+      const pricePer10K = (priceNum * 10000 / 1000000).toFixed(6);
+
+      console.log(chalk.gray('\nPricing:'));
+      console.log(chalk.gray('  Per Token:  '), `${priceNum} (${pricePerToken} USDC)`);
+      console.log(chalk.gray('  Per 1K:     '), `${pricePerToken * 1000} (${pricePer1K} USDC)`);
+      console.log(chalk.gray('  Per 10K:    '), `${pricePerToken * 10000} (${pricePer10K} USDC)`);
+    }
+
     // Metadata
     if (Object.keys(info.metadata).length > 0) {
       console.log(chalk.gray('\nMetadata:'));
@@ -236,11 +253,6 @@ function displayFormattedInfo(info: HostDisplayInfo, isOwnAddress: boolean) {
       // Location
       if (info.metadata.location) {
         console.log(chalk.gray('  Location:   '), info.metadata.location);
-      }
-
-      // Pricing
-      if (info.metadata.costPerToken !== undefined) {
-        console.log(chalk.gray('  Price/Token:'), `$${info.metadata.costPerToken}`);
       }
 
       // Concurrency

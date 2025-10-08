@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding host-controlled pricing to Fabstir LLM Marketplace
 >
-> **Status**: 🚧 IN PROGRESS (10/17 sub-phases complete, 59%) | **Target**: Multi-chain marketplace with dynamic pricing | **Progress**: Phase 1 ✅ Complete, Phase 2 ✅ Complete, Phase 3 (2/4) ⏳
+> **Status**: 🚧 IN PROGRESS (11/17 sub-phases complete, 65%) | **Target**: Multi-chain marketplace with dynamic pricing | **Progress**: Phase 1 ✅ Complete, Phase 2 ✅ Complete, Phase 3 (3/4) ⏳
 
 ## Overview
 
@@ -969,22 +969,23 @@ fabstir-host update-pricing --price 1500 --yes
 
 ---
 
-### Sub-phase 3.3: Info Command Pricing Display ⏳
+### Sub-phase 3.3: Info Command Pricing Display ✅
 
 **Goal**: Update info command to display pricing information
 
-**Status**: ⏳ Not started (waiting on 3.2)
+**Status**: ✅ Complete (11/11 tests passing)
 
 **Tasks**:
-- [ ] Write tests in `packages/host-cli/tests/commands/info-pricing.test.ts` (100 lines max)
-  - [ ] Test: info displays minimum price
-  - [ ] Test: info shows price in USDC/token format
-  - [ ] Test: info handles hosts without pricing (migration case)
-- [ ] Update `packages/host-cli/src/commands/info.ts` (+40 lines max)
-  - [ ] Fetch pricing from HostManager
-  - [ ] Display in both raw and USDC format
-  - [ ] Add pricing section to output
-- [ ] Verify all tests pass (3/3 ✅)
+- [x] Write tests in `packages/host-cli/tests/commands/info.test.ts` (updated existing tests)
+  - [x] Test: info displays minimum price
+  - [x] Test: info shows price in USDC/token format
+  - [x] Test: info handles hosts without pricing (migration case)
+- [x] Update `packages/host-cli/src/commands/info.ts` (+30 lines)
+  - [x] Read 7th field (minPricePerToken) from contract
+  - [x] Display in both raw and USDC format
+  - [x] Add pricing section to output
+  - [x] Remove deprecated metadata.costPerToken display
+- [x] Verify all tests pass (11/11 ✅)
 
 **Implementation Requirements**:
 ```typescript
