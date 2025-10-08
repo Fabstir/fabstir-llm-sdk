@@ -166,6 +166,12 @@ export default function ChatContextDemo() {
   const [error, setError] = useState<string>("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Host Discovery State
+  const [availableHosts, setAvailableHosts] = useState<any[]>([]);
+  const [maxPriceFilter, setMaxPriceFilter] = useState<string>('');
+  const [sortBy, setSortBy] = useState<'price' | 'random'>('price');
+  const [showHostList, setShowHostList] = useState(false);
+
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -967,28 +973,92 @@ export default function ChatContextDemo() {
     return signer;
   }
 
-  // Start chat session
-  async function startSession() {
-    const sm = sdk?.getSessionManager();
+  // Discover and filter hosts
+  async function discoverHosts() {
     const hm = sdk?.getHostManager();
+    if (!hm) {
+      setError("Host manager not initialized");
+      return;
+    }
+
+    setIsLoading(true);
+    setStatus("Discovering hosts...");
+    addMessage("system", "🔍 Discovering active hosts...");
+
+    try {
+      // Get all hosts with actual pricing from blockchain
+      const hosts: any[] = await (hm as any).discoverAllActiveHostsWithModels();
+      console.log("Found hosts with pricing:", hosts);
+
+      // Filter by max price if set
+      let filtered = hosts;
+      if (maxPriceFilter) {
+        const maxPrice = BigInt(maxPriceFilter);
+        filtered = hosts.filter(h => h.minPricePerToken <= maxPrice);
+        addMessage("system", `💵 Filtering hosts with price ≤ ${maxPriceFilter} (${(Number(maxPriceFilter)/1000000).toFixed(6)} USDC/token)`);
+      }
+
+      // Filter hosts that support models
+      const modelSupported = filtered.filter(
+        (h: any) => h.supportedModels && h.supportedModels.length > 0
+      );
+
+      if (modelSupported.length === 0) {
+        throw new Error(
+          maxPriceFilter
+            ? `No hosts found within price range ${maxPriceFilter}`
+            : "No active hosts found supporting required models"
+        );
+      }
+
+      // Sort hosts
+      let sorted = [...modelSupported];
+      if (sortBy === 'price') {
+        sorted.sort((a, b) => Number(a.minPricePerToken - b.minPricePerToken));
+        addMessage("system", `📊 Sorted ${sorted.length} hosts by price (lowest first)`);
+      } else if (sortBy === 'random') {
+        sorted.sort(() => Math.random() - 0.5);
+        addMessage("system", `🎲 Shuffled ${sorted.length} hosts randomly`);
+      }
+
+      setAvailableHosts(sorted);
+      setShowHostList(true);
+      setStatus(`Found ${sorted.length} hosts`);
+      addMessage("system", `✅ Found ${sorted.length} available hosts. Select one to start session.`);
+    } catch (error: any) {
+      setError(`Discovery failed: ${error.message}`);
+      addMessage("system", `❌ Discovery failed: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  // Select a host and start session
+  async function selectHostAndStart(host: any) {
+    const sm = sdk?.getSessionManager();
     const pm = sdk?.getPaymentManager();
 
-    if (!sm || !hm || !pm) {
+    if (!sm || !pm) {
       setError("Managers not initialized");
       return;
     }
 
-    // Check if wallet is connected
-    if (!isConnected || !sdk) {
-      setError("Wallet not connected. Please connect wallet first.");
-      addMessage(
-        "system",
-        '⚠️ Wallet not connected. Please click "Connect Wallet" first.'
-      );
-      return;
-    }
+    // Use actual host pricing from blockchain
+    const hostWithPricing = {
+      address: host.address,
+      endpoint: host.apiUrl,
+      models: host.supportedModels,
+      pricePerToken: Number(host.minPricePerToken), // Use ACTUAL pricing
+    };
 
-    // Clear previous session messages but keep system messages about wallet connection
+    setActiveHost(hostWithPricing);
+    activeHostRef.current = hostWithPricing;
+    setShowHostList(false);
+
+    addMessage("system", `✅ Selected host: ${host.address.slice(0, 10)}...${host.address.slice(-8)}`);
+    addMessage("system", `💵 Host price: ${(Number(host.minPricePerToken)/1000000).toFixed(6)} USDC/token`);
+
+    // Clear previous session messages but keep system messages
     setMessages((prev) =>
       prev.filter(
         (m) =>
@@ -996,7 +1066,11 @@ export default function ChatContextDemo() {
           (m.content.includes("Connected with") ||
             m.content.includes("SDK authenticated") ||
             m.content.includes("Auto Spend") ||
-            m.content.includes("Primary account funded"))
+            m.content.includes("Primary account funded") ||
+            m.content.includes("Discovering") ||
+            m.content.includes("Found") ||
+            m.content.includes("Selected host") ||
+            m.content.includes("Host price"))
       )
     );
 
@@ -1010,80 +1084,24 @@ export default function ChatContextDemo() {
         addMessage("system", `Closing existing session ${sessionId}...`);
         await sm.endSession(sessionId);
       } catch (err) {
-        console.log(
-          "Error closing previous session (may be already closed):",
-          err
-        );
+        console.log("Error closing previous session (may be already closed):", err);
       }
       setSessionId(null);
       setJobId(null);
     }
 
     setIsLoading(true);
-    setStatus("Discovering hosts...");
+    setStatus("Creating session...");
 
     try {
       const contracts = getContractAddresses();
-
-      // Discover hosts using HostManager
-      addMessage("system", "🔍 Discovering active hosts...");
-      let hosts: any[] = [];
-
-      try {
-        hosts = await (hm as any).discoverAllActiveHostsWithModels();
-        console.log("Found hosts:", hosts);
-      } catch (sdkError: any) {
-        console.log("SDK host discovery failed, error:", sdkError.message);
-        throw new Error("Unable to discover hosts");
-      }
-
-      if (hosts.length === 0) {
-        throw new Error("No active hosts available");
-      }
-
-      // Parse host metadata
-      const parsedHosts = hosts.map((host: any) => ({
-        address: host.address,
-        endpoint: host.apiUrl || host.endpoint,
-        models: host.supportedModels || [],
-        pricePerToken: PRICE_PER_TOKEN,
-      }));
-
-      // Filter hosts that support models
-      const modelSupported = parsedHosts.filter(
-        (h: any) => h.models && h.models.length > 0
-      );
-      if (modelSupported.length === 0) {
-        throw new Error("No active hosts found supporting required models");
-      }
-
-      // Randomly select a host
-      const randomIndex = Math.floor(Math.random() * modelSupported.length);
-      const host = modelSupported[randomIndex];
-      console.log(
-        `Randomly selected host ${randomIndex + 1} of ${
-          modelSupported.length
-        }: ${host.address}`
-      );
-
-      setActiveHost(host);
-      activeHostRef.current = host;
       // Store selected host address for later use
-      (window as any).__selectedHostAddress = host.address;
+      (window as any).__selectedHostAddress = hostWithPricing.address;
 
-      // Display which host we're connecting to
-      addMessage(
-        "system",
-        `🎲 Randomly selected host ${randomIndex + 1} of ${
-          modelSupported.length
-        }`
-      );
-      addMessage(
-        "system",
-        `📡 Host: ${host.address.slice(0, 6)}...${host.address.slice(-4)}`
-      );
-      addMessage("system", `🤖 Model: ${host.models[0]}`);
-      addMessage("system", `🌐 Endpoint: ${host.endpoint}`);
+      // Display connection details
+      addMessage("system", `📡 Connecting to host ${hostWithPricing.address.slice(0, 6)}...${hostWithPricing.address.slice(-4)}`);
+      addMessage("system", `🤖 Model: ${hostWithPricing.models[0]}`);
+      addMessage("system", `🌐 Endpoint: ${hostWithPricing.endpoint}`);
 
       setStatus("Checking USDC balance...");
 
@@ -1153,17 +1171,17 @@ export default function ChatContextDemo() {
       setStatus("Creating session...");
 
       // Validate host endpoint
-      const hostEndpoint = host.endpoint;
+      const hostEndpoint = hostWithPricing.endpoint;
       if (!hostEndpoint) {
         throw new Error(
-          `Host ${host.address} does not have an API endpoint configured`
+          `Host ${hostWithPricing.address} does not have an API endpoint configured`
         );
       }
 
-      // Create session configuration with direct payment
+      // Create session configuration with actual host pricing
       const sessionConfig = {
         depositAmount: SESSION_DEPOSIT_AMOUNT,
-        pricePerToken: Number(host.pricePerToken || PRICE_PER_TOKEN),
+        pricePerToken: Number(hostWithPricing.pricePerToken), // Use ACTUAL pricing from host
         proofInterval: PROOF_INTERVAL,
         duration: SESSION_DURATION,
         paymentToken: contracts.USDC,
@@ -1184,9 +1202,9 @@ export default function ChatContextDemo() {
 
       const fullSessionConfig = {
         ...sessionConfig,
-        model: host.models[0],
-        provider: host.address,
-        hostAddress: host.address,
+        model: hostWithPricing.models[0],
+        provider: hostWithPricing.address,
+        hostAddress: hostWithPricing.address,
         endpoint: hostEndpoint,
         chainId: selectedChainId,
       };
@@ -1215,10 +1233,6 @@ export default function ChatContextDemo() {
       }
       addMessage("system", "🎉 Payment processed via Auto Spend Permission - no popup!");
 
-      // Store active host
-      setActiveHost(host);
-      activeHostRef.current = host;
-
       // Wait for WebSocket connection
       setStatus("Establishing WebSocket connection...");
       await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -1229,10 +1243,15 @@ export default function ChatContextDemo() {
     } catch (error: any) {
       console.error("Failed to start session:", error);
       setError(`Failed to start session: ${error.message}`);
-      addMessage("system", `Error: ${error.message}`);
+      addMessage("system", `❌ Session creation failed: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
+  }
+
+  // Start chat session (deprecated - now triggers discovery)
+  async function startSession() {
+    discoverHosts();
   }
 
   // Send message to LLM
@@ -1885,6 +1904,90 @@ export default function ChatContextDemo() {
         </button>
       </div>
 
+      {/* Host Discovery Filters - shown when connected but no session */}
+      {isConnected && !sessionId && (
+        <div className="mb-4 p-4 bg-gray-50 rounded-lg">
+          <h3 className="font-semibold mb-3">🔍 Host Discovery</h3>
+          <div className="flex gap-4 items-end mb-3">
+            <div>
+              <label className="block text-sm mb-1 font-medium">Max Price per Token:</label>
+              <input
+                type="number"
+                value={maxPriceFilter}
+                onChange={(e) => setMaxPriceFilter(e.target.value)}
+                placeholder="No limit"
+                className="px-3 py-2 border rounded w-40"
+                min="100"
+                max="100000"
+              />
+              {maxPriceFilter && (
+                <div className="text-xs text-gray-500 mt-1">
+                  ≈ ${(Number(maxPriceFilter)/1000000).toFixed(6)} USDC/token
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1 font-medium">Sort By:</label>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="px-3 py-2 border rounded"
+              >
+                <option value="price">Lowest Price</option>
+                <option value="random">Random</option>
+              </select>
+            </div>
+
+            <button
+              onClick={discoverHosts}
+              disabled={isLoading}
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
+            >
+              {showHostList ? "Refresh Hosts" : "Discover Hosts"}
+            </button>
+          </div>
+
+          {/* Host List */}
+          {showHostList && availableHosts.length > 0 && (
+            <div className="mt-3 max-h-60 overflow-y-auto border rounded bg-white">
+              <div className="text-sm font-semibold p-2 bg-gray-100 sticky top-0">
+                Available Hosts ({availableHosts.length}):
+              </div>
+              {availableHosts.map((host, index) => (
+                <div
+                  key={host.address}
+                  className="flex items-center justify-between p-3 border-b hover:bg-blue-50 transition-colors"
+                >
+                  <div className="flex-1">
+                    <div className="text-sm font-mono font-semibold">
+                      #{index + 1}: {host.address.slice(0, 10)}...{host.address.slice(-8)}
+                    </div>
+                    <div className="text-xs text-gray-600 mt-1 space-y-0.5">
+                      <div>💵 {(Number(host.minPricePerToken)/1000000).toFixed(6)} USDC/token</div>
+                      <div>📦 {host.supportedModels?.length || 0} models supported</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => selectHostAndStart(host)}
+                    disabled={isLoading}
+                    className="px-3 py-1.5 bg-green-500 text-white text-sm rounded hover:bg-green-600 disabled:bg-gray-300 transition-colors"
+                  >
+                    Select & Start
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {showHostList && availableHosts.length === 0 && (
+            <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
+              ⚠️ No hosts found matching criteria. Try adjusting filters.
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Control Buttons */}
       <div className="flex gap-2">
         {!isConnected ? (
@@ -1901,7 +2004,7 @@ export default function ChatContextDemo() {
             disabled={isLoading}
             className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-300"
           >
-            Start Session
+            Discover Hosts
           </button>
         ) : (
           <>

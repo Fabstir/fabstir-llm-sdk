@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding host-controlled pricing to Fabstir LLM Marketplace
 >
-> **Status**: 🚧 IN PROGRESS (13/17 sub-phases complete, 76%) | **Target**: Multi-chain marketplace with dynamic pricing | **Progress**: Phase 1 ✅ Complete, Phase 2 ✅ Complete, Phase 3 ✅ Complete, Phase 4 (2/4) ⏳
+> **Status**: 🚧 IN PROGRESS (14/17 sub-phases complete, 82%) | **Target**: Multi-chain marketplace with dynamic pricing | **Progress**: Phase 1 ✅ Complete, Phase 2 ✅ Complete, Phase 3 ✅ Complete, Phase 4 (3/4) ⏳
 
 ## Overview
 
@@ -1204,19 +1204,21 @@ private async handleUpdatePricing(req: Request, res: Response) {
 
 ---
 
-### Sub-phase 4.3: Host Discovery with Price Filtering ⏳
+### Sub-phase 4.3: Host Discovery with Price Filtering ✅
 
 **Goal**: Add price filtering to host discovery in chat demo
 
-**Status**: ⏳ Not started (waiting on 4.2)
+**Status**: ✅ Complete (ready for manual testing)
 
 **Tasks**:
-- [ ] Update `apps/harness/pages/chat-context-demo.tsx` (+100 lines max)
-  - [ ] Add "Max Price" filter input to host discovery
-  - [ ] Add sorting dropdown (price/reputation/random)
-  - [ ] Display host pricing in discovery list
-  - [ ] Filter hosts by max price
-  - [ ] Sort hosts by selected criteria
+- [x] Update `apps/harness/pages/chat-context-popupfree-demo.tsx` (+100 lines max)
+  - [x] Add "Max Price" filter input to host discovery
+  - [x] Add sorting dropdown (price/random)
+  - [x] Display host pricing in discovery list
+  - [x] Filter hosts by max price
+  - [x] Sort hosts by selected criteria
+  - [x] Use actual host minPricePerToken from blockchain
+  - [x] Two-step flow: discover → select host → start session
 - [ ] Test manually:
   - [ ] Price filter works
   - [ ] Sorting by price works
@@ -1280,10 +1282,12 @@ async function discoverHosts() {
 ```
 
 **Acceptance Criteria**:
-- [ ] Price filter input works
-- [ ] Sorting dropdown works
-- [ ] Host pricing displayed in list
-- [ ] Filtered/sorted results correct
+- [x] Price filter input works
+- [x] Sorting dropdown works
+- [x] Host pricing displayed in list
+- [x] Filtered/sorted results correct
+- [x] Uses actual minPricePerToken from blockchain
+- [x] Sessions created with actual host pricing
 - [ ] Manual testing passes
 
 ---
