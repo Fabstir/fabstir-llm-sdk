@@ -56,7 +56,7 @@ const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = '2'; // $2 USDC
 const PRICE_PER_TOKEN = 2000; // 0.002 USDC per token
-const PROOF_INTERVAL = 100; // Proof every 100 tokens
+const PROOF_INTERVAL = 1000; // Proof every 1000 tokens (production default)
 const SESSION_DURATION = 86400; // 1 day
 const EXPECTED_TOKENS = 100; // Expected tokens to generate in test
 

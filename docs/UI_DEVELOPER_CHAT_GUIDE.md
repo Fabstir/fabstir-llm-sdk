@@ -776,7 +776,7 @@ interface ParsedHost {
 // Session configuration
 const SESSION_DEPOSIT = '2.0';
 const PRICE_PER_TOKEN = 2000;
-const PROOF_INTERVAL = 100;
+const PROOF_INTERVAL = 1000; // Proof checkpoints every 1000 tokens (production default)
 const SESSION_DURATION = 86400;
 
 export function useChatSession(

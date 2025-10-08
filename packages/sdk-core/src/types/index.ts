@@ -241,7 +241,7 @@ export const SUPPORTED_CHAINS = {
 } as const;
 
 export const DEFAULT_GAS_LIMIT = 500000n;
-export const DEFAULT_PROOF_INTERVAL = 100;
+export const DEFAULT_PROOF_INTERVAL = 1000; // Proof checkpoints every 1000 tokens (production default)
 export const DEFAULT_SESSION_DURATION = 86400; // 24 hours
 export const DEFAULT_STAKE_AMOUNT = '1000'; // 1000 FAB tokens
 

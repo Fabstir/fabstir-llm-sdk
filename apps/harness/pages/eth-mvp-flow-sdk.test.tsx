@@ -49,7 +49,7 @@ const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = '0.0006'; // ~$2.40 ETH deposit (same value as USDC test)
 // PRICE_PER_TOKEN removed - now using actual host minPricePerToken from blockchain
-const PROOF_INTERVAL = 100; // Proof every 100 tokens
+const PROOF_INTERVAL = 1000; // Proof every 1000 tokens (production default)
 const SESSION_DURATION = 86400; // 1 day
 const EXPECTED_TOKENS = 100; // Expected tokens to generate in test
 const DEFAULT_PRICE_PER_TOKEN = '0.000005'; // Fallback: 0.000005 ETH per token (used if host pricing unavailable)

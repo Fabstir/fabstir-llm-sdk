@@ -24,7 +24,7 @@ const CONTRACT_USDC_TOKEN = process.env.CONTRACT_USDC_TOKEN!;
 
 const HOST_MIN_PRICE = 2000; // Host's minimum price per token
 const SESSION_DEPOSIT = '2'; // $2 USDC deposit
-const PROOF_INTERVAL = 100;
+const PROOF_INTERVAL = 1000; // Proof checkpoints every 1000 tokens (production default)
 const SESSION_DURATION = 3600;
 
 describe('Session Pricing Flow Integration Tests', () => {

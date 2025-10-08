@@ -3000,7 +3000,7 @@ export const BASE_SEPOLIA_CHAIN_HEX = "0x14a34";
 export const MIN_USDC_DEPOSIT = "1";           // $1 minimum (reduced from $2)
 export const DEFAULT_PRICE_PER_TOKEN = 200;    // 200 units per token
 export const DEFAULT_SESSION_DURATION = 3600;  // 1 hour
-export const DEFAULT_PROOF_INTERVAL = 100;     // 100 seconds
+export const DEFAULT_PROOF_INTERVAL = 1000;    // 1000 tokens (production default, balances security and gas costs)
 
 // Proof Requirements
 export const MIN_PROOF_LENGTH = 64;            // 64 bytes minimum

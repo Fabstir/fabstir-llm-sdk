@@ -110,14 +110,14 @@ The `checkpointInterval` (also called `proofInterval`) determines how often the 
 
 ```solidity
 // Set during session creation
-checkpointInterval: 500  // Submit proof every 500 tokens
+checkpointInterval: 1000  // Submit proof every 1000 tokens (production default)
 ```
 
 ### Checkpoint Parameters
 
 | Parameter | Min | Max | Typical | Purpose |
 |-----------|-----|-----|---------|---------|
-| checkpointInterval | 100 | 1,000,000 | 500-1000 | Tokens between proofs |
+| checkpointInterval | 100 | 1,000,000 | 1000 (production) | Tokens between proofs |
 | Proof submission time | - | - | 5-10 sec | On-chain verification |
 | Gas per checkpoint | - | - | ~30,000 | L2 optimized |
 
@@ -126,19 +126,26 @@ checkpointInterval: 500  // Submit proof every 500 tokens
 **Small Intervals (100-500 tokens):**
 - ✅ More frequent payment verification
 - ✅ Lower risk for both parties
-- ❌ Higher transaction costs
-- Best for: High-value models, untrusted parties
+- ❌ Higher transaction costs (10x more gas than production default)
+- Best for: Development/testing, high-value models, untrusted parties
 
-**Medium Intervals (500-5000 tokens):**
-- ✅ Balanced cost and security
+**Production Default (1000 tokens):** ⭐ RECOMMENDED
+- ✅ Optimal balance of security and gas costs
+- ✅ ~$0.50 savings per session vs. 100-token intervals
 - ✅ Reasonable verification frequency
-- Best for: Most use cases
+- Best for: Production deployments, most use cases
+
+**Medium-Large Intervals (2000-5000 tokens):**
+- ✅ Lower transaction costs
+- ❌ Moderate risk exposure
+- ❌ Longer payment delays
+- Best for: Long sessions, trusted relationships
 
 **Large Intervals (5000+ tokens):**
 - ✅ Minimal transaction costs
-- ❌ Higher risk exposure
-- ❌ Longer payment delays
-- Best for: Trusted relationships, low-value interactions
+- ❌ High risk exposure
+- ❌ Significant payment delays
+- Best for: Trusted relationships only, low-value interactions
 
 ## Token-Based Accounting
 
@@ -228,7 +235,7 @@ createSessionJob(
     host,           // Assigned GPU provider (must have supported models)
     pricePerToken,  // Rate (e.g., 0.0001 ETH/token)
     maxDuration,    // Time limit (e.g., 24 hours)
-    proofInterval   // Checkpoint frequency (e.g., 500)
+    proofInterval   // Checkpoint frequency (e.g., 1000 - production default)
 )
 // Deposit sent as msg.value for ETH, or pre-approved for tokens
 ```
@@ -381,7 +388,7 @@ const tx = await marketplace.createSessionJob(
     ethers.utils.parseEther("1"),     // 1 ETH deposit
     ethers.utils.parseEther("0.0001"), // Price per token
     86400,                              // 24 hour duration
-    500                                 // Proof every 500 tokens (checkpoint interval)
+    1000                                // Proof every 1000 tokens (production default)
 );
 const jobId = tx.events[0].args.jobId;
 

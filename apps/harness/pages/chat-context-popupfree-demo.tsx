@@ -90,7 +90,7 @@ const TEST_TREASURY_PRIVATE_KEY =
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = "2"; // $2 USDC
 // PRICE_PER_TOKEN removed - now using actual host minPricePerToken from blockchain
-const PROOF_INTERVAL = 100; // Checkpoint every 100 tokens
+const PROOF_INTERVAL = 1000; // Checkpoint every 1000 tokens (production default)
 const SESSION_DURATION = 86400; // 1 day
 
 // Message type for chat

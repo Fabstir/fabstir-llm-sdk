@@ -4,8 +4,8 @@
 
 **Contract Address**: `0x2ACcc60893872A499700908889B38C5420CBcFD1`
 **Network**: Base Sepolia
-**Status**: ✅ ACTIVE - Fixed internal verification for USDC
-**Last Updated**: January 13, 2025
+**Status**: ✅ ACTIVE - Configured for JobMarketplaceWithModels
+**Last Updated**: January 28, 2025
 
 ### Overview
 
@@ -42,12 +42,14 @@ contract ProofSystem is IProofSystem {
 
 ### Integration with JobMarketplace
 
-The ProofSystem integrates seamlessly with JobMarketplaceFABWithS5:
+The ProofSystem integrates seamlessly with JobMarketplaceWithModels (`0x462050a4a551c4292586D9c1DE23e3158a9bF3B3`):
 
 1. **Proof Submission**: Host calls `submitProofOfWork()` on marketplace
 2. **Verification**: Marketplace calls `verifyAndMarkComplete()` on ProofSystem
 3. **State Update**: If valid, proof hash is marked as used
 4. **Token Credit**: Marketplace credits proven tokens to session
+
+**Configuration**: ProofSystem is configured via `setProofSystem()` on JobMarketplaceWithModels
 
 ### Key Functions
 
