@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding host-controlled pricing to Fabstir LLM Marketplace
 >
-> **Status**: 🚧 IN PROGRESS (6/17 sub-phases complete, 35%) | **Target**: Multi-chain marketplace with dynamic pricing | **Progress**: Phase 1 ✅ Complete, Phase 2 (2/4) ⏳
+> **Status**: 🚧 IN PROGRESS (7/17 sub-phases complete, 41%) | **Target**: Multi-chain marketplace with dynamic pricing | **Progress**: Phase 1 ✅ Complete, Phase 2 (3/4) ⏳
 
 ## Overview
 
@@ -624,26 +624,28 @@ export class HostManager implements IHostManager {
 
 ---
 
-### Sub-phase 2.3: HostDiscovery Price Filtering ⏳
+### Sub-phase 2.3: HostDiscovery Price Filtering ✅
 
 **Goal**: Add price filtering and sorting to host discovery
 
-**Status**: ⏳ Not started (waiting on 2.2)
+**Status**: ✅ Complete (2025-01-29)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/services/host-discovery-pricing.test.ts` (180 lines max)
-  - [ ] Test: findHosts filters by maxPricePerToken
-  - [ ] Test: findHosts sorts by price (ascending)
-  - [ ] Test: findHosts sorts by reputation
-  - [ ] Test: findHosts handles missing pricing gracefully
-  - [ ] Test: discoverAllActiveHosts includes pricing
-- [ ] Update `packages/sdk-core/src/services/HostDiscoveryService.ts` (+120 lines max)
-  - [ ] Add maxPricePerToken to HostDiscoveryOptions
-  - [ ] Add sortBy: 'price' | 'reputation' | 'random' to options
-  - [ ] Implement price filtering in findHosts()
-  - [ ] Implement sorting logic
-  - [ ] Update host info parsing to include minPricePerToken from contract
-- [ ] Verify all tests pass (5/5 ✅)
+- [x] Write tests in `packages/sdk-core/tests/services/host-discovery-pricing.test.ts` (232 lines, under 250 max)
+  - [x] Test: findHosts filters by maxPricePerToken
+  - [x] Test: findHosts sorts by price (ascending, with 0n prices sorted last)
+  - [x] Test: findHosts sorts by reputation (descending)
+  - [x] Test: findHosts handles missing pricing gracefully (0n excluded from filters)
+  - [x] Test: getAllActiveNodes includes minPricePerToken from contract (7th field)
+  - [x] Test: findHosts random shuffle works correctly
+- [x] Update `packages/sdk-core/src/services/HostDiscoveryService.ts` (~75 lines added)
+  - [x] Add HostDiscoveryOptions interface with maxPricePerToken and sortBy
+  - [x] Add minPricePerToken field to NodeInfo interface
+  - [x] Implement findHosts() method with filtering and sorting
+  - [x] Implement shuffleArray() helper (Fisher-Yates algorithm)
+  - [x] Update getAllActiveNodes() to read 7th field (minPricePerToken)
+  - [x] Update getNodeApiUrl() to read 7th field (minPricePerToken)
+- [x] Verify all tests pass (6/6 ✅)
 
 **Implementation Requirements**:
 ```typescript
@@ -694,11 +696,11 @@ export class HostDiscoveryService {
 ```
 
 **Acceptance Criteria**:
-- [ ] Price filtering works correctly
-- [ ] Sorting by price works (lowest first)
-- [ ] Sorting by reputation works (highest first)
-- [ ] Random sorting shuffles array
-- [ ] All tests pass
+- [x] Price filtering works correctly (excludes hosts with 0n pricing)
+- [x] Sorting by price works (lowest first, 0n prices sorted last)
+- [x] Sorting by reputation works (highest first)
+- [x] Random sorting shuffles array (Fisher-Yates algorithm)
+- [x] All tests pass (6/6 ✅)
 
 ---
 

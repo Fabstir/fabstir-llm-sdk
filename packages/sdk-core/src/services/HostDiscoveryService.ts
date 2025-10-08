@@ -23,6 +23,14 @@ export interface NodeInfo {
   models?: string[];
   reputation?: number;
   pricePerToken?: number;
+  minPricePerToken?: bigint; // NEW: Minimum price from contract
+}
+
+export interface HostDiscoveryOptions {
+  modelId?: string;
+  region?: string;
+  maxPricePerToken?: bigint; // NEW: Filter by maximum price
+  sortBy?: 'price' | 'reputation' | 'random'; // NEW: Sort order
 }
 
 export class HostDiscoveryService {
@@ -54,7 +62,7 @@ export class HostDiscoveryService {
 
     try {
       const nodeFullInfo = await this.contract.getNodeFullInfo(nodeAddress);
-      // Returns: [nodeOperator, stakedAmount, active, metadata, apiUrl]
+      // Returns: [nodeOperator, stakedAmount, active, metadata, apiUrl, supportedModels, minPricePerToken]
 
       // Check if node is active (index 2)
       if (!nodeFullInfo[2]) {
@@ -91,7 +99,8 @@ export class HostDiscoveryService {
         models: parsedMetadata.models || [],
         region: parsedMetadata.region || '',
         reputation: parsedMetadata.reputation || 95,
-        pricePerToken: parsedMetadata.pricePerToken || 2000
+        pricePerToken: parsedMetadata.pricePerToken || 2000,
+        minPricePerToken: nodeFullInfo[6] || 0n // NEW: 7th field (index 6)
       };
 
       this.nodeCache.set(nodeAddress.toLowerCase(), info);
@@ -121,7 +130,7 @@ export class HostDiscoveryService {
       for (const address of nodeAddresses) {
         try {
           // Get FULL node info from contract using getNodeFullInfo
-          // Returns: [nodeOperator, stakedAmount, active, metadata, apiUrl]
+          // Returns: [nodeOperator, stakedAmount, active, metadata, apiUrl, supportedModels, minPricePerToken]
           let nodeFullInfo;
           try {
             nodeFullInfo = await this.contract.getNodeFullInfo(address);
@@ -160,7 +169,8 @@ export class HostDiscoveryService {
             models: parsedMetadata.models || [], // From parsed metadata
             region: parsedMetadata.region || '',
             reputation: parsedMetadata.reputation || 95,
-            pricePerToken: parsedMetadata.pricePerToken || 2000
+            pricePerToken: parsedMetadata.pricePerToken || 2000,
+            minPricePerToken: nodeFullInfo[6] || 0n // NEW: 7th field (index 6)
           };
 
           activeNodes.push(nodeInfo);
@@ -180,6 +190,78 @@ export class HostDiscoveryService {
     } catch (error: any) {
       throw new Error(`Failed to discover active nodes: ${error.message}`);
     }
+  }
+
+  /**
+   * Find hosts with filtering and sorting options
+   * @param options - Filtering and sorting options
+   * @returns Filtered and sorted list of hosts
+   */
+  async findHosts(options: HostDiscoveryOptions = {}): Promise<NodeInfo[]> {
+    // Get all active hosts
+    let hosts = await this.getAllActiveNodes();
+
+    // Filter by model ID (existing functionality)
+    if (options.modelId) {
+      hosts = hosts.filter(h =>
+        h.supportedModels?.includes(options.modelId!) ||
+        h.models?.includes(options.modelId!)
+      );
+    }
+
+    // Filter by region (existing functionality)
+    if (options.region) {
+      hosts = hosts.filter(h => h.region === options.region);
+    }
+
+    // NEW: Filter by maximum price
+    if (options.maxPricePerToken !== undefined) {
+      hosts = hosts.filter(h => {
+        // Exclude hosts with no pricing information (0n, undefined, or null)
+        if (!h.minPricePerToken || h.minPricePerToken === 0n) {
+          return false;
+        }
+        return h.minPricePerToken <= options.maxPricePerToken!;
+      });
+    }
+
+    // NEW: Sort hosts
+    if (options.sortBy === 'price') {
+      // Sort by price ascending (lowest first), hosts with 0n price go last
+      hosts.sort((a, b) => {
+        const priceA = a.minPricePerToken || 0n;
+        const priceB = b.minPricePerToken || 0n;
+
+        // Put hosts with no pricing (0n) at the end
+        if (priceA === 0n && priceB !== 0n) return 1;
+        if (priceA !== 0n && priceB === 0n) return -1;
+        if (priceA === 0n && priceB === 0n) return 0;
+
+        return Number(priceA - priceB);
+      });
+    } else if (options.sortBy === 'reputation') {
+      // Sort by reputation descending (highest first)
+      hosts.sort((a, b) => (b.reputation || 0) - (a.reputation || 0));
+    } else if (options.sortBy === 'random') {
+      // Random shuffle
+      hosts = this.shuffleArray(hosts);
+    }
+
+    return hosts;
+  }
+
+  /**
+   * Shuffle array using Fisher-Yates algorithm
+   * @param array - Array to shuffle
+   * @returns Shuffled copy of array
+   */
+  private shuffleArray<T>(array: T[]): T[] {
+    const result = [...array];
+    for (let i = result.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
   }
 
   /**
