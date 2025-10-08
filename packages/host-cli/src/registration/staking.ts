@@ -16,6 +16,7 @@ export interface StakingConfig {
   models: string[];
   apiUrl: string;
   metadata?: Record<string, any>;
+  minPricePerToken?: string;  // Minimum price per token (100-100,000 range)
   gasLimit?: number;
   gasPrice?: bigint;
   estimateOnly?: boolean;
@@ -283,6 +284,18 @@ export async function stakeTokens(config: StakingConfig): Promise<StakingResult>
     // Execute registration with staking
     const hostManager = sdk.getHostManager();
 
+    // Validate and default pricing
+    const minPrice = config.minPricePerToken || '2000';
+    const priceNum = parseInt(minPrice);
+
+    if (isNaN(priceNum) || priceNum < 100 || priceNum > 100000) {
+      throw new RegistrationError(
+        `minPricePerToken must be between 100 and 100000, got ${minPrice}`,
+        ErrorCode.VALIDATION_FAILED,
+        { price: minPrice }
+      );
+    }
+
     // Parse model strings to ModelSpec format
     // Supports "repo:file" or "repo/file" format, defaults to common HuggingFace repo
     const supportedModels = config.models.map(modelStr => {
@@ -327,7 +340,8 @@ export async function stakeTokens(config: StakingConfig): Promise<StakingResult>
     const txHash = await hostManager.registerHostWithModels({
       metadata,
       apiUrl: config.apiUrl,
-      supportedModels
+      supportedModels,
+      minPricePerToken: minPrice  // Pass validated pricing to SDK
     });
 
     // SDK already waits for transaction confirmation and returns hash

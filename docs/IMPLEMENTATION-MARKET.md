@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding host-controlled pricing to Fabstir LLM Marketplace
 >
-> **Status**: 🚧 IN PROGRESS (8/17 sub-phases complete, 47%) | **Target**: Multi-chain marketplace with dynamic pricing | **Progress**: Phase 1 ✅ Complete, Phase 2 ✅ Complete
+> **Status**: 🚧 IN PROGRESS (9/17 sub-phases complete, 53%) | **Target**: Multi-chain marketplace with dynamic pricing | **Progress**: Phase 1 ✅ Complete, Phase 2 ✅ Complete, Phase 3 (1/4) ⏳
 
 ## Overview
 
@@ -783,29 +783,34 @@ export class SessionManager implements ISessionManager {
 **Estimated Time**: 6-8 hours
 **Goal**: Update CLI commands to support pricing management
 
-### Sub-phase 3.1: Register Command Pricing Parameter ⏳
+### Sub-phase 3.1: Register Command Pricing Parameter ✅
 
 **Goal**: Add pricing parameter to register command
 
-**Status**: ⏳ Not started (waiting on Phase 2)
+**Status**: ✅ Complete
 
 **Tasks**:
-- [ ] Write tests in `packages/host-cli/tests/commands/register-pricing.test.ts` (120 lines max)
-  - [ ] Test: register with --price flag succeeds
-  - [ ] Test: register without --price uses default (2000)
-  - [ ] Test: register validates price range
-  - [ ] Test: register shows pricing in output
-- [ ] Update `packages/host-cli/src/commands/register.ts` (+60 lines max)
-  - [ ] Add --price option to command
-  - [ ] Add validation for price range
-  - [ ] Pass minPricePerToken to SDK registerHost()
-  - [ ] Update success message to show pricing
-  - [ ] Add --price to help text and examples
-- [ ] Update `packages/host-cli/docs/COMMANDS.md` (+30 lines)
-  - [ ] Document --price parameter
-  - [ ] Add pricing examples
-  - [ ] Explain default behavior
-- [ ] Verify all tests pass (4/4 ✅)
+- [x] Write tests in `packages/host-cli/tests/commands/register-pricing.test.ts` (~220 lines)
+  - [x] Test: register with --price flag succeeds (explicit 3000)
+  - [x] Test: register without --price uses default (2000)
+  - [x] Test: price is passed to registerHost correctly
+  - [x] Test: price is displayed in registration output
+- [x] Update interfaces with minPricePerToken field
+  - [x] RegistrationConfig interface (+1 line)
+  - [x] StakingConfig interface (+1 line)
+- [x] Update `packages/host-cli/src/registration/staking.ts` (+14 lines)
+  - [x] Add price validation (100-100,000 range)
+  - [x] Default to '2000' if not specified
+  - [x] Pass minPricePerToken to SDK registerHostWithModels()
+- [x] Update `packages/host-cli/src/commands/register.ts` (+7 lines)
+  - [x] Add --price option to command (line 29)
+  - [x] Pass minPricePerToken to config (line 43)
+  - [x] Display pricing in output (lines 110-112)
+- [x] Update `packages/host-cli/docs/COMMANDS.md` (+26 lines)
+  - [x] Document --price parameter in options table
+  - [x] Add pricing examples (premium and budget)
+  - [x] Update output to show pricing display
+- [x] All tests pass (4/4 ✅)
 
 **Implementation Requirements**:
 ```typescript
@@ -854,11 +859,11 @@ fabstir-host register --url http://... --models "..." --stake 1000 --price 1000
 ```
 
 **Acceptance Criteria**:
-- [ ] --price flag works
-- [ ] Defaults to 2000 if not specified
-- [ ] Validation prevents invalid prices
-- [ ] Output shows pricing
-- [ ] Documentation updated
+- [x] --price flag works
+- [x] Defaults to 2000 if not specified
+- [x] Validation prevents invalid prices (enforced in staking.ts)
+- [x] Output shows pricing ("Min Price: 2000 (0.002000 USDC/token)")
+- [x] Documentation updated with examples
 
 ---
 

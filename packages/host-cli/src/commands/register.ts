@@ -26,6 +26,7 @@ export function registerRegisterCommand(program: Command): void {
     .option('--stake <amount>', 'Stake amount in FAB (default: 1000)', '1000')
     .option('--models <models>', 'Comma-separated list of supported models')
     .option('--url <url>', 'Public URL for your host')
+    .option('--price <amount>', 'Minimum price per token (100-100,000, default: 2000)', '2000')
     .option('--force', 'Skip confirmation prompts')
     .option('-k, --private-key <key>', 'Private key to use (otherwise uses wallet file)')
     .option('-r, --rpc-url <url>', 'RPC URL', process.env.RPC_URL_BASE_SEPOLIA)
@@ -38,7 +39,8 @@ export function registerRegisterCommand(program: Command): void {
         const config: RegistrationConfig = {
           stakeAmount: ethers.parseEther(options.stake),
           apiUrl: options.url || 'http://localhost:8080',
-          models: options.models ? options.models.split(',') : ['gpt-3.5-turbo']
+          models: options.models ? options.models.split(',') : ['gpt-3.5-turbo'],
+          minPricePerToken: options.price || '2000'
         };
 
         await executeRegistration(config);
@@ -103,6 +105,11 @@ export async function executeRegistration(
     console.log(chalk.gray(`  API URL: ${config.apiUrl}`));
     console.log(chalk.gray(`  Models: ${config.models.join(', ')}`));
     console.log(chalk.gray(`  Stake: ${ethers.formatUnits(config.stakeAmount || 1000000000000000000000n, 18)} FAB`));
+
+    // Show pricing
+    const priceNum = parseInt(config.minPricePerToken || '2000');
+    const priceInUSDC = (priceNum / 1000000).toFixed(6);
+    console.log(chalk.gray(`  Min Price: ${priceNum} (${priceInUSDC} USDC/token)`));
 
     if (config.metadata?.name) {
       console.log(chalk.gray(`  Name: ${config.metadata.name}`));

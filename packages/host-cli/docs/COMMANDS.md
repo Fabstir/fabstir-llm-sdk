@@ -192,6 +192,7 @@ Registers your node as a host in the Fabstir marketplace. This involves:
 | `--stake <amount>` | Stake amount in FAB | 1000 |
 | `--url <url>` | Public URL for host | - |
 | `--models <models>` | Comma-separated model list | - |
+| `--price <amount>` | Minimum price per token (100-100,000) | 2000 |
 
 #### Examples
 ```bash
@@ -208,6 +209,20 @@ pnpm host register \
   --stake 5000 \
   --url http://my-host.example.com:8083 \
   --models llama-3,gpt-4
+
+# Registration with custom pricing (premium)
+pnpm host register \
+  --stake 1000 \
+  --url http://premium-host.com:8083 \
+  --models llama-3 \
+  --price 3000
+
+# Registration with budget pricing (competitive)
+pnpm host register \
+  --stake 1000 \
+  --url http://budget-host.com:8083 \
+  --models llama-3 \
+  --price 1000
 ```
 
 #### SDK Integration
@@ -231,6 +246,7 @@ const txHash = await hostManager.registerHost(stakeAmount, url, models);
   Transaction: 0xdef456...
 ✓ Host registered successfully!
   Stake: 1000 FAB
+  Min Price: 2000 (0.002000 USDC/token)
   Status: Active
 ```
 

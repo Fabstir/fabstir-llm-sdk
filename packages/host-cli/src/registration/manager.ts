@@ -22,6 +22,7 @@ export interface RegistrationConfig {
     [key: string]: any;
   };
   stakeAmount?: bigint;
+  minPricePerToken?: string;  // Minimum price per token (100-100,000 range)
   gasLimit?: number;
   gasPrice?: bigint;
   onProgress?: (message: string) => void;
@@ -236,6 +237,7 @@ export async function registerHost(config: RegistrationConfig): Promise<{
       models: config.models,
       apiUrl: config.apiUrl,
       metadata: config.metadata,
+      minPricePerToken: config.minPricePerToken,  // Pass pricing to staking layer
       gasLimit: config.gasLimit,
       gasPrice: config.gasPrice
     };
