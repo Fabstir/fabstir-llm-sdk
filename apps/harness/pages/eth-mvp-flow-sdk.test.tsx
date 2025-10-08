@@ -48,11 +48,12 @@ const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_
 
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = '0.0006'; // ~$2.40 ETH deposit (same value as USDC test)
-const PRICE_PER_TOKEN = '0.000005'; // 0.000005 ETH per token
+// PRICE_PER_TOKEN removed - now using actual host minPricePerToken from blockchain
 const PROOF_INTERVAL = 100; // Proof every 100 tokens
 const SESSION_DURATION = 86400; // 1 day
 const EXPECTED_TOKENS = 100; // Expected tokens to generate in test
-// Contract now accepts: 0.0006 ETH deposit, 0.000005 ETH/token, covers 120 tokens
+const DEFAULT_PRICE_PER_TOKEN = '0.000005'; // Fallback: 0.000005 ETH per token (used if host pricing unavailable)
+// Contract now accepts: 0.0006 ETH deposit, varies by host pricing, covers ~120 tokens
 
 // ERC20 ABIs
 const erc20BalanceOfAbi = [{
@@ -107,6 +108,7 @@ export default function BaseEthMvpFlowSDKTest() {
   const [activeHosts, setActiveHosts] = useState<any[]>([]);
   const [s5Cid, setS5Cid] = useState<string>("");
   const [totalTokensGenerated, setTotalTokensGenerated] = useState(0);
+  const [hostPricing, setHostPricing] = useState<string>(DEFAULT_PRICE_PER_TOKEN);
 
   // SDK instances
   const [sdk, setSdk] = useState<FabstirSDKCore | null>(null);
@@ -491,6 +493,15 @@ export default function BaseEthMvpFlowSDKTest() {
       selectedHostRef.current = selected;  // Also update ref for immediate access
       setActiveHosts(modelSupported);
 
+      // Set host pricing from blockchain (with fallback to default)
+      // minPricePerToken is raw integer, convert to ETH string format for compatibility
+      const pricingRaw = Number(selected.minPricePerToken || 0);
+      const pricingEth = pricingRaw > 0
+        ? ethers.formatUnits(pricingRaw, 18) // Convert from wei to ETH
+        : DEFAULT_PRICE_PER_TOKEN;
+      setHostPricing(pricingEth);
+      addLog(`💵 Host pricing: ${pricingEth} ETH/token (raw: ${pricingRaw})`);
+
       // Store selected host address in window for use across React renders
       (window as any).__selectedHostAddress = selected.address;
 
@@ -563,9 +574,9 @@ export default function BaseEthMvpFlowSDKTest() {
 
       // Create session using direct ETH payment
       // No approvals needed - ETH is sent directly with the transaction
-      // Convert price per token to wei for the contract
-      const pricePerTokenInWei = ethers.parseEther(PRICE_PER_TOKEN).toString();
-      console.log('Price per token:', PRICE_PER_TOKEN, 'ETH');
+      // Convert price per token to wei for the contract (use actual host pricing)
+      const pricePerTokenInWei = ethers.parseEther(hostPricing).toString();
+      console.log('Price per token:', hostPricing, 'ETH');
       console.log('Price per token in wei:', pricePerTokenInWei);
 
       const sessionConfig = {
@@ -751,7 +762,8 @@ export default function BaseEthMvpFlowSDKTest() {
       const tokensUsed = sessionDetails.tokensUsed || 42; // Simulated token count
 
       addLog(`Tokens used in session: ${tokensUsed}`);
-      addLog(`Cost: ${tokensUsed * PRICE_PER_TOKEN / 1000000} USDC`);
+      const costInEth = (tokensUsed * parseFloat(hostPricing)).toFixed(9);
+      addLog(`Cost: ${costInEth} ETH (${tokensUsed} tokens × ${hostPricing} ETH/token)`);
 
       setStepStatus(prev => ({ ...prev, 6: 'completed' }));
       setCurrentStep(6);
@@ -860,7 +872,8 @@ export default function BaseEthMvpFlowSDKTest() {
       addLog("Step 9: Starting - Record host earnings (90%)");
 
       const tokensUsed = 42; // From step 6
-      const totalCost = BigInt(tokensUsed * PRICE_PER_TOKEN);
+      const pricePerTokenWei = ethers.parseEther(hostPricing); // Convert ETH string to wei
+      const totalCost = pricePerTokenWei * BigInt(tokensUsed);
       const hostEarnings = (totalCost * 90n) / 100n; // 90% to host
 
       // Record earnings via direct contract call for the selected host
@@ -921,7 +934,8 @@ export default function BaseEthMvpFlowSDKTest() {
       addLog("Step 10: Starting - Record treasury fees (10%)");
 
       const tokensUsed = 42; // From step 6
-      const totalCost = BigInt(tokensUsed * PRICE_PER_TOKEN);
+      const pricePerTokenWei = ethers.parseEther(hostPricing); // Convert ETH string to wei
+      const totalCost = pricePerTokenWei * BigInt(tokensUsed);
       const treasuryFees = (totalCost * 10n) / 100n; // 10% to treasury
 
       // Record fees via TreasuryManager
@@ -1033,15 +1047,15 @@ export default function BaseEthMvpFlowSDKTest() {
       addLog(`⏳ Host will detect disconnect and complete contract to claim earnings`);
 
       // Calculate expected payment distribution
-      const tokensCost = (totalTokensGenerated * PRICE_PER_TOKEN) / 1000000; // Convert to USDC
+      const tokensCost = totalTokensGenerated * parseFloat(hostPricing); // ETH cost
       const hostPayment = tokensCost * 0.9; // 90% to host
       const treasuryPayment = tokensCost * 0.1; // 10% to treasury
 
       addLog(`📊 Tokens used in session: ${totalTokensGenerated}`);
       addLog(`💰 Expected payment distribution (when host completes):`);
-      addLog(`   Total cost: ${tokensCost.toFixed(6)} USDC (${totalTokensGenerated} tokens × $${PRICE_PER_TOKEN/1000000}/token)`);
-      addLog(`   Host will receive: ${hostPayment.toFixed(6)} USDC (90%)`);
-      addLog(`   Treasury will receive: ${treasuryPayment.toFixed(6)} USDC (10%)`);
+      addLog(`   Total cost: ${tokensCost.toFixed(9)} ETH (${totalTokensGenerated} tokens × ${hostPricing} ETH/token)`);
+      addLog(`   Host will receive: ${hostPayment.toFixed(9)} ETH (90%)`);
+      addLog(`   Treasury will receive: ${treasuryPayment.toFixed(9)} ETH (10%)`);
 
       addLog(`ℹ️ Note: Balances won't update until host calls completeSessionJob`);
 

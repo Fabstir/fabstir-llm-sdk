@@ -89,7 +89,7 @@ const TEST_TREASURY_PRIVATE_KEY =
 
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = "2"; // $2 USDC
-const PRICE_PER_TOKEN = 2000; // 0.002 USDC per token
+// PRICE_PER_TOKEN removed - now using actual host minPricePerToken from blockchain
 const PROOF_INTERVAL = 100; // Checkpoint every 100 tokens
 const SESSION_DURATION = 86400; // 1 day
 
@@ -1527,8 +1527,9 @@ export default function ChatContextDemo() {
         "⏳ Host will detect disconnect and complete contract to claim earnings"
       );
 
-      // Calculate expected payment distribution
-      const tokensCost = (totalTokens * PRICE_PER_TOKEN) / 1000000; // Convert to USDC
+      // Calculate expected payment distribution using actual host pricing
+      const pricePerToken = activeHostRef.current?.pricePerToken || activeHost?.pricePerToken || 2000;
+      const tokensCost = (totalTokens * pricePerToken) / 1000000; // Convert to USDC
       const hostPayment = tokensCost * 0.9; // 90% to host
       const treasuryPayment = tokensCost * 0.1; // 10% to treasury
 

@@ -48,10 +48,11 @@ const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_
 
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = '2'; // $2 USDC
-const PRICE_PER_TOKEN = 1; // 0.000001 USDC per token (1 unit in 6-decimal USDC)
+// PRICE_PER_TOKEN removed - now using actual host minPricePerToken from blockchain
 const PROOF_INTERVAL = 100; // Proof every 100 tokens
 const SESSION_DURATION = 86400; // 1 day
 const EXPECTED_TOKENS = 100; // Expected tokens to generate in test
+const DEFAULT_PRICE_PER_TOKEN = 1; // Fallback: 0.000001 USDC per token (used if host pricing unavailable)
 
 // ERC20 ABIs
 const erc20BalanceOfAbi = [{
@@ -106,6 +107,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
   const [activeHosts, setActiveHosts] = useState<any[]>([]);
   const [s5Cid, setS5Cid] = useState<string>("");
   const [totalTokensGenerated, setTotalTokensGenerated] = useState(0);
+  const [hostPricing, setHostPricing] = useState<number>(DEFAULT_PRICE_PER_TOKEN);
 
   // SDK instances
   const [sdk, setSdk] = useState<FabstirSDKCore | null>(null);
@@ -528,6 +530,11 @@ export default function BaseUsdcMvpFlowSDKTest() {
       selectedHostRef.current = selected;  // Also update ref for immediate access
       setActiveHosts(modelSupported);
 
+      // Set host pricing from blockchain (with fallback to default)
+      const pricing = Number(selected.minPricePerToken || DEFAULT_PRICE_PER_TOKEN);
+      setHostPricing(pricing);
+      addLog(`💵 Host pricing: ${pricing} (${(pricing/1000000).toFixed(6)} USDC/token)`);
+
       // Store selected host address in window for use across React renders
       (window as any).__selectedHostAddress = selected.address;
 
@@ -602,7 +609,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
       // Step 2 already approved the contract, so payments are automatic
       const sessionConfig = {
         depositAmount: SESSION_DEPOSIT_AMOUNT, // Amount for this session
-        pricePerToken: Number(hostToUse.pricePerToken || PRICE_PER_TOKEN),
+        pricePerToken: hostPricing, // Use actual host pricing from blockchain
         proofInterval: PROOF_INTERVAL,
         duration: SESSION_DURATION,
         paymentToken: contracts.USDC,  // Using USDC with direct payment
@@ -893,7 +900,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog("Step 9: Starting - Record host earnings (90%)");
 
       const tokensUsed = 42; // From step 6
-      const totalCost = BigInt(tokensUsed * PRICE_PER_TOKEN);
+      const totalCost = BigInt(tokensUsed * hostPricing);
       const hostEarnings = (totalCost * 90n) / 100n; // 90% to host
 
       // Record earnings via HostManager for the selected host
@@ -953,7 +960,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog("Step 10: Starting - Record treasury fees (10%)");
 
       const tokensUsed = 42; // From step 6
-      const totalCost = BigInt(tokensUsed * PRICE_PER_TOKEN);
+      const totalCost = BigInt(tokensUsed * hostPricing);
       const treasuryFees = (totalCost * 10n) / 100n; // 10% to treasury
 
       // Record fees via TreasuryManager
@@ -1064,14 +1071,14 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog(`🔐 WebSocket disconnected`);
       addLog(`⏳ Host will detect disconnect and complete contract to claim earnings`);
 
-      // Calculate expected payment distribution
-      const tokensCost = (totalTokensGenerated * PRICE_PER_TOKEN) / 1000000; // Convert to USDC
+      // Calculate expected payment distribution using actual host pricing
+      const tokensCost = (totalTokensGenerated * hostPricing) / 1000000; // Convert to USDC
       const hostPayment = tokensCost * 0.9; // 90% to host
       const treasuryPayment = tokensCost * 0.1; // 10% to treasury
 
       addLog(`📊 Tokens used in session: ${totalTokensGenerated}`);
       addLog(`💰 Expected payment distribution (when host completes):`);
-      addLog(`   Total cost: ${tokensCost.toFixed(6)} USDC (${totalTokensGenerated} tokens × $${PRICE_PER_TOKEN/1000000}/token)`);
+      addLog(`   Total cost: ${tokensCost.toFixed(6)} USDC (${totalTokensGenerated} tokens × $${hostPricing/1000000}/token)`);
       addLog(`   Host will receive: ${hostPayment.toFixed(6)} USDC (90%)`);
       addLog(`   Treasury will receive: ${treasuryPayment.toFixed(6)} USDC (10%)`);
 

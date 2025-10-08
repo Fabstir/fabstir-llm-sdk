@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding host-controlled pricing to Fabstir LLM Marketplace
 >
-> **Status**: 🚧 IN PROGRESS (14/17 sub-phases complete, 82%) | **Target**: Multi-chain marketplace with dynamic pricing | **Progress**: Phase 1 ✅ Complete, Phase 2 ✅ Complete, Phase 3 ✅ Complete, Phase 4 (3/4) ⏳
+> **Status**: 🚧 IN PROGRESS (15/17 sub-phases complete, 88%) | **Target**: Multi-chain marketplace with dynamic pricing | **Progress**: Phase 1 ✅ Complete, Phase 2 ✅ Complete, Phase 3 ✅ Complete, Phase 4 (3/4) ⏳, Phase 5 (1/2) ⏳
 
 ## Overview
 
@@ -1298,26 +1298,27 @@ async function discoverHosts() {
 **Estimated Time**: 4-6 hours
 **Goal**: Update client flows to respect host pricing
 
-### Sub-phase 5.1: Session Creation Price Defaults ⏳
+### Sub-phase 5.1: Session Creation Price Defaults ✅
 
 **Goal**: Update session creation to default to host minimum pricing
 
-**Status**: ⏳ Not started (waiting on Phase 2)
+**Status**: ✅ Complete (ready for manual testing)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/integration/session-pricing-flow.test.ts` (200 lines max)
-  - [ ] Test: session creation without price uses host minimum
-  - [ ] Test: session creation with price >= minimum succeeds
-  - [ ] Test: session creation with price < minimum fails
-  - [ ] Test: error message explains pricing violation
-- [ ] Update session creation flows in harness:
-  - [ ] `apps/harness/pages/chat-context-demo.tsx` (+50 lines)
-  - [ ] `apps/harness/pages/usdc-mvp-flow-sdk.test.tsx` (+30 lines)
-  - [ ] `apps/harness/pages/eth-mvp-flow-sdk.test.tsx` (+30 lines)
-  - [ ] Remove hardcoded `PRICE_PER_TOKEN` constants
-  - [ ] Fetch from selected host instead
-  - [ ] Use host pricing in session creation
-- [ ] Verify all tests pass (4/4 ✅)
+- [x] Write tests in `packages/sdk-core/tests/integration/session-pricing-flow.test.ts` (197 lines)
+  - [x] Test: session creation without price uses host minimum
+  - [x] Test: session creation with price >= minimum succeeds
+  - [x] Test: session creation with price < minimum fails
+  - [x] Test: error message explains pricing violation
+  - [x] Test: exact host minimum price validation
+- [x] Update session creation flows in harness:
+  - [x] `apps/harness/pages/chat-context-popupfree-demo.tsx` (removed PRICE_PER_TOKEN constant)
+  - [x] `apps/harness/pages/usdc-mvp-flow-sdk.test.tsx` (fetch host pricing from minPricePerToken)
+  - [x] `apps/harness/pages/eth-mvp-flow-sdk.test.tsx` (fetch host pricing, use ETH format)
+  - [x] Remove hardcoded `PRICE_PER_TOKEN` constants
+  - [x] Fetch from selected host instead
+  - [x] Use host pricing in session creation and cost calculations
+- [ ] Verify all tests pass (5/5 ✅)
 
 **Implementation Requirements**:
 ```typescript
@@ -1344,11 +1345,12 @@ const result = await paymentManager.createSessionFromDeposit({
 ```
 
 **Acceptance Criteria**:
-- [ ] Hardcoded prices removed
-- [ ] Sessions use host pricing
-- [ ] Price displayed when host selected
-- [ ] Tests verify pricing enforcement
-- [ ] All existing flows work with new pricing
+- [x] Hardcoded prices removed from active files
+- [x] Sessions use host pricing from minPricePerToken
+- [x] Price displayed when host selected
+- [x] Tests verify pricing enforcement (default, accept, reject, error messages)
+- [x] SessionManager validates and defaults pricing (from Sub-phase 2.4)
+- [ ] All existing flows work with new pricing (manual testing)
 
 ---
 
