@@ -105,6 +105,20 @@ export interface IHostManager {
   updateSupportedModels(modelIds: string[]): Promise<string>;
 
   /**
+   * Update host minimum pricing
+   * @param newMinPrice - New minimum price per token (100-100,000 range)
+   * @returns Transaction hash
+   */
+  updatePricing(newMinPrice: string): Promise<string>;
+
+  /**
+   * Get host minimum pricing
+   * @param hostAddress - Host address to query pricing for
+   * @returns Minimum price per token as bigint (0 if host not registered)
+   */
+  getPricing(hostAddress: string): Promise<bigint>;
+
+  /**
    * Get host accumulated earnings for a specific token
    * @param hostAddress - Host address to check earnings for
    * @param tokenAddress - Token address (use ethers.ZeroAddress for native ETH/BNB)

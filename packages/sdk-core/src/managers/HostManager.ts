@@ -22,10 +22,14 @@ import { ModelManager } from './ModelManager';
 import { HostDiscoveryService } from '../services/HostDiscoveryService';
 import { NodeRegistryABI } from '../contracts/abis';
 
+/**
+ * Host registration parameters with model validation and pricing
+ */
 export interface HostRegistrationWithModels {
   metadata: HostMetadata;
   apiUrl: string;
   supportedModels: ModelSpec[];
+  minPricePerToken: string;    // Minimum price per token (100-100,000 range, will be parsed to bigint)
 }
 
 export class HostManager {

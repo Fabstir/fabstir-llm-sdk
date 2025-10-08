@@ -43,7 +43,7 @@ export interface HostMetadata {
 }
 
 /**
- * Host information including model support
+ * Host information including model support and pricing
  */
 export interface HostInfo {
   address: string;             // Ethereum address
@@ -52,6 +52,8 @@ export interface HostInfo {
   supportedModels: string[];  // Array of model IDs
   isActive: boolean;          // Is host active
   stake: bigint;              // Staked amount
+  minPricePerToken: bigint;   // Minimum price per token (100-100,000 = 0.0001-0.1 USDC)
+  advertisedPrice?: bigint;   // Optional recommended price for UI display
 }
 
 /**
