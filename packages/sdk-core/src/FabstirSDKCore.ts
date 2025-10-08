@@ -621,6 +621,12 @@ export class FabstirSDKCore extends EventEmitter {
 
       console.log('Initializing HostManager...');
       await (this.hostManager as any).initialize();
+
+      // NEW: Enable price validation in SessionManager
+      if (this.sessionManager) {
+        (this.sessionManager as any).setHostManager(this.hostManager);
+        console.log('SessionManager price validation enabled');
+      }
       console.log('HostManager initialized');
 
       // Create ClientManager after ModelManager and HostManager are available

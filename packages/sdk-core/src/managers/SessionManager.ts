@@ -1,6 +1,6 @@
 /**
  * Browser-compatible Session Manager
- * 
+ *
  * Manages LLM session lifecycle including creation, checkpoint proofs,
  * and completion. Works with WebSocket for real-time streaming.
  */
@@ -15,9 +15,11 @@ import {
 } from '../types';
 import { PaymentManager } from './PaymentManager';
 import { StorageManager } from './StorageManager';
+import { HostManager } from './HostManager';
 import { WebSocketClient } from '../websocket/WebSocketClient';
 import { ChainRegistry } from '../config/ChainRegistry';
 import { UnsupportedChainError } from '../errors/ChainErrors';
+import { PricingValidationError } from '../errors/pricing-errors';
 
 export interface SessionState {
   sessionId: bigint;
@@ -47,16 +49,26 @@ export interface ExtendedSessionConfig extends SessionConfig {
 export class SessionManager implements ISessionManager {
   private paymentManager: PaymentManager;
   private storageManager: StorageManager;
+  private hostManager?: HostManager; // NEW: Optional until set after auth
   private wsClient?: WebSocketClient;
   private sessions: Map<string, SessionState> = new Map();
   private initialized = false;
 
   constructor(
     paymentManager: PaymentManager,
-    storageManager: StorageManager
+    storageManager: StorageManager,
+    hostManager?: HostManager // NEW: Optional parameter
   ) {
     this.paymentManager = paymentManager;
     this.storageManager = storageManager;
+    this.hostManager = hostManager; // NEW
+  }
+
+  /**
+   * Set HostManager for price validation (called after authentication)
+   */
+  setHostManager(hostManager: HostManager): void {
+    this.hostManager = hostManager;
   }
 
   /**
@@ -102,13 +114,45 @@ export class SessionManager implements ISessionManager {
     const endpoint = config.endpoint;
 
     try {
+      // NEW: Price validation against host minimum
+      let validatedPrice = config.pricePerToken;
+
+      if (this.hostManager && provider) {
+        try {
+          // Fetch host info to get minimum price
+          const hostInfo = await this.hostManager.getHostInfo(provider);
+          const hostMinPrice = Number(hostInfo.minPricePerToken || 0n);
+
+          // Default to host minimum if not provided
+          if (validatedPrice === undefined || validatedPrice === null) {
+            validatedPrice = hostMinPrice;
+            console.log(`Using host minimum price: ${hostMinPrice}`);
+          }
+
+          // Validate client price >= host minimum
+          if (validatedPrice < hostMinPrice) {
+            throw new PricingValidationError(
+              `Price ${validatedPrice} is below host minimum ${hostMinPrice}. ` +
+              `Host "${provider}" requires at least ${hostMinPrice} per token.`,
+              BigInt(validatedPrice)
+            );
+          }
+        } catch (error) {
+          if (error instanceof PricingValidationError) {
+            throw error; // Re-throw pricing errors
+          }
+          // Log but don't fail for other errors (host lookup failures)
+          console.warn('Could not validate pricing against host:', error);
+        }
+      }
+
       // Create session job with payment
       // PaymentManagerMultiChain expects a SessionJobParams object with 'amount' field
       const sessionJobParams = {
         host: provider,
         model: model,
         amount: config.depositAmount,  // PaymentManagerMultiChain expects 'amount', not 'depositAmount'
-        pricePerToken: config.pricePerToken,
+        pricePerToken: validatedPrice, // NEW: Use validated price
         proofInterval: config.proofInterval,
         duration: config.duration,
         chainId: config.chainId,
@@ -167,6 +211,11 @@ export class SessionManager implements ISessionManager {
         jobId: jobId
       };
     } catch (error: any) {
+      // Re-throw pricing validation errors without wrapping
+      if (error instanceof PricingValidationError) {
+        throw error;
+      }
+
       throw new SDKError(
         `Failed to start session: ${error.message}`,
         'SESSION_START_ERROR',
