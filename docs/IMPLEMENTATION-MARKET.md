@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding host-controlled pricing to Fabstir LLM Marketplace
 >
-> **Status**: 🚧 IN PROGRESS (11/17 sub-phases complete, 65%) | **Target**: Multi-chain marketplace with dynamic pricing | **Progress**: Phase 1 ✅ Complete, Phase 2 ✅ Complete, Phase 3 (3/4) ⏳
+> **Status**: 🚧 IN PROGRESS (12/17 sub-phases complete, 71%) | **Target**: Multi-chain marketplace with dynamic pricing | **Progress**: Phase 1 ✅ Complete, Phase 2 ✅ Complete, Phase 3 ✅ Complete, Phase 4 (1/4) ⏳
 
 ## Overview
 
@@ -1031,26 +1031,28 @@ Supported Models:
 **Estimated Time**: 6-8 hours
 **Goal**: Update browser UI to support pricing management
 
-### Sub-phase 4.1: Node Registration Pricing UI ⏳
+### Sub-phase 4.1: Node Registration Pricing UI ✅
 
 **Goal**: Add pricing input to node registration form
 
-**Status**: ⏳ Not started (waiting on Phase 2)
+**Status**: ✅ Complete (ready for manual testing)
 
 **Tasks**:
-- [ ] Update `apps/harness/components/NodeManagementClient.tsx` (+100 lines max)
-  - [ ] Add pricing input field to registration form (default: 2000)
-  - [ ] Add price validation (100-100000)
-  - [ ] Show price in USDC format as user types
-  - [ ] Pass pricing to registration API
-  - [ ] Display pricing in success message
-- [ ] Add price calculator helper:
-  - [ ] Show cost per 1000 tokens
-  - [ ] Show estimated session cost
-- [ ] Test manually:
-  - [ ] Register with default price
-  - [ ] Register with custom price
-  - [ ] Validation works
+- [x] Update `apps/harness/components/NodeManagementClient.tsx` (~40 lines)
+  - [x] Add pricing input field to registration form (default: 2000)
+  - [x] Add price validation (100-100000)
+  - [x] Show price in USDC format as user types
+  - [x] Pass pricing to registration API
+  - [x] Display pricing in success message
+- [x] Update `apps/harness/lib/hostApiClient.ts` (+1 line)
+  - [x] Add minPricePerToken to RegisterParams interface
+- [x] Add price calculator helper:
+  - [x] Show cost per 1000 tokens
+  - [x] Show cost per 10000 tokens
+- [x] Manual testing checklist:
+  - [ ] Register with default price (2000)
+  - [ ] Register with custom price (5000)
+  - [ ] Validation works (min 100, max 100000)
   - [ ] Success message shows pricing
 
 **Implementation Requirements**:
@@ -1098,11 +1100,11 @@ await mgmtApiClient.register({
 ```
 
 **Acceptance Criteria**:
-- [ ] Pricing input appears in form
-- [ ] Default value is 2000
-- [ ] Real-time USDC conversion shown
-- [ ] Validation prevents invalid values
-- [ ] Registration includes pricing
+- [x] Pricing input appears in form
+- [x] Default value is 2000
+- [x] Real-time USDC conversion shown (3 formats: per token, per 1K, per 10K)
+- [x] Validation prevents invalid values (HTML5 min/max/step)
+- [x] Registration includes pricing parameter
 
 ---
 

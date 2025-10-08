@@ -103,6 +103,7 @@ const NodeManagementClient: React.FC = () => {
   const [additionalStakeAmount, setAdditionalStakeAmount] = useState('100');
   const [apiUrl, setApiUrl] = useState('http://localhost:8083');
   const [supportedModels, setSupportedModels] = useState('CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf'); // Default approved model
+  const [minPricePerToken, setMinPricePerToken] = useState('2000');
 
   // UI state
   const [logs, setLogs] = useState<string[]>([]);
@@ -669,6 +670,16 @@ const NodeManagementClient: React.FC = () => {
     }
   };
 
+  // Price calculation helper for UI display
+  const calculatePriceDisplay = (price: string) => {
+    const p = parseInt(price) || 0;
+    return {
+      perToken: (p / 1000000).toFixed(6),
+      per1000: ((p * 1000) / 1000000).toFixed(3),
+      per10000: ((p * 10000) / 1000000).toFixed(2)
+    };
+  };
+
   // Register Node
   const registerNode = async () => {
     if (!mgmtApiClient) {
@@ -731,11 +742,13 @@ const NodeManagementClient: React.FC = () => {
         models: [modelString],
         stakeAmount: stakeAmount,
         metadata: JSON.parse(metadata),
-        privateKey: privateKey
+        privateKey: privateKey,
+        minPricePerToken: minPricePerToken
       });
 
       addLog(`✅ Node registered! TX: ${result.transactionHash}`);
       addLog(`📝 Config file created for address: ${result.hostAddress}`);
+      addLog(`💵 Pricing: ${minPricePerToken} (${calculatePriceDisplay(minPricePerToken).perToken} USDC/token)`);
       await checkRegistrationStatus();
 
     } catch (error: any) {
@@ -1405,6 +1418,27 @@ const NodeManagementClient: React.FC = () => {
                   onChange={(e) => setStakeAmount(e.target.value)}
                   style={{ padding: '5px', width: '200px' }}
                 />
+              </div>
+
+              <div style={{ marginBottom: '10px' }}>
+                <label>Minimum Price Per Token:</label><br />
+                <input
+                  type="number"
+                  value={minPricePerToken}
+                  onChange={(e) => setMinPricePerToken(e.target.value)}
+                  min="100"
+                  max="100000"
+                  step="100"
+                  style={{ padding: '5px', width: '200px' }}
+                />
+                <div style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>
+                  <div>💵 ${calculatePriceDisplay(minPricePerToken).perToken} USDC per token</div>
+                  <div>💵 ${calculatePriceDisplay(minPricePerToken).per1000} USDC per 1,000 tokens</div>
+                  <div>💵 ${calculatePriceDisplay(minPricePerToken).per10000} USDC per 10,000 tokens</div>
+                </div>
+                <small style={{ color: '#666', display: 'block', marginTop: '5px' }}>
+                  Range: 100-100,000 (0.0001-0.1 USDC per token)
+                </small>
               </div>
 
               <button

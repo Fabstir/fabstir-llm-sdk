@@ -23,6 +23,7 @@ export interface RegisterParams {
   stakeAmount: string;
   metadata?: any;
   privateKey: string;
+  minPricePerToken?: string;  // Optional pricing (defaults to 2000 on backend)
 }
 
 export interface RegisterResponse {
