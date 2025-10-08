@@ -632,6 +632,81 @@ pnpm host update-metadata \
 
 ---
 
+### update-pricing
+
+Update the minimum price per token for your host.
+
+```bash
+pnpm host update-pricing --price <amount> [options]
+```
+
+#### Description
+Updates your host's minimum price per token. This is the minimum price clients must pay for inference tokens from your host. The price is validated on-chain and takes effect immediately.
+
+#### Options
+| Option | Description |
+|--------|-------------|
+| `--price <amount>` | New minimum price per token (100-100,000) |
+| `--private-key <key>` | Private key for authentication |
+| `--rpc-url <url>` | RPC endpoint URL |
+
+#### Examples
+```bash
+# Increase to premium pricing (0.005 USDC/token)
+pnpm host update-pricing \
+  --price 5000 \
+  --private-key 0x... \
+  --rpc-url https://...
+
+# Lower to competitive pricing (0.0015 USDC/token)
+pnpm host update-pricing \
+  --price 1500 \
+  --private-key 0x...
+
+# Budget pricing (0.001 USDC/token)
+pnpm host update-pricing \
+  --price 1000
+```
+
+#### SDK Integration
+Uses `HostManager.updatePricing()`:
+```typescript
+const hostManager = getHostManager();
+
+// Get current pricing
+const hostInfo = await hostManager.getHostInfo(address);
+console.log(`Current: ${hostInfo.minPricePerToken}`);
+
+// Update pricing
+const txHash = await hostManager.updatePricing('5000');
+```
+
+#### Output
+```
+💰 Updating Host Pricing...
+
+📍 Address: 0x4594F755...
+🌐 Network: Base Sepolia
+
+Current price: 2000 (0.002000 USDC/token)
+New price:     5000 (0.005000 USDC/token)
+
+📝 Submitting transaction...
+📋 Transaction hash: 0xabc123...
+
+✅ Successfully updated pricing!
+🔗 Transaction: 0xabc123...
+✓ New price: 5000 (0.005000 USDC/token)
+```
+
+**Notes**:
+- Price must be between 100 (0.0001 USDC/token) and 100,000 (0.1 USDC/token)
+- Change takes effect immediately on-chain
+- Clients creating new sessions will see the updated price
+- Existing sessions continue at their original price
+
+---
+
 ## Financial Commands
 
 ### withdraw
