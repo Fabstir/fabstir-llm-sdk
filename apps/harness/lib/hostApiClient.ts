@@ -44,6 +44,16 @@ export interface DiscoverNodesResponse {
   count: number;
 }
 
+export interface UpdatePricingParams {
+  price: string;
+}
+
+export interface UpdatePricingResponse {
+  success: boolean;
+  transactionHash: string;
+  newPrice: string;
+}
+
 /**
  * HTTP client for Host Management API
  * Wraps fetch() calls to management server endpoints
@@ -233,6 +243,24 @@ export class HostApiClient {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Update metadata failed' }));
+      throw new Error(error.error || `HTTP ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * POST /api/update-pricing - Update minimum price per token
+   */
+  async updatePricing(params: UpdatePricingParams): Promise<UpdatePricingResponse> {
+    const response = await fetch(`${this.baseUrl}/api/update-pricing`, {
+      method: 'POST',
+      headers: this.headers,
+      body: JSON.stringify(params),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Update pricing failed' }));
       throw new Error(error.error || `HTTP ${response.status}`);
     }
 

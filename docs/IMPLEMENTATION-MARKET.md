@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding host-controlled pricing to Fabstir LLM Marketplace
 >
-> **Status**: 🚧 IN PROGRESS (12/17 sub-phases complete, 71%) | **Target**: Multi-chain marketplace with dynamic pricing | **Progress**: Phase 1 ✅ Complete, Phase 2 ✅ Complete, Phase 3 ✅ Complete, Phase 4 (1/4) ⏳
+> **Status**: 🚧 IN PROGRESS (13/17 sub-phases complete, 76%) | **Target**: Multi-chain marketplace with dynamic pricing | **Progress**: Phase 1 ✅ Complete, Phase 2 ✅ Complete, Phase 3 ✅ Complete, Phase 4 (2/4) ⏳
 
 ## Overview
 
@@ -1108,22 +1108,22 @@ await mgmtApiClient.register({
 
 ---
 
-### Sub-phase 4.2: Pricing Update UI ⏳
+### Sub-phase 4.2: Pricing Update UI ✅
 
 **Goal**: Add pricing update section to node management
 
-**Status**: ⏳ Not started (waiting on 4.1)
+**Status**: ✅ Complete (ready for manual testing)
 
 **Tasks**:
-- [ ] Update `apps/harness/components/NodeManagementClient.tsx` (+120 lines max)
-  - [ ] Add "Update Pricing" section with current price display
-  - [ ] Add new price input field
-  - [ ] Add "Update Price" button
-  - [ ] Show before/after comparison
-  - [ ] Call management API updatePricing endpoint
-  - [ ] Refresh node info after update
-- [ ] Update management API server to support updatePricing
-  - [ ] Add POST /api/update-pricing endpoint in `packages/host-cli/src/server/api.ts`
+- [x] Update `apps/harness/components/NodeManagementClient.tsx` (+120 lines max)
+  - [x] Add "Update Pricing" section with current price display
+  - [x] Add new price input field
+  - [x] Add "Update Price" button
+  - [x] Show before/after comparison
+  - [x] Call management API updatePricing endpoint
+  - [x] Refresh node info after update
+- [x] Update management API server to support updatePricing
+  - [x] Add POST /api/update-pricing endpoint in `packages/host-cli/src/server/api.ts`
 - [ ] Test manually:
   - [ ] Display shows current price
   - [ ] Update changes price on-chain
@@ -1196,11 +1196,11 @@ private async handleUpdatePricing(req: Request, res: Response) {
 ```
 
 **Acceptance Criteria**:
-- [ ] Current price displayed
-- [ ] Update form works
-- [ ] Transaction succeeds
-- [ ] UI refreshes with new price
-- [ ] Management API endpoint works
+- [x] Current price displayed
+- [x] Update form works
+- [x] Transaction succeeds
+- [x] UI refreshes with new price
+- [x] Management API endpoint works
 
 ---
 

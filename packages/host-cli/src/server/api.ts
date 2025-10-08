@@ -101,6 +101,7 @@ export class ManagementServer {
     this.app.post('/api/withdraw-earnings', this.handleWithdrawEarnings.bind(this));
     this.app.post('/api/update-models', this.handleUpdateModels.bind(this));
     this.app.post('/api/update-metadata', this.handleUpdateMetadata.bind(this));
+    this.app.post('/api/update-pricing', this.handleUpdatePricing.bind(this));
     this.app.get('/api/discover-nodes', this.handleDiscoverNodes.bind(this));
   }
 
@@ -339,6 +340,33 @@ export class ManagementServer {
       error: 'Not Implemented',
       message: 'Update-metadata endpoint requires CLI command refactoring to export callable function'
     });
+  }
+
+  private async handleUpdatePricing(req: Request, res: Response): Promise<void> {
+    try {
+      const { price } = req.body;
+
+      // Validate price
+      const priceNum = parseInt(price);
+      if (isNaN(priceNum) || priceNum < 100 || priceNum > 100000) {
+        res.status(400).json({ error: 'Price must be between 100 and 100000' });
+        return;
+      }
+
+      // Get HostManager from SDK
+      const hostManager = getHostManager();
+
+      // Update pricing
+      const txHash = await hostManager.updatePricing(price);
+
+      res.json({
+        success: true,
+        transactionHash: txHash,
+        newPrice: price
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || 'Failed to update pricing' });
+    }
   }
 
   private async handleDiscoverNodes(req: Request, res: Response): Promise<void> {

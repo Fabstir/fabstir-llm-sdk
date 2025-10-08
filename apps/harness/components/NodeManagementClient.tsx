@@ -104,6 +104,7 @@ const NodeManagementClient: React.FC = () => {
   const [apiUrl, setApiUrl] = useState('http://localhost:8083');
   const [supportedModels, setSupportedModels] = useState('CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf'); // Default approved model
   const [minPricePerToken, setMinPricePerToken] = useState('2000');
+  const [newPriceValue, setNewPriceValue] = useState('');
 
   // UI state
   const [logs, setLogs] = useState<string[]>([]);
@@ -678,6 +679,35 @@ const NodeManagementClient: React.FC = () => {
       per1000: ((p * 1000) / 1000000).toFixed(3),
       per10000: ((p * 10000) / 1000000).toFixed(2)
     };
+  };
+
+  // Update Pricing
+  const updatePricing = async () => {
+    if (!mgmtApiClient) {
+      addLog('❌ Management API client not initialized');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const currentPrice = nodeInfo?.minPricePerToken?.toString() || '0';
+      addLog(`💰 Updating pricing from ${currentPrice} to ${newPriceValue}...`);
+
+      const result = await mgmtApiClient.updatePricing({
+        price: newPriceValue
+      });
+
+      addLog(`✅ Pricing updated! TX: ${result.transactionHash}`);
+      addLog(`💵 New price: ${newPriceValue} (${calculatePriceDisplay(newPriceValue).perToken} USDC/token)`);
+
+      // Refresh node info
+      await checkRegistrationStatus();
+      setNewPriceValue(''); // Clear input
+    } catch (error: any) {
+      addLog(`❌ Update failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Register Node
@@ -1567,6 +1597,61 @@ const NodeManagementClient: React.FC = () => {
                 </div>
                 <small style={{ color: '#666', fontSize: '12px' }}>
                   Enter amount of FAB tokens to add to your current stake
+                </small>
+              </div>
+
+              {/* Pricing Update */}
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ fontSize: '14px', marginBottom: '5px', display: 'block', fontWeight: 'bold' }}>
+                  💰 Pricing Management:
+                </label>
+                <div style={{ marginBottom: '10px', fontSize: '13px', color: '#555' }}>
+                  <strong>Current Price:</strong> {nodeInfo?.minPricePerToken?.toString() || '2000'}
+                  {' '}({calculatePriceDisplay(nodeInfo?.minPricePerToken?.toString() || '2000').perToken} USDC/token)
+                </div>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <input
+                    type="number"
+                    value={newPriceValue}
+                    onChange={(e) => setNewPriceValue(e.target.value)}
+                    placeholder="Enter new price"
+                    min="100"
+                    max="100000"
+                    step="100"
+                    style={{
+                      padding: '8px',
+                      width: '150px',
+                      border: '1px solid #ccc',
+                      borderRadius: '3px',
+                      fontSize: '14px'
+                    }}
+                    disabled={loading}
+                  />
+                  <button
+                    onClick={updatePricing}
+                    disabled={loading || !newPriceValue || parseInt(newPriceValue) < 100 || parseInt(newPriceValue) > 100000}
+                    style={{
+                      padding: '8px 15px',
+                      backgroundColor: (loading || !newPriceValue || parseInt(newPriceValue) < 100 || parseInt(newPriceValue) > 100000) ? '#ccc' : '#ffc107',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '3px',
+                      cursor: (loading || !newPriceValue || parseInt(newPriceValue) < 100 || parseInt(newPriceValue) > 100000) ? 'not-allowed' : 'pointer',
+                      fontSize: '14px'
+                    }}
+                  >
+                    Update Price
+                  </button>
+                </div>
+                {newPriceValue && parseInt(newPriceValue) >= 100 && parseInt(newPriceValue) <= 100000 && (
+                  <div style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>
+                    <div>New: {newPriceValue} ({calculatePriceDisplay(newPriceValue).perToken} USDC/token)</div>
+                    <div>• Per 1,000 tokens: ${calculatePriceDisplay(newPriceValue).per1000} USDC</div>
+                    <div>• Per 10,000 tokens: ${calculatePriceDisplay(newPriceValue).per10000} USDC</div>
+                  </div>
+                )}
+                <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '5px' }}>
+                  Valid range: 100-100,000 (0.0001-0.1 USDC per token)
                 </small>
               </div>
 
