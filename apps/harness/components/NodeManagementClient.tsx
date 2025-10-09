@@ -179,13 +179,24 @@ const NodeManagementClient: React.FC = () => {
           setLiveServerLogs(prev => [...prev, ...logs]);
         });
 
-        // Connect to WebSocket
-        await client.connect();
+        // Connect to WebSocket with a timeout
+        const connectPromise = client.connect();
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Connection timeout')), 3000)
+        );
+
+        await Promise.race([connectPromise, timeoutPromise]);
         setMgmtWsClient(client);
         addLog('✅ Connected to management server logs');
       } catch (error: any) {
-        console.error('Failed to connect to management server WebSocket:', error);
-        addLog(`⚠️  Could not connect to management server logs: ${error.message}`);
+        // Silently log the error without throwing to console.error
+        // This is expected if the management server isn't running
+        const errorMessage = error.message || 'Connection failed';
+        if (errorMessage.includes('WebSocket connection failed')) {
+          addLog(`ℹ️ Management server not available for log streaming`);
+        } else {
+          addLog(`⚠️  Could not connect to management server logs: ${errorMessage}`);
+        }
       }
     };
 
@@ -216,15 +227,18 @@ const NodeManagementClient: React.FC = () => {
 
       try {
         const { HostApiClient } = await import('../lib/hostApiClient');
-        const client = new HostApiClient({ baseUrl: 'http://localhost:3001' });
+        const client = new HostApiClient({
+          baseUrl: 'http://localhost:3001',
+          apiKey: 'test-key'
+        });
         setMgmtApiClient(client);
         addLog('✅ Management API client initialized');
 
         // Refresh status immediately after initialization
         refreshNodeStatus(client);
       } catch (error: any) {
-        console.error('Failed to initialize management API client:', error);
-        addLog(`⚠️  Could not initialize management API: ${error.message}`);
+        // Don't log to console.error for expected connection failures
+        addLog(`ℹ️ Management API not available (server may not be running)`);
       }
     };
 
@@ -360,25 +374,30 @@ const NodeManagementClient: React.FC = () => {
   // Get chain-specific contract addresses
   const getContractAddresses = (chainId: number) => {
     if (chainId === ChainId.BASE_SEPOLIA) {
+      // NEVER hardcode fallback addresses - they cause silent bugs!
+      // All addresses MUST come from environment variables
+      if (!process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE ||
+          !process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY ||
+          !process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM ||
+          !process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN ||
+          !process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS ||
+          !process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN ||
+          !process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY) {
+        throw new Error('Missing required contract addresses in environment variables');
+      }
+
       return {
-        jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE || '0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944',
-        nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY || '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
-        proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM || '0x2ACcc60893872A499700908889B38C5420CBcFD1',
-        fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN || '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
-        hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS || '0x908962e8c6CE72610021586f85ebDE09aAc97776',
-        usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN || '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-        modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY || '0x92b2De840bB2171203011A6dBA928d855cA8183E'
+        jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE,
+        nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY,
+        proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM,
+        fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN,
+        hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS,
+        usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN,
+        modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY
       };
     } else {
-      return {
-        jobMarketplace: '0x0000000000000000000000000000000000000001',
-        nodeRegistry: '0x0000000000000000000000000000000000000002',
-        proofSystem: '0x0000000000000000000000000000000000000003',
-        fabToken: '0x0000000000000000000000000000000000000007',
-        hostEarnings: '0x0000000000000000000000000000000000000004',
-        usdcToken: '0x0000000000000000000000000000000000000006',
-        modelRegistry: '0x0000000000000000000000000000000000000005'
-      };
+      // For chains that don't have contracts deployed yet
+      throw new Error(`Contracts not yet deployed on chain ${chainId}`);
     }
   };
 

@@ -7,6 +7,7 @@ import { getSDK, getAuthenticatedAddress } from '../sdk/client';
 import { getFABBalance } from '../balance/checker';
 import { RegistrationError, ErrorCode } from './errors';
 import { ethers } from 'ethers';
+import { DEFAULT_PRICE_PER_TOKEN, DEFAULT_PRICE_PER_TOKEN_NUMBER, MAX_PRICE_PER_TOKEN } from '@fabstir/sdk-core';
 
 /**
  * Staking configuration
@@ -285,12 +286,12 @@ export async function stakeTokens(config: StakingConfig): Promise<StakingResult>
     const hostManager = sdk.getHostManager();
 
     // Validate and default pricing
-    const minPrice = config.minPricePerToken || '2000';
+    const minPrice = config.minPricePerToken || DEFAULT_PRICE_PER_TOKEN;
     const priceNum = parseInt(minPrice);
 
-    if (isNaN(priceNum) || priceNum < 100 || priceNum > 100000) {
+    if (isNaN(priceNum) || priceNum < DEFAULT_PRICE_PER_TOKEN_NUMBER || priceNum > Number(MAX_PRICE_PER_TOKEN)) {
       throw new RegistrationError(
-        `minPricePerToken must be between 100 and 100000, got ${minPrice}`,
+        `minPricePerToken must be between ${DEFAULT_PRICE_PER_TOKEN_NUMBER} and ${Number(MAX_PRICE_PER_TOKEN)}, got ${minPrice}`,
         ErrorCode.VALIDATION_FAILED,
         { price: minPrice }
       );
@@ -337,6 +338,7 @@ export async function stakeTokens(config: StakingConfig): Promise<StakingResult>
     };
 
     // Register host with models using correct SDK signature
+    console.log('[staking.ts] Calling registerHostWithModels with minPricePerToken:', minPrice);
     const txHash = await hostManager.registerHostWithModels({
       metadata,
       apiUrl: config.apiUrl,

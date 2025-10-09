@@ -2,16 +2,20 @@
  * Centralized ABI imports - Single source of truth for all contract ABIs
  * ABIs are stored in src/contracts/abis/
  * This prevents duplication and makes updates easier when contracts are upgraded
+ *
+ * NOTE: Using require() instead of import to ensure CommonJS compatibility
+ * JSON arrays loaded via require() don't have .default property, which causes
+ * issues with esbuild's __toESM() wrapper when bundling for CommonJS
  */
 
-// Import all ABIs from local folder
-import JobMarketplaceABI from './JobMarketplaceWithModels-CLIENT-ABI.json';
-import HostEarningsABI from './HostEarnings-CLIENT-ABI.json';
-import NodeRegistryABI from './NodeRegistryWithModels-CLIENT-ABI.json';
-import ProofSystemABI from './ProofSystem-CLIENT-ABI.json';
-import ERC20ABI from './ERC20-ABI.json';
-import BaseAccountFactoryABI from './BaseAccountFactory-ABI.json';
-import BaseSmartAccountABI from './BaseSmartAccount-ABI.json';
+// Import all ABIs from local folder using require() for CommonJS compatibility
+const JobMarketplaceABI = require('./JobMarketplaceWithModels-CLIENT-ABI.json');
+const HostEarningsABI = require('./HostEarnings-CLIENT-ABI.json');
+const NodeRegistryABI = require('./NodeRegistryWithModels-CLIENT-ABI.json');
+const ProofSystemABI = require('./ProofSystem-CLIENT-ABI.json');
+const ERC20ABI = require('./ERC20-ABI.json');
+const BaseAccountFactoryABI = require('./BaseAccountFactory-ABI.json');
+const BaseSmartAccountABI = require('./BaseSmartAccount-ABI.json');
 
 // Export all ABIs for use throughout the application
 export {

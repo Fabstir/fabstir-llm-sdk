@@ -21,7 +21,17 @@ import { SDKError } from '../errors';
 import { ContractManager } from '../contracts/ContractManager';
 import { ModelManager } from './ModelManager';
 import { HostDiscoveryService } from '../services/HostDiscoveryService';
-import { NodeRegistryABI } from '../contracts/abis';
+// Import the correct NodeRegistry ABI directly
+import NodeRegistryABI from '../contracts/abis/NodeRegistryWithModels-CLIENT-ABI.json';
+
+/**
+ * Pricing constants for host registration
+ * Exported for use in host-cli and other consumers
+ */
+export const MIN_PRICE_PER_TOKEN = 100n;
+export const MAX_PRICE_PER_TOKEN = 100000n;
+export const DEFAULT_PRICE_PER_TOKEN = '100'; // String for BigInt conversion
+export const DEFAULT_PRICE_PER_TOKEN_NUMBER = 100; // Numeric form for parseInt()
 
 /**
  * Host registration parameters with model validation and pricing
@@ -69,6 +79,18 @@ export class HostManager {
     // Initialize contract with full NodeRegistryWithModels ABI
     console.log('Initializing NodeRegistry contract with full ABI');
     console.log('Contract address:', nodeRegistryAddress);
+    console.log('NodeRegistryABI type:', typeof NodeRegistryABI);
+    console.log('NodeRegistryABI is array?', Array.isArray(NodeRegistryABI));
+    console.log('NodeRegistryABI length:', NodeRegistryABI?.length || 0);
+    if (Array.isArray(NodeRegistryABI) && NodeRegistryABI.length > 0) {
+      console.log('First ABI entry:', JSON.stringify(NodeRegistryABI[0]).substring(0, 200));
+      console.log('Second ABI entry:', JSON.stringify(NodeRegistryABI[1]).substring(0, 200));
+      // Count function entries
+      const funcs = NodeRegistryABI.filter((item: any) => item.type === 'function');
+      console.log('Number of function entries in ABI:', funcs.length);
+    } else {
+      console.error('NodeRegistryABI is NOT a valid array:', NodeRegistryABI);
+    }
 
     this.nodeRegistry = new Contract(
       nodeRegistryAddress,
@@ -79,9 +101,19 @@ export class HostManager {
     // Verify the contract interface is loaded
     if (this.nodeRegistry.interface) {
       console.log('Contract interface initialized successfully');
-      const functions = Object.keys(this.nodeRegistry.interface.functions || {});
-      console.log(`Loaded ${functions.length} contract functions`);
-      console.log('Has updateSupportedModels?', functions.includes('updateSupportedModels(bytes32[])'));
+      console.log('Interface fragments length:', this.nodeRegistry.interface.fragments?.length || 0);
+
+      // In ethers v6, use fragments to count functions
+      const functionFragments = this.nodeRegistry.interface.fragments.filter((f: any) => f.type === 'function');
+      console.log(`Loaded ${functionFragments.length} contract functions via fragments`);
+
+      // Test if registerNode function exists
+      try {
+        const registerNodeFunc = this.nodeRegistry.interface.getFunction('registerNode');
+        console.log('Has registerNode?', !!registerNodeFunc);
+      } catch (e) {
+        console.error('registerNode not found:', e.message);
+      }
     } else {
       console.error('Failed to initialize contract interface');
     }
@@ -142,10 +174,12 @@ export class HostManager {
       }
 
       // Validate pricing parameter early (before checking registration)
-      const minPrice = BigInt(request.minPricePerToken);
-      if (minPrice < 100n || minPrice > 100000n) {
+      // Ensure minPricePerToken has a value (default to '100' if undefined)
+      const priceStr = request.minPricePerToken || DEFAULT_PRICE_PER_TOKEN;
+      const minPrice = BigInt(priceStr);
+      if (minPrice < MIN_PRICE_PER_TOKEN || minPrice > MAX_PRICE_PER_TOKEN) {
         throw new PricingValidationError(
-          `minPricePerToken must be between 100 and 100000, got ${minPrice}`,
+          `minPricePerToken must be between ${MIN_PRICE_PER_TOKEN} and ${MAX_PRICE_PER_TOKEN}, got ${minPrice}`,
           minPrice
         );
       }
@@ -238,6 +272,37 @@ export class HostManager {
       // Step 3: Register node with models (no ETH value needed, pricing already validated)
       console.log('Registering node with models...');
       console.log('Minimum price per token:', minPrice);
+
+      // Debug: Check if method exists
+      if (!this.nodeRegistry || !this.nodeRegistry['registerNode']) {
+        console.error('ERROR: registerNode method not found on contract!');
+        console.error('Contract address:', this.nodeRegistry?.address || this.nodeRegistry?.target);
+        console.error('Available methods:', Object.keys(this.nodeRegistry || {}).filter(k => typeof this.nodeRegistry[k] === 'function'));
+        throw new Error('registerNode method not found on NodeRegistry contract');
+      }
+
+      console.log('REGISTRATION DEBUG - About to call registerNode with:');
+      console.log('  metadataJson:', metadataJson);
+      console.log('  apiUrl:', request.apiUrl);
+      console.log('  modelIds:', modelIds);
+      console.log('  minPrice:', minPrice);
+      console.log('  Contract address:', this.nodeRegistry.target || this.nodeRegistry.address);
+      console.log('  Contract interface exists?', !!this.nodeRegistry.interface);
+
+      // Try to encode the transaction data manually to see what's being sent
+      try {
+        const encodedData = this.nodeRegistry.interface.encodeFunctionData('registerNode', [
+          metadataJson,
+          request.apiUrl,
+          modelIds,
+          minPrice
+        ]);
+        console.log('  Encoded transaction data:', encodedData);
+        console.log('  Encoded data length:', encodedData.length);
+      } catch (encodeError) {
+        console.error('  ERROR encoding transaction data:', encodeError);
+      }
+
       const tx = await this.nodeRegistry['registerNode'](
         metadataJson,
         request.apiUrl,
@@ -247,6 +312,11 @@ export class HostManager {
           gasLimit: 500000n
         }
       );
+
+      console.log('REGISTRATION DEBUG - Transaction created:');
+      console.log('  Transaction hash:', tx.hash);
+      console.log('  Transaction to:', tx.to);
+      console.log('  Transaction data:', tx.data);
 
       const receipt = await tx.wait(3); // Wait for 3 confirmations
       console.log('Node registration successful');
@@ -482,7 +552,7 @@ export class HostManager {
         models: (node as any).models || [],
         endpoint: node.apiUrl,
         reputation: (node as any).reputation || 95,
-        pricePerToken: (node as any).pricePerToken || 2000
+        pricePerToken: (node as any).pricePerToken || Number(MIN_PRICE_PER_TOKEN)
       } as HostInfo));
     } catch (error: any) {
       console.error('Failed to get active hosts:', error);
@@ -723,9 +793,9 @@ export class HostManager {
       const price = BigInt(newMinPrice);
 
       // Validate price range
-      if (price < 100n || price > 100000n) {
+      if (price < MIN_PRICE_PER_TOKEN || price > MAX_PRICE_PER_TOKEN) {
         throw new PricingValidationError(
-          `minPricePerToken must be between 100 and 100000, got ${price}`,
+          `minPricePerToken must be between ${MIN_PRICE_PER_TOKEN} and ${MAX_PRICE_PER_TOKEN}, got ${price}`,
           price
         );
       }

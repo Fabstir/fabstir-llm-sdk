@@ -27,7 +27,13 @@ export { PaymentManager } from './managers/PaymentManager';
 export { PaymentManager as PaymentManagerMultiChain } from './managers/PaymentManagerMultiChain';
 export { StorageManager } from './managers/StorageManager';
 export { SessionManager } from './managers/SessionManager';
-export { HostManager } from './managers/HostManager';
+export {
+  HostManager,
+  MIN_PRICE_PER_TOKEN,
+  MAX_PRICE_PER_TOKEN,
+  DEFAULT_PRICE_PER_TOKEN,
+  DEFAULT_PRICE_PER_TOKEN_NUMBER
+} from './managers/HostManager';
 export { TreasuryManager } from './managers/TreasuryManager';
 
 // Model governance managers

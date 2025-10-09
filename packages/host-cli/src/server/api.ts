@@ -13,6 +13,7 @@ import type { RegistrationConfig } from '../registration/manager';
 import { withdrawHostEarnings } from '../commands/withdraw';
 import { getSDK, getHostManager, authenticateSDK, initializeSDK } from '../sdk/client';
 import { ethers } from 'ethers';
+import { DEFAULT_PRICE_PER_TOKEN, MIN_PRICE_PER_TOKEN, MAX_PRICE_PER_TOKEN, DEFAULT_PRICE_PER_TOKEN_NUMBER } from '@fabstir/sdk-core';
 
 /**
  * Server configuration interface
@@ -202,12 +203,23 @@ export class ManagementServer {
 
   private async handleRegister(req: Request, res: Response): Promise<void> {
     try {
-      const { walletAddress, publicUrl, models, stakeAmount, metadata, privateKey } = req.body;
+      const { walletAddress, publicUrl, models, stakeAmount, metadata, privateKey, minPricePerToken } = req.body;
+
+      // Debug log incoming request
+      console.log('[API] Register request body:', {
+        walletAddress,
+        publicUrl,
+        models,
+        stakeAmount,
+        metadata,
+        privateKey: privateKey ? '***' : undefined,
+        minPricePerToken
+      });
 
       // Validate required fields
-      if (!publicUrl || !models || !stakeAmount) {
+      if (!publicUrl || !models) {
         res.status(400).json({
-          error: 'Missing required fields: publicUrl, models, stakeAmount'
+          error: 'Missing required fields: publicUrl, models'
         });
         return;
       }
@@ -219,6 +231,23 @@ export class ManagementServer {
         return;
       }
 
+      // Validate and parse stakeAmount
+      let stakeAmountBigInt: bigint | undefined;
+      if (stakeAmount !== undefined && stakeAmount !== null && stakeAmount !== '') {
+        try {
+          // Convert string stake amount to BigInt (in wei)
+          const stakeAmountStr = stakeAmount.toString().trim();
+          if (stakeAmountStr && parseFloat(stakeAmountStr) > 0) {
+            stakeAmountBigInt = ethers.parseEther(stakeAmountStr);
+          }
+        } catch (error) {
+          res.status(400).json({
+            error: `Invalid stake amount: ${stakeAmount}. Must be a valid number.`
+          });
+          return;
+        }
+      }
+
       // Initialize and authenticate SDK with provided private key
       await initializeSDK('base-sepolia');
       await authenticateSDK(privateKey);
@@ -228,12 +257,13 @@ export class ManagementServer {
       const { saveConfig, loadConfig } = await import('../config/storage');
       const { extractHostPort } = await import('../utils/network');
 
-      // Prepare registration config
+      // Prepare registration config (ensure minPricePerToken has a value)
       const registrationConfig: RegistrationConfig = {
         apiUrl: publicUrl,
         models: Array.isArray(models) ? models : [models],
-        stakeAmount: ethers.parseEther(stakeAmount.toString()),
-        metadata
+        stakeAmount: stakeAmountBigInt,  // Will use default in registerHost if undefined
+        metadata,
+        minPricePerToken: minPricePerToken || '100'  // Default to minimum price of 100
       };
 
       // Register on blockchain (WITHOUT starting node)
@@ -348,8 +378,8 @@ export class ManagementServer {
 
       // Validate price
       const priceNum = parseInt(price);
-      if (isNaN(priceNum) || priceNum < 100 || priceNum > 100000) {
-        res.status(400).json({ error: 'Price must be between 100 and 100000' });
+      if (isNaN(priceNum) || priceNum < DEFAULT_PRICE_PER_TOKEN_NUMBER || priceNum > Number(MAX_PRICE_PER_TOKEN)) {
+        res.status(400).json({ error: `Price must be between ${DEFAULT_PRICE_PER_TOKEN_NUMBER} and ${Number(MAX_PRICE_PER_TOKEN)}` });
         return;
       }
 
@@ -398,7 +428,8 @@ export class ManagementServer {
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        this.server = this.app.listen(this.config.port, () => {
+        // Bind to 0.0.0.0 for Docker compatibility (accessible from host)
+        this.server = this.app.listen(this.config.port, '0.0.0.0', () => {
           this.startTime = Date.now();
           resolve();
         });

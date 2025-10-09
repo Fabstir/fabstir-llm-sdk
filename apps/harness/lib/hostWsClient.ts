@@ -53,14 +53,20 @@ export class HostWsClient {
         }
 
         this.ws = new WebSocket(wsUrl);
+        let hasConnected = false;
 
         this.ws.onopen = () => {
+          hasConnected = true;
           this.retries = 0;
           this.shouldReconnect = true;
           resolve();
         };
 
         this.ws.onerror = (error) => {
+          if (!hasConnected) {
+            // Initial connection failed - don't auto-reconnect
+            this.shouldReconnect = false;
+          }
           reject(new Error(`WebSocket connection failed: ${error}`));
         };
 
@@ -69,7 +75,10 @@ export class HostWsClient {
         };
 
         this.ws.onclose = () => {
-          this.handleDisconnect();
+          if (hasConnected) {
+            // Only auto-reconnect if we had a successful connection before
+            this.handleDisconnect();
+          }
         };
       } catch (error) {
         reject(error);
@@ -122,7 +131,7 @@ export class HostWsClient {
         this.onHistoryCallback?.(message.lines);
       }
     } catch (error) {
-      console.error('Failed to parse WebSocket message:', error);
+      // Silently ignore parse errors - could be malformed messages from an unexpected source
     }
   }
 
@@ -152,7 +161,7 @@ export class HostWsClient {
       await this.connect();
     } catch (error) {
       // Reconnection failed, handleDisconnect will retry if under max retries
-      console.error('WebSocket reconnection failed:', error);
+      // Silently fail - the error is expected when the server isn't running
     }
   }
 }

@@ -15,6 +15,7 @@ import { spawnInferenceServer, stopInferenceServer, ProcessHandle } from '../pro
 import { extractHostPort, verifyPublicEndpoint, warnIfLocalhost } from '../utils/network';
 import { showNetworkTroubleshooting } from '../utils/diagnostics';
 import { saveConfig, loadConfig } from '../config/storage';
+import { DEFAULT_PRICE_PER_TOKEN } from '@fabstir/sdk-core';
 
 /**
  * Register the register command with the CLI
@@ -26,7 +27,7 @@ export function registerRegisterCommand(program: Command): void {
     .option('--stake <amount>', 'Stake amount in FAB (default: 1000)', '1000')
     .option('--models <models>', 'Comma-separated list of supported models')
     .option('--url <url>', 'Public URL for your host')
-    .option('--price <amount>', 'Minimum price per token (100-100,000, default: 2000)', '2000')
+    .option('--price <amount>', `Minimum price per token (100-100,000, default: ${DEFAULT_PRICE_PER_TOKEN})`, DEFAULT_PRICE_PER_TOKEN)
     .option('--force', 'Skip confirmation prompts')
     .option('-k, --private-key <key>', 'Private key to use (otherwise uses wallet file)')
     .option('-r, --rpc-url <url>', 'RPC URL', process.env.RPC_URL_BASE_SEPOLIA)
@@ -40,7 +41,7 @@ export function registerRegisterCommand(program: Command): void {
           stakeAmount: ethers.parseEther(options.stake),
           apiUrl: options.url || 'http://localhost:8080',
           models: options.models ? options.models.split(',') : ['gpt-3.5-turbo'],
-          minPricePerToken: options.price || '2000'
+          minPricePerToken: options.price || DEFAULT_PRICE_PER_TOKEN
         };
 
         await executeRegistration(config);
@@ -107,7 +108,7 @@ export async function executeRegistration(
     console.log(chalk.gray(`  Stake: ${ethers.formatUnits(config.stakeAmount || 1000000000000000000000n, 18)} FAB`));
 
     // Show pricing
-    const priceNum = parseInt(config.minPricePerToken || '2000');
+    const priceNum = parseInt(config.minPricePerToken || DEFAULT_PRICE_PER_TOKEN);
     const priceInUSDC = (priceNum / 1000000).toFixed(6);
     console.log(chalk.gray(`  Min Price: ${priceNum} (${priceInUSDC} USDC/token)`));
 
