@@ -52,7 +52,7 @@ const SESSION_DEPOSIT_AMOUNT = '2'; // $2 USDC
 const PROOF_INTERVAL = 1000; // Proof every 1000 tokens (production default)
 const SESSION_DURATION = 86400; // 1 day
 const EXPECTED_TOKENS = 100; // Expected tokens to generate in test
-const DEFAULT_PRICE_PER_TOKEN = 1; // Fallback: 0.000001 USDC per token (used if host pricing unavailable)
+const DEFAULT_PRICE_PER_TOKEN = 100; // Fallback: 0.0001 USDC per token (minimum acceptable pricing)
 
 // ERC20 ABIs
 const erc20BalanceOfAbi = [{
@@ -182,7 +182,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
       console.log(`[S5 Seed] Pre-cached test seed for ${userAddr}`);
     }
 
-    if (sdk) {
+    if (sdk && sdk.isAuthenticated()) {
       const timer = setTimeout(() => {
         console.log("Reading initial balances...");
         readAllBalances();
@@ -208,6 +208,11 @@ export default function BaseUsdcMvpFlowSDKTest() {
   async function readAllBalances() {
     try {
       const newBalances: Balances = {};
+
+      if (!sdk || !sdk.isAuthenticated()) {
+        console.log("SDK not authenticated yet, skipping balance read");
+        return;
+      }
 
       if (sdk) {
         const contracts = getContractAddresses();
@@ -514,7 +519,8 @@ export default function BaseUsdcMvpFlowSDKTest() {
         address: host.address,
         endpoint: host.apiUrl || host.endpoint || `http://localhost:8080`,  // Use endpoint property name
         models: host.supportedModels || [],
-        pricePerToken: 2000 // Default price
+        pricePerToken: 2000, // Default price (legacy)
+        minPricePerToken: host.minPricePerToken || 0  // NEW: Include pricing from blockchain
       }));
 
       // Filter hosts that support our model

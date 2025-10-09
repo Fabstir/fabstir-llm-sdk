@@ -24,7 +24,7 @@ echo -e "${GREEN}✅ Container is running${NC}"
 # Start management server
 echo ""
 echo "🚀 Starting management server on port 3001..."
-docker exec -d fabstir-host-test sh -c 'cd /app && node --require /app/polyfills.js dist/index.js serve --port 3001'
+docker exec -d fabstir-host-test sh -c 'cd /app && node --require /app/polyfills.js dist/index.js serve --port 3001 --cors "http://localhost:3000,http://localhost:3006"'
 
 # Wait for server to initialize
 echo "⏳ Waiting for server to start..."
@@ -39,6 +39,7 @@ if curl -s http://localhost:3001/health > /dev/null 2>&1; then
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo -e "${YELLOW}📍 Management API:${NC} http://localhost:3001"
   echo -e "${YELLOW}🌐 Browser UI:${NC}     http://localhost:3000/node-management-enhanced"
+  echo -e "${YELLOW}            or:${NC}     http://localhost:3006/node-management-enhanced"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
   echo "To stop the server:"

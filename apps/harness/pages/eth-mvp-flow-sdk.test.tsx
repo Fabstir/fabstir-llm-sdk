@@ -47,7 +47,7 @@ const TEST_TREASURY_ADDRESS = process.env.NEXT_PUBLIC_TEST_TREASURY_ADDRESS!;
 const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_KEY!;
 
 // Session configuration
-const SESSION_DEPOSIT_AMOUNT = '0.0006'; // ~$2.40 ETH deposit (same value as USDC test)
+const SESSION_DEPOSIT_AMOUNT = '0.01'; // 0.01 ETH deposit (~$40 at ETH price) - enough for proof interval minimum
 // PRICE_PER_TOKEN removed - now using actual host minPricePerToken from blockchain
 const PROOF_INTERVAL = 1000; // Proof every 1000 tokens (production default)
 const SESSION_DURATION = 86400; // 1 day
@@ -477,7 +477,8 @@ export default function BaseEthMvpFlowSDKTest() {
         address: host.address,
         endpoint: host.apiUrl || host.endpoint || `http://localhost:8080`,  // Use endpoint property name
         models: host.supportedModels || [],
-        pricePerToken: 2000 // Default price
+        pricePerToken: 2000, // Default price (legacy)
+        minPricePerToken: host.minPricePerToken || 0  // NEW: Include pricing from blockchain
       }));
 
       // Filter hosts that support our model
@@ -494,10 +495,11 @@ export default function BaseEthMvpFlowSDKTest() {
       setActiveHosts(modelSupported);
 
       // Set host pricing from blockchain (with fallback to default)
-      // minPricePerToken is raw integer, convert to ETH string format for compatibility
+      // minPricePerToken is in USDC scale (100 = 0.0001 USDC per token)
+      // For ETH testnet, convert to a very small ETH amount
       const pricingRaw = Number(selected.minPricePerToken || 0);
       const pricingEth = pricingRaw > 0
-        ? ethers.formatUnits(pricingRaw, 18) // Convert from wei to ETH
+        ? (pricingRaw / 100000000).toFixed(9) // Convert USDC price to ETH (divide by 100M for testnet)
         : DEFAULT_PRICE_PER_TOKEN;
       setHostPricing(pricingEth);
       addLog(`💵 Host pricing: ${pricingEth} ETH/token (raw: ${pricingRaw})`);

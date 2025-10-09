@@ -16,7 +16,7 @@ docker run -d \
   -v ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-node/target/release/fabstir-llm-node:/usr/local/bin/fabstir-llm-node:ro \
   -v ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-sdk/.env.test:/app/.env.test:ro \
   --env-file ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-sdk/.env.test \
-  -e HOST_PRIVATE_KEY="${TEST_HOST_2_PRIVATE_KEY}" \
+  -e HOST_PRIVATE_KEY="${TEST_HOST_1_PRIVATE_KEY}" \
   --entrypoint /bin/sh \
   fabstir-host-cli:local \
   -c "while true; do sleep 3600; done"
