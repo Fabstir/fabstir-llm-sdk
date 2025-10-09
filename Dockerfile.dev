@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y \
     xvfb libgtk-3-0 libnss3 libxss1 libasound2 \
     libatk1.0-0 libatk-bridge2.0-0 libdrm2 libgbm1 libxshmfence1 \
     wget \
+    # Docker CLI
+    docker.io \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Global Node tools for SDK dev ---
@@ -30,6 +32,9 @@ RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 RUN id -u developer >/dev/null 2>&1 || useradd -m -s /bin/bash developer && \
     echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
+# --- Add developer to docker group ---
+RUN groupadd -f docker && usermod -aG docker developer
+
 # --- Fix node_modules permissions for developer ---
 RUN mkdir -p /workspace/node_modules && chown -R developer:developer /workspace/node_modules
 RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
@@ -40,4 +45,3 @@ USER developer
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/bin/bash"]
-
