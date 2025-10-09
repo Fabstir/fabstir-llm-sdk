@@ -294,6 +294,9 @@ importers:
       '@vitest/ui':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.2
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@24.5.2)(@vitest/ui@3.2.4)(jsdom@23.2.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))

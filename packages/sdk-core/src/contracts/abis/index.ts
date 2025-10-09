@@ -7,7 +7,7 @@
 // Import all ABIs from local folder
 import JobMarketplaceABI from './JobMarketplaceWithModels-CLIENT-ABI.json';
 import HostEarningsABI from './HostEarnings-CLIENT-ABI.json';
-import NodeRegistryABI from './NodeRegistry.json';
+import NodeRegistryABI from './NodeRegistryWithModels-CLIENT-ABI.json';
 import ProofSystemABI from './ProofSystem-CLIENT-ABI.json';
 import ERC20ABI from './ERC20-ABI.json';
 import BaseAccountFactoryABI from './BaseAccountFactory-ABI.json';

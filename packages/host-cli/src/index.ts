@@ -5,6 +5,9 @@
  * Entry point for the host node management tool
  */
 
+// Polyfill IndexedDB for Node.js (required for S5 storage in SDK)
+import 'fake-indexeddb/auto';
+
 import { Command } from 'commander';
 import { registerInitCommand } from './commands/init';
 import { registerConfigCommand } from './commands/config';

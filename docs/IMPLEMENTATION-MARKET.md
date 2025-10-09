@@ -1649,6 +1649,694 @@ Before starting:
 
 ---
 
+## Manual Testing Guide
+
+**Purpose**: This section collates all deferred manual tests from the implementation. Complete these tests to verify the pricing implementation works end-to-end.
+
+**⚡ Automated Test Status (2025-01-08)**:
+- ✅ Test Suite 1: Host CLI - Registration with Pricing (4/4 passed)
+- ✅ Test Suite 2: Host CLI - Info Command (11/11 passed)
+- ✅ Test Suite 3: Host CLI - Update Pricing (4/4 passed)
+- **Total**: 19/19 automated unit tests passing
+
+**Remaining Manual Testing**:
+Test Suites 4-10 require actual blockchain interaction, running nodes, and browser UI testing. These cannot be fully automated and require manual verification.
+
+**Prerequisites**:
+- Contracts deployed to Base Sepolia (Jan 28, 2025)
+- Test accounts funded with FAB tokens and USDC
+- Host CLI built and configured
+- Test harness running (`cd apps/harness && pnpm dev`)
+- TEST_HOST_1 and TEST_HOST_2 ready to register
+- Production node running on http://localhost:8080 (for session tests)
+
+**Environment Setup**:
+```bash
+# Required environment variables in .env.test:
+CONTRACT_NODE_REGISTRY=0xC8dDD546e0993eEB4Df03591208aEDF6336342D7
+CONTRACT_JOB_MARKETPLACE=0x462050a4a551c4292586D9c1DE23e3158a9bF3B3
+TEST_HOST_1_PRIVATE_KEY=0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2
+TEST_HOST_1_ADDRESS=0x4594F755F593B517Bb3194F4DeC20C48a3f04504
+TEST_HOST_2_PRIVATE_KEY=0x9ac736a402fa7163b3a30c31b379aa2e3979eb9a3a2b01890485c334a6da575b
+TEST_HOST_2_ADDRESS=0x20f2A5FCDf271A5E6b04383C2915Ea980a50948c
+```
+
+---
+
+### Test Suite 1: Host CLI - Registration with Pricing (Sub-phase 3.1) ✅
+
+**Goal**: Verify host registration with pricing parameter works correctly.
+
+**Automated Test Results** (2025-01-08): ✅ ALL 4 TESTS PASSED
+- ✅ register with --price flag succeeds
+- ✅ register without --price uses default (2000)
+- ✅ price is passed to registerHost correctly
+- ✅ price is displayed in registration output
+
+**Test File**: `packages/host-cli/tests/commands/register-pricing.test.ts`
+
+#### Test 1.1: Register with Default Price
+```bash
+# Command
+cd packages/host-cli
+fabstir-host register \
+  --url "http://localhost:8080" \
+  --models "CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf" \
+  --stake "1000"
+```
+
+**Expected Output**:
+```
+✅ Host registered successfully!
+Transaction: 0x...
+Address: 0x4594F755F593B517Bb3194F4DeC20C48a3f04504
+Min Price: 2000 (0.002000 USDC/token)
+```
+
+**Verification**:
+- [ ] Transaction succeeds
+- [ ] Output shows "Min Price: 2000"
+- [ ] USDC format displayed correctly (0.002000)
+
+#### Test 1.2: Register with Custom Price
+```bash
+# Command
+fabstir-host register \
+  --url "http://localhost:8081" \
+  --models "CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf" \
+  --stake "1000" \
+  --price "5000"
+```
+
+**Expected Output**:
+```
+✅ Host registered successfully!
+Transaction: 0x...
+Min Price: 5000 (0.005000 USDC/token)
+```
+
+**Verification**:
+- [ ] Transaction succeeds
+- [ ] Output shows "Min Price: 5000"
+- [ ] USDC format shows 0.005000
+
+#### Test 1.3: Register with Invalid Price (Below Minimum)
+```bash
+# Command
+fabstir-host register \
+  --url "http://localhost:8080" \
+  --models "CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf" \
+  --stake "1000" \
+  --price "50"
+```
+
+**Expected Output**:
+```
+❌ Error: Price must be between 100 and 100000, got 50
+```
+
+**Verification**:
+- [ ] Registration fails with clear error message
+- [ ] No transaction submitted
+
+#### Test 1.4: Register with Invalid Price (Above Maximum)
+```bash
+# Command
+fabstir-host register \
+  --url "http://localhost:8080" \
+  --models "CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf" \
+  --stake "1000" \
+  --price "150000"
+```
+
+**Expected Output**:
+```
+❌ Error: Price must be between 100 and 100000, got 150000
+```
+
+**Verification**:
+- [ ] Registration fails with clear error message
+- [ ] No transaction submitted
+
+---
+
+### Test Suite 2: Host CLI - Info Command Pricing Display (Sub-phase 3.3) ✅
+
+**Goal**: Verify info command displays pricing correctly.
+
+**Automated Test Results** (2025-01-08): ✅ ALL 11 TESTS PASSED
+- ✅ info displays minimum price
+- ✅ info shows price in USDC/token format
+- ✅ info handles hosts without pricing (migration case)
+- ✅ address validation works
+- ✅ error handling for network issues
+- ✅ wallet file handling
+- ✅ contract call validation
+- (Plus 4 additional comprehensive tests)
+
+**Test File**: `packages/host-cli/tests/commands/info.test.ts`
+
+#### Test 2.1: Display Registered Host Info
+```bash
+# Command (after registering TEST_HOST_1 in Test 1.1)
+fabstir-host info --address 0x4594F755F593B517Bb3194F4DeC20C48a3f04504
+```
+
+**Expected Output**:
+```
+Host Information
+================
+
+Address: 0x4594F755F593B517Bb3194F4DeC20C48a3f04504
+Status: Active
+API URL: http://localhost:8080
+Staked: 1000 FAB
+
+Pricing:
+  Minimum per token: 2000 (0.002 USDC/token)
+  Per 1000 tokens: 2 USDC
+  Example session cost: 20 USDC (10,000 tokens)
+
+Supported Models:
+  - CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf
+```
+
+**Verification**:
+- [ ] Pricing section appears
+- [ ] Shows raw value (2000) and USDC format (0.002)
+- [ ] Per 1000 tokens calculation correct (2 USDC)
+- [ ] Example session cost correct (20 USDC for 10K tokens)
+
+#### Test 2.2: Display Host with Custom Pricing
+```bash
+# Command (after registering TEST_HOST_2 with price 5000)
+fabstir-host info --address 0x20f2A5FCDf271A5E6b04383C2915Ea980a50948c
+```
+
+**Expected Output**:
+```
+Pricing:
+  Minimum per token: 5000 (0.005 USDC/token)
+  Per 1000 tokens: 5 USDC
+  Example session cost: 50 USDC (10,000 tokens)
+```
+
+**Verification**:
+- [ ] Shows custom price (5000)
+- [ ] All calculations match the custom price
+
+---
+
+### Test Suite 3: Host CLI - Update Pricing Command (Sub-phase 3.2) ✅
+
+**Goal**: Verify pricing update command works correctly.
+
+**Automated Test Results** (2025-01-08): ✅ ALL 4 TESTS PASSED
+- ✅ update-pricing calls SDK with correct price
+- ✅ displays current and new pricing
+- ✅ rejects when host not registered
+- ✅ validates price range (100-100,000)
+
+**Test File**: `packages/host-cli/tests/commands/update-pricing.test.ts`
+
+#### Test 3.1: Update to Higher Price
+```bash
+# Command (update TEST_HOST_1 from 2000 to 3000)
+fabstir-host update-pricing --price 3000
+```
+
+**Expected Output**:
+```
+Current price: 2000 (0.002 USDC/token)
+New price: 3000 (0.003 USDC/token)
+? Update pricing on-chain? (Y/n) Y
+
+✅ Pricing updated!
+Transaction: 0x...
+```
+
+**Verification**:
+- [ ] Shows before/after comparison correctly
+- [ ] Transaction succeeds
+- [ ] Run `info` command to verify new price
+
+#### Test 3.2: Update to Lower Price
+```bash
+# Command (update TEST_HOST_1 from 3000 to 1500)
+fabstir-host update-pricing --price 1500 --yes
+```
+
+**Expected Output**:
+```
+Current price: 3000 (0.003 USDC/token)
+New price: 1500 (0.0015 USDC/token)
+
+✅ Pricing updated!
+Transaction: 0x...
+```
+
+**Verification**:
+- [ ] Update succeeds
+- [ ] `--yes` flag skips confirmation
+- [ ] Verify with `info` command
+
+#### Test 3.3: Update with Invalid Price
+```bash
+# Command
+fabstir-host update-pricing --price 50
+```
+
+**Expected Output**:
+```
+❌ Error: Price must be between 100 and 100000
+```
+
+**Verification**:
+- [ ] Fails with clear error
+- [ ] No transaction submitted
+
+---
+
+### Test Suite 4: Browser UI - Node Registration (Sub-phase 4.1)
+
+**Goal**: Verify browser UI registration form includes pricing and validates correctly.
+
+**Setup**:
+```bash
+cd apps/harness
+pnpm dev
+# Navigate to http://localhost:3000
+# Open browser DevTools console
+```
+
+#### Test 4.1: Register with Default Price
+**Steps**:
+1. Navigate to test harness page with NodeManagementClient
+2. Fill in registration form:
+   - Public URL: `http://localhost:8080`
+   - Models: `CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf`
+   - Stake: `1000`
+   - **Min Price Per Token**: Leave as default (2000)
+3. Observe real-time USDC conversion display
+4. Click "Register Node"
+
+**Expected Behavior**:
+- [ ] Default price input shows "2000"
+- [ ] Real-time display shows:
+  - "$0.002000 USDC per token"
+  - "$2.000 USDC per 1,000 tokens"
+  - "$20.00 USDC per 10,000 tokens"
+- [ ] Registration succeeds
+- [ ] Success message shows "Min Price: 2000 (0.002000 USDC/token)"
+
+#### Test 4.2: Register with Custom Price
+**Steps**:
+1. Fill in registration form
+2. Change **Min Price Per Token** to `5000`
+3. Observe real-time conversion update
+4. Click "Register Node"
+
+**Expected Behavior**:
+- [ ] Real-time display updates to:
+  - "$0.005000 USDC per token"
+  - "$5.000 USDC per 1,000 tokens"
+  - "$50.00 USDC per 10,000 tokens"
+- [ ] Registration succeeds
+- [ ] Success message shows "Min Price: 5000 (0.005000 USDC/token)"
+
+#### Test 4.3: Validation - Below Minimum
+**Steps**:
+1. Try to set **Min Price Per Token** to `50`
+2. Attempt registration
+
+**Expected Behavior**:
+- [ ] HTML5 validation prevents input < 100 (browser shows error)
+- [ ] Cannot submit form with invalid value
+
+#### Test 4.4: Validation - Above Maximum
+**Steps**:
+1. Try to set **Min Price Per Token** to `150000`
+2. Attempt registration
+
+**Expected Behavior**:
+- [ ] HTML5 validation prevents input > 100000
+- [ ] Cannot submit form with invalid value
+
+---
+
+### Test Suite 5: Browser UI - Pricing Update (Sub-phase 4.2)
+
+**Goal**: Verify pricing update UI works correctly.
+
+**Prerequisites**: TEST_HOST_1 must be registered (from Test Suite 4)
+
+#### Test 5.1: Display Current Price
+**Steps**:
+1. Navigate to Node Management page
+2. Observe "Pricing Management" section
+
+**Expected Behavior**:
+- [ ] Current price displayed: "2000 (0.002000 USDC/token)"
+- [ ] Display matches actual on-chain value
+
+#### Test 5.2: Update to Higher Price
+**Steps**:
+1. In "New Price" input, enter `4000`
+2. Click "Update Price"
+3. Wait for transaction confirmation
+
+**Expected Behavior**:
+- [ ] Transaction submits successfully
+- [ ] UI shows transaction hash
+- [ ] After confirmation, page refreshes
+- [ ] Current price updates to "4000 (0.004000 USDC/token)"
+
+#### Test 5.3: Update to Lower Price
+**Steps**:
+1. In "New Price" input, enter `1800`
+2. Click "Update Price"
+
+**Expected Behavior**:
+- [ ] Transaction succeeds
+- [ ] UI refreshes with new price "1800 (0.001800 USDC/token)"
+
+---
+
+### Test Suite 6: Browser UI - Host Discovery with Price Filtering (Sub-phase 4.3)
+
+**Goal**: Verify host discovery UI shows pricing and filtering works.
+
+**Prerequisites**:
+- TEST_HOST_1 registered with price 2000
+- TEST_HOST_2 registered with price 5000
+
+**Page**: Navigate to `http://localhost:3000/chat-context-popupfree-demo`
+
+#### Test 6.1: Discover Hosts Without Filter
+**Steps**:
+1. Click "Start Session" or "Discover Hosts" button
+2. Observe host list
+
+**Expected Behavior**:
+- [ ] Both hosts appear in list
+- [ ] Each host shows pricing:
+  - TEST_HOST_1: "Min Price: 2000 (0.002 USDC/token)"
+  - TEST_HOST_2: "Min Price: 5000 (0.005 USDC/token)"
+- [ ] Hosts sorted by price (lowest first by default)
+
+#### Test 6.2: Filter by Max Price
+**Steps**:
+1. Enter "3000" in "Max Price" filter input
+2. Click "Discover Hosts"
+
+**Expected Behavior**:
+- [ ] Only TEST_HOST_1 appears (price 2000 < 3000)
+- [ ] TEST_HOST_2 filtered out (price 5000 > 3000)
+
+#### Test 6.3: Sort by Price
+**Steps**:
+1. Clear max price filter
+2. Select "Sort by: Lowest Price"
+3. Discover hosts
+
+**Expected Behavior**:
+- [ ] TEST_HOST_1 appears first (2000)
+- [ ] TEST_HOST_2 appears second (5000)
+
+#### Test 6.4: Sort by Random
+**Steps**:
+1. Select "Sort by: Random"
+2. Discover hosts multiple times
+
+**Expected Behavior**:
+- [ ] Both hosts appear
+- [ ] Order changes randomly between discoveries
+
+#### Test 6.5: Select Host and View Pricing
+**Steps**:
+1. Discover hosts
+2. Click "Select" on TEST_HOST_1
+3. Observe session info display
+
+**Expected Behavior**:
+- [ ] Selected host pricing displayed
+- [ ] System message shows: "Price: 0.002 USDC/token"
+- [ ] Session will use this host's pricing
+
+---
+
+### Test Suite 7: Session Creation with Pricing (Sub-phase 5.1)
+
+**Goal**: Verify sessions respect host pricing and validation works.
+
+**Prerequisites**:
+- TEST_HOST_1 registered with price 2000
+- Node running on http://localhost:8080
+- Test user funded with USDC
+
+**Pages to Test**:
+1. `http://localhost:3000/usdc-mvp-flow-sdk.test` (USDC payments)
+2. `http://localhost:3000/eth-mvp-flow-sdk.test` (ETH payments)
+3. `http://localhost:3000/chat-context-popupfree-demo` (Full UI)
+
+#### Test 7.1: USDC Flow - Session Creation with Host Pricing
+**Page**: `usdc-mvp-flow-sdk.test.tsx`
+
+**Steps**:
+1. Click through steps sequentially
+2. Observe host discovery (Step 3)
+3. Observe session creation (Step 4)
+4. Complete full flow
+
+**Expected Behavior**:
+- [ ] Step 3: Host pricing fetched and displayed
+  - Log: "💵 Host pricing: 2000 (0.002000 USDC/token)"
+- [ ] Step 4: Session created with host pricing
+  - No hardcoded PRICE_PER_TOKEN used
+- [ ] Cost calculations use actual host pricing:
+  - "Total cost: X USDC (tokens × 2000/token)"
+- [ ] Flow completes successfully
+
+#### Test 7.2: ETH Flow - Session Creation with Host Pricing
+**Page**: `eth-mvp-flow-sdk.test.tsx`
+
+**Steps**:
+1. Click through steps sequentially
+2. Observe host discovery
+3. Observe session creation with ETH payment
+
+**Expected Behavior**:
+- [ ] Host pricing converted to ETH format correctly
+  - Raw value from contract: 2000
+  - Converted to ETH string for compatibility
+- [ ] Session uses correct pricing
+- [ ] Cost calculations in ETH match pricing
+- [ ] Flow completes successfully
+
+#### Test 7.3: Chat UI - Session with Host Minimum
+**Page**: `chat-context-popupfree-demo.tsx`
+
+**Steps**:
+1. Discover hosts
+2. Select TEST_HOST_1 (price 2000)
+3. Start session (don't specify custom price)
+4. Send prompt and generate response
+
+**Expected Behavior**:
+- [ ] No PRICE_PER_TOKEN constant in logs
+- [ ] Session uses host's minPricePerToken (2000)
+- [ ] Cost display uses host pricing
+- [ ] Response generated successfully
+
+#### Test 7.4: Session Validation - Price Below Minimum (Should Fail)
+**Note**: This test requires modifying code temporarily to force a low price.
+
+**Steps**:
+1. Temporarily modify session creation to use price 1000
+2. Attempt to create session with TEST_HOST_1 (min 2000)
+
+**Expected Behavior**:
+- [ ] SessionManager throws PricingValidationError
+- [ ] Error message: "Price 1000 is below host minimum 2000"
+- [ ] Session not created
+- [ ] Clear error displayed to user
+
+**Cleanup**: Remove temporary modification
+
+---
+
+### Test Suite 8: Proof Interval Optimization (Sub-phase 5.2)
+
+**Goal**: Verify 1000-token proof interval works correctly.
+
+**Prerequisites**: Session running from Test Suite 7
+
+#### Test 8.1: Verify Proof Interval Configuration
+**Steps**:
+1. Check session configuration in any test page
+2. Look for PROOF_INTERVAL constant
+
+**Expected Behavior**:
+- [ ] All pages use: `const PROOF_INTERVAL = 1000;`
+- [ ] Comment indicates: "(production default)"
+- [ ] No page uses 100 tokens anymore
+
+#### Test 8.2: Monitor Proof Submissions During Session
+**Steps**:
+1. Start a session with long conversation
+2. Monitor console logs for proof submissions
+3. Generate > 1000 tokens
+
+**Expected Behavior**:
+- [ ] First proof submitted around 1000 tokens
+- [ ] Subsequent proofs at ~1000 token intervals
+- [ ] Gas costs reduced vs. 100-token intervals
+
+#### Test 8.3: Verify Session Completion with 1000-Token Intervals
+**Steps**:
+1. Complete full session from Test 7.1 or 7.2
+2. Verify final payment calculation
+
+**Expected Behavior**:
+- [ ] Session completes successfully
+- [ ] Payment distributed correctly (90% host, 10% treasury)
+- [ ] Proof verification succeeded at ~1000 token intervals
+
+---
+
+### Test Suite 9: Integration Tests (Phase 6 - Sub-phase 6.1)
+
+**Goal**: End-to-end verification of complete pricing lifecycle.
+
+#### Test 9.1: Full Pricing Lifecycle
+**Steps**:
+1. Register TEST_HOST_1 with price 2000 (CLI)
+2. Verify registration (CLI info command)
+3. Update price to 3000 (CLI update-pricing)
+4. Verify update (CLI info command)
+5. Discover hosts from browser UI
+6. Create session at host minimum price
+7. Complete session successfully
+
+**Expected Behavior**:
+- [ ] All steps complete without errors
+- [ ] Price changes reflected immediately
+- [ ] Session uses updated pricing
+- [ ] Payment calculated with correct price
+
+#### Test 9.2: Multi-Host Price Discovery
+**Steps**:
+1. Register TEST_HOST_1 with price 2000
+2. Register TEST_HOST_2 with price 5000
+3. Discover hosts without filter
+4. Discover hosts with max price 3000
+5. Select and create session with cheapest host
+
+**Expected Behavior**:
+- [ ] Both hosts discovered initially
+- [ ] Filter correctly excludes expensive host
+- [ ] Session created with cheapest host's pricing
+- [ ] Cost savings visible to user
+
+#### Test 9.3: Pricing Validation Across All Flows
+**Steps**:
+1. Attempt session with price below minimum (should fail)
+2. Attempt session with price equal to minimum (should succeed)
+3. Attempt session with price above minimum (should succeed)
+4. Attempt session without specifying price (should use host minimum)
+
+**Expected Behavior**:
+- [ ] Price < minimum: Clear error "Price below host minimum"
+- [ ] Price = minimum: Success
+- [ ] Price > minimum: Success
+- [ ] No price specified: Uses host minimum, success
+
+---
+
+### Test Suite 10: Regression Testing
+
+**Goal**: Verify existing functionality still works after pricing changes.
+
+#### Test 10.1: Basic Session Flow (No Pricing Awareness)
+**Steps**:
+1. Use any test harness page
+2. Complete session without explicitly checking pricing
+3. Verify session completes normally
+
+**Expected Behavior**:
+- [ ] Session creation succeeds
+- [ ] Pricing automatically fetched from host
+- [ ] User not required to manually specify price
+- [ ] Backward compatibility maintained
+
+#### Test 10.2: Contract Interaction Verification
+**Steps**:
+1. Verify NodeRegistry.getNodeFullInfo() returns 7 fields (including minPricePerToken)
+2. Verify JobMarketplace.createSessionJob() accepts pricePerToken parameter
+3. Verify price validation occurs at contract level
+
+**Expected Behavior**:
+- [ ] getNodeFullInfo returns correct structure
+- [ ] createSessionJob validates pricing
+- [ ] Contract reverts if price < host minimum
+
+---
+
+### Completion Checklist
+
+After completing all test suites:
+
+#### CLI Functionality
+- [ ] Host registration with pricing works (default and custom)
+- [ ] Price validation prevents invalid values
+- [ ] Info command displays pricing correctly
+- [ ] Update-pricing command works
+- [ ] Pricing changes reflected immediately
+
+#### Browser UI Functionality
+- [ ] Registration form includes pricing input
+- [ ] Price validation works in forms
+- [ ] Real-time USDC conversion displays
+- [ ] Pricing update UI works
+- [ ] Current price displayed correctly
+- [ ] Host discovery shows pricing
+- [ ] Price filtering works
+- [ ] Price sorting works
+
+#### Session Creation
+- [ ] Sessions use host minimum pricing by default
+- [ ] Sessions accept explicit pricing >= minimum
+- [ ] Sessions reject pricing < minimum with clear error
+- [ ] USDC and ETH flows both work
+- [ ] Cost calculations use actual host pricing
+
+#### Proof Intervals
+- [ ] 1000-token interval configured everywhere
+- [ ] Proofs submitted at correct intervals
+- [ ] Sessions complete successfully with new interval
+
+#### Integration
+- [ ] Full lifecycle (register → update → discover → session) works
+- [ ] Multi-host scenarios work
+- [ ] Price discovery helps users find best deals
+- [ ] No regressions in existing functionality
+
+#### Documentation
+- [ ] All manual tests documented in this guide
+- [ ] Results logged and issues tracked
+- [ ] Any bugs found have been reported/fixed
+
+---
+
+**Next Steps After Testing**:
+1. Mark all checkboxes as you complete tests
+2. Document any issues encountered in GitHub issues
+3. Update this guide with any additional tests discovered
+4. Once all tests pass, update Phase 6 status to "Complete"
+5. Prepare for production deployment
+
+---
+
 **Document Version**: 1.0
 **Last Updated**: January 7, 2025
 **Status**: Ready for review and team approval
