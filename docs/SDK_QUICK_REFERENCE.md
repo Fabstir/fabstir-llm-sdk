@@ -237,6 +237,68 @@ PAYMENT_SPLIT = {
 BASE_SEPOLIA_CHAIN_ID = 84532
 ```
 
+## Dual Pricing System
+
+Hosts set two separate minimum prices for native token (ETH/BNB) and stablecoin (USDC) payments.
+
+### Registering a Host with Dual Pricing
+
+```typescript
+const hostManager = sdk.getHostManager();
+
+await hostManager.registerHostWithModels({
+  apiUrl: 'http://localhost:8080',
+  supportedModels: ['model-hash-here'],
+  metadata: {
+    hardware: { gpu: 'RTX 4090', vram: 24, ram: 64 },
+    capabilities: ['inference', 'streaming'],
+    location: 'us-west',
+    maxConcurrent: 10,
+    costPerToken: 0.000316
+  },
+  minPricePerTokenNative: '11363636363636',  // ~$0.00005 @ $4400 ETH
+  minPricePerTokenStable: '316'              // 0.000316 USDC
+});
+```
+
+### Pricing Ranges
+
+**Native Token (ETH/BNB):**
+- MIN: `2272727273` wei (~$0.00001 @ $4400 ETH)
+- MAX: `22727272727273` wei (~$0.1 @ $4400 ETH)
+- DEFAULT: `11363636363636` wei (~$0.00005 @ $4400 ETH)
+
+**Stablecoin (USDC):**
+- MIN: `10` (0.00001 USDC per token)
+- MAX: `100000` (0.1 USDC per token)
+- DEFAULT: `316` (0.000316 USDC per token)
+
+### Querying Host Pricing
+
+```typescript
+const hostInfo = await hostManager.getHostStatus(hostAddress);
+console.log('Native pricing:', hostInfo.minPricePerTokenNative.toString(), 'wei');
+console.log('Stable pricing:', hostInfo.minPricePerTokenStable.toString(), 'raw USDC');
+
+// Format for display
+const nativeEth = ethers.formatEther(hostInfo.minPricePerTokenNative);
+const stableUsdc = Number(hostInfo.minPricePerTokenStable) / 1_000_000;
+console.log(`Native: ${nativeEth} ETH/token`);
+console.log(`Stable: ${stableUsdc.toFixed(6)} USDC/token`);
+```
+
+### Updating Host Pricing
+
+```typescript
+const hostManager = sdk.getHostManager();
+
+// Update native pricing
+await hostManager.updatePricingNative('15909090909091');  // ~$0.00007 @ $4400 ETH
+
+// Update stable pricing
+await hostManager.updatePricingStable('500');  // 0.0005 USDC
+```
+
 ## Contract Addresses
 
 **Source of Truth:** `.env.test`

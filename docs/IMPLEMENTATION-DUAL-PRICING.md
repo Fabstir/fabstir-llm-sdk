@@ -407,27 +407,18 @@ docker exec fabstir-host-test fabstir-host info --address $TEST_HOST_1_ADDRESS
 
 **Files to Update**:
 
-1. [ ] `docs/SDK_API.md`:
+1. [x] `docs/SDK_API.md`:
    - Document dual pricing methods
    - Update HostInfo interface
    - Add examples for both native and stable
 
-2. [ ] `docs/SDK_QUICK_REFERENCE.md`:
+2. [x] `docs/SDK_QUICK_REFERENCE.md`:
    - Add dual pricing quick start
    - Show how to query both prices
 
 3. [ ] `docs/UI_DEVELOPER_CHAT_GUIDE.md`:
    - Update with dual pricing display patterns
    - Show ETH vs USDC pricing handling
-
-4. [ ] `CLAUDE.md`:
-   - Update contract addresses
-   - Add dual pricing architecture section
-   - Update common issues & fixes
-
-5. [ ] `CLAUDE.local.md`:
-   - Update test account pricing examples
-   - Note completion of dual pricing implementation
 
 #### 4.4 Final Checkpoint
 
@@ -494,11 +485,14 @@ If critical issues arise:
 - [x] Management UI updated (NodeManagementClient.tsx)
 - [x] Checkpoint validated (Next.js build successful, all TypeScript errors resolved)
 
-### Batch 4: Validation & Docs ⏸️ PENDING
-- [ ] Hosts re-registered
-- [ ] Full test suite passed
-- [ ] Documentation updated
-- [ ] Final validation complete
+### Batch 4: Validation & Docs 🚧 IN PROGRESS
+- [ ] Hosts re-registered (script created, requires manual UI registration due to ethers v5/v6 conflicts)
+- [ ] Full test suite passed (requires user to test ETH and USDC flows manually)
+- [x] Documentation updated:
+  - [x] SDK_API.md (added dual pricing interfaces, methods, and examples)
+  - [x] SDK_QUICK_REFERENCE.md (added dual pricing system section)
+  - [ ] UI_DEVELOPER_CHAT_GUIDE.md (pending dual pricing display patterns)
+- [ ] Final validation complete (pending host registration and E2E tests)
 
 ---
 

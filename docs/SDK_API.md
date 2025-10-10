@@ -1448,8 +1448,10 @@ async registerHostWithModels(
 interface HostRegistrationWithModels {
   metadata: HostMetadata;
   supportedModels: ModelSpec[];
-  stake?: string;           // Optional stake amount
-  apiUrl?: string;          // Host API endpoint
+  stake?: string;                     // Optional stake amount
+  apiUrl?: string;                    // Host API endpoint
+  minPricePerTokenNative: string;     // Minimum price for native token payments (wei)
+  minPricePerTokenStable: string;     // Minimum price for stablecoin payments (raw USDC)
 }
 
 interface HostMetadata {
@@ -1463,6 +1465,36 @@ interface HostMetadata {
   maxConcurrent: number;
   costPerToken: number;
 }
+```
+
+**Pricing Ranges:**
+- **Native Token (ETH/BNB):**
+  - MIN: `2272727273` wei (~$0.00001 @ $4400 ETH)
+  - MAX: `22727272727273` wei (~$0.1 @ $4400 ETH)
+  - DEFAULT: `11363636363636` wei (~$0.00005 @ $4400 ETH)
+  - Range: 10,000x
+
+- **Stablecoin (USDC):**
+  - MIN: `10` (0.00001 USDC per token)
+  - MAX: `100000` (0.1 USDC per token)
+  - DEFAULT: `316` (0.000316 USDC per token)
+  - Range: 10,000x
+
+**Example:**
+```typescript
+await hostManager.registerHostWithModels({
+  apiUrl: 'http://localhost:8080',
+  supportedModels: ['model-hash-here'],
+  metadata: {
+    hardware: { gpu: 'RTX 4090', vram: 24, ram: 64 },
+    capabilities: ['inference', 'streaming'],
+    location: 'us-west',
+    maxConcurrent: 10,
+    costPerToken: 0.000316
+  },
+  minPricePerTokenNative: '11363636363636',  // ~$0.00005 @ $4400 ETH
+  minPricePerTokenStable: '316'              // 0.000316 USDC
+});
 ```
 
 ### findHostsForModel
@@ -1483,6 +1515,8 @@ interface HostInfo {
   stake: bigint;
   reputation: number;
   apiUrl?: string;
+  minPricePerTokenNative: bigint;   // Minimum price for native token (wei)
+  minPricePerTokenStable: bigint;   // Minimum price for stablecoins (raw USDC)
 }
 ```
 
@@ -1506,10 +1540,12 @@ async getHostStatus(hostAddress: string): Promise<{
   stake: bigint;
   metadata?: HostMetadata;
   apiUrl?: string;
+  minPricePerTokenNative: bigint;   // Minimum price for native token (wei)
+  minPricePerTokenStable: bigint;   // Minimum price for stablecoins (raw USDC)
 }>
 ```
 
-**Note:** This method returns registration and model information. To get earnings, use `getHostEarnings()` separately.
+**Note:** This method returns registration, model information, and dual pricing. To get earnings, use `getHostEarnings()` separately.
 
 ### discoverAllActiveHostsWithModels
 
@@ -1576,6 +1612,48 @@ Withdraws accumulated earnings for a host.
 
 ```typescript
 async withdrawEarnings(tokenAddress: string): Promise<string>
+```
+
+### updatePricingNative
+
+Updates the native token pricing for the current host.
+
+```typescript
+async updatePricingNative(newPrice: string): Promise<string>
+```
+
+**Parameters:**
+- `newPrice`: New minimum price in wei (string)
+- Must be within range: `2272727273` to `22727272727273`
+
+**Example:**
+```typescript
+const hostManager = sdk.getHostManager();
+
+// Update native pricing to ~$0.00007 @ $4400 ETH
+const txHash = await hostManager.updatePricingNative('15909090909091');
+console.log('Native pricing updated:', txHash);
+```
+
+### updatePricingStable
+
+Updates the stablecoin pricing for the current host.
+
+```typescript
+async updatePricingStable(newPrice: string): Promise<string>
+```
+
+**Parameters:**
+- `newPrice`: New minimum price in raw USDC units (string)
+- Must be within range: `10` to `100000`
+
+**Example:**
+```typescript
+const hostManager = sdk.getHostManager();
+
+// Update stable pricing to 0.0005 USDC
+const txHash = await hostManager.updatePricingStable('500');
+console.log('Stable pricing updated:', txHash);
 ```
 
 ## Storage Management
