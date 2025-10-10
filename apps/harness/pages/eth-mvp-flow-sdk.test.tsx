@@ -47,7 +47,7 @@ const TEST_TREASURY_ADDRESS = process.env.NEXT_PUBLIC_TEST_TREASURY_ADDRESS!;
 const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_KEY!;
 
 // Session configuration
-const SESSION_DEPOSIT_AMOUNT = '0.01'; // 0.01 ETH deposit (~$40 at ETH price) - enough for proof interval minimum
+const SESSION_DEPOSIT_AMOUNT = '0.012'; // 0.012 ETH deposit (~$52 at $4400 ETH) - covers proof interval (1000 tokens @ 0.000011363636 ETH/token = ~0.0114 ETH)
 // PRICE_PER_TOKEN removed - now using actual host minPricePerTokenNative from blockchain (dual pricing)
 const PROOF_INTERVAL = 1000; // Proof every 1000 tokens (production default)
 const SESSION_DURATION = 86400; // 1 day
