@@ -59,7 +59,7 @@ export default function HostRegistration() {
     }
 
     try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      const provider = new ethers.BrowserProvider(window.ethereum as any);
       await provider.send('eth_requestAccounts', []);
       const signer = await provider.getSigner();
 
@@ -111,33 +111,26 @@ export default function HostRegistration() {
     setRegistrationResult(null);
 
     try {
-      // Build metadata object
+      // Build metadata object matching HostMetadata interface
       const metadata = {
-        url: nodeUrl,
-        region,
-        tier,
-        models: selectedModels.map(m => ({
-          repo: m.repo,
-          file: m.file,
-          sha256: m.sha256
-        })),
-        capabilities: {
-          streaming: true,
-          maxConcurrentRequests: maxConcurrent,
-          supportedFormats: ['json', 'sse']
+        hardware: {
+          gpu: 'RTX 4090',  // Default GPU
+          vram: 24,         // VRAM in GB
+          ram: 64           // System RAM in GB
         },
-        pricing: {
-          pricePerToken,
-          currency: 'USDC'
-        }
+        capabilities: ['inference', 'streaming', 'batch'],
+        location: region,
+        maxConcurrent: maxConcurrent,
+        costPerToken: parseFloat(pricePerToken)
       };
 
       // Register host with models
       const result = await hostManager.registerHostWithModels({
-        nodeUrl,
+        apiUrl: nodeUrl,
         supportedModels: selectedModels,
         metadata,
-        pricePerToken: ethers.parseUnits(pricePerToken, 6) // USDC has 6 decimals
+        minPricePerTokenNative: ethers.parseEther(pricePerToken).toString(), // ETH/BNB price in wei
+        minPricePerTokenStable: ethers.parseUnits(pricePerToken, 6).toString() // USDC price (6 decimals)
       });
 
       setRegistrationResult({

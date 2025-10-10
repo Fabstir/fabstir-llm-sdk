@@ -487,12 +487,12 @@ If critical issues arise:
 - [x] SDK builds successfully (esbuild completes, type errors are pre-existing)
 - [x] Checkpoint validated (build successful)
 
-### Batch 3: UI Integration ⏸️ PENDING
-- [ ] ETH flow updated
-- [ ] USDC flow updated
-- [ ] Base USDC flow updated
-- [ ] Management UI updated
-- [ ] Checkpoint validated
+### Batch 3: UI Integration ✅ COMPLETE
+- [x] ETH flow updated (eth-mvp-flow-sdk.test.tsx)
+- [x] USDC flow updated (usdc-mvp-flow-sdk.test.tsx)
+- [x] Base USDC flow updated (base-usdc-mvp-flow-sdk.test.tsx)
+- [x] Management UI updated (NodeManagementClient.tsx)
+- [x] Checkpoint validated (Next.js build successful, all TypeScript errors resolved)
 
 ### Batch 4: Validation & Docs ⏸️ PENDING
 - [ ] Hosts re-registered

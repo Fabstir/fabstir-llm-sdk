@@ -11,6 +11,11 @@ export interface IStorageManager {
    * Initialize storage with S5 seed
    */
   initialize(seed: string): Promise<void>;
+
+  /**
+   * Check if storage is initialized
+   */
+  isInitialized(): boolean;
   
   /**
    * Store data to S5 network

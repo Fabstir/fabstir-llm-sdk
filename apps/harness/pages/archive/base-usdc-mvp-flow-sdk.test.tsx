@@ -20,14 +20,13 @@ import { createBaseAccountSDK } from "@base-org/account";
 import { encodeFunctionData, parseUnits, createPublicClient, http, getAddress, formatUnits } from "viem";
 import { ethers } from 'ethers';
 import { FabstirSDKCore } from '@fabstir/sdk-core';
-import { cacheSeed, hasCachedSeed } from '../../../packages/sdk-core/src/utils/s5-seed-derivation';
-import type { 
-  PaymentManager, 
-  SessionManager, 
-  HostManager, 
-  StorageManager, 
-  TreasuryManager 
-} from '@fabstir/sdk-core';
+import { cacheSeed, hasCachedSeed } from '@fabstir/sdk-core';
+import type { IPaymentManager, 
+  ISessionManager, 
+  IHostManager, 
+  IStorageManager, 
+  ITreasuryManager 
+ } from '@fabstir/sdk-core';
 
 // Get configuration from environment variables
 const CHAIN_HEX = "0x14a34";  // Base Sepolia
@@ -119,11 +118,11 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
   // SDK instances
   const [sdk, setSdk] = useState<FabstirSDKCore | null>(null);
-  const [paymentManager, setPaymentManager] = useState<PaymentManager | null>(null);
-  const [sessionManager, setSessionManager] = useState<SessionManager | null>(null);
-  const [hostManager, setHostManager] = useState<HostManager | null>(null);
-  const [storageManager, setStorageManager] = useState<StorageManager | null>(null);
-  const [treasuryManager, setTreasuryManager] = useState<TreasuryManager | null>(null);
+  const [paymentManager, setPaymentManager] = useState<IPaymentManager | null>(null);
+  const [sessionManager, setSessionManager] = useState<ISessionManager | null>(null);
+  const [hostManager, setHostManager] = useState<IHostManager | null>(null);
+  const [storageManager, setStorageManager] = useState<IStorageManager | null>(null);
+  const [treasuryManager, setTreasuryManager] = useState<ITreasuryManager | null>(null);
 
   // Helper: Add log message
   const addLog = (message: string) => {

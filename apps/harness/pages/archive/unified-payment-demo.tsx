@@ -60,34 +60,35 @@ function UnifiedPaymentFlow() {
    */
   function detectAvailableWallets() {
     const wallets = [];
-    
+    const ethereum = window.ethereum as any;
+
     // Check for MetaMask
-    if (window.ethereum?.isMetaMask) {
+    if (ethereum?.isMetaMask) {
       wallets.push({
         name: 'MetaMask',
         icon: '🦊',
-        provider: window.ethereum
+        provider: ethereum
       });
     }
-    
+
     // Check for Coinbase Wallet
-    if (window.ethereum?.isCoinbaseWallet || window.coinbaseWalletExtension) {
+    if (ethereum?.isCoinbaseWallet || (window as any).coinbaseWalletExtension) {
       wallets.push({
         name: 'Coinbase Wallet',
         icon: '💙',
-        provider: window.ethereum?.isCoinbaseWallet ? window.ethereum : window.coinbaseWalletExtension
+        provider: ethereum?.isCoinbaseWallet ? ethereum : (window as any).coinbaseWalletExtension
       });
     }
-    
+
     // Check for generic injected wallet
-    if (window.ethereum && wallets.length === 0) {
+    if (ethereum && wallets.length === 0) {
       wallets.push({
         name: 'Injected Wallet',
         icon: '👛',
-        provider: window.ethereum
+        provider: ethereum
       });
     }
-    
+
     return wallets;
   }
 
@@ -108,7 +109,7 @@ function UnifiedPaymentFlow() {
         return;
       } else {
         // Use default provider
-        provider = new ethers.BrowserProvider(window.ethereum);
+        provider = new ethers.BrowserProvider(window.ethereum as any);
       }
 
       // Request connection
@@ -566,11 +567,6 @@ function UnifiedPaymentFlow() {
 }
 
 // Type augmentation for window.ethereum
-declare global {
-  interface Window {
-    ethereum?: any;
-  }
-}
 
 export default function UnifiedPaymentDemo() {
   return (

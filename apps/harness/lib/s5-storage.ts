@@ -15,9 +15,13 @@ export class S5ConversationStore {
 
   async initializeS5(): Promise<void> {
     try {
-      this.s5Client = await S5.new({ seed: this.seedPhrase, portal: this.portalUrl });
-      await this.s5Client.connect();
-    } catch (error) { throw new Error(`Failed to initialize S5: ${error.message}`); }
+      this.s5Client = await S5.create({
+        initialPeers: ["wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p"]
+      });
+      await this.s5Client.recoverIdentityFromSeedPhrase(this.seedPhrase);
+      await this.s5Client.registerOnNewPortal(this.portalUrl);
+      await this.s5Client.fs.ensureIdentityInitialized();
+    } catch (error: any) { throw new Error(`Failed to initialize S5: ${error.message}`); }
   }
 
   async saveConversation(data: ConversationData): Promise<StorageResult> {
@@ -32,8 +36,9 @@ export class S5ConversationStore {
         type: 'conversation',
         version: '1.0'
       };
-      const cid = await this.s5Client!.uploadJson(metadata);
-      return { success: true, cid: cid.toString() };
+      const path = `home/conversations/${data.jobId}-${Date.now()}.json`;
+      await this.s5Client!.fs.put(path, metadata);
+      return { success: true, cid: path };
     } catch (error: any) {
       return { success: false, error: error.message };
     }
@@ -42,7 +47,7 @@ export class S5ConversationStore {
   async retrieveConversation(cid: string): Promise<ConversationData | null> {
     try {
       if (!this.s5Client) await this.initializeS5();
-      return await this.s5Client!.downloadJson(cid) as ConversationData;
+      return await this.s5Client!.fs.get(cid) as ConversationData;
     } catch (error) { console.error('Failed to retrieve conversation:', error); return null; }
   }
 

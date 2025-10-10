@@ -9,12 +9,6 @@ import {
   type ModelSpec
 } from '@fabstir/sdk-core';
 
-declare global {
-  interface Window {
-    ethereum?: any;
-  }
-}
-
 interface FilterOptions {
   minVRAM?: number;
   maxPrice?: number;
@@ -56,7 +50,7 @@ export default function HostDiscoveryModels() {
     }
 
     try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      const provider = new ethers.BrowserProvider(window.ethereum as any);
       await provider.send('eth_requestAccounts', []);
       const signer = await provider.getSigner();
 

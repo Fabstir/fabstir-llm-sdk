@@ -211,7 +211,7 @@ export default function BaseUsdcMvpFlowTest() {
       addLog(`Connected to primary account: ${primary}`);
 
       // Check primary account balance first
-      const ethersProvider = new ethers.providers.JsonRpcProvider(RPC_URL);
+      const ethersProvider = new ethers.JsonRpcProvider(RPC_URL);
       const wallet = new ethers.Wallet(TEST_USER_1_PRIVATE_KEY, ethersProvider);
       
       const usdcContract = new ethers.Contract(USDC, [

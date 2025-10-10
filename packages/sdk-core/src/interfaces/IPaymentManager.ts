@@ -3,6 +3,7 @@
  * Browser-compatible payment operations
  */
 
+import { Signer } from 'ethers';
 import { JobCreationRequest, JobResult, PaymentOptions, TransactionResult } from '../types';
 
 export interface IPaymentManager {
@@ -83,4 +84,32 @@ export interface IPaymentManager {
     data: string,
     value?: bigint
   ): Promise<bigint>;
+
+  /**
+   * Submit checkpoint proof
+   */
+  submitCheckpoint(
+    jobId: bigint,
+    tokensGenerated: number,
+    proof: string
+  ): Promise<string>;
+
+  /**
+   * Submit checkpoint proof as host (requires host signer)
+   */
+  submitCheckpointAsHost(
+    jobId: bigint,
+    tokensGenerated: number,
+    proof: string,
+    hostSigner: Signer
+  ): Promise<string>;
+
+  /**
+   * Complete session job
+   */
+  completeSession(
+    jobId: bigint,
+    totalTokens: number,
+    finalProof: string
+  ): Promise<string>;
 }

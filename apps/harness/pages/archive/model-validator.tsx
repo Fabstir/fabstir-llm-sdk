@@ -1,7 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { ethers } from 'ethers';
-import { ModelManager } from '@fabstir/sdk-core/managers/ModelManager';
-import { APPROVED_MODELS } from '@fabstir/sdk-core/constants/models';
+import { ModelManager, APPROVED_MODELS } from '@fabstir/sdk-core';
 
 export default function ModelValidator() {
   const [file, setFile] = useState<File | null>(null);
@@ -22,7 +21,7 @@ export default function ModelValidator() {
 
   const calculateModelId = (repo: string, filename: string): string => {
     const input = `${repo}/${filename}`;
-    const hash = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(input));
+    const hash = ethers.keccak256(ethers.toUtf8Bytes(input));
     return hash;
   };
 
@@ -79,7 +78,7 @@ export default function ModelValidator() {
       let onChainApproved = false;
       try {
         if (window.ethereum) {
-          const provider = new ethers.providers.Web3Provider(window.ethereum);
+          const provider = new ethers.BrowserProvider(window.ethereum as any);
           const modelManager = new ModelManager(
             provider,
             '0xfE54c2aa68A7Afe8E0DD571933B556C8b6adC357'
@@ -99,7 +98,7 @@ export default function ModelValidator() {
         calculatedHash,
         expectedHash: matchedModel?.sha256
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Validation error:', error);
       setValidationResult({
         error: error.message

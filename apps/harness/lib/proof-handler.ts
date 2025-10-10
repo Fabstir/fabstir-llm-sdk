@@ -3,28 +3,28 @@ interface ProofData { jobId: number; prompt: string; response: string; tokensPro
 interface ProofStatus { success: boolean; txHash: string; gasUsed: string; confirmations: number; }
 
 export class ProofHandler {
-  private provider: ethers.providers.JsonRpcProvider;
+  private provider: ethers.JsonRpcProvider;
   private contractAddress: string;
   private hostPrivateKey: string;
-  
+
   constructor(rpcUrl: string, contractAddress: string, hostPrivateKey: string) {
-    this.provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+    this.provider = new ethers.JsonRpcProvider(rpcUrl);
     this.contractAddress = contractAddress;
     this.hostPrivateKey = hostPrivateKey;
   }
 
   async generateProof(data: ProofData): Promise<string> {
-    const proofBytes = ethers.utils.randomBytes(256); // mock EZKL proof
-    const model_hash = ethers.utils.keccak256(ethers.utils.toUtf8Bytes('llama-2-7b'));
-    const input_hash = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(data.prompt));
-    const output_hash = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(data.response));
-    const combinedProof = ethers.utils.concat([
+    const proofBytes = ethers.randomBytes(256); // mock EZKL proof
+    const model_hash = ethers.keccak256(ethers.toUtf8Bytes('llama-2-7b'));
+    const input_hash = ethers.keccak256(ethers.toUtf8Bytes(data.prompt));
+    const output_hash = ethers.keccak256(ethers.toUtf8Bytes(data.response));
+    const combinedProof = ethers.concat([
       proofBytes,
-      ethers.utils.arrayify(model_hash).slice(0, 32),
-      ethers.utils.arrayify(input_hash).slice(0, 32),
-      ethers.utils.arrayify(output_hash).slice(0, 32)
+      ethers.getBytes(model_hash).slice(0, 32),
+      ethers.getBytes(input_hash).slice(0, 32),
+      ethers.getBytes(output_hash).slice(0, 32)
     ]);
-    return ethers.utils.hexlify(combinedProof);
+    return ethers.hexlify(combinedProof);
   }
 
   async submitProof(jobId: number, proof: string, tokensProven: number): Promise<ProofStatus> {

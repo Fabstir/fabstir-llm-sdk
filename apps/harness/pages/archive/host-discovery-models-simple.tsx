@@ -15,12 +15,6 @@ const APPROVED_MODELS = {
   }
 };
 
-declare global {
-  interface Window {
-    ethereum?: any;
-  }
-}
-
 export default function HostDiscoveryModelsSimple() {
   const [selectedModel, setSelectedModel] = useState<any>(null);
   const [modelId, setModelId] = useState<string>('');
@@ -42,7 +36,7 @@ export default function HostDiscoveryModelsSimple() {
     }
 
     try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      const provider = new ethers.BrowserProvider(window.ethereum as any);
       await provider.send('eth_requestAccounts', []);
       const signer = await provider.getSigner();
       const address = await signer.getAddress();

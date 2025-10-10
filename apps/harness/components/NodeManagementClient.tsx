@@ -58,12 +58,6 @@ const TEST_ACCOUNTS = {
 
 type WalletType = 'metamask' | 'private-key';
 
-declare global {
-  interface Window {
-    ethereum: any;
-  }
-}
-
 const NodeManagementClient: React.FC = () => {
   // SDK Module state (loaded dynamically)
   const [SDKModule, setSDKModule] = useState<any>(null);
@@ -103,8 +97,10 @@ const NodeManagementClient: React.FC = () => {
   const [additionalStakeAmount, setAdditionalStakeAmount] = useState('100');
   const [apiUrl, setApiUrl] = useState('http://localhost:8083');
   const [supportedModels, setSupportedModels] = useState('CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf'); // Default approved model
-  const [minPricePerToken, setMinPricePerToken] = useState('2000');
-  const [newPriceValue, setNewPriceValue] = useState('');
+  const [minPricePerTokenNative, setMinPricePerTokenNative] = useState('11363636363636'); // Default native pricing (ETH/BNB)
+  const [minPricePerTokenStable, setMinPricePerTokenStable] = useState('316'); // Default stable pricing (USDC)
+  const [newPriceNativeValue, setNewPriceNativeValue] = useState('');
+  const [newPriceStableValue, setNewPriceStableValue] = useState('');
 
   // UI state
   const [logs, setLogs] = useState<string[]>([]);
@@ -420,7 +416,7 @@ const NodeManagementClient: React.FC = () => {
           throw new Error('MetaMask not found! Please install MetaMask.');
         }
 
-        const accounts = await window.ethereum.request({
+        const accounts = await window.ethereum!.request!({
           method: 'eth_requestAccounts'
         });
 
@@ -428,7 +424,7 @@ const NodeManagementClient: React.FC = () => {
           throw new Error('No accounts found');
         }
 
-        const provider = new ethers.BrowserProvider(window.ethereum);
+        const provider = new ethers.BrowserProvider(window.ethereum as any);
         walletSigner = await provider.getSigner();
         address = await walletSigner.getAddress();
 
@@ -438,7 +434,7 @@ const NodeManagementClient: React.FC = () => {
           throw new Error('Invalid test account selected');
         }
 
-        const provider = new ethers.JsonRpcProvider(CHAINS[selectedChain].rpcUrl);
+        const provider = new ethers.JsonRpcProvider(CHAINS[selectedChain as keyof typeof CHAINS].rpcUrl);
         walletSigner = new ethers.Wallet(testAccount.privateKey, provider);
         address = await walletSigner.getAddress();
 
@@ -455,7 +451,7 @@ const NodeManagementClient: React.FC = () => {
       setWalletConnected(true);
 
       addLog(`✅ Wallet connected: ${address}`);
-      addLog(`🔗 Chain: ${CHAINS[selectedChain].name}`);
+      addLog(`🔗 Chain: ${CHAINS[selectedChain as keyof typeof CHAINS].name}`);
 
       // Initialize SDK with connected wallet
       const sdkInstance = await initializeSDK(walletSigner);
@@ -480,7 +476,7 @@ const NodeManagementClient: React.FC = () => {
       }
 
       addLog('🔧 Initializing SDK...');
-      addLog(`📊 Chain: ${CHAINS[selectedChain].name} (${selectedChain})`);
+      addLog(`📊 Chain: ${CHAINS[selectedChain as keyof typeof CHAINS].name} (${selectedChain})`);
 
       const { FabstirSDKCore } = SDKModule;
       const contractAddresses = getContractAddresses(selectedChain);
@@ -488,7 +484,7 @@ const NodeManagementClient: React.FC = () => {
       const sdkInstance = new FabstirSDKCore({
         mode: 'production',
         chainId: selectedChain,
-        rpcUrl: CHAINS[selectedChain].rpcUrl,
+        rpcUrl: CHAINS[selectedChain as keyof typeof CHAINS].rpcUrl,
         contractAddresses
       });
 
@@ -522,7 +518,7 @@ const NodeManagementClient: React.FC = () => {
     const currentSigner = signerToUse || signer;
 
     try {
-      addLog(`🔍 Checking registration for ${checkAddress.slice(0, 10)}... on ${CHAINS[selectedChain].name}...`);
+      addLog(`🔍 Checking registration for ${checkAddress.slice(0, 10)}... on ${CHAINS[selectedChain as keyof typeof CHAINS].name}...`);
 
       const hostManager = targetSdk.getHostManager();
       const info = await hostManager.getHostInfo(checkAddress);
@@ -587,7 +583,7 @@ const NodeManagementClient: React.FC = () => {
           stakedAmountFormatted: stakedAmountDisplay
         });
       } else {
-        addLog(`ℹ️ Not registered on ${CHAINS[selectedChain].name}`);
+        addLog(`ℹ️ Not registered on ${CHAINS[selectedChain as keyof typeof CHAINS].name}`);
         setNodeInfo(null);
         setDiscoveredApiUrl('');
       }
@@ -624,7 +620,7 @@ const NodeManagementClient: React.FC = () => {
   const switchChain = async (chainId: number) => {
     try {
       setChainSwitching(true);
-      addLog(`🔄 Switching to ${CHAINS[chainId].name}...`);
+      addLog(`🔄 Switching to ${CHAINS[chainId as keyof typeof CHAINS].name}...`);
 
       // Store the old chain temporarily
       const oldChain = selectedChain;
@@ -650,7 +646,7 @@ const NodeManagementClient: React.FC = () => {
         setChainSwitching(false);
       }
 
-      addLog(`✅ Switched to ${CHAINS[chainId].name}`);
+      addLog(`✅ Switched to ${CHAINS[chainId as keyof typeof CHAINS].name}`);
     } catch (error: any) {
       addLog(`❌ Chain switch failed: ${error.message}`);
       setChainSwitching(false);
@@ -666,7 +662,7 @@ const NodeManagementClient: React.FC = () => {
       }
 
       addLog('🔧 Initializing SDK...');
-      addLog(`📊 Chain: ${CHAINS[chainId].name} (${chainId})`);
+      addLog(`📊 Chain: ${CHAINS[chainId as keyof typeof CHAINS].name} (${chainId})`);
 
       const { FabstirSDKCore } = SDKModule;
       const contractAddresses = getContractAddresses(chainId);
@@ -674,7 +670,7 @@ const NodeManagementClient: React.FC = () => {
       const sdkInstance = new FabstirSDKCore({
         mode: 'production',
         chainId: chainId,
-        rpcUrl: CHAINS[chainId].rpcUrl,
+        rpcUrl: CHAINS[chainId as keyof typeof CHAINS].rpcUrl,
         contractAddresses
       });
 
@@ -690,40 +686,88 @@ const NodeManagementClient: React.FC = () => {
     }
   };
 
-  // Price calculation helper for UI display
-  const calculatePriceDisplay = (price: string) => {
-    const p = parseInt(price) || 0;
-    return {
-      perToken: (p / 1000000).toFixed(6),
-      per1000: ((p * 1000) / 1000000).toFixed(3),
-      per10000: ((p * 10000) / 1000000).toFixed(2)
-    };
+  // Price calculation helpers for UI display (DUAL PRICING)
+  const formatNativePrice = (weiPrice: string, ethPriceUSD = 4400) => {
+    try {
+      const ethAmount = parseFloat(ethers.formatEther(BigInt(weiPrice)));
+      const usdAmount = ethAmount * ethPriceUSD;
+      return {
+        wei: weiPrice,
+        eth: ethAmount.toFixed(18),
+        usd: usdAmount.toFixed(6),
+        per1000: (usdAmount * 1000).toFixed(4)
+      };
+    } catch {
+      return { wei: '0', eth: '0', usd: '0', per1000: '0' };
+    }
   };
 
-  // Update Pricing
-  const updatePricing = async () => {
-    if (!mgmtApiClient) {
-      addLog('❌ Management API client not initialized');
+  const formatStablePrice = (rawPrice: string) => {
+    try {
+      const usdAmount = Number(rawPrice) / 1_000_000;
+      return {
+        raw: rawPrice,
+        usdc: usdAmount.toFixed(6),
+        per1000: (usdAmount * 1000).toFixed(4)
+      };
+    } catch {
+      return { raw: '0', usdc: '0', per1000: '0' };
+    }
+  };
+
+  // Update Native Pricing (ETH/BNB)
+  const updatePricingNative = async () => {
+    if (!sdk) {
+      addLog('❌ SDK not initialized');
       return;
     }
 
     setLoading(true);
     try {
-      const currentPrice = nodeInfo?.minPricePerToken?.toString() || '0';
-      addLog(`💰 Updating pricing from ${currentPrice} to ${newPriceValue}...`);
+      const currentPriceNative = nodeInfo?.minPricePerTokenNative?.toString() || '0';
+      addLog(`💰 Updating native pricing from ${currentPriceNative} to ${newPriceNativeValue} wei...`);
 
-      const result = await mgmtApiClient.updatePricing({
-        price: newPriceValue
-      });
+      const hostManager = sdk.getHostManager();
+      const txHash = await hostManager.updatePricingNative(newPriceNativeValue);
 
-      addLog(`✅ Pricing updated! TX: ${result.transactionHash}`);
-      addLog(`💵 New price: ${newPriceValue} (${calculatePriceDisplay(newPriceValue).perToken} USDC/token)`);
+      addLog(`✅ Native pricing updated! TX: ${txHash}`);
+      const formatted = formatNativePrice(newPriceNativeValue);
+      addLog(`💵 New native price: ${formatted.eth} ETH/token (~$${formatted.usd})`);
 
       // Refresh node info
       await checkRegistrationStatus();
-      setNewPriceValue(''); // Clear input
+      setNewPriceNativeValue(''); // Clear input
     } catch (error: any) {
-      addLog(`❌ Update failed: ${error.message}`);
+      addLog(`❌ Native pricing update failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Update Stable Pricing (USDC)
+  const updatePricingStable = async () => {
+    if (!sdk) {
+      addLog('❌ SDK not initialized');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const currentPriceStable = nodeInfo?.minPricePerTokenStable?.toString() || '0';
+      addLog(`💰 Updating stable pricing from ${currentPriceStable} to ${newPriceStableValue}...`);
+
+      const hostManager = sdk.getHostManager();
+      const txHash = await hostManager.updatePricingStable(newPriceStableValue);
+
+      addLog(`✅ Stable pricing updated! TX: ${txHash}`);
+      const formatted = formatStablePrice(newPriceStableValue);
+      addLog(`💵 New stable price: ${formatted.usdc} USDC/token`);
+
+      // Refresh node info
+      await checkRegistrationStatus();
+      setNewPriceStableValue(''); // Clear input
+    } catch (error: any) {
+      addLog(`❌ Stable pricing update failed: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -757,7 +801,7 @@ const NodeManagementClient: React.FC = () => {
 
     setLoading(true);
     try {
-      addLog(`📝 Registering node on ${CHAINS[selectedChain].name} via Management API...`);
+      addLog(`📝 Registering node on ${CHAINS[selectedChain as keyof typeof CHAINS].name} via Management API...`);
 
       // Parse supported models from input (format: repo:file)
       const trimmedModel = supportedModels.trim();
@@ -784,7 +828,7 @@ const NodeManagementClient: React.FC = () => {
       addLog(`📚 Model: ${modelString}`);
 
       // Call management API /api/register endpoint
-      // This will create the config file AND register on blockchain
+      // This will create the config file AND register on blockchain (DUAL PRICING)
       const result = await mgmtApiClient.register({
         walletAddress: walletAddress,
         publicUrl: apiUrl,
@@ -792,12 +836,16 @@ const NodeManagementClient: React.FC = () => {
         stakeAmount: stakeAmount,
         metadata: JSON.parse(metadata),
         privateKey: privateKey,
-        minPricePerToken: minPricePerToken
+        minPricePerTokenNative: minPricePerTokenNative,
+        minPricePerTokenStable: minPricePerTokenStable
       });
 
       addLog(`✅ Node registered! TX: ${result.transactionHash}`);
       addLog(`📝 Config file created for address: ${result.hostAddress}`);
-      addLog(`💵 Pricing: ${minPricePerToken} (${calculatePriceDisplay(minPricePerToken).perToken} USDC/token)`);
+      const nativeFormatted = formatNativePrice(minPricePerTokenNative);
+      const stableFormatted = formatStablePrice(minPricePerTokenStable);
+      addLog(`💵 Native pricing: ${nativeFormatted.eth} ETH/token (~$${nativeFormatted.usd})`);
+      addLog(`💵 Stable pricing: ${stableFormatted.usdc} USDC/token`);
       await checkRegistrationStatus();
 
     } catch (error: any) {
@@ -821,7 +869,7 @@ const NodeManagementClient: React.FC = () => {
 
     setLoading(true);
     try {
-      addLog(`📝 Unregistering from ${CHAINS[selectedChain].name}...`);
+      addLog(`📝 Unregistering from ${CHAINS[selectedChain as keyof typeof CHAINS].name}...`);
 
       const hostManager = sdk.getHostManager();
       const txHash = await hostManager.unregisterHost();
@@ -873,7 +921,7 @@ const NodeManagementClient: React.FC = () => {
     setLoading(true);
     try {
       addLog(`💰 Adding ${additionalStakeAmount} FAB to stake...`);
-      addLog(`📊 Current chain: ${CHAINS[selectedChain].name}`);
+      addLog(`📊 Current chain: ${CHAINS[selectedChain as keyof typeof CHAINS].name}`);
 
       const hostManager = sdk.getHostManager();
 
@@ -892,7 +940,7 @@ const NodeManagementClient: React.FC = () => {
       const txHash = await hostManager.addStake(additionalStakeAmount);
 
       addLog(`✅ Transaction submitted: ${txHash}`);
-      addLog(`🔗 View on explorer: ${CHAINS[selectedChain].explorer}/tx/${txHash}`);
+      addLog(`🔗 View on explorer: ${CHAINS[selectedChain as keyof typeof CHAINS].explorer}/tx/${txHash}`);
 
       // Wait for transaction confirmation
       addLog('⏳ Waiting for blockchain confirmation...');
@@ -1047,14 +1095,14 @@ const NodeManagementClient: React.FC = () => {
 
     setLoading(true);
     try {
-      addLog(`🔍 Discovering nodes on ${CHAINS[selectedChain].name}...`);
+      addLog(`🔍 Discovering nodes on ${CHAINS[selectedChain as keyof typeof CHAINS].name}...`);
 
       const hostManager = sdk.getHostManager();
       const nodes = await hostManager.discoverAllActiveHosts();
 
       if (nodes.length > 0) {
         addLog(`✅ Found ${nodes.length} active nodes:`);
-        nodes.forEach(node => {
+        nodes.forEach((node: any) => {
           addLog(`  📍 ${node.nodeAddress.slice(0, 8)}...${node.nodeAddress.slice(-6)}: ${node.apiUrl}`);
         });
         setDiscoveredNodes(nodes);
@@ -1288,7 +1336,7 @@ const NodeManagementClient: React.FC = () => {
             </button>
           ))}
           <span style={{ marginLeft: '20px', color: '#666' }}>
-            Current: <strong>{CHAINS[selectedChain].name}</strong> ({CHAINS[selectedChain].nativeToken})
+            Current: <strong>{CHAINS[selectedChain as keyof typeof CHAINS].name}</strong> ({CHAINS[selectedChain as keyof typeof CHAINS].nativeToken})
           </span>
         </div>
       </div>
@@ -1370,7 +1418,7 @@ const NodeManagementClient: React.FC = () => {
                 <br />
                 <strong>Type:</strong> {walletType}
                 <br />
-                <strong>Chain:</strong> {CHAINS[selectedChain].name}
+                <strong>Chain:</strong> {CHAINS[selectedChain as keyof typeof CHAINS].name}
                 <br />
                 <strong>Status:</strong> {isRegistered ? '✅ Registered' : '❌ Not Registered'}
               </div>
@@ -1426,7 +1474,12 @@ const NodeManagementClient: React.FC = () => {
                 />
                 {walletType === 'private-key' && selectedTestAccount.startsWith('TEST_HOST') && (
                   <button
-                    onClick={() => setApiUrl(TEST_ACCOUNTS[selectedTestAccount as keyof typeof TEST_ACCOUNTS].apiUrl!)}
+                    onClick={() => {
+                      const account = TEST_ACCOUNTS[selectedTestAccount as keyof typeof TEST_ACCOUNTS];
+                      if ('apiUrl' in account && account.apiUrl) {
+                        setApiUrl(account.apiUrl);
+                      }
+                    }}
                     style={{ marginTop: '5px', padding: '3px 8px', fontSize: '12px' }}
                   >
                     Use Test Host URL
@@ -1470,23 +1523,54 @@ const NodeManagementClient: React.FC = () => {
               </div>
 
               <div style={{ marginBottom: '10px' }}>
-                <label>Minimum Price Per Token:</label><br />
+                <label>Minimum Price Per Token (Native - ETH/BNB):</label><br />
+                <input
+                  type="text"
+                  value={minPricePerTokenNative}
+                  onChange={(e) => setMinPricePerTokenNative(e.target.value)}
+                  placeholder="11363636363636"
+                  style={{ padding: '5px', width: '300px', fontFamily: 'monospace' }}
+                />
+                <div style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>
+                  {(() => {
+                    const formatted = formatNativePrice(minPricePerTokenNative || '11363636363636');
+                    return (
+                      <>
+                        <div>⛽ {formatted.eth} ETH per token (~${formatted.usd} @ $4400 ETH)</div>
+                        <div>⛽ ${formatted.per1000} per 1,000 tokens</div>
+                      </>
+                    );
+                  })()}
+                </div>
+                <small style={{ color: '#666', display: 'block', marginTop: '5px' }}>
+                  Range: 2,272,727,273 to 22,727,272,727,273 wei (~$0.00001 to $0.1 @ $4400 ETH)
+                </small>
+              </div>
+
+              <div style={{ marginBottom: '10px' }}>
+                <label>Minimum Price Per Token (Stable - USDC):</label><br />
                 <input
                   type="number"
-                  value={minPricePerToken}
-                  onChange={(e) => setMinPricePerToken(e.target.value)}
-                  min="100"
+                  value={minPricePerTokenStable}
+                  onChange={(e) => setMinPricePerTokenStable(e.target.value)}
+                  min="10"
                   max="100000"
-                  step="100"
+                  step="10"
                   style={{ padding: '5px', width: '200px' }}
                 />
                 <div style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>
-                  <div>💵 ${calculatePriceDisplay(minPricePerToken).perToken} USDC per token</div>
-                  <div>💵 ${calculatePriceDisplay(minPricePerToken).per1000} USDC per 1,000 tokens</div>
-                  <div>💵 ${calculatePriceDisplay(minPricePerToken).per10000} USDC per 10,000 tokens</div>
+                  {(() => {
+                    const formatted = formatStablePrice(minPricePerTokenStable || '316');
+                    return (
+                      <>
+                        <div>💵 ${formatted.usdc} USDC per token</div>
+                        <div>💵 ${formatted.per1000} per 1,000 tokens</div>
+                      </>
+                    );
+                  })()}
                 </div>
                 <small style={{ color: '#666', display: 'block', marginTop: '5px' }}>
-                  Range: 100-100,000 (0.0001-0.1 USDC per token)
+                  Range: 10-100,000 (0.00001-0.1 USDC per token)
                 </small>
               </div>
 
@@ -1520,7 +1604,7 @@ const NodeManagementClient: React.FC = () => {
               <h3>⚙️ Node Management</h3>
 
               <div style={{ marginBottom: '15px', fontSize: '14px' }}>
-                <div>Chain: {CHAINS[selectedChain].name}</div>
+                <div>Chain: {CHAINS[selectedChain as keyof typeof CHAINS].name}</div>
                 <div>Active: {nodeInfo.isActive ? '✅' : '❌'}</div>
                 <div>Staked: {nodeInfo.stakedAmountFormatted || '0'} FAB</div>
                 <div>API URL: {nodeInfo.apiUrl || discoveredApiUrl || 'Not set'}</div>
@@ -1619,59 +1703,125 @@ const NodeManagementClient: React.FC = () => {
                 </small>
               </div>
 
-              {/* Pricing Update */}
+              {/* Dual Pricing Management */}
               <div style={{ marginBottom: '15px' }}>
-                <label style={{ fontSize: '14px', marginBottom: '5px', display: 'block', fontWeight: 'bold' }}>
-                  💰 Pricing Management:
+                <label style={{ fontSize: '14px', marginBottom: '10px', display: 'block', fontWeight: 'bold' }}>
+                  💰 Dual Pricing Management:
                 </label>
-                <div style={{ marginBottom: '10px', fontSize: '13px', color: '#555' }}>
-                  <strong>Current Price:</strong> {nodeInfo?.minPricePerToken?.toString() || '2000'}
-                  {' '}({calculatePriceDisplay(nodeInfo?.minPricePerToken?.toString() || '2000').perToken} USDC/token)
-                </div>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                  <input
-                    type="number"
-                    value={newPriceValue}
-                    onChange={(e) => setNewPriceValue(e.target.value)}
-                    placeholder="Enter new price"
-                    min="100"
-                    max="100000"
-                    step="100"
-                    style={{
-                      padding: '8px',
-                      width: '150px',
-                      border: '1px solid #ccc',
-                      borderRadius: '3px',
-                      fontSize: '14px'
-                    }}
-                    disabled={loading}
-                  />
-                  <button
-                    onClick={updatePricing}
-                    disabled={loading || !newPriceValue || parseInt(newPriceValue) < 100 || parseInt(newPriceValue) > 100000}
-                    style={{
-                      padding: '8px 15px',
-                      backgroundColor: (loading || !newPriceValue || parseInt(newPriceValue) < 100 || parseInt(newPriceValue) > 100000) ? '#ccc' : '#ffc107',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '3px',
-                      cursor: (loading || !newPriceValue || parseInt(newPriceValue) < 100 || parseInt(newPriceValue) > 100000) ? 'not-allowed' : 'pointer',
-                      fontSize: '14px'
-                    }}
-                  >
-                    Update Price
-                  </button>
-                </div>
-                {newPriceValue && parseInt(newPriceValue) >= 100 && parseInt(newPriceValue) <= 100000 && (
-                  <div style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>
-                    <div>New: {newPriceValue} ({calculatePriceDisplay(newPriceValue).perToken} USDC/token)</div>
-                    <div>• Per 1,000 tokens: ${calculatePriceDisplay(newPriceValue).per1000} USDC</div>
-                    <div>• Per 10,000 tokens: ${calculatePriceDisplay(newPriceValue).per10000} USDC</div>
+
+                {/* Native Pricing Section */}
+                <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#f9f9f9', borderRadius: '5px' }}>
+                  <div style={{ marginBottom: '10px', fontSize: '13px', color: '#555' }}>
+                    <strong>Current Native Price (ETH/BNB):</strong> {nodeInfo?.minPricePerTokenNative?.toString() || '11363636363636'} wei
+                    {' '}(~${formatNativePrice(nodeInfo?.minPricePerTokenNative?.toString() || '11363636363636').usd})
                   </div>
-                )}
-                <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '5px' }}>
-                  Valid range: 100-100,000 (0.0001-0.1 USDC per token)
-                </small>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      value={newPriceNativeValue}
+                      onChange={(e) => setNewPriceNativeValue(e.target.value)}
+                      placeholder="Enter new native price (wei)"
+                      style={{
+                        padding: '8px',
+                        width: '200px',
+                        border: '1px solid #ccc',
+                        borderRadius: '3px',
+                        fontSize: '14px',
+                        fontFamily: 'monospace'
+                      }}
+                      disabled={loading}
+                    />
+                    <button
+                      onClick={updatePricingNative}
+                      disabled={loading || !newPriceNativeValue}
+                      style={{
+                        padding: '8px 15px',
+                        backgroundColor: (loading || !newPriceNativeValue) ? '#ccc' : '#28a745',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '3px',
+                        cursor: (loading || !newPriceNativeValue) ? 'not-allowed' : 'pointer',
+                        fontSize: '14px'
+                      }}
+                    >
+                      Update Native
+                    </button>
+                  </div>
+                  {newPriceNativeValue && (
+                    <div style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>
+                      {(() => {
+                        const formatted = formatNativePrice(newPriceNativeValue);
+                        return (
+                          <>
+                            <div>New: {formatted.eth} ETH/token (~${formatted.usd})</div>
+                            <div>• Per 1,000 tokens: ~${formatted.per1000}</div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
+                  <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '5px' }}>
+                    Valid range: 2,272,727,273 to 22,727,272,727,273 wei
+                  </small>
+                </div>
+
+                {/* Stable Pricing Section */}
+                <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#f9f9f9', borderRadius: '5px' }}>
+                  <div style={{ marginBottom: '10px', fontSize: '13px', color: '#555' }}>
+                    <strong>Current Stable Price (USDC):</strong> {nodeInfo?.minPricePerTokenStable?.toString() || '316'}
+                    {' '}(${formatStablePrice(nodeInfo?.minPricePerTokenStable?.toString() || '316').usdc}/token)
+                  </div>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <input
+                      type="number"
+                      value={newPriceStableValue}
+                      onChange={(e) => setNewPriceStableValue(e.target.value)}
+                      placeholder="Enter new stable price"
+                      min="10"
+                      max="100000"
+                      step="10"
+                      style={{
+                        padding: '8px',
+                        width: '150px',
+                        border: '1px solid #ccc',
+                        borderRadius: '3px',
+                        fontSize: '14px'
+                      }}
+                      disabled={loading}
+                    />
+                    <button
+                      onClick={updatePricingStable}
+                      disabled={loading || !newPriceStableValue || parseInt(newPriceStableValue) < 10 || parseInt(newPriceStableValue) > 100000}
+                      style={{
+                        padding: '8px 15px',
+                        backgroundColor: (loading || !newPriceStableValue || parseInt(newPriceStableValue) < 10 || parseInt(newPriceStableValue) > 100000) ? '#ccc' : '#ffc107',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '3px',
+                        cursor: (loading || !newPriceStableValue || parseInt(newPriceStableValue) < 10 || parseInt(newPriceStableValue) > 100000) ? 'not-allowed' : 'pointer',
+                        fontSize: '14px'
+                      }}
+                    >
+                      Update Stable
+                    </button>
+                  </div>
+                  {newPriceStableValue && parseInt(newPriceStableValue) >= 10 && parseInt(newPriceStableValue) <= 100000 && (
+                    <div style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>
+                      {(() => {
+                        const formatted = formatStablePrice(newPriceStableValue);
+                        return (
+                          <>
+                            <div>New: ${formatted.usdc} USDC/token</div>
+                            <div>• Per 1,000 tokens: ${formatted.per1000}</div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
+                  <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '5px' }}>
+                    Valid range: 10-100,000 (0.00001-0.1 USDC per token)
+                  </small>
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
@@ -1751,7 +1901,7 @@ const NodeManagementClient: React.FC = () => {
               disabled={loading}
               style={{ marginBottom: '10px' }}
             >
-              Discover Nodes on {CHAINS[selectedChain].name}
+              Discover Nodes on {CHAINS[selectedChain as keyof typeof CHAINS].name}
             </button>
 
             {discoveredNodes.length > 0 && (

@@ -335,13 +335,13 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
         // Read treasury accumulated balance via SDK
         if (treasuryManager) {
-          try {
-            const treasuryBalance = await treasuryManager.getAccumulatedBalance();
-            newBalances.treasuryAccumulated = ethers.formatUnits(treasuryBalance, 6);
-          } catch (err) {
-            console.log('Could not read treasury accumulated balance');
-            newBalances.treasuryAccumulated = '0';
-          }
+//          try {
+//            const treasuryBalance = await treasuryManager.getAccumulatedBalance();
+//            newBalances.treasuryAccumulated = ethers.formatUnits(treasuryBalance, 6);
+//          } catch (err) {
+//            console.log('Could not read treasury accumulated balance');
+//            newBalances.treasuryAccumulated = '0';
+//          }
         }
 
         addLog(`Balances updated via SDK`);
@@ -615,12 +615,13 @@ export default function BaseUsdcMvpFlowSDKTest() {
         throw new Error("No active hosts found");
       }
 
-      // Parse host metadata
+      // Parse host metadata with DUAL pricing support
       const parsedHosts = hosts.map((host: any) => ({
         address: host.address,
         endpoint: host.apiUrl || host.endpoint || `http://localhost:8080`,  // Use endpoint property name
         models: host.supportedModels || [],
-        pricePerToken: 2000 // Default price
+        minPricePerTokenNative: host.minPricePerTokenNative || 0n,  // NEW: Native token pricing (ETH/BNB)
+        minPricePerTokenStable: host.minPricePerTokenStable || 316  // NEW: Stablecoin pricing (USDC) - use stable default
       }));
 
       // Filter hosts that support our model
@@ -2343,12 +2344,13 @@ export default function BaseUsdcMvpFlowSDKTest() {
         throw new Error("No hosts available");
       }
 
-      // Select a random host for the flow
+      // Select a random host for the flow with DUAL pricing support
       const parsedHosts = currentHosts.map((host: any) => ({
         address: host.address,
         endpoint: host.apiUrl || host.endpoint || `http://localhost:8080`,
         models: host.supportedModels || [],
-        pricePerToken: 2000
+        minPricePerTokenNative: host.minPricePerTokenNative || 0n,  // NEW: Native token pricing (ETH/BNB)
+        minPricePerTokenStable: host.minPricePerTokenStable || 316  // NEW: Stablecoin pricing (USDC) - use stable default
       }));
       const randomIndex = Math.floor(Math.random() * parsedHosts.length);
       const flowSelectedHost = parsedHosts[randomIndex];

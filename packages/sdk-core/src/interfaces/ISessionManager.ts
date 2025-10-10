@@ -10,9 +10,7 @@ export interface ISessionManager {
    * Start a new session
    */
   startSession(
-    model: string,
-    provider: string,
-    config: SessionConfig
+    config: any
   ): Promise<{
     sessionId: bigint;
     jobId: bigint;
@@ -24,6 +22,15 @@ export interface ISessionManager {
   sendPrompt(
     sessionId: bigint,
     prompt: string
+  ): Promise<string>;
+
+  /**
+   * Send prompt with streaming support
+   */
+  sendPromptStreaming(
+    sessionId: bigint,
+    prompt: string,
+    onToken?: (token: string) => void
   ): Promise<string>;
   
   /**
@@ -90,4 +97,9 @@ export interface ISessionManager {
     tokensUsed: number,
     pricePerToken: number
   ): bigint;
+
+  /**
+   * End a session cleanly (user-initiated)
+   */
+  endSession(sessionId: bigint): Promise<void>;
 }

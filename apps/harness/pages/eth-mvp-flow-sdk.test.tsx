@@ -48,11 +48,12 @@ const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_
 
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = '0.01'; // 0.01 ETH deposit (~$40 at ETH price) - enough for proof interval minimum
-// PRICE_PER_TOKEN removed - now using actual host minPricePerToken from blockchain
+// PRICE_PER_TOKEN removed - now using actual host minPricePerTokenNative from blockchain (dual pricing)
 const PROOF_INTERVAL = 1000; // Proof every 1000 tokens (production default)
 const SESSION_DURATION = 86400; // 1 day
 const EXPECTED_TOKENS = 100; // Expected tokens to generate in test
-const DEFAULT_PRICE_PER_TOKEN = '0.000005'; // Fallback: 0.000005 ETH per token (used if host pricing unavailable)
+const DEFAULT_PRICE_NATIVE_WEI = '11363636363636'; // Fallback native pricing: ~0.0000114 ETH per token (~$0.00005 @ $4400 ETH)
+const DEFAULT_PRICE_PER_TOKEN = ethers.formatEther(DEFAULT_PRICE_NATIVE_WEI); // Convert to ETH for display
 // Contract now accepts: 0.0006 ETH deposit, varies by host pricing, covers ~120 tokens
 
 // ERC20 ABIs
@@ -472,13 +473,13 @@ export default function BaseEthMvpFlowSDKTest() {
         throw new Error("No active hosts found");
       }
 
-      // Parse host metadata
+      // Parse host metadata with DUAL pricing support
       const parsedHosts = hosts.map((host: any) => ({
         address: host.address,
         endpoint: host.apiUrl || host.endpoint || `http://localhost:8080`,  // Use endpoint property name
         models: host.supportedModels || [],
-        pricePerToken: 2000, // Default price (legacy)
-        minPricePerToken: host.minPricePerToken || 0  // NEW: Include pricing from blockchain
+        minPricePerTokenNative: host.minPricePerTokenNative || 0n,  // NEW: Native token pricing (ETH/BNB)
+        minPricePerTokenStable: host.minPricePerTokenStable || 0   // NEW: Stablecoin pricing (USDC)
       }));
 
       // Filter hosts that support our model
@@ -494,15 +495,11 @@ export default function BaseEthMvpFlowSDKTest() {
       selectedHostRef.current = selected;  // Also update ref for immediate access
       setActiveHosts(modelSupported);
 
-      // Set host pricing from blockchain (with fallback to default)
-      // minPricePerToken is in USDC scale (100 = 0.0001 USDC per token)
-      // For ETH testnet, convert to a very small ETH amount
-      const pricingRaw = Number(selected.minPricePerToken || 0);
-      const pricingEth = pricingRaw > 0
-        ? (pricingRaw / 100000000).toFixed(9) // Convert USDC price to ETH (divide by 100M for testnet)
-        : DEFAULT_PRICE_PER_TOKEN;
+      // Set host pricing from blockchain (DUAL PRICING - use native for ETH sessions)
+      const pricingNativeWei = selected.minPricePerTokenNative || BigInt(DEFAULT_PRICE_NATIVE_WEI);
+      const pricingEth = ethers.formatEther(pricingNativeWei);
       setHostPricing(pricingEth);
-      addLog(`💵 Host pricing: ${pricingEth} ETH/token (raw: ${pricingRaw})`);
+      addLog(`💵 Host native pricing: ${pricingEth} ETH/token (wei: ${pricingNativeWei.toString()})`);
 
       // Store selected host address in window for use across React renders
       (window as any).__selectedHostAddress = selected.address;

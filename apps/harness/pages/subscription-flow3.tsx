@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { encodeFunctionData, parseUnits, createPublicClient, http, getAddress, formatUnits } from "viem";
 import { FabstirSDKCore } from '@fabstir/sdk-core';
-import type { PaymentManager } from '@fabstir/sdk-core';
+import type { IPaymentManager  } from '@fabstir/sdk-core';
 
 // Get configuration from environment variables
 const CHAIN_HEX = "0x14a34";  // Base Sepolia
@@ -84,7 +84,7 @@ export default function SubscriptionFlowSDK() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
   const [sdk, setSdk] = useState<FabstirSDKCore | null>(null);
-  const [paymentManager, setPaymentManager] = useState<PaymentManager | null>(null);
+  const [paymentManager, setPaymentManager] = useState<IPaymentManager | null>(null);
 
   // Initialize SDK
   useEffect(() => {
@@ -215,7 +215,7 @@ export default function SubscriptionFlowSDK() {
       // In production, this would be done through a different mechanism
       // (e.g., user deposits, backend service, etc.)
       console.log("Authenticating SDK...");
-      await sdk.authenticate(TEST_USER_1_PRIVATE_KEY);
+      await sdk.authenticate('privatekey', { privateKey: TEST_USER_1_PRIVATE_KEY });
       console.log("SDK authenticated successfully");
       
       // Get PaymentManager for USDC transfer
@@ -286,7 +286,6 @@ export default function SubscriptionFlowSDK() {
         // Fallback if Base Account SDK is not available
         console.warn("Base Account SDK not initialized, using dummy sub-account");
         throw new Error('Cannot create mock subscription in production');
-        setSubAddr(sub);
       } else {
         // Use Base Account SDK to create/get sub-account
         const sub = await ensureSubAccount(provider, primaryAddr as `0x${string}`);
@@ -298,9 +297,9 @@ export default function SubscriptionFlowSDK() {
       
       setStatus("✅ Step 2 complete: Sub-account created with auto spend permissions");
       setCurrentStep(2);
-      
+
       await new Promise(r => setTimeout(r, 2000));
-      await readAllBalances(primaryAddr, sub);
+      await readAllBalances(primaryAddr, subAddr);
 
     } catch (err: any) {
       setError("Step 2 failed: " + err.message);
@@ -462,7 +461,7 @@ export default function SubscriptionFlowSDK() {
       if (typeof window !== "undefined") {
         try {
           // Dynamically import Base Account SDK only on client side
-          const { default: sdk } = await import("@base-org/account");
+          const sdk = await import("@base-org/account") as any;
           const provider = await sdk.initializeSmartWallet({
             chain: "base-sepolia",
             appId: `Fabstir Harness Test ${Date.now()}`,

@@ -168,7 +168,7 @@ export default function SubscriptionFlow() {
       console.log("Connected to primary account:", primary);
 
       // Send USDC from TEST_USER_1 to primary account
-      const ethersProvider = new ethers.providers.JsonRpcProvider(RPC_URL);
+      const ethersProvider = new ethers.JsonRpcProvider(RPC_URL);
       const wallet = new ethers.Wallet(TEST_USER_1_PRIVATE_KEY, ethersProvider);
       
       const usdcContract = new ethers.Contract(USDC, [

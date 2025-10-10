@@ -87,7 +87,7 @@ export function UnifiedPaymentFlow() {
       }
 
       // Request connection
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      const provider = new ethers.BrowserProvider(window.ethereum as any);
       const signer = await provider.getSigner();
       const address = await signer.getAddress();
       const type = await detectWalletType(signer);
@@ -249,7 +249,7 @@ export function UnifiedPaymentFlow() {
   // Render UI
   return (
     <div className="unified-payment-flow">
-      <style jsx>{`
+      <style>{`
         .unified-payment-flow {
           max-width: 600px;
           margin: 0 auto;
@@ -528,11 +528,4 @@ export function UnifiedPaymentFlow() {
       )}
     </div>
   );
-}
-
-// Type augmentation for window.ethereum
-declare global {
-  interface Window {
-    ethereum?: any;
-  }
 }

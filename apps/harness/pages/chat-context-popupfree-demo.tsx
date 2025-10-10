@@ -51,13 +51,12 @@ import {
   fetchPermissions,
   prepareSpendCallData,
 } from "@base-org/account/spend-permission";
-import type {
-  PaymentManager,
-  SessionManager,
-  StorageManager,
-  HostManager,
-  TreasuryManager,
-} from "@fabstir/sdk-core";
+import type { IPaymentManager,
+  ISessionManager,
+  IStorageManager,
+  IHostManager,
+  ITreasuryManager,
+ } from '@fabstir/sdk-core';
 
 // Environment configuration
 const DEFAULT_CHAIN_ID = ChainId.BASE_SEPOLIA;
@@ -101,28 +100,21 @@ interface ChatMessage {
   tokens?: number;
 }
 
-// Extend Window interface for Ethereum provider
-declare global {
-  interface Window {
-    ethereum?: any;
-  }
-}
-
 export default function ChatContextDemo() {
   // SDK State
   const [sdk, setSdk] = useState<FabstirSDKCore | null>(null);
-  const [sessionManager, setSessionManager] = useState<SessionManager | null>(
+  const [sessionManager, setSessionManager] = useState<ISessionManager | null>(
     null
   );
-  const [paymentManager, setPaymentManager] = useState<PaymentManager | null>(
+  const [paymentManager, setPaymentManager] = useState<IPaymentManager | null>(
     null
   );
-  const [storageManager, setStorageManager] = useState<StorageManager | null>(
+  const [storageManager, setStorageManager] = useState<IStorageManager | null>(
     null
   );
-  const [hostManager, setHostManager] = useState<HostManager | null>(null);
+  const [hostManager, setHostManager] = useState<IHostManager | null>(null);
   const [treasuryManager, setTreasuryManager] =
-    useState<TreasuryManager | null>(null);
+    useState<ITreasuryManager | null>(null);
 
   // Wallet State
   const [selectedChainId, setSelectedChainId] =
@@ -213,7 +205,9 @@ export default function ChatContextDemo() {
 
     if (tokens) {
       setTotalTokens((prev) => prev + tokens);
-      setTotalCost((prev) => prev + (tokens * PRICE_PER_TOKEN) / 1000000); // Convert to USDC
+      // Use actual host pricing (fallback to 2000 if no host selected yet)
+      const pricePerToken = activeHostRef.current?.pricePerToken || activeHost?.pricePerToken || 2000;
+      setTotalCost((prev) => prev + (tokens * pricePerToken) / 1000000); // Convert to USDC
     }
   };
 
@@ -314,18 +308,31 @@ export default function ChatContextDemo() {
       }
 
       // Read treasury accumulated earnings
+
+
+      // TODO: Update to use multi-chain getTreasuryBalance(tokenAddress) API
+
+
+      /*
+
+
       if (treasuryManager) {
+
+
         try {
-          const treasuryEarnings =
-            await treasuryManager.getAccumulatedBalance();
-          newBalances.treasuryAccumulated = ethers.formatUnits(
-            treasuryEarnings,
-            6
-          );
+
+
+          const treasuryEarnings = await treasuryManager.getTreasuryBalance(usdcAddress);
+
+
+          newBalances.treasuryAccumulated = ethers.formatUnits(treasuryEarnings, 6);
+
+
         } catch (e) {
           console.log("Error reading treasury accumulated:", e);
         }
       }
+      */
 
       // Read host wallet balances
       if (TEST_HOST_1_ADDRESS) {
@@ -581,7 +588,7 @@ export default function ChatContextDemo() {
 
   // Connect with wallet provider (MetaMask or other wallet)
   async function connectWithWalletProvider() {
-    if (!window.ethereum) {
+    if (!window.ethereum || !window.ethereum.request) {
       setError(
         "No wallet provider found. Please install MetaMask or use Base Account Kit."
       );
@@ -596,7 +603,8 @@ export default function ChatContextDemo() {
       const userAddress = accounts[0];
 
       // Create a provider and signer from the wallet
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      // Type assertion needed because EthereumProvider.request is optional but we've verified it exists
+      const provider = new ethers.BrowserProvider(window.ethereum as any);
       const signer = await provider.getSigner();
 
       // Authenticate SDK with the signer
@@ -1346,6 +1354,7 @@ export default function ChatContextDemo() {
     if (!storageManager || !sessionId) return;
 
     try {
+      const now = Date.now();
       await storageManager.storeConversation({
         id: sessionId.toString(),
         messages: messages.map((m) => ({
@@ -1353,6 +1362,8 @@ export default function ChatContextDemo() {
           content: m.content,
           timestamp: m.timestamp,
         })),
+        createdAt: now,
+        updatedAt: now,
         metadata: {
           totalTokens,
           totalCost,
@@ -1542,7 +1553,7 @@ export default function ChatContextDemo() {
         "system",
         `   Total cost: ${tokensCost.toFixed(
           6
-        )} USDC (${totalTokens} tokens × $${PRICE_PER_TOKEN / 1000000}/token)`
+        )} USDC (${totalTokens} tokens × $${pricePerToken / 1000000}/token)`
       );
       addMessage(
         "system",
@@ -1593,7 +1604,9 @@ export default function ChatContextDemo() {
         const hostWallet = new ethers.Wallet(hostPrivateKey, hostProvider);
         const chain = ChainRegistry.getChain(selectedChainId);
         const hostSdk = new FabstirSDKCore({
-          walletAddress: await hostWallet.getAddress(),
+          mode: "production" as const,
+          chainId: selectedChainId,
+          rpcUrl: RPC_URLS[selectedChainId as keyof typeof RPC_URLS],
           contractAddresses: {
             jobMarketplace: chain.contracts.jobMarketplace,
             nodeRegistry: chain.contracts.nodeRegistry,
@@ -1706,7 +1719,7 @@ export default function ChatContextDemo() {
             </span>
           </div>
         </div>
-        {sessionId && (
+        {sessionId !== null && sessionId !== 0n && (
           <div className="text-xs text-gray-500 mt-1">
             <div>Session ID: {sessionId.toString()}</div>
             {activeHost && (

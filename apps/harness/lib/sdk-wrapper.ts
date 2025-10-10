@@ -1,4 +1,3 @@
-import { BaseAccountWallet } from '@fabstir/llm-sdk';
 import { encodeFunctionData } from 'viem';
 import { connectWallet } from './base-account';
 import { getOrCreateSubAccount } from './sub-account';
@@ -7,7 +6,6 @@ import type { BatchCall, SDKConfig, TransactionResult } from './types';
 
 /** Browser-compatible SDK wrapper */
 export class FabstirHarnessSDK {
-  private baseWallet: BaseAccountWallet | null = null;
   private subAccount: string | null = null;
   private provider: any;
 
@@ -19,17 +17,9 @@ export class FabstirHarnessSDK {
     const accounts = await connectWallet();
     const sub = await getOrCreateSubAccount(accounts[0]);
     this.subAccount = sub.address;
-    
-    if (typeof window !== 'undefined' && window.ethereum) {
-      this.baseWallet = new BaseAccountWallet();
-    }
   }
 
   async sendBatchCalls(from: string, calls: BatchCall[]): Promise<TransactionResult> {
-    if (this.baseWallet) {
-      return await this.baseWallet.sendSponsoredCalls(from, calls);
-    }
-    
     return await this.provider.request({
       method: 'wallet_sendCalls',
       params: [{
@@ -43,10 +33,6 @@ export class FabstirHarnessSDK {
   }
 
   async getCallsStatus(id: string): Promise<any> {
-    if (this.baseWallet) {
-      return await this.baseWallet.getCallsStatus(id);
-    }
-    
     return await this.provider.request({
       method: 'wallet_getCallsStatus',
       params: [{ id }]

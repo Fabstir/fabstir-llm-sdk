@@ -26,9 +26,12 @@ const EnhancedSDKFeaturesTest: React.FC = () => {
   const testHostDiscovery = async () => {
     try {
       addLog('🚀 Starting Host Discovery Test...');
-      
+
       // Initialize SDK
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      if (!window.ethereum) {
+        throw new Error('Please install MetaMask or another Web3 wallet');
+      }
+      const provider = new ethers.BrowserProvider(window.ethereum as any);
       const signer = await provider.getSigner();
       const walletAddress = await signer.getAddress();
       
@@ -91,9 +94,12 @@ const EnhancedSDKFeaturesTest: React.FC = () => {
       addLog('🚀 Starting WebSocket Streaming Test...');
       setStreamedResponse('');
       setIsStreaming(true);
-      
+
       // Initialize SDK
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      if (!window.ethereum) {
+        throw new Error('Please install MetaMask or another Web3 wallet');
+      }
+      const provider = new ethers.BrowserProvider(window.ethereum as any);
       const signer = await provider.getSigner();
       const walletAddress = await signer.getAddress();
       
@@ -138,7 +144,7 @@ const EnhancedSDKFeaturesTest: React.FC = () => {
           }
 
           // Use the first active host that's not the current wallet
-          const availableHost = activeHosts.find(h =>
+          const availableHost = activeHosts.find((h: any) =>
             h.address?.toLowerCase() !== walletAddress.toLowerCase()
           );
           if (availableHost) {
@@ -178,21 +184,20 @@ const EnhancedSDKFeaturesTest: React.FC = () => {
       );
       addLog(`✅ Session job created: ${jobTx.txHash}`);
       
-      // Start session
-      // The startSession method expects: model, provider, config, endpoint
-      const sessionConfig = {
+      // Start session with proper config object
+      const fullSessionConfig = {
+        model: TINY_VICUNA_MODEL_ID,
+        provider: providerAddress,
+        hostAddress: providerAddress,
+        endpoint: 'http://localhost:8080',
+        chainId: 84532, // Base Sepolia
         depositAmount: BigInt(2000000), // 2 USDC in smallest units
         pricePerToken: BigInt(2000),
         proofInterval: BigInt(10),
         duration: BigInt(3600)
       };
 
-      const session = await sessionManager.startSession(
-        TINY_VICUNA_MODEL_ID, // Use the correct model ID
-        providerAddress,
-        sessionConfig,
-        'http://localhost:8080' // endpoint
-      );
+      const session = await sessionManager.startSession(fullSessionConfig);
 
       addLog(`✅ Session started: ${session.sessionId}`);
       addLog('🔄 Sending prompt with WebSocket streaming...');
@@ -240,9 +245,12 @@ const EnhancedSDKFeaturesTest: React.FC = () => {
   const testIntegratedFlow = async () => {
     try {
       addLog('🚀 Starting Integrated Flow Test...');
-      
+
       // Initialize SDK
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      if (!window.ethereum) {
+        throw new Error('Please install MetaMask or another Web3 wallet');
+      }
+      const provider = new ethers.BrowserProvider(window.ethereum as any);
       const signer = await provider.getSigner();
       const walletAddress = await signer.getAddress();
       
@@ -300,20 +308,20 @@ const EnhancedSDKFeaturesTest: React.FC = () => {
       );
       addLog(`✅ Session job created: ${jobTx.txHash}`);
 
-      // Start session with correct parameters (matching WebSocket test)
-      const sessionConfig = {
+      // Start session with proper config object
+      const fullSessionConfig = {
+        model: TINY_VICUNA_MODEL_ID,
+        provider: selectedHost!,
+        hostAddress: selectedHost!,
+        endpoint: apiUrl || 'http://localhost:8080',
+        chainId: 84532, // Base Sepolia
         depositAmount: BigInt(2000000), // 2 USDC in smallest units
         pricePerToken: BigInt(2000),
         proofInterval: BigInt(10),
         duration: BigInt(3600)
       };
 
-      const session = await sessionManager.startSession(
-        TINY_VICUNA_MODEL_ID, // Use the correct model ID
-        selectedHost!,
-        sessionConfig,
-        apiUrl || 'http://localhost:8080' // Use discovered API URL or fallback
-      );
+      const session = await sessionManager.startSession(fullSessionConfig);
 
       const sessionId = session.sessionId;
       

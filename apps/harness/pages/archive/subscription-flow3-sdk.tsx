@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { createBaseAccountSDK } from "@base-org/account";
 import { encodeFunctionData, parseUnits, createPublicClient, http, getAddress, formatUnits } from "viem";
 import { FabstirSDKCore } from '@fabstir/sdk-core';
-import type { PaymentManager } from '@fabstir/sdk-core';
+import type { IPaymentManager } from '@fabstir/sdk-core';
 
 // Get configuration from environment variables
 const CHAIN_HEX = "0x14a34";  // Base Sepolia
@@ -59,7 +59,7 @@ export default function SubscriptionFlowSDK() {
   
   // SDK instances
   const [sdk, setSdk] = useState<FabstirSDKCore | null>(null);
-  const [paymentManager, setPaymentManager] = useState<PaymentManager | null>(null);
+  const [paymentManager, setPaymentManager] = useState<IPaymentManager | null>(null);
 
   // Initialize FabstirSDKCore on mount
   useEffect(() => {

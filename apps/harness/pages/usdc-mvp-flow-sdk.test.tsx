@@ -48,11 +48,11 @@ const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_
 
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = '2'; // $2 USDC
-// PRICE_PER_TOKEN removed - now using actual host minPricePerToken from blockchain
+// PRICE_PER_TOKEN removed - now using actual host minPricePerTokenStable from blockchain (dual pricing)
 const PROOF_INTERVAL = 1000; // Proof every 1000 tokens (production default)
 const SESSION_DURATION = 86400; // 1 day
 const EXPECTED_TOKENS = 100; // Expected tokens to generate in test
-const DEFAULT_PRICE_PER_TOKEN = 100; // Fallback: 0.0001 USDC per token (minimum acceptable pricing)
+const DEFAULT_PRICE_STABLE = 316; // Fallback stable pricing: 0.000316 USDC per token (default for stablecoin sessions)
 
 // ERC20 ABIs
 const erc20BalanceOfAbi = [{
@@ -295,13 +295,13 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
         // Read treasury accumulated balance via SDK
         if (treasuryManager) {
-          try {
-            const treasuryBalance = await treasuryManager.getAccumulatedBalance();
-            newBalances.treasuryAccumulated = ethers.formatUnits(treasuryBalance, 6);
-          } catch (err) {
-            console.log('Could not read treasury accumulated balance:', err);
-            newBalances.treasuryAccumulated = '0';
-          }
+//          try {
+//            const treasuryBalance = await treasuryManager.getAccumulatedBalance();
+//            newBalances.treasuryAccumulated = ethers.formatUnits(treasuryBalance, 6);
+//          } catch (err) {
+//            console.log('Could not read treasury accumulated balance:', err);
+//            newBalances.treasuryAccumulated = '0';
+//          }
         }
 
         addLog(`Balances updated via SDK`);
@@ -514,13 +514,13 @@ export default function BaseUsdcMvpFlowSDKTest() {
         throw new Error("No active hosts found");
       }
 
-      // Parse host metadata
+      // Parse host metadata with DUAL pricing support
       const parsedHosts = hosts.map((host: any) => ({
         address: host.address,
         endpoint: host.apiUrl || host.endpoint || `http://localhost:8080`,  // Use endpoint property name
         models: host.supportedModels || [],
-        pricePerToken: 2000, // Default price (legacy)
-        minPricePerToken: host.minPricePerToken || 0  // NEW: Include pricing from blockchain
+        minPricePerTokenNative: host.minPricePerTokenNative || 0n,  // NEW: Native token pricing (ETH/BNB)
+        minPricePerTokenStable: host.minPricePerTokenStable || 0   // NEW: Stablecoin pricing (USDC)
       }));
 
       // Filter hosts that support our model
@@ -536,10 +536,11 @@ export default function BaseUsdcMvpFlowSDKTest() {
       selectedHostRef.current = selected;  // Also update ref for immediate access
       setActiveHosts(modelSupported);
 
-      // Set host pricing from blockchain (with fallback to default)
-      const pricing = Number(selected.minPricePerToken || DEFAULT_PRICE_PER_TOKEN);
-      setHostPricing(pricing);
-      addLog(`💵 Host pricing: ${pricing} (${(pricing/1000000).toFixed(6)} USDC/token)`);
+      // Set host pricing from blockchain (DUAL PRICING - use stable for USDC sessions)
+      const pricingStable = Number(selected.minPricePerTokenStable || DEFAULT_PRICE_STABLE);
+      const pricingUSDC = (pricingStable / 1_000_000).toFixed(6);
+      setHostPricing(pricingStable);
+      addLog(`💵 Host stable pricing: $${pricingUSDC} USDC/token (raw: ${pricingStable})`);
 
       // Store selected host address in window for use across React renders
       (window as any).__selectedHostAddress = selected.address;

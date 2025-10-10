@@ -54,12 +54,6 @@ const TEST_ACCOUNTS = {
 
 type WalletType = 'metamask' | 'private-key';
 
-declare global {
-  interface Window {
-    ethereum: any;
-  }
-}
-
 const NodeManagementComponent: React.FC = () => {
   // Chain state
   const [selectedChain, setSelectedChain] = useState<number>(ChainId.BASE_SEPOLIA);
@@ -159,7 +153,7 @@ const NodeManagementComponent: React.FC = () => {
           throw new Error('MetaMask not found! Please install MetaMask.');
         }
 
-        const accounts = await window.ethereum.request({
+        const accounts = await window.ethereum!.request!({
           method: 'eth_requestAccounts'
         });
 
@@ -167,7 +161,7 @@ const NodeManagementComponent: React.FC = () => {
           throw new Error('No accounts found');
         }
 
-        const provider = new ethers.BrowserProvider(window.ethereum);
+        const provider = new ethers.BrowserProvider(window.ethereum as any);
         walletSigner = await provider.getSigner();
         address = await walletSigner.getAddress();
 
@@ -178,7 +172,7 @@ const NodeManagementComponent: React.FC = () => {
           throw new Error('Invalid test account selected');
         }
 
-        const provider = new ethers.JsonRpcProvider(CHAINS[selectedChain].rpcUrl);
+        const provider = new ethers.JsonRpcProvider(CHAINS[selectedChain as keyof typeof CHAINS].rpcUrl);
         walletSigner = new ethers.Wallet(testAccount.privateKey, provider);
         address = await walletSigner.getAddress();
 
@@ -195,7 +189,7 @@ const NodeManagementComponent: React.FC = () => {
       setWalletConnected(true);
 
       addLog(`✅ Wallet connected: ${address}`);
-      addLog(`🔗 Chain: ${CHAINS[selectedChain].name}`);
+      addLog(`🔗 Chain: ${CHAINS[selectedChain as keyof typeof CHAINS].name}`);
 
       // Initialize SDK with connected wallet
       const sdkInstance = await initializeSDK(walletSigner);
@@ -241,7 +235,7 @@ const NodeManagementComponent: React.FC = () => {
   const switchChain = async (chainId: number) => {
     try {
       setChainSwitching(true);
-      addLog(`🔄 Switching to ${CHAINS[chainId].name}...`);
+      addLog(`🔄 Switching to ${CHAINS[chainId as keyof typeof CHAINS].name}...`);
 
       setSelectedChain(chainId);
 
@@ -256,7 +250,7 @@ const NodeManagementComponent: React.FC = () => {
         }
       }
 
-      addLog(`✅ Switched to ${CHAINS[chainId].name}`);
+      addLog(`✅ Switched to ${CHAINS[chainId as keyof typeof CHAINS].name}`);
 
     } catch (error: any) {
       addLog(`❌ Chain switch failed: ${error.message}`);
@@ -269,7 +263,7 @@ const NodeManagementComponent: React.FC = () => {
   const initializeSDK = async (walletSigner: ethers.Signer) => {
     try {
       addLog('🔧 Initializing SDK...');
-      addLog(`📊 Chain: ${CHAINS[selectedChain].name} (${selectedChain})`);
+      addLog(`📊 Chain: ${CHAINS[selectedChain as keyof typeof CHAINS].name} (${selectedChain})`);
 
       // Dynamically import SDK to avoid build-time issues
       const { FabstirSDKCore } = await import('@fabstir/sdk-core');
@@ -280,7 +274,7 @@ const NodeManagementComponent: React.FC = () => {
       const sdkInstance = new FabstirSDKCore({
         mode: 'production',
         chainId: selectedChain,
-        rpcUrl: CHAINS[selectedChain].rpcUrl,
+        rpcUrl: CHAINS[selectedChain as keyof typeof CHAINS].rpcUrl,
         contractAddresses
       });
 
@@ -300,7 +294,7 @@ const NodeManagementComponent: React.FC = () => {
   // 4. CHECK REGISTRATION STATUS with SDK instance
   const checkRegistrationStatusWithSDK = async (address: string, sdkInstance: any) => {
     try {
-      addLog(`🔍 Checking registration on ${CHAINS[selectedChain].name}...`);
+      addLog(`🔍 Checking registration on ${CHAINS[selectedChain as keyof typeof CHAINS].name}...`);
 
       const hostManager = sdkInstance.getHostManager();
       const info = await hostManager.getHostInfo(address);
@@ -351,7 +345,7 @@ const NodeManagementComponent: React.FC = () => {
         });
 
       } else {
-        addLog(`ℹ️ Not registered on ${CHAINS[selectedChain].name}`);
+        addLog(`ℹ️ Not registered on ${CHAINS[selectedChain as keyof typeof CHAINS].name}`);
         setNodeInfo(null);
         setDiscoveredApiUrl('');
       }
@@ -372,7 +366,7 @@ const NodeManagementComponent: React.FC = () => {
     try {
       if (!sdk) throw new Error('SDK not initialized');
 
-      addLog(`📝 Registering node on ${CHAINS[selectedChain].name}...`);
+      addLog(`📝 Registering node on ${CHAINS[selectedChain as keyof typeof CHAINS].name}...`);
       addLog(`API URL: ${apiUrl}`);
       addLog(`Metadata: ${metadata}`);
       addLog(`Stake: ${stakeAmount} FAB`);
@@ -419,7 +413,7 @@ const NodeManagementComponent: React.FC = () => {
       });
 
       addLog(`✅ Node registered! TX: ${txHash}`);
-      addLog(`🔗 View on explorer: ${CHAINS[selectedChain].explorer}/tx/${txHash}`);
+      addLog(`🔗 View on explorer: ${CHAINS[selectedChain as keyof typeof CHAINS].explorer}/tx/${txHash}`);
 
       // Refresh status
       await checkRegistrationStatusWithSDK(walletAddress, sdk);
@@ -524,7 +518,7 @@ const NodeManagementComponent: React.FC = () => {
     try {
       if (!sdk) throw new Error('SDK not initialized');
 
-      addLog(`📝 Unregistering from ${CHAINS[selectedChain].name}...`);
+      addLog(`📝 Unregistering from ${CHAINS[selectedChain as keyof typeof CHAINS].name}...`);
 
       const hostManager = sdk.getHostManager();
       const txHash = await hostManager.unregisterHost();
@@ -568,14 +562,14 @@ const NodeManagementComponent: React.FC = () => {
     try {
       if (!sdk) throw new Error('SDK not initialized');
 
-      addLog(`🔍 Discovering nodes on ${CHAINS[selectedChain].name}...`);
+      addLog(`🔍 Discovering nodes on ${CHAINS[selectedChain as keyof typeof CHAINS].name}...`);
 
       const hostManager = sdk.getHostManager();
       const nodes = await hostManager.discoverAllActiveHosts();
 
       if (nodes.length > 0) {
         addLog(`✅ Found ${nodes.length} active nodes:`);
-        nodes.forEach(node => {
+        nodes.forEach((node: any) => {
           addLog(`  📍 ${node.nodeAddress.slice(0, 8)}...${node.nodeAddress.slice(-6)}: ${node.apiUrl}`);
         });
         setDiscoveredNodes(nodes);
@@ -729,13 +723,13 @@ const NodeManagementComponent: React.FC = () => {
         window.location.reload();
       };
 
-      window.ethereum.on('accountsChanged', handleAccountsChanged);
-      window.ethereum.on('chainChanged', handleChainChanged);
+      window.ethereum!.on!('accountsChanged', handleAccountsChanged);
+      window.ethereum!.on!('chainChanged', handleChainChanged);
 
       return () => {
-        if (window.ethereum.removeListener) {
-          window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
-          window.ethereum.removeListener('chainChanged', handleChainChanged);
+        if (window.ethereum!.removeListener) {
+          window.ethereum!.removeListener!('accountsChanged', handleAccountsChanged);
+          window.ethereum!.removeListener!('chainChanged', handleChainChanged);
         }
       };
     }
@@ -775,7 +769,7 @@ const NodeManagementComponent: React.FC = () => {
             </button>
           ))}
           <span style={{ marginLeft: '20px', color: '#666' }}>
-            Current: <strong>{CHAINS[selectedChain].name}</strong> ({CHAINS[selectedChain].nativeToken})
+            Current: <strong>{CHAINS[selectedChain as keyof typeof CHAINS].name}</strong> ({CHAINS[selectedChain as keyof typeof CHAINS].nativeToken})
           </span>
         </div>
       </div>
@@ -846,11 +840,14 @@ const NodeManagementComponent: React.FC = () => {
               Connect Test Account
             </button>
 
-            {selectedTestAccount.startsWith('TEST_HOST') && (
-              <div style={{ marginTop: '10px', fontSize: '12px', color: '#856404' }}>
-                <strong>API URL:</strong> {TEST_ACCOUNTS[selectedTestAccount as keyof typeof TEST_ACCOUNTS].apiUrl}
-              </div>
-            )}
+            {selectedTestAccount.startsWith('TEST_HOST') && (() => {
+              const account = TEST_ACCOUNTS[selectedTestAccount as keyof typeof TEST_ACCOUNTS];
+              return 'apiUrl' in account && account.apiUrl ? (
+                <div style={{ marginTop: '10px', fontSize: '12px', color: '#856404' }}>
+                  <strong>API URL:</strong> {account.apiUrl}
+                </div>
+              ) : null;
+            })()}
           </div>
 
           <div style={{
@@ -879,7 +876,7 @@ const NodeManagementComponent: React.FC = () => {
                 <br />
                 <strong>Type:</strong> {walletType}
                 <br />
-                <strong>Chain:</strong> {CHAINS[selectedChain].name}
+                <strong>Chain:</strong> {CHAINS[selectedChain as keyof typeof CHAINS].name}
                 <br />
                 <strong>Status:</strong> {isRegistered ? '✅ Registered' : '❌ Not Registered'}
                 {discoveredApiUrl && (
@@ -931,7 +928,7 @@ const NodeManagementComponent: React.FC = () => {
               borderRadius: '5px',
               backgroundColor: '#f0fff0'
             }}>
-              <h3>📝 Register Node on {CHAINS[selectedChain].name}</h3>
+              <h3>📝 Register Node on {CHAINS[selectedChain as keyof typeof CHAINS].name}</h3>
 
               <div style={{ marginBottom: '10px' }}>
                 <label>API URL:</label><br />
@@ -944,7 +941,12 @@ const NodeManagementComponent: React.FC = () => {
                 />
                 {walletType === 'private-key' && selectedTestAccount.startsWith('TEST_HOST') && (
                   <button
-                    onClick={() => setApiUrl(TEST_ACCOUNTS[selectedTestAccount as keyof typeof TEST_ACCOUNTS].apiUrl!)}
+                    onClick={() => {
+                      const account = TEST_ACCOUNTS[selectedTestAccount as keyof typeof TEST_ACCOUNTS];
+                      if ('apiUrl' in account && account.apiUrl) {
+                        setApiUrl(account.apiUrl);
+                      }
+                    }}
                     style={{ marginTop: '5px', padding: '3px 8px', fontSize: '12px' }}
                   >
                     Use Test Host URL
@@ -1002,7 +1004,7 @@ const NodeManagementComponent: React.FC = () => {
               <h3>⚙️ Node Management</h3>
 
               <div style={{ marginBottom: '15px', fontSize: '14px' }}>
-                <div>Chain: {CHAINS[nodeInfo.chainId || selectedChain].name}</div>
+                <div>Chain: {CHAINS[(nodeInfo.chainId || selectedChain) as keyof typeof CHAINS].name}</div>
                 <div>Active: {nodeInfo.isActive ? '✅' : '❌'}</div>
                 <div>Staked: {nodeInfo.stakedAmount} FAB</div>
                 <div>Models: {nodeInfo.supportedModels?.length || 0}</div>
@@ -1074,7 +1076,7 @@ const NodeManagementComponent: React.FC = () => {
               disabled={loading}
               style={{ marginBottom: '10px' }}
             >
-              Discover Nodes on {CHAINS[selectedChain].name}
+              Discover Nodes on {CHAINS[selectedChain as keyof typeof CHAINS].name}
             </button>
 
             {discoveredNodes.length > 0 && (

@@ -6,10 +6,10 @@ interface SettlementStatus {
   hostPayment: string; treasuryFee: string; userRefund: string;
 }
 export class PaymentSettlement {
-  private provider: ethers.providers.JsonRpcProvider;
+  private provider: ethers.JsonRpcProvider;
   private hostAddress: string;
   constructor(rpcUrl: string, hostAddress: string) {
-    this.provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+    this.provider = new ethers.JsonRpcProvider(rpcUrl);
     this.hostAddress = hostAddress;
   }
 
@@ -35,7 +35,7 @@ export class PaymentSettlement {
   async checkBalances(addresses: string[]): Promise<Record<string, string>> {
     const usdc = new ethers.Contract(USDC_ADDRESS, ['function balanceOf(address) view returns (uint256)'], this.provider);
     const balances: Record<string, string> = {};
-    for (const addr of addresses) balances[addr] = ethers.utils.formatUnits(await usdc.balanceOf(addr), 6); // USDC
+    for (const addr of addresses) balances[addr] = ethers.formatUnits(await usdc.balanceOf(addr), 6); // USDC
     return balances;
   }
 

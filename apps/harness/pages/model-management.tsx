@@ -56,7 +56,7 @@ export default function ModelManagementPage() {
   // State management
   const [isConnected, setIsConnected] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
-  const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
+  const [provider, setProvider] = useState<ethers.Provider | null>(null);
   const [signer, setSigner] = useState<ethers.Signer | null>(null);
   const [modelManager, setModelManager] = useState<ModelManager | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -94,7 +94,7 @@ export default function ModelManagementPage() {
 
       // Request network switch to Base Sepolia with our RPC
       try {
-        await window.ethereum.request({
+        await (window.ethereum as any).request({
           method: 'wallet_switchEthereumChain',
           params: [{ chainId: '0x14a34' }], // 84532 in hex
         });
@@ -102,7 +102,7 @@ export default function ModelManagementPage() {
         // This error code indicates that the chain has not been added to MetaMask
         if (switchError.code === 4902) {
           try {
-            await window.ethereum.request({
+            await (window.ethereum as any).request({
               method: 'wallet_addEthereumChain',
               params: [{
                 chainId: '0x14a34',
@@ -172,7 +172,7 @@ export default function ModelManagementPage() {
         throw new Error('No Ethereum provider found');
       }
 
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      const provider = new ethers.BrowserProvider(window.ethereum as any);
       await provider.send("eth_requestAccounts", []);
       const signer = await provider.getSigner();
       const address = await signer.getAddress();

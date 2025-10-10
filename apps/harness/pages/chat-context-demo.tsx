@@ -29,13 +29,12 @@ import {
   connectWallet as connectBaseWallet,
   getAccountInfo,
 } from "../lib/base-account";
-import type {
-  PaymentManager,
-  SessionManager,
-  StorageManager,
-  HostManager,
-  TreasuryManager,
-} from "@fabstir/sdk-core";
+import type { IPaymentManager,
+  ISessionManager,
+  IStorageManager,
+  IHostManager,
+  ITreasuryManager,
+ } from '@fabstir/sdk-core';
 
 // Environment configuration
 const DEFAULT_CHAIN_ID = ChainId.BASE_SEPOLIA;
@@ -75,27 +74,22 @@ interface ChatMessage {
 }
 
 // Extend Window interface for Ethereum provider
-declare global {
-  interface Window {
-    ethereum?: any;
-  }
-}
 
 export default function ChatContextDemo() {
   // SDK State
   const [sdk, setSdk] = useState<FabstirSDKCore | null>(null);
-  const [sessionManager, setSessionManager] = useState<SessionManager | null>(
+  const [sessionManager, setSessionManager] = useState<ISessionManager | null>(
     null
   );
-  const [paymentManager, setPaymentManager] = useState<PaymentManager | null>(
+  const [paymentManager, setPaymentManager] = useState<IPaymentManager | null>(
     null
   );
-  const [storageManager, setStorageManager] = useState<StorageManager | null>(
+  const [storageManager, setStorageManager] = useState<IStorageManager | null>(
     null
   );
-  const [hostManager, setHostManager] = useState<HostManager | null>(null);
+  const [hostManager, setHostManager] = useState<IHostManager | null>(null);
   const [treasuryManager, setTreasuryManager] =
-    useState<TreasuryManager | null>(null);
+    useState<ITreasuryManager | null>(null);
 
   // Wallet State
   const [selectedChainId, setSelectedChainId] =
@@ -278,18 +272,31 @@ export default function ChatContextDemo() {
       }
 
       // Read treasury accumulated earnings
+
+
+      // TODO: Update to use multi-chain getTreasuryBalance(tokenAddress) API
+
+
+      /*
+
+
       if (treasuryManager) {
+
+
         try {
-          const treasuryEarnings =
-            await treasuryManager.getAccumulatedBalance();
-          newBalances.treasuryAccumulated = ethers.formatUnits(
-            treasuryEarnings,
-            6
-          );
+
+
+          const treasuryEarnings = await treasuryManager.getTreasuryBalance(usdcAddress);
+
+
+          newBalances.treasuryAccumulated = ethers.formatUnits(treasuryEarnings, 6);
+
+
         } catch (e) {
           console.log("Error reading treasury accumulated:", e);
         }
       }
+      */
 
       // Read host wallet balances
       if (TEST_HOST_1_ADDRESS) {
@@ -544,13 +551,13 @@ export default function ChatContextDemo() {
 
     try {
       // Request account access
-      const accounts = await window.ethereum.request({
+      const accounts = await window.ethereum!.request!({
         method: "eth_requestAccounts",
       });
       const userAddress = accounts[0];
 
       // Create a provider and signer from the wallet
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      const provider = new ethers.BrowserProvider(window.ethereum as any);
       const signer = await provider.getSigner();
 
       // Authenticate SDK with the signer
@@ -1258,6 +1265,8 @@ export default function ChatContextDemo() {
           model: activeHost?.models?.[0] || "unknown",
           provider: activeHost?.address || "unknown",
         },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
       });
     } catch (error) {
       console.warn("Failed to store conversation:", error);
@@ -1456,7 +1465,9 @@ export default function ChatContextDemo() {
         const hostWallet = new ethers.Wallet(hostPrivateKey, hostProvider);
         const chain = ChainRegistry.getChain(selectedChainId);
         const hostSdk = new FabstirSDKCore({
-          walletAddress: await hostWallet.getAddress(),
+          mode: 'production' as const,
+          chainId: selectedChainId,
+          rpcUrl: RPC_URLS[selectedChainId as keyof typeof RPC_URLS],
           contractAddresses: {
             jobMarketplace: chain.contracts.jobMarketplace,
             nodeRegistry: chain.contracts.nodeRegistry,
@@ -1567,7 +1578,7 @@ export default function ChatContextDemo() {
             </span>
           </div>
         </div>
-        {sessionId && (
+        {sessionId !== null && (
           <div className="text-xs text-gray-500 mt-1">
             <div>Session ID: {sessionId.toString()}</div>
             {activeHost && (
