@@ -416,9 +416,10 @@ docker exec fabstir-host-test fabstir-host info --address $TEST_HOST_1_ADDRESS
    - Add dual pricing quick start
    - Show how to query both prices
 
-3. [ ] `docs/UI_DEVELOPER_CHAT_GUIDE.md`:
-   - Update with dual pricing display patterns
-   - Show ETH vs USDC pricing handling
+3. [x] `docs/UI_DEVELOPER_CHAT_GUIDE.md`:
+   - Added comprehensive dual pricing display patterns section (2.4)
+   - Includes hooks for querying pricing, display components, payment type selector
+   - Shows ETH vs USDC pricing handling with validation examples
 
 #### 4.4 Final Checkpoint
 
@@ -491,7 +492,8 @@ If critical issues arise:
 - [x] Documentation updated:
   - [x] SDK_API.md (added dual pricing interfaces, methods, and examples)
   - [x] SDK_QUICK_REFERENCE.md (added dual pricing system section)
-  - [ ] UI_DEVELOPER_CHAT_GUIDE.md (pending dual pricing display patterns)
+  - [x] UI_DEVELOPER_CHAT_GUIDE.md (added section 2.4 with dual pricing display patterns)
+- [x] Next.js build verified (pre-existing HTML import errors not related to dual pricing changes)
 - [ ] Final validation complete (pending host registration and E2E tests)
 
 ---

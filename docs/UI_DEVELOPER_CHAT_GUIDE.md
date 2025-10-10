@@ -735,6 +735,520 @@ export function useBaseAccount() {
 }
 ```
 
+### 2.4 Dual Pricing Display Patterns
+
+The Fabstir marketplace uses a **dual pricing system** where hosts set separate minimum prices for native token (ETH/BNB) and stablecoin (USDC) payments. This section shows you how to query and display pricing correctly in your UI.
+
+#### Understanding Dual Pricing
+
+Hosts register with two pricing values:
+- **`minPricePerTokenNative`**: Minimum price in native token (wei for ETH/BNB)
+- **`minPricePerTokenStable`**: Minimum price in stablecoins (raw USDC units with 6 decimals)
+
+**Pricing Ranges**:
+```typescript
+// Native Token (ETH/BNB)
+MIN: 2,272,727,273 wei (~$0.00001 @ $4400 ETH)
+MAX: 22,727,272,727,273 wei (~$0.1 @ $4400 ETH)
+DEFAULT: 11,363,636,363,636 wei (~$0.00005 @ $4400 ETH)
+
+// Stablecoin (USDC)
+MIN: 10 (0.00001 USDC per token)
+MAX: 100,000 (0.1 USDC per token)
+DEFAULT: 316 (0.000316 USDC per token)
+```
+
+#### Querying Host Pricing
+
+Create `hooks/use-host-pricing.ts`:
+
+```typescript
+'use client';
+
+import { useState, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { ethers } from 'ethers';
+import type { HostManager } from '@fabstir/sdk-core';
+
+interface HostPricing {
+  address: string;
+  minPricePerTokenNative: bigint;
+  minPricePerTokenStable: bigint;
+  // Human-readable formatted values
+  nativeEth: string;
+  nativeUsd: string;
+  stableUsdc: string;
+  perThousandTokensUsd: string;
+}
+
+export function useHostPricing(
+  hostManager: HostManager | null,
+  hostAddress: string | undefined,
+  ethPriceUsd: number = 4400 // You can fetch this from an oracle
+) {
+  // Query host pricing
+  const {
+    data: pricing,
+    isLoading,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['host-pricing', hostAddress],
+    queryFn: async () => {
+      if (!hostManager || !hostAddress) {
+        throw new Error('Host manager or address not available');
+      }
+
+      // Get host info with pricing
+      const hostInfo = await hostManager.getHostInfo(hostAddress);
+
+      // Format native pricing
+      const nativeEth = ethers.formatEther(hostInfo.minPricePerTokenNative);
+      const nativeUsd = (parseFloat(nativeEth) * ethPriceUsd).toFixed(6);
+
+      // Format stable pricing (USDC has 6 decimals)
+      const stableUsdc = (Number(hostInfo.minPricePerTokenStable) / 1_000_000).toFixed(6);
+
+      // Calculate cost per 1000 tokens
+      const perThousandTokensUsd = (parseFloat(stableUsdc) * 1000).toFixed(2);
+
+      const result: HostPricing = {
+        address: hostInfo.address,
+        minPricePerTokenNative: hostInfo.minPricePerTokenNative,
+        minPricePerTokenStable: hostInfo.minPricePerTokenStable,
+        nativeEth,
+        nativeUsd,
+        stableUsdc,
+        perThousandTokensUsd,
+      };
+
+      return result;
+    },
+    enabled: !!hostManager && !!hostAddress,
+    staleTime: 30000, // Cache for 30 seconds
+  });
+
+  return {
+    pricing,
+    isLoading,
+    error,
+    refetch,
+  };
+}
+```
+
+#### Pricing Display Component
+
+Create `components/host-pricing-display.tsx`:
+
+```typescript
+'use client';
+
+import { motion } from 'framer-motion';
+import { DollarSign, Zap, TrendingUp } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+
+interface HostPricingDisplayProps {
+  pricing: {
+    nativeEth: string;
+    nativeUsd: string;
+    stableUsdc: string;
+    perThousandTokensUsd: string;
+  } | null;
+  isLoading: boolean;
+  paymentType?: 'ETH' | 'USDC';
+}
+
+export function HostPricingDisplay({
+  pricing,
+  isLoading,
+  paymentType = 'USDC',
+}: HostPricingDisplayProps) {
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-6 w-32" />
+        </CardHeader>
+        <CardContent>
+          <Skeleton className="h-20 w-full" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!pricing) {
+    return (
+      <Card>
+        <CardContent className="p-6 text-center text-muted-foreground">
+          No pricing information available
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+    >
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <DollarSign className="w-5 h-5" />
+            Host Pricing
+            <Badge variant="outline" className="ml-auto">
+              {paymentType}
+            </Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Native Token Pricing (ETH/BNB) */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Zap className="w-4 h-4" />
+              <span>Native Token (ETH)</span>
+            </div>
+            <div className="pl-6">
+              <p className="text-2xl font-bold">
+                {pricing.nativeEth} ETH
+                <span className="text-sm font-normal text-muted-foreground ml-2">
+                  per token
+                </span>
+              </p>
+              <p className="text-sm text-muted-foreground">
+                ~${pricing.nativeUsd} USD per token
+              </p>
+            </div>
+          </div>
+
+          {/* Stablecoin Pricing (USDC) */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <TrendingUp className="w-4 h-4" />
+              <span>Stablecoin (USDC)</span>
+            </div>
+            <div className="pl-6">
+              <p className="text-2xl font-bold">
+                ${pricing.stableUsdc}
+                <span className="text-sm font-normal text-muted-foreground ml-2">
+                  per token
+                </span>
+              </p>
+              <p className="text-sm text-muted-foreground">
+                ~${pricing.perThousandTokensUsd} per 1000 tokens
+              </p>
+            </div>
+          </div>
+
+          {/* Current Selection Highlight */}
+          <div className="pt-4 border-t">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Your Selection:</span>
+              <Badge variant="secondary" className="text-base">
+                {paymentType === 'ETH'
+                  ? `${pricing.nativeEth} ETH/token`
+                  : `$${pricing.stableUsdc} USDC/token`}
+              </Badge>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+```
+
+#### Using Pricing in Session Creation
+
+When creating a session, ensure your `pricePerToken` meets the host's minimum:
+
+```typescript
+'use client';
+
+import { useState } from 'react';
+import { useToast } from '@/components/ui/use-toast';
+import { ChainId } from '@fabstir/sdk-core';
+import type { SessionManager } from '@fabstir/sdk-core';
+
+export function useSessionWithPricing(sessionManager: SessionManager | null) {
+  const { toast } = useToast();
+
+  const startSessionWithPricing = async (
+    hostInfo: {
+      address: string;
+      endpoint: string;
+      minPricePerTokenNative: bigint;
+      minPricePerTokenStable: bigint;
+    },
+    paymentType: 'ETH' | 'USDC',
+    depositAmount: string
+  ) => {
+    if (!sessionManager) {
+      throw new Error('Session manager not initialized');
+    }
+
+    // Get minimum price for selected payment type
+    const minPrice = paymentType === 'ETH'
+      ? hostInfo.minPricePerTokenNative
+      : hostInfo.minPricePerTokenStable;
+
+    // IMPORTANT: Your pricePerToken must be >= host's minimum
+    // For this example, we'll use the host's minimum + 10%
+    const pricePerToken = Number(minPrice) * 1.1;
+
+    // Validate pricing
+    if (pricePerToken < Number(minPrice)) {
+      toast({
+        title: 'Invalid Pricing',
+        description: `Price per token (${pricePerToken}) is below host minimum (${minPrice})`,
+        variant: 'destructive',
+      });
+      throw new Error('Price below host minimum');
+    }
+
+    const config = {
+      depositAmount,
+      pricePerToken: Math.floor(pricePerToken),
+      duration: 86400, // 24 hours
+      proofInterval: 1000, // 1000 tokens
+      hostUrl: hostInfo.endpoint,
+      model: 'llama-3.2-1b-instruct', // Or get from host's supported models
+      chainId: ChainId.BASE_SEPOLIA,
+    };
+
+    try {
+      const result = await sessionManager.startSession(config);
+
+      toast({
+        title: 'Session Started',
+        description: `Deposited ${depositAmount} ${paymentType} at ${pricePerToken} per token`,
+      });
+
+      return result;
+    } catch (error: any) {
+      // Contract will revert if pricing is invalid
+      if (error.message?.includes('PriceBelowMinimum')) {
+        toast({
+          title: 'Pricing Error',
+          description: 'Your price per token is below the host minimum',
+          variant: 'destructive',
+        });
+      }
+      throw error;
+    }
+  };
+
+  return { startSessionWithPricing };
+}
+```
+
+#### Payment Type Selector Component
+
+Create `components/payment-type-selector.tsx`:
+
+```typescript
+'use client';
+
+import { useState } from 'react';
+import { motion } from 'framer-motion';
+import { Check } from 'lucide-react';
+import { Card } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+
+interface PaymentTypeSelectorProps {
+  onSelect: (type: 'ETH' | 'USDC') => void;
+  selected: 'ETH' | 'USDC';
+  pricing: {
+    nativeEth: string;
+    nativeUsd: string;
+    stableUsdc: string;
+  } | null;
+}
+
+export function PaymentTypeSelector({
+  onSelect,
+  selected,
+  pricing,
+}: PaymentTypeSelectorProps) {
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      {/* ETH Payment */}
+      <motion.div
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+      >
+        <Card
+          className={cn(
+            'cursor-pointer transition-all p-6',
+            selected === 'ETH' && 'ring-2 ring-primary shadow-lg'
+          )}
+          onClick={() => onSelect('ETH')}
+        >
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h3 className="font-semibold text-lg">Pay with ETH</h3>
+              <p className="text-sm text-muted-foreground">
+                Native token payment
+              </p>
+            </div>
+            {selected === 'ETH' && (
+              <div className="bg-primary text-primary-foreground rounded-full p-1">
+                <Check className="w-4 h-4" />
+              </div>
+            )}
+          </div>
+          {pricing && (
+            <div className="space-y-1">
+              <p className="text-2xl font-bold">{pricing.nativeEth} ETH</p>
+              <p className="text-sm text-muted-foreground">
+                ~${pricing.nativeUsd} per token
+              </p>
+            </div>
+          )}
+        </Card>
+      </motion.div>
+
+      {/* USDC Payment */}
+      <motion.div
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+      >
+        <Card
+          className={cn(
+            'cursor-pointer transition-all p-6',
+            selected === 'USDC' && 'ring-2 ring-primary shadow-lg'
+          )}
+          onClick={() => onSelect('USDC')}
+        >
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h3 className="font-semibold text-lg">Pay with USDC</h3>
+              <p className="text-sm text-muted-foreground">
+                Stable pricing
+              </p>
+            </div>
+            {selected === 'USDC' && (
+              <div className="bg-primary text-primary-foreground rounded-full p-1">
+                <Check className="w-4 h-4" />
+              </div>
+            )}
+          </div>
+          {pricing && (
+            <div className="space-y-1">
+              <p className="text-2xl font-bold">${pricing.stableUsdc}</p>
+              <p className="text-sm text-muted-foreground">
+                USDC per token
+              </p>
+            </div>
+          )}
+        </Card>
+      </motion.div>
+    </div>
+  );
+}
+```
+
+#### Complete Example: Pricing-Aware Host Selector
+
+```typescript
+'use client';
+
+import { useState } from 'react';
+import { useHostPricing } from '@/hooks/use-host-pricing';
+import { HostPricingDisplay } from '@/components/host-pricing-display';
+import { PaymentTypeSelector } from '@/components/payment-type-selector';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+
+export function PricingAwareHostSelector({
+  hosts,
+  onStartSession,
+  hostManager,
+}: any) {
+  const [selectedHost, setSelectedHost] = useState<any>(null);
+  const [paymentType, setPaymentType] = useState<'ETH' | 'USDC'>('USDC');
+
+  const { pricing, isLoading } = useHostPricing(
+    hostManager,
+    selectedHost?.address
+  );
+
+  const handleStartSession = () => {
+    if (!selectedHost || !pricing) return;
+
+    onStartSession(selectedHost, paymentType, pricing);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Host Selection */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Select Host</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {/* Your host list UI here */}
+          <select
+            onChange={(e) => {
+              const host = hosts.find((h: any) => h.address === e.target.value);
+              setSelectedHost(host);
+            }}
+            className="w-full p-2 border rounded"
+          >
+            <option value="">Choose a host...</option>
+            {hosts.map((host: any) => (
+              <option key={host.address} value={host.address}>
+                {host.address.slice(0, 10)}...{host.address.slice(-8)}
+              </option>
+            ))}
+          </select>
+        </CardContent>
+      </Card>
+
+      {/* Payment Type Selection */}
+      {selectedHost && (
+        <>
+          <PaymentTypeSelector
+            onSelect={setPaymentType}
+            selected={paymentType}
+            pricing={pricing}
+          />
+
+          {/* Pricing Display */}
+          <HostPricingDisplay
+            pricing={pricing}
+            isLoading={isLoading}
+            paymentType={paymentType}
+          />
+
+          {/* Start Session Button */}
+          <Button
+            onClick={handleStartSession}
+            disabled={!pricing}
+            size="lg"
+            className="w-full"
+          >
+            Start Session with {paymentType}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+```
+
+**Key Takeaways**:
+
+1. **Always query pricing before session creation** - Host's minimum prices can change
+2. **Format pricing correctly** - Native uses `formatEther()`, stable divides by 1,000,000
+3. **Validate pricing** - Your `pricePerToken` MUST be >= host's minimum or the contract will revert
+4. **Show both options** - Let users choose between ETH and USDC payments
+5. **Cache pricing data** - Use React Query's `staleTime` to avoid excessive queries
+
 ---
 
 ## 💬 Part 3: Chat Implementation with @assistant-ui

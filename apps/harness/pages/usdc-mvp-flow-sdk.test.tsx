@@ -107,7 +107,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
   const [activeHosts, setActiveHosts] = useState<any[]>([]);
   const [s5Cid, setS5Cid] = useState<string>("");
   const [totalTokensGenerated, setTotalTokensGenerated] = useState(0);
-  const [hostPricing, setHostPricing] = useState<number>(DEFAULT_PRICE_PER_TOKEN);
+  const [hostPricing, setHostPricing] = useState<number>(DEFAULT_PRICE_STABLE);
 
   // SDK instances
   const [sdk, setSdk] = useState<FabstirSDKCore | null>(null);
