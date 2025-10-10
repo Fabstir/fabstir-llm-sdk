@@ -46,14 +46,15 @@ export interface HostMetadata {
  * Host information including model support and pricing
  */
 export interface HostInfo {
-  address: string;             // Ethereum address
-  apiUrl: string;             // API endpoint
-  metadata: HostMetadata;     // Host metadata
-  supportedModels: string[];  // Array of model IDs
-  isActive: boolean;          // Is host active
-  stake: bigint;              // Staked amount
-  minPricePerToken: bigint;   // Minimum price per token (100-100,000 = 0.0001-0.1 USDC)
-  advertisedPrice?: bigint;   // Optional recommended price for UI display
+  address: string;                  // Ethereum address
+  apiUrl: string;                  // API endpoint
+  metadata: HostMetadata;          // Host metadata
+  supportedModels: string[];       // Array of model IDs
+  isActive: boolean;               // Is host active
+  stake: bigint;                   // Staked amount
+  minPricePerTokenNative: bigint;  // Minimum price per token in native token (ETH/BNB)
+  minPricePerTokenStable: bigint;  // Minimum price per token in stablecoin (USDC)
+  advertisedPrice?: bigint;        // Optional recommended price for UI display (deprecated)
 }
 
 /**

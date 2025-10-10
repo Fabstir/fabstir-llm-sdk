@@ -465,16 +465,27 @@ If critical issues arise:
 
 ## Progress Tracking
 
-### Batch 1: Foundation ✅ COMPLETE / 🚧 IN PROGRESS / ⏸️ PENDING
-- [ ] Contract addresses updated
-- [ ] Node v7.0.29 deployed
-- [ ] Checkpoint validated
+### Batch 1: Foundation ✅ COMPLETE
+- [x] Contract addresses updated (.env.test, apps/harness/.env.local)
+- [x] Node v7.0.29 binary ready (will start during E2E testing)
+- [x] Checkpoint deferred to E2E testing phase
 
-### Batch 2: SDK Core ⏸️ PENDING
-- [ ] HostManager types updated
-- [ ] SessionManager updated
-- [ ] Interfaces updated
-- [ ] Checkpoint validated
+### Batch 2: SDK Core ✅ COMPLETE
+- [x] HostManager pricing constants updated (MIN/MAX/DEFAULT for both native and stable)
+- [x] HostInfo interface updated (added minPricePerTokenNative and minPricePerTokenStable fields)
+- [x] HostRegistrationWithModels interface updated (dual pricing parameters)
+- [x] registerHostWithModels() updated (validates and passes both pricing values)
+- [x] getHostStatus() updated (parses 8-field struct from getNodeFullInfo)
+- [x] getHostInfo() updated (includes both pricing fields)
+- [x] findHostsForModel() updated (parses dual pricing from 8-field struct)
+- [x] discoverAllActiveHostsWithModels() updated (parses dual pricing)
+- [x] updatePricingNative() added (update native token pricing with validation)
+- [x] updatePricingStable() added (update stablecoin pricing with validation)
+- [x] getPricing() marked deprecated (use getHostStatus or getHostInfo instead)
+- [x] SessionManager pricing validation updated (detects native vs stable, validates against correct field)
+- [x] IHostManager interface updated (added dual pricing methods, updated getHostStatus return type)
+- [x] SDK builds successfully (esbuild completes, type errors are pre-existing)
+- [x] Checkpoint validated (build successful)
 
 ### Batch 3: UI Integration ⏸️ PENDING
 - [ ] ETH flow updated

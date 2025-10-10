@@ -48,7 +48,7 @@ export interface IHostManager {
   getHostInfo(address: string): Promise<HostInfo>;
 
   /**
-   * Get host status
+   * Get host status (with dual pricing support)
    */
   getHostStatus(hostAddress: string): Promise<{
     isRegistered: boolean;
@@ -57,6 +57,8 @@ export interface IHostManager {
     stake: bigint;
     metadata?: HostMetadata;
     apiUrl?: string;
+    minPricePerTokenNative?: bigint;   // Native token pricing (ETH/BNB)
+    minPricePerTokenStable?: bigint;   // Stablecoin pricing (USDC)
   }>;
 
   /**
@@ -105,16 +107,32 @@ export interface IHostManager {
   updateSupportedModels(modelIds: string[]): Promise<string>;
 
   /**
-   * Update host minimum pricing
+   * Update host minimum pricing for native tokens (ETH/BNB)
+   * @param newMinPrice - New minimum price in wei (2,272,727,273 to 22,727,272,727,273)
+   * @returns Transaction hash
+   */
+  updatePricingNative(newMinPrice: string): Promise<string>;
+
+  /**
+   * Update host minimum pricing for stablecoins (USDC)
+   * @param newMinPrice - New minimum price (10 to 100,000)
+   * @returns Transaction hash
+   */
+  updatePricingStable(newMinPrice: string): Promise<string>;
+
+  /**
+   * Update host minimum pricing (legacy method)
    * @param newMinPrice - New minimum price per token (100-100,000 range)
    * @returns Transaction hash
+   * @deprecated Use updatePricingNative() or updatePricingStable() instead
    */
   updatePricing(newMinPrice: string): Promise<string>;
 
   /**
-   * Get host minimum pricing
+   * Get host minimum pricing (legacy method)
    * @param hostAddress - Host address to query pricing for
    * @returns Minimum price per token as bigint (0 if host not registered)
+   * @deprecated Use getHostStatus() or getHostInfo() to get dual pricing fields
    */
   getPricing(hostAddress: string): Promise<bigint>;
 

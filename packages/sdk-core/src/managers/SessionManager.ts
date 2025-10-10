@@ -119,24 +119,37 @@ export class SessionManager implements ISessionManager {
 
       if (this.hostManager && provider) {
         try {
-          // Fetch host info to get minimum price
+          // Fetch host info to get minimum price (DUAL PRICING)
           const hostInfo = await this.hostManager.getHostInfo(provider);
-          const hostMinPrice = Number(hostInfo.minPricePerToken || 0n);
+
+          // Determine if this is native token (ETH/BNB) or stablecoin (USDC) payment
+          const isNativePayment = !config.paymentToken ||
+                                  config.paymentToken === '0x0000000000000000000000000000000000000000' ||
+                                  config.paymentToken === ethers.ZeroAddress;
+
+          // Select the appropriate pricing field
+          const hostMinPrice = isNativePayment
+            ? Number(hostInfo.minPricePerTokenNative || 0n)
+            : Number(hostInfo.minPricePerTokenStable || 0n);
+
+          const pricingType = isNativePayment ? 'native (ETH/BNB)' : 'stablecoin (USDC)';
 
           // Default to host minimum if not provided
           if (validatedPrice === undefined || validatedPrice === null) {
             validatedPrice = hostMinPrice;
-            console.log(`Using host minimum price: ${hostMinPrice}`);
+            console.log(`Using host minimum ${pricingType} price: ${hostMinPrice}`);
           }
 
           // Validate client price >= host minimum
           if (validatedPrice < hostMinPrice) {
             throw new PricingValidationError(
-              `Price ${validatedPrice} is below host minimum ${hostMinPrice}. ` +
-              `Host "${provider}" requires at least ${hostMinPrice} per token.`,
+              `Price ${validatedPrice} is below host minimum ${pricingType} price ${hostMinPrice}. ` +
+              `Host "${provider}" requires at least ${hostMinPrice} per token for ${pricingType} payments.`,
               BigInt(validatedPrice)
             );
           }
+
+          console.log(`✓ Pricing validated: ${validatedPrice} >= ${hostMinPrice} (${pricingType})`);
         } catch (error) {
           if (error instanceof PricingValidationError) {
             throw error; // Re-throw pricing errors

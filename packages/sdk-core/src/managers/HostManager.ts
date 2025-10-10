@@ -25,22 +25,34 @@ import { HostDiscoveryService } from '../services/HostDiscoveryService';
 import NodeRegistryABI from '../contracts/abis/NodeRegistryWithModels-CLIENT-ABI.json';
 
 /**
- * Pricing constants for host registration
+ * Pricing constants for host registration - DUAL PRICING
  * Exported for use in host-cli and other consumers
  */
-export const MIN_PRICE_PER_TOKEN = 100n;
-export const MAX_PRICE_PER_TOKEN = 100000n;
-export const DEFAULT_PRICE_PER_TOKEN = '100'; // String for BigInt conversion
-export const DEFAULT_PRICE_PER_TOKEN_NUMBER = 100; // Numeric form for parseInt()
+// Native token pricing (ETH/BNB)
+export const MIN_PRICE_NATIVE = 2_272_727_273n;
+export const MAX_PRICE_NATIVE = 22_727_272_727_273n;
+export const DEFAULT_PRICE_NATIVE = '11363636363636'; // ~$0.00005 @ $4400 ETH
+
+// Stablecoin pricing (USDC)
+export const MIN_PRICE_STABLE = 10n;
+export const MAX_PRICE_STABLE = 100_000n;
+export const DEFAULT_PRICE_STABLE = '316'; // ~$0.000316 USDC
+
+// Legacy constants (deprecated - use dual pricing above)
+export const MIN_PRICE_PER_TOKEN = MIN_PRICE_STABLE;
+export const MAX_PRICE_PER_TOKEN = MAX_PRICE_STABLE;
+export const DEFAULT_PRICE_PER_TOKEN = DEFAULT_PRICE_STABLE;
+export const DEFAULT_PRICE_PER_TOKEN_NUMBER = 316;
 
 /**
- * Host registration parameters with model validation and pricing
+ * Host registration parameters with model validation and DUAL pricing
  */
 export interface HostRegistrationWithModels {
   metadata: HostMetadata;
   apiUrl: string;
   supportedModels: ModelSpec[];
-  minPricePerToken: string;    // Minimum price per token (100-100,000 range, will be parsed to bigint)
+  minPricePerTokenNative: string;    // Minimum price for ETH/BNB (wei)
+  minPricePerTokenStable: string;    // Minimum price for USDC (raw)
 }
 
 export class HostManager {
@@ -173,14 +185,26 @@ export class HostManager {
         );
       }
 
-      // Validate pricing parameter early (before checking registration)
-      // Ensure minPricePerToken has a value (default to '100' if undefined)
-      const priceStr = request.minPricePerToken || DEFAULT_PRICE_PER_TOKEN;
-      const minPrice = BigInt(priceStr);
-      if (minPrice < MIN_PRICE_PER_TOKEN || minPrice > MAX_PRICE_PER_TOKEN) {
+      // Validate DUAL pricing parameters early (before checking registration)
+      const priceNativeStr = request.minPricePerTokenNative || DEFAULT_PRICE_NATIVE;
+      const priceStableStr = request.minPricePerTokenStable || DEFAULT_PRICE_STABLE;
+
+      const minPriceNative = BigInt(priceNativeStr);
+      const minPriceStable = BigInt(priceStableStr);
+
+      // Validate native token pricing range
+      if (minPriceNative < MIN_PRICE_NATIVE || minPriceNative > MAX_PRICE_NATIVE) {
         throw new PricingValidationError(
-          `minPricePerToken must be between ${MIN_PRICE_PER_TOKEN} and ${MAX_PRICE_PER_TOKEN}, got ${minPrice}`,
-          minPrice
+          `minPricePerTokenNative must be between ${MIN_PRICE_NATIVE} and ${MAX_PRICE_NATIVE} wei, got ${minPriceNative}`,
+          minPriceNative
+        );
+      }
+
+      // Validate stablecoin pricing range
+      if (minPriceStable < MIN_PRICE_STABLE || minPriceStable > MAX_PRICE_STABLE) {
+        throw new PricingValidationError(
+          `minPricePerTokenStable must be between ${MIN_PRICE_STABLE} and ${MAX_PRICE_STABLE}, got ${minPriceStable}`,
+          minPriceStable
         );
       }
 
@@ -269,9 +293,10 @@ export class HostManager {
       const allowance = await fabToken.allowance(signerAddress, this.nodeRegistryAddress);
       console.log(`Allowance after approval: ${ethers.formatEther(allowance)} FAB`);
 
-      // Step 3: Register node with models (no ETH value needed, pricing already validated)
+      // Step 3: Register node with models (no ETH value needed, dual pricing validated)
       console.log('Registering node with models...');
-      console.log('Minimum price per token:', minPrice);
+      console.log('Minimum price native:', minPriceNative);
+      console.log('Minimum price stable:', minPriceStable);
 
       // Debug: Check if method exists
       if (!this.nodeRegistry || !this.nodeRegistry['registerNode']) {
@@ -281,11 +306,12 @@ export class HostManager {
         throw new Error('registerNode method not found on NodeRegistry contract');
       }
 
-      console.log('REGISTRATION DEBUG - About to call registerNode with:');
+      console.log('REGISTRATION DEBUG - About to call registerNode with DUAL PRICING:');
       console.log('  metadataJson:', metadataJson);
       console.log('  apiUrl:', request.apiUrl);
       console.log('  modelIds:', modelIds);
-      console.log('  minPrice:', minPrice);
+      console.log('  minPriceNative:', minPriceNative);
+      console.log('  minPriceStable:', minPriceStable);
       console.log('  Contract address:', this.nodeRegistry.target || this.nodeRegistry.address);
       console.log('  Contract interface exists?', !!this.nodeRegistry.interface);
 
@@ -295,7 +321,8 @@ export class HostManager {
           metadataJson,
           request.apiUrl,
           modelIds,
-          minPrice
+          minPriceNative,
+          minPriceStable
         ]);
         console.log('  Encoded transaction data:', encodedData);
         console.log('  Encoded data length:', encodedData.length);
@@ -307,7 +334,8 @@ export class HostManager {
         metadataJson,
         request.apiUrl,
         modelIds,
-        minPrice,  // NEW: 4th parameter for pricing
+        minPriceNative,  // 4th parameter: native pricing (ETH/BNB)
+        minPriceStable,  // 5th parameter: stable pricing (USDC)
         {
           gasLimit: 500000n
         }
@@ -367,16 +395,18 @@ export class HostManager {
       for (const address of nodeAddresses) {
         const info = await this.nodeRegistry['getNodeFullInfo'](address);
 
-        // Parse the returned data
+        // Parse the returned data (8-field struct with dual pricing)
         const metadata = JSON.parse(info[3]); // metadata is at index 3
 
         hosts.push({
           address,
-          apiUrl: info[4],           // apiUrl at index 4
+          apiUrl: info[4],                           // apiUrl at index 4
           metadata: metadata,
-          supportedModels: info[5],   // model IDs array at index 5
-          isActive: info[1],          // isActive at index 1
-          stake: info[2]              // stake at index 2
+          supportedModels: info[5],                  // model IDs array at index 5
+          isActive: info[2],                         // isActive at index 2
+          stake: info[1],                            // stake at index 1
+          minPricePerTokenNative: info[6] || 0n,     // Native pricing at index 6
+          minPricePerTokenStable: info[7] || 0n      // Stable pricing at index 7
         });
       }
 
@@ -464,7 +494,8 @@ export class HostManager {
     stake: bigint;
     metadata?: HostMetadata;
     apiUrl?: string;
-    minPricePerToken?: bigint;
+    minPricePerTokenNative?: bigint;   // Native token pricing (ETH/BNB)
+    minPricePerTokenStable?: bigint;   // Stablecoin pricing (USDC)
   }> {
     if (!this.initialized || !this.nodeRegistry) {
       throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
@@ -497,12 +528,13 @@ export class HostManager {
 
       return {
         isRegistered: true,
-        isActive: info[2],  // Fixed: was info[1]
-        supportedModels: info[5],
-        stake: info[1],      // Fixed: was info[2]
+        isActive: info[2],                          // isActive at index 2
+        supportedModels: info[5],                   // model IDs at index 5
+        stake: info[1],                             // stake at index 1
         metadata,
-        apiUrl: info[4],
-        minPricePerToken: info[6] || 0n  // NEW: 7th field from contract
+        apiUrl: info[4],                            // apiUrl at index 4
+        minPricePerTokenNative: info[6] || 0n,      // Native pricing at index 6 (8-field struct)
+        minPricePerTokenStable: info[7] || 0n       // Stable pricing at index 7 (8-field struct)
       };
     } catch (error: any) {
       console.error('Error fetching host status:', error);
@@ -510,7 +542,7 @@ export class HostManager {
         isRegistered: false,
         isActive: false,
         supportedModels: [],
-        stake: 0n  // Fixed: was BigNumber.from(0)
+        stake: 0n
       };
     }
   }
@@ -611,11 +643,13 @@ export class HostManager {
 
         hosts.push({
           address,
-          apiUrl: info[4],
+          apiUrl: info[4],                           // apiUrl at index 4
           metadata,
-          supportedModels: info[5],
-          isActive: info[1],
-          stake: info[2]
+          supportedModels: info[5],                  // model IDs at index 5
+          isActive: info[2],                         // isActive at index 2
+          stake: info[1],                            // stake at index 1
+          minPricePerTokenNative: info[6] || 0n,     // Native pricing at index 6
+          minPricePerTokenStable: info[7] || 0n      // Stable pricing at index 7
         });
       }
 
@@ -729,7 +763,8 @@ export class HostManager {
       },
       supportedModels: status.supportedModels || [],
       stake: status.stake,
-      minPricePerToken: status.minPricePerToken || 0n  // NEW: Include pricing from contract
+      minPricePerTokenNative: status.minPricePerTokenNative || 0n,  // Native pricing
+      minPricePerTokenStable: status.minPricePerTokenStable || 0n   // Stable pricing
     };
   }
 
@@ -831,9 +866,120 @@ export class HostManager {
   }
 
   /**
+   * Update host minimum pricing for native tokens (ETH/BNB)
+   * @param newMinPrice - New minimum price in wei (2,272,727,273 to 22,727,272,727,273)
+   * @returns Transaction hash
+   */
+  async updatePricingNative(newMinPrice: string): Promise<string> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new ModelRegistryError('Not initialized', this.nodeRegistryAddress);
+    }
+
+    try {
+      const price = BigInt(newMinPrice);
+
+      // Validate native token price range
+      if (price < MIN_PRICE_NATIVE || price > MAX_PRICE_NATIVE) {
+        throw new PricingValidationError(
+          `minPricePerTokenNative must be between ${MIN_PRICE_NATIVE} and ${MAX_PRICE_NATIVE} wei, got ${price}`,
+          price
+        );
+      }
+
+      console.log('Updating native token pricing to:', price);
+
+      const tx = await this.nodeRegistry.updatePricingNative(
+        price,
+        { gasLimit: 200000n }
+      );
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Failed to update native pricing',
+          this.nodeRegistry.address
+        );
+      }
+
+      console.log('Successfully updated native pricing');
+      return receipt.hash;
+    } catch (error: any) {
+      if (error instanceof PricingValidationError) {
+        throw error;
+      }
+      console.error('Error updating native pricing:', error);
+      throw new ModelRegistryError(
+        `Failed to update native pricing: ${error.message}`,
+        this.nodeRegistry?.address
+      );
+    }
+  }
+
+  /**
+   * Update host minimum pricing for stablecoins (USDC)
+   * @param newMinPrice - New minimum price (10 to 100,000)
+   * @returns Transaction hash
+   */
+  async updatePricingStable(newMinPrice: string): Promise<string> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new ModelRegistryError('Not initialized', this.nodeRegistryAddress);
+    }
+
+    try {
+      const price = BigInt(newMinPrice);
+
+      // Validate stablecoin price range
+      if (price < MIN_PRICE_STABLE || price > MAX_PRICE_STABLE) {
+        throw new PricingValidationError(
+          `minPricePerTokenStable must be between ${MIN_PRICE_STABLE} and ${MAX_PRICE_STABLE}, got ${price}`,
+          price
+        );
+      }
+
+      console.log('Updating stablecoin pricing to:', price);
+
+      const tx = await this.nodeRegistry.updatePricingStable(
+        price,
+        { gasLimit: 200000n }
+      );
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Failed to update stablecoin pricing',
+          this.nodeRegistry.address
+        );
+      }
+
+      console.log('Successfully updated stablecoin pricing');
+      return receipt.hash;
+    } catch (error: any) {
+      if (error instanceof PricingValidationError) {
+        throw error;
+      }
+      console.error('Error updating stablecoin pricing:', error);
+      throw new ModelRegistryError(
+        `Failed to update stablecoin pricing: ${error.message}`,
+        this.nodeRegistry?.address
+      );
+    }
+  }
+
+  /**
    * Get host minimum pricing
    * @param hostAddress - Host address to query pricing for
    * @returns Minimum price per token as bigint (0 if not registered)
+   * @deprecated Use getHostStatus() or getHostInfo() to get dual pricing fields
    */
   async getPricing(hostAddress: string): Promise<bigint> {
     if (!this.initialized || !this.nodeRegistry) {
