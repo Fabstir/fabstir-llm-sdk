@@ -998,11 +998,11 @@ export default function ChatContextDemo() {
       const hosts: any[] = await (hm as any).discoverAllActiveHostsWithModels();
       console.log("Found hosts with pricing:", hosts);
 
-      // Filter by max price if set
+      // Filter by max price if set (use stable pricing for USDC)
       let filtered = hosts;
       if (maxPriceFilter) {
         const maxPrice = BigInt(maxPriceFilter);
-        filtered = hosts.filter(h => h.minPricePerToken <= maxPrice);
+        filtered = hosts.filter(h => (h.minPricePerTokenStable || h.minPricePerToken) <= maxPrice);
         addMessage("system", `💵 Filtering hosts with price ≤ ${maxPriceFilter} (${(Number(maxPriceFilter)/1000000).toFixed(6)} USDC/token)`);
       }
 
@@ -1019,10 +1019,10 @@ export default function ChatContextDemo() {
         );
       }
 
-      // Sort hosts
+      // Sort hosts (use stable pricing for USDC)
       let sorted = [...modelSupported];
       if (sortBy === 'price') {
-        sorted.sort((a, b) => Number(a.minPricePerToken - b.minPricePerToken));
+        sorted.sort((a, b) => Number((a.minPricePerTokenStable || a.minPricePerToken) - (b.minPricePerTokenStable || b.minPricePerToken)));
         addMessage("system", `📊 Sorted ${sorted.length} hosts by price (lowest first)`);
       } else if (sortBy === 'random') {
         sorted.sort(() => Math.random() - 0.5);
@@ -1051,12 +1051,13 @@ export default function ChatContextDemo() {
       return;
     }
 
-    // Use actual host pricing from blockchain
+    // Use actual host pricing from blockchain (DUAL PRICING - use stable for USDC)
+    const stablePricing = host.minPricePerTokenStable || host.minPricePerToken || 316;
     const hostWithPricing = {
       address: host.address,
       endpoint: host.apiUrl,
       models: host.supportedModels,
-      pricePerToken: Number(host.minPricePerToken), // Use ACTUAL pricing
+      pricePerToken: Number(stablePricing), // Use ACTUAL stable pricing for USDC
     };
 
     setActiveHost(hostWithPricing);
@@ -1064,7 +1065,7 @@ export default function ChatContextDemo() {
     setShowHostList(false);
 
     addMessage("system", `✅ Selected host: ${host.address.slice(0, 10)}...${host.address.slice(-8)}`);
-    addMessage("system", `💵 Host price: ${(Number(host.minPricePerToken)/1000000).toFixed(6)} USDC/token`);
+    addMessage("system", `💵 Host price: ${(Number(stablePricing)/1000000).toFixed(6)} USDC/token`);
 
     // Clear previous session messages but keep system messages
     setMessages((prev) =>
@@ -1176,6 +1177,41 @@ export default function ChatContextDemo() {
         );
       }
 
+      setStatus("Approving USDC...");
+
+      // Step: Approve USDC for JobMarketplace using PaymentManager
+      // This properly handles the approval via Base Account Kit's wallet_sendCalls
+      addMessage("system", "📝 Approving USDC for session creation...");
+
+      // Check current allowance via PaymentManager
+      const currentAllowance = await pm.checkAllowance(
+        subAccount,
+        contracts.JOB_MARKETPLACE,
+        contracts.USDC
+      );
+      console.log("Current USDC allowance:", ethers.formatUnits(currentAllowance, 6), "USDC");
+      addMessage("system", `Current allowance: ${ethers.formatUnits(currentAllowance, 6)} USDC`);
+
+      if (currentAllowance < sessionCost) {
+        console.log("Approving USDC for JobMarketplace...");
+        addMessage("system", "⏳ Requesting USDC approval...");
+
+        // Approve 5x session cost for multiple sessions (same as working test)
+        const approveMultiplier = 5n;
+        const totalApprovalAmount = sessionCost * approveMultiplier;
+
+        const approveResult = await pm.approveToken(
+          contracts.JOB_MARKETPLACE,
+          totalApprovalAmount,
+          contracts.USDC
+        );
+
+        console.log("Approval TX:", approveResult.hash);
+        addMessage("system", `✅ USDC approved for ${ethers.formatUnits(totalApprovalAmount, 6)} USDC (for multiple sessions)`);
+      } else {
+        addMessage("system", "✅ USDC already approved");
+      }
+
       setStatus("Creating session...");
 
       // Validate host endpoint
@@ -1193,14 +1229,11 @@ export default function ChatContextDemo() {
         proofInterval: PROOF_INTERVAL,
         duration: SESSION_DURATION,
         paymentToken: contracts.USDC,
-        useDeposit: false, // Use direct payment with Auto Spend Permissions
+        useDeposit: false, // Use direct payment
         chainId: selectedChainId, // REQUIRED for multi-chain
       };
 
-      // No manual USDC approval needed! Spend permissions handle this automatically
-      // The sub-account already has spend permissions granted during connection
-
-      // Start session - with Auto Spend Permissions, payment happens automatically without popups!
+      // Start session - USDC approval complete, ready to create session
       addMessage(
         "system",
         isUsingBaseAccount
@@ -1978,7 +2011,7 @@ export default function ChatContextDemo() {
                       #{index + 1}: {host.address.slice(0, 10)}...{host.address.slice(-8)}
                     </div>
                     <div className="text-xs text-gray-600 mt-1 space-y-0.5">
-                      <div>💵 {(Number(host.minPricePerToken)/1000000).toFixed(6)} USDC/token</div>
+                      <div>💵 {(Number(host.minPricePerTokenStable || host.minPricePerToken || 316)/1000000).toFixed(6)} USDC/token</div>
                       <div>📦 {host.supportedModels?.length || 0} models supported</div>
                     </div>
                   </div>
@@ -2012,15 +2045,7 @@ export default function ChatContextDemo() {
           >
             Connect Wallet
           </button>
-        ) : !sessionId ? (
-          <button
-            onClick={startSession}
-            disabled={isLoading}
-            className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-300"
-          >
-            Discover Hosts
-          </button>
-        ) : (
+        ) : sessionId ? (
           <>
             <button
               onClick={clearConversation}
@@ -2037,7 +2062,7 @@ export default function ChatContextDemo() {
               End Session
             </button>
           </>
-        )}
+        ) : null}
       </div>
 
       {/* Instructions */}
