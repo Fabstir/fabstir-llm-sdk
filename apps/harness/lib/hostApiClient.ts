@@ -23,7 +23,8 @@ export interface RegisterParams {
   stakeAmount: string;
   metadata?: any;
   privateKey: string;
-  minPricePerToken?: string;  // Optional pricing (defaults to 2000 on backend)
+  minPricePerTokenNative: string;   // Native token pricing (ETH/BNB) in wei
+  minPricePerTokenStable: string;   // Stablecoin pricing (USDC) in raw units
 }
 
 export interface RegisterResponse {

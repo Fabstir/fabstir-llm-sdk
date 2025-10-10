@@ -22,7 +22,8 @@ export interface RegistrationConfig {
     [key: string]: any;
   };
   stakeAmount?: bigint;
-  minPricePerToken?: string;  // Minimum price per token (100-100,000 range)
+  minPricePerTokenNative: string;   // Native token pricing (ETH/BNB) in wei
+  minPricePerTokenStable: string;   // Stablecoin pricing (USDC) in raw units
   gasLimit?: number;
   gasPrice?: bigint;
   onProgress?: (message: string) => void;
@@ -237,7 +238,8 @@ export async function registerHost(config: RegistrationConfig): Promise<{
       models: config.models,
       apiUrl: config.apiUrl,
       metadata: config.metadata,
-      minPricePerToken: config.minPricePerToken,  // Pass pricing to staking layer
+      minPricePerTokenNative: config.minPricePerTokenNative,  // Native pricing (ETH/BNB)
+      minPricePerTokenStable: config.minPricePerTokenStable,  // Stable pricing (USDC)
       gasLimit: config.gasLimit,
       gasPrice: config.gasPrice
     };

@@ -203,7 +203,7 @@ export class ManagementServer {
 
   private async handleRegister(req: Request, res: Response): Promise<void> {
     try {
-      const { walletAddress, publicUrl, models, stakeAmount, metadata, privateKey, minPricePerToken } = req.body;
+      const { walletAddress, publicUrl, models, stakeAmount, metadata, privateKey, minPricePerTokenNative, minPricePerTokenStable } = req.body;
 
       // Debug log incoming request
       console.log('[API] Register request body:', {
@@ -213,7 +213,8 @@ export class ManagementServer {
         stakeAmount,
         metadata,
         privateKey: privateKey ? '***' : undefined,
-        minPricePerToken
+        minPricePerTokenNative,
+        minPricePerTokenStable
       });
 
       // Validate required fields
@@ -257,13 +258,22 @@ export class ManagementServer {
       const { saveConfig, loadConfig } = await import('../config/storage');
       const { extractHostPort } = await import('../utils/network');
 
-      // Prepare registration config (ensure minPricePerToken has a value)
+      // Validate dual pricing fields
+      if (!minPricePerTokenNative || !minPricePerTokenStable) {
+        res.status(400).json({
+          error: 'Missing required pricing fields: minPricePerTokenNative, minPricePerTokenStable'
+        });
+        return;
+      }
+
+      // Prepare registration config with dual pricing
       const registrationConfig: RegistrationConfig = {
         apiUrl: publicUrl,
         models: Array.isArray(models) ? models : [models],
         stakeAmount: stakeAmountBigInt,  // Will use default in registerHost if undefined
         metadata,
-        minPricePerToken: minPricePerToken || '100'  // Default to minimum price of 100
+        minPricePerTokenNative,
+        minPricePerTokenStable
       };
 
       // Register on blockchain (WITHOUT starting node)

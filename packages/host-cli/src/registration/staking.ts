@@ -17,7 +17,8 @@ export interface StakingConfig {
   models: string[];
   apiUrl: string;
   metadata?: Record<string, any>;
-  minPricePerToken?: string;  // Minimum price per token (100-100,000 range)
+  minPricePerTokenNative: string;   // Native token pricing (ETH/BNB) in wei
+  minPricePerTokenStable: string;   // Stablecoin pricing (USDC) in raw units
   gasLimit?: number;
   gasPrice?: bigint;
   estimateOnly?: boolean;
@@ -285,15 +286,34 @@ export async function stakeTokens(config: StakingConfig): Promise<StakingResult>
     // Execute registration with staking
     const hostManager = sdk.getHostManager();
 
-    // Validate and default pricing
-    const minPrice = config.minPricePerToken || DEFAULT_PRICE_PER_TOKEN;
-    const priceNum = parseInt(minPrice);
-
-    if (isNaN(priceNum) || priceNum < DEFAULT_PRICE_PER_TOKEN_NUMBER || priceNum > Number(MAX_PRICE_PER_TOKEN)) {
+    // Validate dual pricing fields (no fallbacks - fail fast)
+    if (!config.minPricePerTokenNative || !config.minPricePerTokenStable) {
       throw new RegistrationError(
-        `minPricePerToken must be between ${DEFAULT_PRICE_PER_TOKEN_NUMBER} and ${Number(MAX_PRICE_PER_TOKEN)}, got ${minPrice}`,
+        `Missing required pricing fields: minPricePerTokenNative, minPricePerTokenStable`,
         ErrorCode.VALIDATION_FAILED,
-        { price: minPrice }
+        { native: config.minPricePerTokenNative, stable: config.minPricePerTokenStable }
+      );
+    }
+
+    // Validate stable pricing range (10-100,000)
+    const stablePriceNum = parseInt(config.minPricePerTokenStable);
+    if (isNaN(stablePriceNum) || stablePriceNum < 10 || stablePriceNum > 100000) {
+      throw new RegistrationError(
+        `minPricePerTokenStable must be between 10 and 100000, got ${config.minPricePerTokenStable}`,
+        ErrorCode.VALIDATION_FAILED,
+        { stablePrice: config.minPricePerTokenStable }
+      );
+    }
+
+    // Validate native pricing range (2,272,727,273 to 22,727,272,727,273 wei)
+    const nativePriceBigInt = BigInt(config.minPricePerTokenNative);
+    const minNativePrice = BigInt('2272727273');
+    const maxNativePrice = BigInt('22727272727273');
+    if (nativePriceBigInt < minNativePrice || nativePriceBigInt > maxNativePrice) {
+      throw new RegistrationError(
+        `minPricePerTokenNative must be between ${minNativePrice} and ${maxNativePrice} wei, got ${config.minPricePerTokenNative}`,
+        ErrorCode.VALIDATION_FAILED,
+        { nativePrice: config.minPricePerTokenNative }
       );
     }
 
@@ -337,13 +357,17 @@ export async function stakeTokens(config: StakingConfig): Promise<StakingResult>
       costPerToken: config.metadata?.costPerToken || 0.0001
     };
 
-    // Register host with models using correct SDK signature
-    console.log('[staking.ts] Calling registerHostWithModels with minPricePerToken:', minPrice);
+    // Register host with models using correct SDK signature (DUAL PRICING)
+    console.log('[staking.ts] Calling registerHostWithModels with dual pricing:', {
+      native: config.minPricePerTokenNative,
+      stable: config.minPricePerTokenStable
+    });
     const txHash = await hostManager.registerHostWithModels({
       metadata,
       apiUrl: config.apiUrl,
       supportedModels,
-      minPricePerToken: minPrice  // Pass validated pricing to SDK
+      minPricePerTokenNative: config.minPricePerTokenNative,  // Native pricing (ETH/BNB) in wei
+      minPricePerTokenStable: config.minPricePerTokenStable   // Stable pricing (USDC) in raw units
     });
 
     // SDK already waits for transaction confirmation and returns hash
