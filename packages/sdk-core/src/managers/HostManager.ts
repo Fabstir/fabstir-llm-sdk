@@ -632,12 +632,28 @@ export class HostManager {
       for (const address of activeNodes) {
         const info = await this.nodeRegistry['getNodeFullInfo'](address);
 
+        // Log raw info for debugging
+        console.log(`[HostManager] getNodeFullInfo for ${address}:`, {
+          operator: info[0],
+          stake: info[1]?.toString(),
+          isActive: info[2],
+          metadataRaw: info[3],
+          apiUrl: info[4],
+          models: info[5],
+          priceNative: info[6]?.toString(),
+          priceStable: info[7]?.toString()
+        });
+
         // Parse metadata
         let metadata: HostMetadata;
         try {
           metadata = JSON.parse(info[3]);
+          console.log(`[HostManager] Successfully parsed metadata for ${address}:`, metadata);
         } catch (e) {
-          console.warn(`Failed to parse metadata for ${address}:`, e);
+          console.error(`[HostManager] Failed to parse metadata for ${address}:`, e);
+          console.error(`[HostManager] Raw metadata value: "${info[3]}"`);
+          console.error(`[HostManager] Metadata type: ${typeof info[3]}`);
+          // Skip this host if metadata is invalid
           continue;
         }
 
