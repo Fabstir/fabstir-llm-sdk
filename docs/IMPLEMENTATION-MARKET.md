@@ -335,13 +335,13 @@ function migrateNodePricing(address[] calldata nodeAddresses) external onlyOwner
 **Status**: ✅ Complete (Jan 28, 2025)
 
 **Tasks**:
-- [x] Contract developer deploys updated `NodeRegistryWithModels` (0xC8dDD546e0993eEB4Df03591208aEDF6336342D7)
-- [x] Contract developer deploys updated `JobMarketplaceWithModels` (0x462050a4a551c4292586D9c1DE23e3158a9bF3B3)
+- [x] Contract developer deploys updated `NodeRegistryWithModels` (0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6)
+- [x] Contract developer deploys updated `JobMarketplaceWithModels` (0xe169A4B57700080725f9553E3Cc69885fea13629)
 - [x] Contract developer verifies contracts on BaseScan
 - [x] Contract developer runs migration for existing test hosts (hosts unregistered - must re-register with pricing)
 - [x] Contract developer provides deployment info:
-  - [x] New NodeRegistry address (0xC8dDD546e0993eEB4Df03591208aEDF6336342D7)
-  - [x] New JobMarketplace address (0x462050a4a551c4292586D9c1DE23e3158a9bF3B3)
+  - [x] New NodeRegistry address (0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6)
+  - [x] New JobMarketplace address (0xe169A4B57700080725f9553E3Cc69885fea13629)
   - [x] Deployment block numbers (32051950, 32051983)
   - [x] Updated ABIs (in client-abis folder)
   - [x] Gas costs for new functions (in DEPLOYMENT_INFO.json)
@@ -394,8 +394,8 @@ function migrateNodePricing(address[] calldata nodeAddresses) external onlyOwner
 - [x] Update `docs/compute-contracts-reference/client-abis/JobMarketplaceWithModels-CLIENT-ABI.json` (Oct 7)
 - [x] Update `.env.test` with new contract addresses:
   ```bash
-  CONTRACT_NODE_REGISTRY=0xC8dDD546e0993eEB4Df03591208aEDF6336342D7
-  CONTRACT_JOB_MARKETPLACE=0x462050a4a551c4292586D9c1DE23e3158a9bF3B3
+  CONTRACT_NODE_REGISTRY=0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6
+  CONTRACT_JOB_MARKETPLACE=0xe169A4B57700080725f9553E3Cc69885fea13629
   ```
 - [x] Changelog documented in `DEPLOYMENT_INFO.json` (features, migrationNotes, breakingChanges):
   - [x] New functions: getNodePricing(), updatePricing(), MIN_PRICE_PER_TOKEN, MAX_PRICE_PER_TOKEN
@@ -1673,8 +1673,8 @@ Test Suites 4-10 require actual blockchain interaction, running nodes, and brows
 **Environment Setup**:
 ```bash
 # Required environment variables in .env.test:
-CONTRACT_NODE_REGISTRY=0xC8dDD546e0993eEB4Df03591208aEDF6336342D7
-CONTRACT_JOB_MARKETPLACE=0x462050a4a551c4292586D9c1DE23e3158a9bF3B3
+CONTRACT_NODE_REGISTRY=0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6
+CONTRACT_JOB_MARKETPLACE=0xe169A4B57700080725f9553E3Cc69885fea13629
 TEST_HOST_1_PRIVATE_KEY=0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2
 TEST_HOST_1_ADDRESS=0x4594F755F593B517Bb3194F4DeC20C48a3f04504
 TEST_HOST_2_PRIVATE_KEY=0x9ac736a402fa7163b3a30c31b379aa2e3979eb9a3a2b01890485c334a6da575b

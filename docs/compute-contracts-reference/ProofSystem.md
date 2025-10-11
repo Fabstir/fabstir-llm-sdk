@@ -42,7 +42,7 @@ contract ProofSystem is IProofSystem {
 
 ### Integration with JobMarketplace
 
-The ProofSystem integrates seamlessly with JobMarketplaceWithModels (`0x462050a4a551c4292586D9c1DE23e3158a9bF3B3`):
+The ProofSystem integrates seamlessly with JobMarketplaceWithModels (`0xe169A4B57700080725f9553E3Cc69885fea13629`):
 
 1. **Proof Submission**: Host calls `submitProofOfWork()` on marketplace
 2. **Verification**: Marketplace calls `verifyAndMarkComplete()` on ProofSystem

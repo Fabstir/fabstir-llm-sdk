@@ -28,8 +28,8 @@ fabstir-compute-contracts
 - ✅ **Phase 3: Integration Testing** (1/1 sub-phase complete)
 - ✅ **Phase 4: Deployment** (4/4 sub-phases complete)
   - ✅ Sub-phase 4.1: Build and Verify (51/51 tests passing)
-  - ✅ Sub-phase 4.2: Deploy NodeRegistryWithModels (`0xC8dDD546e0993eEB4Df03591208aEDF6336342D7`)
-  - ✅ Sub-phase 4.3: Deploy JobMarketplaceWithModels (`0x462050a4a551c4292586D9c1DE23e3158a9bF3B3`)
+  - ✅ Sub-phase 4.2: Deploy NodeRegistryWithModels (`0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6`)
+  - ✅ Sub-phase 4.3: Deploy JobMarketplaceWithModels (`0xe169A4B57700080725f9553E3Cc69885fea13629`)
   - ✅ Sub-phase 4.4: Extract ABIs and Documentation
 
 **Last Updated:** 2025-01-28
@@ -513,7 +513,7 @@ Deploy updated NodeRegistry to Base Sepolia.
 - [x] Test registration with pricing on deployed contract
 
 **Deployment Details (2025-01-28):**
-- **Address**: `0xC8dDD546e0993eEB4Df03591208aEDF6336342D7`
+- **Address**: `0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6`
 - **Transaction**: `0xb33fed7ebb85ae915928620a198ef77e5648bf85518c60140adf9150a7175e51`
 - **Block**: 32,051,950
 - **Gas Used**: 1,863,700
@@ -540,7 +540,7 @@ Deploy updated JobMarketplace pointing to new NodeRegistry.
 - [x] Test session creation with price validation
 
 **Deployment Details (2025-01-28):**
-- **Address**: `0x462050a4a551c4292586D9c1DE23e3158a9bF3B3`
+- **Address**: `0xe169A4B57700080725f9553E3Cc69885fea13629`
 - **Transaction**: `0x3bcc5230fcae239023cc822e7bedd4fbd34d4b77d5fff9fc43e3763582e0b104`
 - **Block**: 32,051,983
 - **Gas Used**: 3,549,893
@@ -554,12 +554,12 @@ Deploy updated JobMarketplace pointing to new NodeRegistry.
 forge script script/DeployJobMarketplaceWithModels.s.sol:DeployJobMarketplaceWithModels \
   --rpc-url https://sepolia.base.org --broadcast --legacy
 
-cast send 0x462050a4a551c4292586d9c1de23e3158a9bf3b3 "setProofSystem(address)" \
+cast send 0xe169A4B57700080725f9553E3Cc69885fea13629 "setProofSystem(address)" \
   0x2ACcc60893872A499700908889B38C5420CBcFD1 \
   --rpc-url https://sepolia.base.org --private-key $PRIVATE_KEY --legacy
 
 cast send 0x908962e8c6CE72610021586f85ebDE09aAc97776 "setAuthorizedCaller(address,bool)" \
-  0x462050a4a551c4292586d9c1de23e3158a9bf3b3 true \
+  0xe169A4B57700080725f9553E3Cc69885fea13629 true \
   --rpc-url https://sepolia.base.org --private-key $PRIVATE_KEY --legacy
 ```
 

@@ -4,8 +4,8 @@
 
 ## Current Deployment
 
-- **JobMarketplaceWithModels**: `0x462050a4a551c4292586D9c1DE23e3158a9bF3B3` ✅ NEW
-- **NodeRegistryWithModels**: `0xC8dDD546e0993eEB4Df03591208aEDF6336342D7` ✅ NEW
+- **JobMarketplaceWithModels**: `0xe169A4B57700080725f9553E3Cc69885fea13629` ✅ NEW
+- **NodeRegistryWithModels**: `0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6` ✅ NEW
 - **ProofSystem**: `0x2ACcc60893872A499700908889B38C5420CBcFD1`
 - **HostEarnings**: `0x908962e8c6CE72610021586f85ebDE09aAc97776`
 - **ModelRegistry**: `0x92b2De840bB2171203011A6dBA928d855cA8183E`
@@ -163,13 +163,13 @@ import NodeRegistryABI from './NodeRegistryWithModels-CLIENT-ABI.json';
 import JobMarketplaceABI from './JobMarketplaceWithModels-CLIENT-ABI.json';
 
 const nodeRegistry = new ethers.Contract(
-  '0xC8dDD546e0993eEB4Df03591208aEDF6336342D7',
+  '0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6',
   NodeRegistryABI,
   provider
 );
 
 const marketplace = new ethers.Contract(
-  '0x462050a4a551c4292586D9c1DE23e3158a9bF3B3',
+  '0xe169A4B57700080725f9553E3Cc69885fea13629',
   JobMarketplaceABI,
   signer
 );
@@ -344,7 +344,7 @@ This creates an immutable chain of proofs that can be verified later.
 ```javascript
 // STEP 0: Query host pricing (NEW - MANDATORY!)
 const nodeRegistry = new ethers.Contract(
-  '0xC8dDD546e0993eEB4Df03591208aEDF6336342D7',
+  '0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6',
   NodeRegistryABI,
   provider
 );
@@ -354,7 +354,7 @@ const myPrice = Math.max(hostMinPrice, 2000); // Ensure >= host minimum
 
 // STEP 1: Create session with validated price
 const marketplace = new ethers.Contract(
-  '0x462050a4a551c4292586D9c1DE23e3158a9bF3B3',
+  '0xe169A4B57700080725f9553E3Cc69885fea13629',
   JobMarketplaceABI,
   signer
 );
@@ -542,13 +542,13 @@ import NodeRegistryABI from './NodeRegistryWithModels-CLIENT-ABI.json';
 import JobMarketplaceABI from './JobMarketplaceWithModels-CLIENT-ABI.json';
 
 const nodeRegistry = new ethers.Contract(
-  '0xC8dDD546e0993eEB4Df03591208aEDF6336342D7',
+  '0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6',
   NodeRegistryABI,
   provider
 );
 
 const marketplace = new ethers.Contract(
-  '0x462050a4a551c4292586D9c1DE23e3158a9bF3B3',
+  '0xe169A4B57700080725f9553E3Cc69885fea13629',
   JobMarketplaceABI,
   signer
 );
@@ -595,7 +595,7 @@ await marketplace.completeSessionJob(jobId);
 
 ```javascript
 const marketplace = new ethers.Contract(
-  '0x462050a4a551c4292586D9c1DE23e3158a9bF3B3',
+  '0xe169A4B57700080725f9553E3Cc69885fea13629',
   JobMarketplaceABI,
   signer
 );
@@ -636,7 +636,7 @@ if (tokenCount > 0) {
 import NodeRegistryABI from './NodeRegistryWithModels-CLIENT-ABI.json';
 
 const nodeRegistry = new ethers.Contract(
-  '0xC8dDD546e0993eEB4Df03591208aEDF6336342D7',
+  '0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6',
   NodeRegistryABI,
   signer
 );

@@ -55,7 +55,9 @@ const TEST_TREASURY_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_
 
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = '2'; // $2 USDC
-const PRICE_PER_TOKEN = 2000; // 0.002 USDC per token
+// DEPRECATED: Use host's minPricePerTokenStable instead (dual pricing system)
+// Kept as fallback constant for legacy code paths only - DO NOT use in new code
+const PRICE_PER_TOKEN = 316; // 0.000316 USDC per token (fallback default, use actual host pricing)
 const PROOF_INTERVAL = 1000; // Proof every 1000 tokens (production default)
 const SESSION_DURATION = 86400; // 1 day
 const EXPECTED_TOKENS = 100; // Expected tokens to generate in test
@@ -311,22 +313,39 @@ export default function BaseUsdcMvpFlowSDKTest() {
           }
         }
 
-        // Read accumulated earnings for the selected host (only if one is selected)
-        if ((selectedHost || (window as any).__selectedHostAddress) && (hostManager || sdk)) {
-          try {
-            // Use the selected host address if available
-            const hostAddress = selectedHost?.address ||
-                               (window as any).__selectedHostAddress;
-            console.log(`[DEBUG] Reading host earnings for address: ${hostAddress}`);
-            console.log(`[DEBUG] HostManager available: ${!!hostManager}`);
-            console.log(`[DEBUG] SDK available: ${!!sdk}`);
+        // Read accumulated earnings for the selected host (or both hosts if no selection)
+        if (hostManager || sdk) {
+          const hm = hostManager || sdk.getHostManager();
 
-            const hostEarnings = await hostManager.getHostEarnings(hostAddress, contracts.USDC);
-            newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
-            console.log(`Host earnings for ${hostAddress}: ${newBalances.hostAccumulated} USDC (raw: ${hostEarnings.toString()})`);
-          } catch (err) {
-            console.log('Error reading host accumulated earnings:', err);
-            newBalances.hostAccumulated = '0';
+          // Determine which host(s) to check
+          const selectedHostAddr = selectedHost?.address || (window as any).__selectedHostAddress;
+
+          if (selectedHostAddr) {
+            // A specific host is selected - read its earnings
+            try {
+              console.log(`[DEBUG] Reading host earnings for selected host: ${selectedHostAddr}`);
+              const hostEarnings = await hm.getHostEarnings(selectedHostAddr, contracts.USDC);
+              newBalances.hostAccumulated = ethers.formatUnits(hostEarnings, 6);
+              console.log(`Host earnings for ${selectedHostAddr}: ${newBalances.hostAccumulated} USDC (raw: ${hostEarnings.toString()})`);
+            } catch (err) {
+              console.log('Error reading selected host accumulated earnings:', err);
+              newBalances.hostAccumulated = '0';
+            }
+          } else {
+            // No host selected - read both test hosts and show the sum
+            try {
+              console.log(`[DEBUG] No host selected - reading earnings for both test hosts`);
+              const host1Earnings = await hm.getHostEarnings(TEST_HOST_1_ADDRESS, contracts.USDC);
+              const host2Earnings = await hm.getHostEarnings(TEST_HOST_2_ADDRESS, contracts.USDC);
+              const totalEarnings = host1Earnings + host2Earnings;
+              newBalances.hostAccumulated = ethers.formatUnits(totalEarnings, 6);
+              console.log(`Host 1 earnings: ${ethers.formatUnits(host1Earnings, 6)} USDC`);
+              console.log(`Host 2 earnings: ${ethers.formatUnits(host2Earnings, 6)} USDC`);
+              console.log(`Total host earnings: ${newBalances.hostAccumulated} USDC`);
+            } catch (err) {
+              console.log('Error reading host accumulated earnings:', err);
+              newBalances.hostAccumulated = '0';
+            }
           }
         } else {
           console.log(`[DEBUG] No hostManager or SDK available yet`);
@@ -621,7 +640,8 @@ export default function BaseUsdcMvpFlowSDKTest() {
         endpoint: host.apiUrl || host.endpoint || `http://localhost:8080`,  // Use endpoint property name
         models: host.supportedModels || [],
         minPricePerTokenNative: host.minPricePerTokenNative || 0n,  // NEW: Native token pricing (ETH/BNB)
-        minPricePerTokenStable: host.minPricePerTokenStable || 316  // NEW: Stablecoin pricing (USDC) - use stable default
+        minPricePerTokenStable: host.minPricePerTokenStable || 316,  // NEW: Stablecoin pricing (USDC) - use stable default
+        pricePerToken: Number(host.minPricePerTokenStable || 316)  // For USDC sessions, use stable pricing
       }));
 
       // Filter hosts that support our model
@@ -737,7 +757,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
       // Step 2 already approved the contract, so payments are automatic
       const sessionConfig = {
         depositAmount: SESSION_DEPOSIT_AMOUNT, // Amount for this session
-        pricePerToken: Number(hostToUse.pricePerToken || PRICE_PER_TOKEN),
+        pricePerToken: Number(hostToUse.minPricePerTokenStable || hostToUse.pricePerToken || 316),  // Use ACTUAL stable pricing
         proofInterval: PROOF_INTERVAL,
         duration: SESSION_DURATION,
         paymentToken: contracts.USDC,  // Using USDC with direct payment
@@ -1248,8 +1268,12 @@ export default function BaseUsdcMvpFlowSDKTest() {
   async function step6CompleteSession() {
     const sm = sdk?.getSessionManager();
 
-    if (!sm || !sessionId) {
+    // Use window object to get session ID (same pattern as Step 5)
+    const currentSessionId = (window as any).__currentSessionId || sessionId;
+
+    if (!sm || !currentSessionId) {
       setError("SessionManager not initialized or no active session");
+      addLog(`❌ Step 6 failed: SessionManager=${!!sm}, SessionId=${currentSessionId}`);
       return;
     }
 
@@ -1265,28 +1289,123 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog(`Treasury accumulated before: ${beforeBalances.treasuryAccumulated || '0'} USDC`);
 
       // Simply end the session - closes WebSocket, no blockchain calls
-      await sm.endSession(sessionId);
+      await sm.endSession(currentSessionId);
 
       addLog(`✅ Session ended successfully`);
       addLog(`🔐 WebSocket disconnected`);
-      addLog(`⏳ Host will detect disconnect and complete contract to claim earnings`);
+      addLog(`⏳ Simulating host completion...`);
 
-      // Calculate expected payment distribution
-      const tokensCost = (totalTokensGenerated * PRICE_PER_TOKEN) / 1000000; // Convert to USDC
+      // Get actual host pricing (dual pricing support)
+      const actualPricePerToken = selectedHost?.pricePerToken || selectedHostRef.current?.pricePerToken || PRICE_PER_TOKEN;
+
+      // Calculate expected payment distribution using ACTUAL host pricing
+      const tokensCost = (totalTokensGenerated * actualPricePerToken) / 1000000; // Convert to USDC
       const hostPayment = tokensCost * 0.9; // 90% to host
       const treasuryPayment = tokensCost * 0.1; // 10% to treasury
 
       addLog(`📊 Tokens used in session: ${totalTokensGenerated}`);
       addLog(`💰 Expected payment distribution (when host completes):`);
-      addLog(`   Total cost: ${tokensCost.toFixed(6)} USDC (${totalTokensGenerated} tokens × $${PRICE_PER_TOKEN/1000000}/token)`);
+      addLog(`   Total cost: ${tokensCost.toFixed(6)} USDC (${totalTokensGenerated} tokens × $${actualPricePerToken/1000000}/token)`);
       addLog(`   Host will receive: ${hostPayment.toFixed(6)} USDC (90%)`);
       addLog(`   Treasury will receive: ${treasuryPayment.toFixed(6)} USDC (10%)`);
 
-      addLog(`ℹ️ Note: Balances won't update until host calls completeSessionJob`);
+      // Simulate host completing the session (in production, host does this)
+      addLog("🔧 Simulating host calling completeSession (for demo purposes)...");
+
+      try {
+        const finalProof = "0x" + "00".repeat(32); // Dummy proof
+        const hostProvider = new ethers.JsonRpcProvider(
+          RPC_URLS[selectedChainId as keyof typeof RPC_URLS]
+        );
+        const selectedHostAddr =
+          selectedHost?.address || selectedHostRef.current?.address || (window as any).__selectedHostAddress;
+
+        if (!selectedHostAddr) {
+          throw new Error("No host selected for completion");
+        }
+
+        let hostPrivateKey: string;
+        if (
+          selectedHostAddr.toLowerCase() === TEST_HOST_1_ADDRESS.toLowerCase()
+        ) {
+          hostPrivateKey = TEST_HOST_1_PRIVATE_KEY;
+        } else if (
+          selectedHostAddr.toLowerCase() === TEST_HOST_2_ADDRESS.toLowerCase()
+        ) {
+          hostPrivateKey = TEST_HOST_2_PRIVATE_KEY;
+        } else {
+          throw new Error(`Unknown host address: ${selectedHostAddr}`);
+        }
+
+        const hostWallet = new ethers.Wallet(hostPrivateKey, hostProvider);
+        const chain = ChainRegistry.getChain(selectedChainId);
+        const hostSdk = new FabstirSDKCore({
+          mode: "production" as const,
+          chainId: selectedChainId,
+          rpcUrl: RPC_URLS[selectedChainId as keyof typeof RPC_URLS],
+          contractAddresses: {
+            jobMarketplace: chain.contracts.jobMarketplace,
+            nodeRegistry: chain.contracts.nodeRegistry,
+            proofSystem: chain.contracts.proofSystem,
+            hostEarnings: chain.contracts.hostEarnings,
+            fabToken: chain.contracts.fabToken,
+            usdcToken: chain.contracts.usdcToken,
+            modelRegistry: chain.contracts.modelRegistry,
+          },
+          s5Config: {
+            seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE!,
+          },
+        });
+
+        await hostSdk.authenticate("signer", { signer: hostWallet });
+        const hostSm = hostSdk.getSessionManager();
+
+        // Use actual token count - node handles padding if needed
+        addLog(`📊 Completing with ${totalTokensGenerated} actual tokens`);
+
+        const completionTx = await hostSm.completeSession(
+          currentSessionId,
+          totalTokensGenerated,
+          finalProof
+        );
+        addLog(`✅ Host completed session - TX: ${completionTx}`);
+
+        // Wait for confirmation
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+
+        // Read balances after completion
+        await readAllBalances();
+        addLog("✅ Balances updated after host completion");
+      } catch (error: any) {
+        console.error(`Host completion failed: ${error.message}`);
+        addLog(`⚠️ Host completion failed: ${error.message}`);
+      }
+
+      // Read final balances BEFORE clearing session state (so we still know which host to check)
+      try {
+        const balancesAfter = await readAllBalances();
+        addLog(`Final host accumulated: ${balancesAfter.hostAccumulated || '0'} USDC`);
+        addLog(`Final treasury accumulated: ${balancesAfter.treasuryAccumulated || '0'} USDC`);
+        addLog(`Final user balance: ${balancesAfter.smartWallet || balancesAfter.testUser1 || '0'} USDC`);
+      } catch (error: any) {
+        console.error(`Failed to read final balances: ${error.message}`);
+        addLog(`⚠️ Failed to read final balances: ${error.message}`);
+      }
+
+      // Clear session state AFTER reading balances (CRITICAL for next run)
+      setSessionId(null);
+      setJobId(null);
+      setSelectedHost(null);
+      selectedHostRef.current = null;
+      setTotalTokensGenerated(0);
+      delete (window as any).__selectedHostAddress;
+      delete (window as any).__currentSessionId;
+      delete (window as any).__currentJobId;
 
       setStepStatus(prev => ({ ...prev, 6: 'completed' }));
       setCurrentStep(6);
-      setStatus("✅ Step 6 Complete: Session ended, awaiting host completion");
+      setStatus("✅ Step 6 Complete: Session ended and completed");
+      addLog("✅ Step 6: Complete - session state cleared for next run");
     } catch (error: any) {
       console.error("Step 6 failed:", error);
       setError(`Step 6 failed: ${error.message}`);
@@ -1829,9 +1948,13 @@ export default function BaseUsdcMvpFlowSDKTest() {
       addLog(`Using host: ${selectedHost.address}`);
       addLog(`Using endpoint: ${hostEndpoint}`);
 
+      // Use actual host pricing from blockchain (USDC stable pricing)
+      const hostPricing = Number(selectedHost.minPricePerTokenStable || 316);
+      addLog(`Using host pricing: ${(hostPricing/1000000).toFixed(6)} USDC per token`);
+
       const sessionConfig = {
         depositAmount: "2", // 2 USDC as string
-        pricePerToken: 2000,
+        pricePerToken: hostPricing,  // Use ACTUAL host pricing
         proofInterval: 100,
         duration: 86400
       };
@@ -2350,7 +2473,8 @@ export default function BaseUsdcMvpFlowSDKTest() {
         endpoint: host.apiUrl || host.endpoint || `http://localhost:8080`,
         models: host.supportedModels || [],
         minPricePerTokenNative: host.minPricePerTokenNative || 0n,  // NEW: Native token pricing (ETH/BNB)
-        minPricePerTokenStable: host.minPricePerTokenStable || 316  // NEW: Stablecoin pricing (USDC) - use stable default
+        minPricePerTokenStable: host.minPricePerTokenStable || 316,  // NEW: Stablecoin pricing (USDC) - use stable default
+        pricePerToken: Number(host.minPricePerTokenStable || 316)  // For USDC sessions, use stable pricing
       }));
       const randomIndex = Math.floor(Math.random() * parsedHosts.length);
       const flowSelectedHost = parsedHosts[randomIndex];

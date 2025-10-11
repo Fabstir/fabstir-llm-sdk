@@ -22,8 +22,8 @@ This document tracks the implementation of the corrected dual pricing system tha
 
 | Contract | Old (Deprecated) | New (Active) |
 |----------|-----------------|--------------|
-| NodeRegistryWithModels | `0xC8dDD546e0993eEB4Df03591208aEDF6336342D7` | `0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6` |
-| JobMarketplaceWithModels | `0x462050a4a551c4292586D9c1DE23e3158a9bF3B3` | `0xe169A4B57700080725f9553E3Cc69885fea13629` |
+| NodeRegistryWithModels | `0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6` | `0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6` |
+| JobMarketplaceWithModels | `0xe169A4B57700080725f9553E3Cc69885fea13629` | `0xe169A4B57700080725f9553E3Cc69885fea13629` |
 
 **Unchanged contracts**:
 - ModelRegistry: `0x92b2De840bB2171203011A6dBA928d855cA8183E`

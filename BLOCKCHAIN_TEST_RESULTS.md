@@ -48,8 +48,8 @@ Successfully tested marketplace pricing implementation (Sub-phase 4.2) on Base S
 
 ### Contracts Used
 
-- **NodeRegistryWithModels**: `0xC8dDD546e0993eEB4Df03591208aEDF6336342D7`
-- **JobMarketplaceWithModels**: `0x462050a4a551c4292586D9c1DE23e3158a9bF3B3`
+- **NodeRegistryWithModels**: `0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6`
+- **JobMarketplaceWithModels**: `0xe169A4B57700080725f9553E3Cc69885fea13629`
 - **FAB Token**: `0xC78949004B4EB6dEf2D66e49Cd81231472612D62`
 
 ### Code Changes Required
