@@ -46,13 +46,15 @@ const TEST_ACCOUNTS = {
     address: process.env.NEXT_PUBLIC_TEST_HOST_1_ADDRESS,
     privateKey: process.env.NEXT_PUBLIC_TEST_HOST_1_PRIVATE_KEY,
     name: 'Test Host 1',
-    apiUrl: process.env.NEXT_PUBLIC_TEST_HOST_1_URL || 'http://localhost:8083'
+    apiUrl: process.env.NEXT_PUBLIC_TEST_HOST_1_URL || '',
+    mgmtUrl: process.env.NEXT_PUBLIC_TEST_HOST_1_MGMT_URL || ''
   },
   TEST_HOST_2: {
     address: process.env.NEXT_PUBLIC_TEST_HOST_2_ADDRESS,
     privateKey: process.env.NEXT_PUBLIC_TEST_HOST_2_PRIVATE_KEY,
     name: 'Test Host 2',
-    apiUrl: process.env.NEXT_PUBLIC_TEST_HOST_2_URL || 'http://localhost:8081'
+    apiUrl: process.env.NEXT_PUBLIC_TEST_HOST_2_URL || '',
+    mgmtUrl: process.env.NEXT_PUBLIC_TEST_HOST_2_MGMT_URL || ''
   }
 };
 
@@ -162,7 +164,8 @@ const NodeManagementClient: React.FC = () => {
 
       try {
         const { HostWsClient } = await import('../lib/hostWsClient');
-        const wsUrl = 'ws://localhost:3001/ws/logs';
+        const mgmtUrl = getMgmtUrl();
+        const wsUrl = mgmtUrl.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws/logs';
         const client = new HostWsClient(wsUrl);
 
         // Setup callbacks before connecting
@@ -198,13 +201,13 @@ const NodeManagementClient: React.FC = () => {
 
     connectMgmtWebSocket();
 
-    // Cleanup on unmount
+    // Cleanup on unmount or when switching accounts
     return () => {
       if (mgmtWsClient) {
         mgmtWsClient.disconnect();
       }
     };
-  }, []);
+  }, [selectedTestAccount]); // Reconnect when test account changes
 
   // Auto-scroll logs when new log arrives
   useEffect(() => {
@@ -223,12 +226,13 @@ const NodeManagementClient: React.FC = () => {
 
       try {
         const { HostApiClient } = await import('../lib/hostApiClient');
+        const mgmtUrl = getMgmtUrl();
         const client = new HostApiClient({
-          baseUrl: 'http://localhost:3001',
+          baseUrl: mgmtUrl,
           apiKey: 'test-key'
         });
         setMgmtApiClient(client);
-        addLog('✅ Management API client initialized');
+        addLog(`✅ Management API client initialized (${mgmtUrl})`);
 
         // Refresh status immediately after initialization
         refreshNodeStatus(client);
@@ -239,7 +243,7 @@ const NodeManagementClient: React.FC = () => {
     };
 
     initMgmtApiClient();
-  }, []);
+  }, [selectedTestAccount]); // Reinitialize when test account changes
 
   // Status polling every 10 seconds when node is running
   useEffect(() => {
@@ -280,6 +284,16 @@ const NodeManagementClient: React.FC = () => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m ${secs}s`;
+  };
+
+  // Helper: Get management API URL based on selected test account
+  const getMgmtUrl = (): string => {
+    const account = TEST_ACCOUNTS[selectedTestAccount as keyof typeof TEST_ACCOUNTS];
+    if ('mgmtUrl' in account && account.mgmtUrl) {
+      return account.mgmtUrl;
+    }
+    // Default to host 1 management URL if not a host account
+    return process.env.NEXT_PUBLIC_TEST_HOST_1_MGMT_URL || 'http://localhost:3001';
   };
 
   // Node Control: Refresh node status from management API

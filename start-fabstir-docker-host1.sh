@@ -1,5 +1,6 @@
 #!/bin/bash
-# Start Fabstir Host Docker Container with mounted binary and GPU support
+# Start Fabstir Host 1 Docker Container with mounted binary and GPU support
+# This runs TEST_HOST_1_ADDRESS on port 8083
 
 # Load environment variables from .env.test
 set -a
@@ -24,3 +25,11 @@ docker run -d \
 echo ""
 echo "Container started. Verifying binary mount..."
 docker exec fabstir-host-test ls -lh /usr/local/bin/fabstir-llm-node
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📦 Host 1 Container: fabstir-host-test"
+echo "🔑 Host Address: ${TEST_HOST_1_ADDRESS}"
+echo "🌐 Node API: http://localhost:8083"
+echo "🔧 P2P Port: 9000"
+echo "📡 Management API: http://localhost:3001 (start with start-management-server-host1.sh)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

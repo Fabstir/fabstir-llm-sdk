@@ -523,14 +523,23 @@ export default function BaseUsdcMvpFlowSDKTest() {
         minPricePerTokenStable: host.minPricePerTokenStable || 0   // NEW: Stablecoin pricing (USDC)
       }));
 
+      // Log all discovered hosts for debugging
+      addLog(`📋 All discovered hosts:`);
+      parsedHosts.forEach((h: any, idx: number) => {
+        addLog(`   [${idx}] ${h.address} - ${h.models.length} models - ${h.endpoint}`);
+      });
+
       // Filter hosts that support our model
       const modelSupported = parsedHosts.filter((h: any) => h.models && h.models.length > 0);
       if (modelSupported.length === 0) {
         throw new Error("No active hosts found supporting required models");
       }
 
-      // Randomly select a host
+      addLog(`✓ ${modelSupported.length} hosts support models`);
+
+      // Randomly select a host (simulates production behavior)
       const randomIndex = Math.floor(Math.random() * modelSupported.length);
+      addLog(`🎲 Random selection: index ${randomIndex} out of ${modelSupported.length} hosts`);
       const selected = modelSupported[randomIndex];
       setSelectedHost(selected);
       selectedHostRef.current = selected;  // Also update ref for immediate access

@@ -207,7 +207,11 @@ export class SessionManager implements ISessionManager {
           chainId: config.chainId,
           model,
           provider,
+          endpoint,  // Store endpoint for session restoration
           jobId: jobId.toString(),
+          status: 'active',  // Store status for restoration
+          totalTokens: 0,  // Initialize token count
+          startTime: sessionState.startTime,  // Store start time
           config: {
             depositAmount: config.depositAmount?.toString() || '',
             pricePerToken: config.pricePerToken?.toString() || '',
@@ -391,9 +395,43 @@ export class SessionManager implements ISessionManager {
       throw new SDKError('SessionManager not initialized', 'SESSION_NOT_INITIALIZED');
     }
 
-    const session = this.sessions.get(sessionId.toString());
+    const sessionIdStr = sessionId.toString();
+    let session = this.sessions.get(sessionIdStr);
+
+    // If session not in memory, try to load from storage (handles SessionManager recreation)
+    if (!session && this.storageManager) {
+      console.log(`Session ${sessionIdStr} not in memory, attempting to load from storage...`);
+      try {
+        const conversation = await this.storageManager.loadConversation(sessionIdStr);
+        if (conversation && conversation.metadata) {
+          // Reconstruct minimal session state from storage
+          session = {
+            sessionId: sessionId,
+            jobId: BigInt(conversation.metadata.jobId || sessionId),
+            chainId: conversation.metadata.chainId || 84532,
+            model: conversation.metadata.model || '',
+            provider: conversation.metadata.provider || '',
+            endpoint: conversation.metadata.endpoint,
+            status: (conversation.metadata.status as any) || 'active',
+            prompts: [],
+            responses: [],
+            checkpoints: [],
+            totalTokens: conversation.metadata.totalTokens || 0,
+            startTime: conversation.metadata.startTime || conversation.createdAt
+          } as SessionState;
+
+          // Add to memory for subsequent calls
+          this.sessions.set(sessionIdStr, session);
+          console.log(`Session ${sessionIdStr} restored from storage`);
+        }
+      } catch (err) {
+        console.warn(`Could not load session ${sessionIdStr} from storage:`, err);
+      }
+    }
+
+    // If still no session after trying storage, throw error
     if (!session) {
-      throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
+      throw new SDKError('Session not found in memory or storage', 'SESSION_NOT_FOUND');
     }
 
     if (session.status !== 'active') {
