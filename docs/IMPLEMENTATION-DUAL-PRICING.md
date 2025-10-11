@@ -63,22 +63,22 @@ RANGE: 10,000x
 - [x] Update `CONTRACT_JOB_MARKETPLACE` to `0xe169A4B57700080725f9553E3Cc69885fea13629`
 
 **File**: `packages/sdk-core/src/config/ChainRegistry.ts`
-- [ ] Update `nodeRegistry` address for Base Sepolia
-- [ ] Update `jobMarketplace` address for Base Sepolia
+- [x] Update `nodeRegistry` address for Base Sepolia
+- [x] Update `jobMarketplace` address for Base Sepolia
 
 **File**: `apps/harness/.env.local` (or Next.js env setup)
-- [ ] Update `NEXT_PUBLIC_CONTRACT_NODE_REGISTRY`
-- [ ] Update `NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE`
+- [x] Update `NEXT_PUBLIC_CONTRACT_NODE_REGISTRY`
+- [x] Update `NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE`
 
 #### 1.2 Deploy New Node v7.0.29
 
 **Location**: `/workspace/fabstir-llm-node-v7.0.29.tar.gz`
 
 **Steps**:
-1. [ ] Extract tarball to node directory
-2. [ ] Rebuild Docker image with new node binary
-3. [ ] Restart container with correct environment variables
-4. [ ] Verify health endpoint shows v7.0.29
+1. [x] Extract tarball to node directory
+2. [x] Rebuild Docker image with new node binary
+3. [x] Restart container with correct environment variables
+4. [x] Verify health endpoint shows v7.0.29
 
 **Commands**:
 ```bash
@@ -98,10 +98,10 @@ bash start-fabstir-docker.sh
 #### 1.3 Checkpoint Validation
 
 **Verify**:
-- [ ] SDK can connect to new contracts
-- [ ] Node starts successfully
-- [ ] Health endpoint returns version 7.0.29
-- [ ] No immediate errors in logs
+- [x] SDK can connect to new contracts
+- [x] Node starts successfully
+- [x] Health endpoint returns version 7.0.29
+- [x] No immediate errors in logs
 
 **Test Commands**:
 ```bash
@@ -123,7 +123,7 @@ curl http://localhost:8083/health
 **File**: `packages/sdk-core/src/managers/HostManager.ts`
 
 **Changes**:
-1. [ ] Update `HostInfo` interface (line ~40-44):
+1. [x] Update `HostInfo` interface (line ~40-44):
 ```typescript
 export interface HostInfo {
   isRegistered: boolean;
@@ -137,7 +137,7 @@ export interface HostInfo {
 }
 ```
 
-2. [ ] Update `RegisterHostRequest` interface (line ~177):
+2. [x] Update `RegisterHostRequest` interface (line ~177):
 ```typescript
 interface RegisterHostRequest {
   metadata: HostMetadata;
@@ -148,7 +148,7 @@ interface RegisterHostRequest {
 }
 ```
 
-3. [ ] Update pricing constants:
+3. [x] Update pricing constants:
 ```typescript
 // Native token pricing (ETH/BNB)
 const MIN_PRICE_NATIVE = 2_272_727_273n;
@@ -161,23 +161,23 @@ const MAX_PRICE_STABLE = 100_000n;
 const DEFAULT_PRICE_STABLE = '316';
 ```
 
-4. [ ] Update `registerHost()` method (line ~245):
+4. [x] Update `registerHost()` method (line ~245):
    - Accept both pricing parameters
    - Validate both ranges separately
    - Pass both to contract call
 
-5. [ ] Update `getHostStatus()` method (line ~505):
+5. [x] Update `getHostStatus()` method (line ~505):
    - Parse 8 fields from `getNodeFullInfo()` (was 7)
    - Return both pricing fields
 
-6. [ ] Add new methods:
+6. [x] Add new methods:
 ```typescript
 async updatePricingNative(newPrice: string): Promise<string>
 async updatePricingStable(newPrice: string): Promise<string>
 async getNodePricing(hostAddress: string, tokenAddress: string): Promise<bigint>
 ```
 
-7. [ ] Update `getHostInfo()` method (line ~732):
+7. [x] Update `getHostInfo()` method (line ~732):
    - Include both pricing fields in returned object
 
 #### 2.2 Update SessionManager
@@ -185,28 +185,28 @@ async getNodePricing(hostAddress: string, tokenAddress: string): Promise<bigint>
 **File**: `packages/sdk-core/src/managers/SessionManager.ts`
 
 **Changes**:
-1. [ ] Update pricing validation logic (line ~124):
+1. [x] Update pricing validation logic (line ~124):
    - Query both native and stable pricing
    - Validate against correct field based on payment token
    - Use `tokenAddress === '0x0000000000000000000000000000000000000000'` for native vs stable detection
 
-2. [ ] Update error messages to specify native vs stable pricing failures
+2. [x] Update error messages to specify native vs stable pricing failures
 
 #### 2.3 Update Interfaces
 
 **File**: `packages/sdk-core/src/interfaces/IHostManager.ts`
 
 **Changes**:
-- [ ] Update `IHostManager` interface to match HostManager changes
-- [ ] Add method signatures for `updatePricingNative()`, `updatePricingStable()`, `getNodePricing()`
+- [x] Update `IHostManager` interface to match HostManager changes
+- [x] Add method signatures for `updatePricingNative()`, `updatePricingStable()`, `getNodePricing()`
 
 #### 2.4 Checkpoint Validation
 
 **Verify**:
-- [ ] TypeScript compilation succeeds
-- [ ] Build completes: `cd packages/sdk-core && pnpm build`
-- [ ] Write simple test to query dual pricing from test host
-- [ ] No type errors in dependent files
+- [x] TypeScript compilation succeeds
+- [x] Build completes: `cd packages/sdk-core && pnpm build`
+- [x] Write simple test to query dual pricing from test host
+- [x] No type errors in dependent files
 
 **Test Script** (create temporary test file):
 ```typescript
@@ -230,7 +230,7 @@ console.log('Stable:', stablePrice.toString());
 **File**: `apps/harness/pages/eth-mvp-flow-sdk.test.tsx`
 
 **Changes**:
-1. [ ] Update host parsing (line ~481):
+1. [x] Update host parsing (line ~481):
 ```typescript
 const parsedHosts = hosts.map((host: any) => ({
   address: host.address,
@@ -241,7 +241,7 @@ const parsedHosts = hosts.map((host: any) => ({
 }));
 ```
 
-2. [ ] Update pricing display (line ~500-505):
+2. [x] Update pricing display (line ~500-505):
 ```typescript
 // Use native pricing for ETH sessions
 const pricingRaw = Number(selected.minPricePerTokenNative || 0);
@@ -252,18 +252,18 @@ setHostPricing(pricingEth);
 addLog(`💵 Host native pricing: ${pricingEth} ETH/token (wei: ${pricingRaw})`);
 ```
 
-3. [ ] Remove old conversion hack (divide by 100000000)
+3. [x] Remove old conversion hack (divide by 100000000)
 
-4. [ ] Update `DEFAULT_PRICE_PER_TOKEN` to use native default
+4. [x] Update `DEFAULT_PRICE_PER_TOKEN` to use native default
 
 #### 3.2 Update USDC Flow Test Harness
 
 **File**: `apps/harness/pages/usdc-mvp-flow-sdk.test.tsx`
 
 **Changes**:
-1. [ ] Update host parsing (line ~523) - same as ETH flow
+1. [x] Update host parsing (line ~523) - same as ETH flow
 
-2. [ ] Update pricing display:
+2. [x] Update pricing display:
 ```typescript
 // Use stable pricing for USDC sessions
 const pricingRaw = Number(selected.minPricePerTokenStable || 316);
@@ -272,27 +272,27 @@ setHostPricing(pricingUSDC);
 addLog(`💵 Host stable pricing: $${pricingUSDC} USDC/token (raw: ${pricingRaw})`);
 ```
 
-3. [ ] Update `DEFAULT_PRICE_PER_TOKEN` from `100` to `316`
+3. [x] Update `DEFAULT_PRICE_PER_TOKEN` from `100` to `316`
 
 #### 3.3 Update Base USDC Flow Test Harness
 
 **File**: `apps/harness/pages/base-usdc-mvp-flow-sdk.test.tsx`
 
 **Changes**:
-- [ ] Same changes as usdc-mvp-flow-sdk.test.tsx (use stable pricing)
+- [x] Same changes as usdc-mvp-flow-sdk.test.tsx (use stable pricing)
 
 #### 3.4 Update Node Management UI
 
 **File**: `apps/harness/components/NodeManagementClient.tsx`
 
 **Changes**:
-1. [ ] Add dual pricing state (line ~106):
+1. [x] Add dual pricing state (line ~106):
 ```typescript
 const [minPricePerTokenNative, setMinPricePerTokenNative] = useState('11363636363636');
 const [minPricePerTokenStable, setMinPricePerTokenStable] = useState('316');
 ```
 
-2. [ ] Add price formatting helpers:
+2. [x] Add price formatting helpers:
 ```typescript
 const formatNativePrice = (weiPrice: string, ethPriceUSD = 4400) => {
   const ethAmount = parseFloat(ethers.formatEther(BigInt(weiPrice)));
@@ -315,36 +315,36 @@ const formatStablePrice = (rawPrice: string) => {
 };
 ```
 
-3. [ ] Update registration form (line ~1472-1491):
+3. [x] Update registration form (line ~1472-1491):
    - Replace single price field with TWO fields
    - Add validation for both ranges
    - Display USD equivalents for both
 
-4. [ ] Update `registerNode()` call (line ~795):
+4. [x] Update `registerNode()` call (line ~795):
    - Pass both `minPricePerTokenNative` and `minPricePerTokenStable`
 
-5. [ ] Update pricing management section (line ~1622-1675):
+5. [x] Update pricing management section (line ~1622-1675):
    - Add TWO update sections (native and stable)
    - Show both current prices from contract
 
-6. [ ] Update `checkRegistrationStatus()` (line ~527):
+6. [x] Update `checkRegistrationStatus()` (line ~527):
    - Parse both pricing fields
    - Display both in UI
 
 #### 3.5 Checkpoint Validation
 
 **Verify**:
-- [ ] Next.js builds successfully: `cd apps/harness && pnpm build`
-- [ ] No TypeScript errors
-- [ ] UI displays both native and stable pricing
-- [ ] Registration form has both price input fields
-- [ ] Price update buttons exist for both types
+- [x] Next.js builds successfully: `cd apps/harness && pnpm build`
+- [x] No TypeScript errors
+- [x] UI displays both native and stable pricing
+- [x] Registration form has both price input fields
+- [x] Price update buttons exist for both types
 
 **Manual UI Test**:
-- [ ] Open http://localhost:3000/eth-mvp-flow-sdk.test
-- [ ] Verify dual pricing shown in host discovery
-- [ ] Open node management UI
-- [ ] Verify registration form has two price fields
+- [x] Open http://localhost:3000/eth-mvp-flow-sdk.test
+- [x] Verify dual pricing shown in host discovery
+- [x] Open node management UI
+- [x] Verify registration form has two price fields
 
 ---
 
@@ -355,12 +355,12 @@ const formatStablePrice = (rawPrice: string) => {
 #### 4.1 Re-register Test Hosts
 
 **Steps**:
-1. [ ] Unregister existing hosts (if registered on old contracts)
-2. [ ] Register TEST_HOST_1 with dual pricing via management UI:
+1. [x] Unregister existing hosts (if registered on old contracts)
+2. [x] Register TEST_HOST_1 with dual pricing via management UI:
    - Native: `11363636363636` wei (~$0.00005 @ $4400 ETH)
    - Stable: `316` (0.000316 USDC per token)
-3. [ ] Verify registration on blockchain
-4. [ ] Query dual pricing to confirm values
+3. [x] Verify registration on blockchain
+4. [x] Query dual pricing to confirm values
 
 **Commands**:
 ```bash
@@ -373,36 +373,36 @@ docker exec fabstir-host-test fabstir-host info --address $TEST_HOST_1_ADDRESS
 #### 4.2 Full Testing Checklist
 
 **Contract Query Tests**:
-- [ ] Query dual pricing from registered host via SDK
-- [ ] Verify `getNodeFullInfo()` returns 8 fields
-- [ ] Verify pricing values match registration
+- [x] Query dual pricing from registered host via SDK
+- [x] Verify `getNodeFullInfo()` returns 8 fields
+- [x] Verify pricing values match registration
 
 **ETH Flow Tests** (`/eth-mvp-flow-sdk.test`):
-- [ ] Display shows native pricing correctly
-- [ ] Create session with pricing >= host native minimum
-- [ ] Verify session creation succeeds
-- [ ] Monitor production node logs for proof submission
-- [ ] Verify host earnings credited correctly
-- [ ] Verify client refund for unused deposit
+- [x] Display shows native pricing correctly
+- [x] Create session with pricing >= host native minimum
+- [x] Verify session creation succeeds
+- [x] Monitor production node logs for proof submission
+- [x] Verify host earnings credited correctly
+- [x] Verify client refund for unused deposit
 
 **USDC Flow Tests** (`/usdc-mvp-flow-sdk.test`):
-- [ ] Display shows stable pricing correctly
-- [ ] Create session with pricing >= host stable minimum
-- [ ] Verify session creation succeeds
-- [ ] Monitor production node logs for proof submission
-- [ ] Verify host earnings credited correctly
-- [ ] Verify client refund for unused deposit
+- [x] Display shows stable pricing correctly
+- [x] Create session with pricing >= host stable minimum
+- [x] Verify session creation succeeds
+- [x] Monitor production node logs for proof submission
+- [x] Verify host earnings credited correctly
+- [x] Verify client refund for unused deposit
 
 **Pricing Validation Tests**:
-- [ ] Test session creation with price < native minimum (should fail)
-- [ ] Test session creation with price < stable minimum (should fail)
-- [ ] Verify correct error messages
+- [x] Test session creation with price < native minimum (should fail)
+- [x] Test session creation with price < stable minimum (should fail)
+- [x] Verify correct error messages
 
 **Management UI Tests**:
-- [ ] Register new host with dual pricing
-- [ ] Update native pricing via UI
-- [ ] Update stable pricing via UI
-- [ ] Verify updates reflected on blockchain
+- [x] Register new host with dual pricing
+- [x] Update native pricing via UI
+- [x] Update stable pricing via UI
+- [x] Verify updates reflected on blockchain
 
 #### 4.3 Update Documentation
 
@@ -425,12 +425,12 @@ docker exec fabstir-host-test fabstir-host info --address $TEST_HOST_1_ADDRESS
 #### 4.4 Final Checkpoint
 
 **Verify**:
-- [ ] All tests pass
-- [ ] ETH flow works end-to-end
-- [ ] USDC flow works end-to-end
-- [ ] Documentation updated
-- [ ] No console errors in UI
-- [ ] Production node logs show successful sessions
+- [x] All tests pass
+- [x] ETH flow works end-to-end
+- [x] USDC flow works end-to-end
+- [x] Documentation updated
+- [x] No console errors in UI
+- [x] Production node logs show successful sessions
 
 ---
 
