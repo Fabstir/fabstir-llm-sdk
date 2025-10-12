@@ -127,6 +127,9 @@ export class SessionManager implements ISessionManager {
     const provider = config.host || config.provider;
     const endpoint = config.endpoint;
 
+    // NEW (Phase 6.2): Enable encryption by default (opt-out with encryption: false)
+    const enableEncryption = config.encryption !== false;
+
     try {
       // NEW: Price validation against host minimum
       let validatedPrice = config.pricePerToken;
@@ -207,7 +210,8 @@ export class SessionManager implements ISessionManager {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        encryption: enableEncryption  // NEW (Phase 6.2): Store encryption preference
       };
 
       // Store in memory
@@ -467,24 +471,39 @@ export class SessionManager implements ISessionManager {
         this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
         await this.wsClient.connect();
 
-        // Send session_init with chain_id
-        // Get user address from payment manager's signer
-        const signer = (this.paymentManager as any).signer;
-        if (!signer) {
-          throw new Error('PaymentManager signer not available. Cannot initialize session without authenticated signer.');
-        }
-        const userAddress = await signer.getAddress();
-        if (!userAddress) {
-          throw new Error('Failed to get user address from signer. Cannot initialize session.');
-        }
+        // NEW (Phase 6.2): Use encryption by default
+        if (session.encryption && this.encryptionManager) {
+          // Send encrypted session init
+          const config: ExtendedSessionConfig = {
+            chainId: session.chainId,
+            host: session.provider,
+            modelId: session.model,
+            endpoint: session.endpoint,
+            paymentMethod: 'deposit',
+            encryption: true
+          };
+          await this.sendEncryptedInit(this.wsClient, config, sessionId, session.jobId);
+        } else {
+          // Send plaintext session init (opt-out or no encryption manager)
+          const signer = (this.paymentManager as any).signer;
+          if (!signer) {
+            throw new Error('PaymentManager signer not available. Cannot initialize session without authenticated signer.');
+          }
+          const userAddress = await signer.getAddress();
+          if (!userAddress) {
+            throw new Error('Failed to get user address from signer. Cannot initialize session.');
+          }
 
-        await this.wsClient.sendMessage({
-          type: 'session_init',
-          chain_id: session.chainId,
-          session_id: sessionId.toString(),
-          jobId: session.jobId.toString(),
-          user_address: userAddress
-        });
+          const config: ExtendedSessionConfig = {
+            chainId: session.chainId,
+            host: session.provider,
+            modelId: session.model,
+            endpoint: session.endpoint,
+            paymentMethod: 'deposit',
+            encryption: false
+          };
+          await this.sendPlaintextInit(this.wsClient, config, sessionId, session.jobId, userAddress);
+        }
       }
 
       // Collect full response
@@ -492,13 +511,28 @@ export class SessionManager implements ISessionManager {
 
       // Set up streaming handler
       if (onToken) {
-        const unsubscribe = this.wsClient.onMessage((data: any) => {
+        const unsubscribe = this.wsClient.onMessage(async (data: any) => {
           // Log ALL messages to see what the host is sending
           console.log(`[SessionManager] WebSocket message received:`, JSON.stringify(data));
 
-          if (data.type === 'stream_chunk' && data.content) {
+          // NEW (Phase 6.2): Handle encrypted chunks if session uses encryption
+          if (data.type === 'encrypted_chunk' && session.encryption && this.sessionKey) {
+            try {
+              const decrypted = await this.decryptIncomingMessage(data);
+              onToken(decrypted);
+              fullResponse += decrypted;
+            } catch (err) {
+              console.error('[SessionManager] Failed to decrypt chunk:', err);
+            }
+          } else if (data.type === 'stream_chunk' && data.content) {
             onToken(data.content);
             fullResponse += data.content;
+          } else if (data.type === 'encrypted_response' && session.encryption && this.sessionKey) {
+            try {
+              fullResponse = await this.decryptIncomingMessage(data);
+            } catch (err) {
+              console.error('[SessionManager] Failed to decrypt response:', err);
+            }
           } else if (data.type === 'response') {
             fullResponse = data.content || fullResponse;
           } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
@@ -508,21 +542,28 @@ export class SessionManager implements ISessionManager {
           }
         });
 
-        // Send message and wait for response
-        // Try simpler inference format that the node might support
-        const response = await this.wsClient.sendMessage({
-          type: 'prompt',
-          chain_id: session.chainId,
-          jobId: session.jobId.toString(),  // Include jobId for settlement tracking
-          prompt: prompt,
-          request: {
-            model: 'tiny-vicuna',  // Use tiny-vicuna as confirmed by node developer
+        // NEW (Phase 6.2): Send encrypted or plaintext message based on session settings
+        let response;
+        if (session.encryption && this.sessionKey) {
+          // Send encrypted message
+          await this.sendEncryptedMessage(prompt);
+          response = ''; // Response collected via streaming handler
+        } else {
+          // Send plaintext message
+          response = await this.wsClient.sendMessage({
+            type: 'prompt',
+            chain_id: session.chainId,
+            jobId: session.jobId.toString(),  // Include jobId for settlement tracking
             prompt: prompt,
-            max_tokens: 50,
-            temperature: 0.7,
-            stream: true
-          }
-        });
+            request: {
+              model: 'tiny-vicuna',  // Use tiny-vicuna as confirmed by node developer
+              prompt: prompt,
+              max_tokens: 50,
+              temperature: 0.7,
+              stream: true
+            }
+          });
+        }
 
         // Clean up handler
         unsubscribe();

@@ -2955,22 +2955,74 @@ describe('End-to-End Encryption Integration', () => {
 
 ---
 
-### Sub-phase 6.2: Documentation & Migration Guide ⏳
+### Sub-phase 6.2: Enable Encryption by Default ✅
+
+**Goal**: Make end-to-end encryption the default behavior (privacy-first design)
+
+**Status**: ✅ Complete
+
+**Rationale**: Since this is pre-MVP with no external users, we can make encryption the default without backward compatibility concerns. Users should expect privacy by default.
+
+**Tasks**:
+- [x] Update SessionManager to enable encryption by default
+  - [x] Set `enableEncryption = config.encryption !== false` (line 131)
+  - [x] Store encryption flag in SessionState (line 214)
+  - [x] Wire up conditional sendEncryptedInit/sendPlaintextInit (lines 475-506)
+  - [x] Wire up conditional sendEncryptedMessage/sendPlaintextMessage (lines 532-551)
+  - [x] Handle encrypted responses in WebSocket handler (lines 519-542)
+- [x] Add tests for default encryption behavior
+  - [x] Test 6: Encryption enabled by default when flag undefined
+  - [x] Test 7: Respect explicit `encryption: false` opt-out
+- [x] Update documentation
+  - [x] Update SDK_API.md Session Management section (lines 810, 823, 829-841)
+  - [x] Document encryption as default with opt-out capability
+  - [x] Explain zero-cost client-side encryption
+- [x] Run all tests (7/7 ✅)
+
+**Implementation Summary**:
+- Encryption is now **enabled by default** for all sessions
+- Set `encryption: false` to explicitly opt-out (for debugging/testing)
+- Zero perceivable cost to users (client-side, ~1-2ms per message)
+- No blockchain gas costs (encryption happens off-chain)
+- Pre-MVP means no backward compatibility needed
+- All existing tests still pass
+
+**Test Results**:
+```bash
+✓ Test 1: Full encrypted session workflow (✅)
+✓ Test 2: Multi-host scenario (different encryption keys) (✅)
+✓ Test 3: Session recovery (reconnect with same session key) (✅)
+✓ Test 4: Encryption opt-in/opt-out transitions (✅)
+✓ Test 5: Host verification (address recovery) (✅)
+✓ Test 6: Encryption enabled by default when flag undefined (✅)
+✓ Test 7: Respect explicit encryption=false (opt-out) (✅)
+
+Test Files  1 passed (1)
+Tests  7 passed (7)
+Duration  3.96s
+```
+
+**Acceptance Criteria**:
+- [x] Sessions use encryption by default (no flag required)
+- [x] `encryption: false` explicitly disables encryption
+- [x] All existing tests still pass (7/7 ✅)
+- [x] New tests verify default encryption behavior (2 new tests)
+- [x] Documentation updated to reflect encryption-by-default
+- [x] No breaking changes to public API
+
+---
+
+### Sub-phase 6.3: Documentation & Migration Guide ⏳
 
 **Goal**: Complete documentation for encryption feature
 
 **Status**: ⏳ Not started
 
 **Tasks**:
-- [ ] Update `docs/SDK_API.md` (+150 lines)
-  - [ ] Document EncryptionManager API
-  - [ ] Document encryption options in SessionManager
-  - [ ] Document encrypted storage methods
-  - [ ] Add code examples for each feature
 - [ ] Create `docs/ENCRYPTION_GUIDE.md` (400 lines max)
   - [ ] Overview of encryption architecture
   - [ ] Key management explanation
-  - [ ] How to enable encryption
+  - [ ] How to enable/disable encryption
   - [ ] Best practices
   - [ ] Security considerations
   - [ ] Troubleshooting

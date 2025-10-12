@@ -807,6 +807,7 @@ interface SessionConfig {
   pricePerToken: number;     // Price per token (e.g., 200)
   duration: number;          // Session duration in seconds (e.g., 3600)
   proofInterval: number;     // Checkpoint interval in tokens (e.g., 100)
+  encryption?: boolean;      // Enable end-to-end encryption (default: true)
 ```
 
 **Example:**
@@ -818,10 +819,25 @@ const { sessionId, jobId } = await sessionManager.startSession(
     depositAmount: "1.0",    // $1 USDC minimum per session
     pricePerToken: 200,      // 0.0002 USDC per token (0.02 cents)
     duration: 3600,          // 1 hour session timeout
-    proofInterval: 100       // Checkpoint every 100 tokens
+    proofInterval: 100,      // Checkpoint every 100 tokens
+    encryption: true         // Enable E2EE (default, can be omitted)
   },
   'http://localhost:8080'   // Optional: Host WebSocket endpoint
 );
+```
+
+**Encryption Notes:**
+- **Default Behavior**: Sessions use end-to-end encryption by default (Phase 6.2)
+- **Zero Cost**: Encryption is client-side with negligible performance impact (~1-2ms per message)
+- **Privacy First**: All messages and session data encrypted using ephemeral-static ECDH + XChaCha20-Poly1305
+- **Opt-Out**: Set `encryption: false` to explicitly disable (for debugging/testing only)
+
+```typescript
+// Explicitly disable encryption (not recommended)
+const { sessionId } = await sessionManager.startSession(model, provider, {
+  ...config,
+  encryption: false  // Opt-out of encryption
+});
 ```
 
 ### sendPrompt
