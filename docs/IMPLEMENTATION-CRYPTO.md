@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding ephemeral-static ECDH encryption to Fabstir LLM SDK
 >
-> **Status**: 🔄 IN PROGRESS (5/17 sub-phases complete, 29%) | **Target**: Secure browser ↔ node communication | **Progress**: Phase 1 (3/3) ✅, Phase 2 (2/3) 🔄, Phase 3 (0/3) ⏳, Phase 4 (0/3) ⏳, Phase 5 (0/3) ⏳, Phase 6 (0/2) ⏳
+> **Status**: 🔄 IN PROGRESS (6/17 sub-phases complete, 35%) | **Target**: Secure browser ↔ node communication | **Progress**: Phase 1 (3/3) ✅, Phase 2 (3/3) ✅, Phase 3 (0/3) ⏳, Phase 4 (0/3) ⏳, Phase 5 (0/3) ⏳, Phase 6 (0/2) ⏳
 
 ## Overview
 
@@ -1108,26 +1108,43 @@ async decryptSessionInit(
 
 ---
 
-### Sub-phase 2.3: Message & Storage Encryption ⏳
+### Sub-phase 2.3: Message & Storage Encryption ✅
 
 **Goal**: Implement symmetric message encryption and storage encryption
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (20/20 tests passing)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/managers/EncryptionManager.test.ts` (+200 lines)
-  - [ ] Test: encryptMessage produces valid encrypted message
-  - [ ] Test: decryptMessage recovers plaintext
-  - [ ] Test: message index changes AAD (prevents replay)
-  - [ ] Test: encryptForStorage works with arbitrary data
-  - [ ] Test: decryptFromStorage recovers typed data
-  - [ ] Test: storage encryption includes metadata
-- [ ] Update `packages/sdk-core/src/managers/EncryptionManager.ts` (+120 lines)
-  - [ ] Implement encryptMessage(sessionKey, message, messageIndex)
-  - [ ] Implement decryptMessage(sessionKey, encrypted)
-  - [ ] Implement encryptForStorage(hostPubKey, data)
-  - [ ] Implement decryptFromStorage(encrypted)
-- [ ] Verify all tests pass (6/6 ✅)
+- [x] Write tests in `packages/sdk-core/tests/managers/EncryptionManager.test.ts` (+157 lines = 380 total)
+  - [x] Test: encryptMessage produces valid encrypted message
+  - [x] Test: decryptMessage recovers plaintext
+  - [x] Test: message index changes AAD (prevents replay)
+  - [x] Test: timestamp included in AAD
+  - [x] Test: different nonces for same message
+  - [x] Test: tampered ciphertext rejected
+  - [x] Test: encryptForStorage works with arbitrary data
+  - [x] Test: decryptFromStorage recovers typed data
+  - [x] Test: storage encryption includes metadata
+  - [x] Test: unique conversationId per encryption
+  - [x] Test: tampered storage payload rejected
+- [x] Update `packages/sdk-core/src/managers/EncryptionManager.ts` (+85 lines = 291 total)
+  - [x] Implement encryptMessage(sessionKey, message, messageIndex)
+    - [x] Generate random 24-byte nonce per message
+    - [x] Create AAD with message_index and timestamp
+    - [x] Encrypt with XChaCha20-Poly1305 AEAD
+  - [x] Implement decryptMessage(sessionKey, encrypted)
+    - [x] Decrypt and verify AAD
+    - [x] Return plaintext
+  - [x] Implement encryptForStorage(hostPubKey, data)
+    - [x] Serialize to JSON
+    - [x] Encrypt with ephemeral-static ECDH
+    - [x] Generate unique conversationId
+    - [x] Add metadata (storedAt, conversationId)
+  - [x] Implement decryptFromStorage(encrypted)
+    - [x] Decrypt with ECDH
+    - [x] Recover sender address from signature
+    - [x] Parse JSON with type safety
+- [x] Verify all tests pass (20/20 ✅)
 
 **Test Requirements**:
 ```typescript

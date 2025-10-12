@@ -12,7 +12,8 @@
 
 import type { Wallet } from 'ethers';
 import * as secp from '@noble/secp256k1';
-import { bytesToHex } from '../crypto/utilities';
+import { xchacha20poly1305 } from '@noble/ciphers/chacha';
+import { bytesToHex, hexToBytes } from '../crypto/utilities';
 import { encryptForEphemeral, decryptFromEphemeral } from '../crypto/encryption';
 import { recoverSenderAddress } from '../crypto/recovery';
 import type {
@@ -22,6 +23,9 @@ import type {
   EncryptedMessage,
   EncryptedStorage
 } from '../interfaces/IEncryptionManager';
+
+const enc = new TextEncoder();
+const dec = new TextDecoder();
 
 /**
  * EncryptionManager class
@@ -147,60 +151,141 @@ export class EncryptionManager implements IEncryptionManager {
   /**
    * Encrypt message with symmetric encryption (fast, no signature).
    *
+   * Algorithm:
+   * 1. Generate random nonce (24 bytes for XChaCha20)
+   * 2. Create AAD with message_index and timestamp (replay protection)
+   * 3. Encrypt with XChaCha20-Poly1305 AEAD
+   * 4. Return encrypted message
+   *
    * @param sessionKey - Shared session key (32 bytes)
    * @param message - Plain text message
-   * @param messageIndex - Sequential message number
-   * @returns Encrypted message
-   * @throws Error - Not implemented (see Sub-phase 2.3)
+   * @param messageIndex - Sequential message number (prevents replay/reordering)
+   * @returns Encrypted message with nonce and AAD
    */
   encryptMessage(
     sessionKey: Uint8Array,
     message: string,
     messageIndex: number
   ): EncryptedMessage {
-    throw new Error('Not implemented - see Sub-phase 2.3: Message & Storage Encryption');
+    // Generate fresh nonce for each message
+    const nonce = crypto.getRandomValues(new Uint8Array(24)); // XChaCha20 uses 24-byte nonce
+
+    // AAD includes message index and timestamp to prevent replay/reordering
+    const aad = enc.encode(JSON.stringify({
+      message_index: messageIndex,
+      timestamp: Date.now()
+    }));
+
+    // Encrypt with XChaCha20-Poly1305
+    const cipher = xchacha20poly1305(sessionKey, nonce, aad);
+    const plaintext = enc.encode(message);
+    const ciphertext = cipher.encrypt(plaintext);
+
+    return {
+      type: 'encrypted_message',
+      nonceHex: bytesToHex(nonce),
+      ciphertextHex: bytesToHex(ciphertext),
+      aadHex: bytesToHex(aad)
+    };
   }
 
   /**
    * Decrypt message with symmetric encryption.
    *
+   * Algorithm:
+   * 1. Parse nonce, ciphertext, and AAD from hex
+   * 2. Decrypt with XChaCha20-Poly1305 (verifies AAD and tag)
+   * 3. Return plaintext
+   *
    * @param sessionKey - Shared session key (32 bytes)
    * @param encrypted - Encrypted message
    * @returns Decrypted plain text
-   * @throws Error - Not implemented (see Sub-phase 2.3)
+   * @throws Error if AAD verification fails or tag is invalid
    */
   decryptMessage(
     sessionKey: Uint8Array,
     encrypted: EncryptedMessage
   ): string {
-    throw new Error('Not implemented - see Sub-phase 2.3: Message & Storage Encryption');
+    const nonce = hexToBytes(encrypted.nonceHex);
+    const ciphertext = hexToBytes(encrypted.ciphertextHex);
+    const aad = hexToBytes(encrypted.aadHex);
+
+    const cipher = xchacha20poly1305(sessionKey, nonce, aad);
+    const plaintext = cipher.decrypt(ciphertext); // Throws if tag verification fails
+
+    return dec.decode(plaintext);
   }
 
   /**
    * Encrypt data for long-term storage with full ECDSA signature.
    *
+   * Algorithm:
+   * 1. Serialize data to JSON
+   * 2. Encrypt with ephemeral-static ECDH (includes signature)
+   * 3. Generate unique conversation ID
+   * 4. Add storage metadata (timestamp, conversationId)
+   * 5. Return wrapped payload
+   *
    * @param hostPubKey - Host's static public key (compressed hex)
-   * @param data - Data to encrypt
+   * @param data - Data to encrypt (any JSON-serializable type)
    * @returns Encrypted storage payload with metadata
-   * @throws Error - Not implemented (see Sub-phase 2.3)
    */
   async encryptForStorage<T>(
     hostPubKey: string,
     data: T
   ): Promise<EncryptedStorage> {
-    throw new Error('Not implemented - see Sub-phase 2.3: Message & Storage Encryption');
+    // Serialize data to JSON
+    const plaintext = JSON.stringify(data);
+
+    // Encrypt with ephemeral-static ECDH (includes full signature)
+    const payload = await encryptForEphemeral(
+      hostPubKey,
+      this.clientPrivateKey,
+      plaintext
+    );
+
+    // Generate unique conversation ID (simple random hex)
+    const conversationId = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
+
+    return {
+      payload,
+      storedAt: new Date().toISOString(),
+      conversationId
+    };
   }
 
   /**
    * Decrypt stored data and verify sender.
    *
+   * Algorithm:
+   * 1. Decrypt payload with ECDH
+   * 2. Recover sender address from signature
+   * 3. Parse JSON to restore original data type
+   * 4. Return data and sender address
+   *
    * @param encrypted - Encrypted storage payload
    * @returns Decrypted data and verified sender address
-   * @throws Error - Not implemented (see Sub-phase 2.3)
+   * @throws Error if signature verification fails or decryption fails
    */
   async decryptFromStorage<T>(
     encrypted: EncryptedStorage
   ): Promise<{ data: T; senderAddress: string }> {
-    throw new Error('Not implemented - see Sub-phase 2.3: Message & Storage Encryption');
+    // Decrypt with ephemeral-static ECDH
+    const plaintext = decryptFromEphemeral(
+      this.clientPrivateKey,
+      this.clientPublicKey,
+      encrypted.payload
+    );
+
+    // Recover sender address from signature
+    const senderAddress = recoverSenderAddress(
+      encrypted.payload,
+      this.clientPublicKey
+    );
+
+    // Parse JSON to restore original data
+    const data = JSON.parse(plaintext) as T;
+
+    return { data, senderAddress };
   }
 }
