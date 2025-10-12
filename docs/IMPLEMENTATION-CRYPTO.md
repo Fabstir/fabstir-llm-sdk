@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding ephemeral-static ECDH encryption to Fabstir LLM SDK
 >
-> **Status**: ⏳ NOT STARTED (0/17 sub-phases complete, 0%) | **Target**: Secure browser ↔ node communication | **Progress**: Phase 1 (0/3) ⏳, Phase 2 (0/3) ⏳, Phase 3 (0/3) ⏳, Phase 4 (0/3) ⏳, Phase 5 (0/3) ⏳, Phase 6 (0/2) ⏳
+> **Status**: 🔄 IN PROGRESS (1/17 sub-phases complete, 6%) | **Target**: Secure browser ↔ node communication | **Progress**: Phase 1 (1/3) 🔄, Phase 2 (0/3) ⏳, Phase 3 (0/3) ⏳, Phase 4 (0/3) ⏳, Phase 5 (0/3) ⏳, Phase 6 (0/2) ⏳
 
 ## Overview
 
@@ -187,7 +187,7 @@ interface StoragePayload {
 
 ## Implementation Status
 
-⏳ **Phase 1: Core Crypto Module** (0/3 sub-phases complete)
+🔄 **Phase 1: Core Crypto Module** (1/3 sub-phases complete) - ✅ Sub-phase 1.1 complete
 ⏳ **Phase 2: EncryptionManager** (0/3 sub-phases complete)
 ⏳ **Phase 3: Host Public Key Discovery** (0/3 sub-phases complete)
 ⏳ **Phase 4: SessionManager Integration** (0/3 sub-phases complete)
@@ -221,35 +221,43 @@ interface StoragePayload {
 **Estimated Time**: 6-8 hours
 **Goal**: Implement low-level cryptographic primitives with full test coverage
 
-### Sub-phase 1.1: Core Utilities & Type Definitions ⏳
+### Sub-phase 1.1: Core Utilities & Type Definitions ✅
 
 **Goal**: Create foundational utilities and TypeScript interfaces for encryption
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (14/14 tests passing)
 
 **Tasks**:
-- [ ] Install dependencies (`@noble/secp256k1@^2.0.0`, `@noble/hashes@^1.3.3`, `@noble/ciphers@^0.4.0`)
-- [ ] Write tests in `packages/sdk-core/tests/crypto/utilities.test.ts` (100 lines max)
-  - [ ] Test: hexToBytes converts hex strings correctly
-  - [ ] Test: bytesToHex converts Uint8Array correctly
-  - [ ] Test: toCompressedPub handles both compressed/uncompressed keys
-  - [ ] Test: pubkeyToAddress derives correct EVM address (known test vectors)
-  - [ ] Test: toChecksumAddress produces EIP-55 checksum
-  - [ ] Test: makeSigMessage produces consistent hash for same inputs
-- [ ] Create `packages/sdk-core/src/crypto/types.ts` (80 lines max)
-  - [ ] Define Hex type alias
-  - [ ] Define EphemeralCipherPayload interface
-  - [ ] Define EncryptEphemeralOptions interface
-  - [ ] Define DecryptEphemeralOptions interface
-  - [ ] Export all types
-- [ ] Create `packages/sdk-core/src/crypto/utilities.ts` (150 lines max)
-  - [ ] Implement hexToBytes(hex: Hex): Uint8Array
-  - [ ] Implement bytesToHex(b: Uint8Array): string
-  - [ ] Implement toCompressedPub(pub): Uint8Array
-  - [ ] Implement pubkeyToAddress(pubkey): string
-  - [ ] Implement toChecksumAddress(addr): string
-  - [ ] Implement makeSigMessage(context params): Uint8Array
-- [ ] Verify all tests pass (6/6 ✅)
+- [x] Install dependencies (`@noble/secp256k1@^2.3.0`, `@noble/hashes@^1.8.0`, `@noble/ciphers@^0.4.1`)
+- [x] Write tests in `packages/sdk-core/tests/crypto/utilities.test.ts` (140 lines)
+  - [x] Test: hexToBytes converts hex strings correctly
+  - [x] Test: hexToBytes handles 0x prefix
+  - [x] Test: bytesToHex produces lowercase hex
+  - [x] Test: round-trip conversion preserves data
+  - [x] Test: hexToBytes throws on invalid hex length
+  - [x] Test: toCompressedPub compresses 65-byte uncompressed key to 33 bytes
+  - [x] Test: toCompressedPub preserves already-compressed key
+  - [x] Test: toCompressedPub handles hex string input
+  - [x] Test: pubkeyToAddress derives correct address from known pubkey
+  - [x] Test: toChecksumAddress produces EIP-55 checksum (with test vectors)
+  - [x] Test: toChecksumAddress is idempotent
+  - [x] Test: makeSigMessage produces consistent hash
+  - [x] Test: makeSigMessage binds all context parameters
+  - [x] Test: makeSigMessage includes AAD when provided
+- [x] Create `packages/sdk-core/src/crypto/types.ts` (80 lines)
+  - [x] Define Hex type alias
+  - [x] Define EphemeralCipherPayload interface
+  - [x] Define EncryptEphemeralOptions interface
+  - [x] Define DecryptEphemeralOptions interface
+  - [x] Export all types
+- [x] Create `packages/sdk-core/src/crypto/utilities.ts` (173 lines)
+  - [x] Implement hexToBytes(hex: Hex): Uint8Array
+  - [x] Implement bytesToHex(b: Uint8Array): string
+  - [x] Implement toCompressedPub(pub): Uint8Array
+  - [x] Implement pubkeyToAddress(pubkey): string
+  - [x] Implement toChecksumAddress(addr): string
+  - [x] Implement makeSigMessage(context params): Uint8Array
+- [x] Verify all tests pass (14/14 ✅)
 
 **Test Requirements**:
 ```typescript
