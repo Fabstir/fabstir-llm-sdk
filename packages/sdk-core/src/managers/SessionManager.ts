@@ -16,10 +16,12 @@ import {
 import { PaymentManager } from './PaymentManager';
 import { StorageManager } from './StorageManager';
 import { HostManager } from './HostManager';
+import { EncryptionManager } from './EncryptionManager';
 import { WebSocketClient } from '../websocket/WebSocketClient';
 import { ChainRegistry } from '../config/ChainRegistry';
 import { UnsupportedChainError } from '../errors/ChainErrors';
 import { PricingValidationError } from '../errors/pricing-errors';
+import { bytesToHex } from '../crypto/utilities';
 
 export interface SessionState {
   sessionId: bigint;
@@ -28,13 +30,14 @@ export interface SessionState {
   model: string;
   provider: string;
   endpoint?: string; // WebSocket endpoint URL
-  status: 'pending' | 'active' | 'paused' | 'completed' | 'failed';
+  status: 'pending' | 'active' | 'paused' | 'completed' | 'failed' | 'ended';
   prompts: string[];
   responses: string[];
   checkpoints: CheckpointProof[];
   totalTokens: number;
   startTime: number;
   endTime?: number;
+  encryption?: boolean; // NEW: Track if session uses encryption
 }
 
 // Extended SessionConfig with chainId
@@ -44,15 +47,19 @@ export interface ExtendedSessionConfig extends SessionConfig {
   modelId: string;
   paymentMethod: 'deposit' | 'direct';
   depositAmount?: ethers.BigNumberish;
+  encryption?: boolean; // NEW: Enable E2EE
 }
 
 export class SessionManager implements ISessionManager {
   private paymentManager: PaymentManager;
   private storageManager: StorageManager;
-  private hostManager?: HostManager; // NEW: Optional until set after auth
+  private hostManager?: HostManager; // Optional until set after auth
+  private encryptionManager?: EncryptionManager; // NEW: Optional until set after auth
   private wsClient?: WebSocketClient;
   private sessions: Map<string, SessionState> = new Map();
   private initialized = false;
+  private sessionKey?: Uint8Array; // NEW: Store session key for Phase 4.2
+  private messageIndex: number = 0; // NEW: For Phase 4.2 replay protection
 
   constructor(
     paymentManager: PaymentManager,
@@ -69,6 +76,13 @@ export class SessionManager implements ISessionManager {
    */
   setHostManager(hostManager: HostManager): void {
     this.hostManager = hostManager;
+  }
+
+  /**
+   * Set EncryptionManager for end-to-end encryption (called after authentication)
+   */
+  setEncryptionManager(encryptionManager: EncryptionManager): void {
+    this.encryptionManager = encryptionManager;
   }
 
   /**
@@ -779,6 +793,88 @@ export class SessionManager implements ISessionManager {
         { originalError: error }
       );
     }
+  }
+
+  /**
+   * Send encrypted session initialization (Phase 4.1)
+   * @private
+   */
+  private async sendEncryptedInit(
+    ws: WebSocketClient,
+    config: ExtendedSessionConfig,
+    sessionId: bigint,
+    jobId: bigint
+  ): Promise<void> {
+    if (!this.encryptionManager) {
+      throw new SDKError(
+        'EncryptionManager not available for encrypted session',
+        'ENCRYPTION_NOT_AVAILABLE'
+      );
+    }
+
+    if (!this.hostManager) {
+      throw new SDKError(
+        'HostManager required for host public key retrieval',
+        'HOST_MANAGER_NOT_AVAILABLE'
+      );
+    }
+
+    // 1. Generate random session key (32 bytes)
+    this.sessionKey = crypto.getRandomValues(new Uint8Array(32));
+    const sessionKeyHex = bytesToHex(this.sessionKey);
+    this.messageIndex = 0;
+
+    // 2. Get host public key (uses cache, metadata, or signature recovery)
+    const hostPubKey = await this.hostManager.getHostPublicKey(
+      config.host,
+      config.endpoint  // API URL for fallback
+    );
+
+    // 3. Prepare session init payload
+    const initPayload = {
+      jobId: jobId,
+      modelName: config.modelId,
+      sessionKey: sessionKeyHex,
+      pricePerToken: config.pricePerToken || 0
+    };
+
+    // 4. Encrypt with EncryptionManager
+    const encrypted = await this.encryptionManager.encryptSessionInit(
+      hostPubKey,
+      initPayload
+    );
+
+    // 5. Send encrypted init message
+    await ws.sendMessage({
+      ...encrypted,  // { type: 'encrypted_session_init', payload: {...} }
+      chain_id: config.chainId,
+      session_id: sessionId.toString()
+    });
+
+    console.log('[SessionManager] Encrypted session init sent with session key');
+  }
+
+  /**
+   * Send plaintext session initialization (backward compatible)
+   * @private
+   */
+  private async sendPlaintextInit(
+    ws: WebSocketClient,
+    config: ExtendedSessionConfig,
+    sessionId: bigint,
+    jobId: bigint,
+    userAddress: string
+  ): Promise<void> {
+    // Existing plaintext logic (lines 467-473 from sendPromptStreaming)
+    await ws.sendMessage({
+      type: 'session_init',
+      chain_id: config.chainId,
+      session_id: sessionId.toString(),
+      jobId: jobId.toString(),
+      user_address: userAddress
+    });
+
+    console.log('[SessionManager] Plaintext session init sent');
   }
 
   /**

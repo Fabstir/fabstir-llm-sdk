@@ -30,6 +30,7 @@ import { HostManager } from './managers/HostManager';
 import { ModelManager } from './managers/ModelManager';
 import { TreasuryManager } from './managers/TreasuryManager';
 import { ClientManager } from './managers/ClientManager';
+import { EncryptionManager } from './managers/EncryptionManager';
 import { ContractManager, ContractAddresses } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 import { SDKConfig, SDKError } from './types';
@@ -95,6 +96,7 @@ export class FabstirSDKCore extends EventEmitter {
   private modelManager?: ModelManager;
   private clientManager?: ClientManager;
   private treasuryManager?: ITreasuryManager;
+  private encryptionManager?: EncryptionManager;
   
   private authenticated = false;
   private s5Seed?: string;
@@ -588,6 +590,17 @@ export class FabstirSDKCore extends EventEmitter {
         );
       }
 
+      // Create EncryptionManager (requires Wallet type for private key access)
+      console.log('Creating EncryptionManager...');
+      // Check if signer is a Wallet instance
+      if (this.signer && 'privateKey' in this.signer) {
+        this.encryptionManager = new EncryptionManager(this.signer as ethers.Wallet);
+        console.log('EncryptionManager created');
+      } else {
+        console.warn('[EncryptionManager] Signer is not a Wallet instance - encryption features disabled');
+        // Encryption is optional, don't throw error
+      }
+
       console.log('Initializing SessionManager...');
       await (this.sessionManager as any).initialize();  // SessionManager doesn't take signer
       console.log('SessionManager initialized');
@@ -626,6 +639,12 @@ export class FabstirSDKCore extends EventEmitter {
       if (this.sessionManager) {
         (this.sessionManager as any).setHostManager(this.hostManager);
         console.log('SessionManager price validation enabled');
+      }
+
+      // NEW: Enable encryption in SessionManager (if EncryptionManager available)
+      if (this.sessionManager && this.encryptionManager) {
+        (this.sessionManager as any).setEncryptionManager(this.encryptionManager);
+        console.log('SessionManager encryption enabled');
       }
       console.log('HostManager initialized');
 
