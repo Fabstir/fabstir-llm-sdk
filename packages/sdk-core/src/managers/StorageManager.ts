@@ -18,6 +18,8 @@ import {
   UserSettingsVersion
 } from '../types';
 import { migrateUserSettings } from './migrations/user-settings';
+import type { EncryptionManager } from './EncryptionManager';
+import type { EncryptedStorage } from '../interfaces/IEncryptionManager';
 
 export interface Exchange {
   prompt: string;
@@ -65,6 +67,7 @@ export class StorageManager implements IStorageManager {
   private userSeed?: string;
   private userAddress?: string;
   private initialized = false;
+  private encryptionManager?: EncryptionManager; // NEW: Optional encryption support
 
   // User settings cache
   private settingsCache: {
@@ -75,6 +78,13 @@ export class StorageManager implements IStorageManager {
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   constructor(private s5PortalUrl: string = StorageManager.DEFAULT_S5_PORTAL) {}
+
+  /**
+   * Set EncryptionManager for encrypted storage (Phase 5.1)
+   */
+  setEncryptionManager(encryptionManager: EncryptionManager): void {
+    this.encryptionManager = encryptionManager;
+  }
 
   /**
    * Initialize storage with S5 seed
@@ -947,6 +957,188 @@ export class StorageManager implements IStorageManager {
       throw new SDKError(
         `Failed to clear user settings: ${error.message}`,
         'STORAGE_CLEAR_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  // ============= Encrypted Storage Methods (Phase 5.1) =============
+
+  /**
+   * Save conversation with encryption (Phase 5.1)
+   * @private
+   */
+  async saveConversationEncrypted(
+    conversation: ConversationData,
+    options: { hostPubKey?: string; encrypt?: boolean }
+  ): Promise<StorageResult> {
+    if (!this.initialized) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+
+    if (options.encrypt && !options.hostPubKey) {
+      throw new SDKError(
+        'hostPubKey required for encrypted conversation storage',
+        'MISSING_HOST_PUBLIC_KEY'
+      );
+    }
+
+    if (!this.encryptionManager) {
+      throw new SDKError(
+        'EncryptionManager required for encrypted storage',
+        'ENCRYPTION_NOT_AVAILABLE'
+      );
+    }
+
+    try {
+      // Encrypt conversation with EncryptionManager
+      const encrypted = await this.encryptionManager.encryptForStorage(
+        options.hostPubKey!,
+        conversation
+      );
+
+      // Prepare encrypted wrapper
+      const encryptedWrapper = {
+        encrypted: true,
+        version: 1,
+        ...encrypted
+      };
+
+      // Store to S5
+      const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversation.id}/conversation-encrypted.json`;
+      await this.s5Client.fs.put(path, encryptedWrapper);
+
+      const metadata = await this.s5Client.fs.getMetadata(path);
+
+      return {
+        cid: metadata?.cid || conversation.id,
+        url: `s5://${metadata?.cid || conversation.id}`,
+        size: JSON.stringify(encryptedWrapper).length,
+        timestamp: Date.now()
+      };
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to save encrypted conversation: ${error.message}`,
+        'STORAGE_ENCRYPT_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Load and decrypt conversation (Phase 5.1)
+   * @private
+   */
+  async loadConversationEncrypted(conversationId: string): Promise<ConversationData> {
+    if (!this.initialized) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+
+    if (!this.encryptionManager) {
+      throw new SDKError(
+        'EncryptionManager required to load encrypted conversation',
+        'ENCRYPTION_NOT_AVAILABLE'
+      );
+    }
+
+    try {
+      // Load from S5
+      const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversationId}/conversation-encrypted.json`;
+      const encryptedWrapper = await this.s5Client.fs.get(path);
+
+      if (!encryptedWrapper) {
+        throw new SDKError(
+          `Encrypted conversation ${conversationId} not found`,
+          'CONVERSATION_NOT_FOUND'
+        );
+      }
+
+      // Extract EncryptedStorage payload
+      const encryptedStorage: EncryptedStorage = {
+        payload: encryptedWrapper.payload,
+        storedAt: encryptedWrapper.storedAt,
+        conversationId: encryptedWrapper.conversationId
+      };
+
+      // Decrypt with EncryptionManager
+      const { data: conversation } = await this.encryptionManager.decryptFromStorage<ConversationData>(
+        encryptedStorage
+      );
+
+      return conversation;
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to load encrypted conversation: ${error.message}`,
+        'STORAGE_DECRYPT_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Save conversation without encryption (backward compatible)
+   * @private
+   */
+  async saveConversationPlaintext(conversation: ConversationData): Promise<StorageResult> {
+    if (!this.initialized) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+
+    try {
+      // Prepare plaintext wrapper
+      const plaintextWrapper = {
+        encrypted: false,
+        version: 1,
+        conversation
+      };
+
+      // Store to S5
+      const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversation.id}/conversation-plaintext.json`;
+      await this.s5Client.fs.put(path, plaintextWrapper);
+
+      const metadata = await this.s5Client.fs.getMetadata(path);
+
+      return {
+        cid: metadata?.cid || conversation.id,
+        url: `s5://${metadata?.cid || conversation.id}`,
+        size: JSON.stringify(plaintextWrapper).length,
+        timestamp: Date.now()
+      };
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to save plaintext conversation: ${error.message}`,
+        'STORAGE_SAVE_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Load plaintext conversation (backward compatible)
+   * @private
+   */
+  async loadConversationPlaintext(conversationId: string): Promise<ConversationData> {
+    if (!this.initialized) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+
+    try {
+      // Load from S5
+      const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversationId}/conversation-plaintext.json`;
+      const plaintextWrapper = await this.s5Client.fs.get(path);
+
+      if (!plaintextWrapper) {
+        throw new SDKError(
+          `Plaintext conversation ${conversationId} not found`,
+          'CONVERSATION_NOT_FOUND'
+        );
+      }
+
+      return plaintextWrapper.conversation;
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to load plaintext conversation: ${error.message}`,
+        'STORAGE_LOAD_ERROR',
         { originalError: error }
       );
     }

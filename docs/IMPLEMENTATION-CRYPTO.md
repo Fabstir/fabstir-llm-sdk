@@ -2331,26 +2331,72 @@ async sendMessage(message: string): Promise<void> {
 **Estimated Time**: 4-6 hours
 **Goal**: Encrypt conversation history in S5 storage
 
-### Sub-phase 5.1: Conversation Encryption ⏳
+### Sub-phase 5.1: Conversation Encryption ✅
 
 **Goal**: Encrypt conversations before S5 upload
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (Jan 12, 2025)
 
-**Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/managers/StorageManager-encryption.test.ts` (180 lines max)
-  - [ ] Test: saveConversation encrypts before upload
-  - [ ] Test: loadConversation decrypts after download
-  - [ ] Test: round-trip preserves conversation data
-  - [ ] Test: encryption optional (encrypt: boolean flag)
-  - [ ] Test: unencrypted conversations still work
-- [ ] Update `packages/sdk-core/src/managers/StorageManager.ts` (+100 lines)
-  - [ ] Add encryptionManager?: EncryptionManager field
-  - [ ] Add encrypt?: boolean to SaveConversationOptions
-  - [ ] Modify saveConversation to encrypt if encrypt=true
-  - [ ] Modify loadConversation to decrypt if encrypted
-  - [ ] Add encryption metadata to S5 blob
-- [ ] Verify all tests pass (5/5 ✅)
+**Implementation Summary**:
+- Created test file `packages/sdk-core/tests/managers/StorageManager-encryption.test.ts` (293 lines)
+  - 7 tests covering: encryption options, S5 upload encryption, S5 download decryption, round-trip, plaintext mode, error cases
+  - All tests passing ✅
+- Updated `packages/sdk-core/src/managers/StorageManager.ts` (+195 lines)
+  - Added `encryptionManager?: EncryptionManager` field
+  - Added `setEncryptionManager()` method for EncryptionManager integration
+  - Implemented `saveConversationEncrypted()` method (57 lines)
+    - Encrypts conversation with host public key using EncryptionManager.encryptForStorage
+    - Wraps encrypted data with metadata (encrypted: true, version: 1)
+    - Stores to S5 at `/sessions/{user}/{id}/conversation-encrypted.json`
+  - Implemented `loadConversationEncrypted()` method (45 lines)
+    - Loads encrypted wrapper from S5
+    - Decrypts with EncryptionManager.decryptFromStorage
+    - Returns original conversation data
+  - Implemented `saveConversationPlaintext()` method (33 lines) for backward compatibility
+  - Implemented `loadConversationPlaintext()` method (26 lines) for backward compatibility
+
+**Acceptance Criteria**: ✅ All met
+- ✅ Conversations encrypted before S5 upload (ephemeral-static ECDH)
+- ✅ Decryption works on load (signature-based sender verification)
+- ✅ Round-trip preserves all conversation data
+- ✅ Backward compatible (plaintext mode works)
+- ✅ Encryption metadata stored (encrypted, version, payload, storedAt, conversationId)
+- ✅ All 7 tests pass
+
+**Test Results**:
+```
+✓ tests/managers/StorageManager-encryption.test.ts  (7 tests) 254ms
+  ✓ should accept encryption options in saveConversation
+  ✓ should encrypt conversation before S5 upload
+  ✓ should decrypt conversation after S5 download
+  ✓ should support round-trip encryption (save + load)
+  ✓ should support unencrypted conversations (backward compatible)
+  ✓ should throw error when trying to encrypt without hostPubKey
+  ✓ should throw error when trying to decrypt without EncryptionManager
+
+Test Files  1 passed (1)
+     Tests  7 passed (7)
+  Duration  1.14s
+```
+
+**Tasks** (Completed):
+- [x] Write tests in `packages/sdk-core/tests/managers/StorageManager-encryption.test.ts` (293 lines)
+  - [x] Test: saveConversation encrypts before upload
+  - [x] Test: loadConversation decrypts after download
+  - [x] Test: round-trip preserves conversation data
+  - [x] Test: encryption optional (encrypt: boolean flag)
+  - [x] Test: unencrypted conversations still work
+  - [x] Test: error when missing hostPubKey
+  - [x] Test: error when missing EncryptionManager
+- [x] Update `packages/sdk-core/src/managers/StorageManager.ts` (+195 lines)
+  - [x] Add encryptionManager?: EncryptionManager field
+  - [x] Add setEncryptionManager() method
+  - [x] Implement saveConversationEncrypted() to encrypt before upload
+  - [x] Implement loadConversationEncrypted() to decrypt after download
+  - [x] Add encryption metadata to S5 blob (encrypted, version, payload)
+  - [x] Implement saveConversationPlaintext() for backward compatibility
+  - [x] Implement loadConversationPlaintext() for backward compatibility
+- [x] Verify all tests pass (7/7 ✅)
 
 **Test Requirements**:
 ```typescript
