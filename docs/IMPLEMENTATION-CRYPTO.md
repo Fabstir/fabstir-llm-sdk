@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding ephemeral-static ECDH encryption to Fabstir LLM SDK
 >
-> **Status**: 🔄 IN PROGRESS (1/17 sub-phases complete, 6%) | **Target**: Secure browser ↔ node communication | **Progress**: Phase 1 (1/3) 🔄, Phase 2 (0/3) ⏳, Phase 3 (0/3) ⏳, Phase 4 (0/3) ⏳, Phase 5 (0/3) ⏳, Phase 6 (0/2) ⏳
+> **Status**: 🔄 IN PROGRESS (2/17 sub-phases complete, 12%) | **Target**: Secure browser ↔ node communication | **Progress**: Phase 1 (2/3) 🔄, Phase 2 (0/3) ⏳, Phase 3 (0/3) ⏳, Phase 4 (0/3) ⏳, Phase 5 (0/3) ⏳, Phase 6 (0/2) ⏳
 
 ## Overview
 
@@ -187,7 +187,7 @@ interface StoragePayload {
 
 ## Implementation Status
 
-🔄 **Phase 1: Core Crypto Module** (1/3 sub-phases complete) - ✅ Sub-phase 1.1 complete
+🔄 **Phase 1: Core Crypto Module** (2/3 sub-phases complete) - ✅ Sub-phase 1.1 complete, ✅ Sub-phase 1.2 complete
 ⏳ **Phase 2: EncryptionManager** (0/3 sub-phases complete)
 ⏳ **Phase 3: Host Public Key Discovery** (0/3 sub-phases complete)
 ⏳ **Phase 4: SessionManager Integration** (0/3 sub-phases complete)
@@ -397,39 +397,40 @@ export function makeSigMessage(
 
 ---
 
-### Sub-phase 1.2: Encryption Implementation ⏳
+### Sub-phase 1.2: Encryption Implementation ✅
 
 **Goal**: Implement ephemeral-static encryption with signature
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (8/8 tests passing)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/crypto/encryption.test.ts` (200 lines max)
-  - [ ] Test: encryptForEphemeral produces valid payload
-  - [ ] Test: decryptFromEphemeral recovers plaintext
-  - [ ] Test: round-trip encryption/decryption preserves data
-  - [ ] Test: different plaintexts produce different ciphertexts
-  - [ ] Test: signature verification fails with wrong senderPubKey
-  - [ ] Test: decryption fails with tampered ciphertext
-  - [ ] Test: decryption fails with tampered signature
-  - [ ] Test: AAD binding works (decryption fails with different AAD)
-- [ ] Create `packages/sdk-core/src/crypto/encryption.ts` (250 lines max)
-  - [ ] Import @noble libraries
-  - [ ] Implement hkdf32(keyMaterial, salt, info): Uint8Array
-  - [ ] Implement encryptForEphemeral(recipientPubHex, senderPrivHex, plaintext, options)
-    - [ ] Generate ephemeral keypair
-    - [ ] ECDH with recipient's static public key
-    - [ ] HKDF key derivation
-    - [ ] XChaCha20-Poly1305 AEAD encryption
-    - [ ] ECDSA signature over context
-    - [ ] Return EphemeralCipherPayload
-  - [ ] Implement decryptFromEphemeral(myPrivHex, myPubHex, payload, options)
-    - [ ] Verify ECDSA signature
-    - [ ] ECDH with sender's ephemeral public key
-    - [ ] HKDF key derivation
-    - [ ] XChaCha20-Poly1305 decryption
-    - [ ] Return plaintext
-- [ ] Verify all tests pass (8/8 ✅)
+- [x] Write tests in `packages/sdk-core/tests/crypto/encryption.test.ts` (169 lines)
+  - [x] Test: encryptForEphemeral produces valid payload
+  - [x] Test: decryptFromEphemeral recovers plaintext
+  - [x] Test: round-trip encryption/decryption preserves data
+  - [x] Test: different plaintexts produce different ciphertexts
+  - [x] Test: decryption fails with tampered ciphertext
+  - [x] Test: decryption fails with tampered signature
+  - [x] Test: AAD binding works - decryption fails with different AAD
+  - [x] Test: AAD binding works - decryption succeeds with correct AAD
+- [x] Create `packages/sdk-core/src/crypto/encryption.ts` (179 lines)
+  - [x] Import @noble libraries
+  - [x] Implement hkdf32(keyMaterial, salt, info): Uint8Array
+  - [x] Implement encryptForEphemeral(recipientPubHex, senderPrivHex, plaintext, options)
+    - [x] Generate ephemeral keypair
+    - [x] ECDH with recipient's static public key
+    - [x] HKDF key derivation
+    - [x] XChaCha20-Poly1305 AEAD encryption
+    - [x] ECDSA signature over context
+    - [x] Return EphemeralCipherPayload
+  - [x] Implement decryptFromEphemeral(myPrivHex, myPubHex, payload, options)
+    - [x] Recover sender's public key from signature
+    - [x] Verify ECDSA signature
+    - [x] ECDH with sender's ephemeral public key
+    - [x] HKDF key derivation
+    - [x] XChaCha20-Poly1305 decryption
+    - [x] Return plaintext
+- [x] Verify all tests pass (8/8 ✅)
 
 **Test Requirements**:
 ```typescript
