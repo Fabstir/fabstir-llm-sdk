@@ -724,6 +724,34 @@ export class FabstirSDKCore extends EventEmitter {
     this.ensureAuthenticated();
     return this.hostManager!;
   }
+
+  /**
+   * Get host's public key for end-to-end encryption.
+   *
+   * This method:
+   * 1. Checks cache first for performance
+   * 2. Tries to get public key from host metadata (preferred)
+   * 3. Falls back to signature-based recovery if metadata missing
+   * 4. Caches the recovered key for future use
+   *
+   * @param hostAddress - Host's Ethereum address
+   * @param hostApiUrl - Optional host API URL (for signature recovery fallback)
+   * @returns Compressed secp256k1 public key (33 bytes hex, 66 characters)
+   * @throws Error if public key cannot be obtained
+   *
+   * @example
+   * ```typescript
+   * // Get public key for encryption
+   * const hostPubKey = await sdk.getHostPublicKey(hostAddress);
+   *
+   * // With explicit API URL for fallback
+   * const hostPubKey = await sdk.getHostPublicKey(hostAddress, 'http://host:8080');
+   * ```
+   */
+  async getHostPublicKey(hostAddress: string, hostApiUrl?: string): Promise<string> {
+    const hostManager = this.getHostManager();
+    return hostManager.getHostPublicKey(hostAddress, hostApiUrl);
+  }
   
   /**
    * Get treasury manager
