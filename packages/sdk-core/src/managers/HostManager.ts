@@ -25,6 +25,7 @@ import { HostDiscoveryService } from '../services/HostDiscoveryService';
 import NodeRegistryABI from '../contracts/abis/NodeRegistryWithModels-CLIENT-ABI.json';
 import * as secp from '@noble/secp256k1';
 import { bytesToHex } from '../crypto/utilities';
+import { requestHostPublicKey } from './HostKeyRecovery';
 
 /**
  * Pricing constants for host registration - DUAL PRICING
@@ -67,6 +68,7 @@ export class HostManager {
   private discoveryService?: HostDiscoveryService;
   private fabTokenAddress?: string;
   private hostEarningsAddress?: string;
+  private publicKeyCache: Map<string, string> = new Map();
 
   constructor(
     signer: Signer,
@@ -790,6 +792,48 @@ export class HostManager {
       minPricePerTokenNative: status.minPricePerTokenNative || 0n,  // Native pricing
       minPricePerTokenStable: status.minPricePerTokenStable || 0n   // Stable pricing
     };
+  }
+
+  /**
+   * Get host public key for encryption (with signature-based recovery fallback)
+   *
+   * This method:
+   * 1. Checks the cache first for performance
+   * 2. Tries to get public key from host metadata (preferred)
+   * 3. Falls back to signature-based recovery if metadata missing
+   * 4. Caches the recovered key for future use
+   *
+   * @param hostAddress - Host's EVM address
+   * @param hostApiUrl - Optional host API URL (overrides contract's apiUrl)
+   * @returns Compressed public key as hex string (66 chars)
+   * @throws Error if public key cannot be obtained
+   */
+  async getHostPublicKey(hostAddress: string, hostApiUrl?: string): Promise<string> {
+    // Check cache first
+    if (this.publicKeyCache.has(hostAddress)) {
+      return this.publicKeyCache.get(hostAddress)!;
+    }
+
+    // Try to get from metadata
+    const hostInfo = await this.getHostInfo(hostAddress);
+    if (hostInfo.metadata.publicKey) {
+      this.publicKeyCache.set(hostAddress, hostInfo.metadata.publicKey);
+      return hostInfo.metadata.publicKey;
+    }
+
+    // Fall back to signature recovery
+    const apiUrl = hostApiUrl || hostInfo.apiUrl;
+    if (!apiUrl) {
+      throw new SDKError(
+        `Cannot recover public key for host ${hostAddress}: no API URL available`,
+        'NO_API_URL'
+      );
+    }
+
+    // Request signature-based recovery
+    const pubKey = await requestHostPublicKey(apiUrl, hostAddress);
+    this.publicKeyCache.set(hostAddress, pubKey);
+    return pubKey;
   }
 
   /**

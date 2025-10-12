@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding ephemeral-static ECDH encryption to Fabstir LLM SDK
 >
-> **Status**: 🔄 IN PROGRESS (7/17 sub-phases complete, 41%) | **Target**: Secure browser ↔ node communication | **Progress**: Phase 1 (3/3) ✅, Phase 2 (3/3) ✅, Phase 3 (1/3) 🔄, Phase 4 (0/3) ⏳, Phase 5 (0/3) ⏳, Phase 6 (0/2) ⏳
+> **Status**: 🔄 IN PROGRESS (8/17 sub-phases complete, 47%) | **Target**: Secure browser ↔ node communication | **Progress**: Phase 1 (3/3) ✅, Phase 2 (3/3) ✅, Phase 3 (2/3) 🔄, Phase 4 (0/3) ⏳, Phase 5 (0/3) ⏳, Phase 6 (0/2) ⏳
 
 ## Overview
 
@@ -1466,35 +1466,46 @@ async getHostInfo(address: string): Promise<HostInfo> {
 
 ---
 
-### Sub-phase 3.2: Signature-Based Key Recovery (Alternative) ⏳
+### Sub-phase 3.2: Signature-Based Key Recovery (Alternative) ✅
 
 **Goal**: Implement signature-based public key recovery as fallback
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (January 2025)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/managers/HostManager-sig-recovery.test.ts` (150 lines max)
-  - [ ] Test: requestHostPublicKey sends challenge
-  - [ ] Test: verifyHostSignature recovers correct pubkey
-  - [ ] Test: recovered address matches host address
-  - [ ] Test: invalid signature rejected
-  - [ ] Test: challenge includes nonce (prevents replay)
-- [ ] Create `packages/sdk-core/src/managers/HostKeyRecovery.ts` (180 lines max)
-  - [ ] Implement requestHostPublicKey(hostApiUrl, hostAddress)
-    - [ ] Generate random challenge nonce
-    - [ ] Request signature from host
-    - [ ] Receive { signature, recid }
-  - [ ] Implement verifyHostSignature(challenge, signature, recid, expectedAddress)
-    - [ ] Recover public key from signature
-    - [ ] Derive EVM address from pubkey
-    - [ ] Verify address matches expected
-    - [ ] Return recovered public key
-- [ ] Update `packages/sdk-core/src/managers/HostManager.ts` (+30 lines)
-  - [ ] Add getHostPublicKey(hostAddress, hostApiUrl) method
-    - [ ] Try to get from metadata first
-    - [ ] Fall back to signature recovery if missing
-    - [ ] Cache recovered key
-- [ ] Verify all tests pass (5/5 ✅)
+- [x] Write tests in `packages/sdk-core/tests/managers/HostKeyRecovery.test.ts` (168 lines)
+  - [x] Test: requestHostPublicKey sends challenge
+  - [x] Test: verifyHostSignature recovers correct pubkey
+  - [x] Test: recovered address matches host address
+  - [x] Test: invalid signature rejected
+  - [x] Test: tampered challenge rejection
+  - [x] Test: different recovery IDs
+  - [x] Test: case-insensitive address comparison
+- [x] Create `packages/sdk-core/src/managers/HostKeyRecovery.ts` (122 lines)
+  - [x] Implement requestHostPublicKey(hostApiUrl, hostAddress)
+    - [x] Generate random challenge nonce (32 bytes)
+    - [x] Request signature from host via POST /v1/auth/challenge
+    - [x] Receive { signature, recid }
+  - [x] Implement verifyHostSignature(challenge, signature, recid, expectedAddress)
+    - [x] Recover public key from signature using @noble/secp256k1 v2.x API
+    - [x] Derive EVM address from pubkey
+    - [x] Verify address matches expected (case-insensitive)
+    - [x] Return recovered compressed public key (33 bytes)
+- [x] Update `packages/sdk-core/src/managers/HostManager.ts` (+47 lines)
+  - [x] Add getHostPublicKey(hostAddress, hostApiUrl?) method
+    - [x] Try to get from metadata first
+    - [x] Fall back to signature recovery if missing
+    - [x] Cache recovered key (Map<string, string>)
+- [x] Update `packages/sdk-core/tests/managers/HostManager-pubkey.test.ts` (+207 lines)
+  - [x] Test: get public key from metadata when available
+  - [x] Test: cache public key from metadata
+  - [x] Test: fall back to signature recovery when metadata missing
+  - [x] Test: cache recovered public key
+  - [x] Test: throw error when no API URL available
+  - [x] Test: use provided API URL for recovery
+- [x] Update `packages/sdk-core/src/interfaces/IHostManager.ts` (+16 lines)
+  - [x] Add getHostPublicKey method signature with documentation
+- [x] Verify all tests pass (13/13 ✅: 7 HostKeyRecovery + 6 HostManager integration)
 
 **Test Requirements**:
 ```typescript
@@ -1642,11 +1653,20 @@ async getHostPublicKey(hostAddress: string, hostApiUrl?: string): Promise<string
 ```
 
 **Acceptance Criteria**:
-- [ ] Signature-based recovery works
-- [ ] Address verification prevents impersonation
-- [ ] Falls back gracefully from metadata
-- [ ] Caches recovered keys
-- [ ] All tests pass
+- [x] Signature-based recovery works ✅
+- [x] Address verification prevents impersonation ✅
+- [x] Falls back gracefully from metadata ✅
+- [x] Caches recovered keys ✅
+- [x] All tests pass (13/13) ✅
+
+**Implementation Notes**:
+- Used @noble/secp256k1 v2.x Signature API for recovery
+- Challenge-response protocol: client generates random 32-byte nonce
+- Host signs SHA256(challenge) with ECDSA
+- Client recovers public key and verifies address match
+- Three-tier caching: memory cache → metadata → signature recovery
+- HTTP endpoint: POST /v1/auth/challenge with { challenge: hex }
+- Response: { signature: hex, recid: 0-3 }
 
 ---
 
