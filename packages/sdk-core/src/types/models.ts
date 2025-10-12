@@ -40,6 +40,7 @@ export interface HostMetadata {
   maxConcurrent: number;       // Max concurrent requests
   costPerToken: number;        // Cost per token in wei
   stakeAmount?: string;        // Stake amount in wei
+  publicKey?: string;          // Compressed secp256k1 public key (33 bytes hex, 66 chars)
 }
 
 /**

@@ -23,6 +23,8 @@ import { ModelManager } from './ModelManager';
 import { HostDiscoveryService } from '../services/HostDiscoveryService';
 // Import the correct NodeRegistry ABI directly
 import NodeRegistryABI from '../contracts/abis/NodeRegistryWithModels-CLIENT-ABI.json';
+import * as secp from '@noble/secp256k1';
+import { bytesToHex } from '../crypto/utilities';
 
 /**
  * Pricing constants for host registration - DUAL PRICING
@@ -208,6 +210,11 @@ export class HostManager {
         );
       }
 
+      // Extract public key from wallet for encryption
+      const privKey = this.signer.privateKey?.replace(/^0x/, '');
+      const pubKeyBytes = privKey ? secp.getPublicKey(privKey, true) : undefined;
+      const publicKey = pubKeyBytes ? bytesToHex(pubKeyBytes) : undefined;
+
       // Format metadata as JSON (new requirement)
       const metadataJson = JSON.stringify({
         hardware: {
@@ -218,7 +225,8 @@ export class HostManager {
         capabilities: request.metadata.capabilities || { streaming: true },
         location: request.metadata.location || 'us-east-1',
         maxConcurrent: request.metadata.maxConcurrent || 5,
-        costPerToken: request.metadata.costPerToken || 0.0001
+        costPerToken: request.metadata.costPerToken || 0.0001,
+        publicKey  // Add publicKey to metadata
       });
 
       // Check if node is already registered
