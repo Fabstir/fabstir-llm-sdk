@@ -878,6 +878,95 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Send encrypted message with session key (Phase 4.2)
+   * @private
+   */
+  private async sendEncryptedMessage(message: string): Promise<void> {
+    if (!this.sessionKey) {
+      throw new SDKError(
+        'Session key not available for encrypted messaging',
+        'SESSION_KEY_NOT_AVAILABLE'
+      );
+    }
+
+    if (!this.encryptionManager) {
+      throw new SDKError(
+        'EncryptionManager not available for encrypted messaging',
+        'ENCRYPTION_NOT_AVAILABLE'
+      );
+    }
+
+    if (!this.wsClient) {
+      throw new SDKError(
+        'WebSocket client not available',
+        'WEBSOCKET_NOT_AVAILABLE'
+      );
+    }
+
+    // Encrypt message with session key
+    const encrypted = this.encryptionManager.encryptMessage(
+      this.sessionKey,
+      message,
+      this.messageIndex++
+    );
+
+    // Send encrypted message via WebSocket
+    await this.wsClient.sendMessage(encrypted);
+
+    console.log(`[SessionManager] Encrypted message sent (index: ${this.messageIndex - 1})`);
+  }
+
+  /**
+   * Send plaintext message (backward compatible)
+   * @private
+   */
+  private async sendPlaintextMessage(message: string): Promise<void> {
+    if (!this.wsClient) {
+      throw new SDKError(
+        'WebSocket client not available',
+        'WEBSOCKET_NOT_AVAILABLE'
+      );
+    }
+
+    // Send plaintext prompt message
+    await this.wsClient.sendMessage({
+      type: 'prompt',
+      prompt: message
+    });
+
+    console.log('[SessionManager] Plaintext message sent');
+  }
+
+  /**
+   * Decrypt incoming encrypted message (Phase 4.2)
+   * @private
+   */
+  private async decryptIncomingMessage(encrypted: any): Promise<string> {
+    if (!this.sessionKey) {
+      throw new SDKError(
+        'Session key not available for decryption',
+        'SESSION_KEY_NOT_AVAILABLE'
+      );
+    }
+
+    if (!this.encryptionManager) {
+      throw new SDKError(
+        'EncryptionManager not available for decryption',
+        'ENCRYPTION_NOT_AVAILABLE'
+      );
+    }
+
+    // Decrypt message with session key
+    const plaintext = this.encryptionManager.decryptMessage(
+      this.sessionKey,
+      encrypted
+    );
+
+    console.log('[SessionManager] Encrypted message decrypted');
+    return plaintext;
+  }
+
+  /**
    * Clean up repetitive text (common issue with small models)
    */
   private cleanupRepetitiveText(text: string): string {

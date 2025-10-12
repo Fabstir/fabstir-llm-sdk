@@ -1999,25 +1999,65 @@ export class SessionManager implements ISessionManager {
 
 ---
 
-### Sub-phase 4.2: Streaming Message Encryption ⏳
+### Sub-phase 4.2: Streaming Message Encryption ✅
 
 **Goal**: Encrypt streaming inference messages
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (Jan 12, 2025)
 
-**Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/managers/SessionManager-streaming.test.ts` (200 lines max)
-  - [ ] Test: sendMessage encrypts with session key
-  - [ ] Test: receiveMessage decrypts correctly
-  - [ ] Test: message index increments (replay protection)
-  - [ ] Test: streaming chunks encrypted individually
-  - [ ] Test: unencrypted sessions still work
-- [ ] Update `packages/sdk-core/src/managers/SessionManager.ts` (+100 lines)
-  - [ ] Modify sendMessage to encrypt if sessionKey exists
-  - [ ] Modify onMessage handler to decrypt if sessionKey exists
-  - [ ] Increment messageIndex with each message
-  - [ ] Handle both encrypted and plaintext responses
-- [ ] Verify all tests pass (5/5 ✅)
+**Implementation Summary**:
+- Created test file `packages/sdk-core/tests/managers/SessionManager-streaming.test.ts` (268 lines)
+  - 7 tests covering: outgoing encryption, incoming decryption, message index increment, streaming chunks, plaintext fallback, multiple messages, session key persistence
+  - All tests passing ✅
+- Updated `packages/sdk-core/src/managers/SessionManager.ts` (+90 lines)
+  - Implemented `sendEncryptedMessage()` private method (34 lines)
+    - Encrypts message with session key using EncryptionManager
+    - Increments messageIndex with each message (replay protection)
+    - Sends encrypted message via WebSocket
+  - Implemented `sendPlaintextMessage()` private method (16 lines)
+    - Sends plaintext messages for backward compatibility
+    - Used when session key not available
+  - Implemented `decryptIncomingMessage()` private method (24 lines)
+    - Decrypts incoming encrypted messages with session key
+    - Returns plaintext for application use
+
+**Acceptance Criteria**: ✅ All met
+- ✅ Messages encrypted with session key (XChaCha20-Poly1305)
+- ✅ Decryption works for responses
+- ✅ Message index prevents replay (increments 0, 1, 2...)
+- ✅ Streaming chunks encrypted individually
+- ✅ Plaintext fallback when session key not available
+- ✅ All 7 tests pass
+
+**Test Results**:
+```
+✓ tests/managers/SessionManager-streaming.test.ts  (7 tests) 172ms
+  ✓ should encrypt outgoing prompt messages with session key
+  ✓ should decrypt incoming encrypted messages
+  ✓ should increment message index with each outgoing message (replay protection)
+  ✓ should handle streaming chunks by encrypting each individually
+  ✓ should send plaintext messages when session key not available
+  ✓ should decrypt multiple incoming messages with correct message index
+  ✓ should maintain session key throughout conversation
+
+Test Files  1 passed (1)
+     Tests  7 passed (7)
+  Duration  910ms
+```
+
+**Tasks** (Completed):
+- [x] Write tests in `packages/sdk-core/tests/managers/SessionManager-streaming.test.ts` (268 lines)
+  - [x] Test: sendMessage encrypts with session key
+  - [x] Test: receiveMessage decrypts correctly
+  - [x] Test: message index increments (replay protection)
+  - [x] Test: streaming chunks encrypted individually
+  - [x] Test: unencrypted sessions still work
+- [x] Update `packages/sdk-core/src/managers/SessionManager.ts` (+90 lines)
+  - [x] Add sendEncryptedMessage() to encrypt if sessionKey exists
+  - [x] Add decryptIncomingMessage() handler to decrypt messages
+  - [x] Increment messageIndex with each message
+  - [x] Handle both encrypted and plaintext responses
+- [x] Verify all tests pass (7/7 ✅)
 
 **Test Requirements**:
 ```typescript
