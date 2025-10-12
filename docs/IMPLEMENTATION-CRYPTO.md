@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding ephemeral-static ECDH encryption to Fabstir LLM SDK
 >
-> **Status**: 🔄 IN PROGRESS (2/17 sub-phases complete, 12%) | **Target**: Secure browser ↔ node communication | **Progress**: Phase 1 (2/3) 🔄, Phase 2 (0/3) ⏳, Phase 3 (0/3) ⏳, Phase 4 (0/3) ⏳, Phase 5 (0/3) ⏳, Phase 6 (0/2) ⏳
+> **Status**: 🔄 IN PROGRESS (3/17 sub-phases complete, 18%) | **Target**: Secure browser ↔ node communication | **Progress**: Phase 1 (3/3) ✅, Phase 2 (0/3) ⏳, Phase 3 (0/3) ⏳, Phase 4 (0/3) ⏳, Phase 5 (0/3) ⏳, Phase 6 (0/2) ⏳
 
 ## Overview
 
@@ -187,7 +187,7 @@ interface StoragePayload {
 
 ## Implementation Status
 
-🔄 **Phase 1: Core Crypto Module** (2/3 sub-phases complete) - ✅ Sub-phase 1.1 complete, ✅ Sub-phase 1.2 complete
+✅ **Phase 1: Core Crypto Module** (3/3 sub-phases complete) - ✅ Sub-phase 1.1, ✅ Sub-phase 1.2, ✅ Sub-phase 1.3
 ⏳ **Phase 2: EncryptionManager** (0/3 sub-phases complete)
 ⏳ **Phase 3: Host Public Key Discovery** (0/3 sub-phases complete)
 ⏳ **Phase 4: SessionManager Integration** (0/3 sub-phases complete)
@@ -639,28 +639,30 @@ export function decryptFromEphemeral(
 
 ---
 
-### Sub-phase 1.3: Address Recovery ⏳
+### Sub-phase 1.3: Address Recovery ✅
 
 **Goal**: Implement EVM address recovery from encrypted payload
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (6/6 tests passing)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/crypto/recovery.test.ts` (150 lines max)
-  - [ ] Test: recoverSenderAddress returns correct address
-  - [ ] Test: recovered address matches sender's actual address
-  - [ ] Test: recovery fails with invalid signature
-  - [ ] Test: checksummed address format
-  - [ ] Test: integration with encryptForEphemeral
-- [ ] Create `packages/sdk-core/src/crypto/recovery.ts` (120 lines max)
-  - [ ] Implement recoverSenderAddress(payload, recipientPubHex): string
-  - [ ] Use signature recovery to get sender's public key
-  - [ ] Derive EVM address from recovered public key
-  - [ ] Return checksummed address
-- [ ] Update `packages/sdk-core/src/crypto/index.ts` (30 lines max)
-  - [ ] Export all public functions and types
-  - [ ] Create barrel export for clean imports
-- [ ] Verify all tests pass (5/5 ✅)
+- [x] Write tests in `packages/sdk-core/tests/crypto/recovery.test.ts` (105 lines)
+  - [x] Test: recoverSenderAddress returns correct address
+  - [x] Test: recovered address matches sender's actual address exactly
+  - [x] Test: should return checksummed address (EIP-55)
+  - [x] Test: should fail with invalid signature (mathematically invalid)
+  - [x] Test: integration with AAD in payload
+  - [x] Test: multiple encryptions recover same sender address
+- [x] Create `packages/sdk-core/src/crypto/recovery.ts` (75 lines)
+  - [x] Implement recoverSenderAddress(payload, recipientPubHex): string
+  - [x] Use signature recovery to get sender's public key
+  - [x] Verify signature (defense in depth)
+  - [x] Derive EVM address from recovered public key
+  - [x] Return checksummed address
+- [x] Update `packages/sdk-core/src/crypto/index.ts` (20 lines)
+  - [x] Export all public functions and types
+  - [x] Create barrel export for clean imports
+- [x] Verify all tests pass (6/6 ✅)
 
 **Test Requirements**:
 ```typescript
