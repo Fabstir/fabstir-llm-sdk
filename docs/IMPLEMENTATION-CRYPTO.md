@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding ephemeral-static ECDH encryption to Fabstir LLM SDK
 >
-> **Status**: 🔄 IN PROGRESS (3/17 sub-phases complete, 18%) | **Target**: Secure browser ↔ node communication | **Progress**: Phase 1 (3/3) ✅, Phase 2 (0/3) ⏳, Phase 3 (0/3) ⏳, Phase 4 (0/3) ⏳, Phase 5 (0/3) ⏳, Phase 6 (0/2) ⏳
+> **Status**: 🔄 IN PROGRESS (5/17 sub-phases complete, 29%) | **Target**: Secure browser ↔ node communication | **Progress**: Phase 1 (3/3) ✅, Phase 2 (2/3) 🔄, Phase 3 (0/3) ⏳, Phase 4 (0/3) ⏳, Phase 5 (0/3) ⏳, Phase 6 (0/2) ⏳
 
 ## Overview
 
@@ -188,7 +188,7 @@ interface StoragePayload {
 ## Implementation Status
 
 ✅ **Phase 1: Core Crypto Module** (3/3 sub-phases complete) - ✅ Sub-phase 1.1, ✅ Sub-phase 1.2, ✅ Sub-phase 1.3
-⏳ **Phase 2: EncryptionManager** (0/3 sub-phases complete)
+🔄 **Phase 2: EncryptionManager** (1/3 sub-phases complete) - ✅ Sub-phase 2.1
 ⏳ **Phase 3: Host Public Key Discovery** (0/3 sub-phases complete)
 ⏳ **Phase 4: SessionManager Integration** (0/3 sub-phases complete)
 ⏳ **Phase 5: StorageManager Integration** (0/3 sub-phases complete)
@@ -782,30 +782,37 @@ export * from './recovery';
 **Estimated Time**: 6-8 hours
 **Goal**: Create high-level encryption manager with session/message/storage modes
 
-### Sub-phase 2.1: Manager Core & Interfaces ⏳
+### Sub-phase 2.1: Manager Core & Interfaces ✅
 
 **Goal**: Define EncryptionManager class and interfaces
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (6/6 tests passing)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/managers/EncryptionManager.test.ts` (150 lines max)
-  - [ ] Test: manager instantiates correctly
-  - [ ] Test: getClientPrivateKey returns wallet key
-  - [ ] Test: manager handles missing wallet gracefully
-- [ ] Create `packages/sdk-core/src/interfaces/IEncryptionManager.ts` (100 lines max)
-  - [ ] Define IEncryptionManager interface
-  - [ ] Define SessionInitPayload type
-  - [ ] Define EncryptedMessage type
-  - [ ] Define EncryptedStorage type
-  - [ ] Define EncryptionMode type ('session' | 'message' | 'storage')
-- [ ] Create `packages/sdk-core/src/managers/EncryptionManager.ts` (200 lines max)
-  - [ ] Implement class skeleton with constructor
-  - [ ] Add private clientPrivateKey field
-  - [ ] Add private wallet field (from AuthManager)
-  - [ ] Implement getClientPrivateKey() helper
-  - [ ] Add error handling for missing wallet
-- [ ] Verify all tests pass (3/3 ✅)
+- [x] Write tests in `packages/sdk-core/tests/managers/EncryptionManager.test.ts` (135 lines)
+  - [x] Test: manager instantiates correctly
+  - [x] Test: getClientPrivateKey returns wallet key
+  - [x] Test: should derive client public key correctly
+  - [x] Test: should store client address
+  - [x] Test: manager handles missing wallet gracefully
+  - [x] Test: should throw "Not implemented" for encryption methods
+- [x] Create `packages/sdk-core/src/interfaces/IEncryptionManager.ts` (175 lines)
+  - [x] Define IEncryptionManager interface
+  - [x] Define SessionInitPayload type
+  - [x] Define EncryptedSessionInit type
+  - [x] Define EncryptedMessage type
+  - [x] Define EncryptedStorage type
+- [x] Create `packages/sdk-core/src/managers/EncryptionManager.ts` (170 lines)
+  - [x] Implement class skeleton with constructor
+  - [x] Add private clientPrivateKey field
+  - [x] Add private clientPublicKey field (compressed, 33 bytes)
+  - [x] Add private clientAddress field (EIP-55 checksummed)
+  - [x] Add private wallet field
+  - [x] Implement getClientPrivateKey() helper
+  - [x] Add error handling for missing wallet
+  - [x] Stub all 6 interface methods (throw "Not implemented")
+- [x] Update `packages/sdk-core/src/interfaces/index.ts` (export IEncryptionManager)
+- [x] Verify all tests pass (6/6 ✅)
 
 **Test Requirements**:
 ```typescript
@@ -959,31 +966,31 @@ export class EncryptionManager implements IEncryptionManager {
 
 ---
 
-### Sub-phase 2.2: Session Init Encryption ⏳
+### Sub-phase 2.2: Session Init Encryption ✅
 
 **Goal**: Implement session initialization with full signature
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (11/11 tests passing)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/managers/EncryptionManager.test.ts` (+150 lines)
-  - [ ] Test: encryptSessionInit produces valid payload
-  - [ ] Test: decryptSessionInit recovers original data
-  - [ ] Test: decryptSessionInit returns correct sender address
-  - [ ] Test: round-trip preserves session data
-  - [ ] Test: tampered payload rejected
-- [ ] Update `packages/sdk-core/src/managers/EncryptionManager.ts` (+80 lines)
-  - [ ] Implement encryptSessionInit(hostPubKey, payload)
-    - [ ] Generate random session key
-    - [ ] Serialize SessionInitPayload to JSON
-    - [ ] Encrypt with ephemeral-static ECDH
-    - [ ] Return EncryptedSessionInit
-  - [ ] Implement decryptSessionInit(encrypted)
-    - [ ] Decrypt payload
-    - [ ] Recover sender address from signature
-    - [ ] Parse JSON to SessionInitPayload
-    - [ ] Return data and sender address
-- [ ] Verify all tests pass (5/5 ✅)
+- [x] Write tests in `packages/sdk-core/tests/managers/EncryptionManager.test.ts` (+103 lines = 223 total)
+  - [x] Test: encryptSessionInit produces valid payload
+  - [x] Test: decryptSessionInit recovers original data
+  - [x] Test: decryptSessionInit returns correct sender address
+  - [x] Test: round-trip preserves session data (including BigInt)
+  - [x] Test: tampered payload rejected
+  - [x] Test: wrong recipient rejected
+- [x] Update `packages/sdk-core/src/managers/EncryptionManager.ts` (+36 lines = 206 total)
+  - [x] Implement encryptSessionInit(hostPubKey, payload)
+    - [x] Serialize SessionInitPayload to JSON (with BigInt support)
+    - [x] Encrypt with ephemeral-static ECDH
+    - [x] Return EncryptedSessionInit
+  - [x] Implement decryptSessionInit(encrypted)
+    - [x] Decrypt payload with ECDH
+    - [x] Recover sender address from signature
+    - [x] Parse JSON to SessionInitPayload (restore BigInt)
+    - [x] Return data and sender address
+- [x] Verify all tests pass (11/11 ✅)
 
 **Test Requirements**:
 ```typescript
