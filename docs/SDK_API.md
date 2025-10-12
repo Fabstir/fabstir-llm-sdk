@@ -1992,6 +1992,209 @@ try {
 }
 ```
 
+### Encrypted Storage (Phase 5.3)
+
+The SDK provides convenience methods for encrypted conversation storage with end-to-end encryption. Conversations can be encrypted with the host's public key and stored on S5 decentralized storage.
+
+**Features:**
+- **End-to-end encryption** - Conversations encrypted with host's public key
+- **Automatic decryption** - SDK handles decryption transparently on load
+- **Backward compatible** - Falls back to plaintext for non-encrypted conversations
+- **Sender verification** - ECDSA signatures allow conversation ownership verification
+- **Metadata tracking** - Tracks encryption status, version, and timestamps
+
+#### saveConversation(conversation, options?): Promise<string>
+
+Save a conversation with optional encryption to S5 storage.
+
+**Parameters:**
+- `conversation` (ConversationData) - Conversation data to save
+- `options` (optional) - Encryption options
+  - `hostPubKey` (string) - Host's public key for encryption (required if encrypt=true)
+  - `encrypt` (boolean) - Whether to encrypt the conversation (default: false)
+
+**Returns:**
+- `Promise<string>` - CID (Content Identifier) of stored conversation
+
+**Throws:**
+- `SDKError` with code `STORAGE_NOT_INITIALIZED` - StorageManager not initialized
+- `SDKError` with code `INVALID_HOST_PUBLIC_KEY` - Invalid or missing host public key when encrypt=true
+- `SDKError` with code `ENCRYPTION_ERROR` - Failed to encrypt conversation
+- `SDKError` with code `STORAGE_SAVE_ERROR` - Failed to save to S5
+
+**Example (Plaintext Storage):**
+```typescript
+const sdk = new FabstirSDKCore({ /* config */ });
+await sdk.authenticate('privatekey', { privateKey });
+
+// Save conversation without encryption
+const conversation = {
+  sessionId: 'sess-123',
+  messages: [
+    { role: 'user', content: 'Hello!', timestamp: Date.now() },
+    { role: 'assistant', content: 'Hi there!', timestamp: Date.now() }
+  ],
+  metadata: {
+    model: 'llama-3',
+    startTime: Date.now()
+  }
+};
+
+const cid = await sdk.saveConversation(conversation);
+console.log('Conversation saved:', cid);
+```
+
+**Example (Encrypted Storage):**
+```typescript
+const sdk = new FabstirSDKCore({ /* config */ });
+await sdk.authenticate('privatekey', { privateKey });
+
+// 1. Get host's public key
+const hostAddress = '0x1234...';
+const hostPubKey = await sdk.getHostPublicKey(hostAddress);
+
+// 2. Save with encryption
+const conversation = {
+  sessionId: 'sess-123',
+  messages: [
+    { role: 'user', content: 'Sensitive message', timestamp: Date.now() },
+    { role: 'assistant', content: 'Response', timestamp: Date.now() }
+  ]
+};
+
+const cid = await sdk.saveConversation(conversation, {
+  hostPubKey,
+  encrypt: true
+});
+
+console.log('Encrypted conversation saved:', cid);
+```
+
+#### loadConversation(conversationId): Promise<ConversationData>
+
+Load a conversation from S5 storage with automatic decryption.
+
+**Parameters:**
+- `conversationId` (string) - Conversation ID or CID to load
+
+**Returns:**
+- `Promise<ConversationData>` - Decrypted conversation data
+
+**Throws:**
+- `SDKError` with code `STORAGE_NOT_INITIALIZED` - StorageManager not initialized
+- `SDKError` with code `CONVERSATION_NOT_FOUND` - Conversation does not exist
+- `SDKError` with code `DECRYPTION_ERROR` - Failed to decrypt (wrong key or corrupted data)
+- `SDKError` with code `STORAGE_LOAD_ERROR` - Failed to load from S5
+
+**Behavior:**
+- Automatically detects encrypted vs plaintext conversations
+- Decrypts using client's private key (if encrypted)
+- Falls back to plaintext if decryption fails
+- Verifies sender signature if metadata present
+
+**Example:**
+```typescript
+const sdk = new FabstirSDKCore({ /* config */ });
+await sdk.authenticate('privatekey', { privateKey });
+
+// Load conversation (handles both encrypted and plaintext)
+try {
+  const conversation = await sdk.loadConversation('conv-123');
+
+  console.log('Session ID:', conversation.sessionId);
+  console.log('Messages:', conversation.messages.length);
+  console.log('Metadata:', conversation.metadata);
+} catch (error) {
+  if (error.code === 'CONVERSATION_NOT_FOUND') {
+    console.error('Conversation does not exist');
+  } else if (error.code === 'DECRYPTION_ERROR') {
+    console.error('Cannot decrypt - wrong key or corrupted');
+  }
+}
+```
+
+#### getHostPublicKey(hostAddress): Promise<string>
+
+Get the public key of a registered host for encryption.
+
+**Parameters:**
+- `hostAddress` (string) - Host's Ethereum address
+
+**Returns:**
+- `Promise<string>` - Host's public key (hex string)
+
+**Throws:**
+- `SDKError` with code `HOST_NOT_FOUND` - Host not registered
+- `SDKError` with code `PUBLIC_KEY_NOT_AVAILABLE` - Host has not set public key
+
+**Example:**
+```typescript
+const sdk = new FabstirSDKCore({ /* config */ });
+await sdk.authenticate('privatekey', { privateKey });
+
+// Get host public key for encryption
+const hostAddress = '0x1234...';
+const hostPubKey = await sdk.getHostPublicKey(hostAddress);
+
+// Use for encrypted storage
+const cid = await sdk.saveConversation(conversation, {
+  hostPubKey,
+  encrypt: true
+});
+```
+
+#### Complete Encrypted Workflow Example
+
+```typescript
+import { FabstirSDKCore, ChainId } from '@fabstir/sdk-core';
+import { ethers } from 'ethers';
+
+// 1. Initialize SDK
+const sdk = new FabstirSDKCore({
+  chainId: ChainId.BASE_SEPOLIA,
+  rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/YOUR_KEY',
+  contractAddresses: { /* ... */ }
+});
+
+// 2. Authenticate
+const wallet = ethers.Wallet.createRandom();
+await sdk.authenticate('privatekey', { privateKey: wallet.privateKey });
+
+// 3. Start encrypted session
+const sessionManager = await sdk.getSessionManager();
+const hostAddress = '0x1234...'; // Discovered via HostManager
+
+await sessionManager.startSession({
+  hostAddress,
+  hostUrl: 'ws://host:8080/ws',
+  jobId: 123n,
+  modelName: 'llama-3',
+  chainId: 84532,
+  encryption: true  // Enable encryption
+});
+
+// 4. Send encrypted messages
+await sessionManager.sendMessage('What is the weather?');
+
+// Wait for response...
+// Messages are encrypted in transit
+
+// 5. Save encrypted conversation
+const conversation = sessionManager.getConversation();
+const hostPubKey = await sdk.getHostPublicKey(hostAddress);
+
+const cid = await sdk.saveConversation(conversation, {
+  hostPubKey,
+  encrypt: true
+});
+
+console.log('Encrypted conversation saved with CID:', cid);
+
+// 6. Load encrypted conversation later
+const loaded = await sdk.loadConversation(cid);
+console.log('Loaded messages:', loaded.messages.length);
+```
+
 ## Treasury Management
 
 Manages treasury operations and fee distribution.

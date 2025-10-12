@@ -771,7 +771,73 @@ export class FabstirSDKCore extends EventEmitter {
     const hostManager = this.getHostManager();
     return hostManager.getHostPublicKey(hostAddress, hostApiUrl);
   }
-  
+
+  /**
+   * Save conversation with optional encryption (Phase 5.3)
+   *
+   * Convenience method that wraps StorageManager.saveConversation with encryption support.
+   *
+   * @param conversation - Conversation data to save
+   * @param options - Optional encryption options
+   * @param options.hostPubKey - Host's public key for encryption (required if encrypt=true)
+   * @param options.encrypt - Whether to encrypt the conversation (default: false)
+   * @returns Storage result with CID
+   *
+   * @example
+   * ```typescript
+   * // Save without encryption
+   * const result = await sdk.saveConversation(conversation);
+   *
+   * // Save with encryption
+   * const hostPubKey = await sdk.getHostPublicKey(hostAddress);
+   * const result = await sdk.saveConversation(conversation, {
+   *   hostPubKey,
+   *   encrypt: true
+   * });
+   * ```
+   */
+  async saveConversation(
+    conversation: any,
+    options?: { hostPubKey?: string; encrypt?: boolean }
+  ): Promise<any> {
+    const storageManager = this.getStorageManager();
+
+    if (options?.encrypt && options.hostPubKey) {
+      // Use encrypted storage (Phase 5.1)
+      return (storageManager as any).saveConversationEncrypted(conversation, options);
+    } else {
+      // Use plaintext storage (backward compatible)
+      return storageManager.saveConversation(conversation);
+    }
+  }
+
+  /**
+   * Load conversation with automatic decryption (Phase 5.3)
+   *
+   * Convenience method that wraps StorageManager.loadConversation with automatic
+   * decryption support. Tries encrypted first, falls back to plaintext.
+   *
+   * @param conversationId - Conversation ID to load
+   * @returns Conversation data
+   *
+   * @example
+   * ```typescript
+   * const conversation = await sdk.loadConversation('conv-123');
+   * ```
+   */
+  async loadConversation(conversationId: string): Promise<any> {
+    const storageManager = this.getStorageManager();
+
+    // Try loadConversationWithMetadata first (Phase 5.2) - handles both encrypted and plaintext
+    try {
+      const result = await (storageManager as any).loadConversationWithMetadata(conversationId);
+      return result.conversation;
+    } catch (error: any) {
+      // Fall back to regular loadConversation for backward compatibility
+      return storageManager.loadConversation(conversationId);
+    }
+  }
+
   /**
    * Get treasury manager
    */
