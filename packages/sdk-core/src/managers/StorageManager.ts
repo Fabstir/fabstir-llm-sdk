@@ -53,6 +53,25 @@ export interface ListOptions {
 }
 
 /**
+ * Conversation metadata info (Phase 5.2)
+ */
+export interface ConversationInfo {
+  cid: string;
+  storedAt: string;
+  conversationId: string;
+  isEncrypted: boolean;
+  senderAddress?: string;  // Optional - only present for encrypted conversations
+}
+
+/**
+ * Result from loading conversation with metadata (Phase 5.2)
+ */
+export interface LoadConversationResult {
+  conversation: ConversationData;
+  senderAddress?: string;  // Optional - only present for encrypted conversations
+}
+
+/**
  * Browser-compatible StorageManager implementation
  * Uses S5.js for decentralized storage operations
  */
@@ -332,24 +351,57 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * List all conversations (implements interface method)
+   * List all conversations with metadata (Phase 5.2)
+   * Returns metadata only (not full conversation data)
    */
-  async listConversations(): Promise<ConversationData[]> {
+  async listConversations(): Promise<ConversationInfo[]> {
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
 
     const sessions = await this.listSessions();
-    const conversations: ConversationData[] = [];
-    
+    const conversationInfos: ConversationInfo[] = [];
+
     for (const session of sessions) {
-      const conversation = await this.loadConversation(session.id);
-      if (conversation) {
-        conversations.push(conversation);
+      // Try encrypted first
+      const encryptedPath = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${session.id}/conversation-encrypted.json`;
+      try {
+        const encryptedWrapper = await this.s5Client.fs.get(encryptedPath);
+        if (encryptedWrapper && encryptedWrapper.encrypted === true) {
+          // Encrypted conversation found
+          const metadata = await this.s5Client.fs.getMetadata(encryptedPath);
+          conversationInfos.push({
+            cid: metadata?.cid || session.id,
+            storedAt: encryptedWrapper.storedAt || new Date().toISOString(),
+            conversationId: encryptedWrapper.conversationId || session.id,
+            isEncrypted: true
+          });
+          continue;
+        }
+      } catch (error: any) {
+        // If encrypted not found, try plaintext below
+      }
+
+      // Try plaintext
+      const plaintextPath = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${session.id}/conversation-plaintext.json`;
+      try {
+        const plaintextWrapper = await this.s5Client.fs.get(plaintextPath);
+        if (plaintextWrapper && plaintextWrapper.encrypted === false) {
+          // Plaintext conversation found
+          const metadata = await this.s5Client.fs.getMetadata(plaintextPath);
+          conversationInfos.push({
+            cid: metadata?.cid || session.id,
+            storedAt: new Date().toISOString(),
+            conversationId: session.id,
+            isEncrypted: false
+          });
+        }
+      } catch (error: any) {
+        // Conversation file not found - skip
       }
     }
-    
-    return conversations;
+
+    return conversationInfos;
   }
 
   /**
@@ -1142,5 +1194,78 @@ export class StorageManager implements IStorageManager {
         { originalError: error }
       );
     }
+  }
+
+  // ============= Metadata Methods (Phase 5.2) =============
+
+  /**
+   * Load conversation with metadata including sender address (Phase 5.2)
+   * Tries encrypted first, then falls back to plaintext
+   */
+  async loadConversationWithMetadata(conversationId: string): Promise<LoadConversationResult> {
+    if (!this.initialized) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+
+    // Try encrypted first
+    const encryptedPath = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversationId}/conversation-encrypted.json`;
+    try {
+      const encryptedWrapper = await this.s5Client.fs.get(encryptedPath);
+
+      if (encryptedWrapper && encryptedWrapper.encrypted === true) {
+        // Encrypted conversation found - decrypt and return with sender address
+        if (!this.encryptionManager) {
+          throw new SDKError(
+            'EncryptionManager required to load encrypted conversation',
+            'ENCRYPTION_NOT_AVAILABLE'
+          );
+        }
+
+        const encryptedStorage: EncryptedStorage = {
+          payload: encryptedWrapper.payload,
+          storedAt: encryptedWrapper.storedAt,
+          conversationId: encryptedWrapper.conversationId
+        };
+
+        const { data: conversation, senderAddress } =
+          await this.encryptionManager.decryptFromStorage<ConversationData>(encryptedStorage);
+
+        return { conversation, senderAddress };
+      }
+    } catch (error: any) {
+      // If encrypted not found, try plaintext below
+      if (!error.message?.includes('not found')) {
+        throw new SDKError(
+          `Failed to load encrypted conversation: ${error.message}`,
+          'STORAGE_LOAD_ERROR',
+          { originalError: error }
+        );
+      }
+    }
+
+    // Try plaintext
+    const plaintextPath = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversationId}/conversation-plaintext.json`;
+    try {
+      const plaintextWrapper = await this.s5Client.fs.get(plaintextPath);
+
+      if (plaintextWrapper && plaintextWrapper.encrypted === false) {
+        // Plaintext conversation - return without sender address
+        return { conversation: plaintextWrapper.conversation };
+      }
+    } catch (error: any) {
+      if (!error.message?.includes('not found')) {
+        throw new SDKError(
+          `Failed to load plaintext conversation: ${error.message}`,
+          'STORAGE_LOAD_ERROR',
+          { originalError: error }
+        );
+      }
+    }
+
+    // Neither encrypted nor plaintext found
+    throw new SDKError(
+      `Conversation ${conversationId} not found`,
+      'CONVERSATION_NOT_FOUND'
+    );
   }
 }
