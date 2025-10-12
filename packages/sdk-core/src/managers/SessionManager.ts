@@ -903,17 +903,26 @@ export class SessionManager implements ISessionManager {
       );
     }
 
-    // Encrypt message with session key
-    const encrypted = this.encryptionManager.encryptMessage(
-      this.sessionKey,
-      message,
-      this.messageIndex++
-    );
+    try {
+      // Encrypt message with session key
+      const encrypted = this.encryptionManager.encryptMessage(
+        this.sessionKey,
+        message,
+        this.messageIndex++
+      );
 
-    // Send encrypted message via WebSocket
-    await this.wsClient.sendMessage(encrypted);
+      // Send encrypted message via WebSocket
+      await this.wsClient.sendMessage(encrypted);
 
-    console.log(`[SessionManager] Encrypted message sent (index: ${this.messageIndex - 1})`);
+      console.log(`[SessionManager] Encrypted message sent (index: ${this.messageIndex - 1})`);
+    } catch (error: any) {
+      // Wrap encryption errors in SDKError for consistent error handling
+      throw new SDKError(
+        `Failed to encrypt message: ${error.message}`,
+        'ENCRYPTION_FAILED',
+        { originalError: error }
+      );
+    }
   }
 
   /**
@@ -956,14 +965,23 @@ export class SessionManager implements ISessionManager {
       );
     }
 
-    // Decrypt message with session key
-    const plaintext = this.encryptionManager.decryptMessage(
-      this.sessionKey,
-      encrypted
-    );
+    try {
+      // Decrypt message with session key
+      const plaintext = this.encryptionManager.decryptMessage(
+        this.sessionKey,
+        encrypted
+      );
 
-    console.log('[SessionManager] Encrypted message decrypted');
-    return plaintext;
+      console.log('[SessionManager] Encrypted message decrypted');
+      return plaintext;
+    } catch (error: any) {
+      // Wrap decryption errors in SDKError for consistent error handling
+      throw new SDKError(
+        `Failed to decrypt message: ${error.message}`,
+        'DECRYPTION_FAILED',
+        { originalError: error }
+      );
+    }
   }
 
   /**
