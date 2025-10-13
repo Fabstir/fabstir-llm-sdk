@@ -40,29 +40,38 @@ export function recoverSenderAddress(
   payload: EphemeralCipherPayload,
   recipientPubHex: string
 ): string {
-  const info = payload.info ?? 'e2ee:ecdh-secp256k1:xchacha20poly1305:v1';
+  // Parse info from hex (empty string → empty byte array for node v8.0.0 compatibility)
+  const info = payload.info && payload.info !== '' ? hexToBytes(payload.info) : new Uint8Array(0);
 
   // 1. Parse payload components
   const ephPub = toCompressedPub(payload.ephPubHex);
   const recipientPub = toCompressedPub(recipientPubHex);
   const salt = hexToBytes(payload.saltHex);
   const nonce = hexToBytes(payload.nonceHex);
-  const aad = payload.aadHex ? hexToBytes(payload.aadHex) : undefined;
+  const aad = payload.aadHex && payload.aadHex !== '' ? hexToBytes(payload.aadHex) : new Uint8Array(0);
 
   // 2. Reconstruct signed message (must match what was signed during encryption)
   const msg = makeSigMessage(ephPub, recipientPub, salt, nonce, info, aad);
 
   // 3. Recover sender's public key from signature
+  // Parse 65-byte signature: [r (32) + s (32) + recovery_id (1)]
+  const sigBytes = hexToBytes(payload.signatureHex);
+  if (sigBytes.length !== 65) {
+    throw new Error(`Invalid signature length: expected 65 bytes, got ${sigBytes.length}`);
+  }
+  const compactSig = sigBytes.slice(0, 64); // First 64 bytes
+  const recid = sigBytes[64]; // Last byte is recovery ID
+
   let senderPubCompressed: Uint8Array;
   try {
-    const signature = secp.Signature.fromCompact(payload.signatureHex).addRecoveryBit(payload.recid);
+    const signature = secp.Signature.fromCompact(compactSig).addRecoveryBit(recid);
     senderPubCompressed = signature.recoverPublicKey(msg).toRawBytes(true); // compressed (33 bytes)
   } catch (error) {
     throw new Error(`Signature recovery failed: ${error instanceof Error ? error.message : 'invalid signature'}`);
   }
 
   // 4. Verify signature (defense in depth - ensures recovered key is correct)
-  const valid = secp.verify(payload.signatureHex, msg, senderPubCompressed);
+  const valid = secp.verify(compactSig, msg, senderPubCompressed);
   if (!valid) {
     throw new Error('Signature verification failed: recovered public key does not validate signature');
   }

@@ -71,7 +71,7 @@ describe('Address Recovery', () => {
     const tampered = { ...payload, signatureHex: '00'.repeat(64) };
 
     expect(() => recoverSenderAddress(tampered, bobPubHex))
-      .toThrow(/recovery failed|signature verification failed/i);
+      .toThrow(/recovery failed|signature verification failed|invalid signature length/i);
   });
 
   test('integration: works with AAD in payload', async () => {

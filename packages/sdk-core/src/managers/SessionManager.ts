@@ -544,12 +544,19 @@ export class SessionManager implements ISessionManager {
 
         // NEW (Phase 6.2): Send encrypted or plaintext message based on session settings
         let response;
-        if (session.encryption && this.sessionKey) {
+        if (session.encryption) {
+          // SECURITY: Session requires encryption - fail if session key not available
+          if (!this.sessionKey) {
+            throw new SDKError(
+              'Session configured for encryption but session key not available. Encrypted init may have failed.',
+              'ENCRYPTION_KEY_MISSING'
+            );
+          }
           // Send encrypted message
           await this.sendEncryptedMessage(prompt);
           response = ''; // Response collected via streaming handler
         } else {
-          // Send plaintext message
+          // Send plaintext message (only if session explicitly opted out of encryption)
           response = await this.wsClient.sendMessage({
             type: 'prompt',
             chain_id: session.chainId,

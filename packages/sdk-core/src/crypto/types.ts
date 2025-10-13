@@ -34,21 +34,21 @@ export interface EphemeralCipherPayload {
   ciphertextHex: string;
 
   // Authentication
-  /** ECDSA signature - compact form (64 bytes hex) */
+  /** ECDSA signature with recovery ID (65 bytes hex: r + s + recovery_id) */
   signatureHex: string;
 
-  /** Recovery ID for public key recovery (0-3) */
+  /** Recovery ID for public key recovery (0-3) - redundant with byte 65 of signature, kept for compatibility */
   recid: number;
 
   // Metadata
   /** Algorithm identifier */
   alg: string;
 
-  /** HKDF info/domain separator */
+  /** HKDF info/domain separator (hex, empty string for node v8.0.0 compatibility) */
   info: string;
 
-  /** Optional additional authenticated data (hex) */
-  aadHex?: string;
+  /** Additional authenticated data (hex, empty string if not provided) */
+  aadHex: string;
 }
 
 /**
@@ -58,8 +58,8 @@ export interface EncryptEphemeralOptions {
   /** Additional authenticated data (not encrypted, but authenticated) */
   aad?: Uint8Array;
 
-  /** HKDF info/domain separator (default: "e2ee:ecdh-secp256k1:xchacha20poly1305:v1") */
-  info?: string;
+  /** HKDF info/domain separator (default: empty byte array for node v8.0.0 compatibility) */
+  info?: Uint8Array;
 
   /** HKDF salt (16 bytes, random if not provided) */
   salt?: Uint8Array;
@@ -75,6 +75,6 @@ export interface DecryptEphemeralOptions {
   /** Additional authenticated data (must match encryption AAD) */
   aad?: Uint8Array;
 
-  /** HKDF info/domain separator (defaults to payload.info) */
-  info?: string;
+  /** HKDF info/domain separator (defaults to payload.info, empty byte array for node v8.0.0) */
+  info?: Uint8Array;
 }

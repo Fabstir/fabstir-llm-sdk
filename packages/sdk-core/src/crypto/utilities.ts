@@ -129,7 +129,7 @@ export function toChecksumAddress(addr: string): string {
  * @param recipientPub - Recipient's static public key (compressed, 33 bytes)
  * @param salt - HKDF salt (16 bytes)
  * @param nonce - XChaCha20 nonce (24 bytes)
- * @param info - HKDF info/domain separator
+ * @param info - HKDF info/domain separator (empty byte array for node v8.0.0 compatibility)
  * @param aad - Optional additional authenticated data
  * @returns SHA-256 hash (32 bytes) ready for ECDSA signing
  */
@@ -138,7 +138,7 @@ export function makeSigMessage(
   recipientPub: Uint8Array,
   salt: Uint8Array,
   nonce: Uint8Array,
-  info: string,
+  info: Uint8Array,
   aad?: Uint8Array
 ): Uint8Array {
   const parts = [
@@ -151,7 +151,7 @@ export function makeSigMessage(
     enc.encode('|'),
     nonce,
     enc.encode('|'),
-    enc.encode(info),
+    info,
   ];
 
   if (aad && aad.length) {

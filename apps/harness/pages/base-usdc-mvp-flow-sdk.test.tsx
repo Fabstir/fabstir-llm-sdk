@@ -183,7 +183,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
 
   // No longer need Base Account SDK - removed
 
-  // Read initial balances when SDK is ready
+  // Pre-cache S5 seed on mount (only once)
   useEffect(() => {
     // Pre-cache S5 seed for TEST_USER_1 to avoid popup
     const userAddr = TEST_USER_1_ADDRESS.toLowerCase();
@@ -192,15 +192,18 @@ export default function BaseUsdcMvpFlowSDKTest() {
       cacheSeed(userAddr, testSeed);
       console.log(`[S5 Seed] Pre-cached test seed for ${userAddr}`);
     }
+  }, []);
 
-    if (sdk) {
+  // Read initial balances only after authentication (when managers are available)
+  useEffect(() => {
+    if (paymentManager) {
       const timer = setTimeout(() => {
         console.log("Reading initial balances...");
         readAllBalances();
       }, 1000);
       return () => clearTimeout(timer);
     }
-  }, [sdk]);
+  }, [paymentManager]);
 
   // Helper: Get contract addresses for current chain
   function getContractAddresses() {

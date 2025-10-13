@@ -347,7 +347,7 @@ export class HostManager {
         minPriceNative,  // 4th parameter: native pricing (ETH/BNB)
         minPriceStable,  // 5th parameter: stable pricing (USDC)
         {
-          gasLimit: 500000n
+          gasLimit: 600000n  // Increased from 500000 to handle registration (~536k gas needed)
         }
       );
 

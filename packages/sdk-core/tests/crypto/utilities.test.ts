@@ -122,7 +122,7 @@ describe('Crypto Utilities', () => {
       const recipientPub = new Uint8Array(33).fill(2);
       const salt = new Uint8Array(16).fill(3);
       const nonce = new Uint8Array(24).fill(4);
-      const info = 'test-info';
+      const info = new Uint8Array(0); // Empty byte array for node v8.0.0 compatibility
 
       const hash1 = makeSigMessage(ephPub, recipientPub, salt, nonce, info);
       const hash2 = makeSigMessage(ephPub, recipientPub, salt, nonce, info);
@@ -136,7 +136,7 @@ describe('Crypto Utilities', () => {
       const recipientPub = new Uint8Array(33).fill(2);
       const salt = new Uint8Array(16).fill(3);
       const nonce = new Uint8Array(24).fill(4);
-      const info = 'test-info';
+      const info = new Uint8Array(0); // Empty byte array for node v8.0.0 compatibility
 
       const hash1 = makeSigMessage(ephPub, recipientPub, salt, nonce, info);
 
@@ -153,7 +153,7 @@ describe('Crypto Utilities', () => {
       const recipientPub = new Uint8Array(33).fill(2);
       const salt = new Uint8Array(16).fill(3);
       const nonce = new Uint8Array(24).fill(4);
-      const info = 'test-info';
+      const info = new Uint8Array(0); // Empty byte array for node v8.0.0 compatibility
       const aad = new Uint8Array([10, 20, 30]);
 
       const hashWithoutAAD = makeSigMessage(ephPub, recipientPub, salt, nonce, info);

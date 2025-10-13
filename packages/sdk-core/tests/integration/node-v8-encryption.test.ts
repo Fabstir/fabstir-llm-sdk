@@ -229,7 +229,7 @@ describe('SDK ↔ Node v8.0.0 Encryption Integration', () => {
 
     // Step 2: Verify signature fields present
     expect(encrypted.payload.signatureHex).toBeDefined();
-    expect(encrypted.payload.signatureHex.length).toBe(128); // 64 bytes = 128 hex chars
+    expect(encrypted.payload.signatureHex.length).toBe(130); // 65 bytes (r+s+recid) = 130 hex chars
     expect(encrypted.payload.recid).toBeGreaterThanOrEqual(0);
     expect(encrypted.payload.recid).toBeLessThanOrEqual(3);
 
@@ -451,7 +451,7 @@ describe('SDK ↔ Node v8.0.0 Encryption Integration', () => {
     expect(completeMessage.payload.ephPubHex).toMatch(/^[0-9a-f]{66}$/i); // 33 bytes compressed
     expect(completeMessage.payload.saltHex).toMatch(/^[0-9a-f]{32}$/i); // 16 bytes
     expect(completeMessage.payload.nonceHex).toMatch(/^[0-9a-f]{48}$/i); // 24 bytes
-    expect(completeMessage.payload.signatureHex).toMatch(/^[0-9a-f]{128}$/i); // 64 bytes
+    expect(completeMessage.payload.signatureHex).toMatch(/^[0-9a-f]{130}$/i); // 65 bytes (r+s+recid)
     expect(typeof completeMessage.payload.recid).toBe('number');
     expect(completeMessage.payload.recid).toBeGreaterThanOrEqual(0);
     expect(completeMessage.payload.recid).toBeLessThanOrEqual(3);
