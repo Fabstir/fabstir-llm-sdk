@@ -48,8 +48,8 @@ describe('Ephemeral-Static Encryption', () => {
       expect(payload.nonceHex.length).toBe(48); // 24 bytes = 48 hex chars
       expect(payload.ciphertextHex).toBeDefined();
       expect(payload.ciphertextHex.length).toBeGreaterThan(0);
-      expect(payload.sigHex).toBeDefined();
-      expect(payload.sigHex.length).toBe(128); // 64 bytes signature = 128 hex chars
+      expect(payload.signatureHex).toBeDefined();
+      expect(payload.signatureHex.length).toBe(128); // 64 bytes signature = 128 hex chars
       expect(payload.recid).toBeGreaterThanOrEqual(0);
       expect(payload.recid).toBeLessThanOrEqual(3);
       expect(payload.alg).toBeDefined();
@@ -102,7 +102,7 @@ describe('Ephemeral-Static Encryption', () => {
       // Different ciphertexts (due to different nonces/ephemeral keys)
       expect(payload1.ciphertextHex).not.toBe(payload2.ciphertextHex);
       // Different signatures (message includes ephemeral key)
-      expect(payload1.sigHex).not.toBe(payload2.sigHex);
+      expect(payload1.signatureHex).not.toBe(payload2.signatureHex);
     });
   });
 
@@ -121,7 +121,7 @@ describe('Ephemeral-Static Encryption', () => {
       const payload = await encryptForEphemeral(bobPubHex, alicePrivHex, 'Secret');
 
       // Tamper with signature (flip first byte)
-      const tampered = { ...payload, sigHex: 'ff' + payload.sigHex.slice(2) };
+      const tampered = { ...payload, signatureHex: 'ff' + payload.signatureHex.slice(2) };
 
       // Signature recovery fails for invalid signatures
       expect(() => decryptFromEphemeral(bobPrivHex, bobPubHex, tampered))

@@ -68,7 +68,7 @@ describe('Address Recovery', () => {
     const payload = await encryptForEphemeral(bobPubHex, alicePrivHex, 'Secret');
 
     // Create mathematically invalid signature (all zeros won't parse)
-    const tampered = { ...payload, sigHex: '00'.repeat(64) };
+    const tampered = { ...payload, signatureHex: '00'.repeat(64) };
 
     expect(() => recoverSenderAddress(tampered, bobPubHex))
       .toThrow(/recovery failed|signature verification failed/i);

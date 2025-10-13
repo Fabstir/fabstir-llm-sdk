@@ -97,7 +97,7 @@ describe('EncryptionManager - Session Init Encryption', () => {
     expect(encrypted.type).toBe('encrypted_session_init');
     expect(encrypted.payload).toBeDefined();
     expect(encrypted.payload.ephPubHex).toBeDefined();
-    expect(encrypted.payload.sigHex).toBeDefined();
+    expect(encrypted.payload.signatureHex).toBeDefined();
     expect(encrypted.payload.recid).toBeGreaterThanOrEqual(0);
     expect(encrypted.payload.recid).toBeLessThanOrEqual(3);
 
@@ -303,7 +303,7 @@ describe('EncryptionManager - Storage Encryption (Full Signature)', () => {
 
     // Verify structure
     expect(encrypted.payload.ephPubHex).toBeDefined();
-    expect(encrypted.payload.sigHex).toBeDefined();
+    expect(encrypted.payload.signatureHex).toBeDefined();
     expect(encrypted.conversationId).toBeDefined();
     expect(encrypted.storedAt).toBeDefined();
 

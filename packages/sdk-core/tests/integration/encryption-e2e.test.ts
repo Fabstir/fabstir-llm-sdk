@@ -366,7 +366,7 @@ describe('End-to-End Encryption Integration (Phase 6.1)', () => {
         ...encrypted,
         payload: {
           ...encrypted.payload,
-          sigHex: 'ff' + encrypted.payload.sigHex.slice(2)
+          signatureHex: 'ff' + encrypted.payload.signatureHex.slice(2)
         }
       };
 

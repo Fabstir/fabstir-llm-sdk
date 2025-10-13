@@ -130,7 +130,7 @@ describe('StorageManager Encryption (Phase 5.1)', () => {
     expect(uploadedData.payload).toBeDefined();
     expect(uploadedData.payload.ephPubHex).toBeDefined();
     expect(uploadedData.payload.ciphertextHex).toBeDefined();
-    expect(uploadedData.payload.sigHex).toBeDefined();
+    expect(uploadedData.payload.signatureHex).toBeDefined();
 
     // Verify original data is NOT in plaintext
     const dataString = JSON.stringify(uploadedData);

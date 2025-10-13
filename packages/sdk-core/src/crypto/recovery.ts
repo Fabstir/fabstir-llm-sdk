@@ -55,14 +55,14 @@ export function recoverSenderAddress(
   // 3. Recover sender's public key from signature
   let senderPubCompressed: Uint8Array;
   try {
-    const signature = secp.Signature.fromCompact(payload.sigHex).addRecoveryBit(payload.recid);
+    const signature = secp.Signature.fromCompact(payload.signatureHex).addRecoveryBit(payload.recid);
     senderPubCompressed = signature.recoverPublicKey(msg).toRawBytes(true); // compressed (33 bytes)
   } catch (error) {
     throw new Error(`Signature recovery failed: ${error instanceof Error ? error.message : 'invalid signature'}`);
   }
 
   // 4. Verify signature (defense in depth - ensures recovered key is correct)
-  const valid = secp.verify(payload.sigHex, msg, senderPubCompressed);
+  const valid = secp.verify(payload.signatureHex, msg, senderPubCompressed);
   if (!valid) {
     throw new Error('Signature verification failed: recovered public key does not validate signature');
   }

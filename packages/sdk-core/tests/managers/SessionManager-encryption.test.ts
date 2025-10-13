@@ -213,7 +213,7 @@ describe('SessionManager Encryption (Phase 4.1)', () => {
     expect(sentMessage.payload).toBeDefined();
     expect(sentMessage.payload.ephPubHex).toBeDefined();
     expect(sentMessage.payload.ciphertextHex).toBeDefined();
-    expect(sentMessage.payload.sigHex).toBeDefined();
+    expect(sentMessage.payload.signatureHex).toBeDefined();
     expect(sentMessage.payload.recid).toBeDefined();
     expect(typeof sentMessage.payload.recid).toBe('number');
     expect(sentMessage.payload.recid).toBeGreaterThanOrEqual(0);

@@ -889,7 +889,8 @@ export class SessionManager implements ISessionManager {
     await ws.sendMessage({
       ...encrypted,  // { type: 'encrypted_session_init', payload: {...} }
       chain_id: config.chainId,
-      session_id: sessionId.toString()
+      session_id: sessionId.toString(),
+      job_id: jobId.toString()
     });
 
     console.log('[SessionManager] Encrypted session init sent with session key');

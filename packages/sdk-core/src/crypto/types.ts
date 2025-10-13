@@ -35,7 +35,7 @@ export interface EphemeralCipherPayload {
 
   // Authentication
   /** ECDSA signature - compact form (64 bytes hex) */
-  sigHex: string;
+  signatureHex: string;
 
   /** Recovery ID for public key recovery (0-3) */
   recid: number;

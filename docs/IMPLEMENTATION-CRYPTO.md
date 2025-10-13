@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding ephemeral-static ECDH encryption to Fabstir LLM SDK
 >
-> **Status**: 🔄 IN PROGRESS (9/17 sub-phases complete, 53%) | **Target**: Secure browser ↔ node communication | **Progress**: Phase 1 (3/3) ✅, Phase 2 (3/3) ✅, Phase 3 (3/3) ✅, Phase 4 (0/3) ⏳, Phase 5 (0/3) ⏳, Phase 6 (0/2) ⏳
+> **Status**: ✅ COMPLETE (All phases done) | **Target**: Secure browser ↔ node communication | **Progress**: Phase 1 (3/3) ✅, Phase 2 (3/3) ✅, Phase 3 (3/3) ✅, Phase 4 (3/3) ✅, Phase 5 (3/3) ✅, Phase 6 (3/3) ✅, Phase 7 (1/1) ✅
 
 ## Overview
 
@@ -188,11 +188,12 @@ interface StoragePayload {
 ## Implementation Status
 
 ✅ **Phase 1: Core Crypto Module** (3/3 sub-phases complete) - ✅ Sub-phase 1.1, ✅ Sub-phase 1.2, ✅ Sub-phase 1.3
-🔄 **Phase 2: EncryptionManager** (1/3 sub-phases complete) - ✅ Sub-phase 2.1
-⏳ **Phase 3: Host Public Key Discovery** (0/3 sub-phases complete)
-⏳ **Phase 4: SessionManager Integration** (0/3 sub-phases complete)
-⏳ **Phase 5: StorageManager Integration** (0/3 sub-phases complete)
-⏳ **Phase 6: Testing & Documentation** (0/2 sub-phases complete)
+✅ **Phase 2: EncryptionManager** (3/3 sub-phases complete) - ✅ Sub-phase 2.1, ✅ Sub-phase 2.2, ✅ Sub-phase 2.3
+✅ **Phase 3: Host Public Key Discovery** (3/3 sub-phases complete) - ✅ Sub-phase 3.1, ✅ Sub-phase 3.2, ✅ Sub-phase 3.3
+✅ **Phase 4: SessionManager Integration** (3/3 sub-phases complete) - ✅ Sub-phase 4.1, ✅ Sub-phase 4.2, ✅ Sub-phase 4.3
+✅ **Phase 5: StorageManager Integration** (3/3 sub-phases complete) - ✅ Sub-phase 5.1, ✅ Sub-phase 5.2, ✅ Sub-phase 5.3
+✅ **Phase 6: Testing & Documentation** (3/3 sub-phases complete) - ✅ Sub-phase 6.1, ✅ Sub-phase 6.2, ✅ Sub-phase 6.3
+✅ **Phase 7: Node Integration Documentation** (1/1 sub-phases complete) - ✅ Sub-phase 7.1
 
 ## Key Principles
 
@@ -3145,12 +3146,93 @@ Session keys: Generated fresh per session, stored in memory only
 
 **Acceptance Criteria**:
 - [x] SDK_API.md updated with encryption docs (Phase 6.2 ✅)
-- [ ] ENCRYPTION_GUIDE.md created (reflects encryption-by-default)
-- [ ] ENCRYPTION_FAQ.md created (reflects encryption-by-default)
-- [ ] CLAUDE.md updated with encryption patterns
-- [ ] All examples reflect default encryption behavior
-- [ ] Documentation reviewed for clarity
-- [ ] No migration guides (pre-MVP, current state only)
+- [x] ENCRYPTION_GUIDE.md created (reflects encryption-by-default) ✅
+- [x] ENCRYPTION_FAQ.md created (reflects encryption-by-default) ✅
+- [x] CLAUDE.md updated with encryption patterns ✅
+- [x] All examples reflect default encryption behavior ✅
+- [x] Documentation reviewed for clarity ✅
+- [x] No migration guides (pre-MVP, current state only) ✅
+
+---
+
+## Phase 7: Node Integration Documentation
+
+**Goal**: Document encryption protocol for production node developers
+
+**Status**: ✅ Complete
+
+**Rationale**: SDK now sends encrypted WebSocket messages by default (Phase 6.2). Production nodes MUST implement decryption to work with SDK clients. This phase provides comprehensive documentation for node developers.
+
+### Sub-phase 7.1: Node Developer Guide ✅
+
+**Tasks**:
+- [x] Create `docs/NODE_ENCRYPTION_GUIDE.md` (~550 lines)
+  - [x] Overview of encryption-by-default
+  - [x] WebSocket message format changes
+  - [x] Decryption implementation steps (with code examples)
+  - [x] Session init decryption (ECDH key exchange)
+  - [x] Message decryption (symmetric XChaCha20-Poly1305)
+  - [x] Response encryption for outgoing messages
+  - [x] Error handling guide
+  - [x] Backward compatibility (plaintext fallback)
+  - [x] Testing recommendations
+  - [x] Security considerations
+  - [x] Troubleshooting common issues
+  - [x] Migration path timeline
+- [x] Update `CLAUDE.md` with node documentation reference
+- [x] Update `CLAUDE.local.md` with critical encryption notice
+
+**Files Created**:
+- `docs/NODE_ENCRYPTION_GUIDE.md`: Complete implementation guide (550+ lines)
+- Updated `CLAUDE.md`: Added `docs/NODE_ENCRYPTION_GUIDE.md` reference in Node Integration section
+- Updated `CLAUDE.local.md`: Added critical encryption notice for node developers
+
+**Key Sections in NODE_ENCRYPTION_GUIDE.md**:
+1. **Overview**: Encryption is default, nodes must support it
+2. **Encryption Protocol Summary**: Session init (ECDH) + Message streaming (symmetric)
+3. **Implementation Steps**: 7-step guide with TypeScript code examples
+   - Step 1: Install @noble cryptographic libraries
+   - Step 2: Implement ECDH key exchange
+   - Step 3: Decrypt session init payload
+   - Step 4: Store session key in memory
+   - Step 5: Decrypt incoming messages
+   - Step 6: Encrypt outgoing responses
+   - Step 7: WebSocket message handler integration
+4. **Error Handling**: Decryption failures, invalid signatures, missing keys
+5. **Backward Compatibility**: Supporting both encrypted and plaintext sessions
+6. **Testing**: Unit tests and integration tests with SDK
+7. **Performance Considerations**: Optimization tips, overhead measurements
+8. **Security Considerations**: Do's and Don'ts checklist
+9. **Troubleshooting**: Common issues and solutions
+10. **Migration Path**: 3-phase timeline for adoption
+
+**Message Types Documented**:
+- **Incoming**: `encrypted_session_init`, `encrypted_message`
+- **Outgoing**: `encrypted_chunk`, `encrypted_response`
+- **Backward Compatible**: `session_init`, `prompt` (plaintext)
+
+**Code Examples Provided**:
+- ✅ ECDH key derivation (using @noble/secp256k1)
+- ✅ Session init decryption with signature recovery
+- ✅ In-memory session key storage
+- ✅ Message encryption/decryption
+- ✅ WebSocket message handler
+- ✅ Error handling patterns
+- ✅ Unit test examples
+
+**Acceptance Criteria**:
+- [x] NODE_ENCRYPTION_GUIDE.md created with comprehensive implementation guide
+- [x] All WebSocket message types documented with JSON schemas
+- [x] Step-by-step implementation guide with code examples
+- [x] Cryptographic library recommendations (@noble/secp256k1, @noble/ciphers)
+- [x] Error handling documented for all failure modes
+- [x] Backward compatibility guide (plaintext fallback)
+- [x] Testing recommendations (unit + integration)
+- [x] Security best practices documented
+- [x] Troubleshooting guide for common issues
+- [x] CLAUDE.md and CLAUDE.local.md updated with references
+
+**Summary**: Node developer documentation is complete. Production node developers now have a comprehensive guide for implementing encryption support. The guide includes protocol details, implementation steps with code examples, error handling, testing, and troubleshooting.
 
 ---
 

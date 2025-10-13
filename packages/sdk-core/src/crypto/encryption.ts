@@ -90,7 +90,7 @@ export async function encryptForEphemeral(
     aad
   );
   const signature = await secp.signAsync(msg, senderStaticPrivBytes); // Returns RecoveredSignature
-  const sigHex = signature.toCompactHex();
+  const signatureHex = signature.toCompactHex();
   const recid = signature.recovery;
 
   // 7. Build payload
@@ -99,7 +99,7 @@ export async function encryptForEphemeral(
     saltHex: bytesToHex(salt),
     nonceHex: bytesToHex(nonce),
     ciphertextHex: bytesToHex(ct),
-    sigHex,
+    signatureHex,
     recid,
     alg,
     info,
@@ -153,14 +153,14 @@ export function decryptFromEphemeral(
 
   let senderIdPub: Uint8Array;
   try {
-    const signature = secp.Signature.fromCompact(payload.sigHex).addRecoveryBit(payload.recid);
+    const signature = secp.Signature.fromCompact(payload.signatureHex).addRecoveryBit(payload.recid);
     senderIdPub = signature.recoverPublicKey(msg).toRawBytes(true); // compressed
   } catch (error) {
     throw new Error(`Signature recovery failed: ${error instanceof Error ? error.message : 'invalid signature'}`);
   }
 
   // 3. Verify signature
-  const valid = secp.verify(payload.sigHex, msg, senderIdPub);
+  const valid = secp.verify(payload.signatureHex, msg, senderIdPub);
   if (!valid) {
     throw new Error('Signature verification failed: message not from claimed sender');
   }
