@@ -12,6 +12,7 @@
 
 import type { Wallet } from 'ethers';
 import * as secp from '@noble/secp256k1';
+import { sha256 } from '@noble/hashes/sha256';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha';
 import { bytesToHex, hexToBytes } from '../crypto/utilities';
 import { encryptForEphemeral, decryptFromEphemeral } from '../crypto/encryption';
@@ -62,11 +63,42 @@ export class EncryptionManager implements IEncryptionManager {
   }
 
   /**
+   * Create EncryptionManager from wallet signature (for browser wallets like MetaMask)
+   * Uses deterministic key derivation from signature
+   *
+   * @param signature - Wallet signature (hex string)
+   * @param address - Wallet address (checksummed)
+   * @returns EncryptionManager instance
+   */
+  static fromSignature(signature: string, address: string): EncryptionManager {
+    // Use signature as seed for deterministic private key
+    const sigBytes = hexToBytes(signature.replace(/^0x/, ''));
+    const hash = sha256(sigBytes);
+    const privateKey = bytesToHex(hash);
+
+    // Create minimal wallet-like object
+    const wallet = {
+      privateKey: '0x' + privateKey,
+      address: address
+    } as Wallet;
+
+    return new EncryptionManager(wallet);
+  }
+
+  /**
    * Get client's private key (for internal use)
    * @private
    */
   private getClientPrivateKey(): string {
     return this.clientPrivateKey;
+  }
+
+  /**
+   * Get client's public key (for sending to host in session_init)
+   * Returns compressed secp256k1 public key in hex format (0x-prefixed)
+   */
+  getPublicKey(): string {
+    return '0x' + this.clientPublicKey;
   }
 
   /**
@@ -153,28 +185,25 @@ export class EncryptionManager implements IEncryptionManager {
    *
    * Algorithm:
    * 1. Generate random nonce (24 bytes for XChaCha20)
-   * 2. Create AAD with message_index and timestamp (replay protection)
+   * 2. Create AAD with message_index (replay protection)
    * 3. Encrypt with XChaCha20-Poly1305 AEAD
-   * 4. Return encrypted message
+   * 4. Return encrypted payload (without wrapper)
    *
    * @param sessionKey - Shared session key (32 bytes)
    * @param message - Plain text message
    * @param messageIndex - Sequential message number (prevents replay/reordering)
-   * @returns Encrypted message with nonce and AAD
+   * @returns Encrypted payload (ciphertextHex, nonceHex, aadHex only)
    */
   encryptMessage(
     sessionKey: Uint8Array,
     message: string,
     messageIndex: number
-  ): EncryptedMessage {
-    // Generate fresh nonce for each message
+  ): { ciphertextHex: string; nonceHex: string; aadHex: string } {
+    // Generate fresh nonce for each message (CRITICAL: must be unique!)
     const nonce = crypto.getRandomValues(new Uint8Array(24)); // XChaCha20 uses 24-byte nonce
 
-    // AAD includes message index and timestamp to prevent replay/reordering
-    const aad = enc.encode(JSON.stringify({
-      message_index: messageIndex,
-      timestamp: Date.now()
-    }));
+    // AAD includes message index for replay protection (per docs line 149)
+    const aad = enc.encode(`message_${messageIndex}`);
 
     // Encrypt with XChaCha20-Poly1305
     const cipher = xchacha20poly1305(sessionKey, nonce, aad);
@@ -182,9 +211,8 @@ export class EncryptionManager implements IEncryptionManager {
     const ciphertext = cipher.encrypt(plaintext);
 
     return {
-      type: 'encrypted_message',
-      nonceHex: bytesToHex(nonce),
       ciphertextHex: bytesToHex(ciphertext),
+      nonceHex: bytesToHex(nonce),
       aadHex: bytesToHex(aad)
     };
   }
@@ -198,18 +226,19 @@ export class EncryptionManager implements IEncryptionManager {
    * 3. Return plaintext
    *
    * @param sessionKey - Shared session key (32 bytes)
-   * @param encrypted - Encrypted message
+   * @param encrypted - Encrypted payload object
    * @returns Decrypted plain text
    * @throws Error if AAD verification fails or tag is invalid
    */
   decryptMessage(
     sessionKey: Uint8Array,
-    encrypted: EncryptedMessage
+    encrypted: { ciphertextHex: string; nonceHex: string; aadHex: string }
   ): string {
     const nonce = hexToBytes(encrypted.nonceHex);
     const ciphertext = hexToBytes(encrypted.ciphertextHex);
     const aad = hexToBytes(encrypted.aadHex);
 
+    // Decrypt with XChaCha20-Poly1305
     const cipher = xchacha20poly1305(sessionKey, nonce, aad);
     const plaintext = cipher.decrypt(ciphertext); // Throws if tag verification fails
 

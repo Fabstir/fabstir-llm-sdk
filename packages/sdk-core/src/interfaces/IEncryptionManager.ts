@@ -11,18 +11,19 @@ import type { EphemeralCipherPayload } from '../crypto/types';
 
 /**
  * Session initialization payload (before encryption)
+ * IMPORTANT: Uses camelCase field names as per node requirements
  */
 export interface SessionInitPayload {
-  /** Job ID from JobMarketplace contract */
-  jobId: bigint;
+  /** Job ID from JobMarketplace contract (as string) */
+  jobId: string;
 
   /** Model name requested */
   modelName: string;
 
-  /** Hex-encoded 32-byte session key for subsequent symmetric encryption */
+  /** Hex-encoded 32-byte session key for subsequent symmetric encryption (without 0x prefix) */
   sessionKey: string;
 
-  /** Price per token in wei/smallest unit */
+  /** Price per token in wei/smallest unit (NUMBER, not string) */
   pricePerToken: number;
 }
 
@@ -35,16 +36,15 @@ export interface EncryptedSessionInit {
 }
 
 /**
- * Encrypted message (symmetric, no signature)
+ * Encrypted message payload (symmetric, no signature)
+ * This is the payload only - SessionManager wraps it with type, session_id, id
  */
 export interface EncryptedMessage {
-  type: 'encrypted_message';
+  /** Ciphertext with Poly1305 tag (variable length hex) */
+  ciphertextHex: string;
 
   /** XChaCha20 nonce (24 bytes hex) */
   nonceHex: string;
-
-  /** Ciphertext with Poly1305 tag (variable length hex) */
-  ciphertextHex: string;
 
   /** Additional Authenticated Data (message index as hex) */
   aadHex: string;
@@ -160,4 +160,14 @@ export interface IEncryptionManager {
   decryptFromStorage<T>(
     encrypted: EncryptedStorage
   ): Promise<{ data: T; senderAddress: string }>;
+
+  /**
+   * Get client's public key (for sending to host in session_init)
+   *
+   * Returns the compressed secp256k1 public key in hex format (0x-prefixed).
+   * This key is used by the host to encrypt responses and verify signatures.
+   *
+   * @returns Compressed public key hex string (33 bytes, 0x-prefixed)
+   */
+  getPublicKey(): string;
 }

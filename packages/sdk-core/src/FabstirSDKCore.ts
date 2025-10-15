@@ -590,15 +590,33 @@ export class FabstirSDKCore extends EventEmitter {
         );
       }
 
-      // Create EncryptionManager (requires Wallet type for private key access)
+      // Create EncryptionManager (Phase 6.2 - supports both Wallet and browser signers)
       console.log('Creating EncryptionManager...');
-      // Check if signer is a Wallet instance
-      if (this.signer && 'privateKey' in this.signer) {
-        this.encryptionManager = new EncryptionManager(this.signer as ethers.Wallet);
-        console.log('EncryptionManager created');
+      if (this.signer) {
+        // For Wallet instances with direct privateKey access
+        if ('privateKey' in this.signer) {
+          this.encryptionManager = new EncryptionManager(this.signer as ethers.Wallet);
+          console.log('EncryptionManager created from Wallet');
+        } else {
+          // For browser wallets (MetaMask, etc.), derive encryption key via signature
+          try {
+            const message = 'Fabstir Encryption Key Derivation - Sign this message to enable end-to-end encryption';
+            const signature = await this.signer.signMessage(message);
+            const address = await this.signer.getAddress();
+            this.encryptionManager = EncryptionManager.fromSignature(signature, address);
+            console.log('EncryptionManager created from browser wallet signature');
+          } catch (error: any) {
+            console.warn('[EncryptionManager] Failed to create from signature:', error.message);
+            throw new SDKError(
+              'Failed to create EncryptionManager. User may have rejected signature request. ' +
+              'Encryption is required by default - set encryption: false in session config to opt-out.',
+              'ENCRYPTION_INIT_FAILED',
+              { originalError: error }
+            );
+          }
+        }
       } else {
-        console.warn('[EncryptionManager] Signer is not a Wallet instance - encryption features disabled');
-        // Encryption is optional, don't throw error
+        throw new SDKError('Signer required for encryption', 'SIGNER_NOT_AVAILABLE');
       }
 
       console.log('Initializing SessionManager...');

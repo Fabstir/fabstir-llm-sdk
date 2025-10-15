@@ -131,6 +131,45 @@ export class WebSocketClient {
   }
 
   /**
+   * Send a message without waiting for a response (fire-and-forget)
+   * Used for encrypted messages where responses are handled by separate handlers
+   */
+  async sendWithoutResponse(message: WebSocketMessage): Promise<void> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      if (this.options.reconnect) {
+        // Queue message for sending after reconnection
+        this.messageQueue.push(message);
+
+        // Try to reconnect
+        if (!this.isReconnecting) {
+          await this.connect();
+        }
+
+        // Wait a bit for reconnection
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          throw new SDKError('WebSocket not connected', 'WS_NOT_CONNECTED');
+        }
+      } else {
+        throw new SDKError('WebSocket not connected', 'WS_NOT_CONNECTED');
+      }
+    }
+
+    try {
+      const messageStr = JSON.stringify(message);
+      console.log('WebSocket sending message (no response expected):', messageStr);
+      this.ws!.send(messageStr);
+    } catch (error: any) {
+      throw new SDKError(
+        `Failed to send message: ${error.message}`,
+        'WS_SEND_ERROR',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
    * Send a message through WebSocket
    */
   async sendMessage(message: WebSocketMessage): Promise<string> {
@@ -138,15 +177,15 @@ export class WebSocketClient {
       if (this.options.reconnect) {
         // Queue message for sending after reconnection
         this.messageQueue.push(message);
-        
+
         // Try to reconnect
         if (!this.isReconnecting) {
           await this.connect();
         }
-        
+
         // Wait a bit for reconnection
         await new Promise(resolve => setTimeout(resolve, 1000));
-        
+
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new SDKError('WebSocket not connected', 'WS_NOT_CONNECTED');
         }
@@ -165,9 +204,12 @@ export class WebSocketClient {
         let streamContent = '';
         let isStreaming = false;
 
+        // Timeout ID for cleanup (v1.3.29 fix)
+        let timeoutId: number;
+
         // Set up one-time response handler
         const responseHandler = (data: any) => {
-          // Handle streaming chunks
+          // Handle plaintext streaming chunks
           if (data.type === 'stream_chunk') {
             isStreaming = true;
             if (data.content) {
@@ -176,10 +218,36 @@ export class WebSocketClient {
             return; // Don't complete yet, wait for stream_end
           }
 
-          // Handle stream end
+          // Handle encrypted streaming chunks
+          if (data.type === 'encrypted_chunk') {
+            isStreaming = true;
+            // Note: Decryption happens at SessionManager level
+            // Just acknowledge receipt for sendMessage() completion tracking
+            return; // Don't complete yet, wait for encrypted_response
+          }
+
+          // Handle plaintext stream end
           if (data.type === 'stream_end' && isStreaming) {
+            clearTimeout(timeoutId);  // Clear timeout (v1.3.29 fix)
             this.messageHandlers.delete(responseHandler);
             resolve(streamContent || 'Stream completed with no content');
+            return;
+          }
+
+          // Handle encrypted response (complete response or stream end)
+          if (data.type === 'encrypted_response') {
+            clearTimeout(timeoutId);  // Clear timeout (v1.3.29 fix)
+            this.messageHandlers.delete(responseHandler);
+            // Return raw encrypted data - SessionManager will decrypt
+            resolve(JSON.stringify(data));
+            return;
+          }
+
+          // Handle session init acknowledgment (for encrypted_session_init)
+          if (data.type === 'session_init_ack') {
+            clearTimeout(timeoutId);  // Clear timeout (v1.3.29 fix)
+            this.messageHandlers.delete(responseHandler);
+            resolve('Session initialized');
             return;
           }
 
@@ -187,6 +255,7 @@ export class WebSocketClient {
           if (data.id === messageId || data.responseId === messageId ||
               (message.type === 'prompt' && data.session_id === message.session_id &&
                (data.type === 'response' || data.type === 'stream_complete'))) {
+            clearTimeout(timeoutId);  // Clear timeout (v1.3.29 fix)
             this.messageHandlers.delete(responseHandler);
 
             if (data.error || data.type === 'error') {
@@ -202,14 +271,14 @@ export class WebSocketClient {
         };
 
         this.messageHandlers.add(responseHandler);
-        
+
         // Send message
         const messageStr = JSON.stringify(messageWithId);
         console.log('WebSocket sending message:', messageStr);
         this.ws!.send(messageStr);
 
-        // Set timeout for response
-        setTimeout(() => {
+        // Set timeout for response (v1.3.29: capture timeout ID for cleanup)
+        timeoutId = window.setTimeout(() => {
           this.messageHandlers.delete(responseHandler);
           console.log(`WebSocket timeout for message ${messageId} - no response received within 30s`);
           reject(new SDKError('Request timeout', 'WS_TIMEOUT'));
@@ -229,10 +298,12 @@ export class WebSocketClient {
    */
   onMessage(handler: (data: any) => void): () => void {
     this.messageHandlers.add(handler);
-    
+    console.log(`[WebSocketClient] Handler registered. Total handlers: ${this.messageHandlers.size}`);
+
     // Return unsubscribe function
     return () => {
       this.messageHandlers.delete(handler);
+      console.log(`[WebSocketClient] Handler unregistered. Total handlers: ${this.messageHandlers.size}`);
     };
   }
 
@@ -254,14 +325,21 @@ export class WebSocketClient {
    * Handle incoming messages
    */
   private handleMessage(data: any): void {
+    console.log(`[WebSocketClient] handleMessage called for type: ${data.type}, Total handlers: ${this.messageHandlers.size}`);
+
     // Call all registered handlers
+    let handlerIndex = 0;
     for (const handler of this.messageHandlers) {
+      handlerIndex++;
+      console.log(`[WebSocketClient] Calling handler ${handlerIndex}/${this.messageHandlers.size}`);
       try {
         handler(data);
+        console.log(`[WebSocketClient] Handler ${handlerIndex} completed`);
       } catch (error) {
-        console.error('Message handler error:', error);
+        console.error(`[WebSocketClient] Handler ${handlerIndex} error:`, error);
       }
     }
+    console.log(`[WebSocketClient] All handlers called for message type: ${data.type}`);
   }
 
   /**
