@@ -13,9 +13,9 @@ import { ChainId } from '../../src/types/chain.types';
 import type { ConversationData } from '../../src/types';
 
 // Set required environment variables for ChainRegistry initialization
-// Source: .env.test (2025-01-28 deployment with corrected dual pricing)
+// Source: .env.test (2025-08-26 deployment with S5 proof storage v8.1.2)
 beforeAll(() => {
-  process.env.CONTRACT_JOB_MARKETPLACE = '0xe169A4B57700080725f9553E3Cc69885fea13629';
+  process.env.CONTRACT_JOB_MARKETPLACE = '0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E';
   process.env.CONTRACT_NODE_REGISTRY = '0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6';
   process.env.CONTRACT_PROOF_SYSTEM = '0x2ACcc60893872A499700908889B38C5420CBcFD1';
   process.env.CONTRACT_HOST_EARNINGS = '0x908962e8c6CE72610021586f85ebDE09aAc97776';
@@ -72,7 +72,7 @@ describe('SDK Encrypted Storage Integration (Phase 5.3)', () => {
       chainId: ChainId.BASE_SEPOLIA,
       rpcUrl,
       contractAddresses: {
-        jobMarketplace: '0xe169A4B57700080725f9553E3Cc69885fea13629',
+        jobMarketplace: '0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E',
         nodeRegistry: '0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6',
         proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
         hostEarnings: '0x908962e8c6CE72610021586f85ebDE09aAc97776',

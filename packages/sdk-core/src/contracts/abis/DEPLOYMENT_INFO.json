@@ -1,22 +1,24 @@
 {
   "network": "Base Sepolia",
   "chainId": 84532,
-  "lastUpdated": "2025-01-05",
-  "status": "Treasury + Host Accumulation Deployed",
+  "lastUpdated": "2025-10-15",
+  "status": "S5 Proof Storage Active (v8.1.2)",
   "contracts": {
     "JobMarketplaceFABWithS5": {
-      "address": "0x55A702Ab5034810F5B9720Fe15f83CFcf914F56b",
-      "deploymentDate": "2025-01-05",
-      "status": "ACTIVE - TREASURY ACCUMULATION ADDED",
+      "address": "0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E",
+      "deploymentDate": "2025-08-26",
+      "status": "ACTIVE - S5 PROOF STORAGE (v8.1.2)",
       "features": [
-        "Treasury fee accumulation (NEW)",
+        "S5 off-chain proof storage (NEW v8.1.2)",
+        "Proof hash + CID on-chain (737x size reduction)",
+        "GPU-accelerated STARK proofs via Risc0",
+        "Treasury fee accumulation",
         "Host earnings accumulation",
         "USDC payment settlement working",
         "90% host / 10% treasury distribution",
         "ETH payments working",
         "Session jobs with proof checkpoints",
-        "EZKL proof verification",
-        "80% total gas savings"
+        "Multi-token support (ETH + USDC)"
       ]
     },
     "HostEarnings": {
