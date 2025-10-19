@@ -1,486 +1,705 @@
-# Fabstir LLM Marketplace - Executive Summary
+# Platformless AI - Executive Summary
 
 ## Vision
-**Democratizing AI access through a decentralized, peer-to-peer marketplace for Large Language Model inference**
+
+**AI infrastructure where no company sits between you and AI models - trustless, private, and sovereign by design**
 
 ## Overview
 
-Fabstir is building the infrastructure for a decentralized AI economy where anyone can monetize their GPU resources by providing LLM inference services, and users can access AI capabilities without relying on centralized providers. Our marketplace creates a trustless, efficient, and censorship-resistant platform for AI services.
+Platformless AI is building decentralized AI infrastructure that eliminates the platform middleman. Unlike traditional AI services, there's no centralized company that can censor prompts, access your data, or revoke your access. Smart contracts coordinate, P2P connections deliver inference, and cryptographic proofs verify computation - all without requiring trust in a central authority.
+
+Our marketplace connects GPU providers directly with users through blockchain-based settlement, end-to-end encryption, and mathematical proof of computation. This creates a trustless, censorship-resistant, and privacy-preserving platform for AI services.
 
 ## The Problem
 
 ### Current AI Market Challenges
 
-1. **Centralization Risks**
-   - Single points of failure (OpenAI, Anthropic, Google)
-   - Censorship and content restrictions
-   - Data privacy concerns
-   - Service availability dependencies
+1. **Platform Control & Censorship**
 
-2. **High Barriers to Entry**
-   - Expensive API costs for developers
-   - Limited access to cutting-edge models
+   - Centralized platforms (OpenAI, Anthropic, Google) control access
+   - Content filtering based on platform policies
+   - Risk of deplatforming or access revocation
+   - No recourse if terms change
+   - Training on user data without consent
+
+2. **Data Privacy & IP Concerns**
+
+   - Proprietary data sent to third-party servers
+   - No end-to-end encryption guarantees
+   - IP leakage risk for enterprises
+   - Compliance issues (GDPR, HIPAA, financial regulations)
+   - Trust-based security (no cryptographic guarantees)
+
+3. **Vendor Lock-In & Economics**
+
+   - 300-750x markup over compute costs
+   - Subscription models and rate limits
+   - API key dependencies (can be revoked)
+   - Limited model selection
    - Geographic restrictions
-   - KYC/compliance requirements
 
-3. **Underutilized Resources**
-   - Millions of consumer GPUs sitting idle
-   - Data centers with spare capacity
-   - No easy way to monetize GPU resources
-   - Inefficient resource allocation
-
-4. **Lack of Model Diversity**
-   - Limited selection from major providers
-   - Difficult to access specialized models
-   - No marketplace for custom fine-tuned models
-   - Innovation bottlenecked by gatekeepers
+4. **Enterprise Compliance Gaps**
+   - Cannot meet data sovereignty requirements
+   - No immutable audit trails
+   - Insufficient for ISO 27001, ISO 42001, SOC 2 compliance
+   - GDPR/HIPAA violations from third-party data handling
+   - Single points of failure
 
 ## Our Solution
 
-### The Fabstir P2P LLM Marketplace
+### Platformless AI: Infrastructure Without the Platform
 
-A decentralized marketplace that connects GPU providers directly with users needing AI inference, using blockchain for payments and cryptographic proofs for verification.
+A decentralized marketplace where smart contracts handle coordination, P2P connections deliver inference, and cryptographic proofs verify computation - no company in the middle.
 
-### Key Components
+### Core Architecture
 
 1. **Decentralized Infrastructure**
-   - Peer-to-peer network (libp2p)
-   - No central servers required
-   - Automatic failover and redundancy
-   - Global distribution
 
-2. **Blockchain Settlement**
-   - Smart contracts on Base (Ethereum L2)
-   - USDC stablecoin payments
-   - Automated escrow and distribution
-   - Transparent pricing
+   - Direct WebSocket connections (user ↔ GPU provider)
+   - Smart contracts for job assignment (Base L2, opBNB)
+   - No central servers or APIs to trust
+   - Global distribution with automatic failover
+   - Multi-chain support for resilience
+
+2. **End-to-End Encryption (Default)**
+
+   - XChaCha20-Poly1305 AEAD encryption
+   - Forward secrecy via ephemeral session keys
+   - ECDSA signatures for sender authentication
+   - Zero-knowledge architecture (hosts process encrypted payloads)
+   - Only you and the GPU provider hold keys
 
 3. **Cryptographic Verification**
-   - EZKL proofs for inference verification
-   - Checkpoint-based validation
-   - Trustless computation
-   - Fraud prevention
 
-4. **Developer-Friendly SDK**
+   - STARK proofs via Risc0 zkVM
+   - ~221KB proofs generated per 1,000 tokens
+   - Off-chain storage on S5 (Sia network)
+   - Only 32-byte hash + CID submitted on-chain (737x size reduction)
+   - Mathematical certainty of computation
+
+4. **Decentralized Storage**
+
+   - Enhanced S5.js (Sia Foundation grant funded)
+   - All conversations encrypted before storage
+   - STARK proofs persisted on Sia network
+   - No centralized databases or servers
+   - Content-addressed, verifiable storage
+
+5. **Multi-Chain Settlement**
+
+   - Base L2 (primary) - fast, cheap transactions
+   - opBNB Testnet (secondary) - alternative chain
+   - ETH, USDC, FAB token payments
+   - Automated escrow and distribution
+   - Immutable on-chain audit trails
+
+6. **Developer-Friendly SDK**
    - Browser-compatible (@fabstir/sdk-core)
-   - Simple integration
-   - Gasless transactions
-   - Real-time streaming
+   - 8 specialized managers (Auth, Payment, Session, Host, Storage, Model, Treasury, Client)
+   - Real-time streaming responses
+   - Simple integration (5 lines to start)
+   - Open source and auditable
+
+7. **Video Transcoding Marketplace** (Post-MVP)
+   - Decentralized video/audio format conversion
+   - GPU-accelerated transcoding (h264, AV1, AAC, Opus)
+   - GOP-based STARK proofs verify quality (PSNR, SSIM metrics)
+   - Privacy-preserving (encrypted uploads via S5 + Blake3)
+   - Competitive pricing vs. AWS MediaConvert, Mux, Cloudflare Stream
+   - Same trustless infrastructure as LLM inference
 
 ## How It Works
 
 ### For Users (Clients)
 
-1. **Connect Wallet** - Use any Ethereum wallet (Coinbase Smart Wallet recommended)
-2. **Deposit USDC** - Minimum $1 to start a session
-3. **Select Model** - Choose from approved models
-4. **Send Prompts** - Get responses in real-time
-5. **Pay for Usage** - Only pay for tokens consumed
+1. **Connect Wallet** - Any Ethereum wallet (MetaMask, Coinbase Wallet, Rainbow)
+2. **Automatic Encryption** - SDK generates session keys, encrypts all messages
+3. **Select Model** - Browse available models and GPU providers
+4. **Deposit Funds** - Minimum deposit (e.g., $1 USDC) into smart contract escrow
+5. **Send Prompts** - Real-time encrypted inference with streaming responses
+6. **Automatic Settlement** - Pay only for tokens used, unused deposit refunded
 
 ### For GPU Providers (Hosts)
 
-1. **Register Node** - Specify hardware and capabilities
-2. **List Models** - Declare supported models
-3. **Set Pricing** - Competitive token pricing
-4. **Serve Requests** - Automatic job matching
-5. **Earn Revenue** - 90% of payments, settlement on session completion
+1. **Register Node** - Specify hardware, stake FAB tokens, list supported models
+2. **Set Pricing** - Competitive per-token pricing (marketplace dynamics)
+3. **Serve Requests** - Automatic job matching via smart contracts
+4. **Process Encrypted Payloads** - Generate inference without seeing prompts
+5. **Submit Proofs** - Generate STARK proofs, upload to S5, submit hash on-chain
+6. **Earn Revenue** - 90% of payments, 10% treasury fee, instant settlement
+
+### For Video Transcoding (Post-MVP)
+
+1. **Upload Video** - Upload to S5 with Blake3 encryption, get CID
+2. **Select Format** - Choose output codec (h264/AV1), resolution (720p/1080p/4K), quality tier
+3. **Find Host** - Browse transcode providers by price, supported formats, hardware acceleration
+4. **Create Job** - Specify format requirements, deposit USDC based on video duration
+5. **Monitor Progress** - Real-time progress updates via WebSocket (GOP-by-GOP)
+6. **Verify Quality** - Spot-check random GOPs, validate PSNR/SSIM metrics against spec
+7. **Download Output** - Retrieve transcoded video from S5, encrypted with your keys
+
+**Transcode Flow**:
+```
+Upload to S5 → Create Job → Host Downloads → GPU Transcode → GOP Proofs
+→ Upload Output to S5 → Submit Proof Hash On-Chain → Payment Release
+```
 
 ### Technical Flow
 
 ```
-Client → Smart Contract → Host Discovery → P2P Connection → Inference → Proof → Payment
+Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted)
+→ Inference (GPU) → STARK Proof → S5 Storage → Hash On-Chain → Payment Release
 ```
 
 ## Technology Stack
 
 ### Core Technologies
 
-- **Blockchain**: Base (Ethereum L2) for low-cost, fast transactions
-- **Payments**: USDC stablecoin for price stability
-- **Networking**: libp2p for peer-to-peer communication
-- **Storage**: S5 Network for decentralized data persistence
-- **Proofs**: EZKL for cryptographic inference verification
-- **Smart Wallets**: Base Account Kit for gasless transactions
+- **Blockchain**: Base L2 (Ethereum), opBNB Testnet - low-cost, fast settlement
+- **Payments**: ETH, USDC, FAB tokens - multi-token support
+- **Encryption**: XChaCha20-Poly1305 AEAD, ECDH key exchange, ECDSA signatures
+- **Proofs**: Risc0 zkVM STARK proofs - cryptographic verification
+- **Storage**: Enhanced S5.js (Sia network) - decentralized, verifiable persistence
+- **Networking**: WebSocket P2P - direct client-to-host connections
+- **Smart Contracts**: JobMarketplace, NodeRegistry, ProofSystem, HostEarnings, ModelRegistry
 
 ### Architecture Highlights
 
-- **Session-Based Model**: Long-running conversations with checkpoints
-- **Streaming Responses**: Real-time token generation
-- **Context Preservation**: Full conversation history maintained
-- **Auto-Scaling**: Dynamic host discovery and load balancing
-- **Fault Tolerance**: Automatic failover and session recovery
+- **Session-Based Model**: Long-running encrypted conversations with checkpoints
+- **Forward Secrecy**: Ephemeral keys per session, discarded after use
+- **Streaming Responses**: Real-time token generation with low latency
+- **Proof Checkpoints**: Every 1,000 tokens, STARK proof generated and verified
+- **Automatic Failover**: Session recovery if host disconnects
+- **Multi-Host Isolation**: Each host has unique encryption keys
+
+### Security & Compliance
+
+**Implemented**:
+
+- ✅ End-to-end encryption by default (XChaCha20-Poly1305)
+- ✅ Zero-knowledge architecture (hosts cannot read prompts/responses)
+- ✅ Immutable audit trails (all transactions on-chain)
+- ✅ GDPR-compliant data handling (encrypted, user-controlled)
+- ✅ Forward secrecy (ephemeral session keys)
+- ✅ Sender authentication (ECDSA signatures)
+
+**In Progress** (Enterprise Compliance):
+
+- 🔄 ISO 27001 (Information Security Management)
+- 🔄 ISO 42001 (AI Management Systems)
+- 🔄 SOC 2 Type 2 audit readiness
+- 🔄 HIPAA compliance architecture validation
 
 ## Business Model
 
 ### Revenue Streams
 
 1. **Transaction Fees**
-   - 10% treasury fee on all transactions
+
+   - 10% treasury fee on all inference payments
+   - 90% goes directly to GPU providers
    - Sustainable protocol development funding
    - Community governance treasury
 
-2. **Model Curation**
-   - Premium model listings
-   - Verification services
-   - Quality assurance
+2. **Model Curation & Governance**
+
+   - Premium model verification
+   - Quality assurance services
+   - Curated model listings
+   - Specialized model hosting
 
 3. **Enterprise Services**
-   - Private networks
+   - Private node deployments
+   - Dedicated compute capacity
    - SLA guarantees
-   - Custom integrations
+   - Custom compliance packages
+   - White-label solutions
 
 ### Token Economics
 
-- **FAB Token** (Future)
-  - Governance rights
-  - Staking for hosts
-  - Priority access
-  - Fee discounts
+- **FAB Token**
 
-- **USDC Payments**
-  - Stable pricing
-  - No volatility risk
-  - Wide acceptance
-  - Easy accounting
+  - Host staking requirement (minimum 100 FAB)
+  - Governance rights (model approvals, protocol upgrades)
+  - Fee discounts (use FAB for payments)
+  - Higher stake = higher job priority
+
+- **Multi-Token Payments**
+  - ETH (native, gas-efficient)
+  - USDC (stablecoin, preferred for pricing)
+  - FAB (platform token, fee discounts)
+  - Users choose payment token
 
 ## Market Opportunity
 
 ### Total Addressable Market
 
-- **Global AI Market**: $500B+ by 2024
-- **LLM API Market**: $10B+ growing 35% annually
-- **GPU Cloud Market**: $7B+ growing 40% annually
-- **Decentralized Compute**: $2B+ emerging market
+- **Global AI Market**: $400B+ by 2025, growing 35% annually
+- **LLM API Market**: $7B+ in 2024, 37% CAGR
+- **Video Transcoding Market**: $1.8B+ by 2027, 17% CAGR (Post-MVP expansion)
+- **Enterprise AI Security**: $22B+ market (compliance, privacy)
+- **Decentralized Compute**: $8B+ emerging market
 
 ### Target Segments
 
-1. **Developers & Startups**
-   - Need affordable AI access
-   - Want model flexibility
-   - Require privacy/control
+1. **Enterprises & Financial Institutions**
 
-2. **GPU Owners**
-   - Gamers with idle GPUs
-   - Small data centers
-   - Crypto miners pivoting
+   - Trading firms (strategy protection, real-time analysis)
+   - Investment banks (client portfolio analysis, compliance)
+   - Law firms (attorney-client privilege, document review)
+   - Healthcare (HIPAA compliance, patient diagnostics)
+   - Web3 companies (avoid centralized AI irony)
 
-3. **Enterprise Clients**
-   - Data sovereignty requirements
-   - Compliance needs
+2. **Developers & Startups**
+
+   - Privacy-first applications
+   - Censorship-resistant apps
    - Custom model deployment
+   - Budget-conscious builders
+
+3. **GPU Providers**
+
+   - Gamers with idle RTX 3060+ GPUs
+   - AI-focused data centers with spare capacity
+   - Cloud GPU providers looking to diversify revenue
+   - Crypto miners pivoting to AI compute
+   - Render farms that already have GPUs for VFX/animation
+   - Geographic diversity (global participation)
 
 4. **Researchers & Academics**
    - Experimental models
+   - Controversial research (no censorship)
    - Budget constraints
-   - Open access needs
+   - Open access requirements
+
+5. **Content Creators & Media Companies** (Post-MVP)
+   - YouTubers, streamers, indie filmmakers (affordable transcoding)
+   - Media companies (privacy-preserving video processing)
+   - NFT marketplaces (video NFT optimization)
+   - Decentralized video platforms (LBRY, Odysee, PeerTube)
+   - Animation studios, VFX houses (render farms diversifying into transcoding)
+   - Censorship-resistant content distribution
 
 ## Competitive Advantages
 
-### 1. **True Decentralization**
-- No single point of failure
-- Censorship resistant
-- Global accessibility
-- Community owned
+### 1. **True Platformlessness**
 
-### 2. **Cost Efficiency**
-- 85-95% lower transaction costs than traditional systems
-- No middleman fees
-- Direct peer-to-peer pricing
-- Competitive marketplace dynamics
+- No company controls access (smart contracts coordinate)
+- No API keys to revoke (wallet-based access)
+- No terms of service to change (immutable protocol)
+- No censorship (no gatekeeper)
+- No single point of failure (distributed infrastructure)
 
-### 3. **Innovation Enablement**
-- Open model ecosystem
-- Permissionless innovation
-- Custom model support
-- Rapid deployment
+### 2. **Cryptographic Security**
 
-### 4. **Superior Economics**
-- Instant settlement
-- No payment delays
-- Transparent pricing
-- Fair revenue distribution (90% to hosts, 10% to treasury)
+- End-to-end encryption by default (not optional)
+- Zero-knowledge architecture (hosts process encrypted payloads)
+- Forward secrecy (past sessions remain secure if keys compromised)
+- STARK proofs (mathematical certainty of computation)
+- Sender authentication (ECDSA signatures)
+
+### 3. **Enterprise Compliance Ready**
+
+- ISO 27001, ISO 42001, SOC 2 preparation underway
+- GDPR-compliant by design (encrypted, user-controlled data)
+- HIPAA-ready architecture (no third-party data exposure)
+- Immutable audit trails (blockchain-based)
+- Data sovereignty (choose geographic regions for compute)
+
+### 4. **Efficient Economics**
+
+- No platform markup (direct P2P pricing)
+- Transparent pricing (all rates visible on-chain)
+- Instant settlement (no payment delays)
+- Fair distribution (90% to hosts, 10% protocol fee)
+- Competitive marketplace (providers compete on price/quality)
 
 ### 5. **Technical Innovation**
-- Cryptographic proof verification
-- Gasless transactions
-- Session-based efficiency
-- Real-time streaming
+
+- Off-chain proof storage (221KB proofs on S5, 32-byte hash on-chain)
+- Multi-chain support (Base, opBNB, future chains)
+- Enhanced S5.js integration (Sia Foundation grant funded)
+- Real-time streaming (low-latency inference)
+- Session-based efficiency (context preservation)
 
 ## Current Status
 
-### Completed Milestones
+### Completed (MVP Ready)
 
 ✅ **Core Infrastructure**
-- Smart contracts deployed on Base Sepolia
-- P2P networking layer operational
-- SDK browser compatibility achieved
-- WebSocket streaming implemented
 
-✅ **Payment System**
-- USDC integration complete
-- Session-based payments working
-- Gasless transactions via Base Account Kit
-- Automatic payment distribution
+- Smart contracts deployed on Base Sepolia, opBNB Testnet
+- Multi-chain support operational
+- WebSocket P2P connections working
+- Production nodes running live inference
+- SDK browser compatibility achieved
+
+✅ **End-to-End Encryption**
+
+- XChaCha20-Poly1305 AEAD implementation complete
+- Forward secrecy via ephemeral keys
+- ECDSA signature authentication
+- Session key management
+- Encryption enabled by default (Phase 6.2)
 
 ✅ **Proof System**
-- EZKL integration functional
-- Checkpoint verification working
-- 64-byte minimum proof validation
-- Rate limiting (10 tokens/second)
+
+- STARK proof generation via Risc0 zkVM
+- ~221KB proofs stored on S5 (Sia network)
+- 32-byte hash + CID on-chain (737x reduction)
+- GPU-accelerated proof generation (0.2-2.3s)
+- Checkpoint verification working (every 1,000 tokens)
+
+✅ **Payment System**
+
+- Multi-token support (ETH, USDC, FAB)
+- Multi-chain payments (Base, opBNB)
+- Session-based escrow and settlement
+- Automatic refunds for unused deposits
+- 90%/10% host/protocol revenue split
+
+✅ **Storage Layer**
+
+- Enhanced S5.js integration complete
+- All conversations encrypted before storage
+- STARK proofs persisted on Sia network
+- Decentralized, content-addressed storage
+- No centralized databases
 
 ✅ **Developer Tools**
+
 - Browser-compatible SDK (@fabstir/sdk-core)
+- 8 specialized managers (modular architecture)
 - Comprehensive API documentation
-- Working demo applications
-- Integration test suite
+- Working demo applications (apps/harness)
+- Integration test suite (7/7 encryption tests passing)
 
-### In Development
+### In Deployment
 
-🚧 **User Interface**
-- Professional web application
-- Mobile-responsive design
-- Wallet integration improvements
-- User dashboard
+🚀 **Production Deployment** (Q1 2025)
 
-🚧 **Model Governance**
-- Expanded model registry
-- Community curation system
-- Quality metrics
-- Reputation system
-
-🚧 **Network Growth**
+- Public beta on Base Sepolia
+- Enterprise beta program
+- Web application (platformlessai.org)
 - Host onboarding tools
-- Automated model deployment
-- Performance monitoring
-- Network statistics dashboard
+- Network monitoring dashboard
+
+🚀 **Compliance & Security**
+
+- ISO 27001 preparation
+- ISO 42001 (AI-specific) preparation
+- SOC 2 Type 2 audit readiness
+- Security audit (smart contracts)
+- Penetration testing
 
 ## Roadmap
 
-### Q4 2025 - Beta Launch
+### Q1 2025 - Public Beta Launch
+
+- [x] MVP complete (production-ready)
 - [ ] Public beta on Base Sepolia
+- [ ] Enterprise beta program launch
+- [ ] Web application live (platformlessai.org)
 - [ ] 10+ verified models
-- [ ] 50+ active hosts
-- [ ] Web application launch
+- [ ] 20+ active hosts
 
-### Q1 2026 - Mainnet Preparation
-- [ ] Security audits
+### Q2 2025 - Enterprise Adoption
+
+- [ ] ISO 27001, SOC 2 certification complete
+- [ ] 3-5 enterprise pilot customers
 - [ ] Base mainnet deployment
-- [ ] FAB token launch
-- [ ] Enterprise partnerships
+- [ ] Enhanced host pricing discovery
+- [ ] Mobile-responsive UI improvements
 
-### Q2 2026 - Scale Phase
-- [ ] 100+ models available
-- [ ] 1,000+ hosts
-- [ ] Mobile applications
-- [ ] API gateway service
+### Q3 2025 - Scale & Expansion
 
-### Q3 2026 - Ecosystem Expansion
-- [ ] Cross-chain support
+- [ ] 50+ models available
+- [ ] 100+ active hosts
+- [ ] 1,000+ monthly active users
+- [ ] API gateway service (REST abstraction)
+- [ ] Model governance DAO launch
+
+### Q4 2025 - Ecosystem Growth
+
+- [ ] Additional L2 chains (Arbitrum, Optimism, Polygon)
+- [ ] RAG/vector database marketplace
 - [ ] Model training marketplace
-- [ ] Data marketplace integration
-- [ ] DAO governance launch
+- [ ] 500+ hosts, 5,000+ users
+- [ ] Institutional partnerships
 
 ## Use Cases
 
-### Current Applications
+### Enterprise Use Cases
 
-1. **Conversational AI**
-   - Chatbots and assistants
-   - Customer support
+1. **Financial Services**
+
+   - Algorithmic trading analysis (no strategy leakage)
+   - Client portfolio analysis (compliance-ready)
+   - Market sentiment analysis (real-time)
+   - Fraud detection (data sovereignty)
+
+2. **Healthcare**
+
+   - Patient diagnostics (HIPAA-compliant)
+   - Medical research (privacy-preserving)
+   - Clinical decision support (encrypted data)
+   - Insurance claim processing (secure)
+
+3. **Legal**
+
+   - Contract review and analysis (attorney-client privilege)
+   - Case law research (confidential)
+   - Document summarization (IP protection)
+   - Due diligence (data security)
+
+4. **Media & Entertainment**
+   - Script generation (no IP theft)
+   - Creative content generation (proprietary)
+   - Translation services (confidential)
+   - Voiceover generation (privacy)
+
+### Developer Use Cases
+
+1. **Privacy-First Applications**
+
+   - Encrypted messaging with AI features
+   - Private personal assistants
+   - Confidential data analysis
+   - Censorship-resistant content platforms
+
+2. **DeFi & Web3**
+
+   - Smart contract auditing (pre-release security)
+   - Market analysis (alpha protection)
+   - Community moderation (uncensorable)
+   - Decentralized social media AI features
+
+3. **Research & Education**
+   - Controversial research (no censorship)
+   - Academic paper analysis
    - Educational tutoring
-   - Creative writing
-
-2. **Content Generation**
-   - Article writing
-   - Code generation
-   - Translation services
-   - Summarization
-
-3. **Research & Analysis**
-   - Data analysis
-   - Research assistance
-   - Document processing
-   - Information extraction
-
-### Future Applications
-
-1. **Specialized Models**
-   - Medical diagnosis assistance
-   - Legal document analysis
-   - Financial modeling
-   - Scientific research
-
-2. **Real-time Services**
-   - Live translation
-   - Voice assistants
-   - Gaming NPCs
-   - Interactive education
-
-3. **Enterprise Solutions**
-   - Private model deployment
-   - Compliance-ready systems
-   - Custom fine-tuning
-   - Hybrid cloud integration
+   - Language learning
 
 ## Investment Highlights
 
-### Why Fabstir?
+### Why Platformless AI?
 
-1. **First Mover Advantage**
-   - First production-ready P2P LLM marketplace
-   - Proven technology stack
-   - Working implementation
+1. **First-Mover Advantage in Trustless AI**
+
+   - First production-ready platformless AI infrastructure
+   - MVP complete with real nodes, real proofs, real encryption
+   - Working implementation, not vaporware
+   - Technical moat (cryptographic verification, multi-chain, encryption)
 
 2. **Network Effects**
-   - More hosts → better availability
-   - More users → higher revenue for hosts
-   - More models → greater user value
-   - Virtuous growth cycle
 
-3. **Defensible Moat**
-   - Cryptographic verification technology
-   - Network effects
-   - Developer ecosystem
-   - Model curation expertise
+   - More hosts → better availability, lower prices
+   - More users → higher revenue for hosts, attracts more hosts
+   - More models → greater user value, attracts more users
+   - Virtuous growth cycle with strong lock-in
 
-4. **Scalable Business Model**
-   - Low operational costs
-   - Automated operations
-   - Global market reach
-   - Multiple revenue streams
+3. **Regulatory Tailwinds**
 
-5. **Aligned Incentives**
-   - Hosts earn 90% of revenue (10% to treasury)
-   - Users get competitive pricing
-   - Protocol captures sustainable fees
-   - Community governance model
+   - EU AI Act, US AI executive orders increasing compliance burden
+   - GDPR enforcement intensifying (€1B+ fines)
+   - Data sovereignty requirements growing
+   - Platformless AI positioned as compliance-by-design solution
 
-## Gas Payment Responsibilities
+4. **Defensible Moat**
 
-### Economic Design
+   - Cryptographic verification technology (STARK proofs)
+   - End-to-end encryption architecture (forward secrecy)
+   - Network effects (first mover in platformless AI)
+   - Enhanced S5.js integration (Sia Foundation grant funded)
+   - Developer ecosystem and SDK adoption
 
-The marketplace uses a hybrid gas payment model:
+5. **Scalable Business Model**
 
-| Operation | Who Pays | Gas Cost | Rationale |
-|-----------|----------|----------|-----------|
-| Session Creation | User | ~200k gas | User initiates service |
-| Checkpoint Proofs | Host | ~30k gas each | Host secures payment |
-| Session Completion | User | ~100k gas | User triggers settlement |
+   - Near-zero marginal cost (automated operations)
+   - Global market reach (no geographic restrictions)
+   - Multiple revenue streams (fees, enterprise, curation)
+   - Sustainable economics (10% treasury fee sufficient)
 
-### Automatic Settlement Innovation
-
-The system now features **gasless session ending for users** through automatic settlement:
-- When users end a session, they simply close the WebSocket connection
-- The host node (v5+) automatically detects disconnection and calls `completeSessionJob()`
-- Hosts pay the gas for settlement (they're incentivized to get their payment)
-- Users receive their refund without paying any gas fees
-- This eliminates the previous incentive misalignment completely
+6. **Aligned Incentives**
+   - Hosts earn 90% (incentivized to provide quality service)
+   - Users pay fair market rates (competitive pricing)
+   - Protocol captures sustainable 10% fee
+   - Community governance (token holder alignment)
 
 ## Technical Specifications
 
-### Contract Addresses (Base Sepolia)
+### Smart Contract Architecture
 
-```
-JobMarketplace: 0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944
-ProofSystem: 0x2ACcc60893872A499700908889B38C5420CBcFD1
-NodeRegistry: 0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218
-HostEarnings: 0x908962e8c6CE72610021586f85ebDE09aAc97776
-ModelRegistry: 0x92b2De840bB2171203011A6dBA928d855cA8183E
-USDC Token: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
-FAB Token: 0xC78949004B4EB6dEf2D66e49Cd81231472612D62
-```
+**Core Contracts**:
 
-### SDK Requirements
+- **JobMarketplace**: Job creation, assignment, payment escrow, settlement
+- **NodeRegistry**: Host registration, model listings, public key storage
+- **ProofSystem**: STARK proof hash + CID verification
+- **HostEarnings**: Accumulated earnings tracking, withdrawal management
+- **ModelRegistry**: Model approvals, governance, quality control
 
-All 7 contract addresses must be provided - no fallbacks or defaults.
+**Contract Addresses**:
+See `.env.test` for current deployed addresses on Base Sepolia and opBNB Testnet. Addresses are updated with each contract deployment and should never be hardcoded.
+
+### SDK Architecture
+
+**8 Specialized Managers**:
+
+1. **AuthManager**: Wallet authentication, S5 seed generation
+2. **PaymentManagerMultiChain**: Deposits, withdrawals, multi-chain, multi-token
+3. **SessionManager**: WebSocket sessions, encryption, streaming
+4. **HostManager**: Registration, pricing, earnings, public key retrieval
+5. **StorageManager**: Encrypted conversation storage (S5), user settings
+6. **ModelManager**: Model registry, governance, approvals
+7. **TreasuryManager**: Platform fee management, governance funds
+8. **ClientManager**: Client reputation, usage tracking
+
+### Encryption Specifications
+
+- **Algorithm**: XChaCha20-Poly1305 AEAD (Authenticated Encryption with Associated Data)
+- **Key Exchange**: Ephemeral-static ECDH on secp256k1
+- **Signatures**: ECDSA secp256k1 (same as Ethereum)
+- **Key Derivation**: HKDF-SHA256
+- **Session Keys**: Random 32 bytes, ephemeral (forward secrecy)
+- **Libraries**: @noble/secp256k1, @noble/ciphers (audited, production-grade)
+
+### Proof Specifications
+
+- **Proof System**: Risc0 zkVM STARK proofs
+- **Proof Size**: ~221KB per checkpoint (1,000 tokens)
+- **Storage**: S5 decentralized network (Sia)
+- **On-Chain Data**: 32-byte hash + CID (~300 bytes total)
+- **Size Reduction**: 737x (221KB → 300 bytes)
+- **Generation Time**: 0.2-2.3s (GPU-accelerated with CUDA)
+- **Verification**: Anyone can retrieve from S5 and verify hash
 
 ## Risk Mitigation
 
 ### Technical Risks
-- **Mitigation**: Extensive testing, gradual rollout, failover systems
+
+- **Risk**: Smart contract vulnerabilities
+- **Mitigation**: Security audits, gradual rollout, bug bounty program, immutable core logic
 
 ### Regulatory Risks
-- **Mitigation**: Decentralized architecture, compliance tools, geographic flexibility
+
+- **Risk**: AI regulation, data privacy laws
+- **Mitigation**: Compliance-by-design (ISO 27001, ISO 42001, SOC 2), decentralized architecture, legal counsel
 
 ### Competition Risks
-- **Mitigation**: First mover advantage, network effects, continuous innovation
+
+- **Risk**: Centralized platforms improve privacy, other decentralized projects
+- **Mitigation**: First mover advantage, network effects, continuous innovation, technical moat
 
 ### Adoption Risks
-- **Mitigation**: Developer-friendly tools, competitive pricing, superior UX
+
+- **Risk**: Crypto wallet barrier, complexity
+- **Mitigation**: Developer-friendly SDK, comprehensive docs, enterprise onboarding support, fiat on-ramps (future)
+
+### Market Risks
+
+- **Risk**: AI market consolidation, regulatory crackdown
+- **Mitigation**: Multi-chain support, geographic diversity, compliance readiness, open-source ethos
 
 ## Team & Governance
 
 ### Core Development
-- Experienced blockchain developers
-- AI/ML expertise
-- Distributed systems engineers
-- Open-source contributors
 
-### Advisory Network
-- Blockchain industry veterans
-- AI researchers
-- Business development experts
-- Legal and compliance advisors
+- Experienced blockchain developers (Ethereum, smart contracts)
+- AI/ML expertise (GGUF models, inference optimization)
+- Distributed systems engineers (P2P, libp2p, WebSocket)
+- Cryptography specialists (STARK proofs, encryption)
+- Open-source contributors (Sia Foundation grant recipient)
+
+### Grants & Funding
+
+- **Sia Foundation Grant**: Enhanced S5.js development (completed)
+- **Base Ecosystem Support**: Contract deployment, developer relations
+- Seeking: Seed round for team expansion, security audits, marketing
 
 ### Community Governance
-- Progressive decentralization
-- Token holder voting
-- Grant programs
-- Ecosystem fund
+
+- Progressive decentralization roadmap
+- FAB token holder voting (model approvals, protocol upgrades)
+- Grant programs for ecosystem development
+- Transparent treasury management
 
 ## Call to Action
 
 ### For Investors
-- Join us in building the decentralized AI infrastructure
-- Ground floor opportunity in emerging market
-- Contact: investors@fabstir.com
+
+- **Opportunity**: Ground floor in platformless AI infrastructure (new category)
+- **Stage**: MVP complete, deploying to production Q1 2025
+- **Contact**: investors@fabstir.com
+- **Ask**: Seed round to scale team, audits, enterprise sales
+
+### For Enterprise Customers
+
+- **Beta Program**: Limited spots for Q1 2025 enterprise beta
+- **Benefits**: Early access, custom compliance support, dedicated integration help
+- **Contact**: enterprise@fabstir.com or DM on LinkedIn
+- **Industries**: Financial services, healthcare, legal, media & entertainment
 
 ### For Developers
-- Start building with our SDK today
-- Access cutting-edge models affordably
-- Documentation: https://docs.fabstir.com
+
+- **Get Started**: SDK available now (@fabstir/sdk-core)
+- **Documentation**: https://docs.platformless.org (comprehensive API reference)
+- **GitHub**: https://github.com/fabstir-llm-marketplace (open source)
+- **Community**: Discord for real-time support
 
 ### For GPU Providers
-- Monetize your idle hardware
-- Join the network as a host
-- Setup guide: https://fabstir.com/host
+
+- **Requirements**: RTX 3060+ (8GB VRAM), Docker, stable internet
+- **Earnings**: 90% of inference payments, set your own pricing
+- **Setup**: Host CLI tools, Docker-based deployment
+- **Contact**: hosts@fabstir.com or join Discord #hosting
 
 ### For Partners
-- Integrate Fabstir into your platform
-- White-label solutions available
-- Contact: partnerships@fabstir.com
+
+- **Integration**: White-label solutions, API partnerships
+- **Opportunities**: Model providers, infrastructure partners, compliance consultants
+- **Contact**: partnerships@fabstir.com
 
 ## Conclusion
 
-Fabstir is positioned to become the foundational infrastructure for decentralized AI services. By solving the critical problems of centralization, cost, and accessibility in the AI market, we're enabling a new era of permissionless innovation and global access to artificial intelligence.
+Platformless AI represents a fundamental shift in AI infrastructure - from platform-centric to protocol-centric. By eliminating the centralized middleman through smart contracts, cryptographic proofs, and end-to-end encryption, we're building AI infrastructure that cannot censor, cannot spy, and cannot be shut down.
 
-The convergence of blockchain technology, cryptographic proofs, and distributed computing creates a unique opportunity to build a more open, efficient, and equitable AI ecosystem. With our technology operational and ready for scale, Fabstir is poised to capture significant value in the rapidly growing AI market.
+Our MVP is complete and production-ready. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise and developer adoption as AI regulation tightens and privacy concerns intensify.
+
+The convergence of blockchain technology, zero-knowledge cryptography, and decentralized storage creates a unique opportunity to build AI infrastructure that respects user sovereignty, protects intellectual property, and enables permissionless innovation. With first-mover advantage in the platformless AI category, we're poised to become foundational infrastructure for the next generation of AI applications.
 
 ---
 
 ## Key Metrics
 
-| Metric | Current (Testnet) | Target (Year 1) |
-|--------|------------------|-----------------|
-| Active Hosts | 10+ | 1,000+ |
-| Available Models | 5 | 100+ |
-| Monthly Transactions | 1,000+ | 1,000,000+ |
-| Total Value Locked | $10,000 | $10,000,000 |
-| SDK Integrations | 5 | 500+ |
-| Average Response Time | <2s | <1s |
-| Cost vs Centralized | 80% lower | 90% lower |
+| Metric               | Current (Testnet) | Target Q2 2025 | Target Q4 2025 |
+| -------------------- | ----------------- | -------------- | -------------- |
+| Active Hosts         | 5-10              | 50+            | 100+           |
+| Available Models     | 5                 | 20+            | 50+            |
+| Monthly Sessions     | 100+              | 1,000+         | 10,000+        |
+| Enterprise Customers | 0                 | 3-5 pilots     | 10-20 paying   |
+| Total Value Locked   | $5,000            | $100,000       | $1,000,000     |
+| SDK Downloads        | 50+               | 500+           | 2,000+         |
+| Avg Response Time    | <2s               | <1.5s          | <1s            |
+| Encryption Default   | 100%              | 100%           | 100%           |
 
 ## Contact Information
 
-- **Website**: https://fabstir.com
-- **Documentation**: https://docs.fabstir.com
-- **GitHub**: https://github.com/fabstir
+- **Website**: https://platformlessai.org
+- **Documentation**: https://docs.platformlessai.org (coming soon)
+- **GitHub**: https://github.com/fabstir-llm-marketplace
 - **Discord**: https://discord.gg/fabstir
-- **Twitter**: @FabstirNetwork
-- **Email**: info@fabstir.com
+- **Twitter**: @PlatformlessAI (coming soon)
+- **LinkedIn**: Search "Platformless AI"
+- **Email**:
+  - General: info@fabstir.com
+  - Investors: investors@fabstir.com
+  - Enterprise: enterprise@fabstir.com
+  - Support: support@fabstir.com
 
 ---
 
-*"Democratizing AI, One Inference at a Time"*
+_"AI Without the Platform - Trustless, Private, Sovereign"_
 
-**© 2025 Fabstir Network. Building the Future of Decentralized AI.**
+**Built by Fabstir | Powered by Sia Storage | Secured by STARK Proofs**
+
+**© 2025 Platformless AI. Building the Future of Trustless AI Infrastructure.**

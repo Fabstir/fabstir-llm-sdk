@@ -105,6 +105,8 @@ When loading:
 - **Authenticated**: Signature proves conversation ownership
 - **Multi-Host Isolation**: Each host has different encryption keys
 
+**Side note**: S5.js stores the encrypted bytes as opaque data - it doesn't add another encryption layer on top. The SDK's EncryptionManager handles all E2E encryption, and S5.js simply persists those encrypted bytes to the Sia network. This single-layer approach is efficient and provides full end-to-end encryption from client to host.
+
 ## Quick Start
 
 ### Default Behavior (Encrypted)
@@ -216,6 +218,8 @@ Session Start → Generate random 32 bytes → Use for message encryption → Di
 - Host discovery metadata (for marketplace functionality)
 - Payment amounts and token usage
 - Contract interactions
+
+**Note**: Encrypted data stored via S5.js remains encrypted on the Sia network. The SDK encrypts conversations before storage, and S5.js persists those encrypted bytes. Sia network operators and S5 nodes cannot read the content - only you and the host (with the correct keys) can decrypt it.
 
 ### Forward Secrecy
 
@@ -435,6 +439,8 @@ await sessionManager.startSession({
 - **API Reference**: See `docs/SDK_API.md` (Session Management section)
 - **FAQ**: See `docs/ENCRYPTION_FAQ.md`
 - **Test Coverage**: See `packages/sdk-core/tests/integration/encryption-e2e.test.ts`
+
+**Note**: Enhanced S5.js has built-in encryption capabilities (`uploadBlobEncrypted()` for blobs, `encryptMutableBytes()` for mutable data), but the SDK uses its own EncryptionManager for end-to-end encryption between users and hosts. S5.js encryption is storage-focused, while SDK encryption provides session-level forward secrecy, sender authentication, and multi-host isolation. The SDK's encrypted data is stored as-is via S5.js to Sia network.
 
 ## Security Disclosure
 
