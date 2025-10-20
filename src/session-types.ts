@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import type { Message } from './storage/types';
 export interface SessionParams { duration: number; maxInactivity: number; messageLimit: number; checkpointInterval: number; }
 export interface SessionJob { jobId: number; client: string; status: string; params: SessionParams; checkpointCount: number; lastCheckpoint: number; currentCost: string; }

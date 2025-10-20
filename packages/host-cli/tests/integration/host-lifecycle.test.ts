@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Host Lifecycle Integration Tests
  * End-to-end tests for complete host lifecycle

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Management API Server (Sub-phases 1.1, 1.2 & 1.3)
  * Express server with health endpoint and CORS support

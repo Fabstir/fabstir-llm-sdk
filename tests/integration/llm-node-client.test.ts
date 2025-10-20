@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { LLMNodeClient } from '../../src/inference/LLMNodeClient';
 import { EventEmitter } from 'events';

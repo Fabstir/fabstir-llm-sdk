@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Proof Verifier - Browser-compatible proof verification
  * Can verify simple proofs without heavy computation

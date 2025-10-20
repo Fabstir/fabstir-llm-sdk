@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 export const JobMarketplaceABI = [
   // Create session job (payable) - 5 parameters
   "function createSessionJob(address hostAddress, uint256 depositAmount, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval) payable returns (uint256)",

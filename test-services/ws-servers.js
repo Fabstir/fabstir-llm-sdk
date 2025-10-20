@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { WebSocketServer } from 'ws';
 
 // Create servers on ports 8080-8088 for different test hosts

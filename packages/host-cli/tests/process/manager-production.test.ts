@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * ProcessManager production updates tests
  * Tests for production-ready process management with environment variables

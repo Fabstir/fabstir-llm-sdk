@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Host WebSocket Client (Sub-phase 4.2)
  * Browser-side WebSocket client for real-time log streaming

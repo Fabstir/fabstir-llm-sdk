@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Web Crypto API utilities for browser-compatible cryptography
  * Replaces Node.js crypto module

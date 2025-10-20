@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import type AuthManager from './AuthManager';
 import type { 
   Node, PeerInfo, ReputationScore, ConnectionMetrics, 

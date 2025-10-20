@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { ethers } from 'ethers';
 const CONTRACT_JOB_MARKETPLACE = '0xD937c594682Fe74E6e3d06239719805C04BE804A';
 const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';

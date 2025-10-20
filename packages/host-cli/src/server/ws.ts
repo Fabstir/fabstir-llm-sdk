@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * WebSocket Log Server (Sub-phases 2.1 & 2.2)
  * Provides real-time log streaming via WebSocket with log file tailing

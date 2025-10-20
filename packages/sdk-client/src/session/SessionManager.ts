@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { EventEmitter } from 'events';
 import { ethers } from 'ethers';
 import type { SessionParams, SessionJob, SessionStatus, TxReceipt } from './types';

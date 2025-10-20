@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Node Management Client Component
  * This component ONLY runs on the client side and loads SDK dynamically

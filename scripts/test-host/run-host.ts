@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { ethers } from 'ethers';
 import { createLibp2p } from 'libp2p';
 import { tcp } from '@libp2p/tcp';

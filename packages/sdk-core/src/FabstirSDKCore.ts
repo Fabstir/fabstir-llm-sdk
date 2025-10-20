@@ -1,6 +1,9 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * FabstirSDKCore - Browser-compatible SDK for Fabstir LLM Marketplace
- * 
+ *
  * This is the main entry point for browser applications.
  * All functionality is browser-safe with zero Node.js dependencies.
  */

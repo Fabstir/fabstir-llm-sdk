@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * P2P Service Interface - Browser-compatible interface for P2P operations
  * Actual P2P implementation resides in sdk-node

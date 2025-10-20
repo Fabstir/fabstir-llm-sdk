@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Base Account Kit integration for browser environments
  * Provides seamless wallet connection with sub-account support

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * @file Pricing Types Tests
  * @description Tests for HostInfo pricing fields and HostRegistrationWithModels pricing parameter

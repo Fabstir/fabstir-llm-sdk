@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PIDManager } from '../../src/daemon/pid';
 import * as path from 'path';

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { useState, useEffect } from 'react';
 import { getOrCreateSubAccount, getCurrentSubAccount } from '../lib/sub-account';
 import { connectWallet } from '../lib/base-account';

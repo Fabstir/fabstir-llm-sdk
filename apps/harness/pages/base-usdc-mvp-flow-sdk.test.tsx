@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Base Account Kit USDC Payment Flow Test Page
  * This test page demonstrates USDC payments with Base Account Kit integration

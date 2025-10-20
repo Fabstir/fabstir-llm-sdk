@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import 'fake-indexeddb/auto'; // Required for S5.js in Node.js
 import * as path from 'path';

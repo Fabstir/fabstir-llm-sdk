@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import 'fake-indexeddb/auto';
 import { S5 } from '@s5-dev/s5js';
 import type { Message, StorageConfig, AccessGrant } from './types';

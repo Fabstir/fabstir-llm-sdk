@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { IWalletProvider, WalletCapabilities, TransactionRequest, TransactionResponse } from '../interfaces/IWalletProvider';
 import { ethers } from 'ethers';
 import { ChainId } from '../types/chain.types';

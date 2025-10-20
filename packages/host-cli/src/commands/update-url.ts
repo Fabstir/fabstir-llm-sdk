@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { initializeSDK, authenticateSDK, getHostManager, getAuthenticatedAddress } from '../sdk/client';

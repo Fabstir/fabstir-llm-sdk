@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Shared types for browser-compatible SDK
  * All types must be browser-safe (no Node.js specific types)

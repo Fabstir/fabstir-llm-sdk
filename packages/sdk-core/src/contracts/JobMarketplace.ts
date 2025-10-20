@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { ethers, Signer, Contract } from 'ethers';
 import { ChainRegistry } from '../config/ChainRegistry';
 import { ChainId } from '../types/chain.types';

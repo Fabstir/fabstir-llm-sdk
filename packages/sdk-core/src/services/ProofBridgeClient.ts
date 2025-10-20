@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Proof Bridge Client - Browser client for proof generation service
  * Communicates with sdk-node for heavy proof generation

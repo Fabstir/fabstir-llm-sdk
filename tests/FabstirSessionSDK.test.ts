@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeEach, vi, beforeAll, afterEach } from 'vitest';
 import { FabstirSessionSDK } from '../src/FabstirSessionSDK';
 import type { SDKConfig, Session } from '../src/session-types';

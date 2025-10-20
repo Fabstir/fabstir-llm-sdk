@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { createBaseAccountSDK, base } from '@base-org/account';
 import { numberToHex, encodeFunctionData, type Hex } from 'viem';
 

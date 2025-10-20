@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { Command } from 'commander';
 import * as ConfigStorage from '../config/storage';
 import * as ConfigManager from '../config/manager';

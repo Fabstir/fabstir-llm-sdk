@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Proof Service Interface - Browser-compatible interface for proof operations
  * Actual proof generation happens in sdk-node

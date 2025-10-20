@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Fabstir
+# SPDX-License-Identifier: BUSL-1.1
+
 FROM fabstir-llm-sdk-dev-cdp:latest
 
 # Switch to root to install system packages

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { S5 } from '@s5-dev/s5js';
 interface ConversationData { prompt: string; response: string; jobId: number; timestamp: number; tokensUsed: number; }
 interface StorageResult { success: boolean; cid?: string; error?: string; }

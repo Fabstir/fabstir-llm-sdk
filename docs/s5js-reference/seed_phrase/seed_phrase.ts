@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 // MIT License
 // Copyright (c) 2021 Skynet Labs
 

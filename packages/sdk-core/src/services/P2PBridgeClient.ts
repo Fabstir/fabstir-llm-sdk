@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * P2P Bridge Client - Browser-compatible WebSocket client
  * Communicates with sdk-node P2P service

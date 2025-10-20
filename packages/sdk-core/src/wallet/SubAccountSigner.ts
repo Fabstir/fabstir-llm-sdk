@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * SubAccountSigner - Custom ethers signer that enables popup-free transactions
  *

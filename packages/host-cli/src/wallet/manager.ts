@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { Wallet, HDNodeWallet, Mnemonic } from 'ethers';
 
 export async function generateWallet(): Promise<HDNodeWallet> {

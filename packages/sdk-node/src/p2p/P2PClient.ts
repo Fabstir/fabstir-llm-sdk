@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * P2P Client - Server-only P2P networking implementation
  * Uses libp2p for actual peer-to-peer communication

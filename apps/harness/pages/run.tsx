@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { useState } from "react";
 import { createBaseAccountSDK } from "@base-org/account";
 import { encodeFunctionData, parseUnits } from "viem";

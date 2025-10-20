@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 // tests/mode/mode-behavior.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { FabstirSDK, JobStatus } from "../../src/index";

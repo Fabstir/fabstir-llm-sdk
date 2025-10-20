@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 // tests/helpers/mock-p2p.ts
 // Mock P2PClient for testing without actual libp2p
 

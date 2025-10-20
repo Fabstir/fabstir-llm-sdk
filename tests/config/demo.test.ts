@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 // src/__tests__/compatibility/demo.test.ts
 import { describe, it, expect, vi } from "vitest";
 import { FabstirSDK } from "../../src/index";

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Serve Command (Sub-phase 3.1)
  * Starts the management API server for browser-based control

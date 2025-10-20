@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Phase 1.1: Unit tests for checkAllowance() SDK integration
  * These tests verify that checkAllowance() uses PaymentManager.checkAllowance()

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * @file Host Discovery Pricing Tests
  * @description Tests for price filtering and sorting in host discovery (Sub-phase 2.3)

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Session Job Manager for browser-compatible USDC payment flows
  * Based on the working base-usdc-mvp-flow.test.tsx implementation

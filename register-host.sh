@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Fabstir
+# SPDX-License-Identifier: BUSL-1.1
+
 #!/bin/bash
 # Register TEST_HOST_1 via CLI to create local config
 

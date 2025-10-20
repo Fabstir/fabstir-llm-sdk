@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createLibp2p, Libp2p } from 'libp2p';
 import { tcp } from '@libp2p/tcp';

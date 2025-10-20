@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * @fabstir/sdk-core - Browser-compatible SDK for Fabstir P2P LLM marketplace
  * 

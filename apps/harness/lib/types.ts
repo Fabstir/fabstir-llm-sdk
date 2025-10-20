@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 // Batch call types for EIP-5792
 export interface BatchCall {
   to: `0x${string}`;

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import type { CacheConfig, CacheEntry } from './types';
 
 export class SessionCache<T> {

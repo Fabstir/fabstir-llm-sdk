@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeEach } from 'vitest';
 import { getTestUser, getTestHost } from './setup/test-accounts';
 import { mockSDKConfig } from './setup/test-helpers';

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Centralized ABI imports - Single source of truth for all contract ABIs
  * ABIs are stored in src/contracts/abis/

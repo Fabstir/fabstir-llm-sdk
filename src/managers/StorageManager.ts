@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { ethers } from 'ethers';
 import 'fake-indexeddb/auto'; // Required for S5.js in Node.js
 import { S5 } from '@s5-dev/s5js';

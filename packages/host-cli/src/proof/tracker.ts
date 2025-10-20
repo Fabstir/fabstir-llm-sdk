@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { EventEmitter } from 'events';
 import * as fs from 'fs/promises';
 import * as path from 'path';

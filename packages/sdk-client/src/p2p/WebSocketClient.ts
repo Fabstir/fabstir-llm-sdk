@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { ConnectionOptions, ConnectionState, P2PMessage, ResponseHandler } from './types';
 export class WebSocketClient {
   private ws?: WebSocket;

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { ethers } from 'ethers';
 import * as secp from '@noble/secp256k1';

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Demo page for unified payment flow
  * Handles both EOA and Smart Wallet users seamlessly

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 export class LLMWebSocketClient {
   private ws: WebSocket | null = null;
   private tokenCount = 0;

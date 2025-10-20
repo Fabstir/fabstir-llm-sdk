@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { IWalletProvider } from '../interfaces/IWalletProvider';
 import { EOAProvider } from '../providers/EOAProvider';
 import { SmartAccountProvider } from '../providers/SmartAccountProvider';

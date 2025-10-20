@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { Logger } from './logger';
 import * as os from 'os';
 import * as fs from 'fs';

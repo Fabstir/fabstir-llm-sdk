@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 // src/FabstirSDK.ts
 import { ethers } from 'ethers';
 import { SDKConfig, SDKError } from './types';

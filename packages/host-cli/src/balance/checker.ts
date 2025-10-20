@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Balance checking module for ETH and FAB tokens
  * Handles balance retrieval, formatting, and requirement checking

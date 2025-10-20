@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Fabstir
+# SPDX-License-Identifier: BUSL-1.1
+
 #!/bin/bash
 # Start Fabstir Host 2 Docker Container with mounted binary and GPU support
 # This runs TEST_HOST_2_ADDRESS on port 8084

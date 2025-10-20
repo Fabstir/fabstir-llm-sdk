@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Unified Bridge Client - Single client for all server-side features
  * Connects to sdk-node bridge server for P2P and proof generation

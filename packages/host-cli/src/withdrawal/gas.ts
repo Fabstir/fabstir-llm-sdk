@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Gas estimation module
  * Handles gas price fetching and cost calculation for withdrawals

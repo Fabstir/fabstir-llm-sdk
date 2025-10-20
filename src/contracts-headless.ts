@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 // src/contracts-headless.ts
 import { ethers } from 'ethers';
 import { TOKEN_ADDRESSES, CONTRACT_ADDRESSES, ERC20_ABI } from './types/contracts.js';

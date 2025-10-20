@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import React, { useState, useEffect } from 'react';
 import { formatUnits } from 'viem';
 import { fetchAllBalances, HOST_ADDRESS, TREASURY_ADDRESS } from '../lib/balance-fetcher';

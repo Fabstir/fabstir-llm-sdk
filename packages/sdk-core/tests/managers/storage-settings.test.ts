@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * @file Storage Manager User Settings Tests
  * @description Tests for user settings storage methods in StorageManager

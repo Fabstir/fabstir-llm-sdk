@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { FallbackManager } from './fallback';
 import { ethers } from 'ethers';
 import EventEmitter from 'events';

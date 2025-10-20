@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import SessionManager from '../../src/managers/SessionManager';
 import AuthManager from '../../src/managers/AuthManager';

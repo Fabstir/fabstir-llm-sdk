@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeAll } from 'vitest';
 import { S5 } from '@s5-dev/s5js';
 import { config as loadEnv } from 'dotenv';

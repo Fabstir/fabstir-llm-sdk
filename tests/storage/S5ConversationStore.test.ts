@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest';
 import { S5ConversationStore } from '../../src/storage/S5ConversationStore';
 import type { Message } from '../../src/storage/types';

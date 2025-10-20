@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { LogRotator } from '../../src/logging/rotation';
 import * as fs from 'fs';

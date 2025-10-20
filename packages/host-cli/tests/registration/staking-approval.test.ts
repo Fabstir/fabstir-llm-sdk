@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Phase 1.3: Unit tests for approveTokens() SDK integration
  * These tests verify that approveTokens() uses PaymentManager.approveToken()

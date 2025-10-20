@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { SessionManager } from '../../packages/sdk-client/src/session/SessionManager';
 import { getTestUser, getTestHost, fundAccount } from './setup/test-accounts';

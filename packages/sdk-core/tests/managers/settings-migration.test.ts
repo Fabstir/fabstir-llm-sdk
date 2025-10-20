@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * @file UserSettings Migration Tests
  * @description Tests for UserSettings schema migration system

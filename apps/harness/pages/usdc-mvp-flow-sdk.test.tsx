@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * USDC Direct Payment Flow Test Page - Multi-Chain Support
  * This test page demonstrates the direct USDC payment flow (approval pattern)

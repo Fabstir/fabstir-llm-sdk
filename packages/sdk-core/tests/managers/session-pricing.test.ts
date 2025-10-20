@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * @file Session Manager Pricing Tests
  * @description Tests for session price validation against host minimums (Sub-phase 2.4)

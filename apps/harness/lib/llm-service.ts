@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { LLMWebSocketClient } from './websocket-client';
 const DEFAULT_PROMPT = "1 + 1 = ?";
 interface LLMResponse { response: string; tokens: number; prompt: string; }

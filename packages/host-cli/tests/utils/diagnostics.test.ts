@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Network diagnostics tests
  * Tests for troubleshooting helpers and network diagnostic utilities

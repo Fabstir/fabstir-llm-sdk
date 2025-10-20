@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { isAddress } from 'ethers';
 import { ConfigData, ValidationResult, PartialConfig } from './types';
 

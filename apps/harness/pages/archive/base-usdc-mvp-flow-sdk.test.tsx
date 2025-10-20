@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * USDC Payment Flow Test Page - Using FabstirSDKCore
  * This test page demonstrates the complete flow using SDK managers instead of direct contract calls

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * @file User Settings Types
  * @description TypeScript types and interfaces for user settings storage via S5

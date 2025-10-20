@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { Wallet, HDNodeWallet } from 'ethers';
 import * as keytar from 'keytar';
 import * as fs from 'fs/promises';

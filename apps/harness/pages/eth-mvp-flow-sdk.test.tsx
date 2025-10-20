@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * ETH Direct Payment Flow Test Page - Multi-Chain Support
  * This test page demonstrates the direct ETH payment flow

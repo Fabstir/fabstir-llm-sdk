@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 // tests/streaming/p2p-stream.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * P2P Bridge Server - WebSocket server that bridges browser clients to P2P network
  * Provides JSON-RPC interface for sdk-core clients

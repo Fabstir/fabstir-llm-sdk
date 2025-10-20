@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Host API Client (Sub-phase 4.1)
  * Browser-side HTTP client for calling the management server API

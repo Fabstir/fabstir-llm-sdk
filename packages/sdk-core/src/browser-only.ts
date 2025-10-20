@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Browser-only exports without S5 dependencies
  * Used for initial page loads where S5 is not needed

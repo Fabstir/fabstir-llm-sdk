@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * @file Host Manager Pricing Tests
  * @description Tests for host-controlled pricing methods (Sub-phase 2.2)

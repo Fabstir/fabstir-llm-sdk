@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import InferenceManager from '../../src/managers/InferenceManager';
 import { WebSocketClient } from '../../packages/sdk-client/src/p2p/WebSocketClient';

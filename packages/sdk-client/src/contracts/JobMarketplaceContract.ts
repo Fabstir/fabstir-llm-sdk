@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { ethers } from 'ethers';
 import { readFileSync } from 'fs';
 import { join } from 'path';

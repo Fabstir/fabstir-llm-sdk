@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import React, { useState, useCallback } from 'react';
 import { ethers } from 'ethers';
 import { ModelManager, APPROVED_MODELS } from '@fabstir/sdk-core';

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 // src/adapters/react/use-sdk.ts
 // React adapter for FabstirSDKHeadless - provides React hooks for easy integration
 // This adapter is OPTIONAL and only needed for React applications

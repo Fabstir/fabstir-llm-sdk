@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * EZKL Proof Generator - Server-side proof generation
  * Handles heavy cryptographic operations for zero-knowledge proofs

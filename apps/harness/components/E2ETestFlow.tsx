@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import React, { useState } from 'react';
 import { parseUnits } from 'viem';
 import { LLMService } from '../lib/llm-service';

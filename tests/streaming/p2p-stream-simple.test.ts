@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 // tests/streaming/p2p-stream-simple.test.ts
 // Test P2P streaming without starting actual libp2p
 

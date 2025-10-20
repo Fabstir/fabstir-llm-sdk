@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { encodeFunctionData } from 'viem';
 import { connectWallet } from './base-account';
 import { getOrCreateSubAccount } from './sub-account';

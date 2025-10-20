@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 // src/adapters/react/index.ts
 export { useSDK, useSDKWithState, useSDKWithWagmi, default } from './use-sdk.js';
 

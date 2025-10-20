@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect } from 'vitest';
 import { ethers } from 'ethers';
 import 'fake-indexeddb/auto';

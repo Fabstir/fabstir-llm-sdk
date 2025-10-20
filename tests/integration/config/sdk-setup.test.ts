@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createRealSDKConfig, initializeSDK } from './sdk-setup';
 import { BalanceTracker } from '../utils/balance-tracker';

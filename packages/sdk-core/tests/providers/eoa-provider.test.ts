@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EOAProvider } from '../../src/providers/EOAProvider';
 import { IWalletProvider } from '../../src/interfaces/IWalletProvider';

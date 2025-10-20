@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { ethers } from 'ethers';
 interface ProofData { jobId: number; prompt: string; response: string; tokensProven: number; }
 interface ProofStatus { success: boolean; txHash: string; gasUsed: string; confirmations: number; }

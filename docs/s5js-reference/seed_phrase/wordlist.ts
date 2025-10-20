@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /// Wordlist where each word has a unique 3-letter prefix. There are 1024 words
 /// so that each word gives us 10 bits of entropy, which lets us get 16 bytes of
 /// entropy from 13 words. A small wordlist also helps us keep our memory

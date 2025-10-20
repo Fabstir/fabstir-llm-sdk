@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Fabstir
+# SPDX-License-Identifier: BUSL-1.1
+
 #!/bin/bash
 # Start Management Server for Fabstir Host 2
 # Launches HTTP + WebSocket server for browser-based node control

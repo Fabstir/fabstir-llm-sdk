@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { ethers } from 'ethers';
 import { createBaseAccountSDK } from '@base-org/account';
 import type { ProviderInterface } from '@base-org/account';

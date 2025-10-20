@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { test, expect } from '@playwright/test';
 
 test('chat-context-popupfree-demo page loads without errors', async ({ page }) => {

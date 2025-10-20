@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 // Define only the minimal types needed for tests
 export interface SessionParams {
   hostAddress: string;

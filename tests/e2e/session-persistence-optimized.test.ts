@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeAll } from 'vitest';
 import 'fake-indexeddb/auto';
 import { FabstirSDK } from '../../src/FabstirSDK';

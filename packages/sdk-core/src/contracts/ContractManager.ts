@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Browser-compatible contract manager for Fabstir SDK
  * Uses ethers.js v6 with browser providers

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Unified Payment Flow Component
  * Handles both EOA (crypto wallets) and Smart Wallet (credit card) users seamlessly

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * End-to-End Integration Tests for Encryption (Phase 6.1)
  *

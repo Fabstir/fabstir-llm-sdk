@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Tests for Serve Command (Sub-phase 3.1)
  * TDD: These tests are written FIRST and should FAIL until implementation is complete

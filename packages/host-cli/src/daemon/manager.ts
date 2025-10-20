@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { spawn, fork, ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';

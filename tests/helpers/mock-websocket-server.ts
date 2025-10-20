@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { WebSocketServer, WebSocket } from 'ws';
 import * as zlib from 'zlib';
 import { promisify } from 'util';

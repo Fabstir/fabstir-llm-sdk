@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import DiscoveryManager from '../../src/managers/DiscoveryManager';
 import HttpDiscoveryClient from '../../src/discovery/HttpDiscoveryClient';

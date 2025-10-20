@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { FabstirSDK } from '../../src/FabstirSDK';
 import InferenceManager from '../../src/managers/InferenceManager';

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { FabstirSDK, JobStatus, PaymentStatus } from '../src';
 import { ethers } from 'ethers';

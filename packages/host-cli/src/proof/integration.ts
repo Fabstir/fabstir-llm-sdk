@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { EventEmitter } from 'events';
 import { MessageHandler } from '../websocket/handlers';
 import { CheckpointTracker } from './checkpoint';

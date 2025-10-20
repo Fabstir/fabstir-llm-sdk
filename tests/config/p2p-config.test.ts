@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 // tests/config/p2p-config.test.ts
 import { describe, it, expect } from "vitest";
 import { FabstirSDK } from "../../src/index";

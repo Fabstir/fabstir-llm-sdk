@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SessionCache } from '../../src/storage/SessionCache';
 import type { Message } from '../../src/storage/types';

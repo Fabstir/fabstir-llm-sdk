@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Unified Bridge Server - Combines P2P and Proof services
  * Provides a single endpoint for browser clients to access server-only features

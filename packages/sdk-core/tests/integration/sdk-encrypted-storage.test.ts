@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Integration Tests for SDK Encrypted Storage (Phase 5.3)
  *
