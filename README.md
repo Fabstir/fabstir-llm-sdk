@@ -260,9 +260,11 @@ See [LICENSE](LICENSE) for full terms.
 
 ### Interested in Contributing?
 
-We're in pre-MVP development. If you're interested in contributing after our MVP launch, please reach out via:
+During the BUSL-1.1 period (until 2029-01-01), we're focusing on core development. If you're interested in contributing or have questions, please reach out via:
 - 💬 [Discord Community](https://discord.gg/fabstir)
 - 📧 Email: support@fabstir.com
+
+After 2029-01-01, the project converts to AGPL-3.0-or-later and will follow standard open-source contribution practices.
 
 ## Documentation
 
