@@ -239,25 +239,30 @@ pnpm test tests/p2p/streaming.test.ts
 pnpm test:coverage
 ```
 
-## Contributing
+## License & Usage
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+This project is source-available under the **Business Source License 1.1** (BUSL-1.1).
 
-### Development Setup
+### You MAY:
+- ✅ View, audit, and review the code (trustless verification)
+- ✅ Use in production on the Official Platformless AI Network with FAB token
+- ✅ Run nodes on the Official Platformless AI Network
+- ✅ Fork for development, testing, research, and security audits
 
-1. Fork the repository
-2. Clone your fork
-3. Install dependencies: `pnpm install`
-4. Create a feature branch: `git checkout -b feature/amazing-feature`
-5. Make your changes
-6. Run tests: `pnpm test`
-7. Commit your changes: `git commit -m 'Add amazing feature'`
-8. Push to your fork: `git push origin feature/amazing-feature`
-9. Open a Pull Request
+### You MAY NOT (before 2029-01-01):
+- ❌ Launch competing networks with different staking tokens
+- ❌ Operate nodes on competing networks
+- ❌ Offer as commercial hosting service (SaaS/PaaS)
 
-## License
+**After 2029-01-01**: Automatically converts to AGPL-3.0-or-later.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+See [LICENSE](LICENSE) for full terms.
+
+### Interested in Contributing?
+
+We're in pre-MVP development. If you're interested in contributing after our MVP launch, please reach out via:
+- 💬 [Discord Community](https://discord.gg/fabstir)
+- 📧 Email: support@fabstir.com
 
 ## Documentation
 
