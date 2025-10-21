@@ -3,8 +3,10 @@
 
 packages:
   - 'packages/*'
+  - '!packages/s5js'
   - 'apps/*'
   - '.'
 
 # This tells pnpm to treat the packages folder as a workspace
 # and enables cross-package dependencies using workspace: protocol
+# Note: @s5-dev/s5js is installed from tarball (s5js-0.3.0.tgz), not from packages/s5js
