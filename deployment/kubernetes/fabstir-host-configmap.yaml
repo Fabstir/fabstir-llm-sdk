@@ -12,13 +12,13 @@ data:
   # ⚠️ SECURITY: Replace with your actual private key before deploying
   # For TEST_HOST_3, get key from .env.test (for authorized developers only)
   # NEVER commit real private keys to public repositories
-  HOST_PRIVATE_KEY: "REPLACE_WITH_YOUR_PRIVATE_KEY"
+  HOST_PRIVATE_KEY: "0x36c4dbaead98ebd10417c0325da8cf1217e12488185f8c4aec68d5c476f39fa5"
 
   # Network Configuration
   NETWORK: "base-sepolia"
   # Get free API key from https://www.alchemy.com/
-  RPC_URL: "https://base-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY"
-  RPC_URL_BASE_SEPOLIA: "https://base-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY"
+  RPC_URL: "https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR"
+  RPC_URL_BASE_SEPOLIA: "https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR"
   CHAIN_ID: "84532"
 
   # Public URL will be set dynamically (NodePort on 209.250.225.219)
@@ -47,12 +47,10 @@ data:
   P2P_PORT: "9000"
   MANAGEMENT_PORT: "3001"
 
-  # Risc0 Configuration
-  # Use dev mode to bypass CUDA issues (expired vGPU license causes kernel panics)
-  # This generates dummy proofs for testing - GPU still used for LLM inference
-  # Remove after vGPU license renewal to use real proofs
-  RISC0_DEV_MODE: "true"
-
   # Logging
   RUST_LOG: "info"
   NODE_ENV: "production"
+
+  # Use dev mode for proofs (vGPU CUDA kernel compatibility issue)
+  # TODO: Rebuild fabstir-llm-node without CUDA support for RISC0 for production
+  RISC0_DEV_MODE: "true"

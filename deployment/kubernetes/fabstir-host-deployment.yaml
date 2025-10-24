@@ -22,7 +22,7 @@ spec:
     spec:
       # Schedule on GPU node only
       nodeSelector:
-        kubernetes.io/hostname: gpu-supported-528de6ebe05f
+        kubernetes.io/hostname: gpu-supported-6e06c973054f
 
       # Init container: Download AI model from HuggingFace
       initContainers:
@@ -53,11 +53,21 @@ spec:
       # Main container: Fabstir LLM Host
       containers:
       - name: fabstir-host
-        image: ghcr.io/fabstir/llm-host:beta-latest
+        image: ghcr.io/fabstir/llm-host:latest-fixed
         imagePullPolicy: Always
 
-        # Start fabstir-llm-node daemon
-        args: ["start", "--daemon"]
+        # Start both servers (fabstir-llm-node + Management API)
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            # Start fabstir-llm-node in background
+            /usr/local/bin/fabstir-llm-node &
+
+            # Wait for node to be ready
+            sleep 5
+
+            # Start Management API server (foreground)
+            node --require /app/polyfills.js /app/dist/index.js serve --port 3001 --cors '*'
 
         # Environment variables from ConfigMap
         envFrom:
@@ -89,8 +99,8 @@ spec:
             cpu: "1500m"       # 1.5 CPU cores
           requests:
             nvidia.com/gpu: 1
-            memory: "4Gi"
-            cpu: "1000m"
+            memory: "2Gi"
+            cpu: "100m"
 
         # Liveness probe: Check if node is responsive
         livenessProbe:

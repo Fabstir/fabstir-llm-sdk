@@ -22,6 +22,9 @@ out/
 .env.local
 .env.*.local
 .env.test
+.env.production
+.env.mock
+.env.host3.template
 
 # Logs
 logs/

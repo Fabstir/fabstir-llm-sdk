@@ -18,8 +18,9 @@ RUN npm install -g pnpm@8 typescript@5
 COPY packages/sdk-core ./packages/sdk-core
 COPY packages/host-cli ./packages/host-cli
 
-# Copy s5js tarball (includes package.json and dist) and extract
+# Copy s5js tarballs (both the dist and the npm package)
 COPY s5js-dist.tar.gz /tmp/
+COPY s5js-0.3.0.tgz /build/
 RUN mkdir -p ./packages/s5js && \
     tar xzf /tmp/s5js-dist.tar.gz -C ./packages/s5js/ && \
     rm /tmp/s5js-dist.tar.gz
@@ -59,7 +60,10 @@ WORKDIR /build/packages/host-cli
 # Compile TypeScript, ignore type errors for local testing
 RUN npx tsc 2>&1 | tee build.log || true && \
     ls -la dist/ && \
-    echo "Build artifacts created successfully"
+    echo "Build artifacts created successfully" && \
+    # Remove any corrupted shebang lines from dist/index.js
+    grep -v "^#!/" dist/index.js > dist/index-clean.js 2>/dev/null || cp dist/index.js dist/index-clean.js && \
+    mv dist/index-clean.js dist/index.js
 
 #######################
 # Stage 3: Runtime
@@ -134,9 +138,11 @@ global.WebSocket = WebSocket;\n\
 #     && cd .. && rm -rf fabstir-llm-node \
 #     && apt-get remove -y cargo git && apt-get autoremove -y
 
-# Placeholder: For MVP testing, binary should be provided separately
-RUN echo '#!/bin/bash\necho "fabstir-llm-node placeholder - mount actual binary at runtime"\nexit 1' > /usr/local/bin/fabstir-llm-node \
-    && chmod +x /usr/local/bin/fabstir-llm-node
+# Extract fabstir-llm-node binary from tarball
+COPY fabstir-llm-node-v8.1.6-websocket-error-logging.tar.gz /tmp/
+RUN tar xzf /tmp/fabstir-llm-node-v8.1.6-websocket-error-logging.tar.gz -C /usr/local/bin/ fabstir-llm-node && \
+    chmod +x /usr/local/bin/fabstir-llm-node && \
+    rm /tmp/fabstir-llm-node-v8.1.6-websocket-error-logging.tar.gz
 
 # Create directories and symlink for model access
 RUN mkdir -p /models /root/.fabstir/logs \
