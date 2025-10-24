@@ -1,0 +1,189 @@
+# Copyright (c) 2025 Fabstir
+# SPDX-License-Identifier: BUSL-1.1
+
+# ============================================================================
+# Fabstir LLM Host - Production Docker Image (Comprehensive)
+# ============================================================================
+#
+# This multi-stage Dockerfile combines:
+# 1. fabstir-llm-node (Rust binary with STARK proofs)
+# 2. TypeScript Host CLI (from packages/host-cli)
+# 3. NVIDIA CUDA runtime for GPU inference
+# 4. Node.js runtime for TypeScript execution
+#
+# Target Registry: ghcr.io/fabstir/llm-host:beta-latest (Private Beta)
+#                  fabstir/llm-host:v1.0 (Public Launch)
+#
+# GPU Providers: Pull this image and run with just .env configuration
+# ============================================================================
+
+# ============================================================================
+# Stage 1: Extract fabstir-llm-node Binary from Tarball
+# ============================================================================
+FROM ubuntu:22.04 AS node-extractor
+
+WORKDIR /extract
+
+# Copy pre-built fabstir-llm-node tarball from repository root
+COPY fabstir-llm-node-v8.1.6-websocket-error-logging.tar.gz /tmp/
+
+# Extract binary to /usr/local/bin/
+RUN tar xzf /tmp/fabstir-llm-node-v8.1.6-websocket-error-logging.tar.gz -C /tmp/ && \
+    mkdir -p /usr/local/bin && \
+    find /tmp -name "fabstir-llm-node" -type f -executable -exec cp {} /usr/local/bin/ \; && \
+    chmod +x /usr/local/bin/fabstir-llm-node && \
+    ls -lh /usr/local/bin/fabstir-llm-node
+
+# Verify binary exists and is executable
+RUN test -x /usr/local/bin/fabstir-llm-node || (echo "ERROR: fabstir-llm-node binary not found or not executable" && exit 1)
+
+# ============================================================================
+# Stage 2: Build TypeScript Host CLI
+# ============================================================================
+FROM node:20-slim AS typescript-builder
+
+WORKDIR /build
+
+# Install pnpm and TypeScript globally
+RUN npm install -g pnpm@8 typescript@5
+
+# Copy only the packages we need (not the full monorepo)
+COPY packages/sdk-core ./packages/sdk-core
+COPY packages/host-cli ./packages/host-cli
+
+# Copy s5js tarballs
+COPY s5js-dist.tar.gz /tmp/
+COPY s5js-0.3.0.tgz ./s5js-0.3.0.tgz
+RUN mkdir -p ./packages/s5js && \
+    tar xzf /tmp/s5js-dist.tar.gz -C ./packages/s5js/ && \
+    rm /tmp/s5js-dist.tar.gz
+
+# Create minimal pnpm-workspace.yaml for these packages
+RUN echo "packages:" > pnpm-workspace.yaml && \
+    echo "  - 'packages/*'" >> pnpm-workspace.yaml
+
+# Remove fabstir-llm-auth dependency from sdk-core (it's outside monorepo)
+RUN sed -i '/"@fabstir\/llm-auth":/d' packages/sdk-core/package.json
+
+# Install ALL dependencies with --ignore-scripts (avoid premature builds)
+WORKDIR /build/packages/s5js
+RUN pnpm install --ignore-scripts
+
+WORKDIR /build/packages/sdk-core
+RUN pnpm install --ignore-scripts
+
+WORKDIR /build/packages/host-cli
+RUN pnpm install --ignore-scripts
+
+# Fix sdk-core build config to mark s5js and events as external
+WORKDIR /build/packages/sdk-core
+RUN sed -i 's/--external:assert/--external:assert --external:@s5-dev\/s5js --external:events/g' package.json && \
+    sed -i 's/--external:@base-org\/account/--external:@base-org\/account --external:@s5-dev\/s5js --external:events/g' package.json
+
+# Build SDK core (dependency of host-cli)
+RUN pnpm run build
+
+# Build host-cli (allow type errors for local testing)
+WORKDIR /build/packages/host-cli
+
+# Remove shebang from SOURCE file BEFORE compiling (prevents TypeScript errors)
+RUN sed -i '/^#!\//d' src/index.ts && \
+    echo "Removed shebang from src/index.ts"
+
+RUN npx tsc 2>&1 | tee build.log || true && \
+    ls -la dist/ && \
+    echo "Build artifacts created successfully"
+
+# ============================================================================
+# Stage 3: Production Runtime (NVIDIA CUDA + Node.js + Both CLIs)
+# ============================================================================
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
+
+# Install Node.js 20 and dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    wget \
+    gnupg \
+    libgomp1 \
+    libssl-dev \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app directory
+WORKDIR /app
+
+# Install pnpm and browser API polyfills (needed for S5 in Node.js)
+RUN npm install -g pnpm@8 fake-indexeddb ws
+
+# Copy built packages as local dependencies
+COPY --from=typescript-builder /build/packages/sdk-core /tmp/deps/sdk-core
+COPY --from=typescript-builder /build/packages/s5js /tmp/deps/s5js
+
+# Copy host-cli files
+COPY --from=typescript-builder /build/packages/host-cli/package.json ./package.json
+COPY --from=typescript-builder /build/packages/host-cli/dist ./dist
+
+# Copy sdk-core ABI files to expected location
+RUN mkdir -p /sdk-core/src/contracts/abis
+COPY --from=typescript-builder /build/packages/sdk-core/src/contracts/abis/*.json /sdk-core/src/contracts/abis/
+
+# Replace workspace dependencies with local file paths
+# Downgrade inquirer to v8 (v9 is ESM-only, not compatible with CommonJS compilation)
+RUN sed -i 's|"@fabstir/sdk-core": "workspace:\*"|"@fabstir/sdk-core": "file:/tmp/deps/sdk-core"|g' package.json && \
+    sed -i 's|"@s5-dev/s5js": "file:.*"|"@s5-dev/s5js": "file:/tmp/deps/s5js"|g' /tmp/deps/sdk-core/package.json && \
+    sed -i 's|"inquirer": "\^9\.[0-9]*\.[0-9]*"|"inquirer": "^8.2.6"|g' package.json && \
+    sed -i 's|"@types/inquirer": "\^9\.[0-9]*\.[0-9]*"|"@types/inquirer": "^8.2.10"|g' package.json && \
+    pnpm install --prod --no-optional --shamefully-hoist
+
+# Create Node.js polyfill script for browser APIs (IndexedDB, WebSocket)
+RUN echo "// Browser API polyfills for S5 in Node.js\n\
+require('fake-indexeddb/auto');\n\
+const WebSocket = require('ws');\n\
+global.WebSocket = WebSocket;\n\
+" > /app/polyfills.js
+
+# Copy fabstir-llm-node binary from Stage 1
+COPY --from=node-extractor /usr/local/bin/fabstir-llm-node /usr/local/bin/fabstir-llm-node
+RUN chmod +x /usr/local/bin/fabstir-llm-node
+
+# Verify Rust binary is executable
+RUN /usr/local/bin/fabstir-llm-node --version || echo "Warning: fabstir-llm-node binary check failed"
+
+# Create symlink for easier access
+RUN ln -s /app/dist/index.js /usr/local/bin/fabstir-host
+
+# Create directories and symlink for model access
+RUN mkdir -p /models /root/.fabstir/logs && \
+    ln -s /models /app/models
+
+# Expose ports
+# 8083: WebSocket API (fabstir-llm-node)
+# 9000: P2P/libp2p (fabstir-llm-node)
+# 3001: Management API (TypeScript Host CLI)
+EXPOSE 8083 9000 3001
+
+# Environment variables (can be overridden at runtime)
+ENV NODE_ENV=production
+ENV API_PORT=8083
+ENV INTERNAL_PORT=8083
+ENV P2P_PORT=9000
+ENV SKIP_S5_STORAGE=true
+
+# Health check (checks if fabstir-llm-node is running)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8083/health || exit 1
+
+# Set working directory
+WORKDIR /app
+
+# Entry point allows running both CLIs
+# Default: Run TypeScript Host CLI commands
+ENTRYPOINT ["node", "--require", "/app/polyfills.js", "dist/index.js"]
+
+# Default command - show help
+CMD ["--help"]

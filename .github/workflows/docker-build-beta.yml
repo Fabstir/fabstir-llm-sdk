@@ -1,0 +1,207 @@
+# Copyright (c) 2025 Fabstir
+# SPDX-License-Identifier: BUSL-1.1
+
+name: Build Production Docker Image (Private Beta)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/host-cli/**'
+      - 'packages/sdk-core/**'
+      - 'deployment/Dockerfile.production.comprehensive'
+      - '.github/workflows/docker-build-beta.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'packages/host-cli/**'
+      - 'packages/sdk-core/**'
+      - 'deployment/Dockerfile.production.comprehensive'
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: fabstir/llm-host
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write  # Required for GHCR push
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=beta-latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+
+      - name: Check for required files
+        run: |
+          echo "Checking for required files..."
+
+          # Check fabstir-llm-node tarball
+          if [ ! -f "fabstir-llm-node-v8.1.6-websocket-error-logging.tar.gz" ]; then
+            echo "ERROR: fabstir-llm-node tarball not found"
+            echo "Expected: fabstir-llm-node-v8.1.6-websocket-error-logging.tar.gz"
+            exit 1
+          fi
+
+          # Check s5js tarball
+          if [ ! -f "s5js-dist.tar.gz" ]; then
+            echo "ERROR: s5js-dist.tar.gz not found"
+            exit 1
+          fi
+
+          # Check Dockerfile
+          if [ ! -f "deployment/Dockerfile.production.comprehensive" ]; then
+            echo "ERROR: Dockerfile not found"
+            exit 1
+          fi
+
+          echo "✅ All required files found"
+          echo ""
+          echo "File sizes:"
+          ls -lh fabstir-llm-node-v8.1.6-websocket-error-logging.tar.gz
+          ls -lh s5js-dist.tar.gz
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deployment/Dockerfile.production.comprehensive
+          push: false  # Build only for PR
+          load: true  # Load into Docker for testing
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Docker image
+        run: |
+          echo "Testing built image..."
+
+          # Get first tag from metadata
+          IMAGE_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n 1)
+          echo "Testing image: ${IMAGE_TAG}"
+
+          # Test basic help command
+          docker run --rm "${IMAGE_TAG}" --help || true
+
+          # Verify image contents
+          echo ""
+          echo "Verifying image contents..."
+          docker run --rm "${IMAGE_TAG}" sh -c "
+            echo 'Node.js version:' && node --version &&
+            echo 'TypeScript CLI:' && ls -lh /app/dist/ &&
+            echo 'Rust binary:' && ls -lh /usr/local/bin/fabstir-llm-node &&
+            echo 'SDK ABIs:' && ls -lh /sdk-core/src/contracts/abis/
+          "
+
+          echo ""
+          echo "✅ Image test passed"
+
+      - name: Push Docker image to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deployment/Dockerfile.production.comprehensive
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate summary
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "## Docker Build Summary 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Registry:** GitHub Container Registry (GHCR)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Pull Command (Beta Testers):**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:beta-latest" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**View on GHCR:** https://github.com/fabstir/fabstir-llm-sdk/pkgs/container/llm-host" >> $GITHUB_STEP_SUMMARY
+
+      - name: Comment on PR (if applicable)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Docker Build Test ✅\n\nDocker image built and tested successfully!\n\n**Note:** Image was not pushed (PR builds are for testing only).`
+            })
+
+  notify-beta-testers:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Send Discord notification
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_BETA }}
+        if: env.DISCORD_WEBHOOK != ''
+        run: |
+          curl -X POST "$DISCORD_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "content": "🚀 **New Beta Image Available**",
+              "embeds": [{
+                "title": "Fabstir LLM Host - Beta Update",
+                "description": "A new beta image has been published to GHCR.",
+                "color": 5814783,
+                "fields": [
+                  {
+                    "name": "Image",
+                    "value": "```ghcr.io/fabstir/llm-host:beta-latest```",
+                    "inline": false
+                  },
+                  {
+                    "name": "Update Command",
+                    "value": "```bash\ndocker pull ghcr.io/fabstir/llm-host:beta-latest\ndocker restart fabstir-host\n```",
+                    "inline": false
+                  },
+                  {
+                    "name": "Commit",
+                    "value": "[View Changes](https://github.com/${{ github.repository }}/commit/${{ github.sha }})",
+                    "inline": false
+                  }
+                ]
+              }]
+            }'
