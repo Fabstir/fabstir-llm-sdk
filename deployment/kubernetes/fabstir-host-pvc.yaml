@@ -1,0 +1,18 @@
+# Copyright (c) 2025 Fabstir
+# SPDX-License-Identifier: BUSL-1.1
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fabstir-host-models
+  namespace: fabstir-host
+  labels:
+    app: fabstir-host
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  # Uses default storage class from VKE
+  # storageClassName: <use-default>

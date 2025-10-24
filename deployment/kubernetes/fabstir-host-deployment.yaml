@@ -1,0 +1,134 @@
+# Copyright (c) 2025 Fabstir
+# SPDX-License-Identifier: BUSL-1.1
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fabstir-host
+  namespace: fabstir-host
+  labels:
+    app: fabstir-host
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fabstir-host
+  template:
+    metadata:
+      labels:
+        app: fabstir-host
+        version: v1
+    spec:
+      # Schedule on GPU node only
+      nodeSelector:
+        kubernetes.io/hostname: gpu-supported-528de6ebe05f
+
+      # Init container: Download AI model from HuggingFace
+      initContainers:
+      - name: download-model
+        image: curlimages/curl:latest
+        securityContext:
+          runAsUser: 0  # Run as root to write to PVC
+        command:
+        - /bin/sh
+        - -c
+        - |
+          MODEL_PATH="/models/tiny-vicuna-1b.q4_k_m.gguf"
+          if [ -f "$MODEL_PATH" ]; then
+            echo "Model already exists ($(du -h $MODEL_PATH | cut -f1))"
+            echo "Skipping download..."
+          else
+            echo "Downloading TinyVicuna 1B model (~700MB)..."
+            curl -L \
+              --progress-bar \
+              --output "$MODEL_PATH" \
+              "https://huggingface.co/afrideva/Tiny-Vicuna-1B-GGUF/resolve/main/tiny-vicuna-1b.q4_k_m.gguf"
+            echo "Model downloaded successfully ($(du -h $MODEL_PATH | cut -f1))"
+          fi
+        volumeMounts:
+        - name: model-storage
+          mountPath: /models
+
+      # Main container: Fabstir LLM Host
+      containers:
+      - name: fabstir-host
+        image: ghcr.io/fabstir/llm-host:beta-latest
+        imagePullPolicy: Always
+
+        # Start fabstir-llm-node daemon
+        args: ["start", "--daemon"]
+
+        # Environment variables from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: fabstir-host-config
+
+        # Ports
+        ports:
+        - name: api
+          containerPort: 8083
+          protocol: TCP
+        - name: p2p
+          containerPort: 9000
+          protocol: TCP
+        - name: management
+          containerPort: 3001
+          protocol: TCP
+
+        # Volume mounts
+        volumeMounts:
+        - name: model-storage
+          mountPath: /models
+
+        # GPU resources
+        resources:
+          limits:
+            nvidia.com/gpu: 1  # Request 1 GPU
+            memory: "6Gi"      # 6GB RAM (leave 2GB for system)
+            cpu: "1500m"       # 1.5 CPU cores
+          requests:
+            nvidia.com/gpu: 1
+            memory: "4Gi"
+            cpu: "1000m"
+
+        # Liveness probe: Check if node is responsive
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8083
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+
+        # Readiness probe: Check if node is ready to serve
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8083
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        # Security context
+        securityContext:
+          privileged: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: false  # Container needs root for GPU access
+          readOnlyRootFilesystem: false
+
+      # Volumes
+      volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: fabstir-host-models
+
+      # Restart policy
+      restartPolicy: Always
+
+      # Termination grace period
+      terminationGracePeriodSeconds: 30

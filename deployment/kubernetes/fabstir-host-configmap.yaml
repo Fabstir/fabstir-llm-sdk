@@ -1,0 +1,56 @@
+# Copyright (c) 2025 Fabstir
+# SPDX-License-Identifier: BUSL-1.1
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fabstir-host-config
+  namespace: fabstir-host
+  labels:
+    app: fabstir-host
+data:
+  # ⚠️ WARNING: This is TEST_HOST_3 test key for Base Sepolia testnet only
+  # NEVER use this key on mainnet or with real funds
+  HOST_PRIVATE_KEY: "0x36c4dbaead98ebd10417c0325da8cf1217e12488185f8c4aec68d5c476f39fa5"
+
+  # Network Configuration
+  NETWORK: "base-sepolia"
+  RPC_URL: "https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR"
+  RPC_URL_BASE_SEPOLIA: "https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR"
+  CHAIN_ID: "84532"
+
+  # Public URL will be set dynamically (NodePort on 209.250.225.219)
+  # This gets overridden by the deployment
+  PUBLIC_URL: "http://AUTO_DETECT:8083"
+
+  # Contract Addresses (Base Sepolia)
+  CONTRACT_JOB_MARKETPLACE: "0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E"
+  CONTRACT_NODE_REGISTRY: "0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6"
+  CONTRACT_PROOF_SYSTEM: "0x2ACcc60893872A499700908889B38C5420CBcFD1"
+  CONTRACT_HOST_EARNINGS: "0x908962e8c6CE72610021586f85ebDE09aAc97776"
+  CONTRACT_MODEL_REGISTRY: "0x92b2De840bB2171203011A6dBA928d855cA8183E"
+  CONTRACT_FAB_TOKEN: "0xC78949004B4EB6dEf2D66e49Cd81231472612D62"
+  CONTRACT_USDC_TOKEN: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+
+  # Base Account Kit Contracts (Base Sepolia)
+  ENTRY_POINT_ADDRESS: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
+  BASE_CONTRACT_SPEND_PERMISSION_MANAGER: "0x689C16c9E29F3c272f8F415F78C72fC7AbBcD177"
+
+  # Model Configuration
+  MODEL_PATH: "/models/tiny-vicuna-1b.q4_k_m.gguf"
+  GPU_LAYERS: "35"
+
+  # Port Configuration
+  API_PORT: "8083"
+  P2P_PORT: "9000"
+  MANAGEMENT_PORT: "3001"
+
+  # Risc0 Configuration
+  # Use dev mode to bypass CUDA issues (expired vGPU license causes kernel panics)
+  # This generates dummy proofs for testing - GPU still used for LLM inference
+  # Remove after vGPU license renewal to use real proofs
+  RISC0_DEV_MODE: "true"
+
+  # Logging
+  RUST_LOG: "info"
+  NODE_ENV: "production"
