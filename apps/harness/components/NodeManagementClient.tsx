@@ -45,6 +45,11 @@ const TEST_ACCOUNTS = {
     privateKey: process.env.NEXT_PUBLIC_TEST_USER_2_PRIVATE_KEY,
     name: 'Test User 2'
   },
+  TEST_USER_3: {
+    address: process.env.NEXT_PUBLIC_TEST_USER_3_ADDRESS,
+    privateKey: process.env.NEXT_PUBLIC_TEST_USER_3_PRIVATE_KEY,
+    name: 'Test User 3'
+  },
   TEST_HOST_1: {
     address: process.env.NEXT_PUBLIC_TEST_HOST_1_ADDRESS,
     privateKey: process.env.NEXT_PUBLIC_TEST_HOST_1_PRIVATE_KEY,
@@ -58,6 +63,13 @@ const TEST_ACCOUNTS = {
     name: 'Test Host 2',
     apiUrl: process.env.NEXT_PUBLIC_TEST_HOST_2_URL || '',
     mgmtUrl: process.env.NEXT_PUBLIC_TEST_HOST_2_MGMT_URL || ''
+  },
+  TEST_HOST_3: {
+    address: process.env.NEXT_PUBLIC_TEST_HOST_3_ADDRESS,
+    privateKey: process.env.NEXT_PUBLIC_TEST_HOST_3_PRIVATE_KEY,
+    name: 'Test Host 3 (Vultr GPU)',
+    apiUrl: process.env.NEXT_PUBLIC_TEST_HOST_3_URL || '',
+    mgmtUrl: process.env.NEXT_PUBLIC_TEST_HOST_3_MGMT_URL || ''
   }
 };
 
