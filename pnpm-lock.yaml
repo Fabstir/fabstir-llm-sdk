@@ -230,6 +230,9 @@ importers:
       '@fabstir/llm-auth':
         specifier: file:../../../fabstir-llm-auth
         version: file:../fabstir-llm-auth(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
+      '@fabstir/vector-db-native':
+        specifier: file:../../fabstir-vector-db-native-0.1.0.tgz
+        version: file:fabstir-vector-db-native-0.1.0.tgz
       '@noble/ciphers':
         specifier: ^0.4.1
         version: 0.4.1
@@ -864,6 +867,11 @@ packages:
   '@fabstir/llm-auth@file:../fabstir-llm-auth':
     resolution: {directory: ../fabstir-llm-auth, type: directory}
     engines: {node: '>=16.0.0'}
+
+  '@fabstir/vector-db-native@file:fabstir-vector-db-native-0.1.0.tgz':
+    resolution: {integrity: sha512-J11Y5Ejxf6Nl6B6jRcW7e+v2Lm2HnLWFkTT5/NCc8MjxRWwNZBSjQUgYAwl73aH3L5ZQVvmAZ9+HCulb9PRMaw==, tarball: file:fabstir-vector-db-native-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>= 16'}
 
   '@humanwhocodes/config-array@0.13.0':
     resolution: {integrity: sha512-DZLEEqFWQFiyK6h5YIeynKx7JlvCYWL0cImfSRXZ9l4Sg2efkFGTuFf6vzXjK1cq6IYkU+Eg/JizXw+TD2vRNw==}
@@ -4763,6 +4771,8 @@ snapshots:
       - use-sync-external-store
       - utf-8-validate
       - zod
+
+  '@fabstir/vector-db-native@file:fabstir-vector-db-native-0.1.0.tgz': {}
 
   '@humanwhocodes/config-array@0.13.0':
     dependencies:
