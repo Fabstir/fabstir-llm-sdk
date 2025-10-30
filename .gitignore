@@ -91,3 +91,9 @@ register-test-user-2.mjs
 test-register-cli.sh
 s5js-dist.tar.gz
 *.tar.gz
+
+deployment/ui-app/
+VGPU_CUDA_ANALYSIS.md
+docs/archive/ENCRYPTION_COMPARISON_PLATFORMLESS_S5.md
+docs/archive/ENCRYPTION_SUMMARY.md
+docs/archive/PLATFORMLESS_AI_DEPLOYMENT_GUIDE.md
