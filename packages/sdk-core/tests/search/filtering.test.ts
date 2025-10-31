@@ -100,10 +100,8 @@ describe('Vector Search Filtering', () => {
     expect(results.every((r: any) => ['urgent', 'low'].includes(r.metadata.tag))).toBe(true);
   });
 
-  it.skip('should filter with $gt and $lt operators (NOT SUPPORTED in v0.2.0)', async () => {
-    // v0.2.0 limitation: $gt and $lt operators not implemented
-    // Only $gte and $lte are supported
-    // Skipping this test until API adds support
+  it('should filter with $gt and $lt operators', async () => {
+    // Testing $gt and $lt (strictly greater/less than - EXCLUSIVE boundaries)
     const dbName = 'test-filter-range';
     await vectorManager.createSession(dbName);
 
@@ -115,17 +113,17 @@ describe('Vector Search Filtering', () => {
 
     await vectorManager.addVectors(dbName, vectors);
 
-    // Get scores greater than 40 (use top-level $gt)
+    // Get scores greater than 40 (field-first syntax)
     const resultsGt = await vectorManager.search(dbName, baseEmbedding, 10, {
-      filter: { $gt: { score: 40 } }
+      filter: { score: { $gt: 40 } }
     });
 
     expect(resultsGt.length).toBe(5); // 50, 60, 70, 80, 90
     expect(resultsGt.every((r: any) => r.metadata.score > 40)).toBe(true);
 
-    // Get scores less than 30 (use top-level $lt)
+    // Get scores less than 30 (field-first syntax)
     const resultsLt = await vectorManager.search(dbName, baseEmbedding, 10, {
-      filter: { $lt: { score: 30 } }
+      filter: { score: { $lt: 30 } }
     });
 
     expect(resultsLt.length).toBe(3); // 0, 10, 20
@@ -211,9 +209,8 @@ describe('Vector Search Filtering', () => {
     expect(results.every((r: any) => ['high', 'low'].includes(r.metadata.priority))).toBe(true);
   });
 
-  it.skip('should filter with nested $and and $or (uses unsupported $gt)', async () => {
-    // v0.2.0 limitation: $gt operator not supported (use $gte instead)
-    // Skipping this test until API adds $gt support
+  it('should filter with nested $and and $or using $gt', async () => {
+    // Testing nested combinators with $gt operator (field-first syntax)
     const dbName = 'test-filter-nested';
     await vectorManager.createSession(dbName);
 
@@ -230,7 +227,7 @@ describe('Vector Search Filtering', () => {
     await vectorManager.addVectors(dbName, vectors);
 
     // Get even docs OR (odd docs with value > 7)
-    // Use top-level $gt inside $and
+    // Use field-first syntax for $gt inside $and
     const results = await vectorManager.search(dbName, baseEmbedding, 10, {
       filter: {
         $or: [
@@ -238,7 +235,7 @@ describe('Vector Search Filtering', () => {
           {
             $and: [
               { category: 'odd' },
-              { $gt: { value: 7 } }
+              { value: { $gt: 7 } }
             ]
           }
         ]

@@ -98,7 +98,7 @@ importers:
         version: 2.3.1(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
       '@fabstir/sdk-core':
         specifier: file:../../packages/sdk-core
-        version: file:packages/sdk-core(@types/react@18.3.24)(bufferutil@4.0.9)(ethers@6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
+        version: link:../../packages/sdk-core
       base-x:
         specifier: ^5.0.1
         version: 5.0.1
@@ -287,7 +287,7 @@ importers:
         version: 6.0.2
       '@fabstir/sdk-core':
         specifier: file:../sdk-core
-        version: file:packages/sdk-core(@types/react@18.3.24)(bufferutil@4.0.9)(ethers@6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
+        version: link:../sdk-core
       '@libp2p/bootstrap':
         specifier: ^10.0.0
         version: 10.1.5
@@ -873,17 +873,6 @@ packages:
   '@fabstir/llm-auth@file:../fabstir-llm-auth':
     resolution: {directory: ../fabstir-llm-auth, type: directory}
     engines: {node: '>=16.0.0'}
-
-  '@fabstir/sdk-core@file:packages/sdk-core':
-    resolution: {directory: packages/sdk-core, type: directory}
-    engines: {node: '>=18.0.0'}
-    peerDependencies:
-      ethers: ^6.9.0
-
-  '@fabstir/vector-db-native@file:fabstir-vector-db-native-0.2.1.tgz':
-    resolution: {integrity: sha512-ToTSf6pA9LTNqRgO5FLI0hpZq+b3JYaVsBk61GK+o9Ygm4JNXGxdjm0pWdFWAy4VLHxEwjCQkvUwf2cKNppj5g==, tarball: file:fabstir-vector-db-native-0.2.1.tgz}
-    version: 0.2.1
-    engines: {node: '>= 16'}
 
   '@fabstir/vector-db-native@file:fabstir-vector-db-native-0.2.2.tgz':
     resolution: {integrity: sha512-53VdU+mtyY6XpWx9O3RL3kM8DIfCKNi0gn3a5B7PTGSZsywYs+BfqRsPg+kT6BD5lhxreoH9V+CVg+MEavfi5Q==, tarball: file:fabstir-vector-db-native-0.2.2.tgz}
@@ -4980,33 +4969,6 @@ snapshots:
       - use-sync-external-store
       - utf-8-validate
       - zod
-
-  '@fabstir/sdk-core@file:packages/sdk-core(@types/react@18.3.24)(bufferutil@4.0.9)(ethers@6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)':
-    dependencies:
-      '@fabstir/llm-auth': file:../fabstir-llm-auth(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
-      '@fabstir/vector-db-native': file:fabstir-vector-db-native-0.2.1.tgz
-      '@noble/ciphers': 0.4.1
-      '@noble/hashes': 1.8.0
-      '@noble/secp256k1': 2.3.0
-      '@s5-dev/s5js': s5js@file:s5js-0.3.0.tgz(bufferutil@4.0.9)(utf-8-validate@5.0.10)
-      ethers: 6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10)
-      mammoth: 1.11.0
-      pdfjs-dist: 3.11.174
-    transitivePeerDependencies:
-      - '@types/react'
-      - bufferutil
-      - debug
-      - encoding
-      - fastestsmallesttextencoderdecoder
-      - immer
-      - react
-      - supports-color
-      - typescript
-      - use-sync-external-store
-      - utf-8-validate
-      - zod
-
-  '@fabstir/vector-db-native@file:fabstir-vector-db-native-0.2.1.tgz': {}
 
   '@fabstir/vector-db-native@file:fabstir-vector-db-native-0.2.2.tgz': {}
 
