@@ -53,8 +53,10 @@
     "@noble/hashes": "^1.8.0",
     "@noble/secp256k1": "^2.3.0",
     "@s5-dev/s5js": "file:../../s5js-0.3.0.tgz",
+    "cohere-ai": "^7.19.0",
     "ethers": "^6.9.0",
     "mammoth": "^1.11.0",
+    "openai": "^4.104.0",
     "pdfjs-dist": "^3.11.174"
   },
   "devDependencies": {
