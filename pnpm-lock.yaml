@@ -98,7 +98,7 @@ importers:
         version: 2.3.1(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
       '@fabstir/sdk-core':
         specifier: file:../../packages/sdk-core
-        version: link:../../packages/sdk-core
+        version: file:packages/sdk-core(@types/react@18.3.24)(bufferutil@4.0.9)(ethers@6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
       base-x:
         specifier: ^5.0.1
         version: 5.0.1
@@ -231,8 +231,8 @@ importers:
         specifier: file:../../../fabstir-llm-auth
         version: file:../fabstir-llm-auth(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
       '@fabstir/vector-db-native':
-        specifier: file:../../fabstir-vector-db-native-0.1.0.tgz
-        version: file:fabstir-vector-db-native-0.1.0.tgz
+        specifier: file:../../fabstir-vector-db-native-0.2.0.tgz
+        version: file:fabstir-vector-db-native-0.2.0.tgz
       '@noble/ciphers':
         specifier: ^0.4.1
         version: 0.4.1
@@ -287,7 +287,7 @@ importers:
         version: 6.0.2
       '@fabstir/sdk-core':
         specifier: file:../sdk-core
-        version: link:../sdk-core
+        version: file:packages/sdk-core(@types/react@18.3.24)(bufferutil@4.0.9)(ethers@6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
       '@libp2p/bootstrap':
         specifier: ^10.0.0
         version: 10.1.5
@@ -874,9 +874,20 @@ packages:
     resolution: {directory: ../fabstir-llm-auth, type: directory}
     engines: {node: '>=16.0.0'}
 
+  '@fabstir/sdk-core@file:packages/sdk-core':
+    resolution: {directory: packages/sdk-core, type: directory}
+    engines: {node: '>=18.0.0'}
+    peerDependencies:
+      ethers: ^6.9.0
+
   '@fabstir/vector-db-native@file:fabstir-vector-db-native-0.1.0.tgz':
     resolution: {integrity: sha512-J11Y5Ejxf6Nl6B6jRcW7e+v2Lm2HnLWFkTT5/NCc8MjxRWwNZBSjQUgYAwl73aH3L5ZQVvmAZ9+HCulb9PRMaw==, tarball: file:fabstir-vector-db-native-0.1.0.tgz}
     version: 0.1.0
+    engines: {node: '>= 16'}
+
+  '@fabstir/vector-db-native@file:fabstir-vector-db-native-0.2.0.tgz':
+    resolution: {integrity: sha512-sYY3Bb0WCYakolW86cd3TJOiq4rjUsRX9PNPSZQJvDj42SfRSFtJSUdnMDcgi7NIT/mfMUS32/viiyOBoRacSw==, tarball: file:fabstir-vector-db-native-0.2.0.tgz}
+    version: 0.2.0
     engines: {node: '>= 16'}
 
   '@humanwhocodes/config-array@0.13.0':
@@ -4970,7 +4981,34 @@ snapshots:
       - utf-8-validate
       - zod
 
+  '@fabstir/sdk-core@file:packages/sdk-core(@types/react@18.3.24)(bufferutil@4.0.9)(ethers@6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)':
+    dependencies:
+      '@fabstir/llm-auth': file:../fabstir-llm-auth(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
+      '@fabstir/vector-db-native': file:fabstir-vector-db-native-0.1.0.tgz
+      '@noble/ciphers': 0.4.1
+      '@noble/hashes': 1.8.0
+      '@noble/secp256k1': 2.3.0
+      '@s5-dev/s5js': s5js@file:s5js-0.3.0.tgz(bufferutil@4.0.9)(utf-8-validate@5.0.10)
+      ethers: 6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10)
+      mammoth: 1.11.0
+      pdfjs-dist: 3.11.174
+    transitivePeerDependencies:
+      - '@types/react'
+      - bufferutil
+      - debug
+      - encoding
+      - fastestsmallesttextencoderdecoder
+      - immer
+      - react
+      - supports-color
+      - typescript
+      - use-sync-external-store
+      - utf-8-validate
+      - zod
+
   '@fabstir/vector-db-native@file:fabstir-vector-db-native-0.1.0.tgz': {}
+
+  '@fabstir/vector-db-native@file:fabstir-vector-db-native-0.2.0.tgz': {}
 
   '@humanwhocodes/config-array@0.13.0':
     dependencies:

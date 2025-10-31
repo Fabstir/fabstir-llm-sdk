@@ -9,6 +9,9 @@ import { IVectorRAGManager } from './interfaces/IVectorRAGManager.js';
 import { RAGConfig, PartialRAGConfig, VectorRecord, SearchOptions, SearchResult, VectorDbStats } from '../rag/types.js';
 import { validateRAGConfig, mergeRAGConfig } from '../rag/config.js';
 import { SessionCache } from '../rag/session-cache.js';
+import { VectorInput, AddVectorResult, AddVectorOptions, validateVector, convertToVectorRecord, validateVectorBatch, handleDuplicates } from '../rag/vector-operations.js';
+import { validateMetadata, MetadataSchema } from '../rag/metadata-validator.js';
+import { BatchProcessor } from '../rag/batch-processor.js';
 
 /**
  * Session status
@@ -38,6 +41,7 @@ export class VectorRAGManager implements IVectorRAGManager {
   private readonly seedPhrase: string;
   private sessions: Map<string, Session>;
   private sessionCache: SessionCache<Session>;
+  private dbNameToSessionId: Map<string, string>; // Map dbName to sessionId
   private disposed: boolean = false;
 
   /**
@@ -66,6 +70,7 @@ export class VectorRAGManager implements IVectorRAGManager {
     this.config = options.config;
     this.sessions = new Map();
     this.sessionCache = new SessionCache<Session>(50);  // Cache up to 50 sessions
+    this.dbNameToSessionId = new Map();
   }
 
   /**
@@ -110,6 +115,7 @@ export class VectorRAGManager implements IVectorRAGManager {
       // Store session
       this.sessions.set(sessionId, session);
       this.sessionCache.set(sessionId, session);
+      this.dbNameToSessionId.set(databaseName, sessionId); // Map dbName to sessionId
 
       return sessionId;
     } catch (error) {
@@ -339,9 +345,11 @@ export class VectorRAGManager implements IVectorRAGManager {
   }
 
   /**
-   * Get session statistics
+   * Get session statistics (accepts dbName or sessionId)
    */
-  async getSessionStats(sessionId: string): Promise<VectorDbStats> {
+  async getSessionStats(identifier: string): Promise<VectorDbStats> {
+    // Try as dbName first, then as sessionId
+    const sessionId = this.dbNameToSessionId.get(identifier) || identifier;
     const session = this.getSession(sessionId);
     if (!session) {
       throw new Error('Session not found');
@@ -351,6 +359,7 @@ export class VectorRAGManager implements IVectorRAGManager {
     session.lastAccessedAt = Date.now();
 
     return {
+      vectorCount: stats.totalVectors || 0,
       totalVectors: stats.totalVectors || 0,
       totalChunks: stats.totalChunks || 0,
       memoryUsageMb: stats.memoryUsageMb || 0,
@@ -371,6 +380,102 @@ export class VectorRAGManager implements IVectorRAGManager {
   async evictLRUSessions(): Promise<void> {
     // Evict 10 LRU sessions
     this.sessionCache.evictMultiple(10);
+  }
+
+  /**
+   * Add vectors using dbName (overload for tests)
+   */
+  async addVectors(dbName: string, vectors: VectorInput[], options?: AddVectorOptions): Promise<AddVectorResult> {
+    const sessionId = this.dbNameToSessionId.get(dbName);
+    if (!sessionId) throw new Error('Session not found');
+    if (vectors.length === 0) return { added: 0, failed: 0 };
+
+    // For single-vector operations, throw on validation errors
+    if (vectors.length === 1) {
+      validateVector(vectors[0]);
+      if (vectors[0].metadata !== undefined) validateMetadata(vectors[0].metadata);
+    }
+
+    const { valid, errors } = validateVectorBatch(vectors);
+    if (valid.length === 0 && errors.length > 0) {
+      // All failed validation - throw first error for single vector, return result for batch
+      if (vectors.length === 1) throw new Error(errors[0].error);
+      return { added: 0, failed: errors.length, errors };
+    }
+
+    const deduped = options?.handleDuplicates ? handleDuplicates(valid, options.handleDuplicates) : { vectors: valid, skipped: 0 };
+
+    const session = this.getSession(sessionId);
+    if (!session || session.status !== 'active') throw new Error('Session not found');
+
+    const vectorRecords = deduped.vectors.map(convertToVectorRecord);
+    await session.vectorDbSession.addVectors(vectorRecords);
+
+    return { added: deduped.vectors.length, failed: errors.length, errors, skipped: deduped.skipped };
+  }
+
+  /**
+   * Search vectors using dbName
+   */
+  async search(dbName: string, queryVector: number[], topK: number, options?: SearchOptions): Promise<any[]> {
+    const sessionId = this.dbNameToSessionId.get(dbName);
+    if (!sessionId) throw new Error('Session not found');
+    return this.searchVectors(sessionId, queryVector, topK, options);
+  }
+
+  /**
+   * Update vector metadata (v0.2.0)
+   */
+  async updateMetadata(dbName: string, vectorId: string, metadata: Record<string, any>): Promise<void> {
+    validateMetadata(metadata);
+    const sessionId = this.dbNameToSessionId.get(dbName);
+    if (!sessionId) throw new Error('Session not found');
+    const session = this.getSession(sessionId);
+    if (!session) throw new Error('Session not found');
+    await session.vectorDbSession.updateMetadata(vectorId, metadata);
+  }
+
+  /**
+   * Delete vectors by metadata filter (v0.2.0)
+   */
+  async deleteByMetadata(dbName: string, filter: Record<string, any>): Promise<{ deletedIds: string[], deletedCount: number }> {
+    const sessionId = this.dbNameToSessionId.get(dbName);
+    if (!sessionId) throw new Error('Session not found');
+    const session = this.getSession(sessionId);
+    if (!session) throw new Error('Session not found');
+    return session.vectorDbSession.deleteByMetadata(filter);
+  }
+
+  /**
+   * Set metadata schema for validation (v0.2.0)
+   */
+  async setSchema(dbName: string, schema: Record<string, any> | null): Promise<void> {
+    const sessionId = this.dbNameToSessionId.get(dbName);
+    if (!sessionId) throw new Error('Session not found');
+    const session = this.getSession(sessionId);
+    if (!session) throw new Error('Session not found');
+    await session.vectorDbSession.setSchema(schema);
+  }
+
+  /**
+   * Batch update metadata (v0.2.0)
+   */
+  async batchUpdateMetadata(dbName: string, updates: Array<{ id: string; metadata: Record<string, any> }>): Promise<{ updated: number }> {
+    const sessionId = this.dbNameToSessionId.get(dbName);
+    if (!sessionId) throw new Error('Session not found');
+    let count = 0;
+    for (const update of updates) {
+      await this.updateMetadata(dbName, update.id, update.metadata);
+      count++;
+    }
+    return { updated: count };
+  }
+
+  /**
+   * Cleanup alias for dispose
+   */
+  async cleanup(): Promise<void> {
+    await this.dispose();
   }
 
   /**
