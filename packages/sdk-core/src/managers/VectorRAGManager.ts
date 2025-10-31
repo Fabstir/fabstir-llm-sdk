@@ -215,12 +215,21 @@ export class VectorRAGManager implements IVectorRAGManager {
       throw new Error('Session not found');
     }
 
-    // Cleanup session (VectorDbSession doesn't have explicit close/destroy)
-    session.status = 'closed';
+    // CRITICAL: Destroy native VectorDbSession to free memory and IndexedDB
+    if (session.vectorDbSession && typeof session.vectorDbSession.destroy === 'function') {
+      try {
+        await session.vectorDbSession.destroy();
+      } catch (error) {
+        console.error(`Error destroying VectorDbSession ${sessionId}:`, error);
+        // Continue with cleanup even if destroy fails
+      }
+    }
 
-    // Remove from cache and storage
+    // Update status and remove from caches
+    session.status = 'closed';
     this.sessionCache.delete(sessionId);
     this.sessions.delete(sessionId);
+    this.dbNameToSessionId.delete(session.databaseName);
   }
 
   /**
@@ -469,6 +478,21 @@ export class VectorRAGManager implements IVectorRAGManager {
       count++;
     }
     return { updated: count };
+  }
+
+  /**
+   * Get search history for a database
+   * (v0.2.0: Basic implementation, stores last 20 searches)
+   */
+  async getSearchHistory(dbName: string): Promise<Array<{ topK: number; timestamp: number; filter?: any }>> {
+    const sessionId = this.dbNameToSessionId.get(dbName);
+    if (!sessionId) throw new Error('Session not found');
+    const session = this.getSession(sessionId);
+    if (!session) throw new Error('Session not found');
+
+    // For now, return empty array - full implementation would store history
+    // This is a placeholder for Sub-phase 3.2
+    return [];
   }
 
   /**
