@@ -30,6 +30,8 @@ import type { EmbeddingService } from '../embeddings/EmbeddingService.js';
 import { ContextBuilder } from '../session/context-builder.js';
 import type { RAGSessionConfig, RAGMetrics } from '../session/rag-config.js';
 import { mergeRAGConfig, validateRAGConfig } from '../session/rag-config.js';
+import { ConversationMemory } from '../conversation/ConversationMemory.js';
+import type { ConversationMemoryConfig } from '../conversation/ConversationMemory.js';
 
 export interface SessionState {
   sessionId: bigint;
@@ -71,6 +73,7 @@ export class SessionManager implements ISessionManager {
   private wsClient?: WebSocketClient;
   private sessions: Map<string, SessionState> = new Map();
   private contextBuilders: Map<string, ContextBuilder> = new Map(); // NEW: Per-session context builders
+  private conversationMemories: Map<string, ConversationMemory> = new Map(); // NEW: Per-session conversation memory
   private initialized = false;
   private sessionKey?: Uint8Array; // NEW: Store session key for Phase 4.2
   private messageIndex: number = 0; // NEW: For Phase 4.2 replay protection
@@ -443,6 +446,17 @@ export class SessionManager implements ISessionManager {
         }
       );
 
+      // Store in conversation memory if enabled
+      const conversationMemory = this.conversationMemories.get(sessionId.toString());
+      if (conversationMemory) {
+        try {
+          await conversationMemory.addMessage('user', prompt);
+          await conversationMemory.addMessage('assistant', response);
+        } catch (memError: any) {
+          console.warn(`Failed to store messages in conversation memory: ${memError.message}`);
+        }
+      }
+
       return response;
     } catch (error: any) {
       throw new SDKError(
@@ -785,6 +799,17 @@ export class SessionManager implements ISessionManager {
           }
         );
 
+        // Store in conversation memory if enabled
+        const conversationMemory = this.conversationMemories.get(sessionIdStr);
+        if (conversationMemory) {
+          try {
+            await conversationMemory.addMessage('user', prompt);
+            await conversationMemory.addMessage('assistant', finalResponse);
+          } catch (memError: any) {
+            console.warn(`Failed to store messages in conversation memory: ${memError.message}`);
+          }
+        }
+
         return finalResponse;
       } else {
         // Non-streaming mode - MUST support encryption too!
@@ -900,6 +925,17 @@ export class SessionManager implements ISessionManager {
             timestamp: Date.now()
           }
         );
+
+        // Store in conversation memory if enabled
+        const conversationMemory = this.conversationMemories.get(sessionIdStr);
+        if (conversationMemory) {
+          try {
+            await conversationMemory.addMessage('user', prompt);
+            await conversationMemory.addMessage('assistant', response);
+          } catch (memError: any) {
+            console.warn(`Failed to store messages in conversation memory: ${memError.message}`);
+          }
+        }
 
         return response;
       }
@@ -1795,6 +1831,26 @@ export class SessionManager implements ISessionManager {
       );
 
       this.contextBuilders.set(sessionId, contextBuilder);
+
+      // Create conversation memory if enabled
+      if (ragConfig.conversationMemory?.enabled) {
+        const memoryConfig: ConversationMemoryConfig = {
+          enabled: true,
+          maxRecentMessages: ragConfig.conversationMemory.maxRecentMessages,
+          maxHistoryMessages: ragConfig.conversationMemory.maxHistoryMessages,
+          maxMemoryTokens: ragConfig.conversationMemory.maxMemoryTokens,
+          similarityThreshold: ragConfig.conversationMemory.similarityThreshold
+        };
+
+        const conversationMemory = new ConversationMemory(
+          this.embeddingService,
+          this.vectorRAGManager,
+          `${vectorDbSessionId}-conversation`, // Separate vector DB session for conversation history
+          memoryConfig
+        );
+
+        this.conversationMemories.set(sessionId, conversationMemory);
+      }
     } catch (error: any) {
       throw new SDKError(`Failed to initialize RAG: ${error.message}`, 'RAG_INIT_FAILED');
     }
@@ -1817,7 +1873,9 @@ export class SessionManager implements ISessionManager {
     }
 
     try {
-      // Retrieve context
+      let augmentedPrompt = '';
+
+      // 1. Retrieve document context from vector DB
       const result = await contextBuilder.retrieveContext({
         prompt,
         topK: session.ragConfig.topK,
@@ -1842,8 +1900,25 @@ export class SessionManager implements ISessionManager {
         }
       }
 
-      // Return augmented prompt (context + original prompt)
-      return result.context ? `${result.context}User: ${prompt}` : prompt;
+      // Add document context if available
+      if (result.context) {
+        augmentedPrompt += result.context;
+      }
+
+      // 2. Retrieve conversation history if conversation memory is enabled
+      const conversationMemory = this.conversationMemories.get(sessionId);
+      if (conversationMemory) {
+        const contextWindow = await conversationMemory.getContextWindow(prompt);
+        if (contextWindow.length > 0) {
+          const formattedHistory = conversationMemory.formatMessagesForContext(contextWindow);
+          augmentedPrompt += formattedHistory;
+        }
+      }
+
+      // 3. Add current prompt
+      augmentedPrompt += `User: ${prompt}`;
+
+      return augmentedPrompt;
     } catch (error: any) {
       // On error, return original prompt and continue
       console.warn(`RAG context retrieval failed: ${error.message}`);

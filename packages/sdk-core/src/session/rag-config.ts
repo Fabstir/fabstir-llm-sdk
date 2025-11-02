@@ -65,6 +65,18 @@ export interface RAGSessionConfig {
    * Example: { documentType: 'pdf', category: 'technical' }
    */
   metadataFilter?: Record<string, any>;
+
+  /**
+   * Enable conversation memory (stores conversation history in vectors)
+   * Default: false
+   */
+  conversationMemory?: {
+    enabled: boolean;
+    maxRecentMessages?: number;     // Number of recent messages always included (default: 3)
+    maxHistoryMessages?: number;    // Max similar historical messages to retrieve (default: 5)
+    maxMemoryTokens?: number;       // Max tokens for all memory messages (default: 1000)
+    similarityThreshold?: number;   // Min similarity for historical messages (default: 0.6)
+  };
 }
 
 /**
@@ -136,7 +148,7 @@ export interface ContextRetrievalOptions extends SearchOptions {
 /**
  * Default RAG configuration
  */
-export const DEFAULT_RAG_CONFIG: Required<Omit<RAGSessionConfig, 'vectorDbSessionId' | 'databaseName' | 'metadataFilter'>> = {
+export const DEFAULT_RAG_CONFIG: Required<Omit<RAGSessionConfig, 'vectorDbSessionId' | 'databaseName' | 'metadataFilter' | 'conversationMemory'>> = {
   enabled: false,
   topK: 5,
   similarityThreshold: 0.7,
