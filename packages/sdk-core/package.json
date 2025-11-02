@@ -48,7 +48,7 @@
   },
   "dependencies": {
     "@fabstir/llm-auth": "file:../../../fabstir-llm-auth",
-    "@fabstir/vector-db-native": "file:/workspace/fabstir-vector-db-native-0.2.2.tgz",
+    "@fabstir/vector-db-native": "file:../../fabstir-vector-db-native-0.3.0.tgz",
     "@noble/ciphers": "^0.4.1",
     "@noble/hashes": "^1.8.0",
     "@noble/secp256k1": "^2.3.0",

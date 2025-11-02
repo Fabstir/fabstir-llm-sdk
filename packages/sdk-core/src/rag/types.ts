@@ -91,6 +91,17 @@ export interface SearchResult extends VectorRecord {
 }
 
 /**
+ * Search result with source database attribution
+ * Used for multi-database search results
+ */
+export interface SearchResultWithSource extends SearchResult {
+  /**
+   * Name of the database this result came from
+   */
+  sourceDatabaseName: string;
+}
+
+/**
  * Vector database statistics
  */
 export interface VectorDbStats {

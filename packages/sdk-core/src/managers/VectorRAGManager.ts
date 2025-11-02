@@ -6,7 +6,7 @@
 
 import { VectorDbSession } from '@fabstir/vector-db-native';
 import { IVectorRAGManager } from './interfaces/IVectorRAGManager.js';
-import { RAGConfig, PartialRAGConfig, VectorRecord, SearchOptions, SearchResult, VectorDbStats } from '../rag/types.js';
+import { RAGConfig, PartialRAGConfig, VectorRecord, SearchOptions, SearchResult, SearchResultWithSource, VectorDbStats } from '../rag/types.js';
 import { validateRAGConfig, mergeRAGConfig } from '../rag/config.js';
 import { SessionCache } from '../rag/session-cache.js';
 import { VectorInput, AddVectorResult, AddVectorOptions, validateVector, convertToVectorRecord, validateVectorBatch, handleDuplicates } from '../rag/vector-operations.js';
@@ -354,6 +354,99 @@ export class VectorRAGManager implements IVectorRAGManager {
 
     session.lastAccessedAt = Date.now();
     return results;
+  }
+
+  /**
+   * Convenience method: Add a single vector
+   * Wraps public addVectors API for single vector insertion
+   */
+  async addVector(
+    dbName: string,
+    id: string,
+    values: number[],
+    metadata: Record<string, any> = {}
+  ): Promise<void> {
+    // Use the public API that expects VectorInput with 'values' property
+    const vectorInput = {
+      id,
+      values,  // VectorInput uses 'values' property
+      metadata
+    };
+    await this.addVectors(dbName, [vectorInput]);
+  }
+
+  /**
+   * Search across multiple databases and merge results
+   * Implements Sub-phase 9.1.1: Multi-database query with score-based merging
+   *
+   * @param databaseNames - Array of database names to search
+   * @param queryVector - Query vector for similarity search
+   * @param options - Search options (topK, threshold, filter)
+   * @returns Merged and ranked results from all databases
+   */
+  async searchMultipleDatabases(
+    databaseNames: string[],
+    queryVector: number[],
+    options?: SearchOptions
+  ): Promise<SearchResultWithSource[]> {
+    this.ensureNotDisposed();
+
+    // Handle empty array
+    if (databaseNames.length === 0) {
+      return [];
+    }
+
+    // Get or create sessions for all databases
+    const sessionPromises = databaseNames.map(async (dbName) => {
+      // Check if session exists
+      const sessionId = this.dbNameToSessionId.get(dbName);
+      if (sessionId) {
+        const session = this.getSession(sessionId);
+        if (session && session.status === 'active') {
+          return { dbName, sessionId };
+        }
+      }
+
+      // Create new session
+      const newSessionId = await this.createSession(dbName);
+      return { dbName, sessionId: newSessionId };
+    });
+
+    const sessions = await Promise.all(sessionPromises);
+
+    // Search all databases in parallel
+    const searchPromises = sessions.map(async ({ dbName, sessionId }) => {
+      try {
+        const results = await this.searchVectors(
+          sessionId,
+          queryVector,
+          options?.topK || 5,
+          options
+        );
+
+        // Add source attribution to each result
+        return results.map((result): SearchResultWithSource => ({
+          ...result,
+          sourceDatabaseName: dbName
+        }));
+      } catch (error) {
+        // If a database search fails, log error and return empty results
+        console.error(`Search failed for database ${dbName}:`, error);
+        return [];
+      }
+    });
+
+    const allResults = await Promise.all(searchPromises);
+
+    // Flatten results from all databases
+    const flattenedResults = allResults.flat();
+
+    // Sort by similarity score (descending)
+    flattenedResults.sort((a, b) => b.score - a.score);
+
+    // Return top-K merged results
+    const topK = options?.topK || 5;
+    return flattenedResults.slice(0, topK);
   }
 
   /**
