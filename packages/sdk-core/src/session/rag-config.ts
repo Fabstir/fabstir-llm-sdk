@@ -24,10 +24,15 @@ export interface RAGSessionConfig {
   vectorDbSessionId?: string;
 
   /**
-   * Database name to create new session from
+   * Database names to query (supports multi-database selection)
    * Either provide this OR vectorDbSessionId
+   *
+   * For backward compatibility:
+   * - Single database: ['my-db']
+   * - Multiple databases: ['db1', 'db2', 'db3']
+   * - Results from all databases are merged and ranked by relevance
    */
-  databaseName?: string;
+  databaseNames?: string[];
 
   /**
    * Number of similar documents to retrieve

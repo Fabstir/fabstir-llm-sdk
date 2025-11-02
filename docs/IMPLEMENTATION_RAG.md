@@ -1150,53 +1150,260 @@ Extended existing `VectorRAGManager` instead of creating separate abstraction la
 
 ### Sub-phase 9.1: React Components for RAG Management
 
-**Goal**: Create React components for vector DB management
+**Overview**: Breaking down into smaller sub-phases for strict TDD bounded autonomy approach.
 
-#### Tasks
-- [ ] Write tests for RAG dashboard component
-- [ ] Write tests for document upload component
-- [ ] Write tests for search interface
-- [ ] Create RAGDashboard component
-- [ ] Implement DocumentUploader component
-- [ ] Create SearchInterface component
-- [ ] Add VectorDBSelector component
-- [ ] Implement FolderExplorer component
-- [ ] Create PermissionManager UI
-- [ ] Test all components together
+**Architecture Decision**: MVP-focused on vector databases only. Graph database UI and workspace features deferred to Phase 10.
 
-**Test Files:**
-- `apps/harness/tests/components/rag-dashboard.test.tsx` (max 300 lines) - Dashboard tests
-- `apps/harness/tests/components/document-upload.test.tsx` (max 250 lines) - Upload tests
-- `apps/harness/tests/components/search.test.tsx` (max 250 lines) - Search tests
+**Key Feature**: Multi-database selection - users can select multiple vector databases and inference will use context from all selected databases.
+
+---
+
+#### Sub-phase 9.1.1: VectorDatabaseSelector Component & Backend
+
+**Goal**: Implement multi-database selection UI and update backend to support multiple databases
+
+**Status**: 🚧 In Progress
+
+**Tasks:**
+- [ ] Write tests for VectorDatabaseSelector component
+  - [ ] Test rendering list of available vector databases
+  - [ ] Test multi-select interaction (checkboxes)
+  - [ ] Test active workspace display
+  - [ ] Test empty state (no databases)
+  - [ ] Test selection persistence
+- [ ] Implement VectorDatabaseSelector component
+- [ ] Update SessionManager RAG config interface
+- [ ] Add multi-database query logic to SessionManager
+- [ ] Integration test: Multi-database inference flow
+
+**Test File:**
+- `apps/harness/tests/components/vector-database-selector.test.tsx` (max 200 lines)
 
 **Implementation Files:**
-- `apps/harness/components/rag/RAGDashboard.tsx` (max 400 lines) - Main dashboard
-- `apps/harness/components/rag/DocumentUploader.tsx` (max 350 lines) - Upload UI
-- `apps/harness/components/rag/SearchInterface.tsx` (max 300 lines) - Search UI
-- `apps/harness/components/rag/FolderExplorer.tsx` (max 300 lines) - Folder UI
+- `apps/harness/components/rag/VectorDatabaseSelector.tsx` (max 250 lines)
+- `packages/sdk-core/src/managers/SessionManager.ts` (update RAG config interface)
+
+**Backend Changes:**
+```typescript
+// packages/sdk-core/src/managers/SessionManager.ts
+interface RAGConfig {
+  enabled: boolean;
+  databaseNames: string[];  // Changed from single databaseName
+  topK: number;
+  threshold: number;
+}
+```
 
 **Success Criteria:**
-- Components render correctly
-- User interactions work
-- State management proper
-- Responsive design
-- Accessibility compliant
+- ✅ Component renders list of available vector databases from DatabaseRegistry
+- ✅ Users can select/deselect multiple databases via checkboxes
+- ✅ Active workspace displays selected databases clearly
+- ✅ SessionManager accepts array of database names
+- ✅ Query logic fetches from multiple databases in parallel
+- ✅ All tests passing
+
+**Estimated Time:** 2-3 hours
+
+---
+
+#### Sub-phase 9.1.2: RAGDashboard Component
+
+**Goal**: Create main dashboard integrating VectorDatabaseSelector and database overview
+
+**Status**: ⏳ Pending
+
+**Tasks:**
+- [ ] Write tests for RAGDashboard component
+  - [ ] Test database overview display
+  - [ ] Test integration with VectorDatabaseSelector
+  - [ ] Test database statistics display
+  - [ ] Test create/delete database actions
+  - [ ] Test permission management UI
+- [ ] Implement RAGDashboard component
+- [ ] Integration test with VectorDatabaseSelector
+
+**Test File:**
+- `apps/harness/tests/components/rag-dashboard.test.tsx` (max 300 lines)
+
+**Implementation File:**
+- `apps/harness/components/rag/RAGDashboard.tsx` (max 400 lines)
+
+**Success Criteria:**
+- ✅ Dashboard shows overview of all databases
+- ✅ Integrates VectorDatabaseSelector from Sub-phase 9.1.1
+- ✅ Shows database statistics (vector count, size, etc.)
+- ✅ Supports create/delete database operations
+- ✅ Responsive design
+- ✅ All tests passing
+
+**Estimated Time:** 2-3 hours
+
+---
+
+#### Sub-phase 9.1.3: SearchInterface Component
+
+**Goal**: Implement search UI that queries across multiple selected databases
+
+**Status**: ⏳ Pending
+
+**Tasks:**
+- [ ] Write tests for SearchInterface component
+  - [ ] Test search across single database
+  - [ ] Test search across multiple databases
+  - [ ] Test result merging and ranking
+  - [ ] Test source attribution (which DB provided result)
+  - [ ] Test empty results handling
+- [ ] Implement SearchInterface component
+- [ ] Add result merging logic
+
+**Test File:**
+- `apps/harness/tests/components/search.test.tsx` (max 250 lines)
+
+**Implementation File:**
+- `apps/harness/components/rag/SearchInterface.tsx` (max 300 lines)
+
+**Success Criteria:**
+- ✅ Search queries all selected databases in parallel
+- ✅ Results are merged and ranked by relevance
+- ✅ Source attribution shows which database provided each result
+- ✅ Handles empty results gracefully
+- ✅ All tests passing
+
+**Estimated Time:** 2-3 hours
+
+---
+
+#### Sub-phase 9.1.4: DocumentUploader Component
+
+**Goal**: Implement document upload UI with chunking and embedding
+
+**Status**: ⏳ Pending
+
+**Tasks:**
+- [ ] Write tests for DocumentUploader component
+  - [ ] Test file selection
+  - [ ] Test upload progress
+  - [ ] Test chunking preview
+  - [ ] Test error handling
+  - [ ] Test success/failure states
+- [ ] Implement DocumentUploader component
+- [ ] Add upload progress tracking
+
+**Test File:**
+- `apps/harness/tests/components/document-upload.test.tsx` (max 250 lines)
+
+**Implementation File:**
+- `apps/harness/components/rag/DocumentUploader.tsx` (max 350 lines)
+
+**Success Criteria:**
+- ✅ File selection works
+- ✅ Upload progress displayed
+- ✅ Chunking preview shown
+- ✅ Error handling robust
+- ✅ All tests passing
+
+**Estimated Time:** 2-3 hours
+
+---
+
+#### Sub-phase 9.1.5: FolderExplorer Component
+
+**Goal**: Implement folder navigation UI for hierarchical document organization
+
+**Status**: ⏳ Pending
+
+**Tasks:**
+- [ ] Write tests for FolderExplorer component
+  - [ ] Test folder tree rendering
+  - [ ] Test create/delete/rename folder
+  - [ ] Test file listing
+  - [ ] Test navigation
+  - [ ] Test drag-and-drop (optional)
+- [ ] Implement FolderExplorer component
+
+**Test File:**
+- `apps/harness/tests/components/folder-explorer.test.tsx` (max 250 lines)
+
+**Implementation File:**
+- `apps/harness/components/rag/FolderExplorer.tsx` (max 300 lines)
+
+**Success Criteria:**
+- ✅ Folder tree renders correctly
+- ✅ CRUD operations work
+- ✅ File listing works
+- ✅ Navigation smooth
+- ✅ All tests passing
+
+**Estimated Time:** 2-3 hours
+
+---
+
+#### Sub-phase 9.1.6: Integration Testing
+
+**Goal**: Test all components working together in complete RAG workflow
+
+**Status**: ⏳ Pending
+
+**Tasks:**
+- [ ] Write integration tests for complete RAG workflow
+  - [ ] Test database creation → document upload → search
+  - [ ] Test multi-database selection → inference → results
+  - [ ] Test permission management across components
+  - [ ] Test error handling across components
+- [ ] Fix any integration issues
+- [ ] Performance testing
+
+**Test File:**
+- `apps/harness/tests/integration/rag-components.test.tsx` (max 300 lines)
+
+**Success Criteria:**
+- ✅ Complete workflow works end-to-end
+- ✅ Components communicate correctly
+- ✅ State management robust
+- ✅ Performance acceptable
+- ✅ All tests passing
+
+**Estimated Time:** 1-2 hours
+
+---
+
+**Overall Sub-phase 9.1 Success Criteria:**
+- ✅ Users can select multiple vector databases (0, 1, or many)
+- ✅ Active workspace displays selected databases clearly
+- ✅ Inference queries all selected databases in parallel
+- ✅ Results from multiple databases are merged and ranked
+- ✅ Components render correctly
+- ✅ User interactions work
+- ✅ State management proper
+- ✅ Responsive design
+- ✅ Accessibility compliant
+
+**Deferred to Phase 10:**
+- Graph database UI support
+- Database type selector (vector vs. graph)
+- Workspace management (save/load database groups)
+- Advanced merging strategies for multi-database results
+
+**Total Estimated Time:** 11-17 hours
 
 ### Sub-phase 9.2: Integration with Chat Interface
 
-**Goal**: Integrate RAG into existing chat-context-demo
+**Goal**: Integrate RAG into existing chat-context-demo with multi-database support
+
+**Note**: Database selection is handled by VectorDatabaseSelector component from Sub-phase 9.1. This phase integrates that selector into the chat interface.
 
 #### Tasks
 - [ ] Write tests for RAG toggle in chat
 - [ ] Write tests for context display
 - [ ] Write tests for source attribution
 - [ ] Add RAG enable/disable toggle
+- [ ] Integrate VectorDatabaseSelector from Sub-phase 9.1
 - [ ] Implement context preview panel
-- [ ] Add source attribution display
+- [ ] Add source attribution display (which database provided each result)
 - [ ] Create context relevance indicator
-- [ ] Add DB selection dropdown
 - [ ] Implement context feedback system
-- [ ] Test full chat flow with RAG
+- [ ] Test full chat flow with RAG (single and multi-database scenarios)
+- [ ] Test result merging from multiple databases
 
 **Test Files:**
 - `apps/harness/tests/integration/chat-rag.test.tsx` (max 300 lines) - Chat integration tests
@@ -1284,6 +1491,76 @@ Extended existing `VectorRAGManager` instead of creating separate abstraction la
 - Covers all features
 - Clear and concise
 - Security documented
+
+### Sub-phase 10.3: Workspace Management and Multi-Type Support
+
+**Goal**: Add workspace concept for grouping vector + graph databases, and add graph database UI support
+
+**Note**: This phase implements the "staging area" / "workspace" concept deferred from Sub-phase 9.1.
+
+#### Tasks
+- [ ] Write tests for workspace creation
+- [ ] Write tests for database type selector
+- [ ] Write tests for multi-type database grouping
+- [ ] Implement WorkspaceManager service
+- [ ] Create DatabaseTypeSelector component
+- [ ] Implement WorkspaceEditor component
+- [ ] Add workspace save/load functionality
+- [ ] Update RAGDashboard for type filtering
+- [ ] Implement multi-type result merging strategies
+- [ ] Add graph database UI support
+- [ ] Test workspace persistence
+- [ ] Test combined vector + graph inference
+
+**Test Files:**
+- `packages/sdk-core/tests/workspace/workspace-manager.test.ts` (max 300 lines) - Workspace tests
+- `apps/harness/tests/components/workspace-editor.test.tsx` (max 250 lines) - UI tests
+- `packages/sdk-core/tests/integration/multi-type-inference.test.ts` (max 300 lines) - Multi-type tests
+
+**Implementation Files:**
+- `packages/sdk-core/src/workspace/WorkspaceManager.ts` (max 350 lines) - Workspace service
+- `apps/harness/components/workspace/WorkspaceEditor.tsx` (max 400 lines) - Workspace UI
+- `apps/harness/components/rag/DatabaseTypeSelector.tsx` (max 200 lines) - Type filter UI
+- `packages/sdk-core/src/managers/MultiTypeRAGManager.ts` (max 400 lines) - Multi-type inference
+
+**Workspace Concept:**
+```typescript
+interface Workspace {
+  id: string;
+  name: string;
+  databases: {
+    vectorDatabases: string[];  // Vector DB names
+    graphDatabases: string[];   // Graph DB names (future)
+  };
+  mergingStrategy: 'round-robin' | 'score-based' | 'type-priority';
+  owner: string;
+  created: number;
+  updated: number;
+}
+```
+
+**Features:**
+- Create named workspaces grouping multiple databases
+- Select active workspace for inference (queries all databases in workspace)
+- Save/load workspace configurations
+- Type-aware UI (show both vector and graph databases)
+- Advanced merging strategies for multi-database/multi-type results
+- Workspace sharing (via permission system)
+
+**Success Criteria:**
+- ✅ Users can create and name workspaces
+- ✅ Users can add vector + graph databases to workspace
+- ✅ Workspaces persist across sessions
+- ✅ Inference uses all databases in active workspace
+- ✅ Results merge correctly from different database types
+- ✅ UI shows database types clearly
+- ✅ Workspace sharing works
+
+**Deferred to Future:**
+- Real-time workspace collaboration
+- Workspace templates
+- Auto-suggestion of database combinations
+- Workspace analytics (which DBs are most useful together)
 
 ---
 
