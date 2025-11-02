@@ -14,6 +14,7 @@ import { validateMetadata, MetadataSchema } from '../rag/metadata-validator.js';
 import { BatchProcessor } from '../rag/batch-processor.js';
 import { DatabaseMetadataService } from '../database/DatabaseMetadataService.js';
 import type { DatabaseMetadata } from '../database/types.js';
+import { validateFolderPath, normalizeFolderPath } from '../rag/folder-utils.js';
 
 /**
  * Session status
@@ -31,6 +32,7 @@ interface Session {
   createdAt: number;
   lastAccessedAt: number;
   config: RAGConfig;
+  folderPaths: Set<string>;  // Track unique folder paths
 }
 
 /**
@@ -124,7 +126,8 @@ export class VectorRAGManager implements IVectorRAGManager {
         status: 'active',
         createdAt: Date.now(),
         lastAccessedAt: Date.now(),
-        config: sessionConfig
+        config: sessionConfig,
+        folderPaths: new Set<string>()  // Initialize folder paths tracker
       };
 
       // Store session
@@ -296,6 +299,21 @@ export class VectorRAGManager implements IVectorRAGManager {
       }
     }
 
+    // Validate and normalize folder paths in metadata
+    for (const vec of vectors) {
+      if (vec.metadata?.folderPath !== undefined) {
+        validateFolderPath(vec.metadata.folderPath);
+      }
+      // Normalize folderPath (default to root if missing)
+      if (!vec.metadata) {
+        vec.metadata = {};
+      }
+      vec.metadata.folderPath = normalizeFolderPath(vec.metadata.folderPath);
+
+      // Track folder path
+      session.folderPaths.add(vec.metadata.folderPath);
+    }
+
     await session.vectorDbSession.addVectors(vectors);
     session.lastAccessedAt = Date.now();
   }
@@ -436,6 +454,21 @@ export class VectorRAGManager implements IVectorRAGManager {
 
     const session = this.getSession(sessionId);
     if (!session || session.status !== 'active') throw new Error('Session not found');
+
+    // Validate and normalize folder paths in metadata
+    for (const vec of deduped.vectors) {
+      if (vec.metadata?.folderPath !== undefined) {
+        validateFolderPath(vec.metadata.folderPath);
+      }
+      // Normalize folderPath (default to root if missing)
+      if (!vec.metadata) {
+        vec.metadata = {};
+      }
+      vec.metadata.folderPath = normalizeFolderPath(vec.metadata.folderPath);
+
+      // Track folder path
+      session.folderPaths.add(vec.metadata.folderPath);
+    }
 
     const vectorRecords = deduped.vectors.map(convertToVectorRecord);
     await session.vectorDbSession.addVectors(vectorRecords);
@@ -581,6 +614,165 @@ export class VectorRAGManager implements IVectorRAGManager {
 
     // Remove metadata
     this.metadataService.delete(databaseName);
+  }
+
+  /**
+   * List all unique folder paths in a session
+   */
+  async listFolders(sessionId: string): Promise<string[]> {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+    if (session.status !== 'active') {
+      throw new Error('Session is closed');
+    }
+
+    // Return sorted array of folder paths
+    return Array.from(session.folderPaths).sort();
+  }
+
+  /**
+   * Get statistics for a specific folder
+   */
+  async getFolderStatistics(sessionId: string, folderPath: string): Promise<{ folderPath: string; vectorCount: number }> {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+    if (session.status !== 'active') {
+      throw new Error('Session is closed');
+    }
+
+    // Validate folder path
+    validateFolderPath(folderPath);
+
+    // Search for all vectors in this folder using a dummy query
+    // Since we can't get all vectors directly, we use search with very large topK
+    const dummyQuery = new Array(384).fill(0);
+    const allResults = await session.vectorDbSession.search(dummyQuery, 100000);
+
+    // Filter by folder path and count
+    const vectorCount = allResults.filter((result: any) => {
+      const resultFolderPath = normalizeFolderPath(result.metadata?.folderPath);
+      return resultFolderPath === folderPath;
+    }).length;
+
+    return { folderPath, vectorCount };
+  }
+
+  /**
+   * Move vectors to a different folder
+   */
+  async moveToFolder(sessionId: string, vectorIds: string[], targetFolderPath: string): Promise<void> {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+    if (session.status !== 'active') {
+      throw new Error('Session is closed');
+    }
+
+    // Validate target folder path
+    validateFolderPath(targetFolderPath);
+
+    // Get all vectors to find the ones to move
+    const dummyQuery = new Array(384).fill(0);
+    const allResults = await session.vectorDbSession.search(dummyQuery, 100000);
+
+    // Find vectors to move
+    for (const vectorId of vectorIds) {
+      const vector = allResults.find((r: any) => r.id === vectorId);
+      if (!vector) {
+        throw new Error(`Vector not found: ${vectorId}`);
+      }
+
+      // Update metadata
+      const updatedMetadata = { ...vector.metadata, folderPath: targetFolderPath };
+      await session.vectorDbSession.updateMetadata(vectorId, updatedMetadata);
+
+      // Track new folder path
+      session.folderPaths.add(targetFolderPath);
+    }
+
+    session.lastAccessedAt = Date.now();
+  }
+
+  /**
+   * Search vectors within a specific folder
+   */
+  async searchInFolder(
+    sessionId: string,
+    folderPath: string,
+    queryVector: number[],
+    options?: SearchOptions
+  ): Promise<SearchResult[]> {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+    if (session.status !== 'active') {
+      throw new Error('Session is closed');
+    }
+
+    // Validate folder path
+    validateFolderPath(folderPath);
+
+    // Search all vectors
+    const topK = options?.topK || 10;
+    const allResults = await session.vectorDbSession.search(queryVector, topK * 10); // Get more results to filter
+
+    // Filter by folder path
+    const filteredResults = allResults.filter((result: any) => {
+      const resultFolderPath = normalizeFolderPath(result.metadata?.folderPath);
+      return resultFolderPath === folderPath;
+    });
+
+    // Limit to topK
+    const limitedResults = filteredResults.slice(0, topK);
+
+    session.lastAccessedAt = Date.now();
+    return limitedResults;
+  }
+
+  /**
+   * Move all vectors from one folder to another
+   */
+  async moveFolderContents(sessionId: string, sourceFolderPath: string, targetFolderPath: string): Promise<void> {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+    if (session.status !== 'active') {
+      throw new Error('Session is closed');
+    }
+
+    // Validate folder paths
+    validateFolderPath(sourceFolderPath);
+    validateFolderPath(targetFolderPath);
+
+    // Get all vectors
+    const dummyQuery = new Array(384).fill(0);
+    const allResults = await session.vectorDbSession.search(dummyQuery, 100000);
+
+    // Find vectors in source folder
+    const vectorsToMove = allResults.filter((r: any) => {
+      const resultFolderPath = normalizeFolderPath(r.metadata?.folderPath);
+      return resultFolderPath === sourceFolderPath;
+    });
+
+    // Move each vector
+    for (const vector of vectorsToMove) {
+      const updatedMetadata = { ...vector.metadata, folderPath: targetFolderPath };
+      await session.vectorDbSession.updateMetadata(vector.id, updatedMetadata);
+    }
+
+    // Track new folder path
+    if (vectorsToMove.length > 0) {
+      session.folderPaths.add(targetFolderPath);
+    }
+
+    session.lastAccessedAt = Date.now();
   }
 
   /**
