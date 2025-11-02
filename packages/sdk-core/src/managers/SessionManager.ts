@@ -25,6 +25,11 @@ import { ChainRegistry } from '../config/ChainRegistry';
 import { UnsupportedChainError } from '../errors/ChainErrors';
 import { PricingValidationError } from '../errors/pricing-errors';
 import { bytesToHex } from '../crypto/utilities';
+import type { VectorRAGManager } from './VectorRAGManager.js';
+import type { EmbeddingService } from '../embeddings/EmbeddingService.js';
+import { ContextBuilder } from '../session/context-builder.js';
+import type { RAGSessionConfig, RAGMetrics } from '../session/rag-config.js';
+import { mergeRAGConfig, validateRAGConfig } from '../session/rag-config.js';
 
 export interface SessionState {
   sessionId: bigint;
@@ -41,6 +46,8 @@ export interface SessionState {
   startTime: number;
   endTime?: number;
   encryption?: boolean; // NEW: Track if session uses encryption
+  ragConfig?: RAGSessionConfig; // NEW: RAG configuration for this session
+  ragMetrics?: RAGMetrics; // NEW: RAG performance metrics
 }
 
 // Extended SessionConfig with chainId
@@ -51,6 +58,7 @@ export interface ExtendedSessionConfig extends SessionConfig {
   paymentMethod: 'deposit' | 'direct';
   depositAmount?: ethers.BigNumberish;
   encryption?: boolean; // NEW: Enable E2EE
+  ragConfig?: RAGSessionConfig; // NEW: RAG configuration
 }
 
 export class SessionManager implements ISessionManager {
@@ -58,8 +66,11 @@ export class SessionManager implements ISessionManager {
   private storageManager: StorageManager;
   private hostManager?: HostManager; // Optional until set after auth
   private encryptionManager?: EncryptionManager; // NEW: Optional until set after auth
+  private vectorRAGManager?: VectorRAGManager; // NEW: Optional for RAG
+  private embeddingService?: EmbeddingService; // NEW: Optional for RAG
   private wsClient?: WebSocketClient;
   private sessions: Map<string, SessionState> = new Map();
+  private contextBuilders: Map<string, ContextBuilder> = new Map(); // NEW: Per-session context builders
   private initialized = false;
   private sessionKey?: Uint8Array; // NEW: Store session key for Phase 4.2
   private messageIndex: number = 0; // NEW: For Phase 4.2 replay protection
@@ -86,6 +97,20 @@ export class SessionManager implements ISessionManager {
    */
   setEncryptionManager(encryptionManager: EncryptionManager): void {
     this.encryptionManager = encryptionManager;
+  }
+
+  /**
+   * Set VectorRAGManager for RAG context retrieval (called after authentication)
+   */
+  setVectorRAGManager(vectorRAGManager: VectorRAGManager): void {
+    this.vectorRAGManager = vectorRAGManager;
+  }
+
+  /**
+   * Set EmbeddingService for RAG context retrieval (called after authentication)
+   */
+  setEmbeddingService(embeddingService: EmbeddingService): void {
+    this.embeddingService = embeddingService;
   }
 
   /**
@@ -200,6 +225,13 @@ export class SessionManager implements ISessionManager {
       const jobId = typeof result === 'number' ? BigInt(result) : result.jobId || result;
       const sessionId = typeof result === 'number' ? BigInt(result) : result.sessionId || jobId;
 
+      // Validate and merge RAG config if provided
+      let ragConfig: RAGSessionConfig | undefined;
+      if (config.ragConfig) {
+        validateRAGConfig(config.ragConfig);
+        ragConfig = mergeRAGConfig(config.ragConfig);
+      }
+
       // Create session state
       const sessionState: SessionState = {
         sessionId: sessionId,
@@ -214,11 +246,24 @@ export class SessionManager implements ISessionManager {
         checkpoints: [],
         totalTokens: 0,
         startTime: Date.now(),
-        encryption: enableEncryption  // NEW (Phase 6.2): Store encryption preference
+        encryption: enableEncryption,  // NEW (Phase 6.2): Store encryption preference
+        ragConfig: ragConfig,  // NEW (Phase 5.1): Store RAG config
+        ragMetrics: ragConfig?.enabled ? {
+          totalRetrievals: 0,
+          averageSimilarity: 0,
+          averageLatencyMs: 0,
+          emptyRetrievals: 0,
+          totalContextTokens: 0
+        } : undefined
       };
 
       // Store in memory
       this.sessions.set(sessionId.toString(), sessionState);
+
+      // Initialize RAG context builder if enabled
+      if (ragConfig?.enabled && this.vectorRAGManager && this.embeddingService) {
+        await this.initializeRAGForSession(sessionId.toString(), ragConfig);
+      }
 
       // Persist to storage (convert BigInt values to strings for JSON serialization)
       await this.storageManager.storeConversation({
@@ -318,19 +363,22 @@ export class SessionManager implements ISessionManager {
     }
 
     try {
-      // Add prompt to session
+      // Inject RAG context if enabled
+      const augmentedPrompt = await this.injectRAGContext(sessionId.toString(), prompt);
+
+      // Add original prompt to session (not augmented)
       session.prompts.push(prompt);
 
       // Use REST API instead of WebSocket (as per node implementation)
       console.log('Session endpoint from storage:', session.endpoint);
       const endpoint = session.endpoint || 'http://localhost:8080';
       const httpUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
-      
-      // Call REST API for inference
+
+      // Call REST API for inference with augmented prompt
       const inferenceUrl = `${httpUrl}/v1/inference`;
       const requestBody = {
         model: session.model || 'tiny-vicuna-1b',
-        prompt: prompt,
+        prompt: augmentedPrompt,  // Use RAG-augmented prompt
         max_tokens: 200,  // Allow longer responses for poems, stories, etc.
         temperature: 0.7,  // Add temperature for better responses
         sessionId: sessionId.toString(),
@@ -462,12 +510,15 @@ export class SessionManager implements ISessionManager {
     }
 
     try {
-      // Add prompt to session
+      // Inject RAG context if enabled
+      const augmentedPrompt = await this.injectRAGContext(sessionIdStr, prompt);
+
+      // Add original prompt to session (not augmented)
       session.prompts.push(prompt);
 
       // Get WebSocket URL from endpoint
       const endpoint = session.endpoint || 'http://localhost:8080';
-      const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://') 
+      const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
         ? endpoint 
         : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
 
@@ -691,10 +742,10 @@ export class SessionManager implements ISessionManager {
             type: 'prompt',
             chain_id: session.chainId,
             jobId: session.jobId.toString(),  // Include jobId for settlement tracking
-            prompt: prompt,
+            prompt: augmentedPrompt,  // Use RAG-augmented prompt
             request: {
               model: 'tiny-vicuna',  // Use tiny-vicuna as confirmed by node developer
-              prompt: prompt,
+              prompt: augmentedPrompt,  // Use RAG-augmented prompt
               max_tokens: 50,
               temperature: 0.7,
               stream: true
@@ -817,10 +868,10 @@ export class SessionManager implements ISessionManager {
             type: 'prompt',
             chain_id: session.chainId,
             jobId: session.jobId.toString(),  // Include jobId for settlement tracking
-            prompt: prompt,
+            prompt: augmentedPrompt,  // Use RAG-augmented prompt
             request: {
               model: 'tiny-vicuna',  // Use tiny-vicuna as confirmed by node developer
-              prompt: prompt,
+              prompt: augmentedPrompt,  // Use RAG-augmented prompt
               max_tokens: 50,
               temperature: 0.7,
               stream: false
@@ -1711,6 +1762,92 @@ export class SessionManager implements ISessionManager {
     this.sessions.clear();
     if (this.wsClient?.isConnected()) {
       this.wsClient.disconnect();
+    }
+  }
+
+  /**
+   * Initialize RAG for a session
+   * Creates a ContextBuilder and initializes the vector DB session
+   * @private
+   */
+  private async initializeRAGForSession(sessionId: string, ragConfig: RAGSessionConfig): Promise<void> {
+    if (!this.vectorRAGManager || !this.embeddingService) {
+      throw new SDKError('VectorRAGManager and EmbeddingService required for RAG', 'RAG_NOT_CONFIGURED');
+    }
+
+    try {
+      // Get or create vector DB session ID
+      let vectorDbSessionId: string;
+      if (ragConfig.vectorDbSessionId) {
+        vectorDbSessionId = ragConfig.vectorDbSessionId;
+      } else if (ragConfig.databaseName) {
+        // Create new vector DB session from database name
+        vectorDbSessionId = await this.vectorRAGManager.createSession(ragConfig.databaseName);
+      } else {
+        throw new SDKError('RAG config must provide vectorDbSessionId or databaseName', 'RAG_CONFIG_INVALID');
+      }
+
+      // Create context builder for this session
+      const contextBuilder = new ContextBuilder(
+        this.embeddingService,
+        this.vectorRAGManager,
+        vectorDbSessionId
+      );
+
+      this.contextBuilders.set(sessionId, contextBuilder);
+    } catch (error: any) {
+      throw new SDKError(`Failed to initialize RAG: ${error.message}`, 'RAG_INIT_FAILED');
+    }
+  }
+
+  /**
+   * Inject RAG context before a prompt
+   * Retrieves relevant context from vector DB and augments the prompt
+   * @private
+   */
+  private async injectRAGContext(sessionId: string, prompt: string): Promise<string> {
+    const session = this.sessions.get(sessionId);
+    if (!session?.ragConfig?.enabled) {
+      return prompt; // RAG disabled, return prompt unchanged
+    }
+
+    const contextBuilder = this.contextBuilders.get(sessionId);
+    if (!contextBuilder) {
+      return prompt; // No context builder, return prompt unchanged
+    }
+
+    try {
+      // Retrieve context
+      const result = await contextBuilder.retrieveContext({
+        prompt,
+        topK: session.ragConfig.topK,
+        threshold: session.ragConfig.similarityThreshold,
+        template: session.ragConfig.contextTemplate,
+        maxTokens: session.ragConfig.maxContextLength,
+        includeSources: session.ragConfig.includeSources,
+        filter: session.ragConfig.metadataFilter
+      });
+
+      // Update session metrics
+      if (session.ragMetrics) {
+        const n = session.ragMetrics.totalRetrievals;
+        session.ragMetrics.totalRetrievals = n + 1;
+        session.ragMetrics.averageLatencyMs =
+          (session.ragMetrics.averageLatencyMs * n + result.metrics.retrievalTimeMs) / (n + 1);
+        session.ragMetrics.averageSimilarity =
+          (session.ragMetrics.averageSimilarity * n + result.metrics.averageSimilarity) / (n + 1);
+        session.ragMetrics.totalContextTokens += result.metrics.contextTokens;
+        if (result.metrics.resultsFound === 0) {
+          session.ragMetrics.emptyRetrievals++;
+        }
+      }
+
+      // Return augmented prompt (context + original prompt)
+      return result.context ? `${result.context}User: ${prompt}` : prompt;
+    } catch (error: any) {
+      // On error, return original prompt and continue
+      console.warn(`RAG context retrieval failed: ${error.message}`);
+      return prompt;
     }
   }
 }
