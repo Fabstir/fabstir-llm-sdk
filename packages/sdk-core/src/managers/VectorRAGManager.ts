@@ -12,6 +12,8 @@ import { SessionCache } from '../rag/session-cache.js';
 import { VectorInput, AddVectorResult, AddVectorOptions, validateVector, convertToVectorRecord, validateVectorBatch, handleDuplicates } from '../rag/vector-operations.js';
 import { validateMetadata, MetadataSchema } from '../rag/metadata-validator.js';
 import { BatchProcessor } from '../rag/batch-processor.js';
+import { DatabaseMetadataService } from '../database/DatabaseMetadataService.js';
+import type { DatabaseMetadata } from '../database/types.js';
 
 /**
  * Session status
@@ -32,19 +34,6 @@ interface Session {
 }
 
 /**
- * Database metadata
- */
-export interface DatabaseMetadata {
-  databaseName: string;
-  createdAt: number;
-  lastAccessedAt: number;
-  owner: string;
-  vectorCount: number;
-  storageSizeBytes: number;
-  description?: string;
-}
-
-/**
  * Database statistics
  */
 export interface DatabaseStats {
@@ -62,10 +51,10 @@ export class VectorRAGManager implements IVectorRAGManager {
   public readonly userAddress: string;
   public readonly config: RAGConfig;
   private readonly seedPhrase: string;
+  private readonly metadataService: DatabaseMetadataService; // Shared metadata service
   private sessions: Map<string, Session>;
   private sessionCache: SessionCache<Session>;
   private dbNameToSessionId: Map<string, string>; // Map dbName to sessionId
-  private databaseMetadata: Map<string, DatabaseMetadata>; // Track metadata per database
   private disposed: boolean = false;
 
   /**
@@ -77,6 +66,7 @@ export class VectorRAGManager implements IVectorRAGManager {
     userAddress?: string;
     seedPhrase?: string;
     config: RAGConfig;
+    metadataService?: DatabaseMetadataService; // Optional for backward compatibility
   }) {
     // Validate required fields
     if (!options.userAddress) {
@@ -92,10 +82,10 @@ export class VectorRAGManager implements IVectorRAGManager {
     this.userAddress = options.userAddress;
     this.seedPhrase = options.seedPhrase;
     this.config = options.config;
+    this.metadataService = options.metadataService || new DatabaseMetadataService(); // Default if not provided
     this.sessions = new Map();
     this.sessionCache = new SessionCache<Session>(50);  // Cache up to 50 sessions
     this.dbNameToSessionId = new Map();
-    this.databaseMetadata = new Map();
   }
 
   /**
@@ -143,16 +133,8 @@ export class VectorRAGManager implements IVectorRAGManager {
       this.dbNameToSessionId.set(databaseName, sessionId); // Map dbName to sessionId
 
       // Initialize database metadata if this is the first session for this database
-      if (!this.databaseMetadata.has(databaseName)) {
-        const metadata: DatabaseMetadata = {
-          databaseName,
-          createdAt: session.createdAt,
-          lastAccessedAt: session.lastAccessedAt,
-          owner: this.userAddress,
-          vectorCount: 0,
-          storageSizeBytes: 0
-        };
-        this.databaseMetadata.set(databaseName, metadata);
+      if (!this.metadataService.exists(databaseName)) {
+        this.metadataService.create(databaseName, 'vector', this.userAddress);
       }
 
       return sessionId;
@@ -539,14 +521,7 @@ export class VectorRAGManager implements IVectorRAGManager {
    * @returns Database metadata or null if not found
    */
   getDatabaseMetadata(databaseName: string): DatabaseMetadata | null {
-    const metadata = this.databaseMetadata.get(databaseName);
-    if (!metadata) {
-      return null;
-    }
-
-    // Update lastAccessedAt
-    metadata.lastAccessedAt = Date.now();
-    return { ...metadata };
+    return this.metadataService.get(databaseName);
   }
 
   /**
@@ -558,14 +533,7 @@ export class VectorRAGManager implements IVectorRAGManager {
     databaseName: string,
     updates: Partial<Omit<DatabaseMetadata, 'databaseName' | 'owner' | 'createdAt'>>
   ): void {
-    const metadata = this.databaseMetadata.get(databaseName);
-    if (!metadata) {
-      throw new Error('Database not found');
-    }
-
-    // Apply updates
-    Object.assign(metadata, updates);
-    metadata.lastAccessedAt = Date.now();
+    this.metadataService.update(databaseName, updates);
   }
 
   /**
@@ -573,12 +541,7 @@ export class VectorRAGManager implements IVectorRAGManager {
    * @returns Array of database metadata, sorted by creation time (newest first)
    */
   listDatabases(): DatabaseMetadata[] {
-    const databases = Array.from(this.databaseMetadata.values());
-
-    // Sort by creation time, newest first
-    return databases
-      .map(db => ({ ...db }))
-      .sort((a, b) => b.createdAt - a.createdAt);
+    return this.metadataService.list({ type: 'vector' });
   }
 
   /**
@@ -587,7 +550,7 @@ export class VectorRAGManager implements IVectorRAGManager {
    * @returns Database statistics or null if not found
    */
   getDatabaseStats(databaseName: string): DatabaseStats | null {
-    const metadata = this.databaseMetadata.get(databaseName);
+    const metadata = this.metadataService.get(databaseName);
     if (!metadata) {
       return null;
     }
@@ -608,8 +571,8 @@ export class VectorRAGManager implements IVectorRAGManager {
    * @param databaseName - Database name to delete
    */
   async deleteDatabase(databaseName: string): Promise<void> {
-    const metadata = this.databaseMetadata.get(databaseName);
-    if (!metadata) {
+    // Check if database exists (will throw if not)
+    if (!this.metadataService.exists(databaseName)) {
       throw new Error('Database not found');
     }
 
@@ -617,7 +580,7 @@ export class VectorRAGManager implements IVectorRAGManager {
     await this.destroySessionsByDatabase(databaseName);
 
     // Remove metadata
-    this.databaseMetadata.delete(databaseName);
+    this.metadataService.delete(databaseName);
   }
 
   /**

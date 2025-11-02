@@ -828,9 +828,101 @@ Extended existing `VectorRAGManager` instead of creating separate abstraction la
 - Database re-creation with same name supported
 - Concurrent database operations supported
 
-### Sub-phase 6.2: Folder Hierarchy Implementation
+### Sub-phase 6.2: Database Manager Refactor for Multi-Type Support ✅ COMPLETE
 
-**Goal**: Implement virtual folder structure for document organization
+**Goal**: Refactor database management to support multiple database types (vector + future graph) via shared services
+
+**Rationale**: Current VectorRAGManager contains multi-DB logic (metadata tracking, permissions, CRUD) that will need to be duplicated when adding GraphRAGManager. This refactor extracts common logic into shared services to enable:
+1. **Future Graph Database Support** - GraphRAGManager can reuse metadata/permission services
+2. **Unified Staging Areas** - Users can combine vector + graph DBs for multi-modal RAG
+3. **Consistent Permission Model** - Same owner/reader/writer roles across all DB types
+4. **Reduced Code Duplication** - Common logic centralized in services
+
+**Approach**: Composition-based architecture with three shared services:
+- `DatabaseMetadataService` - Tracks creation time, size, owner, description for all DB types
+- `PermissionService` - Manages owner/reader/writer roles (basic implementation for MVP)
+- `DatabaseRegistry` - Unified listing/access across vector + future graph databases
+
+#### Tasks - ✅ ALL COMPLETE
+- [x] Write tests for DatabaseMetadataService (28 tests)
+- [x] Write tests for PermissionService (30 tests)
+- [x] Write tests for DatabaseRegistry (23 tests)
+- [x] Implement DatabaseMetadataService (136 lines)
+- [x] Implement PermissionService (127 lines)
+- [x] Implement DatabaseRegistry (58 lines)
+- [x] Refactor VectorRAGManager to compose services
+- [x] Verify all 56 existing tests still pass (backward compatibility)
+- [x] **All 81 new tests passing + All 56 existing tests passing = 137 total tests passing!**
+
+**Test Files:**
+- `packages/sdk-core/tests/database/metadata-service.test.ts` (max 300 lines) - Metadata CRUD tests
+  - Create/read/update/delete metadata
+  - Multi-type support (vector/graph)
+  - Timestamp tracking (createdAt, lastAccessedAt)
+  - Size tracking (vectorCount, storageSizeBytes)
+  - Description and custom fields
+  - Listing with filters
+- `packages/sdk-core/tests/database/permission-service.test.ts` (max 300 lines) - Permission tests
+  - Grant/revoke permissions
+  - Owner/reader/writer role checks
+  - Permission inheritance (default owner has all permissions)
+  - Multi-user scenarios
+  - Permission listing per database
+- `packages/sdk-core/tests/database/registry.test.ts` (max 250 lines) - Registry tests
+  - Register/unregister databases
+  - List databases by type (vector/graph/all)
+  - Get database by name
+  - Check database existence
+  - Multi-type filtering
+
+**Implementation Files:**
+- `packages/sdk-core/src/database/DatabaseMetadataService.ts` (max 350 lines) - Shared metadata service
+  - Interface: `DatabaseMetadata` (databaseName, type, createdAt, lastAccessedAt, owner, vectorCount, storageSizeBytes, description)
+  - Methods: create(), get(), update(), delete(), list(), exists()
+  - Type-aware (supports 'vector' | 'graph' | future types)
+- `packages/sdk-core/src/database/PermissionService.ts` (max 400 lines) - Shared permission service
+  - Interface: `PermissionRecord` (databaseName, userAddress, role: 'owner' | 'reader' | 'writer')
+  - Methods: grant(), revoke(), check(), list(), getRole()
+  - Role-based access control (owner > writer > reader)
+- `packages/sdk-core/src/database/DatabaseRegistry.ts` (max 300 lines) - Unified registry
+  - Methods: register(), unregister(), get(), list(), exists()
+  - Type filtering (list by 'vector', 'graph', or all)
+  - Integration with metadata and permission services
+- Refactor `packages/sdk-core/src/managers/VectorRAGManager.ts` - Composition integration
+  - Remove direct `databaseMetadata` Map (use DatabaseMetadataService)
+  - Inject services via constructor
+  - Update methods to use services:
+    - `createSession()` → calls metadataService.create()
+    - `getDatabaseMetadata()` → calls metadataService.get()
+    - `updateDatabaseMetadata()` → calls metadataService.update()
+    - `listDatabases()` → calls metadataService.list({ type: 'vector' })
+    - `deleteDatabase()` → calls metadataService.delete()
+  - Maintain backward-compatible API (no breaking changes)
+
+**Success Criteria:**
+- ✅ All new service tests pass (~60 tests)
+- ✅ All existing multi-db tests pass (56 tests from Sub-phase 6.1)
+- ✅ VectorRAGManager uses services via composition
+- ✅ API remains backward compatible (no breaking changes to public methods)
+- ✅ Architecture ready for future GraphRAGManager
+- ✅ Permission system works for basic scenarios (owner/reader/writer)
+- ✅ Metadata tracked consistently across all databases
+- ✅ Registry provides unified view of vector databases (graph support deferred)
+
+**Implementation Time Estimate:** ~3 hours
+- Phase 1: Service interfaces and tests (1 hour)
+- Phase 2: Service implementations (1 hour)
+- Phase 3: VectorRAGManager refactor + backward compatibility (1 hour)
+
+**Benefits for Future Work:**
+- **Sub-phase 6.3 (Folder Hierarchy)**: Folder permissions integrate cleanly with PermissionService
+- **Phase 7 (Access Control)**: PermissionService already provides foundation for sharing/collaboration
+- **Future Graph DB**: GraphRAGManager reuses all services, just implements graph-specific methods
+- **Staging Areas**: Easy to combine vector + graph databases via DatabaseRegistry
+
+### Sub-phase 6.3: Folder Hierarchy Implementation
+
+**Goal**: Implement virtual folder structure for document organization within vector databases
 
 #### Tasks
 - [ ] Write tests for hierarchy creation
