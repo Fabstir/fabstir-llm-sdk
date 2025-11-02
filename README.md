@@ -10,6 +10,8 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 - 💰 **Automated Payments** - Built-in escrow and payment handling via smart contracts
 - 🔄 **Session Management** - Stateful conversations with checkpoint proofs
 - 📦 **S5 Storage Integration** - Decentralized conversation persistence
+- 🧠 **RAG (Retrieval-Augmented Generation)** - Upload documents and enhance LLM responses with semantic search
+- 🗂️ **Vector Databases** - Client-side vector management with folder hierarchies and permissions
 - 🛡️ **Error Recovery** - Automatic retries and failover to ensure reliability
 - 🔌 **Browser Compatible** - Works in both Node.js and browser environments
 
@@ -102,21 +104,90 @@ Stream inference directly without blockchain transactions:
 async function directInference() {
   const sdk = new FabstirSDKCore({ network: 'base-sepolia' });
   await sdk.authenticate(privateKey);
-  
+
   const inferenceManager = sdk.getInferenceManager();
-  
+
   // Stream tokens with automatic host selection
   for await (const token of inferenceManager.streamInference(
     "Write a haiku about coding",
-    { 
+    {
       model: 'llama-2-7b',
       temperature: 0.9,
-      maxTokens: 100 
+      maxTokens: 100
     }
   )) {
     process.stdout.write(token);
   }
 }
+```
+
+### RAG-Enhanced Chat with Document Upload
+
+Upload documents and enhance LLM responses with semantic search:
+
+```typescript
+import { FabstirSDKCore } from "@fabstir/sdk-core";
+import { HostAdapter } from "@fabstir/sdk-core/embeddings";
+import { DocumentManager } from "@fabstir/sdk-core/managers";
+
+async function ragExample() {
+  // Initialize SDK
+  const sdk = new FabstirSDKCore({ network: 'base-sepolia' });
+  await sdk.authenticate(privateKey);
+
+  // Setup RAG managers
+  const vectorRAGManager = sdk.getVectorRAGManager();
+  const embeddingService = new HostAdapter({ hostUrl: 'http://host:8080' });
+  const documentManager = new DocumentManager({
+    embeddingService,
+    vectorManager: vectorRAGManager,
+    databaseName: 'my-knowledge-base'
+  });
+
+  // Create vector database
+  await vectorRAGManager.createSession('my-knowledge-base');
+
+  // Upload document (PDF, DOCX, TXT, MD, HTML)
+  const result = await documentManager.processDocument(file, {
+    chunkSize: 500,
+    overlap: 50,
+    onProgress: (p) => console.log(`Progress: ${p.progress}%`)
+  });
+  console.log(`Added ${result.chunks} chunks`);
+
+  // Start RAG-enhanced session
+  const sessionManager = sdk.getSessionManager();
+  sessionManager.setVectorRAGManager(vectorRAGManager);
+  sessionManager.setEmbeddingService(embeddingService);
+
+  const { sessionId } = await sessionManager.startSession({
+    hostUrl: 'http://host:8080',
+    jobId: 123n,
+    modelName: 'llama-3',
+    chainId: 84532,
+    ragConfig: {
+      enabled: true,
+      databaseName: 'my-knowledge-base',
+      topK: 5,          // Retrieve top 5 similar chunks
+      threshold: 0.7     // Minimum similarity score
+    }
+  });
+
+  // Ask questions about your documents
+  // RAG context is automatically injected
+  await sessionManager.sendPrompt(sessionId,
+    "What are the key points in the uploaded document?"
+  );
+
+  // Access RAG metrics
+  const session = sessionManager.getSession(sessionId.toString());
+  console.log('RAG Metrics:', {
+    contextsRetrieved: session.ragMetrics.contextsRetrieved,
+    avgSimilarity: session.ragMetrics.avgSimilarityScore,
+    retrievalTime: session.ragMetrics.retrievalTimeMs
+  });
+}
+```
 
 ## Installation
 
@@ -192,6 +263,15 @@ const sdk = new FabstirSDK({
 - [P2P Configuration](docs/P2P_CONFIGURATION.md) - P2P network configuration
 - [Architecture](docs/ARCHITECTURE.md) - System architecture overview
 - [Configuration](docs/CONFIGURATION.md) - All configuration options
+
+### RAG Documentation
+
+- [**RAG Quick Start**](docs/RAG_QUICK_START.md) - Get started with RAG in 5 minutes
+- [**RAG API Reference**](docs/RAG_API_REFERENCE.md) - Complete RAG API documentation
+- [**RAG Integration Guide**](docs/RAG_INTEGRATION_GUIDE.md) - Integration patterns (React, Redux, Express)
+- [**RAG Best Practices**](docs/RAG_BEST_PRACTICES.md) - Production recommendations
+- [**RAG Troubleshooting**](docs/RAG_TROUBLESHOOTING.md) - Common issues and solutions
+- [**RAG Security Guide**](docs/RAG_SECURITY.md) - Security and compliance
 
 ## Examples
 
