@@ -48,7 +48,8 @@ export class DatabaseMetadataService {
       owner,
       vectorCount: options?.vectorCount ?? 0,
       storageSizeBytes: options?.storageSizeBytes ?? 0,
-      description: options?.description
+      description: options?.description,
+      isPublic: options?.isPublic ?? false
     };
 
     this.metadata.set(databaseName, metadata);

@@ -584,6 +584,12 @@ export class VectorRAGManager implements IVectorRAGManager {
     const vectorRecords = deduped.vectors.map(convertToVectorRecord);
     await session.vectorDbSession.addVectors(vectorRecords);
 
+    // Update metadata with actual vector count from VectorDbSession
+    const stats = await session.vectorDbSession.getStats();
+    this.metadataService.update(session.databaseName, {
+      vectorCount: stats.vectorCount || 0
+    });
+
     return { added: deduped.vectors.length, failed: errors.length, errors, skipped: deduped.skipped };
   }
 
@@ -591,7 +597,7 @@ export class VectorRAGManager implements IVectorRAGManager {
    * Search vectors using dbName
    * Auto-creates session if one doesn't exist
    */
-  async search(dbName: string, queryVector: number[], topK: number, options?: SearchOptions): Promise<any[]> {
+  async search(dbName: string, queryVector: number[], topK: number, options?: SearchOptions): Promise<SearchResultWithSource[]> {
     // Auto-create session if it doesn't exist
     let sessionId = this.dbNameToSessionId.get(dbName);
     if (!sessionId) {
@@ -601,7 +607,13 @@ export class VectorRAGManager implements IVectorRAGManager {
     // Check read permission
     this.checkPermission(dbName, 'read');
 
-    return this.searchVectors(sessionId, queryVector, topK, options);
+    const results = await this.searchVectors(sessionId, queryVector, topK, options);
+
+    // Add sourceDatabaseName to results for consistency with multi-database search
+    return results.map(result => ({
+      ...result,
+      sourceDatabaseName: dbName
+    }));
   }
 
   /**
