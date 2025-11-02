@@ -32,6 +32,29 @@ interface Session {
 }
 
 /**
+ * Database metadata
+ */
+export interface DatabaseMetadata {
+  databaseName: string;
+  createdAt: number;
+  lastAccessedAt: number;
+  owner: string;
+  vectorCount: number;
+  storageSizeBytes: number;
+  description?: string;
+}
+
+/**
+ * Database statistics
+ */
+export interface DatabaseStats {
+  databaseName: string;
+  vectorCount: number;
+  storageSizeBytes: number;
+  sessionCount: number;
+}
+
+/**
  * Vector RAG Manager
  * Manages vector database sessions for RAG operations
  */
@@ -42,6 +65,7 @@ export class VectorRAGManager implements IVectorRAGManager {
   private sessions: Map<string, Session>;
   private sessionCache: SessionCache<Session>;
   private dbNameToSessionId: Map<string, string>; // Map dbName to sessionId
+  private databaseMetadata: Map<string, DatabaseMetadata>; // Track metadata per database
   private disposed: boolean = false;
 
   /**
@@ -71,6 +95,7 @@ export class VectorRAGManager implements IVectorRAGManager {
     this.sessions = new Map();
     this.sessionCache = new SessionCache<Session>(50);  // Cache up to 50 sessions
     this.dbNameToSessionId = new Map();
+    this.databaseMetadata = new Map();
   }
 
   /**
@@ -116,6 +141,19 @@ export class VectorRAGManager implements IVectorRAGManager {
       this.sessions.set(sessionId, session);
       this.sessionCache.set(sessionId, session);
       this.dbNameToSessionId.set(databaseName, sessionId); // Map dbName to sessionId
+
+      // Initialize database metadata if this is the first session for this database
+      if (!this.databaseMetadata.has(databaseName)) {
+        const metadata: DatabaseMetadata = {
+          databaseName,
+          createdAt: session.createdAt,
+          lastAccessedAt: session.lastAccessedAt,
+          owner: this.userAddress,
+          vectorCount: 0,
+          storageSizeBytes: 0
+        };
+        this.databaseMetadata.set(databaseName, metadata);
+      }
 
       return sessionId;
     } catch (error) {
@@ -493,6 +531,93 @@ export class VectorRAGManager implements IVectorRAGManager {
     // For now, return empty array - full implementation would store history
     // This is a placeholder for Sub-phase 3.2
     return [];
+  }
+
+  /**
+   * Get metadata for a specific database
+   * @param databaseName - Database name
+   * @returns Database metadata or null if not found
+   */
+  getDatabaseMetadata(databaseName: string): DatabaseMetadata | null {
+    const metadata = this.databaseMetadata.get(databaseName);
+    if (!metadata) {
+      return null;
+    }
+
+    // Update lastAccessedAt
+    metadata.lastAccessedAt = Date.now();
+    return { ...metadata };
+  }
+
+  /**
+   * Update database metadata
+   * @param databaseName - Database name
+   * @param updates - Metadata fields to update
+   */
+  updateDatabaseMetadata(
+    databaseName: string,
+    updates: Partial<Omit<DatabaseMetadata, 'databaseName' | 'owner' | 'createdAt'>>
+  ): void {
+    const metadata = this.databaseMetadata.get(databaseName);
+    if (!metadata) {
+      throw new Error('Database not found');
+    }
+
+    // Apply updates
+    Object.assign(metadata, updates);
+    metadata.lastAccessedAt = Date.now();
+  }
+
+  /**
+   * List all databases with metadata
+   * @returns Array of database metadata, sorted by creation time (newest first)
+   */
+  listDatabases(): DatabaseMetadata[] {
+    const databases = Array.from(this.databaseMetadata.values());
+
+    // Sort by creation time, newest first
+    return databases
+      .map(db => ({ ...db }))
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  /**
+   * Get statistics for a database
+   * @param databaseName - Database name
+   * @returns Database statistics or null if not found
+   */
+  getDatabaseStats(databaseName: string): DatabaseStats | null {
+    const metadata = this.databaseMetadata.get(databaseName);
+    if (!metadata) {
+      return null;
+    }
+
+    // Count sessions for this database
+    const sessions = this.listSessions(databaseName);
+
+    return {
+      databaseName: metadata.databaseName,
+      vectorCount: metadata.vectorCount,
+      storageSizeBytes: metadata.storageSizeBytes,
+      sessionCount: sessions.length
+    };
+  }
+
+  /**
+   * Delete a database and all its sessions
+   * @param databaseName - Database name to delete
+   */
+  async deleteDatabase(databaseName: string): Promise<void> {
+    const metadata = this.databaseMetadata.get(databaseName);
+    if (!metadata) {
+      throw new Error('Database not found');
+    }
+
+    // Destroy all sessions for this database
+    await this.destroySessionsByDatabase(databaseName);
+
+    // Remove metadata
+    this.databaseMetadata.delete(databaseName);
   }
 
   /**
