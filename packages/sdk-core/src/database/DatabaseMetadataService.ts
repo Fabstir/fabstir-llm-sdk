@@ -73,7 +73,7 @@ export class DatabaseMetadataService {
 
   /**
    * Update metadata for a database
-   * Only updates mutable fields (description, vectorCount, storageSizeBytes)
+   * Only updates mutable fields (description, vectorCount, storageSizeBytes, isPublic)
    */
   update(databaseName: string, updates: UpdateMetadata): void {
     const metadata = this.metadata.get(databaseName);
@@ -90,6 +90,9 @@ export class DatabaseMetadataService {
     }
     if (updates.storageSizeBytes !== undefined) {
       metadata.storageSizeBytes = updates.storageSizeBytes;
+    }
+    if (updates.isPublic !== undefined) {
+      metadata.isPublic = updates.isPublic;
     }
 
     // Update last accessed time

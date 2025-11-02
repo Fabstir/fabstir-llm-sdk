@@ -35,13 +35,21 @@ export interface DatabaseMetadata {
 
   /** Optional human-readable description */
   description?: string;
+
+  /**
+   * Database visibility
+   * - true: Public (anyone can read)
+   * - false/undefined: Private (only users with explicit permissions)
+   * @default false
+   */
+  isPublic?: boolean;
 }
 
 /**
  * Metadata fields that can be updated
  * Excludes immutable fields: databaseName, type, owner, createdAt
  */
-export type UpdateMetadata = Partial<Pick<DatabaseMetadata, 'description' | 'vectorCount' | 'storageSizeBytes'>>;
+export type UpdateMetadata = Partial<Pick<DatabaseMetadata, 'description' | 'vectorCount' | 'storageSizeBytes' | 'isPublic'>>;
 
 /**
  * Options for creating database metadata

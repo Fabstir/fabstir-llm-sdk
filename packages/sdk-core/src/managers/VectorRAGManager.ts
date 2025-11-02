@@ -15,6 +15,7 @@ import { BatchProcessor } from '../rag/batch-processor.js';
 import { DatabaseMetadataService } from '../database/DatabaseMetadataService.js';
 import type { DatabaseMetadata } from '../database/types.js';
 import { validateFolderPath, normalizeFolderPath } from '../rag/folder-utils.js';
+import { PermissionManager } from '../permissions/PermissionManager.js';
 
 /**
  * Session status
@@ -54,6 +55,7 @@ export class VectorRAGManager implements IVectorRAGManager {
   public readonly config: RAGConfig;
   private readonly seedPhrase: string;
   private readonly metadataService: DatabaseMetadataService; // Shared metadata service
+  private readonly permissionManager?: PermissionManager; // Optional permission manager
   private sessions: Map<string, Session>;
   private sessionCache: SessionCache<Session>;
   private dbNameToSessionId: Map<string, string>; // Map dbName to sessionId
@@ -69,6 +71,7 @@ export class VectorRAGManager implements IVectorRAGManager {
     seedPhrase?: string;
     config: RAGConfig;
     metadataService?: DatabaseMetadataService; // Optional for backward compatibility
+    permissionManager?: PermissionManager; // Optional permission manager
   }) {
     // Validate required fields
     if (!options.userAddress) {
@@ -85,6 +88,7 @@ export class VectorRAGManager implements IVectorRAGManager {
     this.seedPhrase = options.seedPhrase;
     this.config = options.config;
     this.metadataService = options.metadataService || new DatabaseMetadataService(); // Default if not provided
+    this.permissionManager = options.permissionManager; // Optional, undefined if not provided
     this.sessions = new Map();
     this.sessionCache = new SessionCache<Session>(50);  // Cache up to 50 sessions
     this.dbNameToSessionId = new Map();
@@ -138,6 +142,10 @@ export class VectorRAGManager implements IVectorRAGManager {
       // Initialize database metadata if this is the first session for this database
       if (!this.metadataService.exists(databaseName)) {
         this.metadataService.create(databaseName, 'vector', this.userAddress);
+      } else {
+        // Database exists - check user has at least read access
+        // Actual operations (addVectors, search) will enforce their required permissions
+        this.checkPermission(databaseName, 'read');
       }
 
       return sessionId;
@@ -289,6 +297,9 @@ export class VectorRAGManager implements IVectorRAGManager {
       throw new Error('Session is closed');
     }
 
+    // Check write permission
+    this.checkPermission(session.databaseName, 'write');
+
     // Validate vector dimensions (all should be same length)
     if (vectors.length > 0) {
       const expectedDim = vectors[0].vector.length;
@@ -431,10 +442,14 @@ export class VectorRAGManager implements IVectorRAGManager {
 
   /**
    * Add vectors using dbName (overload for tests)
+   * Auto-creates session if one doesn't exist
    */
   async addVectors(dbName: string, vectors: VectorInput[], options?: AddVectorOptions): Promise<AddVectorResult> {
-    const sessionId = this.dbNameToSessionId.get(dbName);
-    if (!sessionId) throw new Error('Session not found');
+    // Auto-create session if it doesn't exist
+    let sessionId = this.dbNameToSessionId.get(dbName);
+    if (!sessionId) {
+      sessionId = await this.createSession(dbName);
+    }
     if (vectors.length === 0) return { added: 0, failed: 0 };
 
     // For single-vector operations, throw on validation errors
@@ -454,6 +469,9 @@ export class VectorRAGManager implements IVectorRAGManager {
 
     const session = this.getSession(sessionId);
     if (!session || session.status !== 'active') throw new Error('Session not found');
+
+    // Check write permission
+    this.checkPermission(session.databaseName, 'write');
 
     // Validate and normalize folder paths in metadata
     for (const vec of deduped.vectors) {
@@ -478,10 +496,18 @@ export class VectorRAGManager implements IVectorRAGManager {
 
   /**
    * Search vectors using dbName
+   * Auto-creates session if one doesn't exist
    */
   async search(dbName: string, queryVector: number[], topK: number, options?: SearchOptions): Promise<any[]> {
-    const sessionId = this.dbNameToSessionId.get(dbName);
-    if (!sessionId) throw new Error('Session not found');
+    // Auto-create session if it doesn't exist
+    let sessionId = this.dbNameToSessionId.get(dbName);
+    if (!sessionId) {
+      sessionId = await this.createSession(dbName);
+    }
+
+    // Check read permission
+    this.checkPermission(dbName, 'read');
+
     return this.searchVectors(sessionId, queryVector, topK, options);
   }
 
@@ -773,6 +799,29 @@ export class VectorRAGManager implements IVectorRAGManager {
     }
 
     session.lastAccessedAt = Date.now();
+  }
+
+  /**
+   * Check if user has permission to perform an action on a database
+   * @private
+   */
+  private checkPermission(databaseName: string, action: 'read' | 'write'): void {
+    // Skip permission check if no permission manager configured
+    if (!this.permissionManager) {
+      return;
+    }
+
+    // Get database metadata
+    const metadata = this.metadataService.get(databaseName);
+    if (!metadata) {
+      throw new Error(`Database not found: ${databaseName}`);
+    }
+
+    // Check permission and log attempt
+    const allowed = this.permissionManager.checkAndLog(metadata, this.userAddress, action);
+    if (!allowed) {
+      throw new Error('Permission denied: insufficient permissions for this operation');
+    }
   }
 
   /**
