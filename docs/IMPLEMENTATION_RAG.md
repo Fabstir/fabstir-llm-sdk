@@ -599,11 +599,11 @@ const result = await manager.processDocument(file, {
 
 ---
 
-### Sub-phase 4.2: Host-Side Embedding (Production) ✅ COMPLETE (Node), ⏳ Pending (SDK)
+### Sub-phase 4.2: Host-Side Embedding (Production) ✅ COMPLETE
 
 **Goal**: Add embedding generation endpoint to fabstir-llm-node
 
-#### Tasks (Node Implementation - Complete)
+#### Tasks - ✅ ALL COMPLETE
 - [x] Write tests for /v1/embed endpoint
 - [x] Write tests for batch embedding
 - [x] Write tests for model loading
@@ -615,15 +615,24 @@ const result = await manager.processDocument(file, {
 - [x] Add performance monitoring
 - [x] Test with concurrent requests
 - [x] Create implementation guide for node developers
-- [ ] Implement SDK HostAdapter.ts (pending)
+- [x] Implement SDK HostAdapter.ts ✅ COMPLETE
 
 **Documentation Files:** ✅ COMPLETE
 - `docs/node-reference/HOST_EMBEDDING_IMPLEMENTATION.md` (1000+ lines) - Comprehensive implementation guide
 
-**Implementation Files:** ✅ COMPLETE (Node Side)
+**Implementation Files:** ✅ COMPLETE
 - `fabstir-llm-node/src/api/embedding.rs` - Rust endpoint (COMPLETE)
 - `fabstir-llm-node/src/models/embedding_model.rs` - Multi-model manager (COMPLETE)
-- `packages/sdk-core/src/embeddings/adapters/HostAdapter.ts` (max 250 lines) - SDK adapter ⏳ PENDING
+- `packages/sdk-core/src/embeddings/adapters/HostAdapter.ts` (150 lines) - SDK adapter ✅ COMPLETE
+
+**Test Files:** ✅ COMPLETE
+- `packages/sdk-core/tests/embeddings/host.test.ts` (18/18 tests passing)
+  - Initialization tests (4/4 passing)
+  - Single & batch embedding tests (5/5 passing)
+  - Error handling tests (5/5 passing)
+  - Cost tracking tests (2/2 passing)
+  - Retry logic test (1/1 passing)
+  - Integration test (1/1 passing)
 
 **Node Performance Results:** ✅ EXCEEDS TARGETS
 - **Single embedding latency**: 10.9ms (target: <100ms) - **9x better**
@@ -647,9 +656,18 @@ const result = await manager.processDocument(file, {
 - ✅ No memory leaks
 - ✅ Performance acceptable (10.9ms, 9x better than target)
 
-**Overall Status:** ✅ **NODE COMPLETE**, ⏳ **SDK PENDING (HostAdapter.ts)**
-**Achievement:** Production-ready host-side embeddings with zero-cost, 9x performance target!
-**Next Action:** Implement `HostAdapter.ts` in SDK to complete Sub-phase 4.2
+**Overall Status:** ✅ **COMPLETE (Node + SDK)**
+**Achievement:** Production-ready host-side embeddings with zero-cost, 9x performance target, fully integrated with SDK!
+
+**SDK Integration:** ✅ VERIFIED
+- ✅ HostAdapter extends EmbeddingService (drop-in replacement for OpenAI/Cohere)
+- ✅ DocumentManager integration verified (uses `EmbeddingService.embedBatch()`)
+- ✅ Zero-cost tracking (cost always $0.00, no daily limits)
+- ✅ 384-dimension validation enforced
+- ✅ Batch size limit: 96 texts (same as Cohere)
+- ✅ Retry logic with exponential backoff inherited from base class
+
+**Next Action:** Proceed to Phase 5 (Session Integration) - Sub-phase 4.2 fully complete!
 
 ---
 
