@@ -701,6 +701,75 @@ export default function ChatContextDemo() {
     }
   }
 
+  // Initialize RAG (Vector Database and Document Manager)
+  async function initializeRAG() {
+    // Validate prerequisites
+    if (!storageManager) {
+      const errorMsg = 'StorageManager not available. Please authenticate first.';
+      setError(errorMsg);
+      addMessage('system', `❌ ${errorMsg}`);
+      return;
+    }
+
+    if (!activeHost || !activeHost.url) {
+      const errorMsg = 'No host selected. Please select a host first.';
+      setError(errorMsg);
+      addMessage('system', `❌ ${errorMsg}`);
+      return;
+    }
+
+    if (!primaryAccount) {
+      const errorMsg = 'Wallet not connected. Please connect wallet first.';
+      setError(errorMsg);
+      addMessage('system', `❌ ${errorMsg}`);
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      setStatus('Initializing RAG system...');
+      addMessage('system', '🔄 Initializing RAG system...');
+
+      // Create VectorRAGManager
+      const vectorRAG = new VectorRAGManager(storageManager, primaryAccount);
+      setVectorRAGManager(vectorRAG);
+      addMessage('system', '✅ VectorRAGManager initialized');
+
+      // Check if vector database exists
+      const existingDbs = await vectorRAG.listVectorDatabases!();
+      const dbExists = existingDbs.includes(vectorDbName);
+
+      if (!dbExists) {
+        // Create new vector database (384 dimensions for all-MiniLM-L6-v2)
+        await vectorRAG.createVectorDatabase!(vectorDbName, { dimension: 384 });
+        addMessage('system', `✅ Created vector database: ${vectorDbName}`);
+      } else {
+        addMessage('system', `✅ Loaded existing vector database: ${vectorDbName}`);
+      }
+
+      // Create HostAdapter with active host URL
+      const hostAdapter = new HostAdapter(activeHost.url);
+      addMessage('system', `✅ HostAdapter configured (${activeHost.url})`);
+
+      // Create DocumentManager
+      const docManager = new DocumentManager(vectorRAG, hostAdapter, vectorDbName);
+      setDocumentManager(docManager);
+      addMessage('system', '✅ DocumentManager initialized');
+
+      setStatus('RAG system ready');
+      addMessage('system', '🎉 RAG system initialized successfully!');
+      setIsRAGEnabled(true);
+    } catch (error: any) {
+      console.error('RAG initialization failed:', error);
+      const errorMsg = `RAG initialization failed: ${error.message}`;
+      setError(errorMsg);
+      addMessage('system', `❌ ${errorMsg}`);
+      setIsRAGEnabled(false);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   // Deposit USDC to primary smart wallet from TEST_USER_1 faucet
   async function depositUSDC() {
     if (!primaryAccount || !sdk) {
@@ -1150,6 +1219,11 @@ export default function ChatContextDemo() {
       );
       addMessage("system", `🤖 Model: ${host.models[0]}`);
       addMessage("system", `🌐 Endpoint: ${host.endpoint}`);
+
+      // Initialize RAG system if not already initialized
+      if (!vectorRAGManager && !documentManager) {
+        await initializeRAG();
+      }
 
       setStatus("Checking USDC balance...");
 
