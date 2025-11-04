@@ -358,18 +358,18 @@ These features are **production-ready** in fabstir-llm-node v8.3.0:
 **Line Budget**: 150 lines (90 tests + 60 implementation)
 
 #### Tasks
-- [ ] Write tests for askWithContext() end-to-end flow
-- [ ] Write tests for automatic embedding generation
-- [ ] Write tests for automatic search and context formatting
-- [ ] Write tests for no results case (send original prompt)
-- [ ] Write tests for error scenarios
-- [ ] Implement askWithContext(sessionId, question, topK) method
-- [ ] Generate embedding for question (via POST /v1/embed or existing embedding service)
-- [ ] Call searchVectors(sessionId, queryEmbedding, topK)
-- [ ] Format context: "Context:\n{chunks}\n\nQuestion: {question}"
-- [ ] Return formatted prompt ready for sendPromptStreaming()
-- [ ] Handle errors gracefully (return original prompt if search fails)
-- [ ] Verify all tests pass
+- [x] Write tests for askWithContext() end-to-end flow
+- [x] Write tests for automatic embedding generation
+- [x] Write tests for automatic search and context formatting
+- [x] Write tests for no results case (send original prompt)
+- [x] Write tests for error scenarios
+- [x] Implement askWithContext(sessionId, question, topK) method
+- [x] Generate embedding for question (via POST /v1/embed or existing embedding service)
+- [x] Call searchVectors(sessionId, queryEmbedding, topK)
+- [x] Format context: "Context:\n{chunks}\n\nQuestion: {question}"
+- [x] Return formatted prompt ready for sendPromptStreaming()
+- [x] Handle errors gracefully (return original prompt if search fails)
+- [x] Verify all tests pass
 
 **Test Files:**
 - `packages/sdk-core/tests/unit/session-ask-with-context.test.ts` (NEW, 90 lines) - askWithContext() tests
@@ -378,16 +378,23 @@ These features are **production-ready** in fabstir-llm-node v8.3.0:
 - `packages/sdk-core/src/managers/SessionManager.ts` (+60 lines) - askWithContext() helper method
 
 **Success Criteria:**
-- [ ] askWithContext() accepts: sessionId (string), question (string), topK (number = 5)
-- [ ] Automatically generates embedding for question
-- [ ] Automatically searches vectors
-- [ ] Formats context with retrieved chunks
-- [ ] Returns enhanced prompt string
-- [ ] Returns original question if no context found
-- [ ] Handles errors gracefully (logs error, returns original question)
-- [ ] All 12 tests pass
+- [x] askWithContext() accepts: sessionId (string), question (string), topK (number = 5)
+- [x] Automatically generates embedding for question
+- [x] Automatically searches vectors
+- [x] Formats context with retrieved chunks
+- [x] Returns enhanced prompt string
+- [x] Returns original question if no context found
+- [x] Handles errors gracefully (logs error, returns original question)
+- [x] All 13 tests pass (13/13) ✅
 
-**Test Results:** ⏳ Pending
+**Test Results:** ✅ **13 passed** (13ms execution time)
+
+**Implementation Notes:**
+- Implemented `askWithContext(sessionId, question, topK=5)` at SessionManager.ts:2000-2034 (~45 lines)
+- Implemented `injectRAGContext(question, results)` private method at SessionManager.ts:2045-2067 (~23 lines)
+- Total: 68 lines implementation (budget: 60, 113% utilized)
+- Test file: `session-ask-with-context.test.ts` (560 lines, 13 tests covering all scenarios)
+- **CRITICAL FIX**: Implemented missing `injectRAGContext()` method that was called at lines 345 & 503 but didn't exist
 
 ---
 

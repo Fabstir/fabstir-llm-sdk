@@ -1989,6 +1989,84 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Convenience helper: Generate embedding + search + inject context
+   * Returns enhanced prompt with RAG context or original question on error
+   *
+   * @param sessionId - Session identifier
+   * @param question - User's question to enhance with context
+   * @param topK - Number of results to retrieve (default: 5)
+   * @returns Enhanced prompt with context or original question
+   */
+  async askWithContext(
+    sessionId: string,
+    question: string,
+    topK: number = 5
+  ): Promise<string> {
+    try {
+      // Get session to retrieve host endpoint and chainId
+      const session = this.sessions.get(sessionId);
+      if (!session || session.status !== 'active') {
+        return question; // Graceful degradation
+      }
+
+      // Create HostAdapter to generate embedding
+      const { HostAdapter } = await import('../embeddings/adapters/HostAdapter');
+      const hostAdapter = new HostAdapter({
+        hostUrl: session.endpoint || 'http://localhost:8080',
+        chainId: session.chainId || 84532,
+        model: 'all-MiniLM-L6-v2'
+      });
+
+      // Generate embedding for question
+      const embeddingResult = await hostAdapter.embedText(question, 'query');
+      const queryVector = embeddingResult.embedding;
+
+      // Search for similar vectors (threshold=0.7)
+      const results = await this.searchVectors(sessionId, queryVector, topK, 0.7);
+
+      // Inject context into prompt
+      return this.injectRAGContext(question, results);
+    } catch (error) {
+      // Graceful degradation: return original question on any error
+      console.warn('askWithContext failed, returning original question:', error);
+      return question;
+    }
+  }
+
+  /**
+   * Format search results into RAG context and inject into prompt
+   * Returns original question if no valid results
+   *
+   * @private
+   * @param question - User's question
+   * @param results - Search results from vector store
+   * @returns Enhanced prompt with context or original question
+   */
+  private injectRAGContext(question: string, results: SearchResult[]): string {
+    // If no results or results lack text metadata, return original question
+    if (!results || results.length === 0) {
+      return question;
+    }
+
+    // Extract text from metadata (graceful handling of missing text field)
+    const contextChunks: string[] = [];
+    for (const result of results) {
+      if (result.metadata && typeof result.metadata.text === 'string') {
+        contextChunks.push(result.metadata.text);
+      }
+    }
+
+    // If no valid text chunks found, return original question
+    if (contextChunks.length === 0) {
+      return question;
+    }
+
+    // Format: Context:\n{chunk1}\n\n{chunk2}\n\n...\n\nQuestion: {question}
+    const context = contextChunks.join('\n\n');
+    return `Context:\n${context}\n\nQuestion: ${question}`;
+  }
+
+  /**
    * Send RAG request and wait for response with timeout
    * @private
    */
