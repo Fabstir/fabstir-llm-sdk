@@ -523,6 +523,20 @@ export default function ChatContextDemo() {
     }
   };
 
+  // RAG: Format context chunks for injection into prompt
+  const formatContext = (chunks: Array<{ text: string; score: number }>, userPrompt: string): string => {
+    // Return original prompt if no chunks
+    if (chunks.length === 0) {
+      return userPrompt;
+    }
+
+    // Format chunks with separation
+    const contextParts = chunks.map(c => c.text).join('\n\n');
+
+    // Build enhanced prompt with context
+    return `Context:\n${contextParts}\n\nQuestion: ${userPrompt}`;
+  };
+
   // RAG: Search documents for relevant context
   const searchRAGDocuments = (query: string): string => {
     if (ragDocuments.length === 0 || !query.trim()) return "";
@@ -1471,11 +1485,36 @@ export default function ChatContextDemo() {
     addMessage("user", userMessage);
 
     try {
+      // RAG: Search for relevant context if enabled
+      let ragChunks: Array<{ text: string; score: number }> = [];
+      let ragContextUsed = false;
+
+      if (isRAGEnabled && uploadedDocuments.length > 0) {
+        try {
+          ragChunks = await searchContext(userMessage);
+          ragContextUsed = ragChunks.length > 0;
+
+          if (ragContextUsed) {
+            addMessage("system", `📚 RAG: Context used (${ragChunks.length} chunks)`);
+          }
+        } catch (error) {
+          console.error('RAG search failed, continuing without context:', error);
+        }
+      }
+
       // Build prompt with full context
       const context = buildContext();
       let fullPrompt: string;
 
-      if (context) {
+      // RAG: Inject context into prompt if available
+      if (ragContextUsed) {
+        const enhancedPrompt = formatContext(ragChunks, userMessage);
+        if (context) {
+          fullPrompt = `${context}\n${enhancedPrompt}\nAssistant:`;
+        } else {
+          fullPrompt = `${enhancedPrompt}\nAssistant:`;
+        }
+      } else if (context) {
         fullPrompt = `${context}\nUser: ${userMessage}\nAssistant:`;
       } else {
         fullPrompt = `User: ${userMessage}\nAssistant:`;
