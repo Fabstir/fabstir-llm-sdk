@@ -21,6 +21,7 @@ COPY packages/host-cli ./packages/host-cli
 # Copy s5js tarballs (both the dist and the npm package)
 COPY s5js-dist.tar.gz /tmp/
 COPY s5js-0.3.0.tgz /build/
+COPY fabstir-vector-db-native-0.3.0.tgz /build/
 RUN mkdir -p ./packages/s5js && \
     tar xzf /tmp/s5js-dist.tar.gz -C ./packages/s5js/ && \
     rm /tmp/s5js-dist.tar.gz
@@ -94,6 +95,7 @@ RUN npm install -g pnpm@8 fake-indexeddb ws
 # Copy built packages as local dependencies
 COPY --from=builder /build/packages/sdk-core /tmp/deps/sdk-core
 COPY --from=builder /build/packages/s5js /tmp/deps/s5js
+COPY --from=builder /build/fabstir-vector-db-native-0.3.0.tgz /tmp/
 
 # Copy host-cli files
 COPY --from=builder /build/packages/host-cli/package.json ./package.json
@@ -139,10 +141,10 @@ global.WebSocket = WebSocket;\n\
 #     && apt-get remove -y cargo git && apt-get autoremove -y
 
 # Extract fabstir-llm-node binary from tarball
-COPY fabstir-llm-node-v8.1.6-websocket-error-logging.tar.gz /tmp/
-RUN tar xzf /tmp/fabstir-llm-node-v8.1.6-websocket-error-logging.tar.gz -C /usr/local/bin/ fabstir-llm-node && \
+COPY fabstir-llm-node-v8.2.0-embeddings-production-ready.tar.gz /tmp/
+RUN tar xzf /tmp/fabstir-llm-node-v8.2.0-embeddings-production-ready.tar.gz -C /usr/local/bin/ fabstir-llm-node && \
     chmod +x /usr/local/bin/fabstir-llm-node && \
-    rm /tmp/fabstir-llm-node-v8.1.6-websocket-error-logging.tar.gz
+    rm /tmp/fabstir-llm-node-v8.2.0-embeddings-production-ready.tar.gz
 
 # Create directories and symlink for model access
 RUN mkdir -p /models /root/.fabstir/logs \
