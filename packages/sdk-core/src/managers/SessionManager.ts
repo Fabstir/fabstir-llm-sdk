@@ -18,7 +18,10 @@ import {
   Vector,
   UploadVectorsMessage,
   UploadVectorsResponse,
-  UploadVectorsResult
+  UploadVectorsResult,
+  SearchVectorsMessage,
+  SearchVectorsResponse,
+  SearchResult
 } from '../types';
 import { PaymentManager } from './PaymentManager';
 import { StorageManager } from './StorageManager';
@@ -1894,6 +1897,98 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Search for similar vectors in session memory (host-side RAG)
+   *
+   * Performs cosine similarity search against vectors stored in the host's session memory.
+   * Returns top-K most similar vectors sorted by descending similarity score.
+   *
+   * @param sessionId - Session identifier (string format)
+   * @param queryVector - Query embedding vector (384 dimensions for all-MiniLM-L6-v2)
+   * @param k - Number of top results to return (1-20, default: 5)
+   * @param threshold - Minimum similarity score (0.0-1.0, default: 0.7)
+   * @returns Promise<SearchResult[]> - Array of search results sorted by score (descending)
+   * @throws {SDKError} If session not found, not active, or WebSocket not connected
+   * @throws {SDKError} If query vector has invalid dimensions or parameters out of range
+   * @throws {SDKError} If search times out after 10 seconds
+   */
+  async searchVectors(
+    sessionId: string,
+    queryVector: number[],
+    k: number = 5,
+    threshold: number = 0.7
+  ): Promise<SearchResult[]> {
+    // Validate session exists and is active
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new SDKError(`Session ${sessionId} not found`, 'SESSION_NOT_FOUND');
+    }
+    if (session.status !== 'active') {
+      throw new SDKError(
+        `Session ${sessionId} is not active (status: ${session.status})`,
+        'SESSION_NOT_ACTIVE'
+      );
+    }
+
+    // Validate WebSocket connection
+    if (!this.wsClient) {
+      throw new SDKError(
+        'WebSocket not connected - call startSession() first',
+        'WEBSOCKET_NOT_CONNECTED'
+      );
+    }
+
+    // Validate query vector dimensions (384 for all-MiniLM-L6-v2)
+    if (queryVector.length !== 384) {
+      throw new SDKError(
+        `Invalid query vector dimensions: expected 384, got ${queryVector.length}`,
+        'INVALID_VECTOR_DIMENSIONS'
+      );
+    }
+
+    // Validate k parameter (1-20)
+    if (k < 1 || k > 20) {
+      throw new SDKError(
+        `Parameter k must be between 1 and 20, got ${k}`,
+        'INVALID_PARAMETER'
+      );
+    }
+
+    // Validate threshold parameter (0.0-1.0)
+    if (threshold < 0.0 || threshold > 1.0) {
+      throw new SDKError(
+        `Parameter threshold must be between 0.0 and 1.0, got ${threshold}`,
+        'INVALID_PARAMETER'
+      );
+    }
+
+    // Generate request ID
+    const requestId = `search_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+    // Build searchVectors message (camelCase JSON format)
+    const message: SearchVectorsMessage = {
+      type: 'searchVectors',
+      requestId,
+      queryVector,
+      k,
+      threshold
+    };
+
+    // Send request and wait for response (10-second timeout)
+    const response = await this._sendRAGRequest(requestId, message, 10000);
+
+    // Handle error response
+    if (response.error) {
+      throw new SDKError(
+        `Search failed: ${response.error}`,
+        'SEARCH_ERROR'
+      );
+    }
+
+    // Return results (already sorted by score descending from host)
+    return response.results || [];
+  }
+
+  /**
    * Send RAG request and wait for response with timeout
    * @private
    */
@@ -1960,6 +2055,28 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Handle searchVectorsResponse from host
+   * @private
+   */
+  private _handleSearchVectorsResponse(response: SearchVectorsResponse): void {
+    const pending = this.pendingRequests.get(response.requestId);
+    if (!pending) {
+      console.warn(`Received searchVectorsResponse for unknown request: ${response.requestId}`);
+      return;
+    }
+
+    // Clear timeout
+    clearTimeout(pending.timeoutId);
+    this.pendingRequests.delete(response.requestId);
+
+    // Resolve with response data (results or error)
+    pending.resolve({
+      results: response.results || [],
+      error: response.error
+    });
+  }
+
+  /**
    * Set up global message handlers for RAG operations
    * @private
    */
@@ -1972,8 +2089,9 @@ export class SessionManager implements ISessionManager {
     this.wsClient.onMessage((data: any) => {
       if (data.type === 'uploadVectorsResponse') {
         this._handleUploadVectorsResponse(data as UploadVectorsResponse);
+      } else if (data.type === 'searchVectorsResponse') {
+        this._handleSearchVectorsResponse(data as SearchVectorsResponse);
       }
-      // Future: Add handler for searchVectorsResponse here
     });
   }
 }
