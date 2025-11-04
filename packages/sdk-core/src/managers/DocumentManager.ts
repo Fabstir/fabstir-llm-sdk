@@ -57,7 +57,7 @@ export class DocumentManager {
 
     // Initialize S5 client
     try {
-      const s5Module = await import('@s5-dev/s5js');
+      const s5Module = await import('@julesl23/s5js');
       const S5 = s5Module.S5;
 
       const s5Instance = await S5.create({

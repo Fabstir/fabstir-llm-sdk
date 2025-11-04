@@ -137,7 +137,7 @@ export class StorageManager implements IStorageManager {
       // Dynamically import S5 when needed
       let S5: any;
       try {
-        const s5Module = await import('@s5-dev/s5js');
+        const s5Module = await import('@julesl23/s5js');
         S5 = s5Module.S5;
         console.log('✅ S5 module loaded successfully');
       } catch (importError: any) {
