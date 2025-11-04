@@ -269,3 +269,7 @@ export function isValidTransactionHash(hash: string): boolean {
 // ============= User Settings Types =============
 
 export * from './settings.types';
+
+// ============= RAG WebSocket Types =============
+
+export * from './rag-websocket';

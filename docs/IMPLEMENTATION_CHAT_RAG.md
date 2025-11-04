@@ -227,35 +227,36 @@ These features are **production-ready** in fabstir-llm-node v8.3.0:
 **Line Budget**: 150 lines (100 types + 50 tests)
 
 #### Tasks
-- [ ] Write tests for Vector type (id, vector, metadata)
-- [ ] Write tests for UploadVectorsMessage type
-- [ ] Write tests for UploadVectorsResponse type
-- [ ] Write tests for SearchVectorsMessage type
-- [ ] Write tests for SearchVectorsResponse type
-- [ ] Add Vector interface to `packages/sdk-core/src/session/types.ts`
-- [ ] Add UploadVectorsMessage interface
-- [ ] Add UploadVectorsResponse interface
-- [ ] Add SearchVectorsMessage interface
-- [ ] Add SearchVectorsResponse interface
-- [ ] Add SearchResult interface (id, vector, metadata, score)
-- [ ] Verify TypeScript compilation succeeds
+- [x] Write tests for Vector type (id, vector, metadata)
+- [x] Write tests for UploadVectorsMessage type
+- [x] Write tests for UploadVectorsResponse type
+- [x] Write tests for SearchVectorsMessage type
+- [x] Write tests for SearchVectorsResponse type
+- [x] Add Vector interface to `packages/sdk-core/src/types/rag-websocket.ts` (NEW file)
+- [x] Add UploadVectorsMessage interface
+- [x] Add UploadVectorsResponse interface
+- [x] Add SearchVectorsMessage interface
+- [x] Add SearchVectorsResponse interface
+- [x] Add SearchResult interface (id, vector, metadata, score)
+- [x] Verify TypeScript compilation succeeds
 
 **Test Files:**
-- `packages/sdk-core/tests/unit/rag-message-types.test.ts` (NEW, 120 lines) - Type validation tests
+- `packages/sdk-core/tests/unit/rag-message-types.test.ts` (NEW, 321 lines) - Type validation tests
 
 **Implementation Files:**
-- `packages/sdk-core/src/session/types.ts` (+30 lines) - RAG message type definitions
+- `packages/sdk-core/src/types/rag-websocket.ts` (NEW, 113 lines) - RAG message type definitions
+- `packages/sdk-core/src/types/index.ts` (MODIFIED, +4 lines) - Export RAG types
 
 **Success Criteria:**
-- [ ] Vector type includes: id (string), vector (number[]), metadata (Record<string, any>)
-- [ ] UploadVectorsMessage includes: type, requestId, vectors[], replace (boolean)
-- [ ] UploadVectorsResponse includes: type, requestId, status, uploaded (number), error?
-- [ ] SearchVectorsMessage includes: type, requestId, queryVector (number[]), k (number), threshold?
-- [ ] SearchVectorsResponse includes: type, requestId, results (SearchResult[]), error?
-- [ ] All types compile without errors
-- [ ] All 20 type validation tests pass
+- [x] Vector type includes: id (string), vector (number[]), metadata (Record<string, any>)
+- [x] UploadVectorsMessage includes: type, requestId, vectors[], replace (boolean)
+- [x] UploadVectorsResponse includes: type, requestId, status, uploaded (number), error?
+- [x] SearchVectorsMessage includes: type, requestId, queryVector (number[]), k (number), threshold?
+- [x] SearchVectorsResponse includes: type, requestId, results (SearchResult[]), error?
+- [x] All types compile without errors (no new errors introduced)
+- [x] All 23 type validation tests pass (100%)
 
-**Test Results:** ⏳ Pending
+**Test Results:** ✅ **23/23 tests passing (100%)**
 
 ---
 
