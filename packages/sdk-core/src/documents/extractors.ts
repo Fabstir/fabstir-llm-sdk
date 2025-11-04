@@ -23,11 +23,9 @@ export async function extractText(
 
   switch (type) {
     case 'pdf':
-      text = await extractFromPDF(file);
-      break;
+      throw new Error('PDF processing is not supported in this environment. Please use .txt, .md, or .html files.');
     case 'docx':
-      text = await extractFromDOCX(file);
-      break;
+      throw new Error('DOCX processing is not supported in this environment. Please use .txt, .md, or .html files.');
     case 'txt':
     case 'md':
       text = await extractFromPlainText(file);
@@ -51,73 +49,9 @@ export async function extractText(
   };
 }
 
-/**
- * Extract text from PDF using pdfjs-dist
- *
- * @param file - PDF file
- * @returns Extracted text
- */
-async function extractFromPDF(file: File): Promise<string> {
-  try {
-    // Dynamically import pdfjs-dist for browser compatibility
-    const pdfjsLib = await import('pdfjs-dist');
-
-    // Set worker path for browser environment
-    if (typeof window !== 'undefined') {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-    }
-
-    // Read file as ArrayBuffer
-    const arrayBuffer = await file.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-
-    // Load PDF document
-    const loadingTask = pdfjsLib.getDocument({ data: uint8Array });
-    const pdf = await loadingTask.promise;
-
-    // Extract text from all pages
-    const textParts: string[] = [];
-
-    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-      const page = await pdf.getPage(pageNum);
-      const textContent = await page.getTextContent();
-
-      // Combine text items
-      const pageText = textContent.items
-        .map((item: any) => item.str)
-        .join(' ');
-
-      textParts.push(pageText);
-    }
-
-    return textParts.join('\n\n');
-  } catch (error) {
-    throw new Error(`Failed to extract text from PDF: ${(error as Error).message}`);
-  }
-}
-
-/**
- * Extract text from DOCX using mammoth
- *
- * @param file - DOCX file
- * @returns Extracted text
- */
-async function extractFromDOCX(file: File): Promise<string> {
-  try {
-    // Dynamically import mammoth for browser compatibility
-    const mammoth = await import('mammoth');
-
-    // Read file as ArrayBuffer
-    const arrayBuffer = await file.arrayBuffer();
-
-    // Extract text with paragraph structure
-    const result = await mammoth.extractRawText({ arrayBuffer });
-
-    return result.value;
-  } catch (error) {
-    throw new Error(`Failed to extract text from DOCX: ${(error as Error).message}`);
-  }
-}
+// PDF and DOCX extraction removed - these require server-side dependencies
+// that cannot be bundled for browser environments (pdfjs-dist + canvas.node, mammoth)
+// For server-side PDF/DOCX processing, implement a separate backend endpoint
 
 /**
  * Extract text from plain text file

@@ -18,6 +18,7 @@ import {
   IHostManager,
   ITreasuryManager
 } from './interfaces';
+import { IVectorRAGManager } from './managers/interfaces/IVectorRAGManager';
 import { IWalletProvider } from './interfaces/IWalletProvider';
 import { AuthManager } from './managers/AuthManager';
 import { PaymentManager } from './managers/PaymentManager';
@@ -34,6 +35,7 @@ import { ModelManager } from './managers/ModelManager';
 import { TreasuryManager } from './managers/TreasuryManager';
 import { ClientManager } from './managers/ClientManager';
 import { EncryptionManager } from './managers/EncryptionManager';
+import { VectorRAGManager } from './managers/VectorRAGManager';
 import { ContractManager, ContractAddresses } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 import { SDKConfig, SDKError } from './types';
@@ -100,6 +102,7 @@ export class FabstirSDKCore extends EventEmitter {
   private clientManager?: ClientManager;
   private treasuryManager?: ITreasuryManager;
   private encryptionManager?: EncryptionManager;
+  private vectorRAGManager?: IVectorRAGManager;
   
   private authenticated = false;
   private s5Seed?: string;
@@ -193,7 +196,15 @@ export class FabstirSDKCore extends EventEmitter {
       
       this.authenticated = true;
       console.log('Authentication flag set to true');
-      
+
+      // Create VectorRAGManager for RAG functionality
+      console.log('Creating VectorRAGManager...');
+      this.vectorRAGManager = new VectorRAGManager(
+        this.storageManager!,
+        this.userAddress!
+      );
+      console.log('VectorRAGManager created');
+
       // Initialize contract manager
       console.log('Creating ContractManager...');
       this.contractManager = new ContractManager(
@@ -766,6 +777,14 @@ export class FabstirSDKCore extends EventEmitter {
   }
 
   /**
+   * Get vector RAG manager for document embeddings and semantic search
+   */
+  getVectorRAGManager(): IVectorRAGManager {
+    this.ensureAuthenticated();
+    return this.vectorRAGManager!;
+  }
+
+  /**
    * Get host's public key for end-to-end encryption.
    *
    * This method:
@@ -1055,6 +1074,7 @@ export class FabstirSDKCore extends EventEmitter {
     this.modelManager = undefined;
     this.clientManager = undefined;
     this.treasuryManager = undefined;
+    this.vectorRAGManager = undefined;
     
     // Clear auth state
     this.provider = undefined;
