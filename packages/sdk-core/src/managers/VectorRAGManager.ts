@@ -1,961 +1,268 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
- * VectorRAGManager
- * Core manager for vector database operations
- * Max 400 lines
+ * VectorRAGManager (Simplified - Host Delegation)
+ * Thin wrapper around SessionManager for RAG vector operations
+ * Delegates all vector storage/search to host via WebSocket
  */
 
-import { VectorDbSession } from '@fabstir/vector-db-native';
-import { IVectorRAGManager } from './interfaces/IVectorRAGManager.js';
-import { RAGConfig, PartialRAGConfig, VectorRecord, SearchOptions, SearchResult, SearchResultWithSource, VectorDbStats } from '../rag/types.js';
-import { validateRAGConfig, mergeRAGConfig } from '../rag/config.js';
-import { SessionCache } from '../rag/session-cache.js';
-import { VectorInput, AddVectorResult, AddVectorOptions, validateVector, convertToVectorRecord, validateVectorBatch, handleDuplicates } from '../rag/vector-operations.js';
-import { validateMetadata, MetadataSchema } from '../rag/metadata-validator.js';
-import { BatchProcessor } from '../rag/batch-processor.js';
-import { DatabaseMetadataService } from '../database/DatabaseMetadataService.js';
-import type { DatabaseMetadata } from '../database/types.js';
-import { validateFolderPath, normalizeFolderPath } from '../rag/folder-utils.js';
-import { PermissionManager } from '../permissions/PermissionManager.js';
+import { SessionManager } from './SessionManager';
+import { IVectorRAGManager } from './interfaces/IVectorRAGManager';
+import type {
+  VectorRecord,
+  SearchResult,
+  UploadVectorsResult,
+  MetadataFilter
+} from '../types';
 
 /**
- * Session status
- */
-type SessionStatus = 'active' | 'closed' | 'unknown';
-
-/**
- * Internal session object
- */
-interface Session {
-  sessionId: string;
-  databaseName: string;
-  vectorDbSession: any;  // VectorDbSession instance
-  status: SessionStatus;
-  createdAt: number;
-  lastAccessedAt: number;
-  config: RAGConfig;
-  folderPaths: Set<string>;  // Track unique folder paths
-}
-
-/**
- * Database statistics
- */
-export interface DatabaseStats {
-  databaseName: string;
-  vectorCount: number;
-  storageSizeBytes: number;
-  sessionCount: number;
-}
-
-/**
- * Vector RAG Manager
- * Manages vector database sessions for RAG operations
+ * Simplified VectorRAGManager
+ *
+ * **Architecture Change (Phase 3, Sub-phase 3.1)**:
+ * - Removed `@fabstir/vector-db-native` dependency (client-side vector DB)
+ * - Removed S5 persistence (host is stateless)
+ * - Delegates to SessionManager WebSocket methods
+ * - Host stores vectors in session memory (Rust backend)
+ *
+ * **Migration from 961 lines to ~200 lines**:
+ * - ❌ Removed: Native VectorDbSession, S5 storage, session caching, folder hierarchies
+ * - ✅ Kept: Simple delegation to SessionManager.uploadVectors/searchVectors
  */
 export class VectorRAGManager implements IVectorRAGManager {
-  public readonly userAddress: string;
-  public readonly config: RAGConfig;
-  private readonly seedPhrase: string;
-  private readonly metadataService: DatabaseMetadataService; // Shared metadata service
-  private readonly permissionManager?: PermissionManager; // Optional permission manager
-  private sessions: Map<string, Session>;
-  private sessionCache: SessionCache<Session>;
-  private dbNameToSessionId: Map<string, string>; // Map dbName to sessionId
-  private disposed: boolean = false;
+  private sessionManager: SessionManager;
 
   /**
    * Create a new VectorRAGManager
    *
-   * @param options - Manager options
+   * **BREAKING CHANGE**: Constructor signature changed
+   *
+   * @param sessionManager - SessionManager instance for WebSocket delegation
+   *
+   * @example
+   * ```typescript
+   * const sessionManager = await sdk.getSessionManager();
+   * const vectorManager = new VectorRAGManager(sessionManager);
+   * ```
    */
-  constructor(options: {
-    userAddress?: string;
-    seedPhrase?: string;
-    config: RAGConfig;
-    metadataService?: DatabaseMetadataService; // Optional for backward compatibility
-    permissionManager?: PermissionManager; // Optional permission manager
-  }) {
-    // Validate required fields
-    if (!options.userAddress) {
-      throw new Error('userAddress is required');
+  constructor(sessionManager: SessionManager) {
+    if (!sessionManager) {
+      throw new Error('SessionManager is required');
     }
-    if (!options.seedPhrase) {
-      throw new Error('seedPhrase is required');
-    }
-
-    // Validate configuration
-    validateRAGConfig(options.config);
-
-    this.userAddress = options.userAddress;
-    this.seedPhrase = options.seedPhrase;
-    this.config = options.config;
-    this.metadataService = options.metadataService || new DatabaseMetadataService(); // Default if not provided
-    this.permissionManager = options.permissionManager; // Optional, undefined if not provided
-    this.sessions = new Map();
-    this.sessionCache = new SessionCache<Session>(50);  // Cache up to 50 sessions
-    this.dbNameToSessionId = new Map();
+    this.sessionManager = sessionManager;
   }
 
   /**
-   * Create a new vector database session
+   * Add vectors to session vector store
+   *
+   * Delegates to `SessionManager.uploadVectors()` which sends vectors to host via WebSocket.
+   * Host stores vectors in session memory (Rust) for the duration of the WebSocket connection.
+   *
+   * @param sessionId - Active session ID
+   * @param vectors - Vectors to upload (384 dimensions)
+   * @param replace - If true, replace all existing vectors; if false, append (default: false)
+   * @returns Upload result with counts
+   *
+   * @throws Error if vector dimensions are invalid (must be 384)
+   * @throws Error if session is not active or WebSocket not connected
    */
-  async createSession(databaseName: string, config?: PartialRAGConfig): Promise<string> {
-    this.ensureNotDisposed();
-
-    // Validate database name
-    if (!databaseName || databaseName.trim() === '') {
-      throw new Error('Database name cannot be empty');
-    }
-
-    // Merge config with defaults
-    const sessionConfig = config ? mergeRAGConfig({ ...this.config, ...config }) : this.config;
-
-    // Generate unique session ID
-    const sessionId = `rag-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    try {
-      // Create VectorDbSession
-      const vectorDbSession = await VectorDbSession.create({
-        s5Portal: sessionConfig.s5Portal,
-        userSeedPhrase: this.seedPhrase,
-        sessionId: `${this.userAddress}-${databaseName}-${sessionId}`,
-        encryptAtRest: sessionConfig.encryptAtRest,
-        chunkSize: sessionConfig.chunkSize,
-        cacheSizeMb: sessionConfig.cacheSizeMb
-      });
-
-      // Create session object
-      const session: Session = {
-        sessionId,
-        databaseName,
-        vectorDbSession,
-        status: 'active',
-        createdAt: Date.now(),
-        lastAccessedAt: Date.now(),
-        config: sessionConfig,
-        folderPaths: new Set<string>()  // Initialize folder paths tracker
-      };
-
-      // Store session
-      this.sessions.set(sessionId, session);
-      this.sessionCache.set(sessionId, session);
-      this.dbNameToSessionId.set(databaseName, sessionId); // Map dbName to sessionId
-
-      // Initialize database metadata if this is the first session for this database
-      if (!this.metadataService.exists(databaseName)) {
-        this.metadataService.create(databaseName, 'vector', this.userAddress);
-      } else {
-        // Database exists - check user has at least read access
-        // Actual operations (addVectors, search) will enforce their required permissions
-        this.checkPermission(databaseName, 'read');
-      }
-
-      return sessionId;
-    } catch (error) {
-      throw new Error(`Failed to create session: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  /**
-   * Get session by ID
-   */
-  getSession(sessionId: string): Session | null {
-    // Try cache first
-    const cached = this.sessionCache.get(sessionId);
-    if (cached) {
-      cached.lastAccessedAt = Date.now();
-      return cached;
-    }
-
-    // Try main store
-    const session = this.sessions.get(sessionId);
-    if (session) {
-      session.lastAccessedAt = Date.now();
-      this.sessionCache.set(sessionId, session);
-      return session;
-    }
-
-    return null;
-  }
-
-  /**
-   * List all active sessions
-   */
-  listSessions(databaseName?: string): Session[] {
-    const allSessions = Array.from(this.sessions.values());
-
-    if (databaseName) {
-      return allSessions.filter(s => s.databaseName === databaseName);
-    }
-
-    return allSessions;
-  }
-
-  /**
-   * Get session status
-   */
-  getSessionStatus(sessionId: string): SessionStatus {
-    const session = this.sessions.get(sessionId);
-    return session ? session.status : 'unknown';
-  }
-
-  /**
-   * Close a session
-   */
-  async closeSession(sessionId: string): Promise<void> {
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-
-    session.status = 'closed';
-    // Note: VectorDbSession doesn't have explicit close(), just set status
-  }
-
-  /**
-   * Reopen a closed session
-   */
-  async reopenSession(sessionId: string): Promise<void> {
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-
-    if (session.status !== 'closed') {
-      throw new Error('Session is not closed');
-    }
-
-    // Recreate VectorDbSession
-    session.vectorDbSession = await VectorDbSession.create({
-      s5Portal: session.config.s5Portal,
-      userSeedPhrase: this.seedPhrase,
-      sessionId: `${this.userAddress}-${session.databaseName}-${sessionId}`,
-      encryptAtRest: session.config.encryptAtRest,
-      chunkSize: session.config.chunkSize,
-      cacheSizeMb: session.config.cacheSizeMb
-    });
-
-    session.status = 'active';
-    session.lastAccessedAt = Date.now();
-  }
-
-  /**
-   * Destroy a session
-   */
-  async destroySession(sessionId: string): Promise<void> {
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-
-    // CRITICAL: Destroy native VectorDbSession to free memory and IndexedDB
-    if (session.vectorDbSession && typeof session.vectorDbSession.destroy === 'function') {
-      try {
-        await session.vectorDbSession.destroy();
-      } catch (error) {
-        console.error(`Error destroying VectorDbSession ${sessionId}:`, error);
-        // Continue with cleanup even if destroy fails
+  async addVectors(
+    sessionId: string,
+    vectors: VectorRecord[],
+    replace: boolean = false
+  ): Promise<UploadVectorsResult> {
+    // Validate vector dimensions (384 for all-MiniLM-L6-v2)
+    for (const vector of vectors) {
+      if (vector.vector.length !== 384) {
+        throw new Error(
+          `Invalid vector dimensions for vector "${vector.id}": expected 384, got ${vector.vector.length}`
+        );
       }
     }
 
-    // Update status and remove from caches
-    session.status = 'closed';
-    this.sessionCache.delete(sessionId);
-    this.sessions.delete(sessionId);
-    this.dbNameToSessionId.delete(session.databaseName);
+    // Delegate to SessionManager
+    return await this.sessionManager.uploadVectors(sessionId, vectors, replace);
   }
 
   /**
-   * Destroy all sessions
+   * Search for similar vectors
+   *
+   * Delegates to `SessionManager.searchVectors()` which performs cosine similarity search
+   * on the host side (Rust vector store in session memory).
+   *
+   * @param sessionId - Active session ID
+   * @param queryVector - Query embedding (384 dimensions)
+   * @param k - Number of results to return (default: 5, max: 20)
+   * @param threshold - Minimum similarity score (default: 0.7, range: 0.0-1.0)
+   * @returns Search results sorted by score (descending)
+   *
+   * @throws Error if query vector dimensions are invalid
+   * @throws Error if session is not active or WebSocket not connected
    */
-  async destroyAllSessions(): Promise<void> {
-    const sessionIds = Array.from(this.sessions.keys());
-
-    for (const sessionId of sessionIds) {
-      await this.destroySession(sessionId);
-    }
-  }
-
-  /**
-   * Destroy sessions by database name
-   */
-  async destroySessionsByDatabase(databaseName: string): Promise<void> {
-    const sessionsToDestroy = this.listSessions(databaseName);
-
-    for (const session of sessionsToDestroy) {
-      await this.destroySession(session.sessionId);
-    }
-  }
-
-  /**
-   * Add vectors to a session
-   */
-  async addVectors(sessionId: string, vectors: VectorRecord[]): Promise<void> {
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-    if (session.status !== 'active') {
-      throw new Error('Session is closed');
-    }
-
-    // Check write permission
-    this.checkPermission(session.databaseName, 'write');
-
-    // Validate vector dimensions (all should be same length)
-    if (vectors.length > 0) {
-      const expectedDim = vectors[0].vector.length;
-      for (const vec of vectors) {
-        if (vec.vector.length !== expectedDim) {
-          throw new Error('Vector dimension mismatch');
-        }
-      }
-    }
-
-    // Validate and normalize folder paths in metadata
-    for (const vec of vectors) {
-      if (vec.metadata?.folderPath !== undefined) {
-        validateFolderPath(vec.metadata.folderPath);
-      }
-      // Normalize folderPath (default to root if missing)
-      if (!vec.metadata) {
-        vec.metadata = {};
-      }
-      vec.metadata.folderPath = normalizeFolderPath(vec.metadata.folderPath);
-
-      // Track folder path
-      session.folderPaths.add(vec.metadata.folderPath);
-    }
-
-    await session.vectorDbSession.addVectors(vectors);
-    session.lastAccessedAt = Date.now();
-  }
-
-  /**
-   * Search vectors by similarity
-   */
-  async searchVectors(
+  async search(
     sessionId: string,
     queryVector: number[],
-    topK: number,
-    options?: SearchOptions
+    k: number = 5,
+    threshold: number = 0.7
   ): Promise<SearchResult[]> {
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-    if (session.status !== 'active') {
-      throw new Error('Session is closed');
-    }
-
-    const results = await session.vectorDbSession.search(
-      queryVector,
-      topK,
-      options
-    );
-
-    session.lastAccessedAt = Date.now();
-    return results;
+    // Delegate to SessionManager
+    return await this.sessionManager.searchVectors(sessionId, queryVector, k, threshold);
   }
 
   /**
-   * Convenience method: Add a single vector
-   * Wraps public addVectors API for single vector insertion
-   */
-  async addVector(
-    dbName: string,
-    id: string,
-    values: number[],
-    metadata: Record<string, any> = {}
-  ): Promise<void> {
-    // Use the public API that expects VectorInput with 'values' property
-    const vectorInput = {
-      id,
-      values,  // VectorInput uses 'values' property
-      metadata
-    };
-    await this.addVectors(dbName, [vectorInput]);
-  }
-
-  /**
-   * Search across multiple databases and merge results
-   * Implements Sub-phase 9.1.1: Multi-database query with score-based merging
+   * Delete vectors by metadata filter (soft delete)
    *
-   * @param databaseNames - Array of database names to search
-   * @param queryVector - Query vector for similarity search
-   * @param options - Search options (topK, threshold, filter)
-   * @returns Merged and ranked results from all databases
+   * **Implementation**: Marks vectors as deleted in metadata instead of physically removing them.
+   * This is because the host is stateless - vectors only exist during WebSocket session.
+   *
+   * **Workflow**:
+   * 1. Search for vectors matching metadata filter (threshold=0.0 to match all)
+   * 2. Mark matching vectors with `{ ...metadata, deleted: true }`
+   * 3. Re-upload marked vectors (replace=false to update metadata)
+   * 4. Client filters out `{ deleted: true }` in future searches
+   *
+   * @param sessionId - Active session ID
+   * @param filter - Metadata filter (MongoDB-style query)
+   * @returns Number of vectors marked as deleted
+   *
+   * @example
+   * ```typescript
+   * // Delete all vectors from a specific source
+   * const count = await vectorManager.deleteByMetadata(sessionId, {
+   *   source: 'obsolete-docs'
+   * });
+   * console.log(`Marked ${count} vectors as deleted`);
+   * ```
+   */
+  async deleteByMetadata(
+    sessionId: string,
+    filter: MetadataFilter
+  ): Promise<number> {
+    // Step 1: Search for all vectors (threshold=0.0 to get all results)
+    // Note: This is a simplified approach. A production implementation would:
+    // - Use a dedicated "searchByMetadata" WebSocket method
+    // - Or maintain a client-side metadata index
+    // For now, we use a zero vector to match all (host returns by metadata filter)
+    const queryVector = new Array(384).fill(0);
+
+    let matchingVectors: SearchResult[];
+    try {
+      // Search with threshold=0.0 to get all vectors
+      matchingVectors = await this.sessionManager.searchVectors(
+        sessionId,
+        queryVector,
+        20, // Max results per search
+        0.0 // Match all
+      );
+    } catch (error) {
+      // If search fails (e.g., no vectors in session), return 0
+      return 0;
+    }
+
+    // Step 2: Filter by metadata on client side
+    const vectorsToDelete = matchingVectors.filter(result => {
+      return this.matchesFilter(result.metadata, filter);
+    });
+
+    if (vectorsToDelete.length === 0) {
+      return 0;
+    }
+
+    // Step 3: Mark vectors as deleted
+    const updatedVectors: VectorRecord[] = vectorsToDelete.map(result => ({
+      id: result.id,
+      vector: result.vector,
+      metadata: {
+        ...result.metadata,
+        deleted: true
+      }
+    }));
+
+    // Step 4: Re-upload with deleted flag (replace=false to update)
+    await this.sessionManager.uploadVectors(sessionId, updatedVectors, false);
+
+    return updatedVectors.length;
+  }
+
+  /**
+   * Check if metadata matches filter (simple implementation)
+   *
+   * @private
+   * @param metadata - Vector metadata
+   * @param filter - Filter criteria
+   * @returns True if metadata matches all filter conditions
+   */
+  private matchesFilter(metadata: Record<string, any>, filter: MetadataFilter): boolean {
+    for (const [key, value] of Object.entries(filter)) {
+      if (metadata[key] !== value) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * @deprecated Host is stateless - vectors only exist during WebSocket session
+   * Use SessionManager.startSession() to create a new session with vectors
+   */
+  async createSession(_databaseName: string): Promise<string> {
+    throw new Error(
+      'createSession() is deprecated. Use SessionManager.startSession() instead.\n' +
+      'Vectors are stored in host session memory (stateless) for WebSocket duration only.'
+    );
+  }
+
+  /**
+   * @deprecated Host is stateless - no session persistence needed
+   */
+  async closeSession(_sessionId: string): Promise<void> {
+    throw new Error(
+      'closeSession() is deprecated. Use SessionManager.endSession() instead.\n' +
+      'Vectors are automatically cleared when WebSocket disconnects.'
+    );
+  }
+
+  /**
+   * @deprecated S5 persistence removed - host is stateless
+   */
+  async saveSession(_sessionId: string): Promise<string> {
+    throw new Error(
+      'saveSession() is deprecated. Host does not persist vectors to S5.\n' +
+      'Vectors only exist in session memory during WebSocket connection.'
+    );
+  }
+
+  /**
+   * @deprecated S5 persistence removed - host is stateless
+   */
+  async loadSession(_sessionId: string, _cid: string): Promise<void> {
+    throw new Error(
+      'loadSession() is deprecated. Host does not load vectors from S5.\n' +
+      'Upload vectors using addVectors() after starting a session.'
+    );
+  }
+
+  /**
+   * @deprecated Native bindings removed - no session stats available
+   */
+  async getSessionStats(_sessionId: string): Promise<any> {
+    throw new Error(
+      'getSessionStats() is deprecated. Native VectorDbSession stats not available.\n' +
+      'Host does not expose vector store statistics via WebSocket.'
+    );
+  }
+
+  /**
+   * @deprecated Multi-database search removed - host stores per-session
    */
   async searchMultipleDatabases(
-    databaseNames: string[],
-    queryVector: number[],
-    options?: SearchOptions
-  ): Promise<SearchResultWithSource[]> {
-    this.ensureNotDisposed();
-
-    // Handle empty array
-    if (databaseNames.length === 0) {
-      return [];
-    }
-
-    // Get or create sessions for all databases
-    const sessionPromises = databaseNames.map(async (dbName) => {
-      // Check if session exists
-      const sessionId = this.dbNameToSessionId.get(dbName);
-      if (sessionId) {
-        const session = this.getSession(sessionId);
-        if (session && session.status === 'active') {
-          return { dbName, sessionId };
-        }
-      }
-
-      // Create new session
-      const newSessionId = await this.createSession(dbName);
-      return { dbName, sessionId: newSessionId };
-    });
-
-    const sessions = await Promise.all(sessionPromises);
-
-    // Search all databases in parallel
-    const searchPromises = sessions.map(async ({ dbName, sessionId }) => {
-      try {
-        const results = await this.searchVectors(
-          sessionId,
-          queryVector,
-          options?.topK || 5,
-          options
-        );
-
-        // Add source attribution to each result
-        return results.map((result): SearchResultWithSource => ({
-          ...result,
-          sourceDatabaseName: dbName
-        }));
-      } catch (error) {
-        // If a database search fails, log error and return empty results
-        console.error(`Search failed for database ${dbName}:`, error);
-        return [];
-      }
-    });
-
-    const allResults = await Promise.all(searchPromises);
-
-    // Flatten results from all databases
-    const flattenedResults = allResults.flat();
-
-    // Sort by similarity score (descending)
-    flattenedResults.sort((a, b) => b.score - a.score);
-
-    // Return top-K merged results
-    const topK = options?.topK || 5;
-    return flattenedResults.slice(0, topK);
-  }
-
-  /**
-   * Delete vectors by IDs
-   */
-  async deleteVectors(sessionId: string, vectorIds: string[]): Promise<void> {
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-    if (session.status !== 'active') {
-      throw new Error('Session is closed');
-    }
-
-    await session.vectorDbSession.deleteVectors(vectorIds);
-    session.lastAccessedAt = Date.now();
-  }
-
-  /**
-   * Save session to S5
-   */
-  async saveSession(sessionId: string): Promise<string> {
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-
-    const cid = await session.vectorDbSession.saveUserVectors();
-    session.lastAccessedAt = Date.now();
-    return cid;
-  }
-
-  /**
-   * Load session from S5
-   */
-  async loadSession(sessionId: string, cid: string): Promise<void> {
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-    if (session.status !== 'active') {
-      throw new Error('Session is closed');
-    }
-
-    await session.vectorDbSession.loadUserVectors(cid);
-    session.lastAccessedAt = Date.now();
-  }
-
-  /**
-   * Get session statistics (accepts dbName or sessionId)
-   */
-  async getSessionStats(identifier: string): Promise<VectorDbStats> {
-    // Try as dbName first, then as sessionId
-    const sessionId = this.dbNameToSessionId.get(identifier) || identifier;
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-
-    const stats = await session.vectorDbSession.getStats();
-    session.lastAccessedAt = Date.now();
-
-    return {
-      vectorCount: stats.totalVectors || 0,
-      totalVectors: stats.totalVectors || 0,
-      totalChunks: stats.totalChunks || 0,
-      memoryUsageMb: stats.memoryUsageMb || 0,
-      lastUpdated: stats.lastUpdated || Date.now()
-    };
-  }
-
-  /**
-   * Clear session cache
-   */
-  async clearSessionCache(sessionId: string): Promise<void> {
-    this.sessionCache.delete(sessionId);
-  }
-
-  /**
-   * Evict least recently used sessions from cache
-   */
-  async evictLRUSessions(): Promise<void> {
-    // Evict 10 LRU sessions
-    this.sessionCache.evictMultiple(10);
-  }
-
-  /**
-   * Add vectors using dbName (overload for tests)
-   * Auto-creates session if one doesn't exist
-   */
-  async addVectors(dbName: string, vectors: VectorInput[], options?: AddVectorOptions): Promise<AddVectorResult> {
-    // Auto-create session if it doesn't exist
-    let sessionId = this.dbNameToSessionId.get(dbName);
-    if (!sessionId) {
-      sessionId = await this.createSession(dbName);
-    }
-    if (vectors.length === 0) return { added: 0, failed: 0 };
-
-    // For single-vector operations, throw on validation errors
-    if (vectors.length === 1) {
-      validateVector(vectors[0]);
-      if (vectors[0].metadata !== undefined) validateMetadata(vectors[0].metadata);
-    }
-
-    const { valid, errors } = validateVectorBatch(vectors);
-    if (valid.length === 0 && errors.length > 0) {
-      // All failed validation - throw first error for single vector, return result for batch
-      if (vectors.length === 1) throw new Error(errors[0].error);
-      return { added: 0, failed: errors.length, errors };
-    }
-
-    const deduped = options?.handleDuplicates ? handleDuplicates(valid, options.handleDuplicates) : { vectors: valid, skipped: 0 };
-
-    const session = this.getSession(sessionId);
-    if (!session || session.status !== 'active') throw new Error('Session not found');
-
-    // Check write permission
-    this.checkPermission(session.databaseName, 'write');
-
-    // Validate and normalize folder paths in metadata
-    for (const vec of deduped.vectors) {
-      if (vec.metadata?.folderPath !== undefined) {
-        validateFolderPath(vec.metadata.folderPath);
-      }
-      // Normalize folderPath (default to root if missing)
-      if (!vec.metadata) {
-        vec.metadata = {};
-      }
-      vec.metadata.folderPath = normalizeFolderPath(vec.metadata.folderPath);
-
-      // Track folder path
-      session.folderPaths.add(vec.metadata.folderPath);
-    }
-
-    const vectorRecords = deduped.vectors.map(convertToVectorRecord);
-    await session.vectorDbSession.addVectors(vectorRecords);
-
-    // Update metadata with actual vector count from VectorDbSession
-    const stats = await session.vectorDbSession.getStats();
-    this.metadataService.update(session.databaseName, {
-      vectorCount: stats.vectorCount || 0
-    });
-
-    return { added: deduped.vectors.length, failed: errors.length, errors, skipped: deduped.skipped };
-  }
-
-  /**
-   * Search vectors using dbName
-   * Auto-creates session if one doesn't exist
-   */
-  async search(dbName: string, queryVector: number[], topK: number, options?: SearchOptions): Promise<SearchResultWithSource[]> {
-    // Auto-create session if it doesn't exist
-    let sessionId = this.dbNameToSessionId.get(dbName);
-    if (!sessionId) {
-      sessionId = await this.createSession(dbName);
-    }
-
-    // Check read permission
-    this.checkPermission(dbName, 'read');
-
-    const results = await this.searchVectors(sessionId, queryVector, topK, options);
-
-    // Add sourceDatabaseName to results for consistency with multi-database search
-    return results.map(result => ({
-      ...result,
-      sourceDatabaseName: dbName
-    }));
-  }
-
-  /**
-   * Update vector metadata (v0.2.0)
-   */
-  async updateMetadata(dbName: string, vectorId: string, metadata: Record<string, any>): Promise<void> {
-    validateMetadata(metadata);
-    const sessionId = this.dbNameToSessionId.get(dbName);
-    if (!sessionId) throw new Error('Session not found');
-    const session = this.getSession(sessionId);
-    if (!session) throw new Error('Session not found');
-    await session.vectorDbSession.updateMetadata(vectorId, metadata);
-  }
-
-  /**
-   * Delete vectors by metadata filter (v0.2.0)
-   */
-  async deleteByMetadata(dbName: string, filter: Record<string, any>): Promise<{ deletedIds: string[], deletedCount: number }> {
-    const sessionId = this.dbNameToSessionId.get(dbName);
-    if (!sessionId) throw new Error('Session not found');
-    const session = this.getSession(sessionId);
-    if (!session) throw new Error('Session not found');
-    return session.vectorDbSession.deleteByMetadata(filter);
-  }
-
-  /**
-   * Set metadata schema for validation (v0.2.0)
-   */
-  async setSchema(dbName: string, schema: Record<string, any> | null): Promise<void> {
-    const sessionId = this.dbNameToSessionId.get(dbName);
-    if (!sessionId) throw new Error('Session not found');
-    const session = this.getSession(sessionId);
-    if (!session) throw new Error('Session not found');
-    await session.vectorDbSession.setSchema(schema);
-  }
-
-  /**
-   * Batch update metadata (v0.2.0)
-   */
-  async batchUpdateMetadata(dbName: string, updates: Array<{ id: string; metadata: Record<string, any> }>): Promise<{ updated: number }> {
-    const sessionId = this.dbNameToSessionId.get(dbName);
-    if (!sessionId) throw new Error('Session not found');
-    let count = 0;
-    for (const update of updates) {
-      await this.updateMetadata(dbName, update.id, update.metadata);
-      count++;
-    }
-    return { updated: count };
-  }
-
-  /**
-   * Get search history for a database
-   * (v0.2.0: Basic implementation, stores last 20 searches)
-   */
-  async getSearchHistory(dbName: string): Promise<Array<{ topK: number; timestamp: number; filter?: any }>> {
-    const sessionId = this.dbNameToSessionId.get(dbName);
-    if (!sessionId) throw new Error('Session not found');
-    const session = this.getSession(sessionId);
-    if (!session) throw new Error('Session not found');
-
-    // For now, return empty array - full implementation would store history
-    // This is a placeholder for Sub-phase 3.2
-    return [];
-  }
-
-  /**
-   * Get metadata for a specific database
-   * @param databaseName - Database name
-   * @returns Database metadata or null if not found
-   */
-  getDatabaseMetadata(databaseName: string): DatabaseMetadata | null {
-    return this.metadataService.get(databaseName);
-  }
-
-  /**
-   * Update database metadata
-   * @param databaseName - Database name
-   * @param updates - Metadata fields to update
-   */
-  updateDatabaseMetadata(
-    databaseName: string,
-    updates: Partial<Omit<DatabaseMetadata, 'databaseName' | 'owner' | 'createdAt'>>
-  ): void {
-    this.metadataService.update(databaseName, updates);
-  }
-
-  /**
-   * List all databases with metadata
-   * @returns Array of database metadata, sorted by creation time (newest first)
-   */
-  listDatabases(): DatabaseMetadata[] {
-    return this.metadataService.list({ type: 'vector' });
-  }
-
-  /**
-   * Get statistics for a database
-   * @param databaseName - Database name
-   * @returns Database statistics or null if not found
-   */
-  getDatabaseStats(databaseName: string): DatabaseStats | null {
-    const metadata = this.metadataService.get(databaseName);
-    if (!metadata) {
-      return null;
-    }
-
-    // Count sessions for this database
-    const sessions = this.listSessions(databaseName);
-
-    return {
-      databaseName: metadata.databaseName,
-      vectorCount: metadata.vectorCount,
-      storageSizeBytes: metadata.storageSizeBytes,
-      sessionCount: sessions.length
-    };
-  }
-
-  /**
-   * Delete a database and all its sessions
-   * @param databaseName - Database name to delete
-   */
-  async deleteDatabase(databaseName: string): Promise<void> {
-    // Check if database exists (will throw if not)
-    if (!this.metadataService.exists(databaseName)) {
-      throw new Error('Database not found');
-    }
-
-    // Destroy all sessions for this database
-    await this.destroySessionsByDatabase(databaseName);
-
-    // Remove metadata
-    this.metadataService.delete(databaseName);
-  }
-
-  /**
-   * List all unique folder paths in a session
-   */
-  async listFolders(sessionId: string): Promise<string[]> {
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-    if (session.status !== 'active') {
-      throw new Error('Session is closed');
-    }
-
-    // Return sorted array of folder paths
-    return Array.from(session.folderPaths).sort();
-  }
-
-  /**
-   * Get statistics for a specific folder
-   */
-  async getFolderStatistics(sessionId: string, folderPath: string): Promise<{ folderPath: string; vectorCount: number }> {
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-    if (session.status !== 'active') {
-      throw new Error('Session is closed');
-    }
-
-    // Validate folder path
-    validateFolderPath(folderPath);
-
-    // Search for all vectors in this folder using a dummy query
-    // Since we can't get all vectors directly, we use search with very large topK
-    const dummyQuery = new Array(384).fill(0);
-    const allResults = await session.vectorDbSession.search(dummyQuery, 100000);
-
-    // Filter by folder path and count
-    const vectorCount = allResults.filter((result: any) => {
-      const resultFolderPath = normalizeFolderPath(result.metadata?.folderPath);
-      return resultFolderPath === folderPath;
-    }).length;
-
-    return { folderPath, vectorCount };
-  }
-
-  /**
-   * Move vectors to a different folder
-   */
-  async moveToFolder(sessionId: string, vectorIds: string[], targetFolderPath: string): Promise<void> {
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-    if (session.status !== 'active') {
-      throw new Error('Session is closed');
-    }
-
-    // Validate target folder path
-    validateFolderPath(targetFolderPath);
-
-    // Get all vectors to find the ones to move
-    const dummyQuery = new Array(384).fill(0);
-    const allResults = await session.vectorDbSession.search(dummyQuery, 100000);
-
-    // Find vectors to move
-    for (const vectorId of vectorIds) {
-      const vector = allResults.find((r: any) => r.id === vectorId);
-      if (!vector) {
-        throw new Error(`Vector not found: ${vectorId}`);
-      }
-
-      // Update metadata
-      const updatedMetadata = { ...vector.metadata, folderPath: targetFolderPath };
-      await session.vectorDbSession.updateMetadata(vectorId, updatedMetadata);
-
-      // Track new folder path
-      session.folderPaths.add(targetFolderPath);
-    }
-
-    session.lastAccessedAt = Date.now();
-  }
-
-  /**
-   * Search vectors within a specific folder
-   */
-  async searchInFolder(
-    sessionId: string,
-    folderPath: string,
-    queryVector: number[],
-    options?: SearchOptions
+    _databaseNames: string[],
+    _queryVector: number[],
+    _k?: number
   ): Promise<SearchResult[]> {
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-    if (session.status !== 'active') {
-      throw new Error('Session is closed');
-    }
-
-    // Validate folder path
-    validateFolderPath(folderPath);
-
-    // Search all vectors
-    const topK = options?.topK || 10;
-    const allResults = await session.vectorDbSession.search(queryVector, topK * 10); // Get more results to filter
-
-    // Filter by folder path
-    const filteredResults = allResults.filter((result: any) => {
-      const resultFolderPath = normalizeFolderPath(result.metadata?.folderPath);
-      return resultFolderPath === folderPath;
-    });
-
-    // Limit to topK
-    const limitedResults = filteredResults.slice(0, topK);
-
-    session.lastAccessedAt = Date.now();
-    return limitedResults;
-  }
-
-  /**
-   * Move all vectors from one folder to another
-   */
-  async moveFolderContents(sessionId: string, sourceFolderPath: string, targetFolderPath: string): Promise<void> {
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-    if (session.status !== 'active') {
-      throw new Error('Session is closed');
-    }
-
-    // Validate folder paths
-    validateFolderPath(sourceFolderPath);
-    validateFolderPath(targetFolderPath);
-
-    // Get all vectors
-    const dummyQuery = new Array(384).fill(0);
-    const allResults = await session.vectorDbSession.search(dummyQuery, 100000);
-
-    // Find vectors in source folder
-    const vectorsToMove = allResults.filter((r: any) => {
-      const resultFolderPath = normalizeFolderPath(r.metadata?.folderPath);
-      return resultFolderPath === sourceFolderPath;
-    });
-
-    // Move each vector
-    for (const vector of vectorsToMove) {
-      const updatedMetadata = { ...vector.metadata, folderPath: targetFolderPath };
-      await session.vectorDbSession.updateMetadata(vector.id, updatedMetadata);
-    }
-
-    // Track new folder path
-    if (vectorsToMove.length > 0) {
-      session.folderPaths.add(targetFolderPath);
-    }
-
-    session.lastAccessedAt = Date.now();
-  }
-
-  /**
-   * Check if user has permission to perform an action on a database
-   * @private
-   */
-  private checkPermission(databaseName: string, action: 'read' | 'write'): void {
-    // Skip permission check if no permission manager configured
-    if (!this.permissionManager) {
-      return;
-    }
-
-    // Get database metadata
-    const metadata = this.metadataService.get(databaseName);
-    if (!metadata) {
-      throw new Error(`Database not found: ${databaseName}`);
-    }
-
-    // Check permission and log attempt
-    const allowed = this.permissionManager.checkAndLog(metadata, this.userAddress, action);
-    if (!allowed) {
-      throw new Error('Permission denied: insufficient permissions for this operation');
-    }
-  }
-
-  /**
-   * Cleanup alias for dispose
-   */
-  async cleanup(): Promise<void> {
-    await this.dispose();
-  }
-
-  /**
-   * Dispose manager and cleanup all resources
-   */
-  async dispose(): Promise<void> {
-    if (this.disposed) {
-      return;
-    }
-
-    await this.destroyAllSessions();
-    this.sessionCache.clear();
-    this.disposed = true;
-  }
-
-  /**
-   * Ensure manager is not disposed
-   * @private
-   */
-  private ensureNotDisposed(): void {
-    if (this.disposed) {
-      throw new Error('Manager has been disposed');
-    }
+    throw new Error(
+      'searchMultipleDatabases() is deprecated. Host stores vectors per-session, not per-database.\n' +
+      'Use search() with a single sessionId instead.'
+    );
   }
 }

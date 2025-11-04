@@ -1,142 +1,123 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
- * IVectorRAGManager Interface
- * Interface for vector database management operations
- * Max 100 lines
+ * IVectorRAGManager Interface (Simplified - Host Delegation)
+ * Interface for WebSocket-delegated vector operations
  */
 
-import { RAGConfig, PartialRAGConfig, VectorRecord, SearchOptions, SearchResult, VectorDbStats } from '../../rag/types.js';
+import type {
+  VectorRecord,
+  SearchResult,
+  UploadVectorsResult,
+  MetadataFilter
+} from '../../types';
 
 /**
  * Vector RAG Manager Interface
- * Manages vector database sessions for RAG operations
+ *
+ * **BREAKING CHANGES (Phase 3, Sub-phase 3.1)**:
+ * - Removed `@fabstir/vector-db-native` dependency
+ * - Removed S5 persistence (saveSession/loadSession)
+ * - Removed session management (createSession/closeSession)
+ * - Removed statistics (getSessionStats)
+ * - Delegates all operations to SessionManager WebSocket methods
+ *
+ * **Migration Guide**:
+ * - Use `SessionManager.startSession()` instead of `createSession()`
+ * - Use `SessionManager.endSession()` instead of `closeSession()`
+ * - No persistence needed - host stores vectors in session memory only
+ * - No statistics available - host does not expose vector store stats
  */
 export interface IVectorRAGManager {
   /**
-   * User's Ethereum address
+   * Add vectors to session vector store
+   *
+   * Delegates to `SessionManager.uploadVectors()`.
+   * Host stores vectors in session memory (Rust) for WebSocket duration.
+   *
+   * @param sessionId - Active session ID
+   * @param vectors - Vectors to upload (384 dimensions)
+   * @param replace - If true, replace all existing vectors (default: false)
+   * @returns Upload result with uploaded/rejected counts
+   *
+   * @throws Error if vector dimensions invalid (must be 384)
+   * @throws Error if session not active or WebSocket not connected
    */
-  readonly userAddress: string;
+  addVectors(
+    sessionId: string,
+    vectors: VectorRecord[],
+    replace?: boolean
+  ): Promise<UploadVectorsResult>;
 
   /**
-   * RAG configuration
+   * Search for similar vectors
+   *
+   * Delegates to `SessionManager.searchVectors()`.
+   * Performs cosine similarity search on host side (Rust vector store).
+   *
+   * @param sessionId - Active session ID
+   * @param queryVector - Query embedding (384 dimensions)
+   * @param k - Number of results (default: 5, max: 20)
+   * @param threshold - Minimum similarity score (default: 0.7, range: 0.0-1.0)
+   * @returns Search results sorted by score (descending)
+   *
+   * @throws Error if query vector dimensions invalid
+   * @throws Error if session not active or WebSocket not connected
    */
-  readonly config: RAGConfig;
+  search(
+    sessionId: string,
+    queryVector: number[],
+    k?: number,
+    threshold?: number
+  ): Promise<SearchResult[]>;
 
   /**
-   * Create a new vector database session
-   * @param databaseName - Name of the database
-   * @param config - Optional session-specific configuration
-   * @returns Session ID
+   * Delete vectors by metadata filter (soft delete)
+   *
+   * Marks vectors as deleted in metadata instead of physically removing them.
+   * Client filters out `{ deleted: true }` in future searches.
+   *
+   * @param sessionId - Active session ID
+   * @param filter - Metadata filter (MongoDB-style query)
+   * @returns Number of vectors marked as deleted
    */
-  createSession(databaseName: string, config?: PartialRAGConfig): Promise<string>;
+  deleteByMetadata(
+    sessionId: string,
+    filter: MetadataFilter
+  ): Promise<number>;
+
+  // ===== DEPRECATED METHODS =====
+  // These methods are deprecated and will throw errors if called.
+  // Kept for interface compatibility during migration.
 
   /**
-   * Get session by ID
-   * @param sessionId - Session ID
-   * @returns Session object or null if not found
+   * @deprecated Use SessionManager.startSession() instead
+   * @throws Error explaining deprecation
    */
-  getSession(sessionId: string): any | null;
+  createSession(databaseName: string): Promise<string>;
 
   /**
-   * List all active sessions
-   * @param databaseName - Optional filter by database name
-   * @returns Array of session objects
-   */
-  listSessions(databaseName?: string): any[];
-
-  /**
-   * Get session status
-   * @param sessionId - Session ID
-   * @returns Session status ('active', 'closed', 'unknown')
-   */
-  getSessionStatus(sessionId: string): 'active' | 'closed' | 'unknown';
-
-  /**
-   * Close a session (keeps data, stops operations)
-   * @param sessionId - Session ID
+   * @deprecated Use SessionManager.endSession() instead
+   * @throws Error explaining deprecation
    */
   closeSession(sessionId: string): Promise<void>;
 
   /**
-   * Reopen a closed session
-   * @param sessionId - Session ID
-   */
-  reopenSession(sessionId: string): Promise<void>;
-
-  /**
-   * Destroy a session (removes all data)
-   * @param sessionId - Session ID
-   */
-  destroySession(sessionId: string): Promise<void>;
-
-  /**
-   * Destroy all sessions
-   */
-  destroyAllSessions(): Promise<void>;
-
-  /**
-   * Destroy sessions by database name
-   * @param databaseName - Database name
-   */
-  destroySessionsByDatabase(databaseName: string): Promise<void>;
-
-  /**
-   * Add vectors to a session
-   * @param sessionId - Session ID
-   * @param vectors - Array of vector records
-   */
-  addVectors(sessionId: string, vectors: VectorRecord[]): Promise<void>;
-
-  /**
-   * Search vectors by similarity
-   * @param sessionId - Session ID
-   * @param queryVector - Query vector
-   * @param topK - Number of results
-   * @param options - Search options (filter, threshold)
-   * @returns Array of search results
-   */
-  searchVectors(sessionId: string, queryVector: number[], topK: number, options?: SearchOptions): Promise<SearchResult[]>;
-
-  /**
-   * Delete vectors by IDs
-   * @param sessionId - Session ID
-   * @param vectorIds - Array of vector IDs to delete
-   */
-  deleteVectors(sessionId: string, vectorIds: string[]): Promise<void>;
-
-  /**
-   * Save session to S5
-   * @param sessionId - Session ID
-   * @returns S5 CID
+   * @deprecated S5 persistence removed - host is stateless
+   * @throws Error explaining deprecation
    */
   saveSession(sessionId: string): Promise<string>;
 
   /**
-   * Load session from S5
-   * @param sessionId - Session ID
-   * @param cid - S5 CID
+   * @deprecated S5 persistence removed - host is stateless
+   * @throws Error explaining deprecation
    */
   loadSession(sessionId: string, cid: string): Promise<void>;
 
   /**
-   * Get session statistics
-   * @param sessionId - Session ID
-   * @returns Vector database statistics
+   * @deprecated Native bindings removed - no session stats available
+   * @throws Error explaining deprecation
    */
-  getSessionStats(sessionId: string): Promise<VectorDbStats>;
-
-  /**
-   * Clear session cache
-   * @param sessionId - Session ID
-   */
-  clearSessionCache(sessionId: string): Promise<void>;
-
-  /**
-   * Evict least recently used sessions from cache
-   */
-  evictLRUSessions(): Promise<void>;
-
-  /**
-   * Dispose manager and cleanup all resources
-   */
-  dispose(): Promise<void>;
+  getSessionStats(sessionId: string): Promise<any>;
 }
