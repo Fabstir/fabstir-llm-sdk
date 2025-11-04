@@ -168,11 +168,22 @@ export default function ChatContextDemo() {
   const [uploadError, setUploadError] = useState<string>("");
   const [uploadProgress, setUploadProgress] = useState<{ stage: 'reading' | 'chunking' | 'embedding' | 'storing'; percent: number; message: string } | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Auto-dismiss toast notifications after 3 seconds
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   // Initialize SDK when chain changes
   useEffect(() => {
@@ -452,12 +463,14 @@ export default function ChatContextDemo() {
         chunks: result.chunks
       }]);
 
-      // Success message
+      // Success message and toast
       addMessage("system", `✅ Uploaded: ${file.name} (${result.chunks} chunks)`);
+      setToast({ type: 'success', message: `Document uploaded successfully: ${file.name}` });
       setStatus("Ready");
     } catch (error: any) {
       setUploadError(error.message);
       addMessage("system", `❌ Upload failed: ${error.message}`);
+      setToast({ type: 'error', message: `Upload failed: ${error.message}` });
       setStatus("Ready");
     } finally {
       setIsUploadingDocument(false);
@@ -487,14 +500,16 @@ export default function ChatContextDemo() {
       // Update uploadedDocuments state to remove the document
       setUploadedDocuments(uploadedDocuments.filter((d) => d.id !== documentId));
 
-      // Success message with deleted count
+      // Success message with deleted count and toast
       addMessage('system', `✅ Removed document (${result.deletedCount} chunks deleted)`);
+      setToast({ type: 'success', message: 'Document removed successfully' });
       setStatus('Ready');
     } catch (error: any) {
       console.error('Document removal failed:', error);
       const errorMsg = `Remove failed: ${error.message}`;
       setError(errorMsg);
       addMessage('system', `❌ ${errorMsg}`);
+      setToast({ type: 'error', message: errorMsg });
       setStatus('Ready');
     } finally {
       setIsLoading(false);
@@ -1894,7 +1909,75 @@ export default function ChatContextDemo() {
 
   // Render UI
   return (
-    <div className="max-w-6xl mx-auto p-6">
+    <>
+      {/* Custom Animations */}
+      <style jsx global>{`
+        @keyframes slideIn {
+          from {
+            transform: translateX(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+        @keyframes slideDown {
+          from {
+            transform: translateY(-10px);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+        .animate-slideIn {
+          animation: slideIn 0.3s ease-out;
+        }
+        .animate-slideDown {
+          animation: slideDown 0.3s ease-out;
+        }
+        .animate-fadeIn {
+          animation: fadeIn 0.3s ease-out;
+        }
+      `}</style>
+
+      <div className="max-w-6xl mx-auto p-6">
+        {/* Toast Notification */}
+      {toast && (
+        <div
+          className={`fixed top-4 right-4 px-4 py-3 rounded border shadow-lg animate-slideIn z-50 ${
+            toast.type === 'success'
+              ? 'bg-green-100 border-green-400 text-green-700'
+              : toast.type === 'error'
+              ? 'bg-red-100 border-red-400 text-red-700'
+              : 'bg-blue-100 border-blue-400 text-blue-700'
+          }`}
+          role="alert"
+          aria-live="polite"
+        >
+          <div className="flex items-center gap-2">
+            <span className="font-medium">{toast.message}</span>
+            <button
+              onClick={() => setToast(null)}
+              className="ml-2 text-sm hover:opacity-70"
+              aria-label="Close notification"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       <h1 className="text-2xl font-bold mb-4">Chat Context Demo</h1>
 
       {/* Chain Selector */}
@@ -2003,7 +2086,9 @@ export default function ChatContextDemo() {
                 }
               }}
               disabled={!storageManager || !activeHost || isUploadingDocument}
-              className="w-4 h-4 text-purple-600 bg-gray-100 border-gray-300 rounded focus:ring-purple-500"
+              className="w-4 h-4 text-purple-600 bg-gray-100 border-gray-300 rounded focus:ring-2 focus:ring-purple-500"
+              title="Enable RAG to enhance LLM responses with relevant context from uploaded documents"
+              aria-label="Enable or disable RAG mode"
             />
             <span className="text-sm font-medium">Enable RAG</span>
           </label>
@@ -2021,7 +2106,9 @@ export default function ChatContextDemo() {
             accept=".txt,.md,.html"
             onChange={handleFileUpload}
             disabled={!isRAGEnabled || isUploadingDocument}
-            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-purple-500 file:text-white hover:file:bg-purple-600 disabled:opacity-50"
+            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-purple-500 file:text-white hover:file:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50"
+            title="Upload .txt, .md, or .html files (max 5MB) to build knowledge base"
+            aria-label="Upload document to knowledge base"
           />
           <p className="text-xs text-gray-600 mt-1">
             Supported formats: .txt, .md, .html (max 5MB)
@@ -2051,12 +2138,16 @@ export default function ChatContextDemo() {
         )}
 
         {uploadedDocuments.length > 0 && (
-          <div className="space-y-2">
+          <div className="space-y-2 transition-all duration-300">
             <p className="text-sm font-semibold">Uploaded Documents ({uploadedDocuments.length}):</p>
-            {uploadedDocuments.map((doc) => (
-              <div key={doc.id} className="flex items-center justify-between bg-white p-2 rounded border">
+            {uploadedDocuments.map((doc, index) => (
+              <div
+                key={doc.id}
+                className="flex items-center justify-between bg-white p-2 md:p-3 rounded border hover:bg-gray-50 transition-colors animate-slideDown"
+                style={{ animationDelay: `${index * 100}ms` }}
+              >
                 <div className="flex-1">
-                  <p className="text-sm font-medium">{doc.name}</p>
+                  <p className="text-sm md:text-base font-medium">{doc.name}</p>
                   <p className="text-xs text-gray-500">
                     {doc.chunks} chunks
                   </p>
@@ -2064,7 +2155,9 @@ export default function ChatContextDemo() {
                 <button
                   onClick={() => removeDocument(doc.id)}
                   disabled={!isRAGEnabled || isUploadingDocument}
-                  className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                  className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 active:bg-red-700 focus:ring-2 focus:ring-red-500 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                  title="Remove this document from the knowledge base"
+                  aria-label="Remove document from knowledge base"
                 >
                   Remove
                 </button>
@@ -2085,7 +2178,10 @@ export default function ChatContextDemo() {
         )}
 
         {uploadedDocuments.length === 0 && isRAGEnabled && !isUploadingDocument && (
-          <p className="text-sm text-gray-500 italic">No documents uploaded yet. Upload files to enhance LLM responses with relevant context.</p>
+          <div className="text-center py-6">
+            <div className="text-4xl mb-2">📁</div>
+            <p className="text-sm text-gray-500 italic">No documents uploaded yet. Upload files to enhance LLM responses with relevant context.</p>
+          </div>
         )}
       </div>
 
@@ -2293,5 +2389,6 @@ export default function ChatContextDemo() {
         </ul>
       </div>
     </div>
+    </>
   );
 }
