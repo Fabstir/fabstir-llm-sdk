@@ -38,7 +38,7 @@
   ],
   "scripts": {
     "prepare": "pnpm run build",
-    "build": "pnpm run build:clean && pnpm run build:esm && pnpm run build:cjs && pnpm run build:submodules && pnpm run build:types",
+    "build": "pnpm run build:clean && pnpm run build:esm && pnpm run build:cjs && pnpm run build:types",
     "build:clean": "rimraf dist",
     "build:esm": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2020 --supported:class-private-field=false --supported:bigint=true --outfile=dist/index.mjs --external:ethers --external:@base-org/account --external:url --external:path --external:node:* --external:crypto --external:fs --external:stream --external:http --external:https --external:zlib --external:net --external:tls --external:assert --external:@julesl23/s5js --external:@fabstir/vector-db-native --external:canvas --external:pdfjs-dist",
     "build:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=node --target=es2020 --outfile=dist/index.js --external:ethers --external:@base-org/account --external:@julesl23/s5js --external:@fabstir/vector-db-native --external:canvas --external:pdfjs-dist",

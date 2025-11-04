@@ -43,7 +43,7 @@ export { TreasuryManager } from './managers/TreasuryManager';
 export { ModelManager } from './managers/ModelManager';
 export { ClientManager } from './managers/ClientManager';
 
-// RAG and Vector Database managers
+// RAG and Vector Database managers (host-side via WebSocket)
 export { VectorRAGManager } from './managers/VectorRAGManager';
 export { DocumentManager } from './documents/DocumentManager';
 export { HostAdapter } from './embeddings/adapters/HostAdapter';
