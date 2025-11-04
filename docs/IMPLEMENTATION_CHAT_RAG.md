@@ -180,14 +180,14 @@ These features are **production-ready** in fabstir-llm-node v8.3.0:
 **Time Estimate**: 30 minutes (15 min tests + 15 min cleanup)
 
 #### Tasks
-- [ ] Write tests to verify Next.js page loads without webpack errors
-- [ ] Remove `@fabstir/vector-db-native` webpack alias from next.config.js (lines 52-60)
-- [ ] Remove `@fabstir/vector-db-native` external configuration
-- [ ] Delete `/workspace/apps/harness/webpack-stubs/vector-db-native-stub.js`
-- [ ] Update ChatContextDemo.tsx import: Change from `@fabstir/sdk-core/rag` to `@fabstir/sdk-core`
-- [ ] Restart Next.js dev server: `cd apps/harness && rm -rf .next && pnpm dev`
-- [ ] Verify page loads without React errors
-- [ ] Verify no webpack warnings about native modules
+- [x] Write tests to verify Next.js page loads without webpack errors
+- [x] Remove `@fabstir/vector-db-native` webpack alias from next.config.js (lines 52-60)
+- [x] Remove `@fabstir/vector-db-native` external configuration
+- [x] Delete `/workspace/apps/harness/webpack-stubs/vector-db-native-stub.js`
+- [x] Update ChatContextDemo.tsx import: Change from `@fabstir/sdk-core/rag` to `@fabstir/sdk-core`
+- [x] Restart Next.js dev server: `cd apps/harness && rm -rf .next && pnpm dev`
+- [x] Verify page loads without React errors
+- [x] Verify no webpack warnings about native modules
 
 **Test Files:**
 - `apps/harness/tests/integration/rag-page-load.test.tsx` (NEW) - Verify page loads and renders
@@ -198,14 +198,21 @@ These features are **production-ready** in fabstir-llm-node v8.3.0:
 - `apps/harness/components/ChatContextDemo.tsx` (MODIFY) - Line 875: Change import path
 
 **Success Criteria:**
-- [ ] next.config.js no longer mentions `@fabstir/vector-db-native`
-- [ ] webpack-stubs directory deleted
-- [ ] ChatContextDemo imports RAG classes from `@fabstir/sdk-core` (not `/rag`)
-- [ ] Next.js dev server starts successfully
-- [ ] Page loads without React errors (no "Element type is invalid...got: object")
-- [ ] No webpack warnings in console
+- [x] next.config.js no longer mentions `@fabstir/vector-db-native`
+- [x] webpack-stubs directory deleted
+- [x] ChatContextDemo imports RAG classes from `@fabstir/sdk-core` (not `/rag`)
+- [x] Next.js dev server starts successfully
+- [x] Page loads without React errors (no "Element type is invalid...got: object")
+- [x] No webpack warnings in console (only expected esbuild warnings about dynamic require)
 
-**Test Results:** ⏳ Pending
+**Test Results:** ✅ **6/6 tests passing (100%)**
+
+**Verification:**
+- ✅ Page loads successfully: `GET /chat-context-rag-demo 200` (verified from server logs)
+- ✅ SDK rebuilt without /rag export path: 691KB ESM bundle
+- ✅ Component imports from main SDK: `import { VectorRAGManager } from '@fabstir/sdk-core'`
+- ✅ Webpack detected SDK file correctly (no stubbing)
+- ✅ No native binding errors in browser console
 
 ---
 
