@@ -1,7 +1,10 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
- * Document Manager
- * Orchestrates document processing: extraction → chunking → embedding → vector storage
- * Max 300 lines
+ * Document Manager (Simplified - No Vector Storage)
+ * Orchestrates document processing: extraction → chunking → embedding → return chunks
+ * Part of Phase 3, Sub-phase 3.2: Simplify DocumentManager (Remove Vector Storage)
  */
 
 import { extractText } from './extractors.js';
@@ -11,86 +14,71 @@ import type {
   ChunkingOptions,
   UploadOptions,
   UploadProgress,
-  BatchOptions,
-  BatchResult
+  BatchOptions
 } from './types.js';
 import type { EmbeddingService } from '../embeddings/EmbeddingService.js';
-import type { VectorRAGManager } from '../managers/VectorRAGManager.js';
-import type { VectorRecord } from '../rag/types.js';
+import type {
+  IDocumentManager,
+  ChunkResult,
+  BatchResult,
+  CostEstimate
+} from './interfaces/IDocumentManager.js';
+
+// Re-export types for backward compatibility
+export type { ChunkResult, BatchResult, CostEstimate } from './interfaces/IDocumentManager.js';
 
 /**
- * Document processing result
- */
-export interface ProcessResult {
-  documentId: string;
-  chunks: number;
-  embeddingsGenerated: boolean;
-  vectorsStored: boolean;
-  totalTokens?: number;
-  cost?: number;
-}
-
-/**
- * Cost estimate
- */
-export interface CostEstimate {
-  chunkCount: number;
-  totalTokens: number;
-  estimatedCost: number;
-}
-
-/**
- * Document info
- */
-export interface DocumentInfo {
-  documentId: string;
-  name: string;
-  type: DocumentType;
-  chunks: number;
-  processedAt: number;
-}
-
-/**
- * Document Manager options
+ * Document Manager options (simplified)
  */
 export interface DocumentManagerOptions {
   embeddingService: EmbeddingService;
-  vectorManager: VectorRAGManager;
-  databaseName: string;
 }
 
 /**
- * Document Manager
- * High-level API for document processing and RAG ingestion
+ * Document Manager (Simplified)
+ *
+ * **Architecture Change (Phase 3, Sub-phase 3.2)**:
+ * - Removed vector storage logic (no longer calls VectorRAGManager.addVectors)
+ * - Returns ChunkResult[] instead of ProcessResult
+ * - Removed tracking of processed documents
+ * - Removed dependency on VectorRAGManager and databaseName
+ *
+ * **Workflow**:
+ * 1. Extract text from file
+ * 2. Chunk text into smaller pieces
+ * 3. Generate embeddings for each chunk
+ * 4. Return chunks with embeddings (caller decides what to do with them)
  */
-export class DocumentManager {
+export class DocumentManager implements IDocumentManager {
   private embeddingService: EmbeddingService;
-  private vectorManager: VectorRAGManager;
-  private databaseName: string;
-  private processedDocuments: Map<string, DocumentInfo> = new Map();
 
   constructor(options: DocumentManagerOptions) {
+    if (!options.embeddingService) {
+      throw new Error('embeddingService is required');
+    }
     this.embeddingService = options.embeddingService;
-    this.vectorManager = options.vectorManager;
-    this.databaseName = options.databaseName;
   }
 
   /**
-   * Process a document: extract → chunk → embed → store
+   * Process a document: extract → chunk → embed → return
+   *
+   * @param file - File to process
+   * @param options - Chunking and progress options
+   * @returns Array of ChunkResult objects with embeddings
    */
   async processDocument(
     file: File,
     options?: ChunkingOptions & UploadOptions & { deduplicateChunks?: boolean }
-  ): Promise<ProcessResult> {
+  ): Promise<ChunkResult[]> {
     const documentId = this.generateDocumentId();
     const documentType = this.getDocumentType(file.name);
 
     try {
-      // Stage 1: Extract text
+      // Stage 1: Extract text (25%)
       this.emitProgress(options, { stage: 'extracting', progress: 25 });
       const { text } = await extractText(file, documentType);
 
-      // Stage 2: Chunk text
+      // Stage 2: Chunk text (50%)
       this.emitProgress(options, { stage: 'chunking', progress: 50 });
       const chunks = chunkText(text, documentId, file.name, documentType, options);
 
@@ -99,49 +87,29 @@ export class DocumentManager {
         ? this.deduplicateChunks(chunks)
         : chunks;
 
-      // Stage 3: Generate embeddings
+      // Stage 3: Generate embeddings (75%)
       this.emitProgress(options, { stage: 'embedding', progress: 75 });
       const texts = uniqueChunks.map(chunk => chunk.text);
       const embeddingResponse = await this.embeddingService.embedBatch(texts);
 
-      // Stage 4: Store in vector DB
-      this.emitProgress(options, { stage: 'embedding', progress: 90 });
+      // Stage 4: Build results (100%)
+      this.emitProgress(options, { stage: 'embedding', progress: 100 });
 
-      const vectors: VectorRecord[] = embeddingResponse.embeddings.map((embedding, index) => ({
+      const results: ChunkResult[] = embeddingResponse.embeddings.map((embedding, index) => ({
         id: `${documentId}-chunk-${uniqueChunks[index].metadata.index}`,
-        values: embedding.embedding,
+        text: embedding.text,
+        embedding: embedding.embedding,
         metadata: {
-          ...uniqueChunks[index].metadata,
           documentId,
           documentName: file.name,
           documentType,
           chunkIndex: uniqueChunks[index].metadata.index,
-          text: embedding.text
+          startOffset: uniqueChunks[index].metadata.startOffset,
+          endOffset: uniqueChunks[index].metadata.endOffset
         }
       }));
 
-      await this.vectorManager.addVectors(this.databaseName, vectors);
-
-      // Stage 5: Complete
-      this.emitProgress(options, { stage: 'complete', progress: 100 });
-
-      // Track processed document
-      this.processedDocuments.set(documentId, {
-        documentId,
-        name: file.name,
-        type: documentType,
-        chunks: uniqueChunks.length,
-        processedAt: Date.now()
-      });
-
-      return {
-        documentId,
-        chunks: uniqueChunks.length,
-        embeddingsGenerated: true,
-        vectorsStored: true,
-        totalTokens: embeddingResponse.totalTokens,
-        cost: embeddingResponse.cost
-      };
+      return results;
     } catch (error) {
       throw error;
     }
@@ -149,6 +117,10 @@ export class DocumentManager {
 
   /**
    * Process multiple documents
+   *
+   * @param files - Files to process
+   * @param options - Chunking and batch options
+   * @returns Array of BatchResult objects
    */
   async processBatch(
     files: File[],
@@ -160,17 +132,26 @@ export class DocumentManager {
     // Process in batches
     for (let i = 0; i < files.length; i += concurrency) {
       const batch = files.slice(i, i + concurrency);
+      // Extract chunking options without batch progress callback
+      const docOptions = options ? {
+        chunkSize: options.chunkSize,
+        overlap: options.overlap
+      } : undefined;
       const batchResults = await Promise.allSettled(
-        batch.map(file => this.processDocument(file, options))
+        batch.map(file => this.processDocument(file, docOptions))
       );
 
       for (let j = 0; j < batchResults.length; j++) {
         const result = batchResults[j];
+        const file = batch[j];
+
         if (result.status === 'fulfilled') {
+          const chunks = result.value;
           results.push({
             success: true,
-            documentId: result.value.documentId,
-            metadata: this.processedDocuments.get(result.value.documentId)
+            documentId: chunks.length > 0 ? chunks[0].metadata.documentId : 'unknown',
+            fileName: file.name,
+            chunks: chunks.length
           });
         } else {
           if (!options?.continueOnError) {
@@ -178,6 +159,7 @@ export class DocumentManager {
           }
           results.push({
             success: false,
+            fileName: file.name,
             error: result.reason.message
           });
         }
@@ -198,6 +180,10 @@ export class DocumentManager {
 
   /**
    * Estimate processing cost
+   *
+   * @param file - File to estimate
+   * @param options - Chunking options
+   * @returns Cost estimate
    */
   async estimateCost(
     file: File,
@@ -216,7 +202,7 @@ export class DocumentManager {
     }, 0);
 
     // Get cost per 1M tokens from embedding service
-    const costPer1MTokens = this.embeddingService['model']?.includes('openai') ? 0.02 : 0.10;
+    const costPer1MTokens = (this.embeddingService as any).model?.includes('openai') ? 0.02 : 0.10;
     const estimatedCost = (totalTokens / 1_000_000) * costPer1MTokens;
 
     return {
@@ -227,27 +213,8 @@ export class DocumentManager {
   }
 
   /**
-   * List processed documents
-   */
-  async listDocuments(): Promise<DocumentInfo[]> {
-    return Array.from(this.processedDocuments.values());
-  }
-
-  /**
-   * Delete document and its vectors
-   */
-  async deleteDocument(documentId: string): Promise<void> {
-    // Delete from vector DB
-    if (this.vectorManager.deleteByMetadata) {
-      await this.vectorManager.deleteByMetadata(this.databaseName, { documentId });
-    }
-
-    // Remove from tracking
-    this.processedDocuments.delete(documentId);
-  }
-
-  /**
    * Generate unique document ID
+   * @private
    */
   private generateDocumentId(): string {
     return `doc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -255,6 +222,7 @@ export class DocumentManager {
 
   /**
    * Get document type from filename
+   * @private
    */
   private getDocumentType(filename: string): DocumentType {
     const ext = filename.split('.').pop()?.toLowerCase();
@@ -277,6 +245,7 @@ export class DocumentManager {
 
   /**
    * Deduplicate chunks by text content
+   * @private
    */
   private deduplicateChunks(chunks: any[]): any[] {
     const seen = new Set<string>();
@@ -291,6 +260,7 @@ export class DocumentManager {
 
   /**
    * Emit progress update
+   * @private
    */
   private emitProgress(options: any, progress: UploadProgress): void {
     if (options?.onProgress) {
