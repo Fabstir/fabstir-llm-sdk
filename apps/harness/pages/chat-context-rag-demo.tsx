@@ -166,6 +166,8 @@ export default function ChatContextDemo() {
   const [ragDocuments, setRagDocuments] = useState<RAGDocument[]>([]);
   const [isUploadingDocument, setIsUploadingDocument] = useState(false);
   const [uploadError, setUploadError] = useState<string>("");
+  const [uploadProgress, setUploadProgress] = useState<{ stage: 'reading' | 'chunking' | 'embedding' | 'storing'; percent: number; message: string } | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -418,13 +420,26 @@ export default function ChatContextDemo() {
 
       const result = await documentManager.processDocument(file, {
         onProgress: (progress) => {
-          // Update status with processing stage
+          // Map DocumentManager stages to upload progress stages
+          let stage: 'reading' | 'chunking' | 'embedding' | 'storing' = 'reading';
+          if (progress.stage === 'extracting') stage = 'reading';
+          else if (progress.stage === 'chunking') stage = 'chunking';
+          else if (progress.stage === 'embedding') stage = 'embedding';
+          else if (progress.stage === 'complete') stage = 'storing';
+
           const stageEmoji = {
             extracting: '📖',
             chunking: '✂️',
             embedding: '🧠',
             complete: '✅'
           }[progress.stage] || '⏳';
+
+          // Update upload progress state for UI
+          setUploadProgress({
+            stage,
+            percent: progress.progress,
+            message: `${stageEmoji} ${progress.stage}... ${progress.progress}%`
+          });
 
           setStatus(`${stageEmoji} ${progress.stage}... ${progress.progress}%`);
         }
@@ -446,6 +461,7 @@ export default function ChatContextDemo() {
       setStatus("Ready");
     } finally {
       setIsUploadingDocument(false);
+      setUploadProgress(null); // Reset progress
       event.target.value = ""; // Reset input
     }
   };
@@ -504,6 +520,8 @@ export default function ChatContextDemo() {
       return [];
     }
 
+    setIsSearching(true); // Set searching state at start
+
     try {
       // Search vector database with topK=5 and threshold=0.7
       const results = await vectorRAGManager.search(vectorDbName, query, {
@@ -520,6 +538,8 @@ export default function ChatContextDemo() {
       console.error('Vector search error:', error);
       setError(`Search failed: ${error.message}`);
       return []; // Return empty array on error
+    } finally {
+      setIsSearching(false); // Reset searching state in finally block
     }
   };
 
@@ -1982,7 +2002,7 @@ export default function ChatContextDemo() {
                   setIsRAGEnabled(false);
                 }
               }}
-              disabled={!storageManager || !activeHost}
+              disabled={!storageManager || !activeHost || isUploadingDocument}
               className="w-4 h-4 text-purple-600 bg-gray-100 border-gray-300 rounded focus:ring-purple-500"
             />
             <span className="text-sm font-medium">Enable RAG</span>
@@ -2008,6 +2028,22 @@ export default function ChatContextDemo() {
           </p>
         </div>
 
+        {/* Upload Progress Bar */}
+        {uploadProgress && (
+          <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-blue-700">{uploadProgress.message}</span>
+              <span className="text-sm font-semibold text-blue-700">{uploadProgress.percent}%</span>
+            </div>
+            <div className="w-full bg-blue-200 rounded-full h-2">
+              <div
+                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${uploadProgress.percent}%` }}
+              ></div>
+            </div>
+          </div>
+        )}
+
         {uploadError && (
           <div className="bg-red-100 border border-red-400 text-red-700 px-3 py-2 rounded text-sm mb-2">
             {uploadError}
@@ -2027,13 +2063,24 @@ export default function ChatContextDemo() {
                 </div>
                 <button
                   onClick={() => removeDocument(doc.id)}
-                  disabled={!isRAGEnabled}
+                  disabled={!isRAGEnabled || isUploadingDocument}
                   className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
                 >
                   Remove
                 </button>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Skeleton UI for loading state */}
+        {isUploadingDocument && uploadedDocuments.length === 0 && (
+          <div className="space-y-2 animate-pulse">
+            <p className="text-sm font-semibold">Processing document...</p>
+            <div className="bg-white p-2 rounded border">
+              <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+              <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+            </div>
           </div>
         )}
 
