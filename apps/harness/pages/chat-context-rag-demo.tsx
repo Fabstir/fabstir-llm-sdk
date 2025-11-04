@@ -386,10 +386,17 @@ export default function ChatContextDemo() {
       .join("\n");
   };
 
-  // RAG: Handle file upload
+  // RAG: Handle file upload with DocumentManager
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    // Validate prerequisites
+    if (!documentManager) {
+      setUploadError("DocumentManager not initialized. Please enable RAG first.");
+      addMessage("system", "❌ Upload failed: DocumentManager not initialized");
+      return;
+    }
 
     setIsUploadingDocument(true);
     setUploadError("");
@@ -406,23 +413,37 @@ export default function ChatContextDemo() {
         throw new Error("File size must be less than 5MB");
       }
 
-      // Read file content
-      const content = await file.text();
+      // Process document with DocumentManager
+      addMessage("system", `🔄 Processing document: ${file.name}...`);
 
-      // Add to documents
-      const newDoc: RAGDocument = {
-        id: Date.now().toString(),
+      const result = await documentManager.processDocument(file, {
+        onProgress: (progress) => {
+          // Update status with processing stage
+          const stageEmoji = {
+            extracting: '📖',
+            chunking: '✂️',
+            embedding: '🧠',
+            complete: '✅'
+          }[progress.stage] || '⏳';
+
+          setStatus(`${stageEmoji} ${progress.stage}... ${progress.progress}%`);
+        }
+      });
+
+      // Add to uploaded documents state (with chunks from DocumentManager)
+      setUploadedDocuments([...uploadedDocuments, {
+        id: result.documentId,
         name: file.name,
-        content,
-        uploadedAt: Date.now(),
-        size: file.size,
-      };
+        chunks: result.chunks
+      }]);
 
-      setRagDocuments([...ragDocuments, newDoc]);
-      addMessage("system", `📄 Uploaded document: ${file.name}`);
+      // Success message
+      addMessage("system", `✅ Uploaded: ${file.name} (${result.chunks} chunks)`);
+      setStatus("Ready");
     } catch (error: any) {
       setUploadError(error.message);
       addMessage("system", `❌ Upload failed: ${error.message}`);
+      setStatus("Ready");
     } finally {
       setIsUploadingDocument(false);
       event.target.value = ""; // Reset input

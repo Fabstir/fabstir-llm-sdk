@@ -311,40 +311,72 @@ Test Files  1 passed (1)
 **Time Estimate**: 3 hours (1.5 hours tests + 1.5 hours implementation)
 
 #### Tasks
-- [ ] Write tests for handleDocumentUpload() with .txt file
-- [ ] Write tests for handleDocumentUpload() with .md file
-- [ ] Write tests for handleDocumentUpload() with .html file
-- [ ] Write tests for file size validation (max 5MB)
-- [ ] Write tests for file type validation
-- [ ] Write tests for DocumentManager.processDocument() call
-- [ ] Write tests for progress callback updates
-- [ ] Write tests for error handling (processing failures)
-- [ ] Write tests for uploadedDocuments state updates
-- [ ] Implement handleDocumentUpload() function
-- [ ] Add file validation (size, type)
-- [ ] Call DocumentManager.processDocument() with progress callback
-- [ ] Update uploadedDocuments state on success
-- [ ] Add system message to chat on success/failure
-- [ ] Reset file input after processing
-- [ ] Test with real files (sample .txt, .md, .html)
+- [x] Write tests for handleDocumentUpload() with .txt file
+- [x] Write tests for handleDocumentUpload() with .md file
+- [x] Write tests for handleDocumentUpload() with .html file
+- [x] Write tests for file size validation (max 5MB)
+- [x] Write tests for file type validation
+- [x] Write tests for DocumentManager.processDocument() call
+- [x] Write tests for progress callback updates
+- [x] Write tests for error handling (processing failures)
+- [x] Write tests for uploadedDocuments state updates
+- [x] Implement handleDocumentUpload() function
+- [x] Add file validation (size, type)
+- [x] Call DocumentManager.processDocument() with progress callback
+- [x] Update uploadedDocuments state on success
+- [x] Add system message to chat on success/failure
+- [x] Reset file input after processing
+- [x] Test with real files (sample .txt, .md, .html)
 
 **Test Files:**
-- `apps/harness/tests/unit/document-upload-handler.test.tsx` (~200 lines) - Upload handler tests
+- `apps/harness/tests/unit/document-upload-handler.test.tsx` (364 lines) - Upload handler tests
 
 **Implementation Files:**
-- `apps/harness/pages/chat-context-rag-demo.tsx` (+80 lines) - handleDocumentUpload() function
+- `apps/harness/pages/chat-context-rag-demo.tsx` (replaced handleFileUpload, 62 lines, lines 389-451)
 
 **Success Criteria:**
-- [ ] Files validated correctly (size, type)
-- [ ] DocumentManager.processDocument() called with correct parameters
-- [ ] Progress updates shown to user (status messages)
-- [ ] uploadedDocuments state updated on success
-- [ ] System message added to chat on success
-- [ ] Error messages shown on failures
-- [ ] File input reset after processing
-- [ ] Works with real .txt, .md, .html files
+- [x] Files validated correctly (size, type)
+- [x] DocumentManager.processDocument() called with correct parameters
+- [x] Progress updates shown to user (status messages with emojis)
+- [x] uploadedDocuments state updated on success
+- [x] System message added to chat on success
+- [x] Error messages shown on failures
+- [x] File input reset after processing
+- [x] Works with real .txt, .md, .html files
 
-**Test Results:** ⏳ Pending
+**Test Results:** ✅ **PASSED (34/34 tests, 12ms)**
+```
+Test Files  1 passed (1)
+     Tests  34 passed (34)
+  Duration  427ms (transform 42ms, setup 0ms, collect 40ms, tests 12ms)
+```
+
+**Details:**
+- ✅ File type validation (.txt, .md, .html accepted; .pdf, .docx rejected)
+- ✅ Case-insensitive extension validation
+- ✅ File size validation (max 5MB, accepts <=5MB, rejects >5MB)
+- ✅ DocumentManager.processDocument() called with File object and progress callback
+- ✅ Progress callback handling (extracting, chunking, embedding, complete stages)
+- ✅ Status updates with stage-specific emojis (📖, ✂️, 🧠, ✅)
+- ✅ uploadedDocuments state updated with {id, name, chunks} from ProcessResult
+- ✅ Preserves existing documents when adding new ones
+- ✅ Success messages with file name and chunks count
+- ✅ Error messages on validation and processing failures
+- ✅ Error state cleared at start of upload
+- ✅ DocumentManager initialization check
+- ✅ File input reset after success and failure
+- ✅ Loading states (isUploadingDocument)
+- ✅ Status reset to "Ready" after processing
+- ✅ TypeScript compilation successful (no errors)
+
+**Implementation Changes:**
+- Replaced simple file.text() approach with DocumentManager.processDocument()
+- Added prerequisite check for documentManager
+- Added progress callback with stage-specific emojis
+- Updated to use uploadedDocuments state (with chunks from DocumentManager)
+- Added processing start message
+- Enhanced error handling with clear messages
+- Status updates show progress percentage and stage
 
 ---
 
@@ -800,9 +832,9 @@ Test Files  1 passed (1)
 - [x] Sub-phase 1.1: Import RAG Components and Add State Variables (11/11 tests ✅)
 - [x] Sub-phase 1.2: RAG Initialization Logic (15/15 tests ✅)
 
-### Phase 2: ⏳ In Progress (1/3 sub-phases)
+### Phase 2: ⏳ In Progress (2/3 sub-phases)
 - [x] Sub-phase 2.1: Document Upload UI Component (26/26 tests ✅)
-- [ ] Sub-phase 2.2: Document Upload Handler Implementation
+- [x] Sub-phase 2.2: Document Upload Handler Implementation (34/34 tests ✅)
 - [ ] Sub-phase 2.3: Document Removal Handler
 
 ### Phase 3: ⏳ Not Started
@@ -830,6 +862,6 @@ Test Files  1 passed (1)
 - **Integration Tests**: 100% coverage for E2E workflows
 - **Manual Tests**: All 8 scenarios verified in browser
 
-**Current Status**: 749/2,100 lines implemented (36%)
+**Current Status**: 1,175/2,100 lines implemented (56%)
 - Phase 1 Complete: 402 lines (316 test + 86 implementation)
-- Phase 2 Partial: 347 lines (274 test + 73 implementation) - 1/3 sub-phases complete
+- Phase 2 Partial: 773 lines (638 test + 135 implementation) - 2/3 sub-phases complete
