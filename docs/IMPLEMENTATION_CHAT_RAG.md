@@ -514,25 +514,35 @@ These features are **production-ready** in fabstir-llm-node v8.3.0:
 **Line Budget**: 60 lines (60 tests)
 
 #### Tasks
-- [ ] Write tests for HostAdapter.generateEmbedding() (POST /v1/embed)
-- [ ] Write tests for batch embedding generation
-- [ ] Write tests for error handling (network errors, host errors)
-- [ ] Verify existing implementation works without changes
-- [ ] Verify all tests pass
+- [x] Write tests for HostAdapter.embedText() (POST /v1/embed)
+- [x] Write tests for batch embedding generation
+- [x] Write tests for error handling (network errors, host errors)
+- [x] Verify existing implementation works without changes
+- [x] Verify all tests pass
 
 **Test Files:**
-- `packages/sdk-core/tests/unit/host-adapter-verify.test.ts` (NEW, 60 lines) - HostAdapter verification tests
+- `packages/sdk-core/tests/unit/host-adapter-verify.test.ts` (NEW, 223 lines) - HostAdapter verification tests
 
 **Implementation Files:**
 - None (no changes needed)
 
 **Success Criteria:**
-- [ ] HostAdapter.generateEmbedding() still generates 384-dimensional embeddings
-- [ ] Batch embedding generation still works
-- [ ] Error handling still works
-- [ ] All 8 tests pass
+- [x] HostAdapter.embedText() generates 384-dimensional embeddings
+- [x] Batch embedding generation works correctly
+- [x] Error handling works (network errors, dimension mismatch)
+- [x] All 8 new verification tests pass
+- [x] All 18 existing tests pass (regression check)
 
-**Test Results:** ⏳ Pending
+**Test Results:** ✅ **26 passed** (8 new verification + 18 existing = 26 total, 4.4s execution time)
+
+**Implementation Notes:**
+- No code changes to HostAdapter (already complete at 156 lines)
+- Created verification test suite (223 lines with 8 tests focused on RAG integration)
+- Test categories: embedText(), embedBatch(), error handling, integration readiness
+- All tests validate 384-dimensional embeddings from all-MiniLM-L6-v2 model
+- Verified integration points with DocumentManager and SessionManager
+- Zero-cost embeddings confirmed (all tests verify cost = 0.0)
+- Regression check passed: all existing 18 tests still passing
 
 ---
 
