@@ -14,7 +14,11 @@ import {
   SDKError,
   SessionConfig,
   SessionJob,
-  CheckpointProof
+  CheckpointProof,
+  Vector,
+  UploadVectorsMessage,
+  UploadVectorsResponse,
+  UploadVectorsResult
 } from '../types';
 import { PaymentManager } from './PaymentManager';
 import { StorageManager } from './StorageManager';
@@ -25,13 +29,6 @@ import { ChainRegistry } from '../config/ChainRegistry';
 import { UnsupportedChainError } from '../errors/ChainErrors';
 import { PricingValidationError } from '../errors/pricing-errors';
 import { bytesToHex } from '../crypto/utilities';
-import type { VectorRAGManager } from './VectorRAGManager.js';
-import type { EmbeddingService } from '../embeddings/EmbeddingService.js';
-import { ContextBuilder } from '../session/context-builder.js';
-import type { RAGSessionConfig, RAGMetrics } from '../session/rag-config.js';
-import { mergeRAGConfig, validateRAGConfig } from '../session/rag-config.js';
-import { ConversationMemory } from '../conversation/ConversationMemory.js';
-import type { ConversationMemoryConfig } from '../conversation/ConversationMemory.js';
 
 export interface SessionState {
   sessionId: bigint;
@@ -48,8 +45,6 @@ export interface SessionState {
   startTime: number;
   endTime?: number;
   encryption?: boolean; // NEW: Track if session uses encryption
-  ragConfig?: RAGSessionConfig; // NEW: RAG configuration for this session
-  ragMetrics?: RAGMetrics; // NEW: RAG performance metrics
 }
 
 // Extended SessionConfig with chainId
@@ -60,7 +55,6 @@ export interface ExtendedSessionConfig extends SessionConfig {
   paymentMethod: 'deposit' | 'direct';
   depositAmount?: ethers.BigNumberish;
   encryption?: boolean; // NEW: Enable E2EE
-  ragConfig?: RAGSessionConfig; // NEW: RAG configuration
 }
 
 export class SessionManager implements ISessionManager {
@@ -68,15 +62,12 @@ export class SessionManager implements ISessionManager {
   private storageManager: StorageManager;
   private hostManager?: HostManager; // Optional until set after auth
   private encryptionManager?: EncryptionManager; // NEW: Optional until set after auth
-  private vectorRAGManager?: VectorRAGManager; // NEW: Optional for RAG
-  private embeddingService?: EmbeddingService; // NEW: Optional for RAG
   private wsClient?: WebSocketClient;
   private sessions: Map<string, SessionState> = new Map();
-  private contextBuilders: Map<string, ContextBuilder> = new Map(); // NEW: Per-session context builders
-  private conversationMemories: Map<string, ConversationMemory> = new Map(); // NEW: Per-session conversation memory
   private initialized = false;
   private sessionKey?: Uint8Array; // NEW: Store session key for Phase 4.2
   private messageIndex: number = 0; // NEW: For Phase 4.2 replay protection
+  private pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: any) => void; timeoutId: NodeJS.Timeout }> = new Map(); // Host-side RAG request tracking
 
   constructor(
     paymentManager: PaymentManager,
@@ -100,20 +91,6 @@ export class SessionManager implements ISessionManager {
    */
   setEncryptionManager(encryptionManager: EncryptionManager): void {
     this.encryptionManager = encryptionManager;
-  }
-
-  /**
-   * Set VectorRAGManager for RAG context retrieval (called after authentication)
-   */
-  setVectorRAGManager(vectorRAGManager: VectorRAGManager): void {
-    this.vectorRAGManager = vectorRAGManager;
-  }
-
-  /**
-   * Set EmbeddingService for RAG context retrieval (called after authentication)
-   */
-  setEmbeddingService(embeddingService: EmbeddingService): void {
-    this.embeddingService = embeddingService;
   }
 
   /**
@@ -262,11 +239,6 @@ export class SessionManager implements ISessionManager {
 
       // Store in memory
       this.sessions.set(sessionId.toString(), sessionState);
-
-      // Initialize RAG context builder if enabled
-      if (ragConfig?.enabled && this.vectorRAGManager && this.embeddingService) {
-        await this.initializeRAGForSession(sessionId.toString(), ragConfig);
-      }
 
       // Persist to storage (convert BigInt values to strings for JSON serialization)
       await this.storageManager.storeConversation({
@@ -548,6 +520,9 @@ export class SessionManager implements ISessionManager {
         this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
         await this.wsClient.connect();
         console.log('[SessionManager] ✅ WebSocket connected successfully');
+
+        // Set up global RAG message handlers
+        this._setupRAGMessageHandlers();
 
         // NEW (Phase 6.2): Use encryption by default
         if (session.encryption && this.encryptionManager) {
@@ -1801,128 +1776,204 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+
   /**
-   * Initialize RAG for a session
-   * Creates a ContextBuilder and initializes the vector DB session
-   * @private
+   * Upload vectors to host for RAG search (Phase 2, Sub-phase 2.2)
+   *
+   * Sends document embedding vectors to the host node for storage in session memory.
+   * Automatically splits large uploads into 1000-vector batches.
+   * Vectors are automatically cleaned up when the WebSocket session ends.
+   *
+   * @param sessionId - Active session ID
+   * @param vectors - Array of Vector objects with id, vector (384d), and metadata
+   * @param replace - If true, replace all existing vectors; if false, append
+   * @returns Promise with upload statistics (uploaded count, rejected count, errors)
+   * @throws SDKError if session invalid, WebSocket not connected, or dimension validation fails
    */
-  private async initializeRAGForSession(sessionId: string, ragConfig: RAGSessionConfig): Promise<void> {
-    if (!this.vectorRAGManager || !this.embeddingService) {
-      throw new SDKError('VectorRAGManager and EmbeddingService required for RAG', 'RAG_NOT_CONFIGURED');
+  async uploadVectors(
+    sessionId: string,
+    vectors: Vector[],
+    replace: boolean = false
+  ): Promise<UploadVectorsResult> {
+    // 1. Validate session exists and is active
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new SDKError(
+        `Session ${sessionId} not found`,
+        'SESSION_NOT_FOUND'
+      );
     }
 
-    try {
-      // Get or create vector DB session ID
-      let vectorDbSessionId: string;
-      if (ragConfig.vectorDbSessionId) {
-        vectorDbSessionId = ragConfig.vectorDbSessionId;
-      } else if (ragConfig.databaseName) {
-        // Create new vector DB session from database name
-        vectorDbSessionId = await this.vectorRAGManager.createSession(ragConfig.databaseName);
-      } else {
-        throw new SDKError('RAG config must provide vectorDbSessionId or databaseName', 'RAG_CONFIG_INVALID');
-      }
-
-      // Create context builder for this session
-      const contextBuilder = new ContextBuilder(
-        this.embeddingService,
-        this.vectorRAGManager,
-        vectorDbSessionId
+    if (session.status !== 'active') {
+      throw new SDKError(
+        `Session ${sessionId} is not active (status: ${session.status})`,
+        'SESSION_NOT_ACTIVE'
       );
+    }
 
-      this.contextBuilders.set(sessionId, contextBuilder);
+    // 2. Validate WebSocket connection
+    if (!this.wsClient) {
+      throw new SDKError(
+        'WebSocket not connected',
+        'WEBSOCKET_NOT_CONNECTED'
+      );
+    }
 
-      // Create conversation memory if enabled
-      if (ragConfig.conversationMemory?.enabled) {
-        const memoryConfig: ConversationMemoryConfig = {
-          enabled: true,
-          maxRecentMessages: ragConfig.conversationMemory.maxRecentMessages,
-          maxHistoryMessages: ragConfig.conversationMemory.maxHistoryMessages,
-          maxMemoryTokens: ragConfig.conversationMemory.maxMemoryTokens,
-          similarityThreshold: ragConfig.conversationMemory.similarityThreshold
-        };
+    // 3. Handle empty vectors array
+    if (vectors.length === 0) {
+      return {
+        uploaded: 0,
+        rejected: 0,
+        errors: []
+      };
+    }
 
-        const conversationMemory = new ConversationMemory(
-          this.embeddingService,
-          this.vectorRAGManager,
-          `${vectorDbSessionId}-conversation`, // Separate vector DB session for conversation history
-          memoryConfig
+    // 4. Validate vector dimensions (384 for all-MiniLM-L6-v2)
+    const EXPECTED_DIMENSION = 384;
+    for (const vector of vectors) {
+      if (vector.vector.length !== EXPECTED_DIMENSION) {
+        throw new SDKError(
+          `Vector ${vector.id}: Invalid dimensions: expected ${EXPECTED_DIMENSION}, got ${vector.vector.length}`,
+          'INVALID_VECTOR_DIMENSION'
         );
-
-        this.conversationMemories.set(sessionId, conversationMemory);
       }
-    } catch (error: any) {
-      throw new SDKError(`Failed to initialize RAG: ${error.message}`, 'RAG_INIT_FAILED');
+    }
+
+    // 5. Split into batches (max 1000 vectors per batch)
+    const BATCH_SIZE = 1000;
+    const batches: Vector[][] = [];
+    for (let i = 0; i < vectors.length; i += BATCH_SIZE) {
+      batches.push(vectors.slice(i, i + BATCH_SIZE));
+    }
+
+    // 6. Upload each batch and accumulate results
+    let totalUploaded = 0;
+    let totalRejected = 0;
+    const allErrors: string[] = [];
+
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      const isFirstBatch = batchIndex === 0;
+
+      // First batch uses caller's replace value, subsequent batches always append
+      const batchReplace = isFirstBatch ? replace : false;
+
+      // Generate unique request ID
+      const requestId = crypto.randomUUID();
+
+      // Create upload message
+      const message: UploadVectorsMessage = {
+        type: 'uploadVectors',
+        requestId,
+        vectors: batch,
+        replace: batchReplace
+      };
+
+      try {
+        // Send message and wait for response (with 30s timeout)
+        const response = await this._sendRAGRequest(requestId, message, 30000);
+
+        // Accumulate results
+        totalUploaded += response.uploaded || 0;
+        totalRejected += response.rejected || 0;
+        if (response.errors && response.errors.length > 0) {
+          allErrors.push(...response.errors);
+        }
+      } catch (error: any) {
+        // If batch fails, add error and continue (best effort)
+        allErrors.push(`Batch ${batchIndex + 1} failed: ${error.message}`);
+        totalRejected += batch.length;
+      }
+    }
+
+    return {
+      uploaded: totalUploaded,
+      rejected: totalRejected,
+      errors: allErrors
+    };
+  }
+
+  /**
+   * Send RAG request and wait for response with timeout
+   * @private
+   */
+  private async _sendRAGRequest(
+    requestId: string,
+    message: any,
+    timeoutMs: number
+  ): Promise<any> {
+    return new Promise((resolve, reject) => {
+      // Set up timeout
+      const timeoutId = setTimeout(() => {
+        this.pendingRequests.delete(requestId);
+        reject(new SDKError(
+          `Request ${requestId} timed out after ${timeoutMs}ms`,
+          'REQUEST_TIMEOUT'
+        ));
+      }, timeoutMs);
+
+      // Track pending request
+      this.pendingRequests.set(requestId, {
+        resolve,
+        reject,
+        timeoutId
+      });
+
+      // Send WebSocket message
+      this.wsClient!.sendWithoutResponse(message).catch((error) => {
+        clearTimeout(timeoutId);
+        this.pendingRequests.delete(requestId);
+        reject(error);
+      });
+    });
+  }
+
+  /**
+   * Handle uploadVectorsResponse from host
+   * @private
+   */
+  private _handleUploadVectorsResponse(response: UploadVectorsResponse): void {
+    const pending = this.pendingRequests.get(response.requestId);
+    if (!pending) {
+      console.warn(`Received uploadVectorsResponse for unknown request: ${response.requestId}`);
+      return;
+    }
+
+    // Clear timeout
+    clearTimeout(pending.timeoutId);
+    this.pendingRequests.delete(response.requestId);
+
+    // Resolve with response data
+    if (response.status === 'success') {
+      pending.resolve({
+        uploaded: response.uploaded,
+        rejected: 0,
+        errors: []
+      });
+    } else {
+      pending.resolve({
+        uploaded: response.uploaded || 0,
+        rejected: 1,
+        errors: response.error ? [response.error] : []
+      });
     }
   }
 
   /**
-   * Inject RAG context before a prompt
-   * Retrieves relevant context from vector DB and augments the prompt
+   * Set up global message handlers for RAG operations
    * @private
    */
-  private async injectRAGContext(sessionId: string, prompt: string): Promise<string> {
-    const session = this.sessions.get(sessionId);
-    if (!session?.ragConfig?.enabled) {
-      return prompt; // RAG disabled, return prompt unchanged
+  private _setupRAGMessageHandlers(): void {
+    if (!this.wsClient) {
+      return;
     }
 
-    const contextBuilder = this.contextBuilders.get(sessionId);
-    if (!contextBuilder) {
-      return prompt; // No context builder, return prompt unchanged
-    }
-
-    try {
-      let augmentedPrompt = '';
-
-      // 1. Retrieve document context from vector DB
-      const result = await contextBuilder.retrieveContext({
-        prompt,
-        topK: session.ragConfig.topK,
-        threshold: session.ragConfig.similarityThreshold,
-        template: session.ragConfig.contextTemplate,
-        maxTokens: session.ragConfig.maxContextLength,
-        includeSources: session.ragConfig.includeSources,
-        filter: session.ragConfig.metadataFilter
-      });
-
-      // Update session metrics
-      if (session.ragMetrics) {
-        const n = session.ragMetrics.totalRetrievals;
-        session.ragMetrics.totalRetrievals = n + 1;
-        session.ragMetrics.averageLatencyMs =
-          (session.ragMetrics.averageLatencyMs * n + result.metrics.retrievalTimeMs) / (n + 1);
-        session.ragMetrics.averageSimilarity =
-          (session.ragMetrics.averageSimilarity * n + result.metrics.averageSimilarity) / (n + 1);
-        session.ragMetrics.totalContextTokens += result.metrics.contextTokens;
-        if (result.metrics.resultsFound === 0) {
-          session.ragMetrics.emptyRetrievals++;
-        }
+    // Register handler for RAG-related messages
+    this.wsClient.onMessage((data: any) => {
+      if (data.type === 'uploadVectorsResponse') {
+        this._handleUploadVectorsResponse(data as UploadVectorsResponse);
       }
-
-      // Add document context if available
-      if (result.context) {
-        augmentedPrompt += result.context;
-      }
-
-      // 2. Retrieve conversation history if conversation memory is enabled
-      const conversationMemory = this.conversationMemories.get(sessionId);
-      if (conversationMemory) {
-        const contextWindow = await conversationMemory.getContextWindow(prompt);
-        if (contextWindow.length > 0) {
-          const formattedHistory = conversationMemory.formatMessagesForContext(contextWindow);
-          augmentedPrompt += formattedHistory;
-        }
-      }
-
-      // 3. Add current prompt
-      augmentedPrompt += `User: ${prompt}`;
-
-      return augmentedPrompt;
-    } catch (error: any) {
-      // On error, return original prompt and continue
-      console.warn(`RAG context retrieval failed: ${error.message}`);
-      return prompt;
-    }
+      // Future: Add handler for searchVectorsResponse here
+    });
   }
 }

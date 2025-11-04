@@ -61,6 +61,21 @@ export interface UploadVectorsResponse {
 }
 
 /**
+ * Result from uploadVectors() operation
+ *
+ * Aggregates results from potentially multiple batches (auto-split at 1000 vectors).
+ *
+ * @property uploaded - Total number of vectors successfully uploaded across all batches
+ * @property rejected - Total number of vectors that failed validation
+ * @property errors - Array of error messages for rejected vectors
+ */
+export interface UploadVectorsResult {
+  uploaded: number;
+  rejected: number;
+  errors: string[];
+}
+
+/**
  * Client → Host: Search vectors by similarity
  *
  * Performs cosine similarity search against stored vectors in session memory.
