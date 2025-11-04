@@ -485,6 +485,44 @@ export default function ChatContextDemo() {
     }
   };
 
+  // RAG: Search vector database for relevant context chunks
+  const searchContext = async (query: string): Promise<Array<{ text: string; score: number }>> => {
+    // Return empty array if RAG is disabled or no documents uploaded
+    if (!isRAGEnabled || uploadedDocuments.length === 0) {
+      return [];
+    }
+
+    // Validate VectorRAGManager is initialized
+    if (!vectorRAGManager) {
+      console.error('VectorRAGManager not initialized');
+      setError('VectorRAGManager not initialized');
+      return [];
+    }
+
+    // Validate query is not empty
+    if (!query || !query.trim()) {
+      return [];
+    }
+
+    try {
+      // Search vector database with topK=5 and threshold=0.7
+      const results = await vectorRAGManager.search(vectorDbName, query, {
+        topK: 5,
+        threshold: 0.7
+      });
+
+      // Return results (already filtered by VectorRAGManager)
+      return results.map((r: any) => ({
+        text: r.text,
+        score: r.score
+      }));
+    } catch (error: any) {
+      console.error('Vector search error:', error);
+      setError(`Search failed: ${error.message}`);
+      return []; // Return empty array on error
+    }
+  };
+
   // RAG: Search documents for relevant context
   const searchRAGDocuments = (query: string): string => {
     if (ragDocuments.length === 0 || !query.trim()) return "";
