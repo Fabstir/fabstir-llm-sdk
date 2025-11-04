@@ -450,6 +450,41 @@ export default function ChatContextDemo() {
     }
   };
 
+  // RAG: Remove document and delete from vector database
+  const removeDocument = async (documentId: string) => {
+    if (!vectorRAGManager) {
+      const errorMsg = 'VectorRAGManager not initialized';
+      setError(errorMsg);
+      addMessage('system', `❌ Remove failed: ${errorMsg}`);
+      return;
+    }
+
+    setIsLoading(true);
+    setStatus('Removing document...');
+
+    try {
+      // Delete all vectors with this documentId from vector database
+      const result = await vectorRAGManager.deleteByMetadata(vectorDbName, {
+        documentId: documentId
+      });
+
+      // Update uploadedDocuments state to remove the document
+      setUploadedDocuments(uploadedDocuments.filter((d) => d.id !== documentId));
+
+      // Success message with deleted count
+      addMessage('system', `✅ Removed document (${result.deletedCount} chunks deleted)`);
+      setStatus('Ready');
+    } catch (error: any) {
+      console.error('Document removal failed:', error);
+      const errorMsg = `Remove failed: ${error.message}`;
+      setError(errorMsg);
+      addMessage('system', `❌ ${errorMsg}`);
+      setStatus('Ready');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // RAG: Search documents for relevant context
   const searchRAGDocuments = (query: string): string => {
     if (ragDocuments.length === 0 || !query.trim()) return "";
@@ -1914,7 +1949,7 @@ export default function ChatContextDemo() {
                   </p>
                 </div>
                 <button
-                  onClick={() => setUploadedDocuments(uploadedDocuments.filter((d) => d.id !== doc.id))}
+                  onClick={() => removeDocument(doc.id)}
                   disabled={!isRAGEnabled}
                   className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
                 >
