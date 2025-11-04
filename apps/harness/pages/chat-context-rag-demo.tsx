@@ -1836,13 +1836,38 @@ export default function ChatContextDemo() {
 
       {/* RAG Document Upload Section */}
       <div className="bg-purple-50 border-2 border-purple-300 p-4 rounded-lg mb-4">
-        <h3 className="font-semibold mb-2">📄 RAG Documents (Upload Context)</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold">📄 RAG Documents (Upload Context)</h3>
+          <label className="flex items-center space-x-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isRAGEnabled}
+              onChange={async (e) => {
+                if (e.target.checked) {
+                  await initializeRAG();
+                } else {
+                  setIsRAGEnabled(false);
+                }
+              }}
+              disabled={!storageManager || !activeHost}
+              className="w-4 h-4 text-purple-600 bg-gray-100 border-gray-300 rounded focus:ring-purple-500"
+            />
+            <span className="text-sm font-medium">Enable RAG</span>
+          </label>
+        </div>
+
+        {!isRAGEnabled && (
+          <p className="text-sm text-gray-600 italic mb-3 bg-gray-100 p-2 rounded">
+            Enable RAG to upload documents and enhance LLM responses with relevant context
+          </p>
+        )}
+
         <div className="mb-3">
           <input
             type="file"
             accept=".txt,.md,.html"
             onChange={handleFileUpload}
-            disabled={isUploadingDocument}
+            disabled={!isRAGEnabled || isUploadingDocument}
             className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-purple-500 file:text-white hover:file:bg-purple-600 disabled:opacity-50"
           />
           <p className="text-xs text-gray-600 mt-1">
@@ -1856,20 +1881,21 @@ export default function ChatContextDemo() {
           </div>
         )}
 
-        {ragDocuments.length > 0 && (
+        {uploadedDocuments.length > 0 && (
           <div className="space-y-2">
-            <p className="text-sm font-semibold">Uploaded Documents ({ragDocuments.length}):</p>
-            {ragDocuments.map((doc) => (
+            <p className="text-sm font-semibold">Uploaded Documents ({uploadedDocuments.length}):</p>
+            {uploadedDocuments.map((doc) => (
               <div key={doc.id} className="flex items-center justify-between bg-white p-2 rounded border">
                 <div className="flex-1">
                   <p className="text-sm font-medium">{doc.name}</p>
                   <p className="text-xs text-gray-500">
-                    {(doc.size / 1024).toFixed(1)} KB • {new Date(doc.uploadedAt).toLocaleTimeString()}
+                    {doc.chunks} chunks
                   </p>
                 </div>
                 <button
-                  onClick={() => setRagDocuments(ragDocuments.filter((d) => d.id !== doc.id))}
-                  className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600"
+                  onClick={() => setUploadedDocuments(uploadedDocuments.filter((d) => d.id !== doc.id))}
+                  disabled={!isRAGEnabled}
+                  className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
                 >
                   Remove
                 </button>
@@ -1878,7 +1904,7 @@ export default function ChatContextDemo() {
           </div>
         )}
 
-        {ragDocuments.length === 0 && !isUploadingDocument && (
+        {uploadedDocuments.length === 0 && isRAGEnabled && !isUploadingDocument && (
           <p className="text-sm text-gray-500 italic">No documents uploaded yet. Upload files to enhance LLM responses with relevant context.</p>
         )}
       </div>

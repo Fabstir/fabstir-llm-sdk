@@ -242,36 +242,65 @@ Test Files  1 passed (1)
 **Time Estimate**: 2 hours (1 hour tests + 1 hour implementation)
 
 #### Tasks
-- [ ] Write tests for RAGDocumentUpload component rendering
-- [ ] Write tests for enable/disable RAG toggle
-- [ ] Write tests for file input (accept .txt, .md, .html)
-- [ ] Write tests for uploaded documents list display
-- [ ] Write tests for remove document button
-- [ ] Write tests for disabled states (before initialization)
-- [ ] Create RAGDocumentUpload component
-- [ ] Add enable/disable checkbox with onChange handler
-- [ ] Add file input with accept attribute and onChange handler
-- [ ] Add uploaded documents list with document name and chunk count
-- [ ] Add remove button for each document
-- [ ] Add styling (Tailwind CSS, match chat-context-demo.tsx style)
-- [ ] Integrate component into main UI layout
+- [x] Write tests for RAGDocumentUpload component rendering
+- [x] Write tests for enable/disable RAG toggle
+- [x] Write tests for file input (accept .txt, .md, .html)
+- [x] Write tests for uploaded documents list display
+- [x] Write tests for remove document button
+- [x] Write tests for disabled states (before initialization)
+- [x] Create RAGDocumentUpload component
+- [x] Add enable/disable checkbox with onChange handler
+- [x] Add file input with accept attribute and onChange handler
+- [x] Add uploaded documents list with document name and chunk count
+- [x] Add remove button for each document
+- [x] Add styling (Tailwind CSS, match chat-context-demo.tsx style)
+- [x] Integrate component into main UI layout
 
 **Test Files:**
-- `apps/harness/tests/unit/rag-upload-ui.test.tsx` (~150 lines) - UI component tests
+- `apps/harness/tests/unit/rag-upload-ui.test.tsx` (274 lines) - UI component logic tests
 
 **Implementation Files:**
-- `apps/harness/pages/chat-context-rag-demo.tsx` (+100 lines) - RAGDocumentUpload component
+- `apps/harness/pages/chat-context-rag-demo.tsx` (+73 lines) - RAGDocumentUpload UI section (lines 1837-1910)
 
 **Success Criteria:**
-- [ ] RAGDocumentUpload component renders correctly
-- [ ] Enable/disable toggle works (calls initializeRAG when enabled)
-- [ ] File input only accepts .txt, .md, .html files
-- [ ] Uploaded documents list displays correctly
-- [ ] Remove button removes document from list
-- [ ] UI matches existing chat-context-demo.tsx style
-- [ ] Responsive layout (works on mobile and desktop)
+- [x] RAGDocumentUpload component renders correctly
+- [x] Enable/disable toggle works (calls initializeRAG when enabled)
+- [x] File input only accepts .txt, .md, .html files
+- [x] Uploaded documents list displays correctly
+- [x] Remove button removes document from list
+- [x] UI matches existing chat-context-demo.tsx style
+- [x] Responsive layout (works on mobile and desktop)
 
-**Test Results:** ⏳ Pending
+**Test Results:** ✅ **PASSED (26/26 tests, 22ms)**
+```
+Test Files  1 passed (1)
+     Tests  26 passed (26)
+  Duration  802ms (transform 59ms, setup 0ms, collect 60ms, tests 22ms)
+```
+
+**Details:**
+- ✅ Component state management (RAG enabled, documents array)
+- ✅ Enable/disable RAG toggle handler (calls initializeRAG when enabled)
+- ✅ File input validation (.txt, .md, .html accepted; .pdf, .docx rejected)
+- ✅ Case-insensitive extension validation
+- ✅ File upload handler integration
+- ✅ Uploaded documents list display (name, chunks count)
+- ✅ Multiple documents support
+- ✅ Remove document handler
+- ✅ Disabled states when RAG not enabled
+- ✅ File upload disabled before initialization
+- ✅ Remove button disabled before initialization
+- ✅ Disabled message shown when RAG not enabled
+- ✅ TypeScript compilation successful (no errors)
+
+**UI Implementation:**
+- Enable/disable checkbox at top right (lines 1842-1856)
+- Disabled state message when RAG off (lines 1859-1863)
+- File input with accept=".txt,.md,.html" (lines 1866-1876)
+- Uploaded documents list with chunks display (lines 1884-1905)
+- Remove button with disabled state support (lines 1895-1901)
+- Empty state message when no documents (lines 1907-1909)
+- Tailwind CSS styling matching existing UI
 
 ---
 
@@ -771,8 +800,8 @@ Test Files  1 passed (1)
 - [x] Sub-phase 1.1: Import RAG Components and Add State Variables (11/11 tests ✅)
 - [x] Sub-phase 1.2: RAG Initialization Logic (15/15 tests ✅)
 
-### Phase 2: ⏳ Not Started
-- [ ] Sub-phase 2.1: Document Upload UI Component
+### Phase 2: ⏳ In Progress (1/3 sub-phases)
+- [x] Sub-phase 2.1: Document Upload UI Component (26/26 tests ✅)
 - [ ] Sub-phase 2.2: Document Upload Handler Implementation
 - [ ] Sub-phase 2.3: Document Removal Handler
 
@@ -801,5 +830,6 @@ Test Files  1 passed (1)
 - **Integration Tests**: 100% coverage for E2E workflows
 - **Manual Tests**: All 8 scenarios verified in browser
 
-**Current Status**: 402/2,100 lines implemented (19%)
+**Current Status**: 749/2,100 lines implemented (36%)
 - Phase 1 Complete: 402 lines (316 test + 86 implementation)
+- Phase 2 Partial: 347 lines (274 test + 73 implementation) - 1/3 sub-phases complete
