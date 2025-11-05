@@ -14,6 +14,70 @@ Deliver a fully decentralized RAG system that:
 5. Supports document upload, chunking, and automatic embedding generation
 6. Implements granular access control for sharing knowledge bases
 
+## Hybrid Architecture: Client Storage + Host Compute
+
+This implementation uses a **hybrid approach** that combines client-side data management with host-side compute:
+
+### Client-Side (Lightweight Operations)
+
+**What**: Data management and organization
+- ✅ Vector storage in S5 (persistent, encrypted, user-controlled)
+- ✅ Folder organization and hierarchy
+- ✅ Permission management and sharing
+- ✅ Database creation and metadata
+- ✅ Document chunking and coordination
+
+**Why**: Mobile-friendly (just S3-like operations), data sovereignty, no heavy compute needed
+
+### Host-Side (Compute-Intensive Operations)
+
+**What**: Heavy computational tasks
+- ✅ Embedding generation via `POST /v1/embed` (ONNX neural network, GPU/CPU)
+- ✅ Vector search via `SessionManager.searchVectors()` (Rust cosine similarity)
+- ✅ Temporary session memory (vectors uploaded for search only, auto-cleanup on disconnect)
+
+**Why**: Performance (Rust speed, GPU acceleration), client doesn't need powerful hardware
+
+### Key Benefits
+
+| Benefit | How Achieved |
+|---------|-------------|
+| **Data Sovereignty** | Your vectors in S5, your folders, your permissions |
+| **Performance** | Rust vector search (~100ms), GPU embeddings |
+| **Persistence** | Build knowledge base over time (100s of docs across sessions) |
+| **Mobile-Friendly** | Client just manages S3-like storage, heavy compute on host |
+| **Privacy** | Host only sees vectors temporarily during search, auto-deleted |
+| **Cost** | Zero embedding costs (host ONNX), no perpetual host storage fees |
+
+### Workflow Example
+
+```typescript
+// 1. Create database (client-side, no session needed)
+await vectorRAG.createSession('work-docs');
+
+// 2. Upload docs (needs session for host embedding)
+const { sessionId } = await sessionManager.startSession({...});
+const chunks = await documentManager.processDocument(file);
+for (const chunk of chunks) {
+  const embedding = await embeddingService.embed(chunk.text); // Host ONNX
+  await vectorRAG.addVector('work-docs', id, embedding, {    // Client S5
+    text: chunk.text,
+    folderPath: '/projects/api'
+  });
+}
+// Vectors PERSIST in S5 after session ends
+await sessionManager.endSession(sessionId);
+
+// 3. Query later (new session, retrieve from S5, search on host)
+const { sessionId: newSessionId } = await sessionManager.startSession({...});
+const vectors = await vectorRAG.getVectors('work-docs');     // From S5
+await sessionManager.uploadVectors(newSessionId, vectors);   // Temp upload
+const results = await sessionManager.searchVectors(newSessionId, query, 5, 0.2);
+// Host discards vectors after session ends
+```
+
+**Critical Point**: Vectors persist in S5 (client), host only uses them temporarily for search. Upload once → query many times.
+
 ## Architecture
 
 ```
@@ -35,6 +99,8 @@ Deliver a fully decentralized RAG system that:
 │  │  │  • Chunked storage (10K vectors/chunk)            ││ │
 │  │  │  • S5 persistence with encryption                 ││ │
 │  │  │  • 58ms search latency (warm cache)               ││ │
+│  │  │  • NOTE: Client-side vector STORAGE only              ││ │
+│  │  │    (no vector search - that's host-side compute)  ││ │
 │  │  └────────────────────────────────────────────────────┘│ │
 │  │                                                        │ │
 │  │  ┌────────────────────────────────────────────────────┐│ │
@@ -49,10 +115,15 @@ Deliver a fully decentralized RAG system that:
 ┌──────────────────────────▼──────────────────────────────────┐
 │            fabstir-llm-node (Rust) - Host Side             │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │  New Embedding Endpoint: POST /v1/embed                │ │
+│  │  Embedding Endpoint: POST /v1/embed                    │ │
 │  │  • Local model (all-MiniLM-L6-v2, 384-dim)            │ │
 │  │  • Batch processing support                           │ │
 │  │  • No API costs                                       │ │
+│  ├────────────────────────────────────────────────────────┤ │
+│  │  Vector Search: SessionManager.searchVectors()        │ │
+│  │  • Rust cosine similarity (~100ms)                    │ │
+│  │  • Temporary session memory (auto-cleanup)            │ │
+│  │  • Supports uploadVectors WebSocket message           │ │
 │  └────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────┘
                            │
@@ -76,6 +147,149 @@ Deliver a fully decentralized RAG system that:
 4. Strict line limits per file (enforced)
 5. No modifications outside specified scope
 6. Mark `x` in `- [ ]` for each completed task
+
+---
+
+## Typical Workflow: Building a Knowledge Base
+
+This section illustrates the complete user journey across multiple sessions:
+
+### Session 1: Create Database and Upload Documents
+
+```typescript
+// 1. Initialize SDK and authenticate
+const sdk = new FabstirSDKCore({ chainId: 84532, ... });
+await sdk.authenticate(privateKey);
+
+// 2. Create vector database (client-side, no session needed)
+const vectorRAG = sdk.getVectorRAGManager();
+await vectorRAG.createSession('work-docs', {
+  dimensions: 384,
+  folderStructure: true,
+  permissions: { owner: userAddress }
+});
+
+// 3. Start LLM session (needed for host embeddings)
+const sessionManager = await sdk.getSessionManager();
+const { sessionId } = await sessionManager.startSession({
+  hostUrl: 'http://localhost:8080',
+  jobId: 123n,
+  modelName: 'llama-3',
+  chainId: 84532
+});
+
+// 4. Upload and process documents
+const documentManager = sdk.getDocumentManager();
+const embeddingService = new HostAdapter({ hostUrl: 'http://localhost:8080' });
+
+for (const file of userFiles) {
+  // Extract text and chunk (client-side)
+  const chunks = await documentManager.processDocument(file, {
+    chunkSize: 500,
+    overlap: 50
+  });
+
+  // Generate embeddings (host-side ONNX) and store vectors (client-side S5)
+  for (const chunk of chunks) {
+    const embedding = await embeddingService.embed(chunk.text); // Host compute
+    await vectorRAG.addVector('work-docs', chunk.id, embedding, {  // Client S5
+      text: chunk.text,
+      source: file.name,
+      folderPath: `/projects/${file.category}`
+    });
+  }
+}
+
+// 5. End session - vectors PERSIST in S5
+await sessionManager.endSession(sessionId);
+console.log('Documents uploaded. Vectors stored in S5.');
+```
+
+### Session 2: Query Knowledge Base (Days/Weeks Later)
+
+```typescript
+// 1. Initialize SDK and authenticate (same user)
+const sdk = new FabstirSDKCore({ chainId: 84532, ... });
+await sdk.authenticate(privateKey);
+
+// 2. Start NEW LLM session
+const sessionManager = await sdk.getSessionManager();
+const { sessionId } = await sessionManager.startSession({
+  hostUrl: 'http://localhost:8080',
+  jobId: 456n,  // Different job
+  modelName: 'llama-3',
+  chainId: 84532
+});
+
+// 3. Retrieve vectors from S5 (client-side storage)
+const vectorRAG = sdk.getVectorRAGManager();
+const vectors = await vectorRAG.getVectors('work-docs');
+console.log(`Retrieved ${vectors.length} vectors from S5`);
+
+// 4. Upload vectors to host TEMPORARILY for search
+await sessionManager.uploadVectors(sessionId, vectors);
+console.log('Vectors uploaded to host (temporary session memory)');
+
+// 5. Generate query embedding (host-side ONNX)
+const embeddingService = new HostAdapter({ hostUrl: 'http://localhost:8080' });
+const queryEmbedding = await embeddingService.embed('How do I authenticate users?');
+
+// 6. Search vectors on host (Rust cosine similarity)
+const results = await sessionManager.searchVectors(
+  sessionId,
+  queryEmbedding,
+  5,    // topK
+  0.2   // threshold
+);
+
+// 7. Inject context and send prompt
+const context = results.map(r => r.metadata?.text).join('\n\n');
+const enhancedPrompt = `Context:\n${context}\n\nQuestion: How do I authenticate users?`;
+
+await sessionManager.sendPromptStreaming(sessionId, enhancedPrompt, (chunk) => {
+  console.log(chunk.content);
+});
+
+// 8. End session - host DISCARDS vectors (auto-cleanup)
+await sessionManager.endSession(sessionId);
+console.log('Session ended. Vectors discarded from host memory.');
+// Vectors still in S5 for future sessions!
+```
+
+### Session 3: Update Database (Add More Documents)
+
+```typescript
+// 1. Start new session for embeddings
+const { sessionId } = await sessionManager.startSession({...});
+
+// 2. Add new documents (vectors persist in S5)
+const newChunks = await documentManager.processDocument(newFile);
+for (const chunk of newChunks) {
+  const embedding = await embeddingService.embed(chunk.text);
+  await vectorRAG.addVector('work-docs', chunk.id, embedding, {...});
+}
+
+// 3. Organize with folders (client-side metadata)
+await vectorRAG.moveVector('work-docs', vectorId, '/archive/old-docs');
+await vectorRAG.setPermissions('work-docs', {
+  readers: ['0x123...', '0x456...']
+});
+
+await sessionManager.endSession(sessionId);
+```
+
+### Key Takeaways
+
+| Operation | Location | Persistence | Session Required? |
+|-----------|----------|-------------|-------------------|
+| Create database | Client (S5) | Permanent | No |
+| Store vectors | Client (S5) | Permanent | No (but needs session for embeddings) |
+| Folder organization | Client (S5 metadata) | Permanent | No |
+| Permissions | Client (S5 metadata) | Permanent | No |
+| Generate embeddings | Host (ONNX) | N/A | Yes |
+| Search vectors | Host (Rust) | Temporary | Yes |
+
+**Critical Point**: Build your knowledge base once (100s of docs), query it unlimited times across many sessions. Vectors persist in S5, host only uses them temporarily during search.
 
 ---
 
@@ -237,6 +451,13 @@ All tests now execute successfully without hanging.
 ---
 
 ## Phase 3: Vector Operations and Search
+
+**Overview**: This phase implements both client-side vector storage operations and host-side search integration:
+
+- **Client-Side (S5)**: Vector addition, deletion, updates, metadata management (lightweight data operations)
+- **Host-Side (Rust)**: Vector search via cosine similarity (compute-intensive operations)
+
+The client stores vectors permanently in S5, while the host performs temporary searches during active sessions. This hybrid approach provides data sovereignty (your vectors, your storage) with high-performance search (Rust speed, ~100ms).
 
 ### ✅ Sub-phase 3.1: Vector Addition and Management - COMPLETE (v0.2.0 Integrated)
 
