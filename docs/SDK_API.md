@@ -923,6 +923,156 @@ async completeSession(
 ): Promise<string>
 ```
 
+### uploadVectors (Host-Side RAG)
+
+Uploads vectors to the host node's session memory via WebSocket for RAG functionality.
+
+```typescript
+async uploadVectors(
+  sessionId: string | BigInt,
+  vectors: Vector[],
+  replace?: boolean
+): Promise<UploadVectorsResult>
+```
+
+**Parameters:**
+- `sessionId`: Active session ID
+- `vectors`: Array of vector objects with id, vector (384-d), and metadata
+- `replace`: If true, replace all existing vectors (default: false)
+
+**Returns:**
+```typescript
+interface UploadVectorsResult {
+  uploaded: number;
+  status: 'success' | 'error';
+  error?: string;
+}
+```
+
+**Example:**
+```typescript
+// Convert document chunks to vectors
+const vectors = chunks.map((chunk, i) => ({
+  id: `chunk-${i}`,
+  vector: chunk.embedding,  // 384-dimensional array
+  metadata: { text: chunk.text, index: i, source: 'doc.pdf' }
+}));
+
+// Upload to host (auto-batched at 1K vectors)
+const result = await sessionManager.uploadVectors(sessionId, vectors);
+console.log(`Uploaded ${result.uploaded} vectors`);
+```
+
+**Notes:**
+- Vectors stored in session memory on host node (Rust)
+- Auto-batched: 1000 vectors per WebSocket message
+- Auto-cleanup: Vectors deleted when session ends
+- No persistence: Host is stateless
+
+### searchVectors (Host-Side RAG)
+
+Searches for similar vectors on the host node via WebSocket.
+
+```typescript
+async searchVectors(
+  sessionId: string | BigInt,
+  queryVector: number[],
+  k?: number,
+  threshold?: number
+): Promise<SearchResult[]>
+```
+
+**Parameters:**
+- `sessionId`: Active session ID
+- `queryVector`: Query embedding (384 dimensions)
+- `k`: Number of results to return (default: 5, max: 20)
+- `threshold`: Minimum similarity score (default: 0.2, range: 0.0-1.0)
+
+**Returns:**
+```typescript
+interface SearchResult {
+  id: string;
+  score: number;           // Cosine similarity (0-1)
+  metadata: Record<string, any>;
+  vector?: number[];       // Optional: include full vector
+}
+```
+
+**Example:**
+```typescript
+// Generate query embedding
+const queryEmbedding = await embeddingService.embed('What is RAG?');
+
+// Search with production-tested threshold
+const results = await sessionManager.searchVectors(
+  sessionId,
+  queryEmbedding,
+  5,    // topK: return top 5 results
+  0.2   // threshold: 0.2 works best with all-MiniLM-L6-v2 (not 0.7!)
+);
+
+results.forEach(r => {
+  console.log(`Score: ${r.score.toFixed(3)}, Text: ${r.metadata?.text}`);
+});
+```
+
+**Threshold Selection Guide:**
+- **0.0**: Accept all results (debugging only)
+- **0.2**: Balanced filtering (recommended for production)
+- **0.4**: Strict filtering (may miss relevant results)
+- **0.7**: Too strict (returns 0 results with all-MiniLM-L6-v2)
+
+**Performance:** ~100ms for 10K vectors (Rust implementation)
+
+### askWithContext (RAG Helper)
+
+Helper method that combines embedding generation, vector search, and context injection.
+
+```typescript
+async askWithContext(
+  sessionId: string | BigInt,
+  question: string,
+  topK?: number
+): Promise<string>
+```
+
+**Parameters:**
+- `sessionId`: Active session ID
+- `question`: User's question
+- `topK`: Number of context chunks to retrieve (default: 5)
+
+**Returns:** Enhanced prompt with RAG context injected
+
+**Example:**
+```typescript
+// Automatic workflow: embed → search → format
+const enhanced = await sessionManager.askWithContext(
+  sessionId,
+  'What are the key findings?',
+  3  // Retrieve top 3 relevant chunks
+);
+
+// Send enhanced prompt to LLM
+await sessionManager.sendPromptStreaming(sessionId, enhanced, (chunk) => {
+  process.stdout.write(chunk.content);
+});
+```
+
+**Context Format:**
+```
+Context:
+[Document 1] <text from metadata>
+
+[Document 2] <text from metadata>
+
+Question: <original question>
+```
+
+**Notes:**
+- Falls back to original question if no results found
+- Automatically handles embedding generation
+- Uses production-tested threshold (0.2)
+
 ### getSessionHistory
 
 Retrieves conversation history for a session.
@@ -2245,7 +2395,7 @@ sessionManager.setVectorRAGManager(vectorRAGManager);
 sessionManager.setEmbeddingService(embeddingService);
 
 const { sessionId } = await sessionManager.startSession({
-  hostUrl: 'http://host:8080',
+  hostUrl: process.env.NEXT_PUBLIC_TEST_HOST_1_URL || 'http://localhost:8083',
   jobId: 123n,
   modelName: 'llama-3',
   chainId: ChainId.BASE_SEPOLIA,
@@ -2253,7 +2403,7 @@ const { sessionId } = await sessionManager.startSession({
     enabled: true,
     databaseName: 'my-knowledge-base',
     topK: 5,
-    threshold: 0.7
+    threshold: 0.2  // Production-tested with all-MiniLM-L6-v2 embeddings
   }
 });
 
@@ -2363,7 +2513,7 @@ interface SearchResult {
 ```typescript
 const queryEmbedding = await embeddingService.embed('search query');
 const results = await vectorRAGManager.search('docs', queryEmbedding, 5, {
-  threshold: 0.7,
+  threshold: 0.2,  // Production-tested: 0.2 works best with all-MiniLM-L6-v2
   filter: {
     $and: [
       { category: 'tutorial' },
@@ -2394,7 +2544,7 @@ async searchMultipleDatabases(
 const results = await vectorRAGManager.searchMultipleDatabases(
   ['user-docs', 'shared-docs', 'public-wiki'],
   queryEmbedding,
-  { topK: 10, threshold: 0.7 }
+  { topK: 10, threshold: 0.2 }  // Production-tested threshold
 );
 ```
 
@@ -2703,7 +2853,7 @@ Enable RAG when starting LLM sessions.
 
 ```typescript
 const { sessionId } = await sessionManager.startSession({
-  hostUrl: 'http://host:8080',
+  hostUrl: process.env.NEXT_PUBLIC_TEST_HOST_1_URL || 'http://localhost:8083',
   jobId: 123n,
   modelName: 'llama-3',
   chainId: ChainId.BASE_SEPOLIA,
@@ -2711,7 +2861,7 @@ const { sessionId } = await sessionManager.startSession({
     enabled: true,
     databaseName: 'my-knowledge-base',
     topK: 5,                    // Retrieve top 5 most similar chunks
-    threshold: 0.7,             // Minimum similarity score
+    threshold: 0.2,             // Production-tested: 0.2 works with all-MiniLM-L6-v2
     conversationMemory: {
       enabled: true,
       maxMessages: 10,          // Store last 10 messages
@@ -2738,12 +2888,10 @@ console.log('RAG Metrics:', {
 
 For complete RAG documentation, see:
 
-- **[RAG Quick Start Guide](./RAG_QUICK_START.md)** - Get started in 5 minutes
 - **[RAG API Reference](./RAG_API_REFERENCE.md)** - Complete API documentation
-- **[RAG Integration Guide](./RAG_INTEGRATION_GUIDE.md)** - Integration patterns (React, Redux, Express)
-- **[RAG Best Practices](./RAG_BEST_PRACTICES.md)** - Production recommendations
-- **[RAG Troubleshooting](./RAG_TROUBLESHOOTING.md)** - Common issues and solutions
-- **[RAG Security Guide](./RAG_SECURITY.md)** - Security and compliance
+- **[RAG Implementation Plan](./IMPLEMENTATION_CHAT_RAG.md)** - Implementation progress and architecture
+- **[RAG Manual Testing](./RAG_MANUAL_TESTING_GUIDE.md)** - Testing host embedding endpoints
+- **[RAG Node Integration](./node-reference/RAG_SDK_INTEGRATION.md)** - Host-side integration guide
 
 ## Treasury Management
 

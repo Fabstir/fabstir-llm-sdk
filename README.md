@@ -121,73 +121,86 @@ async function directInference() {
 }
 ```
 
-### RAG-Enhanced Chat with Document Upload
+### RAG-Enhanced Chat with Document Upload (Host-Side)
 
-Upload documents and enhance LLM responses with semantic search:
+Upload documents and enhance LLM responses with semantic search using host-side vector storage:
 
 ```typescript
 import { FabstirSDKCore } from "@fabstir/sdk-core";
 import { HostAdapter } from "@fabstir/sdk-core/embeddings";
-import { DocumentManager } from "@fabstir/sdk-core/managers";
+import { DocumentManager } from "@fabstir/sdk-core/documents";
 
 async function ragExample() {
   // Initialize SDK
   const sdk = new FabstirSDKCore({ network: 'base-sepolia' });
   await sdk.authenticate(privateKey);
 
-  // Setup RAG managers
-  const vectorRAGManager = sdk.getVectorRAGManager();
-  const embeddingService = new HostAdapter({ hostUrl: 'http://host:8080' });
-  const documentManager = new DocumentManager({
-    embeddingService,
-    vectorManager: vectorRAGManager,
-    databaseName: 'my-knowledge-base'
-  });
+  // Setup RAG with zero-cost host embeddings
+  const hostUrl = process.env.NEXT_PUBLIC_TEST_HOST_1_URL || 'http://localhost:8083';
+  const embeddingService = new HostAdapter({ hostUrl, dimensions: 384 });
+  const documentManager = new DocumentManager({ embeddingService });
 
-  // Create vector database
-  await vectorRAGManager.createSession('my-knowledge-base');
-
-  // Upload document (PDF, DOCX, TXT, MD, HTML)
-  const result = await documentManager.processDocument(file, {
-    chunkSize: 500,
-    overlap: 50,
-    onProgress: (p) => console.log(`Progress: ${p.progress}%`)
-  });
-  console.log(`Added ${result.chunks} chunks`);
-
-  // Start RAG-enhanced session
-  const sessionManager = sdk.getSessionManager();
-  sessionManager.setVectorRAGManager(vectorRAGManager);
-  sessionManager.setEmbeddingService(embeddingService);
-
+  // Start session with host node
+  const sessionManager = await sdk.getSessionManager();
   const { sessionId } = await sessionManager.startSession({
-    hostUrl: 'http://host:8080',
+    hostUrl,
     jobId: 123n,
     modelName: 'llama-3',
-    chainId: 84532,
-    ragConfig: {
-      enabled: true,
-      databaseName: 'my-knowledge-base',
-      topK: 5,          // Retrieve top 5 similar chunks
-      threshold: 0.7     // Minimum similarity score
-    }
+    chainId: 84532
   });
 
-  // Ask questions about your documents
-  // RAG context is automatically injected
-  await sessionManager.sendPrompt(sessionId,
-    "What are the key points in the uploaded document?"
+  // Process document: extract → chunk → embed
+  const chunks = await documentManager.processDocument(file, {
+    chunkSize: 500,
+    overlap: 50,
+    onProgress: (p) => console.log(`${p.stage}: ${p.progress}%`)
+  });
+
+  // Upload vectors to host via WebSocket
+  const vectors = chunks.map((chunk, i) => ({
+    id: `chunk-${i}`,
+    vector: chunk.embedding,
+    metadata: { text: chunk.text, index: i }
+  }));
+
+  await sessionManager.uploadVectors(sessionId, vectors);
+  console.log(`Uploaded ${vectors.length} vectors to host`);
+
+  // Ask questions - context automatically injected
+  const enhanced = await sessionManager.askWithContext(
+    sessionId,
+    "What are the key points in the uploaded document?",
+    3  // topK: retrieve top 3 similar chunks
   );
 
-  // Access RAG metrics
-  const session = sessionManager.getSession(sessionId.toString());
-  console.log('RAG Metrics:', {
-    contextsRetrieved: session.ragMetrics.contextsRetrieved,
-    avgSimilarity: session.ragMetrics.avgSimilarityScore,
-    retrievalTime: session.ragMetrics.retrievalTimeMs
+  await sessionManager.sendPromptStreaming(sessionId, enhanced, (chunk) => {
+    process.stdout.write(chunk.content);
+  });
+
+  // Or search manually with production-tested threshold
+  const query = "key points";
+  const queryEmbedding = await embeddingService.embed(query);
+  const results = await sessionManager.searchVectors(
+    sessionId,
+    queryEmbedding,
+    5,      // topK: return top 5 results
+    0.2     // threshold: 0.2 works best with all-MiniLM-L6-v2 (not 0.7!)
+  );
+
+  results.forEach(r => {
+    console.log(`Score: ${r.score.toFixed(3)}, Text: ${r.metadata?.text}`);
   });
 }
 ```
+
+**Key Features:**
+- **Host-Side Storage**: Vectors stored in session memory on host node (Rust)
+- **Zero-Cost Embeddings**: Use HostAdapter for free 384-d embeddings
+- **Production-Tested**: Threshold 0.2 (not 0.7) works best with all-MiniLM-L6-v2
+- **Auto-Cleanup**: Vectors automatically deleted when session ends
+- **WebSocket Protocol**: `uploadVectors` and `searchVectors` messages over persistent connection
+
+See [docs/IMPLEMENTATION_CHAT_RAG.md](docs/IMPLEMENTATION_CHAT_RAG.md) for complete architecture and production configuration.
 
 ## Installation
 
@@ -266,12 +279,10 @@ const sdk = new FabstirSDK({
 
 ### RAG Documentation
 
-- [**RAG Quick Start**](docs/RAG_QUICK_START.md) - Get started with RAG in 5 minutes
 - [**RAG API Reference**](docs/RAG_API_REFERENCE.md) - Complete RAG API documentation
-- [**RAG Integration Guide**](docs/RAG_INTEGRATION_GUIDE.md) - Integration patterns (React, Redux, Express)
-- [**RAG Best Practices**](docs/RAG_BEST_PRACTICES.md) - Production recommendations
-- [**RAG Troubleshooting**](docs/RAG_TROUBLESHOOTING.md) - Common issues and solutions
-- [**RAG Security Guide**](docs/RAG_SECURITY.md) - Security and compliance
+- [**RAG Implementation Plan**](docs/IMPLEMENTATION_CHAT_RAG.md) - Implementation progress and architecture
+- [**RAG Manual Testing Guide**](docs/RAG_MANUAL_TESTING_GUIDE.md) - Testing host embedding endpoints
+- [**RAG Node Integration**](docs/node-reference/RAG_SDK_INTEGRATION.md) - Host-side integration guide
 
 ## Examples
 
