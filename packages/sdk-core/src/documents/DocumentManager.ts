@@ -179,6 +179,18 @@ export class DocumentManager implements IDocumentManager {
   }
 
   /**
+   * Embed a single text string (for queries)
+   *
+   * @param text - Text to embed
+   * @param type - Embedding type ('document' or 'query')
+   * @returns Embedding result with vector
+   */
+  async embedText(text: string, type: 'document' | 'query' = 'query'): Promise<{ embedding: number[]; text: string; tokenCount: number }> {
+    const result = await this.embeddingService.embedBatch([text]);
+    return result.embeddings[0];
+  }
+
+  /**
    * Estimate processing cost
    *
    * @param file - File to estimate

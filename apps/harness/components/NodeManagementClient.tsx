@@ -143,6 +143,7 @@ const NodeManagementClient: React.FC = () => {
   const [nodeUptime, setNodeUptime] = useState<number>(0);
   const [nodePublicUrl, setNodePublicUrl] = useState<string>('');
   const [nodeStartTime, setNodeStartTime] = useState<string>('');
+  const [nodeVersion, setNodeVersion] = useState<string>('');
   const [statusPollingActive, setStatusPollingActive] = useState(false);
 
   // SDK instance
@@ -326,6 +327,8 @@ const NodeManagementClient: React.FC = () => {
         setNodeStartTime(status.startTime || '');
         setNodeUptime(status.uptime || 0);
         setStatusPollingActive(true);
+        // Fetch version
+        fetchNodeVersion();
       } else {
         setNodeStatus('stopped');
         setNodePid(null);
@@ -337,6 +340,24 @@ const NodeManagementClient: React.FC = () => {
     } catch (error: any) {
       console.error('Failed to refresh node status:', error);
       // Don't spam logs with polling errors
+    }
+  };
+
+  // Fetch node version from /v1/version endpoint
+  const fetchNodeVersion = async () => {
+    try {
+      // Use nodePublicUrl if available, otherwise try discoveredApiUrl or test account URL
+      const apiUrl = nodePublicUrl || discoveredApiUrl || TEST_ACCOUNTS.TEST_HOST_1.apiUrl || 'http://localhost:8083';
+
+      const response = await fetch(`${apiUrl}/v1/version`);
+      if (response.ok) {
+        const data = await response.json();
+        setNodeVersion(data.build || data.version || 'unknown');
+        addLog(`📌 Node version: ${data.build || data.version}`);
+      }
+    } catch (error) {
+      // Silently fail - version is nice-to-have, not critical
+      console.log('Could not fetch version:', error);
     }
   };
 
@@ -359,6 +380,8 @@ const NodeManagementClient: React.FC = () => {
 
       // Refresh status after starting
       await refreshNodeStatus();
+      // Fetch node version
+      setTimeout(() => fetchNodeVersion(), 2000);
     } catch (error: any) {
       addLog(`❌ Start failed: ${error.message}`);
       console.error('Start node error:', error);
@@ -381,6 +404,7 @@ const NodeManagementClient: React.FC = () => {
 
       setNodePid(null);
       setNodePublicUrl('');
+      setNodeVersion('');
       setNodeUptime(0);
       setStatusPollingActive(false);
 
@@ -1304,6 +1328,61 @@ const NodeManagementClient: React.FC = () => {
     }
   };
 
+  // Test RAG Embedding Endpoint
+  const testRagEmbedding = async () => {
+    if (!discoveredApiUrl) {
+      addLog('❌ No API URL discovered');
+      return;
+    }
+
+    try {
+      addLog('🧪 Testing /v1/embed endpoint...');
+
+      const embedUrl = `${discoveredApiUrl}/v1/embed`;
+      const response = await fetch(embedUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          texts: ['Hello world', 'Test embedding'],
+          model: 'all-MiniLM-L6-v2',
+          chain_id: selectedChain
+        }),
+        signal: AbortSignal.timeout(10000) // 10 second timeout
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const embeddingCount = data.embeddings?.length || 0;
+        const firstEmbeddingDim = data.embeddings?.[0]?.embedding?.length || 0;
+        addLog(`✅ RAG embedding test passed!`);
+        addLog(`   📊 Received ${embeddingCount} embeddings`);
+        addLog(`   📏 Dimension: ${firstEmbeddingDim} (expected: 384)`);
+        addLog(`   💰 Cost: $${data.cost || 0}`);
+        addLog(`   ⛓️  Chain: ${data.chain_name || 'unknown'}`);
+
+        if (firstEmbeddingDim === 384) {
+          addLog(`   ✅ Embedding dimension correct!`);
+        } else {
+          addLog(`   ⚠️  Warning: Expected 384 dimensions, got ${firstEmbeddingDim}`);
+        }
+      } else {
+        const errorText = await response.text();
+        addLog(`❌ RAG test failed: HTTP ${response.status}`);
+        addLog(`   Error: ${errorText}`);
+      }
+
+    } catch (error: any) {
+      if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+        addLog(`❌ RAG test timeout - endpoint may not be available`);
+        addLog(`   This means /v1/embed is not responding`);
+      } else {
+        addLog(`❌ RAG test failed: ${error.message}`);
+      }
+    }
+  };
+
   // Initial setup message
   useEffect(() => {
     addLog('👋 Multi-Chain Node Management Ready!');
@@ -1900,6 +1979,7 @@ const NodeManagementClient: React.FC = () => {
                 <button onClick={connectWebSocket} disabled={loading || wsConnected}>Connect WS</button>
                 <button onClick={disconnectWebSocket} disabled={loading || !wsConnected}>Disconnect WS</button>
                 <button onClick={testWebSocketStreaming} disabled={loading || !wsConnected}>Test Stream</button>
+                <button onClick={testRagEmbedding} disabled={loading}>Test RAG</button>
               </div>
 
               {streamedTokens && (
@@ -1987,6 +2067,18 @@ const NodeManagementClient: React.FC = () => {
               <div style={{ marginBottom: '5px' }}>
                 <strong>URL:</strong> {nodePublicUrl || 'N/A'}
               </div>
+              {nodeVersion && (
+                <div style={{ marginBottom: '5px' }}>
+                  <strong>Version:</strong>{' '}
+                  <span style={{
+                    color: '#007bff',
+                    fontFamily: 'monospace',
+                    fontSize: '12px'
+                  }}>
+                    {nodeVersion}
+                  </span>
+                </div>
+              )}
             </>
           )}
 

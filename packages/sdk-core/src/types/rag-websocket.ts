@@ -30,12 +30,14 @@ export interface Vector {
  * Vectors are automatically cleaned up when the WebSocket session ends.
  *
  * @property type - Message type identifier ("uploadVectors")
+ * @property session_id - Session ID for SessionStore persistence (v8.3.4+)
  * @property requestId - Unique request ID for tracking responses
  * @property vectors - Array of Vector objects to upload (max 1000 per batch)
  * @property replace - If true, replace all existing vectors; if false, append to existing vectors
  */
 export interface UploadVectorsMessage {
   type: 'uploadVectors';
+  session_id: string;
   requestId: string;
   vectors: Vector[];
   replace: boolean;
@@ -81,6 +83,7 @@ export interface UploadVectorsResult {
  * Performs cosine similarity search against stored vectors in session memory.
  *
  * @property type - Message type identifier ("searchVectors")
+ * @property session_id - Session ID for SessionStore lookup (v8.3.4+)
  * @property requestId - Unique request ID for tracking responses
  * @property queryVector - Query embedding vector (384 dimensions)
  * @property k - Number of top results to return
@@ -88,6 +91,7 @@ export interface UploadVectorsResult {
  */
 export interface SearchVectorsMessage {
   type: 'searchVectors';
+  session_id: string;
   requestId: string;
   queryVector: number[];
   k: number;

@@ -422,7 +422,7 @@ export class SessionManager implements ISessionManager {
       );
 
       // Store in conversation memory if enabled
-      const conversationMemory = this.conversationMemories.get(sessionId.toString());
+      const conversationMemory = this.conversationMemories?.get(sessionId.toString());
       if (conversationMemory) {
         try {
           await conversationMemory.addMessage('user', prompt);
@@ -778,7 +778,7 @@ export class SessionManager implements ISessionManager {
         );
 
         // Store in conversation memory if enabled
-        const conversationMemory = this.conversationMemories.get(sessionIdStr);
+        const conversationMemory = this.conversationMemories?.get(sessionIdStr);
         if (conversationMemory) {
           try {
             await conversationMemory.addMessage('user', prompt);
@@ -905,7 +905,7 @@ export class SessionManager implements ISessionManager {
         );
 
         // Store in conversation memory if enabled
-        const conversationMemory = this.conversationMemories.get(sessionIdStr);
+        const conversationMemory = this.conversationMemories?.get(sessionIdStr);
         if (conversationMemory) {
           try {
             await conversationMemory.addMessage('user', prompt);
@@ -1814,12 +1814,59 @@ export class SessionManager implements ISessionManager {
       );
     }
 
-    // 2. Validate WebSocket connection
-    if (!this.wsClient) {
-      throw new SDKError(
-        'WebSocket not connected',
-        'WEBSOCKET_NOT_CONNECTED'
-      );
+    // 2. Ensure WebSocket is connected (initialize if needed)
+    if (!this.wsClient || !this.wsClient.isConnected()) {
+      console.log('[SessionManager] 🔌 Initializing WebSocket for vector upload...');
+
+      // Get WebSocket URL from endpoint
+      const endpoint = session.endpoint || 'http://localhost:8080';
+      const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
+        ? endpoint
+        : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
+
+      console.log('[SessionManager] Connecting to:', wsUrl);
+      this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+      await this.wsClient.connect();
+      console.log('[SessionManager] ✅ WebSocket connected');
+
+      // Set up global RAG message handlers
+      this._setupRAGMessageHandlers();
+
+      // Send session init (encryption support)
+      if (session.encryption && this.encryptionManager) {
+        console.log('[SessionManager] 🔐 Sending encrypted session init...');
+        const config: ExtendedSessionConfig = {
+          chainId: session.chainId,
+          host: session.provider,
+          modelId: session.model,
+          endpoint: session.endpoint,
+          paymentMethod: 'deposit',
+          encryption: true
+        };
+        await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
+      } else {
+        console.log('[SessionManager] 📤 Sending plaintext session init...');
+        const signer = (this.paymentManager as any).signer;
+        if (!signer) {
+          throw new Error('PaymentManager signer not available');
+        }
+        const userAddress = await signer.getAddress();
+        if (!userAddress) {
+          throw new Error('Failed to get user address from signer');
+        }
+
+        const config: ExtendedSessionConfig = {
+          chainId: session.chainId,
+          host: session.provider,
+          modelId: session.model,
+          endpoint: session.endpoint,
+          paymentMethod: 'deposit',
+          encryption: false
+        };
+        await this.sendPlaintextInit(this.wsClient, config, session.sessionId, session.jobId, userAddress);
+      }
+
+      console.log('[SessionManager] ✅ Session initialized, ready for vector upload');
     }
 
     // 3. Handle empty vectors array
@@ -1867,6 +1914,7 @@ export class SessionManager implements ISessionManager {
       // Create upload message
       const message: UploadVectorsMessage = {
         type: 'uploadVectors',
+        session_id: sessionId, // Required for SessionStore (v8.3.4+)
         requestId,
         vectors: batch,
         replace: batchReplace
@@ -1915,7 +1963,7 @@ export class SessionManager implements ISessionManager {
     sessionId: string,
     queryVector: number[],
     k: number = 5,
-    threshold: number = 0.7
+    threshold: number = 0.2
   ): Promise<SearchResult[]> {
     // Validate session exists and is active
     const session = this.sessions.get(sessionId);
@@ -1967,6 +2015,7 @@ export class SessionManager implements ISessionManager {
     // Build searchVectors message (camelCase JSON format)
     const message: SearchVectorsMessage = {
       type: 'searchVectors',
+      session_id: sessionId, // Required for SessionStore (v8.3.4+)
       requestId,
       queryVector,
       k,

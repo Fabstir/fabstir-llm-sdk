@@ -89,8 +89,8 @@ RUN apt-get update && apt-get install -y \
 # Create app directory
 WORKDIR /app
 
-# Install pnpm and browser API polyfills (needed for S5 in Node.js)
-RUN npm install -g pnpm@8 fake-indexeddb ws
+# Install pnpm globally
+RUN npm install -g pnpm@8
 
 # Copy built packages as local dependencies
 COPY --from=builder /build/packages/sdk-core /tmp/deps/sdk-core
@@ -140,15 +140,17 @@ global.WebSocket = WebSocket;\n\
 #     && cd .. && rm -rf fabstir-llm-node \
 #     && apt-get remove -y cargo git && apt-get autoremove -y
 
-# Extract fabstir-llm-node binary from tarball
-COPY fabstir-llm-node-v8.2.0-embeddings-production-ready.tar.gz /tmp/
-RUN tar xzf /tmp/fabstir-llm-node-v8.2.0-embeddings-production-ready.tar.gz -C /usr/local/bin/ fabstir-llm-node && \
+# Extract fabstir-llm-node binary and models from tarball
+COPY fabstir-llm-node-v8.3.5-rag-response-type-field.tar.gz /tmp/
+RUN mkdir -p /models /root/.fabstir/logs && \
+    tar xzf /tmp/fabstir-llm-node-v8.3.5-rag-response-type-field.tar.gz -C /tmp/ && \
+    mv /tmp/fabstir-llm-node /usr/local/bin/ && \
     chmod +x /usr/local/bin/fabstir-llm-node && \
-    rm /tmp/fabstir-llm-node-v8.2.0-embeddings-production-ready.tar.gz
+    if [ -d /tmp/models ]; then mv /tmp/models/* /models/; fi && \
+    rm -rf /tmp/fabstir-llm-node-v8.3.5-rag-response-type-field.tar.gz /tmp/models
 
-# Create directories and symlink for model access
-RUN mkdir -p /models /root/.fabstir/logs \
-    && ln -s /models /app/models
+# Create symlink for model access from app directory
+RUN ln -s /models /app/models
 
 # Expose ports
 EXPOSE 8083 9000 3001

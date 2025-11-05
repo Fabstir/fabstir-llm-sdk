@@ -197,14 +197,6 @@ export class FabstirSDKCore extends EventEmitter {
       this.authenticated = true;
       console.log('Authentication flag set to true');
 
-      // Create VectorRAGManager for RAG functionality
-      console.log('Creating VectorRAGManager...');
-      this.vectorRAGManager = new VectorRAGManager(
-        this.storageManager!,
-        this.userAddress!
-      );
-      console.log('VectorRAGManager created');
-
       // Initialize contract manager
       console.log('Creating ContractManager...');
       this.contractManager = new ContractManager(
@@ -578,6 +570,10 @@ export class FabstirSDKCore extends EventEmitter {
     console.log('Creating SessionManager...');
     this.sessionManager = new SessionManager(this.paymentManager as any, this.storageManager);
     console.log('SessionManager created');
+
+    console.log('Creating VectorRAGManager...');
+    this.vectorRAGManager = new VectorRAGManager(this.sessionManager);
+    console.log('VectorRAGManager created');
 
     console.log('Creating TreasuryManager...');
     this.treasuryManager = new TreasuryManager(this.contractManager!);
