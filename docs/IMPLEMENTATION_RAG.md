@@ -1894,6 +1894,483 @@ interface Workspace {
 
 ---
 
+## Phase 11: Session Group Management (Projects)
+
+**Overview**: This phase implements the "Session Group" concept (analogous to Claude Projects) that enables users to organize their chat sessions with associated vector databases and files. Each session group is a workspace that persists chat history, linked databases, and allows users to continue conversations across multiple sessions.
+
+**Key Concept**:
+- **Session Group** = Named container for chat sessions + linked vector databases
+- **Chat Session** = Individual conversation within a session group (with history)
+- **Default Vector DB** = Auto-created database when files are uploaded without selecting a specific database
+
+### Architecture Overview
+
+```
+Session Group (e.g., "Engineering Project")
+├── name: "Engineering Project"
+├── databases: ['api-docs', 'design-specs']  // Linked vector DBs
+├── defaultDatabaseId: 'default-eng-proj'    // Auto-created for quick file uploads
+├── chatSessions: [                          // Conversation history
+│   {
+│     sessionId: 'sess_123',
+│     title: 'How to authenticate users?',
+│     messages: [...],
+│     timestamp: 1704067200000,
+│     active: false
+│   },
+│   {
+│     sessionId: 'sess_456',
+│     title: 'Database schema design',
+│     messages: [...],
+│     timestamp: 1704153600000,
+│     active: true
+│   }
+├── ]
+├── owner: '0xUserAddress'
+├── created: 1704067200000
+└── updated: 1704153600000
+```
+
+**User Workflow**:
+1. Create session group → Auto-creates default vector DB
+2. Add existing vector databases to session group OR upload files to default DB
+3. Start chat session → Creates new entry in session group
+4. Return later → List session groups, select group, continue previous session or start new
+5. Share session group → Recipient sees it in their list with owner info
+
+---
+
+### Sub-phase 11.1: SessionGroupManager Service (Backend)
+
+**Goal**: Implement backend service for creating, managing, and persisting session groups with chat history
+
+**Status**: ⏳ Pending
+
+#### Tasks
+- [ ] Write tests for session group creation
+- [ ] Write tests for chat session tracking
+- [ ] Write tests for message history persistence
+- [ ] Write tests for session group listing
+- [ ] Write tests for session group deletion
+- [ ] Write tests for auto-generated session titles
+- [ ] Write tests for default vector DB creation
+- [ ] Implement SessionGroupManager class
+- [ ] Implement ChatSession interface
+- [ ] Add S5 storage integration for persistence
+- [ ] Implement session group metadata tracking
+- [ ] Add session group search/filtering
+- [ ] Test with 20+ session groups and 100+ chat sessions
+
+**Test Files:**
+- `packages/sdk-core/tests/session-groups/creation.test.ts` (max 300 lines)
+  - Create session group with name
+  - Auto-create default vector DB
+  - Verify session group metadata
+  - Test duplicate name handling
+  - Test session group limits (if any)
+- `packages/sdk-core/tests/session-groups/chat-sessions.test.ts` (max 350 lines)
+  - Start new chat session in group
+  - Track message history
+  - Auto-generate session title from first message
+  - List chat sessions in group (sorted by timestamp)
+  - Continue existing chat session
+  - Delete chat session
+  - Test with 50+ sessions in one group
+- `packages/sdk-core/tests/session-groups/persistence.test.ts` (max 300 lines)
+  - Persist session group to S5
+  - Load session group from S5
+  - Update session group metadata
+  - Persist chat session history
+  - Verify data integrity after reload
+- `packages/sdk-core/tests/session-groups/database-linking.test.ts` (max 300 lines)
+  - Link existing vector DB to session group
+  - Unlink vector DB from session group
+  - List linked databases
+  - Use default vector DB
+  - Upload files to default vector DB
+  - Test multi-database queries within session group
+
+**Implementation Files:**
+- `packages/sdk-core/src/managers/SessionGroupManager.ts` (max 500 lines)
+  - Main manager class with S5 integration
+  - Methods:
+    - `createSessionGroup(name, options?)` → Creates group + default vector DB
+    - `listSessionGroups()` → Returns all session groups for user
+    - `getSessionGroup(groupId)` → Returns single session group with full details
+    - `deleteSessionGroup(groupId)` → Deletes group, chat history, default DB
+    - `updateSessionGroup(groupId, updates)` → Updates name, linked DBs
+    - `linkDatabase(groupId, databaseName)` → Adds existing vector DB to group
+    - `unlinkDatabase(groupId, databaseName)` → Removes vector DB from group
+    - `getDefaultDatabase(groupId)` → Returns default vector DB for quick uploads
+- `packages/sdk-core/src/session-groups/ChatSessionTracker.ts` (max 400 lines)
+  - Chat session lifecycle management
+  - Methods:
+    - `startChatSession(groupId, initialMessage?)` → Creates new session entry
+    - `getChatSession(groupId, sessionId)` → Returns session with history
+    - `listChatSessions(groupId, options?)` → Lists all sessions (paginated, sorted)
+    - `continueChatSession(groupId, sessionId)` → Resumes existing session
+    - `addMessage(groupId, sessionId, message)` → Appends message to history
+    - `generateSessionTitle(messages)` → Auto-generates title from first 2-3 messages
+    - `deleteChatSession(groupId, sessionId)` → Removes session and history
+    - `searchChatSessions(groupId, query)` → Searches across session titles/messages
+- `packages/sdk-core/src/session-groups/types.ts` (max 200 lines)
+  - TypeScript interfaces and types:
+    ```typescript
+    interface SessionGroup {
+      id: string;
+      name: string;
+      databases: string[];              // Linked vector DB names
+      defaultDatabaseId: string;        // Auto-created default DB
+      chatSessions: ChatSessionMetadata[]; // Session list (IDs + titles)
+      owner: string;
+      created: number;
+      updated: number;
+      description?: string;
+      permissions?: {
+        readers?: string[];
+        writers?: string[];
+      };
+    }
+
+    interface ChatSessionMetadata {
+      sessionId: string;
+      title: string;                    // Auto-generated or user-set
+      timestamp: number;
+      messageCount: number;
+      active: boolean;                  // Currently open session
+      lastMessage?: string;             // Preview text
+    }
+
+    interface ChatSession {
+      sessionId: string;
+      groupId: string;
+      title: string;
+      messages: ChatMessage[];
+      metadata: {
+        model: string;
+        hostUrl: string;
+        databasesUsed: string[];        // Which DBs were queried
+      };
+      created: number;
+      updated: number;
+    }
+
+    interface ChatMessage {
+      role: 'user' | 'assistant';
+      content: string;
+      timestamp: number;
+      ragSources?: SearchResult[];      // If RAG was used
+    }
+    ```
+
+**S5 Storage Structure:**
+```
+home/session-groups/{userAddress}/
+├── {groupId}/
+│   ├── metadata.json              # Group name, linked DBs, default DB
+│   ├── sessions/
+│   │   ├── {sessionId}.json       # Full chat history for each session
+│   │   └── index.json             # Session list for fast loading
+│   └── permissions.json           # Sharing permissions (future)
+```
+
+**Success Criteria:**
+- ✅ Users can create unlimited session groups
+- ✅ Each group auto-creates default vector DB (named `default-{groupId}`)
+- ✅ Users can link/unlink existing vector databases to groups
+- ✅ Chat sessions tracked with full message history
+- ✅ Session titles auto-generated from first user message (truncated to 50 chars)
+- ✅ Users can list all session groups (sorted by last updated)
+- ✅ Users can list chat sessions within a group (sorted by timestamp, newest first)
+- ✅ Session group persists to S5 (survives browser refresh)
+- ✅ Chat history persists across sessions
+- ✅ All tests passing (60+ tests)
+
+**Estimated Time:** 6-8 hours
+
+---
+
+### Sub-phase 11.2: Session Group UI Components
+
+**Goal**: Implement React components for session group management and chat session navigation
+
+**Status**: ⏳ Pending
+
+#### Tasks
+- [ ] Write tests for SessionGroupList component
+- [ ] Write tests for SessionGroupCreator component
+- [ ] Write tests for ChatSessionList component
+- [ ] Write tests for DatabaseLinker component
+- [ ] Implement SessionGroupList component
+- [ ] Implement SessionGroupCreator component (modal/form)
+- [ ] Implement ChatSessionList component
+- [ ] Implement DatabaseLinker component (select existing DBs)
+- [ ] Add session group switching logic
+- [ ] Integrate with existing chat UI
+- [ ] Add file upload to default vector DB
+
+**Test Files:**
+- `apps/harness/tests/components/session-group-list.test.tsx` (max 300 lines)
+  - Render list of session groups
+  - Create new session group
+  - Select session group
+  - Delete session group
+  - Search/filter session groups
+  - Empty state (no groups)
+- `apps/harness/tests/components/chat-session-list.test.tsx` (max 300 lines)
+  - Render chat sessions within group
+  - Start new chat session
+  - Continue existing session
+  - Delete chat session
+  - Display session titles and previews
+  - Sort by timestamp (newest first)
+
+**Implementation Files:**
+- `apps/harness/components/session-groups/SessionGroupList.tsx` (max 400 lines)
+  - Displays all session groups in sidebar
+  - Shows group name, database count, last updated
+  - "Create New Group" button
+  - Select group → loads chat sessions
+  - Delete group → confirms + removes
+  - Search bar for filtering groups
+- `apps/harness/components/session-groups/SessionGroupCreator.tsx` (max 300 lines)
+  - Modal/form for creating session group
+  - Input: Group name (required)
+  - Input: Description (optional)
+  - Option: Link existing vector databases (multi-select)
+  - Creates group + default vector DB automatically
+  - Validates name uniqueness
+- `apps/harness/components/session-groups/ChatSessionList.tsx` (max 400 lines)
+  - Displays chat sessions within selected group
+  - Shows session title, timestamp, message count
+  - "New Chat" button
+  - Click session → loads history and resumes
+  - Delete session → removes from list
+  - Sort by newest/oldest
+  - Preview last message (truncated)
+- `apps/harness/components/session-groups/DatabaseLinker.tsx` (max 300 lines)
+  - UI for linking/unlinking vector databases to group
+  - Multi-select from user's vector databases
+  - Shows currently linked databases
+  - "Upload to Default DB" quick action
+  - Integrates with VectorDatabaseSelector from Phase 9.1.1
+- `apps/harness/components/session-groups/SessionGroupDashboard.tsx` (max 500 lines)
+  - Main layout integrating all sub-components
+  - Left sidebar: SessionGroupList
+  - Center panel: ChatSessionList + active chat
+  - Right sidebar: DatabaseLinker + linked DB list
+  - Responsive design (collapsible panels)
+
+**UI Mockup Flow:**
+```
+┌────────────────────────────────────────────────────────────────────┐
+│  Fabstir LLM SDK - Session Groups                                  │
+├───────────────┬────────────────────────────┬────────────────────────┤
+│ Session Groups│  Chat Sessions             │  Linked Databases      │
+│               │                            │                        │
+│ 🗂️ Engineering│  💬 New Chat               │  📚 api-docs           │
+│   Project     │                            │  📚 design-specs       │
+│   (active)    │  How to authenticate...    │  + Link Database       │
+│               │  2 days ago · 12 messages  │                        │
+│ 🗂️ Personal   │                            │  📁 Default DB         │
+│   Research    │  Database schema design    │  Upload files here →   │
+│               │  5 hours ago · 8 messages  │                        │
+│ + New Group   │                            │                        │
+│               │  API versioning strategy   │                        │
+│               │  1 week ago · 20 messages  │                        │
+└───────────────┴────────────────────────────┴────────────────────────┘
+```
+
+**Success Criteria:**
+- ✅ Users see list of session groups in sidebar
+- ✅ Creating new group is intuitive (modal with name input)
+- ✅ Selecting group shows chat sessions in that group
+- ✅ Starting new chat creates session entry immediately
+- ✅ Chat titles display correctly (auto-generated or custom)
+- ✅ Continuing chat loads full message history
+- ✅ Linked databases shown clearly (with unlink option)
+- ✅ Quick "Upload to Default DB" action works
+- ✅ Responsive design works on mobile/desktop
+- ✅ Smooth transitions between groups/sessions
+
+**Estimated Time:** 6-8 hours
+
+---
+
+### Sub-phase 11.3: Session Group Integration with SessionManager
+
+**Goal**: Integrate session groups with SessionManager so chat sessions automatically track history and link to groups
+
+**Status**: ⏳ Pending
+
+#### Tasks
+- [ ] Write tests for SessionManager + SessionGroup integration
+- [ ] Write tests for automatic chat history persistence
+- [ ] Write tests for multi-database querying within group context
+- [ ] Update SessionManager to accept groupId parameter
+- [ ] Implement automatic message tracking
+- [ ] Add RAG context from all linked databases
+- [ ] Implement session resumption with history injection
+- [ ] Test end-to-end workflow (create group → chat → return → resume)
+
+**Test Files:**
+- `packages/sdk-core/tests/integration/session-group-chat.test.ts` (max 400 lines)
+  - Create session group
+  - Link vector databases to group
+  - Start chat session via SessionManager with groupId
+  - Send messages → verify auto-tracked in group
+  - End session → verify persisted
+  - Resume session → verify history loaded
+  - Query uses all linked databases in group
+  - Verify RAG sources attributed correctly
+  - Test with default vector DB
+  - Test with multiple linked databases
+
+**Implementation Changes:**
+- `packages/sdk-core/src/managers/SessionManager.ts` (modifications)
+  - Add `groupId?: string` parameter to `startSession()`
+  - If groupId provided:
+    - Create ChatSession entry in SessionGroupManager
+    - Auto-track all messages to that ChatSession
+    - Load chat history when resuming
+    - Query all linked databases for RAG context
+  - Add methods:
+    - `startSessionInGroup(groupId, options?)` → Convenience method
+    - `resumeSessionInGroup(groupId, sessionId)` → Loads history + continues
+    - `getSessionHistory(groupId, sessionId)` → Returns full message list
+- `packages/sdk-core/src/managers/SessionGroupManager.ts` (additions)
+  - Add integration methods:
+    - `onSessionStart(groupId, sessionId, metadata)` → Called by SessionManager
+    - `onMessageSent(groupId, sessionId, message)` → Auto-tracking hook
+    - `onSessionEnd(groupId, sessionId)` → Finalizes session metadata
+
+**Success Criteria:**
+- ✅ Starting chat via SessionManager with groupId auto-creates ChatSession entry
+- ✅ All user/assistant messages automatically persisted to S5
+- ✅ Resuming session loads full message history into chat UI
+- ✅ RAG queries use all linked databases in session group
+- ✅ Session titles auto-generated from first user message
+- ✅ Default vector DB usable without explicitly linking
+- ✅ Integration tests covering full workflow pass
+
+**Estimated Time:** 4-6 hours
+
+---
+
+### Sub-phase 11.4: Shared Session Groups (Permissions)
+
+**Goal**: Enable users to share session groups with others (read-only or read-write)
+
+**Status**: ⏳ Pending
+
+**Rationale**: Reuses existing PermissionManager from Phase 7, but applies it to session groups instead of individual vector databases.
+
+#### Tasks
+- [ ] Write tests for session group sharing
+- [ ] Write tests for shared group discovery
+- [ ] Write tests for permission enforcement (read/write)
+- [ ] Integrate PermissionManager with SessionGroupManager
+- [ ] Implement shared group listing
+- [ ] Add "Shared by" UI indicator
+- [ ] Add share dialog UI
+- [ ] Test multi-user collaboration scenarios
+
+**Test Files:**
+- `packages/sdk-core/tests/session-groups/sharing.test.ts` (max 300 lines)
+  - Share session group with another user (reader/writer)
+  - Recipient lists shared groups
+  - Recipient can view chat sessions (reader)
+  - Recipient can add messages (writer)
+  - Recipient CANNOT delete group (owner only)
+  - Revoke sharing permissions
+  - Test with shared vector databases
+
+**Implementation Changes:**
+- `packages/sdk-core/src/managers/SessionGroupManager.ts` (additions)
+  - Add methods:
+    - `shareGroup(groupId, userAddress, role)` → Grant permissions
+    - `unshareGroup(groupId, userAddress)` → Revoke permissions
+    - `listSharedGroups()` → Returns groups shared with current user
+    - `getGroupPermissions(groupId)` → Returns permission list
+  - Integrate with `PermissionManager` from Phase 7
+- `apps/harness/components/session-groups/ShareDialog.tsx` (max 300 lines)
+  - Modal for sharing session group
+  - Input: Recipient address
+  - Select: Role (reader/writer)
+  - Shows current shares
+  - Revoke button for each share
+
+**UI Updates:**
+- SessionGroupList shows "Shared by {owner}" badge for shared groups
+- Share button in SessionGroupDashboard toolbar
+- Permission indicator (👁️ read-only vs ✏️ can edit)
+
+**Success Criteria:**
+- ✅ Owner can share session group with other users
+- ✅ Shared groups appear in recipient's session group list
+- ✅ "Shared by {owner address}" displayed clearly
+- ✅ Reader can view but not modify
+- ✅ Writer can add messages but not delete group
+- ✅ Owner can revoke sharing at any time
+- ✅ Permissions work with both default and linked vector databases
+
+**Estimated Time:** 4-5 hours
+
+---
+
+### Sub-phase 11.5: Session Group Search and Organization
+
+**Goal**: Add search/filtering for session groups and chat sessions, plus organization features (favorites, tags)
+
+**Status**: ⏳ Pending (Future Enhancement)
+
+**Features Deferred to Post-MVP:**
+- Search across session group names and descriptions
+- Search within chat session messages
+- Favorite session groups (pin to top)
+- Tags for session groups (e.g., "work", "personal", "research")
+- Archive old session groups
+- Bulk operations (delete multiple sessions)
+- Export chat session history (JSON/Markdown)
+
+**Rationale**: Core workflow supported by Sub-phases 11.1-11.4. Search and organization are quality-of-life improvements that can be added incrementally based on user feedback.
+
+---
+
+### Phase 11 Summary
+
+**Total Estimated Time**: 20-27 hours
+
+**Sub-phase Breakdown**:
+1. SessionGroupManager Service: 6-8 hours ✅ Backend + tests
+2. Session Group UI: 6-8 hours ✅ React components
+3. SessionManager Integration: 4-6 hours ✅ Automatic tracking
+4. Sharing Permissions: 4-5 hours ✅ Multi-user support
+5. Search/Organization: Deferred to post-MVP
+
+**Dependencies**:
+- ✅ Phase 6 (Multi-Database Support) - Required for database linking
+- ✅ Phase 7 (Permissions) - Required for sharing
+- ✅ SessionManager (existing) - Required for chat session tracking
+- ✅ VectorRAGManager (existing) - Required for default DB creation
+
+**Test Coverage Target**: 85%+ (60+ tests across all sub-phases)
+
+**Key Files Created**: 15+ new files (8 implementation, 7 test)
+
+**Success Criteria**:
+- ✅ User can create named session groups (like Claude Projects)
+- ✅ User can add vector databases to session groups
+- ✅ User can upload files to default vector DB in group
+- ✅ Each chat session creates entry in session group
+- ✅ User can return later to continue previous sessions
+- ✅ Full chat history persists across sessions
+- ✅ Session groups can be shared with other users
+- ✅ Shared groups appear with "Shared by" indicator
+- ✅ All workflows covered by integration tests
+
+---
+
 ## Global Success Metrics
 
 1. **Performance**: < 100ms search latency with 100K vectors
