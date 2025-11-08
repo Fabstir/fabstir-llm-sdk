@@ -113,7 +113,7 @@ const NodeManagementClient: React.FC = () => {
   const [stakeAmount, setStakeAmount] = useState('1000');
   const [additionalStakeAmount, setAdditionalStakeAmount] = useState('100');
   const [apiUrl, setApiUrl] = useState('http://localhost:8083');
-  const [supportedModels, setSupportedModels] = useState('CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf'); // Default approved model
+  const [supportedModels, setSupportedModels] = useState(''); // Empty by default - user will type model or load from blockchain hashes
   const [minPricePerTokenNative, setMinPricePerTokenNative] = useState('11363636363636'); // Default native pricing (ETH/BNB)
   const [minPricePerTokenStable, setMinPricePerTokenStable] = useState('316'); // Default stable pricing (USDC)
   const [newPriceNativeValue, setNewPriceNativeValue] = useState('');
@@ -581,12 +581,37 @@ const NodeManagementClient: React.FC = () => {
 
       // Update supported models from blockchain if available (only when registered)
       if (info.isRegistered && info.supportedModels && info.supportedModels.length > 0) {
-        // Note: Blockchain returns model IDs (hashes), not repo:file format
-        // Don't overwrite the input field with hashes
+        // Query ModelRegistry to convert hashes back to repo:file format
         addLog(`📚 Loaded ${info.supportedModels.length} supported model(s) from blockchain`);
+
+        try {
+          const modelManager = targetSdk.getModelManager();
+          const modelHash = info.supportedModels[0]; // Get first model hash
+
+          // Query ModelRegistry for repo and file
+          const modelInfo = await modelManager.getModelDetails(modelHash);
+
+          if (modelInfo && modelInfo.huggingfaceRepo && modelInfo.fileName) {
+            const repoFileFormat = `${modelInfo.huggingfaceRepo}:${modelInfo.fileName}`;
+            addLog(`  ✓ Model: ${repoFileFormat}`);
+            // Update the input field with the actual repo:file format
+            setSupportedModels(repoFileFormat);
+          } else {
+            addLog(`  Model ${info.supportedModels.length}: ${modelHash.substring(0, 16)}...`);
+            addLog(`  ⚠️ Could not retrieve repo:file format from ModelRegistry`);
+          }
+        } catch (err: any) {
+          addLog(`  ⚠️ Error querying ModelRegistry: ${err.message}`);
+          info.supportedModels.forEach((modelId: string, idx: number) => {
+            addLog(`  Model ${idx + 1}: ${modelId.substring(0, 16)}...`);
+          });
+        }
       } else if (!info.isRegistered) {
-        // Reset to default repo:file format when not registered
-        setSupportedModels('CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf');
+        // Not registered - show helpful placeholder
+        addLog(`💡 Not registered. You can register with any approved model.`);
+        addLog(`   Examples:`);
+        addLog(`   • CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf`);
+        addLog(`   • bartowski/openai_gpt-oss-20b-GGUF:openai_gpt-oss-20b-Q8_0.gguf`);
       }
 
       // Get staked amount from SDK (no direct contract calls)
@@ -899,6 +924,14 @@ const NodeManagementClient: React.FC = () => {
           minPricePerTokenNative: minPricePerTokenNative.toString(),
           minPricePerTokenStable: minPricePerTokenStable.toString()
         };
+
+        // DEBUG: Log what we're actually sending
+        console.log('🔍 UI DEBUG - Registration Request:');
+        console.log('  supportedModels state variable:', supportedModels);
+        console.log('  modelString after trim:', modelString);
+        console.log('  modelRepo:', modelRepo);
+        console.log('  modelFile:', modelFile);
+        console.log('  registrationRequest.supportedModels:', registrationRequest.supportedModels);
 
         const txHash = await hostManager.registerHostWithModels(registrationRequest);
 
@@ -1233,7 +1266,8 @@ const NodeManagementClient: React.FC = () => {
       const healthUrl = `${discoveredApiUrl}/health`;
       const response = await fetch(healthUrl, {
         method: 'GET',
-        signal: AbortSignal.timeout(5000)
+        mode: 'cors',
+        signal: AbortSignal.timeout(10000)  // Increased timeout for production nodes
       });
 
       if (response.ok) {
@@ -1247,7 +1281,17 @@ const NodeManagementClient: React.FC = () => {
 
     } catch (error: any) {
       setHealthStatus('🔴 Offline');
-      addLog(`❌ Health check failed: ${error.message}`);
+
+      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        addLog(`❌ Health check failed: Cannot reach ${discoveredApiUrl}`);
+        addLog(`⚠️  This may be due to:`);
+        addLog(`   1. Firewall blocking external access to port 8080`);
+        addLog(`   2. CORS not configured on the node`);
+        addLog(`   3. Node not running or not listening on public IP`);
+        addLog(`💡 Try: curl ${discoveredApiUrl}/health from Ubuntu server`);
+      } else {
+        addLog(`❌ Health check failed: ${error.message}`);
+      }
     }
   };
 
@@ -1317,11 +1361,34 @@ const NodeManagementClient: React.FC = () => {
 
       ws.onerror = (error) => {
         addLog(`❌ WebSocket error: ${error}`);
+        addLog(`⚠️  WebSocket connection failed. This may be due to:`);
+        addLog(`   1. Firewall blocking external WebSocket connections on port 8080`);
+        addLog(`   2. Node registered with localhost URL instead of public IP`);
+        addLog(`   3. CORS/WebSocket origin restrictions`);
+        addLog(`💡 Check node registration: Should be http://81.150.166.91:8080, not http://localhost:8080`);
         setWsConnected(false);
       };
 
       ws.onclose = (event) => {
-        addLog(`WebSocket closed: ${event.code} ${event.reason}`);
+        addLog(`WebSocket closed: ${event.code} ${event.reason || '(no reason)'}`);
+
+        if (event.code === 1006) {
+          addLog(`⚠️  Error 1006 = Abnormal closure (connection failed before handshake)`);
+          addLog(`📋 Diagnostics:`);
+          addLog(`   • Trying to connect to: ${wsUrl}`);
+          addLog(`   • This URL is correct (public IP, not localhost)`);
+          addLog(`   • Problem: Firewall is blocking external connections to port 8080`);
+          addLog(``);
+          addLog(`🔧 To fix (run on Ubuntu server):`);
+          addLog(`   1. sudo ufw allow 8080/tcp`);
+          addLog(`   2. sudo ufw reload`);
+          addLog(`   3. sudo ufw status (verify rule added)`);
+          addLog(``);
+          addLog(`🧪 To test locally on server:`);
+          addLog(`   • curl http://localhost:8080/health (should work)`);
+          addLog(`   • curl http://81.150.166.91:8080/health (may fail if firewall blocks)`);
+        }
+
         setWsConnected(false);
         addLog('ℹ️ Host will handle settlement on disconnect');
       };
@@ -2017,6 +2084,20 @@ const NodeManagementClient: React.FC = () => {
             }}>
               <h3>🧪 Node Testing</h3>
 
+              {discoveredApiUrl !== nodePublicUrl && (
+                <div style={{
+                  padding: '8px',
+                  backgroundColor: '#fff3cd',
+                  border: '1px solid #ffc107',
+                  borderRadius: '3px',
+                  marginBottom: '10px',
+                  fontSize: '12px'
+                }}>
+                  ⚠️ <strong>Production Node:</strong> HTTP health checks may fail due to firewall/CORS.
+                  Use "Connect WS" and "Test Stream" for real connectivity tests.
+                </div>
+              )}
+
               <div style={{ marginBottom: '10px' }}>
                 <strong>Health:</strong> {healthStatus}
                 <br />
@@ -2024,10 +2105,16 @@ const NodeManagementClient: React.FC = () => {
               </div>
 
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                <button onClick={checkHealth} disabled={loading}>Check Health</button>
-                <button onClick={connectWebSocket} disabled={loading || wsConnected}>Connect WS</button>
+                <button onClick={checkHealth} disabled={loading} title="HTTP GET to /health (may fail for production nodes)">
+                  Check Health
+                </button>
+                <button onClick={connectWebSocket} disabled={loading || wsConnected} title="Connect via WebSocket">
+                  Connect WS
+                </button>
                 <button onClick={disconnectWebSocket} disabled={loading || !wsConnected}>Disconnect WS</button>
-                <button onClick={testWebSocketStreaming} disabled={loading || !wsConnected}>Test Stream</button>
+                <button onClick={testWebSocketStreaming} disabled={loading || !wsConnected} title="Send test prompt">
+                  Test Stream
+                </button>
                 <button onClick={testRagEmbedding} disabled={loading}>Test RAG</button>
               </div>
 
@@ -2084,7 +2171,10 @@ const NodeManagementClient: React.FC = () => {
         borderRadius: '5px',
         backgroundColor: '#e7f9f0'
       }}>
-        <h3>🎮 Node Control {mgmtApiClient ? '(API Ready)' : '(Initializing...)'}</h3>
+        <h3>🎮 Local Node Control {mgmtApiClient ? '(API Ready)' : '(Initializing...)'}</h3>
+        <p style={{ fontSize: '12px', color: '#666', marginTop: '-5px', marginBottom: '10px' }}>
+          Controls your local development node (not production)
+        </p>
 
         <div style={{
           marginBottom: '15px',
@@ -2114,8 +2204,13 @@ const NodeManagementClient: React.FC = () => {
                 <strong>Uptime:</strong> {formatUptime(nodeUptime)}
               </div>
               <div style={{ marginBottom: '5px' }}>
-                <strong>URL:</strong> {nodePublicUrl || 'N/A'}
+                <strong>Local URL:</strong> {nodePublicUrl || 'N/A'}
               </div>
+              {discoveredApiUrl && discoveredApiUrl !== nodePublicUrl && (
+                <div style={{ marginBottom: '5px', color: '#28a745', fontWeight: 'bold' }}>
+                  <strong>Production URL:</strong> {discoveredApiUrl}
+                </div>
+              )}
               {nodeVersion && (
                 <div style={{ marginBottom: '5px' }}>
                   <strong>Version:</strong>{' '}

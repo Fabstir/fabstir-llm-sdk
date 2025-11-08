@@ -350,7 +350,9 @@ export default function ChatContextDemo() {
         // Also limit overall length
         content = content.substring(0, 200);
 
-        return `${m.role === "user" ? "User" : "Assistant"}: ${content}`;
+        // Return raw content without "User:/Assistant:" formatting
+        // The node will apply the correct chat template (e.g., Harmony format)
+        return content;
       })
       .join("\n");
   };
@@ -1116,6 +1118,26 @@ export default function ChatContextDemo() {
           : "📝 Starting session..."
       );
 
+      // DIAGNOSTIC: Query node's available models
+      try {
+        const nodeModelsUrl = `${hostEndpoint.replace('/ws', '')}/v1/models?chain_id=${selectedChainId}`;
+        console.log("📊 Querying node models:", nodeModelsUrl);
+        const modelsResponse = await fetch(nodeModelsUrl);
+        const modelsData = await modelsResponse.json();
+        console.log("📊 Node reports available models:", modelsData);
+
+        if (modelsData.models && modelsData.models.length > 0) {
+          addMessage("system", `📊 Node has ${modelsData.models.length} model(s) available:`);
+          modelsData.models.forEach((m: any, idx: number) => {
+            console.log(`  Model ${idx + 1}:`, m);
+            addMessage("system", `  ${idx + 1}. ID: ${m.id?.substring(0, 16)}... | Name: ${m.name || m.huggingface_repo}`);
+          });
+        }
+      } catch (err: any) {
+        console.warn("Could not query node models:", err.message);
+        addMessage("system", `⚠️ Could not query node models: ${err.message}`);
+      }
+
       const fullSessionConfig = {
         ...sessionConfig,
         model: host.models[0],
@@ -1126,6 +1148,8 @@ export default function ChatContextDemo() {
       };
 
       console.log("Starting session with config:", fullSessionConfig);
+      console.log("📝 Model hash we're using:", host.models[0]);
+      console.log("📝 This will be converted to short name by SessionManager");
 
       const result = await sm.startSession(fullSessionConfig);
 
@@ -1182,19 +1206,39 @@ export default function ChatContextDemo() {
     addMessage("user", userMessage);
 
     try {
-      // Build prompt with full context
-      const context = buildContext();
-      let fullPrompt: string;
+      // Build conversation context - hosts are STATELESS, client maintains conversation state
+      // For GPT-OSS-20B, node expects Harmony format multi-turn conversation
+      // Format: <|start|>user<|message|>...<|end|><|start|>assistant<|channel|>final<|message|>...<|end|>
 
-      if (context) {
-        fullPrompt = `${context}\nUser: ${userMessage}\nAssistant:`;
+      // Get previous exchanges (filter out system messages about wallet/session)
+      const previousExchanges = messages.filter(m => m.role !== 'system');
+
+      // Build Harmony format conversation history
+      let fullPrompt = '';
+
+      if (previousExchanges.length > 0) {
+        // Include previous conversation in Harmony format
+        const harmonyHistory = previousExchanges
+          .map(m => {
+            if (m.role === 'user') {
+              return `<|start|>user<|message|>${m.content}<|end|>`;
+            } else {
+              // Assistant messages use 'final' channel
+              return `<|start|>assistant<|channel|>final<|message|>${m.content}<|end|>`;
+            }
+          })
+          .join('\n');
+
+        // Add current user message (node will add assistant prompt)
+        fullPrompt = `${harmonyHistory}\n<|start|>user<|message|>${userMessage}<|end|>`;
       } else {
-        fullPrompt = `User: ${userMessage}\nAssistant:`;
+        // First message - just send user message, node adds system prompt
+        fullPrompt = userMessage;
       }
 
-      console.log("=== CONTEXT BEING SENT TO MODEL ===");
+      console.log("=== RAW PROMPT BEING SENT TO NODE ===");
       console.log(fullPrompt);
-      console.log("=== END CONTEXT ===");
+      console.log("=== END RAW PROMPT ===");
 
       // Send to LLM
       setStatus("Sending message...");
@@ -1205,6 +1249,24 @@ export default function ChatContextDemo() {
 
       // Clean up the response to remove any repetitive patterns
       console.log("Raw response from LLM:", response);
+      console.log("📊 Response details:");
+      console.log("  Length:", response.length);
+      console.log("  First 100 chars:", response.substring(0, 100));
+      console.log("  Char codes (first 20):", Array.from(response.substring(0, 20)).map((c, i) => `${i}: ${c} (${c.charCodeAt(0)})`));
+
+      // Check if response is mostly dots/ellipses (garbage output indicator)
+      const dotsCount = (response.match(/\./g) || []).length;
+      const ellipsisCount = (response.match(/…/g) || []).length;
+      const totalDots = dotsCount + ellipsisCount;
+      const garbageRatio = totalDots / Math.max(1, response.length);
+      console.log("  Dots/Ellipsis count:", totalDots, "out of", response.length, "chars");
+      console.log("  Garbage ratio:", (garbageRatio * 100).toFixed(2) + "%");
+
+      if (garbageRatio > 0.3) {
+        console.warn("⚠️ HIGH GARBAGE RATIO DETECTED - Response may be corrupted!");
+        addMessage("system", "⚠️ Warning: Response appears to contain mostly dots/ellipses - possible model output issue");
+      }
+
       let cleanedResponse = response;
 
       // Handle repetitive pattern from model

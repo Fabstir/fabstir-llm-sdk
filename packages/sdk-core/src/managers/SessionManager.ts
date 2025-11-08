@@ -33,6 +33,26 @@ import { UnsupportedChainError } from '../errors/ChainErrors';
 import { PricingValidationError } from '../errors/pricing-errors';
 import { bytesToHex } from '../crypto/utilities';
 
+/**
+ * Convert model hash to short name that nodes expect in their .env MODEL_NAME
+ * If not a known hash, return as-is (could be a short name already)
+ */
+function convertModelHashToName(modelHashOrName: string): string {
+  const MODEL_HASH_TO_NAME: Record<string, string> = {
+    '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced': 'tiny-vicuna',
+    '0x14843424179fbcb9aeb7fd446fa97143300609757bd49ffb3ec7fb2f75aed1ca': 'tinyllama',
+    '0x27c438a3cbc9e67878e65ca69db4fef2323743afbcd565317fea401ba8b2ae5d': 'gpt-oss-20b'
+  };
+
+  // If it's a hash we recognize, convert it
+  if (MODEL_HASH_TO_NAME[modelHashOrName]) {
+    return MODEL_HASH_TO_NAME[modelHashOrName];
+  }
+
+  // Otherwise return as-is (could already be a short name, or unknown model)
+  return modelHashOrName;
+}
+
 export interface SessionState {
   sessionId: bigint;
   jobId: bigint;
@@ -220,7 +240,7 @@ export class SessionManager implements ISessionManager {
         sessionId: sessionId,
         jobId: jobId,
         chainId: config.chainId,
-        model,
+        model: convertModelHashToName(model),  // Convert hash to short name for node compatibility
         provider,
         endpoint,
         status: 'active',
@@ -355,7 +375,7 @@ export class SessionManager implements ISessionManager {
       // Call REST API for inference with augmented prompt
       const inferenceUrl = `${httpUrl}/v1/inference`;
       const requestBody = {
-        model: session.model || 'tiny-vicuna-1b',
+        model: session.model,
         prompt: augmentedPrompt,  // Use RAG-augmented prompt
         max_tokens: 200,  // Allow longer responses for poems, stories, etc.
         temperature: 0.7,  // Add temperature for better responses
@@ -736,7 +756,7 @@ export class SessionManager implements ISessionManager {
             jobId: session.jobId.toString(),  // Include jobId for settlement tracking
             prompt: augmentedPrompt,  // Use RAG-augmented prompt
             request: {
-              model: 'tiny-vicuna',  // Use tiny-vicuna as confirmed by node developer
+              model: session.model,
               prompt: augmentedPrompt,  // Use RAG-augmented prompt
               max_tokens: 50,
               temperature: 0.7,
@@ -873,7 +893,7 @@ export class SessionManager implements ISessionManager {
             jobId: session.jobId.toString(),  // Include jobId for settlement tracking
             prompt: augmentedPrompt,  // Use RAG-augmented prompt
             request: {
-              model: 'tiny-vicuna',  // Use tiny-vicuna as confirmed by node developer
+              model: session.model,
               prompt: augmentedPrompt,  // Use RAG-augmented prompt
               max_tokens: 50,
               temperature: 0.7,
@@ -1686,7 +1706,7 @@ export class SessionManager implements ISessionManager {
       // Call REST API for inference
       const inferenceUrl = `${httpUrl}/v1/inference`;
       const requestBody = {
-        model: session.model || 'tiny-vicuna-1b',
+        model: session.model,
         prompt: prompt,
         max_tokens: 200,  // Allow longer responses for poems, stories, etc.
         temperature: 0.7,  // Add temperature for better responses
