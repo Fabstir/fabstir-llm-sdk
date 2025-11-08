@@ -828,34 +828,13 @@ const NodeManagementClient: React.FC = () => {
 
   // Register Node
   const registerNode = async () => {
-    if (!mgmtApiClient) {
-      addLog('❌ Management API client not initialized');
-      return;
-    }
-
     if (!walletAddress) {
       addLog('❌ No wallet address available');
       return;
     }
 
-    // Get private key from selected test account (only for private key wallet type)
-    let privateKey: string | undefined;
-    if (walletType === 'private-key') {
-      const testAccount = TEST_ACCOUNTS[selectedTestAccount as keyof typeof TEST_ACCOUNTS];
-      if (!testAccount || !testAccount.privateKey) {
-        addLog('❌ No private key available for selected account');
-        return;
-      }
-      privateKey = testAccount.privateKey;
-    } else {
-      addLog('❌ Registration via Management API only supports private key wallet type');
-      return;
-    }
-
     setLoading(true);
     try {
-      addLog(`📝 Registering node on ${CHAINS[selectedChain as keyof typeof CHAINS].name} via Management API...`);
-
       // Parse supported models from input (format: repo:file)
       const trimmedModel = supportedModels.trim();
 
@@ -880,25 +859,95 @@ const NodeManagementClient: React.FC = () => {
       const modelString = `${repo}:${file}`;
       addLog(`📚 Model: ${modelString}`);
 
-      // Call management API /api/register endpoint
-      // This will create the config file AND register on blockchain (DUAL PRICING)
-      const result = await mgmtApiClient.register({
-        walletAddress: walletAddress,
-        publicUrl: apiUrl,
-        models: [modelString],
-        stakeAmount: stakeAmount,
-        metadata: JSON.parse(metadata),
-        privateKey: privateKey,
-        minPricePerTokenNative: minPricePerTokenNative,
-        minPricePerTokenStable: minPricePerTokenStable
-      });
+      // Two registration paths:
+      // 1. MetaMask/Browser Wallet: Use SDK HostManager directly
+      // 2. Private Key: Use Management API (creates config file)
+      if (walletType === 'metamask' || walletType === 'base-account') {
+        // MetaMask path: Use SDK HostManager (works with browser provider)
+        if (!sdk) {
+          addLog('❌ SDK not initialized');
+          setLoading(false);
+          return;
+        }
 
-      addLog(`✅ Node registered! TX: ${result.transactionHash}`);
-      addLog(`📝 Config file created for address: ${result.hostAddress}`);
-      const nativeFormatted = formatNativePrice(minPricePerTokenNative);
-      const stableFormatted = formatStablePrice(minPricePerTokenStable);
-      addLog(`💵 Native pricing: ${nativeFormatted.eth} ETH/token (~$${nativeFormatted.usd})`);
-      addLog(`💵 Stable pricing: ${stableFormatted.usdc} USDC/token`);
+        addLog(`📝 Registering node on ${CHAINS[selectedChain as keyof typeof CHAINS].name} via SDK...`);
+
+        const hostManager = sdk.getHostManager();
+
+        // Parse metadata JSON
+        const metadataObj = JSON.parse(metadata);
+
+        // Parse model string into ModelSpec format (repo:file)
+        const [modelRepo, modelFile] = modelString.split(':');
+
+        // Prepare registration request
+        const registrationRequest = {
+          metadata: {
+            hardware: metadataObj.hardware || {
+              gpu: 'RTX 4090',
+              vram: 24,
+              ram: 64
+            },
+            capabilities: metadataObj.capabilities || ['inference', 'streaming'],
+            location: metadataObj.location || 'us-east-1',
+            maxConcurrent: metadataObj.maxConcurrent || 5,
+            costPerToken: metadataObj.costPerToken || 0.002,
+            stakeAmount: stakeAmount.toString()  // Include stake in metadata
+          },
+          apiUrl: apiUrl,
+          supportedModels: [{ repo: modelRepo, file: modelFile }],
+          minPricePerTokenNative: minPricePerTokenNative.toString(),
+          minPricePerTokenStable: minPricePerTokenStable.toString()
+        };
+
+        const txHash = await hostManager.registerHostWithModels(registrationRequest);
+
+        addLog(`✅ Node registered! TX: ${txHash}`);
+        const nativeFormatted = formatNativePrice(minPricePerTokenNative);
+        const stableFormatted = formatStablePrice(minPricePerTokenStable);
+        addLog(`💵 Native pricing: ${nativeFormatted.eth} ETH/token (~$${nativeFormatted.usd})`);
+        addLog(`💵 Stable pricing: ${stableFormatted.usdc} USDC/token`);
+
+      } else if (walletType === 'private-key') {
+        // Private key path: Use Management API (creates config file)
+        if (!mgmtApiClient) {
+          addLog('❌ Management API client not initialized');
+          setLoading(false);
+          return;
+        }
+
+        const testAccount = TEST_ACCOUNTS[selectedTestAccount as keyof typeof TEST_ACCOUNTS];
+        if (!testAccount || !testAccount.privateKey) {
+          addLog('❌ No private key available for selected account');
+          setLoading(false);
+          return;
+        }
+
+        addLog(`📝 Registering node on ${CHAINS[selectedChain as keyof typeof CHAINS].name} via Management API...`);
+
+        const result = await mgmtApiClient.register({
+          walletAddress: walletAddress,
+          publicUrl: apiUrl,
+          models: [modelString],
+          stakeAmount: stakeAmount,
+          metadata: JSON.parse(metadata),
+          privateKey: testAccount.privateKey,
+          minPricePerTokenNative: minPricePerTokenNative,
+          minPricePerTokenStable: minPricePerTokenStable
+        });
+
+        addLog(`✅ Node registered! TX: ${result.transactionHash}`);
+        addLog(`📝 Config file created for address: ${result.hostAddress}`);
+        const nativeFormatted = formatNativePrice(minPricePerTokenNative);
+        const stableFormatted = formatStablePrice(minPricePerTokenStable);
+        addLog(`💵 Native pricing: ${nativeFormatted.eth} ETH/token (~$${nativeFormatted.usd})`);
+        addLog(`💵 Stable pricing: ${stableFormatted.usdc} USDC/token`);
+      } else {
+        addLog(`❌ Unsupported wallet type: ${walletType}`);
+        setLoading(false);
+        return;
+      }
+
       await checkRegistrationStatus();
 
     } catch (error: any) {
