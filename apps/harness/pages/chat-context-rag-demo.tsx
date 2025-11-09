@@ -367,7 +367,9 @@ export default function ChatContextDemo() {
         // Also limit overall length
         content = content.substring(0, 200);
 
-        return `${m.role === "user" ? "User" : "Assistant"}: ${content}`;
+        // Return raw content without "User:/Assistant:" formatting
+        // The node will apply the correct chat template (e.g., Harmony format)
+        return content;
       })
       .join("\n");
   };
@@ -1230,9 +1232,6 @@ export default function ChatContextDemo() {
     addMessage("user", userMessage);
 
     try {
-      // Build conversational context from previous messages
-      const conversationContext = buildContext();
-
       // Search RAG documents (always attempt if documentManager exists)
       let ragContext = "";
       if (documentManager) {
@@ -1274,19 +1273,48 @@ export default function ChatContextDemo() {
         }
       }
 
-      // Build full prompt: RAG context + conversation context + user message
-      let fullPrompt: string;
-      const allContext = (ragContext + conversationContext).trim();
+      // Build conversation context - hosts are STATELESS, client maintains conversation state
+      // For GPT-OSS-20B, node expects Harmony format multi-turn conversation
+      // Format: <|start|>user<|message|>...<|end|><|start|>assistant<|channel|>final<|message|>...<|end|>
 
-      if (allContext) {
-        fullPrompt = `${allContext}\nUser: ${userMessage}\nAssistant:`;
+      // Get previous exchanges (filter out system messages about wallet/session)
+      const previousExchanges = messages.filter(m => m.role !== 'system');
+
+      // Build Harmony format conversation history
+      let fullPrompt = '';
+
+      if (previousExchanges.length > 0) {
+        // Include previous conversation in Harmony format
+        const harmonyHistory = previousExchanges
+          .map(m => {
+            if (m.role === 'user') {
+              return `<|start|>user<|message|>${m.content}<|end|>`;
+            } else {
+              // Assistant messages use 'final' channel
+              return `<|start|>assistant<|channel|>final<|message|>${m.content}<|end|>`;
+            }
+          })
+          .join('\n');
+
+        // If we have RAG context, prepend it before the conversation history
+        if (ragContext) {
+          fullPrompt = `${ragContext}${harmonyHistory}\n<|start|>user<|message|>${userMessage}<|end|>`;
+        } else {
+          // Add current user message (node will add assistant prompt)
+          fullPrompt = `${harmonyHistory}\n<|start|>user<|message|>${userMessage}<|end|>`;
+        }
       } else {
-        fullPrompt = `User: ${userMessage}\nAssistant:`;
+        // First message - prepend RAG context if available, then send user message
+        if (ragContext) {
+          fullPrompt = `${ragContext}${userMessage}`;
+        } else {
+          fullPrompt = userMessage;
+        }
       }
 
-      console.log("=== CONTEXT BEING SENT TO MODEL ===");
+      console.log("=== RAW PROMPT BEING SENT TO NODE ===");
       console.log(fullPrompt);
-      console.log("=== END CONTEXT ===");
+      console.log("=== END RAW PROMPT ===");
 
       // Send to LLM
       setStatus("Sending message...");

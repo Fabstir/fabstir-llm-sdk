@@ -386,7 +386,9 @@ export default function ChatContextDemo() {
         // Also limit overall length
         content = content.substring(0, 200);
 
-        return `${m.role === "user" ? "User" : "Assistant"}: ${content}`;
+        // Return raw content without "User:/Assistant:" formatting
+        // The node will apply the correct chat template (e.g., Harmony format)
+        return content;
       })
       .join("\n");
   };
@@ -1317,19 +1319,39 @@ export default function ChatContextDemo() {
     addMessage("user", userMessage);
 
     try {
-      // Build prompt with full context
-      const context = buildContext();
-      let fullPrompt: string;
+      // Build conversation context - hosts are STATELESS, client maintains conversation state
+      // For GPT-OSS-20B, node expects Harmony format multi-turn conversation
+      // Format: <|start|>user<|message|>...<|end|><|start|>assistant<|channel|>final<|message|>...<|end|>
 
-      if (context) {
-        fullPrompt = `${context}\nUser: ${userMessage}\nAssistant:`;
+      // Get previous exchanges (filter out system messages about wallet/session)
+      const previousExchanges = messages.filter(m => m.role !== 'system');
+
+      // Build Harmony format conversation history
+      let fullPrompt = '';
+
+      if (previousExchanges.length > 0) {
+        // Include previous conversation in Harmony format
+        const harmonyHistory = previousExchanges
+          .map(m => {
+            if (m.role === 'user') {
+              return `<|start|>user<|message|>${m.content}<|end|>`;
+            } else {
+              // Assistant messages use 'final' channel
+              return `<|start|>assistant<|channel|>final<|message|>${m.content}<|end|>`;
+            }
+          })
+          .join('\n');
+
+        // Add current user message (node will add assistant prompt)
+        fullPrompt = `${harmonyHistory}\n<|start|>user<|message|>${userMessage}<|end|>`;
       } else {
-        fullPrompt = `User: ${userMessage}\nAssistant:`;
+        // First message - just send user message, node adds system prompt
+        fullPrompt = userMessage;
       }
 
-      console.log("=== CONTEXT BEING SENT TO MODEL ===");
+      console.log("=== RAW PROMPT BEING SENT TO NODE ===");
       console.log(fullPrompt);
-      console.log("=== END CONTEXT ===");
+      console.log("=== END RAW PROMPT ===");
 
       // Send to LLM using SessionManager (same as working demo)
       setStatus("Sending message...");
