@@ -43,6 +43,18 @@ export { TreasuryManager } from './managers/TreasuryManager';
 export { ModelManager } from './managers/ModelManager';
 export { ClientManager } from './managers/ClientManager';
 
+// Permission and collaboration managers
+export { PermissionManager } from './managers/PermissionManager';
+export { PermissionStorage } from './storage/PermissionStorage';
+
+// RAG and Vector Database managers (host-side via WebSocket)
+export { VectorRAGManager } from './managers/VectorRAGManager';
+export { DocumentManager } from './documents/DocumentManager';
+export { HostAdapter } from './embeddings/adapters/HostAdapter';
+export type { IVectorRAGManager } from './managers/interfaces/IVectorRAGManager';
+export type { IDocumentManager } from './documents/interfaces/IDocumentManager';
+export type { IEmbeddingService } from './embeddings/interfaces/IEmbeddingService';
+
 // Services
 export { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 export { P2PBridgeClient } from './services/P2PBridgeClient';

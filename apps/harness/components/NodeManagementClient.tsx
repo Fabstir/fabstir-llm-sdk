@@ -113,7 +113,7 @@ const NodeManagementClient: React.FC = () => {
   const [stakeAmount, setStakeAmount] = useState('1000');
   const [additionalStakeAmount, setAdditionalStakeAmount] = useState('100');
   const [apiUrl, setApiUrl] = useState('http://localhost:8083');
-  const [supportedModels, setSupportedModels] = useState('CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf'); // Default approved model
+  const [supportedModels, setSupportedModels] = useState(''); // Empty by default - user will type model or load from blockchain hashes
   const [minPricePerTokenNative, setMinPricePerTokenNative] = useState('11363636363636'); // Default native pricing (ETH/BNB)
   const [minPricePerTokenStable, setMinPricePerTokenStable] = useState('316'); // Default stable pricing (USDC)
   const [newPriceNativeValue, setNewPriceNativeValue] = useState('');
@@ -143,6 +143,7 @@ const NodeManagementClient: React.FC = () => {
   const [nodeUptime, setNodeUptime] = useState<number>(0);
   const [nodePublicUrl, setNodePublicUrl] = useState<string>('');
   const [nodeStartTime, setNodeStartTime] = useState<string>('');
+  const [nodeVersion, setNodeVersion] = useState<string>('');
   const [statusPollingActive, setStatusPollingActive] = useState(false);
 
   // SDK instance
@@ -326,6 +327,8 @@ const NodeManagementClient: React.FC = () => {
         setNodeStartTime(status.startTime || '');
         setNodeUptime(status.uptime || 0);
         setStatusPollingActive(true);
+        // Fetch version
+        fetchNodeVersion();
       } else {
         setNodeStatus('stopped');
         setNodePid(null);
@@ -337,6 +340,24 @@ const NodeManagementClient: React.FC = () => {
     } catch (error: any) {
       console.error('Failed to refresh node status:', error);
       // Don't spam logs with polling errors
+    }
+  };
+
+  // Fetch node version from /v1/version endpoint
+  const fetchNodeVersion = async () => {
+    try {
+      // Use nodePublicUrl if available, otherwise try discoveredApiUrl or test account URL
+      const apiUrl = nodePublicUrl || discoveredApiUrl || TEST_ACCOUNTS.TEST_HOST_1.apiUrl || 'http://localhost:8083';
+
+      const response = await fetch(`${apiUrl}/v1/version`);
+      if (response.ok) {
+        const data = await response.json();
+        setNodeVersion(data.build || data.version || 'unknown');
+        addLog(`📌 Node version: ${data.build || data.version}`);
+      }
+    } catch (error) {
+      // Silently fail - version is nice-to-have, not critical
+      console.log('Could not fetch version:', error);
     }
   };
 
@@ -359,6 +380,8 @@ const NodeManagementClient: React.FC = () => {
 
       // Refresh status after starting
       await refreshNodeStatus();
+      // Fetch node version
+      setTimeout(() => fetchNodeVersion(), 2000);
     } catch (error: any) {
       addLog(`❌ Start failed: ${error.message}`);
       console.error('Start node error:', error);
@@ -381,6 +404,7 @@ const NodeManagementClient: React.FC = () => {
 
       setNodePid(null);
       setNodePublicUrl('');
+      setNodeVersion('');
       setNodeUptime(0);
       setStatusPollingActive(false);
 
@@ -557,12 +581,37 @@ const NodeManagementClient: React.FC = () => {
 
       // Update supported models from blockchain if available (only when registered)
       if (info.isRegistered && info.supportedModels && info.supportedModels.length > 0) {
-        // Note: Blockchain returns model IDs (hashes), not repo:file format
-        // Don't overwrite the input field with hashes
+        // Query ModelRegistry to convert hashes back to repo:file format
         addLog(`📚 Loaded ${info.supportedModels.length} supported model(s) from blockchain`);
+
+        try {
+          const modelManager = targetSdk.getModelManager();
+          const modelHash = info.supportedModels[0]; // Get first model hash
+
+          // Query ModelRegistry for repo and file
+          const modelInfo = await modelManager.getModelDetails(modelHash);
+
+          if (modelInfo && modelInfo.huggingfaceRepo && modelInfo.fileName) {
+            const repoFileFormat = `${modelInfo.huggingfaceRepo}:${modelInfo.fileName}`;
+            addLog(`  ✓ Model: ${repoFileFormat}`);
+            // Update the input field with the actual repo:file format
+            setSupportedModels(repoFileFormat);
+          } else {
+            addLog(`  Model ${info.supportedModels.length}: ${modelHash.substring(0, 16)}...`);
+            addLog(`  ⚠️ Could not retrieve repo:file format from ModelRegistry`);
+          }
+        } catch (err: any) {
+          addLog(`  ⚠️ Error querying ModelRegistry: ${err.message}`);
+          info.supportedModels.forEach((modelId: string, idx: number) => {
+            addLog(`  Model ${idx + 1}: ${modelId.substring(0, 16)}...`);
+          });
+        }
       } else if (!info.isRegistered) {
-        // Reset to default repo:file format when not registered
-        setSupportedModels('CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf');
+        // Not registered - show helpful placeholder
+        addLog(`💡 Not registered. You can register with any approved model.`);
+        addLog(`   Examples:`);
+        addLog(`   • CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf`);
+        addLog(`   • bartowski/openai_gpt-oss-20b-GGUF:openai_gpt-oss-20b-Q8_0.gguf`);
       }
 
       // Get staked amount from SDK (no direct contract calls)
@@ -804,34 +853,13 @@ const NodeManagementClient: React.FC = () => {
 
   // Register Node
   const registerNode = async () => {
-    if (!mgmtApiClient) {
-      addLog('❌ Management API client not initialized');
-      return;
-    }
-
     if (!walletAddress) {
       addLog('❌ No wallet address available');
       return;
     }
 
-    // Get private key from selected test account (only for private key wallet type)
-    let privateKey: string | undefined;
-    if (walletType === 'private-key') {
-      const testAccount = TEST_ACCOUNTS[selectedTestAccount as keyof typeof TEST_ACCOUNTS];
-      if (!testAccount || !testAccount.privateKey) {
-        addLog('❌ No private key available for selected account');
-        return;
-      }
-      privateKey = testAccount.privateKey;
-    } else {
-      addLog('❌ Registration via Management API only supports private key wallet type');
-      return;
-    }
-
     setLoading(true);
     try {
-      addLog(`📝 Registering node on ${CHAINS[selectedChain as keyof typeof CHAINS].name} via Management API...`);
-
       // Parse supported models from input (format: repo:file)
       const trimmedModel = supportedModels.trim();
 
@@ -856,25 +884,103 @@ const NodeManagementClient: React.FC = () => {
       const modelString = `${repo}:${file}`;
       addLog(`📚 Model: ${modelString}`);
 
-      // Call management API /api/register endpoint
-      // This will create the config file AND register on blockchain (DUAL PRICING)
-      const result = await mgmtApiClient.register({
-        walletAddress: walletAddress,
-        publicUrl: apiUrl,
-        models: [modelString],
-        stakeAmount: stakeAmount,
-        metadata: JSON.parse(metadata),
-        privateKey: privateKey,
-        minPricePerTokenNative: minPricePerTokenNative,
-        minPricePerTokenStable: minPricePerTokenStable
-      });
+      // Two registration paths:
+      // 1. MetaMask/Browser Wallet: Use SDK HostManager directly
+      // 2. Private Key: Use Management API (creates config file)
+      if (walletType === 'metamask' || walletType === 'base-account') {
+        // MetaMask path: Use SDK HostManager (works with browser provider)
+        if (!sdk) {
+          addLog('❌ SDK not initialized');
+          setLoading(false);
+          return;
+        }
 
-      addLog(`✅ Node registered! TX: ${result.transactionHash}`);
-      addLog(`📝 Config file created for address: ${result.hostAddress}`);
-      const nativeFormatted = formatNativePrice(minPricePerTokenNative);
-      const stableFormatted = formatStablePrice(minPricePerTokenStable);
-      addLog(`💵 Native pricing: ${nativeFormatted.eth} ETH/token (~$${nativeFormatted.usd})`);
-      addLog(`💵 Stable pricing: ${stableFormatted.usdc} USDC/token`);
+        addLog(`📝 Registering node on ${CHAINS[selectedChain as keyof typeof CHAINS].name} via SDK...`);
+
+        const hostManager = sdk.getHostManager();
+
+        // Parse metadata JSON
+        const metadataObj = JSON.parse(metadata);
+
+        // Parse model string into ModelSpec format (repo:file)
+        const [modelRepo, modelFile] = modelString.split(':');
+
+        // Prepare registration request
+        const registrationRequest = {
+          metadata: {
+            hardware: metadataObj.hardware || {
+              gpu: 'RTX 4090',
+              vram: 24,
+              ram: 64
+            },
+            capabilities: metadataObj.capabilities || ['inference', 'streaming'],
+            location: metadataObj.location || 'us-east-1',
+            maxConcurrent: metadataObj.maxConcurrent || 5,
+            costPerToken: metadataObj.costPerToken || 0.002,
+            stakeAmount: stakeAmount.toString()  // Include stake in metadata
+          },
+          apiUrl: apiUrl,
+          supportedModels: [{ repo: modelRepo, file: modelFile }],
+          minPricePerTokenNative: minPricePerTokenNative.toString(),
+          minPricePerTokenStable: minPricePerTokenStable.toString()
+        };
+
+        // DEBUG: Log what we're actually sending
+        console.log('🔍 UI DEBUG - Registration Request:');
+        console.log('  supportedModels state variable:', supportedModels);
+        console.log('  modelString after trim:', modelString);
+        console.log('  modelRepo:', modelRepo);
+        console.log('  modelFile:', modelFile);
+        console.log('  registrationRequest.supportedModels:', registrationRequest.supportedModels);
+
+        const txHash = await hostManager.registerHostWithModels(registrationRequest);
+
+        addLog(`✅ Node registered! TX: ${txHash}`);
+        const nativeFormatted = formatNativePrice(minPricePerTokenNative);
+        const stableFormatted = formatStablePrice(minPricePerTokenStable);
+        addLog(`💵 Native pricing: ${nativeFormatted.eth} ETH/token (~$${nativeFormatted.usd})`);
+        addLog(`💵 Stable pricing: ${stableFormatted.usdc} USDC/token`);
+
+      } else if (walletType === 'private-key') {
+        // Private key path: Use Management API (creates config file)
+        if (!mgmtApiClient) {
+          addLog('❌ Management API client not initialized');
+          setLoading(false);
+          return;
+        }
+
+        const testAccount = TEST_ACCOUNTS[selectedTestAccount as keyof typeof TEST_ACCOUNTS];
+        if (!testAccount || !testAccount.privateKey) {
+          addLog('❌ No private key available for selected account');
+          setLoading(false);
+          return;
+        }
+
+        addLog(`📝 Registering node on ${CHAINS[selectedChain as keyof typeof CHAINS].name} via Management API...`);
+
+        const result = await mgmtApiClient.register({
+          walletAddress: walletAddress,
+          publicUrl: apiUrl,
+          models: [modelString],
+          stakeAmount: stakeAmount,
+          metadata: JSON.parse(metadata),
+          privateKey: testAccount.privateKey,
+          minPricePerTokenNative: minPricePerTokenNative,
+          minPricePerTokenStable: minPricePerTokenStable
+        });
+
+        addLog(`✅ Node registered! TX: ${result.transactionHash}`);
+        addLog(`📝 Config file created for address: ${result.hostAddress}`);
+        const nativeFormatted = formatNativePrice(minPricePerTokenNative);
+        const stableFormatted = formatStablePrice(minPricePerTokenStable);
+        addLog(`💵 Native pricing: ${nativeFormatted.eth} ETH/token (~$${nativeFormatted.usd})`);
+        addLog(`💵 Stable pricing: ${stableFormatted.usdc} USDC/token`);
+      } else {
+        addLog(`❌ Unsupported wallet type: ${walletType}`);
+        setLoading(false);
+        return;
+      }
+
       await checkRegistrationStatus();
 
     } catch (error: any) {
@@ -1160,7 +1266,8 @@ const NodeManagementClient: React.FC = () => {
       const healthUrl = `${discoveredApiUrl}/health`;
       const response = await fetch(healthUrl, {
         method: 'GET',
-        signal: AbortSignal.timeout(5000)
+        mode: 'cors',
+        signal: AbortSignal.timeout(10000)  // Increased timeout for production nodes
       });
 
       if (response.ok) {
@@ -1174,7 +1281,17 @@ const NodeManagementClient: React.FC = () => {
 
     } catch (error: any) {
       setHealthStatus('🔴 Offline');
-      addLog(`❌ Health check failed: ${error.message}`);
+
+      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        addLog(`❌ Health check failed: Cannot reach ${discoveredApiUrl}`);
+        addLog(`⚠️  This may be due to:`);
+        addLog(`   1. Firewall blocking external access to port 8080`);
+        addLog(`   2. CORS not configured on the node`);
+        addLog(`   3. Node not running or not listening on public IP`);
+        addLog(`💡 Try: curl ${discoveredApiUrl}/health from Ubuntu server`);
+      } else {
+        addLog(`❌ Health check failed: ${error.message}`);
+      }
     }
   };
 
@@ -1244,11 +1361,34 @@ const NodeManagementClient: React.FC = () => {
 
       ws.onerror = (error) => {
         addLog(`❌ WebSocket error: ${error}`);
+        addLog(`⚠️  WebSocket connection failed. This may be due to:`);
+        addLog(`   1. Firewall blocking external WebSocket connections on port 8080`);
+        addLog(`   2. Node registered with localhost URL instead of public IP`);
+        addLog(`   3. CORS/WebSocket origin restrictions`);
+        addLog(`💡 Check node registration: Should be http://81.150.166.91:8080, not http://localhost:8080`);
         setWsConnected(false);
       };
 
       ws.onclose = (event) => {
-        addLog(`WebSocket closed: ${event.code} ${event.reason}`);
+        addLog(`WebSocket closed: ${event.code} ${event.reason || '(no reason)'}`);
+
+        if (event.code === 1006) {
+          addLog(`⚠️  Error 1006 = Abnormal closure (connection failed before handshake)`);
+          addLog(`📋 Diagnostics:`);
+          addLog(`   • Trying to connect to: ${wsUrl}`);
+          addLog(`   • This URL is correct (public IP, not localhost)`);
+          addLog(`   • Problem: Firewall is blocking external connections to port 8080`);
+          addLog(``);
+          addLog(`🔧 To fix (run on Ubuntu server):`);
+          addLog(`   1. sudo ufw allow 8080/tcp`);
+          addLog(`   2. sudo ufw reload`);
+          addLog(`   3. sudo ufw status (verify rule added)`);
+          addLog(``);
+          addLog(`🧪 To test locally on server:`);
+          addLog(`   • curl http://localhost:8080/health (should work)`);
+          addLog(`   • curl http://81.150.166.91:8080/health (may fail if firewall blocks)`);
+        }
+
         setWsConnected(false);
         addLog('ℹ️ Host will handle settlement on disconnect');
       };
@@ -1301,6 +1441,61 @@ const NodeManagementClient: React.FC = () => {
 
     } catch (error: any) {
       addLog(`❌ Streaming failed: ${error.message}`);
+    }
+  };
+
+  // Test RAG Embedding Endpoint
+  const testRagEmbedding = async () => {
+    if (!discoveredApiUrl) {
+      addLog('❌ No API URL discovered');
+      return;
+    }
+
+    try {
+      addLog('🧪 Testing /v1/embed endpoint...');
+
+      const embedUrl = `${discoveredApiUrl}/v1/embed`;
+      const response = await fetch(embedUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          texts: ['Hello world', 'Test embedding'],
+          model: 'all-MiniLM-L6-v2',
+          chain_id: selectedChain
+        }),
+        signal: AbortSignal.timeout(10000) // 10 second timeout
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const embeddingCount = data.embeddings?.length || 0;
+        const firstEmbeddingDim = data.embeddings?.[0]?.embedding?.length || 0;
+        addLog(`✅ RAG embedding test passed!`);
+        addLog(`   📊 Received ${embeddingCount} embeddings`);
+        addLog(`   📏 Dimension: ${firstEmbeddingDim} (expected: 384)`);
+        addLog(`   💰 Cost: $${data.cost || 0}`);
+        addLog(`   ⛓️  Chain: ${data.chain_name || 'unknown'}`);
+
+        if (firstEmbeddingDim === 384) {
+          addLog(`   ✅ Embedding dimension correct!`);
+        } else {
+          addLog(`   ⚠️  Warning: Expected 384 dimensions, got ${firstEmbeddingDim}`);
+        }
+      } else {
+        const errorText = await response.text();
+        addLog(`❌ RAG test failed: HTTP ${response.status}`);
+        addLog(`   Error: ${errorText}`);
+      }
+
+    } catch (error: any) {
+      if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+        addLog(`❌ RAG test timeout - endpoint may not be available`);
+        addLog(`   This means /v1/embed is not responding`);
+      } else {
+        addLog(`❌ RAG test failed: ${error.message}`);
+      }
     }
   };
 
@@ -1889,6 +2084,20 @@ const NodeManagementClient: React.FC = () => {
             }}>
               <h3>🧪 Node Testing</h3>
 
+              {discoveredApiUrl !== nodePublicUrl && (
+                <div style={{
+                  padding: '8px',
+                  backgroundColor: '#fff3cd',
+                  border: '1px solid #ffc107',
+                  borderRadius: '3px',
+                  marginBottom: '10px',
+                  fontSize: '12px'
+                }}>
+                  ⚠️ <strong>Production Node:</strong> HTTP health checks may fail due to firewall/CORS.
+                  Use "Connect WS" and "Test Stream" for real connectivity tests.
+                </div>
+              )}
+
               <div style={{ marginBottom: '10px' }}>
                 <strong>Health:</strong> {healthStatus}
                 <br />
@@ -1896,10 +2105,17 @@ const NodeManagementClient: React.FC = () => {
               </div>
 
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                <button onClick={checkHealth} disabled={loading}>Check Health</button>
-                <button onClick={connectWebSocket} disabled={loading || wsConnected}>Connect WS</button>
+                <button onClick={checkHealth} disabled={loading} title="HTTP GET to /health (may fail for production nodes)">
+                  Check Health
+                </button>
+                <button onClick={connectWebSocket} disabled={loading || wsConnected} title="Connect via WebSocket">
+                  Connect WS
+                </button>
                 <button onClick={disconnectWebSocket} disabled={loading || !wsConnected}>Disconnect WS</button>
-                <button onClick={testWebSocketStreaming} disabled={loading || !wsConnected}>Test Stream</button>
+                <button onClick={testWebSocketStreaming} disabled={loading || !wsConnected} title="Send test prompt">
+                  Test Stream
+                </button>
+                <button onClick={testRagEmbedding} disabled={loading}>Test RAG</button>
               </div>
 
               {streamedTokens && (
@@ -1955,7 +2171,10 @@ const NodeManagementClient: React.FC = () => {
         borderRadius: '5px',
         backgroundColor: '#e7f9f0'
       }}>
-        <h3>🎮 Node Control {mgmtApiClient ? '(API Ready)' : '(Initializing...)'}</h3>
+        <h3>🎮 Local Node Control {mgmtApiClient ? '(API Ready)' : '(Initializing...)'}</h3>
+        <p style={{ fontSize: '12px', color: '#666', marginTop: '-5px', marginBottom: '10px' }}>
+          Controls your local development node (not production)
+        </p>
 
         <div style={{
           marginBottom: '15px',
@@ -1985,8 +2204,25 @@ const NodeManagementClient: React.FC = () => {
                 <strong>Uptime:</strong> {formatUptime(nodeUptime)}
               </div>
               <div style={{ marginBottom: '5px' }}>
-                <strong>URL:</strong> {nodePublicUrl || 'N/A'}
+                <strong>Local URL:</strong> {nodePublicUrl || 'N/A'}
               </div>
+              {discoveredApiUrl && discoveredApiUrl !== nodePublicUrl && (
+                <div style={{ marginBottom: '5px', color: '#28a745', fontWeight: 'bold' }}>
+                  <strong>Production URL:</strong> {discoveredApiUrl}
+                </div>
+              )}
+              {nodeVersion && (
+                <div style={{ marginBottom: '5px' }}>
+                  <strong>Version:</strong>{' '}
+                  <span style={{
+                    color: '#007bff',
+                    fontFamily: 'monospace',
+                    fontSize: '12px'
+                  }}>
+                    {nodeVersion}
+                  </span>
+                </div>
+              )}
             </>
           )}
 

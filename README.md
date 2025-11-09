@@ -10,6 +10,8 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 - 💰 **Automated Payments** - Built-in escrow and payment handling via smart contracts
 - 🔄 **Session Management** - Stateful conversations with checkpoint proofs
 - 📦 **S5 Storage Integration** - Decentralized conversation persistence
+- 🧠 **RAG (Retrieval-Augmented Generation)** - Upload documents and enhance LLM responses with semantic search
+- 🗂️ **Vector Databases** - Client-side vector management with folder hierarchies and permissions
 - 🛡️ **Error Recovery** - Automatic retries and failover to ensure reliability
 - 🔌 **Browser Compatible** - Works in both Node.js and browser environments
 
@@ -102,21 +104,103 @@ Stream inference directly without blockchain transactions:
 async function directInference() {
   const sdk = new FabstirSDKCore({ network: 'base-sepolia' });
   await sdk.authenticate(privateKey);
-  
+
   const inferenceManager = sdk.getInferenceManager();
-  
+
   // Stream tokens with automatic host selection
   for await (const token of inferenceManager.streamInference(
     "Write a haiku about coding",
-    { 
+    {
       model: 'llama-2-7b',
       temperature: 0.9,
-      maxTokens: 100 
+      maxTokens: 100
     }
   )) {
     process.stdout.write(token);
   }
 }
+```
+
+### RAG-Enhanced Chat with Document Upload (Host-Side)
+
+Upload documents and enhance LLM responses with semantic search using host-side vector storage:
+
+```typescript
+import { FabstirSDKCore } from "@fabstir/sdk-core";
+import { HostAdapter } from "@fabstir/sdk-core/embeddings";
+import { DocumentManager } from "@fabstir/sdk-core/documents";
+
+async function ragExample() {
+  // Initialize SDK
+  const sdk = new FabstirSDKCore({ network: 'base-sepolia' });
+  await sdk.authenticate(privateKey);
+
+  // Setup RAG with zero-cost host embeddings
+  const hostUrl = process.env.NEXT_PUBLIC_TEST_HOST_1_URL || 'http://localhost:8083';
+  const embeddingService = new HostAdapter({ hostUrl, dimensions: 384 });
+  const documentManager = new DocumentManager({ embeddingService });
+
+  // Start session with host node
+  const sessionManager = await sdk.getSessionManager();
+  const { sessionId } = await sessionManager.startSession({
+    hostUrl,
+    jobId: 123n,
+    modelName: 'llama-3',
+    chainId: 84532
+  });
+
+  // Process document: extract → chunk → embed
+  const chunks = await documentManager.processDocument(file, {
+    chunkSize: 500,
+    overlap: 50,
+    onProgress: (p) => console.log(`${p.stage}: ${p.progress}%`)
+  });
+
+  // Upload vectors to host via WebSocket
+  const vectors = chunks.map((chunk, i) => ({
+    id: `chunk-${i}`,
+    vector: chunk.embedding,
+    metadata: { text: chunk.text, index: i }
+  }));
+
+  await sessionManager.uploadVectors(sessionId, vectors);
+  console.log(`Uploaded ${vectors.length} vectors to host`);
+
+  // Ask questions - context automatically injected
+  const enhanced = await sessionManager.askWithContext(
+    sessionId,
+    "What are the key points in the uploaded document?",
+    3  // topK: retrieve top 3 similar chunks
+  );
+
+  await sessionManager.sendPromptStreaming(sessionId, enhanced, (chunk) => {
+    process.stdout.write(chunk.content);
+  });
+
+  // Or search manually with production-tested threshold
+  const query = "key points";
+  const queryEmbedding = await embeddingService.embed(query);
+  const results = await sessionManager.searchVectors(
+    sessionId,
+    queryEmbedding,
+    5,      // topK: return top 5 results
+    0.2     // threshold: 0.2 works best with all-MiniLM-L6-v2 (not 0.7!)
+  );
+
+  results.forEach(r => {
+    console.log(`Score: ${r.score.toFixed(3)}, Text: ${r.metadata?.text}`);
+  });
+}
+```
+
+**Key Features:**
+- **Host-Side Storage**: Vectors stored in session memory on host node (Rust)
+- **Zero-Cost Embeddings**: Use HostAdapter for free 384-d embeddings
+- **Production-Tested**: Threshold 0.2 (not 0.7) works best with all-MiniLM-L6-v2
+- **Auto-Cleanup**: Vectors automatically deleted when session ends
+- **WebSocket Protocol**: `uploadVectors` and `searchVectors` messages over persistent connection
+
+See [docs/IMPLEMENTATION_CHAT_RAG.md](docs/IMPLEMENTATION_CHAT_RAG.md) for complete architecture and production configuration.
 
 ## Installation
 
@@ -192,6 +276,13 @@ const sdk = new FabstirSDK({
 - [P2P Configuration](docs/P2P_CONFIGURATION.md) - P2P network configuration
 - [Architecture](docs/ARCHITECTURE.md) - System architecture overview
 - [Configuration](docs/CONFIGURATION.md) - All configuration options
+
+### RAG Documentation
+
+- [**RAG API Reference**](docs/RAG_API_REFERENCE.md) - Complete RAG API documentation
+- [**RAG Implementation Plan**](docs/IMPLEMENTATION_CHAT_RAG.md) - Implementation progress and architecture
+- [**RAG Manual Testing Guide**](docs/RAG_MANUAL_TESTING_GUIDE.md) - Testing host embedding endpoints
+- [**RAG Node Integration**](docs/node-reference/RAG_SDK_INTEGRATION.md) - Host-side integration guide
 
 ## Examples
 

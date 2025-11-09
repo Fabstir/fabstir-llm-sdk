@@ -191,7 +191,7 @@ export class AuthManager {
     }
 
     // Dynamically import S5 when needed
-    const { S5 } = await import('@s5-dev/s5js');
+    const { S5 } = await import('@julesl23/s5js');
 
     // S5.js is already browser-compatible
     const s5 = new S5();

@@ -11,6 +11,11 @@
 - [Host Management](#host-management)
 - [Storage Management](#storage-management)
   - [User Settings Storage](#user-settings-storage)
+- [RAG and Vector Databases](#rag-and-vector-databases)
+  - [VectorRAGManager](#vectorragmanager)
+  - [DocumentManager](#documentmanager)
+  - [Embedding Services](#embedding-services)
+  - [Permissions and Sharing](#permissions-and-sharing)
 - [Treasury Management](#treasury-management)
 - [Client Manager](#client-manager)
 - [WebSocket Communication](#websocket-communication)
@@ -28,6 +33,7 @@ The Fabstir SDK provides a comprehensive interface for interacting with the Fabs
 - Browser-compatible core functionality
 - USDC and ETH payment support
 - Session-based LLM interactions with context preservation
+- **RAG (Retrieval-Augmented Generation)** with vector databases, document upload, and semantic search
 - Model governance and validation
 - WebSocket real-time streaming
 - S5 decentralized storage integration
@@ -916,6 +922,156 @@ async completeSession(
   finalProof: string
 ): Promise<string>
 ```
+
+### uploadVectors (Host-Side RAG)
+
+Uploads vectors to the host node's session memory via WebSocket for RAG functionality.
+
+```typescript
+async uploadVectors(
+  sessionId: string | BigInt,
+  vectors: Vector[],
+  replace?: boolean
+): Promise<UploadVectorsResult>
+```
+
+**Parameters:**
+- `sessionId`: Active session ID
+- `vectors`: Array of vector objects with id, vector (384-d), and metadata
+- `replace`: If true, replace all existing vectors (default: false)
+
+**Returns:**
+```typescript
+interface UploadVectorsResult {
+  uploaded: number;
+  status: 'success' | 'error';
+  error?: string;
+}
+```
+
+**Example:**
+```typescript
+// Convert document chunks to vectors
+const vectors = chunks.map((chunk, i) => ({
+  id: `chunk-${i}`,
+  vector: chunk.embedding,  // 384-dimensional array
+  metadata: { text: chunk.text, index: i, source: 'doc.pdf' }
+}));
+
+// Upload to host (auto-batched at 1K vectors)
+const result = await sessionManager.uploadVectors(sessionId, vectors);
+console.log(`Uploaded ${result.uploaded} vectors`);
+```
+
+**Notes:**
+- Vectors stored in session memory on host node (Rust)
+- Auto-batched: 1000 vectors per WebSocket message
+- Auto-cleanup: Vectors deleted when session ends
+- No persistence: Host is stateless
+
+### searchVectors (Host-Side RAG)
+
+Searches for similar vectors on the host node via WebSocket.
+
+```typescript
+async searchVectors(
+  sessionId: string | BigInt,
+  queryVector: number[],
+  k?: number,
+  threshold?: number
+): Promise<SearchResult[]>
+```
+
+**Parameters:**
+- `sessionId`: Active session ID
+- `queryVector`: Query embedding (384 dimensions)
+- `k`: Number of results to return (default: 5, max: 20)
+- `threshold`: Minimum similarity score (default: 0.2, range: 0.0-1.0)
+
+**Returns:**
+```typescript
+interface SearchResult {
+  id: string;
+  score: number;           // Cosine similarity (0-1)
+  metadata: Record<string, any>;
+  vector?: number[];       // Optional: include full vector
+}
+```
+
+**Example:**
+```typescript
+// Generate query embedding
+const queryEmbedding = await embeddingService.embed('What is RAG?');
+
+// Search with production-tested threshold
+const results = await sessionManager.searchVectors(
+  sessionId,
+  queryEmbedding,
+  5,    // topK: return top 5 results
+  0.2   // threshold: 0.2 works best with all-MiniLM-L6-v2 (not 0.7!)
+);
+
+results.forEach(r => {
+  console.log(`Score: ${r.score.toFixed(3)}, Text: ${r.metadata?.text}`);
+});
+```
+
+**Threshold Selection Guide:**
+- **0.0**: Accept all results (debugging only)
+- **0.2**: Balanced filtering (recommended for production)
+- **0.4**: Strict filtering (may miss relevant results)
+- **0.7**: Too strict (returns 0 results with all-MiniLM-L6-v2)
+
+**Performance:** ~100ms for 10K vectors (Rust implementation)
+
+### askWithContext (RAG Helper)
+
+Helper method that combines embedding generation, vector search, and context injection.
+
+```typescript
+async askWithContext(
+  sessionId: string | BigInt,
+  question: string,
+  topK?: number
+): Promise<string>
+```
+
+**Parameters:**
+- `sessionId`: Active session ID
+- `question`: User's question
+- `topK`: Number of context chunks to retrieve (default: 5)
+
+**Returns:** Enhanced prompt with RAG context injected
+
+**Example:**
+```typescript
+// Automatic workflow: embed → search → format
+const enhanced = await sessionManager.askWithContext(
+  sessionId,
+  'What are the key findings?',
+  3  // Retrieve top 3 relevant chunks
+);
+
+// Send enhanced prompt to LLM
+await sessionManager.sendPromptStreaming(sessionId, enhanced, (chunk) => {
+  process.stdout.write(chunk.content);
+});
+```
+
+**Context Format:**
+```
+Context:
+[Document 1] <text from metadata>
+
+[Document 2] <text from metadata>
+
+Question: <original question>
+```
+
+**Notes:**
+- Falls back to original question if no results found
+- Automatically handles embedding generation
+- Uses production-tested threshold (0.2)
 
 ### getSessionHistory
 
@@ -2210,6 +2366,532 @@ console.log('Encrypted conversation saved with CID:', cid);
 const loaded = await sdk.loadConversation(cid);
 console.log('Loaded messages:', loaded.messages.length);
 ```
+
+## RAG and Vector Databases
+
+The SDK includes a complete **Retrieval-Augmented Generation (RAG)** system that enhances LLM responses by retrieving relevant context from user documents.
+
+### Quick Start
+
+```typescript
+// 1. Get RAG managers
+const vectorRAGManager = sdk.getVectorRAGManager();
+const embeddingService = new HostAdapter({ hostUrl: 'http://host:8080' });
+const documentManager = new DocumentManager({
+  embeddingService,
+  vectorManager: vectorRAGManager,
+  databaseName: 'my-knowledge-base'
+});
+
+// 2. Create vector database
+await vectorRAGManager.createSession('my-knowledge-base');
+
+// 3. Upload document
+const result = await documentManager.processDocument(file);
+console.log(`Added ${result.chunks} chunks`);
+
+// 4. Start RAG-enhanced session
+sessionManager.setVectorRAGManager(vectorRAGManager);
+sessionManager.setEmbeddingService(embeddingService);
+
+const { sessionId } = await sessionManager.startSession({
+  hostUrl: process.env.NEXT_PUBLIC_TEST_HOST_1_URL || 'http://localhost:8083',
+  jobId: 123n,
+  modelName: 'llama-3',
+  chainId: ChainId.BASE_SEPOLIA,
+  ragConfig: {
+    enabled: true,
+    databaseName: 'my-knowledge-base',
+    topK: 5,
+    threshold: 0.2  // Production-tested with all-MiniLM-L6-v2 embeddings
+  }
+});
+
+// 5. Send prompts - RAG context automatically injected
+await sessionManager.sendPrompt(sessionId, 'What does the document say about...?');
+```
+
+### VectorRAGManager
+
+Manages vector databases and semantic search operations.
+
+#### Get VectorRAGManager
+
+```typescript
+const vectorRAGManager = sdk.getVectorRAGManager();
+```
+
+#### createSession
+
+Creates a new vector database.
+
+```typescript
+async createSession(databaseName: string, config?: DatabaseConfig): Promise<string>
+```
+
+**Parameters:**
+- `databaseName` - Unique identifier for the database
+- `config` - Optional configuration (dimensions, metric, encryption)
+
+**Returns:** Database session ID
+
+**Example:**
+```typescript
+const sessionId = await vectorRAGManager.createSession('my-docs', {
+  dimensions: 384,
+  metric: 'cosine',
+  encryption: true
+});
+```
+
+#### addVector / addVectors
+
+Adds vector(s) to database.
+
+```typescript
+async addVector(
+  databaseName: string,
+  id: string,
+  vector: number[],
+  metadata?: VectorMetadata
+): Promise<void>
+
+async addVectors(
+  databaseName: string,
+  vectors: VectorInput[]
+): Promise<AddVectorResult>
+```
+
+**Example:**
+```typescript
+// Single vector
+await vectorRAGManager.addVector('docs', 'doc-1', embedding, {
+  content: 'Document text...',
+  title: 'Getting Started',
+  category: 'tutorial'
+});
+
+// Batch vectors
+const result = await vectorRAGManager.addVectors('docs', [
+  { id: 'doc-1', vector: emb1, metadata: { content: '...' } },
+  { id: 'doc-2', vector: emb2, metadata: { content: '...' } }
+]);
+console.log(`Added ${result.added}, failed ${result.failed}`);
+```
+
+#### search
+
+Searches for similar vectors.
+
+```typescript
+async search(
+  databaseName: string,
+  queryVector: number[],
+  topK: number,
+  options?: SearchOptions
+): Promise<SearchResult[]>
+```
+
+**Parameters:**
+- `queryVector` - Query embedding (384 dimensions)
+- `topK` - Number of results to return
+- `options.threshold` - Minimum similarity score (0-1)
+- `options.filter` - Metadata filter (MongoDB-style)
+- `options.includeVectors` - Include vector arrays in results
+
+**Returns:**
+```typescript
+interface SearchResult {
+  id: string;
+  score: number;
+  metadata: VectorMetadata;
+  vector?: number[];
+}
+```
+
+**Example:**
+```typescript
+const queryEmbedding = await embeddingService.embed('search query');
+const results = await vectorRAGManager.search('docs', queryEmbedding, 5, {
+  threshold: 0.2,  // Production-tested: 0.2 works best with all-MiniLM-L6-v2
+  filter: {
+    $and: [
+      { category: 'tutorial' },
+      { $gte: { createdAt: Date.now() - 86400000 * 30 } }
+    ]
+  }
+});
+
+results.forEach(r => {
+  console.log(`${r.metadata.title} (score: ${r.score})`);
+});
+```
+
+#### searchMultipleDatabases
+
+Searches across multiple databases simultaneously.
+
+```typescript
+async searchMultipleDatabases(
+  databaseNames: string[],
+  queryVector: number[],
+  options: SearchOptions
+): Promise<SearchResult[]>
+```
+
+**Example:**
+```typescript
+const results = await vectorRAGManager.searchMultipleDatabases(
+  ['user-docs', 'shared-docs', 'public-wiki'],
+  queryEmbedding,
+  { topK: 10, threshold: 0.2 }  // Production-tested threshold
+);
+```
+
+#### deleteVector / deleteByMetadata
+
+Deletes vectors from database.
+
+```typescript
+async deleteVector(databaseName: string, id: string): Promise<void>
+
+async deleteByMetadata(
+  databaseName: string,
+  filter: MetadataFilter
+): Promise<DeleteResult>
+```
+
+**Example:**
+```typescript
+// Delete single vector
+await vectorRAGManager.deleteVector('docs', 'doc-1');
+
+// Delete by metadata
+const result = await vectorRAGManager.deleteByMetadata('docs', {
+  $lt: { createdAt: Date.now() - 86400000 * 365 } // Older than 1 year
+});
+console.log(`Deleted ${result.deletedCount} old documents`);
+```
+
+#### Folder Operations
+
+Organize vectors in virtual folder hierarchies.
+
+```typescript
+// Move to folder
+await vectorRAGManager.moveToFolder('docs', 'doc-1', '/tutorials/python');
+
+// Search in folder
+const results = await vectorRAGManager.searchInFolder(
+  'docs',
+  '/tutorials',
+  queryVector,
+  5,
+  { recursive: true }
+);
+
+// List folders
+const folders = vectorRAGManager.listFolders('docs');
+console.log('Folders:', folders);
+
+// Folder statistics
+const stats = vectorRAGManager.getFolderStatistics('docs', '/tutorials');
+console.log('Vectors in folder:', stats.vectorCount);
+```
+
+#### Database Management
+
+```typescript
+// Get metadata
+const metadata = vectorRAGManager.getDatabaseMetadata('docs');
+console.log('Created:', metadata.createdAt);
+
+// Get statistics
+const stats = vectorRAGManager.getDatabaseStats('docs');
+console.log('Total vectors:', stats.vectorCount);
+
+// List all databases
+const databases = vectorRAGManager.listDatabases();
+databases.forEach(db => console.log(db.databaseName));
+
+// Delete database
+await vectorRAGManager.deleteDatabase('old-docs');
+
+// Vacuum (reclaim storage)
+const vacuumStats = await vectorRAGManager.vacuum('docs');
+console.log(`Freed ${vacuumStats.spaceFreed} bytes`);
+```
+
+### DocumentManager
+
+Handles document processing, chunking, and embedding generation.
+
+#### Constructor
+
+```typescript
+const documentManager = new DocumentManager({
+  embeddingService: embeddingService,
+  vectorManager: vectorRAGManager,
+  databaseName: 'docs'
+});
+```
+
+#### processDocument
+
+Uploads and processes a document.
+
+```typescript
+async processDocument(
+  file: File,
+  options?: ProcessOptions
+): Promise<ProcessResult>
+```
+
+**Options:**
+- `chunkSize` - Tokens per chunk (default: 500)
+- `overlap` - Token overlap between chunks (default: 50)
+- `metadata` - Additional metadata for all chunks
+- `folderPath` - Virtual folder path
+- `onProgress` - Progress callback
+
+**Returns:**
+```typescript
+interface ProcessResult {
+  documentId: string;
+  chunks: number;
+  tokens: number;
+  processingTime: number;
+  cost?: number;
+}
+```
+
+**Example:**
+```typescript
+const result = await documentManager.processDocument(file, {
+  chunkSize: 500,
+  overlap: 50,
+  metadata: { author: 'John Doe', category: 'tutorial' },
+  folderPath: '/tutorials/python',
+  onProgress: (progress) => {
+    console.log(`Progress: ${progress.progress}%`);
+  }
+});
+
+console.log(`Processed ${result.chunks} chunks in ${result.processingTime}ms`);
+```
+
+#### processBatch
+
+Processes multiple documents in parallel.
+
+```typescript
+async processBatch(
+  files: File[],
+  options?: BatchOptions
+): Promise<BatchResult>
+```
+
+**Example:**
+```typescript
+const result = await documentManager.processBatch(files, {
+  concurrency: 3,
+  continueOnError: true
+});
+
+console.log(`Success: ${result.successful}, Failed: ${result.failed}`);
+```
+
+#### deleteDocument
+
+Deletes a document and all its chunks.
+
+```typescript
+async deleteDocument(documentId: string): Promise<void>
+```
+
+#### estimateCost
+
+Estimates cost before processing.
+
+```typescript
+async estimateCost(file: File): Promise<CostEstimate>
+```
+
+**Example:**
+```typescript
+const estimate = await documentManager.estimateCost(largePdf);
+console.log(`Estimated cost: $${estimate.estimatedCost}`);
+console.log(`Chunks: ${estimate.estimatedChunks}`);
+```
+
+### Embedding Services
+
+Three embedding adapters for different deployment scenarios.
+
+#### HostAdapter (Recommended for Production)
+
+Zero-cost, host-side embeddings using local models.
+
+```typescript
+import { HostAdapter } from '@fabstir/sdk-core/embeddings';
+
+const embeddingService = new HostAdapter({
+  hostUrl: 'http://your-host:8080',
+  model: 'all-MiniLM-L6-v2',
+  dimensions: 384
+});
+```
+
+**Benefits:**
+- Zero API costs
+- 9x faster than target (11ms vs 100ms)
+- No third-party data exposure
+- GDPR compliant
+
+#### OpenAIAdapter
+
+External API using OpenAI embeddings.
+
+```typescript
+import { OpenAIAdapter } from '@fabstir/sdk-core/embeddings';
+
+const embeddingService = new OpenAIAdapter({
+  apiKey: process.env.OPENAI_API_KEY,
+  model: 'text-embedding-3-small',
+  dimensions: 384,
+  maxRetries: 3
+});
+```
+
+**Cost:** ~$0.02 per 1M tokens
+
+#### CohereAdapter
+
+External API using Cohere embeddings.
+
+```typescript
+import { CohereAdapter } from '@fabstir/sdk-core/embeddings';
+
+const embeddingService = new CohereAdapter({
+  apiKey: process.env.COHERE_API_KEY,
+  model: 'embed-english-v3.0',
+  dimensions: 384
+});
+```
+
+**Cost:** ~$0.10 per 1M tokens
+
+### Permissions and Sharing
+
+Control access to vector databases with fine-grained permissions.
+
+#### PermissionManager
+
+```typescript
+import { PermissionManager } from '@fabstir/sdk-core/permissions';
+
+const permissionManager = new PermissionManager(ownerAddress, {
+  auditLogger: true
+});
+
+// Grant permissions
+permissionManager.grant('docs', readerAddress, 'reader');
+permissionManager.grant('docs', writerAddress, 'writer');
+
+// Check permissions
+const canWrite = permissionManager.check('docs', 'write', userAddress);
+
+// Revoke permissions
+permissionManager.revoke('docs', userAddress);
+
+// List permissions
+const permissions = permissionManager.listPermissions('docs');
+
+// Get audit logs
+const logs = permissionManager.getAuditLogs('docs');
+```
+
+**Permission Levels:**
+- **reader** - Read-only access (search)
+- **writer** - Read + write access (add/update/delete vectors)
+- **owner** - Full control (manage permissions, delete database)
+
+#### SharingManager
+
+```typescript
+import { SharingManager } from '@fabstir/sdk-core/sharing';
+
+const sharingManager = new SharingManager({
+  permissionManager: sdk.getPermissionManager()
+});
+
+// Create invitation
+const invitation = await sharingManager.createInvitation({
+  databaseName: 'docs',
+  recipientAddress: '0x123...',
+  role: 'reader',
+  expiresIn: 86400000 // 24 hours
+});
+
+console.log('Invitation code:', invitation.invitationCode);
+
+// Generate access token
+const token = await sharingManager.generateAccessToken({
+  databaseName: 'docs',
+  role: 'reader',
+  expiresIn: 3600000,   // 1 hour
+  usageLimit: 100       // Max 100 uses
+});
+
+// Revoke invitation
+await sharingManager.revokeInvitation(invitationId);
+```
+
+### RAG Configuration in Sessions
+
+Enable RAG when starting LLM sessions.
+
+```typescript
+const { sessionId } = await sessionManager.startSession({
+  hostUrl: process.env.NEXT_PUBLIC_TEST_HOST_1_URL || 'http://localhost:8083',
+  jobId: 123n,
+  modelName: 'llama-3',
+  chainId: ChainId.BASE_SEPOLIA,
+  ragConfig: {
+    enabled: true,
+    databaseName: 'my-knowledge-base',
+    topK: 5,                    // Retrieve top 5 most similar chunks
+    threshold: 0.2,             // Production-tested: 0.2 works with all-MiniLM-L6-v2
+    conversationMemory: {
+      enabled: true,
+      maxMessages: 10,          // Store last 10 messages
+      includeRecent: 5,         // Always include 5 most recent
+      similarityThreshold: 0.8  // For historical retrieval
+    }
+  }
+});
+```
+
+### Monitoring RAG Performance
+
+```typescript
+const session = sessionManager.getSession(sessionId.toString());
+console.log('RAG Metrics:', {
+  contextsRetrieved: session.ragMetrics.contextsRetrieved,
+  avgSimilarity: session.ragMetrics.avgSimilarityScore,
+  retrievalTime: session.ragMetrics.retrievalTimeMs,
+  tokensAdded: session.ragMetrics.tokensAdded
+});
+```
+
+### Comprehensive Documentation
+
+For complete RAG documentation, see:
+
+- **[RAG API Reference](./RAG_API_REFERENCE.md)** - Complete API documentation
+- **[RAG Implementation Plan](./IMPLEMENTATION_CHAT_RAG.md)** - Implementation progress and architecture
+- **[RAG Manual Testing](./RAG_MANUAL_TESTING_GUIDE.md)** - Testing host embedding endpoints
+- **[RAG Node Integration](./node-reference/RAG_SDK_INTEGRATION.md)** - Host-side integration guide
 
 ## Treasury Management
 

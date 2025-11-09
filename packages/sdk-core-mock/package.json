@@ -1,0 +1,27 @@
+{
+  "name": "@fabstir/sdk-core-mock",
+  "version": "0.1.0",
+  "description": "Mock implementation of Fabstir SDK Core for UI development",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@fabstir/sdk-core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  },
+  "keywords": [
+    "fabstir",
+    "sdk",
+    "mock",
+    "testing",
+    "ui-development"
+  ],
+  "author": "Fabstir",
+  "license": "MIT"
+}

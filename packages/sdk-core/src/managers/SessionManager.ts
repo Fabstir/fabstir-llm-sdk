@@ -14,7 +14,14 @@ import {
   SDKError,
   SessionConfig,
   SessionJob,
-  CheckpointProof
+  CheckpointProof,
+  Vector,
+  UploadVectorsMessage,
+  UploadVectorsResponse,
+  UploadVectorsResult,
+  SearchVectorsMessage,
+  SearchVectorsResponse,
+  SearchResult
 } from '../types';
 import { PaymentManager } from './PaymentManager';
 import { StorageManager } from './StorageManager';
@@ -25,6 +32,26 @@ import { ChainRegistry } from '../config/ChainRegistry';
 import { UnsupportedChainError } from '../errors/ChainErrors';
 import { PricingValidationError } from '../errors/pricing-errors';
 import { bytesToHex } from '../crypto/utilities';
+
+/**
+ * Convert model hash to short name that nodes expect in their .env MODEL_NAME
+ * If not a known hash, return as-is (could be a short name already)
+ */
+function convertModelHashToName(modelHashOrName: string): string {
+  const MODEL_HASH_TO_NAME: Record<string, string> = {
+    '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced': 'tiny-vicuna',
+    '0x14843424179fbcb9aeb7fd446fa97143300609757bd49ffb3ec7fb2f75aed1ca': 'tinyllama',
+    '0x27c438a3cbc9e67878e65ca69db4fef2323743afbcd565317fea401ba8b2ae5d': 'gpt-oss-20b'
+  };
+
+  // If it's a hash we recognize, convert it
+  if (MODEL_HASH_TO_NAME[modelHashOrName]) {
+    return MODEL_HASH_TO_NAME[modelHashOrName];
+  }
+
+  // Otherwise return as-is (could already be a short name, or unknown model)
+  return modelHashOrName;
+}
 
 export interface SessionState {
   sessionId: bigint;
@@ -41,6 +68,7 @@ export interface SessionState {
   startTime: number;
   endTime?: number;
   encryption?: boolean; // NEW: Track if session uses encryption
+  groupId?: string; // NEW: Session Groups integration
 }
 
 // Extended SessionConfig with chainId
@@ -51,6 +79,7 @@ export interface ExtendedSessionConfig extends SessionConfig {
   paymentMethod: 'deposit' | 'direct';
   depositAmount?: ethers.BigNumberish;
   encryption?: boolean; // NEW: Enable E2EE
+  groupId?: string; // NEW: Session Groups integration
 }
 
 export class SessionManager implements ISessionManager {
@@ -58,11 +87,13 @@ export class SessionManager implements ISessionManager {
   private storageManager: StorageManager;
   private hostManager?: HostManager; // Optional until set after auth
   private encryptionManager?: EncryptionManager; // NEW: Optional until set after auth
+  private sessionGroupManager?: any; // NEW: Session Groups integration (SessionGroupManager)
   private wsClient?: WebSocketClient;
   private sessions: Map<string, SessionState> = new Map();
   private initialized = false;
   private sessionKey?: Uint8Array; // NEW: Store session key for Phase 4.2
   private messageIndex: number = 0; // NEW: For Phase 4.2 replay protection
+  private pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: any) => void; timeoutId: NodeJS.Timeout }> = new Map(); // Host-side RAG request tracking
 
   constructor(
     paymentManager: PaymentManager,
@@ -200,12 +231,38 @@ export class SessionManager implements ISessionManager {
       const jobId = typeof result === 'number' ? BigInt(result) : result.jobId || result;
       const sessionId = typeof result === 'number' ? BigInt(result) : result.sessionId || jobId;
 
+      // Validate and merge RAG config if provided
+      let ragConfig: RAGSessionConfig | undefined;
+      if (config.ragConfig) {
+        validateRAGConfig(config.ragConfig);
+        ragConfig = mergeRAGConfig(config.ragConfig);
+      }
+
+      // NEW: Session Groups integration - Validate groupId if provided
+      if (config.groupId !== undefined) {
+        // Validate groupId format (must not be empty if provided)
+        if (config.groupId.trim() === '') {
+          throw new SDKError('Invalid group ID', 'INVALID_GROUP_ID');
+        }
+
+        // Verify group exists and user has permission (only if manager available)
+        if (this.sessionGroupManager) {
+          const userAddress = await this.storageManager.getUserAddress();
+          if (!userAddress) {
+            throw new SDKError('User not authenticated', 'USER_NOT_AUTHENTICATED');
+          }
+
+          // Will throw if group doesn't exist or user lacks permission
+          await this.sessionGroupManager.getSessionGroup(config.groupId, userAddress);
+        }
+      }
+
       // Create session state
       const sessionState: SessionState = {
         sessionId: sessionId,
         jobId: jobId,
         chainId: config.chainId,
-        model,
+        model: convertModelHashToName(model),  // Convert hash to short name for node compatibility
         provider,
         endpoint,
         status: 'active',
@@ -214,7 +271,16 @@ export class SessionManager implements ISessionManager {
         checkpoints: [],
         totalTokens: 0,
         startTime: Date.now(),
-        encryption: enableEncryption  // NEW (Phase 6.2): Store encryption preference
+        encryption: enableEncryption,  // NEW (Phase 6.2): Store encryption preference
+        groupId: config.groupId,  // NEW: Session Groups integration
+        ragConfig: ragConfig,  // NEW (Phase 5.1): Store RAG config
+        ragMetrics: ragConfig?.enabled ? {
+          totalRetrievals: 0,
+          averageSimilarity: 0,
+          averageLatencyMs: 0,
+          emptyRetrievals: 0,
+          totalContextTokens: 0
+        } : undefined
       };
 
       // Store in memory
@@ -244,6 +310,18 @@ export class SessionManager implements ISessionManager {
         createdAt: sessionState.startTime,
         updatedAt: sessionState.startTime
       });
+
+      // NEW: Session Groups integration - Link session to group if groupId provided
+      if (config.groupId && this.sessionGroupManager) {
+        const userAddress = await this.storageManager.getUserAddress();
+        if (userAddress) {
+          await this.sessionGroupManager.addChatSession(
+            config.groupId,
+            userAddress,
+            sessionId.toString()
+          );
+        }
+      }
 
       return {
         sessionId: sessionId,
@@ -318,19 +396,22 @@ export class SessionManager implements ISessionManager {
     }
 
     try {
-      // Add prompt to session
+      // Inject RAG context if enabled
+      const augmentedPrompt = await this.injectRAGContext(sessionId.toString(), prompt);
+
+      // Add original prompt to session (not augmented)
       session.prompts.push(prompt);
 
       // Use REST API instead of WebSocket (as per node implementation)
       console.log('Session endpoint from storage:', session.endpoint);
       const endpoint = session.endpoint || 'http://localhost:8080';
       const httpUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
-      
-      // Call REST API for inference
+
+      // Call REST API for inference with augmented prompt
       const inferenceUrl = `${httpUrl}/v1/inference`;
       const requestBody = {
-        model: session.model || 'tiny-vicuna-1b',
-        prompt: prompt,
+        model: session.model,
+        prompt: augmentedPrompt,  // Use RAG-augmented prompt
         max_tokens: 200,  // Allow longer responses for poems, stories, etc.
         temperature: 0.7,  // Add temperature for better responses
         sessionId: sessionId.toString(),
@@ -394,6 +475,17 @@ export class SessionManager implements ISessionManager {
           timestamp: Date.now()
         }
       );
+
+      // Store in conversation memory if enabled
+      const conversationMemory = this.conversationMemories?.get(sessionId.toString());
+      if (conversationMemory) {
+        try {
+          await conversationMemory.addMessage('user', prompt);
+          await conversationMemory.addMessage('assistant', response);
+        } catch (memError: any) {
+          console.warn(`Failed to store messages in conversation memory: ${memError.message}`);
+        }
+      }
 
       return response;
     } catch (error: any) {
@@ -462,12 +554,15 @@ export class SessionManager implements ISessionManager {
     }
 
     try {
-      // Add prompt to session
+      // Inject RAG context if enabled
+      const augmentedPrompt = await this.injectRAGContext(sessionIdStr, prompt);
+
+      // Add original prompt to session (not augmented)
       session.prompts.push(prompt);
 
       // Get WebSocket URL from endpoint
       const endpoint = session.endpoint || 'http://localhost:8080';
-      const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://') 
+      const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
         ? endpoint 
         : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
 
@@ -483,6 +578,9 @@ export class SessionManager implements ISessionManager {
         this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
         await this.wsClient.connect();
         console.log('[SessionManager] ✅ WebSocket connected successfully');
+
+        // Set up global RAG message handlers
+        this._setupRAGMessageHandlers();
 
         // NEW (Phase 6.2): Use encryption by default
         if (session.encryption && this.encryptionManager) {
@@ -691,10 +789,10 @@ export class SessionManager implements ISessionManager {
             type: 'prompt',
             chain_id: session.chainId,
             jobId: session.jobId.toString(),  // Include jobId for settlement tracking
-            prompt: prompt,
+            prompt: augmentedPrompt,  // Use RAG-augmented prompt
             request: {
-              model: 'tiny-vicuna',  // Use tiny-vicuna as confirmed by node developer
-              prompt: prompt,
+              model: session.model,
+              prompt: augmentedPrompt,  // Use RAG-augmented prompt
               max_tokens: 50,
               temperature: 0.7,
               stream: true
@@ -733,6 +831,17 @@ export class SessionManager implements ISessionManager {
             timestamp: Date.now()
           }
         );
+
+        // Store in conversation memory if enabled
+        const conversationMemory = this.conversationMemories?.get(sessionIdStr);
+        if (conversationMemory) {
+          try {
+            await conversationMemory.addMessage('user', prompt);
+            await conversationMemory.addMessage('assistant', finalResponse);
+          } catch (memError: any) {
+            console.warn(`Failed to store messages in conversation memory: ${memError.message}`);
+          }
+        }
 
         return finalResponse;
       } else {
@@ -817,10 +926,10 @@ export class SessionManager implements ISessionManager {
             type: 'prompt',
             chain_id: session.chainId,
             jobId: session.jobId.toString(),  // Include jobId for settlement tracking
-            prompt: prompt,
+            prompt: augmentedPrompt,  // Use RAG-augmented prompt
             request: {
-              model: 'tiny-vicuna',  // Use tiny-vicuna as confirmed by node developer
-              prompt: prompt,
+              model: session.model,
+              prompt: augmentedPrompt,  // Use RAG-augmented prompt
               max_tokens: 50,
               temperature: 0.7,
               stream: false
@@ -849,6 +958,17 @@ export class SessionManager implements ISessionManager {
             timestamp: Date.now()
           }
         );
+
+        // Store in conversation memory if enabled
+        const conversationMemory = this.conversationMemories?.get(sessionIdStr);
+        if (conversationMemory) {
+          try {
+            await conversationMemory.addMessage('user', prompt);
+            await conversationMemory.addMessage('assistant', response);
+          } catch (memError: any) {
+            console.warn(`Failed to store messages in conversation memory: ${memError.message}`);
+          }
+        }
 
         return response;
       }
@@ -1621,7 +1741,7 @@ export class SessionManager implements ISessionManager {
       // Call REST API for inference
       const inferenceUrl = `${httpUrl}/v1/inference`;
       const requestBody = {
-        model: session.model || 'tiny-vicuna-1b',
+        model: session.model,
         prompt: prompt,
         max_tokens: 200,  // Allow longer responses for poems, stories, etc.
         temperature: 0.7,  // Add temperature for better responses
@@ -1712,5 +1832,539 @@ export class SessionManager implements ISessionManager {
     if (this.wsClient?.isConnected()) {
       this.wsClient.disconnect();
     }
+  }
+
+
+  /**
+   * Upload vectors to host for RAG search (Phase 2, Sub-phase 2.2)
+   *
+   * Sends document embedding vectors to the host node for storage in session memory.
+   * Automatically splits large uploads into 1000-vector batches.
+   * Vectors are automatically cleaned up when the WebSocket session ends.
+   *
+   * @param sessionId - Active session ID
+   * @param vectors - Array of Vector objects with id, vector (384d), and metadata
+   * @param replace - If true, replace all existing vectors; if false, append
+   * @returns Promise with upload statistics (uploaded count, rejected count, errors)
+   * @throws SDKError if session invalid, WebSocket not connected, or dimension validation fails
+   */
+  async uploadVectors(
+    sessionId: string,
+    vectors: Vector[],
+    replace: boolean = false
+  ): Promise<UploadVectorsResult> {
+    // 1. Validate session exists and is active
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new SDKError(
+        `Session ${sessionId} not found`,
+        'SESSION_NOT_FOUND'
+      );
+    }
+
+    if (session.status !== 'active') {
+      throw new SDKError(
+        `Session ${sessionId} is not active (status: ${session.status})`,
+        'SESSION_NOT_ACTIVE'
+      );
+    }
+
+    // 2. Ensure WebSocket is connected (initialize if needed)
+    if (!this.wsClient || !this.wsClient.isConnected()) {
+      console.log('[SessionManager] 🔌 Initializing WebSocket for vector upload...');
+
+      // Get WebSocket URL from endpoint
+      const endpoint = session.endpoint || 'http://localhost:8080';
+      const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
+        ? endpoint
+        : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
+
+      console.log('[SessionManager] Connecting to:', wsUrl);
+      this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+      await this.wsClient.connect();
+      console.log('[SessionManager] ✅ WebSocket connected');
+
+      // Set up global RAG message handlers
+      this._setupRAGMessageHandlers();
+
+      // Send session init (encryption support)
+      if (session.encryption && this.encryptionManager) {
+        console.log('[SessionManager] 🔐 Sending encrypted session init...');
+        const config: ExtendedSessionConfig = {
+          chainId: session.chainId,
+          host: session.provider,
+          modelId: session.model,
+          endpoint: session.endpoint,
+          paymentMethod: 'deposit',
+          encryption: true
+        };
+        await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
+      } else {
+        console.log('[SessionManager] 📤 Sending plaintext session init...');
+        const signer = (this.paymentManager as any).signer;
+        if (!signer) {
+          throw new Error('PaymentManager signer not available');
+        }
+        const userAddress = await signer.getAddress();
+        if (!userAddress) {
+          throw new Error('Failed to get user address from signer');
+        }
+
+        const config: ExtendedSessionConfig = {
+          chainId: session.chainId,
+          host: session.provider,
+          modelId: session.model,
+          endpoint: session.endpoint,
+          paymentMethod: 'deposit',
+          encryption: false
+        };
+        await this.sendPlaintextInit(this.wsClient, config, session.sessionId, session.jobId, userAddress);
+      }
+
+      console.log('[SessionManager] ✅ Session initialized, ready for vector upload');
+    }
+
+    // 3. Handle empty vectors array
+    if (vectors.length === 0) {
+      return {
+        uploaded: 0,
+        rejected: 0,
+        errors: []
+      };
+    }
+
+    // 4. Validate vector dimensions (384 for all-MiniLM-L6-v2)
+    const EXPECTED_DIMENSION = 384;
+    for (const vector of vectors) {
+      if (vector.vector.length !== EXPECTED_DIMENSION) {
+        throw new SDKError(
+          `Vector ${vector.id}: Invalid dimensions: expected ${EXPECTED_DIMENSION}, got ${vector.vector.length}`,
+          'INVALID_VECTOR_DIMENSION'
+        );
+      }
+    }
+
+    // 5. Split into batches (max 1000 vectors per batch)
+    const BATCH_SIZE = 1000;
+    const batches: Vector[][] = [];
+    for (let i = 0; i < vectors.length; i += BATCH_SIZE) {
+      batches.push(vectors.slice(i, i + BATCH_SIZE));
+    }
+
+    // 6. Upload each batch and accumulate results
+    let totalUploaded = 0;
+    let totalRejected = 0;
+    const allErrors: string[] = [];
+
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      const isFirstBatch = batchIndex === 0;
+
+      // First batch uses caller's replace value, subsequent batches always append
+      const batchReplace = isFirstBatch ? replace : false;
+
+      // Generate unique request ID
+      const requestId = crypto.randomUUID();
+
+      // Create upload message
+      const message: UploadVectorsMessage = {
+        type: 'uploadVectors',
+        session_id: sessionId, // Required for SessionStore (v8.3.4+)
+        requestId,
+        vectors: batch,
+        replace: batchReplace
+      };
+
+      try {
+        // Send message and wait for response (with 30s timeout)
+        const response = await this._sendRAGRequest(requestId, message, 30000);
+
+        // Accumulate results
+        totalUploaded += response.uploaded || 0;
+        totalRejected += response.rejected || 0;
+        if (response.errors && response.errors.length > 0) {
+          allErrors.push(...response.errors);
+        }
+      } catch (error: any) {
+        // If batch fails, add error and continue (best effort)
+        allErrors.push(`Batch ${batchIndex + 1} failed: ${error.message}`);
+        totalRejected += batch.length;
+      }
+    }
+
+    return {
+      uploaded: totalUploaded,
+      rejected: totalRejected,
+      errors: allErrors
+    };
+  }
+
+  /**
+   * Search for similar vectors in session memory (host-side RAG)
+   *
+   * Performs cosine similarity search against vectors stored in the host's session memory.
+   * Returns top-K most similar vectors sorted by descending similarity score.
+   *
+   * @param sessionId - Session identifier (string format)
+   * @param queryVector - Query embedding vector (384 dimensions for all-MiniLM-L6-v2)
+   * @param k - Number of top results to return (1-20, default: 5)
+   * @param threshold - Minimum similarity score (0.0-1.0, default: 0.7)
+   * @returns Promise<SearchResult[]> - Array of search results sorted by score (descending)
+   * @throws {SDKError} If session not found, not active, or WebSocket not connected
+   * @throws {SDKError} If query vector has invalid dimensions or parameters out of range
+   * @throws {SDKError} If search times out after 10 seconds
+   */
+  async searchVectors(
+    sessionId: string,
+    queryVector: number[],
+    k: number = 5,
+    threshold: number = 0.2
+  ): Promise<SearchResult[]> {
+    // Validate session exists and is active
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new SDKError(`Session ${sessionId} not found`, 'SESSION_NOT_FOUND');
+    }
+    if (session.status !== 'active') {
+      throw new SDKError(
+        `Session ${sessionId} is not active (status: ${session.status})`,
+        'SESSION_NOT_ACTIVE'
+      );
+    }
+
+    // Validate WebSocket connection
+    if (!this.wsClient) {
+      throw new SDKError(
+        'WebSocket not connected - call startSession() first',
+        'WEBSOCKET_NOT_CONNECTED'
+      );
+    }
+
+    // Validate query vector dimensions (384 for all-MiniLM-L6-v2)
+    if (queryVector.length !== 384) {
+      throw new SDKError(
+        `Invalid query vector dimensions: expected 384, got ${queryVector.length}`,
+        'INVALID_VECTOR_DIMENSIONS'
+      );
+    }
+
+    // Validate k parameter (1-20)
+    if (k < 1 || k > 20) {
+      throw new SDKError(
+        `Parameter k must be between 1 and 20, got ${k}`,
+        'INVALID_PARAMETER'
+      );
+    }
+
+    // Validate threshold parameter (0.0-1.0)
+    if (threshold < 0.0 || threshold > 1.0) {
+      throw new SDKError(
+        `Parameter threshold must be between 0.0 and 1.0, got ${threshold}`,
+        'INVALID_PARAMETER'
+      );
+    }
+
+    // Generate request ID
+    const requestId = `search_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+    // Build searchVectors message (camelCase JSON format)
+    const message: SearchVectorsMessage = {
+      type: 'searchVectors',
+      session_id: sessionId, // Required for SessionStore (v8.3.4+)
+      requestId,
+      queryVector,
+      k,
+      threshold
+    };
+
+    // Send request and wait for response (10-second timeout)
+    const response = await this._sendRAGRequest(requestId, message, 10000);
+
+    // Handle error response
+    if (response.error) {
+      throw new SDKError(
+        `Search failed: ${response.error}`,
+        'SEARCH_ERROR'
+      );
+    }
+
+    // Return results (already sorted by score descending from host)
+    return response.results || [];
+  }
+
+  /**
+   * Convenience helper: Generate embedding + search + inject context
+   * Returns enhanced prompt with RAG context or original question on error
+   *
+   * @param sessionId - Session identifier
+   * @param question - User's question to enhance with context
+   * @param topK - Number of results to retrieve (default: 5)
+   * @returns Enhanced prompt with context or original question
+   */
+  async askWithContext(
+    sessionId: string,
+    question: string,
+    topK: number = 5
+  ): Promise<string> {
+    try {
+      // Get session to retrieve host endpoint and chainId
+      const session = this.sessions.get(sessionId);
+      if (!session || session.status !== 'active') {
+        return question; // Graceful degradation
+      }
+
+      // Create HostAdapter to generate embedding
+      const { HostAdapter } = await import('../embeddings/adapters/HostAdapter');
+      const hostAdapter = new HostAdapter({
+        hostUrl: session.endpoint || 'http://localhost:8080',
+        chainId: session.chainId || 84532,
+        model: 'all-MiniLM-L6-v2'
+      });
+
+      // Generate embedding for question
+      const embeddingResult = await hostAdapter.embedText(question, 'query');
+      const queryVector = embeddingResult.embedding;
+
+      // Search for similar vectors (threshold=0.7)
+      const results = await this.searchVectors(sessionId, queryVector, topK, 0.7);
+
+      // Inject context into prompt
+      return this.injectRAGContext(question, results);
+    } catch (error) {
+      // Graceful degradation: return original question on any error
+      console.warn('askWithContext failed, returning original question:', error);
+      return question;
+    }
+  }
+
+  /**
+   * Format search results into RAG context and inject into prompt
+   * Returns original question if no valid results
+   *
+   * @private
+   * @param question - User's question
+   * @param results - Search results from vector store
+   * @returns Enhanced prompt with context or original question
+   */
+  private injectRAGContext(question: string, results: SearchResult[]): string {
+    // If no results or results lack text metadata, return original question
+    if (!results || results.length === 0) {
+      return question;
+    }
+
+    // Extract text from metadata (graceful handling of missing text field)
+    const contextChunks: string[] = [];
+    for (const result of results) {
+      if (result.metadata && typeof result.metadata.text === 'string') {
+        contextChunks.push(result.metadata.text);
+      }
+    }
+
+    // If no valid text chunks found, return original question
+    if (contextChunks.length === 0) {
+      return question;
+    }
+
+    // Format: Context:\n{chunk1}\n\n{chunk2}\n\n...\n\nQuestion: {question}
+    const context = contextChunks.join('\n\n');
+    return `Context:\n${context}\n\nQuestion: ${question}`;
+  }
+
+  /**
+   * Send RAG request and wait for response with timeout
+   * @private
+   */
+  private async _sendRAGRequest(
+    requestId: string,
+    message: any,
+    timeoutMs: number
+  ): Promise<any> {
+    return new Promise((resolve, reject) => {
+      // Set up timeout
+      const timeoutId = setTimeout(() => {
+        this.pendingRequests.delete(requestId);
+        reject(new SDKError(
+          `Request ${requestId} timed out after ${timeoutMs}ms`,
+          'REQUEST_TIMEOUT'
+        ));
+      }, timeoutMs);
+
+      // Track pending request
+      this.pendingRequests.set(requestId, {
+        resolve,
+        reject,
+        timeoutId
+      });
+
+      // Send WebSocket message
+      this.wsClient!.sendWithoutResponse(message).catch((error) => {
+        clearTimeout(timeoutId);
+        this.pendingRequests.delete(requestId);
+        reject(error);
+      });
+    });
+  }
+
+  /**
+   * Handle uploadVectorsResponse from host
+   * @private
+   */
+  private _handleUploadVectorsResponse(response: UploadVectorsResponse): void {
+    const pending = this.pendingRequests.get(response.requestId);
+    if (!pending) {
+      console.warn(`Received uploadVectorsResponse for unknown request: ${response.requestId}`);
+      return;
+    }
+
+    // Clear timeout
+    clearTimeout(pending.timeoutId);
+    this.pendingRequests.delete(response.requestId);
+
+    // Resolve with response data
+    if (response.status === 'success') {
+      pending.resolve({
+        uploaded: response.uploaded,
+        rejected: 0,
+        errors: []
+      });
+    } else {
+      pending.resolve({
+        uploaded: response.uploaded || 0,
+        rejected: 1,
+        errors: response.error ? [response.error] : []
+      });
+    }
+  }
+
+  /**
+   * Handle searchVectorsResponse from host
+   * @private
+   */
+  private _handleSearchVectorsResponse(response: SearchVectorsResponse): void {
+    const pending = this.pendingRequests.get(response.requestId);
+    if (!pending) {
+      console.warn(`Received searchVectorsResponse for unknown request: ${response.requestId}`);
+      return;
+    }
+
+    // Clear timeout
+    clearTimeout(pending.timeoutId);
+    this.pendingRequests.delete(response.requestId);
+
+    // Resolve with response data (results or error)
+    pending.resolve({
+      results: response.results || [],
+      error: response.error
+    });
+  }
+
+  /**
+   * Set up global message handlers for RAG operations
+   * @private
+   */
+  private _setupRAGMessageHandlers(): void {
+    if (!this.wsClient) {
+      return;
+    }
+
+    // Register handler for RAG-related messages
+    this.wsClient.onMessage((data: any) => {
+      if (data.type === 'uploadVectorsResponse') {
+        this._handleUploadVectorsResponse(data as UploadVectorsResponse);
+      } else if (data.type === 'searchVectorsResponse') {
+        this._handleSearchVectorsResponse(data as SearchVectorsResponse);
+      }
+    });
+  }
+
+  /**
+   * Get session history for a session group
+   *
+   * NEW: Session Groups integration - Returns all sessions in a group with metadata.
+   * Sessions are sorted by startTime descending (newest first).
+   *
+   * @param groupId - Session group ID
+   * @returns Array of session metadata objects sorted by start time (newest first)
+   * @throws {SDKError} If session group manager not available or group not found
+   */
+  async getSessionHistory(groupId: string): Promise<Array<{
+    sessionId: string;
+    model?: string;
+    totalTokens: number;
+    chainId: number;
+    startTime: number;
+    endTime?: number;
+    status: string;
+  }>> {
+    if (!this.sessionGroupManager) {
+      throw new SDKError(
+        'Session group manager not available',
+        'SESSION_GROUP_MANAGER_NOT_AVAILABLE'
+      );
+    }
+
+    // Get user address
+    const userAddress = await this.storageManager.getUserAddress();
+    if (!userAddress) {
+      throw new SDKError('User not authenticated', 'USER_NOT_AUTHENTICATED');
+    }
+
+    // Get group to verify it exists and user has permission
+    const group = await this.sessionGroupManager.getSessionGroup(groupId, userAddress);
+
+    // Build session history from all sessions in group
+    const history = [];
+
+    for (const sessionIdStr of group.chatSessions) {
+      // Try to get from in-memory sessions first
+      let session = this.sessions.get(sessionIdStr);
+
+      // If not in memory, try loading from storage
+      if (!session) {
+        try {
+          const conversation = await this.storageManager.loadConversation(sessionIdStr);
+          if (conversation && conversation.metadata) {
+            // Reconstruct session metadata from storage
+            session = {
+              sessionId: BigInt(sessionIdStr),
+              jobId: BigInt(conversation.metadata.jobId || '0'),
+              chainId: conversation.metadata.chainId,
+              model: conversation.metadata.model,
+              provider: conversation.metadata.provider || '',
+              status: conversation.metadata.status || 'unknown',
+              prompts: [],
+              responses: [],
+              checkpoints: [],
+              totalTokens: conversation.metadata.totalTokens || 0,
+              startTime: conversation.metadata.startTime || conversation.createdAt,
+              endTime: conversation.metadata.endTime,
+              encryption: conversation.metadata.encryption,
+              groupId: groupId
+            } as SessionState;
+          }
+        } catch (error) {
+          // Skip sessions that can't be loaded
+          console.warn(`Failed to load session ${sessionIdStr}:`, error);
+          continue;
+        }
+      }
+
+      if (session) {
+        history.push({
+          sessionId: sessionIdStr,
+          model: session.model,
+          totalTokens: session.totalTokens,
+          chainId: session.chainId,
+          startTime: session.startTime,
+          endTime: session.endTime,
+          status: session.status
+        });
+      }
+    }
+
+    // Sort by startTime descending (newest first)
+    history.sort((a, b) => b.startTime - a.startTime);
+
+    return history;
   }
 }

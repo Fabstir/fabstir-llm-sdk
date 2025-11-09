@@ -18,6 +18,7 @@ import {
   IHostManager,
   ITreasuryManager
 } from './interfaces';
+import { IVectorRAGManager } from './managers/interfaces/IVectorRAGManager';
 import { IWalletProvider } from './interfaces/IWalletProvider';
 import { AuthManager } from './managers/AuthManager';
 import { PaymentManager } from './managers/PaymentManager';
@@ -34,6 +35,7 @@ import { ModelManager } from './managers/ModelManager';
 import { TreasuryManager } from './managers/TreasuryManager';
 import { ClientManager } from './managers/ClientManager';
 import { EncryptionManager } from './managers/EncryptionManager';
+import { VectorRAGManager } from './managers/VectorRAGManager';
 import { ContractManager, ContractAddresses } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 import { SDKConfig, SDKError } from './types';
@@ -100,6 +102,7 @@ export class FabstirSDKCore extends EventEmitter {
   private clientManager?: ClientManager;
   private treasuryManager?: ITreasuryManager;
   private encryptionManager?: EncryptionManager;
+  private vectorRAGManager?: IVectorRAGManager;
   
   private authenticated = false;
   private s5Seed?: string;
@@ -193,7 +196,7 @@ export class FabstirSDKCore extends EventEmitter {
       
       this.authenticated = true;
       console.log('Authentication flag set to true');
-      
+
       // Initialize contract manager
       console.log('Creating ContractManager...');
       this.contractManager = new ContractManager(
@@ -568,6 +571,10 @@ export class FabstirSDKCore extends EventEmitter {
     this.sessionManager = new SessionManager(this.paymentManager as any, this.storageManager);
     console.log('SessionManager created');
 
+    console.log('Creating VectorRAGManager...');
+    this.vectorRAGManager = new VectorRAGManager(this.sessionManager);
+    console.log('VectorRAGManager created');
+
     console.log('Creating TreasuryManager...');
     this.treasuryManager = new TreasuryManager(this.contractManager!);
     console.log('TreasuryManager created');
@@ -763,6 +770,14 @@ export class FabstirSDKCore extends EventEmitter {
   getHostManager(): IHostManager {
     this.ensureAuthenticated();
     return this.hostManager!;
+  }
+
+  /**
+   * Get vector RAG manager for document embeddings and semantic search
+   */
+  getVectorRAGManager(): IVectorRAGManager {
+    this.ensureAuthenticated();
+    return this.vectorRAGManager!;
   }
 
   /**
@@ -1055,6 +1070,7 @@ export class FabstirSDKCore extends EventEmitter {
     this.modelManager = undefined;
     this.clientManager = undefined;
     this.treasuryManager = undefined;
+    this.vectorRAGManager = undefined;
     
     // Clear auth state
     this.provider = undefined;

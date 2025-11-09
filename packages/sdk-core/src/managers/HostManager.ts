@@ -27,7 +27,7 @@ import { HostDiscoveryService } from '../services/HostDiscoveryService';
 // Import the correct NodeRegistry ABI directly
 import NodeRegistryABI from '../contracts/abis/NodeRegistryWithModels-CLIENT-ABI.json';
 import * as secp from '@noble/secp256k1';
-import { bytesToHex } from '../crypto/utilities';
+import { bytesToHex, hexToBytes, toCompressedPub } from '../crypto/utilities';
 import { requestHostPublicKey } from './HostKeyRecovery';
 
 /**
@@ -216,9 +216,32 @@ export class HostManager {
       }
 
       // Extract public key from wallet for encryption
+      let publicKey: string | undefined;
+
       const privKey = this.signer.privateKey?.replace(/^0x/, '');
-      const pubKeyBytes = privKey ? secp.getPublicKey(privKey, true) : undefined;
-      const publicKey = pubKeyBytes ? bytesToHex(pubKeyBytes) : undefined;
+      if (privKey) {
+        // Direct extraction from private key (works for hardcoded keys)
+        const pubKeyBytes = secp.getPublicKey(privKey, true);
+        publicKey = bytesToHex(pubKeyBytes);
+        console.log('✓ Extracted public key from private key (hardcoded wallet)');
+      } else {
+        // Signature-based recovery (works for MetaMask/browser providers)
+        console.log('⚠️  Private key not accessible, using signature-based recovery (MetaMask)');
+        const message = 'Fabstir Host Registration Public Key';
+        const signature = await this.signer.signMessage(message);
+
+        // Recover public key from signature
+        const messageHash = ethers.hashMessage(message);
+        const recoveredPubKey = ethers.SigningKey.recoverPublicKey(messageHash, signature);
+
+        // Convert to compressed format (ethers returns uncompressed 0x04... format)
+        // Remove 0x prefix and convert to bytes
+        const uncompressedBytes = hexToBytes(recoveredPubKey.slice(2));
+        const compressedBytes = toCompressedPub(uncompressedBytes);
+        publicKey = bytesToHex(compressedBytes);
+
+        console.log('✓ Recovered public key from signature:', publicKey);
+      }
 
       // Format metadata as JSON (new requirement)
       const metadataJson = JSON.stringify({

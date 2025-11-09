@@ -1,14 +1,14 @@
 # Vector DB Integration Guide for fabstir-llm-sdk
 
 **Target Audience:** SDK Developers
-**Last Updated:** 2025-01-28
-**Status:** ✅ Phase 6 Complete - Production Ready with Chunked Storage (v0.1.1)
+**Last Updated:** 2025-01-31
+**Status:** ✅ v0.2.0 Complete - Production Ready with CRUD Operations
 
 ## ✅ Implementation Status - PRODUCTION READY
 
-**All Features Implemented and Tested (28/28 tests passing)**
+**All Features Implemented and Tested (100+ tests passing)**
 
-✅ **Phase 1-6 Complete:**
+✅ **v0.2.0 Complete - Full CRUD Operations:**
 - ✅ Session management (create, destroy)
 - ✅ Add vectors with auto-initialization
 - ✅ Search with similarity scoring and threshold filtering
@@ -18,11 +18,16 @@
 - ✅ Hybrid indexing (HNSW for recent + IVF for historical data)
 - ✅ Round-trip persistence (save → load preserves all data)
 - ✅ Multi-session support
-- ✅ **Chunked storage** - Scalable partitioning with lazy loading (Phase 6)
+- ✅ **Chunked storage** - Scalable partitioning with lazy loading
 - ✅ **Encryption-at-rest** - Enabled by default via S5.js (<5% overhead)
 - ✅ **LRU chunk cache** - Configurable memory limits (default 150 MB)
 - ✅ **Parallel chunk loading** - Fast index reconstruction
 - ✅ **1M+ vectors support** - 64 MB for 100K vectors, tested at scale
+- ✅ **DELETE operations** - `deleteVector()` and `deleteByMetadata()` (v0.2.0)
+- ✅ **UPDATE operations** - `updateMetadata()` without re-indexing (v0.2.0)
+- ✅ **METADATA FILTERING** - MongoDB-style search filters (v0.2.0)
+- ✅ **SCHEMA VALIDATION** - Optional metadata type enforcement (v0.2.0)
+- ✅ **VACUUM API** - Manual cleanup of deleted vectors (v0.2.0)
 
 **What this means for you:**
 - ✅ Full RAG with decentralized vector persistence
@@ -31,13 +36,33 @@
 - ✅ **Scales to 1M+ vectors** with efficient chunked storage
 - ✅ **Encrypted by default** - User data security built-in
 - ✅ **Memory efficient** - 64 MB for 100K vectors with lazy loading
-- ✅ Production-ready with comprehensive test coverage
+- ✅ **Production-ready CRUD** - Delete, update, filter, schema validation
+- ✅ **Data lifecycle management** - GDPR compliance, content moderation
+- ✅ Production-ready with comprehensive test coverage (100+ tests)
 
 ---
 
-## 🔄 Breaking Changes (v0.1.0 → v0.1.1)
+## 🔄 Breaking Changes
+
+### v0.1.1 → v0.2.0
 
 **Good News:** No breaking changes in the API! 🎉
+
+**What's New:**
+- ✅ All existing v0.1.1 code works unchanged
+- ✅ New CRUD methods are **additive** (opt-in)
+- ✅ `search()` accepts optional `filter` parameter (backward compatible)
+- ✅ v0.2.0 loads v0.1.1 CIDs (forward-only compatibility)
+- ⚠️ v0.1.1 cannot load v0.2.0 CIDs (manifest v3 not supported)
+
+**New v0.2.0 Methods (optional):**
+- `deleteVector(id)` - Delete single vector
+- `deleteByMetadata(filter)` - Bulk delete
+- `updateMetadata(id, metadata)` - Update without re-indexing
+- `setSchema(schema)` - Optional validation
+- `vacuum()` - Manual cleanup
+
+### v0.1.0 → v0.1.1
 
 **Storage Format Change:**
 - v0.1.1 uses **chunked storage** format for better scalability
@@ -435,17 +460,30 @@ async function getEmbedding(text: string): Promise<number[]> {
 
 ---
 
-##### `session.search(queryVector, k, options?)`
+##### `session.search(queryVector, k, options?)` ✨ **Enhanced in v0.2.0**
 
-Searches for similar vectors using hybrid HNSW/IVF indexing.
+Searches for similar vectors using hybrid HNSW/IVF indexing with optional metadata filtering.
 
 **Parameters:**
 
 ```typescript
 interface SearchOptions {
   threshold?: number; // Minimum similarity score (0-1, default: 0.7)
-  filters?: Record<string, any>; // Metadata filters (future enhancement)
+  filter?: MetadataFilter; // v0.2.0: MongoDB-style metadata filters
+  kOversample?: number; // v0.2.0: Oversample multiplier for filtering (default: k * 2)
   includeVectors?: boolean; // Return vectors in results (default: false)
+}
+
+// v0.2.0: MongoDB-style filter language
+interface MetadataFilter {
+  $eq?: { [field: string]: any };        // Equals
+  $in?: { [field: string]: any[] };      // In array
+  $gt?: { [field: string]: number };     // Greater than
+  $gte?: { [field: string]: number };    // Greater than or equal
+  $lt?: { [field: string]: number };     // Less than
+  $lte?: { [field: string]: number };    // Less than or equal
+  $and?: MetadataFilter[];               // AND combinator
+  $or?: MetadataFilter[];                // OR combinator
 }
 ```
 
@@ -531,6 +569,155 @@ await session.addVectors([
 - Call `saveToS5()` to persist changes to decentralized storage
 - All vectors must have same dimensionality
 - Minimum 3 vectors required for IVF index initialization
+
+---
+
+##### `session.deleteVector(id)` ✨ **NEW in v0.2.0**
+
+Deletes a single vector by ID (soft deletion).
+
+**Parameters:** `id: string` - Vector ID to delete
+
+**Returns:** `Promise<void>`
+
+**Example:**
+
+```typescript
+await session.deleteVector('doc1_chunk1');
+```
+
+**Notes:**
+- Soft deletion: Vector is marked as deleted but not physically removed until `vacuum()`
+- Deleted vectors are automatically filtered from search results
+- Call `vacuum()` before `saveToS5()` to physically remove deleted vectors
+
+---
+
+##### `session.deleteByMetadata(filter)` ✨ **NEW in v0.2.0**
+
+Deletes multiple vectors matching metadata filter (soft deletion).
+
+**Parameters:** `filter: MetadataFilter` - MongoDB-style filter
+
+**Returns:**
+```typescript
+Promise<{
+  deletedIds: string[];
+  deletedCount: number;
+}>
+```
+
+**Example:**
+
+```typescript
+// Delete all vectors with category 'obsolete'
+const result = await session.deleteByMetadata({
+  category: { $eq: 'obsolete' }
+});
+console.log(`Deleted ${result.deletedCount} vectors`);
+
+// Delete with complex filter
+const result2 = await session.deleteByMetadata({
+  $and: [
+    { status: { $eq: 'archived' } },
+    { age_days: { $gt: 365 } }
+  ]
+});
+```
+
+---
+
+##### `session.updateMetadata(id, metadata)` ✨ **NEW in v0.2.0**
+
+Updates metadata for a vector without re-indexing.
+
+**Parameters:**
+- `id: string` - Vector ID
+- `metadata: any` - New metadata (replaces existing)
+
+**Returns:** `Promise<void>`
+
+**Example:**
+
+```typescript
+await session.updateMetadata('doc1_chunk1', {
+  text: 'Updated content...',
+  documentId: 'doc1',
+  chunkIndex: 0,
+  lastModified: Date.now()
+});
+```
+
+**Notes:**
+- Only updates metadata, vector embeddings and index structure unchanged
+- No re-indexing required (O(1) operation)
+- Updated metadata immediately available in search results
+
+---
+
+##### `session.setSchema(schema)` ✨ **NEW in v0.2.0**
+
+Sets optional metadata schema for validation.
+
+**Parameters:** `schema: MetadataSchema | null` - Schema definition (null to disable)
+
+**Returns:** `Promise<void>`
+
+**Example:**
+
+```typescript
+// Set schema
+await session.setSchema({
+  type: 'object',
+  properties: {
+    text: { type: 'string', required: true },
+    documentId: { type: 'string', required: true },
+    chunkIndex: { type: 'number', required: false }
+  }
+});
+
+// Add vectors (validated against schema)
+await session.addVectors([...]);
+
+// Disable schema validation
+await session.setSchema(null);
+```
+
+**Supported Types:** `string`, `number`, `boolean`, `array`, `object`
+
+---
+
+##### `session.vacuum()` ✨ **NEW in v0.2.0**
+
+Physically removes soft-deleted vectors from indices.
+
+**Returns:**
+```typescript
+Promise<{
+  hnswRemoved: number;
+  ivfRemoved: number;
+  totalRemoved: number;
+}>
+```
+
+**Example:**
+
+```typescript
+// Delete some vectors
+await session.deleteByMetadata({ status: 'archived' });
+
+// Vacuum before save to optimize storage
+const stats = await session.vacuum();
+console.log(`Removed ${stats.totalRemoved} deleted vectors`);
+
+// Save compacted index
+const cid = await session.saveToS5();
+```
+
+**Notes:**
+- Optional operation (deleted vectors filtered from search automatically)
+- Recommended before `saveToS5()` to reduce manifest size
+- Performance: <1ms for 10 deletions, <100ms for 1000 deletions
 
 ---
 
