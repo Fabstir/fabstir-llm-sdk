@@ -5,7 +5,8 @@
 **Target Audience**: UI Developer
 
 **Prerequisites**:
-- SDK backend complete (Session Groups, VectorDatabaseManager, PermissionManager)
+- SDK backend complete: SessionGroupManager ✅, PermissionManager ✅, PermissionStorage ✅
+- SDK backend blocked: VectorDatabaseManager ⏳ (Phase 2 blocker)
 - Reference UI: `apps/harness/pages/chat-context-demo.tsx`
 - Design system: Tailwind CSS matching chat-context-demo style
 
@@ -413,6 +414,12 @@ interface SessionResponse {
 - `sessionGroupManager.createSessionGroup(input)` - Create new group
 - `sessionGroupManager.getSessionGroup(groupId, requestor)` - Get group details
 
+**SDK Storage Available**:
+- `SessionGroupStorage` - Groups persist to S5 with encryption
+- `PermissionStorage` - Permissions persist to S5 with encryption (enables multi-user collaboration)
+- Cache-first strategy for performance
+- Automatic cross-device sync
+
 **Files to Modify/Create**:
 - Modify: `apps/harness/pages/chat-context-demo.tsx`
 - Create: `apps/harness/components/session-groups/GroupSelector.tsx` (≤250 lines)
@@ -505,7 +512,13 @@ interface SessionResponse {
    - Radio buttons for default database selection
    - Shows linked databases count
 
-3. **SDK Integration**:
+3. **Permission Cascade Indicator** (when sharing is implemented):
+   - Badge showing number of users with access to this group
+   - Tooltip: "Sharing this group grants {permission} access to all {N} linked databases"
+   - Visual indicator on DatabaseLinker showing inherited permissions from group
+   - Note: Cascade handled automatically by SDK via `permissionManager.grantPermission({ cascade: true })`
+
+4. **SDK Integration**:
    - Update: `sessionGroupManager.updateSessionGroup(groupId, requestor, { name, description })`
    - Link: `sessionGroupManager.linkVectorDatabase(groupId, requestor, dbId)`
    - Unlink: `sessionGroupManager.unlinkVectorDatabase(groupId, requestor, dbId)`
@@ -589,6 +602,131 @@ interface SessionResponse {
 - ✅ Search works
 
 **Estimated Time**: 3-5 hours
+
+---
+
+### Sub-phase 4.4: Share Group Modal
+
+**Goal**: Enable users to share session groups with collaborators
+
+**Status**: ✅ Ready for UI development
+
+**SDK Methods Available** (already implemented):
+- `permissionManager.grantPermission(input)` - Share group with user
+- `permissionManager.revokePermission(resourceId, grantedTo, requestor)` - Remove user access
+- `permissionManager.listPermissions(resourceId, requestor)` - List all shares for group
+- `permissionManager.checkPermission(resourceId, userAddress)` - Check user permission level
+- `permissionManager.getPermissionSummary(resourceId)` - Get share statistics
+
+**Files to Create**:
+- `apps/harness/components/session-groups/ShareGroupModal.tsx` (≤350 lines)
+- `apps/harness/components/session-groups/PermissionRow.tsx` (≤150 lines)
+
+**Component Tests**:
+- [ ] Share with user - Enter wallet address, select permission level (READER/WRITER/ADMIN)
+- [ ] Permission levels - Radio buttons for READER, WRITER, ADMIN with descriptions
+- [ ] List current shares - Shows all users with access
+- [ ] Revoke permission - Remove button for each user
+- [ ] Owner protection - Cannot remove owner's permission (disabled button)
+- [ ] Cascade indicator - Shows linked databases will be shared
+- [ ] Validation - Invalid wallet addresses, duplicate shares
+- [ ] Permission level changes - Update existing permission
+
+**Implementation Details**:
+
+1. **ShareGroupModal component**:
+   - Modal with "Share '{groupName}'" title
+   - **Add User Section**:
+     - Input field for wallet address (with validation pattern: `0x[a-fA-F0-9]{40}`)
+     - Permission level selector (radio buttons with descriptions)
+     - "Share" button (disabled if invalid address)
+   - **Current Shares Section**:
+     - List of PermissionRow components
+     - Shows owner at top (with "Owner" badge, no remove button)
+     - Shows shared users below (sorted by granted date)
+   - **Cascade Indicator**:
+     - Info badge: "Sharing this group grants access to {N} linked databases"
+     - Only shown if group has linked databases
+   - **Close button**
+
+2. **PermissionRow component**:
+   - User wallet address (truncated: `0x1234...5678`)
+   - Permission level badge (color-coded):
+     - READER: Green badge "Can view"
+     - WRITER: Blue badge "Can edit"
+     - ADMIN: Red badge "Full access"
+   - Granted by and date (tooltip on hover)
+   - "Remove" button (not shown for owner)
+   - Confirmation modal when removing ("Are you sure you want to revoke access for 0x1234...5678?")
+
+3. **Permission Level Descriptions** (shown below radio buttons):
+   - **READER**: Can view sessions and search linked databases (read-only access)
+   - **WRITER**: Can add sessions and documents, but cannot modify group settings
+   - **ADMIN**: Full access - can share with others, modify settings, and delete group
+
+4. **SDK Integration**:
+   ```typescript
+   // List current shares
+   const permissions = await permissionManager.listPermissions(groupId, userAddress);
+
+   // Grant permission (cascade to linked databases)
+   await permissionManager.grantPermission({
+     resourceId: groupId,
+     resourceType: 'session_group',
+     grantedBy: userAddress,
+     grantedTo: recipientAddress,
+     level: 'READER', // or 'WRITER', 'ADMIN'
+     cascade: true  // Auto-share linked databases
+   });
+
+   // Revoke permission
+   await permissionManager.revokePermission(
+     groupId,
+     userAddress, // requestor
+     recipientAddress, // grantedTo
+     true // cascade (also remove from linked databases)
+   );
+
+   // Get share count for badge
+   const summary = await permissionManager.getPermissionSummary(groupId);
+   // summary.totalPermissions, summary.readerCount, etc.
+   ```
+
+5. **Cascade Permissions**:
+   - When sharing a group, SDK automatically grants same permission to all linked databases
+   - Show linked databases count: `const linkedDbs = await sessionGroupManager.getLinkedDatabases(groupId);`
+   - Tooltip: "Alice (READER) can view all {linkedDbs.length} linked databases"
+   - Handled automatically by SDK via `cascade: true` parameter
+
+6. **Validation**:
+   - Wallet address format: Must match `/^0x[a-fA-F0-9]{40}$/`
+   - Cannot share with self: `recipientAddress !== userAddress`
+   - Cannot revoke owner: Check if `permission.grantedBy === owner`
+   - Show validation errors below input field
+
+**Manual Testing Checklist**:
+- [ ] Share group with another wallet address
+- [ ] Verify READER permission level works (can view, cannot edit)
+- [ ] Verify WRITER permission level works (can add sessions, cannot delete group)
+- [ ] Verify ADMIN permission level works (full access including sharing)
+- [ ] Revoke permission from user
+- [ ] Test owner cannot be removed (button disabled)
+- [ ] Test cascade (shared user can access linked databases via separate VectorDB UI)
+- [ ] Test invalid wallet address validation
+- [ ] Test duplicate share (should update permission level, not create duplicate)
+- [ ] Test with 10+ shared users
+- [ ] Test permission summary badge shows correct count
+
+**Success Criteria**:
+- ✅ 8/8 tests passing
+- ✅ Share group works with all 3 permission levels
+- ✅ Permission levels enforced
+- ✅ Cascade permissions work (verified via VectorDB access)
+- ✅ Owner protection works (cannot revoke)
+- ✅ Validation prevents invalid shares
+- ✅ UI matches chat-context-demo style
+
+**Estimated Time**: 4-5 hours
 
 ---
 
@@ -878,15 +1016,16 @@ interface SessionResponse {
 **Total UI Work**: ~54-74 hours
 
 **Phase Breakdown**:
-- Phase 2: Vector Database Management UI: 12-16 hours (⏳ Blocked on SDK)
-- Phase 3: RAG Sources Transparency UI: 8-12 hours (✅ Phase 3.1 ready, 3.2 blocked)
-- Phase 4: Session Groups UI: 10-14 hours (✅ Ready - SDK complete)
+- Phase 2: Vector Database Management UI: 12-16 hours (⏳ Blocked on VectorDatabaseManager)
+- Phase 3: RAG Sources Transparency UI: 8-12 hours (✅ Phase 3.1 ready, 3.2 blocked on VectorDatabaseManager)
+- Phase 4: Session Groups UI: 14-19 hours (✅ Ready - SessionGroupManager, PermissionManager, PermissionStorage complete)
+  - Sub-phases: 4.1 Group Selector (3-4h), 4.2 Settings Modal (4-5h), 4.3 History (3-5h), 4.4 Share Modal (4-5h)
 - Phase 6: Dashboard & Navigation: 8-12 hours (✅ Ready)
 - Phase 7: Settings & Advanced Features: 6-10 hours (✅ Ready)
 
 **Ready to Start**:
 - Phase 3.1: Sources Citation in Chat
-- Phase 4: All session groups UI (3 sub-phases)
+- Phase 4: All session groups UI (4 sub-phases)
 - Phase 6: All dashboard/navigation (3 sub-phases)
 - Phase 7: All settings (2 sub-phases)
 
@@ -895,8 +1034,8 @@ interface SessionResponse {
 - Phase 3.2: Document viewer (VectorDatabaseManager.getDocument not implemented)
 
 **Prerequisites**:
-- SDK backend complete (see `docs/IMPLEMENTATION_RAG_MISSING.md`)
-- VectorDatabaseManager implemented (Phase 2 blocker)
+- SDK backend implemented: SessionGroupManager ✅, PermissionManager ✅, PermissionStorage ✅ (see `docs/IMPLEMENTATION_RAG_MISSING.md`)
+- SDK backend blocked: VectorDatabaseManager ⏳ (Phase 2 blocker for database management UI)
 
 **Testing Strategy**:
 - Component tests using Vitest + React Testing Library
