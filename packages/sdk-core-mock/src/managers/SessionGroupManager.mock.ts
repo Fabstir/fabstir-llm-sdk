@@ -395,7 +395,10 @@ export class SessionGroupManagerMock implements ISessionGroupManager {
     await this.delay(100);
 
     const group = await this.getSessionGroup(groupId);
-    return group.permissions || { readers: [], writers: [] };
+    return {
+      readers: group.permissions?.readers ?? [],
+      writers: group.permissions?.writers ?? []
+    };
   }
 
   // Helper Methods

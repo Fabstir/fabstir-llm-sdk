@@ -11,7 +11,6 @@ export type {
 
   // Vector types (from rag-websocket.ts)
   Vector,
-  SearchResult,
 
   // Host types
   HostInfo,
@@ -27,6 +26,14 @@ export type {
   // Common types
   SDKError
 } from '@fabstir/sdk-core';
+
+// Define SearchResult locally (compatible with real SDK's SearchResult from rag-websocket.ts)
+export interface SearchResult {
+  id: string;
+  vector: number[];
+  metadata: Record<string, any>;
+  score: number;
+}
 
 // ===== Phase 11 Types (UI Development - not in real SDK yet) =====
 
@@ -164,4 +171,20 @@ export interface SessionInfo {
   status: 'pending' | 'active' | 'paused' | 'completed' | 'failed' | 'ended';
   createdAt: number;
   groupId?: string; // Link to session group
+}
+
+/**
+ * Extended Session Config for Mock SDK
+ * (Real SDK uses different SessionConfig - this is mock-specific)
+ */
+export interface MockSessionConfig {
+  hostUrl: string;
+  jobId: bigint;
+  modelName: string;
+  chainId: number;
+  groupId?: string;
+  depositAmount?: string;
+  pricePerToken?: number;
+  proofInterval?: number;
+  duration?: number;
 }

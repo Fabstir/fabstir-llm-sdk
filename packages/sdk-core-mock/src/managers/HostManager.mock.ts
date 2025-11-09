@@ -27,35 +27,45 @@ export class HostManagerMock implements IHostManager {
         address: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb',
         apiUrl: 'http://localhost:8080',
         stake: BigInt('1000000000000000000'), // 1 ETH
-        active: true,
+        isActive: true,
         supportedModels: [
           '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced' // TinyVicuna
         ],
         minPricePerTokenNative: BigInt('2272727273'), // ~0.0025 USDC equivalent in wei
         minPricePerTokenStable: BigInt('2000'), // 0.002 USDC
         metadata: {
-          name: 'Primary Test Host',
-          description: 'Fast and reliable LLM inference',
-          region: 'us-east-1'
-        },
-        reputation: 95
+          hardware: {
+            gpu: 'RTX 4090',
+            vram: 24,
+            ram: 64
+          },
+          capabilities: ['inference', 'streaming', 'batch'],
+          location: 'us-east-1',
+          maxConcurrent: 4,
+          costPerToken: 2000
+        }
       },
       {
         address: '0x123d35Cc6634C0532925a3b844Bc9e7595f0bEb',
         apiUrl: 'http://localhost:8081',
         stake: BigInt('500000000000000000'), // 0.5 ETH
-        active: true,
+        isActive: true,
         supportedModels: [
           '0x14843424179fbcb9aeb7fd446fa97143300609757bd49ffb3ec7fb2f75aed1ca' // TinyLlama
         ],
         minPricePerTokenNative: BigInt('1818181818'), // ~0.002 USDC equivalent
         minPricePerTokenStable: BigInt('1500'), // 0.0015 USDC
         metadata: {
-          name: 'Secondary Test Host',
-          description: 'Budget-friendly inference',
-          region: 'us-west-2'
-        },
-        reputation: 88
+          hardware: {
+            gpu: 'RTX 3090',
+            vram: 24,
+            ram: 32
+          },
+          capabilities: ['inference', 'streaming'],
+          location: 'us-west-2',
+          maxConcurrent: 2,
+          costPerToken: 1500
+        }
       }
     ];
 
@@ -146,7 +156,7 @@ export class HostManagerMock implements IHostManager {
 
     return {
       isRegistered: true,
-      isActive: host.active,
+      isActive: host.isActive,
       supportedModels: host.supportedModels || [],
       stake: host.stake,
       metadata: host.metadata,
@@ -160,15 +170,15 @@ export class HostManagerMock implements IHostManager {
     await this.delay(300);
 
     return Array.from(this.mockHosts.values())
-      .filter(host => host.active)
-      .sort((a, b) => (b.reputation || 0) - (a.reputation || 0));
+      .filter(host => host.isActive)
+      .sort((a, b) => Number(b.minPricePerTokenStable) - Number(a.minPricePerTokenStable)); // Sort by price, lower first
   }
 
   async discoverAllActiveHosts(): Promise<Array<{nodeAddress: string; apiUrl: string}>> {
     await this.delay(400);
 
     return Array.from(this.mockHosts.values())
-      .filter(host => host.active)
+      .filter(host => host.isActive)
       .map(host => ({
         nodeAddress: host.address,
         apiUrl: host.apiUrl
@@ -183,7 +193,7 @@ export class HostManagerMock implements IHostManager {
     await this.delay(300);
 
     return Array.from(this.mockHosts.values())
-      .filter(host => host.active && host.supportedModels?.includes(model));
+      .filter(host => host.isActive && host.supportedModels?.includes(model));
   }
 
   async findHostsForModel(modelId: string): Promise<HostInfo[]> {
@@ -264,7 +274,12 @@ export class HostManagerMock implements IHostManager {
     await this.delay(150);
 
     const host = this.mockHosts.get(address);
-    return host?.reputation || 0;
+    if (!host) return 0;
+
+    // Mock reputation: calculate based on stake amount (higher stake = higher reputation)
+    // Convert stake to number (ETH) and scale to 0-100
+    const stakeInEth = Number(host.stake) / 1e18;
+    return Math.min(100, Math.floor(stakeInEth * 100));
   }
 
   // Helper Methods

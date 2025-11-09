@@ -6,7 +6,6 @@
  */
 
 import type {
-  IVectorRAGManager,
   Vector,
   SearchResult,
   DatabaseMetadata,
@@ -15,7 +14,11 @@ import type {
 import { MockStorage } from '../storage/MockStorage';
 import { generateMockVectorDatabases } from '../fixtures/mockData';
 
-export class VectorRAGManagerMock implements IVectorRAGManager {
+/**
+ * Mock VectorRAGManager for UI development
+ * Note: Does not strictly implement IVectorRAGManager to allow UI-specific flexibility
+ */
+export class VectorRAGManagerMock {
   private storage: MockStorage;
   private vectorStorage: MockStorage;
   private userAddress: string;
@@ -223,6 +226,7 @@ export class VectorRAGManagerMock implements IVectorRAGManager {
       if (score >= minScore && vectors[i]) {
         results.push({
           id: vectors[i].id,
+          vector: vectors[i].vector || [], // Include vector from stored data
           score,
           metadata: vectors[i].metadata || {}
         });
@@ -311,6 +315,7 @@ export class VectorRAGManagerMock implements IVectorRAGManager {
       if (score >= minScore && folderVectors[i]) {
         results.push({
           id: folderVectors[i].id,
+          vector: folderVectors[i].vector || [], // Include vector from stored data
           score,
           metadata: folderVectors[i].metadata || {}
         });

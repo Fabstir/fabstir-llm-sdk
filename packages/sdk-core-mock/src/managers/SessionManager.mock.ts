@@ -6,14 +6,17 @@
  */
 
 import type {
-  ISessionManager,
-  SessionConfig,
   SessionInfo,
   Vector,
-  SearchResult
+  SearchResult,
+  MockSessionConfig
 } from '../types';
 
-export class SessionManagerMock implements ISessionManager {
+/**
+ * Mock SessionManager for UI development
+ * Note: Does not strictly implement ISessionManager to allow UI-specific flexibility
+ */
+export class SessionManagerMock {
   private activeSessions: Map<string, SessionInfo> = new Map();
   private userAddress: string;
 
@@ -21,7 +24,7 @@ export class SessionManagerMock implements ISessionManager {
     this.userAddress = userAddress;
   }
 
-  async startSession(config: SessionConfig): Promise<SessionInfo> {
+  async startSession(config: MockSessionConfig): Promise<SessionInfo> {
     await this.delay(800); // Simulate connection time
 
     const sessionId = this.generateId('sess');
@@ -123,6 +126,7 @@ export class SessionManagerMock implements ISessionManager {
     for (let i = 0; i < topK; i++) {
       results.push({
         id: `vec-${i + 1}`,
+        vector: [], // Empty vector for mock (not used in UI)
         score: 0.95 - (i * 0.08),
         metadata: {
           text: `Mock search result ${i + 1}...`,
