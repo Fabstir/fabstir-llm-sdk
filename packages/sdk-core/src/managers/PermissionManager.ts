@@ -9,6 +9,7 @@ import type {
   PermissionQueryResult,
   PermissionSummary,
 } from '../types/permissions.types';
+import type { PermissionStorage } from '../storage/PermissionStorage';
 
 /**
  * Permission Manager
@@ -16,15 +17,16 @@ import type {
  * Manages granular access control for session groups and vector databases.
  * Enables users to share resources with collaborators at different permission levels.
  *
- * Storage: In-memory for Phase 1 (Phase 2 will add S5 persistence)
+ * Storage: S5 persistence with PermissionStorage (falls back to in-memory if not provided)
  */
 export class PermissionManager implements IPermissionManager {
+  private storage?: PermissionStorage;
   private permissions: Map<string, Permission> = new Map();
   private resourceOwners: Map<string, string> = new Map();
   private databaseLinks: Map<string, string[]> = new Map();
 
-  constructor() {
-    // Future: Initialize with storage manager for S5 persistence
+  constructor(storage?: PermissionStorage) {
+    this.storage = storage;
   }
 
   /**
@@ -70,14 +72,25 @@ export class PermissionManager implements IPermissionManager {
     }
 
     // Check if permission already exists
-    const existingKey = this.getPermissionKey(resourceId, grantedTo);
-    const existing = this.permissions.get(existingKey);
+    let existing: Permission | null = null;
+    if (this.storage) {
+      existing = await this.storage.load(resourceId, grantedTo);
+    } else {
+      const existingKey = this.getPermissionKey(resourceId, grantedTo);
+      existing = this.permissions.get(existingKey) || null;
+    }
 
     if (existing && !existing.deleted) {
       // Update existing permission
       existing.level = level;
       existing.grantedAt = new Date();
-      this.permissions.set(existingKey, existing);
+
+      if (this.storage) {
+        await this.storage.save(existing);
+      } else {
+        const existingKey = this.getPermissionKey(resourceId, grantedTo);
+        this.permissions.set(existingKey, existing);
+      }
 
       // Cascade if requested
       if (cascade && resourceType === 'session_group') {
@@ -99,7 +112,12 @@ export class PermissionManager implements IPermissionManager {
       deleted: false,
     };
 
-    this.permissions.set(existingKey, permission);
+    if (this.storage) {
+      await this.storage.save(permission);
+    } else {
+      const existingKey = this.getPermissionKey(resourceId, grantedTo);
+      this.permissions.set(existingKey, permission);
+    }
 
     // Cascade if requested
     if (cascade && resourceType === 'session_group') {
@@ -130,8 +148,13 @@ export class PermissionManager implements IPermissionManager {
     }
 
     // Find permission
-    const key = this.getPermissionKey(resourceId, grantedTo);
-    const permission = this.permissions.get(key);
+    let permission: Permission | null = null;
+    if (this.storage) {
+      permission = await this.storage.load(resourceId, grantedTo);
+    } else {
+      const key = this.getPermissionKey(resourceId, grantedTo);
+      permission = this.permissions.get(key) || null;
+    }
 
     if (!permission || permission.deleted) {
       throw new Error('Permission not found');
@@ -139,7 +162,12 @@ export class PermissionManager implements IPermissionManager {
 
     // Soft delete
     permission.deleted = true;
-    this.permissions.set(key, permission);
+    if (this.storage) {
+      await this.storage.save(permission);
+    } else {
+      const key = this.getPermissionKey(resourceId, grantedTo);
+      this.permissions.set(key, permission);
+    }
 
     // Cascade if requested
     if (cascade) {
@@ -165,15 +193,19 @@ export class PermissionManager implements IPermissionManager {
       throw new Error('Permission denied');
     }
 
-    const result: Permission[] = [];
-
-    for (const permission of Array.from(this.permissions.values())) {
-      if (permission.resourceId === resourceId && !permission.deleted) {
-        result.push(permission);
+    if (this.storage) {
+      // Use storage to load all permissions for resource
+      return await this.storage.loadAll(resourceId);
+    } else {
+      // In-memory fallback
+      const result: Permission[] = [];
+      for (const permission of Array.from(this.permissions.values())) {
+        if (permission.resourceId === resourceId && !permission.deleted) {
+          result.push(permission);
+        }
       }
+      return result;
     }
-
-    return result;
   }
 
   /**
@@ -186,8 +218,13 @@ export class PermissionManager implements IPermissionManager {
       return 'admin' as PermissionLevel;
     }
 
-    const key = this.getPermissionKey(resourceId, userAddress);
-    const permission = this.permissions.get(key);
+    let permission: Permission | null = null;
+    if (this.storage) {
+      permission = await this.storage.load(resourceId, userAddress);
+    } else {
+      const key = this.getPermissionKey(resourceId, userAddress);
+      permission = this.permissions.get(key) || null;
+    }
 
     if (!permission || permission.deleted) {
       return null;
@@ -241,23 +278,30 @@ export class PermissionManager implements IPermissionManager {
     let adminCount = 0;
     let lastGrantedAt: Date | undefined;
 
-    for (const permission of Array.from(this.permissions.values())) {
-      if (permission.resourceId === resourceId && !permission.deleted) {
-        switch (permission.level) {
-          case 'reader':
-            readerCount++;
-            break;
-          case 'writer':
-            writerCount++;
-            break;
-          case 'admin':
-            adminCount++;
-            break;
-        }
+    let permissions: Permission[];
+    if (this.storage) {
+      permissions = await this.storage.loadAll(resourceId);
+    } else {
+      permissions = Array.from(this.permissions.values()).filter(
+        p => p.resourceId === resourceId && !p.deleted
+      );
+    }
 
-        if (!lastGrantedAt || permission.grantedAt > lastGrantedAt) {
-          lastGrantedAt = permission.grantedAt;
-        }
+    for (const permission of permissions) {
+      switch (permission.level) {
+        case 'reader':
+          readerCount++;
+          break;
+        case 'writer':
+          writerCount++;
+          break;
+        case 'admin':
+          adminCount++;
+          break;
+      }
+
+      if (!lastGrantedAt || permission.grantedAt > lastGrantedAt) {
+        lastGrantedAt = permission.grantedAt;
       }
     }
 
@@ -284,11 +328,22 @@ export class PermissionManager implements IPermissionManager {
 
     for (const dbId of linkedDbs) {
       if (isRevoke) {
-        const dbKey = this.getPermissionKey(dbId, userAddress);
-        const dbPermission = this.permissions.get(dbKey);
+        let dbPermission: Permission | null = null;
+        if (this.storage) {
+          dbPermission = await this.storage.load(dbId, userAddress);
+        } else {
+          const dbKey = this.getPermissionKey(dbId, userAddress);
+          dbPermission = this.permissions.get(dbKey) || null;
+        }
+
         if (dbPermission && !dbPermission.deleted) {
           dbPermission.deleted = true;
-          this.permissions.set(dbKey, dbPermission);
+          if (this.storage) {
+            await this.storage.save(dbPermission);
+          } else {
+            const dbKey = this.getPermissionKey(dbId, userAddress);
+            this.permissions.set(dbKey, dbPermission);
+          }
         }
       } else {
         // Grant permission to database
@@ -303,8 +358,12 @@ export class PermissionManager implements IPermissionManager {
           deleted: false,
         };
 
-        const dbKey = this.getPermissionKey(dbId, userAddress);
-        this.permissions.set(dbKey, dbPermission);
+        if (this.storage) {
+          await this.storage.save(dbPermission);
+        } else {
+          const dbKey = this.getPermissionKey(dbId, userAddress);
+          this.permissions.set(dbKey, dbPermission);
+        }
       }
     }
   }

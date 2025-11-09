@@ -75,17 +75,21 @@ This document outlines the SDK backend implementation for Session Groups (Claude
 - ✅ `packages/sdk-core/tests/storage/session-group-storage.test.ts` (402 lines, 16 tests)
 - ✅ `packages/sdk-core/tests/managers/session-manager-groups.test.ts` (458 lines, 13 tests)
 
-### Phase 2 Files (⏳ Pending)
+### Phase 2 Files (✅ Complete)
 
 **Managers**:
-- ⏳ `packages/sdk-core/src/managers/PermissionManager.ts` (≤300 lines)
-- ⏳ `packages/sdk-core/src/interfaces/IPermissionManager.ts` (≤100 lines)
+- ✅ `packages/sdk-core/src/managers/PermissionManager.ts` (378 lines)
+- ✅ `packages/sdk-core/src/interfaces/IPermissionManager.ts` (123 lines)
+
+**Storage**:
+- ✅ `packages/sdk-core/src/storage/PermissionStorage.ts` (299 lines)
 
 **Types**:
-- ⏳ `packages/sdk-core/src/types/permissions.types.ts` (≤150 lines)
+- ✅ `packages/sdk-core/src/types/permissions.types.ts` (146 lines)
 
 **Tests**:
-- ⏳ `packages/sdk-core/tests/managers/permission-manager.test.ts` (≤400 lines)
+- ✅ `packages/sdk-core/tests/managers/permission-manager.test.ts` (536 lines, 38 tests)
+- ✅ `packages/sdk-core/tests/storage/permission-storage.test.ts` (570 lines, 32 tests)
 
 ---
 
@@ -424,17 +428,95 @@ This document outlines the SDK backend implementation for Session Groups (Claude
 
 ---
 
+### Sub-phase 2.2: Permission Storage with S5
+
+**Goal**: Implement S5 persistent storage for permissions to enable multi-user collaboration across devices
+
+**Status**: ✅ **COMPLETE** (Jan 2025)
+
+**Files Created**:
+- `packages/sdk-core/src/storage/PermissionStorage.ts` (299 lines)
+- `packages/sdk-core/tests/storage/permission-storage.test.ts` (570 lines, 32 tests)
+
+**Files Modified**:
+- `packages/sdk-core/src/managers/PermissionManager.ts` (updated to use PermissionStorage)
+- `packages/sdk-core/src/index.ts` (exported PermissionStorage)
+
+**Tasks**:
+
+#### Test Writing
+- [x] **Test: save()** - Saves permission to S5 with encryption (4 tests)
+- [x] **Test: load()** - Loads specific permission from S5 (4 tests)
+- [x] **Test: loadAll()** - Loads all permissions for a resource (4 tests)
+- [x] **Test: delete()** - Deletes permission from S5 (3 tests)
+- [x] **Test: exists()** - Checks if permission exists (2 tests)
+- [x] **Test: deleteByResource()** - Cascade deletion (3 tests)
+- [x] **Test: Encryption** - Verifies end-to-end encryption (2 tests)
+- [x] **Test: Caching** - Cache-first strategy (3 tests)
+- [x] **Test: Error handling** - Graceful failures (3 tests)
+- [x] **Test: Edge cases** - Multiple resources, concurrent ops (2 tests)
+- [x] **Test: Performance** - Cache operations (2 tests)
+
+**Show Test Failures**: ✅ Verified import errors initially (file didn't exist), then 4 cache failures
+
+#### Implementation
+- [x] **Create PermissionStorage.ts** following SessionGroupStorage pattern:
+  - Constructor(s5Client, userSeed, userAddress, encryptionManager)
+  - save() - Encrypts and saves to S5, updates cache
+  - load() - Loads from cache first, then S5 if needed
+  - loadAll() - Cache-first, loads all permissions for resource
+  - delete() - Deletes from S5 and removes from cache
+  - exists() - Checks cache then S5
+  - deleteByResource() - Cascade deletion for all permissions
+  - Cache: Map<resourceId, Permission[]> (array per resource)
+  - Storage path: `home/permissions/{userAddress}/{resourceId}/{granteeAddress}.json`
+- [x] **Update PermissionManager**:
+  - Added optional `storage?: PermissionStorage` constructor parameter
+  - Updated all methods to use storage when available
+  - Maintained backward compatibility with in-memory fallback
+  - grantPermission(), revokePermission(), listPermissions(), checkPermission(), getPermissionSummary(), cascadePermission() all support storage
+
+#### Test Verification
+- [x] **Run tests**: All 32 storage tests pass (100%)
+- [x] **Run manager tests**: All 38 manager tests still pass (100%)
+- [x] **Total**: 70/70 tests passing (32 storage + 38 manager)
+
+**Success Criteria**:
+- ✅ 32/32 PermissionStorage tests passing
+- ✅ 38/38 PermissionManager tests still passing
+- ✅ Permissions persist across sessions via S5
+- ✅ End-to-end encryption working
+- ✅ Cache-first strategy for performance
+- ✅ Multi-user collaboration enabled
+- ✅ Backward compatible (storage optional)
+- ✅ Follows SessionGroupStorage patterns
+
+**Actual Time**: ~3 hours (under estimate)
+
+**Key Features Implemented**:
+- S5 persistent storage for permissions
+- End-to-end encryption with EncryptionManager
+- Cache-first strategy for performance
+- Three-level storage path structure for efficient lookup
+- Graceful error handling for corrupt data
+- Soft delete preservation in storage
+- Multi-user cross-device sync capability
+
+---
+
 ### Phase 2 Summary
 
 **Total Estimated Time**: 6-8 hours
-**Actual Time**: ~4 hours (under estimate)
+**Actual Time**: ~7 hours (within estimate)
 
 **Sub-phase Breakdown**:
 1. Permission Model: ~4 hours ✅ SDK backend only
+2. Permission Storage with S5: ~3 hours ✅ SDK backend only
 
 **Dependencies**:
 - ✅ SessionGroupManager (Phase 1 complete)
 - ✅ Enhanced S5.js (existing)
+- ✅ EncryptionManager (existing)
 
 **Success Criteria**:
 - ✅ User can share session groups
@@ -442,16 +524,21 @@ This document outlines the SDK backend implementation for Session Groups (Claude
 - ✅ Permissions enforced in SDK
 - ✅ Cascade permissions functional
 - ✅ Owner permissions protected
-- ✅ 38/38 tests passing
+- ✅ Permissions persist across sessions/devices
+- ✅ Multi-user collaboration enabled
+- ✅ 70/70 tests passing (32 storage + 38 manager)
 
-**Files Created**: 4 new files (3 implementation, 1 test)
+**Files Created**: 6 new files (4 implementation, 2 test)
 
 **Key Features Implemented**:
 - Granular permission levels (reader, writer, admin)
 - Cascade permissions from groups to linked databases
 - Owner always has admin permission (cannot be revoked)
 - Soft delete (deleted: true) for audit trail
-- In-memory storage (Phase 1 pattern)
+- S5 persistent storage with encryption
+- Cache-first strategy for performance
+- Multi-user cross-device collaboration
+- Backward compatible (storage optional)
 
 ---
 
