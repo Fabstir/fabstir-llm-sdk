@@ -43,6 +43,9 @@ export { TreasuryManager } from './managers/TreasuryManager';
 export { ModelManager } from './managers/ModelManager';
 export { ClientManager } from './managers/ClientManager';
 
+// Permission and collaboration managers
+export { PermissionManager } from './managers/PermissionManager';
+
 // RAG and Vector Database managers (host-side via WebSocket)
 export { VectorRAGManager } from './managers/VectorRAGManager';
 export { DocumentManager } from './documents/DocumentManager';

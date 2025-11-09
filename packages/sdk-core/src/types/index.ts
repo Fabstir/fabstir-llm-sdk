@@ -273,3 +273,7 @@ export * from './settings.types';
 // ============= RAG WebSocket Types =============
 
 export * from './rag-websocket';
+
+// ============= Permission Types =============
+
+export * from './permissions.types';

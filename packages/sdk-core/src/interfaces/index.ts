@@ -14,3 +14,4 @@ export { IHostManager } from './IHostManager';
 export { ITreasuryManager } from './ITreasuryManager';
 export { IP2PService, P2PNode, P2PMessage, P2PDiscoveryResult } from './IP2PService';
 export * from './IEncryptionManager';
+export { IPermissionManager } from './IPermissionManager';
