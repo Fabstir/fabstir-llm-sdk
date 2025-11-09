@@ -99,3 +99,35 @@ export interface SessionGroupWithStats extends SessionGroup {
   /** Total storage size across all databases (bytes) */
   totalStorageSize?: number;
 }
+
+/**
+ * Vector Database Metadata
+ *
+ * Metadata for a vector database that can be linked to session groups.
+ * Used by listLinkedDatabases() to return database information.
+ */
+export interface VectorDatabaseMetadata {
+  /** Unique database identifier */
+  id: string;
+
+  /** Human-readable database name */
+  name: string;
+
+  /** Database description */
+  description?: string;
+
+  /** Creation timestamp */
+  createdAt: Date;
+
+  /** Last modification timestamp */
+  updatedAt: Date;
+
+  /** Owner wallet address */
+  owner: string;
+
+  /** Number of vectors stored */
+  vectorCount?: number;
+
+  /** Storage size in bytes */
+  storageSize?: number;
+}

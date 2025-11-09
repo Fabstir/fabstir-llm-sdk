@@ -406,6 +406,116 @@ describe('SessionGroupManager', () => {
     });
   });
 
+  describe('listLinkedDatabases()', () => {
+    it('should return metadata for all linked databases', async () => {
+      const group = await manager.createSessionGroup({
+        name: 'Test Group',
+        description: 'Testing database metadata',
+        owner: testOwner,
+      });
+
+      // Link 3 databases
+      await manager.linkVectorDatabase(group.id, testOwner, 'db-1');
+      await manager.linkVectorDatabase(group.id, testOwner, 'db-2');
+      await manager.linkVectorDatabase(group.id, testOwner, 'db-3');
+
+      const databases = await manager.listLinkedDatabases(group.id, testOwner);
+
+      expect(databases).toHaveLength(3);
+      expect(databases[0]).toHaveProperty('id', 'db-1');
+      expect(databases[0]).toHaveProperty('name');
+      expect(databases[0]).toHaveProperty('createdAt');
+      expect(databases[1]).toHaveProperty('id', 'db-2');
+      expect(databases[2]).toHaveProperty('id', 'db-3');
+    });
+
+    it('should return empty array for group with no linked databases', async () => {
+      const group = await manager.createSessionGroup({
+        name: 'Empty Group',
+        description: 'No databases',
+        owner: testOwner,
+      });
+
+      const databases = await manager.listLinkedDatabases(group.id, testOwner);
+
+      expect(databases).toEqual([]);
+    });
+  });
+
+  describe('Database existence validation', () => {
+    it('should throw error when linking non-existent database', async () => {
+      const group = await manager.createSessionGroup({
+        name: 'Test Group',
+        description: 'Testing validation',
+        owner: testOwner,
+      });
+
+      await expect(
+        manager.linkVectorDatabase(group.id, testOwner, 'non-existent-db')
+      ).rejects.toThrow('Vector database not found');
+    });
+  });
+
+  describe('Database deletion handling', () => {
+    it('should auto-remove deleted database from all groups', async () => {
+      // Create two groups
+      const group1 = await manager.createSessionGroup({
+        name: 'Group 1',
+        description: 'First group',
+        owner: testOwner,
+      });
+
+      const group2 = await manager.createSessionGroup({
+        name: 'Group 2',
+        description: 'Second group',
+        owner: testOwner,
+      });
+
+      // Link same database to both groups
+      await manager.linkVectorDatabase(group1.id, testOwner, 'db-shared');
+      await manager.linkVectorDatabase(group2.id, testOwner, 'db-shared');
+
+      // Set as default in group1
+      await manager.setDefaultDatabase(group1.id, testOwner, 'db-shared');
+
+      // Simulate database deletion
+      await manager.handleDatabaseDeletion('db-shared');
+
+      // Verify removed from both groups
+      const updated1 = await manager.getSessionGroup(group1.id, testOwner);
+      const updated2 = await manager.getSessionGroup(group2.id, testOwner);
+
+      expect(updated1.linkedDatabases).not.toContain('db-shared');
+      expect(updated1.defaultDatabase).toBeUndefined(); // Cleared default
+      expect(updated2.linkedDatabases).not.toContain('db-shared');
+    });
+  });
+
+  describe('Performance', () => {
+    it('should link 20 databases in under 100ms', async () => {
+      const group = await manager.createSessionGroup({
+        name: 'Performance Test',
+        description: 'Testing speed',
+        owner: testOwner,
+      });
+
+      const startTime = Date.now();
+
+      // Link 20 databases
+      for (let i = 0; i < 20; i++) {
+        await manager.linkVectorDatabase(group.id, testOwner, `db-${i}`);
+      }
+
+      const elapsed = Date.now() - startTime;
+
+      expect(elapsed).toBeLessThan(100);
+
+      // Verify all linked
+      const updated = await manager.getSessionGroup(group.id, testOwner);
+      expect(updated.linkedDatabases).toHaveLength(20);
+    });
+  });
+
   describe('addChatSession()', () => {
     it('should add session ID to group', async () => {
       const group = await manager.createSessionGroup({

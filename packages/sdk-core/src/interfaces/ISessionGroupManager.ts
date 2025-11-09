@@ -5,6 +5,7 @@ import type {
   SessionGroup,
   CreateSessionGroupInput,
   UpdateSessionGroupInput,
+  VectorDatabaseMetadata,
 } from '../types/session-groups.types';
 
 /**
@@ -117,6 +118,30 @@ export interface ISessionGroupManager {
     requestor: string,
     databaseId?: string
   ): Promise<SessionGroup>;
+
+  /**
+   * List all linked vector databases with metadata
+   *
+   * @param groupId - Session group ID
+   * @param requestor - Wallet address of requestor
+   * @returns Array of database metadata
+   * @throws {Error} If group not found
+   * @throws {Error} If requestor lacks permission
+   */
+  listLinkedDatabases(
+    groupId: string,
+    requestor: string
+  ): Promise<VectorDatabaseMetadata[]>;
+
+  /**
+   * Handle database deletion by removing from all groups
+   *
+   * Internal method called when a vector database is deleted.
+   * Removes the database from all session groups that linked it.
+   *
+   * @param databaseId - Database ID that was deleted
+   */
+  handleDatabaseDeletion(databaseId: string): Promise<void>;
 
   /**
    * Add a chat session to a session group

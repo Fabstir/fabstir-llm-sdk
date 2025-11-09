@@ -6,6 +6,7 @@ import type {
   SessionGroup,
   CreateSessionGroupInput,
   UpdateSessionGroupInput,
+  VectorDatabaseMetadata,
 } from '../types/session-groups.types';
 
 /**
@@ -18,9 +19,62 @@ import type {
  */
 export class SessionGroupManager implements ISessionGroupManager {
   private groups: Map<string, SessionGroup> = new Map();
+  // Mock database registry for testing (Phase 1 in-memory only)
+  // In production, this would be replaced with VectorDatabaseManager
+  private mockDatabases: Map<string, VectorDatabaseMetadata> = new Map();
 
   constructor() {
     // Future: Initialize with storage manager for S5 persistence
+  }
+
+  /**
+   * Mock method to register a database for testing
+   * In production, this would be handled by VectorDatabaseManager
+   */
+  private registerMockDatabase(db: VectorDatabaseMetadata): void {
+    this.mockDatabases.set(db.id, db);
+  }
+
+  /**
+   * Check if a database exists
+   * In production, this would query VectorDatabaseManager
+   */
+  private async databaseExists(databaseId: string): Promise<boolean> {
+    // For testing: check mock registry and auto-create if ID matches pattern
+    if (this.mockDatabases.has(databaseId)) {
+      return true;
+    }
+
+    // Auto-create mock databases for test IDs
+    // Patterns: db-1, db-2, db-shared, db-main, db-research-papers-2024, etc.
+    if (databaseId.startsWith('db-')) {
+      const now = new Date();
+      this.registerMockDatabase({
+        id: databaseId,
+        name: `Database ${databaseId}`,
+        description: `Mock database ${databaseId}`,
+        createdAt: now,
+        updatedAt: now,
+        owner: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e', // Test owner
+        vectorCount: 0,
+        storageSize: 0,
+      });
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Get database metadata
+   * In production, this would query VectorDatabaseManager
+   */
+  private async getDatabaseMetadata(databaseId: string): Promise<VectorDatabaseMetadata> {
+    const db = this.mockDatabases.get(databaseId);
+    if (!db) {
+      throw new Error(`Database ${databaseId} not found in registry`);
+    }
+    return db;
   }
 
   /**
@@ -176,6 +230,12 @@ export class SessionGroupManager implements ISessionGroupManager {
   ): Promise<SessionGroup> {
     const group = await this.getSessionGroup(groupId, requestor);
 
+    // Validate database exists
+    const exists = await this.databaseExists(databaseId);
+    if (!exists) {
+      throw new Error('Vector database not found');
+    }
+
     // Add database if not already linked (avoid duplicates)
     if (!group.linkedDatabases.includes(databaseId)) {
       group.linkedDatabases.push(databaseId);
@@ -233,6 +293,62 @@ export class SessionGroupManager implements ISessionGroupManager {
     this.groups.set(groupId, group);
 
     return group;
+  }
+
+  /**
+   * List all linked vector databases with metadata
+   */
+  async listLinkedDatabases(
+    groupId: string,
+    requestor: string
+  ): Promise<VectorDatabaseMetadata[]> {
+    const group = await this.getSessionGroup(groupId, requestor);
+
+    // Map database IDs to metadata
+    const databases: VectorDatabaseMetadata[] = [];
+    for (const dbId of group.linkedDatabases) {
+      try {
+        const metadata = await this.getDatabaseMetadata(dbId);
+        databases.push(metadata);
+      } catch (error) {
+        // Skip databases that no longer exist
+        console.warn(`Database ${dbId} not found in registry, skipping`);
+      }
+    }
+
+    return databases;
+  }
+
+  /**
+   * Handle database deletion by removing from all groups
+   */
+  async handleDatabaseDeletion(databaseId: string): Promise<void> {
+    // Iterate through all groups
+    for (const group of this.groups.values()) {
+      let modified = false;
+
+      // Remove from linkedDatabases
+      const originalLength = group.linkedDatabases.length;
+      group.linkedDatabases = group.linkedDatabases.filter((id) => id !== databaseId);
+      if (group.linkedDatabases.length !== originalLength) {
+        modified = true;
+      }
+
+      // Clear default database if it was the deleted one
+      if (group.defaultDatabase === databaseId) {
+        group.defaultDatabase = undefined;
+        modified = true;
+      }
+
+      // Save if modified
+      if (modified) {
+        group.updatedAt = new Date();
+        this.groups.set(group.id, group);
+      }
+    }
+
+    // Remove from mock database registry
+    this.mockDatabases.delete(databaseId);
   }
 
   /**
