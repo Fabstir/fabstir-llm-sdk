@@ -68,6 +68,7 @@ export interface SessionState {
   startTime: number;
   endTime?: number;
   encryption?: boolean; // NEW: Track if session uses encryption
+  groupId?: string; // NEW: Session Groups integration
 }
 
 // Extended SessionConfig with chainId
@@ -78,6 +79,7 @@ export interface ExtendedSessionConfig extends SessionConfig {
   paymentMethod: 'deposit' | 'direct';
   depositAmount?: ethers.BigNumberish;
   encryption?: boolean; // NEW: Enable E2EE
+  groupId?: string; // NEW: Session Groups integration
 }
 
 export class SessionManager implements ISessionManager {
@@ -85,6 +87,7 @@ export class SessionManager implements ISessionManager {
   private storageManager: StorageManager;
   private hostManager?: HostManager; // Optional until set after auth
   private encryptionManager?: EncryptionManager; // NEW: Optional until set after auth
+  private sessionGroupManager?: any; // NEW: Session Groups integration (SessionGroupManager)
   private wsClient?: WebSocketClient;
   private sessions: Map<string, SessionState> = new Map();
   private initialized = false;
@@ -235,6 +238,25 @@ export class SessionManager implements ISessionManager {
         ragConfig = mergeRAGConfig(config.ragConfig);
       }
 
+      // NEW: Session Groups integration - Validate groupId if provided
+      if (config.groupId !== undefined) {
+        // Validate groupId format (must not be empty if provided)
+        if (config.groupId.trim() === '') {
+          throw new SDKError('Invalid group ID', 'INVALID_GROUP_ID');
+        }
+
+        // Verify group exists and user has permission (only if manager available)
+        if (this.sessionGroupManager) {
+          const userAddress = await this.storageManager.getUserAddress();
+          if (!userAddress) {
+            throw new SDKError('User not authenticated', 'USER_NOT_AUTHENTICATED');
+          }
+
+          // Will throw if group doesn't exist or user lacks permission
+          await this.sessionGroupManager.getSessionGroup(config.groupId, userAddress);
+        }
+      }
+
       // Create session state
       const sessionState: SessionState = {
         sessionId: sessionId,
@@ -250,6 +272,7 @@ export class SessionManager implements ISessionManager {
         totalTokens: 0,
         startTime: Date.now(),
         encryption: enableEncryption,  // NEW (Phase 6.2): Store encryption preference
+        groupId: config.groupId,  // NEW: Session Groups integration
         ragConfig: ragConfig,  // NEW (Phase 5.1): Store RAG config
         ragMetrics: ragConfig?.enabled ? {
           totalRetrievals: 0,
@@ -287,6 +310,18 @@ export class SessionManager implements ISessionManager {
         createdAt: sessionState.startTime,
         updatedAt: sessionState.startTime
       });
+
+      // NEW: Session Groups integration - Link session to group if groupId provided
+      if (config.groupId && this.sessionGroupManager) {
+        const userAddress = await this.storageManager.getUserAddress();
+        if (userAddress) {
+          await this.sessionGroupManager.addChatSession(
+            config.groupId,
+            userAddress,
+            sessionId.toString()
+          );
+        }
+      }
 
       return {
         sessionId: sessionId,
@@ -2240,5 +2275,96 @@ export class SessionManager implements ISessionManager {
         this._handleSearchVectorsResponse(data as SearchVectorsResponse);
       }
     });
+  }
+
+  /**
+   * Get session history for a session group
+   *
+   * NEW: Session Groups integration - Returns all sessions in a group with metadata.
+   * Sessions are sorted by startTime descending (newest first).
+   *
+   * @param groupId - Session group ID
+   * @returns Array of session metadata objects sorted by start time (newest first)
+   * @throws {SDKError} If session group manager not available or group not found
+   */
+  async getSessionHistory(groupId: string): Promise<Array<{
+    sessionId: string;
+    model?: string;
+    totalTokens: number;
+    chainId: number;
+    startTime: number;
+    endTime?: number;
+    status: string;
+  }>> {
+    if (!this.sessionGroupManager) {
+      throw new SDKError(
+        'Session group manager not available',
+        'SESSION_GROUP_MANAGER_NOT_AVAILABLE'
+      );
+    }
+
+    // Get user address
+    const userAddress = await this.storageManager.getUserAddress();
+    if (!userAddress) {
+      throw new SDKError('User not authenticated', 'USER_NOT_AUTHENTICATED');
+    }
+
+    // Get group to verify it exists and user has permission
+    const group = await this.sessionGroupManager.getSessionGroup(groupId, userAddress);
+
+    // Build session history from all sessions in group
+    const history = [];
+
+    for (const sessionIdStr of group.chatSessions) {
+      // Try to get from in-memory sessions first
+      let session = this.sessions.get(sessionIdStr);
+
+      // If not in memory, try loading from storage
+      if (!session) {
+        try {
+          const conversation = await this.storageManager.loadConversation(sessionIdStr);
+          if (conversation && conversation.metadata) {
+            // Reconstruct session metadata from storage
+            session = {
+              sessionId: BigInt(sessionIdStr),
+              jobId: BigInt(conversation.metadata.jobId || '0'),
+              chainId: conversation.metadata.chainId,
+              model: conversation.metadata.model,
+              provider: conversation.metadata.provider || '',
+              status: conversation.metadata.status || 'unknown',
+              prompts: [],
+              responses: [],
+              checkpoints: [],
+              totalTokens: conversation.metadata.totalTokens || 0,
+              startTime: conversation.metadata.startTime || conversation.createdAt,
+              endTime: conversation.metadata.endTime,
+              encryption: conversation.metadata.encryption,
+              groupId: groupId
+            } as SessionState;
+          }
+        } catch (error) {
+          // Skip sessions that can't be loaded
+          console.warn(`Failed to load session ${sessionIdStr}:`, error);
+          continue;
+        }
+      }
+
+      if (session) {
+        history.push({
+          sessionId: sessionIdStr,
+          model: session.model,
+          totalTokens: session.totalTokens,
+          chainId: session.chainId,
+          startTime: session.startTime,
+          endTime: session.endTime,
+          status: session.status
+        });
+      }
+    }
+
+    // Sort by startTime descending (newest first)
+    history.sort((a, b) => b.startTime - a.startTime);
+
+    return history;
   }
 }
