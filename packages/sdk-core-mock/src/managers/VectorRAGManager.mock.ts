@@ -21,12 +21,14 @@ import { generateMockVectorDatabases } from '../fixtures/mockData';
 export class VectorRAGManagerMock {
   private storage: MockStorage;
   private vectorStorage: MockStorage;
+  private folderStorage: MockStorage;
   private userAddress: string;
 
   constructor(userAddress: string) {
     this.userAddress = userAddress;
     this.storage = new MockStorage(`vector-dbs-${userAddress}`);
     this.vectorStorage = new MockStorage(`vectors-${userAddress}`);
+    this.folderStorage = new MockStorage(`folders-${userAddress}`);
 
     // Initialize with mock data if empty
     if (this.storage.size() === 0) {
@@ -35,8 +37,19 @@ export class VectorRAGManagerMock {
         this.storage.set(db.name, db);
         // Initialize empty vector array for each DB
         this.vectorStorage.set(db.name, []);
+        // Initialize empty folder array for each DB
+        this.folderStorage.set(db.name, []);
       });
     }
+
+    // Migration: Ensure all existing databases have folder storage initialized
+    const allDatabases = this.storage.getAll<DatabaseMetadata>();
+    allDatabases.forEach(db => {
+      if (!this.folderStorage.has(db.name)) {
+        this.folderStorage.set(db.name, []);
+        console.log(`[Mock] Initialized folder storage for existing database: ${db.name}`);
+      }
+    });
   }
 
   async createSession(
@@ -64,6 +77,7 @@ export class VectorRAGManagerMock {
 
     this.storage.set(databaseName, db);
     this.vectorStorage.set(databaseName, []);
+    this.folderStorage.set(databaseName, []);
 
     console.log('[Mock] Created vector database:', databaseName);
   }
@@ -182,6 +196,12 @@ export class VectorRAGManagerMock {
     return vectors.filter(v => vectorIds.includes(v.id));
   }
 
+  async listVectors(databaseName: string): Promise<Vector[]> {
+    await this.delay(200);
+
+    return this.vectorStorage.get<Vector[]>(databaseName) || [];
+  }
+
   async deleteVector(databaseName: string, vectorId: string): Promise<void> {
     await this.delay(200);
 
@@ -240,9 +260,14 @@ export class VectorRAGManagerMock {
   async listFolders(databaseName: string): Promise<string[]> {
     await this.delay(200);
 
-    const vectors = this.vectorStorage.get<Vector[]>(databaseName) || [];
     const folders = new Set<string>();
 
+    // Add explicitly created folders
+    const explicitFolders = this.folderStorage.get<string[]>(databaseName) || [];
+    explicitFolders.forEach(f => folders.add(f));
+
+    // Add folders from vectors
+    const vectors = this.vectorStorage.get<Vector[]>(databaseName) || [];
     vectors.forEach(v => {
       if (v.metadata?.folderPath) {
         folders.add(v.metadata.folderPath);
@@ -250,6 +275,29 @@ export class VectorRAGManagerMock {
     });
 
     return Array.from(folders).sort();
+  }
+
+  async getAllFoldersWithCounts(databaseName: string): Promise<Array<{ path: string; fileCount: number }>> {
+    await this.delay(200);
+
+    const folders = new Map<string, number>();
+
+    // Add explicitly created folders with 0 count
+    const explicitFolders = this.folderStorage.get<string[]>(databaseName) || [];
+    explicitFolders.forEach(f => folders.set(f, 0));
+
+    // Count files in each folder
+    const vectors = this.vectorStorage.get<Vector[]>(databaseName) || [];
+    vectors.forEach(v => {
+      const folderPath = v.metadata?.folderPath;
+      if (folderPath) {
+        folders.set(folderPath, (folders.get(folderPath) || 0) + 1);
+      }
+    });
+
+    return Array.from(folders.entries())
+      .map(([path, fileCount]) => ({ path, fileCount }))
+      .sort((a, b) => a.path.localeCompare(b.path));
   }
 
   async getFolderStatistics(
@@ -347,6 +395,80 @@ export class VectorRAGManagerMock {
     console.log(`[Mock] Moved ${movedCount} vectors from ${sourceFolder} to ${targetFolder}`);
 
     return movedCount;
+  }
+
+  async createFolder(databaseName: string, folderPath: string): Promise<void> {
+    await this.delay(200);
+
+    // Validate database exists
+    if (!this.storage.has(databaseName)) {
+      throw new Error(`[Mock] Database not found: ${databaseName}`);
+    }
+
+    // Validate the path format
+    if (!folderPath || folderPath.trim() === '') {
+      throw new Error('[Mock] Folder path cannot be empty');
+    }
+
+    // Store folder metadata
+    const folders = this.folderStorage.get<string[]>(databaseName) || [];
+    if (!folders.includes(folderPath)) {
+      folders.push(folderPath);
+      this.folderStorage.set(databaseName, folders);
+    }
+
+    console.log(`[Mock] Created folder: ${folderPath} in ${databaseName}`);
+  }
+
+  async renameFolder(
+    databaseName: string,
+    oldPath: string,
+    newPath: string
+  ): Promise<number> {
+    await this.delay(300);
+
+    const vectors = this.vectorStorage.get<Vector[]>(databaseName) || [];
+    let renamedCount = 0;
+
+    vectors.forEach(v => {
+      if (v.metadata?.folderPath === oldPath) {
+        v.metadata.folderPath = newPath;
+        renamedCount++;
+      }
+    });
+
+    this.vectorStorage.set(databaseName, vectors);
+
+    // Update folder storage
+    const folders = this.folderStorage.get<string[]>(databaseName) || [];
+    const folderIndex = folders.indexOf(oldPath);
+    if (folderIndex !== -1) {
+      folders[folderIndex] = newPath;
+      this.folderStorage.set(databaseName, folders);
+    }
+
+    console.log(`[Mock] Renamed folder ${oldPath} to ${newPath} (${renamedCount} vectors updated)`);
+
+    return renamedCount;
+  }
+
+  async deleteFolder(databaseName: string, folderPath: string): Promise<number> {
+    await this.delay(300);
+
+    const vectors = this.vectorStorage.get<Vector[]>(databaseName) || [];
+    const vectorsToKeep = vectors.filter(v => v.metadata?.folderPath !== folderPath);
+    const deletedCount = vectors.length - vectorsToKeep.length;
+
+    this.vectorStorage.set(databaseName, vectorsToKeep);
+
+    // Remove from folder storage
+    const folders = this.folderStorage.get<string[]>(databaseName) || [];
+    const updatedFolders = folders.filter(f => f !== folderPath);
+    this.folderStorage.set(databaseName, updatedFolders);
+
+    console.log(`[Mock] Deleted folder ${folderPath} (removed ${deletedCount} vectors)`);
+
+    return deletedCount;
   }
 
   // Helper Methods

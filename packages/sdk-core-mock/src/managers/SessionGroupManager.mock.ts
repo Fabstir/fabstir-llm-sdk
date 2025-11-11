@@ -64,6 +64,7 @@ export class SessionGroupManagerMock implements ISessionGroupManager {
       databases: options?.databases || [],
       defaultDatabaseId: this.generateId('default-db'),
       chatSessions: [],
+      groupDocuments: [],
       owner: this.userAddress,
       created: Date.now(),
       updated: Date.now(),
@@ -94,6 +95,12 @@ export class SessionGroupManagerMock implements ISessionGroupManager {
     const group = this.storage.get<SessionGroup>(groupId);
     if (!group) {
       throw new Error(`[Mock] Session group not found: ${groupId}`);
+    }
+
+    // Migration: Add groupDocuments field if missing (for old data)
+    if (!group.groupDocuments) {
+      group.groupDocuments = [];
+      this.storage.set(groupId, group);
     }
 
     return group;
@@ -275,12 +282,19 @@ export class SessionGroupManagerMock implements ISessionGroupManager {
     const session = await this.getChatSession(groupId, sessionId);
     session.messages.push(message);
     session.updated = Date.now();
+
+    // Auto-generate title from first user message if still using default
+    if (session.title === 'New conversation' && message.role === 'user') {
+      session.title = this.generateTitle(message.content);
+    }
+
     this.chatStorage.set(sessionId, session);
 
     // Update group's session metadata
     const group = await this.getSessionGroup(groupId);
     const sessionMeta = group.chatSessions.find(s => s.sessionId === sessionId);
     if (sessionMeta) {
+      sessionMeta.title = session.title; // Update title in metadata too
       sessionMeta.messageCount = session.messages.length;
       sessionMeta.lastMessage = message.content.substring(0, 100);
       sessionMeta.timestamp = message.timestamp;
@@ -332,6 +346,41 @@ export class SessionGroupManagerMock implements ISessionGroupManager {
         msg.content.toLowerCase().includes(queryLower)
       );
     });
+  }
+
+  // Group Document Methods
+
+  async addGroupDocument(groupId: string, document: import('../types').GroupDocument): Promise<void> {
+    await this.delay(200);
+
+    const group = await this.getSessionGroup(groupId);
+
+    // Add document to group
+    group.groupDocuments.push(document);
+    group.updated = Date.now();
+
+    this.storage.set(groupId, group);
+    console.log('[Mock] Added group document:', document.name);
+  }
+
+  async removeGroupDocument(groupId: string, documentId: string): Promise<void> {
+    await this.delay(200);
+
+    const group = await this.getSessionGroup(groupId);
+
+    // Remove document from group
+    group.groupDocuments = group.groupDocuments.filter(doc => doc.id !== documentId);
+    group.updated = Date.now();
+
+    this.storage.set(groupId, group);
+    console.log('[Mock] Removed group document:', documentId);
+  }
+
+  async listGroupDocuments(groupId: string): Promise<import('../types').GroupDocument[]> {
+    await this.delay(100);
+
+    const group = await this.getSessionGroup(groupId);
+    return group.groupDocuments;
   }
 
   // Sharing Methods

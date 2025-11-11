@@ -6,7 +6,7 @@
  * This component ONLY runs on the client side and loads SDK dynamically
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ethers } from 'ethers';
 
 // Chain ID constants (matching sdk-core)
@@ -149,6 +149,28 @@ const NodeManagementClient: React.FC = () => {
   // SDK instance
   const [sdk, setSdk] = useState<any>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+
+  // Detect if the connected wallet is registered to a local vs remote node
+  // Check discoveredApiUrl (from blockchain) rather than nodePublicUrl (from local management API)
+  const isLocalNode = useMemo(() => {
+    // If wallet not connected or not registered, allow local controls
+    if (!walletConnected || !isRegistered || !discoveredApiUrl) {
+      return true;
+    }
+
+    // Check if the on-chain registered URL is localhost
+    try {
+      const url = new URL(discoveredApiUrl);
+      const hostname = url.hostname.toLowerCase();
+      return hostname === 'localhost' ||
+             hostname === '127.0.0.1' ||
+             hostname === '0.0.0.0' ||
+             hostname === '::1'; // IPv6 localhost
+    } catch {
+      // If URL parsing fails, check for localhost string
+      return discoveredApiUrl.includes('localhost') || discoveredApiUrl.includes('127.0.0.1');
+    }
+  }, [walletConnected, isRegistered, discoveredApiUrl]);
 
   // Load SDK module dynamically on client side only
   useEffect(() => {
@@ -1678,6 +1700,57 @@ const NodeManagementClient: React.FC = () => {
             </div>
           </div>
 
+          {/* On-Chain Registration Info (Read-Only) */}
+          {walletConnected && isRegistered && discoveredApiUrl && (
+            <div style={{
+              marginBottom: '20px',
+              padding: '15px',
+              border: '1px solid #17a2b8',
+              borderRadius: '5px',
+              backgroundColor: '#e7f4f9'
+            }}>
+              <h3>📡 On-Chain Registration Info</h3>
+              <p style={{ fontSize: '12px', color: '#666', marginTop: '-5px', marginBottom: '10px' }}>
+                Read-only data from NodeRegistry smart contract
+              </p>
+
+              <div style={{ fontSize: '14px' }}>
+                <div style={{ marginBottom: '5px' }}>
+                  <strong>Registered:</strong> ✅ Yes
+                </div>
+                <div style={{ marginBottom: '5px' }}>
+                  <strong>Public URL:</strong> <code>{discoveredApiUrl}</code>
+                </div>
+                <div style={{ marginBottom: '5px' }}>
+                  <strong>Active:</strong> {nodeInfo?.isActive ? '✅ Yes' : '❌ No'}
+                </div>
+                {nodeInfo?.stakedAmountFormatted && (
+                  <div style={{ marginBottom: '5px' }}>
+                    <strong>Staked:</strong> {nodeInfo.stakedAmountFormatted} FAB
+                  </div>
+                )}
+                {nodeInfo?.supportedModels && nodeInfo.supportedModels.length > 0 && (
+                  <div style={{ marginBottom: '5px' }}>
+                    <strong>Models:</strong> {nodeInfo.supportedModels.length} supported
+                  </div>
+                )}
+              </div>
+
+              {discoveredApiUrl !== nodePublicUrl && nodePublicUrl && (
+                <div style={{
+                  marginTop: '10px',
+                  padding: '8px',
+                  backgroundColor: '#fff3cd',
+                  border: '1px solid #ffc107',
+                  borderRadius: '3px',
+                  fontSize: '12px'
+                }}>
+                  ℹ️ <strong>Note:</strong> This is a remote production server. Your local node ({nodePublicUrl}) is separate.
+                </div>
+              )}
+            </div>
+          )}
+
           {!isRegistered && (
             <div style={{
               marginBottom: '20px',
@@ -2167,14 +2240,31 @@ const NodeManagementClient: React.FC = () => {
       <div style={{
         marginBottom: '20px',
         padding: '15px',
-        border: '1px solid #28a745',
+        border: `1px solid ${isLocalNode ? '#28a745' : '#6c757d'}`,
         borderRadius: '5px',
-        backgroundColor: '#e7f9f0'
+        backgroundColor: isLocalNode ? '#e7f9f0' : '#f8f9fa',
+        opacity: isLocalNode ? 1 : 0.6,
+        position: 'relative'
       }}>
-        <h3>🎮 Local Node Control {mgmtApiClient ? '(API Ready)' : '(Initializing...)'}</h3>
+        <h3>🎮 Local Development Node Control {mgmtApiClient ? '(API Ready)' : '(Initializing...)'}</h3>
         <p style={{ fontSize: '12px', color: '#666', marginTop: '-5px', marginBottom: '10px' }}>
-          Controls your local development node (not production)
+          Controls Docker container on THIS machine only
         </p>
+
+        {!isLocalNode && discoveredApiUrl && (
+          <div style={{
+            padding: '10px',
+            backgroundColor: '#fff3cd',
+            border: '1px solid #ffc107',
+            borderRadius: '3px',
+            marginBottom: '15px',
+            fontSize: '13px'
+          }}>
+            <strong>⚠️ Remote Host Detected:</strong><br />
+            This wallet is registered to a remote server (<code>{discoveredApiUrl}</code>).<br />
+            SSH to that machine to manage the node. Local controls are disabled.
+          </div>
+        )}
 
         <div style={{
           marginBottom: '15px',
@@ -2206,11 +2296,6 @@ const NodeManagementClient: React.FC = () => {
               <div style={{ marginBottom: '5px' }}>
                 <strong>Local URL:</strong> {nodePublicUrl || 'N/A'}
               </div>
-              {discoveredApiUrl && discoveredApiUrl !== nodePublicUrl && (
-                <div style={{ marginBottom: '5px', color: '#28a745', fontWeight: 'bold' }}>
-                  <strong>Production URL:</strong> {discoveredApiUrl}
-                </div>
-              )}
               {nodeVersion && (
                 <div style={{ marginBottom: '5px' }}>
                   <strong>Version:</strong>{' '}
@@ -2236,15 +2321,16 @@ const NodeManagementClient: React.FC = () => {
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <button
             onClick={handleStartNode}
-            disabled={loading || !mgmtApiClient || nodeStatus === 'running'}
+            disabled={!isLocalNode || loading || !mgmtApiClient || nodeStatus === 'running'}
+            title={!isLocalNode ? 'Remote host - cannot control from this machine' : ''}
             style={{
               padding: '10px 20px',
               backgroundColor: nodeStatus === 'running' ? '#6c757d' : '#28a745',
               color: 'white',
               border: 'none',
               borderRadius: '3px',
-              cursor: (loading || !mgmtApiClient || nodeStatus === 'running') ? 'not-allowed' : 'pointer',
-              opacity: (loading || !mgmtApiClient || nodeStatus === 'running') ? 0.6 : 1
+              cursor: (!isLocalNode || loading || !mgmtApiClient || nodeStatus === 'running') ? 'not-allowed' : 'pointer',
+              opacity: (!isLocalNode || loading || !mgmtApiClient || nodeStatus === 'running') ? 0.6 : 1
             }}
           >
             {loading ? '⏳ Starting...' : '▶️ Start Node'}
@@ -2252,15 +2338,16 @@ const NodeManagementClient: React.FC = () => {
 
           <button
             onClick={handleStopNode}
-            disabled={loading || !mgmtApiClient || nodeStatus === 'stopped'}
+            disabled={!isLocalNode || loading || !mgmtApiClient || nodeStatus === 'stopped'}
+            title={!isLocalNode ? 'Remote host - cannot control from this machine' : ''}
             style={{
               padding: '10px 20px',
               backgroundColor: nodeStatus === 'stopped' ? '#6c757d' : '#dc3545',
               color: 'white',
               border: 'none',
               borderRadius: '3px',
-              cursor: (loading || !mgmtApiClient || nodeStatus === 'stopped') ? 'not-allowed' : 'pointer',
-              opacity: (loading || !mgmtApiClient || nodeStatus === 'stopped') ? 0.6 : 1
+              cursor: (!isLocalNode || loading || !mgmtApiClient || nodeStatus === 'stopped') ? 'not-allowed' : 'pointer',
+              opacity: (!isLocalNode || loading || !mgmtApiClient || nodeStatus === 'stopped') ? 0.6 : 1
             }}
           >
             {loading ? '⏳ Stopping...' : '⏹️ Stop Node'}

@@ -21,7 +21,11 @@ export class MockStorage {
   set(key: string, value: any): void {
     const fullKey = `${this.prefix}-${key}`;
     try {
-      localStorage.setItem(fullKey, JSON.stringify(value));
+      // Custom replacer to handle BigInt values
+      const json = JSON.stringify(value, (key, val) =>
+        typeof val === 'bigint' ? val.toString() : val
+      );
+      localStorage.setItem(fullKey, json);
     } catch (error) {
       console.error(`[MockStorage] Failed to set ${fullKey}:`, error);
     }

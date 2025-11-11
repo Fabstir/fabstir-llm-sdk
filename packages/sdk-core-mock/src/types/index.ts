@@ -38,6 +38,18 @@ export interface SearchResult {
 // ===== Phase 11 Types (UI Development - not in real SDK yet) =====
 
 /**
+ * Group Document
+ * Files uploaded to the session group (available in all chat sessions)
+ */
+export interface GroupDocument {
+  id: string;
+  name: string;
+  size: number;
+  uploaded: number; // Timestamp
+  contentType?: string;
+}
+
+/**
  * Session Group (Project)
  * Organizes chat sessions and linked vector databases
  */
@@ -48,6 +60,7 @@ export interface SessionGroup {
   databases: string[]; // Vector database names linked to this group
   defaultDatabaseId: string; // Auto-created default database
   chatSessions: ChatSessionSummary[];
+  groupDocuments: GroupDocument[]; // Documents available in all chat sessions
   owner: string; // User address
   created: number; // Timestamp
   updated: number; // Timestamp
@@ -128,6 +141,11 @@ export interface ISessionGroupManager {
 
   addMessage(groupId: string, sessionId: string, message: ChatMessage): Promise<void>;
   deleteChatSession(groupId: string, sessionId: string): Promise<void>;
+
+  // Group Document Methods
+  addGroupDocument(groupId: string, document: GroupDocument): Promise<void>;
+  removeGroupDocument(groupId: string, documentId: string): Promise<void>;
+  listGroupDocuments(groupId: string): Promise<GroupDocument[]>;
 
   shareGroup(groupId: string, userAddress: string, role: 'reader' | 'writer'): Promise<void>;
   unshareGroup(groupId: string, userAddress: string): Promise<void>;

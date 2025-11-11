@@ -107,3 +107,8 @@ models/
 
 # fabstir-llm-node binary (extracted from tarball)
 fabstir-llm-node
+
+test-screenshots*/
+*-screenshot.png
+upload-test-*.png
+  

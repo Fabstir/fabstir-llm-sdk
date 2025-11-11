@@ -45,6 +45,7 @@ export function generateMockSessionGroups(): SessionGroup[] {
           lastMessage: 'Use semantic versioning with backward compatibility'
         }
       ],
+      groupDocuments: [],
       owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
       created: now - 7 * 24 * 60 * 60 * 1000, // 7 days ago
       updated: now - 5 * 60 * 1000,
@@ -77,6 +78,7 @@ export function generateMockSessionGroups(): SessionGroup[] {
           lastMessage: 'Key insight: Users want better mobile experience'
         }
       ],
+      groupDocuments: [],
       owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
       created: now - 14 * 24 * 60 * 60 * 1000,
       updated: now - 2 * 60 * 60 * 1000,
@@ -101,6 +103,7 @@ export function generateMockSessionGroups(): SessionGroup[] {
           lastMessage: 'I like the blue gradient approach'
         }
       ],
+      groupDocuments: [],
       owner: '0xDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF', // Different owner (shared)
       created: now - 3 * 24 * 60 * 60 * 1000,
       updated: now - 24 * 60 * 60 * 1000,
@@ -125,6 +128,7 @@ export function generateMockSessionGroups(): SessionGroup[] {
           lastMessage: 'RoBERTa shows 2% improvement on our dataset'
         }
       ],
+      groupDocuments: [],
       owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
       created: now - 10 * 24 * 60 * 60 * 1000,
       updated: now - 3 * 24 * 60 * 60 * 1000,
@@ -149,6 +153,7 @@ export function generateMockSessionGroups(): SessionGroup[] {
           lastMessage: 'Action items: Follow up on pricing, send proposal'
         }
       ],
+      groupDocuments: [],
       owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
       created: now - 30 * 24 * 60 * 60 * 1000,
       updated: now - 7 * 24 * 60 * 60 * 1000,
