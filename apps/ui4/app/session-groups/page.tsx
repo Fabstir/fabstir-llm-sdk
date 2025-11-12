@@ -36,7 +36,10 @@ export default function SessionGroupsPage() {
   const sortedGroups = [...filteredGroups].sort((a, b) => {
     switch (sortBy) {
       case 'recent':
-        return b.updated - a.updated;
+        // Handle cases where updatedAt might be undefined or not a Date object
+        const aTime = a.updatedAt instanceof Date ? a.updatedAt.getTime() : 0;
+        const bTime = b.updatedAt instanceof Date ? b.updatedAt.getTime() : 0;
+        return bTime - aTime;
       case 'name':
         return a.name.localeCompare(b.name);
       case 'sessions':

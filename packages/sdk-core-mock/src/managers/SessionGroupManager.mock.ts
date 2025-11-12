@@ -9,7 +9,10 @@ import type {
   ISessionGroupManager,
   SessionGroup,
   ChatSession,
-  ChatMessage
+  ChatMessage,
+  CreateSessionGroupInput,
+  UpdateSessionGroupInput,
+  VectorDatabaseMetadata
 } from '../types';
 import { MockStorage } from '../storage/MockStorage';
 import { generateMockSessionGroups, generateMockChatMessages } from '../fixtures/mockData';
@@ -31,65 +34,74 @@ export class SessionGroupManagerMock implements ISessionGroupManager {
         this.storage.set(group.id, group);
 
         // Initialize chat sessions for this group
-        group.chatSessions.forEach(sessionMeta => {
-          const fullSession: ChatSession = {
-            sessionId: sessionMeta.sessionId,
-            groupId: group.id,
-            title: sessionMeta.title,
-            messages: generateMockChatMessages(sessionMeta.title),
-            metadata: {
-              model: 'llama-3',
-              hostUrl: 'http://localhost:8080',
-              databasesUsed: group.databases
-            },
-            created: sessionMeta.timestamp,
-            updated: sessionMeta.timestamp
-          };
-          this.chatStorage.set(sessionMeta.sessionId, fullSession);
-        });
+        // Note: In real SDK, chatSessions is string[] (just IDs)
+        // Mock data fixtures still use ChatSessionSummary for backward compatibility
+        const sessionMetas = group.chatSessions as any;
+        if (Array.isArray(sessionMetas) && sessionMetas.length > 0 && typeof sessionMetas[0] === 'object') {
+          sessionMetas.forEach((sessionMeta: any) => {
+            const fullSession: ChatSession = {
+              sessionId: sessionMeta.sessionId,
+              groupId: group.id,
+              title: sessionMeta.title,
+              messages: generateMockChatMessages(sessionMeta.title),
+              metadata: {
+                model: 'llama-3',
+                hostUrl: 'http://localhost:8080',
+                databasesUsed: group.linkedDatabases
+              },
+              created: sessionMeta.timestamp,
+              updated: sessionMeta.timestamp
+            };
+            this.chatStorage.set(sessionMeta.sessionId, fullSession);
+          });
+        }
       });
     }
   }
 
   async createSessionGroup(
-    name: string,
-    options?: { description?: string; databases?: string[] }
+    input: CreateSessionGroupInput
   ): Promise<SessionGroup> {
     await this.delay(500); // Simulate network delay
 
     const group: SessionGroup = {
       id: this.generateId('group'),
-      name,
-      description: options?.description,
-      databases: options?.databases || [],
-      defaultDatabaseId: this.generateId('default-db'),
-      chatSessions: [],
-      groupDocuments: [],
-      owner: this.userAddress,
-      created: Date.now(),
-      updated: Date.now(),
-      permissions: {
-        readers: [],
-        writers: []
-      }
+      name: input.name,
+      description: input.description,           // REQUIRED
+      createdAt: new Date(),                    // Date object
+      updatedAt: new Date(),                    // Date object
+      owner: input.owner,
+      linkedDatabases: [],                      // Renamed from databases
+      defaultDatabase: undefined,               // OPTIONAL - Renamed from defaultDatabaseId
+      chatSessions: [],                         // Just IDs (string[])
+      metadata: input.metadata || {},           // Custom metadata
+      deleted: false                            // Soft-delete flag
     };
 
     this.storage.set(group.id, group);
-    console.log('[Mock] Created session group:', name);
+    console.log('[Mock] Created session group:', input.name);
 
     return group;
   }
 
-  async listSessionGroups(): Promise<SessionGroup[]> {
+  async listSessionGroups(owner: string): Promise<SessionGroup[]> {
     await this.delay(200);
 
     const groups = this.storage.getAll() as SessionGroup[];
 
-    // Sort by updated (newest first)
-    return groups.sort((a, b) => b.updated - a.updated);
+    // Filter by owner and exclude deleted groups
+    const filtered = groups.filter(g => g.owner === owner && !g.deleted);
+
+    // Sort by updatedAt (newest first)
+    // Handle cases where updatedAt might be undefined or not a Date object
+    return filtered.sort((a, b) => {
+      const aTime = a.updatedAt instanceof Date ? a.updatedAt.getTime() : 0;
+      const bTime = b.updatedAt instanceof Date ? b.updatedAt.getTime() : 0;
+      return bTime - aTime;
+    });
   }
 
-  async getSessionGroup(groupId: string): Promise<SessionGroup> {
+  async getSessionGroup(groupId: string, requestor: string): Promise<SessionGroup> {
     await this.delay(150);
 
     const group = this.storage.get<SessionGroup>(groupId);
@@ -97,358 +109,196 @@ export class SessionGroupManagerMock implements ISessionGroupManager {
       throw new Error(`[Mock] Session group not found: ${groupId}`);
     }
 
-    // Migration: Add groupDocuments field if missing (for old data)
-    if (!group.groupDocuments) {
-      group.groupDocuments = [];
-      this.storage.set(groupId, group);
+    if (group.deleted) {
+      throw new Error(`[Mock] Session group has been deleted: ${groupId}`);
+    }
+
+    // In real SDK, this would check permissions (requestor can access if owner or has permission)
+    // For mock, we just allow access if requestor is owner
+    if (group.owner !== requestor) {
+      throw new Error(`[Mock] Access denied: ${requestor} cannot access group ${groupId}`);
     }
 
     return group;
   }
 
-  async deleteSessionGroup(groupId: string): Promise<void> {
+  async deleteSessionGroup(groupId: string, requestor: string): Promise<void> {
     await this.delay(300);
 
-    // Delete the group
-    const group = await this.getSessionGroup(groupId);
+    // Get the group (this also checks permissions)
+    const group = await this.getSessionGroup(groupId, requestor);
 
-    // Delete all associated chat sessions
-    group.chatSessions.forEach(sessionMeta => {
-      this.chatStorage.delete(sessionMeta.sessionId);
-    });
+    // Soft delete (mark as deleted instead of removing)
+    group.deleted = true;
+    group.updatedAt = new Date();
 
-    this.storage.delete(groupId);
-    console.log('[Mock] Deleted session group:', groupId);
+    this.storage.set(groupId, group);
+    console.log('[Mock] Soft-deleted session group:', groupId);
   }
 
   async updateSessionGroup(
     groupId: string,
-    updates: Partial<SessionGroup>
+    requestor: string,
+    updates: UpdateSessionGroupInput
   ): Promise<SessionGroup> {
     await this.delay(250);
 
-    const group = await this.getSessionGroup(groupId);
-    const updated = {
-      ...group,
-      ...updates,
-      id: group.id, // Preserve ID
-      owner: group.owner, // Preserve owner
-      created: group.created, // Preserve created time
-      updated: Date.now()
-    };
+    const group = await this.getSessionGroup(groupId, requestor);
 
-    this.storage.set(groupId, updated);
-    return updated;
+    // Apply allowed updates (only name, description, metadata)
+    if (updates.name !== undefined) group.name = updates.name;
+    if (updates.description !== undefined) group.description = updates.description;
+    if (updates.metadata !== undefined) {
+      group.metadata = { ...group.metadata, ...updates.metadata };
+    }
+
+    group.updatedAt = new Date();
+
+    this.storage.set(groupId, group);
+    return group;
   }
 
-  async linkDatabase(groupId: string, databaseName: string): Promise<void> {
+  async linkVectorDatabase(groupId: string, requestor: string, databaseId: string): Promise<SessionGroup> {
     await this.delay(200);
 
-    const group = await this.getSessionGroup(groupId);
-    if (!group.databases.includes(databaseName)) {
-      group.databases.push(databaseName);
-      group.updated = Date.now();
+    const group = await this.getSessionGroup(groupId, requestor);
+
+    if (!group.linkedDatabases.includes(databaseId)) {
+      group.linkedDatabases.push(databaseId);
+      group.updatedAt = new Date();
       this.storage.set(groupId, group);
     }
 
-    console.log('[Mock] Linked database to group:', databaseName);
+    console.log('[Mock] Linked vector database to group:', databaseId);
+    return group;
   }
 
-  async unlinkDatabase(groupId: string, databaseName: string): Promise<void> {
+  async unlinkVectorDatabase(groupId: string, requestor: string, databaseId: string): Promise<SessionGroup> {
     await this.delay(200);
 
-    const group = await this.getSessionGroup(groupId);
-    group.databases = group.databases.filter(db => db !== databaseName);
-    group.updated = Date.now();
+    const group = await this.getSessionGroup(groupId, requestor);
+
+    group.linkedDatabases = group.linkedDatabases.filter(db => db !== databaseId);
+
+    // Clear default database if it was the unlinked one
+    if (group.defaultDatabase === databaseId) {
+      group.defaultDatabase = undefined;
+    }
+
+    group.updatedAt = new Date();
     this.storage.set(groupId, group);
 
-    console.log('[Mock] Unlinked database from group:', databaseName);
+    console.log('[Mock] Unlinked vector database from group:', databaseId);
+    return group;
   }
 
-  async getDefaultDatabase(groupId: string): Promise<string> {
+  async setDefaultDatabase(groupId: string, requestor: string, databaseId?: string): Promise<SessionGroup> {
     await this.delay(100);
 
-    const group = await this.getSessionGroup(groupId);
-    return group.defaultDatabaseId;
-  }
+    const group = await this.getSessionGroup(groupId, requestor);
 
-  // Chat Session Methods
+    // If databaseId provided, verify it's linked
+    if (databaseId && !group.linkedDatabases.includes(databaseId)) {
+      throw new Error(`[Mock] Database ${databaseId} is not linked to group ${groupId}`);
+    }
 
-  async startChatSession(
-    groupId: string,
-    initialMessage?: string
-  ): Promise<ChatSession> {
-    await this.delay(400);
-
-    const group = await this.getSessionGroup(groupId);
-
-    const session: ChatSession = {
-      sessionId: this.generateId('sess'),
-      groupId,
-      title: initialMessage
-        ? this.generateTitle(initialMessage)
-        : 'New conversation',
-      messages: initialMessage ? [{
-        role: 'user',
-        content: initialMessage,
-        timestamp: Date.now()
-      }] : [],
-      metadata: {
-        model: 'llama-3',
-        hostUrl: 'http://localhost:8080',
-        databasesUsed: group.databases
-      },
-      created: Date.now(),
-      updated: Date.now()
-    };
-
-    // Store session
-    this.chatStorage.set(session.sessionId, session);
-
-    // Add to group's session list
-    group.chatSessions.push({
-      sessionId: session.sessionId,
-      title: session.title,
-      timestamp: session.created,
-      messageCount: session.messages.length,
-      active: true,
-      lastMessage: initialMessage
-    });
-    group.updated = Date.now();
+    group.defaultDatabase = databaseId;
+    group.updatedAt = new Date();
     this.storage.set(groupId, group);
 
-    console.log('[Mock] Started chat session:', session.sessionId);
-    return session;
+    console.log('[Mock] Set default database:', databaseId || 'none');
+    return group;
   }
 
-  async getChatSession(groupId: string, sessionId: string): Promise<ChatSession> {
+  async listLinkedDatabases(groupId: string, requestor: string): Promise<VectorDatabaseMetadata[]> {
     await this.delay(150);
 
-    const session = this.chatStorage.get<ChatSession>(sessionId);
-    if (!session || session.groupId !== groupId) {
-      throw new Error(`[Mock] Chat session not found: ${sessionId}`);
-    }
+    const group = await this.getSessionGroup(groupId, requestor);
 
-    return session;
+    // Mock: Return metadata for linked databases
+    // In real SDK, this would query the actual vector database metadata
+    return group.linkedDatabases.map(dbId => ({
+      id: dbId,
+      name: dbId,
+      dimensions: 384,
+      vectorCount: Math.floor(Math.random() * 10000),
+      storageSizeBytes: Math.floor(Math.random() * 5000000),
+      owner: group.owner,
+      created: Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000,
+      lastAccessed: Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000,
+      description: `Mock vector database: ${dbId}`,
+      folderStructure: true
+    }));
   }
 
-  async listChatSessions(
-    groupId: string,
-    options?: { limit?: number; offset?: number }
-  ): Promise<ChatSession[]> {
+  async handleDatabaseDeletion(databaseId: string): Promise<void> {
     await this.delay(200);
 
-    const group = await this.getSessionGroup(groupId);
-    const sessionIds = group.chatSessions.map(s => s.sessionId);
-
-    const sessions: ChatSession[] = [];
-    for (const sessionId of sessionIds) {
-      const session = this.chatStorage.get<ChatSession>(sessionId);
-      if (session) sessions.push(session);
-    }
-
-    // Sort by updated (newest first)
-    sessions.sort((a, b) => b.updated - a.updated);
-
-    // Apply pagination
-    const { limit = 50, offset = 0 } = options || {};
-    return sessions.slice(offset, offset + limit);
-  }
-
-  async continueChatSession(groupId: string, sessionId: string): Promise<ChatSession> {
-    await this.delay(200);
-
-    const session = await this.getChatSession(groupId, sessionId);
-
-    // Update group's session list to mark as active
-    const group = await this.getSessionGroup(groupId);
-    const sessionMeta = group.chatSessions.find(s => s.sessionId === sessionId);
-    if (sessionMeta) {
-      sessionMeta.active = true;
-      group.updated = Date.now();
-      this.storage.set(groupId, group);
-    }
-
-    return session;
-  }
-
-  async addMessage(
-    groupId: string,
-    sessionId: string,
-    message: ChatMessage
-  ): Promise<void> {
-    await this.delay(100);
-
-    const session = await this.getChatSession(groupId, sessionId);
-    session.messages.push(message);
-    session.updated = Date.now();
-
-    // Auto-generate title from first user message if still using default
-    if (session.title === 'New conversation' && message.role === 'user') {
-      session.title = this.generateTitle(message.content);
-    }
-
-    this.chatStorage.set(sessionId, session);
-
-    // Update group's session metadata
-    const group = await this.getSessionGroup(groupId);
-    const sessionMeta = group.chatSessions.find(s => s.sessionId === sessionId);
-    if (sessionMeta) {
-      sessionMeta.title = session.title; // Update title in metadata too
-      sessionMeta.messageCount = session.messages.length;
-      sessionMeta.lastMessage = message.content.substring(0, 100);
-      sessionMeta.timestamp = message.timestamp;
-      group.updated = Date.now();
-      this.storage.set(groupId, group);
-    }
-  }
-
-  async generateSessionTitle(messages: ChatMessage[]): Promise<string> {
-    await this.delay(100);
-
-    // Use first user message as title
-    const firstUserMessage = messages.find(m => m.role === 'user');
-    if (firstUserMessage) {
-      return this.generateTitle(firstUserMessage.content);
-    }
-
-    return 'New conversation';
-  }
-
-  async deleteChatSession(groupId: string, sessionId: string): Promise<void> {
-    await this.delay(300);
-
-    // Remove session data
-    this.chatStorage.delete(sessionId);
-
-    // Remove from group's session list
-    const group = await this.getSessionGroup(groupId);
-    group.chatSessions = group.chatSessions.filter(s => s.sessionId !== sessionId);
-    group.updated = Date.now();
-    this.storage.set(groupId, group);
-
-    console.log('[Mock] Deleted chat session:', sessionId);
-  }
-
-  async searchChatSessions(groupId: string, query: string): Promise<ChatSession[]> {
-    await this.delay(300);
-
-    const sessions = await this.listChatSessions(groupId);
-
-    // Simple search: check if query appears in title or messages
-    const queryLower = query.toLowerCase();
-    return sessions.filter(session => {
-      if (session.title.toLowerCase().includes(queryLower)) {
-        return true;
-      }
-
-      return session.messages.some(msg =>
-        msg.content.toLowerCase().includes(queryLower)
-      );
-    });
-  }
-
-  // Group Document Methods
-
-  async addGroupDocument(groupId: string, document: import('../types').GroupDocument): Promise<void> {
-    await this.delay(200);
-
-    const group = await this.getSessionGroup(groupId);
-
-    // Add document to group
-    group.groupDocuments.push(document);
-    group.updated = Date.now();
-
-    this.storage.set(groupId, group);
-    console.log('[Mock] Added group document:', document.name);
-  }
-
-  async removeGroupDocument(groupId: string, documentId: string): Promise<void> {
-    await this.delay(200);
-
-    const group = await this.getSessionGroup(groupId);
-
-    // Remove document from group
-    group.groupDocuments = group.groupDocuments.filter(doc => doc.id !== documentId);
-    group.updated = Date.now();
-
-    this.storage.set(groupId, group);
-    console.log('[Mock] Removed group document:', documentId);
-  }
-
-  async listGroupDocuments(groupId: string): Promise<import('../types').GroupDocument[]> {
-    await this.delay(100);
-
-    const group = await this.getSessionGroup(groupId);
-    return group.groupDocuments;
-  }
-
-  // Sharing Methods
-
-  async shareGroup(
-    groupId: string,
-    userAddress: string,
-    role: 'reader' | 'writer'
-  ): Promise<void> {
-    await this.delay(300);
-
-    const group = await this.getSessionGroup(groupId);
-
-    if (role === 'reader' && !group.permissions?.readers?.includes(userAddress)) {
-      group.permissions = group.permissions || { readers: [], writers: [] };
-      group.permissions.readers!.push(userAddress);
-    } else if (role === 'writer' && !group.permissions?.writers?.includes(userAddress)) {
-      group.permissions = group.permissions || { readers: [], writers: [] };
-      group.permissions.writers!.push(userAddress);
-    }
-
-    group.updated = Date.now();
-    this.storage.set(groupId, group);
-
-    console.log('[Mock] Shared group with:', userAddress, role);
-  }
-
-  async unshareGroup(groupId: string, userAddress: string): Promise<void> {
-    await this.delay(250);
-
-    const group = await this.getSessionGroup(groupId);
-
-    if (group.permissions) {
-      group.permissions.readers = group.permissions.readers?.filter(a => a !== userAddress);
-      group.permissions.writers = group.permissions.writers?.filter(a => a !== userAddress);
-    }
-
-    group.updated = Date.now();
-    this.storage.set(groupId, group);
-
-    console.log('[Mock] Unshared group with:', userAddress);
-  }
-
-  async listSharedGroups(): Promise<SessionGroup[]> {
-    await this.delay(200);
-
-    // Mock: Return groups owned by others where current user has permissions
+    // Remove database from all groups that link to it
     const allGroups = this.storage.getAll() as SessionGroup[];
 
-    return allGroups.filter(g =>
-      g.owner !== this.userAddress &&
-      (g.permissions?.readers?.includes(this.userAddress) ||
-       g.permissions?.writers?.includes(this.userAddress))
-    );
+    for (const group of allGroups) {
+      let updated = false;
+
+      if (group.linkedDatabases.includes(databaseId)) {
+        group.linkedDatabases = group.linkedDatabases.filter(db => db !== databaseId);
+        updated = true;
+      }
+
+      if (group.defaultDatabase === databaseId) {
+        group.defaultDatabase = undefined;
+        updated = true;
+      }
+
+      if (updated) {
+        group.updatedAt = new Date();
+        this.storage.set(group.id, group);
+      }
+    }
+
+    console.log('[Mock] Handled database deletion:', databaseId);
   }
 
-  async getGroupPermissions(groupId: string): Promise<{
-    readers: string[];
-    writers: string[];
-  }> {
-    await this.delay(100);
+  // Chat Session Methods (UPDATED - Real SDK only has addChatSession and listChatSessions)
 
-    const group = await this.getSessionGroup(groupId);
-    return {
-      readers: group.permissions?.readers ?? [],
-      writers: group.permissions?.writers ?? []
-    };
+  async addChatSession(groupId: string, requestor: string, sessionId: string): Promise<SessionGroup> {
+    await this.delay(200);
+
+    const group = await this.getSessionGroup(groupId, requestor);
+
+    // Add session ID to group
+    if (!group.chatSessions.includes(sessionId)) {
+      group.chatSessions.push(sessionId);
+      group.updatedAt = new Date();
+      this.storage.set(groupId, group);
+    }
+
+    console.log('[Mock] Added chat session to group:', sessionId);
+    return group;
   }
+
+  async listChatSessions(groupId: string, requestor: string): Promise<string[]> {
+    await this.delay(150);
+
+    const group = await this.getSessionGroup(groupId, requestor);
+    return group.chatSessions;
+  }
+
+  // DEPRECATED METHODS REMOVED:
+  // - startChatSession (use SessionManager in real SDK)
+  // - getChatSession (use SessionManager in real SDK)
+  // - continueChatSession (use SessionManager in real SDK)
+  // - addMessage (use SessionManager in real SDK)
+  // - generateSessionTitle (use SessionManager in real SDK)
+  // - deleteChatSession (use SessionManager in real SDK)
+  // - searchChatSessions (use SessionManager in real SDK)
+  // - addGroupDocument (use DocumentManager in real SDK)
+  // - removeGroupDocument (use DocumentManager in real SDK)
+  // - listGroupDocuments (use DocumentManager in real SDK)
+  // - shareGroup (use PermissionManager in real SDK)
+  // - unshareGroup (use PermissionManager in real SDK)
+  // - listSharedGroups (use PermissionManager in real SDK)
+  // - getGroupPermissions (use PermissionManager in real SDK)
 
   // Helper Methods
 

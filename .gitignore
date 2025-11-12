@@ -112,3 +112,21 @@ test-screenshots*/
 *-screenshot.png
 upload-test-*.png
   
+apps/ui4/test-grid-investigation.mjs
+apps/ui4/test-notifications-edge-cases.mjs
+apps/ui4/test-notifications.mjs
+apps/ui4/test-session7-mobile.mjs
+apps/ui4/test-upload-debug.mjs
+apps/ui4/test-uploads.mjs
+session-groups-after-fix.png
+session-groups-after-refresh.png
+
+COMPARISON_REPORT_INDEX.md
+SDK_COMPARISON_SUMMARY.md
+SDK_MIGRATION_CODE_PATTERNS.md
+SDK_MOCK_VS_REAL_COMPARISON.md
+UI4_ANALYSIS.md
+UI4_FILE_REFERENCE.md
+docs/ui4-reference/WEBSOCKET_FIX_UI4.md
+UI4_INDEX.md
+UI4_QUICK_SUMMARY.md

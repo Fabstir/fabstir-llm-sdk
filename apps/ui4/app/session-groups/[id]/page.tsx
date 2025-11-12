@@ -215,7 +215,7 @@ export default function SessionGroupDetailPage() {
     );
   }
 
-  const lastUpdate = formatDistanceToNow(new Date(selectedGroup.updated), {
+  const lastUpdate = formatDistanceToNow(selectedGroup.updatedAt, {
     addSuffix: true,
   });
 
@@ -295,7 +295,7 @@ export default function SessionGroupDetailPage() {
                 <div>
                   <p className="text-sm text-gray-500">Databases Linked</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {selectedGroup.databases.length}
+                    {selectedGroup.linkedDatabases.length}
                   </p>
                 </div>
               </div>

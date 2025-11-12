@@ -5,25 +5,40 @@
  * - Session Groups
  * - Vector Databases
  * - Chat Sessions
+ *
+ * UPDATED: Aligned with real SDK types (Jan 2025)
  */
 
-import type { SessionGroup, DatabaseMetadata } from '../types';
+import type { SessionGroup, VectorDatabaseMetadata, ChatSessionSummary } from '../types';
 
+/**
+ * Generate mock session groups (aligned with real SDK)
+ * Note: Returns groups with ChatSessionSummary[] for backward compat with UI4
+ * SessionGroupManager.mock.ts handles conversion to string[] IDs
+ */
 export function generateMockSessionGroups(): SessionGroup[] {
-  const now = Date.now();
+  const now = new Date();
+
+  // Helper to create dates relative to now
+  const daysAgo = (days: number) => new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+  const hoursAgo = (hours: number) => new Date(now.getTime() - hours * 60 * 60 * 1000);
+  const minutesAgo = (minutes: number) => new Date(now.getTime() - minutes * 60 * 1000);
 
   return [
     {
       id: 'group-engineering-001',
       name: 'Engineering Project',
       description: 'All engineering-related discussions and documentation',
-      databases: ['api-documentation', 'design-specifications'],
-      defaultDatabaseId: 'default-engineering-001',
+      createdAt: daysAgo(7),
+      updatedAt: minutesAgo(5),
+      owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
+      linkedDatabases: ['api-documentation', 'design-specifications'],
+      defaultDatabase: 'api-documentation',
       chatSessions: [
         {
           sessionId: 'sess-001',
           title: 'How to implement authentication for mobile apps?',
-          timestamp: now - 5 * 60 * 1000, // 5 min ago
+          timestamp: now.getTime() - 5 * 60 * 1000,
           messageCount: 12,
           active: true,
           lastMessage: 'What about token refresh strategies?'
@@ -31,7 +46,7 @@ export function generateMockSessionGroups(): SessionGroup[] {
         {
           sessionId: 'sess-002',
           title: 'Database migration strategy',
-          timestamp: now - 2 * 60 * 60 * 1000, // 2 hours ago
+          timestamp: now.getTime() - 2 * 60 * 60 * 1000,
           messageCount: 8,
           active: false,
           lastMessage: "Let's use blue-green deployment approach"
@@ -39,32 +54,31 @@ export function generateMockSessionGroups(): SessionGroup[] {
         {
           sessionId: 'sess-003',
           title: 'API versioning best practices',
-          timestamp: now - 7 * 24 * 60 * 60 * 1000, // 7 days ago
+          timestamp: now.getTime() - 7 * 24 * 60 * 60 * 1000,
           messageCount: 20,
           active: false,
           lastMessage: 'Use semantic versioning with backward compatibility'
         }
-      ],
-      groupDocuments: [],
-      owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
-      created: now - 7 * 24 * 60 * 60 * 1000, // 7 days ago
-      updated: now - 5 * 60 * 1000,
-      permissions: {
-        readers: [],
-        writers: ['0xABCDEF1234567890ABCDEF1234567890ABCDEF12']
-      }
+      ] as any, // Cast to any for backward compat (should be string[])
+      metadata: {
+        tags: ['engineering', 'backend', 'api']
+      },
+      deleted: false
     },
     {
       id: 'group-research-001',
       name: 'Product Research',
       description: 'Market analysis and competitor research',
-      databases: ['research-papers', 'market-analysis', 'competitor-data'],
-      defaultDatabaseId: 'default-research-001',
+      createdAt: daysAgo(14),
+      updatedAt: hoursAgo(2),
+      owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
+      linkedDatabases: ['research-papers', 'market-analysis', 'competitor-data'],
+      defaultDatabase: 'research-papers',
       chatSessions: [
         {
           sessionId: 'sess-004',
           title: 'Analyze competitor pricing strategies',
-          timestamp: now - 2 * 60 * 60 * 1000,
+          timestamp: now.getTime() - 2 * 60 * 60 * 1000,
           messageCount: 15,
           active: false,
           lastMessage: 'Summary: Most competitors use tiered pricing...'
@@ -72,188 +86,193 @@ export function generateMockSessionGroups(): SessionGroup[] {
         {
           sessionId: 'sess-005',
           title: 'User feedback analysis Q4 2024',
-          timestamp: now - 3 * 24 * 60 * 60 * 1000,
+          timestamp: now.getTime() - 3 * 24 * 60 * 60 * 1000,
           messageCount: 25,
           active: false,
           lastMessage: 'Key insight: Users want better mobile experience'
         }
-      ],
-      groupDocuments: [],
-      owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
-      created: now - 14 * 24 * 60 * 60 * 1000,
-      updated: now - 2 * 60 * 60 * 1000,
-      permissions: {
-        readers: [],
-        writers: []
-      }
+      ] as any,
+      metadata: {
+        tags: ['research', 'market-analysis']
+      },
+      deleted: false
     },
     {
       id: 'group-design-shared',
       name: 'Design Brainstorming',
       description: 'UI/UX design discussions',
-      databases: ['design-system'],
-      defaultDatabaseId: 'default-design-shared',
+      createdAt: daysAgo(3),
+      updatedAt: daysAgo(1),
+      owner: '0xDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF', // Different owner (shared)
+      linkedDatabases: ['design-system'],
+      defaultDatabase: undefined,
       chatSessions: [
         {
           sessionId: 'sess-006',
           title: 'Color palette recommendations for mobile app',
-          timestamp: now - 24 * 60 * 60 * 1000, // Yesterday
+          timestamp: now.getTime() - 24 * 60 * 60 * 1000,
           messageCount: 4,
           active: false,
           lastMessage: 'I like the blue gradient approach'
         }
-      ],
-      groupDocuments: [],
-      owner: '0xDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF', // Different owner (shared)
-      created: now - 3 * 24 * 60 * 60 * 1000,
-      updated: now - 24 * 60 * 60 * 1000,
-      permissions: {
-        readers: ['0x1234567890ABCDEF1234567890ABCDEF12345678'], // Shared with current user
-        writers: []
-      }
+      ] as any,
+      metadata: {
+        tags: ['design', 'ui', 'ux']
+      },
+      deleted: false
     },
     {
       id: 'group-ml-training',
       name: 'ML Model Training',
       description: 'Machine learning experiments and model training logs',
-      databases: ['training-data'],
-      defaultDatabaseId: 'default-ml-training',
+      createdAt: daysAgo(10),
+      updatedAt: daysAgo(3),
+      owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
+      linkedDatabases: ['training-data'],
+      defaultDatabase: 'training-data',
       chatSessions: [
         {
           sessionId: 'sess-007',
           title: 'Compare BERT vs RoBERTa performance',
-          timestamp: now - 3 * 24 * 60 * 60 * 1000,
+          timestamp: now.getTime() - 3 * 24 * 60 * 60 * 1000,
           messageCount: 6,
           active: false,
           lastMessage: 'RoBERTa shows 2% improvement on our dataset'
         }
-      ],
-      groupDocuments: [],
-      owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
-      created: now - 10 * 24 * 60 * 60 * 1000,
-      updated: now - 3 * 24 * 60 * 60 * 1000,
-      permissions: {
-        readers: [],
-        writers: []
-      }
+      ] as any,
+      metadata: {
+        tags: ['machine-learning', 'nlp']
+      },
+      deleted: false
     },
     {
       id: 'group-personal',
       name: 'Personal Notes',
       description: 'Personal learning and random thoughts',
-      databases: [],
-      defaultDatabaseId: 'default-personal',
+      createdAt: daysAgo(30),
+      updatedAt: daysAgo(7),
+      owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
+      linkedDatabases: [],
+      defaultDatabase: undefined,
       chatSessions: [
         {
           sessionId: 'sess-008',
           title: 'Summarize meeting notes from client call',
-          timestamp: now - 7 * 24 * 60 * 60 * 1000,
+          timestamp: now.getTime() - 7 * 24 * 60 * 60 * 1000,
           messageCount: 2,
           active: false,
           lastMessage: 'Action items: Follow up on pricing, send proposal'
         }
-      ],
-      groupDocuments: [],
-      owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
-      created: now - 30 * 24 * 60 * 60 * 1000,
-      updated: now - 7 * 24 * 60 * 60 * 1000,
-      permissions: {
-        readers: [],
-        writers: []
-      }
+      ] as any,
+      metadata: {
+        tags: ['personal']
+      },
+      deleted: false
     }
   ];
 }
 
-export function generateMockVectorDatabases(): DatabaseMetadata[] {
+/**
+ * Generate mock vector databases (aligned with real SDK)
+ */
+export function generateMockVectorDatabases(): VectorDatabaseMetadata[] {
   const now = Date.now();
+  const daysAgo = (days: number) => now - days * 24 * 60 * 60 * 1000;
 
   return [
     {
+      id: 'api-documentation',
       name: 'api-documentation',
       dimensions: 384,
       vectorCount: 2345,
       storageSizeBytes: 3600000,
       owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
-      created: now - 30 * 24 * 60 * 60 * 1000,
+      created: daysAgo(30),
       lastAccessed: now - 2 * 60 * 60 * 1000,
       description: 'Complete API documentation and implementation guides',
       folderStructure: true
     },
     {
+      id: 'design-specifications',
       name: 'design-specifications',
       dimensions: 384,
       vectorCount: 1823,
       storageSizeBytes: 2800000,
       owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
-      created: now - 25 * 24 * 60 * 60 * 1000,
-      lastAccessed: now - 1 * 24 * 60 * 60 * 1000,
+      created: daysAgo(25),
+      lastAccessed: daysAgo(1),
       description: 'Design specs, wireframes, and UI component documentation',
       folderStructure: true
     },
     {
+      id: 'research-papers',
       name: 'research-papers',
       dimensions: 384,
       vectorCount: 5621,
       storageSizeBytes: 8600000,
       owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
-      created: now - 60 * 24 * 60 * 60 * 1000,
-      lastAccessed: now - 3 * 24 * 60 * 60 * 1000,
+      created: daysAgo(60),
+      lastAccessed: daysAgo(3),
       description: 'Academic and industry research papers on AI and machine learning',
       folderStructure: true
     },
     {
+      id: 'personal-knowledge',
       name: 'personal-knowledge',
       dimensions: 384,
       vectorCount: 892,
       storageSizeBytes: 1400000,
       owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
-      created: now - 45 * 24 * 60 * 60 * 1000,
-      lastAccessed: now - 7 * 24 * 60 * 60 * 1000,
+      created: daysAgo(45),
+      lastAccessed: daysAgo(7),
       description: 'Personal notes, learning materials, and bookmarks',
       folderStructure: true
     },
     {
+      id: 'market-analysis',
       name: 'market-analysis',
       dimensions: 384,
       vectorCount: 1234,
       storageSizeBytes: 1900000,
       owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
-      created: now - 20 * 24 * 60 * 60 * 1000,
-      lastAccessed: now - 2 * 24 * 60 * 60 * 1000,
+      created: daysAgo(20),
+      lastAccessed: daysAgo(2),
       description: 'Market research reports and competitive analysis',
       folderStructure: true
     },
     {
+      id: 'competitor-data',
       name: 'competitor-data',
       dimensions: 384,
       vectorCount: 987,
       storageSizeBytes: 1500000,
       owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
-      created: now - 15 * 24 * 60 * 60 * 1000,
-      lastAccessed: now - 2 * 24 * 60 * 60 * 1000,
+      created: daysAgo(15),
+      lastAccessed: daysAgo(2),
       description: 'Competitor product features, pricing, and positioning',
       folderStructure: true
     },
     {
+      id: 'design-system',
       name: 'design-system',
       dimensions: 384,
       vectorCount: 3421,
       storageSizeBytes: 5200000,
       owner: '0xDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF', // Shared by someone else
-      created: now - 40 * 24 * 60 * 60 * 1000,
-      lastAccessed: now - 1 * 24 * 60 * 60 * 1000,
+      created: daysAgo(40),
+      lastAccessed: daysAgo(1),
       description: 'Complete design system documentation and component library',
       folderStructure: true
     },
     {
+      id: 'training-data',
       name: 'training-data',
       dimensions: 384,
       vectorCount: 1203,
       storageSizeBytes: 1850000,
       owner: '0x1234567890ABCDEF1234567890ABCDEF12345678',
-      created: now - 10 * 24 * 60 * 60 * 1000,
-      lastAccessed: now - 3 * 24 * 60 * 60 * 1000,
+      created: daysAgo(10),
+      lastAccessed: daysAgo(3),
       description: 'ML training datasets and experiment results',
       folderStructure: true
     }

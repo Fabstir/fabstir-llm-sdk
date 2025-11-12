@@ -61,12 +61,12 @@ export function useSessionGroups(): UseSessionGroupsReturn {
   const [error, setError] = useState<string | null>(null);
 
   const loadSessionGroups = useCallback(async () => {
-    if (!managers?.sessionGroupManager) return;
+    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) return;
 
     try {
       setIsLoading(true);
       setError(null);
-      const groups = await managers.sessionGroupManager.listSessionGroups();
+      const groups = await managers.sessionGroupManager.listSessionGroups(managers.authManager.userAddress);
       setSessionGroups(groups);
     } catch (err) {
       console.error('[useSessionGroups] Failed to load groups:', err);
@@ -87,14 +87,19 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     name: string,
     options?: { description?: string; databases?: string[] }
   ): Promise<SessionGroup> => {
-    if (!managers?.sessionGroupManager) {
+    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) {
       throw new Error('SDK not initialized');
     }
 
     try {
       setIsLoading(true);
       setError(null);
-      const group = await managers.sessionGroupManager.createSessionGroup(name, options);
+      const group = await managers.sessionGroupManager.createSessionGroup({
+        name,
+        description: options?.description || '',
+        owner: managers.authManager.userAddress,
+        metadata: {}
+      });
       await loadSessionGroups(); // Refresh list
       return group;
     } catch (err) {
@@ -108,12 +113,12 @@ export function useSessionGroups(): UseSessionGroupsReturn {
   }, [managers, loadSessionGroups]);
 
   const selectGroup = useCallback(async (groupId: string): Promise<void> => {
-    if (!managers?.sessionGroupManager) return;
+    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) return;
 
     try {
       setIsLoading(true);
       setError(null);
-      const group = await managers.sessionGroupManager.getSessionGroup(groupId);
+      const group = await managers.sessionGroupManager.getSessionGroup(groupId, managers.authManager.userAddress);
       setSelectedGroup(group);
     } catch (err) {
       console.error('[useSessionGroups] Failed to select group:', err);
@@ -124,12 +129,12 @@ export function useSessionGroups(): UseSessionGroupsReturn {
   }, [managers]);
 
   const deleteGroup = useCallback(async (groupId: string): Promise<void> => {
-    if (!managers?.sessionGroupManager) return;
+    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) return;
 
     try {
       setIsLoading(true);
       setError(null);
-      await managers.sessionGroupManager.deleteSessionGroup(groupId);
+      await managers.sessionGroupManager.deleteSessionGroup(groupId, managers.authManager.userAddress);
 
       // Clear selected group if it was deleted
       if (selectedGroup?.id === groupId) {
@@ -151,14 +156,22 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     groupId: string,
     updates: Partial<SessionGroup>
   ): Promise<SessionGroup> => {
-    if (!managers?.sessionGroupManager) {
+    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) {
       throw new Error('SDK not initialized');
     }
 
     try {
       setIsLoading(true);
       setError(null);
-      const updated = await managers.sessionGroupManager.updateSessionGroup(groupId, updates);
+      const updated = await managers.sessionGroupManager.updateSessionGroup(
+        groupId,
+        managers.authManager.userAddress,
+        {
+          name: updates.name,
+          description: updates.description,
+          metadata: updates.metadata
+        }
+      );
 
       // Update selected group if it was updated
       if (selectedGroup?.id === groupId) {
@@ -181,11 +194,11 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     groupId: string,
     databaseName: string
   ): Promise<void> => {
-    if (!managers?.sessionGroupManager) return;
+    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) return;
 
     try {
       setError(null);
-      await managers.sessionGroupManager.linkDatabase(groupId, databaseName);
+      await managers.sessionGroupManager.linkVectorDatabase(groupId, managers.authManager.userAddress, databaseName);
 
       // Refresh selected group if it was updated
       if (selectedGroup?.id === groupId) {
@@ -205,11 +218,11 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     groupId: string,
     databaseName: string
   ): Promise<void> => {
-    if (!managers?.sessionGroupManager) return;
+    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) return;
 
     try {
       setError(null);
-      await managers.sessionGroupManager.unlinkDatabase(groupId, databaseName);
+      await managers.sessionGroupManager.unlinkVectorDatabase(groupId, managers.authManager.userAddress, databaseName);
 
       // Refresh selected group if it was updated
       if (selectedGroup?.id === groupId) {

@@ -20,6 +20,7 @@ export interface SDKManagers {
   vectorRAGManager: IVectorRAGManager;
   hostManager: IHostManager;
   paymentManager: IPaymentManager;
+  authManager: { userAddress: string };
 }
 
 export class UI4SDK {
@@ -79,6 +80,7 @@ export class UI4SDK {
       vectorRAGManager: this.sdk.getVectorRAGManager(),
       hostManager: this.sdk.getHostManager(),
       paymentManager: this.sdk.getPaymentManager(),
+      authManager: this.sdk.getAuthManager(),
     };
   }
 

@@ -8,7 +8,7 @@
 import type {
   Vector,
   SearchResult,
-  DatabaseMetadata,
+  VectorDatabaseMetadata,
   FolderStats
 } from '../types';
 import { MockStorage } from '../storage/MockStorage';
@@ -43,7 +43,7 @@ export class VectorRAGManagerMock {
     }
 
     // Migration: Ensure all existing databases have folder storage initialized
-    const allDatabases = this.storage.getAll<DatabaseMetadata>();
+    const allDatabases = this.storage.getAll<VectorDatabaseMetadata>();
     allDatabases.forEach(db => {
       if (!this.folderStorage.has(db.name)) {
         this.folderStorage.set(db.name, []);
@@ -54,7 +54,7 @@ export class VectorRAGManagerMock {
 
   async createSession(
     databaseName: string,
-    options?: { dimensions?: number; folderStructure?: boolean }
+    options?: { dimensions?: number; folderStructure?: boolean; description?: string }
   ): Promise<void> {
     await this.delay(400);
 
@@ -63,7 +63,8 @@ export class VectorRAGManagerMock {
       throw new Error(`[Mock] Database already exists: ${databaseName}`);
     }
 
-    const db: DatabaseMetadata = {
+    const db: VectorDatabaseMetadata = {
+      id: databaseName,
       name: databaseName,
       dimensions: options?.dimensions || 384,
       vectorCount: 0,
@@ -71,7 +72,7 @@ export class VectorRAGManagerMock {
       owner: this.userAddress,
       created: Date.now(),
       lastAccessed: Date.now(),
-      description: '',
+      description: options?.description || '',
       folderStructure: options?.folderStructure !== false
     };
 
@@ -82,15 +83,15 @@ export class VectorRAGManagerMock {
     console.log('[Mock] Created vector database:', databaseName);
   }
 
-  async listDatabases(): Promise<DatabaseMetadata[]> {
+  async listDatabases(): Promise<VectorDatabaseMetadata[]> {
     await this.delay(300);
     return this.storage.getAll();
   }
 
-  async getDatabaseMetadata(databaseName: string): Promise<DatabaseMetadata> {
+  async getVectorDatabaseMetadata(databaseName: string): Promise<VectorDatabaseMetadata> {
     await this.delay(200);
 
-    const db = this.storage.get<DatabaseMetadata>(databaseName);
+    const db = this.storage.get<VectorDatabaseMetadata>(databaseName);
     if (!db) {
       throw new Error(`[Mock] Database not found: ${databaseName}`);
     }
@@ -98,13 +99,18 @@ export class VectorRAGManagerMock {
     return db;
   }
 
-  async updateDatabaseMetadata(
+  // Alias for compatibility with UI calls
+  async getDatabaseMetadata(databaseName: string): Promise<VectorDatabaseMetadata> {
+    return this.getVectorDatabaseMetadata(databaseName);
+  }
+
+  async updateVectorDatabaseMetadata(
     databaseName: string,
-    updates: Partial<DatabaseMetadata>
+    updates: Partial<VectorDatabaseMetadata>
   ): Promise<void> {
     await this.delay(300);
 
-    const db = this.storage.get<DatabaseMetadata>(databaseName);
+    const db = this.storage.get<VectorDatabaseMetadata>(databaseName);
     if (!db) {
       throw new Error(`[Mock] Database not found: ${databaseName}`);
     }
@@ -152,7 +158,7 @@ export class VectorRAGManagerMock {
     this.vectorStorage.set(databaseName, vectors);
 
     // Update database metadata
-    const db = this.storage.get<DatabaseMetadata>(databaseName);
+    const db = this.storage.get<VectorDatabaseMetadata>(databaseName);
     if (db) {
       db.vectorCount = vectors.length;
       db.storageSizeBytes = vectors.length * vector.length * 4; // Rough estimate
@@ -215,7 +221,7 @@ export class VectorRAGManagerMock {
     this.vectorStorage.set(databaseName, filtered);
 
     // Update database metadata
-    const db = this.storage.get<DatabaseMetadata>(databaseName);
+    const db = this.storage.get<VectorDatabaseMetadata>(databaseName);
     if (db) {
       db.vectorCount = filtered.length;
       db.lastAccessed = Date.now();

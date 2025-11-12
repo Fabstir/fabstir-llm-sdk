@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { mockWallet, type WalletState } from '@/lib/mock-wallet';
+import { ui4SDK } from '@/lib/sdk';
 
 export interface UseWalletReturn {
   address: string | null;
@@ -46,6 +47,10 @@ export function useWallet(): UseWalletReturn {
     try {
       setIsConnecting(true);
       const address = await mockWallet.connect();
+
+      // Initialize SDK with wallet address
+      await ui4SDK.initialize(address);
+
       setState({
         address,
         isConnected: true,
@@ -59,6 +64,7 @@ export function useWallet(): UseWalletReturn {
 
   const disconnect = useCallback(() => {
     mockWallet.disconnect();
+    ui4SDK.disconnect();
     setState({
       address: null,
       isConnected: false,
