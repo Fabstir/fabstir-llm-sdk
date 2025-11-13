@@ -18,18 +18,11 @@ const navItems = [
 export function Navbar() {
   const pathname = usePathname();
   const { address, isConnected, isConnecting, connect, disconnect } = useWallet();
-  const { initialize, disconnect: disconnectSDK } = useSDK();
+  const { disconnect: disconnectSDK } = useSDK(); // SDK auto-initializes via useWallet
   const [unreadCount, setUnreadCount] = useState(0);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Initialize SDK when wallet connects
-  useEffect(() => {
-    if (isConnected && address) {
-      initialize(address).catch((err) => {
-        console.error('Failed to initialize SDK:', err);
-      });
-    }
-  }, [isConnected, address, initialize]);
+  // NOTE: SDK initialization is handled by useWallet hook - don't initialize here
 
   // Close mobile menu on navigation
   useEffect(() => {

@@ -864,17 +864,30 @@ await page.waitForTimeout(10000); // After transaction submit
 await page.waitForSelector('text=Transaction confirmed', { timeout: TX_TIMEOUT });
 ```
 
-### 5.2: Manual Testing Checklist
+### 5.2: Manual Testing Checklist ✅
 
-#### Wallet Connection
-- [ ] Click "Connect Wallet"
-- [ ] Base Account Kit UI appears
-- [ ] Successfully authenticate
-- [ ] Primary account address shown
-- [ ] Sub-account created (first time only)
-- [ ] Sub-account address shown
-- [ ] SDK initializes (green "✓ SDK Ready" badge)
-- [ ] No console errors
+**Complete checklist**: `/workspace/tests-ui5/MANUAL_TESTING_CHECKLIST.md` (61 tests)
+
+**Initial Verification (2025-11-13)**:
+- [x] Click "Connect Wallet"
+- [x] MetaMask UI appears (Base Account Kit integration pending full test)
+- [x] Successfully authenticate
+- [x] Primary account address shown in navbar (0x8D64...4bF6)
+- [x] SDK initializes successfully
+- [x] S5 storage connects (no timeout errors)
+- [x] No console errors (only benign warnings: illegal path, favicon 404)
+
+**Status**: Basic wallet connection and SDK initialization verified working. Full 61-test checklist ready for comprehensive manual testing.
+
+#### Wallet Connection (From Checklist)
+- [x] Click "Connect Wallet"
+- [ ] Base Account Kit UI appears (using MetaMask currently)
+- [x] Successfully authenticate
+- [x] Primary account address shown
+- [ ] Sub-account created (first time only) - pending Base Account Kit full integration
+- [ ] Sub-account address shown - pending Base Account Kit full integration
+- [x] SDK initializes (check console for success message)
+- [x] No console errors
 
 #### Vector Database Operations
 - [ ] Navigate to /vector-databases

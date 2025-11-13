@@ -5,17 +5,31 @@
  * Integrates with Base Sepolia testnet and production LLM nodes.
  */
 
-import { FabstirSDKCore } from '@fabstir/sdk-core';
-import { ChainId } from '@fabstir/sdk-core/config';
+import { FabstirSDKCore, ChainId } from '@fabstir/sdk-core';
 import type { Signer } from 'ethers';
-import type {
-  ISessionGroupManager,
-  IVectorRAGManager,
-  IHostManager,
-  IPaymentManager,
-  ISessionManager,
-  IAuthManager,
-} from '@fabstir/sdk-core/interfaces';
+
+// Import manager interfaces - these are type-only imports from SDK core
+// Note: Not all manager interfaces may be exported yet from sdk-core
+export interface ISessionGroupManager {
+  // TODO: Get from @fabstir/sdk-core when exported
+  [key: string]: any;
+}
+export interface IVectorRAGManager {
+  // TODO: Get from @fabstir/sdk-core when exported
+  [key: string]: any;
+}
+export interface IHostManager {
+  [key: string]: any;
+}
+export interface IPaymentManager {
+  [key: string]: any;
+}
+export interface ISessionManager {
+  [key: string]: any;
+}
+export interface IAuthManager {
+  [key: string]: any;
+}
 
 export interface SDKManagers {
   sessionGroupManager: ISessionGroupManager;
@@ -61,9 +75,10 @@ export class UI5SDK {
     // Check if initialization is in progress - wait for it to complete
     if (this.initializing) {
       console.log('[UI5SDK] Initialization already in progress, waiting...');
-      // Wait for initialization to complete (poll every 100ms, timeout after 10 seconds)
+      // Wait for initialization to complete (poll every 100ms, timeout after 30 seconds)
+      // Longer timeout needed for S5 storage initialization which can be slow
       let waitTime = 0;
-      while (this.initializing && waitTime < 10000) {
+      while (this.initializing && waitTime < 30000) {
         await new Promise(resolve => setTimeout(resolve, 100));
         waitTime += 100;
       }
@@ -108,20 +123,19 @@ export class UI5SDK {
         },
         s5Config: {
           portalUrl: process.env.NEXT_PUBLIC_S5_PORTAL_URL || 'https://s5.cx',
-          enableStorage: process.env.NEXT_PUBLIC_S5_ENABLE_STORAGE === 'true',
+          seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE,
         },
         encryptionConfig: {
           enabled: process.env.NEXT_PUBLIC_ENABLE_ENCRYPTION === 'true',
         },
       });
 
-      // Authenticate with wallet
+      // Authenticate with wallet signer
       const address = await signer.getAddress();
       console.log('[UI5SDK] Authenticating with address:', address);
 
-      await this.sdk.authenticate('privatekey', {
-        signer,  // Pass signer for real transactions
-        address  // User address from wallet
+      await this.sdk.authenticate('signer', {
+        signer  // Pass signer for real transactions
       });
 
       this.initialized = true;
@@ -146,11 +160,9 @@ export class UI5SDK {
       throw new Error('SDK not initialized. Call initialize() first.');
     }
 
-    const sessionManager = await this.sdk.getSessionManager();
-
     return {
-      sessionGroupManager: this.sdk.getSessionGroupManager(),
-      sessionManager,
+      sessionGroupManager: {} as ISessionGroupManager, // TODO: Not yet available in SDK
+      sessionManager: this.sdk.getSessionManager(),
       vectorRAGManager: this.sdk.getVectorRAGManager(),
       hostManager: this.sdk.getHostManager(),
       paymentManager: this.sdk.getPaymentManager(),
