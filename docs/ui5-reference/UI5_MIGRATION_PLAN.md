@@ -19,15 +19,15 @@ UI5 will be a production-ready version of UI4 using:
 
 ---
 
-## Phase 0: Project Setup
+## Phase 0: Project Setup ✅
 
 ### 0.1: Copy UI4 to UI5
-- [ ] Copy entire `/workspace/apps/ui4/` to `/workspace/apps/ui5/`
-- [ ] Update `apps/ui5/package.json` name to `"@fabstir/ui5"`
-- [ ] Update `apps/ui5/package.json` description to "Production UI with Real SDK"
-- [ ] Add ui5 to root workspace in `/workspace/package.json`
-- [ ] Create `/workspace/apps/ui5/.env.local` (do not commit)
-- [ ] Create `/workspace/apps/ui5/.gitignore` entry for `.env.local`
+- [x] Copy entire `/workspace/apps/ui4/` to `/workspace/apps/ui5/`
+- [x] Update `apps/ui5/package.json` name to `"@fabstir/ui5"`
+- [x] Update `apps/ui5/package.json` description to "Production UI with Real SDK"
+- [x] Add ui5 to root workspace in `/workspace/package.json`
+- [x] Create `/workspace/apps/ui5/.env.local` (do not commit)
+- [x] Create `/workspace/apps/ui5/.gitignore` entry for `.env.local`
 
 **Commands**:
 ```bash
@@ -45,35 +45,35 @@ echo ".env.local" >> .gitignore
 ```
 
 **Verification**:
-- [ ] UI5 folder exists with all UI4 files
-- [ ] UI5 package.json has correct name
-- [ ] .env.local file created (empty for now)
+- [x] UI5 folder exists with all UI4 files
+- [x] UI5 package.json has correct name
+- [x] .env.local file created (empty for now)
 
 **Time Estimate**: 15 minutes
 
 ---
 
-## Phase 1: Dependency Updates
+## Phase 1: Dependency Updates ✅
 
 ### 1.1: Remove Mock SDK
-- [ ] Open `/workspace/apps/ui5/package.json`
-- [ ] Remove dependency: `"@fabstir/sdk-core-mock": "workspace:*"`
-- [ ] Remove any other mock-related dependencies
+- [x] Open `/workspace/apps/ui5/package.json`
+- [x] Remove dependency: `"@fabstir/sdk-core-mock": "workspace:*"`
+- [x] Remove any other mock-related dependencies
 
 ### 1.2: Add Production SDK
-- [ ] Add dependency: `"@fabstir/sdk-core": "workspace:*"`
-- [ ] Add dependency: `"@s5-dev/s5js": "^1.0.0"` (if not already present)
-- [ ] Add dependency: `"ethers": "^6.13.0"`
+- [x] Add dependency: `"@fabstir/sdk-core": "workspace:*"`
+- [x] ~~Add dependency: `"@s5-dev/s5js": "^1.0.0"`~~ (Skipped - pulled in via sdk-core workspace)
+- [x] Add dependency: `"ethers": "^6.13.0"`
 
 ### 1.3: Add Base Account Kit
-- [ ] Add dependency: `"@base-org/account": "^1.0.0"` (Base Account SDK)
-- [ ] Add dependency: `"viem": "^2.0.0"` (required by Base Account Kit)
-- [ ] Add dependency: `"@wagmi/core": "^2.0.0"` (wallet integration)
+- [x] Add dependency: `"@base-org/account": "^1.0.0"` (Base Account SDK)
+- [x] Add dependency: `"viem": "^2.0.0"` (required by Base Account Kit)
+- [x] Add dependency: `"@wagmi/core": "^2.0.0"` (wallet integration)
 
 ### 1.4: Install Dependencies
-- [ ] Run `cd /workspace/apps/ui5 && pnpm install`
-- [ ] Verify no installation errors
-- [ ] Verify `@fabstir/sdk-core` resolves to workspace package
+- [x] Run `cd /workspace/apps/ui5 && pnpm install`
+- [x] Verify no installation errors
+- [x] Verify `@fabstir/sdk-core` resolves to workspace package
 
 **package.json changes**:
 ```diff
@@ -95,10 +95,10 @@ echo ".env.local" >> .gitignore
 ```
 
 **Verification**:
-- [ ] `pnpm install` completes successfully
-- [ ] `node_modules/@fabstir/sdk-core` exists
-- [ ] `node_modules/@base-org/account` exists
-- [ ] No dependency conflicts
+- [x] `pnpm install` completes successfully
+- [x] `node_modules/@fabstir/sdk-core` exists
+- [x] `node_modules/@base-org/account` exists
+- [x] No dependency conflicts
 
 **Time Estimate**: 20 minutes
 
