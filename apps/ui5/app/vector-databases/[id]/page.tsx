@@ -1,0 +1,448 @@
+'use client';
+
+import { useState, useEffect, useMemo } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { useWallet } from '@/hooks/use-wallet';
+import { useVectorDatabases } from '@/hooks/use-vector-databases';
+import { FolderTree, FolderNode } from '@/components/vector-databases/folder-tree';
+import { FileBrowser, FileItem } from '@/components/vector-databases/file-browser';
+import { FolderActions } from '@/components/vector-databases/folder-actions';
+import { FileDetailsModal } from '@/components/vector-databases/file-details-modal';
+import { UploadDocumentModal } from '@/components/vector-databases/upload-document-modal';
+import { Database, ArrowLeft, Upload, FolderPlus } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
+import type { DatabaseMetadata, Vector } from '@fabstir/sdk-core-mock';
+
+/**
+ * Vector Database Detail Page
+ *
+ * View database details and manage vectors
+ */
+export default function VectorDatabaseDetailPage() {
+  const params = useParams();
+  const router = useRouter();
+  const { isConnected } = useWallet();
+  const { getDatabase, listVectors, deleteVector, addVectors, isInitialized, createFolder, renameFolder, deleteFolder, getAllFoldersWithCounts } = useVectorDatabases();
+
+  const databaseName = decodeURIComponent(params.id as string);
+
+  const [database, setDatabase] = useState<DatabaseMetadata | null>(null);
+  const [vectors, setVectors] = useState<Vector[]>([]);
+  const [foldersWithCounts, setFoldersWithCounts] = useState<Array<{ path: string; fileCount: number }>>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Folder and file management state
+  const [selectedPath, setSelectedPath] = useState<string>('/');
+  const [folderAction, setFolderAction] = useState<{
+    action: 'create' | 'rename' | 'delete';
+    folder?: FolderNode | null;
+    parentPath?: string;
+  } | null>(null);
+  const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+
+  // Load database and vectors
+  useEffect(() => {
+    if (!isConnected || !isInitialized) return;
+
+    loadData();
+  }, [isConnected, isInitialized, databaseName]);
+
+  const loadData = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      // Get database metadata
+      const db = await getDatabase(databaseName);
+      setDatabase(db);
+
+      // Get all vectors from database
+      const dbVectors = await listVectors(databaseName);
+      setVectors(dbVectors);
+
+      // Get folders with counts (includes empty folders)
+      if (db?.folderStructure) {
+        const folders = await getAllFoldersWithCounts(databaseName);
+        setFoldersWithCounts(folders);
+      }
+    } catch (err) {
+      console.error('Failed to load database:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load database');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Build folder tree from folders with counts
+  const folderTree = useMemo((): FolderNode[] => {
+    if (!database?.folderStructure) return [];
+
+    const pathMap = new Map<string, FolderNode>();
+
+    // Initialize folders from foldersWithCounts (includes empty folders)
+    foldersWithCounts.forEach(({ path, fileCount }) => {
+      if (path === '/') return;
+
+      const parts = path.split('/').filter(Boolean);
+      let currentPath = '';
+
+      parts.forEach((part, index) => {
+        currentPath = currentPath ? `${currentPath}/${part}` : `/${part}`;
+
+        if (!pathMap.has(currentPath)) {
+          pathMap.set(currentPath, {
+            id: currentPath,
+            name: part,
+            path: currentPath,
+            children: [],
+            fileCount: 0,
+          });
+        }
+      });
+
+      // Set file count for the final folder
+      const folder = pathMap.get(path);
+      if (folder) {
+        folder.fileCount = fileCount;
+      }
+    });
+
+    // Build tree structure
+    const rootFolders: FolderNode[] = [];
+    pathMap.forEach((folder) => {
+      const parentPath = folder.path.substring(0, folder.path.lastIndexOf('/')) || '/';
+      if (parentPath === '/') {
+        rootFolders.push(folder);
+      } else {
+        const parent = pathMap.get(parentPath);
+        if (parent) {
+          parent.children.push(folder);
+        }
+      }
+    });
+
+    return rootFolders;
+  }, [foldersWithCounts, database?.folderStructure]);
+
+  // Convert vectors to FileItem format
+  const fileItems = useMemo((): FileItem[] => {
+    return vectors.map((vector) => ({
+      id: vector.id,
+      name: vector.metadata?.fileName || vector.id,
+      size: vector.vector.length * 4, // 4 bytes per float
+      uploaded: vector.metadata?.createdAt || Date.now(),
+      folderPath: vector.metadata?.folderPath || '/',
+      vectorCount: 1, // Each file is one vector (or chunk)
+    }));
+  }, [vectors]);
+
+  const handleDeleteVector = async (vectorId: string) => {
+    try {
+      await deleteVector(databaseName, vectorId);
+      await loadData(); // Refresh
+    } catch (err) {
+      console.error('Failed to delete vector:', err);
+      alert('Failed to delete vector');
+    }
+  };
+
+  // Folder action handlers
+  const handleFolderAction = (action: 'create' | 'rename' | 'delete', folder: FolderNode) => {
+    setFolderAction({ action, folder });
+  };
+
+  const handleFolderConfirm = async (folderName: string, path?: string) => {
+    if (!folderAction) return;
+
+    try {
+      if (folderAction.action === 'create') {
+        // Create new folder at parent path
+        const parentPath = path || folderAction.parentPath || '/';
+        const fullPath = parentPath === '/' ? `/${folderName}` : `${parentPath}/${folderName}`;
+        await createFolder(databaseName, fullPath);
+        console.log('Created folder:', fullPath);
+      } else if (folderAction.action === 'rename' && folderAction.folder) {
+        // Rename existing folder
+        const oldPath = folderAction.folder.path;
+        const parentPath = oldPath.split('/').slice(0, -1).join('/') || '/';
+        const newPath = parentPath === '/' ? `/${folderName}` : `${parentPath}/${folderName}`;
+        const updatedCount = await renameFolder(databaseName, oldPath, newPath);
+        console.log(`Renamed folder ${oldPath} to ${newPath} (${updatedCount} vectors updated)`);
+      } else if (folderAction.action === 'delete' && folderAction.folder) {
+        // Delete folder and all its contents
+        const deletedCount = await deleteFolder(databaseName, folderAction.folder.path);
+        console.log(`Deleted folder ${folderAction.folder.path} (${deletedCount} vectors removed)`);
+      }
+
+      setFolderAction(null);
+      await loadData(); // Reload to reflect changes
+    } catch (err) {
+      console.error('Failed to perform folder action:', err);
+      alert(err instanceof Error ? err.message : 'Failed to perform folder action');
+    }
+  };
+
+  // File handlers
+  const handleFileClick = (file: FileItem) => {
+    setSelectedFile(file);
+  };
+
+  const handleFileDelete = async (fileId: string) => {
+    await handleDeleteVector(fileId);
+  };
+
+  // Upload handler
+  const handleUploadDocuments = async (files: File[], folderPath?: string) => {
+    // Generate mock vectors for each file
+    const vectors: Vector[] = files.map((file, index) => {
+      // Generate a mock 384-dimensional vector (matching database dimensions)
+      const mockVector = Array.from({ length: database?.dimensions || 384 }, () => Math.random());
+
+      return {
+        id: `${file.name}-${Date.now()}-${index}`,
+        vector: mockVector,
+        metadata: {
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type,
+          folderPath: folderPath || selectedPath,
+          createdAt: Date.now(),
+          chunkIndex: 0,
+          totalChunks: 1
+        }
+      };
+    });
+
+    // Add vectors to database
+    await addVectors(databaseName, vectors);
+
+    // Reload data to show new documents
+    await loadData();
+  };
+
+  // Not connected state
+  if (!isConnected) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <Database className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Not Connected</h2>
+          <p className="text-gray-600">Please connect your wallet to view this database</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="animate-spin h-8 w-8 border-4 border-purple-600 border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  // Error state
+  if (error || !database) {
+    return (
+      <div className="max-w-7xl mx-auto space-y-6">
+        <Link
+          href="/vector-databases"
+          className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Databases
+        </Link>
+
+        <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+          <Database className="h-12 w-12 text-red-400 mx-auto mb-3" />
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Database Not Found</h3>
+          <p className="text-gray-600">{error || 'The requested database could not be found'}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Format storage size
+  const formatSize = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-6">
+      {/* Back Button */}
+      <Link
+        href="/vector-databases"
+        className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back to Databases
+      </Link>
+
+      {/* Database Header */}
+      <div className="bg-white rounded-lg border p-6">
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-purple-100 rounded-lg">
+              <Database className="h-8 w-8 text-purple-600" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">{database.name}</h1>
+              {database.description && (
+                <p className="text-gray-600 mt-1">{database.description}</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mt-6">
+          <div className="p-4 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-600">Vectors</p>
+            <p className="text-2xl font-bold text-gray-900">{database.vectorCount.toLocaleString()}</p>
+          </div>
+          <div className="p-4 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-600">Dimensions</p>
+            <p className="text-2xl font-bold text-gray-900">{database.dimensions}</p>
+          </div>
+          <div className="p-4 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-600">Storage</p>
+            <p className="text-2xl font-bold text-gray-900">{formatSize(database.storageSizeBytes)}</p>
+          </div>
+          <div className="p-4 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-600">Last Updated</p>
+            <p className="text-xl font-bold text-gray-900">
+              {formatDistanceToNow(database.lastAccessed, { addSuffix: true })}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Vectors Section with Folder Tree and File Browser */}
+      <div className="bg-white rounded-lg border">
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Documents ({database.vectorCount.toLocaleString()})
+            </h2>
+            <div className="flex items-center gap-2">
+              {database.folderStructure && (
+                <button
+                  onClick={() => setFolderAction({ action: 'create', parentPath: selectedPath })}
+                  className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors text-sm"
+                >
+                  <FolderPlus className="h-4 w-4" />
+                  New Folder
+                </button>
+              )}
+              <button
+                onClick={() => setIsUploadModalOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors text-sm"
+              >
+                <Upload className="h-4 w-4" />
+                Upload Documents
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {database.folderStructure ? (
+          <div className="grid grid-cols-12 divide-x divide-gray-200" style={{ height: '600px' }}>
+            {/* Folder Tree (Left Sidebar) */}
+            <div className="col-span-3 overflow-auto p-4">
+              <div className="mb-4">
+                <button
+                  onClick={() => setSelectedPath('/')}
+                  className={`w-full text-left px-3 py-2 rounded-md transition-colors ${
+                    selectedPath === '/' ? 'bg-blue-50 text-blue-900' : 'hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Database className="h-4 w-4 text-blue-600" />
+                    <span className="text-sm font-medium">Root</span>
+                  </div>
+                </button>
+              </div>
+              <FolderTree
+                folders={folderTree}
+                selectedPath={selectedPath}
+                onFolderSelect={setSelectedPath}
+                onFolderAction={handleFolderAction}
+              />
+            </div>
+
+            {/* File Browser (Right Panel) */}
+            <div className="col-span-9">
+              <FileBrowser
+                files={fileItems}
+                currentPath={selectedPath}
+                onFileClick={handleFileClick}
+                onFileDelete={handleFileDelete}
+              />
+            </div>
+          </div>
+        ) : (
+          // Simple file list (no folder structure)
+          <div style={{ height: '600px' }}>
+            <FileBrowser
+              files={fileItems}
+              currentPath="/"
+              onFileClick={handleFileClick}
+              onFileDelete={handleFileDelete}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Modals */}
+      <FolderActions
+        isOpen={folderAction !== null}
+        onClose={() => setFolderAction(null)}
+        action={folderAction?.action || 'create'}
+        folder={folderAction?.folder}
+        parentPath={folderAction?.parentPath}
+        onConfirm={handleFolderConfirm}
+      />
+
+      <FileDetailsModal
+        isOpen={selectedFile !== null}
+        onClose={() => setSelectedFile(null)}
+        file={selectedFile}
+      />
+
+      <UploadDocumentModal
+        isOpen={isUploadModalOpen}
+        onClose={() => setIsUploadModalOpen(false)}
+        databaseName={database.name}
+        onUpload={handleUploadDocuments}
+        initialFolderPath={selectedPath}
+      />
+
+      {/* Info Panel */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Database Information</h3>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <p className="text-gray-600">Owner</p>
+            <p className="text-gray-900 font-mono text-xs">{database.owner}</p>
+          </div>
+          <div>
+            <p className="text-gray-600">Created</p>
+            <p className="text-gray-900">{new Date(database.created).toLocaleDateString()}</p>
+          </div>
+          <div>
+            <p className="text-gray-600">Folder Structure</p>
+            <p className="text-gray-900">{database.folderStructure ? 'Enabled' : 'Disabled'}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
