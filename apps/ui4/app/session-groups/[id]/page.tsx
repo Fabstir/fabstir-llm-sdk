@@ -4,10 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
-import { Trash2, X, FileText } from "lucide-react";
+import { Trash2, X, FileText, Database } from "lucide-react";
 import { useWallet } from "@/hooks/use-wallet";
 import { useSDK } from "@/hooks/use-sdk";
 import { useSessionGroups } from "@/hooks/use-session-groups";
+import { useVectorDatabases } from "@/hooks/use-vector-databases";
 
 interface ChatSession {
   sessionId: string;
@@ -36,12 +37,17 @@ export default function SessionGroupDetailPage() {
     listChatSessionsWithData,
     addGroupDocument,
     removeGroupDocument,
+    linkDatabase,
+    unlinkDatabase,
     isLoading,
     error,
   } = useSessionGroups();
 
+  const { databases } = useVectorDatabases();
+
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [showLinkDatabaseModal, setShowLinkDatabaseModal] = useState(false);
 
   const groupId = params.id as string;
 
@@ -107,6 +113,35 @@ export default function SessionGroupDetailPage() {
       await removeGroupDocument(groupId, docId);
     } catch (error) {
       console.error("Failed to remove document:", error);
+    }
+  };
+
+  // --- Link Vector Database ---
+  const handleLinkDatabase = async (databaseName: string) => {
+    try {
+      console.log("[Mock] Linking database to group:", databaseName);
+      await linkDatabase(groupId, databaseName);
+      setShowLinkDatabaseModal(false);
+    } catch (error) {
+      console.error("Failed to link database:", error);
+    }
+  };
+
+  // --- Unlink Vector Database ---
+  const handleUnlinkDatabase = async (databaseName: string) => {
+    if (
+      !confirm(
+        `Unlink database "${databaseName}"? It will no longer be available in chat sessions.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      console.log("[Mock] Unlinking database from group:", databaseName);
+      await unlinkDatabase(groupId, databaseName);
+    } catch (error) {
+      console.error("Failed to unlink database:", error);
     }
   };
 
@@ -380,6 +415,62 @@ export default function SessionGroupDetailPage() {
                 </p>
               )}
             </div>
+
+            {/* Linked Databases Card */}
+            <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Linked Databases
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowLinkDatabaseModal(true)}
+                  className="text-sm px-3 py-1 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                >
+                  + Link Database
+                </button>
+              </div>
+              <p className="text-xs text-gray-600 mb-3">
+                Linked databases provide context for RAG-enhanced responses
+              </p>
+
+              {selectedGroup.linkedDatabases.length > 0 ? (
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {selectedGroup.linkedDatabases.map((dbName) => {
+                    const dbInfo = databases.find(db => db.name === dbName);
+                    return (
+                      <div
+                        key={dbName}
+                        className="flex items-center gap-2 p-2 border border-gray-200 rounded-md hover:bg-gray-50 group"
+                      >
+                        <Database className="h-4 w-4 text-purple-600 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {dbName}
+                          </p>
+                          {dbInfo && (
+                            <p className="text-xs text-gray-500">
+                              {dbInfo.vectorCount.toLocaleString()} vectors
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => handleUnlinkDatabase(dbName)}
+                          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 transition-opacity"
+                          title="Unlink database"
+                        >
+                          <X className="h-3 w-3 text-red-600" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 text-center py-4">
+                  No databases linked yet
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Chat Sessions List */}
@@ -462,6 +553,63 @@ export default function SessionGroupDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Link Database Modal */}
+      {showLinkDatabaseModal && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setShowLinkDatabaseModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Link Vector Database
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Select a database to link to this session group. Linked databases
+              provide context for RAG-enhanced chat responses.
+            </p>
+
+            <div className="space-y-2 max-h-96 overflow-y-auto mb-4">
+              {databases
+                .filter((db) => !selectedGroup.linkedDatabases.includes(db.name))
+                .map((db) => (
+                  <button
+                    key={db.name}
+                    onClick={() => handleLinkDatabase(db.name)}
+                    className="w-full flex items-center gap-3 p-3 border border-gray-200 rounded-md hover:bg-blue-50 hover:border-blue-300 transition-colors text-left"
+                  >
+                    <Database className="h-5 w-5 text-purple-600 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {db.name}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {db.vectorCount.toLocaleString()} vectors •{" "}
+                        {(db.storageSize / (1024 * 1024)).toFixed(1)} MB
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              {databases.filter((db) => !selectedGroup.linkedDatabases.includes(db.name))
+                .length === 0 && (
+                <p className="text-sm text-gray-500 text-center py-4">
+                  All available databases are already linked
+                </p>
+              )}
+            </div>
+
+            <button
+              onClick={() => setShowLinkDatabaseModal(false)}
+              className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
