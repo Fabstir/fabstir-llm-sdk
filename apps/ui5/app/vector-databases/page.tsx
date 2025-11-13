@@ -7,7 +7,7 @@ import { useVectorDatabases } from '@/hooks/use-vector-databases';
 import { DatabaseCard } from '@/components/vector-databases/database-card';
 import { CreateDatabaseModal } from '@/components/vector-databases/create-database-modal';
 import { Database, Search, Plus, ArrowUpDown } from 'lucide-react';
-import type { DatabaseMetadata } from '@fabstir/sdk-core-mock';
+import type { DatabaseMetadata } from '../../../hooks/use-vector-databases';
 
 type SortOption = 'name' | 'date' | 'size' | 'vectors';
 

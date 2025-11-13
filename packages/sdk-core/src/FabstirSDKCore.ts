@@ -36,6 +36,7 @@ import { TreasuryManager } from './managers/TreasuryManager';
 import { ClientManager } from './managers/ClientManager';
 import { EncryptionManager } from './managers/EncryptionManager';
 import { VectorRAGManager } from './managers/VectorRAGManager';
+import { DEFAULT_RAG_CONFIG } from './rag/config';
 import { ContractManager, ContractAddresses } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 import { SDKConfig, SDKError } from './types';
@@ -572,8 +573,9 @@ export class FabstirSDKCore extends EventEmitter {
     console.log('SessionManager created');
 
     console.log('Creating VectorRAGManager...');
-    this.vectorRAGManager = new VectorRAGManager(this.sessionManager);
-    console.log('VectorRAGManager created');
+    // VectorRAGManager needs userAddress, seedPhrase, config, and sessionManager
+    // These will be set after authentication, so we defer initialization
+    console.log('VectorRAGManager will be initialized after authentication');
 
     console.log('Creating TreasuryManager...');
     this.treasuryManager = new TreasuryManager(this.contractManager!);
@@ -690,6 +692,24 @@ export class FabstirSDKCore extends EventEmitter {
       console.log('Initializing TreasuryManager...');
       await (this.treasuryManager as any).initialize(this.signer);
       console.log('TreasuryManager initialized');
+
+      // Initialize VectorRAGManager after authentication (needs userAddress and s5Seed)
+      if (this.userAddress && this.s5Seed && this.sessionManager) {
+        console.log('Creating VectorRAGManager with userAddress and s5Seed...');
+        const ragConfig = {
+          ...DEFAULT_RAG_CONFIG,
+          s5Portal: this.config.s5Config?.portalUrl || DEFAULT_RAG_CONFIG.s5Portal
+        };
+        this.vectorRAGManager = new VectorRAGManager({
+          userAddress: this.userAddress,
+          seedPhrase: this.s5Seed,
+          config: ragConfig,
+          sessionManager: this.sessionManager as SessionManager
+        });
+        console.log('VectorRAGManager created with database management enabled');
+      } else {
+        console.warn('VectorRAGManager initialization skipped: missing userAddress or s5Seed');
+      }
     }
     
     // Initialize bridge client if configured

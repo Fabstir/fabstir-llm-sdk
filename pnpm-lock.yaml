@@ -482,25 +482,6 @@ importers:
         specifier: ^1.1.0
         version: 1.6.1(@types/node@20.19.17)(@vitest/ui@1.6.1)(jsdom@23.2.0(bufferutil@4.0.9)(canvas@2.11.2)(utf-8-validate@5.0.10))(lightningcss@1.30.2)(terser@5.44.0)
 
-  tests-ui5:
-    dependencies:
-      dotenv:
-        specifier: ^16.6.1
-        version: 16.6.1
-      ethers:
-        specifier: ^6.15.0
-        version: 6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10)
-    devDependencies:
-      '@playwright/test':
-        specifier: ^1.55.1
-        version: 1.55.1
-      '@types/node':
-        specifier: ^22.10.1
-        version: 22.19.1
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.2
-
 packages:
 
   '@adraffy/ens-normalize@1.10.1':
@@ -2295,9 +2276,6 @@ packages:
 
   '@types/node@20.19.17':
     resolution: {integrity: sha512-gfehUI8N1z92kygssiuWvLiwcbOB3IRktR6hTDgJlXMYh5OvkPSRmgfoBUmfZt+vhwJtX7v1Yw4KvvAf7c5QKQ==}
-
-  '@types/node@22.19.1':
-    resolution: {integrity: sha512-LCCV0HdSZZZb34qifBsyWlUmok6W7ouER+oQIGBScS8EsZsQbrtFTUrDX4hOl+CS6p7cnNC4td+qrSVGSCTUfQ==}
 
   '@types/node@22.7.5':
     resolution: {integrity: sha512-jML7s2NAzMWc//QSJ1a3prpk78cOPchGvXJsC3C6R6PSMoooztvRVQEz89gmBTBY1SPMaqo5teB4uNHPdetShQ==}
@@ -8586,10 +8564,6 @@ snapshots:
       undici-types: 5.26.5
 
   '@types/node@20.19.17':
-    dependencies:
-      undici-types: 6.21.0
-
-  '@types/node@22.19.1':
     dependencies:
       undici-types: 6.21.0
 

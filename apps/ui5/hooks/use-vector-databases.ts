@@ -2,7 +2,35 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSDK } from './use-sdk';
-import type { DatabaseMetadata, Vector, SearchResult, FolderStats } from '@fabstir/sdk-core-mock';
+
+// TODO: Import proper types from @fabstir/sdk-core when available
+// For now, define minimal types needed
+export interface DatabaseMetadata {
+  name: string;
+  description?: string;
+  vectorCount: number;
+  storageSizeBytes: number;
+  lastAccessed: number;
+  createdAt?: number;
+  dimensions?: number;
+}
+
+export interface Vector {
+  id: string;
+  values: number[];
+  metadata?: Record<string, any>;
+}
+
+export interface SearchResult {
+  id: string;
+  score: number;
+  metadata?: Record<string, any>;
+}
+
+export interface FolderStats {
+  totalFiles: number;
+  totalSize: number;
+}
 
 /**
  * Hook for managing vector databases

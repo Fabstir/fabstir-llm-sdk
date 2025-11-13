@@ -845,6 +845,160 @@ export function Header() {
 
 ## Phase 5: Testing & Validation
 
+### 5.0: SDK Core Bug Fix - Restore VectorRAGManager Database Management ✅
+
+**Background**: The production SDK's VectorRAGManager was "simplified" (commit 91c2e0b) which removed client-side database management features. This broke the vector database UI that UI4/UI5 depend on. The simplification removed too much - we need client-side database management but NOT client-side search.
+
+**Root Cause**:
+- Old VectorRAGManager (961 lines): Had database management + client-side WASM search
+- New VectorRAGManager (269 lines): Removed everything, delegated to SessionManager
+- Problem: Removed database management which IS needed client-side
+- Problem: The "simplification" comment says to use SessionManager.startSession() but that's for LLM sessions, not vector databases!
+
+**Correct Architecture**:
+```
+Client-Side (VectorRAGManager):
+├── Database Management (RESTORE THIS)
+│   ├── createSession() - Creates persistent vector DB using VectorDbSession
+│   ├── listDatabases() - Lists user's databases from metadata
+│   ├── addVectors() - Stores vectors in S5 via VectorDbSession
+│   ├── getVectors() - Retrieves vectors from S5
+│   └── deleteDatabase() - Removes database from S5
+│
+└── Search Operations (KEEP DELEGATED TO HOST)
+    ├── search() - Delegates to SessionManager.searchVectors()
+    └── uploadVectors() - Uploads to host session for search
+```
+
+Host-Side (SessionManager):
+└── Stateless Operations
+    ├── searchVectors() - Rust cosine similarity search
+    └── WebSocket session memory (auto-cleared on disconnect)
+
+**Implementation Strategy**: Hybrid restoration from commit 91c2e0b^
+
+#### Sub-phase 5.0.1: Restore Client-Side Database Management
+
+**Files to Restore** (from git commit `91c2e0b^`):
+- `/workspace/packages/sdk-core/src/managers/VectorRAGManager.ts` (partial restoration)
+
+**Methods to RESTORE** (client-side, ~400 lines):
+1. Constructor: Accept `userAddress`, `seedPhrase`, `config`, `metadataService`
+2. `createSession(dbName, config?)` - Creates VectorDbSession for persistence
+3. `listDatabases()` - Returns DatabaseMetadata[] from metadata service
+4. `addVector(sessionId, id, values, metadata)` - Adds to client VectorDbSession
+5. `getVectors(sessionId, vectorIds)` - Retrieves from client VectorDbSession
+6. `deleteDatabase(dbName)` - Removes database and S5 data
+7. `closeSession(sessionId)` - Closes VectorDbSession (saves to S5)
+8. Private helpers: `getSession()`, `ensureNotDisposed()`, session caching
+
+**Methods to KEEP HOST-DELEGATED** (no changes, ~80 lines):
+1. `search()` - Delegates to SessionManager.searchVectors() (Rust search)
+2. `uploadVectors()` - Uploads vectors to host session memory
+3. `deleteByMetadata()` - Soft delete via metadata update
+
+**Methods to REMOVE** (client-side search, ~200 lines):
+1. ~~`searchVectors()`~~ - This did client-side WASM search (NOT wanted)
+2. ~~`searchInFolder()`~~ - Client-side folder filtering (NOT wanted)
+3. ~~`searchMultipleDatabases()`~~ - Client-side multi-DB search (NOT wanted)
+
+**Supporting Files** (already exist, no changes needed):
+- `/workspace/packages/sdk-core/src/rag/types.ts` ✅
+- `/workspace/packages/sdk-core/src/rag/config.ts` ✅
+- `/workspace/packages/sdk-core/src/rag/session-cache.ts` ✅
+- `/workspace/packages/sdk-core/src/rag/vector-operations.ts` ✅
+- `/workspace/packages/sdk-core/src/database/DatabaseMetadataService.ts` ✅
+- `/workspace/packages/sdk-core/src/database/types.ts` ✅
+
+**Package Dependency**:
+```bash
+# Already installed in sdk-core package.json
+"@fabstir/vector-db-native": "file:fabstir-vector-db-native-0.3.0.tgz"
+```
+
+**Implementation Steps**:
+1. [x] Extract old VectorRAGManager: `git show 91c2e0b^:packages/sdk-core/src/managers/VectorRAGManager.ts > /tmp/old-vectorragmanager.ts`
+2. [x] Copy file structure and imports from old version
+3. [x] Restore constructor with userAddress/seedPhrase parameters
+4. [x] Restore createSession() - client-side VectorDbSession creation
+5. [x] Restore listDatabases() - metadata service integration
+6. [x] Restore addVector() - client-side vector storage
+7. [x] Restore closeSession() - S5 persistence
+8. [x] Keep search() delegated to SessionManager (NO client-side search!)
+9. [x] Remove all client-side search methods (searchVectors, searchInFolder, searchMultipleDatabases)
+10. [x] Update IVectorRAGManager interface to match restored methods (added deleteByMetadata)
+11. [x] Test import: `import { VectorDbSession } from '@fabstir/vector-db-native'`
+12. [x] Verify no TypeScript errors (SDK builds successfully)
+
+**Expected File Size**: ~550 lines (down from 961, up from 269)
+
+**Time Estimate**: 3-4 hours (careful extraction and testing)
+
+#### Sub-phase 5.0.2: Update FabstirSDKCore Initialization
+
+**File**: `/workspace/packages/sdk-core/src/FabstirSDKCore.ts`
+
+**Current Code** (line ~575):
+```typescript
+this.vectorRAGManager = new VectorRAGManager(this.sessionManager);
+```
+
+**New Code**:
+```typescript
+// VectorRAGManager needs userAddress, S5 seed, and config
+if (!this.userAddress) {
+  throw new Error('Cannot initialize VectorRAGManager: userAddress not set');
+}
+if (!this.s5Seed) {
+  throw new Error('Cannot initialize VectorRAGManager: S5 seed not generated');
+}
+
+// Get default RAG config
+const ragConfig: RAGConfig = {
+  portalUrl: this.config.s5Config?.portalUrl || 'https://s5.cx',
+  seedPhrase: this.s5Seed,
+  dimensions: 384, // all-MiniLM-L6-v2
+  metric: 'cosine',
+  indexType: 'hnsw'
+};
+
+// Initialize VectorRAGManager with database management support
+this.vectorRAGManager = new VectorRAGManager({
+  userAddress: this.userAddress,
+  seedPhrase: this.s5Seed,
+  config: ragConfig,
+  metadataService: new DatabaseMetadataService(),
+  sessionManager: this.sessionManager // For search delegation
+});
+```
+
+**Additional Imports Needed**:
+```typescript
+import { RAGConfig } from './rag/types';
+import { DatabaseMetadataService } from './database/DatabaseMetadataService';
+```
+
+**Time Estimate**: 30 minutes
+
+#### Sub-phase 5.0.3: Test Database Creation
+
+**Test File**: `/workspace/tests-ui5/test-vector-db-create.spec.ts` (already exists)
+
+**Verification Steps**:
+1. [x] Start UI5: `cd /workspace/apps/ui5 && pnpm dev --port 3002`
+2. [x] Run test: `cd /workspace/tests-ui5 && npx playwright test test-vector-db-create.spec.ts`
+3. [x] Verify: Database creation succeeds (no deprecation error)
+4. [x] Verify: Database appears in list
+5. [x] Verify: No client-side search methods used (only SessionManager.searchVectors)
+
+**Expected Result**: Test passes, database created client-side, stored in S5
+
+**Time Estimate**: 1 hour (including debugging)
+
+**Total Time for Phase 5.0**: 4-6 hours
+
+---
+
 ### 5.1: Update Test Scripts for Real SDK ✅
 - [x] Copy test scripts from UI4: `cp /workspace/test-*.cjs /workspace/tests-ui5/`
 - [x] Update scripts to connect to UI5: `http://localhost:3002` (different port)
