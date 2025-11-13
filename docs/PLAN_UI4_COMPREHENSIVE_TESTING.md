@@ -1,8 +1,8 @@
 # UI4 Comprehensive Testing Plan
 
-**Status**: ✅ PHASE 3 COMPLETE - All Session Group Operations 100% Passing
+**Status**: ✅ PHASE 3 COMPLETE - All 5 Session Group Sub-phases 100% Passing
 **Created**: 2025-01-12
-**Last Updated**: 2025-01-13 02:54 UTC (Phase 3.4 - Database Linking UI Implementation)
+**Last Updated**: 2025-01-13 05:01 UTC (Phase 3.5 - Document Removal)
 **Branch**: feature/mock-sdk-api-alignment
 **Server**: http://localhost:3001
 
@@ -17,12 +17,12 @@
   - 2.2: Upload Files (6/6 tests)
   - 2.3: View Details (verified)
   - 2.4: Delete Database (8/8 tests)
-- **Phase 3: Session Group Operations (100% - FULLY AUTOMATED & TESTED)** 🎉
+- **Phase 3: Session Group Operations (100% - ALL 5 SUB-PHASES COMPLETE)** 🎉
   - 3.1: Create Session Group (6/6 tests)
   - 3.2: View Group Detail (verified)
   - 3.3: Upload Group Documents (6/6 tests)
   - 3.4: Link Vector Database (8/8 tests) - **UI IMPLEMENTED** ✨
-  - 3.5: Remove Group Document (pending)
+  - 3.5: Remove Group Document (8/8 tests) - **COMPLETE** ✨
 
 **Bugs Fixed:** 8 Critical (5 from Phase 1-3 + 3 new from Phase 4)
 - BUG #3: Infinite render loop (useVectorDatabases)
@@ -194,13 +194,28 @@ Perform comprehensive end-to-end testing of UI4 application with focus on:
   - Statistics card updates reactively when databases are linked/unlinked
   - Modal closes automatically after successful link operation
 
-### Sub-phase 3.5: Remove Group Document
-- [ ] On group detail page, hover over first uploaded document
-- [ ] Click X/remove button that appears
-- [ ] Confirm deletion dialog
-- [ ] Verify document removed from list
-- [ ] Verify count decreases to 2 documents
-- [ ] Check console for errors
+### Sub-phase 3.5: Remove Group Document ✅ COMPLETED
+- [x] Upload test documents (3 files via file input) ✅ SUCCESS
+- [x] Verify documents appear in Group Documents section ✅ SUCCESS (4 total with 1 existing)
+- [x] Hover over first uploaded document ✅ SUCCESS (X button reveals on hover)
+- [x] Click X/remove button ✅ SUCCESS
+- [x] Test Cancel: Dismiss deletion dialog ✅ SUCCESS
+- [x] Verify document still exists after cancel ✅ SUCCESS (4 documents unchanged)
+- [x] Click X/remove button again ✅ SUCCESS
+- [x] Test Confirm: Accept deletion dialog ✅ SUCCESS
+- [x] Verify document removed from list ✅ SUCCESS (4 → 3 documents)
+- [x] Verify remaining documents visible ✅ SUCCESS (3 documents shown)
+- [x] Check console for errors ✅ NO ERRORS
+- **Automated Test**: `/workspace/test-remove-document-phase3-5.cjs` - **8/8 tests passing** 🎉
+- **Key Findings**:
+  - Document removal uses browser native confirm() dialog
+  - X button is opacity-0 group-hover:opacity-100 (reveals on hover)
+  - Cancel preserves document correctly
+  - Confirm removes document from mock localStorage
+  - Group Documents section updates reactively
+  - File upload via setInputFiles() works correctly
+  - Multiple file upload supported (uploaded 3 test files)
+  - Mock SDK correctly updates groupDocuments array
 
 ---
 
