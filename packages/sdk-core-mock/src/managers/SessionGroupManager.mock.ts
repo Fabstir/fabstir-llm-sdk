@@ -97,6 +97,13 @@ export class SessionGroupManagerMock implements ISessionGroupManager {
     // Filter by owner and exclude deleted groups
     const filtered = groups.filter(g => g.owner === owner && !g.deleted);
 
+    // Migration: Ensure linkedDatabases exists (for old localStorage data)
+    filtered.forEach(group => {
+      if (!group.linkedDatabases) {
+        group.linkedDatabases = [];
+      }
+    });
+
     // Sort by updatedAt (newest first)
     // Handle cases where updatedAt might be undefined or not a Date object
     return filtered.sort((a, b) => {
@@ -116,6 +123,11 @@ export class SessionGroupManagerMock implements ISessionGroupManager {
 
     if (group.deleted) {
       throw new Error(`[Mock] Session group has been deleted: ${groupId}`);
+    }
+
+    // Migration: Ensure linkedDatabases exists (for old localStorage data)
+    if (!group.linkedDatabases) {
+      group.linkedDatabases = [];
     }
 
     // In real SDK, this would check permissions (requestor can access if owner or has permission)
@@ -514,14 +526,72 @@ export class SessionGroupManagerMock implements ISessionGroupManager {
     return filtered;
   }
 
-  // DEPRECATED METHODS REMOVED:
-  // - addGroupDocument (use DocumentManager in real SDK)
-  // - removeGroupDocument (use DocumentManager in real SDK)
-  // - listGroupDocuments (use DocumentManager in real SDK)
-  // - shareGroup (use PermissionManager in real SDK)
-  // - unshareGroup (use PermissionManager in real SDK)
-  // - listSharedGroups (use PermissionManager in real SDK)
-  // - getGroupPermissions (use PermissionManager in real SDK)
+  // Sharing/Permission Methods (TEMPORARY STUBS - use PermissionManager in real SDK)
+
+  async shareGroup(groupId: string, userAddress: string, role: 'reader' | 'writer'): Promise<void> {
+    await this.delay(300);
+
+    const group = this.storage.get<SessionGroup>(groupId);
+    if (!group) {
+      throw new Error(`[Mock] Session group not found: ${groupId}`);
+    }
+
+    // Initialize permissions if not exists
+    if (!group.permissions) {
+      group.permissions = { readers: [], writers: [] };
+    }
+
+    // Remove from other role first (can't be both reader and writer)
+    if (role === 'reader') {
+      group.permissions.writers = group.permissions.writers.filter(addr => addr !== userAddress);
+      if (!group.permissions.readers.includes(userAddress)) {
+        group.permissions.readers.push(userAddress);
+      }
+    } else {
+      group.permissions.readers = group.permissions.readers.filter(addr => addr !== userAddress);
+      if (!group.permissions.writers.includes(userAddress)) {
+        group.permissions.writers.push(userAddress);
+      }
+    }
+
+    group.updatedAt = new Date();
+    this.storage.set(groupId, group);
+
+    console.log(`[Mock] Share group ${groupId} with ${userAddress} as ${role}`);
+  }
+
+  async unshareGroup(groupId: string, userAddress: string): Promise<void> {
+    await this.delay(300);
+
+    const group = this.storage.get<SessionGroup>(groupId);
+    if (!group) {
+      throw new Error(`[Mock] Session group not found: ${groupId}`);
+    }
+
+    // Remove from both readers and writers
+    if (group.permissions) {
+      group.permissions.readers = group.permissions.readers.filter(addr => addr !== userAddress);
+      group.permissions.writers = group.permissions.writers.filter(addr => addr !== userAddress);
+      group.updatedAt = new Date();
+      this.storage.set(groupId, group);
+    }
+
+    console.log(`[Mock] Unshare group ${groupId} from ${userAddress}`);
+  }
+
+  async getGroupPermissions(groupId: string): Promise<{ readers: string[]; writers: string[] }> {
+    await this.delay(200);
+
+    const group = this.storage.get<SessionGroup>(groupId);
+    if (!group) {
+      throw new Error(`[Mock] Session group not found: ${groupId}`);
+    }
+
+    console.log(`[Mock] Get permissions for group ${groupId}`, group.permissions);
+
+    // Return permissions or empty arrays if not set
+    return group.permissions || { readers: [], writers: [] };
+  }
 
   // Helper Methods
 

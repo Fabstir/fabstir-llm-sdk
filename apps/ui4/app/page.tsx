@@ -55,24 +55,46 @@ export default function HomePage() {
       try {
         setLoading(true);
 
+        // Get user address for filtering
+        const userAddress = managers.authManager?.userAddress;
+        if (!userAddress) {
+          console.warn('[Dashboard] No user address available, cannot load session groups');
+          setLoading(false);
+          return;
+        }
+
         // Get session groups
-        const groups = await managers.sessionGroupManager.listSessionGroups();
+        const groups = await managers.sessionGroupManager.listSessionGroups(userAddress);
+        console.log('[Dashboard] Loaded session groups:', groups.length, groups);
 
         // Get vector databases (if available)
         let databases: any[] = [];
         if (managers.vectorRAGManager && typeof managers.vectorRAGManager.listDatabases === 'function') {
           databases = await managers.vectorRAGManager.listDatabases();
+          console.log('[Dashboard] Loaded vector databases:', databases.length, databases);
         }
 
         // Calculate total sessions across all groups
         const totalSessions = groups.reduce((sum, group) => {
-          return sum + (group.chatSessions?.length || 0);
+          const sessionCount = group.chatSessions?.length || 0;
+          console.log(`[Dashboard] Group "${group.name}" has ${sessionCount} sessions`);
+          return sum + sessionCount;
         }, 0);
 
-        // Calculate total documents across all databases
+        // Calculate total vectors across all databases
+        // Note: vectorCount represents document chunks (embedded vectors), not raw files
         const totalDocuments = databases.reduce((sum, db) => {
-          return sum + (db.files?.length || 0);
+          const vectorCount = db.vectorCount || 0;
+          console.log(`[Dashboard] Database "${db.name}" has ${vectorCount} vectors`);
+          return sum + vectorCount;
         }, 0);
+
+        console.log('[Dashboard] Final stats:', {
+          sessionGroups: groups.length,
+          totalSessions,
+          vectorDatabases: databases.length,
+          totalDocuments
+        });
 
         setStats({
           sessionGroups: groups.length,
@@ -238,10 +260,10 @@ export default function HomePage() {
           className="cursor-pointer transition-transform active:scale-95 touch-manipulation"
         >
           <StatsCard
-            title="Documents"
+            title="Vectors"
             value={stats.totalDocuments}
             icon={FileText}
-            description="Uploaded files"
+            description="Document chunks"
           />
         </div>
       </div>

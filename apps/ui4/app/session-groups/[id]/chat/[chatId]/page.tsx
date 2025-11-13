@@ -247,7 +247,9 @@ export default function ChatSessionPage() {
                 Chat Session
               </h1>
               <p className="text-xs text-gray-500">
-                Started {formatDistanceToNow(new Date(session.created), { addSuffix: true })}
+                Started {session.created && !isNaN(new Date(session.created).getTime())
+                  ? formatDistanceToNow(new Date(session.created), { addSuffix: true })
+                  : 'recently'}
               </p>
             </div>
           </div>
@@ -278,7 +280,9 @@ export default function ChatSessionPage() {
                     msg.role === 'user' ? 'text-blue-100' : 'text-gray-500'
                   }`}
                 >
-                  {formatDistanceToNow(new Date(msg.timestamp), { addSuffix: true })}
+                  {msg.timestamp && !isNaN(new Date(msg.timestamp).getTime())
+                    ? formatDistanceToNow(new Date(msg.timestamp), { addSuffix: true })
+                    : 'just now'}
                 </p>
               </div>
             </div>

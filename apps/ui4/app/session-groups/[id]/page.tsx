@@ -266,9 +266,9 @@ export default function SessionGroupDetailPage() {
     );
   }
 
-  const lastUpdate = formatDistanceToNow(selectedGroup.updatedAt, {
-    addSuffix: true,
-  });
+  const lastUpdate = selectedGroup.updatedAt && !isNaN(new Date(selectedGroup.updatedAt).getTime())
+    ? formatDistanceToNow(new Date(selectedGroup.updatedAt), { addSuffix: true })
+    : 'recently';
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -346,7 +346,7 @@ export default function SessionGroupDetailPage() {
                 <div>
                   <p className="text-sm text-gray-500">Databases Linked</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {selectedGroup.linkedDatabases.length}
+                    {selectedGroup.linkedDatabases?.length || 0}
                   </p>
                 </div>
               </div>
@@ -434,9 +434,9 @@ export default function SessionGroupDetailPage() {
                 Linked databases provide context for RAG-enhanced responses
               </p>
 
-              {selectedGroup.linkedDatabases.length > 0 ? (
+              {(selectedGroup.linkedDatabases?.length || 0) > 0 ? (
                 <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {selectedGroup.linkedDatabases.map((dbName) => {
+                  {selectedGroup.linkedDatabases?.map((dbName) => {
                     const dbInfo = databases.find(db => db.name === dbName);
                     return (
                       <div
@@ -527,9 +527,9 @@ export default function SessionGroupDetailPage() {
                         <div className="flex items-center gap-4 text-xs text-gray-500">
                           <span>💬 {session.messageCount} messages</span>
                           <span>
-                            {formatDistanceToNow(new Date(session.timestamp), {
-                              addSuffix: true,
-                            })}
+                            {session.timestamp && !isNaN(new Date(session.timestamp).getTime())
+                              ? formatDistanceToNow(new Date(session.timestamp), { addSuffix: true })
+                              : 'recently'}
                           </span>
                         </div>
                       </div>
@@ -574,7 +574,7 @@ export default function SessionGroupDetailPage() {
 
             <div className="space-y-2 max-h-96 overflow-y-auto mb-4">
               {databases
-                .filter((db) => !selectedGroup.linkedDatabases.includes(db.name))
+                .filter((db) => !selectedGroup.linkedDatabases?.includes(db.name))
                 .map((db) => (
                   <button
                     key={db.name}
@@ -593,7 +593,7 @@ export default function SessionGroupDetailPage() {
                     </div>
                   </button>
                 ))}
-              {databases.filter((db) => !selectedGroup.linkedDatabases.includes(db.name))
+              {databases.filter((db) => !selectedGroup.linkedDatabases?.includes(db.name))
                 .length === 0 && (
                 <p className="text-sm text-gray-500 text-center py-4">
                   All available databases are already linked

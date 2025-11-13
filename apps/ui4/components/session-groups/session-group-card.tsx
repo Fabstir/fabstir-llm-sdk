@@ -42,8 +42,13 @@ export function SessionGroupCard({
   const router = useRouter();
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
-  const lastUpdate = formatDistanceToNow(group.updatedAt, { addSuffix: true });
-  const lastSession = group.chatSessions[0]; // Most recent session
+
+  // Safely format date - handle invalid dates from mock SDK
+  const lastUpdate = group.updatedAt && !isNaN(new Date(group.updatedAt).getTime())
+    ? formatDistanceToNow(new Date(group.updatedAt), { addSuffix: true })
+    : 'recently';
+
+  const lastSession = group.chatSessions?.[0]; // Most recent session (safe access)
 
   const handleDelete = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -103,7 +108,7 @@ export function SessionGroupCard({
       {/* Stats */}
       <div className="space-y-2 mb-4">
         <p className="text-sm text-gray-600">
-          💬 {group.chatSessions.length} chat {group.chatSessions.length === 1 ? 'session' : 'sessions'}
+          💬 {group.chatSessions?.length || 0} chat {(group.chatSessions?.length || 0) === 1 ? 'session' : 'sessions'}
         </p>
 
         {(() => {
@@ -118,7 +123,7 @@ export function SessionGroupCard({
           return null;
         })()}
 
-        {group.linkedDatabases.length > 0 ? (
+        {group.linkedDatabases && group.linkedDatabases.length > 0 ? (
           <div>
             <p className="text-sm text-gray-600 mb-1">
               📚 {group.linkedDatabases.length} database{group.linkedDatabases.length > 1 ? 's' : ''} linked:
