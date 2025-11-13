@@ -845,11 +845,11 @@ export function Header() {
 
 ## Phase 5: Testing & Validation
 
-### 5.1: Update Test Scripts for Real SDK
-- [ ] Copy test scripts from UI4: `cp /workspace/test-*.cjs /workspace/tests-ui5/`
-- [ ] Update scripts to connect to UI5: `http://localhost:3002` (different port)
-- [ ] Add longer timeouts for real blockchain transactions
-- [ ] Update expectations for real SDK behavior
+### 5.1: Update Test Scripts for Real SDK ✅
+- [x] Copy test scripts from UI4: `cp /workspace/test-*.cjs /workspace/tests-ui5/`
+- [x] Update scripts to connect to UI5: `http://localhost:3002` (different port)
+- [x] Add longer timeouts for real blockchain transactions
+- [x] Update expectations for real SDK behavior
 
 **Key Changes in Test Scripts**:
 ```javascript
