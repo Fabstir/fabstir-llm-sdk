@@ -80,6 +80,11 @@ export interface ExtendedSessionConfig extends SessionConfig {
   depositAmount?: ethers.BigNumberish;
   encryption?: boolean; // NEW: Enable E2EE
   groupId?: string; // NEW: Session Groups integration
+  vectorDatabase?: {
+    // NEW: S5 vector database for RAG (Sub-phase 5.1.3)
+    manifestPath: string; // S5 path to manifest.json (e.g., "home/vector-databases/{user}/{db}/manifest.json")
+    userAddress: string; // Owner address for verification
+  };
 }
 
 export class SessionManager implements ISessionManager {
@@ -1236,12 +1241,22 @@ export class SessionManager implements ISessionManager {
 
     // 3. Prepare session init payload (per docs lines 469-477)
     console.log('[SessionManager] 📦 STEP 3: Preparing init payload...');
-    const initPayload = {
+    const initPayload: any = {
       sessionKey: sessionKeyHex,
       jobId: jobId.toString(),  // MUST be string per docs
       modelName: config.modelId,
       pricePerToken: config.pricePerToken || 0  // MUST be number in wei/smallest units
     };
+
+    // NEW (Sub-phase 5.1.3): Include vector database info if provided
+    if (config.vectorDatabase) {
+      initPayload.vectorDatabase = {
+        manifestPath: config.vectorDatabase.manifestPath,
+        userAddress: config.vectorDatabase.userAddress
+      };
+      console.log('[SessionManager] 📁 Vector database included:', config.vectorDatabase.manifestPath);
+    }
+
     console.log('[SessionManager] initPayload:', JSON.stringify(initPayload, null, 2));
 
     // 4. Encrypt with EncryptionManager
@@ -1289,13 +1304,24 @@ export class SessionManager implements ISessionManager {
     userAddress: string
   ): Promise<void> {
     // Existing plaintext logic (lines 467-473 from sendPromptStreaming)
-    await ws.sendMessage({
+    const initMessage: any = {
       type: 'session_init',
       chain_id: config.chainId,
       session_id: sessionId.toString(),
       jobId: jobId.toString(),
       user_address: userAddress
-    });
+    };
+
+    // NEW (Sub-phase 5.1.3): Include vector database info if provided
+    if (config.vectorDatabase) {
+      initMessage.vector_database = {
+        manifest_path: config.vectorDatabase.manifestPath,
+        user_address: config.vectorDatabase.userAddress
+      };
+      console.log('[SessionManager] 📁 Vector database included (plaintext):', config.vectorDatabase.manifestPath);
+    }
+
+    await ws.sendMessage(initMessage);
 
     console.log('[SessionManager] Plaintext session init sent');
   }

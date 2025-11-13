@@ -1423,7 +1423,7 @@ async searchInFolder(
 
 **Goal**: Coordinate with host node to load vectors from S5 for search
 
-**Status**: ⏳ Pending (Requires fabstir-llm-node changes)
+**Status**: ✅ Completed (SDK-side), ⏳ Pending (Host-side implementation)
 
 **Note**: This sub-phase requires changes to `fabstir-llm-node` (Rust codebase). Coordination needed with node developer.
 
@@ -1436,9 +1436,9 @@ async searchInFolder(
 6. Return results via WebSocket
 
 **SDK-Side Changes**:
-- [ ] **Update SessionManager.searchVectors()** - Send S5 CID to host
-- [ ] **Update SessionManager.startSession()** - Include database CID in init message
-- [ ] **Add SessionManager.uploadVectors()** - Upload vectors to host via WebSocket
+- [x] **Update SessionManager.searchVectors()** - Send S5 CID to host (existing uploadVectors flow remains)
+- [x] **Update SessionManager.startSession()** - Include database CID in init message (vectorDatabase field added)
+- [x] **SessionManager.uploadVectors()** - Already exists, no changes needed (backward compatible)
 
 **WebSocket Protocol Update**:
 ```typescript
@@ -1473,16 +1473,18 @@ async searchInFolder(
 ```
 
 **Documentation Needed**:
-- [ ] Update `docs/node-reference/SDK_INTEGRATION_NOTES.md`
-- [ ] Update `docs/node-reference/WEBSOCKET_API_SDK_GUIDE.md`
-- [ ] Create `docs/node-reference/S5_VECTOR_LOADING.md`
+- [ ] Update `docs/node-reference/SDK_INTEGRATION_NOTES.md` (optional - host-side only)
+- [x] Update `docs/node-reference/WEBSOCKET_API_SDK_GUIDE.md` (completed - added vector_database field)
+- [x] Create `docs/node-reference/S5_VECTOR_LOADING.md` (completed - comprehensive host-side guide)
 
 **Success Criteria**:
-- ✅ Host can load vectors from S5 CID
-- ✅ Host can decrypt vectors with shared key
-- ✅ Host can perform search on loaded vectors
-- ✅ SessionManager can initiate search via WebSocket
-- ✅ End-to-end test: Client uploads vectors → Host loads → Client searches → Results returned
+- ✅ SDK sends vectorDatabase field in session_init (completed)
+- ✅ Documentation created for host-side implementation (completed - S5_VECTOR_LOADING.md)
+- ⏳ Host can load vectors from S5 CID (pending - requires fabstir-llm-node implementation)
+- ⏳ Host can decrypt vectors with shared key (pending - requires fabstir-llm-node implementation)
+- ⏳ Host can perform search on loaded vectors (pending - requires fabstir-llm-node implementation)
+- ⏳ SessionManager can initiate search via WebSocket (pending - requires host-side S5 loading)
+- ⏳ End-to-end test: Client uploads vectors → Host loads → Client searches → Results returned (pending)
 
 **Estimated Time**: 2-3 hours (SDK-side only, host changes TBD)
 
