@@ -6,6 +6,7 @@ import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { Trash2, X, FileText } from "lucide-react";
 import { useWallet } from "@/hooks/use-wallet";
+import { useSDK } from "@/hooks/use-sdk";
 import { useSessionGroups } from "@/hooks/use-session-groups";
 
 interface ChatSession {
@@ -26,6 +27,7 @@ export default function SessionGroupDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { isConnected } = useWallet();
+  const { isInitialized } = useSDK();
   const {
     selectedGroup,
     selectGroup,
@@ -125,10 +127,11 @@ export default function SessionGroupDetailPage() {
 
   // --- Load session group on mount ---
   useEffect(() => {
-    if (isConnected && groupId) {
+    // Wait for both wallet connection AND SDK initialization
+    if (isConnected && isInitialized && groupId) {
       selectGroup(groupId);
     }
-  }, [isConnected, groupId, selectGroup]);
+  }, [isConnected, isInitialized, groupId, selectGroup]);
 
   // --- Update chat sessions when selectedGroup changes ---
   useEffect(() => {
@@ -151,14 +154,15 @@ export default function SessionGroupDetailPage() {
   useEffect(() => {
     const handleFocus = () => {
       if (fileDialogOpen.current) return;
-      if (isConnected && groupId) {
+      // Wait for both wallet connection AND SDK initialization
+      if (isConnected && isInitialized && groupId) {
         selectGroup(groupId);
       }
     };
 
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
-  }, [isConnected, groupId, selectGroup]);
+  }, [isConnected, isInitialized, groupId, selectGroup]);
 
   // --- UI STATES ---
 

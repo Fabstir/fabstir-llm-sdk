@@ -57,13 +57,18 @@ export function useSDK(): UseSDKReturn {
   // Subscribe to SDK initialization events
   useEffect(() => {
     const checkAndUpdateSDKState = async () => {
+      // Only call getManagers if SDK is truly initialized
+      // This prevents race condition where useEffect runs before authenticate() completes
       if (ui4SDK.isInitialized()) {
         try {
           const sdkManagers = await ui4SDK.getManagers();
           setManagers(sdkManagers);
           setIsInitialized(true);
         } catch (err) {
+          // If getManagers fails, SDK may not be fully authenticated yet
           console.error('[useSDK] Failed to get SDK managers:', err);
+          setManagers(null);
+          setIsInitialized(false);
         }
       } else {
         setManagers(null);
@@ -71,10 +76,10 @@ export function useSDK(): UseSDKReturn {
       }
     };
 
-    // Check initial state
+    // Check initial state in case SDK was already initialized (e.g., from localStorage)
     checkAndUpdateSDKState();
 
-    // Subscribe to SDK changes
+    // Subscribe to SDK changes (will be notified when initialize() completes)
     const unsubscribe = ui4SDK.subscribe(checkAndUpdateSDKState);
 
     return unsubscribe;

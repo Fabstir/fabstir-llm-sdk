@@ -63,7 +63,12 @@ export function generateMockSessionGroups(): SessionGroup[] {
       metadata: {
         tags: ['engineering', 'backend', 'api']
       },
-      deleted: false
+      deleted: false,
+      groupDocuments: [],  // Empty initially, documents added via addGroupDocument()
+      permissions: {
+        readers: [],
+        writers: []
+      }
     },
     {
       id: 'group-research-001',

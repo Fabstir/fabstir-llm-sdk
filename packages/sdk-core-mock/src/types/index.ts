@@ -51,6 +51,16 @@ export interface GroupDocument {
 }
 
 /**
+ * Group Permissions
+ * Access control for session groups
+ * @deprecated - Use PermissionManager in real SDK (kept for UI4 compatibility)
+ */
+export interface GroupPermissions {
+  readers: string[];  // User addresses with read access
+  writers: string[];  // User addresses with write access
+}
+
+/**
  * Session Group (Project)
  * Organizes chat sessions and linked vector databases
  *
@@ -68,8 +78,8 @@ export interface SessionGroup {
   chatSessions: string[];                 // Just IDs (not ChatSessionSummary[])
   metadata: Record<string, any>;          // Custom metadata fields
   deleted: boolean;                       // Soft-delete flag
-  // Removed: groupDocuments (use DocumentManager)
-  // Removed: permissions (use PermissionManager)
+  groupDocuments?: GroupDocument[];       // Documents uploaded to the group
+  permissions?: GroupPermissions;         // Access control
 }
 
 /**

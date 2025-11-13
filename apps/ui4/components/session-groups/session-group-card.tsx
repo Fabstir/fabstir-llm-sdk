@@ -42,7 +42,7 @@ export function SessionGroupCard({
   const router = useRouter();
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
-  const lastUpdate = formatDistanceToNow(new Date(group.updated), { addSuffix: true });
+  const lastUpdate = formatDistanceToNow(group.updatedAt, { addSuffix: true });
   const lastSession = group.chatSessions[0]; // Most recent session
 
   const handleDelete = (e: React.MouseEvent) => {
@@ -118,20 +118,20 @@ export function SessionGroupCard({
           return null;
         })()}
 
-        {group.databases.length > 0 ? (
+        {group.linkedDatabases.length > 0 ? (
           <div>
             <p className="text-sm text-gray-600 mb-1">
-              📚 {group.databases.length} database{group.databases.length > 1 ? 's' : ''} linked:
+              📚 {group.linkedDatabases.length} database{group.linkedDatabases.length > 1 ? 's' : ''} linked:
             </p>
             <ul className="ml-4 space-y-0.5">
-              {group.databases.slice(0, 3).map((db) => (
+              {group.linkedDatabases.slice(0, 3).map((db) => (
                 <li key={db} className="text-sm text-gray-500">
                   • {db}
                 </li>
               ))}
-              {group.databases.length > 3 && (
+              {group.linkedDatabases.length > 3 && (
                 <li className="text-sm text-gray-400">
-                  • +{group.databases.length - 3} more
+                  • +{group.linkedDatabases.length - 3} more
                 </li>
               )}
             </ul>

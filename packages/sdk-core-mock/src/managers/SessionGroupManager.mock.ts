@@ -259,6 +259,47 @@ export class SessionGroupManagerMock implements ISessionGroupManager {
     console.log('[Mock] Handled database deletion:', databaseId);
   }
 
+  // Group Document Methods
+
+  async addGroupDocument(groupId: string, document: { id: string; name: string; size: number; uploaded: number; contentType?: string }): Promise<void> {
+    await this.delay(150);
+
+    const group = this.storage.get<SessionGroup>(groupId);
+    if (!group) {
+      throw new Error(`[Mock] Session group not found: ${groupId}`);
+    }
+
+    // Initialize groupDocuments array if it doesn't exist
+    if (!group.groupDocuments) {
+      group.groupDocuments = [];
+    }
+
+    // Add document to the group
+    group.groupDocuments.push(document);
+    group.updatedAt = new Date();
+    this.storage.set(groupId, group);
+
+    console.log('[Mock] Added document to group:', document.name);
+  }
+
+  async removeGroupDocument(groupId: string, documentId: string): Promise<void> {
+    await this.delay(150);
+
+    const group = this.storage.get<SessionGroup>(groupId);
+    if (!group) {
+      throw new Error(`[Mock] Session group not found: ${groupId}`);
+    }
+
+    // Remove document from the group
+    if (group.groupDocuments) {
+      group.groupDocuments = group.groupDocuments.filter(doc => doc.id !== documentId);
+      group.updatedAt = new Date();
+      this.storage.set(groupId, group);
+    }
+
+    console.log('[Mock] Removed document from group:', documentId);
+  }
+
   // Chat Session Methods (UPDATED - Real SDK only has addChatSession and listChatSessions)
 
   async addChatSession(groupId: string, requestor: string, sessionId: string): Promise<SessionGroup> {
