@@ -97,6 +97,12 @@ export class UI5SDK {
     this.initializing = true;
 
     try {
+      // Check for test mode
+      const isTestMode = typeof window !== 'undefined' && (window as any).__TEST_WALLET__;
+      if (isTestMode) {
+        console.log('[UI5SDK] 🧪 Test mode detected - using test wallet');
+      }
+
       console.log('[UI5SDK] Initializing SDK with production configuration...');
 
       // Validate environment variables
@@ -132,7 +138,8 @@ export class UI5SDK {
 
       // Authenticate with wallet signer
       const address = await signer.getAddress();
-      console.log('[UI5SDK] Authenticating with address:', address);
+      const testMode = typeof window !== 'undefined' && (window as any).__TEST_WALLET__;
+      console.log(`[UI5SDK] Authenticating with address: ${address}${testMode ? ' (TEST MODE)' : ''}`);
 
       await this.sdk.authenticate('signer', {
         signer  // Pass signer for real transactions

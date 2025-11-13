@@ -1,0 +1,23 @@
+{
+  "name": "@fabstir/ui5-tests",
+  "version": "1.0.0",
+  "description": "Automated tests for UI5 with production SDK",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:ui": "playwright test --ui",
+    "test:wallet": "playwright test test-wallet-connection.spec.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "ethers": "^6.15.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.1",
+    "@types/node": "^22.10.1",
+    "typescript": "^5.7.2"
+  }
+}

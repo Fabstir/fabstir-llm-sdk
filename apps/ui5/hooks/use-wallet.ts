@@ -37,6 +37,37 @@ export function useWallet(): UseWalletReturn {
 
   // Check for existing wallet connection on mount
   useEffect(() => {
+    // CHECK FOR TEST MODE FIRST
+    const testWallet = typeof window !== 'undefined' ? (window as any).__TEST_WALLET__ : null;
+    if (testWallet && testWallet.autoApprove) {
+      console.log('[useWallet] 🧪 Test mode detected - auto-connecting test wallet');
+      setAddress(testWallet.address);
+      setIsConnected(true);
+      setWalletMode('metamask'); // Use metamask mode for test wallet
+
+      // Initialize SDK with test signer
+      if (testWallet.signer) {
+        setSigner(testWallet.signer);
+
+        if (!ui5SDK.isInitialized()) {
+          console.log('[useWallet] Auto-initializing SDK with test wallet...');
+          ui5SDK.initialize(testWallet.signer)
+            .then(() => {
+              setIsInitialized(true);
+              console.log('[useWallet] SDK initialized successfully in test mode');
+            })
+            .catch((err) => {
+              console.error('[useWallet] Failed to initialize SDK in test mode:', err);
+              setError(err.message);
+            });
+        } else {
+          setIsInitialized(true);
+        }
+      }
+      return;
+    }
+
+    // Normal production flow - check for existing Base Account Kit connection
     const baseWallet = getBaseWallet();
 
     if (baseWallet.isConnected()) {
