@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { mockWallet, type WalletState } from '@/lib/mock-wallet';
+import { ui4SDK } from '@/lib/sdk';
 
 export interface UseWalletReturn {
   address: string | null;
@@ -29,6 +30,21 @@ export function useWallet(): UseWalletReturn {
     const currentState = mockWallet.getState();
     setState(currentState);
 
+    // If wallet was previously connected (restored from localStorage),
+    // automatically initialize the SDK
+    if (currentState.isConnected && currentState.address) {
+      console.log('[useWallet] Wallet already connected, initializing SDK...');
+      ui4SDK.initialize(currentState.address)
+        .then(() => {
+          console.log('[useWallet] SDK initialization completed successfully');
+        })
+        .catch((err) => {
+          console.error('[useWallet] Failed to initialize SDK on mount:', err);
+        });
+    } else {
+      console.log('[useWallet] No saved wallet connection found');
+    }
+
     // Listen for wallet state changes from other components
     const handleWalletStateChange = (event: Event) => {
       const customEvent = event as CustomEvent<WalletState>;
@@ -46,6 +62,10 @@ export function useWallet(): UseWalletReturn {
     try {
       setIsConnecting(true);
       const address = await mockWallet.connect();
+
+      // Initialize SDK with wallet address
+      await ui4SDK.initialize(address);
+
       setState({
         address,
         isConnected: true,
@@ -59,6 +79,7 @@ export function useWallet(): UseWalletReturn {
 
   const disconnect = useCallback(() => {
     mockWallet.disconnect();
+    ui4SDK.disconnect();
     setState({
       address: null,
       isConnected: false,

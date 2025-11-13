@@ -20,11 +20,13 @@ export interface SDKManagers {
   vectorRAGManager: IVectorRAGManager;
   hostManager: IHostManager;
   paymentManager: IPaymentManager;
+  authManager: { userAddress: string };
 }
 
 export class UI4SDK {
   private sdk: FabstirSDKCoreMock | null = null;
   private initialized = false;
+  private initializing = false; // Lock to prevent concurrent initialization
   private listeners: Set<() => void> = new Set();
 
   /**
@@ -46,21 +48,50 @@ export class UI4SDK {
    * Initialize SDK with wallet address
    */
   async initialize(walletAddress: string): Promise<void> {
+    // Check if already initialized
     if (this.initialized && this.sdk) {
       return; // Already initialized
     }
 
-    // Initialize mock SDK
-    this.sdk = new FabstirSDKCoreMock({
-      mode: 'development' as const,
-      userAddress: walletAddress,
-    });
+    // Check if initialization is in progress - wait for it to complete
+    if (this.initializing) {
+      console.log('[UI4SDK] Initialization already in progress, waiting...');
+      // Wait for initialization to complete (poll every 100ms, timeout after 10 seconds)
+      let waitTime = 0;
+      while (this.initializing && waitTime < 10000) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        waitTime += 100;
+      }
 
-    // Authenticate with mock wallet
-    await this.sdk.authenticate('mock', { address: walletAddress });
+      if (this.initializing) {
+        console.error('[UI4SDK] Initialization timeout - forcing reset');
+        this.initializing = false;
+        // Don't return - try to initialize again
+      } else {
+        // Initialization completed by another instance
+        return;
+      }
+    }
 
-    this.initialized = true;
-    this.notify(); // Notify all hooks
+    // Set lock to prevent concurrent initialization
+    this.initializing = true;
+
+    try {
+      // Initialize mock SDK
+      this.sdk = new FabstirSDKCoreMock({
+        mode: 'development' as const,
+        userAddress: walletAddress,
+      });
+
+      // Authenticate with mock wallet
+      await this.sdk.authenticate('mock', { address: walletAddress });
+
+      this.initialized = true;
+      this.notify(); // Notify all hooks
+    } finally {
+      // Release lock
+      this.initializing = false;
+    }
   }
 
   /**
@@ -79,6 +110,7 @@ export class UI4SDK {
       vectorRAGManager: this.sdk.getVectorRAGManager(),
       hostManager: this.sdk.getHostManager(),
       paymentManager: this.sdk.getPaymentManager(),
+      authManager: this.sdk.getAuthManager(),
     };
   }
 

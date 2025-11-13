@@ -40,6 +40,7 @@ export interface SearchResult {
 /**
  * Group Document
  * Files uploaded to the session group (available in all chat sessions)
+ * @deprecated - Use DocumentManager in real SDK (kept for UI4 compatibility)
  */
 export interface GroupDocument {
   id: string;
@@ -50,28 +51,40 @@ export interface GroupDocument {
 }
 
 /**
+ * Group Permissions
+ * Access control for session groups
+ * @deprecated - Use PermissionManager in real SDK (kept for UI4 compatibility)
+ */
+export interface GroupPermissions {
+  readers: string[];  // User addresses with read access
+  writers: string[];  // User addresses with write access
+}
+
+/**
  * Session Group (Project)
  * Organizes chat sessions and linked vector databases
+ *
+ * UPDATED: Aligned with real SDK (@fabstir/sdk-core)
  */
 export interface SessionGroup {
   id: string;
   name: string;
-  description?: string;
-  databases: string[]; // Vector database names linked to this group
-  defaultDatabaseId: string; // Auto-created default database
-  chatSessions: ChatSessionSummary[];
-  groupDocuments: GroupDocument[]; // Documents available in all chat sessions
-  owner: string; // User address
-  created: number; // Timestamp
-  updated: number; // Timestamp
-  permissions?: {
-    readers?: string[]; // Addresses with read access
-    writers?: string[]; // Addresses with write access
-  };
+  description: string;                    // REQUIRED (not optional!)
+  createdAt: Date;                        // Date object (not number timestamp)
+  updatedAt: Date;                        // Date object (not number timestamp)
+  owner: string;                          // User address
+  linkedDatabases: string[];              // Renamed from 'databases'
+  defaultDatabase?: string;               // OPTIONAL - Renamed from 'defaultDatabaseId'
+  chatSessions: string[];                 // Just IDs (not ChatSessionSummary[])
+  metadata: Record<string, any>;          // Custom metadata fields
+  deleted: boolean;                       // Soft-delete flag
+  groupDocuments?: GroupDocument[];       // Documents uploaded to the group
+  permissions?: GroupPermissions;         // Access control
 }
 
 /**
  * Chat Session Summary (for list views)
+ * @deprecated - Real SDK uses string[] for chatSessions (kept for UI4 compatibility)
  */
 export interface ChatSessionSummary {
   sessionId: string;
@@ -80,6 +93,28 @@ export interface ChatSessionSummary {
   messageCount: number;
   active: boolean;
   lastMessage?: string;
+}
+
+/**
+ * Input type for creating session groups
+ * ADDED: Required by real SDK
+ */
+export interface CreateSessionGroupInput {
+  name: string;
+  description: string;        // REQUIRED!
+  owner: string;
+  metadata?: Record<string, any>;
+}
+
+/**
+ * Input type for updating session groups
+ * ADDED: Required by real SDK (only allows updating name, description, metadata)
+ */
+export interface UpdateSessionGroupInput {
+  name?: string;
+  description?: string;
+  metadata?: Record<string, any>;
+  // Note: Cannot update owner, linkedDatabases, defaultDatabase, chatSessions
 }
 
 /**
@@ -117,45 +152,39 @@ export interface ChatSessionMetadata {
 
 /**
  * Session Group Manager Interface
+ * UPDATED: Aligned with real SDK (@fabstir/sdk-core)
  */
 export interface ISessionGroupManager {
-  createSessionGroup(name: string, options?: {
-    description?: string;
-    databases?: string[];
-  }): Promise<SessionGroup>;
+  // Core session group methods
+  createSessionGroup(input: CreateSessionGroupInput): Promise<SessionGroup>;
+  listSessionGroups(owner: string): Promise<SessionGroup[]>;
+  getSessionGroup(groupId: string, requestor: string): Promise<SessionGroup>;
+  updateSessionGroup(groupId: string, requestor: string, updates: UpdateSessionGroupInput): Promise<SessionGroup>;
+  deleteSessionGroup(groupId: string, requestor: string): Promise<void>;
 
-  listSessionGroups(): Promise<SessionGroup[]>;
-  getSessionGroup(groupId: string): Promise<SessionGroup>;
-  deleteSessionGroup(groupId: string): Promise<void>;
-  updateSessionGroup(groupId: string, updates: Partial<SessionGroup>): Promise<SessionGroup>;
+  // Vector database linking methods
+  linkVectorDatabase(groupId: string, requestor: string, databaseId: string): Promise<SessionGroup>;
+  unlinkVectorDatabase(groupId: string, requestor: string, databaseId: string): Promise<SessionGroup>;
+  setDefaultDatabase(groupId: string, requestor: string, databaseId?: string): Promise<SessionGroup>;
+  listLinkedDatabases(groupId: string, requestor: string): Promise<VectorDatabaseMetadata[]>;
+  handleDatabaseDeletion(databaseId: string): Promise<void>;
 
-  linkDatabase(groupId: string, databaseName: string): Promise<void>;
-  unlinkDatabase(groupId: string, databaseName: string): Promise<void>;
+  // Chat session management (KEPT - these exist in real SDK!)
+  addChatSession(groupId: string, requestor: string, sessionId: string): Promise<SessionGroup>;
+  listChatSessions(groupId: string, requestor: string): Promise<string[]>;
 
-  startChatSession(groupId: string, initialMessage?: string): Promise<ChatSession>;
-  getChatSession(groupId: string, sessionId: string): Promise<ChatSession>;
-  listChatSessions(groupId: string, options?: {
-    limit?: number;
-    activeOnly?: boolean;
-  }): Promise<ChatSession[]>;
-
-  addMessage(groupId: string, sessionId: string, message: ChatMessage): Promise<void>;
-  deleteChatSession(groupId: string, sessionId: string): Promise<void>;
-
-  // Group Document Methods
-  addGroupDocument(groupId: string, document: GroupDocument): Promise<void>;
-  removeGroupDocument(groupId: string, documentId: string): Promise<void>;
-  listGroupDocuments(groupId: string): Promise<GroupDocument[]>;
-
-  shareGroup(groupId: string, userAddress: string, role: 'reader' | 'writer'): Promise<void>;
-  unshareGroup(groupId: string, userAddress: string): Promise<void>;
-  listSharedGroups(): Promise<SessionGroup[]>;
+  // Removed methods (no longer in real SDK):
+  // - startChatSession, getChatSession, addMessage, deleteChatSession, etc. (use SessionManager)
+  // - addGroupDocument, removeGroupDocument, listGroupDocuments (use DocumentManager)
+  // - shareGroup, unshareGroup, listSharedGroups (use PermissionManager)
 }
 
 /**
- * Database Metadata (for vector DB management)
+ * Vector Database Metadata (for vector DB management)
+ * UPDATED: Renamed from DatabaseMetadata to match real SDK
  */
-export interface DatabaseMetadata {
+export interface VectorDatabaseMetadata {
+  id: string;                  // ADDED: Database ID
   name: string;
   dimensions: number;
   vectorCount: number;
@@ -166,6 +195,11 @@ export interface DatabaseMetadata {
   description?: string;
   folderStructure?: boolean;
 }
+
+/**
+ * @deprecated Use VectorDatabaseMetadata instead
+ */
+export type DatabaseMetadata = VectorDatabaseMetadata;
 
 /**
  * Folder Statistics (for folder management)

@@ -42,8 +42,13 @@ export function SessionGroupCard({
   const router = useRouter();
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
-  const lastUpdate = formatDistanceToNow(new Date(group.updated), { addSuffix: true });
-  const lastSession = group.chatSessions[0]; // Most recent session
+
+  // Safely format date - handle invalid dates from mock SDK
+  const lastUpdate = group.updatedAt && !isNaN(new Date(group.updatedAt).getTime())
+    ? formatDistanceToNow(new Date(group.updatedAt), { addSuffix: true })
+    : 'recently';
+
+  const lastSession = group.chatSessions?.[0]; // Most recent session (safe access)
 
   const handleDelete = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -103,7 +108,7 @@ export function SessionGroupCard({
       {/* Stats */}
       <div className="space-y-2 mb-4">
         <p className="text-sm text-gray-600">
-          💬 {group.chatSessions.length} chat {group.chatSessions.length === 1 ? 'session' : 'sessions'}
+          💬 {group.chatSessions?.length || 0} chat {(group.chatSessions?.length || 0) === 1 ? 'session' : 'sessions'}
         </p>
 
         {(() => {
@@ -118,20 +123,20 @@ export function SessionGroupCard({
           return null;
         })()}
 
-        {group.databases.length > 0 ? (
+        {group.linkedDatabases && group.linkedDatabases.length > 0 ? (
           <div>
             <p className="text-sm text-gray-600 mb-1">
-              📚 {group.databases.length} database{group.databases.length > 1 ? 's' : ''} linked:
+              📚 {group.linkedDatabases.length} database{group.linkedDatabases.length > 1 ? 's' : ''} linked:
             </p>
             <ul className="ml-4 space-y-0.5">
-              {group.databases.slice(0, 3).map((db) => (
+              {group.linkedDatabases.slice(0, 3).map((db) => (
                 <li key={db} className="text-sm text-gray-500">
                   • {db}
                 </li>
               ))}
-              {group.databases.length > 3 && (
+              {group.linkedDatabases.length > 3 && (
                 <li className="text-sm text-gray-400">
-                  • +{group.databases.length - 3} more
+                  • +{group.linkedDatabases.length - 3} more
                 </li>
               )}
             </ul>

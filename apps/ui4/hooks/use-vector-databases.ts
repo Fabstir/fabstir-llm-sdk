@@ -39,7 +39,8 @@ export function useVectorDatabases() {
   // Initial fetch
   useEffect(() => {
     fetchDatabases();
-  }, [fetchDatabases]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isInitialized, managers]);
 
   // Create database
   const createDatabase = useCallback(

@@ -36,8 +36,8 @@ export function GroupSettingsModal({
   const [activeTab, setActiveTab] = useState<TabType>('general');
   const [name, setName] = useState(group.name);
   const [description, setDescription] = useState(group.description || '');
-  const [linkedDatabases, setLinkedDatabases] = useState<string[]>(group.databases);
-  const [defaultDatabase, setDefaultDatabase] = useState<string | null>(null);
+  const [linkedDatabases, setLinkedDatabases] = useState<string[]>(group.linkedDatabases || []);
+  const [defaultDatabase, setDefaultDatabase] = useState<string | null>(group.defaultDatabase || null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,16 +62,27 @@ export function GroupSettingsModal({
   useEffect(() => {
     setName(group.name);
     setDescription(group.description || '');
-    setLinkedDatabases(group.databases);
-    setDefaultDatabase(group.defaultDatabaseId || null);
+    setLinkedDatabases(group.linkedDatabases || []);
+    setDefaultDatabase(group.defaultDatabase || null);
     setError(null);
   }, [group]);
+
+  const handleClose = () => {
+    // Reset form to original group values
+    setName(group.name);
+    setDescription(group.description || '');
+    setLinkedDatabases(group.linkedDatabases || []);
+    setDefaultDatabase(group.defaultDatabase || null);
+    setError(null);
+    setActiveTab('general');
+    onClose();
+  };
 
   // Close on Escape key
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
       if (event.key === 'Escape' && isOpen) {
-        onClose();
+        handleClose();
       }
     }
 
@@ -79,7 +90,7 @@ export function GroupSettingsModal({
       document.addEventListener('keydown', handleEscape);
       return () => document.removeEventListener('keydown', handleEscape);
     }
-  }, [isOpen, onClose]);
+  }, [isOpen, handleClose]);
 
   if (!mounted || !isOpen) return null;
 
@@ -97,10 +108,10 @@ export function GroupSettingsModal({
       await onSave({
         name: name.trim(),
         description: description.trim() || undefined,
-        databases: linkedDatabases,
-        defaultDatabaseId: defaultDatabase || undefined,
+        linkedDatabases: linkedDatabases,
+        defaultDatabase: defaultDatabase || undefined,
       });
-      onClose();
+      handleClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     } finally {
@@ -109,7 +120,7 @@ export function GroupSettingsModal({
   };
 
   const handleDelete = async () => {
-    const confirmMessage = `Delete "${group.name}"? This will delete all ${group.chatSessions.length} chat sessions in this group. This action cannot be undone.`;
+    const confirmMessage = `Delete "${group.name}"? This will delete all ${group.chatSessions?.length || 0} chat sessions in this group. This action cannot be undone.`;
 
     if (!confirm(confirmMessage)) {
       return;
@@ -125,7 +136,7 @@ export function GroupSettingsModal({
 
     try {
       await onDelete(group.id);
-      onClose();
+      handleClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete group');
     } finally {
@@ -144,7 +155,7 @@ export function GroupSettingsModal({
         backgroundColor: 'rgba(0, 0, 0, 0.75)',
         zIndex: 9999
       }}
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div
         className="bg-white rounded-lg shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col"
@@ -162,7 +173,7 @@ export function GroupSettingsModal({
             <h2 className="text-xl font-semibold text-gray-900">Group Settings</h2>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2 rounded-md hover:bg-gray-200 transition-colors"
             disabled={isSaving || isDeleting}
           >
@@ -255,15 +266,15 @@ export function GroupSettingsModal({
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <p className="text-gray-600">Created</p>
-                    <p className="text-gray-900">{new Date(group.created).toLocaleDateString()}</p>
+                    <p className="text-gray-900">{group.createdAt ? new Date(group.createdAt).toLocaleDateString() : 'N/A'}</p>
                   </div>
                   <div>
                     <p className="text-gray-600">Last Updated</p>
-                    <p className="text-gray-900">{new Date(group.updated).toLocaleDateString()}</p>
+                    <p className="text-gray-900">{group.updatedAt ? new Date(group.updatedAt).toLocaleDateString() : 'N/A'}</p>
                   </div>
                   <div>
                     <p className="text-gray-600">Chat Sessions</p>
-                    <p className="text-gray-900">{group.chatSessions.length}</p>
+                    <p className="text-gray-900">{group.chatSessions?.length || 0}</p>
                   </div>
                   <div>
                     <p className="text-gray-600">Linked Databases</p>
@@ -335,7 +346,7 @@ export function GroupSettingsModal({
         {/* Footer */}
         <div className="border-t border-gray-200 px-6 py-4 flex justify-end gap-3 bg-gray-50">
           <button
-            onClick={onClose}
+            onClick={handleClose}
             disabled={isSaving || isDeleting}
             className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >

@@ -41,7 +41,14 @@ export class MockStorage {
     if (value === null) return null;
 
     try {
-      return JSON.parse(value) as T;
+      // Custom reviver to handle Date strings
+      return JSON.parse(value, (key, val) => {
+        // ISO 8601 date format regex
+        if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(val)) {
+          return new Date(val);
+        }
+        return val;
+      }) as T;
     } catch (error) {
       console.error(`[MockStorage] Failed to parse ${fullKey}:`, error);
       return value as T;

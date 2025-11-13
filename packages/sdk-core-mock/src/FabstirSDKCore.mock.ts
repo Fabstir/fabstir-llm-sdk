@@ -64,6 +64,7 @@ export class FabstirSDKCoreMock {
   private vectorRAGManager: VectorRAGManagerMock;
   private hostManager: HostManagerMock;
   private paymentManager: PaymentManagerMock;
+  private authManager: { userAddress: string };
 
   constructor(config: FabstirSDKCoreMockConfig = {}) {
     this.config = config;
@@ -75,6 +76,7 @@ export class FabstirSDKCoreMock {
     this.vectorRAGManager = new VectorRAGManagerMock(this.userAddress);
     this.hostManager = new HostManagerMock();
     this.paymentManager = new PaymentManagerMock(this.userAddress);
+    this.authManager = { userAddress: this.userAddress };
 
     console.log('[Mock SDK] Initialized for user:', this.userAddress);
   }
@@ -147,6 +149,14 @@ export class FabstirSDKCoreMock {
   }
 
   /**
+   * Get AuthManager (Authentication/User Info)
+   */
+  getAuthManager(): { userAddress: string } {
+    this.ensureAuthenticated();
+    return this.authManager;
+  }
+
+  /**
    * Get host public key (mock implementation)
    */
   async getHostPublicKey(hostAddress: string, hostApiUrl?: string): Promise<string> {
@@ -182,6 +192,7 @@ export class FabstirSDKCoreMock {
     this.vectorRAGManager = new VectorRAGManagerMock(this.userAddress);
     this.hostManager = new HostManagerMock();
     this.paymentManager = new PaymentManagerMock(this.userAddress);
+    this.authManager = { userAddress: this.userAddress };
 
     console.log('[Mock SDK] Reset to initial state with fresh fixtures');
   }

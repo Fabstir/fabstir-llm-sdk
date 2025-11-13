@@ -186,8 +186,8 @@ export default function SettingsPage() {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Not Connected</h2>
-          <p className="text-gray-600">Please connect your wallet to access settings</p>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Not Connected</h2>
+          <p className="text-gray-600 dark:text-gray-400">Please connect your wallet to access settings</p>
         </div>
       </div>
     );
@@ -199,42 +199,42 @@ export default function SettingsPage() {
       <div>
         <Link
           href="/"
-          className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors mb-4"
+          className="flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors mb-4"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Dashboard
         </Link>
 
-        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-        <p className="mt-2 text-gray-600">Manage your account and preferences</p>
+        <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Settings</h1>
+        <p className="mt-2 text-gray-600 dark:text-gray-400">Manage your account and preferences</p>
       </div>
 
       {/* Account Section */}
-      <div className="bg-white rounded-lg border p-6">
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex items-center gap-3 mb-6">
-          <User className="h-6 w-6 text-blue-600" />
-          <h2 className="text-xl font-semibold">Account</h2>
+          <User className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Account</h2>
         </div>
 
         <div className="space-y-4">
           {/* Wallet Address */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               Wallet Address
             </label>
             <div className="flex items-center gap-2">
-              <code className="flex-1 px-3 py-2 bg-gray-50 rounded-md text-sm font-mono break-all">
+              <code className="flex-1 px-3 py-2 bg-gray-50 dark:bg-gray-700 rounded-md text-sm font-mono break-all text-gray-900 dark:text-gray-100">
                 {address}
               </code>
               <button
                 onClick={handleCopyAddress}
-                className="p-2 rounded-md hover:bg-gray-100 transition-colors"
+                className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 title="Copy address"
               >
                 {copiedAddress ? (
-                  <Check className="h-4 w-4 text-green-600" />
+                  <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
                 ) : (
-                  <Copy className="h-4 w-4 text-gray-600" />
+                  <Copy className="h-4 w-4 text-gray-600 dark:text-gray-400" />
                 )}
               </button>
             </div>
@@ -242,39 +242,39 @@ export default function SettingsPage() {
 
           {/* S5 Seed */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               S5 Storage Seed
             </label>
             <div className="flex items-center gap-2">
-              <code className="flex-1 px-3 py-2 bg-gray-50 rounded-md text-sm font-mono">
+              <code className="flex-1 px-3 py-2 bg-gray-50 dark:bg-gray-700 rounded-md text-sm font-mono text-gray-900 dark:text-gray-100">
                 {showSeed
                   ? 'word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12'
                   : '••••• ••••• ••••• ••••• ••••• ••••• ••••• ••••• ••••• ••••• ••••• •••••'}
               </code>
               <button
                 onClick={() => setShowSeed(!showSeed)}
-                className="p-2 rounded-md hover:bg-gray-100 transition-colors"
+                className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 title={showSeed ? 'Hide seed' : 'Show seed'}
               >
                 {showSeed ? (
-                  <EyeOff className="h-4 w-4 text-gray-600" />
+                  <EyeOff className="h-4 w-4 text-gray-600 dark:text-gray-400" />
                 ) : (
-                  <Eye className="h-4 w-4 text-gray-600" />
+                  <Eye className="h-4 w-4 text-gray-600 dark:text-gray-400" />
                 )}
               </button>
               <button
                 onClick={handleCopySeed}
-                className="p-2 rounded-md hover:bg-gray-100 transition-colors"
+                className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 title="Copy seed"
               >
                 {copiedSeed ? (
-                  <Check className="h-4 w-4 text-green-600" />
+                  <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
                 ) : (
-                  <Copy className="h-4 w-4 text-gray-600" />
+                  <Copy className="h-4 w-4 text-gray-600 dark:text-gray-400" />
                 )}
               </button>
             </div>
-            <p className="mt-2 text-sm text-gray-500">
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
               Keep this seed phrase secure. It's required to access your S5 storage.
             </p>
           </div>
@@ -282,16 +282,16 @@ export default function SettingsPage() {
       </div>
 
       {/* Preferences Section */}
-      <div className="bg-white rounded-lg border p-6">
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex items-center gap-3 mb-6">
-          <Palette className="h-6 w-6 text-blue-600" />
-          <h2 className="text-xl font-semibold">Preferences</h2>
+          <Palette className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Preferences</h2>
         </div>
 
         <div className="space-y-6">
           {/* Theme */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-3">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
               Theme
             </label>
             <div className="flex gap-3">
@@ -302,7 +302,7 @@ export default function SettingsPage() {
                   className={`px-4 py-2 rounded-md border transition-colors ${
                     settings.theme === theme
                       ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                      : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
                   }`}
                 >
                   {theme.charAt(0).toUpperCase() + theme.slice(1)}
@@ -313,14 +313,14 @@ export default function SettingsPage() {
 
           {/* Language */}
           <div>
-            <label htmlFor="language" className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="language" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               Language
             </label>
             <select
               id="language"
               value={settings.language}
               onChange={(e) => handleLanguageChange(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600"
             >
               <option value="en">English</option>
               <option value="es">Español</option>
@@ -333,8 +333,8 @@ export default function SettingsPage() {
           {/* Notifications */}
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <Bell className="h-5 w-5 text-gray-600" />
-              <label className="block text-sm font-medium text-gray-700">
+              <Bell className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Notifications
               </label>
             </div>
@@ -345,9 +345,9 @@ export default function SettingsPage() {
                     type="checkbox"
                     checked={value}
                     onChange={() => handleNotificationToggle(key as keyof UserSettings['notifications'])}
-                    className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-2 focus:ring-blue-500"
+                    className="h-4 w-4 text-blue-600 rounded border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500"
                   />
-                  <span className="text-sm text-gray-700">
+                  <span className="text-sm text-gray-700 dark:text-gray-300">
                     {key.charAt(0).toUpperCase() + key.slice(1)} notifications
                   </span>
                 </label>
@@ -358,17 +358,17 @@ export default function SettingsPage() {
       </div>
 
       {/* Data Management Section */}
-      <div className="bg-white rounded-lg border p-6">
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex items-center gap-3 mb-6">
-          <Globe className="h-6 w-6 text-blue-600" />
-          <h2 className="text-xl font-semibold">Data Management</h2>
+          <Globe className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Data Management</h2>
         </div>
 
         <div className="space-y-4">
           {/* Export Data */}
           <div>
-            <h3 className="text-sm font-medium text-gray-900 mb-2">Export Your Data</h3>
-            <p className="text-sm text-gray-600 mb-3">
+            <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">Export Your Data</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
               Download all your session groups, vector databases, and settings as JSON.
             </p>
             <button
@@ -381,12 +381,12 @@ export default function SettingsPage() {
             </button>
           </div>
 
-          <hr className="border-gray-200" />
+          <hr className="border-gray-200 dark:border-gray-700" />
 
           {/* Delete Account */}
           <div>
-            <h3 className="text-sm font-medium text-red-900 mb-2">Delete Account</h3>
-            <p className="text-sm text-gray-600 mb-3">
+            <h3 className="text-sm font-medium text-red-900 dark:text-red-400 mb-2">Delete Account</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
               Permanently delete your account and all associated data. This action cannot be undone.
             </p>
             <button
