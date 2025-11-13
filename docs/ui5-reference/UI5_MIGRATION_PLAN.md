@@ -843,7 +843,7 @@ export function Header() {
 
 ---
 
-## Phase 5: Testing & Validation
+## Phase 5: SDK Architecture Improvements & Testing
 
 ### 5.0: SDK Core Bug Fix - Restore VectorRAGManager Database Management ✅
 
@@ -999,7 +999,226 @@ import { DatabaseMetadataService } from './database/DatabaseMetadataService';
 
 ---
 
-### 5.1: Update Test Scripts for Real SDK ✅
+### 5.1: Replace @fabstir/vector-db-native with Lightweight S5 Storage ⏳
+
+**Problem Identified**: Phase 5.0 restored VectorRAGManager but it uses `@fabstir/vector-db-native` (8MB Rust binary with Node.js-only dependencies like `fs`, `path`, `process`). This causes:
+1. ❌ Browser incompatibility (Next.js can't bundle it)
+2. ❌ Includes heavy HNSW/IVF search algorithms (8MB) that should be on host
+3. ❌ Violates mobile-first principle (mobile phones shouldn't run heavy algorithms)
+
+**Solution**: Replace with lightweight (~5KB) browser-compatible S5VectorStore.
+
+**Implementation Plan**: See `docs/IMPLEMENTATION_S5_VECTOR_STORE.md` for complete TDD bounded autonomy plan following strict format from `docs/IMPLEMENTATION_RAG_MISSING.md`.
+
+**Architecture Summary**:
+```
+Client → S5VectorStore (~5KB)
+         ├── S5 storage ✅
+         ├── Metadata management ✅
+         ├── Simple CRUD ✅
+         └── Web Crypto encryption ✅
+
+Host → Heavy Operations (via SessionManager)
+         ├── Embeddings (GPU) ✅
+         ├── HNSW/IVF indexing ✅
+         ├── Vector search ✅
+         └── Batch processing ✅
+```
+
+**Key Sub-phases** (from IMPLEMENTATION_S5_VECTOR_STORE.md):
+- **5.1.1**: Create S5VectorStore Module (6-8 hours) - 30 tests, browser-compatible storage
+- **5.1.2**: Update VectorRAGManager (3-4 hours) - Replace VectorDbSession with S5VectorStore
+- **5.1.3**: Update Host Node Integration (2-3 hours) - Host loads vectors from S5 CID
+- **5.1.4**: Testing & Validation (2-3 hours) - Unit, integration, browser, performance tests
+- **5.1.5**: Documentation (1-2 hours) - API reference, migration guide
+
+**Total Time Estimate**: 12-16 hours
+
+**Status Tracking**: ⏳ Not started - See implementation document for detailed progress tracking
+
+**Complete Implementation Details**: See `docs/IMPLEMENTATION_S5_VECTOR_STORE.md`
+
+This document follows strict TDD bounded autonomy approach with:
+- 30 comprehensive tests (write all tests first)
+- Complete S5VectorStore implementation (~400 lines)
+- VectorRAGManager updates (~150 lines changed)
+- Host node coordination via WebSocket
+- Browser/performance/integration testing
+- API documentation and migration guide
+
+**Reusing Mock SDK Types**: Types from `@fabstir/sdk-core-mock/src/types/index.ts` will be reused where applicable:
+- `VectorDatabaseMetadata` ✅
+- `FolderStats` ✅
+- `SearchResult` ✅
+```typescript
+// OLD: Import native module
+import { VectorDbSession } from '@fabstir/vector-db-native';
+
+// NEW: Import lightweight storage
+import { S5VectorStore } from '../storage/S5VectorStore';
+import { SessionManager } from './SessionManager';
+
+export class VectorRAGManager implements IVectorRAGManager {
+  private vectorStore: S5VectorStore;
+  private sessionManager: SessionManager;
+
+  constructor(options: {
+    userAddress: string;
+    seedPhrase: string;
+    s5Client: S5Client;
+    sessionManager: SessionManager;
+  }) {
+    this.vectorStore = new S5VectorStore(options.s5Client, options.seedPhrase);
+    this.sessionManager = options.sessionManager;
+  }
+
+  // Lightweight client-side operations
+  async createSession(databaseName: string): Promise<string> {
+    return await this.vectorStore.createDatabase(
+      databaseName,
+      this.userAddress
+    );
+  }
+
+  async listDatabases(): Promise<DatabaseMetadata[]> {
+    return await this.vectorStore.listDatabases(this.userAddress);
+  }
+
+  async addVectors(sessionId: string, vectors: VectorRecord[]): Promise<void> {
+    // Store in S5 (lightweight)
+    await this.vectorStore.addVectors(sessionId, vectors);
+  }
+
+  // Heavy operation delegated to host
+  async search(
+    sessionId: string,
+    queryVector: number[],
+    topK: number = 5,
+    threshold: number = 0.7
+  ): Promise<SearchResult[]> {
+    // Get S5 CIDs for this database
+    const cids = await this.vectorStore.getDatabaseCIDs(sessionId);
+
+    // Delegate to SessionManager → Host loads from S5 and searches
+    return await this.sessionManager.searchVectors(
+      sessionId,
+      queryVector,
+      topK,
+      threshold,
+      { s5Cids: cids } // Host loads from these CIDs
+    );
+  }
+}
+```
+
+#### Sub-phase 5.1.3: Update Host Node to Load from S5
+
+**Context**: Host nodes need to load vectors from S5 CIDs when performing search.
+
+**File to Update**: `fabstir-llm-node` (separate repository)
+
+**New WebSocket Message Type**:
+```rust
+// searchVectors request now includes S5 CIDs
+{
+  "type": "searchVectors",
+  "session_id": "sess_123",
+  "query_vector": [0.1, 0.2, ...],
+  "top_k": 5,
+  "threshold": 0.7,
+  "s5_cids": ["cid1", "cid2", "cid3"] // Host loads from these
+}
+```
+
+**Host Implementation** (pseudocode):
+```rust
+async fn handle_search_vectors(request: SearchVectorsRequest) -> SearchResult {
+    // 1. Load vectors from S5 CIDs
+    let vectors = load_vectors_from_s5(&request.s5_cids).await?;
+
+    // 2. Build HNSW index in memory (host has RAM for this)
+    let index = build_hnsw_index(vectors)?;
+
+    // 3. Perform search
+    let results = index.search(&request.query_vector, request.top_k)?;
+
+    // 4. Return results
+    Ok(results)
+}
+```
+
+**Note**: This change is in the host node repository, not SDK. Coordinate with host node team.
+
+#### Sub-phase 5.1.4: Testing & Validation
+
+**Test Plan**:
+
+1. **Unit Tests** for S5VectorStore:
+   - Test encryption/decryption
+   - Test chunking (10K vectors per chunk)
+   - Test S5 upload/download
+   - Test metadata management
+
+2. **Integration Tests**:
+   - Create database → Store vectors → Load from S5
+   - Add 50K vectors → Verify chunked correctly (5 chunks)
+   - Search vectors → Verify host loads from S5 and returns results
+
+3. **Browser Compatibility Tests**:
+   - Test in Chrome, Firefox, Safari
+   - Test on mobile (iOS Safari, Android Chrome)
+   - Verify no Node.js-specific errors
+
+4. **Performance Tests**:
+   - Add 100K vectors → Measure upload time
+   - Load 100K vectors → Measure download time
+   - Compare with old @fabstir/vector-db-native approach
+
+**Expected Results**:
+- ✅ No browser compatibility errors
+- ✅ Works on mobile devices
+- ✅ Lightweight (~5KB vs 8MB)
+- ✅ Search delegated to host correctly
+
+#### Sub-phase 5.1.5: Update Documentation
+
+**Files to Update**:
+1. `/workspace/docs/SDK_API.md` - Document S5VectorStore API
+2. `/workspace/docs/ARCHITECTURE.md` - Document client/host split
+3. `/workspace/docs/ui5-reference/README.md` - Update migration notes
+4. `/workspace/packages/sdk-core/README.md` - Update dependencies
+
+**Documentation Points**:
+- Client handles lightweight operations only
+- Host handles heavy computation (search, embeddings)
+- Vectors stored in S5 (user-owned, decentralized)
+- Browser-compatible architecture
+
+**Time Estimate**: 12-16 hours total
+- Sub-phase 5.1.1: Create S5VectorStore (6-8 hours)
+- Sub-phase 5.1.2: Update VectorRAGManager (2-3 hours)
+- Sub-phase 5.1.3: Coordinate with host team (1-2 hours)
+- Sub-phase 5.1.4: Testing (2-3 hours)
+- Sub-phase 5.1.5: Documentation (1 hour)
+
+**Dependencies**:
+- Enhanced S5.js for S5 operations
+- Web Crypto API (browser built-in)
+- Host node update (coordinate with host team)
+
+**Success Criteria**:
+- [  ] S5VectorStore module created and tested
+- [  ] VectorRAGManager uses S5VectorStore instead of @fabstir/vector-db-native
+- [  ] No browser compatibility errors
+- [  ] Works on mobile devices
+- [  ] Search correctly delegated to host
+- [  ] Host can load vectors from S5 CIDs
+- [  ] All tests passing
+- [  ] Documentation updated
+
+---
+
+### 5.2: Update Test Scripts for Real SDK ✅
 - [x] Copy test scripts from UI4: `cp /workspace/test-*.cjs /workspace/tests-ui5/`
 - [x] Update scripts to connect to UI5: `http://localhost:3002` (different port)
 - [x] Add longer timeouts for real blockchain transactions
