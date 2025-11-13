@@ -9,7 +9,7 @@ export default defineConfig({
   workers: 1, // Single worker for blockchain tests
   reporter: [
     ['list'],
-    ['html', { outputFolder: 'test-results/html' }],
+    ['html', { outputFolder: 'playwright-report' }],
   ],
   use: {
     baseURL: 'http://localhost:3002',

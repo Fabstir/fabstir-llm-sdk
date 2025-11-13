@@ -2,6 +2,11 @@ import { test as base, expect } from '@playwright/test';
 import { TestWalletProvider } from './test-wallet-provider';
 import dotenv from 'dotenv';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+// ES module compatibility for __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Load environment variables from .env.test
 dotenv.config({ path: path.resolve(__dirname, '../../.env.test') });
@@ -22,14 +27,14 @@ export const test = base.extend<TestFixtures>({
     if (!process.env.TEST_USER_1_PRIVATE_KEY) {
       throw new Error('Missing TEST_USER_1_PRIVATE_KEY in .env.test');
     }
-    if (!process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA) {
-      throw new Error('Missing NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA in .env.test');
+    if (!process.env.RPC_URL_BASE_SEPOLIA) {
+      throw new Error('Missing RPC_URL_BASE_SEPOLIA in .env.test');
     }
 
     // Create test wallet
     const testWallet = new TestWalletProvider({
       privateKey: process.env.TEST_USER_1_PRIVATE_KEY,
-      rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA,
+      rpcUrl: process.env.RPC_URL_BASE_SEPOLIA,
       chainId: 84532,
     });
 
