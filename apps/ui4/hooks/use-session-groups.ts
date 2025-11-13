@@ -27,6 +27,7 @@ export interface UseSessionGroupsReturn {
   startChat: (groupId: string, initialMessage?: string) => Promise<ChatSession>;
   continueChat: (groupId: string, sessionId: string) => Promise<ChatSession>;
   getChatSession: (groupId: string, sessionId: string) => Promise<ChatSession | null>;
+  listChatSessionsWithData: (groupId: string) => Promise<ChatSession[]>;
   addMessage: (groupId: string, sessionId: string, message: ChatMessage) => Promise<void>;
   deleteChat: (groupId: string, sessionId: string) => Promise<void>;
   searchChats: (groupId: string, query: string) => Promise<ChatSession[]>;
@@ -355,6 +356,32 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     }
   }, [managers]);
 
+  const listChatSessionsWithData = useCallback(async (
+    groupId: string
+  ): Promise<ChatSession[]> => {
+    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) return [];
+
+    try {
+      setError(null);
+      // Get session IDs
+      const sessionIds = await managers.sessionGroupManager.listChatSessions(groupId, managers.authManager.userAddress);
+
+      // Fetch full data for each session
+      const sessions: ChatSession[] = [];
+      for (const sessionId of sessionIds) {
+        const session = await managers.sessionGroupManager.getChatSession(groupId, sessionId);
+        if (session) {
+          sessions.push(session);
+        }
+      }
+
+      return sessions;
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to list chat sessions:', err);
+      return [];
+    }
+  }, [managers]);
+
   // Sharing Operations
 
   const shareGroup = useCallback(async (
@@ -464,6 +491,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     startChat,
     continueChat,
     getChatSession,
+    listChatSessionsWithData,
     addMessage,
     deleteChat,
     searchChats,

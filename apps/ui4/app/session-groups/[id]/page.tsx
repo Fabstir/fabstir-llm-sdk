@@ -33,6 +33,7 @@ export default function SessionGroupDetailPage() {
     selectGroup,
     startChat,
     deleteChat,
+    listChatSessionsWithData,
     addGroupDocument,
     removeGroupDocument,
     isLoading,
@@ -133,22 +134,33 @@ export default function SessionGroupDetailPage() {
     }
   }, [isConnected, isInitialized, groupId, selectGroup]);
 
-  // --- Update chat sessions when selectedGroup changes ---
+  // --- Load chat sessions when selectedGroup changes ---
   useEffect(() => {
-    if (selectedGroup && selectedGroup.chatSessions) {
-      const formattedSessions = selectedGroup.chatSessions.map((s) => ({
-        sessionId: s.sessionId,
-        title: s.title,
-        lastMessage: s.lastMessage,
-        messageCount: s.messageCount || 0,
-        timestamp: s.timestamp,
-        active: s.active !== undefined ? s.active : true,
-      }));
-      setChatSessions(formattedSessions);
-    } else {
-      setChatSessions([]);
+    async function loadChatSessions() {
+      if (selectedGroup && groupId) {
+        try {
+          const sessions = await listChatSessionsWithData(groupId);
+          // Convert ChatSession to local ChatSession format with computed properties
+          const formattedSessions = sessions.map((s) => ({
+            sessionId: s.sessionId,
+            title: s.title,
+            lastMessage: s.messages.length > 0 ? s.messages[s.messages.length - 1].content.substring(0, 100) : undefined,
+            messageCount: s.messages.length,
+            timestamp: s.updated,
+            active: true, // All sessions are active by default
+          }));
+          setChatSessions(formattedSessions);
+        } catch (err) {
+          console.error('[SessionGroupDetail] Failed to load chat sessions:', err);
+          setChatSessions([]);
+        }
+      } else {
+        setChatSessions([]);
+      }
     }
-  }, [selectedGroup]);
+
+    loadChatSessions();
+  }, [selectedGroup, groupId, listChatSessionsWithData]);
 
   // --- Fix: prevent reload when window regains focus after file picker ---
   useEffect(() => {

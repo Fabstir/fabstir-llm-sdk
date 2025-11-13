@@ -76,20 +76,11 @@ export default function ChatSessionPage() {
   useEffect(() => {
     if (selectedGroup) {
       setGroupName(selectedGroup.name);
-      setLinkedDatabases(selectedGroup.databases || []);
+      setLinkedDatabases(selectedGroup.linkedDatabases || []);
 
-      // Load sessions from group
-      const sessionList = selectedGroup.chatSessions || [];
-      const formattedSessions: Session[] = sessionList.map((s) => ({
-        id: s.sessionId,
-        groupId: groupId,
-        title: s.title,
-        lastMessage: s.lastMessage,
-        messageCount: s.messageCount || 0,
-        created: s.timestamp,
-        updated: s.timestamp,
-      }));
-      setSessions(formattedSessions);
+      // Note: chatSessions is now string[] (just IDs), not full objects
+      // Sessions sidebar is not used in this layout, so we can skip loading them
+      setSessions([]);
     }
   }, [selectedGroup, groupId]);
 
@@ -106,15 +97,14 @@ export default function ChatSessionPage() {
         : `📎 Attached: ${fileList}`;
     }
 
-    // Add user message
+    // Add user message (optimistic update)
     const userMessage: ChatMessage = {
       role: 'user',
       content: messageContent,
       timestamp: Date.now(),
     };
 
-    const updatedMessages = [...messages, userMessage];
-    setMessages(updatedMessages);
+    setMessages(prev => [...prev, userMessage]);
 
     try {
       // TODO: Upload files to session-specific database via SDK
@@ -123,64 +113,14 @@ export default function ChatSessionPage() {
         console.log('[Mock] Uploading files to session database:', files.map(f => f.name));
       }
 
-      // Save user message via SDK
+      // Send message via SDK - this will automatically generate AI response in mock SDK
       await sdkAddMessage(groupId, sessionId, userMessage);
 
-      // Simulate API delay
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // Wait for SDK to generate AI response (mock SDK adds response automatically)
+      await new Promise((resolve) => setTimeout(resolve, 2000));
 
-      // Generate mock assistant response with RAG sources
-      // Include both linked databases AND attached files as sources
-      const mockSources: any[] = [];
-
-      // Add sources from linked databases
-      if (linkedDatabases.length > 0) {
-        mockSources.push({
-          documentName: linkedDatabases[0] || 'Document 1',
-          chunkText: `This is a relevant chunk from ${linkedDatabases[0]}. It contains information related to your query about "${message.substring(0, 30)}...".`,
-          similarityScore: 0.85,
-          filePath: '/documents/example.pdf',
-          vectorId: 'vec-' + Math.random().toString(36).substr(2, 9),
-        });
-      }
-
-      // Add sources from attached files (session-specific)
-      if (files && files.length > 0) {
-        files.forEach((file, idx) => {
-          mockSources.push({
-            documentName: file.name,
-            chunkText: `Content extracted from ${file.name}. This document was just uploaded and contains relevant information for this specific conversation.`,
-            similarityScore: 0.95, // Higher score since it was just attached
-            filePath: `/session-docs/${file.name}`,
-            vectorId: 'vec-' + Math.random().toString(36).substr(2, 9),
-          });
-        });
-      }
-
-      const finalSources = mockSources.length > 0 ? mockSources : undefined;
-
-      const mockResponses = [
-        "That's a great question! Based on the context from your documents, here's what I found:",
-        'Let me help you with that. According to the information in your knowledge base:',
-        'I can see from your documents that this topic relates to several key points:',
-        'Here\'s what I learned from your uploaded documents about "' +
-          message.substring(0, 30) +
-          '":',
-      ];
-
-      const assistantMessage: ChatMessage = {
-        role: 'assistant',
-        content: mockResponses[Math.floor(Math.random() * mockResponses.length)],
-        timestamp: Date.now(),
-        tokens: Math.floor(Math.random() * 50) + 20,
-        sources: finalSources,
-      };
-
-      const finalMessages = [...updatedMessages, assistantMessage];
-      setMessages(finalMessages);
-
-      // Save assistant message via SDK
-      await sdkAddMessage(groupId, sessionId, assistantMessage);
+      // Reload messages from SDK to get the AI-generated response
+      await loadMessages();
 
       // Refresh group to update session metadata
       await selectGroup(groupId);
@@ -194,8 +134,7 @@ export default function ChatSessionPage() {
         timestamp: Date.now(),
       };
 
-      const finalMessages = [...updatedMessages, errorMessage];
-      setMessages(finalMessages);
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setLoading(false);
     }

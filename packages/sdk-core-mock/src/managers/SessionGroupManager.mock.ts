@@ -31,12 +31,12 @@ export class SessionGroupManagerMock implements ISessionGroupManager {
     if (this.storage.size() === 0) {
       console.log('[Mock] Initializing session groups with mock data');
       generateMockSessionGroups().forEach(group => {
-        this.storage.set(group.id, group);
-
         // Initialize chat sessions for this group
         // Note: In real SDK, chatSessions is string[] (just IDs)
         // Mock data fixtures still use ChatSessionSummary for backward compatibility
         const sessionMetas = group.chatSessions as any;
+        const sessionIds: string[] = [];
+
         if (Array.isArray(sessionMetas) && sessionMetas.length > 0 && typeof sessionMetas[0] === 'object') {
           sessionMetas.forEach((sessionMeta: any) => {
             const fullSession: ChatSession = {
@@ -53,8 +53,13 @@ export class SessionGroupManagerMock implements ISessionGroupManager {
               updated: sessionMeta.timestamp
             };
             this.chatStorage.set(sessionMeta.sessionId, fullSession);
+            sessionIds.push(sessionMeta.sessionId);
           });
         }
+
+        // Convert chatSessions to just IDs (real SDK format)
+        group.chatSessions = sessionIds;
+        this.storage.set(group.id, group);
       });
     }
   }
@@ -325,14 +330,191 @@ export class SessionGroupManagerMock implements ISessionGroupManager {
     return group.chatSessions;
   }
 
+  // Chat Session Content Methods (UI4 Testing - Real SDK uses SessionManager)
+  // These methods are implemented for UI testing only. In production, use SessionManager.
+
+  async startChatSession(groupId: string, initialMessage?: string): Promise<ChatSession> {
+    await this.delay(300);
+
+    const group = this.storage.get<SessionGroup>(groupId);
+    if (!group) {
+      throw new Error(`[Mock] Session group not found: ${groupId}`);
+    }
+
+    const sessionId = this.generateId('sess');
+    const now = Date.now();
+
+    // Create chat session
+    const session: ChatSession = {
+      sessionId,
+      groupId,
+      title: initialMessage ? this.generateTitle(initialMessage) : 'New Chat',
+      messages: [],
+      metadata: {
+        model: 'llama-3',
+        hostUrl: 'http://localhost:8080',
+        databasesUsed: group.linkedDatabases
+      },
+      created: now,
+      updated: now
+    };
+
+    // Add initial message if provided
+    if (initialMessage) {
+      session.messages.push({
+        role: 'user',
+        content: initialMessage,
+        timestamp: now
+      });
+
+      // Generate mock AI response
+      const mockMessages = generateMockChatMessages(initialMessage);
+      if (mockMessages.length > 1) {
+        session.messages.push({
+          role: 'assistant',
+          content: mockMessages[1].content,
+          timestamp: now + 1500,
+          sources: mockMessages[1].ragSources
+        });
+      }
+    }
+
+    // Store chat session
+    this.chatStorage.set(sessionId, session);
+
+    // Add session ID to group
+    if (!group.chatSessions.includes(sessionId)) {
+      group.chatSessions.push(sessionId);
+      group.updatedAt = new Date();
+      this.storage.set(groupId, group);
+    }
+
+    console.log('[Mock] Started chat session:', sessionId);
+    return session;
+  }
+
+  async getChatSession(groupId: string, sessionId: string): Promise<ChatSession | null> {
+    await this.delay(150);
+
+    const session = this.chatStorage.get<ChatSession>(sessionId);
+    if (!session) {
+      return null;
+    }
+
+    if (session.groupId !== groupId) {
+      throw new Error(`[Mock] Session ${sessionId} does not belong to group ${groupId}`);
+    }
+
+    return session;
+  }
+
+  async continueChatSession(groupId: string, sessionId: string): Promise<ChatSession> {
+    await this.delay(150);
+
+    const session = await this.getChatSession(groupId, sessionId);
+    if (!session) {
+      throw new Error(`[Mock] Chat session not found: ${sessionId}`);
+    }
+
+    return session;
+  }
+
+  async addMessage(groupId: string, sessionId: string, message: ChatMessage): Promise<void> {
+    await this.delay(200);
+
+    const session = await this.getChatSession(groupId, sessionId);
+    if (!session) {
+      throw new Error(`[Mock] Chat session not found: ${sessionId}`);
+    }
+
+    // Add message
+    session.messages.push(message);
+    session.updated = Date.now();
+
+    // If user message, generate mock AI response
+    if (message.role === 'user') {
+      await this.delay(1500); // Simulate AI processing time
+
+      const mockMessages = generateMockChatMessages(message.content);
+      if (mockMessages.length > 1) {
+        session.messages.push({
+          role: 'assistant',
+          content: mockMessages[1].content,
+          timestamp: Date.now(),
+          sources: mockMessages[1].ragSources
+        });
+      }
+    }
+
+    // Store updated session
+    this.chatStorage.set(sessionId, session);
+
+    // Update group timestamp
+    const group = this.storage.get<SessionGroup>(groupId);
+    if (group) {
+      group.updatedAt = new Date();
+      this.storage.set(groupId, group);
+    }
+
+    console.log('[Mock] Added message to session:', sessionId);
+  }
+
+  async deleteChatSession(groupId: string, sessionId: string): Promise<void> {
+    await this.delay(200);
+
+    const session = await this.getChatSession(groupId, sessionId);
+    if (!session) {
+      // Already deleted or doesn't exist
+      return;
+    }
+
+    // Remove from storage
+    this.chatStorage.delete(sessionId);
+
+    // Remove from group
+    const group = this.storage.get<SessionGroup>(groupId);
+    if (group) {
+      group.chatSessions = group.chatSessions.filter(id => id !== sessionId);
+      group.updatedAt = new Date();
+      this.storage.set(groupId, group);
+    }
+
+    console.log('[Mock] Deleted chat session:', sessionId);
+  }
+
+  async searchChatSessions(groupId: string, query: string): Promise<ChatSession[]> {
+    await this.delay(200);
+
+    const group = this.storage.get<SessionGroup>(groupId);
+    if (!group) {
+      throw new Error(`[Mock] Session group not found: ${groupId}`);
+    }
+
+    // Get all sessions for this group
+    const sessions: ChatSession[] = [];
+    for (const sessionId of group.chatSessions) {
+      const session = this.chatStorage.get<ChatSession>(sessionId);
+      if (session) {
+        sessions.push(session);
+      }
+    }
+
+    // Filter by query (search in title and message content)
+    const lowerQuery = query.toLowerCase();
+    const filtered = sessions.filter(session => {
+      if (session.title.toLowerCase().includes(lowerQuery)) {
+        return true;
+      }
+      return session.messages.some(msg =>
+        msg.content.toLowerCase().includes(lowerQuery)
+      );
+    });
+
+    console.log('[Mock] Search found', filtered.length, 'sessions for query:', query);
+    return filtered;
+  }
+
   // DEPRECATED METHODS REMOVED:
-  // - startChatSession (use SessionManager in real SDK)
-  // - getChatSession (use SessionManager in real SDK)
-  // - continueChatSession (use SessionManager in real SDK)
-  // - addMessage (use SessionManager in real SDK)
-  // - generateSessionTitle (use SessionManager in real SDK)
-  // - deleteChatSession (use SessionManager in real SDK)
-  // - searchChatSessions (use SessionManager in real SDK)
   // - addGroupDocument (use DocumentManager in real SDK)
   // - removeGroupDocument (use DocumentManager in real SDK)
   // - listGroupDocuments (use DocumentManager in real SDK)
