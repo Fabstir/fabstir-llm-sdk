@@ -6,12 +6,14 @@
  * Client-side database management + host-side search delegation
  *
  * Architecture:
- * - Client-side: VectorDbSession for persistent storage in S5
+ * - Client-side: S5VectorStore for persistent storage in S5 (browser-compatible, ~5KB)
  * - Host-side: SessionManager for stateless search operations (Rust)
  */
 
-import { VectorDbSession } from '@fabstir/vector-db-native';
+import { S5VectorStore } from '../storage/S5VectorStore';
+import type { S5 } from '@s5-dev/s5js';
 import { SessionManager } from './SessionManager';
+import { EncryptionManager } from './EncryptionManager';
 import { IVectorRAGManager } from './interfaces/IVectorRAGManager';
 import { RAGConfig, PartialRAGConfig, VectorRecord, SearchResult, SearchResultWithSource } from '../rag/types';
 import { validateRAGConfig, mergeRAGConfig } from '../rag/config';
@@ -19,6 +21,7 @@ import { SessionCache } from '../rag/session-cache';
 import { DatabaseMetadataService } from '../database/DatabaseMetadataService';
 import type { DatabaseMetadata } from '../database/types';
 import { PermissionManager } from '../permissions/PermissionManager';
+import type { Vector, VectorDatabaseMetadata, FolderStats } from '@fabstir/sdk-core-mock';
 
 /**
  * Session status
@@ -31,7 +34,6 @@ type SessionStatus = 'active' | 'closed' | 'unknown';
 interface Session {
   sessionId: string;
   databaseName: string;
-  vectorDbSession: any; // VectorDbSession instance
   status: SessionStatus;
   createdAt: number;
   lastAccessedAt: number;
@@ -60,6 +62,7 @@ export class VectorRAGManager implements IVectorRAGManager {
   private readonly metadataService: DatabaseMetadataService;
   private readonly permissionManager?: PermissionManager;
   private readonly sessionManager: SessionManager;
+  private readonly vectorStore: S5VectorStore;
   private sessions: Map<string, Session>;
   private sessionCache: SessionCache<Session>;
   private dbNameToSessionId: Map<string, string>;
@@ -75,6 +78,8 @@ export class VectorRAGManager implements IVectorRAGManager {
     seedPhrase: string;
     config: RAGConfig;
     sessionManager: SessionManager;
+    s5Client: S5;
+    encryptionManager: EncryptionManager;
     metadataService?: DatabaseMetadataService;
     permissionManager?: PermissionManager;
   }) {
@@ -87,6 +92,12 @@ export class VectorRAGManager implements IVectorRAGManager {
     }
     if (!options.sessionManager) {
       throw new Error('sessionManager is required');
+    }
+    if (!options.s5Client) {
+      throw new Error('s5Client is required');
+    }
+    if (!options.encryptionManager) {
+      throw new Error('encryptionManager is required');
     }
 
     // Validate configuration
@@ -101,11 +112,18 @@ export class VectorRAGManager implements IVectorRAGManager {
     this.sessions = new Map();
     this.sessionCache = new SessionCache<Session>(50);
     this.dbNameToSessionId = new Map();
+
+    // Initialize S5VectorStore (shared across all sessions)
+    this.vectorStore = new S5VectorStore({
+      s5Client: options.s5Client,
+      userAddress: options.userAddress,
+      encryptionManager: options.encryptionManager
+    });
   }
 
   /**
    * Create a new vector database session (client-side)
-   * This creates a persistent VectorDbSession using @fabstir/vector-db-native
+   * This creates a persistent vector database using S5VectorStore
    */
   async createSession(databaseName: string, config?: PartialRAGConfig): Promise<string> {
     this.ensureNotDisposed();
@@ -122,21 +140,17 @@ export class VectorRAGManager implements IVectorRAGManager {
     const sessionId = `rag-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
     try {
-      // Create VectorDbSession (client-side storage)
-      const vectorDbSession = await VectorDbSession.create({
-        s5Portal: sessionConfig.s5Portal,
-        userSeedPhrase: this.seedPhrase,
-        sessionId: `${this.userAddress}-${databaseName}-${sessionId}`,
-        encryptAtRest: sessionConfig.encryptAtRest,
-        chunkSize: sessionConfig.chunkSize,
-        cacheSizeMb: sessionConfig.cacheSizeMb
+      // Create database in S5VectorStore (client-side storage)
+      await this.vectorStore.createDatabase({
+        name: databaseName,
+        owner: this.userAddress,
+        description: sessionConfig.description
       });
 
       // Create session object
       const session: Session = {
         sessionId,
         databaseName,
-        vectorDbSession,
         status: 'active',
         createdAt: Date.now(),
         lastAccessedAt: Date.now(),
@@ -219,15 +233,7 @@ export class VectorRAGManager implements IVectorRAGManager {
       throw new Error('Session not found');
     }
 
-    // Destroy native VectorDbSession to free memory and IndexedDB
-    if (session.vectorDbSession && typeof session.vectorDbSession.destroy === 'function') {
-      try {
-        await session.vectorDbSession.destroy();
-      } catch (error) {
-        console.error(`Error destroying VectorDbSession ${sessionId}:`, error);
-      }
-    }
-
+    // S5VectorStore auto-saves - no cleanup needed
     // Update status and remove from caches
     session.status = 'closed';
     this.sessionCache.delete(sessionId);
@@ -237,7 +243,7 @@ export class VectorRAGManager implements IVectorRAGManager {
 
   /**
    * Add vectors to client-side storage
-   * Stores vectors in S5 via VectorDbSession
+   * Stores vectors in S5 via S5VectorStore
    */
   async addVectors(sessionId: string, vectors: VectorRecord[]): Promise<void> {
     const session = this.getSession(sessionId);
@@ -251,7 +257,7 @@ export class VectorRAGManager implements IVectorRAGManager {
     // Check write permission
     this.checkPermission(session.databaseName, 'write');
 
-    // Validate vector dimensions (all should be same length)
+    // Validate vector dimensions (S5VectorStore also validates, but check here for better error messages)
     if (vectors.length > 0) {
       const expectedDim = vectors[0].vector.length;
       for (const vec of vectors) {
@@ -261,12 +267,12 @@ export class VectorRAGManager implements IVectorRAGManager {
       }
     }
 
-    // Add vectors to client-side storage
-    await session.vectorDbSession.addVectors(vectors);
+    // Add vectors to S5VectorStore (auto-saved)
+    await this.vectorStore.addVectors(session.databaseName, vectors);
     session.lastAccessedAt = Date.now();
 
     // Update metadata with actual vector count
-    const stats = await session.vectorDbSession.getStats();
+    const stats = await this.vectorStore.getStats(session.databaseName);
     this.metadataService.update(session.databaseName, {
       vectorCount: stats.vectorCount || 0
     });
@@ -330,13 +336,15 @@ export class VectorRAGManager implements IVectorRAGManager {
       throw new Error('Session is closed');
     }
 
-    await session.vectorDbSession.deleteVectors(vectorIds);
+    // Delete each vector individually
+    for (const vectorId of vectorIds) {
+      await this.vectorStore.deleteVector(session.databaseName, vectorId);
+    }
     session.lastAccessedAt = Date.now();
   }
 
   /**
    * Delete vectors by metadata filter (client-side storage)
-   * Uses @fabstir/vector-db-native deleteByMetadata method
    */
   async deleteByMetadata(sessionId: string, filter: Record<string, any>): Promise<number> {
     const session = this.getSession(sessionId);
@@ -347,14 +355,15 @@ export class VectorRAGManager implements IVectorRAGManager {
       throw new Error('Session is closed');
     }
 
-    const result = await session.vectorDbSession.deleteByMetadata(filter);
+    const deletedCount = await this.vectorStore.deleteByMetadata(session.databaseName, filter);
     session.lastAccessedAt = Date.now();
 
-    return result.deletedCount;
+    return deletedCount;
   }
 
   /**
    * Save session to S5 (client-side persistence)
+   * S5VectorStore auto-saves on every operation, so this returns a dummy CID
    */
   async saveSession(sessionId: string): Promise<string> {
     const session = this.getSession(sessionId);
@@ -362,13 +371,13 @@ export class VectorRAGManager implements IVectorRAGManager {
       throw new Error('Session not found');
     }
 
-    const cid = await session.vectorDbSession.saveUserVectors();
     session.lastAccessedAt = Date.now();
-    return cid;
+    return 'auto-saved'; // S5VectorStore auto-saves
   }
 
   /**
    * Load session from S5 (client-side persistence)
+   * S5VectorStore auto-loads on access, so this is a no-op
    */
   async loadSession(sessionId: string, cid: string): Promise<void> {
     const session = this.getSession(sessionId);
@@ -379,7 +388,7 @@ export class VectorRAGManager implements IVectorRAGManager {
       throw new Error('Session is closed');
     }
 
-    await session.vectorDbSession.loadUserVectors(cid);
+    // S5VectorStore auto-loads on access - no action needed
     session.lastAccessedAt = Date.now();
   }
 
@@ -394,14 +403,14 @@ export class VectorRAGManager implements IVectorRAGManager {
       throw new Error('Session not found');
     }
 
-    const stats = await session.vectorDbSession.getStats();
+    const stats = await this.vectorStore.getStats(session.databaseName);
     session.lastAccessedAt = Date.now();
 
     return {
-      vectorCount: stats.totalVectors || 0,
-      totalVectors: stats.totalVectors || 0,
-      totalChunks: stats.totalChunks || 0,
-      memoryUsageMb: stats.memoryUsageMb || 0,
+      vectorCount: stats.vectorCount || 0,
+      totalVectors: stats.vectorCount || 0,
+      totalChunks: stats.chunkCount || 0,
+      memoryUsageMb: (stats.storageSizeBytes || 0) / (1024 * 1024),
       lastUpdated: stats.lastUpdated || Date.now()
     };
   }
@@ -465,6 +474,83 @@ export class VectorRAGManager implements IVectorRAGManager {
     updates: Partial<Omit<DatabaseMetadata, 'databaseName' | 'owner' | 'createdAt'>>
   ): void {
     this.metadataService.update(databaseName, updates);
+  }
+
+  // ===== MOCK SDK PARITY METHODS (for UI4→UI5 Migration) =====
+
+  /** Get vector database metadata */
+  async getVectorDatabaseMetadata(databaseName: string): Promise<VectorDatabaseMetadata> {
+    return await this.vectorStore.getVectorDatabaseMetadata(databaseName);
+  }
+
+  /** Alias for getVectorDatabaseMetadata() */
+  async getDatabaseMetadata(databaseName: string): Promise<VectorDatabaseMetadata> {
+    return await this.vectorStore.getDatabaseMetadata(databaseName);
+  }
+
+  /** Update vector database metadata */
+  async updateVectorDatabaseMetadata(databaseName: string, updates: Partial<VectorDatabaseMetadata>): Promise<void> {
+    await this.vectorStore.updateVectorDatabaseMetadata(databaseName, updates);
+  }
+
+  /** Add single vector to database */
+  async addVector(dbName: string, id: string, values: number[], metadata: Record<string, any> = {}): Promise<void> {
+    await this.vectorStore.addVector(dbName, id, values, metadata);
+  }
+
+  /** Get specific vectors by IDs */
+  async getVectors(databaseName: string, vectorIds: string[]): Promise<Vector[]> {
+    return await this.vectorStore.getVectors(databaseName, vectorIds);
+  }
+
+  /** List all vectors in database */
+  async listVectors(databaseName: string): Promise<Vector[]> {
+    return await this.vectorStore.listVectors(databaseName);
+  }
+
+  /** List all folder paths */
+  async listFolders(databaseName: string): Promise<string[]> {
+    return await this.vectorStore.listFolders(databaseName);
+  }
+
+  /** Get all folders with vector counts */
+  async getAllFoldersWithCounts(databaseName: string): Promise<Array<{ path: string; fileCount: number }>> {
+    return await this.vectorStore.getAllFoldersWithCounts(databaseName);
+  }
+
+  /** Get folder statistics */
+  async getFolderStatistics(databaseName: string, folderPath: string): Promise<FolderStats> {
+    return await this.vectorStore.getFolderStatistics(databaseName, folderPath);
+  }
+
+  /** Create empty folder */
+  async createFolder(databaseName: string, folderPath: string): Promise<void> {
+    await this.vectorStore.createFolder(databaseName, folderPath);
+  }
+
+  /** Rename folder and update all vectors */
+  async renameFolder(databaseName: string, oldPath: string, newPath: string): Promise<number> {
+    return await this.vectorStore.renameFolder(databaseName, oldPath, newPath);
+  }
+
+  /** Delete folder and all vectors */
+  async deleteFolder(databaseName: string, folderPath: string): Promise<number> {
+    return await this.vectorStore.deleteFolder(databaseName, folderPath);
+  }
+
+  /** Move single vector to folder */
+  async moveToFolder(databaseName: string, vectorId: string, targetFolder: string): Promise<void> {
+    await this.vectorStore.moveToFolder(databaseName, vectorId, targetFolder);
+  }
+
+  /** Move all vectors from one folder to another */
+  async moveFolderContents(databaseName: string, sourceFolder: string, targetFolder: string): Promise<number> {
+    return await this.vectorStore.moveFolderContents(databaseName, sourceFolder, targetFolder);
+  }
+
+  /** Search within a specific folder (requires host support via SessionManager) */
+  async searchInFolder(databaseName: string, folderPath: string, queryVector: number[], k?: number, threshold?: number): Promise<SearchResult[]> {
+    return await this.vectorStore.searchInFolder(databaseName, folderPath, queryVector, k, threshold);
   }
 
   /**
