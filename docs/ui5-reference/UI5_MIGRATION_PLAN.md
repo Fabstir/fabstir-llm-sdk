@@ -1,0 +1,1175 @@
+# UI5 Migration Plan: Production SDK Integration
+
+**Project**: fabstir-llm-sdk - UI5 with Real SDK (@fabstir/sdk-core)
+**Goal**: Migrate UI4 (mock SDK) to UI5 (production SDK) with Base Account Kit integration
+**Estimated Time**: 12-20 hours
+**Prerequisites**: UI4 fully tested (61/61 tests passing with mock SDK)
+
+---
+
+## Overview
+
+UI5 will be a production-ready version of UI4 using:
+- ✅ Real `@fabstir/sdk-core` (not mock)
+- ✅ Real blockchain transactions (Base Sepolia testnet)
+- ✅ Real S5 storage for conversations
+- ✅ Real WebSocket connections to production nodes
+- ✅ **Base Account Kit** for account abstraction
+- ✅ **Sub-accounts with spend permissions** for gasless transactions
+
+---
+
+## Phase 0: Project Setup
+
+### 0.1: Copy UI4 to UI5
+- [ ] Copy entire `/workspace/apps/ui4/` to `/workspace/apps/ui5/`
+- [ ] Update `apps/ui5/package.json` name to `"@fabstir/ui5"`
+- [ ] Update `apps/ui5/package.json` description to "Production UI with Real SDK"
+- [ ] Add ui5 to root workspace in `/workspace/package.json`
+- [ ] Create `/workspace/apps/ui5/.env.local` (do not commit)
+- [ ] Create `/workspace/apps/ui5/.gitignore` entry for `.env.local`
+
+**Commands**:
+```bash
+cd /workspace/apps
+cp -r ui4 ui5
+
+# Update package.json
+cd ui5
+# Change name: "@fabstir/ui4" → "@fabstir/ui5"
+# Change description to mention production SDK
+
+# Create environment file
+touch .env.local
+echo ".env.local" >> .gitignore
+```
+
+**Verification**:
+- [ ] UI5 folder exists with all UI4 files
+- [ ] UI5 package.json has correct name
+- [ ] .env.local file created (empty for now)
+
+**Time Estimate**: 15 minutes
+
+---
+
+## Phase 1: Dependency Updates
+
+### 1.1: Remove Mock SDK
+- [ ] Open `/workspace/apps/ui5/package.json`
+- [ ] Remove dependency: `"@fabstir/sdk-core-mock": "workspace:*"`
+- [ ] Remove any other mock-related dependencies
+
+### 1.2: Add Production SDK
+- [ ] Add dependency: `"@fabstir/sdk-core": "workspace:*"`
+- [ ] Add dependency: `"@s5-dev/s5js": "^1.0.0"` (if not already present)
+- [ ] Add dependency: `"ethers": "^6.13.0"`
+
+### 1.3: Add Base Account Kit
+- [ ] Add dependency: `"@base-org/account": "^1.0.0"` (Base Account SDK)
+- [ ] Add dependency: `"viem": "^2.0.0"` (required by Base Account Kit)
+- [ ] Add dependency: `"@wagmi/core": "^2.0.0"` (wallet integration)
+
+### 1.4: Install Dependencies
+- [ ] Run `cd /workspace/apps/ui5 && pnpm install`
+- [ ] Verify no installation errors
+- [ ] Verify `@fabstir/sdk-core` resolves to workspace package
+
+**package.json changes**:
+```diff
+{
+  "name": "@fabstir/ui5",
+  "dependencies": {
+-   "@fabstir/sdk-core-mock": "workspace:*",
++   "@fabstir/sdk-core": "workspace:*",
++   "@s5-dev/s5js": "^1.0.0",
++   "ethers": "^6.13.0",
++   "@base-org/account": "^1.0.0",
++   "viem": "^2.0.0",
++   "@wagmi/core": "^2.0.0",
+    "next": "14.0.0",
+    "react": "^18.2.0",
+    // ... other dependencies
+  }
+}
+```
+
+**Verification**:
+- [ ] `pnpm install` completes successfully
+- [ ] `node_modules/@fabstir/sdk-core` exists
+- [ ] `node_modules/@base-org/account` exists
+- [ ] No dependency conflicts
+
+**Time Estimate**: 20 minutes
+
+---
+
+## Phase 2: Configuration Setup
+
+### 2.1: Environment Variables
+- [ ] Copy contract addresses from `/workspace/.env.test` to `apps/ui5/.env.local`
+- [ ] Add RPC URLs for Base Sepolia
+- [ ] Add S5 portal configuration
+- [ ] Add Base Account Kit configuration
+- [ ] **DO NOT** commit `.env.local` to git
+
+**File**: `/workspace/apps/ui5/.env.local`
+
+```bash
+# ===========================
+# BLOCKCHAIN CONFIGURATION
+# ===========================
+
+# Base Sepolia (Chain ID: 84532)
+NEXT_PUBLIC_CHAIN_ID=84532
+NEXT_PUBLIC_CHAIN_NAME="Base Sepolia"
+NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA=https://sepolia.base.org
+
+# ===========================
+# CONTRACT ADDRESSES
+# Copy from .env.test (do NOT hardcode!)
+# ===========================
+
+NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE=<copy from .env.test>
+NEXT_PUBLIC_CONTRACT_NODE_REGISTRY=<copy from .env.test>
+NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM=<copy from .env.test>
+NEXT_PUBLIC_CONTRACT_HOST_EARNINGS=<copy from .env.test>
+NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY=<copy from .env.test>
+NEXT_PUBLIC_CONTRACT_USDC_TOKEN=<copy from .env.test>
+NEXT_PUBLIC_CONTRACT_FAB_TOKEN=<copy from .env.test>
+
+# ===========================
+# BASE ACCOUNT KIT
+# ===========================
+
+# Base Protocol Contract (NOT Fabstir contract!)
+NEXT_PUBLIC_BASE_CONTRACT_SPEND_PERMISSION_MANAGER=<copy from .env.test>
+
+# Account Kit Configuration
+NEXT_PUBLIC_BASE_ACCOUNT_KIT_API_KEY=<your Coinbase API key>
+NEXT_PUBLIC_BASE_ACCOUNT_KIT_PROJECT_ID=<your project ID>
+
+# ===========================
+# S5 STORAGE
+# ===========================
+
+NEXT_PUBLIC_S5_PORTAL_URL=https://s5.cx
+NEXT_PUBLIC_S5_ENABLE_STORAGE=true
+
+# User-specific (each user provides their own seed)
+# This is for testing only - production uses wallet-derived seeds
+NEXT_PUBLIC_S5_SEED_PHRASE="<optional test seed phrase>"
+
+# ===========================
+# PRODUCTION NODE ENDPOINTS
+# ===========================
+
+NEXT_PUBLIC_DEFAULT_HOST_URL=http://81.150.166.91:8080
+NEXT_PUBLIC_DEFAULT_HOST_WS=ws://81.150.166.91:8080/ws
+
+# ===========================
+# FEATURE FLAGS
+# ===========================
+
+NEXT_PUBLIC_ENABLE_ENCRYPTION=true
+NEXT_PUBLIC_ENABLE_BASE_ACCOUNT_KIT=true
+NEXT_PUBLIC_ENABLE_GASLESS_TRANSACTIONS=true
+
+# ===========================
+# DEVELOPMENT
+# ===========================
+
+NODE_ENV=development
+NEXT_PUBLIC_DEBUG_MODE=true
+```
+
+### 2.2: Verify Environment Variables
+- [ ] Check all contract addresses are from `.env.test` (no hardcoded values)
+- [ ] Verify RPC URL is accessible: `curl https://sepolia.base.org`
+- [ ] Verify S5 portal is accessible: `curl https://s5.cx`
+- [ ] Confirm `BASE_CONTRACT_SPEND_PERMISSION_MANAGER` is Base protocol address (not Fabstir)
+
+**Verification Commands**:
+```bash
+# Test RPC endpoint
+curl -X POST https://sepolia.base.org \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+
+# Should return: {"jsonrpc":"2.0","id":1,"result":"0x..."}
+
+# Test S5 portal
+curl -I https://s5.cx
+# Should return: HTTP/2 200
+```
+
+**Time Estimate**: 30 minutes
+
+---
+
+## Phase 3: SDK Core Integration
+
+### 3.1: Update SDK Initialization
+
+**File**: `/workspace/apps/ui5/lib/sdk.ts`
+
+- [ ] Remove mock SDK imports
+- [ ] Add real SDK imports
+- [ ] Update SDK initialization to use `FabstirSDKCore`
+- [ ] Add ChainRegistry configuration
+- [ ] Add S5 configuration
+- [ ] Add proper error handling
+
+**Before (Mock SDK)**:
+```typescript
+import { UI4SDK } from '@fabstir/sdk-core-mock';
+
+class UI5SDK {
+  private sdk: UI4SDK | null = null;
+
+  async initialize(userAddress: string): Promise<void> {
+    this.sdk = new UI4SDK(userAddress);
+    await this.sdk.initialize();
+  }
+}
+```
+
+**After (Real SDK)**:
+```typescript
+import { FabstirSDKCore } from '@fabstir/sdk-core';
+import { ChainRegistry, ChainId } from '@fabstir/sdk-core/config';
+import type { Signer } from 'ethers';
+
+class UI5SDK {
+  private sdk: FabstirSDKCore | null = null;
+  private isInitializing = false;
+
+  /**
+   * Initialize SDK with real blockchain connection
+   * @param signer - Ethers signer from wallet (MetaMask, Base Account Kit, etc.)
+   */
+  async initialize(signer: Signer): Promise<void> {
+    // Prevent concurrent initialization
+    if (this.isInitializing) {
+      const maxWait = 5000;
+      const startTime = Date.now();
+      while (this.isInitializing && Date.now() - startTime < maxWait) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      if (this.isInitializing) {
+        throw new Error('SDK initialization timeout');
+      }
+      return;
+    }
+
+    // Already initialized
+    if (this.sdk?.isInitialized()) {
+      return;
+    }
+
+    this.isInitializing = true;
+
+    try {
+      // Get chain configuration
+      const chain = ChainRegistry.getChain(ChainId.BASE_SEPOLIA);
+
+      // Initialize SDK with real configuration
+      this.sdk = new FabstirSDKCore({
+        mode: 'production' as const,
+        chainId: ChainId.BASE_SEPOLIA,
+        rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!,
+        contractAddresses: {
+          jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!,
+          nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY!,
+          proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM!,
+          hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS!,
+          modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY!,
+          usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
+          fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN!,
+        },
+        s5Config: {
+          portalUrl: process.env.NEXT_PUBLIC_S5_PORTAL_URL!,
+          enableStorage: process.env.NEXT_PUBLIC_ENABLE_STORAGE === 'true',
+        },
+        encryptionConfig: {
+          enabled: process.env.NEXT_PUBLIC_ENABLE_ENCRYPTION === 'true',
+        },
+      });
+
+      // Authenticate with wallet
+      const address = await signer.getAddress();
+      await this.sdk.authenticate('privatekey', {
+        signer,  // Pass signer for real transactions
+        address  // User address from wallet
+      });
+
+      console.log('[UI5SDK] SDK initialized successfully for:', address);
+    } catch (error) {
+      console.error('[UI5SDK] Initialization failed:', error);
+      this.sdk = null;
+      throw error;
+    } finally {
+      this.isInitializing = false;
+    }
+  }
+
+  /**
+   * Get SDK instance (throws if not initialized)
+   */
+  getSDK(): FabstirSDKCore {
+    if (!this.sdk) {
+      throw new Error('SDK not initialized. Call initialize() first.');
+    }
+    return this.sdk;
+  }
+
+  /**
+   * Check if SDK is initialized
+   */
+  isInitialized(): boolean {
+    return this.sdk?.isInitialized() ?? false;
+  }
+
+  /**
+   * Get all SDK managers
+   */
+  getManagers() {
+    if (!this.sdk?.isInitialized()) {
+      return null;
+    }
+    return {
+      sessionGroupManager: this.sdk.getSessionGroupManager(),
+      vectorRAGManager: this.sdk.getVectorRAGManager(),
+      sessionManager: this.sdk.getSessionManager(),
+      paymentManager: this.sdk.getPaymentManager(),
+      hostManager: this.sdk.getHostManager(),
+      // Add other managers as needed
+    };
+  }
+}
+
+// Singleton instance
+export const ui5SDK = new UI5SDK();
+```
+
+**Verification**:
+- [ ] TypeScript compiles without errors
+- [ ] All environment variables accessed correctly
+- [ ] Error handling in place for initialization failures
+
+**Time Estimate**: 1 hour
+
+### 3.2: Update SDK Hook
+
+**File**: `/workspace/apps/ui5/hooks/use-sdk.ts`
+
+- [ ] Update to use new SDK initialization pattern
+- [ ] Pass signer instead of userAddress
+- [ ] Add proper loading and error states
+
+```typescript
+import { useState, useEffect } from 'react';
+import { ui5SDK } from '@/lib/sdk';
+import type { Signer } from 'ethers';
+
+export function useSDK(signer: Signer | null) {
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [managers, setManagers] = useState<ReturnType<typeof ui5SDK.getManagers>>(null);
+
+  useEffect(() => {
+    // Check if SDK already initialized on mount
+    if (ui5SDK.isInitialized() && !managers) {
+      setManagers(ui5SDK.getManagers());
+      setIsInitialized(true);
+    }
+  }, []);
+
+  const initializeSDK = async () => {
+    if (!signer || isInitializing || isInitialized) {
+      return;
+    }
+
+    setIsInitializing(true);
+    setError(null);
+
+    try {
+      await ui5SDK.initialize(signer);
+      setManagers(ui5SDK.getManagers());
+      setIsInitialized(true);
+      console.log('[useSDK] SDK initialized successfully');
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to initialize SDK';
+      console.error('[useSDK] Initialization error:', errorMessage);
+      setError(errorMessage);
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  return {
+    managers,
+    isInitialized,
+    isInitializing,
+    error,
+    initializeSDK,
+  };
+}
+```
+
+**Time Estimate**: 30 minutes
+
+---
+
+## Phase 4: Base Account Kit Integration
+
+### 4.1: Create Base Wallet Provider
+
+**File**: `/workspace/apps/ui5/lib/base-wallet.ts`
+
+- [ ] Create Base Account Kit provider
+- [ ] Implement sub-account creation with spend permissions
+- [ ] Handle authentication flow
+- [ ] Export signer for SDK
+
+```typescript
+import { createBaseAccountSDK } from '@base-org/account';
+import { base } from '@base-org/account/chains';
+import { ethers } from 'ethers';
+
+export interface BaseWalletConfig {
+  apiKey: string;
+  projectId: string;
+  chain: typeof base.sepolia | typeof base.mainnet;
+}
+
+export interface SubAccountConfig {
+  tokenAddress: string;
+  tokenDecimals: number;
+  maxAllowance: string;  // e.g., "1000000" for 1M USDC
+  periodDays: number;     // e.g., 365 for 1 year
+}
+
+export class BaseWalletProvider {
+  private accountSDK: any;
+  private primaryAccount: string | null = null;
+  private subAccount: string | null = null;
+
+  constructor(config: BaseWalletConfig) {
+    this.accountSDK = createBaseAccountSDK({
+      apiKey: config.apiKey,
+      projectId: config.projectId,
+      chain: config.chain,
+    });
+  }
+
+  /**
+   * Connect wallet and get primary account
+   */
+  async connect(): Promise<string> {
+    try {
+      // Trigger Base Account Kit UI (pop-up or embedded)
+      await this.accountSDK.connect();
+
+      // Get primary smart wallet address
+      this.primaryAccount = await this.accountSDK.getAddress();
+
+      console.log('[BaseWallet] Connected:', this.primaryAccount);
+      return this.primaryAccount;
+    } catch (error) {
+      console.error('[BaseWallet] Connection failed:', error);
+      throw new Error('Failed to connect Base Account Kit wallet');
+    }
+  }
+
+  /**
+   * Create or get sub-account with spend permissions (for gasless transactions)
+   */
+  async ensureSubAccount(config: SubAccountConfig): Promise<{
+    address: string;
+    isExisting: boolean;
+  }> {
+    if (!this.primaryAccount) {
+      throw new Error('Primary account not connected. Call connect() first.');
+    }
+
+    try {
+      // Check if sub-account already exists for this origin
+      const existingSubAccount = await this.accountSDK.getSubAccount();
+
+      if (existingSubAccount) {
+        console.log('[BaseWallet] Using existing sub-account:', existingSubAccount);
+        this.subAccount = existingSubAccount;
+        return { address: existingSubAccount, isExisting: true };
+      }
+
+      // Create new sub-account with spend permissions
+      console.log('[BaseWallet] Creating sub-account with spend permissions...');
+
+      const subAccountAddress = await this.accountSDK.createSubAccount({
+        spendPermission: {
+          token: config.tokenAddress,
+          allowance: ethers.parseUnits(config.maxAllowance, config.tokenDecimals),
+          period: config.periodDays * 24 * 60 * 60, // days to seconds
+        },
+      });
+
+      this.subAccount = subAccountAddress;
+      console.log('[BaseWallet] Sub-account created:', subAccountAddress);
+
+      return { address: subAccountAddress, isExisting: false };
+    } catch (error) {
+      console.error('[BaseWallet] Sub-account creation failed:', error);
+      throw new Error('Failed to create sub-account with spend permissions');
+    }
+  }
+
+  /**
+   * Get ethers signer for SDK integration
+   */
+  async getSigner(): Promise<ethers.Signer> {
+    if (!this.primaryAccount) {
+      throw new Error('Wallet not connected');
+    }
+
+    // Convert Base Account Kit provider to ethers signer
+    const provider = await this.accountSDK.getProvider();
+    const signer = await provider.getSigner();
+
+    return signer;
+  }
+
+  /**
+   * Get current account addresses
+   */
+  getAddresses(): { primary: string | null; sub: string | null } {
+    return {
+      primary: this.primaryAccount,
+      sub: this.subAccount,
+    };
+  }
+
+  /**
+   * Disconnect wallet
+   */
+  async disconnect(): Promise<void> {
+    await this.accountSDK.disconnect();
+    this.primaryAccount = null;
+    this.subAccount = null;
+    console.log('[BaseWallet] Disconnected');
+  }
+
+  /**
+   * Check if wallet is connected
+   */
+  isConnected(): boolean {
+    return this.primaryAccount !== null;
+  }
+}
+
+// Singleton instance
+let baseWalletInstance: BaseWalletProvider | null = null;
+
+export function getBaseWallet(): BaseWalletProvider {
+  if (!baseWalletInstance) {
+    const config: BaseWalletConfig = {
+      apiKey: process.env.NEXT_PUBLIC_BASE_ACCOUNT_KIT_API_KEY!,
+      projectId: process.env.NEXT_PUBLIC_BASE_ACCOUNT_KIT_PROJECT_ID!,
+      chain: base.sepolia, // Use base.mainnet for production
+    };
+
+    baseWalletInstance = new BaseWalletProvider(config);
+  }
+
+  return baseWalletInstance;
+}
+```
+
+**Verification**:
+- [ ] TypeScript compiles without errors
+- [ ] Base Account Kit SDK imported correctly
+- [ ] Environment variables accessed
+
+**Time Estimate**: 2 hours
+
+### 4.2: Update Wallet Hook
+
+**File**: `/workspace/apps/ui5/hooks/use-wallet.ts`
+
+- [ ] Remove mock wallet implementation
+- [ ] Add Base Account Kit integration
+- [ ] Handle sub-account creation
+- [ ] Auto-initialize SDK after connection
+
+```typescript
+import { useState, useEffect } from 'react';
+import { getBaseWallet } from '@/lib/base-wallet';
+import { useSDK } from './use-sdk';
+import type { Signer } from 'ethers';
+
+export function useWallet() {
+  const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [address, setAddress] = useState<string | null>(null);
+  const [subAccountAddress, setSubAccountAddress] = useState<string | null>(null);
+  const [signer, setSigner] = useState<Signer | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const { initializeSDK, isInitialized, managers } = useSDK(signer);
+
+  // Check for existing connection on mount
+  useEffect(() => {
+    const baseWallet = getBaseWallet();
+    if (baseWallet.isConnected()) {
+      const addresses = baseWallet.getAddresses();
+      setAddress(addresses.primary);
+      setSubAccountAddress(addresses.sub);
+      setIsConnected(true);
+
+      // Get signer and initialize SDK
+      baseWallet.getSigner().then(async (walletSigner) => {
+        setSigner(walletSigner);
+        if (!isInitialized) {
+          await initializeSDK();
+        }
+      });
+    }
+  }, []);
+
+  /**
+   * Connect Base Account Kit wallet
+   */
+  const connectWallet = async () => {
+    if (isConnecting || isConnected) {
+      return;
+    }
+
+    setIsConnecting(true);
+    setError(null);
+
+    try {
+      const baseWallet = getBaseWallet();
+
+      // Step 1: Connect primary account
+      console.log('[useWallet] Connecting Base Account Kit...');
+      const primaryAddress = await baseWallet.connect();
+      setAddress(primaryAddress);
+      setIsConnected(true);
+
+      // Step 2: Ensure sub-account with spend permissions
+      console.log('[useWallet] Setting up sub-account...');
+      const subAccountResult = await baseWallet.ensureSubAccount({
+        tokenAddress: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
+        tokenDecimals: 6,
+        maxAllowance: '1000000', // 1M USDC
+        periodDays: 365,
+      });
+      setSubAccountAddress(subAccountResult.address);
+
+      if (subAccountResult.isExisting) {
+        console.log('[useWallet] Using existing sub-account');
+      } else {
+        console.log('[useWallet] Created new sub-account');
+      }
+
+      // Step 3: Get signer
+      const walletSigner = await baseWallet.getSigner();
+      setSigner(walletSigner);
+
+      // Step 4: Initialize SDK
+      console.log('[useWallet] Initializing SDK...');
+      await initializeSDK();
+
+      console.log('[useWallet] Connection complete!');
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to connect wallet';
+      console.error('[useWallet] Connection error:', errorMessage);
+      setError(errorMessage);
+      setIsConnected(false);
+      setAddress(null);
+      setSubAccountAddress(null);
+      setSigner(null);
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  /**
+   * Disconnect wallet
+   */
+  const disconnectWallet = async () => {
+    try {
+      const baseWallet = getBaseWallet();
+      await baseWallet.disconnect();
+
+      setIsConnected(false);
+      setAddress(null);
+      setSubAccountAddress(null);
+      setSigner(null);
+
+      console.log('[useWallet] Disconnected successfully');
+    } catch (err) {
+      console.error('[useWallet] Disconnect error:', err);
+    }
+  };
+
+  return {
+    // Connection state
+    isConnected,
+    isConnecting,
+    address,           // Primary smart wallet address
+    subAccountAddress, // Sub-account with spend permissions (for gasless txs)
+    signer,
+    error,
+
+    // SDK state
+    isInitialized,
+    managers,
+
+    // Actions
+    connectWallet,
+    disconnectWallet,
+  };
+}
+```
+
+**Verification**:
+- [ ] Wallet connection flow works
+- [ ] Sub-account created with spend permissions
+- [ ] SDK initializes after wallet connection
+
+**Time Estimate**: 2 hours
+
+### 4.3: Update Header Component
+
+**File**: `/workspace/apps/ui5/components/Header.tsx`
+
+- [ ] Update to show both primary and sub-account addresses
+- [ ] Show connection status
+- [ ] Handle Base Account Kit UI
+
+```typescript
+'use client';
+
+import { useWallet } from '@/hooks/use-wallet';
+
+export function Header() {
+  const {
+    isConnected,
+    isConnecting,
+    address,
+    subAccountAddress,
+    isInitialized,
+    connectWallet,
+    disconnectWallet,
+    error,
+  } = useWallet();
+
+  return (
+    <header className="bg-white border-b border-gray-200 px-6 py-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">UI5 - Production</h1>
+          <p className="text-sm text-gray-500">Powered by @fabstir/sdk-core</p>
+        </div>
+
+        <div className="flex items-center gap-4">
+          {error && (
+            <div className="text-sm text-red-600">
+              Error: {error}
+            </div>
+          )}
+
+          {isConnected ? (
+            <div className="flex items-center gap-3">
+              {/* Primary Account */}
+              <div className="text-right">
+                <p className="text-xs text-gray-500">Primary Account</p>
+                <p className="text-sm font-mono">
+                  {address?.slice(0, 6)}...{address?.slice(-4)}
+                </p>
+              </div>
+
+              {/* Sub-account (if exists) */}
+              {subAccountAddress && (
+                <div className="text-right">
+                  <p className="text-xs text-gray-500">Sub-account (Gasless)</p>
+                  <p className="text-sm font-mono text-green-600">
+                    {subAccountAddress.slice(0, 6)}...{subAccountAddress.slice(-4)}
+                  </p>
+                </div>
+              )}
+
+              {/* SDK Status */}
+              <div className="flex items-center gap-2">
+                {isInitialized ? (
+                  <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded">
+                    ✓ SDK Ready
+                  </span>
+                ) : (
+                  <span className="text-xs text-yellow-600 bg-yellow-50 px-2 py-1 rounded">
+                    ⏳ Initializing...
+                  </span>
+                )}
+              </div>
+
+              {/* Disconnect Button */}
+              <button
+                onClick={disconnectWallet}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+              >
+                Disconnect
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={connectWallet}
+              disabled={isConnecting}
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 rounded-md"
+            >
+              {isConnecting ? 'Connecting...' : 'Connect Wallet'}
+            </button>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
+```
+
+**Time Estimate**: 1 hour
+
+---
+
+## Phase 5: Testing & Validation
+
+### 5.1: Update Test Scripts for Real SDK
+- [ ] Copy test scripts from UI4: `cp /workspace/test-*.cjs /workspace/tests-ui5/`
+- [ ] Update scripts to connect to UI5: `http://localhost:3002` (different port)
+- [ ] Add longer timeouts for real blockchain transactions
+- [ ] Update expectations for real SDK behavior
+
+**Key Changes in Test Scripts**:
+```javascript
+// Increase timeouts for real blockchain
+const TX_TIMEOUT = 30000; // 30 seconds for transactions
+const UPLOAD_TIMEOUT = 60000; // 60 seconds for S5 uploads
+
+// Wait for blockchain confirmations
+await page.waitForTimeout(10000); // After transaction submit
+
+// Check for transaction success (not instant like mock)
+await page.waitForSelector('text=Transaction confirmed', { timeout: TX_TIMEOUT });
+```
+
+### 5.2: Manual Testing Checklist
+
+#### Wallet Connection
+- [ ] Click "Connect Wallet"
+- [ ] Base Account Kit UI appears
+- [ ] Successfully authenticate
+- [ ] Primary account address shown
+- [ ] Sub-account created (first time only)
+- [ ] Sub-account address shown
+- [ ] SDK initializes (green "✓ SDK Ready" badge)
+- [ ] No console errors
+
+#### Vector Database Operations
+- [ ] Navigate to /vector-databases
+- [ ] Create new database
+- [ ] Wait for blockchain transaction (~5-10 seconds)
+- [ ] Database appears in list
+- [ ] Upload test file to database
+- [ ] Wait for S5 upload (~2-5 seconds)
+- [ ] File appears in database
+- [ ] Delete database
+- [ ] Confirm blockchain transaction
+- [ ] Database removed from list
+
+#### Session Group Operations
+- [ ] Navigate to /session-groups
+- [ ] Create new session group
+- [ ] Session group appears in list
+- [ ] Open session group detail
+- [ ] Upload document to group
+- [ ] Wait for S5 upload
+- [ ] Document appears in list
+- [ ] Link vector database to group
+- [ ] Database link appears
+- [ ] Unlink database
+- [ ] Link removed
+
+#### Chat Operations
+- [ ] Create new chat session
+- [ ] Send message: "Hello, this is a test"
+- [ ] Wait for WebSocket connection
+- [ ] Wait for LLM response (~5-10 seconds)
+- [ ] AI response appears in chat
+- [ ] Send follow-up message
+- [ ] Conversation persists after refresh
+- [ ] Delete chat session
+- [ ] Session removed from list
+
+#### Payment Operations (Gasless Transactions)
+- [ ] Navigate to payment section
+- [ ] Check USDC balance
+- [ ] Deposit USDC using sub-account
+- [ ] Transaction completes WITHOUT MetaMask popup (gasless!)
+- [ ] Balance updates
+- [ ] Withdraw USDC
+- [ ] Transaction completes
+- [ ] Balance updates
+
+### 5.3: Run Automated Tests
+- [ ] Start UI5: `cd /workspace/apps/ui5 && pnpm dev --port 3002`
+- [ ] Run test suite: `cd /workspace/tests-ui5 && ./run-all-tests.sh`
+- [ ] Verify all tests pass (may take 15-30 minutes with real blockchain)
+- [ ] Review test output for errors
+- [ ] Check screenshots generated
+
+**Expected Results**:
+- All 61 tests should pass (with adjusted timeouts)
+- Real blockchain transactions confirmed
+- Real S5 storage working
+- Real WebSocket connections successful
+- Gasless transactions working via sub-account
+
+### 5.4: Performance Testing
+- [ ] Measure page load times (should be < 3 seconds)
+- [ ] Measure transaction times (should be < 15 seconds)
+- [ ] Measure file upload times (should be < 10 seconds)
+- [ ] Measure LLM response times (should be < 15 seconds)
+- [ ] Test with slow network (throttle to 3G)
+- [ ] Test with multiple concurrent operations
+
+### 5.5: Error Handling Testing
+- [ ] Disconnect internet during transaction
+- [ ] Verify error message displayed
+- [ ] Reconnect and retry
+- [ ] Try transaction with insufficient balance
+- [ ] Verify error message
+- [ ] Try connecting to unavailable node
+- [ ] Verify fallback to alternative node
+- [ ] Test S5 portal downtime handling
+
+**Time Estimate**: 6-8 hours
+
+---
+
+## Phase 6: Production Preparation
+
+### 6.1: Environment Configuration
+- [ ] Create `apps/ui5/.env.production` for production values
+- [ ] Update contract addresses for mainnet (when ready)
+- [ ] Update RPC URLs for mainnet
+- [ ] Configure production S5 portal
+- [ ] Set production feature flags
+
+### 6.2: Build Optimization
+- [ ] Run production build: `cd apps/ui5 && pnpm build`
+- [ ] Verify no build errors
+- [ ] Check bundle size (should be < 500KB for main bundle)
+- [ ] Test production build locally: `pnpm start`
+- [ ] Verify all functionality works in production mode
+
+### 6.3: Security Audit
+- [ ] Review all API keys are in environment variables
+- [ ] Verify no private keys in code
+- [ ] Check all contract addresses are from environment
+- [ ] Review authentication flow for vulnerabilities
+- [ ] Test spend permission limits are enforced
+- [ ] Verify S5 encryption is enabled
+
+### 6.4: Documentation Updates
+- [ ] Update README.md with UI5 setup instructions
+- [ ] Document Base Account Kit integration
+- [ ] Document gasless transaction flow
+- [ ] Create user guide for wallet connection
+- [ ] Document environment variable requirements
+
+**Time Estimate**: 3-4 hours
+
+---
+
+## Phase 7: Deployment
+
+### 7.1: Staging Deployment
+- [ ] Deploy to staging environment (e.g., Vercel preview)
+- [ ] Configure environment variables in deployment platform
+- [ ] Test deployed version end-to-end
+- [ ] Verify all features work in staging
+- [ ] Share staging URL with stakeholders for feedback
+
+### 7.2: Production Deployment
+- [ ] Create production environment configuration
+- [ ] Deploy to production (e.g., Vercel production)
+- [ ] Configure production environment variables
+- [ ] Set up monitoring (Sentry, LogRocket, etc.)
+- [ ] Set up analytics (Google Analytics, Mixpanel, etc.)
+- [ ] Test production deployment
+- [ ] Monitor for errors in first 24 hours
+
+### 7.3: Post-Deployment Validation
+- [ ] Test all critical flows in production
+- [ ] Monitor error rates
+- [ ] Check transaction success rates
+- [ ] Verify S5 storage working
+- [ ] Monitor performance metrics
+- [ ] Gather user feedback
+
+**Time Estimate**: 2-3 hours
+
+---
+
+## Troubleshooting Guide
+
+### Issue: "SDK not initialized"
+**Cause**: SDK initialization failed or wallet not connected
+**Solution**:
+1. Check wallet is connected (address shown in header)
+2. Check browser console for SDK initialization errors
+3. Verify all environment variables are set
+4. Try disconnecting and reconnecting wallet
+
+### Issue: "Transaction failed"
+**Cause**: Insufficient funds, network error, or contract revert
+**Solution**:
+1. Check wallet balance (need testnet ETH for gas)
+2. Check USDC balance for payments
+3. Verify contract addresses are correct
+4. Check Base Sepolia testnet status
+5. Review transaction revert reason in console
+
+### Issue: "Sub-account creation failed"
+**Cause**: Base Account Kit configuration error or network issue
+**Solution**:
+1. Verify Base Account Kit API key is valid
+2. Check `BASE_CONTRACT_SPEND_PERMISSION_MANAGER` address
+3. Ensure sufficient ETH for deployment transaction
+4. Try clearing browser cache and reconnecting
+
+### Issue: "WebSocket connection failed"
+**Cause**: Node offline, network error, or incorrect URL
+**Solution**:
+1. Verify node URL is accessible: `curl http://81.150.166.91:8080/health`
+2. Check WebSocket URL format: `ws://` not `wss://` for HTTP
+3. Try alternative node if available
+4. Check browser console for WebSocket errors
+
+### Issue: "S5 upload failed"
+**Cause**: S5 portal unavailable, large file, or network timeout
+**Solution**:
+1. Verify S5 portal is accessible: `curl https://s5.cx`
+2. Check file size (limit may be 10MB)
+3. Increase upload timeout
+4. Try uploading smaller file
+5. Check browser console for S5 errors
+
+### Issue: "Gasless transaction not working"
+**Cause**: Sub-account not created, spend permission not set, or allowance exceeded
+**Solution**:
+1. Verify sub-account address shown in header
+2. Check spend permission was created during connection
+3. Verify transaction amount within allowance (1M USDC)
+4. Check transaction is using sub-account not primary account
+5. Review spend permission contract on block explorer
+
+---
+
+## Success Criteria
+
+### Must Pass
+- [ ] All 61 automated tests pass with real SDK
+- [ ] Wallet connection works with Base Account Kit
+- [ ] Sub-account created with spend permissions
+- [ ] Gasless transactions work (no MetaMask popups for allowed operations)
+- [ ] Real blockchain transactions confirmed
+- [ ] Real S5 storage persists data
+- [ ] Real WebSocket connections stream LLM responses
+- [ ] No console errors during normal operations
+- [ ] All UI flows work identically to UI4
+
+### Should Pass
+- [ ] Transaction times < 15 seconds average
+- [ ] File uploads < 10 seconds average
+- [ ] Page loads < 3 seconds average
+- [ ] Error messages displayed for all failure cases
+- [ ] Graceful degradation when services unavailable
+- [ ] Mobile responsive (if UI4 was responsive)
+
+### Nice to Have
+- [ ] Transaction pending states shown
+- [ ] Upload progress indicators
+- [ ] Network status indicator
+- [ ] Transaction history view
+- [ ] Estimated gas costs displayed
+
+---
+
+## Timeline Estimate
+
+| Phase | Description | Time | Dependencies |
+|-------|-------------|------|--------------|
+| 0 | Project Setup | 15 min | None |
+| 1 | Dependencies | 20 min | Phase 0 |
+| 2 | Configuration | 30 min | Phase 1 |
+| 3 | SDK Integration | 1.5 hours | Phase 2 |
+| 4 | Base Account Kit | 5 hours | Phase 3 |
+| 5 | Testing | 6-8 hours | Phase 4 |
+| 6 | Production Prep | 3-4 hours | Phase 5 |
+| 7 | Deployment | 2-3 hours | Phase 6 |
+| **TOTAL** | **Full Migration** | **18-24 hours** | Sequential |
+
+**Optimistic**: 18 hours (if everything works first try)
+**Realistic**: 20-22 hours (with some debugging)
+**Pessimistic**: 24+ hours (if major issues encountered)
+
+---
+
+## References
+
+### Documentation
+- **UI4 Testing Summary**: `/workspace/docs/UI4_TESTING_SUMMARY.md`
+- **Mock SDK API Alignment**: `/workspace/docs/PLAN_MOCK_SDK_API_ALIGNMENT.md`
+- **SDK API Reference**: `/workspace/docs/SDK_API.md`
+- **Base Account Kit Integration**: `/workspace/CLAUDE.md` (section on Base Account Kit)
+
+### Example Code
+- **Base Account Kit Example**: `/workspace/apps/harness/pages/base-usdc-mvp-flow-sdk.test.tsx`
+- **SDK Initialization**: `/workspace/packages/sdk-core/src/FabstirSDKCore.ts`
+- **Base Account Manager**: `/workspace/packages/sdk-core/src/wallet/BaseAccountManager.ts`
+
+### Test Scripts (UI4)
+- `/workspace/test-vector-db-phase2.cjs`
+- `/workspace/test-chat-operations.cjs`
+- `/workspace/test-navigation-phase5.cjs`
+- All 8 test scripts (copy and adapt for UI5)
+
+---
+
+## Notes
+
+### Important Reminders
+1. **Never hardcode contract addresses** - Always use environment variables
+2. **Test with testnet first** - Never deploy to mainnet without thorough testing
+3. **Sub-accounts are per-origin** - Each domain gets one sub-account per primary wallet
+4. **Gasless transactions have limits** - Spend permissions enforce allowance caps
+5. **S5 storage requires network** - Handle offline scenarios gracefully
+6. **WebSocket connections can drop** - Implement reconnection logic
+7. **Blockchain transactions are slow** - Set expectations for 5-15 second confirmations
+
+### Best Practices
+- Use TypeScript strict mode
+- Add loading states for all async operations
+- Display transaction hashes for transparency
+- Log all errors to console for debugging
+- Test on multiple browsers (Chrome, Firefox, Safari)
+- Test on mobile devices
+- Monitor Sentry/logging service for production errors
+
+---
+
+**Plan Created**: January 13, 2025
+**Status**: Ready for execution
+**Next Step**: Phase 0 - Copy UI4 to UI5
