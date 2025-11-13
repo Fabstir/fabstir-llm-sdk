@@ -1,14 +1,15 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ui4SDK, type SDKManagers } from '@/lib/sdk';
+import { ui5SDK, type SDKManagers } from '@/lib/sdk';
+import type { Signer } from 'ethers';
 
 export interface UseSDKReturn {
   managers: SDKManagers | null;
   isInitialized: boolean;
   isInitializing: boolean;
   error: Error | null;
-  initialize: (walletAddress: string) => Promise<void>;
+  initialize: (signer: Signer) => Promise<void>;
   disconnect: () => void;
 }
 
@@ -17,14 +18,16 @@ export interface UseSDKReturn {
  *
  * Provides access to all SDK managers (SessionGroupManager, VectorRAGManager, etc.)
  * after wallet connection and SDK initialization.
+ *
+ * @param signer - Optional ethers Signer from wallet for auto-initialization
  */
-export function useSDK(): UseSDKReturn {
+export function useSDK(signer?: Signer | null): UseSDKReturn {
   const [managers, setManagers] = useState<SDKManagers | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const initialize = useCallback(async (walletAddress: string) => {
+  const initialize = useCallback(async (walletSigner: Signer) => {
     if (isInitialized || isInitializing) {
       return; // Already initialized or initializing
     }
@@ -33,22 +36,24 @@ export function useSDK(): UseSDKReturn {
       setIsInitializing(true);
       setError(null);
 
-      await ui4SDK.initialize(walletAddress);
-      const sdkManagers = await ui4SDK.getManagers();
+      console.log('[useSDK] Initializing SDK with signer...');
+      await ui5SDK.initialize(walletSigner);
+      const sdkManagers = await ui5SDK.getManagers();
 
       setManagers(sdkManagers);
       setIsInitialized(true);
+      console.log('[useSDK] SDK initialized successfully');
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Failed to initialize SDK');
       setError(error);
-      console.error('SDK initialization error:', error);
+      console.error('[useSDK] SDK initialization error:', error);
     } finally {
       setIsInitializing(false);
     }
   }, [isInitialized, isInitializing]);
 
   const disconnect = useCallback(() => {
-    ui4SDK.disconnect();
+    ui5SDK.disconnect();
     setManagers(null);
     setIsInitialized(false);
     setError(null);
@@ -58,10 +63,9 @@ export function useSDK(): UseSDKReturn {
   useEffect(() => {
     const checkAndUpdateSDKState = async () => {
       // Only call getManagers if SDK is truly initialized
-      // This prevents race condition where useEffect runs before authenticate() completes
-      if (ui4SDK.isInitialized()) {
+      if (ui5SDK.isInitialized()) {
         try {
-          const sdkManagers = await ui4SDK.getManagers();
+          const sdkManagers = await ui5SDK.getManagers();
           setManagers(sdkManagers);
           setIsInitialized(true);
         } catch (err) {
@@ -76,14 +80,22 @@ export function useSDK(): UseSDKReturn {
       }
     };
 
-    // Check initial state in case SDK was already initialized (e.g., from localStorage)
+    // Check initial state in case SDK was already initialized
     checkAndUpdateSDKState();
 
     // Subscribe to SDK changes (will be notified when initialize() completes)
-    const unsubscribe = ui4SDK.subscribe(checkAndUpdateSDKState);
+    const unsubscribe = ui5SDK.subscribe(checkAndUpdateSDKState);
 
     return unsubscribe;
   }, []); // Only run once on mount
+
+  // Auto-initialize when signer is provided
+  useEffect(() => {
+    if (signer && !isInitialized && !isInitializing) {
+      console.log('[useSDK] Auto-initializing with provided signer');
+      initialize(signer);
+    }
+  }, [signer, isInitialized, isInitializing, initialize]);
 
   return {
     managers,

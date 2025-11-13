@@ -1,18 +1,21 @@
 /**
- * SDK Initialization for UI4
+ * SDK Initialization for UI5
  *
- * Provides a centralized SDK instance using the mock SDK for development.
- * This allows the UI to be developed and tested without blockchain connectivity.
+ * Provides a centralized SDK instance using the production SDK with real blockchain connectivity.
+ * Integrates with Base Sepolia testnet and production LLM nodes.
  */
 
-import { FabstirSDKCoreMock } from '@fabstir/sdk-core-mock';
+import { FabstirSDKCore } from '@fabstir/sdk-core';
+import { ChainId } from '@fabstir/sdk-core/config';
+import type { Signer } from 'ethers';
 import type {
   ISessionGroupManager,
   IVectorRAGManager,
   IHostManager,
   IPaymentManager,
   ISessionManager,
-} from '@fabstir/sdk-core-mock';
+  IAuthManager,
+} from '@fabstir/sdk-core/interfaces';
 
 export interface SDKManagers {
   sessionGroupManager: ISessionGroupManager;
@@ -20,11 +23,11 @@ export interface SDKManagers {
   vectorRAGManager: IVectorRAGManager;
   hostManager: IHostManager;
   paymentManager: IPaymentManager;
-  authManager: { userAddress: string };
+  authManager: IAuthManager;
 }
 
-export class UI4SDK {
-  private sdk: FabstirSDKCoreMock | null = null;
+export class UI5SDK {
+  private sdk: FabstirSDKCore | null = null;
   private initialized = false;
   private initializing = false; // Lock to prevent concurrent initialization
   private listeners: Set<() => void> = new Set();
@@ -45,17 +48,19 @@ export class UI4SDK {
   }
 
   /**
-   * Initialize SDK with wallet address
+   * Initialize SDK with wallet signer
+   * @param signer - Ethers signer from wallet (MetaMask, Base Account Kit, etc.)
    */
-  async initialize(walletAddress: string): Promise<void> {
+  async initialize(signer: Signer): Promise<void> {
     // Check if already initialized
     if (this.initialized && this.sdk) {
-      return; // Already initialized
+      console.log('[UI5SDK] Already initialized');
+      return;
     }
 
     // Check if initialization is in progress - wait for it to complete
     if (this.initializing) {
-      console.log('[UI4SDK] Initialization already in progress, waiting...');
+      console.log('[UI5SDK] Initialization already in progress, waiting...');
       // Wait for initialization to complete (poll every 100ms, timeout after 10 seconds)
       let waitTime = 0;
       while (this.initializing && waitTime < 10000) {
@@ -64,9 +69,9 @@ export class UI4SDK {
       }
 
       if (this.initializing) {
-        console.error('[UI4SDK] Initialization timeout - forcing reset');
+        console.error('[UI5SDK] Initialization timeout - forcing reset');
         this.initializing = false;
-        // Don't return - try to initialize again
+        throw new Error('SDK initialization timeout');
       } else {
         // Initialization completed by another instance
         return;
@@ -77,17 +82,56 @@ export class UI4SDK {
     this.initializing = true;
 
     try {
-      // Initialize mock SDK
-      this.sdk = new FabstirSDKCoreMock({
-        mode: 'development' as const,
-        userAddress: walletAddress,
+      console.log('[UI5SDK] Initializing SDK with production configuration...');
+
+      // Validate environment variables
+      if (!process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA) {
+        throw new Error('Missing NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA in environment');
+      }
+      if (!process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE) {
+        throw new Error('Missing contract addresses in environment');
+      }
+
+      // Initialize SDK with production configuration
+      this.sdk = new FabstirSDKCore({
+        mode: 'production' as const,
+        chainId: ChainId.BASE_SEPOLIA,
+        rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA,
+        contractAddresses: {
+          jobMarketplace: process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!,
+          nodeRegistry: process.env.NEXT_PUBLIC_CONTRACT_NODE_REGISTRY!,
+          proofSystem: process.env.NEXT_PUBLIC_CONTRACT_PROOF_SYSTEM!,
+          hostEarnings: process.env.NEXT_PUBLIC_CONTRACT_HOST_EARNINGS!,
+          modelRegistry: process.env.NEXT_PUBLIC_CONTRACT_MODEL_REGISTRY!,
+          usdcToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
+          fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN!,
+        },
+        s5Config: {
+          portalUrl: process.env.NEXT_PUBLIC_S5_PORTAL_URL || 'https://s5.cx',
+          enableStorage: process.env.NEXT_PUBLIC_S5_ENABLE_STORAGE === 'true',
+        },
+        encryptionConfig: {
+          enabled: process.env.NEXT_PUBLIC_ENABLE_ENCRYPTION === 'true',
+        },
       });
 
-      // Authenticate with mock wallet
-      await this.sdk.authenticate('mock', { address: walletAddress });
+      // Authenticate with wallet
+      const address = await signer.getAddress();
+      console.log('[UI5SDK] Authenticating with address:', address);
+
+      await this.sdk.authenticate('privatekey', {
+        signer,  // Pass signer for real transactions
+        address  // User address from wallet
+      });
 
       this.initialized = true;
       this.notify(); // Notify all hooks
+      console.log('[UI5SDK] SDK initialized successfully');
+    } catch (error) {
+      console.error('[UI5SDK] Initialization failed:', error);
+      this.sdk = null;
+      this.initialized = false;
+      throw error;
     } finally {
       // Release lock
       this.initializing = false;
@@ -165,6 +209,16 @@ export class UI4SDK {
   }
 
   /**
+   * Get Auth Manager
+   */
+  getAuthManager(): IAuthManager {
+    if (!this.sdk || !this.initialized) {
+      throw new Error('SDK not initialized. Call initialize() first.');
+    }
+    return this.sdk.getAuthManager();
+  }
+
+  /**
    * Check if SDK is initialized
    */
   isInitialized(): boolean {
@@ -182,4 +236,4 @@ export class UI4SDK {
 }
 
 // Singleton instance
-export const ui4SDK = new UI4SDK();
+export const ui5SDK = new UI5SDK();
