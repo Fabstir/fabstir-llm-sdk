@@ -55,6 +55,7 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.1",
     "@types/node": "^20.11.30",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^1.6.1",
