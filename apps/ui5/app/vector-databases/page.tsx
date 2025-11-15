@@ -214,7 +214,7 @@ export default function VectorDatabasesPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredDatabases.map((database) => (
             <DatabaseCard
-              key={database.name}
+              key={database.databaseName}
               database={database}
               onDelete={handleDeleteDatabase}
             />

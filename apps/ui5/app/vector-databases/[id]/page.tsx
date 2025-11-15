@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useWallet } from '@/hooks/use-wallet';
@@ -10,6 +10,7 @@ import { FileBrowser, FileItem } from '@/components/vector-databases/file-browse
 import { FolderActions } from '@/components/vector-databases/folder-actions';
 import { FileDetailsModal } from '@/components/vector-databases/file-details-modal';
 import { UploadDocumentModal } from '@/components/vector-databases/upload-document-modal';
+import { VectorSearchPanel, SearchResult } from '@/components/vector-databases/vector-search-panel';
 import { Database, ArrowLeft, Upload, FolderPlus } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import type { DatabaseMetadata, Vector } from '@fabstir/sdk-core';
@@ -23,7 +24,7 @@ export default function VectorDatabaseDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { isConnected } = useWallet();
-  const { getDatabase, listVectors, deleteVector, addVectors, isInitialized, createFolder, renameFolder, deleteFolder, getAllFoldersWithCounts } = useVectorDatabases();
+  const { managers, getDatabase, listVectors, deleteVector, addVectors, isInitialized, createFolder, renameFolder, deleteFolder, getAllFoldersWithCounts, searchVectors } = useVectorDatabases();
 
   const databaseName = decodeURIComponent(params.id as string);
 
@@ -43,38 +44,53 @@ export default function VectorDatabaseDetailPage() {
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
-  // Load database and vectors
-  useEffect(() => {
-    if (!isConnected || !isInitialized) return;
+  // Load database and vectors - useCallback to allow calling from handlers
+  // NOTE: managers is NOT in dependency array to avoid infinite loop (it's an object that changes reference)
+  // Instead, we check managers availability inside the function
+  const loadData = useCallback(async () => {
+    // Re-check managers on each call (handles case where managers becomes available)
+    if (!isConnected || !isInitialized || !managers) {
+      console.log(`[Page] Skipping loadData: isConnected=${isConnected}, isInitialized=${isInitialized}, managers=${!!managers}`);
+      return;
+    }
 
-    loadData();
-  }, [isConnected, isInitialized, databaseName]);
+    console.log(`[Page] Loading data for database: ${databaseName}`);
 
-  const loadData = async () => {
     try {
       setIsLoading(true);
       setError(null);
 
-      // Get database metadata
-      const db = await getDatabase(databaseName);
+      console.log('[Page] About to call getDatabaseMetadata...');
+      // Get database metadata directly from vectorRAGManager
+      const vectorRAGManager = managers.vectorRAGManager;
+      const db = await vectorRAGManager.getDatabaseMetadata(databaseName);
+      console.log('[Page] ✅ getDatabaseMetadata succeeded:', db.databaseName);
       setDatabase(db);
 
       // Get all vectors from database
-      const dbVectors = await listVectors(databaseName);
+      const dbVectors = await vectorRAGManager.listVectors(databaseName);
+      console.log('[Page] ✅ listVectors succeeded, count:', dbVectors.length);
       setVectors(dbVectors);
 
       // Get folders with counts (includes empty folders)
       if (db?.folderStructure) {
-        const folders = await getAllFoldersWithCounts(databaseName);
+        const folders = await vectorRAGManager.getAllFoldersWithCounts(databaseName);
+        console.log('[Page] ✅ getAllFoldersWithCounts succeeded, count:', folders.length);
         setFoldersWithCounts(folders);
       }
     } catch (err) {
-      console.error('Failed to load database:', err);
+      console.error('[Page] ❌ Failed to load database:', err);
       setError(err instanceof Error ? err.message : 'Failed to load database');
     } finally {
       setIsLoading(false);
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, isInitialized, databaseName]); // managers checked in function, not in deps
+
+  // Load data when component mounts or dependencies change
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   // Build folder tree from folders with counts
   const folderTree = useMemo((): FolderNode[] => {
@@ -223,6 +239,11 @@ export default function VectorDatabaseDetailPage() {
     await loadData();
   };
 
+  // Vector search handler
+  const handleVectorSearch = async (queryVector: number[], k?: number, threshold?: number): Promise<SearchResult[]> => {
+    return await searchVectors(databaseName, queryVector, k, threshold);
+  };
+
   // Not connected state
   if (!isConnected) {
     return (
@@ -231,6 +252,18 @@ export default function VectorDatabaseDetailPage() {
           <Database className="h-12 w-12 text-gray-400 mx-auto mb-3" />
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Not Connected</h2>
           <p className="text-gray-600">Please connect your wallet to view this database</p>
+        </div>
+      </div>
+    );
+  }
+
+  // SDK initialization check - wait for SDK to be ready
+  if (!isInitialized) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="animate-spin h-8 w-8 border-4 border-purple-600 border-t-transparent rounded-full mx-auto mb-4" />
+          <p className="text-gray-600">Initializing...</p>
         </div>
       </div>
     );
@@ -294,7 +327,7 @@ export default function VectorDatabaseDetailPage() {
               <Database className="h-8 w-8 text-purple-600" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">{database.name}</h1>
+              <h1 className="text-2xl font-bold text-gray-900">{database.databaseName}</h1>
               {database.description && (
                 <p className="text-gray-600 mt-1">{database.description}</p>
               )}
@@ -319,11 +352,18 @@ export default function VectorDatabaseDetailPage() {
           <div className="p-4 bg-gray-50 rounded-lg">
             <p className="text-sm text-gray-600">Last Updated</p>
             <p className="text-xl font-bold text-gray-900">
-              {formatDistanceToNow(database.lastAccessed, { addSuffix: true })}
+              {formatDistanceToNow(database.lastAccessedAt, { addSuffix: true })}
             </p>
           </div>
         </div>
       </div>
+
+      {/* Vector Search Panel */}
+      <VectorSearchPanel
+        databaseName={database.databaseName}
+        dimensions={database.dimensions || 384}
+        onSearch={handleVectorSearch}
+      />
 
       {/* Vectors Section with Folder Tree and File Browser */}
       <div className="bg-white rounded-lg border">
@@ -420,7 +460,7 @@ export default function VectorDatabaseDetailPage() {
       <UploadDocumentModal
         isOpen={isUploadModalOpen}
         onClose={() => setIsUploadModalOpen(false)}
-        databaseName={database.name}
+        databaseName={database.databaseName}
         onUpload={handleUploadDocuments}
         initialFolderPath={selectedPath}
       />

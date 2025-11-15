@@ -61,22 +61,31 @@ export function useSDK(signer?: Signer | null): UseSDKReturn {
 
   // Subscribe to SDK initialization events
   useEffect(() => {
+    let isSubscribed = true; // Prevent state updates after unmount
+
     const checkAndUpdateSDKState = async () => {
+      if (!isSubscribed) return; // Component unmounted, skip state updates
+
       // Only call getManagers if SDK is truly initialized
       if (ui5SDK.isInitialized()) {
         try {
           const sdkManagers = await ui5SDK.getManagers();
-          setManagers(sdkManagers);
-          setIsInitialized(true);
+          if (isSubscribed) {
+            setManagers(sdkManagers);
+            setIsInitialized(true);
+          }
         } catch (err) {
-          // If getManagers fails, SDK may not be fully authenticated yet
-          console.error('[useSDK] Failed to get SDK managers:', err);
+          // If getManagers fails, log but DON'T reset states immediately
+          // The SDK might still be initializing managers asynchronously
+          console.error('[useSDK] Failed to get SDK managers (will retry on next notification):', err);
+          // Don't reset - wait for next notification event instead of creating race condition
+        }
+      } else {
+        // SDK is definitely not initialized, safe to reset
+        if (isSubscribed) {
           setManagers(null);
           setIsInitialized(false);
         }
-      } else {
-        setManagers(null);
-        setIsInitialized(false);
       }
     };
 
@@ -86,7 +95,10 @@ export function useSDK(signer?: Signer | null): UseSDKReturn {
     // Subscribe to SDK changes (will be notified when initialize() completes)
     const unsubscribe = ui5SDK.subscribe(checkAndUpdateSDKState);
 
-    return unsubscribe;
+    return () => {
+      isSubscribed = false; // Prevent state updates after unmount
+      unsubscribe();
+    };
   }, []); // Only run once on mount
 
   // Auto-initialize when signer is provided

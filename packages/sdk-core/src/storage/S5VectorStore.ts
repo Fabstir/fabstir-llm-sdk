@@ -321,10 +321,6 @@ export class S5VectorStore {
     return db;
   }
 
-  async getDatabaseMetadata(databaseName: string): Promise<DatabaseMetadata> {
-    return await this.getDatabaseMetadata(databaseName);
-  }
-
   async updateDatabaseMetadata(databaseName: string, updates: Partial<DatabaseMetadata>): Promise<void> {
     const manifest = await this._loadManifest(databaseName);
     if (!manifest || manifest.deleted) throw new Error(`Database "${databaseName}" not found`);

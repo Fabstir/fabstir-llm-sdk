@@ -108,9 +108,14 @@ export function useVectorDatabases() {
   // Get database metadata
   const getDatabase = useCallback(
     async (name: string): Promise<DatabaseMetadata> => {
-      if (!managers) throw new Error('SDK not initialized');
+      console.log(`[useVectorDatabases] getDatabase called, managers:`, !!managers);
+      if (!managers) {
+        console.error('[useVectorDatabases] ❌ getDatabase: managers is null!');
+        throw new Error('SDK not initialized');
+      }
 
       const vectorRAGManager = managers.vectorRAGManager;
+      console.log('[useVectorDatabases] ✅ About to call getDatabaseMetadata');
       return await vectorRAGManager.getDatabaseMetadata(name);
     },
     [managers]
@@ -314,8 +319,9 @@ export function useVectorDatabases() {
     // State
     databases,
     isLoading,
-    isInitialized,
+    isInitialized: isInitialized && !!managers,  // Both SDK initialized AND managers ready
     error,
+    managers,  // Expose managers for direct access
 
     // Database operations
     createDatabase,

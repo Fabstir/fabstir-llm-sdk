@@ -100,7 +100,7 @@ export default function GroupSelectorDemoPage() {
                 <div className="pt-3 border-t border-gray-200">
                   <p className="text-sm text-gray-600 mb-2">Databases:</p>
                   <ul className="space-y-1">
-                    {activeGroup.databases.map((db) => (
+                    {activeGroup.databases.map((db: string) => (
                       <li key={db} className="text-sm text-gray-700 flex items-center gap-2">
                         <span className="text-green-600">•</span>
                         {db}
