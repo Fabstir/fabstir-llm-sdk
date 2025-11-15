@@ -81,6 +81,86 @@ Host (Server)
 
 ---
 
+## Data Architecture: Dual-Type System
+
+### Why Two Type Definitions?
+
+S5VectorStore uses a **dual-type architecture** with separate types for internal storage vs external API:
+
+1. **`DatabaseManifest`** (Internal - S5 Storage):
+   - Optimized for CBOR serialization (compact field names)
+   - Used in S5 network storage paths (e.g., `manifest.json`)
+   - Compact field names reduce storage size
+
+2. **`DatabaseMetadata`** (External - Public API):
+   - Consistent with SDK naming conventions
+   - Exposed to UI components and application code
+   - TypeScript-friendly with descriptive field names
+
+### Field Name Mapping
+
+The `_manifestToMetadata()` method (S5VectorStore.ts:642-653) bridges these two types:
+
+| DatabaseManifest (Internal) | DatabaseMetadata (External) | Why Different? |
+|----------------------------|----------------------------|----------------|
+| `name` | `databaseName` | Consistency with DatabaseMetadataService |
+| `created` | `createdAt` | Standard timestamp convention |
+| `lastAccessed` | `lastAccessedAt` | Standard timestamp convention |
+| `updated` | (not exposed) | Internal tracking only |
+
+### Data Flow Example
+
+```typescript
+// 1. User creates database via UI
+const metadata = await vectorStore.createDatabase({
+  databaseName: 'my-docs',  // External API uses databaseName
+  description: 'Project documentation'
+});
+
+// 2. S5VectorStore converts to internal format
+const manifest: DatabaseManifest = {
+  name: 'my-docs',          // Internal storage uses name
+  owner: '0x123...',
+  created: Date.now(),      // Internal uses created
+  lastAccessed: Date.now(), // Internal uses lastAccessed
+  // ... other fields
+};
+
+// 3. Save to S5 with CBOR encoding (compact)
+await this.s5Client.fs.put(path, manifest);
+
+// 4. Load from S5 and convert back to external format
+const loadedManifest = await this.s5Client.fs.get(path);
+const publicMetadata = this._manifestToMetadata(loadedManifest);
+
+// 5. UI receives consistent field names
+console.log(publicMetadata.databaseName);  // 'my-docs'
+console.log(publicMetadata.createdAt);     // timestamp
+```
+
+### Benefits of Dual-Type Architecture
+
+1. **Storage Efficiency**: CBOR with compact field names reduces storage costs
+2. **API Stability**: Public API can evolve independently of internal storage format
+3. **Type Safety**: TypeScript enforces correct usage in application code
+4. **Future-Proofing**: Can migrate storage format without breaking public API
+
+### Developer Guidelines
+
+**When to use DatabaseManifest**:
+- ✅ Internal S5VectorStore methods (`_loadManifest`, `_saveManifest`)
+- ✅ S5 storage operations
+- ✅ CBOR serialization/deserialization
+
+**When to use DatabaseMetadata**:
+- ✅ Public API methods (`createDatabase`, `listDatabases`)
+- ✅ UI components (React, Vue, etc.)
+- ✅ External integrations (VectorRAGManager, UI5, etc.)
+
+**Never expose DatabaseManifest to application code** - always convert via `_manifestToMetadata()`.
+
+---
+
 ## File Organization
 
 ### Phase 5.1 Files
@@ -246,19 +326,38 @@ export interface VectorChunk {
 
 /**
  * Database Manifest (S5 metadata)
+ *
+ * ⚠️ IMPORTANT: Internal vs External Field Names
+ *
+ * This is the INTERNAL storage format (S5 network). It uses different field names
+ * than the external DatabaseMetadata API for CBOR encoding efficiency.
+ *
+ * Field Name Mapping (DatabaseManifest → DatabaseMetadata):
+ * - name           → databaseName
+ * - created        → createdAt
+ * - lastAccessed   → lastAccessedAt
+ * - updated        → (internal only, not exposed in public API)
+ *
+ * The _manifestToMetadata() method (S5VectorStore.ts:642-653) performs this mapping.
+ *
+ * Why separate types?
+ * - DatabaseManifest: Optimized for S5 CBOR serialization (compact field names)
+ * - DatabaseMetadata: Public API contract (consistent with SDK interfaces)
  */
 export interface DatabaseManifest {
-  version: string;                 // Storage format version (e.g., "1.0.0")
-  databaseName: string;
+  name: string;                    // ⚠️ Maps to DatabaseMetadata.databaseName
   owner: string;
-  createdAt: number;
-  updatedAt: number;
-  dimensions: number;              // Vector dimensions
+  description?: string;
+  dimensions?: number;             // Vector dimensions (optional for empty DBs)
   vectorCount: number;             // Total vectors across all chunks
-  chunkCount: number;              // Number of chunks
+  storageSizeBytes: number;        // Total storage size in bytes
+  created: number;                 // ⚠️ Maps to DatabaseMetadata.createdAt
+  lastAccessed: number;            // ⚠️ Maps to DatabaseMetadata.lastAccessedAt
+  updated: number;                 // Internal: last update timestamp
   chunks: ChunkMetadata[];         // Metadata for each chunk
+  chunkCount: number;              // Number of chunks
   folderPaths: string[];           // All unique folder paths
-  deleted: boolean;                // Soft-delete flag
+  deleted?: boolean;               // Soft-delete flag (optional)
 }
 
 /**
@@ -938,6 +1037,11 @@ export class S5VectorStore {
 
   /**
    * Load manifest from S5
+   *
+   * Uses Enhanced S5.js API with CBOR auto-decoding:
+   * - fs.get() returns parsed object (not encrypted bytes)
+   * - No manual JSON.parse() needed (CBOR handles it)
+   * - No EncryptionManager needed (S5 handles encryption internally)
    */
   private async _loadManifest(databaseName: string): Promise<DatabaseManifest | null> {
     // Check cache first
@@ -947,13 +1051,19 @@ export class S5VectorStore {
 
     try {
       const path = this._getManifestPath(databaseName);
-      const encrypted = await this.s5Client.downloadFile(path);
+      const data = await this.s5Client.fs.get(path);  // ✅ NEW: Enhanced S5.js API
 
-      if (!encrypted) return null;
+      if (!data) return null;
 
-      // Decrypt
-      const json = await this.encryptionManager.decrypt(encrypted);
-      const manifest = JSON.parse(json) as DatabaseManifest;
+      // ✅ NEW: Handle both string (legacy) and object (CBOR) responses
+      let manifest: DatabaseManifest;
+      if (typeof data === 'string') {
+        manifest = JSON.parse(data) as DatabaseManifest;
+      } else if (typeof data === 'object') {
+        manifest = data as DatabaseManifest;  // ✅ CBOR auto-decoded
+      } else {
+        throw new Error(`Unexpected data type: ${typeof data}`);
+      }
 
       // Cache
       if (this.cacheEnabled) {
@@ -969,16 +1079,17 @@ export class S5VectorStore {
 
   /**
    * Save manifest to S5
+   *
+   * Uses Enhanced S5.js API with CBOR auto-encoding:
+   * - fs.put() accepts objects directly (not JSON strings)
+   * - No manual JSON.stringify() needed (CBOR handles it)
+   * - No EncryptionManager needed (S5 handles encryption internally)
    */
   private async _saveManifest(databaseName: string, manifest: DatabaseManifest): Promise<void> {
     const path = this._getManifestPath(databaseName);
-    const json = JSON.stringify(manifest);
 
-    // Encrypt
-    const encrypted = await this.encryptionManager.encrypt(json);
-
-    // Upload to S5
-    await this.s5Client.uploadFile(path, encrypted);
+    // ✅ NEW: Upload object directly - Enhanced S5.js handles CBOR encoding
+    await this.s5Client.fs.put(path, manifest);
 
     // Update cache
     if (this.cacheEnabled) {
@@ -1494,7 +1605,25 @@ async searchInFolder(
 
 **Goal**: Comprehensive testing of S5VectorStore integration
 
-**Status**: ✅ **Completed** (2025-11-15)
+**Status**: ⚠️ **Needs Re-validation** (last passing: 2025-11-15, before breaking changes)
+
+**⚠️ CRITICAL**: Recent breaking changes require test re-validation:
+1. **Enhanced S5.js Migration** (Sub-phase 5.1.5b, commit `c3e96cc`):
+   - Changed from `downloadFile()`/`uploadFile()` to `fs.get()`/`fs.put()`
+   - Removed EncryptionManager integration (S5 handles encryption)
+   - Changed from manual JSON encoding to automatic CBOR encoding
+   - **Impact**: Tests expecting old API calls will fail
+
+2. **DatabaseMetadata Field Names** (Sub-phase 5.1.6):
+   - Changed internal field names: `name` → `databaseName`, `created` → `createdAt`, `lastAccessed` → `lastAccessedAt`
+   - **Impact**: Tests checking field names may fail
+
+3. **Action Required**:
+   ```bash
+   # Re-run test suite to verify current status
+   pnpm test packages/sdk-core/tests/storage/s5-vector-store.test.ts
+   pnpm test packages/sdk-core/tests/managers/vector-rag-manager.test.ts
+   ```
 
 **Test Categories**:
 
@@ -1656,6 +1785,93 @@ No installation needed - bundled with @fabstir/sdk-core
 - ✅ README.md updated
 
 **Estimated Time**: 1-2 hours
+
+---
+
+### Sub-phase 5.1.5b: Enhanced S5.js Migration (CBOR Encoding)
+
+**Goal**: Migrate from old S5.js API (downloadFile/uploadFile with manual JSON) to Enhanced S5.js API (fs.get/fs.put with automatic CBOR encoding)
+
+**Status**: ✅ **Completed** (2025-11-13, commit `c3e96cc`)
+
+**Why This Migration**:
+- **CBOR Efficiency**: CBOR (Concise Binary Object Representation) is more efficient than JSON for binary data
+- **Automatic Encoding**: No manual `JSON.stringify()` / `JSON.parse()` needed
+- **Built-in Encryption**: S5 handles encryption internally (no EncryptionManager needed in application layer)
+- **Type Safety**: Direct object handling reduces string-based errors
+
+**API Changes**:
+
+| Old API (Removed) | New API (Current) | Notes |
+|------------------|-------------------|-------|
+| `s5Client.downloadFile(path)` | `s5Client.fs.get(path)` | Returns parsed object, not bytes |
+| `s5Client.uploadFile(path, data)` | `s5Client.fs.put(path, obj)` | Accepts objects directly |
+| `encryptionManager.encrypt(json)` | (removed) | S5 handles encryption |
+| `encryptionManager.decrypt(bytes)` | (removed) | S5 handles decryption |
+| `JSON.stringify(manifest)` | (automatic) | CBOR auto-encodes |
+| `JSON.parse(json)` | (automatic) | CBOR auto-decodes |
+
+**Affected Methods**:
+
+1. **`_loadManifest()` (lines 966-998)**:
+   ```typescript
+   // ❌ OLD (before c3e96cc):
+   const encrypted = await this.s5Client.downloadFile(path);
+   const json = await this.encryptionManager.decrypt(encrypted);
+   const manifest = JSON.parse(json) as DatabaseManifest;
+
+   // ✅ NEW (after c3e96cc):
+   const data = await this.s5Client.fs.get(path);
+   const manifest = typeof data === 'object' ? data : JSON.parse(data);
+   ```
+
+2. **`_saveManifest()` (lines 1008-1018)**:
+   ```typescript
+   // ❌ OLD (before c3e96cc):
+   const json = JSON.stringify(manifest);
+   const encrypted = await this.encryptionManager.encrypt(json);
+   await this.s5Client.uploadFile(path, encrypted);
+
+   // ✅ NEW (after c3e96cc):
+   await this.s5Client.fs.put(path, manifest);  // Direct object upload
+   ```
+
+3. **`_loadChunk()` (lines 1049+)**:
+   - Same pattern: `fs.get()` returns object directly
+   - Handle both string (legacy) and object (CBOR) responses
+
+4. **`_saveChunk()` (lines 1070+)**:
+   - Same pattern: `fs.put()` accepts object directly
+   - CBOR auto-encodes the object
+
+**Type Handling Strategy**:
+
+Since `fs.get()` can return either string (legacy data) or object (CBOR-encoded data), all load methods check type:
+
+```typescript
+const data = await this.s5Client.fs.get(path);
+
+// Handle both legacy (string) and new (object) formats
+let result: T;
+if (typeof data === 'string') {
+  result = JSON.parse(data) as T;  // Legacy fallback
+} else if (typeof data === 'object') {
+  result = data as T;  // CBOR auto-decoded
+} else {
+  throw new Error(`Unexpected data type: ${typeof data}`);
+}
+```
+
+**Breaking Changes**:
+- ✅ **No breaking changes** to public API (S5VectorStore interface unchanged)
+- ✅ Internal implementation only (private methods)
+- ✅ Backward compatible with legacy JSON-encoded data
+
+**Commit Reference**:
+- Primary commit: `c3e96cc` - "feat: migrate storage layer to Enhanced s5.js API"
+- Related fixes: See Sub-phase 5.1.6 for production bug fixes
+
+**Estimated Time**: 3-4 hours (completed)
 
 ---
 
