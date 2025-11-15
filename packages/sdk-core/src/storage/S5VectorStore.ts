@@ -201,6 +201,9 @@ export class S5VectorStore {
   }
 
   async listDatabases(): Promise<DatabaseMetadata[]> {
+    // Ensure databases are loaded from S5 if cache is empty
+    await this.initialize();
+
     const databases: DatabaseMetadata[] = [];
     for (const manifest of this.manifestCache.values()) {
       if (!manifest.deleted) databases.push(this._manifestToMetadata(manifest));
