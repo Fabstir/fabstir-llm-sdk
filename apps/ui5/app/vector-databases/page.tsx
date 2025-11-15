@@ -35,7 +35,7 @@ export default function VectorDatabasesPage() {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
         (db) =>
-          db.name?.toLowerCase().includes(query) ||
+          db.databaseName?.toLowerCase().includes(query) ||
           db.description?.toLowerCase().includes(query)
       );
     }
@@ -44,9 +44,9 @@ export default function VectorDatabasesPage() {
     filtered = [...filtered].sort((a, b) => {
       switch (sortBy) {
         case 'name':
-          return (a.name || '').localeCompare(b.name || '');
+          return (a.databaseName || '').localeCompare(b.databaseName || '');
         case 'date':
-          return (b.lastAccessed || 0) - (a.lastAccessed || 0); // Newest first
+          return (b.lastAccessedAt || 0) - (a.lastAccessedAt || 0); // Newest first
         case 'size':
           return (b.storageSizeBytes || 0) - (a.storageSizeBytes || 0); // Largest first
         case 'vectors':

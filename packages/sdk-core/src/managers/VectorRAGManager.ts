@@ -138,6 +138,19 @@ export class VectorRAGManager implements IVectorRAGManager {
     console.log('[VectorRAGManager] Initialize called - about to call vectorStore.initialize()');
     await this.vectorStore.initialize();
     console.log('[VectorRAGManager] ✅ VectorStore initialized');
+
+    // Populate metadataService from loaded databases
+    const loadedDatabases = await this.vectorStore.listDatabases();
+    for (const db of loadedDatabases) {
+      if (!this.metadataService.exists(db.databaseName)) {
+        this.metadataService.create(db.databaseName, 'vector', this.userAddress, {
+          vectorCount: db.vectorCount,
+          storageSizeBytes: db.storageSizeBytes,
+          description: db.description
+        });
+      }
+    }
+    console.log(`[VectorRAGManager] ✅ Populated metadata for ${loadedDatabases.length} existing database(s)`);
   }
 
   /**

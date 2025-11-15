@@ -641,16 +641,14 @@ export class S5VectorStore {
 
   private _manifestToMetadata(manifest: DatabaseManifest): DatabaseMetadata {
     return {
-      id: manifest.name,
-      name: manifest.name,
-      dimensions: manifest.dimensions || 0,
+      databaseName: manifest.name,
+      type: 'vector' as const,
+      createdAt: manifest.created,
+      lastAccessedAt: manifest.lastAccessed,
+      owner: manifest.owner,
       vectorCount: manifest.vectorCount,
       storageSizeBytes: manifest.storageSizeBytes,
-      owner: manifest.owner,
-      created: manifest.created,
-      lastAccessed: manifest.lastAccessed,
       description: manifest.description,
-      folderStructure: manifest.folderPaths.length > 0,
     };
   }
 

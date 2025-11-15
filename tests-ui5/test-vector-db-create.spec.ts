@@ -68,6 +68,36 @@ test.describe.serial('Vector Database - Create', () => {
     // Take screenshot of initial state
     await page.screenshot({ path: 'test-results/vector-db-list-initial.png' });
 
+    // CLEANUP: Delete "Test Database 1" if it already exists from a previous test run
+    const existingDatabase = page.locator('text=Test Database 1').first();
+    const databaseExists = await existingDatabase.count() > 0;
+
+    if (databaseExists) {
+      console.log('[Test] 🧹 Cleaning up existing "Test Database 1" from previous run...');
+
+      // Set up dialog handler BEFORE clicking delete
+      page.once('dialog', async dialog => {
+        console.log('[Test] Confirmation dialog:', dialog.message());
+        await dialog.accept();
+        console.log('[Test] Accepted deletion confirmation');
+      });
+
+      // Find the database card containing "Test Database 1"
+      const databaseCard = page.locator('a:has-text("Test Database 1")').first();
+
+      // Find and click the delete button within that card
+      // The delete button is a trash icon button
+      const deleteButton = databaseCard.locator('button[title="Delete database"]');
+      await deleteButton.click();
+      console.log('[Test] Clicked delete button');
+
+      // Wait for database to be removed from the list
+      await page.waitForTimeout(2000);
+      console.log('[Test] ✅ Cleanup complete');
+    } else {
+      console.log('[Test] No existing "Test Database 1" found, skipping cleanup');
+    }
+
     // Check if there's a "+ Create Database" or "New Database" button
     const createButton = page.locator('button:has-text("Create Database"), button:has-text("New Database"), a:has-text("New Database")').first();
     await expect(createButton).toBeVisible({ timeout: 5000 });

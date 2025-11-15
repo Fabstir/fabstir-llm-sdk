@@ -19,8 +19,8 @@ export function DatabaseCard({ database, onDelete }: DatabaseCardProps) {
     e.preventDefault();
     e.stopPropagation();
 
-    if (confirm(`Delete database "${database.name}"? This will remove all ${database.vectorCount} vectors. This action cannot be undone.`)) {
-      onDelete(database.name);
+    if (confirm(`Delete database "${database.databaseName}"? This will remove all ${database.vectorCount} vectors. This action cannot be undone.`)) {
+      onDelete(database.databaseName);
     }
   };
 
@@ -35,7 +35,7 @@ export function DatabaseCard({ database, onDelete }: DatabaseCardProps) {
 
   return (
     <Link
-      href={`/vector-databases/${encodeURIComponent(database.name)}`}
+      href={`/vector-databases/${encodeURIComponent(database.databaseName)}`}
       className="block bg-white rounded-lg border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all p-6 group"
     >
       {/* Header */}
@@ -46,7 +46,7 @@ export function DatabaseCard({ database, onDelete }: DatabaseCardProps) {
           </div>
           <div className="flex-1 min-w-0">
             <h3 className="text-lg font-semibold text-gray-900 truncate group-hover:text-blue-600 transition-colors">
-              {database.name}
+              {database.databaseName}
             </h3>
             {database.description && (
               <p className="text-sm text-gray-600 truncate mt-0.5">{database.description}</p>
