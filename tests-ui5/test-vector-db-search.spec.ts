@@ -18,6 +18,20 @@ test.describe('Vector Database - Search', () => {
   test('should search vector database and display results (Sub-phase 3.4)', async ({ page, testWallet }) => {
     // Increase timeout for document upload and embedding generation
     test.setTimeout(180000); // 3 minutes
+
+    // Enable browser console capture
+    page.on('console', msg => {
+      const type = msg.type();
+      const text = msg.text();
+      if (type === 'error') {
+        console.log(`[Browser Error] ${text}`);
+      } else if (type === 'warning') {
+        console.log(`[Browser Warning] ${text}`);
+      } else {
+        console.log(`[Browser] ${text}`);
+      }
+    });
+
     console.log('[Test] Starting vector database search test');
     console.log('[Test] Test wallet:', testWallet.getAddress());
 
@@ -112,11 +126,13 @@ This is a test document for automated testing purposes.
     // Take screenshot after file selection
     await page.screenshot({ path: 'test-results/vector-db-upload-modal.png' });
 
-    // Click Upload/Submit button
-    const submitButton = page.locator('button:has-text("Upload"), button:has-text("Submit"), button:has-text("Add"), button[type="submit"]').filter({ hasNot: page.locator('[disabled]') }).first();
+    // Click Upload/Submit button INSIDE the modal (not the "Upload Documents" button that opens the modal)
+    // The modal's submit button has text like "Upload 1 File" or "Upload N Files"
+    // Use :has-text twice to match buttons containing BOTH "Upload" AND "File"
+    const submitButton = page.locator('button:has-text("Upload"):has-text("File")').first();
     await submitButton.waitFor({ timeout: 5000 });
     await submitButton.click();
-    console.log('[Test] Clicked submit button');
+    console.log('[Test] Clicked submit button inside modal');
 
     // Clean up temp file
     fs.unlinkSync(testFilePath);
