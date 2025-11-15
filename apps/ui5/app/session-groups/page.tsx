@@ -8,7 +8,7 @@ import { useSDK } from '@/hooks/use-sdk';
 import { useSessionGroups } from '@/hooks/use-session-groups';
 import { useVectorDatabases } from '@/hooks/use-vector-databases';
 import { SessionGroupCard } from '@/components/session-groups/session-group-card';
-import type { SessionGroup } from '@fabstir/sdk-core-mock';
+import type { SessionGroup } from '@fabstir/sdk-core';
 
 /**
  * Session Groups List Page

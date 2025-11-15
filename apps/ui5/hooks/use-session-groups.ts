@@ -6,7 +6,7 @@ import type {
   SessionGroup,
   ChatSession,
   ChatMessage,
-} from '@fabstir/sdk-core-mock';
+} from '@fabstir/sdk-core';
 
 export interface UseSessionGroupsReturn {
   // Session Groups

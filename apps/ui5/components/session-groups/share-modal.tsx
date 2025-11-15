@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Share2, UserPlus, Trash2 } from 'lucide-react';
-import type { SessionGroup } from '@fabstir/sdk-core-mock';
+import type { SessionGroup } from '@fabstir/sdk-core';
 
 interface ShareModalProps {
   isOpen: boolean;

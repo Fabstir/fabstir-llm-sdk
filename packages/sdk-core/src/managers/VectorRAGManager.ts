@@ -11,7 +11,7 @@
  */
 
 import { S5VectorStore } from '../storage/S5VectorStore';
-import type { S5 } from '@s5-dev/s5js';
+import type { S5 } from '@julesl23/s5js';
 import { SessionManager } from './SessionManager';
 import { EncryptionManager } from './EncryptionManager';
 import { IVectorRAGManager } from './interfaces/IVectorRAGManager';
@@ -21,7 +21,7 @@ import { SessionCache } from '../rag/session-cache';
 import { DatabaseMetadataService } from '../database/DatabaseMetadataService';
 import type { DatabaseMetadata } from '../database/types';
 import { PermissionManager } from '../permissions/PermissionManager';
-import type { Vector, VectorDatabaseMetadata, FolderStats } from '@fabstir/sdk-core-mock';
+import type { Vector, VectorDatabaseMetadata, FolderStats } from '../types';
 
 /**
  * Session status
@@ -119,6 +119,25 @@ export class VectorRAGManager implements IVectorRAGManager {
       userAddress: options.userAddress,
       encryptionManager: options.encryptionManager
     });
+  }
+
+  /**
+   * Initialize the VectorRAGManager by loading existing databases from S5 storage
+   *
+   * IMPORTANT: This method MUST be called after construction to load existing vector databases
+   * from S5 storage. Without this call, listDatabases() will return an empty array even when
+   * databases exist.
+   *
+   * This method should be called once after creating the VectorRAGManager instance:
+   * ```typescript
+   * const vectorRAGManager = new VectorRAGManager(options);
+   * await vectorRAGManager.initialize();
+   * ```
+   */
+  async initialize(): Promise<void> {
+    console.log('[VectorRAGManager] Initialize called - about to call vectorStore.initialize()');
+    await this.vectorStore.initialize();
+    console.log('[VectorRAGManager] ✅ VectorStore initialized');
   }
 
   /**
@@ -322,6 +341,18 @@ export class VectorRAGManager implements IVectorRAGManager {
   ): Promise<SearchResult[]> {
     // Delegate to SessionManager for host-side search
     return await this.sessionManager.searchVectors(sessionId, queryVector, topK, threshold);
+  }
+
+  /**
+   * Alias for search() - for backward compatibility
+   */
+  async searchVectors(
+    sessionId: string,
+    queryVector: number[],
+    topK: number = 5,
+    threshold: number = 0.7
+  ): Promise<SearchResult[]> {
+    return await this.search(sessionId, queryVector, topK, threshold);
   }
 
   /**

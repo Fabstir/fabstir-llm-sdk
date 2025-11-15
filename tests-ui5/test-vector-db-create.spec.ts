@@ -10,10 +10,34 @@
  */
 import { test, expect, TEST_CONFIG } from './lib/test-setup';
 
-test.describe('Vector Database - Create', () => {
+test.describe.serial('Vector Database - Create', () => {
+  // Shared wallet address for both tests (to persist database between tests)
+  let sharedWalletAddress: string;
+
   test('should create a new vector database with blockchain transaction', async ({ page, testWallet }) => {
+    // Increase timeout for S5 storage operations (can take 60-90 seconds)
+    test.setTimeout(120000);
     console.log('[Test] Starting vector database creation test');
     console.log('[Test] Test wallet:', testWallet.getAddress());
+
+    // Save wallet address for Test 2
+    sharedWalletAddress = testWallet.getAddress();
+
+    // Capture console errors and logs
+    const consoleMessages: string[] = [];
+    page.on('console', (msg) => {
+      const text = `[Browser ${msg.type()}] ${msg.text()}`;
+      consoleMessages.push(text);
+      // Log SDK initialization messages, errors, and warnings
+      if (msg.type() === 'error' || msg.type() === 'warning' || text.includes('[UI5SDK]') || text.includes('[S5VectorStore]') || text.includes('[useWallet]') || text.includes('[VectorRAGManager]')) {
+        console.log(text);
+      }
+    });
+
+    page.on('pageerror', (error) => {
+      console.log(`[Browser Error] ${error.message}`);
+      consoleMessages.push(`[Browser Error] ${error.message}`);
+    });
 
     // Navigate to UI5
     await page.goto(TEST_CONFIG.UI5_URL);
@@ -36,6 +60,11 @@ test.describe('Vector Database - Create', () => {
     await page.waitForSelector('text=Vector Databases', { timeout: 10000 });
     console.log('[Test] Vector databases page loaded');
 
+    // CRITICAL: Wait for React hydration to complete before interacting
+    // Note: app-ready marker is hidden (display: none), so we check for 'attached' state
+    await page.getByTestId('app-ready').waitFor({ state: 'attached', timeout: 10000 });
+    console.log('[Test] ✅ React hydration complete (app-ready marker found)');
+
     // Take screenshot of initial state
     await page.screenshot({ path: 'test-results/vector-db-list-initial.png' });
 
@@ -48,6 +77,18 @@ test.describe('Vector Database - Create', () => {
     await createButton.click();
     console.log('[Test] Clicked create button');
 
+    // Wait a moment for React state update and modal rendering
+    await page.waitForTimeout(2000);
+
+    // Debug: Check page HTML for modal elements
+    const htmlContent = await page.content();
+    console.log('[Test] Page HTML includes "Create Vector Database":', htmlContent.includes('Create Vector Database'));
+    console.log('[Test] Page HTML includes "isOpen":', htmlContent.includes('modal'));
+
+    // Debug: Log what's visible on the page
+    const bodyText = await page.textContent('body');
+    console.log('[Test] Body text includes "Create Vector Database":', bodyText?.includes('Create Vector Database'));
+
     // Wait for modal to appear
     await page.waitForSelector('text=Create Vector Database', { timeout: 5000 });
     console.log('[Test] Modal appeared');
@@ -55,26 +96,47 @@ test.describe('Vector Database - Create', () => {
     // Wait a moment for modal to fully render
     await page.waitForTimeout(500);
 
-    // Fill in database name (look inside modal)
-    const nameInput = page.locator('input[type="text"]').first();
+    // Fill in database name (use ID selector for specificity)
+    const nameInput = page.locator('#name');
     await nameInput.waitFor({ timeout: 5000 });
     await nameInput.fill('Test Database 1');
     console.log('[Test] Filled database name');
 
-    // Fill in description (second text input in modal)
-    const allInputs = page.locator('input[type="text"], textarea');
-    if (await allInputs.count() >= 2) {
-      await allInputs.nth(1).fill('UI5 automated test database');
-      console.log('[Test] Filled description');
-    }
+    // Fill in description (use ID selector for specificity)
+    const descriptionInput = page.locator('#description');
+    await descriptionInput.waitFor({ timeout: 5000 });
+    await descriptionInput.fill('UI5 automated test database');
+    console.log('[Test] Filled description');
 
     // Take screenshot before submission
     await page.screenshot({ path: 'test-results/vector-db-create-form.png' });
 
-    // Click create/submit button (force click to bypass modal overlay)
+    // Listen for page crashes
+    page.on('crash', () => {
+      console.log('[Test] 🔥 PAGE CRASHED!');
+      console.log('[Test] 📝 Console messages before crash:', consoleMessages.slice(0, 20));
+    });
+
+    // Click create/submit button OR press Enter to submit form naturally
     const submitButton = page.locator('button:has-text("Create"), button:has-text("Submit"), button[type="submit"]').first();
-    await submitButton.click({ force: true });
-    console.log('[Test] Clicked submit button');
+
+    // Wait for button to be ready
+    await submitButton.waitFor({ state: 'visible', timeout: 5000 });
+
+    // Option 1: Try normal click first (triggers React events)
+    try {
+      await submitButton.click({ timeout: 2000 });
+      console.log('[Test] Clicked submit button (normal click)');
+    } catch (e) {
+      // Option 2: If button is blocked, press Enter to submit form (also triggers React events)
+      console.log('[Test] Button blocked, using Enter key to submit form');
+      await page.keyboard.press('Enter');
+    }
+
+    // Log console messages immediately after submit to catch early errors
+    await page.waitForTimeout(2000);
+    console.log('[Test] 📝 Console messages after submit (' + consoleMessages.length + ' total):');
+    consoleMessages.slice(0, 30).forEach((msg, i) => console.log(`  [${i}] ${msg}`));
 
     // Verify no MetaMask popup (test wallet should auto-approve)
     console.log('[Test] ⏳ Waiting for blockchain transaction (5-15 seconds)...');
@@ -167,6 +229,12 @@ test.describe('Vector Database - Create', () => {
     // Wait a moment for any final console messages
     await page.waitForTimeout(1000);
 
+    // Log ALL console messages captured from start
+    console.log('[Test] 📝 ALL Console Messages (' + consoleMessages.length + ' total):');
+    consoleMessages.forEach((msg, i) => {
+      console.log(`  [${i}] ${msg}`);
+    });
+
     // Log transaction hash if found in console
     const txHashMessages = consoleInfo.filter(msg =>
       msg.toLowerCase().includes('transaction') || msg.toLowerCase().includes('tx')
@@ -190,8 +258,35 @@ test.describe('Vector Database - Create', () => {
     console.log('[Test] ✅ Vector database creation test passed');
   });
 
-  test('should show database in list after creation', async ({ page, testWallet }) => {
+  test('should show database in list after creation', async ({ page }) => {
+    // Same timeout as Test 1
+    test.setTimeout(120000);
     console.log('[Test] Verifying database persists in list');
+    console.log('[Test] Using shared wallet from Test 1:', sharedWalletAddress);
+
+    // Capture console messages for debugging
+    page.on('console', (msg) => {
+      const text = `[Browser ${msg.type()}] ${msg.text()}`;
+      // Log SDK initialization messages, errors, and warnings
+      if (msg.type() === 'error' || msg.type() === 'warning' || text.includes('[UI5SDK]') || text.includes('[S5VectorStore]') || text.includes('[useWallet]') || text.includes('[VectorRAGManager]')) {
+        console.log(text);
+      }
+    });
+
+    // Inject the same wallet as Test 1 (BEFORE navigation)
+    await page.addInitScript((walletData) => {
+      console.log('[Browser] 🧪 Test wallet injected (shared from Test 1):', walletData.address);
+      (window as any).__TEST_WALLET__ = {
+        address: walletData.address,
+        privateKey: walletData.privateKey,
+        chainId: walletData.chainId,
+        autoApprove: true,
+      };
+    }, {
+      address: sharedWalletAddress,
+      privateKey: process.env.TEST_USER_1_PRIVATE_KEY!,
+      chainId: 84532,
+    });
 
     // Navigate to vector databases page
     await page.goto(`${TEST_CONFIG.UI5_URL}/vector-databases`);
@@ -199,6 +294,23 @@ test.describe('Vector Database - Create', () => {
 
     // Wait for page load
     await page.waitForSelector('text=Vector Databases', { timeout: 30000 });
+
+    // Wait for React hydration
+    await page.getByTestId('app-ready').waitFor({ state: 'attached', timeout: 10000 });
+    console.log('[Test] ✅ React hydration complete');
+
+    // CRITICAL: S5 loading can take time - wait for databases to load from storage
+    // Wait for either database card to appear OR stats to update (indicating databases loaded)
+    console.log('[Test] ⏳ Waiting for databases to load from S5 storage (up to 60 seconds)...');
+
+    // Wait for the "No Vector Databases Yet" message to disappear (indicates databases loaded)
+    const emptyState = page.locator('text=No Vector Databases Yet');
+    try {
+      await emptyState.waitFor({ state: 'hidden', timeout: 60000 });
+      console.log('[Test] ✅ Databases loaded (empty state disappeared)');
+    } catch (e) {
+      console.log('[Test] ⚠️ Empty state still visible after 60s - database may not have been created');
+    }
 
     // Verify "Test Database 1" exists
     const databaseCard = page.locator('text=Test Database 1');

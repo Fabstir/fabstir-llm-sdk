@@ -73,11 +73,34 @@ export function useVectorDatabases() {
   // Create database
   const createDatabase = useCallback(
     async (name: string, options?: { dimensions?: number; folderStructure?: boolean; description?: string }) => {
-      if (!managers) throw new Error('SDK not initialized');
+      console.log(`[use-vector-databases] 🚀 createDatabase() called with:`, { name, options });
 
-      const vectorRAGManager = managers.vectorRAGManager;
-      await vectorRAGManager.createSession(name, options);
-      await fetchDatabases(); // Refresh list
+      try {
+        if (!managers) {
+          console.error('[use-vector-databases] ❌ Error: SDK not initialized');
+          throw new Error('SDK not initialized');
+        }
+        console.log('[use-vector-databases] ✅ Managers available:', !!managers);
+
+        const vectorRAGManager = managers.vectorRAGManager;
+        console.log('[use-vector-databases] ✅ VectorRAGManager obtained:', !!vectorRAGManager);
+
+        // Create a RAG session which internally creates the vector database via S5VectorStore
+        console.log(`[use-vector-databases] 📝 About to call createSession("${name}")...`);
+        const sessionId = await vectorRAGManager.createSession(name, {
+          description: options?.description,
+          dimensions: options?.dimensions
+        });
+        console.log(`[use-vector-databases] ✅ Session/database created with ID: ${sessionId}`);
+
+        console.log('[use-vector-databases] 🔄 Refreshing database list...');
+        await fetchDatabases(); // Refresh list
+        console.log('[use-vector-databases] ✅ Database list refreshed');
+      } catch (error) {
+        console.error('[use-vector-databases] ❌ Error in createDatabase:', error);
+        console.error('[use-vector-databases] Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+        throw error; // Re-throw to show in UI
+      }
     },
     [managers, fetchDatabases]
   );

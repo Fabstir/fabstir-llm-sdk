@@ -704,7 +704,9 @@ export class FabstirSDKCore extends EventEmitter {
           userAddress: this.userAddress,
           seedPhrase: this.s5Seed,
           config: ragConfig,
-          sessionManager: this.sessionManager as SessionManager
+          sessionManager: this.sessionManager as SessionManager,
+          s5Client: this.storageManager!.getS5Client(),
+          encryptionManager: this.encryptionManager!
         });
         console.log('VectorRAGManager created with database management enabled');
       } else {

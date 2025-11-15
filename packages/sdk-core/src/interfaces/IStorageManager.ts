@@ -80,6 +80,11 @@ export interface IStorageManager {
    */
   clearCache(): Promise<void>;
 
+  /**
+   * Get S5 client instance (for VectorRAGManager)
+   */
+  getS5Client(): any;
+
   // ============= User Settings Methods =============
 
   /**

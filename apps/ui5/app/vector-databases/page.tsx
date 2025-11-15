@@ -6,6 +6,7 @@ import { useWallet } from '@/hooks/use-wallet';
 import { useVectorDatabases } from '@/hooks/use-vector-databases';
 import { DatabaseCard } from '@/components/vector-databases/database-card';
 import { CreateDatabaseModal } from '@/components/vector-databases/create-database-modal';
+import { AppReadyMarker } from '@/components/app-ready-marker';
 import { Database, Search, Plus, ArrowUpDown } from 'lucide-react';
 import type { DatabaseMetadata } from '../../../hooks/use-vector-databases';
 
@@ -34,7 +35,7 @@ export default function VectorDatabasesPage() {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
         (db) =>
-          db.name.toLowerCase().includes(query) ||
+          db.name?.toLowerCase().includes(query) ||
           db.description?.toLowerCase().includes(query)
       );
     }
@@ -43,13 +44,13 @@ export default function VectorDatabasesPage() {
     filtered = [...filtered].sort((a, b) => {
       switch (sortBy) {
         case 'name':
-          return a.name.localeCompare(b.name);
+          return (a.name || '').localeCompare(b.name || '');
         case 'date':
-          return b.lastAccessed - a.lastAccessed; // Newest first
+          return (b.lastAccessed || 0) - (a.lastAccessed || 0); // Newest first
         case 'size':
-          return b.storageSizeBytes - a.storageSizeBytes; // Largest first
+          return (b.storageSizeBytes || 0) - (a.storageSizeBytes || 0); // Largest first
         case 'vectors':
-          return b.vectorCount - a.vectorCount; // Most vectors first
+          return (b.vectorCount || 0) - (a.vectorCount || 0); // Most vectors first
         default:
           return 0;
       }
@@ -62,7 +63,14 @@ export default function VectorDatabasesPage() {
     name: string,
     options: { dimensions?: number; folderStructure?: boolean; description?: string }
   ) => {
-    await createDatabase(name, options);
+    console.log('[VectorDatabasesPage] handleCreateDatabase() called with:', { name, options });
+    try {
+      await createDatabase(name, options);
+      console.log('[VectorDatabasesPage] ✅ createDatabase() completed');
+    } catch (error) {
+      console.error('[VectorDatabasesPage] ❌ createDatabase() failed:', error);
+      throw error; // Re-throw to propagate to modal
+    }
   };
 
   const handleDeleteDatabase = async (name: string) => {
@@ -95,7 +103,11 @@ export default function VectorDatabasesPage() {
 
         {/* Create Button */}
         <button
-          onClick={() => setIsCreateModalOpen(true)}
+          onClick={() => {
+            console.log('[CreateDatabaseButton] clicked - setting isCreateModalOpen to true');
+            setIsCreateModalOpen(true);
+            console.log('[CreateDatabaseButton] state should now be true');
+          }}
           className="flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors font-medium whitespace-nowrap"
         >
           <Plus className="h-5 w-5" />
@@ -216,6 +228,9 @@ export default function VectorDatabasesPage() {
         onClose={() => setIsCreateModalOpen(false)}
         onCreate={handleCreateDatabase}
       />
+
+      {/* App Ready Marker for E2E tests */}
+      <AppReadyMarker />
     </div>
   );
 }

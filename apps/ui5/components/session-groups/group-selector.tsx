@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronDown, Search, Plus, Check, Folder } from 'lucide-react';
-import type { SessionGroup } from '@fabstir/sdk-core-mock';
+import type { SessionGroup } from '@fabstir/sdk-core';
 
 interface GroupSelectorProps {
   groups: SessionGroup[];

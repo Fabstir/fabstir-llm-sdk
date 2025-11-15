@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 import { Database, Trash2, Eye, Folder, HardDrive } from 'lucide-react';
-import type { DatabaseMetadata } from '@fabstir/sdk-core-mock';
+import type { DatabaseMetadata } from '@fabstir/sdk-core';
 
 interface DatabaseCardProps {
   database: DatabaseMetadata;

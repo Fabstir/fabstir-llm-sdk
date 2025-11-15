@@ -46,11 +46,12 @@ export function validateRAGConfig(config: PartialRAGConfig): void {
   if (config.s5Portal !== undefined) {
     try {
       const url = new URL(config.s5Portal);
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-        throw new Error('s5Portal must use http or https');
+      const validProtocols = ['http:', 'https:', 'ws:', 'wss:'];
+      if (!validProtocols.includes(url.protocol)) {
+        throw new Error('s5Portal must use http, https, ws, or wss protocol');
       }
     } catch (error) {
-      if (error instanceof Error && error.message.includes('http or https')) {
+      if (error instanceof Error && error.message.includes('protocol')) {
         throw error;
       }
       throw new Error('s5Portal must be a valid URL');

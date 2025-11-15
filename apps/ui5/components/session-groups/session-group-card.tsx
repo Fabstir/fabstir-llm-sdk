@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import type { SessionGroup } from '@fabstir/sdk-core-mock';
+import type { SessionGroup } from '@fabstir/sdk-core';
 import { GroupSettingsModal } from './group-settings-modal';
 import { ShareModal } from './share-modal';
 

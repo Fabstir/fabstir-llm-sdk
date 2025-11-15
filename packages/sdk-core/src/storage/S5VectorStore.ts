@@ -1,9 +1,10 @@
 // Copyright (c) 2025 Fabstir
 // SPDX-License-Identifier: BUSL-1.1
 
-import type { S5 } from '@s5-dev/s5js';
+import type { S5 } from '@julesl23/s5js';
 import type { EncryptionManager } from '../managers/EncryptionManager';
-import type { Vector, VectorDatabaseMetadata, FolderStats, SearchResult } from '@fabstir/sdk-core-mock';
+import type { Vector, SearchResult } from '../types';
+import type { DatabaseMetadata } from '../database/types';
 
 interface DatabaseManifest {
   name: string;
@@ -58,7 +59,79 @@ export class S5VectorStore {
     this.vectorCache = new Map();
   }
 
-  async createDatabase(config: { name: string; owner: string; description?: string }): Promise<VectorDatabaseMetadata> {
+  /**
+   * Initialize the vector store by loading all database manifests from S5 storage
+   *
+   * IMPORTANT: This method MUST be called after construction to populate the manifestCache
+   * from S5 storage. Without this, listDatabases() will return an empty array even when
+   * databases exist in S5.
+   *
+   * Uses S5 filesystem API to:
+   * 1. List all subdirectories in home/vector-databases/{userAddress}/
+   * 2. Load manifest.json from each database directory
+   * 3. Populate manifestCache for fast access
+   */
+  async initialize(): Promise<void> {
+    console.log('[S5VectorStore] 🚀 Initialize() called - starting database discovery');
+    try {
+      const basePath = this._getDatabaseBasePath();
+      console.log(`[S5VectorStore] Step 1: Base path = ${basePath}`);
+
+      // List all database directories using S5 fs.list()
+      console.log('[S5VectorStore] Step 2: Calling s5Client.fs.list()...');
+      const iterator = await this.s5Client.fs.list(basePath);
+
+      // Collect all entries from the async iterator
+      const entries: any[] = [];
+      for await (const entry of iterator) {
+        entries.push(entry);
+      }
+      console.log(`[S5VectorStore] Step 2: ✅ Got ${entries.length} entries`);
+
+      if (entries.length === 0) {
+        // No databases yet - this is fine for new users
+        console.log('[S5VectorStore] ⚠️ No databases found (empty directory)');
+        return;
+      }
+
+      // Load manifests in parallel for better performance
+      const directories = entries.filter((entry: any) => entry.type === 'directory');
+      console.log(`[S5VectorStore] Step 3: Found ${directories.length} database directories`);
+
+      const manifestPromises = directories.map(async (entry: any) => {
+        try {
+          const databaseName = entry.name;
+          console.log(`[S5VectorStore] Loading manifest for "${databaseName}"...`);
+          const manifest = await this._loadManifest(databaseName);
+
+          if (manifest && !manifest.deleted && this.cacheEnabled) {
+            this.manifestCache.set(databaseName, manifest);
+            console.log(`[S5VectorStore] ✅ Loaded "${databaseName}" into cache`);
+          }
+        } catch (error) {
+          // Log error but continue with other manifests
+          console.warn(`[S5VectorStore] Failed to load manifest for database "${entry.name}":`, error);
+        }
+      });
+
+      await Promise.all(manifestPromises);
+
+      console.log(`[S5VectorStore] ✅✅✅ Initialized with ${this.manifestCache.size} database(s)`);
+    } catch (error) {
+      // If base path doesn't exist yet, that's okay - user has no databases
+      const errorMsg = (error as any)?.message || '';
+      if (errorMsg.includes('not found') || errorMsg.includes('404') || errorMsg.includes('does not exist')) {
+        console.log('[S5VectorStore] ⚠️ No existing databases found (base path does not exist yet)');
+        return;
+      }
+
+      // Log other errors but don't throw - allow SDK to continue working
+      console.error('[S5VectorStore] ❌ Error during initialization:', error);
+    }
+  }
+
+  async createDatabase(config: { name: string; owner: string; description?: string }): Promise<DatabaseMetadata> {
+    console.log(`[S5VectorStore] 📝 createDatabase() called with name: ${config.name}, owner: ${config.owner}`);
     if (!config.name?.trim()) throw new Error('Database name cannot be empty');
     if (await this.databaseExists(config.name)) throw new Error(`Database "${config.name}" already exists`);
 
@@ -76,19 +149,21 @@ export class S5VectorStore {
       folderPaths: [],
     };
 
+    console.log(`[S5VectorStore] 💾 About to save manifest to S5...`);
     await this._saveManifest(config.name, manifest);
+    console.log(`[S5VectorStore] ✅ Manifest saved successfully`);
     return this._manifestToMetadata(manifest);
   }
 
-  async listDatabases(): Promise<VectorDatabaseMetadata[]> {
-    const databases: VectorDatabaseMetadata[] = [];
+  async listDatabases(): Promise<DatabaseMetadata[]> {
+    const databases: DatabaseMetadata[] = [];
     for (const manifest of this.manifestCache.values()) {
       if (!manifest.deleted) databases.push(this._manifestToMetadata(manifest));
     }
     return databases;
   }
 
-  async getDatabase(databaseName: string): Promise<VectorDatabaseMetadata | null> {
+  async getDatabase(databaseName: string): Promise<DatabaseMetadata | null> {
     const manifest = await this._loadManifest(databaseName);
     return (manifest && !manifest.deleted) ? this._manifestToMetadata(manifest) : null;
   }
@@ -192,17 +267,17 @@ export class S5VectorStore {
     };
   }
 
-  async getVectorDatabaseMetadata(databaseName: string): Promise<VectorDatabaseMetadata> {
+  async getDatabaseMetadata(databaseName: string): Promise<DatabaseMetadata> {
     const db = await this.getDatabase(databaseName);
     if (!db) throw new Error(`Database "${databaseName}" not found`);
     return db;
   }
 
-  async getDatabaseMetadata(databaseName: string): Promise<VectorDatabaseMetadata> {
-    return await this.getVectorDatabaseMetadata(databaseName);
+  async getDatabaseMetadata(databaseName: string): Promise<DatabaseMetadata> {
+    return await this.getDatabaseMetadata(databaseName);
   }
 
-  async updateVectorDatabaseMetadata(databaseName: string, updates: Partial<VectorDatabaseMetadata>): Promise<void> {
+  async updateDatabaseMetadata(databaseName: string, updates: Partial<DatabaseMetadata>): Promise<void> {
     const manifest = await this._loadManifest(databaseName);
     if (!manifest || manifest.deleted) throw new Error(`Database "${databaseName}" not found`);
     if (updates.description !== undefined) manifest.description = updates.description;
@@ -391,10 +466,9 @@ export class S5VectorStore {
 
     try {
       const path = this._getManifestPath(databaseName);
-      const encrypted = await this.s5Client.downloadFile(path);
-      if (!encrypted) return null;
+      const json = await this.s5Client.fs.get(path);
+      if (!json) return null;
 
-      const json = await this.encryptionManager.decrypt(encrypted);
       const manifest = JSON.parse(json) as DatabaseManifest;
 
       if (this.cacheEnabled) {
@@ -409,12 +483,17 @@ export class S5VectorStore {
 
   private async _saveManifest(databaseName: string, manifest: DatabaseManifest): Promise<void> {
     const path = this._getManifestPath(databaseName);
+    console.log(`[S5VectorStore] _saveManifest() called for "${databaseName}"`);
+    console.log(`[S5VectorStore] Path: ${path}`);
     const json = JSON.stringify(manifest);
-    const encrypted = await this.encryptionManager.encrypt(json);
-    await this.s5Client.uploadFile(path, encrypted);
+    console.log(`[S5VectorStore] Manifest JSON size: ${json.length} bytes`);
+    console.log(`[S5VectorStore] Calling s5Client.fs.put()...`);
+    await this.s5Client.fs.put(path, json);
+    console.log(`[S5VectorStore] ✅ s5Client.fs.put() completed successfully`);
 
     if (this.cacheEnabled) {
       this.manifestCache.set(databaseName, manifest);
+      console.log(`[S5VectorStore] Cached manifest for "${databaseName}"`);
     }
   }
 
@@ -446,10 +525,9 @@ export class S5VectorStore {
   private async _loadChunk(databaseName: string, chunkId: number): Promise<VectorChunk | null> {
     try {
       const path = this._getChunkPath(databaseName, chunkId);
-      const encrypted = await this.s5Client.downloadFile(path);
-      if (!encrypted) return null;
+      const json = await this.s5Client.fs.get(path);
+      if (!json) return null;
 
-      const json = await this.encryptionManager.decrypt(encrypted);
       return JSON.parse(json) as VectorChunk;
     } catch (error) {
       return null;
@@ -478,19 +556,18 @@ export class S5VectorStore {
   private async _saveChunk(databaseName: string, chunk: VectorChunk): Promise<ChunkMetadata> {
     const path = this._getChunkPath(databaseName, chunk.chunkId);
     const json = JSON.stringify(chunk);
-    const encrypted = await this.encryptionManager.encrypt(json);
-    const cid = await this.s5Client.uploadFile(path, encrypted);
+    await this.s5Client.fs.put(path, json);
 
     return {
       chunkId: chunk.chunkId,
-      cid: cid,
+      cid: path, // Use path as identifier in path-based S5
       vectorCount: chunk.vectors.length,
-      sizeBytes: encrypted.byteLength,
+      sizeBytes: json.length,
       updatedAt: Date.now(),
     };
   }
 
-  private _manifestToMetadata(manifest: DatabaseManifest): VectorDatabaseMetadata {
+  private _manifestToMetadata(manifest: DatabaseManifest): DatabaseMetadata {
     return {
       id: manifest.name,
       name: manifest.name,

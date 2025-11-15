@@ -45,24 +45,51 @@ export function useWallet(): UseWalletReturn {
       setIsConnected(true);
       setWalletMode('metamask'); // Use metamask mode for test wallet
 
-      // Initialize SDK with test signer
-      if (testWallet.signer) {
-        setSigner(testWallet.signer);
+      // Initialize SDK with test signer - create from privateKey
+      console.log(`[useWallet] 🔍 Debug: testWallet.privateKey exists? ${!!testWallet.privateKey}`);
+      if (testWallet.privateKey) {
+        // Create signer from private key using TestWalletAdapter
+        import('../lib/wallet-adapter').then(({ TestWalletAdapter }) => {
+          const adapter = new TestWalletAdapter(
+            {
+              chainId: testWallet.chainId,
+              rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA || 'https://sepolia.base.org',
+            },
+            testWallet.privateKey
+          );
 
-        if (!ui5SDK.isInitialized()) {
-          console.log('[useWallet] Auto-initializing SDK with test wallet...');
-          ui5SDK.initialize(testWallet.signer)
-            .then(() => {
+          adapter.getSigner().then((testSigner) => {
+            console.log('[useWallet] ✅ Test signer created from privateKey');
+            setSigner(testSigner);
+
+            const isAlreadyInitialized = ui5SDK.isInitialized();
+            console.log(`[useWallet] 🔍 Debug: SDK already initialized? ${isAlreadyInitialized}`);
+
+            if (!isAlreadyInitialized) {
+              console.log('[useWallet] Auto-initializing SDK with test wallet...');
+              ui5SDK.initialize(testSigner)
+                .then(() => {
+                  setIsInitialized(true);
+                  console.log('[useWallet] SDK initialized successfully in test mode');
+                })
+                .catch((err) => {
+                  console.error('[useWallet] Failed to initialize SDK in test mode:', err);
+                  setError(err.message);
+                });
+            } else {
+              console.log('[useWallet] ⚠️ SDK already initialized - skipping initialization');
               setIsInitialized(true);
-              console.log('[useWallet] SDK initialized successfully in test mode');
-            })
-            .catch((err) => {
-              console.error('[useWallet] Failed to initialize SDK in test mode:', err);
-              setError(err.message);
-            });
-        } else {
-          setIsInitialized(true);
-        }
+            }
+          }).catch((err) => {
+            console.error('[useWallet] Failed to get test signer:', err);
+            setError(err.message);
+          });
+        }).catch((err) => {
+          console.error('[useWallet] Failed to load TestWalletAdapter:', err);
+          setError(err.message);
+        });
+      } else {
+        console.error('[useWallet] ❌ Test wallet privateKey is missing!');
       }
       return;
     }

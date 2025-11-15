@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 import type { Permission } from '../types/permissions.types';
-import type { EncryptionManager } from '../encryption/EncryptionManager';
+import type { EncryptionManager } from '../managers/EncryptionManager';
 
 /**
  * Permission Storage

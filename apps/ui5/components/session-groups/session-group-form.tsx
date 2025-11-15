@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { SessionGroup } from '@fabstir/sdk-core-mock';
+import type { SessionGroup } from '@fabstir/sdk-core';
 
 interface SessionGroupFormProps {
   initialData?: Partial<SessionGroup>;

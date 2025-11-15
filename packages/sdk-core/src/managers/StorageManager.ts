@@ -116,6 +116,13 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
+   * Get S5 client instance (for VectorRAGManager)
+   */
+  getS5Client(): any {
+    return this.s5Client;
+  }
+
+  /**
    * Initialize storage with S5 seed
    */
   async initialize(seed: string, userAddress?: string): Promise<void> {

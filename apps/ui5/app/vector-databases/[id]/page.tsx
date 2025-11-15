@@ -12,7 +12,7 @@ import { FileDetailsModal } from '@/components/vector-databases/file-details-mod
 import { UploadDocumentModal } from '@/components/vector-databases/upload-document-modal';
 import { Database, ArrowLeft, Upload, FolderPlus } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
-import type { DatabaseMetadata, Vector } from '@fabstir/sdk-core-mock';
+import type { DatabaseMetadata, Vector } from '@fabstir/sdk-core';
 
 /**
  * Vector Database Detail Page

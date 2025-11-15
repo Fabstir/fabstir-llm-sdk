@@ -141,13 +141,24 @@ export class UI5SDK {
       const testMode = typeof window !== 'undefined' && (window as any).__TEST_WALLET__;
       console.log(`[UI5SDK] Authenticating with address: ${address}${testMode ? ' (TEST MODE)' : ''}`);
 
+      console.log('[UI5SDK] Step 1: About to authenticate...');
       await this.sdk.authenticate('signer', {
         signer  // Pass signer for real transactions
       });
+      console.log('[UI5SDK] Step 1: ✅ Authentication complete');
+
+      // Initialize VectorRAGManager to load existing databases from S5
+      console.log('[UI5SDK] Step 2: About to get VectorRAGManager...');
+      const vectorRAGManager = this.sdk.getVectorRAGManager();
+      console.log('[UI5SDK] Step 2: ✅ VectorRAGManager obtained:', !!vectorRAGManager);
+
+      console.log('[UI5SDK] Step 3: About to call vectorRAGManager.initialize()...');
+      await vectorRAGManager.initialize();
+      console.log('[UI5SDK] Step 3: ✅ VectorRAGManager initialized');
 
       this.initialized = true;
       this.notify(); // Notify all hooks
-      console.log('[UI5SDK] SDK initialized successfully');
+      console.log('[UI5SDK] ✅✅✅ SDK initialized successfully');
     } catch (error) {
       console.error('[UI5SDK] Initialization failed:', error);
       this.sdk = null;

@@ -216,7 +216,7 @@ importers:
         specifier: ^1.0.0
         version: 1.1.1(@types/react@19.2.2)(bufferutil@4.0.9)(react@19.2.0)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
       '@fabstir/sdk-core':
-        specifier: workspace:*
+        specifier: file:../../packages/sdk-core
         version: link:../../packages/sdk-core
       '@wagmi/core':
         specifier: ^2.0.0

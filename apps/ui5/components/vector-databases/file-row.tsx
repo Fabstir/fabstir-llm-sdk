@@ -2,7 +2,7 @@
 
 import { formatDistanceToNow } from 'date-fns';
 import { FileText, Trash2, Eye, Folder } from 'lucide-react';
-import type { Vector } from '@fabstir/sdk-core-mock';
+import type { Vector } from '@fabstir/sdk-core';
 
 interface FileRowProps {
   vector: Vector;

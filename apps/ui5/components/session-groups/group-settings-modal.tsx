@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Save, Trash2, Settings as SettingsIcon, Database, AlertTriangle } from 'lucide-react';
-import type { SessionGroup } from '@fabstir/sdk-core-mock';
+import type { SessionGroup } from '@fabstir/sdk-core';
 import { DatabaseLinker } from './database-linker';
 
 interface GroupSettingsModalProps {

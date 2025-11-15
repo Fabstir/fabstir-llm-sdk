@@ -25,8 +25,14 @@ export function CreateDatabaseModal({ isOpen, onClose, onCreate }: CreateDatabas
 
   // Handle mounting for SSR
   useEffect(() => {
+    console.log('[CreateDatabaseModal] Component mounted, setting mounted=true');
     setMounted(true);
   }, []);
+
+  // Log whenever props change
+  useEffect(() => {
+    console.log('[CreateDatabaseModal] Render - isOpen:', isOpen, 'mounted:', mounted);
+  }, [isOpen, mounted]);
 
   // Prevent body scroll when modal is open
   useEffect(() => {
@@ -67,42 +73,57 @@ export function CreateDatabaseModal({ isOpen, onClose, onCreate }: CreateDatabas
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('[CreateDatabaseModal] handleSubmit() called');
 
     // Validation
     if (!name.trim()) {
+      console.log('[CreateDatabaseModal] Validation failed: name is required');
       setError('Database name is required');
       return;
     }
 
     if (name.length > 50) {
+      console.log('[CreateDatabaseModal] Validation failed: name too long');
       setError('Database name must be 50 characters or less');
       return;
     }
 
     if (!/^[a-zA-Z0-9-_ ]+$/.test(name)) {
+      console.log('[CreateDatabaseModal] Validation failed: invalid characters');
       setError('Database name can only contain letters, numbers, spaces, hyphens, and underscores');
       return;
     }
 
+    console.log('[CreateDatabaseModal] Validation passed');
     setIsCreating(true);
     setError(null);
 
     try {
+      console.log('[CreateDatabaseModal] About to call onCreate() with:', {
+        name: name.trim(),
+        dimensions,
+        folderStructure,
+        description: description.trim() || undefined
+      });
       await onCreate(name.trim(), {
         dimensions,
         folderStructure,
         description: description.trim() || undefined
       });
+      console.log('[CreateDatabaseModal] ✅ onCreate() completed successfully');
       onClose();
     } catch (err) {
+      console.error('[CreateDatabaseModal] ❌ onCreate() failed:', err);
       setError(err instanceof Error ? err.message : 'Failed to create database');
     } finally {
       setIsCreating(false);
+      console.log('[CreateDatabaseModal] handleSubmit() finished (isCreating set to false)');
     }
   };
 
   const modalContent = (
     <div
+      data-testid="create-vector-db-modal"
       className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
       style={{
         top: 0,
@@ -236,43 +257,40 @@ export function CreateDatabaseModal({ isOpen, onClose, onCreate }: CreateDatabas
               </p>
             </div>
           </div>
-        </form>
 
-        {/* Footer */}
-        <div className="border-t border-gray-200 px-6 py-4 flex justify-end gap-3 bg-gray-50">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={isCreating}
-            className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            onClick={handleSubmit}
-            disabled={isCreating || !name.trim()}
-            className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            {isCreating ? (
-              <>
-                <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" />
-                Creating...
-              </>
-            ) : (
-              <>
-                <Plus className="h-5 w-5" />
-                Create Database
-              </>
-            )}
-          </button>
-        </div>
+          {/* Footer */}
+          <div className="border-t border-gray-200 px-6 py-4 flex justify-end gap-3 bg-gray-50 -mx-6 -mb-6">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isCreating}
+              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isCreating || !name.trim()}
+              className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {isCreating ? (
+                <>
+                  <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" />
+                  Creating...
+                </>
+              ) : (
+                <>
+                  <Plus className="h-5 w-5" />
+                  Create Database
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
 
-  // Only render portal in browser environment
-  if (typeof document === 'undefined') return null;
-
-  return createPortal(modalContent, document.body);
+  // Render modal directly (not using portal for now to debug)
+  return modalContent;
 }
