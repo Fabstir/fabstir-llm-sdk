@@ -1,14 +1,22 @@
 /**
  * Base Wallet Provider for UI5
  *
- * Supports multiple wallet connection methods:
- * 1. Base Account Kit (with API keys configured) - Gasless transactions via sub-accounts
- * 2. MetaMask/Browser Wallet (fallback) - Standard wallet connection
+ * Now uses flexible wallet adapter pattern to support:
+ * 1. MetaMask/Browser Wallet (production)
+ * 2. Test Wallet (automated testing with private key)
+ * 3. Base Account Kit (gasless transactions) - Coming soon
+ * 4. Particle Network (social login) - Coming soon
  *
  * Provides a unified interface for wallet connection and signer access.
  */
 
 import { ethers, type Signer } from 'ethers';
+import {
+  getWalletManager,
+  type WalletAdapter,
+  type WalletType,
+  type WalletConfig as AdapterWalletConfig,
+} from './wallet-adapter';
 
 export interface WalletConfig {
   // Base Account Kit configuration (optional - for gasless transactions)
@@ -29,33 +37,81 @@ export interface SubAccountConfig {
 }
 
 /**
- * Unified wallet provider supporting Base Account Kit and MetaMask
+ * Detect which wallet type to use based on environment
+ */
+function detectWalletType(): WalletType {
+  // Check for test mode first
+  if (typeof window !== 'undefined') {
+    const testWallet = (window as any).__TEST_WALLET__;
+    if (testWallet && testWallet.privateKey) {
+      console.log('[BaseWallet] 🧪 Test wallet detected');
+      return 'test-wallet';
+    }
+  }
+
+  // Check for Base Account Kit API keys
+  const hasBaseAccountKit = !!(
+    process.env.NEXT_PUBLIC_BASE_ACCOUNT_KIT_API_KEY &&
+    process.env.NEXT_PUBLIC_BASE_ACCOUNT_KIT_PROJECT_ID
+  );
+  if (hasBaseAccountKit) {
+    console.log('[BaseWallet] Base Account Kit configured');
+    return 'base-account-kit';
+  }
+
+  // Default to MetaMask
+  if (typeof window !== 'undefined' && window.ethereum) {
+    console.log('[BaseWallet] MetaMask detected');
+    return 'metamask';
+  }
+
+  throw new Error('No wallet available. Please install MetaMask or configure Base Account Kit.');
+}
+
+/**
+ * Unified wallet provider using flexible adapter pattern
  */
 export class BaseWalletProvider {
-  private signer: Signer | null = null;
-  private address: string | null = null;
-  private provider: ethers.BrowserProvider | null = null;
-  private useBaseAccountKit: boolean = false;
+  private adapter: WalletAdapter | null = null;
   private config: WalletConfig;
 
   constructor(config: WalletConfig) {
     this.config = config;
-    this.useBaseAccountKit = !!(
-      config.baseAccountKit?.apiKey &&
-      config.baseAccountKit?.projectId
-    );
   }
 
   /**
-   * Connect wallet (MetaMask or Base Account Kit)
+   * Connect wallet (auto-detects wallet type)
    */
   async connect(): Promise<string> {
     try {
-      if (this.useBaseAccountKit) {
-        return await this.connectBaseAccountKit();
-      } else {
-        return await this.connectMetaMask();
+      const walletType = detectWalletType();
+      console.log(`[BaseWallet] Connecting via ${walletType}...`);
+
+      const manager = getWalletManager();
+
+      // Prepare wallet config
+      const adapterConfig: AdapterWalletConfig = {
+        chainId: this.config.chainId,
+        rpcUrl: this.config.rpcUrl,
+      };
+
+      // Prepare wallet-specific options
+      const options: any = {};
+
+      if (walletType === 'test-wallet') {
+        // Get test wallet private key from window
+        const testWallet = (window as any).__TEST_WALLET__;
+        options.privateKey = testWallet.privateKey;
+      } else if (walletType === 'base-account-kit' && this.config.baseAccountKit) {
+        options.baseAccountKit = this.config.baseAccountKit;
       }
+
+      // Connect via wallet manager
+      const address = await manager.connect(walletType, adapterConfig, options);
+      this.adapter = manager.getAdapter();
+
+      console.log(`[BaseWallet] Connected via ${walletType}:`, address);
+      return address;
     } catch (error) {
       console.error('[BaseWallet] Connection failed:', error);
       throw new Error('Failed to connect wallet');
@@ -63,170 +119,77 @@ export class BaseWalletProvider {
   }
 
   /**
-   * Connect using MetaMask or browser wallet
-   */
-  private async connectMetaMask(): Promise<string> {
-    if (typeof window === 'undefined' || !window.ethereum) {
-      throw new Error('MetaMask not installed. Please install MetaMask to continue.');
-    }
-
-    console.log('[BaseWallet] Connecting via MetaMask...');
-
-    // Create ethers provider from window.ethereum
-    this.provider = new ethers.BrowserProvider(window.ethereum);
-
-    // Request account access
-    await this.provider.send('eth_requestAccounts', []);
-
-    // Get signer and address
-    this.signer = await this.provider.getSigner();
-    this.address = await this.signer.getAddress();
-
-    // Verify we're on the correct network
-    const network = await this.provider.getNetwork();
-    if (Number(network.chainId) !== this.config.chainId) {
-      console.warn(
-        `[BaseWallet] Wrong network. Expected ${this.config.chainId}, got ${network.chainId}`
-      );
-      // Try to switch network
-      try {
-        await this.switchNetwork();
-      } catch (switchError) {
-        throw new Error(
-          `Please switch to chain ID ${this.config.chainId} in MetaMask`
-        );
-      }
-    }
-
-    console.log('[BaseWallet] MetaMask connected:', this.address);
-    return this.address;
-  }
-
-  /**
-   * Switch to the correct network in MetaMask
-   */
-  private async switchNetwork(): Promise<void> {
-    if (!window.ethereum) return;
-
-    try {
-      await window.ethereum.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: `0x${this.config.chainId.toString(16)}` }],
-      });
-    } catch (switchError: any) {
-      // This error code indicates that the chain has not been added to MetaMask
-      if (switchError.code === 4902) {
-        await window.ethereum.request({
-          method: 'wallet_addEthereumChain',
-          params: [
-            {
-              chainId: `0x${this.config.chainId.toString(16)}`,
-              rpcUrls: [this.config.rpcUrl],
-              chainName: 'Base Sepolia',
-              nativeCurrency: {
-                name: 'ETH',
-                symbol: 'ETH',
-                decimals: 18,
-              },
-              blockExplorerUrls: ['https://sepolia.basescan.org'],
-            },
-          ],
-        });
-      } else {
-        throw switchError;
-      }
-    }
-  }
-
-  /**
-   * Connect using Base Account Kit (placeholder for future implementation)
-   * Requires @base-org/account package and API configuration
-   */
-  private async connectBaseAccountKit(): Promise<string> {
-    // TODO: Implement Base Account Kit connection when API keys are configured
-    // For now, fallback to MetaMask
-    console.log(
-      '[BaseWallet] Base Account Kit configured but not yet implemented. Using MetaMask fallback.'
-    );
-    this.useBaseAccountKit = false;
-    return await this.connectMetaMask();
-
-    /*
-    // Future implementation:
-    import { createBaseAccountSDK } from '@base-org/account';
-    import { base } from '@base-org/account/chains';
-
-    const accountSDK = createBaseAccountSDK({
-      apiKey: this.config.baseAccountKit!.apiKey,
-      projectId: this.config.baseAccountKit!.projectId,
-      chain: base.sepolia,
-    });
-
-    await accountSDK.connect();
-    this.address = await accountSDK.getAddress();
-    const provider = await accountSDK.getProvider();
-    this.signer = await provider.getSigner();
-
-    return this.address;
-    */
-  }
-
-  /**
    * Create or get sub-account with spend permissions (Base Account Kit only)
-   * For MetaMask connections, this is a no-op and returns the primary address
+   * For MetaMask/Test Wallet connections, this is a no-op and returns the primary address
    */
   async ensureSubAccount(config: SubAccountConfig): Promise<{
     address: string;
     isExisting: boolean;
   }> {
-    if (!this.address) {
+    if (!this.adapter) {
       throw new Error('Wallet not connected. Call connect() first.');
     }
 
-    if (!this.useBaseAccountKit) {
-      // MetaMask doesn't support sub-accounts
+    const walletType = this.adapter.getType();
+
+    if (walletType !== 'base-account-kit') {
+      // MetaMask and Test Wallet don't support sub-accounts
+      const address = this.adapter.getAddress();
       console.log(
-        '[BaseWallet] Sub-accounts not supported with MetaMask. Using primary address.'
+        `[BaseWallet] Sub-accounts not supported with ${walletType}. Using primary address.`
       );
-      return { address: this.address, isExisting: true };
+      return { address: address!, isExisting: true };
     }
 
     // TODO: Implement sub-account creation when Base Account Kit is active
     console.warn('[BaseWallet] Sub-account creation not yet implemented');
-    return { address: this.address, isExisting: true };
+    const address = this.adapter.getAddress();
+    return { address: address!, isExisting: true };
   }
 
   /**
    * Get ethers signer for SDK integration
    */
   async getSigner(): Promise<Signer> {
-    if (!this.signer) {
+    if (!this.adapter) {
       throw new Error('Wallet not connected');
     }
-    return this.signer;
+    return await this.adapter.getSigner();
   }
 
   /**
    * Get current wallet address
    */
   getAddress(): string | null {
-    return this.address;
+    if (!this.adapter) {
+      return null;
+    }
+    return this.adapter.getAddress();
   }
 
   /**
    * Get connection mode
    */
   getMode(): 'base-account-kit' | 'metamask' {
-    return this.useBaseAccountKit ? 'base-account-kit' : 'metamask';
+    if (!this.adapter) {
+      return 'metamask'; // Default
+    }
+    const type = this.adapter.getType();
+    return type === 'base-account-kit' ? 'base-account-kit' : 'metamask';
   }
 
   /**
    * Disconnect wallet
    */
   async disconnect(): Promise<void> {
-    this.signer = null;
-    this.address = null;
-    this.provider = null;
+    if (this.adapter) {
+      await this.adapter.disconnect();
+    }
+
+    const manager = getWalletManager();
+    await manager.disconnect();
+
+    this.adapter = null;
     console.log('[BaseWallet] Disconnected');
   }
 
@@ -234,7 +197,7 @@ export class BaseWalletProvider {
    * Check if wallet is connected
    */
   isConnected(): boolean {
-    return this.address !== null;
+    return this.adapter !== null && this.adapter.isConnected();
   }
 }
 

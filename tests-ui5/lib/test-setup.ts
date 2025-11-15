@@ -41,16 +41,18 @@ export const test = base.extend<TestFixtures>({
     console.log(`[TestSetup] Created test wallet: ${testWallet.getAddress()}`);
 
     // Inject wallet into browser BEFORE navigation
+    // CRITICAL: Must inject privateKey for wallet-adapter.ts TestWalletAdapter to work
     await page.addInitScript((walletData) => {
-      console.log('[Browser] Test wallet injected:', walletData.address);
+      console.log('[Browser] 🧪 Test wallet injected:', walletData.address);
       (window as any).__TEST_WALLET__ = {
         address: walletData.address,
+        privateKey: walletData.privateKey, // Required by wallet-adapter.ts TestWalletAdapter
         chainId: walletData.chainId,
-        signer: null, // Will be created by SDK using injected wallet
         autoApprove: true,
       };
     }, {
       address: testWallet.getAddress(),
+      privateKey: process.env.TEST_USER_1_PRIVATE_KEY,
       chainId: testWallet.chainId,
     });
 
