@@ -92,7 +92,9 @@ export function DatabaseCard({ database, onDelete }: DatabaseCardProps) {
       {/* Footer */}
       <div className="flex items-center justify-between pt-4 border-t border-gray-100">
         <div className="text-xs text-gray-500">
-          Updated {formatDistanceToNow(database.lastAccessed, { addSuffix: true })}
+          Updated {database.lastAccessed && database.lastAccessed > 0
+            ? formatDistanceToNow(database.lastAccessed, { addSuffix: true })
+            : 'just now'}
         </div>
 
         {/* View Button */}

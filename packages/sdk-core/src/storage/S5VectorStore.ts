@@ -104,9 +104,13 @@ export class S5VectorStore {
           console.log(`[S5VectorStore] Loading manifest for "${databaseName}"...`);
           const manifest = await this._loadManifest(databaseName);
 
+          console.log(`[S5VectorStore] Manifest loaded for "${databaseName}": exists=${!!manifest}, deleted=${manifest?.deleted}, cacheEnabled=${this.cacheEnabled}`);
+
           if (manifest && !manifest.deleted && this.cacheEnabled) {
             this.manifestCache.set(databaseName, manifest);
             console.log(`[S5VectorStore] ✅ Loaded "${databaseName}" into cache`);
+          } else {
+            console.log(`[S5VectorStore] ❌ Skipped caching "${databaseName}" - check conditions above`);
           }
         } catch (error) {
           // Log error but continue with other manifests
@@ -466,10 +470,29 @@ export class S5VectorStore {
 
     try {
       const path = this._getManifestPath(databaseName);
-      const json = await this.s5Client.fs.get(path);
-      if (!json) return null;
+      console.log(`[S5VectorStore] _loadManifest: Getting manifest from path: ${path}`);
+      const data = await this.s5Client.fs.get(path);
+      console.log(`[S5VectorStore] _loadManifest: Got result from s5Client.fs.get(): ${!!data}, type=${typeof data}`);
 
-      const manifest = JSON.parse(json) as DatabaseManifest;
+      if (!data) {
+        console.log(`[S5VectorStore] _loadManifest: No data returned for "${databaseName}"`);
+        return null;
+      }
+
+      // s5.js fs.get() returns the parsed object directly, not a JSON string
+      let manifest: DatabaseManifest;
+      if (typeof data === 'string') {
+        // If it's a string, parse it
+        manifest = JSON.parse(data) as DatabaseManifest;
+      } else if (typeof data === 'object') {
+        // If it's already an object, use it directly
+        manifest = data as DatabaseManifest;
+      } else {
+        console.log(`[S5VectorStore] _loadManifest: Unexpected data type for "${databaseName}": ${typeof data}`);
+        return null;
+      }
+
+      console.log(`[S5VectorStore] _loadManifest: Successfully loaded manifest for "${databaseName}"`);
 
       if (this.cacheEnabled) {
         this.manifestCache.set(databaseName, manifest);
@@ -477,6 +500,7 @@ export class S5VectorStore {
 
       return manifest;
     } catch (error) {
+      console.log(`[S5VectorStore] _loadManifest: Error loading manifest for "${databaseName}":`, error);
       return null;
     }
   }

@@ -128,8 +128,9 @@ test.describe.serial('Vector Database - Create', () => {
       await submitButton.click({ timeout: 2000 });
       console.log('[Test] Clicked submit button (normal click)');
     } catch (e) {
-      // Option 2: If button is blocked, press Enter to submit form (also triggers React events)
-      console.log('[Test] Button blocked, using Enter key to submit form');
+      // Option 2: If button is blocked, press Enter on focused input to submit form
+      console.log('[Test] Button blocked, using Enter key on name input to submit form');
+      await nameInput.focus();
       await page.keyboard.press('Enter');
     }
 

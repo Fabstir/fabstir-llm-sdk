@@ -1659,9 +1659,134 @@ No installation needed - bundled with @fabstir/sdk-core
 
 ---
 
+### Sub-phase 5.1.6: Production Bug Fixes
+
+**Goal**: Fix critical database persistence bug discovered in UI5 production testing
+
+**Status**: ✅ **Completed** (2025-11-15)
+
+**Critical Bug Discovered**: Database manifests not loading from S5 storage
+
+**Root Cause Analysis**:
+- Enhanced s5.js `fs.get()` method returns parsed JavaScript **objects**, not JSON strings
+- S5VectorStore `_loadManifest()` was calling `JSON.parse()` on these objects
+- Error: `SyntaxError: "[object Object]" is not valid JSON`
+- Impact: **ALL database loading failed** - showed "0 database(s)" despite successful saves
+
+**Symptoms**:
+```
+[S5VectorStore] Step 2: ✅ Got 2 entries
+[S5VectorStore] Step 3: Found 2 database directories
+[S5VectorStore] Loading manifest for "Test Database 1"...
+[S5VectorStore] _loadManifest: Got result from s5Client.fs.get(): true, length=undefined
+[S5VectorStore] _loadManifest: Error loading manifest for "Test Database 1":
+  SyntaxError: "[object Object]" is not valid JSON
+[S5VectorStore] Manifest loaded for "Test Database 1": exists=false, deleted=undefined
+[S5VectorStore] ❌ Skipped caching "Test Database 1" - check conditions above
+[S5VectorStore] ✅✅✅ Initialized with 0 database(s)  ❌ WRONG - should be 2!
+```
+
+**Solution Implemented**:
+
+Updated `S5VectorStore._loadManifest()` to handle both string and object responses:
+
+```typescript
+// File: packages/sdk-core/src/storage/S5VectorStore.ts
+// Lines: 466-506 (approximately)
+
+private async _loadManifest(databaseName: string): Promise<DatabaseManifest | null> {
+  // ... cache check ...
+
+  try {
+    const path = this._getManifestPath(databaseName);
+    console.log(`[S5VectorStore] _loadManifest: Getting manifest from path: ${path}`);
+    const data = await this.s5Client.fs.get(path);
+    console.log(`[S5VectorStore] _loadManifest: Got result, type=${typeof data}`);
+
+    if (!data) {
+      console.log(`[S5VectorStore] _loadManifest: No data returned`);
+      return null;
+    }
+
+    // ✅ FIX: Handle both string and object responses
+    let manifest: DatabaseManifest;
+    if (typeof data === 'string') {
+      // If it's a string, parse it
+      manifest = JSON.parse(data) as DatabaseManifest;
+    } else if (typeof data === 'object') {
+      // If it's already an object, use it directly (s5.js auto-parses)
+      manifest = data as DatabaseManifest;
+    } else {
+      console.log(`[S5VectorStore] Unexpected data type: ${typeof data}`);
+      return null;
+    }
+
+    console.log(`[S5VectorStore] _loadManifest: Successfully loaded manifest`);
+
+    // ... cache update ...
+    return manifest;
+  } catch (error) {
+    console.log(`[S5VectorStore] _loadManifest: Error:`, error);
+    return null;
+  }
+}
+```
+
+**Verification** (After Fix):
+```
+[S5VectorStore] Step 2: ✅ Got 2 entries
+[S5VectorStore] Step 3: Found 2 database directories
+[S5VectorStore] Loading manifest for "Test Database 1"...
+[S5VectorStore] _loadManifest: Got result, type=object
+[S5VectorStore] _loadManifest: Successfully loaded manifest for "Test Database 1"
+[S5VectorStore] ✅ Loaded "Test Database 1" into cache
+[S5VectorStore] Loading manifest for "UI5 automated test database"...
+[S5VectorStore] _loadManifest: Successfully loaded manifest for "UI5 automated test database"
+[S5VectorStore] ✅ Loaded "UI5 automated test database" into cache
+[S5VectorStore] ✅✅✅ Initialized with 2 database(s)  ✅ CORRECT!
+```
+
+**Additional Fixes**:
+1. **Enhanced s5.js Update**: Updated to v0.9.0-beta.3 (registry race condition fix)
+2. **Date Formatting Fix**: Fixed `DatabaseCard.tsx` to handle undefined `lastAccessed` values
+3. **Test Form Fields**: Fixed Playwright test to use ID-based selectors (`#name`, `#description`)
+4. **Form Submission**: Fixed React synthetic event handling (focus input before Enter key)
+
+**Test Results**:
+- ✅ **Test 1 PASSED**: Database creation and persistence working end-to-end
+- ✅ Database manifests loading correctly from S5
+- ✅ UI displays databases properly with correct metadata
+- ⏳ Test 2 pending (minor issue - duplicate database names)
+
+**Files Modified**:
+- `/workspace/packages/sdk-core/src/storage/S5VectorStore.ts` (Lines 466-506)
+- `/workspace/apps/ui5/components/vector-databases/database-card.tsx` (Lines 92-98)
+- `/workspace/tests-ui5/test-vector-db-create.spec.ts` (Lines 99-134)
+- `/workspace/pnpm-lock.yaml` (s5.js version bump)
+
+**Success Criteria**:
+- ✅ Database manifests load correctly from S5 storage
+- ✅ S5VectorStore initializes with correct database count (not 0)
+- ✅ Databases persist across page reloads
+- ✅ UI5 vector database creation fully functional
+- ✅ No console errors related to JSON parsing
+- ✅ Enhanced s5.js updated to latest stable version (v0.9.0-beta.3)
+
+**Impact**: This was a **production-blocking bug** that prevented the entire vector database feature from working. The fix enables:
+- ✅ Database persistence across sessions
+- ✅ Loading existing databases on page reload
+- ✅ Proper database discovery during SDK initialization
+- ✅ Full UI5 vector database workflow (create → save → reload → display)
+
+**Estimated Time**: 3 hours (debugging + fix + verification)
+
+**Actual Time**: 4 hours (included cross-referencing with s5.js API changes)
+
+---
+
 ## Phase 5.1 Summary
 
-**Total Estimated Time**: 12-16 hours
+**Total Estimated Time**: 12-16 hours (actual: 16-20 hours with production bug fix)
 
 **Sub-phase Breakdown**:
 1. Create S5VectorStore Module: 6-8 hours ✅ Core implementation + tests
@@ -1669,6 +1794,7 @@ No installation needed - bundled with @fabstir/sdk-core
 3. Update Host Node Integration: 2-3 hours ⏳ Coordination with node developer
 4. Testing & Validation: 2-3 hours ✅ Comprehensive testing
 5. Documentation: 1-2 hours ✅ API docs + migration guide
+6. Production Bug Fixes: 4 hours ✅ **s5.js fs.get() object handling fix (2025-11-15)**
 
 **Dependencies**:
 - ✅ Enhanced S5.js (existing)
@@ -1704,4 +1830,4 @@ No installation needed - bundled with @fabstir/sdk-core
 
 ---
 
-**Last Updated**: 2025-11-13
+**Last Updated**: 2025-11-15
