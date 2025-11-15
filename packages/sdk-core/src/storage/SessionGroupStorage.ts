@@ -73,12 +73,8 @@ export class SessionGroupStorage {
     // Build S5 path
     const path = this.buildPath(group.id);
 
-    // Serialize encrypted payload
-    const data = JSON.stringify(encrypted);
-    const bytes = new TextEncoder().encode(data);
-
-    // Write to S5
-    await this.s5Client.fs.writeFile(path, bytes);
+    // Write to S5 - S5 handles CBOR encoding automatically
+    await this.s5Client.fs.put(path, encrypted);
 
     // Update cache
     this.cache.set(group.id, group);
@@ -105,25 +101,19 @@ export class SessionGroupStorage {
     // Build S5 path
     const path = this.buildPath(groupId);
 
-    // Check if file exists
-    const exists = await this.s5Client.fs.exists(path);
-    if (!exists) {
+    // Read encrypted data from S5 - S5 decodes CBOR automatically
+    const encrypted = await this.s5Client.fs.get(path);
+
+    if (!encrypted) {
       throw new Error(`Session group not found: ${groupId}`);
     }
 
-    // Read encrypted data from S5
-    const bytes = await this.s5Client.fs.readFile(path);
-    const data = new TextDecoder().decode(bytes as Uint8Array);
-
-    // Parse encrypted storage payload
-    const encrypted: EncryptedStorage = JSON.parse(data);
-
-    // Decrypt
+    // Decrypt (encrypted is already an object from S5)
     const { data: group } = await this.encryptionManager.decryptFromStorage<SessionGroup>(
-      encrypted
+      encrypted as EncryptedStorage
     );
 
-    // Deserialize dates (JSON.parse converts them to strings)
+    // Deserialize dates (they may be strings after decryption)
     group.createdAt = new Date(group.createdAt);
     group.updatedAt = new Date(group.updatedAt);
 
@@ -143,24 +133,19 @@ export class SessionGroupStorage {
     const dirPath = this.buildDirPath();
 
     try {
-      // List directory
-      const entries = await this.s5Client.fs.readdir(dirPath);
-
-      // Filter for .json files only
-      const jsonFiles = entries.filter(
-        (entry: any) => entry.type === 1 && entry.name.endsWith('.json')
-      );
-
-      // Load each group
       const groups: SessionGroup[] = [];
-      for (const file of jsonFiles) {
-        const groupId = file.name.replace('.json', '');
-        try {
-          const group = await this.load(groupId);
-          groups.push(group);
-        } catch (error) {
-          console.warn(`Failed to load group ${groupId}:`, error);
-          // Continue loading other groups
+
+      // List directory using async iterator
+      for await (const entry of this.s5Client.fs.list(dirPath)) {
+        if (entry.type === 'file' && entry.name.endsWith('.json')) {
+          const groupId = entry.name.replace('.json', '');
+          try {
+            const group = await this.load(groupId);
+            groups.push(group);
+          } catch (error) {
+            console.warn(`Failed to load group ${groupId}:`, error);
+            // Continue loading other groups
+          }
         }
       }
 
@@ -184,7 +169,7 @@ export class SessionGroupStorage {
     const path = this.buildPath(groupId);
 
     // Remove from S5
-    await this.s5Client.fs.rm(path, { recursive: false });
+    await this.s5Client.fs.delete(path);
 
     // Remove from cache
     this.cache.delete(groupId);
@@ -202,9 +187,10 @@ export class SessionGroupStorage {
       return true;
     }
 
-    // Check S5
+    // Check S5 using getMetadata()
     const path = this.buildPath(groupId);
-    return await this.s5Client.fs.exists(path);
+    const metadata = await this.s5Client.fs.getMetadata(path);
+    return !!metadata;
   }
 
   /**

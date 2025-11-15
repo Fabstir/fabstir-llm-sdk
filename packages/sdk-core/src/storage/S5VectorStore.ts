@@ -71,15 +71,43 @@ export class S5VectorStore {
    * 2. Load manifest.json from each database directory
    * 3. Populate manifestCache for fast access
    */
+  /**
+   * Initialize vector store by loading existing databases from S5
+   *
+   * **Usage**: Call once at startup, not after every operation
+   * - Skips initialization if cache is already populated
+   * - Retries with exponential backoff to handle blob propagation delays
+   */
   async initialize(): Promise<void> {
+    // Skip if already initialized (prevents redundant S5 calls)
+    if (this.cacheEnabled && this.manifestCache.size > 0) {
+      console.log('[S5VectorStore] ✅ Already initialized - using existing cache');
+      return;
+    }
+
     console.log('[S5VectorStore] 🚀 Initialize() called - starting database discovery');
     try {
       const basePath = this._getDatabaseBasePath();
       console.log(`[S5VectorStore] Step 1: Base path = ${basePath}`);
 
-      // List all database directories using S5 fs.list()
+      // Retry fs.list() up to 3 times (blob propagation delay)
       console.log('[S5VectorStore] Step 2: Calling s5Client.fs.list()...');
-      const iterator = await this.s5Client.fs.list(basePath);
+      let iterator;
+      for (let i = 0; i < 3; i++) {
+        try {
+          iterator = await this.s5Client.fs.list(basePath);
+          break;
+        } catch (error: any) {
+          if (i === 2) throw error; // Give up after 3 attempts
+          console.log(`[S5VectorStore] ⚠️ Retry fs.list() attempt ${i + 1}/3 - waiting ${500 * (i + 1)}ms`);
+          await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
+        }
+      }
+
+      if (!iterator) {
+        console.log('[S5VectorStore] ❌ Failed to get iterator from fs.list()');
+        return;
+      }
 
       // Collect all entries from the async iterator
       const entries: any[] = [];
@@ -94,27 +122,40 @@ export class S5VectorStore {
         return;
       }
 
-      // Load manifests in parallel for better performance
+      // Load manifests in parallel with retry logic
       const directories = entries.filter((entry: any) => entry.type === 'directory');
       console.log(`[S5VectorStore] Step 3: Found ${directories.length} database directories`);
 
       const manifestPromises = directories.map(async (entry: any) => {
-        try {
-          const databaseName = entry.name;
-          console.log(`[S5VectorStore] Loading manifest for "${databaseName}"...`);
-          const manifest = await this._loadManifest(databaseName);
+        const databaseName = entry.name;
 
-          console.log(`[S5VectorStore] Manifest loaded for "${databaseName}": exists=${!!manifest}, deleted=${manifest?.deleted}, cacheEnabled=${this.cacheEnabled}`);
+        // Retry loading manifest with exponential backoff (blob propagation delay)
+        for (let i = 0; i < 5; i++) {
+          try {
+            console.log(`[S5VectorStore] Loading manifest for "${databaseName}"... (attempt ${i + 1}/5)`);
+            const manifest = await this._loadManifest(databaseName);
 
-          if (manifest && !manifest.deleted && this.cacheEnabled) {
-            this.manifestCache.set(databaseName, manifest);
-            console.log(`[S5VectorStore] ✅ Loaded "${databaseName}" into cache`);
-          } else {
-            console.log(`[S5VectorStore] ❌ Skipped caching "${databaseName}" - check conditions above`);
+            console.log(`[S5VectorStore] Manifest loaded for "${databaseName}": exists=${!!manifest}, deleted=${manifest?.deleted}, cacheEnabled=${this.cacheEnabled}`);
+
+            if (manifest && !manifest.deleted && this.cacheEnabled) {
+              this.manifestCache.set(databaseName, manifest);
+              console.log(`[S5VectorStore] ✅ Loaded "${databaseName}" into cache`);
+              return; // Success - exit retry loop
+            } else {
+              console.log(`[S5VectorStore] ❌ Skipped caching "${databaseName}" - check conditions above`);
+              break; // Got manifest (even if null), no need to retry
+            }
+          } catch (error) {
+            if (i === 4) {
+              // Final attempt failed - log warning and continue
+              console.warn(`[S5VectorStore] ⚠️ Failed to load "${databaseName}" after 5 retries:`, error);
+            } else {
+              // Retry with exponential backoff: 200ms, 400ms, 800ms, 1600ms
+              const delay = 200 * Math.pow(2, i);
+              console.log(`[S5VectorStore] ⚠️ Retry loading "${databaseName}" (${i + 1}/5) - waiting ${delay}ms`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+            }
           }
-        } catch (error) {
-          // Log error but continue with other manifests
-          console.warn(`[S5VectorStore] Failed to load manifest for database "${entry.name}":`, error);
         }
       });
 
@@ -509,10 +550,9 @@ export class S5VectorStore {
     const path = this._getManifestPath(databaseName);
     console.log(`[S5VectorStore] _saveManifest() called for "${databaseName}"`);
     console.log(`[S5VectorStore] Path: ${path}`);
-    const json = JSON.stringify(manifest);
-    console.log(`[S5VectorStore] Manifest JSON size: ${json.length} bytes`);
     console.log(`[S5VectorStore] Calling s5Client.fs.put()...`);
-    await this.s5Client.fs.put(path, json);
+    // S5 handles CBOR encoding automatically - pass object directly
+    await this.s5Client.fs.put(path, manifest);
     console.log(`[S5VectorStore] ✅ s5Client.fs.put() completed successfully`);
 
     if (this.cacheEnabled) {
@@ -549,10 +589,11 @@ export class S5VectorStore {
   private async _loadChunk(databaseName: string, chunkId: number): Promise<VectorChunk | null> {
     try {
       const path = this._getChunkPath(databaseName, chunkId);
-      const json = await this.s5Client.fs.get(path);
-      if (!json) return null;
+      // S5 returns object directly (CBOR decoding automatic)
+      const data = await this.s5Client.fs.get(path);
+      if (!data) return null;
 
-      return JSON.parse(json) as VectorChunk;
+      return data as VectorChunk;
     } catch (error) {
       return null;
     }
@@ -579,14 +620,18 @@ export class S5VectorStore {
 
   private async _saveChunk(databaseName: string, chunk: VectorChunk): Promise<ChunkMetadata> {
     const path = this._getChunkPath(databaseName, chunk.chunkId);
-    const json = JSON.stringify(chunk);
-    await this.s5Client.fs.put(path, json);
+    console.log(`[S5VectorStore] _saveChunk() called for chunk ${chunk.chunkId}`);
+    console.log(`[S5VectorStore] Path: ${path}`);
+    console.log(`[S5VectorStore] Calling s5Client.fs.put()...`);
+    // S5 handles CBOR encoding automatically - pass object directly
+    await this.s5Client.fs.put(path, chunk);
+    console.log(`[S5VectorStore] ✅ s5Client.fs.put() completed successfully`);
 
     return {
       chunkId: chunk.chunkId,
       cid: path, // Use path as identifier in path-based S5
       vectorCount: chunk.vectors.length,
-      sizeBytes: json.length,
+      sizeBytes: 0, // Size calculated by S5 (CBOR encoded)
       updatedAt: Date.now(),
     };
   }

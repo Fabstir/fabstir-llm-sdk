@@ -494,26 +494,25 @@ export class FolderHierarchy {
   }
 
   /**
-   * Serialize hierarchy to JSON
+   * Serialize hierarchy to object (for CBOR encoding by S5)
    */
-  serialize(databaseName: string): string {
+  serialize(databaseName: string): any {
     const root = this.databases.get(databaseName);
     if (!root) {
-      return JSON.stringify({ version: 1, folders: {} });
+      return { version: 1, folders: {} };
     }
 
-    return JSON.stringify({
+    return {
       version: 1,
       folders: this.serializeNode(root)
-    }, null, 2);
+    };
   }
 
   /**
-   * Deserialize hierarchy from JSON
+   * Deserialize hierarchy from object (CBOR decoded by S5)
    */
-  deserialize(databaseName: string, json: string): void {
+  deserialize(databaseName: string, data: any): void {
     try {
-      const data = JSON.parse(json);
       const root = this.getOrCreateRoot(databaseName);
 
       if (data.folders) {
@@ -659,7 +658,8 @@ export class FolderHierarchy {
    */
   private deserializeNode(parent: FolderNode, data: any): void {
     if (data.children) {
-      for (const [name, childData] of Object.entries(data.children)) {
+      for (const [name, rawChildData] of Object.entries(data.children)) {
+        const childData = rawChildData as any;
         const child: FolderNode = {
           name: childData.name,
           path: childData.path,

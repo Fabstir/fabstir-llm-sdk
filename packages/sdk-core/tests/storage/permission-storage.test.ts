@@ -31,26 +31,64 @@ describe('PermissionStorage', () => {
   });
 
   beforeEach(() => {
-    // Mock S5 client
+    // Mock S5 client with correct Enhanced s5.js API methods
+    const mockData = new Map<string, any>();
+
     mockS5Client = {
       fs: {
-        writeFile: vi.fn().mockResolvedValue(undefined),
-        readFile: vi.fn().mockResolvedValue(new Uint8Array()),
-        readdir: vi.fn().mockResolvedValue([]),
-        deleteFile: vi.fn().mockResolvedValue(undefined),
+        // ✅ CORRECT: Enhanced s5.js API methods
+        put: vi.fn(async (path: string, data: any) => {
+          mockData.set(path, data);
+          return true;
+        }),
+        get: vi.fn(async (path: string) => {
+          return mockData.get(path) || null;
+        }),
+        list: vi.fn(async function* (path: string) {
+          // Async iterator - yield entries that match the path
+          for (const [key, value] of mockData.entries()) {
+            if (key.startsWith(path) && key !== path) {
+              const name = key.split('/').pop();
+              if (name) {
+                yield {
+                  type: 'file',
+                  name: name
+                };
+              }
+            }
+          }
+        }),
+        delete: vi.fn(async (path: string) => {
+          mockData.delete(path);
+          return true;
+        }),
+        getMetadata: vi.fn(async (path: string) => {
+          return mockData.has(path) ? { cid: 'mock-cid' } : null;
+        })
       },
     };
 
     // Mock EncryptionManager
+    const testHostPubKey = '0x03' + '1'.repeat(64); // Mock compressed public key
+
     mockEncryptionManager = {
-      getPublicKey: vi.fn().mockReturnValue('mock-public-key'),
+      getPublicKey: vi.fn().mockReturnValue(testHostPubKey),
       encryptForStorage: vi.fn().mockImplementation(async (pubKey, data) => ({
-        encrypted: JSON.stringify(data),
-        nonce: 'mock-nonce',
+        payload: {
+          ciphertextHex: Buffer.from(JSON.stringify(data)).toString('hex'),
+          nonceHex: '000000000000000000000000',
+          ephemeralPubKeyHex: '0x03' + '2'.repeat(64),
+          signatureHex: '0x' + '3'.repeat(130),
+        },
+        storedAt: new Date().toISOString(),
+        conversationId: 'permission-storage',
       })),
-      decryptFromStorage: vi.fn().mockImplementation(async (encrypted) => {
-        return JSON.parse(encrypted.encrypted);
-      }),
+      decryptFromStorage: vi.fn().mockImplementation(async (encrypted) => ({
+        data: JSON.parse(
+          Buffer.from(encrypted.payload.ciphertextHex, 'hex').toString()
+        ),
+        senderAddress: testUserAddress,
+      })),
     } as any;
 
     storage = new PermissionStorage(
@@ -68,9 +106,9 @@ describe('PermissionStorage', () => {
       await storage.save(permission);
 
       expect(mockEncryptionManager.encryptForStorage).toHaveBeenCalled();
-      expect(mockS5Client.fs.writeFile).toHaveBeenCalled();
+      expect(mockS5Client.fs.put).toHaveBeenCalled();
 
-      const writeCall = mockS5Client.fs.writeFile.mock.calls[0];
+      const writeCall = mockS5Client.fs.put.mock.calls[0];
       const path = writeCall[0];
       expect(path).toContain('home/permissions');
       expect(path).toContain(testUserAddress);
@@ -116,23 +154,22 @@ describe('PermissionStorage', () => {
   describe('load()', () => {
     it('should load permission from S5', async () => {
       const permission = createMockPermission();
-      const encryptedData = await mockEncryptionManager.encryptForStorage('key', permission);
 
-      mockS5Client.fs.readFile.mockResolvedValue(
-        new TextEncoder().encode(JSON.stringify(encryptedData))
-      );
+      // Save first to populate mock S5 storage
+      await storage.save(permission);
+
+      // Clear cache to force reload from S5
+      storage.clearCache();
 
       const loaded = await storage.load(testResourceId, testGranteeAddress);
 
       expect(loaded).toBeDefined();
       expect(loaded?.id).toBe(permission.id);
-      expect(mockS5Client.fs.readFile).toHaveBeenCalled();
     });
 
     it('should return null if permission not found', async () => {
-      mockS5Client.fs.readFile.mockRejectedValue(new Error('not found'));
-
-      const loaded = await storage.load(testResourceId, testGranteeAddress);
+      // Empty mock storage - get() will return null
+      const loaded = await storage.load(testResourceId, 'nonexistent-address');
 
       expect(loaded).toBeNull();
     });
@@ -142,24 +179,22 @@ describe('PermissionStorage', () => {
       await storage.save(permission);
 
       // Reset mock to verify it's not called again
-      mockS5Client.fs.readFile.mockClear();
+      mockS5Client.fs.get.mockClear();
 
       const loaded = await storage.load(testResourceId, testGranteeAddress);
 
       expect(loaded).toBeDefined();
-      expect(mockS5Client.fs.readFile).not.toHaveBeenCalled();
+      expect(mockS5Client.fs.get).not.toHaveBeenCalled();
     });
 
     it('should convert date strings to Date objects', async () => {
       const permission = createMockPermission();
-      const encryptedData = await mockEncryptionManager.encryptForStorage('key', {
-        ...permission,
-        grantedAt: permission.grantedAt.toISOString(), // Simulate JSON string
-      });
 
-      mockS5Client.fs.readFile.mockResolvedValue(
-        new TextEncoder().encode(JSON.stringify(encryptedData))
-      );
+      // Save permission
+      await storage.save(permission);
+
+      // Clear cache and reload
+      storage.clearCache();
 
       const loaded = await storage.load(testResourceId, testGranteeAddress);
 
@@ -172,25 +207,15 @@ describe('PermissionStorage', () => {
       const grantee1 = '0x1111111111111111111111111111111111111111';
       const grantee2 = '0x2222222222222222222222222222222222222222';
 
-      mockS5Client.fs.readdir.mockResolvedValue([
-        { name: `${grantee1}.json`, type: 1 },
-        { name: `${grantee2}.json`, type: 1 },
-      ]);
-
       const perm1 = createMockPermission({ grantedTo: grantee1 });
       const perm2 = createMockPermission({ grantedTo: grantee2 });
 
-      mockS5Client.fs.readFile
-        .mockResolvedValueOnce(
-          new TextEncoder().encode(JSON.stringify(
-            await mockEncryptionManager.encryptForStorage('key', perm1)
-          ))
-        )
-        .mockResolvedValueOnce(
-          new TextEncoder().encode(JSON.stringify(
-            await mockEncryptionManager.encryptForStorage('key', perm2)
-          ))
-        );
+      // Save permissions first (populates mock S5 storage)
+      await storage.save(perm1);
+      await storage.save(perm2);
+
+      // Clear cache to force reload from mock S5
+      storage.clearCache();
 
       const permissions = await storage.loadAll(testResourceId);
 
@@ -200,8 +225,7 @@ describe('PermissionStorage', () => {
     });
 
     it('should return empty array if resource has no permissions', async () => {
-      mockS5Client.fs.readdir.mockRejectedValue(new Error('not found'));
-
+      // Empty mock storage - list() will yield nothing
       const permissions = await storage.loadAll(testResourceId);
 
       expect(permissions).toEqual([]);
@@ -211,25 +235,15 @@ describe('PermissionStorage', () => {
       const grantee1 = '0x1111111111111111111111111111111111111111';
       const grantee2 = '0x2222222222222222222222222222222222222222';
 
-      mockS5Client.fs.readdir.mockResolvedValue([
-        { name: `${grantee1}.json`, type: 1 },
-        { name: `${grantee2}.json`, type: 1 },
-      ]);
-
       const perm1 = createMockPermission({ grantedTo: grantee1, deleted: true });
       const perm2 = createMockPermission({ grantedTo: grantee2, deleted: false });
 
-      mockS5Client.fs.readFile
-        .mockResolvedValueOnce(
-          new TextEncoder().encode(JSON.stringify(
-            await mockEncryptionManager.encryptForStorage('key', perm1)
-          ))
-        )
-        .mockResolvedValueOnce(
-          new TextEncoder().encode(JSON.stringify(
-            await mockEncryptionManager.encryptForStorage('key', perm2)
-          ))
-        );
+      // Save permissions first
+      await storage.save(perm1);
+      await storage.save(perm2);
+
+      // Clear cache to force reload
+      storage.clearCache();
 
       const permissions = await storage.loadAll(testResourceId);
 
@@ -241,20 +255,25 @@ describe('PermissionStorage', () => {
       const grantee1 = '0x1111111111111111111111111111111111111111';
       const grantee2 = '0x2222222222222222222222222222222222222222';
 
-      mockS5Client.fs.readdir.mockResolvedValue([
-        { name: `${grantee1}.json`, type: 1 },
-        { name: `${grantee2}.json`, type: 1 },
-      ]);
-
+      const perm1 = createMockPermission({ grantedTo: grantee1 });
       const perm2 = createMockPermission({ grantedTo: grantee2 });
 
-      mockS5Client.fs.readFile
-        .mockRejectedValueOnce(new Error('corrupt data'))
-        .mockResolvedValueOnce(
-          new TextEncoder().encode(JSON.stringify(
-            await mockEncryptionManager.encryptForStorage('key', perm2)
-          ))
-        );
+      // Save perm1
+      await storage.save(perm1);
+
+      // Make get() throw error for perm1, but work for perm2
+      mockS5Client.fs.get
+        .mockImplementationOnce(async () => { throw new Error('corrupt data'); })
+        .mockImplementationOnce(async (path) => {
+          // For perm2, return encrypted data
+          return await mockEncryptionManager.encryptForStorage('key', perm2);
+        });
+
+      // Save perm2
+      await storage.save(perm2);
+
+      // Clear cache to force reload
+      storage.clearCache();
 
       const permissions = await storage.loadAll(testResourceId);
 
@@ -270,8 +289,8 @@ describe('PermissionStorage', () => {
 
       await storage.delete(testResourceId, testGranteeAddress);
 
-      expect(mockS5Client.fs.deleteFile).toHaveBeenCalled();
-      const deleteCall = mockS5Client.fs.deleteFile.mock.calls[0];
+      expect(mockS5Client.fs.delete).toHaveBeenCalled();
+      const deleteCall = mockS5Client.fs.delete.mock.calls[0];
       expect(deleteCall[0]).toContain(testResourceId);
       expect(deleteCall[0]).toContain(testGranteeAddress);
     });
@@ -287,7 +306,7 @@ describe('PermissionStorage', () => {
     });
 
     it('should not throw if permission does not exist', async () => {
-      mockS5Client.fs.deleteFile.mockRejectedValue(new Error('not found'));
+      mockS5Client.fs.delete.mockRejectedValue(new Error('not found'));
 
       await expect(
         storage.delete(testResourceId, testGranteeAddress)
@@ -317,36 +336,32 @@ describe('PermissionStorage', () => {
       const grantee1 = '0x1111111111111111111111111111111111111111';
       const grantee2 = '0x2222222222222222222222222222222222222222';
 
+      // Save permissions first (populates mock S5 storage)
       await storage.save(createMockPermission({ grantedTo: grantee1 }));
       await storage.save(createMockPermission({ grantedTo: grantee2 }));
 
-      mockS5Client.fs.readdir.mockResolvedValue([
-        { name: `${grantee1}.json`, type: 1 },
-        { name: `${grantee2}.json`, type: 1 },
-      ]);
-
+      // deleteByResource will use list() async iterator
       await storage.deleteByResource(testResourceId);
 
-      expect(mockS5Client.fs.deleteFile).toHaveBeenCalledTimes(2);
+      expect(mockS5Client.fs.delete).toHaveBeenCalledTimes(2);
     });
 
     it('should clear cache for resource', async () => {
       const grantee1 = '0x1111111111111111111111111111111111111111';
+
+      // Save permission first
       await storage.save(createMockPermission({ grantedTo: grantee1 }));
 
-      mockS5Client.fs.readdir.mockResolvedValue([
-        { name: `${grantee1}.json`, type: 1 },
-      ]);
-
+      // Delete all permissions for resource
       await storage.deleteByResource(testResourceId);
 
+      // Verify cache is cleared
       const cached = await storage.loadAll(testResourceId);
       expect(cached.length).toBe(0);
     });
 
     it('should not throw if resource has no permissions', async () => {
-      mockS5Client.fs.readdir.mockRejectedValue(new Error('not found'));
-
+      // Empty mock storage - list() will yield nothing
       await expect(
         storage.deleteByResource(testResourceId)
       ).resolves.not.toThrow();
@@ -368,7 +383,7 @@ describe('PermissionStorage', () => {
       const permission = createMockPermission();
       const encryptedData = await mockEncryptionManager.encryptForStorage('key', permission);
 
-      mockS5Client.fs.readFile.mockResolvedValue(
+      mockS5Client.fs.get.mockResolvedValue(
         new TextEncoder().encode(JSON.stringify(encryptedData))
       );
 
@@ -381,20 +396,20 @@ describe('PermissionStorage', () => {
   describe('Caching', () => {
     it('should cache permissions after loading', async () => {
       const permission = createMockPermission();
-      const encryptedData = await mockEncryptionManager.encryptForStorage('key', permission);
 
-      mockS5Client.fs.readFile.mockResolvedValue(
-        new TextEncoder().encode(JSON.stringify(encryptedData))
-      );
+      // Save permission first
+      await storage.save(permission);
 
+      // Load once (will populate cache from S5)
+      storage.clearCache(); // Clear save cache
       await storage.load(testResourceId, testGranteeAddress);
 
       // Load again - should use cache
-      mockS5Client.fs.readFile.mockClear();
+      mockS5Client.fs.get.mockClear();
       const loaded = await storage.load(testResourceId, testGranteeAddress);
 
       expect(loaded).toBeDefined();
-      expect(mockS5Client.fs.readFile).not.toHaveBeenCalled();
+      expect(mockS5Client.fs.get).not.toHaveBeenCalled();
     });
 
     it('should clear cache when requested', async () => {
@@ -420,7 +435,7 @@ describe('PermissionStorage', () => {
 
   describe('Error handling', () => {
     it('should handle S5 write errors gracefully', async () => {
-      mockS5Client.fs.writeFile.mockRejectedValue(new Error('Network error'));
+      mockS5Client.fs.put.mockRejectedValue(new Error('Network error'));
 
       await expect(
         storage.save(createMockPermission())
@@ -428,7 +443,7 @@ describe('PermissionStorage', () => {
     });
 
     it('should handle S5 read errors gracefully', async () => {
-      mockS5Client.fs.readFile.mockRejectedValue(new Error('Network error'));
+      mockS5Client.fs.get.mockRejectedValue(new Error('Network error'));
 
       const loaded = await storage.load(testResourceId, testGranteeAddress);
 
@@ -436,7 +451,7 @@ describe('PermissionStorage', () => {
     });
 
     it('should handle corrupt data gracefully', async () => {
-      mockS5Client.fs.readFile.mockResolvedValue(
+      mockS5Client.fs.get.mockResolvedValue(
         new TextEncoder().encode('invalid json data')
       );
 
@@ -487,17 +502,14 @@ describe('PermissionStorage', () => {
         `0x${i.toString().padStart(40, '0')}`
       );
 
-      mockS5Client.fs.readdir.mockResolvedValue(
-        grantees.map(addr => ({ name: `${addr}.json`, type: 1 }))
-      );
-
+      // Save 50 permissions first (populates mock S5 storage)
       for (const grantee of grantees) {
         const perm = createMockPermission({ grantedTo: grantee });
-        const encrypted = await mockEncryptionManager.encryptForStorage('key', perm);
-        mockS5Client.fs.readFile.mockResolvedValueOnce(
-          new TextEncoder().encode(JSON.stringify(encrypted))
-        );
+        await storage.save(perm);
       }
+
+      // Clear cache to force reload from mock S5
+      storage.clearCache();
 
       const start = Date.now();
       const permissions = await storage.loadAll(testResourceId);
