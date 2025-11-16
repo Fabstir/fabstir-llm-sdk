@@ -8,11 +8,13 @@ import { useSDK } from './use-sdk';
 export interface DatabaseMetadata {
   name: string;
   description?: string;
-  vectorCount: number;
+  vectorCount: number;  // Count of vectors from ready documents only
   storageSizeBytes: number;
   lastAccessed: number;
   createdAt?: number;
   dimensions?: number;
+  pendingDocuments?: DocumentMetadata[];  // Documents awaiting embeddings
+  readyDocuments?: DocumentMetadata[];     // Documents with embeddings complete
 }
 
 export interface Vector {
@@ -30,6 +32,33 @@ export interface SearchResult {
 export interface FolderStats {
   totalFiles: number;
   totalSize: number;
+}
+
+export interface DocumentMetadata {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  fileType: string;
+  folderPath: string;
+  s5Cid: string;  // S5 storage CID for document content
+  createdAt: number;
+  embeddingStatus: 'pending' | 'processing' | 'ready' | 'failed';
+  embeddingProgress?: number;  // 0-100 percentage
+  embeddingError?: string;
+  vectorCount?: number;
+  lastEmbeddingAttempt?: number;
+}
+
+export interface EmbeddingProgress {
+  sessionId: string;
+  databaseName: string;
+  documentId: string;
+  fileName: string;
+  totalChunks: number;
+  processedChunks: number;
+  percentage: number;
+  status: 'pending' | 'processing' | 'complete' | 'failed';
+  error?: string;
 }
 
 /**
