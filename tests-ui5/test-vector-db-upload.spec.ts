@@ -337,8 +337,25 @@ test.describe('Vector Database - Upload Files', () => {
 
     if (bothFilesFound) {
       // DEFERRED EMBEDDINGS: Verify both files show "Pending Embeddings" badge
-      const pendingBadges = page.locator('text=/Pending.*Embedding/i, [class*="pending"], [class*="badge"]').filter({ hasText: /pending/i });
-      const badgeCount = await pendingBadges.count();
+      const pendingBadgeSelectors = [
+        page.locator('text=/Pending.*Embedding/i'),
+        page.locator('[class*="pending"]').filter({ hasText: /embedding/i }),
+        page.locator('[class*="badge"]').filter({ hasText: /pending/i })
+      ];
+
+      let badgeCount = 0;
+      for (const selector of pendingBadgeSelectors) {
+        try {
+          const count = await selector.count();
+          if (count > 0) {
+            badgeCount = count;
+            break;
+          }
+        } catch (e) {
+          // Try next selector
+        }
+      }
+
       if (badgeCount >= 2) {
         console.log('[Test] ✅ Both files show "Pending Embeddings" badge');
       } else {

@@ -366,9 +366,12 @@ export function useVectorDatabases() {
       // Save updated metadata to S5
       await s5.fs.put(metadataPath, metadata);
 
-      await fetchDatabases(); // Refresh to update UI
+      // NOTE: Caller must handle UI updates optimistically to avoid S5 P2P propagation delay.
+      // Do NOT call fetchDatabases() here - it reads from S5 immediately after write,
+      // which returns stale data due to P2P network propagation time.
+      // See: /workspace/tests-ui5/S5_WRITE_READ_ANTI_PATTERN_AUDIT.md
     },
-    [managers, fetchDatabases]
+    [managers]
   );
 
   const getVectors = useCallback(
@@ -397,9 +400,13 @@ export function useVectorDatabases() {
 
       const vectorRAGManager = managers.vectorRAGManager;
       await vectorRAGManager.deleteVector(databaseName, vectorId);
-      await fetchDatabases(); // Refresh to update stats
+
+      // NOTE: Caller must handle UI updates optimistically to avoid S5 P2P propagation delay.
+      // Do NOT call fetchDatabases() here - it reads from S5 immediately after write,
+      // which returns stale data due to P2P network propagation time.
+      // See: /workspace/tests-ui5/S5_WRITE_READ_ANTI_PATTERN_AUDIT.md
     },
-    [managers, fetchDatabases]
+    [managers]
   );
 
   // Search operations
