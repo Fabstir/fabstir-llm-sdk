@@ -114,30 +114,30 @@ Background Processing:
 **Goal**: Extend existing metadata structures to support deferred embeddings
 
 #### Sub-phase 1.1: Update DocumentMetadata Interface
-- [ ] Add `embeddingStatus` field to `DocumentMetadata` interface
-- [ ] Add `embeddingProgress` field (0-100 percentage)
-- [ ] Add `embeddingError` field for failed embeddings
-- [ ] Add `lastEmbeddingAttempt` timestamp
-- [ ] Add `s5Cid` field for document content storage
-- [ ] **File**: `/workspace/apps/ui5/hooks/use-vector-databases.ts` (lines 1-30)
-- [ ] **Test**: TypeScript compiles without errors
+- [x] Add `embeddingStatus` field to `DocumentMetadata` interface
+- [x] Add `embeddingProgress` field (0-100 percentage)
+- [x] Add `embeddingError` field for failed embeddings
+- [x] Add `lastEmbeddingAttempt` timestamp
+- [x] Add `s5Cid` field for document content storage
+- [x] **File**: `/workspace/apps/ui5/hooks/use-vector-databases.ts` (lines 1-30)
+- [x] **Test**: TypeScript compiles without errors
 
 #### Sub-phase 1.2: Update VectorDatabaseMetadata Interface
-- [ ] Split documents into `pendingDocuments[]` and `readyDocuments[]`
-- [ ] Update `vectorCount` to reflect only ready documents
-- [ ] **File**: `/workspace/apps/ui5/hooks/use-vector-databases.ts` (lines 1-30)
-- [ ] **Test**: Existing databases load correctly with migration logic
+- [x] Split documents into `pendingDocuments[]` and `readyDocuments[]`
+- [x] Update `vectorCount` to reflect only ready documents
+- [x] **File**: `/workspace/apps/ui5/hooks/use-vector-databases.ts` (lines 1-30)
+- [x] **Test**: Existing databases load correctly with migration logic
 
 #### Sub-phase 1.3: Create EmbeddingProgress Interface
-- [ ] Define `EmbeddingProgress` interface for real-time updates
-- [ ] Add fields: `sessionId`, `databaseName`, `documentId`, `fileName`, `totalChunks`, `processedChunks`, `percentage`, `status`, `error`
-- [ ] **File**: `/workspace/apps/ui5/hooks/use-vector-databases.ts` (lines 1-30)
-- [ ] **Test**: TypeScript compiles without errors
+- [x] Define `EmbeddingProgress` interface for real-time updates
+- [x] Add fields: `sessionId`, `databaseName`, `documentId`, `fileName`, `totalChunks`, `processedChunks`, `percentage`, `status`, `error`
+- [x] **File**: `/workspace/apps/ui5/hooks/use-vector-databases.ts` (lines 1-30)
+- [x] **Test**: TypeScript compiles without errors
 
 **Acceptance Criteria**:
 - [x] All interfaces defined with correct types
-- [ ] No breaking changes to existing code
-- [ ] TypeScript compiles without errors
+- [x] No breaking changes to existing code
+- [x] TypeScript compiles without errors
 
 ---
 
