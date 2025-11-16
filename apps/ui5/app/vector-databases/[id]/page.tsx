@@ -315,14 +315,22 @@ export default function VectorDatabaseDetailPage() {
         await addPendingDocument(databaseName, docMetadata);
 
         console.log(`[Page] ✅ Document metadata saved with status: pending`);
+        // Optimistically update local state (don't wait for S5 P2P propagation)
+        setDatabase(prevDb => {
+          if (!prevDb) return prevDb;
+          return {
+            ...prevDb,
+            pendingDocuments: [...(prevDb.pendingDocuments || []), docMetadata]
+          };
+        });
+
       } catch (error) {
         console.error(`[Page] ❌ Failed to upload ${file.name}:`, error);
       }
     }
 
-    // Reload data to show new documents with "pending embeddings" badge
-    await loadData();
-    console.log('[Page] ✅ DEFERRED EMBEDDINGS: Upload complete - documents shown with "pending" status');
+    console.log('[Page] ✅ DEFERRED EMBEDDINGS: Upload complete - documents shown with "pending" status (optimistic UI update)');
+    // Note: S5 will sync in background. Don't call loadData() immediately as P2P network needs time to propagate.
   };
 
   // Vector search handler
