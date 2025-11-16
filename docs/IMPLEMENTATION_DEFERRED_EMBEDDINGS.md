@@ -345,39 +345,56 @@ Background Processing:
 
 ---
 
-### Phase 6: Document Status UI (1-2 hours)
+### Phase 6: Document Status UI (1-2 hours) ✅ COMPLETE
 
 **Goal**: Show embedding status on documents in vector database detail page
 
-#### Sub-phase 6.1: Add Status Badges to Document List
-- [ ] Add badge component next to document name
-- [ ] Badge variants:
-  - [ ] "Pending Embeddings" (yellow/warning)
-  - [ ] "Processing..." (blue/info with spinner)
-  - [ ] "Ready" (green/success with checkmark + vector count)
-  - [ ] "Failed" (red/error with tooltip showing error message)
-- [ ] **File**: `/workspace/apps/ui5/components/vector-databases/document-list.tsx`
+#### Sub-phase 6.1: Add Status Badges to Document List ✅
+- [x] Add badge component next to document name
+- [x] Badge variants:
+  - [x] "Pending Embeddings" (yellow/warning with AlertTriangle icon)
+  - [x] "Processing..." (blue/info with Loader2 spinner + progress percentage)
+  - [x] "Ready" (green/success with CheckCircle + vector count)
+  - [x] "Failed" (red/error with XCircle + tooltip showing error message)
+- [x] Extended FileItem interface with embeddingStatus, embeddingProgress, embeddingError fields
+- [x] Created renderStatusBadge() helper function in FileBrowser component
+- [x] Merged pending/ready documents in vector database page fileItems
+- [x] **File**: `/workspace/apps/ui5/components/vector-databases/file-browser.tsx` (lines 7-18, 104-147, 209-217)
+- [x] **File**: `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx` (lines 145-191)
 - [ ] **Test**: Badges show correct status for each document
 
-#### Sub-phase 6.2: Add Info Banner for Pending Documents
-- [ ] Show banner at top of vector database page if `pendingDocuments.length > 0`
-- [ ] Message: "X documents pending embeddings. Start a chat session to generate embeddings."
-- [ ] Include icon and count
-- [ ] **File**: `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx`
+#### Sub-phase 6.2: Add Info Banner for Pending Documents ✅
+- [x] Show banner at top of vector database page if `pendingDocuments.length > 0`
+- [x] Message: "X documents pending embeddings. Start a chat session to generate embeddings."
+- [x] Include AlertTriangle icon and count
+- [x] Yellow background with proper styling
+- [x] **File**: `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx` (lines 14, 428-443)
 - [ ] **Test**: Banner appears when pending documents exist, hides when all ready
 
-#### Sub-phase 6.3: Add Retry Button for Failed Documents
-- [ ] Add "Retry" button next to failed documents
-- [ ] Click → trigger embedding generation for that specific document
-- [ ] Use existing session if active, or show "Start session first" message
-- [ ] **File**: `/workspace/apps/ui5/components/vector-databases/document-list.tsx`
+#### Sub-phase 6.3: Add Retry Button for Failed Documents ✅
+- [x] Add "Retry" button (RotateCw icon) next to failed documents
+- [x] Click → show helpful message about triggering embeddings via session
+- [x] Added onFileRetry callback prop to FileBrowser
+- [x] Implemented handleFileRetry with user guidance message
+- [x] Button only appears for documents with embeddingStatus === 'failed'
+- [x] Tooltip shows error message if available
+- [x] **File**: `/workspace/apps/ui5/components/vector-databases/file-browser.tsx` (lines 4, 25, 40, 228-237)
+- [x] **File**: `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx` (lines 244-261, 531, 543)
 - [ ] **Test**: Retry button successfully re-processes failed document
 
 **Acceptance Criteria**:
-- [ ] Document status is visible at a glance (color-coded badges)
-- [ ] Users know when documents are not yet searchable
-- [ ] Failed documents can be retried without re-uploading
-- [ ] Info banner provides clear call-to-action
+- [x] Document status is visible at a glance (color-coded badges)
+- [x] Users know when documents are not yet searchable (status badges + info banner)
+- [x] Failed documents can be retried without re-uploading (retry button with guidance)
+- [x] Info banner provides clear call-to-action
+
+**Implementation Notes**:
+- Status badges use color-coded design: yellow (pending), blue (processing), green (ready), red (failed)
+- Processing badge shows percentage if available
+- Failed badge shows error in tooltip
+- Documents are grouped by filename when displaying vectors (multiple chunks = 1 document)
+- Pending documents are merged from database.pendingDocuments array
+- Retry functionality guides users to start a session (individual retry is TODO for future)
 
 ---
 

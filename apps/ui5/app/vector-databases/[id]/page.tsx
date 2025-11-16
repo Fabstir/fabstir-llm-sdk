@@ -11,7 +11,7 @@ import { FolderActions } from '@/components/vector-databases/folder-actions';
 import { FileDetailsModal } from '@/components/vector-databases/file-details-modal';
 import { UploadDocumentModal } from '@/components/vector-databases/upload-document-modal';
 import { VectorSearchPanel, SearchResult } from '@/components/vector-databases/vector-search-panel';
-import { Database, ArrowLeft, Upload, FolderPlus } from 'lucide-react';
+import { Database, ArrowLeft, Upload, FolderPlus, AlertTriangle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
 /**
@@ -142,17 +142,53 @@ export default function VectorDatabaseDetailPage() {
     return rootFolders;
   }, [foldersWithCounts, database?.folderStructure]);
 
-  // Convert vectors to FileItem format
+  // Convert vectors + pending/ready documents to FileItem format (Sub-phase 6.1)
   const fileItems = useMemo((): FileItem[] => {
-    return vectors.map((vector) => ({
-      id: vector.id,
-      name: vector.metadata?.fileName || vector.id,
-      size: vector.vector.length * 4, // 4 bytes per float
-      uploaded: vector.metadata?.createdAt || Date.now(),
-      folderPath: vector.metadata?.folderPath || '/',
-      vectorCount: 1, // Each file is one vector (or chunk)
-    }));
-  }, [vectors]);
+    const items: FileItem[] = [];
+
+    // Add ready documents from vectors
+    const vectorsByDoc = new Map<string, Vector[]>();
+    vectors.forEach((vector) => {
+      const fileName = vector.metadata?.fileName || vector.id;
+      if (!vectorsByDoc.has(fileName)) {
+        vectorsByDoc.set(fileName, []);
+      }
+      vectorsByDoc.get(fileName)!.push(vector);
+    });
+
+    // Create FileItems from grouped vectors (ready documents)
+    vectorsByDoc.forEach((docVectors, fileName) => {
+      const firstVector = docVectors[0];
+      items.push({
+        id: firstVector.id,
+        name: fileName,
+        size: docVectors.reduce((sum, v) => sum + v.values.length * 4, 0),
+        uploaded: firstVector.metadata?.createdAt || Date.now(),
+        folderPath: firstVector.metadata?.folderPath || '/',
+        vectorCount: docVectors.length,
+        embeddingStatus: 'ready',
+      });
+    });
+
+    // Add pending documents from database metadata
+    if (database?.pendingDocuments) {
+      database.pendingDocuments.forEach((doc: any) => {
+        items.push({
+          id: doc.id,
+          name: doc.fileName,
+          size: doc.fileSize || 0,
+          uploaded: doc.createdAt || Date.now(),
+          folderPath: doc.folderPath || '/',
+          vectorCount: 0,
+          embeddingStatus: doc.embeddingStatus || 'pending',
+          embeddingProgress: doc.embeddingProgress,
+          embeddingError: doc.embeddingError,
+        });
+      });
+    }
+
+    return items;
+  }, [vectors, database]);
 
   const handleDeleteVector = async (vectorId: string) => {
     try {
@@ -203,6 +239,25 @@ export default function VectorDatabaseDetailPage() {
   // File handlers
   const handleFileClick = (file: FileItem) => {
     setSelectedFile(file);
+  };
+
+  // Sub-phase 6.3: Retry failed document embedding
+  const handleFileRetry = async (file: FileItem) => {
+    // Show message - actual retry logic would require an active session
+    alert(
+      `Retry embedding for "${file.name}"?\n\n` +
+      `To regenerate embeddings for this document:\n` +
+      `1. Start a chat session in a linked session group\n` +
+      `2. Embeddings will be generated automatically for all pending/failed documents\n\n` +
+      `Note: Individual document retry will be available in future updates.`
+    );
+
+    // TODO: In future, implement single-document retry
+    // This would require:
+    // 1. Active session check (if no session, show "Start session first" message)
+    // 2. Reset document status to 'pending'
+    // 3. Trigger embedding generation for this specific document
+    // 4. Update progress UI
   };
 
   const handleFileDelete = async (fileId: string) => {
@@ -389,6 +444,23 @@ export default function VectorDatabaseDetailPage() {
         </div>
       </div>
 
+      {/* Sub-phase 6.2: Info Banner for Pending Documents */}
+      {database.pendingDocuments && database.pendingDocuments.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-yellow-900 mb-1">
+                {database.pendingDocuments.length} {database.pendingDocuments.length === 1 ? 'document' : 'documents'} pending embeddings
+              </h3>
+              <p className="text-sm text-yellow-800">
+                Start a chat session to generate embeddings for these documents and enable semantic search.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Vector Search Panel */}
       <VectorSearchPanel
         databaseName={database.databaseName}
@@ -456,6 +528,7 @@ export default function VectorDatabaseDetailPage() {
                 currentPath={selectedPath}
                 onFileClick={handleFileClick}
                 onFileDelete={handleFileDelete}
+                onFileRetry={handleFileRetry}
               />
             </div>
           </div>
@@ -467,6 +540,7 @@ export default function VectorDatabaseDetailPage() {
               currentPath="/"
               onFileClick={handleFileClick}
               onFileDelete={handleFileDelete}
+              onFileRetry={handleFileRetry}
             />
           </div>
         )}

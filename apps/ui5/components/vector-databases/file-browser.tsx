@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Search, FileText, Trash2, Info, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, FileText, Trash2, Info, ChevronLeft, ChevronRight, Loader2, CheckCircle, XCircle, AlertTriangle, RotateCw } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
 export interface FileItem {
@@ -11,6 +11,10 @@ export interface FileItem {
   uploaded: number;
   folderPath: string;
   vectorCount?: number;
+  // Sub-phase 6.1: Embedding status fields
+  embeddingStatus?: 'pending' | 'processing' | 'ready' | 'failed';
+  embeddingProgress?: number; // 0-100
+  embeddingError?: string;
 }
 
 interface FileBrowserProps {
@@ -18,6 +22,7 @@ interface FileBrowserProps {
   currentPath: string;
   onFileClick?: (file: FileItem) => void;
   onFileDelete?: (fileId: string) => void;
+  onFileRetry?: (file: FileItem) => void; // Sub-phase 6.3: Retry failed embeddings
 }
 
 type SortField = 'name' | 'size' | 'uploaded';
@@ -32,7 +37,7 @@ type SortDirection = 'asc' | 'desc';
  * - Pagination (20 items per page)
  * - File actions (view details, delete)
  */
-export function FileBrowser({ files, currentPath, onFileClick, onFileDelete }: FileBrowserProps) {
+export function FileBrowser({ files, currentPath, onFileClick, onFileDelete, onFileRetry }: FileBrowserProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('uploaded');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -97,6 +102,51 @@ export function FileBrowser({ files, currentPath, onFileClick, onFileDelete }: F
     return `${Math.round(bytes / Math.pow(k, i) * 100) / 100} ${sizes[i]}`;
   };
 
+  // Sub-phase 6.1: Render status badge for document embedding status
+  const renderStatusBadge = (file: FileItem) => {
+    if (!file.embeddingStatus || file.embeddingStatus === 'ready') {
+      // Ready documents show vector count badge
+      if (file.vectorCount && file.vectorCount > 0) {
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+            <CheckCircle className="h-3 w-3" />
+            {file.vectorCount} vectors
+          </span>
+        );
+      }
+      return null;
+    }
+
+    switch (file.embeddingStatus) {
+      case 'pending':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+            <AlertTriangle className="h-3 w-3" />
+            Pending Embeddings
+          </span>
+        );
+      case 'processing':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Processing... {file.embeddingProgress ? `${file.embeddingProgress}%` : ''}
+          </span>
+        );
+      case 'failed':
+        return (
+          <span
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 cursor-help"
+            title={file.embeddingError || 'Embedding generation failed'}
+          >
+            <XCircle className="h-3 w-3" />
+            Failed
+          </span>
+        );
+      default:
+        return null;
+    }
+  };
+
   const getSortIcon = (field: SortField) => {
     if (sortField !== field) return null;
     return sortDirection === 'asc' ? '↑' : '↓';
@@ -158,10 +208,13 @@ export function FileBrowser({ files, currentPath, onFileClick, onFileDelete }: F
             <tbody className="bg-white divide-y divide-gray-200">
               {paginatedFiles.map((file) => (
                 <tr key={file.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 whitespace-nowrap">
+                  <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-gray-400" />
-                      <span className="text-sm text-gray-900">{file.name}</span>
+                      <FileText className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                      <div className="flex flex-col gap-1 min-w-0">
+                        <span className="text-sm text-gray-900">{file.name}</span>
+                        {renderStatusBadge(file)}
+                      </div>
                     </div>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
@@ -172,6 +225,16 @@ export function FileBrowser({ files, currentPath, onFileClick, onFileDelete }: F
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
                     <div className="flex items-center justify-end gap-2">
+                      {/* Sub-phase 6.3: Retry button for failed documents */}
+                      {file.embeddingStatus === 'failed' && onFileRetry && (
+                        <button
+                          onClick={() => onFileRetry(file)}
+                          className="p-1 rounded hover:bg-yellow-50 transition-colors"
+                          title={`Retry embedding generation${file.embeddingError ? ': ' + file.embeddingError : ''}`}
+                        >
+                          <RotateCw className="h-4 w-4 text-yellow-600" />
+                        </button>
+                      )}
                       {onFileClick && (
                         <button
                           onClick={() => onFileClick(file)}
