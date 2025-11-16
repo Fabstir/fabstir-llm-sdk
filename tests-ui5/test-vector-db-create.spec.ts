@@ -11,8 +11,9 @@
 import { test, expect, TEST_CONFIG } from './lib/test-setup';
 
 test.describe.serial('Vector Database - Create', () => {
-  // Shared wallet address for both tests (to persist database between tests)
+  // Shared state for both tests (to persist database between tests)
   let sharedWalletAddress: string;
+  let sharedDatabaseName: string;
 
   test('should create a new vector database with blockchain transaction', async ({ page, testWallet }) => {
     // Increase timeout for S5 storage operations (can take 60-90 seconds)
@@ -20,8 +21,10 @@ test.describe.serial('Vector Database - Create', () => {
     console.log('[Test] Starting vector database creation test');
     console.log('[Test] Test wallet:', testWallet.getAddress());
 
-    // Save wallet address for Test 2
+    // Save wallet address and generate unique database name for both tests
     sharedWalletAddress = testWallet.getAddress();
+    sharedDatabaseName = `Test-DB-${Date.now()}`;
+    console.log('[Test] Unique database name:', sharedDatabaseName);
 
     // Capture console errors and logs
     const consoleMessages: string[] = [];
@@ -68,35 +71,7 @@ test.describe.serial('Vector Database - Create', () => {
     // Take screenshot of initial state
     await page.screenshot({ path: 'test-results/vector-db-list-initial.png' });
 
-    // CLEANUP: Delete "Test Database 1" if it already exists from a previous test run
-    const existingDatabase = page.locator('text=Test Database 1').first();
-    const databaseExists = await existingDatabase.count() > 0;
-
-    if (databaseExists) {
-      console.log('[Test] 🧹 Cleaning up existing "Test Database 1" from previous run...');
-
-      // Set up dialog handler BEFORE clicking delete
-      page.once('dialog', async dialog => {
-        console.log('[Test] Confirmation dialog:', dialog.message());
-        await dialog.accept();
-        console.log('[Test] Accepted deletion confirmation');
-      });
-
-      // Find the database card containing "Test Database 1"
-      const databaseCard = page.locator('a:has-text("Test Database 1")').first();
-
-      // Find and click the delete button within that card
-      // The delete button is a trash icon button
-      const deleteButton = databaseCard.locator('button[title="Delete database"]');
-      await deleteButton.click();
-      console.log('[Test] Clicked delete button');
-
-      // Wait for database to be removed from the list
-      await page.waitForTimeout(2000);
-      console.log('[Test] ✅ Cleanup complete');
-    } else {
-      console.log('[Test] No existing "Test Database 1" found, skipping cleanup');
-    }
+    // No cleanup needed - using unique database name
 
     // Check if there's a "+ Create Database" or "New Database" button
     const createButton = page.locator('button:has-text("Create Database"), button:has-text("New Database"), a:has-text("New Database")').first();
@@ -129,8 +104,8 @@ test.describe.serial('Vector Database - Create', () => {
     // Fill in database name (use ID selector for specificity)
     const nameInput = page.locator('#name');
     await nameInput.waitFor({ timeout: 5000 });
-    await nameInput.fill('Test Database 1');
-    console.log('[Test] Filled database name');
+    await nameInput.fill(sharedDatabaseName);
+    console.log('[Test] Filled database name:', sharedDatabaseName);
 
     // Fill in description (use ID selector for specificity)
     const descriptionInput = page.locator('#description');
@@ -235,10 +210,10 @@ test.describe.serial('Vector Database - Create', () => {
       await page.waitForTimeout(1000);
     }
 
-    // Check if "Test Database 1" appears on the page
-    const databaseCard = page.locator('text=Test Database 1');
+    // Check if database appears on the page
+    const databaseCard = page.locator(`text=${sharedDatabaseName}`);
     await expect(databaseCard).toBeVisible({ timeout: 5000 });
-    console.log('[Test] ✅ Database appears in list');
+    console.log('[Test] ✅ Database appears in list:', sharedDatabaseName);
 
     // Check for console errors (set up listener at start of test for complete capture)
     // Note: This captures errors after this point, should ideally be set up earlier
@@ -343,10 +318,10 @@ test.describe.serial('Vector Database - Create', () => {
       console.log('[Test] ⚠️ Empty state still visible after 60s - database may not have been created');
     }
 
-    // Verify "Test Database 1" exists
-    const databaseCard = page.locator('text=Test Database 1');
+    // Verify database exists (using shared name from Test 1)
+    const databaseCard = page.locator(`text=${sharedDatabaseName}`);
     await expect(databaseCard).toBeVisible({ timeout: 10000 });
-    console.log('[Test] ✅ Database found in list');
+    console.log('[Test] ✅ Database found in list:', sharedDatabaseName);
 
     // Take screenshot
     await page.screenshot({ path: 'test-results/vector-db-list-with-database.png' });

@@ -2406,6 +2406,485 @@ if (settings) {
 
 ---
 
+## 📄 Part 6: Deferred Embeddings Workflow
+
+**What is Deferred Embeddings?** A workflow where documents are uploaded to vector databases WITHOUT embeddings, then embeddings are generated later during an active session with a host. This improves UX by separating document upload (instant) from embedding generation (slow).
+
+### 6.1 Architecture Overview
+
+```
+User Flow:
+1. Upload document → S5 storage (instant, no blockchain)
+2. Document marked as "pending" in vector database
+3. User starts chat session with host
+4. Background: Generate embeddings via host's /v1/embed endpoint
+5. Progress bar shows real-time progress
+6. Document moves from "pending" to "ready" status
+7. Now searchable in RAG queries
+```
+
+**Key Benefits:**
+- ⚡ Instant uploads (no waiting for embeddings)
+- 📊 Real-time progress tracking
+- 🔄 Retry failed embeddings
+- 💰 Only pay for embeddings when needed (during session)
+- 🎯 Better UX: upload now, process later
+
+### 6.2 Document Upload with Pending Status
+
+```typescript
+// Component: /components/vector-databases/file-uploader.tsx
+import { useState } from 'react';
+import { useVectorDatabases } from '@/hooks/use-vector-databases';
+import { Button } from '@/components/ui/button';
+import { Upload } from 'lucide-react';
+
+export function FileUploader({ databaseName }: { databaseName: string }) {
+  const [uploading, setUploading] = useState(false);
+  const { uploadDocument } = useVectorDatabases();
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      // Upload file content to S5 storage
+      const fileContent = await file.text();
+
+      // Add document with "pending" status (no embeddings yet)
+      await uploadDocument(databaseName, {
+        id: `doc-${Date.now()}`,
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        content: fileContent,  // Raw text content
+        status: 'pending',     // Key: pending status
+        uploadedAt: Date.now()
+      });
+
+      toast.success(`${file.name} uploaded! Embeddings will be generated during next session.`);
+    } catch (error) {
+      toast.error(`Upload failed: ${error.message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div>
+      <input
+        type="file"
+        accept=".txt,.md,.pdf"
+        onChange={handleFileUpload}
+        className="hidden"
+        id="file-upload"
+      />
+      <label htmlFor="file-upload">
+        <Button asChild disabled={uploading}>
+          <span>
+            <Upload className="mr-2 h-4 w-4" />
+            {uploading ? 'Uploading...' : 'Upload Document'}
+          </span>
+        </Button>
+      </label>
+    </div>
+  );
+}
+```
+
+### 6.3 Progress Bar Integration
+
+```typescript
+// Component: /components/vector-databases/embedding-progress-bar.tsx
+import { useEffect, useState } from 'react';
+import { Progress } from '@/components/ui/progress';
+import { CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+
+interface EmbeddingProgressProps {
+  documentId: string;
+  fileName: string;
+  status: 'pending' | 'processing' | 'ready' | 'failed';
+  progress?: number;
+  errorMessage?: string;
+}
+
+export function EmbeddingProgressBar({
+  documentId,
+  fileName,
+  status,
+  progress = 0,
+  errorMessage
+}: EmbeddingProgressProps) {
+  return (
+    <div className="space-y-2 p-4 border rounded-lg">
+      {/* Header with status icon */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {status === 'processing' && (
+            <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+          )}
+          {status === 'ready' && (
+            <CheckCircle className="h-4 w-4 text-green-500" />
+          )}
+          {status === 'failed' && (
+            <AlertCircle className="h-4 w-4 text-red-500" />
+          )}
+          <span className="font-medium text-sm">{fileName}</span>
+        </div>
+        <span className="text-xs text-gray-500">
+          {status === 'pending' && 'Awaiting session'}
+          {status === 'processing' && `${progress}%`}
+          {status === 'ready' && 'Complete'}
+          {status === 'failed' && 'Failed'}
+        </span>
+      </div>
+
+      {/* Progress bar (only show when processing) */}
+      {status === 'processing' && (
+        <Progress value={progress} className="h-2" />
+      )}
+
+      {/* Error message */}
+      {status === 'failed' && errorMessage && (
+        <p className="text-xs text-red-600">{errorMessage}</p>
+      )}
+    </div>
+  );
+}
+```
+
+### 6.4 Background Embedding Generation
+
+```typescript
+// Hook: /hooks/use-embedding-generation.ts
+import { useState, useCallback } from 'react';
+import { useFabstirSDK } from './use-sdk';
+import { useVectorDatabases } from './use-vector-databases';
+
+export function useEmbeddingGeneration() {
+  const { sdk } = useFabstirSDK();
+  const { updateDocumentStatus } = useVectorDatabases();
+  const [processing, setProcessing] = useState(false);
+
+  const generateEmbeddingsForPendingDocuments = useCallback(
+    async (sessionId: bigint) => {
+      if (!sdk) {
+        throw new Error('SDK not initialized');
+      }
+
+      setProcessing(true);
+      try {
+        // 1. Get VectorRAGManager
+        const vectorRAGManager = sdk.getVectorRAGManager();
+
+        // 2. Get all pending documents
+        const pendingDocs = await vectorRAGManager.getPendingDocuments();
+        console.log(`Found ${pendingDocs.length} pending documents`);
+
+        // 3. Process each document
+        const sessionManager = sdk.getSessionManager();
+        for (const doc of pendingDocs) {
+          try {
+            // Update to processing status
+            await updateDocumentStatus(doc.id, 'processing', {
+              embeddingProgress: 0
+            });
+
+            // Generate embeddings via host's /v1/embed endpoint
+            const vectors = await sessionManager.generateEmbeddings(
+              sessionId,
+              doc.content,  // Raw document text
+              {
+                chunkSize: 512,
+                chunkOverlap: 50
+              }
+            );
+
+            // Update progress
+            await updateDocumentStatus(doc.id, 'processing', {
+              embeddingProgress: 50
+            });
+
+            // Add vectors to database
+            await vectorRAGManager.addVectors(doc.databaseName, vectors);
+
+            // Update to ready status
+            await updateDocumentStatus(doc.id, 'ready', {
+              vectorCount: vectors.length,
+              embeddingProgress: 100
+            });
+
+            console.log(`✅ ${doc.fileName}: ${vectors.length} vectors generated`);
+          } catch (error) {
+            // Update to failed status
+            await updateDocumentStatus(doc.id, 'failed', {
+              embeddingError: error.message
+            });
+            console.error(`❌ ${doc.fileName} failed:`, error);
+          }
+        }
+      } finally {
+        setProcessing(false);
+      }
+    },
+    [sdk, updateDocumentStatus]
+  );
+
+  return { generateEmbeddingsForPendingDocuments, processing };
+}
+```
+
+### 6.5 Trigger Background Processing on Session Start
+
+```typescript
+// Page: /app/session-groups/[id]/page.tsx
+import { useEmbeddingGeneration } from '@/hooks/use-embedding-generation';
+
+export default function SessionGroupPage() {
+  const { generateEmbeddingsForPendingDocuments } = useEmbeddingGeneration();
+
+  const handleStartSession = async () => {
+    try {
+      // 1. Start session with host
+      const { sessionId } = await sessionManager.startSession({
+        hostUrl: selectedHost.url,
+        jobId: BigInt(Math.floor(Math.random() * 1000000)),
+        modelName: 'llama-3',
+        chainId: ChainId.BASE_SEPOLIA,
+        depositAmount: '1.0'
+      });
+
+      setSessionId(sessionId);
+      toast.success('Session started!');
+
+      // 2. Start background embedding generation (don't await - runs in background)
+      generateEmbeddingsForPendingDocuments(sessionId).catch((error) => {
+        console.error('Background embedding generation failed:', error);
+        toast.error('Some documents failed to process');
+      });
+    } catch (error) {
+      toast.error(`Failed to start session: ${error.message}`);
+    }
+  };
+
+  return (
+    <div>
+      {/* Chat UI */}
+      {/* Progress bars for pending documents */}
+      <PendingDocumentsList />
+    </div>
+  );
+}
+```
+
+### 6.6 Display Pending Documents with Progress
+
+```typescript
+// Component: /components/vector-databases/pending-documents-list.tsx
+import { useEffect, useState } from 'react';
+import { useFabstirSDK } from '@/hooks/use-sdk';
+import { EmbeddingProgressBar } from './embedding-progress-bar';
+
+export function PendingDocumentsList() {
+  const { sdk } = useFabstirSDK();
+  const [pendingDocs, setPendingDocs] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!sdk) return;
+
+    const vectorRAGManager = sdk.getVectorRAGManager();
+
+    // Poll for updates every 2 seconds
+    const interval = setInterval(async () => {
+      try {
+        const docs = await vectorRAGManager.getPendingDocuments();
+        setPendingDocs(docs);
+      } catch (error) {
+        console.error('Failed to fetch pending documents:', error);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [sdk]);
+
+  if (pendingDocs.length === 0) return null;
+
+  return (
+    <div className="space-y-3 p-4 bg-blue-50 rounded-lg">
+      <h3 className="text-sm font-medium text-blue-900">
+        Processing Documents ({pendingDocs.length})
+      </h3>
+      {pendingDocs.map((doc) => (
+        <EmbeddingProgressBar
+          key={doc.id}
+          documentId={doc.id}
+          fileName={doc.fileName}
+          status={doc.status}
+          progress={doc.embeddingProgress}
+          errorMessage={doc.embeddingError}
+        />
+      ))}
+    </div>
+  );
+}
+```
+
+### 6.7 Error Handling Best Practices
+
+#### Handle Network Failures
+
+```typescript
+try {
+  const vectors = await sessionManager.generateEmbeddings(sessionId, content);
+} catch (error) {
+  if (error.code === 'EMBEDDING_TIMEOUT') {
+    // Host took too long (>120 seconds)
+    await updateDocumentStatus(doc.id, 'failed', {
+      embeddingError: 'Embedding generation timeout. Try smaller document or different host.'
+    });
+  } else if (error.code === 'NETWORK_ERROR') {
+    // Host unreachable
+    await updateDocumentStatus(doc.id, 'failed', {
+      embeddingError: 'Host disconnected. Will retry when session restarts.'
+    });
+  } else if (error.code === 'SESSION_INACTIVE') {
+    // Session ended before processing completed
+    console.log('Session ended, stopping embedding generation');
+    break; // Stop processing remaining documents
+  } else {
+    // Unknown error
+    await updateDocumentStatus(doc.id, 'failed', {
+      embeddingError: error.message
+    });
+  }
+}
+```
+
+#### Retry Failed Documents
+
+```typescript
+// Component: Retry button for failed documents
+<Button
+  variant="outline"
+  size="sm"
+  onClick={async () => {
+    // Reset to pending status
+    await updateDocumentStatus(doc.id, 'pending');
+
+    // Trigger re-processing if session is active
+    if (sessionId) {
+      await generateEmbeddingsForPendingDocuments(sessionId);
+    } else {
+      toast.info('Start a session to retry embedding generation');
+    }
+  }}
+>
+  Retry
+</Button>
+```
+
+#### Progress Auto-Hide
+
+```typescript
+// Hide progress bar after 3 seconds when status is 'ready'
+useEffect(() => {
+  if (status === 'ready') {
+    const timer = setTimeout(() => {
+      setVisible(false);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }
+}, [status]);
+```
+
+### 6.8 Search Clarification UI
+
+Make it clear to users when semantic search is unavailable:
+
+```typescript
+// Component: Vector search panel
+{readyDocumentCount === 0 ? (
+  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+    <div className="flex items-start gap-3">
+      <AlertCircle className="h-5 w-5 text-gray-400 flex-shrink-0" />
+      <div>
+        <p className="text-sm font-medium text-gray-700 mb-1">
+          Semantic search unavailable
+        </p>
+        <p className="text-sm text-gray-600">
+          Upload and vectorize documents to enable semantic search. Documents
+          must have embeddings generated before they can be searched semantically.
+        </p>
+      </div>
+    </div>
+  </div>
+) : (
+  <VectorSearchInput onSearch={handleSearch} />
+)}
+
+{/* Text-based filtering is always available */}
+<input
+  type="text"
+  placeholder="Type to filter by filename..."
+  title="Text-based filtering. Semantic search available after embeddings complete."
+  value={searchQuery}
+  onChange={(e) => setSearchQuery(e.target.value)}
+/>
+```
+
+### 6.9 Complete Workflow Example
+
+```typescript
+// Complete deferred embeddings workflow
+export default function VectorDatabasePage({ params }: { params: { id: string } }) {
+  const { sdk } = useFabstirSDK();
+  const { generateEmbeddingsForPendingDocuments } = useEmbeddingGeneration();
+  const [sessionId, setSessionId] = useState<bigint | null>(null);
+
+  // 1. User uploads document
+  const handleUpload = async (file: File) => {
+    const content = await file.text();
+    await vectorRAGManager.uploadDocument(params.id, {
+      id: `doc-${Date.now()}`,
+      fileName: file.name,
+      content: content,
+      status: 'pending'  // Key: pending status, no embeddings yet
+    });
+    toast.success('Document uploaded! Embeddings will be generated during next session.');
+  };
+
+  // 2. User starts session
+  const handleStartSession = async () => {
+    const { sessionId } = await sessionManager.startSession({...});
+    setSessionId(sessionId);
+
+    // 3. Automatically start background embedding generation
+    generateEmbeddingsForPendingDocuments(sessionId);
+  };
+
+  // 4. Display progress
+  return (
+    <div>
+      <FileUploader onUpload={handleUpload} />
+      <PendingDocumentsList />  {/* Shows progress bars */}
+      <VectorSearchPanel readyDocumentCount={readyDocs.length} />
+    </div>
+  );
+}
+```
+
+### 6.10 Key Takeaways
+
+✅ **Deferred embeddings separate upload (instant) from processing (slow)**
+✅ **Documents start as "pending", become "ready" after embedding generation**
+✅ **Background processing happens during active session**
+✅ **Progress bars show real-time updates**
+✅ **Failed documents can be retried**
+✅ **Clear UI indicating when semantic search is unavailable**
+
+---
+
 ## 🔧 Troubleshooting
 
 ### Issue: "SDK not initialized"

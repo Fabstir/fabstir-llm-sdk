@@ -1104,6 +1104,89 @@ Pauses an active session.
 async pauseSession(sessionId: bigint): Promise<void>
 ```
 
+### generateEmbeddings
+
+Generates vector embeddings for document content using the host's embedding model. Part of the **deferred embeddings workflow** where documents are uploaded without embeddings and processed later during an active session.
+
+```typescript
+async generateEmbeddings(
+  sessionId: bigint,
+  fileContent: string,
+  options?: {
+    chunkSize?: number;
+    chunkOverlap?: number;
+    chainId?: number;
+  }
+): Promise<Vector[]>
+```
+
+**Parameters:**
+- `sessionId` - Active session ID (must be started with a host)
+- `fileContent` - Raw document text to chunk and embed
+- `options.chunkSize` - Characters per chunk (default: 512)
+- `options.chunkOverlap` - Overlap between chunks (default: 50)
+- `options.chainId` - Blockchain chain ID (default: from session)
+
+**Returns:** Array of vectors with embeddings and metadata
+
+**Throws:**
+- `SESSION_NOT_FOUND` - Session does not exist
+- `SESSION_INACTIVE` - Session must be active
+- `INVALID_CONTENT` - No valid chunks generated
+- `EMBEDDING_TIMEOUT` - Operation exceeded 120 seconds
+- `NETWORK_ERROR` - Failed to reach host embedding endpoint
+- `EMBEDDING_FAILED` - Host returned error response
+
+**Example:**
+```typescript
+// 1. Start session with host
+const { sessionId } = await sessionManager.startSession({
+  hostUrl: 'http://localhost:8080',
+  jobId: 123n,
+  modelName: 'llama-3',
+  chainId: ChainId.BASE_SEPOLIA
+});
+
+// 2. Read document content
+const fileContent = await file.text();
+
+// 3. Generate embeddings via host
+const vectors = await sessionManager.generateEmbeddings(
+  sessionId,
+  fileContent,
+  {
+    chunkSize: 512,      // Characters per chunk
+    chunkOverlap: 50     // Overlap for context continuity
+  }
+);
+
+console.log(`Generated ${vectors.length} embeddings`);
+// vectors[0].values = [0.12, -0.45, ...] // 384D embedding
+// vectors[0].metadata.text = "chunk text..."
+// vectors[0].metadata.chunkIndex = 0
+// vectors[0].metadata.model = "all-MiniLM-L6-v2"
+
+// 4. Add to vector database
+await vectorRAGManager.addVectors(databaseName, vectors);
+```
+
+**Architecture:**
+- Calls host's `/v1/embed` endpoint (requires active session)
+- Uses `all-MiniLM-L6-v2` model (384 dimensions)
+- Automatic chunking with overlap for semantic continuity
+- 120-second timeout for large documents
+- Returns vectors ready to add to VectorRAGManager
+
+**When to Use:**
+- **Deferred embeddings workflow**: Upload documents without embeddings, process during session
+- **Background processing**: Generate embeddings after document upload
+- **Progress tracking**: Show real-time progress as chunks are embedded
+- **Host-side processing**: Leverage host's GPU/CPU for embedding generation
+
+**See Also:**
+- `VectorRAGManager.getPendingDocuments()` - Get documents awaiting embeddings
+- `VectorRAGManager.updateDocumentStatus()` - Update document embedding status
+
 ## Payment Management
 
 Handles ETH and USDC payments for jobs.
@@ -2621,6 +2704,183 @@ await vectorRAGManager.deleteDatabase('old-docs');
 const vacuumStats = await vectorRAGManager.vacuum('docs');
 console.log(`Freed ${vacuumStats.spaceFreed} bytes`);
 ```
+
+#### Deferred Embeddings
+
+Methods for managing documents in the **deferred embeddings workflow**, where documents are uploaded without embeddings and processed later during an active session.
+
+##### getPendingDocuments
+
+Gets all documents awaiting embedding generation across all vector databases.
+
+```typescript
+async getPendingDocuments(sessionGroupId?: string): Promise<PendingDocument[]>
+```
+
+**Parameters:**
+- `sessionGroupId` - Optional: Filter by session group (currently not implemented)
+
+**Returns:** Array of pending documents with database context
+
+```typescript
+interface PendingDocument {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  fileType: string;
+  uploadedAt: number;
+  status: 'pending' | 'processing' | 'failed';
+  embeddingProgress?: number;  // 0-100 percentage
+  embeddingError?: string;
+  vectorCount?: number;
+  databaseName: string;  // Which database this document belongs to
+}
+```
+
+**Example:**
+```typescript
+// Get all pending documents
+const pending = await vectorRAGManager.getPendingDocuments();
+console.log(`Found ${pending.length} documents awaiting embeddings`);
+
+pending.forEach(doc => {
+  console.log(`${doc.fileName} (${doc.databaseName}): ${doc.status}`);
+  if (doc.embeddingProgress !== undefined) {
+    console.log(`  Progress: ${doc.embeddingProgress}%`);
+  }
+  if (doc.embeddingError) {
+    console.log(`  Error: ${doc.embeddingError}`);
+  }
+});
+```
+
+**When to Use:**
+- Display pending documents UI
+- Start background embedding generation during session
+- Show progress indicators for embedding processing
+- Identify failed documents needing retry
+
+**See Also:**
+- `SessionManager.generateEmbeddings()` - Generate embeddings for pending documents
+- `VectorRAGManager.updateDocumentStatus()` - Update document status after processing
+
+##### updateDocumentStatus
+
+Updates the embedding status of a document. Automatically moves document from `pendingDocuments[]` to `readyDocuments[]` when status is set to 'ready'.
+
+```typescript
+async updateDocumentStatus(
+  documentId: string,
+  status: 'pending' | 'processing' | 'ready' | 'failed',
+  updates?: {
+    vectorCount?: number;
+    embeddingProgress?: number;
+    embeddingError?: string;
+  }
+): Promise<void>
+```
+
+**Parameters:**
+- `documentId` - Unique document identifier
+- `status` - New embedding status
+- `updates.vectorCount` - Number of vectors generated (for 'ready' status)
+- `updates.embeddingProgress` - Progress percentage (0-100, for 'processing' status)
+- `updates.embeddingError` - Error message (for 'failed' status)
+
+**Example:**
+```typescript
+// Update to processing status
+await vectorRAGManager.updateDocumentStatus(
+  'doc-123',
+  'processing',
+  { embeddingProgress: 45 }
+);
+
+// Update to ready status (moves to readyDocuments[])
+await vectorRAGManager.updateDocumentStatus(
+  'doc-123',
+  'ready',
+  { vectorCount: 150 }
+);
+
+// Update to failed status
+await vectorRAGManager.updateDocumentStatus(
+  'doc-456',
+  'failed',
+  { embeddingError: 'Host disconnected during embedding generation' }
+);
+
+// Retry failed document (reset to pending)
+await vectorRAGManager.updateDocumentStatus(
+  'doc-456',
+  'pending'
+);
+```
+
+**Workflow:**
+```typescript
+// 1. Upload document (UI adds to pendingDocuments[])
+const fileContent = await file.text();
+const docId = `doc-${Date.now()}`;
+
+// 2. Start session with host
+const { sessionId } = await sessionManager.startSession({...});
+
+// 3. Get pending documents
+const pending = await vectorRAGManager.getPendingDocuments();
+
+// 4. Process each pending document
+for (const doc of pending) {
+  try {
+    // Update to processing
+    await vectorRAGManager.updateDocumentStatus(
+      doc.id,
+      'processing',
+      { embeddingProgress: 0 }
+    );
+
+    // Generate embeddings
+    const vectors = await sessionManager.generateEmbeddings(
+      sessionId,
+      doc.fileContent
+    );
+
+    // Update progress
+    await vectorRAGManager.updateDocumentStatus(
+      doc.id,
+      'processing',
+      { embeddingProgress: 50 }
+    );
+
+    // Add to vector database
+    await vectorRAGManager.addVectors(doc.databaseName, vectors);
+
+    // Update to ready (moves to readyDocuments[])
+    await vectorRAGManager.updateDocumentStatus(
+      doc.id,
+      'ready',
+      { vectorCount: vectors.length }
+    );
+  } catch (error) {
+    // Update to failed
+    await vectorRAGManager.updateDocumentStatus(
+      doc.id,
+      'failed',
+      { embeddingError: error.message }
+    );
+  }
+}
+```
+
+**Status Transitions:**
+- `pending` → `processing` → `ready` (success path)
+- `pending` → `processing` → `failed` (error path)
+- `failed` → `pending` (retry)
+- `ready` documents are moved to `readyDocuments[]` array
+
+**See Also:**
+- `SessionManager.generateEmbeddings()` - Generate embeddings for document
+- `VectorRAGManager.getPendingDocuments()` - Get all pending documents
 
 ### DocumentManager
 
