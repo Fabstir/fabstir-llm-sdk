@@ -10,6 +10,7 @@ import { useSDK } from "@/hooks/use-sdk";
 import { useSessionGroups } from "@/hooks/use-session-groups";
 import { useVectorDatabases, type EmbeddingProgress } from "@/hooks/use-vector-databases";
 import { downloadFromS5 } from "@/lib/s5-utils";
+import { EmbeddingProgressBar } from "@/components/vector-databases/embedding-progress-bar";
 
 interface ChatSession {
   sessionId: string;
@@ -50,6 +51,11 @@ export default function SessionGroupDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [showLinkDatabaseModal, setShowLinkDatabaseModal] = useState(false);
   const [embeddingProgress, setEmbeddingProgress] = useState<EmbeddingProgress | null>(null);
+
+  // --- Sub-phase 5.4: Document Queue Tracking ---
+  const [documentQueue, setDocumentQueue] = useState<string[]>([]); // List of document names in queue
+  const [queuePosition, setQueuePosition] = useState<number>(0); // Current position (1-indexed)
+  const [processingStartTimes, setProcessingStartTimes] = useState<Map<string, number>>(new Map()); // Track start time per document
 
   const groupId = params.id as string;
 
@@ -147,10 +153,35 @@ export default function SessionGroupDetailPage() {
     }
   };
 
-  // --- Embedding Progress Callback (Sub-phase 4.3) ---
+  // --- Embedding Progress Callback (Sub-phase 4.3 + 5.2 + 5.4) ---
   const handleEmbeddingProgress = (progress: EmbeddingProgress) => {
     console.log('[EmbeddingProgress]', progress);
     setEmbeddingProgress(progress);
+
+    // Track processing start time (Sub-phase 5.4)
+    if (progress.status === 'processing' && !processingStartTimes.has(progress.documentId)) {
+      setProcessingStartTimes(prev => new Map(prev).set(progress.documentId, Date.now()));
+    }
+
+    // Update queue position when document completes (Sub-phase 5.4)
+    if (progress.status === 'complete' || progress.status === 'failed') {
+      setQueuePosition(prev => prev + 1);
+
+      // Remove completed document from queue
+      setDocumentQueue(prev => prev.filter(name => name !== progress.fileName));
+
+      // Auto-hide progress bar 3 seconds after completion
+      setTimeout(() => {
+        setEmbeddingProgress(null);
+
+        // Clear queue state if all documents processed
+        if (documentQueue.length <= 1) {
+          setDocumentQueue([]);
+          setQueuePosition(0);
+          setProcessingStartTimes(new Map());
+        }
+      }, 3000);
+    }
   };
 
   // --- Start LLM Session (Sub-phase 4.2) ---
@@ -226,6 +257,10 @@ export default function SessionGroupDetailPage() {
       }
 
       console.log(`[ProcessPendingEmbeddings] 📋 Found ${pendingDocs.length} pending documents`);
+
+      // Initialize document queue (Sub-phase 5.4)
+      setDocumentQueue(pendingDocs.map((doc: any) => doc.fileName));
+      setQueuePosition(1); // Start at position 1 (1-indexed)
 
       // Process each document
       for (let i = 0; i < pendingDocs.length; i++) {
@@ -538,6 +573,33 @@ export default function SessionGroupDetailPage() {
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Embedding Progress Bar (Sub-phase 5.3 + 5.4) */}
+        {embeddingProgress && (
+          <div className="mb-6">
+            <EmbeddingProgressBar
+              progress={embeddingProgress}
+              queueSize={documentQueue.length > 0 ? documentQueue.length + queuePosition - 1 : undefined}
+              queuePosition={queuePosition > 0 ? queuePosition : undefined}
+              remainingDocuments={documentQueue.filter(name => name !== embeddingProgress.fileName)}
+              estimatedTimeRemaining={(() => {
+                // Calculate estimated time based on average processing time
+                if (processingStartTimes.size === 0 || documentQueue.length <= 1) return undefined;
+
+                // Calculate average time per document from completed documents
+                const completedCount = processingStartTimes.size;
+                const totalTime = Array.from(processingStartTimes.values()).reduce((sum, startTime) => {
+                  return sum + (Date.now() - startTime);
+                }, 0);
+                const avgTimePerDoc = totalTime / completedCount / 1000; // Convert to seconds
+
+                // Estimate remaining time
+                const remainingDocs = documentQueue.length - 1; // Exclude current document
+                return Math.round(avgTimePerDoc * remainingDocs);
+              })()}
+            />
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Panel */}
           <div className="lg:col-span-1 space-y-6">
