@@ -1,8 +1,17 @@
 /**
- * Vector Database Search Test
+ * Vector Database Search Test (After Embeddings Ready)
  *
  * Tests searching vector databases with semantic/vector search.
- * Covers Sub-phase 3.4 from comprehensive testing plan.
+ * Covers Sub-phase 3.4c from comprehensive testing plan.
+ *
+ * PREREQUISITE (Deferred Embeddings Architecture):
+ * This test assumes embeddings have been generated (Sub-phase 3.4b complete).
+ * With deferred embeddings (2025-11-16), documents upload instantly but are marked
+ * as "pending". Embeddings generate during session start (Sub-phase 3.4b).
+ * Search only works AFTER embeddings are ready.
+ *
+ * For complete workflow testing including embedding generation, see:
+ * - test-deferred-embeddings.spec.ts (Sub-phase 3.4b)
  *
  * Verifies:
  * - Search query input
@@ -138,9 +147,12 @@ This is a test document for automated testing purposes.
     fs.unlinkSync(testFilePath);
     console.log('[Test] Cleaned up temporary file');
 
-    // Wait for upload/embedding to complete (can take 10-30 seconds)
-    console.log('[Test] ⏳ Waiting for document upload and embedding (10-30 seconds)...');
-    await page.waitForTimeout(5000); // Initial wait
+    // DEFERRED EMBEDDINGS: Upload is fast (< 2s), but document will be "pending"
+    // This test assumes embeddings were already generated in a previous session (Sub-phase 3.4b)
+    // If embeddings are still pending, search will fail or return no results
+    console.log('[Test] ⏳ Waiting for document upload (< 2 seconds, embedding deferred)...');
+    console.log('[Test] ⚠️ NOTE: This test assumes embeddings are READY (generated in Sub-phase 3.4b)');
+    await page.waitForTimeout(2000); // Wait for S5 upload
 
     // Look for upload success indicators
     const uploadSuccessIndicators = [

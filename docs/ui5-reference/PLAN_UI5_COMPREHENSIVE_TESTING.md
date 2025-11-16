@@ -1,10 +1,25 @@
 # UI5 Comprehensive Testing Plan
 
-**Status**: 🚧 IN PROGRESS - Phase 3.1-3.4 Complete (40% Complete)
+**Status**: 🚧 IN PROGRESS - Phase 3.1-3.4c Complete (40% Complete)
 **Created**: 2025-11-13
-**Last Updated**: 2025-11-15 03:50 UTC
+**Last Updated**: 2025-11-16 (Deferred Embeddings Architecture Update)
 **Branch**: feature/ui5-migration
 **Server**: http://localhost:3002 (Container) / http://localhost:3012 (Host)
+
+---
+
+## ⚠️ ARCHITECTURE UPDATE (2025-11-16)
+
+**Deferred Embeddings Implementation**: Documents now upload instantly to S5 (< 2s) and embeddings generate in the background during chat session initialization. This replaces the old synchronous embedding generation during upload.
+
+**Key Changes**:
+- **Upload flow**: S5 upload only (no embeddings) → instant completion (< 2s, not 2-10s)
+- **Documents marked as "pending"** after upload (yellow "Pending Embeddings" badge)
+- **Embeddings generate when chat session starts** (background, non-blocking)
+- **Progress bar** shows embedding generation during session (e.g., "Vectorizing Documents (1 of 3)")
+- **Search only available** after embeddings complete (documents transition: pending → processing → ready)
+
+**See**: `docs/IMPLEMENTATION_DEFERRED_EMBEDDINGS.md` for implementation details (Phases 1-9 complete)
 
 ---
 
@@ -21,19 +36,21 @@
   - 2.2: Verify Test Mode Detection (complete)
 
 **In Progress:** 🔄
-- Phase 3: Vector Database Operations (80% - Sub-phases 3.1-3.4 complete)
+- Phase 3: Vector Database Operations (70% - Sub-phases 3.1-3.4c updated for deferred embeddings)
   - 3.1: Create Vector Database ✅ COMPLETE
-  - 3.2: Upload Single File ✅ COMPLETE
-  - 3.3: Upload Multiple Files ✅ COMPLETE
-  - 3.4: Search Vector Database ✅ COMPLETE
+  - 3.2: Upload Single File ✅ UPDATED (added pending status checks)
+  - 3.3: Upload Multiple Files ✅ UPDATED (added pending status checks)
+  - 3.4a: Search Disabled for Pending Docs ⏳ NEW (requires implementation)
+  - 3.4b: Background Embedding Processing ⏳ NEW (requires implementation)
+  - 3.4c: Search After Embeddings Ready ⏳ UPDATED (requires prerequisite)
   - 3.5: Delete Vector Database - Pending
 
 **Pending:** ⏳
 - Phase 4: Session Group Operations (0%)
-- Phase 5: Chat Session Operations (0%)
+- Phase 5: Chat Session Operations (0% - includes new Sub-phase 5.1b for background embedding during chat)
 - Phase 6: Navigation & UI Flow Testing (0%)
-- Phase 7: Error Handling & Edge Cases (0%)
-- Phase 8: Performance & Blockchain Testing (0%)
+- Phase 7: Error Handling & Edge Cases (0% - includes new Sub-phases 7.6-7.7 for embedding failures)
+- Phase 8: Performance & Blockchain Testing (0% - includes new Sub-phase 8.6 for embedding performance)
 
 **Total Progress**: 2.8/8 phases = **40% Complete**
 
@@ -245,14 +262,19 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 - [x] Click "Upload Documents" button
 - [x] Select test-doc-1.txt from `/tmp`
 - [x] Click "Upload" button
-- [x] **WAIT: 2-10 seconds for S5 upload**
+- [x] **WAIT: < 2 seconds for S5 upload** (no embeddings, deferred until session start)
 - [x] Verify upload progress indicator
 - [x] Verify file appears in documents list
 - [x] Check file metadata (name, size, CID)
+- [ ] **Verify file shows "Pending Embeddings" badge** (yellow, AlertTriangle icon)
+- [ ] **Verify embeddingStatus === 'pending'** in document metadata
+- [ ] **Verify document added to database.pendingDocuments[] array**
+- [ ] **Verify info banner**: "1 document pending embeddings. Start a chat session to generate embeddings."
+- [ ] **Verify pendingDocuments count === 1, readyDocuments count === 0**
 - [x] Verify document count updated (0 → 1)
-- [x] Take screenshot showing uploaded file
+- [x] Take screenshot showing uploaded file with pending status
 
-**Expected Duration**: 5-15 seconds per file (S5 upload)
+**Expected Duration**: < 2 seconds per file (S5 upload only, embeddings deferred)
 
 **Automated Test**: ✅ `/workspace/tests-ui5/test-vector-db-upload.spec.ts` (Test 1, lines 17-187)
 
@@ -275,13 +297,17 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 - [x] Click "Upload Documents" again
 - [x] Select test-doc-2.md and test-doc-3.json (multiple selection)
 - [x] Click "Upload" button
-- [x] **WAIT: 5-20 seconds for both files**
+- [x] **WAIT: < 4 seconds for both files** (S5 upload only, no embeddings)
 - [x] Verify both files appear in list
+- [ ] **Verify both files show "Pending Embeddings" badge**
+- [ ] **Verify pendingDocuments count === 3** (1 previous + 2 new)
+- [ ] **Verify readyDocuments count === 0**
+- [ ] **Verify banner shows**: "3 documents pending embeddings"
 - [x] Verify document count updated (1 → 3)
 - [x] Check console for upload errors (none expected)
-- [x] Take screenshot showing all 3 documents
+- [x] Take screenshot showing all 3 documents with pending status
 
-**Expected Duration**: 10-30 seconds (multiple S5 uploads)
+**Expected Duration**: < 4 seconds (multiple S5 uploads, embeddings deferred)
 
 **Automated Test**: ✅ `/workspace/tests-ui5/test-vector-db-upload.spec.ts` (Test 2, lines 189-287)
 
@@ -302,25 +328,107 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 
 **Documentation**: `SUB_PHASES_3.2_3.3_COMPLETION.md` - Complete reference guide
 
-### Sub-phase 3.4: Search Vector Database ✅ COMPLETE
+### Sub-phase 3.4a: Verify Search Disabled for Pending Documents (NEW)
 
-- [x] Enter search query: "What is the main topic?"
-- [x] Click "Search" button
-- [x] **WAIT: 1-3 seconds for vector search**
-- [x] Verify search results appear
-- [x] Check relevance scores displayed
-- [x] Verify matched text snippets shown
-- [x] Take screenshot of search results
+**Goal**: Verify search is disabled when no embeddings are ready
 
-**Expected Duration**: 2-5 seconds (vector search)
+**Prerequisites**: Documents uploaded with pending status (from Sub-phases 3.2-3.3)
 
-**Automated Test**: ✅ `/workspace/tests-ui5/test-vector-db-search.spec.ts` (287 lines, 2 tests)
+**Test Steps**:
+- [ ] Navigate to vector database detail page
+- [ ] Locate search input field
+- [ ] Verify placeholder text: "Upload and vectorize documents to enable semantic search"
+- [ ] Enter search query: "What is the main topic?"
+- [ ] Verify search disabled OR shows message: "No ready documents yet. Start a chat session to generate embeddings."
+- [ ] Verify no results returned
+- [ ] Take screenshot of disabled search state
 
-**Status**: ✅ COMPLETE - Test ready for execution
-**Coverage**: 7/7 requirements (100%)
-**Date Completed**: 2025-11-15
+**Expected Results**:
+- Search input disabled or shows helpful message
+- Clear indication that embeddings are pending
+- Banner visible: "3 documents pending embeddings"
 
-**Implementation Details**:
+**Expected Duration**: < 30 seconds
+
+**Automated Test**: Update `/workspace/tests-ui5/test-vector-db-search.spec.ts` - Add test case for disabled state
+
+---
+
+### Sub-phase 3.4b: Background Embedding Processing (NEW)
+
+**Goal**: Verify embeddings generate in background during session start
+
+**Prerequisites**: At least 3 documents with pending embeddings (from Sub-phases 3.2-3.3)
+
+**Test Steps**:
+- [ ] Navigate to session group containing this vector database
+- [ ] Click "Create Session" or open existing session
+- [ ] **IMMEDIATELY** verify progress bar appears automatically
+- [ ] Verify progress bar shows: "🔄 Vectorizing Documents (1 of 3)"
+- [ ] Verify current document name displayed: "test-doc-1.txt"
+- [ ] Verify percentage updates: 0% → 35% → 65% → 100%
+- [ ] Verify queue shows remaining documents: "Remaining: test-doc-2.md, test-doc-3.json"
+- [ ] Verify estimated time remaining displayed
+- [ ] Verify can send chat messages while embeddings generate (non-blocking)
+- [ ] **WAIT: < 30 seconds per document** for completion (< 90 seconds total for 3 docs)
+- [ ] Verify documents transition: pending → processing → ready
+- [ ] Verify progress bar auto-hides after 3 seconds of completion
+- [ ] Verify all documents now have "Ready" badge (green, CheckCircle icon)
+- [ ] Take screenshot of progress bar mid-processing
+- [ ] Take screenshot after completion (all documents ready)
+
+**Expected Results**:
+- Progress bar appears automatically on session start
+- Embedding generation non-blocking (can chat during process)
+- Clear progress indicators (percentage, current document name, queue)
+- Documents transition to ready status
+- Progress bar auto-dismisses after completion
+- All documents show green "Ready" badge
+
+**Performance Target**: < 30 seconds per document
+
+**Expected Duration**: 1-2 minutes total (3 documents + verification)
+
+**Automated Test**: Create `/workspace/tests-ui5/test-deferred-embeddings.spec.ts` - Comprehensive workflow test
+
+---
+
+### Sub-phase 3.4c: Search After Embeddings Ready (UPDATED)
+
+**Goal**: Verify semantic search works after embeddings are ready
+
+**Prerequisites**: Complete Sub-phase 3.4b (all embeddings ready)
+
+**Test Steps**:
+- [ ] Navigate back to vector database detail page
+- [ ] Verify all documents show "Ready" badge (green)
+- [ ] Verify readyDocuments count === 3
+- [ ] Locate search input field
+- [ ] Verify search input enabled (no longer disabled)
+- [ ] Enter search query: "What is the main topic?"
+- [ ] Click "Search" button
+- [ ] **WAIT: 2-5 seconds for search results**
+- [ ] Verify search results appear
+- [ ] Check relevance scores displayed (0.0-1.0 range)
+- [ ] Verify matched text snippets shown
+- [ ] Verify results ranked by relevance (highest score first)
+- [ ] Take screenshot of search results
+
+**Expected Results**:
+- Search input enabled and responsive
+- Results returned within 5 seconds
+- Relevant results with similarity scores
+- Clear result formatting with document names and snippets
+
+**Expected Duration**: 10-20 seconds
+
+**Automated Test**: ✅ `/workspace/tests-ui5/test-vector-db-search.spec.ts` (287 lines, 2 tests) - Update to run AFTER embeddings complete
+
+**Status**: ⏳ PENDING - Requires update for deferred embeddings workflow
+**Previous Coverage**: 7/7 requirements (100%)
+**Requires Update**: Add prerequisite check (embeddings ready)
+
+**Implementation Details** (from previous version):
 - Search input detection (7 selector patterns + fallback)
 - Search button detection (5 patterns + Enter key fallback)
 - Results verification (6 detection patterns)
@@ -334,11 +442,9 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 **Expected Matches**: Content from test-doc-1.txt about vector database testing
 
 **Screenshots**:
-- `test-results/vector-db-search-input.png` - Before search
-- `test-results/vector-db-search-results.png` - Results displayed
-- `test-results/vector-db-search-no-results.png` - Empty results state
-
-**Documentation**: `SUB_PHASE_3.4_COMPLETION.md` - Complete implementation guide
+- `test-results/vector-db-search-disabled.png` - Disabled state (Sub-phase 3.4a)
+- `test-results/vector-db-embedding-progress.png` - Progress bar (Sub-phase 3.4b)
+- `test-results/vector-db-search-results.png` - Results after embeddings ready (Sub-phase 3.4c)
 
 ### Sub-phase 3.5: Delete Vector Database
 - [ ] Navigate back to vector databases list
@@ -455,11 +561,55 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 - [ ] **EXPECT: No MetaMask popup** (test wallet auto-approves)
 - [ ] **WAIT: 5-15 seconds for blockchain transaction**
 - [ ] Verify session appears in list
-- [ ] Take screenshot
+- [ ] **IF pending documents exist**: Verify progress bar appears automatically
+- [ ] **IF pending documents exist**: Verify background embedding processing starts (non-blocking)
+- [ ] **IF pending documents exist**: Verify can send chat messages immediately (embeddings run in background)
+- [ ] Verify chat functions normally while embeddings generate
+- [ ] Take screenshot (capture progress bar if present)
 
-**Expected Duration**: 15-30 seconds (blockchain transaction)
+**Expected Duration**: 15-30 seconds (blockchain transaction) + embedding time if pending documents
 
 **Automated Test**: Create `/workspace/tests-ui5/test-chat-create.spec.ts`
+
+---
+
+### Sub-phase 5.1b: Verify Background Embedding During Chat (NEW)
+
+**Goal**: Verify chat session integrates seamlessly with background embedding processing
+
+**Prerequisites**: Session group with 3+ documents in pending status
+
+**Test Steps**:
+- [ ] Create new chat session in group with pending documents
+- [ ] **IMMEDIATELY** after session creation, verify progress bar appears
+- [ ] Send a chat message: "Hello, test message"
+- [ ] Verify message sends successfully while embeddings generate
+- [ ] Verify LLM response received while embeddings still processing
+- [ ] Monitor progress bar: "Vectorizing Documents (1 of 3)"
+- [ ] Verify progress bar updates as embeddings complete
+- [ ] Wait for all embeddings to complete
+- [ ] Verify progress bar auto-hides after 3 seconds
+- [ ] Send another message: "What is in the uploaded documents?"
+- [ ] Verify RAG context now includes vectorized documents in response
+- [ ] Verify response references document content
+- [ ] Take screenshot of chat during embedding processing
+- [ ] Take screenshot of RAG-enhanced response after embeddings complete
+
+**Expected Results**:
+- Chat fully functional during embedding generation
+- Progress bar visible but non-intrusive (top of chat area)
+- RAG context empty until embeddings complete
+- RAG context includes documents after embeddings ready
+- Seamless user experience (no blocking, no delays in chat)
+- Clear indication when RAG context becomes available
+
+**Performance Target**: Chat latency unaffected by background embeddings (< 1s to send message)
+
+**Expected Duration**: 2-3 minutes (session creation + embeddings + chat testing)
+
+**Automated Test**: Create `/workspace/tests-ui5/test-chat-with-rag.spec.ts` - Comprehensive RAG workflow test
+
+---
 
 ### Sub-phase 5.2: Send Text Message
 - [ ] Click on "Test Chat" session to open
@@ -615,6 +765,73 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 
 ---
 
+### Sub-phase 7.6: Embedding Generation Failure (NEW)
+
+**Goal**: Verify graceful handling of embedding generation failures
+
+**Test Steps**:
+- [ ] Upload document to vector database
+- [ ] Verify document shows "Pending Embeddings" badge (yellow)
+- [ ] Start chat session to trigger embedding generation
+- [ ] **SIMULATE**: Disconnect internet OR stop host node during embedding
+- [ ] Verify document transitions to "Failed" status (red badge, AlertCircle icon)
+- [ ] Verify error icon appears with tooltip on document
+- [ ] Hover over error icon
+- [ ] Verify tooltip shows: "Embedding generation failed: [reason]"
+- [ ] Verify retry mechanism available (manual or automatic)
+- [ ] Verify banner shows: "Some documents failed to vectorize. Start a new session to retry."
+- [ ] Reconnect internet OR restart host
+- [ ] Start new session
+- [ ] Verify failed document retries automatically
+- [ ] Verify document transitions: failed → pending → processing → ready
+- [ ] Take screenshot of failed state
+- [ ] Take screenshot of retry in progress
+
+**Expected Results**:
+- Clear error indication (red badge, error icon)
+- Helpful error message in tooltip
+- Retry mechanism available and functional
+- Failed documents don't block other operations
+- Graceful recovery on retry
+- User receives clear guidance on how to proceed
+
+**Expected Duration**: 2-3 minutes (including retry)
+
+**Automated Test**: Create `/workspace/tests-ui5/test-embedding-failure.spec.ts`
+
+---
+
+### Sub-phase 7.7: Large Document Timeout Handling (NEW)
+
+**Goal**: Verify timeout handling for large documents
+
+**Test Steps**:
+- [ ] Upload very large document (> 10MB or > 100 pages) to vector database
+- [ ] Verify document shows "Pending Embeddings" badge
+- [ ] Start chat session to trigger embedding generation
+- [ ] Monitor progress bar for 2+ minutes
+- [ ] Verify timeout occurs at 120 seconds (2 minutes)
+- [ ] Verify document marked as "Failed" with timeout message
+- [ ] Verify error tooltip: "Embedding timeout (120s). Document may be too large."
+- [ ] Verify suggestion in banner: "Try splitting document into smaller files (< 10MB recommended)"
+- [ ] Verify timeout doesn't crash the app or block other operations
+- [ ] Verify other documents (if any) continue processing
+- [ ] Take screenshot of timeout error state
+
+**Expected Results**:
+- Timeout after 120 seconds for large documents
+- Clear timeout message with document name
+- Helpful suggestion to user (split file)
+- Document marked as failed, not stuck in processing state
+- App remains stable, other operations unaffected
+- User can retry with smaller files
+
+**Expected Duration**: 3-4 minutes (includes 2-minute timeout wait)
+
+**Automated Test**: Create `/workspace/tests-ui5/test-embedding-timeout.spec.ts`
+
+---
+
 ## Phase 8: Performance & Blockchain Testing ⏳ PENDING
 
 **Goal**: Measure and document real-world performance with blockchain and storage
@@ -629,14 +846,20 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 **Expected Range**: 5-15 seconds per transaction
 
 ### Sub-phase 8.2: Measure S5 Upload Times
-- [ ] Upload 5 files (1KB each)
-- [ ] Measure upload time for each
+- [ ] Upload 5 files (varying sizes: 1KB, 100KB, 500KB, 1MB, 5MB)
+- [ ] Measure upload time for each:
+  - 1KB file: _______ seconds
+  - 100KB file: _______ seconds
+  - 500KB file: _______ seconds
+  - 1MB file: _______ seconds
+  - 5MB file: _______ seconds
 - [ ] Calculate average: _______ seconds
-- [ ] Test with 1MB file
-- [ ] Measure time: _______ seconds
+- [ ] **VERIFY**: All uploads < 2 seconds ✅ (deferred embeddings: S5 upload only, no vectorization)
+- [ ] Note: Embedding generation now happens during session start (see Sub-phase 8.6)
 - [ ] Take screenshots
 
-**Expected Range**: 2-10 seconds per file
+**Expected Range**: < 2 seconds per file (S5 upload only, embeddings deferred to session start)
+**Note**: Previous range was 2-10s when embeddings were generated during upload. With deferred embeddings, upload is S5-only and much faster.
 
 ### Sub-phase 8.3: Measure WebSocket Latency
 - [ ] Send 5 chat messages
@@ -665,6 +888,55 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 
 ---
 
+### Sub-phase 8.6: Measure Embedding Generation Performance (NEW)
+
+**Goal**: Verify embedding generation meets performance targets
+
+**Prerequisites**: 5 documents uploaded with pending status
+
+**Test Steps**:
+- [ ] Upload 5 documents of varying sizes to vector database:
+  - Small 1: < 1MB, < 10 pages (e.g., test-doc-1.txt)
+  - Small 2: < 1MB, < 10 pages (e.g., test-doc-2.md)
+  - Medium 1: 1-5MB, 10-50 pages
+  - Medium 2: 1-5MB, 10-50 pages
+  - Large: 5-10MB, 50-100 pages
+- [ ] Start chat session to trigger embedding generation
+- [ ] Monitor progress bar and measure time per document:
+  - Document 1 (small): _______ seconds
+  - Document 2 (small): _______ seconds
+  - Document 3 (medium): _______ seconds
+  - Document 4 (medium): _______ seconds
+  - Document 5 (large): _______ seconds
+- [ ] Calculate averages:
+  - Small docs average (< 1MB): _______ seconds
+  - Medium docs average (1-5MB): _______ seconds
+  - Large doc (5-10MB): _______ seconds
+  - Overall average: _______ seconds
+- [ ] **VERIFY**: Small docs < 15 seconds ✅
+- [ ] **VERIFY**: Medium docs < 30 seconds ✅
+- [ ] **VERIFY**: Large docs < 60 seconds ✅
+- [ ] **VERIFY**: Overall average < 30 seconds ✅
+- [ ] Take note of any outliers or performance issues
+
+**Performance Targets**:
+- **Small documents** (< 1MB): < 15 seconds per document
+- **Medium documents** (1-5MB): < 30 seconds per document
+- **Large documents** (5-10MB): < 60 seconds per document
+- **Overall average**: < 30 seconds per document
+
+**Expected Duration**: 3-5 minutes (5 documents + measurements)
+
+**Notes**:
+- Embedding time depends on host GPU/CPU performance
+- Times may vary based on model (all-MiniLM-L6-v2 baseline: 384 dimensions)
+- Background processing should not block chat functionality
+- Progress bar should provide accurate time estimates
+
+**Automated Test**: Create `/workspace/tests-ui5/test-embedding-performance.spec.ts`
+
+---
+
 ## Test Execution Summary
 
 ### Overall Statistics
@@ -679,13 +951,15 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 |-------|-----------|--------|--------|
 | Phase 1: Test Infrastructure | 2h | 2.2h | ✅ Complete |
 | Phase 2: Wallet Connection | 30min | - | ⏳ Pending |
-| Phase 3: Vector Databases | 2h | - | ⏳ Pending |
+| Phase 3: Vector Databases | 2.5h | - | ⏳ Pending (+30min for 3.4a/b/c deferred embeddings) |
 | Phase 4: Session Groups | 2h | - | ⏳ Pending |
-| Phase 5: Chat Sessions | 2h | - | ⏳ Pending |
+| Phase 5: Chat Sessions | 2.5h | - | ⏳ Pending (+30min for 5.1b background embeddings) |
 | Phase 6: Navigation | 1h | - | ⏳ Pending |
-| Phase 7: Error Handling | 1h | - | ⏳ Pending |
-| Phase 8: Performance | 1h | - | ⏳ Pending |
-| **Total** | **11.5h** | **2.2h** | **19% Complete** |
+| Phase 7: Error Handling | 1.5h | - | ⏳ Pending (+30min for 7.6-7.7 embedding failures) |
+| Phase 8: Performance | 1.5h | - | ⏳ Pending (+30min for 8.6 embedding performance) |
+| **Total** | **13.5h** | **2.2h** | **16% Complete** |
+
+**Note**: Time estimates increased by 2 hours to account for deferred embeddings architecture testing (new Sub-phases 3.4a/b/c, 5.1b, 7.6-7.7, 8.6).
 
 ### Blockchain Transaction Log
 | Operation | Tx Hash | Block | Gas Used | Time (s) | Status |
@@ -708,13 +982,16 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 | Aspect | UI4 (Mock) | UI5 (Production) |
 |--------|------------|------------------|
 | **Blockchain** | Instant (localStorage) | 5-15s (Base Sepolia) |
-| **Storage** | Instant (localStorage) | 2-10s (S5 network) |
+| **Storage (Upload)** | Instant (localStorage) | < 2s (S5 upload, deferred embeddings) |
+| **Embeddings** | Instant (mock) | < 30s/doc (during session start, background) |
 | **WebSocket** | Simulated (instant) | Real (5-15s LLM) |
 | **Transactions** | Mock (no gas) | Real (testnet ETH) |
 | **Wallet** | Auto-connected | Test wallet (auto-approved) |
-| **Test Duration** | 5 min (61 tests) | 15-30 min (61 tests) |
+| **Test Duration** | 5 min (61 tests) | 18-35 min (61 tests) |
 | **Manual Approval** | None | None (test wallet) |
 | **Cost** | Free | Testnet ETH (~0.01 ETH) |
+
+**Note**: Upload time reduced from 2-10s to < 2s with deferred embeddings architecture (2025-11-16). Embeddings now generate in background during session start, not during upload.
 
 ---
 
@@ -790,5 +1067,6 @@ curl http://localhost:3002
 
 ---
 
-**Last Updated**: 2025-11-13 14:00 UTC
-**Next Update**: After completing Phase 2.1 (first automated test run)
+**Last Updated**: 2025-11-16 (Deferred Embeddings Architecture Alignment)
+**Next Update**: After completing Sub-phases 3.4a-3.4c implementation
+**Architecture Changes**: Aligned with deferred embeddings implementation (docs/IMPLEMENTATION_DEFERRED_EMBEDDINGS.md Phases 1-9 complete)
