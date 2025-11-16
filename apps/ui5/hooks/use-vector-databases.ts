@@ -157,9 +157,25 @@ export function useVectorDatabases() {
 
       const vectorRAGManager = managers.vectorRAGManager;
       await vectorRAGManager.updateDatabaseMetadata(name, updates);
-      await fetchDatabases(); // Refresh list
+
+      // Optimistic UI update - merge updates into local state immediately
+      setDatabases(prevDbs =>
+        prevDbs.map(db =>
+          db.name === name
+            ? {
+                ...db,
+                ...updates,
+                lastAccessed: Date.now()
+              }
+            : db
+        )
+      );
+
+      // NOTE: Caller must NOT rely on immediate S5 consistency.
+      // S5 will sync in background. Don't call fetchDatabases() immediately.
+      // See: /workspace/tests-ui5/S5_WRITE_READ_ANTI_PATTERN_AUDIT.md
     },
-    [managers, fetchDatabases]
+    [managers]
   );
 
   // Delete database
@@ -169,9 +185,15 @@ export function useVectorDatabases() {
 
       const vectorRAGManager = managers.vectorRAGManager;
       await vectorRAGManager.deleteDatabase(name);
-      await fetchDatabases(); // Refresh list
+
+      // Optimistic UI update - remove from local state immediately
+      setDatabases(prevDbs => prevDbs.filter(db => db.name !== name));
+
+      // NOTE: Caller must NOT rely on immediate S5 consistency.
+      // S5 will sync in background. Don't call fetchDatabases() immediately.
+      // See: /workspace/tests-ui5/S5_WRITE_READ_ANTI_PATTERN_AUDIT.md
     },
-    [managers, fetchDatabases]
+    [managers]
   );
 
   // Folder operations
@@ -241,10 +263,26 @@ export function useVectorDatabases() {
 
       const vectorRAGManager = managers.vectorRAGManager;
       const deletedCount = await vectorRAGManager.deleteFolder(databaseName, folderPath);
-      await fetchDatabases(); // Refresh to update stats
+
+      // Optimistic UI update - update stats immediately
+      setDatabases(prevDbs =>
+        prevDbs.map(db =>
+          db.name === databaseName
+            ? {
+                ...db,
+                vectorCount: Math.max(0, (db.vectorCount || 0) - deletedCount),
+                lastAccessed: Date.now()
+              }
+            : db
+        )
+      );
+
       return deletedCount;
+      // NOTE: Caller must handle folder tree updates separately.
+      // S5 will sync in background. Don't call fetchDatabases() immediately.
+      // See: /workspace/tests-ui5/S5_WRITE_READ_ANTI_PATTERN_AUDIT.md
     },
-    [managers, fetchDatabases]
+    [managers]
   );
 
   const getAllFoldersWithCounts = useCallback(
@@ -264,9 +302,26 @@ export function useVectorDatabases() {
 
       const vectorRAGManager = managers.vectorRAGManager;
       await vectorRAGManager.addVector(databaseName, id, vector, metadata);
-      await fetchDatabases(); // Refresh to update stats
+
+      // Optimistic UI update - increment vectorCount and update stats
+      setDatabases(prevDbs =>
+        prevDbs.map(db =>
+          db.name === databaseName
+            ? {
+                ...db,
+                vectorCount: (db.vectorCount || 0) + 1,
+                storageSizeBytes: (db.storageSizeBytes || 0) + (vector.length * 4), // Approximate size
+                lastAccessed: Date.now()
+              }
+            : db
+        )
+      );
+
+      // NOTE: Caller must NOT rely on immediate S5 consistency.
+      // S5 will sync in background. Don't call fetchDatabases() immediately.
+      // See: /workspace/tests-ui5/S5_WRITE_READ_ANTI_PATTERN_AUDIT.md
     },
-    [managers, fetchDatabases]
+    [managers]
   );
 
   const addVectors = useCallback(

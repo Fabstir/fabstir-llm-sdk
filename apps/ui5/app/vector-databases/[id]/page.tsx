@@ -226,10 +226,19 @@ export default function VectorDatabaseDetailPage() {
         // Delete folder and all its contents
         const deletedCount = await deleteFolder(databaseName, folderAction.folder.path);
         console.log(`Deleted folder ${folderAction.folder.path} (${deletedCount} vectors removed)`);
+
+        // Optimistic UI update - remove folder and its vectors
+        setFoldersWithCounts(prev =>
+          prev.filter(f => !f.path.startsWith(folderAction.folder!.path))
+        );
+        setVectors(prev =>
+          prev.filter(v => !v.metadata?.folderPath?.startsWith(folderAction.folder!.path))
+        );
       }
 
       setFolderAction(null);
-      await loadData(); // Reload to reflect changes
+      // Note: S5 will sync in background. Don't call loadData() immediately after folder operations.
+      // Optimistic updates above handle UI changes. See: /workspace/tests-ui5/S5_WRITE_READ_ANTI_PATTERN_AUDIT.md
     } catch (err) {
       console.error('Failed to perform folder action:', err);
       alert(err instanceof Error ? err.message : 'Failed to perform folder action');
