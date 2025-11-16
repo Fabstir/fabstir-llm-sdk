@@ -212,6 +212,8 @@ export default function VectorDatabaseDetailPage() {
 
   // Upload handler
   const handleUploadDocuments = async (files: File[], folderPath?: string) => {
+    console.log('[Page] 🚀 handleUploadDocuments called with:', { fileCount: files.length, folderPath });
+
     // Generate mock vectors for each file
     const vectors: Vector[] = files.map((file, index) => {
       // Generate a mock 384-dimensional vector (matching database dimensions)
@@ -219,7 +221,7 @@ export default function VectorDatabaseDetailPage() {
 
       return {
         id: `${file.name}-${Date.now()}-${index}`,
-        vector: mockVector,
+        values: mockVector,
         metadata: {
           fileName: file.name,
           fileSize: file.size,

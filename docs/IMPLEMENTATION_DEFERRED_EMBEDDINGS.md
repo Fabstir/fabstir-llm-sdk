@@ -1,0 +1,597 @@
+# Deferred Embeddings Implementation Plan
+
+**Status**: Planning Phase
+**Target**: UI5 Production SDK Integration
+**Created**: 2025-11-15
+**Last Updated**: 2025-11-15
+
+---
+
+## Overview
+
+Implement deferred embeddings architecture to solve the timing mismatch between document upload (no session) and embedding generation (requires host session). Documents are uploaded immediately to S5 storage, but embeddings are generated in the background when a user starts a chat session.
+
+### Key Features
+
+1. **Instant Upload**: Documents stored in S5 immediately without waiting for embeddings
+2. **Background Processing**: Embeddings generated when user starts chat session
+3. **Progress Visibility**: Real-time progress bar showing which documents are being vectorized
+4. **Search Clarification**: File search is text-based filtering, not semantic vector search
+5. **Graceful Degradation**: Documents visible immediately, search capability added progressively
+
+### User Flow
+
+```
+1. User uploads document → Stored in S5 with "pending embeddings" status
+2. User starts chat session → Host discovered + WebSocket connection established
+3. Background: Process pending documents → Generate embeddings for each document
+4. Progress bar: "Vectorizing document 2 of 5: api-documentation.pdf (35%)"
+5. Document status: "pending" → "processing" → "ready"
+6. User can search once embeddings complete
+```
+
+---
+
+## Architecture
+
+### Data Structures
+
+```typescript
+interface DocumentMetadata {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  fileType: string;
+  folderPath: string;
+  s5Cid: string;  // S5 storage CID for document content
+  createdAt: number;
+  embeddingStatus: 'pending' | 'processing' | 'ready' | 'failed';
+  embeddingProgress?: number;  // 0-100 percentage
+  embeddingError?: string;
+  vectorCount?: number;
+  lastEmbeddingAttempt?: number;
+}
+
+interface VectorDatabaseMetadata {
+  name: string;
+  description?: string;
+  dimensions: number;
+  pendingDocuments: DocumentMetadata[];  // Awaiting embeddings
+  readyDocuments: DocumentMetadata[];     // Embeddings complete
+  vectorCount: number;
+  createdAt: number;
+  lastAccessed: number;
+}
+
+interface EmbeddingProgress {
+  sessionId: string;
+  databaseName: string;
+  documentId: string;
+  fileName: string;
+  totalChunks: number;
+  processedChunks: number;
+  percentage: number;
+  status: 'pending' | 'processing' | 'complete' | 'failed';
+  error?: string;
+}
+```
+
+### Storage Structure
+
+```
+home/vector-databases/{userAddress}/
+├── {dbName}/
+│   ├── metadata.json        # DB config, pending/ready docs, stats
+│   ├── vectors.cid          # S5 CID pointing to chunked vectors
+│   └── hierarchy.json       # Virtual folder tree structure
+```
+
+### SDK Method Flow
+
+```
+Upload Flow:
+  handleUploadDocuments() → uploadToS5() → addPendingDocument() → UI refresh
+
+Session Start Flow:
+  handleStartSession() → discoverHost() → startSession() → processPendingEmbeddings()
+
+Background Processing:
+  processPendingEmbeddings() → for each doc:
+    - updateDocumentStatus('processing')
+    - downloadFromS5()
+    - sessionManager.generateEmbeddings() [WebSocket to host]
+    - vectorRAGManager.addVectors() [Store in S5]
+    - updateDocumentStatus('ready')
+    - emit progress event
+```
+
+---
+
+## Implementation Phases
+
+### Phase 1: Data Structures & Storage (2-3 hours)
+
+**Goal**: Extend existing metadata structures to support deferred embeddings
+
+#### Sub-phase 1.1: Update DocumentMetadata Interface
+- [ ] Add `embeddingStatus` field to `DocumentMetadata` interface
+- [ ] Add `embeddingProgress` field (0-100 percentage)
+- [ ] Add `embeddingError` field for failed embeddings
+- [ ] Add `lastEmbeddingAttempt` timestamp
+- [ ] Add `s5Cid` field for document content storage
+- [ ] **File**: `/workspace/apps/ui5/hooks/use-vector-databases.ts` (lines 1-30)
+- [ ] **Test**: TypeScript compiles without errors
+
+#### Sub-phase 1.2: Update VectorDatabaseMetadata Interface
+- [ ] Split documents into `pendingDocuments[]` and `readyDocuments[]`
+- [ ] Update `vectorCount` to reflect only ready documents
+- [ ] **File**: `/workspace/apps/ui5/hooks/use-vector-databases.ts` (lines 1-30)
+- [ ] **Test**: Existing databases load correctly with migration logic
+
+#### Sub-phase 1.3: Create EmbeddingProgress Interface
+- [ ] Define `EmbeddingProgress` interface for real-time updates
+- [ ] Add fields: `sessionId`, `databaseName`, `documentId`, `fileName`, `totalChunks`, `processedChunks`, `percentage`, `status`, `error`
+- [ ] **File**: `/workspace/apps/ui5/hooks/use-vector-databases.ts` (lines 1-30)
+- [ ] **Test**: TypeScript compiles without errors
+
+**Acceptance Criteria**:
+- [x] All interfaces defined with correct types
+- [ ] No breaking changes to existing code
+- [ ] TypeScript compiles without errors
+
+---
+
+### Phase 2: Upload Flow (No Embeddings) (2-3 hours)
+
+**Goal**: Modify upload to store documents without generating vectors
+
+#### Sub-phase 2.1: Modify handleUploadDocuments
+- [ ] Remove `Math.random()` vector generation code
+- [ ] Add S5 upload for document content → get `s5Cid`
+- [ ] Create `DocumentMetadata` with `embeddingStatus: 'pending'`
+- [ ] Call `addPendingDocument()` instead of `addVectors()`
+- [ ] Update UI to show "pending embeddings" badge
+- [ ] **File**: `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx` (lines 214-242)
+- [ ] **Test**: Document appears in UI with "pending" badge immediately after upload
+
+#### Sub-phase 2.2: Add addPendingDocument Method
+- [ ] Create `addPendingDocument(databaseName, docMetadata)` in `useVectorDatabases` hook
+- [ ] Load existing metadata from S5
+- [ ] Append to `pendingDocuments[]` array
+- [ ] Save updated metadata to S5
+- [ ] **File**: `/workspace/apps/ui5/hooks/use-vector-databases.ts` (new method)
+- [ ] **Test**: Document metadata persists in S5 after upload
+
+#### Sub-phase 2.3: Add S5 Upload Helper
+- [ ] Create `uploadDocumentToS5(fileContent, databaseName, documentId)` helper
+- [ ] Use `s5.fs.put(path, data)` from Enhanced S5.js
+- [ ] Path format: `home/vector-databases/{databaseName}/documents/{documentId}.txt`
+- [ ] Returns path for later retrieval
+- [ ] **File**: `/workspace/apps/ui5/lib/s5-utils.ts` (new file or add to existing)
+- [ ] **Test**: Document content can be retrieved using returned path
+- [ ] **Reference**: `docs/s5js-reference/API.md` lines 196-210 (put method)
+
+**Acceptance Criteria**:
+- [ ] Upload completes in < 2 seconds (no embedding wait)
+- [ ] Document appears in UI immediately with "pending embeddings" badge
+- [ ] Document metadata persists in S5 storage
+- [ ] No vector generation during upload
+- [ ] Console logs confirm deferred embeddings approach
+
+---
+
+### Phase 3: SDK Methods for Background Processing (3-4 hours)
+
+**Goal**: Add SDK methods to generate embeddings via WebSocket when session is active
+
+#### Sub-phase 3.1: Add SessionManager.generateEmbeddings
+- [ ] Create `generateEmbeddings(sessionId, fileContent, options)` method
+- [ ] Send HTTP POST to `/v1/embed` endpoint on host
+- [ ] Request format: `{ texts: string[], model: "all-MiniLM-L6-v2", chainId: number }`
+- [ ] Response format: `{ embeddings: [{ embedding: number[], text: string, tokenCount: number }], ...metadata }`
+- [ ] Convert file content into chunks (512 chars each, 50 char overlap)
+- [ ] Return `Promise<Vector[]>` with generated 384-dimensional embeddings
+- [ ] Add timeout (120 seconds for large documents)
+- [ ] **File**: `/workspace/packages/sdk-core/src/managers/SessionManager.ts` (new method)
+- [ ] **Test**: Method sends correct HTTP request and receives 384D vectors
+- [ ] **Reference**: `docs/node-reference/API.md` lines 805-918 (Generate Embeddings endpoint)
+
+#### Sub-phase 3.2: Add VectorRAGManager.getPendingDocuments
+- [ ] Create `getPendingDocuments(sessionGroupId)` method
+- [ ] Get all vector databases in session group
+- [ ] Collect all `pendingDocuments` from each database
+- [ ] Return `DocumentMetadata[]` array
+- [ ] **File**: `/workspace/packages/sdk-core/src/managers/VectorRAGManager.ts` (new method)
+- [ ] **Test**: Returns correct pending documents across multiple databases
+
+#### Sub-phase 3.3: Add VectorRAGManager.updateDocumentStatus
+- [ ] Create `updateDocumentStatus(docId, status, updates)` method
+- [ ] Find document in `pendingDocuments[]` across all databases
+- [ ] Update status and optional fields (vectorCount, error, progress)
+- [ ] Move to `readyDocuments[]` if status is 'ready'
+- [ ] Save updated metadata to S5
+- [ ] **File**: `/workspace/packages/sdk-core/src/managers/VectorRAGManager.ts` (new method)
+- [ ] **Test**: Status updates persist and documents move between arrays
+
+#### Sub-phase 3.4: Add downloadFromS5 Helper
+- [ ] Create `downloadFromS5(s5Path)` helper to retrieve document content
+- [ ] Use `s5.fs.get(path)` from Enhanced S5.js
+- [ ] Automatically decodes (CBOR → JSON → UTF-8 → raw bytes)
+- [ ] Returns document content as string
+- [ ] **File**: `/workspace/apps/ui5/lib/s5-utils.ts`
+- [ ] **Test**: Can retrieve uploaded document using S5 path
+- [ ] **Reference**: `docs/s5js-reference/API.md` lines 152-194 (get method)
+
+**Acceptance Criteria**:
+- [ ] `generateEmbeddings()` successfully generates vectors via WebSocket
+- [ ] `getPendingDocuments()` returns all pending docs across databases
+- [ ] `updateDocumentStatus()` correctly updates and persists status
+- [ ] Documents can be downloaded from S5 using CID
+
+---
+
+### Phase 4: Session Start Flow (2-3 hours)
+
+**Goal**: Process pending embeddings in background when user starts chat session
+
+#### Sub-phase 4.1: Add processPendingEmbeddings Function
+- [ ] Create `processPendingEmbeddings(sessionId, host, onProgress)` function
+- [ ] Get all pending documents via `getPendingDocuments()`
+- [ ] Return early if no pending documents
+- [ ] Loop through each document:
+  - [ ] Update status to 'processing'
+  - [ ] Download content from S5
+  - [ ] Generate embeddings via `sessionManager.generateEmbeddings()`
+  - [ ] Store vectors via `vectorRAGManager.addVectors()`
+  - [ ] Update status to 'ready' with vectorCount
+  - [ ] Call `onProgress()` callback with progress data
+- [ ] Catch errors and mark failed documents with error message
+- [ ] **File**: `/workspace/apps/ui5/app/session-groups/[id]/page.tsx` (new function)
+- [ ] **Test**: All pending documents get processed when session starts
+
+#### Sub-phase 4.2: Integrate with handleStartSession
+- [ ] Modify `handleStartSession()` to call `processPendingEmbeddings()` after session creation
+- [ ] Run in background (non-blocking) using `.catch()` for errors
+- [ ] Don't block chat UI - user can start chatting immediately
+- [ ] **File**: `/workspace/apps/ui5/app/session-groups/[id]/page.tsx` (modify existing)
+- [ ] **Test**: Chat session starts immediately, embeddings process in background
+
+#### Sub-phase 4.3: Add Progress Callback
+- [ ] Create `handleEmbeddingProgress(progress: EmbeddingProgress)` callback
+- [ ] Update UI state with current progress
+- [ ] Trigger re-render to show progress bar
+- [ ] **File**: `/workspace/apps/ui5/app/session-groups/[id]/page.tsx` (new function)
+- [ ] **Test**: Progress updates appear in UI during background processing
+
+**Acceptance Criteria**:
+- [ ] Session starts immediately without waiting for embeddings
+- [ ] Pending documents are processed in background
+- [ ] Progress updates trigger UI re-renders
+- [ ] Errors don't crash chat - documents marked as failed
+- [ ] User can chat while embeddings generate
+
+---
+
+### Phase 5: Progress Bar UI (2-3 hours)
+
+**Goal**: Show real-time progress of background embedding generation
+
+#### Sub-phase 5.1: Create EmbeddingProgressBar Component
+- [ ] Create `<EmbeddingProgressBar>` component
+- [ ] Props: `progress: EmbeddingProgress | null`
+- [ ] Show document name, percentage, processed/total chunks
+- [ ] Use linear progress bar (e.g., shadcn/ui Progress)
+- [ ] Show status icon (spinner for processing, checkmark for complete)
+- [ ] **File**: `/workspace/apps/ui5/components/vector-databases/embedding-progress-bar.tsx` (new file)
+- [ ] **Test**: Component renders correctly with mock progress data
+
+#### Sub-phase 5.2: Add Progress State to Session Page
+- [ ] Add `embeddingProgress` state to session-groups/[id]/page.tsx
+- [ ] Update state in `handleEmbeddingProgress()` callback
+- [ ] Clear state when all documents complete
+- [ ] **File**: `/workspace/apps/ui5/app/session-groups/[id]/page.tsx`
+- [ ] **Test**: State updates correctly during background processing
+
+#### Sub-phase 5.3: Integrate Progress Bar into Chat UI
+- [ ] Add `<EmbeddingProgressBar>` above chat input area
+- [ ] Show only when `embeddingProgress` is not null
+- [ ] Auto-hide when processing complete
+- [ ] **File**: `/workspace/apps/ui5/app/session-groups/[id]/page.tsx`
+- [ ] **Test**: Progress bar appears during processing, hides when complete
+
+#### Sub-phase 5.4: Add Multi-Document Queue Display
+- [ ] Show queue: "Processing 2 of 5 documents"
+- [ ] List remaining documents in queue
+- [ ] Estimated time remaining (based on average time per document)
+- [ ] **File**: `/workspace/apps/ui5/components/vector-databases/embedding-progress-bar.tsx`
+- [ ] **Test**: Queue display updates correctly as documents complete
+
+**Acceptance Criteria**:
+- [ ] Progress bar shows real-time updates during embedding generation
+- [ ] User can see which document is currently being processed
+- [ ] Queue shows remaining documents
+- [ ] Progress bar auto-hides when complete
+- [ ] UI remains responsive during background processing
+
+**Design Reference**:
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 🔄 Vectorizing Documents (2 of 5)                          │
+│                                                             │
+│ Current: api-documentation.pdf                             │
+│ [████████████████░░░░░░░░] 65% (1,240 / 1,900 chunks)     │
+│                                                             │
+│ Remaining: design-specs.pdf, user-guide.pdf, changelog.md │
+│ Estimated time: 2 minutes                                  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Phase 6: Document Status UI (1-2 hours)
+
+**Goal**: Show embedding status on documents in vector database detail page
+
+#### Sub-phase 6.1: Add Status Badges to Document List
+- [ ] Add badge component next to document name
+- [ ] Badge variants:
+  - [ ] "Pending Embeddings" (yellow/warning)
+  - [ ] "Processing..." (blue/info with spinner)
+  - [ ] "Ready" (green/success with checkmark + vector count)
+  - [ ] "Failed" (red/error with tooltip showing error message)
+- [ ] **File**: `/workspace/apps/ui5/components/vector-databases/document-list.tsx`
+- [ ] **Test**: Badges show correct status for each document
+
+#### Sub-phase 6.2: Add Info Banner for Pending Documents
+- [ ] Show banner at top of vector database page if `pendingDocuments.length > 0`
+- [ ] Message: "X documents pending embeddings. Start a chat session to generate embeddings."
+- [ ] Include icon and count
+- [ ] **File**: `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx`
+- [ ] **Test**: Banner appears when pending documents exist, hides when all ready
+
+#### Sub-phase 6.3: Add Retry Button for Failed Documents
+- [ ] Add "Retry" button next to failed documents
+- [ ] Click → trigger embedding generation for that specific document
+- [ ] Use existing session if active, or show "Start session first" message
+- [ ] **File**: `/workspace/apps/ui5/components/vector-databases/document-list.tsx`
+- [ ] **Test**: Retry button successfully re-processes failed document
+
+**Acceptance Criteria**:
+- [ ] Document status is visible at a glance (color-coded badges)
+- [ ] Users know when documents are not yet searchable
+- [ ] Failed documents can be retried without re-uploading
+- [ ] Info banner provides clear call-to-action
+
+---
+
+### Phase 7: Search Clarification (1 hour)
+
+**Goal**: Clarify that file search is text-based filtering, not semantic vector search
+
+#### Sub-phase 7.1: Update Search UI Labels
+- [ ] Change "Search files" label to "Filter by filename"
+- [ ] Add placeholder: "Type to filter by filename..."
+- [ ] Add tooltip: "Text-based filtering. Semantic search available after embeddings complete."
+- [ ] **File**: `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx`
+- [ ] **Test**: Labels clearly indicate text filtering
+
+#### Sub-phase 7.2: Add Semantic Search Input (Future)
+- [ ] Add separate "Semantic Search" input below filter
+- [ ] Disable if no ready documents exist
+- [ ] Show message: "Upload and vectorize documents to enable semantic search"
+- [ ] **File**: `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx`
+- [ ] **Test**: Semantic search input disabled when no ready documents
+
+#### Sub-phase 7.3: Implement Text Filtering
+- [ ] Filter documents client-side by filename match
+- [ ] Case-insensitive search
+- [ ] Show count: "Showing 3 of 15 documents"
+- [ ] **File**: `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx`
+- [ ] **Test**: Filtering works correctly on document list
+
+**Acceptance Criteria**:
+- [ ] Users understand difference between text filtering and semantic search
+- [ ] Text filtering works instantly on document filenames
+- [ ] Semantic search clearly requires embeddings to be ready
+- [ ] UI provides helpful context about search capabilities
+
+---
+
+### Phase 8: Testing & Validation (2-3 hours)
+
+**Goal**: Comprehensive testing of deferred embeddings workflow
+
+#### Sub-phase 8.1: Unit Tests
+- [ ] Test `addPendingDocument()` method
+- [ ] Test `getPendingDocuments()` method
+- [ ] Test `updateDocumentStatus()` method
+- [ ] Test `processPendingEmbeddings()` function
+- [ ] **Files**: `/workspace/tests-ui5/*.test.ts`
+- [ ] **Target**: All unit tests passing
+
+#### Sub-phase 8.2: Integration Tests (Playwright)
+- [ ] Test: Upload document → Verify "pending" status
+- [ ] Test: Start session → Verify background processing starts
+- [ ] Test: Wait for completion → Verify "ready" status
+- [ ] Test: Search after embeddings → Verify search works
+- [ ] Test: Failed embedding → Verify error handling
+- [ ] Test: Retry failed document → Verify re-processing
+- [ ] **Files**: `/workspace/tests-ui5/test-deferred-embeddings.spec.ts` (new file)
+- [ ] **Target**: All integration tests passing
+
+#### Sub-phase 8.3: Manual Testing Checklist
+- [ ] Upload 5 documents to vector database
+- [ ] Verify all show "pending embeddings" badge
+- [ ] Start chat session
+- [ ] Verify progress bar appears
+- [ ] Verify progress bar shows correct document names and percentages
+- [ ] Verify documents transition: pending → processing → ready
+- [ ] Verify progress bar auto-hides when complete
+- [ ] Verify semantic search works after embeddings complete
+- [ ] Test failed embedding scenario (disconnect during processing)
+- [ ] Verify retry button works for failed documents
+
+**Acceptance Criteria**:
+- [ ] All unit tests passing (95%+ coverage)
+- [ ] All integration tests passing
+- [ ] Manual testing checklist 100% complete
+- [ ] No console errors during normal operation
+- [ ] Performance: Upload < 2s, embeddings < 30s per document
+
+---
+
+### Phase 9: Documentation (1 hour)
+
+**Goal**: Document deferred embeddings architecture for future developers
+
+#### Sub-phase 9.1: Update SDK API Documentation
+- [ ] Document `SessionManager.generateEmbeddings()` method
+- [ ] Document `VectorRAGManager.getPendingDocuments()` method
+- [ ] Document `VectorRAGManager.updateDocumentStatus()` method
+- [ ] **File**: `/workspace/docs/SDK_API.md`
+
+#### Sub-phase 9.2: Update UI Developer Guide
+- [ ] Document deferred embeddings workflow
+- [ ] Document progress bar integration
+- [ ] Document error handling best practices
+- [ ] **File**: `/workspace/docs/UI_DEVELOPER_CHAT_GUIDE.md`
+
+#### Sub-phase 9.3: Add Architecture Diagram
+- [ ] Create flow diagram showing upload → session → background processing
+- [ ] Add to implementation doc
+- [ ] **File**: `/workspace/docs/IMPLEMENTATION_DEFERRED_EMBEDDINGS.md` (this file)
+
+**Acceptance Criteria**:
+- [ ] Documentation is clear and comprehensive
+- [ ] Code examples are correct and tested
+- [ ] Architecture diagram accurately represents system
+
+---
+
+## File Modifications Summary
+
+### New Files
+- [ ] `/workspace/apps/ui5/components/vector-databases/embedding-progress-bar.tsx` - Progress bar component
+- [ ] `/workspace/apps/ui5/lib/s5-utils.ts` - S5 upload/download helpers (if doesn't exist)
+- [ ] `/workspace/tests-ui5/test-deferred-embeddings.spec.ts` - Integration tests
+
+### Modified Files
+- [ ] `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx` - Remove Math.random(), add deferred upload
+- [ ] `/workspace/apps/ui5/app/session-groups/[id]/page.tsx` - Add background processing on session start
+- [ ] `/workspace/apps/ui5/hooks/use-vector-databases.ts` - Add pending document methods
+- [ ] `/workspace/apps/ui5/components/vector-databases/document-list.tsx` - Add status badges
+- [ ] `/workspace/packages/sdk-core/src/managers/SessionManager.ts` - Add generateEmbeddings()
+- [ ] `/workspace/packages/sdk-core/src/managers/VectorRAGManager.ts` - Add pending document methods
+- [ ] `/workspace/docs/SDK_API.md` - Document new SDK methods
+- [ ] `/workspace/docs/UI_DEVELOPER_CHAT_GUIDE.md` - Document deferred embeddings workflow
+
+---
+
+## Risk Mitigation
+
+### Risk 1: Host Node Doesn't Support Embeddings
+**Mitigation**:
+- [ ] Check host capabilities before processing
+- [ ] Fallback to OpenAI/Cohere API if host lacks embedding support
+- [ ] Add host capability check to `HostManager.discoverHosts()`
+
+### Risk 2: Large Documents Timeout
+**Mitigation**:
+- [ ] Set 2-minute timeout for `generateEmbeddings()`
+- [ ] Show warning for files > 10MB: "Large document may take several minutes"
+- [ ] Add chunking strategy for very large documents (split into smaller pieces)
+
+### Risk 3: User Closes Browser During Processing
+**Mitigation**:
+- [ ] Persist processing state to S5 (resume on next session)
+- [ ] Add "Processing interrupted" status
+- [ ] Auto-resume on next session start
+
+### Risk 4: Multiple Sessions Processing Same Document
+**Mitigation**:
+- [ ] Add lock mechanism: check `lastEmbeddingAttempt` timestamp
+- [ ] Skip documents already processing (< 5 minutes old)
+- [ ] Show "Already processing in another session" message
+
+---
+
+## Performance Targets
+
+| Metric | Target | Rationale |
+|--------|--------|-----------|
+| Upload time | < 2 seconds | User expects instant feedback |
+| Embedding generation | < 30 seconds per document | Depends on host speed, acceptable wait |
+| Progress update frequency | Every 5 seconds | Balance between responsiveness and overhead |
+| UI responsiveness | < 100ms | Progress updates shouldn't block chat |
+| Memory usage | < 50MB per document | Avoid browser crashes on large uploads |
+
+---
+
+## Success Criteria
+
+### Must Have (MVP)
+- [x] Documents upload without waiting for embeddings
+- [ ] Embeddings generate in background when session starts
+- [ ] Progress bar shows real-time updates
+- [ ] Documents transition: pending → processing → ready
+- [ ] Failed embeddings can be retried
+- [ ] Search works after embeddings complete
+
+### Should Have (Post-MVP)
+- [ ] Queue shows all pending documents
+- [ ] Estimated time remaining
+- [ ] Pause/resume background processing
+- [ ] Cancel individual document processing
+- [ ] Batch retry all failed documents
+
+### Nice to Have (Future)
+- [ ] Embedding quality metrics (accuracy scores)
+- [ ] A/B test different embedding models
+- [ ] Incremental embeddings (add new chunks without re-processing)
+- [ ] Client-side embeddings (WebAssembly fallback)
+
+---
+
+## Timeline Estimate
+
+| Phase | Estimated Time | Dependencies |
+|-------|----------------|--------------|
+| Phase 1: Data Structures | 2-3 hours | None |
+| Phase 2: Upload Flow | 2-3 hours | Phase 1 |
+| Phase 3: SDK Methods | 3-4 hours | Phase 1 |
+| Phase 4: Session Start Flow | 2-3 hours | Phase 2, 3 |
+| Phase 5: Progress Bar UI | 2-3 hours | Phase 4 |
+| Phase 6: Document Status UI | 1-2 hours | Phase 2 |
+| Phase 7: Search Clarification | 1 hour | None |
+| Phase 8: Testing | 2-3 hours | Phase 1-7 |
+| Phase 9: Documentation | 1 hour | Phase 1-8 |
+
+**Total: 16-22 hours** (2-3 days of focused development)
+
+---
+
+## Next Steps
+
+1. **Review this plan** with project owner
+2. **Start Phase 1** (Data Structures)
+3. **Implement in order** (Phase 1 → Phase 9)
+4. **Mark checkboxes** as tasks complete
+5. **Update status** section at top of document
+
+---
+
+## Status Tracking
+
+**Overall Progress**: 0% (0 / 9 phases complete)
+
+- [ ] Phase 1: Data Structures & Storage
+- [ ] Phase 2: Upload Flow (No Embeddings)
+- [ ] Phase 3: SDK Methods for Background Processing
+- [ ] Phase 4: Session Start Flow
+- [ ] Phase 5: Progress Bar UI
+- [ ] Phase 6: Document Status UI
+- [ ] Phase 7: Search Clarification
+- [ ] Phase 8: Testing & Validation
+- [ ] Phase 9: Documentation
+
+**Last Updated**: 2025-11-15 (Plan created)

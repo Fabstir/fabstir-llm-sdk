@@ -245,9 +245,31 @@ export function useVectorDatabases() {
       if (!managers) throw new Error('SDK not initialized');
 
       const vectorRAGManager = managers.vectorRAGManager;
-      const result = await vectorRAGManager.addVectors(databaseName, vectors);
+
+      //  NOTE: The SDK has a bug where createSession() always tries to create the database,
+      // which fails if it already exists in S5 storage. As a workaround, we use the
+      // SDK's addVector() convenience method which calls vectorStore.addVector() directly.
+
+      let success = 0;
+      let failed = 0;
+
+      for (const vector of vectors) {
+        try {
+          await vectorRAGManager.addVector(
+            databaseName,
+            vector.id,
+            vector.values,
+            vector.metadata
+          );
+          success++;
+        } catch (error) {
+          console.error(`Failed to add vector ${vector.id}:`, error);
+          failed++;
+        }
+      }
+
       await fetchDatabases(); // Refresh to update stats
-      return result;
+      return { success, failed };
     },
     [managers, fetchDatabases]
   );
@@ -294,7 +316,20 @@ export function useVectorDatabases() {
       if (!managers) throw new Error('SDK not initialized');
 
       const vectorRAGManager = managers.vectorRAGManager;
-      return await vectorRAGManager.searchVectors(databaseName, queryVector, k, threshold);
+
+      // NOTE: The SDK has a bug where createSession() always tries to create the database,
+      // which fails if it already exists in S5 storage. As a workaround, we use the
+      // SDK's searchInFolder() method with root path to search the entire database
+      // without requiring session creation.
+
+      // Use searchInFolder with root path as workaround
+      return await vectorRAGManager.searchInFolder(
+        databaseName,
+        '/',  // Root folder path to search entire database
+        queryVector,
+        k,
+        threshold
+      );
     },
     [managers]
   );

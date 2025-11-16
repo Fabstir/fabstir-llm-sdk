@@ -81,29 +81,43 @@ export function UploadDocumentModal({ isOpen, onClose, databaseName, onUpload, i
   };
 
   const handleUpload = async () => {
-    if (files.length === 0) return;
+    console.log('[Modal] 🚀 handleUpload called, files:', files.length);
 
+    if (files.length === 0) {
+      console.log('[Modal] ⚠️ No files to upload, returning early');
+      return;
+    }
+
+    console.log('[Modal] ✅ Starting upload process');
     setIsUploading(true);
 
     try {
+      console.log('[Modal] 📦 Marking files as uploading');
       // Mark all as uploading
       setFiles(prev => prev.map(f => ({ ...f, status: 'uploading' as const })));
 
+      console.log('[Modal] 📤 About to call onUpload callback with', files.length, 'files');
       // Call upload handler
       await onUpload(files.map(f => f.file), folderPath);
+      console.log('[Modal] ✅ onUpload callback completed successfully');
 
       // Mark all as success
+      console.log('[Modal] 🎉 Upload successful, marking files as success');
       setFiles(prev => prev.map(f => ({ ...f, status: 'success' as const })));
 
       // Close after a brief delay
+      console.log('[Modal] ⏱️ Scheduling modal close in 1.5 seconds');
       setTimeout(() => {
+        console.log('[Modal] 🚪 Closing modal now');
         onClose();
       }, 1500);
     } catch (err) {
+      console.log('[Modal] ❌ Upload failed with error:', err);
       // Mark all as error
       const errorMessage = err instanceof Error ? err.message : 'Upload failed';
       setFiles(prev => prev.map(f => ({ ...f, status: 'error' as const, error: errorMessage })));
     } finally {
+      console.log('[Modal] 🔚 Finally block - setting isUploading to false');
       setIsUploading(false);
     }
   };
@@ -125,7 +139,8 @@ export function UploadDocumentModal({ isOpen, onClose, databaseName, onUpload, i
         bottom: 0,
         left: 0,
         backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        zIndex: 9999
+        zIndex: 9999,
+        pointerEvents: 'none'
       }}
       onClick={!isUploading ? onClose : undefined}
     >
@@ -134,7 +149,8 @@ export function UploadDocumentModal({ isOpen, onClose, databaseName, onUpload, i
         style={{
           position: 'relative',
           zIndex: 10000,
-          backgroundColor: 'white'
+          backgroundColor: 'white',
+          pointerEvents: 'auto'
         }}
         onClick={(e) => e.stopPropagation()}
       >
