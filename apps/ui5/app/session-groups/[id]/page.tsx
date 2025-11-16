@@ -8,7 +8,8 @@ import { Trash2, X, FileText, Database } from "lucide-react";
 import { useWallet } from "@/hooks/use-wallet";
 import { useSDK } from "@/hooks/use-sdk";
 import { useSessionGroups } from "@/hooks/use-session-groups";
-import { useVectorDatabases } from "@/hooks/use-vector-databases";
+import { useVectorDatabases, type EmbeddingProgress } from "@/hooks/use-vector-databases";
+import { downloadFromS5 } from "@/lib/s5-utils";
 
 interface ChatSession {
   sessionId: string;
@@ -28,7 +29,7 @@ export default function SessionGroupDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { isConnected } = useWallet();
-  const { isInitialized } = useSDK();
+  const { managers, isInitialized } = useSDK();
   const {
     selectedGroup,
     selectGroup,
@@ -48,6 +49,7 @@ export default function SessionGroupDetailPage() {
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [uploading, setUploading] = useState(false);
   const [showLinkDatabaseModal, setShowLinkDatabaseModal] = useState(false);
+  const [embeddingProgress, setEmbeddingProgress] = useState<EmbeddingProgress | null>(null);
 
   const groupId = params.id as string;
 
@@ -142,6 +144,214 @@ export default function SessionGroupDetailPage() {
       await unlinkDatabase(groupId, databaseName);
     } catch (error) {
       console.error("Failed to unlink database:", error);
+    }
+  };
+
+  // --- Embedding Progress Callback (Sub-phase 4.3) ---
+  const handleEmbeddingProgress = (progress: EmbeddingProgress) => {
+    console.log('[EmbeddingProgress]', progress);
+    setEmbeddingProgress(progress);
+  };
+
+  // --- Start LLM Session (Sub-phase 4.2) ---
+  // This function starts an LLM session with a host and triggers background embedding processing
+  // Called when user creates a new chat session (after production SDK integration)
+  const handleStartSession = async (
+    hostUrl: string,
+    modelId: string,
+    pricePerToken?: number
+  ): Promise<bigint | null> => {
+    if (!managers || !isInitialized) {
+      console.error('[handleStartSession] SDK not initialized');
+      return null;
+    }
+
+    try {
+      console.log('[handleStartSession] 🚀 Starting LLM session...', { hostUrl, modelId });
+
+      // Start LLM session via SessionManager
+      const sessionConfig = {
+        host: hostUrl,
+        modelId: modelId,
+        chainId: 84532, // Base Sepolia (TODO: get from settings)
+        paymentMethod: 'deposit' as const,
+        depositAmount: '1000000', // 1 USDC (TODO: calculate based on expected usage)
+        pricePerToken: pricePerToken || 2000, // Default 0.002 USDC per token
+        encryption: true, // Enable E2EE by default
+        groupId: groupId // Link session to current session group
+      };
+
+      const result = await managers.sessionManager.startSession(sessionConfig);
+      const sessionId = result.sessionId;
+
+      console.log('[handleStartSession] ✅ LLM session started:', sessionId.toString());
+
+      // Trigger background embedding processing (non-blocking)
+      processPendingEmbeddings(sessionId, hostUrl, handleEmbeddingProgress).catch((error) => {
+        console.error('[handleStartSession] ⚠️  Background embedding processing failed:', error);
+        // Don't throw - user can still chat even if embeddings fail
+      });
+
+      return sessionId;
+    } catch (error) {
+      console.error('[handleStartSession] ❌ Failed to start session:', error);
+      throw error;
+    }
+  };
+
+  // --- Process Pending Embeddings (Sub-phase 4.1) ---
+  const processPendingEmbeddings = async (
+    sessionId: bigint,
+    hostUrl: string,
+    onProgress?: (progress: EmbeddingProgress) => void
+  ) => {
+    if (!managers) {
+      console.error('[ProcessPendingEmbeddings] SDK managers not available');
+      return;
+    }
+
+    try {
+      console.log('[ProcessPendingEmbeddings] 🚀 Starting background embedding generation...');
+
+      // Get all pending documents via VectorRAGManager
+      const vectorRAGManager = managers.vectorRAGManager;
+      const sessionManager = managers.sessionManager;
+      const storageManager = managers.storageManager;
+
+      const pendingDocs = await vectorRAGManager.getPendingDocuments();
+
+      if (pendingDocs.length === 0) {
+        console.log('[ProcessPendingEmbeddings] ✅ No pending documents to process');
+        return;
+      }
+
+      console.log(`[ProcessPendingEmbeddings] 📋 Found ${pendingDocs.length} pending documents`);
+
+      // Process each document
+      for (let i = 0; i < pendingDocs.length; i++) {
+        const doc = pendingDocs[i];
+
+        try {
+          console.log(`[ProcessPendingEmbeddings] 📄 Processing document ${i + 1}/${pendingDocs.length}: ${doc.fileName}`);
+
+          // Update status to 'processing'
+          await vectorRAGManager.updateDocumentStatus(doc.id, 'processing', {
+            embeddingProgress: 0
+          });
+
+          // Emit progress
+          if (onProgress) {
+            onProgress({
+              sessionId: sessionId.toString(),
+              databaseName: doc.databaseName,
+              documentId: doc.id,
+              fileName: doc.fileName,
+              totalChunks: 0, // Will be updated after chunking
+              processedChunks: 0,
+              percentage: 0,
+              status: 'processing'
+            });
+          }
+
+          // Download document content from S5
+          const s5 = storageManager.s5Client;
+          const fileContent = await downloadFromS5(s5, doc.s5Cid);
+
+          if (!fileContent) {
+            throw new Error('Failed to download document from S5');
+          }
+
+          const contentString = typeof fileContent === 'string'
+            ? fileContent
+            : new TextDecoder().decode(fileContent);
+
+          console.log(`[ProcessPendingEmbeddings] ✅ Downloaded ${contentString.length} chars from S5`);
+
+          // Generate embeddings via SessionManager
+          const vectors = await sessionManager.generateEmbeddings(sessionId, contentString);
+
+          console.log(`[ProcessPendingEmbeddings] ✅ Generated ${vectors.length} vectors`);
+
+          // Update progress mid-way
+          if (onProgress) {
+            onProgress({
+              sessionId: sessionId.toString(),
+              databaseName: doc.databaseName,
+              documentId: doc.id,
+              fileName: doc.fileName,
+              totalChunks: vectors.length,
+              processedChunks: Math.floor(vectors.length / 2),
+              percentage: 50,
+              status: 'processing'
+            });
+          }
+
+          // Store vectors in S5 vector database
+          // Note: Using the internal databaseName from the document
+          for (const vector of vectors) {
+            await vectorRAGManager.addVector(
+              doc.databaseName,
+              vector.id,
+              vector.values,
+              vector.metadata
+            );
+          }
+
+          console.log(`[ProcessPendingEmbeddings] ✅ Stored ${vectors.length} vectors in S5`);
+
+          // Update status to 'ready'
+          await vectorRAGManager.updateDocumentStatus(doc.id, 'ready', {
+            vectorCount: vectors.length,
+            embeddingProgress: 100
+          });
+
+          // Emit final progress
+          if (onProgress) {
+            onProgress({
+              sessionId: sessionId.toString(),
+              databaseName: doc.databaseName,
+              documentId: doc.id,
+              fileName: doc.fileName,
+              totalChunks: vectors.length,
+              processedChunks: vectors.length,
+              percentage: 100,
+              status: 'complete'
+            });
+          }
+
+          console.log(`[ProcessPendingEmbeddings] ✅ Document ${doc.fileName} complete`);
+
+        } catch (error: any) {
+          console.error(`[ProcessPendingEmbeddings] ❌ Failed to process ${doc.fileName}:`, error);
+
+          // Mark document as failed
+          await vectorRAGManager.updateDocumentStatus(doc.id, 'failed', {
+            embeddingError: error.message
+          });
+
+          // Emit error progress
+          if (onProgress) {
+            onProgress({
+              sessionId: sessionId.toString(),
+              databaseName: doc.databaseName,
+              documentId: doc.id,
+              fileName: doc.fileName,
+              totalChunks: 0,
+              processedChunks: 0,
+              percentage: 0,
+              status: 'failed',
+              error: error.message
+            });
+          }
+
+          // Continue with next document
+        }
+      }
+
+      console.log('[ProcessPendingEmbeddings] 🎉 All documents processed');
+
+    } catch (error) {
+      console.error('[ProcessPendingEmbeddings] ❌ Fatal error:', error);
     }
   };
 
