@@ -38,6 +38,7 @@ export interface SDKManagers {
   hostManager: IHostManager;
   paymentManager: IPaymentManager;
   authManager: IAuthManager;
+  storageManager: any;  // IStorageManager with s5Client property
 }
 
 export class UI5SDK {
@@ -185,6 +186,7 @@ export class UI5SDK {
       hostManager: this.sdk.getHostManager(),
       paymentManager: this.sdk.getPaymentManager(),
       authManager: this.sdk.getAuthManager(),
+      storageManager: this.sdk.getStorageManager(),
     };
   }
 

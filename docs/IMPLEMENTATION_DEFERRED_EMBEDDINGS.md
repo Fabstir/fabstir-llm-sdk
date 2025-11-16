@@ -146,37 +146,37 @@ Background Processing:
 **Goal**: Modify upload to store documents without generating vectors
 
 #### Sub-phase 2.1: Modify handleUploadDocuments
-- [ ] Remove `Math.random()` vector generation code
-- [ ] Add S5 upload for document content → get `s5Cid`
-- [ ] Create `DocumentMetadata` with `embeddingStatus: 'pending'`
-- [ ] Call `addPendingDocument()` instead of `addVectors()`
-- [ ] Update UI to show "pending embeddings" badge
-- [ ] **File**: `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx` (lines 214-242)
-- [ ] **Test**: Document appears in UI with "pending" badge immediately after upload
+- [x] Remove `Math.random()` vector generation code
+- [x] Add S5 upload for document content → get `s5Cid`
+- [x] Create `DocumentMetadata` with `embeddingStatus: 'pending'`
+- [x] Call `addPendingDocument()` instead of `addVectors()`
+- [x] Update UI to show "pending embeddings" badge
+- [x] **File**: `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx` (lines 214-272)
+- [x] **Test**: Document appears in UI with "pending" badge immediately after upload
 
 #### Sub-phase 2.2: Add addPendingDocument Method
-- [ ] Create `addPendingDocument(databaseName, docMetadata)` in `useVectorDatabases` hook
-- [ ] Load existing metadata from S5
-- [ ] Append to `pendingDocuments[]` array
-- [ ] Save updated metadata to S5
-- [ ] **File**: `/workspace/apps/ui5/hooks/use-vector-databases.ts` (new method)
-- [ ] **Test**: Document metadata persists in S5 after upload
+- [x] Create `addPendingDocument(databaseName, docMetadata)` in `useVectorDatabases` hook
+- [x] Load existing metadata from S5
+- [x] Append to `pendingDocuments[]` array
+- [x] Save updated metadata to S5
+- [x] **File**: `/workspace/apps/ui5/hooks/use-vector-databases.ts` (lines 306-372)
+- [x] **Test**: Document metadata persists in S5 after upload
 
 #### Sub-phase 2.3: Add S5 Upload Helper
-- [ ] Create `uploadDocumentToS5(fileContent, databaseName, documentId)` helper
-- [ ] Use `s5.fs.put(path, data)` from Enhanced S5.js
-- [ ] Path format: `home/vector-databases/{databaseName}/documents/{documentId}.txt`
-- [ ] Returns path for later retrieval
-- [ ] **File**: `/workspace/apps/ui5/lib/s5-utils.ts` (new file or add to existing)
-- [ ] **Test**: Document content can be retrieved using returned path
-- [ ] **Reference**: `docs/s5js-reference/API.md` lines 196-210 (put method)
+- [x] Create `uploadDocumentToS5(fileContent, databaseName, documentId)` helper
+- [x] Use `s5.fs.put(path, data)` from Enhanced S5.js
+- [x] Path format: `home/vector-databases/{databaseName}/documents/{documentId}.txt`
+- [x] Returns path for later retrieval
+- [x] **File**: `/workspace/apps/ui5/lib/s5-utils.ts` (new file created)
+- [x] **Test**: Document content can be retrieved using returned path
+- [x] **Reference**: `docs/s5js-reference/API.md` lines 196-210 (put method)
 
 **Acceptance Criteria**:
-- [ ] Upload completes in < 2 seconds (no embedding wait)
-- [ ] Document appears in UI immediately with "pending embeddings" badge
-- [ ] Document metadata persists in S5 storage
-- [ ] No vector generation during upload
-- [ ] Console logs confirm deferred embeddings approach
+- [x] Upload completes in < 2 seconds (no embedding wait)
+- [x] Document appears in UI immediately with "pending embeddings" badge
+- [x] Document metadata persists in S5 storage
+- [x] No vector generation during upload
+- [x] Console logs confirm deferred embeddings approach
 
 ---
 

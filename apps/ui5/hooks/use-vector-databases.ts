@@ -303,6 +303,74 @@ export function useVectorDatabases() {
     [managers, fetchDatabases]
   );
 
+  const addPendingDocument = useCallback(
+    async (databaseName: string, docMetadata: DocumentMetadata): Promise<void> => {
+      if (!managers) throw new Error('SDK not initialized');
+
+      const storageManager = managers.storageManager;
+      const s5 = storageManager.s5Client;
+
+      if (!s5) {
+        throw new Error('S5 storage not initialized');
+      }
+
+      // Load existing database metadata from S5
+      const metadataPath = `home/vector-databases/${databaseName}/metadata.json`;
+      let metadata: DatabaseMetadata;
+
+      try {
+        const existingMetadata = await s5.fs.get(metadataPath);
+        if (existingMetadata) {
+          metadata = typeof existingMetadata === 'string'
+            ? JSON.parse(existingMetadata)
+            : existingMetadata;
+        } else {
+          // If metadata doesn't exist, create new structure
+          metadata = {
+            name: databaseName,
+            vectorCount: 0,
+            storageSizeBytes: 0,
+            lastAccessed: Date.now(),
+            createdAt: Date.now(),
+            dimensions: 384,
+            pendingDocuments: [],
+            readyDocuments: []
+          };
+        }
+      } catch (error) {
+        console.error('Failed to load metadata, creating new:', error);
+        metadata = {
+          name: databaseName,
+          vectorCount: 0,
+          storageSizeBytes: 0,
+          lastAccessed: Date.now(),
+          createdAt: Date.now(),
+          dimensions: 384,
+          pendingDocuments: [],
+          readyDocuments: []
+        };
+      }
+
+      // Initialize arrays if they don't exist (backward compatibility)
+      if (!metadata.pendingDocuments) {
+        metadata.pendingDocuments = [];
+      }
+      if (!metadata.readyDocuments) {
+        metadata.readyDocuments = [];
+      }
+
+      // Append to pendingDocuments array
+      metadata.pendingDocuments.push(docMetadata);
+      metadata.lastAccessed = Date.now();
+
+      // Save updated metadata to S5
+      await s5.fs.put(metadataPath, metadata);
+
+      await fetchDatabases(); // Refresh to update UI
+    },
+    [managers, fetchDatabases]
+  );
+
   const getVectors = useCallback(
     async (databaseName: string, vectorIds: string[]): Promise<Vector[]> => {
       if (!managers) throw new Error('SDK not initialized');
@@ -407,6 +475,7 @@ export function useVectorDatabases() {
     // Vector operations
     addVector,
     addVectors,
+    addPendingDocument,
     getVectors,
     listVectors,
     deleteVector,

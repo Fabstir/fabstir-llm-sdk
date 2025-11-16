@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useWallet } from '@/hooks/use-wallet';
-import { useVectorDatabases } from '@/hooks/use-vector-databases';
+import { useVectorDatabases, type DatabaseMetadata, type Vector } from '@/hooks/use-vector-databases';
 import { FolderTree, FolderNode } from '@/components/vector-databases/folder-tree';
 import { FileBrowser, FileItem } from '@/components/vector-databases/file-browser';
 import { FolderActions } from '@/components/vector-databases/folder-actions';
@@ -13,7 +13,6 @@ import { UploadDocumentModal } from '@/components/vector-databases/upload-docume
 import { VectorSearchPanel, SearchResult } from '@/components/vector-databases/vector-search-panel';
 import { Database, ArrowLeft, Upload, FolderPlus } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
-import type { DatabaseMetadata, Vector } from '@fabstir/sdk-core';
 
 /**
  * Vector Database Detail Page
@@ -24,7 +23,7 @@ export default function VectorDatabaseDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { isConnected } = useWallet();
-  const { managers, getDatabase, listVectors, deleteVector, addVectors, isInitialized, createFolder, renameFolder, deleteFolder, getAllFoldersWithCounts, searchVectors } = useVectorDatabases();
+  const { managers, getDatabase, listVectors, deleteVector, addVectors, addPendingDocument, isInitialized, createFolder, renameFolder, deleteFolder, getAllFoldersWithCounts, searchVectors } = useVectorDatabases();
 
   const databaseName = decodeURIComponent(params.id as string);
 
@@ -212,33 +211,63 @@ export default function VectorDatabaseDetailPage() {
 
   // Upload handler
   const handleUploadDocuments = async (files: File[], folderPath?: string) => {
-    console.log('[Page] 🚀 handleUploadDocuments called with:', { fileCount: files.length, folderPath });
+    console.log('[Page] 🚀 DEFERRED EMBEDDINGS: handleUploadDocuments called with:', { fileCount: files.length, folderPath });
 
-    // Generate mock vectors for each file
-    const vectors: Vector[] = files.map((file, index) => {
-      // Generate a mock 384-dimensional vector (matching database dimensions)
-      const mockVector = Array.from({ length: database?.dimensions || 384 }, () => Math.random());
+    if (!managers) {
+      console.error('[Page] ❌ Cannot upload - managers not initialized');
+      return;
+    }
 
-      return {
-        id: `${file.name}-${Date.now()}-${index}`,
-        values: mockVector,
-        metadata: {
+    const storageManager = managers.storageManager;
+    const s5 = storageManager?.s5Client;
+
+    if (!s5) {
+      console.error('[Page] ❌ Cannot upload - S5 storage not initialized');
+      return;
+    }
+
+    // Upload each document to S5 storage WITHOUT generating embeddings
+    for (const file of files) {
+      try {
+        console.log(`[Page] 📄 Uploading document to S5: ${file.name}`);
+
+        // Read file content
+        const fileContent = await file.text();
+
+        // Generate unique document ID
+        const documentId = `${file.name}-${Date.now()}`;
+
+        // Upload document content to S5
+        const { uploadDocumentToS5 } = await import('@/lib/s5-utils');
+        const s5Cid = await uploadDocumentToS5(s5, fileContent, databaseName, documentId);
+
+        console.log(`[Page] ✅ Document uploaded to S5: ${s5Cid}`);
+
+        // Create DocumentMetadata with "pending" embedding status
+        const docMetadata: import('@/hooks/use-vector-databases').DocumentMetadata = {
+          id: documentId,
           fileName: file.name,
           fileSize: file.size,
           fileType: file.type,
           folderPath: folderPath || selectedPath,
+          s5Cid: s5Cid,
           createdAt: Date.now(),
-          chunkIndex: 0,
-          totalChunks: 1
-        }
-      };
-    });
+          embeddingStatus: 'pending',
+          embeddingProgress: 0
+        };
 
-    // Add vectors to database
-    await addVectors(databaseName, vectors);
+        // Add to pendingDocuments array (no vector generation)
+        await addPendingDocument(databaseName, docMetadata);
 
-    // Reload data to show new documents
+        console.log(`[Page] ✅ Document metadata saved with status: pending`);
+      } catch (error) {
+        console.error(`[Page] ❌ Failed to upload ${file.name}:`, error);
+      }
+    }
+
+    // Reload data to show new documents with "pending embeddings" badge
     await loadData();
+    console.log('[Page] ✅ DEFERRED EMBEDDINGS: Upload complete - documents shown with "pending" status');
   };
 
   // Vector search handler
