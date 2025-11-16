@@ -18,6 +18,8 @@ interface VectorSearchPanelProps {
   databaseName: string;
   dimensions: number;
   onSearch: (queryVector: number[], k?: number, threshold?: number) => Promise<SearchResult[]>;
+  readyDocumentCount?: number; // Sub-phase 7.2: Track ready documents
+  disabled?: boolean; // Sub-phase 7.2: Disable when no ready documents
 }
 
 /**
@@ -25,7 +27,7 @@ interface VectorSearchPanelProps {
  *
  * Allows users to search vector databases using natural language queries
  */
-export function VectorSearchPanel({ databaseName, dimensions, onSearch }: VectorSearchPanelProps) {
+export function VectorSearchPanel({ databaseName, dimensions, onSearch, readyDocumentCount = 0, disabled = false }: VectorSearchPanelProps) {
   const [query, setQuery] = useState('');
   const [topK, setTopK] = useState(5);
   const [threshold, setThreshold] = useState(0.7);
@@ -82,38 +84,52 @@ export function VectorSearchPanel({ databaseName, dimensions, onSearch }: Vector
     <div className="bg-white rounded-lg border">
       {/* Search Input Section */}
       <div className="p-6 border-b border-gray-200">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Vector Search</h2>
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Semantic Search</h2>
 
-        <div className="space-y-4">
-          {/* Query Input */}
-          <div className="flex gap-2">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder="Ask a question about your documents..."
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                disabled={isSearching}
-              />
+        {/* Sub-phase 7.2: Show message when disabled */}
+        {disabled || readyDocumentCount === 0 ? (
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-gray-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-gray-700 mb-1">Semantic search unavailable</p>
+                <p className="text-sm text-gray-600">
+                  Upload and vectorize documents to enable semantic search. Documents must have embeddings generated before they can be searched semantically.
+                </p>
+              </div>
             </div>
-            <button
-              onClick={handleSearch}
-              disabled={isSearching || !query.trim()}
-              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-            >
-              {isSearching ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Searching...
-                </>
-              ) : (
-                'Search'
-              )}
-            </button>
           </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Query Input */}
+            <div className="flex gap-2">
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="Ask a question about your documents..."
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={isSearching}
+                />
+              </div>
+              <button
+                onClick={handleSearch}
+                disabled={isSearching || !query.trim()}
+                className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+              >
+                {isSearching ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Searching...
+                  </>
+                ) : (
+                  'Search'
+                )}
+              </button>
+            </div>
 
           {/* Advanced Options */}
           <details className="text-sm">
@@ -144,14 +160,15 @@ export function VectorSearchPanel({ databaseName, dimensions, onSearch }: Vector
               </div>
             </div>
           </details>
-        </div>
 
-        {/* Error Display */}
-        {error && (
-          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md flex items-start gap-2">
-            <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-red-700">{error}</p>
-          </div>
+          {/* Error Display */}
+          {error && (
+            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md flex items-start gap-2">
+              <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          )}
+        </div>
         )}
       </div>
 

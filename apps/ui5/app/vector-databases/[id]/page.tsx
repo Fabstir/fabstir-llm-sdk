@@ -466,6 +466,7 @@ export default function VectorDatabaseDetailPage() {
         databaseName={database.databaseName}
         dimensions={database.dimensions || 384}
         onSearch={handleVectorSearch}
+        readyDocumentCount={database.readyDocuments?.length || 0}
       />
 
       {/* Vectors Section with Folder Tree and File Browser */}

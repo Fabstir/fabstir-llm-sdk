@@ -154,7 +154,7 @@ export function FileBrowser({ files, currentPath, onFileClick, onFileDelete, onF
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header with Search */}
+      {/* Header with Search (Sub-phase 7.1) */}
       <div className="p-4 border-b border-gray-200">
         <div className="flex items-center gap-4">
           <div className="flex-1 relative">
@@ -166,12 +166,17 @@ export function FileBrowser({ files, currentPath, onFileClick, onFileDelete, onF
                 setSearchQuery(e.target.value);
                 setCurrentPage(1);
               }}
-              placeholder="Search files..."
+              placeholder="Type to filter by filename..."
+              title="Text-based filtering. Semantic search available after embeddings complete."
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
           <div className="text-sm text-gray-600">
-            {filteredFiles.length} file{filteredFiles.length !== 1 ? 's' : ''}
+            {searchQuery ? (
+              <>Showing {filteredFiles.length} of {files.filter(f => f.folderPath === currentPath).length} file{filteredFiles.length !== 1 ? 's' : ''}</>
+            ) : (
+              <>{filteredFiles.length} file{filteredFiles.length !== 1 ? 's' : ''}</>
+            )}
           </div>
         </div>
       </div>
