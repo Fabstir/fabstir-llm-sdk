@@ -1,9 +1,9 @@
 # Deferred Embeddings Implementation Plan
 
-**Status**: Planning Phase
+**Status**: Phase 7 Complete
 **Target**: UI5 Production SDK Integration
 **Created**: 2025-11-15
-**Last Updated**: 2025-11-15
+**Last Updated**: 2025-11-16
 
 ---
 
@@ -403,31 +403,31 @@ Background Processing:
 **Goal**: Clarify that file search is text-based filtering, not semantic vector search
 
 #### Sub-phase 7.1: Update Search UI Labels
-- [ ] Change "Search files" label to "Filter by filename"
-- [ ] Add placeholder: "Type to filter by filename..."
-- [ ] Add tooltip: "Text-based filtering. Semantic search available after embeddings complete."
-- [ ] **File**: `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx`
-- [ ] **Test**: Labels clearly indicate text filtering
+- [x] Change "Search files" label to "Filter by filename"
+- [x] Add placeholder: "Type to filter by filename..."
+- [x] Add tooltip: "Text-based filtering. Semantic search available after embeddings complete."
+- [x] **File**: `/workspace/apps/ui5/components/vector-databases/file-browser.tsx`
+- [x] **Test**: Labels clearly indicate text filtering
 
 #### Sub-phase 7.2: Add Semantic Search Input (Future)
-- [ ] Add separate "Semantic Search" input below filter
-- [ ] Disable if no ready documents exist
-- [ ] Show message: "Upload and vectorize documents to enable semantic search"
-- [ ] **File**: `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx`
-- [ ] **Test**: Semantic search input disabled when no ready documents
+- [x] Add separate "Semantic Search" input below filter
+- [x] Disable if no ready documents exist
+- [x] Show message: "Upload and vectorize documents to enable semantic search"
+- [x] **File**: `/workspace/apps/ui5/components/vector-databases/vector-search-panel.tsx`, `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx`
+- [x] **Test**: Semantic search input disabled when no ready documents
 
 #### Sub-phase 7.3: Implement Text Filtering
-- [ ] Filter documents client-side by filename match
-- [ ] Case-insensitive search
-- [ ] Show count: "Showing 3 of 15 documents"
-- [ ] **File**: `/workspace/apps/ui5/app/vector-databases/[id]/page.tsx`
-- [ ] **Test**: Filtering works correctly on document list
+- [x] Filter documents client-side by filename match
+- [x] Case-insensitive search
+- [x] Show count: "Showing 3 of 15 documents"
+- [x] **File**: `/workspace/apps/ui5/components/vector-databases/file-browser.tsx`
+- [x] **Test**: Filtering works correctly on document list
 
 **Acceptance Criteria**:
-- [ ] Users understand difference between text filtering and semantic search
-- [ ] Text filtering works instantly on document filenames
-- [ ] Semantic search clearly requires embeddings to be ready
-- [ ] UI provides helpful context about search capabilities
+- [x] Users understand difference between text filtering and semantic search
+- [x] Text filtering works instantly on document filenames
+- [x] Semantic search clearly requires embeddings to be ready
+- [x] UI provides helpful context about search capabilities
 
 ---
 
