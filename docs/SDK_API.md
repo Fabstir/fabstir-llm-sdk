@@ -2498,6 +2498,20 @@ await sessionManager.sendPrompt(sessionId, 'What does the document say about...?
 
 Manages vector databases and semantic search operations.
 
+**Architecture**: VectorRAGManager uses a hybrid approach:
+- **Storage**: S5VectorStore for decentralized persistence (S5 network)
+- **Search**: In-memory native JavaScript vector database for fast semantic search
+- **Deferred Embeddings**: Uploads documents without embeddings, generates them later during sessions
+
+**Key Features**:
+- ✅ Cross-device sync via S5 decentralized storage
+- ✅ Chunked storage (10K vectors per chunk for efficiency)
+- ✅ Virtual folder hierarchies for organization
+- ✅ Pending/ready document tracking for deferred embeddings
+- ✅ Browser and Node.js compatible
+
+**Storage Layer**: See [S5VectorStore API](./S5_VECTOR_STORE_API.md) for detailed storage documentation.
+
 #### Get VectorRAGManager
 
 ```typescript

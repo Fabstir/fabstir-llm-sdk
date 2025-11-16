@@ -175,6 +175,16 @@ export class S5VectorStore {
     }
   }
 
+  /**
+   * Create a new vector database
+   *
+   * @param config - Database configuration
+   * @param config.name - Unique database identifier (alphanumeric + hyphens)
+   * @param config.owner - Owner's Ethereum address (0x...)
+   * @param config.description - Optional human-readable description
+   * @returns Database metadata
+   * @throws Error if database name is empty or database already exists
+   */
   async createDatabase(config: { name: string; owner: string; description?: string }): Promise<DatabaseMetadata> {
     console.log(`[S5VectorStore] 📝 createDatabase() called with name: ${config.name}, owner: ${config.owner}`);
     if (!config.name?.trim()) throw new Error('Database name cannot be empty');
@@ -200,6 +210,11 @@ export class S5VectorStore {
     return this._manifestToMetadata(manifest);
   }
 
+  /**
+   * List all databases for current user
+   *
+   * @returns Array of database metadata (excluding deleted databases)
+   */
   async listDatabases(): Promise<DatabaseMetadata[]> {
     // Ensure databases are loaded from S5 if cache is empty
     await this.initialize();
@@ -211,11 +226,26 @@ export class S5VectorStore {
     return databases;
   }
 
+  /**
+   * Get metadata for a specific database
+   *
+   * @param databaseName - Database identifier
+   * @returns Database metadata or null if not found/deleted
+   */
   async getDatabase(databaseName: string): Promise<DatabaseMetadata | null> {
     const manifest = await this._loadManifest(databaseName);
     return (manifest && !manifest.deleted) ? this._manifestToMetadata(manifest) : null;
   }
 
+  /**
+   * Delete a database and all its vectors
+   *
+   * Marks database as deleted in manifest and removes from cache.
+   * Chunks are not immediately deleted (lazy cleanup).
+   *
+   * @param databaseName - Database identifier
+   * @throws Error if database not found
+   */
   async deleteDatabase(databaseName: string): Promise<void> {
     const manifest = await this._loadManifest(databaseName);
     if (!manifest) throw new Error(`Database "${databaseName}" not found`);
@@ -225,11 +255,27 @@ export class S5VectorStore {
     this.vectorCache.delete(databaseName);
   }
 
+  /**
+   * Check if a database exists
+   *
+   * @param databaseName - Database identifier
+   * @returns true if database exists and not deleted
+   */
   async databaseExists(databaseName: string): Promise<boolean> {
     const manifest = await this._loadManifest(databaseName);
     return manifest !== null && !manifest.deleted;
   }
 
+  /**
+   * Add multiple vectors to database (batch operation)
+   *
+   * Automatically chunks into 10K-vector groups for efficient storage.
+   * Updates manifest and persists to S5 in background.
+   *
+   * @param databaseName - Database identifier
+   * @param vectors - Array of vectors with IDs, values, and optional metadata
+   * @throws Error if database not found or vector dimensions mismatch
+   */
   async addVectors(databaseName: string, vectors: Vector[]): Promise<void> {
     const manifest = await this._loadManifest(databaseName);
     if (!manifest) throw new Error(`Database "${databaseName}" not found`);
@@ -256,6 +302,13 @@ export class S5VectorStore {
     this.vectorCache.set(databaseName, cache);
   }
 
+  /**
+   * Retrieve a single vector by ID
+   *
+   * @param databaseName - Database identifier
+   * @param vectorId - Vector identifier
+   * @returns Vector with metadata or null if not found
+   */
   async getVector(databaseName: string, vectorId: string): Promise<Vector | null> {
     const manifest = await this._loadManifest(databaseName);
     if (!manifest) return null;
@@ -263,6 +316,13 @@ export class S5VectorStore {
     return cache.get(vectorId) || null;
   }
 
+  /**
+   * Delete a single vector by ID
+   *
+   * @param databaseName - Database identifier
+   * @param vectorId - Vector identifier
+   * @throws Error if database not found
+   */
   async deleteVector(databaseName: string, vectorId: string): Promise<void> {
     const manifest = await this._loadManifest(databaseName);
     if (!manifest) throw new Error(`Database "${databaseName}" not found`);
@@ -273,6 +333,14 @@ export class S5VectorStore {
     await this._saveChunksBackground(databaseName, cache, manifest);
   }
 
+  /**
+   * Delete all vectors matching a metadata filter
+   *
+   * @param databaseName - Database identifier
+   * @param filter - Metadata filter (key-value exact match)
+   * @returns Number of vectors deleted
+   * @throws Error if database not found
+   */
   async deleteByMetadata(databaseName: string, filter: Record<string, any>): Promise<number> {
     const manifest = await this._loadManifest(databaseName);
     if (!manifest) throw new Error(`Database "${databaseName}" not found`);
@@ -290,6 +358,14 @@ export class S5VectorStore {
     return deletedCount;
   }
 
+  /**
+   * Update metadata for a specific vector
+   *
+   * @param databaseName - Database identifier
+   * @param vectorId - Vector identifier
+   * @param metadata - Metadata to update (merged with existing)
+   * @throws Error if vector not found
+   */
   async updateMetadata(databaseName: string, vectorId: string, metadata: Record<string, any>): Promise<void> {
     const vector = await this.getVector(databaseName, vectorId);
     if (!vector) throw new Error(`Vector "${vectorId}" not found`);
@@ -297,6 +373,15 @@ export class S5VectorStore {
     await this.addVectors(databaseName, [vector]);
   }
 
+  /**
+   * List all vectors in database
+   *
+   * Warning: Loads ALL vectors into memory - use with caution for large databases
+   *
+   * @param databaseName - Database identifier
+   * @returns All vectors with metadata
+   * @throws Error if database not found
+   */
   async listVectors(databaseName: string): Promise<Vector[]> {
     const manifest = await this._loadManifest(databaseName);
     if (!manifest) throw new Error(`Database "${databaseName}" not found`);
