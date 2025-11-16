@@ -643,4 +643,152 @@ export class VectorRAGManager implements IVectorRAGManager {
       throw new Error('Manager has been disposed');
     }
   }
+
+  /**
+   * Get all pending documents across all vector databases
+   *
+   * Retrieves documents that have embeddingStatus: 'pending' from all databases
+   * in the current user's storage. Used for deferred embeddings workflow.
+   *
+   * @param sessionGroupId - Optional session group ID to filter databases (not yet implemented)
+   * @returns Array of DocumentMetadata objects with pending embeddings
+   */
+  async getPendingDocuments(sessionGroupId?: string): Promise<any[]> {
+    this.ensureNotDisposed();
+
+    // Get all vector databases
+    const databases = this.listDatabases();
+    const allPendingDocs: any[] = [];
+
+    // Collect pending documents from each database
+    for (const db of databases) {
+      try {
+        const metadata = await this.vectorStore.getDatabaseMetadata(db.name);
+
+        if (metadata.pendingDocuments && Array.isArray(metadata.pendingDocuments)) {
+          // Add database name to each document for context
+          const docsWithDbName = metadata.pendingDocuments.map(doc => ({
+            ...doc,
+            databaseName: db.name
+          }));
+          allPendingDocs.push(...docsWithDbName);
+        }
+      } catch (error) {
+        console.warn(`[VectorRAGManager] Failed to get pending docs from ${db.name}:`, error);
+        // Continue with other databases
+      }
+    }
+
+    console.log(`[VectorRAGManager] Found ${allPendingDocs.length} pending documents across ${databases.length} databases`);
+
+    return allPendingDocs;
+  }
+
+  /**
+   * Update document embedding status
+   *
+   * Finds a document by ID across all databases and updates its status.
+   * If status is 'ready', moves document from pendingDocuments[] to readyDocuments[].
+   *
+   * @param documentId - Unique document identifier
+   * @param status - New embedding status
+   * @param updates - Optional fields to update (vectorCount, embeddingProgress, embeddingError)
+   */
+  async updateDocumentStatus(
+    documentId: string,
+    status: 'pending' | 'processing' | 'ready' | 'failed',
+    updates?: {
+      vectorCount?: number;
+      embeddingProgress?: number;
+      embeddingError?: string;
+    }
+  ): Promise<void> {
+    this.ensureNotDisposed();
+
+    // Find document across all databases
+    const databases = this.listDatabases();
+    let foundDatabase: string | null = null;
+    let foundDocument: any | null = null;
+
+    for (const db of databases) {
+      try {
+        const metadata = await this.vectorStore.getDatabaseMetadata(db.name);
+
+        if (metadata.pendingDocuments && Array.isArray(metadata.pendingDocuments)) {
+          const docIndex = metadata.pendingDocuments.findIndex(doc => doc.id === documentId);
+          if (docIndex !== -1) {
+            foundDatabase = db.name;
+            foundDocument = metadata.pendingDocuments[docIndex];
+            break;
+          }
+        }
+
+        // Also check readyDocuments in case status is being updated again
+        if (metadata.readyDocuments && Array.isArray(metadata.readyDocuments)) {
+          const docIndex = metadata.readyDocuments.findIndex(doc => doc.id === documentId);
+          if (docIndex !== -1) {
+            foundDatabase = db.name;
+            foundDocument = metadata.readyDocuments[docIndex];
+            break;
+          }
+        }
+      } catch (error) {
+        console.warn(`[VectorRAGManager] Failed to search ${db.name}:`, error);
+      }
+    }
+
+    if (!foundDatabase || !foundDocument) {
+      throw new Error(`Document ${documentId} not found in any database`);
+    }
+
+    console.log(`[VectorRAGManager] Updating document ${documentId} in ${foundDatabase}: ${foundDocument.embeddingStatus} → ${status}`);
+
+    // Load current metadata
+    const metadata = await this.vectorStore.getDatabaseMetadata(foundDatabase);
+
+    // Initialize arrays if they don't exist
+    if (!metadata.pendingDocuments) {
+      metadata.pendingDocuments = [];
+    }
+    if (!metadata.readyDocuments) {
+      metadata.readyDocuments = [];
+    }
+
+    // Update document fields
+    const updatedDoc = {
+      ...foundDocument,
+      embeddingStatus: status,
+      lastEmbeddingAttempt: Date.now(),
+      ...(updates?.vectorCount !== undefined && { vectorCount: updates.vectorCount }),
+      ...(updates?.embeddingProgress !== undefined && { embeddingProgress: updates.embeddingProgress }),
+      ...(updates?.embeddingError !== undefined && { embeddingError: updates.embeddingError })
+    };
+
+    // Move document between arrays if status changed to 'ready'
+    if (status === 'ready' && foundDocument.embeddingStatus !== 'ready') {
+      // Remove from pendingDocuments
+      metadata.pendingDocuments = metadata.pendingDocuments.filter(doc => doc.id !== documentId);
+
+      // Add to readyDocuments
+      metadata.readyDocuments.push(updatedDoc);
+
+      console.log(`[VectorRAGManager] Moved document ${documentId} to readyDocuments`);
+    } else {
+      // Update in-place in current array
+      const pendingIndex = metadata.pendingDocuments.findIndex(doc => doc.id === documentId);
+      if (pendingIndex !== -1) {
+        metadata.pendingDocuments[pendingIndex] = updatedDoc;
+      }
+
+      const readyIndex = metadata.readyDocuments.findIndex(doc => doc.id === documentId);
+      if (readyIndex !== -1) {
+        metadata.readyDocuments[readyIndex] = updatedDoc;
+      }
+    }
+
+    // Save updated metadata to S5
+    await this.vectorStore.updateVectorDatabaseMetadata(foundDatabase, metadata);
+
+    console.log(`[VectorRAGManager] ✅ Document ${documentId} status updated to ${status}`);
+  }
 }

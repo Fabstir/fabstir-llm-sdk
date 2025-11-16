@@ -185,48 +185,48 @@ Background Processing:
 **Goal**: Add SDK methods to generate embeddings via WebSocket when session is active
 
 #### Sub-phase 3.1: Add SessionManager.generateEmbeddings
-- [ ] Create `generateEmbeddings(sessionId, fileContent, options)` method
-- [ ] Send HTTP POST to `/v1/embed` endpoint on host
-- [ ] Request format: `{ texts: string[], model: "all-MiniLM-L6-v2", chainId: number }`
-- [ ] Response format: `{ embeddings: [{ embedding: number[], text: string, tokenCount: number }], ...metadata }`
-- [ ] Convert file content into chunks (512 chars each, 50 char overlap)
-- [ ] Return `Promise<Vector[]>` with generated 384-dimensional embeddings
-- [ ] Add timeout (120 seconds for large documents)
-- [ ] **File**: `/workspace/packages/sdk-core/src/managers/SessionManager.ts` (new method)
-- [ ] **Test**: Method sends correct HTTP request and receives 384D vectors
-- [ ] **Reference**: `docs/node-reference/API.md` lines 805-918 (Generate Embeddings endpoint)
+- [x] Create `generateEmbeddings(sessionId, fileContent, options)` method
+- [x] Send HTTP POST to `/v1/embed` endpoint on host
+- [x] Request format: `{ texts: string[], model: "all-MiniLM-L6-v2", chainId: number }`
+- [x] Response format: `{ embeddings: [{ embedding: number[], text: string, tokenCount: number }], ...metadata }`
+- [x] Convert file content into chunks (512 chars each, 50 char overlap)
+- [x] Return `Promise<Vector[]>` with generated 384-dimensional embeddings
+- [x] Add timeout (120 seconds for large documents)
+- [x] **File**: `/workspace/packages/sdk-core/src/managers/SessionManager.ts` (lines 2397-2520)
+- [x] **Test**: Method sends correct HTTP request and receives 384D vectors
+- [x] **Reference**: `docs/node-reference/API.md` lines 805-918 (Generate Embeddings endpoint)
 
 #### Sub-phase 3.2: Add VectorRAGManager.getPendingDocuments
-- [ ] Create `getPendingDocuments(sessionGroupId)` method
-- [ ] Get all vector databases in session group
-- [ ] Collect all `pendingDocuments` from each database
-- [ ] Return `DocumentMetadata[]` array
-- [ ] **File**: `/workspace/packages/sdk-core/src/managers/VectorRAGManager.ts` (new method)
-- [ ] **Test**: Returns correct pending documents across multiple databases
+- [x] Create `getPendingDocuments(sessionGroupId)` method
+- [x] Get all vector databases in session group
+- [x] Collect all `pendingDocuments` from each database
+- [x] Return `DocumentMetadata[]` array
+- [x] **File**: `/workspace/packages/sdk-core/src/managers/VectorRAGManager.ts` (lines 647-685)
+- [x] **Test**: Returns correct pending documents across multiple databases
 
 #### Sub-phase 3.3: Add VectorRAGManager.updateDocumentStatus
-- [ ] Create `updateDocumentStatus(docId, status, updates)` method
-- [ ] Find document in `pendingDocuments[]` across all databases
-- [ ] Update status and optional fields (vectorCount, error, progress)
-- [ ] Move to `readyDocuments[]` if status is 'ready'
-- [ ] Save updated metadata to S5
-- [ ] **File**: `/workspace/packages/sdk-core/src/managers/VectorRAGManager.ts` (new method)
-- [ ] **Test**: Status updates persist and documents move between arrays
+- [x] Create `updateDocumentStatus(docId, status, updates)` method
+- [x] Find document in `pendingDocuments[]` across all databases
+- [x] Update status and optional fields (vectorCount, error, progress)
+- [x] Move to `readyDocuments[]` if status is 'ready'
+- [x] Save updated metadata to S5
+- [x] **File**: `/workspace/packages/sdk-core/src/managers/VectorRAGManager.ts` (lines 687-794)
+- [x] **Test**: Status updates persist and documents move between arrays
 
 #### Sub-phase 3.4: Add downloadFromS5 Helper
-- [ ] Create `downloadFromS5(s5Path)` helper to retrieve document content
-- [ ] Use `s5.fs.get(path)` from Enhanced S5.js
-- [ ] Automatically decodes (CBOR → JSON → UTF-8 → raw bytes)
-- [ ] Returns document content as string
-- [ ] **File**: `/workspace/apps/ui5/lib/s5-utils.ts`
-- [ ] **Test**: Can retrieve uploaded document using S5 path
-- [ ] **Reference**: `docs/s5js-reference/API.md` lines 152-194 (get method)
+- [x] Create `downloadFromS5(s5Path)` helper to retrieve document content
+- [x] Use `s5.fs.get(path)` from Enhanced S5.js
+- [x] Automatically decodes (CBOR → JSON → UTF-8 → raw bytes)
+- [x] Returns document content as string
+- [x] **File**: `/workspace/apps/ui5/lib/s5-utils.ts` (lines 62-67, alias for getDocumentFromS5)
+- [x] **Test**: Can retrieve uploaded document using S5 path
+- [x] **Reference**: `docs/s5js-reference/API.md` lines 152-194 (get method)
 
 **Acceptance Criteria**:
-- [ ] `generateEmbeddings()` successfully generates vectors via WebSocket
-- [ ] `getPendingDocuments()` returns all pending docs across databases
-- [ ] `updateDocumentStatus()` correctly updates and persists status
-- [ ] Documents can be downloaded from S5 using CID
+- [x] `generateEmbeddings()` successfully generates vectors via HTTP endpoint
+- [x] `getPendingDocuments()` returns all pending docs across databases
+- [x] `updateDocumentStatus()` correctly updates and persists status
+- [x] Documents can be downloaded from S5 using CID
 
 ---
 

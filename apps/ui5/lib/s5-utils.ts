@@ -43,11 +43,25 @@ export async function uploadDocumentToS5(
  *
  * @param s5 - S5 client instance (from StorageManager.s5Client)
  * @param s5Cid - S5 CID (path) returned from uploadDocumentToS5
- * @returns Document content
+ * @returns Document content (automatically decoded: CBOR → JSON → UTF-8 → raw bytes)
  */
 export async function getDocumentFromS5(
   s5: S5Client,
   s5Cid: string
 ): Promise<string | Uint8Array | undefined> {
   return await s5.fs.get(s5Cid);
+}
+
+/**
+ * Alias for getDocumentFromS5 - used in deferred embeddings workflow
+ *
+ * @param s5 - S5 client instance (from StorageManager.s5Client)
+ * @param s5Path - S5 path to document
+ * @returns Document content as string or Uint8Array
+ */
+export async function downloadFromS5(
+  s5: S5Client,
+  s5Path: string
+): Promise<string | Uint8Array | undefined> {
+  return await getDocumentFromS5(s5, s5Path);
 }

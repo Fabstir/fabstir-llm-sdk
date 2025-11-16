@@ -2393,4 +2393,128 @@ export class SessionManager implements ISessionManager {
 
     return history;
   }
+
+  /**
+   * Generate embeddings for document chunks
+   *
+   * Sends text to host's /v1/embed endpoint to generate 384-dimensional embeddings
+   * using the all-MiniLM-L6-v2 model. Automatically chunks large documents.
+   *
+   * @param sessionId - Active session ID (for host endpoint)
+   * @param fileContent - Document content to embed
+   * @param options - Optional configuration
+   * @param options.chunkSize - Characters per chunk (default: 512)
+   * @param options.chunkOverlap - Overlap between chunks (default: 50)
+   * @param options.chainId - Blockchain chain ID (default: from session)
+   * @returns Promise<Vector[]> Array of vectors with embeddings and metadata
+   *
+   * @throws Error if session not found or not active
+   * @throws Error if embedding generation fails
+   * @throws Error if timeout (120 seconds)
+   */
+  async generateEmbeddings(
+    sessionId: bigint,
+    fileContent: string,
+    options?: {
+      chunkSize?: number;
+      chunkOverlap?: number;
+      chainId?: number;
+    }
+  ): Promise<Vector[]> {
+    const session = this.sessions.get(sessionId.toString());
+    if (!session) {
+      throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
+    }
+
+    if (session.status !== 'active') {
+      throw new SDKError('Session must be active to generate embeddings', 'SESSION_INACTIVE');
+    }
+
+    // Chunk configuration
+    const chunkSize = options?.chunkSize || 512;
+    const chunkOverlap = options?.chunkOverlap || 50;
+    const chainId = options?.chainId || session.chainId;
+
+    // Split file content into chunks with overlap
+    const chunks: string[] = [];
+    for (let i = 0; i < fileContent.length; i += chunkSize - chunkOverlap) {
+      const chunk = fileContent.slice(i, i + chunkSize).trim();
+      if (chunk.length > 0) {
+        chunks.push(chunk);
+      }
+    }
+
+    if (chunks.length === 0) {
+      throw new SDKError('No valid chunks generated from file content', 'INVALID_CONTENT');
+    }
+
+    console.log(`[SessionManager] 🧩 Generated ${chunks.length} chunks from document`);
+
+    // Get HTTP endpoint from session
+    const endpoint = session.endpoint || 'http://localhost:8080';
+    const httpUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
+    const embedUrl = `${httpUrl}/v1/embed`;
+
+    console.log(`[SessionManager] 🌐 Calling embedding endpoint: ${embedUrl}`);
+
+    // Send request to /v1/embed endpoint
+    const requestBody = {
+      texts: chunks,
+      model: 'all-MiniLM-L6-v2',
+      chainId: chainId
+    };
+
+    let fetchResponse;
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 second timeout
+
+      fetchResponse = await fetch(embedUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+    } catch (fetchError: any) {
+      if (fetchError.name === 'AbortError') {
+        throw new SDKError('Embedding generation timeout (120s)', 'EMBEDDING_TIMEOUT');
+      }
+      console.error('[SessionManager] ❌ Fetch error:', fetchError);
+      throw new SDKError(`Network error calling embedding API: ${fetchError.message}`, 'NETWORK_ERROR');
+    }
+
+    if (!fetchResponse.ok) {
+      const errorText = await fetchResponse.text();
+      throw new SDKError(`Embedding generation failed: ${fetchResponse.status} - ${errorText}`, 'EMBEDDING_FAILED');
+    }
+
+    const result = await fetchResponse.json();
+    console.log(`[SessionManager] ✅ Received ${result.embeddings?.length || 0} embeddings`);
+
+    if (!result.embeddings || !Array.isArray(result.embeddings)) {
+      throw new SDKError('Invalid response format from embedding endpoint', 'INVALID_RESPONSE');
+    }
+
+    // Convert to Vector[] format
+    const vectors: Vector[] = result.embeddings.map((item: any, index: number) => ({
+      id: `chunk-${Date.now()}-${index}`,
+      values: item.embedding,
+      metadata: {
+        text: item.text,
+        tokenCount: item.tokenCount,
+        chunkIndex: index,
+        totalChunks: chunks.length,
+        model: result.model,
+        chainId: result.chainId
+      }
+    }));
+
+    console.log(`[SessionManager] 🎯 Generated ${vectors.length} vectors with 384D embeddings`);
+
+    return vectors;
+  }
 }
