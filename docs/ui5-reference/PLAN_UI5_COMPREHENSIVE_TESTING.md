@@ -1,8 +1,8 @@
 # UI5 Comprehensive Testing Plan
 
-**Status**: 🚧 IN PROGRESS - Phase 4 Complete (Session Group Operations) (64% Complete)
+**Status**: 🚧 IN PROGRESS - Phase 5 Started (Chat Session Operations) (66% Complete)
 **Created**: 2025-11-13
-**Last Updated**: 2025-11-17 (Phase 4.5 COMPLETE - Delete session group with S5 persistence fix)
+**Last Updated**: 2025-11-17 (Phase 5.1 COMPLETE - Chat session creation working)
 **Branch**: feature/ui5-migration
 **Server**: http://localhost:3002 (Container) / http://localhost:3012 (Host)
 
@@ -53,13 +53,17 @@
   - 4.4: Unlink Vector Database from Group ✅ COMPLETE (2/2 tests passing)
   - 4.5: Delete Session Group ✅ COMPLETE (2/2 tests passing)
 
+**In Progress:** 🔄
+- Phase 5: Chat Session Operations (20% - 1/5 sub-phases complete)
+  - 5.1: Create Chat Session ✅ COMPLETE (2/2 tests passing)
+  - 5.2-5.5: Pending
+
 **Pending:** ⏳
-- Phase 5: Chat Session Operations (0% - includes semantic search during chat)
 - Phase 6: Navigation & UI Flow Testing (0%)
 - Phase 7: Error Handling & Edge Cases (0%)
 - Phase 8: Performance & Blockchain Testing (0%)
 
-**Total Progress**: 5.0/8 phases = **64% Complete**
+**Total Progress**: 5.2/8 phases = **66% Complete**
 
 **Bugs Fixed:** 16
   1. Fixed ES module `__dirname` error in test-setup.ts (used fileURLToPath)
@@ -87,8 +91,9 @@
 3. ✅ Phase 4.3 COMPLETE - Link database to session group working
 4. ✅ Phase 4.4 COMPLETE - Unlink database from session group working
 5. ✅ Phase 4.5 COMPLETE - Delete session group with S5 persistence verified
-6. 🔄 Execute Phase 5 (Chat Session Operations with semantic search)
-7. ⏳ Execute remaining phases (6-8)
+6. ✅ Phase 5.1 COMPLETE - Chat session creation and navigation working
+7. 🔄 Execute Phase 5.2-5.5 (Chat messaging, WebSocket streaming, semantic search)
+8. ⏳ Execute remaining phases (6-8)
 
 ---
 
@@ -608,30 +613,35 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 
 ---
 
-## Phase 5: Chat Session Operations ⏳ PENDING
+## Phase 5: Chat Session Operations 🔄 IN PROGRESS (20% - 1/5 complete)
 
 **Goal**: Test chat session creation, message sending, AI responses via real WebSocket streaming
 
 **Route**: `/session-groups/[id]` (within a session group)
 
-### Sub-phase 5.1: Create Chat Session
-- [ ] Navigate to a session group detail page
-- [ ] Click "Create Chat Session" button
-- [ ] Fill in session name: "Test Chat"
-- [ ] Select model (if dropdown exists)
-- [ ] Click "Create"
-- [ ] **EXPECT: No MetaMask popup** (test wallet auto-approves)
-- [ ] **WAIT: 5-15 seconds for blockchain transaction**
-- [ ] Verify session appears in list
-- [ ] **IF pending documents exist**: Verify progress bar appears automatically
-- [ ] **IF pending documents exist**: Verify background embedding processing starts (non-blocking)
-- [ ] **IF pending documents exist**: Verify can send chat messages immediately (embeddings run in background)
-- [ ] Verify chat functions normally while embeddings generate
-- [ ] Take screenshot (capture progress bar if present)
+### Sub-phase 5.1: Create Chat Session ✅ COMPLETE
 
-**Expected Duration**: 15-30 seconds (blockchain transaction) + embedding time if pending documents
+**Test Results**: 2/2 tests passing (42.3s total)
 
-**Automated Test**: Create `/workspace/tests-ui5/test-chat-create.spec.ts`
+- [x] Navigate to session groups page
+- [x] Navigate to session group detail page via "Open" button
+- [x] Click "+ New Chat" button (actual button text, not "Create Chat Session")
+- [x] **VERIFY: No blockchain transaction** (chat session metadata only, not on-chain)
+- [x] **VERIFY: Navigation to chat page** `/session-groups/{groupId}/{sessionId}`
+- [x] Verify chat interface loaded (message input visible)
+- [x] Check for embedding progress bar (if pending documents exist)
+- [x] Handle empty state (no chats yet)
+- [x] Take screenshots (before creation, after success)
+
+**Key Findings**:
+- Chat session creation is **instant** (metadata only, not blockchain tx)
+- URL format: `/session-groups/sg-{timestamp}-{id}/sess-{timestamp}-{id}`
+- No progress bar appeared (no pending documents in test session group)
+- Edge case handled: Empty state button found
+
+**Actual Duration**: < 2 seconds (metadata creation, S5 storage)
+
+**Automated Test**: `/workspace/tests-ui5/test-chat-create.spec.ts` ✅ PASSING
 
 ---
 
