@@ -161,7 +161,22 @@ export class SessionGroupManager implements ISessionGroupManager {
       throw new Error('Invalid group ID');
     }
 
-    const group = this.groups.get(groupId);
+    // Check in-memory cache first
+    let group = this.groups.get(groupId);
+
+    // If not in cache and S5 storage is available, try loading from S5
+    if (!group && this.storage) {
+      try {
+        group = await this.storage.load(groupId);
+        if (group) {
+          // Update in-memory cache
+          this.groups.set(groupId, group);
+        }
+      } catch (err) {
+        console.error('[SessionGroupManager.getSessionGroup] Failed to load from S5 storage:', err);
+        // Continue with cache-only check below
+      }
+    }
 
     if (!group) {
       throw new Error('Session group not found');
