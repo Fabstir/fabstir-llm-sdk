@@ -277,6 +277,11 @@ export class SessionGroupManager implements ISessionGroupManager {
       group.linkedDatabases.push(databaseId);
       group.updatedAt = new Date();
       this.groups.set(groupId, group);
+
+      // Persist to S5 storage
+      if (this.storage) {
+        await this.storage.save(group);
+      }
     }
 
     return group;
@@ -302,6 +307,11 @@ export class SessionGroupManager implements ISessionGroupManager {
 
     group.updatedAt = new Date();
     this.groups.set(groupId, group);
+
+    // Persist to S5 storage
+    if (this.storage) {
+      await this.storage.save(group);
+    }
 
     return group;
   }
