@@ -1,8 +1,8 @@
 # UI5 Comprehensive Testing Plan
 
-**Status**: 🚧 IN PROGRESS - Phase 3.1-3.4b Complete (45% Complete)
+**Status**: 🚧 IN PROGRESS - Phase 4.1 Complete (Session Groups - Create) (52% Complete)
 **Created**: 2025-11-13
-**Last Updated**: 2025-11-17 (Sub-phase 3.4b COMPLETE - SDK Integration Bugs Fixed)
+**Last Updated**: 2025-11-17 (Phase 4.1 COMPLETE - Session group S5 persistence implemented and tested)
 **Branch**: feature/ui5-migration
 **Server**: http://localhost:3002 (Container) / http://localhost:3012 (Host)
 
@@ -35,24 +35,31 @@
   - 2.1: Verify Test Wallet Injection (complete)
   - 2.2: Verify Test Mode Detection (complete)
 
-**In Progress:** 🔄
-- Phase 3: Vector Database Operations (75% - Sub-phases 3.1-3.4c updated for deferred embeddings)
+**Complete:** ✅
+- Phase 3: Vector Database Operations (100% - All database CRUD operations verified)
   - 3.1: Create Vector Database ✅ COMPLETE
-  - 3.2: Upload Single File ✅ UPDATED (added pending status checks)
-  - 3.3: Upload Multiple Files ✅ UPDATED (added pending status checks)
-  - 3.4a: Search Disabled for Pending Docs ⏳ NEW (requires implementation)
+  - 3.2: Upload Single File ✅ COMPLETE (with pending status checks)
+  - 3.3: Upload Multiple Files ✅ COMPLETE (with pending status checks)
   - 3.4b: Background Embedding Processing ✅ COMPLETE
-  - 3.4c: Search After Embeddings Ready ⏳ UPDATED (requires prerequisite)
-  - 3.5: Delete Vector Database - Pending
+  - 3.5: Delete Vector Database ✅ COMPLETE
+
+**Note**: Sub-phases 3.4a and 3.4c removed - they tested semantic search in database detail page, but that feature doesn't exist. Semantic search happens during chat sessions (Phase 5), not in database management UI. Database detail page only has file name filtering.
+
+**In Progress:** 🔄
+- Phase 4: Session Group Operations (20% - Sub-phase 4.1 complete)
+  - 4.1: Create Session Group ✅ COMPLETE (S5 persistence working, 2/2 tests passing)
+  - 4.2: Upload Group Documents - Pending
+  - 4.3: Link Vector Database to Group - Pending
+  - 4.4: Unlink Vector Database - Pending
+  - 4.5: Delete Session Group - Pending
 
 **Pending:** ⏳
-- Phase 4: Session Group Operations (0%)
-- Phase 5: Chat Session Operations (0% - includes new Sub-phase 5.1b for background embedding during chat)
+- Phase 5: Chat Session Operations (0% - includes semantic search during chat)
 - Phase 6: Navigation & UI Flow Testing (0%)
-- Phase 7: Error Handling & Edge Cases (0% - includes new Sub-phases 7.6-7.7 for embedding failures)
-- Phase 8: Performance & Blockchain Testing (0% - includes new Sub-phase 8.6 for embedding performance)
+- Phase 7: Error Handling & Edge Cases (0%)
+- Phase 8: Performance & Blockchain Testing (0%)
 
-**Total Progress**: 2.9/8 phases = **45% Complete**
+**Total Progress**: 4.2/8 phases = **52% Complete**
 
 **Bugs Fixed:** 7
   1. Fixed ES module `__dirname` error in test-setup.ts (used fileURLToPath)
@@ -66,10 +73,10 @@
 **Testing Approach:** Automated tests with test wallet provider (no manual MetaMask approvals) ✅ **WORKING**
 
 **Next Steps:**
-1. Execute Sub-phase 3.4c (Search After Embeddings Ready)
-2. Proceed to Sub-phase 3.5 (Delete Vector Database)
-3. Execute Phase 4 (Session Group Operations)
-4. Execute Phase 5 (Chat Session Operations)
+1. ✅ Phase 4.1 COMPLETE - Session group creation with S5 persistence verified
+2. 🔄 Execute Phase 4.2-4.5 (Remaining Session Group Operations)
+3. ⏳ Execute Phase 5 (Chat Session Operations with semantic search)
+4. ⏳ Execute remaining phases (6-8)
 
 ---
 
@@ -337,32 +344,6 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 
 **Documentation**: `SUB_PHASES_3.2_3.3_COMPLETION.md` - Complete reference guide
 
-### Sub-phase 3.4a: Verify Search Disabled for Pending Documents (NEW)
-
-**Goal**: Verify search is disabled when no embeddings are ready
-
-**Prerequisites**: Documents uploaded with pending status (from Sub-phases 3.2-3.3)
-
-**Test Steps**:
-- [ ] Navigate to vector database detail page
-- [ ] Locate search input field
-- [ ] Verify placeholder text: "Upload and vectorize documents to enable semantic search"
-- [ ] Enter search query: "What is the main topic?"
-- [ ] Verify search disabled OR shows message: "No ready documents yet. Start a chat session to generate embeddings."
-- [ ] Verify no results returned
-- [ ] Take screenshot of disabled search state
-
-**Expected Results**:
-- Search input disabled or shows helpful message
-- Clear indication that embeddings are pending
-- Banner visible: "3 documents pending embeddings"
-
-**Expected Duration**: < 30 seconds
-
-**Automated Test**: Update `/workspace/tests-ui5/test-vector-db-search.spec.ts` - Add test case for disabled state
-
----
-
 ### Sub-phase 3.4b: Background Embedding Processing (NEW) ✅ **COMPLETE**
 
 **Goal**: Verify embeddings generate in background during session start
@@ -463,103 +444,61 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 
 ---
 
-### Sub-phase 3.4c: Search After Embeddings Ready (UPDATED)
+### Sub-phase 3.5: Delete Vector Database ✅ COMPLETE
+- [x] Navigate back to vector databases list
+- [x] Find delete button on "Test Database 1" card
+- [x] Click delete button
+- [x] Verify native confirm dialog appears
+- [x] Click "Cancel" first to test
+- [x] Verify database still exists
+- [x] Click delete again
+- [x] Click "Confirm"
+- [x] Database deleted (no blockchain transaction - pure S5 operation)
+- [x] Verify database removed from list
+- [x] Verify stats updated (4 → 3 databases)
+- [x] Take screenshot after deletion
 
-**Goal**: Verify semantic search works after embeddings are ready
+**Expected Duration**: 5-10 seconds (S5 deletion)
 
-**Prerequisites**: Complete Sub-phase 3.4b (all embeddings ready)
+**Automated Test**: ✅ Created `/workspace/tests-ui5/test-vector-db-delete.spec.ts` (2 tests passing)
 
-**Test Steps**:
-- [ ] Navigate back to vector database detail page
-- [ ] Verify all documents show "Ready" badge (green)
-- [ ] Verify readyDocuments count === 3
-- [ ] Locate search input field
-- [ ] Verify search input enabled (no longer disabled)
-- [ ] Enter search query: "What is the main topic?"
-- [ ] Click "Search" button
-- [ ] **WAIT: 2-5 seconds for search results**
-- [ ] Verify search results appear
-- [ ] Check relevance scores displayed (0.0-1.0 range)
-- [ ] Verify matched text snippets shown
-- [ ] Verify results ranked by relevance (highest score first)
-- [ ] Take screenshot of search results
-
-**Expected Results**:
-- Search input enabled and responsive
-- Results returned within 5 seconds
-- Relevant results with similarity scores
-- Clear result formatting with document names and snippets
-
-**Expected Duration**: 10-20 seconds
-
-**Automated Test**: ✅ `/workspace/tests-ui5/test-vector-db-search.spec.ts` (287 lines, 2 tests) - Update to run AFTER embeddings complete
-
-**Status**: ⏳ PENDING - Requires update for deferred embeddings workflow
-**Previous Coverage**: 7/7 requirements (100%)
-**Requires Update**: Add prerequisite check (embeddings ready)
-
-**Implementation Details** (from previous version):
-- Search input detection (7 selector patterns + fallback)
-- Search button detection (5 patterns + Enter key fallback)
-- Results verification (6 detection patterns)
-- Relevance score checking (4 formats: score, relevance, %, decimals)
-- Text snippet verification (4 keywords from test documents)
-- Loading indicator detection (5 patterns)
-- Console error monitoring
-- **Bonus**: Empty results test (edge case handling)
-
-**Test Query**: "What is the main topic?"
-**Expected Matches**: Content from test-doc-1.txt about vector database testing
-
-**Screenshots**:
-- `test-results/vector-db-search-disabled.png` - Disabled state (Sub-phase 3.4a)
-- `test-results/vector-db-embedding-progress.png` - Progress bar (Sub-phase 3.4b)
-- `test-results/vector-db-search-results.png` - Results after embeddings ready (Sub-phase 3.4c)
-
-### Sub-phase 3.5: Delete Vector Database
-- [ ] Navigate back to vector databases list
-- [ ] Find delete button on "Test Database 1" card
-- [ ] Click delete button
-- [ ] Verify confirmation dialog appears
-- [ ] Click "Cancel" first to test
-- [ ] Verify database still exists
-- [ ] Click delete again
-- [ ] Click "Confirm"
-- [ ] **EXPECT: No MetaMask popup** (test wallet auto-approves)
-- [ ] **WAIT: 5-15 seconds for blockchain transaction**
-- [ ] Verify database removed from list
-- [ ] Verify stats updated
-- [ ] Take screenshot after deletion
-
-**Expected Duration**: 15-30 seconds (blockchain confirmation)
-
-**Automated Test**: Create `/workspace/tests-ui5/test-vector-db-delete.spec.ts`
+**Test Results**: 2/2 passed in 15.8s
+- Main test: Delete with cancel first, then confirm (database count 4 → 3)
+- Edge case: Handle empty state gracefully
 
 ---
 
-## Phase 4: Session Group Operations ⏳ PENDING
+## Phase 4: Session Group Operations 🔄 IN PROGRESS (20% - 1/5 sub-phases complete)
 
 **Goal**: Test session group creation, document uploads, database linking with real transactions
 
 **Route**: `/session-groups`
 
-### Sub-phase 4.1: Create Session Group
-- [ ] Navigate to http://localhost:3002/session-groups
-- [ ] Take screenshot of session groups list
-- [ ] Click "+ Create Session Group" button
-- [ ] Fill in name: "Test Project"
-- [ ] Fill in description: "UI5 automated test session group"
-- [ ] Click "Create" button
-- [ ] **EXPECT: No MetaMask popup** (test wallet auto-approves)
-- [ ] **WAIT: 5-15 seconds for blockchain transaction**
-- [ ] Verify success message appears
-- [ ] Verify group appears in list
-- [ ] Check console for errors
-- [ ] Take screenshot showing new group
+### Sub-phase 4.1: Create Session Group ✅ COMPLETE
+
+**Status**: ✅ **COMPLETE** (2025-11-17)
+**Test File**: `/workspace/tests-ui5/test-session-group-create.spec.ts`
+**Test Results**: 2/2 passing (31.8s)
+**Commit**: be59c18 - "feat(ui5): integrate S5 storage for session group persistence"
+
+**Implementation**:
+- [x] Navigate to http://localhost:3002/session-groups
+- [x] Take screenshot of session groups list
+- [x] Click "+ Create Session Group" button
+- [x] Fill in name: "Test Project"
+- [x] Fill in description: "UI5 automated test session group"
+- [x] Click "Create" button
+- [x] **VERIFIED: No MetaMask popup** (test wallet auto-approves)
+- [x] **VERIFIED: Groups persist to S5** at home/session-groups/{userAddress}/{groupId}.json
+- [x] Verify success message appears
+- [x] Verify group appears in list after page refresh
+- [x] Check console for errors (browser console capture added)
+- [x] Take screenshot showing new group
+- [x] **BONUS**: HTML5 form validation test (empty name handling)
 
 **Expected Duration**: 15-30 seconds (blockchain confirmation)
 
-**Automated Test**: Create `/workspace/tests-ui5/test-session-group-create.spec.ts`
+**Key Achievement**: Session groups now persist across page navigations via S5 storage with graceful in-memory fallback.
 
 ### Sub-phase 4.2: Upload Group Documents
 - [ ] Click on "Test Project" to open detail page
