@@ -1,8 +1,8 @@
 # UI5 Comprehensive Testing Plan
 
-**Status**: 🚧 IN PROGRESS - Phase 4.3 Complete (Session Groups - Link Database to Group) (58% Complete)
+**Status**: 🚧 IN PROGRESS - Phase 4.4 Complete (Session Groups - Unlink Database from Group) (62% Complete)
 **Created**: 2025-11-13
-**Last Updated**: 2025-11-17 (Phase 4.3 COMPLETE - Link database to session group with S5 cache fix)
+**Last Updated**: 2025-11-17 (Phase 4.4 COMPLETE - Unlink database from session group with S5 persistence fix)
 **Branch**: feature/ui5-migration
 **Server**: http://localhost:3002 (Container) / http://localhost:3012 (Host)
 
@@ -46,11 +46,11 @@
 **Note**: Sub-phases 3.4a and 3.4c removed - they tested semantic search in database detail page, but that feature doesn't exist. Semantic search happens during chat sessions (Phase 5), not in database management UI. Database detail page only has file name filtering.
 
 **In Progress:** 🔄
-- Phase 4: Session Group Operations (60% - Sub-phases 4.1-4.3 complete)
+- Phase 4: Session Group Operations (80% - Sub-phases 4.1-4.4 complete)
   - 4.1: Create Session Group ✅ COMPLETE (S5 persistence working, 2/2 tests passing)
   - 4.2: Upload Group Documents ✅ COMPLETE (S5 storage working, 2/2 tests passing)
   - 4.3: Link Vector Database to Group ✅ COMPLETE (2/2 tests passing)
-  - 4.4: Unlink Vector Database - Pending
+  - 4.4: Unlink Vector Database from Group ✅ COMPLETE (2/2 tests passing)
   - 4.5: Delete Session Group - Pending
 
 **Pending:** ⏳
@@ -59,9 +59,9 @@
 - Phase 7: Error Handling & Edge Cases (0%)
 - Phase 8: Performance & Blockchain Testing (0%)
 
-**Total Progress**: 4.6/8 phases = **58% Complete**
+**Total Progress**: 4.8/8 phases = **62% Complete**
 
-**Bugs Fixed:** 14
+**Bugs Fixed:** 15
   1. Fixed ES module `__dirname` error in test-setup.ts (used fileURLToPath)
   2. Fixed test looking for non-existent "✓ SDK Ready" text (changed to check dashboard load)
   3. Fixed AuthManager constructor to accept authentication data from SDK core
@@ -76,6 +76,7 @@
   12. **Phase 4.2**: Fixed hook state management (removed re-fetch loop causing hang)
   13. **Phase 4.2**: Fixed test selectors to find card container instead of heading row
   14. **Phase 4.3**: Fixed SessionGroupManager.getSessionGroup() cache-only lookup preventing direct navigation to group detail pages
+  15. **Phase 4.4**: Fixed SessionGroupManager.linkVectorDatabase() and unlinkVectorDatabase() to persist to S5 storage (was cache-only, causing state loss)
 
 **Testing Approach:** Automated tests with test wallet provider (no manual MetaMask approvals) ✅ **WORKING**
 
@@ -83,9 +84,10 @@
 1. ✅ Phase 4.1 COMPLETE - Session group creation with S5 persistence verified
 2. ✅ Phase 4.2 COMPLETE - Group document upload with S5 storage working
 3. ✅ Phase 4.3 COMPLETE - Link database to session group working
-4. 🔄 Execute Phase 4.4-4.5 (Unlink databases, delete session group)
-5. ⏳ Execute Phase 5 (Chat Session Operations with semantic search)
-6. ⏳ Execute remaining phases (6-8)
+4. ✅ Phase 4.4 COMPLETE - Unlink database from session group working
+5. 🔄 Execute Phase 4.5 (Delete session group)
+6. ⏳ Execute Phase 5 (Chat Session Operations with semantic search)
+7. ⏳ Execute remaining phases (6-8)
 
 ---
 
@@ -565,16 +567,22 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 
 **Bug Fixed**: SessionGroupManager.getSessionGroup() now loads from S5 storage when group not in cache (was cache-only, causing "Session Group Not Found" on direct navigation)
 
-### Sub-phase 4.4: Unlink Vector Database
-- [ ] Hover over linked database
-- [ ] Click unlink button (X icon)
-- [ ] Confirm unlink dialog
-- [ ] **WAIT: 5-15 seconds for blockchain transaction**
-- [ ] Verify database removed from Linked Databases
-- [ ] Verify statistics updated
-- [ ] Take screenshot
+### Sub-phase 4.4: Unlink Vector Database ✅ COMPLETE
+- [x] Hover over linked database
+- [x] Click unlink button (X icon)
+- [x] Confirm unlink dialog
+- [x] **WAIT: 5-15 seconds for blockchain transaction**
+- [x] Verify database removed from Linked Databases
+- [x] Verify statistics updated
+- [x] Take screenshot
+- [x] Test 1: Main unlink flow (database count decreases, statistics update)
+- [x] Test 2: Edge case - unlinking last database (shows empty state)
 
 **Expected Duration**: 15-30 seconds (blockchain confirmation)
+
+**Automated Test**: `/workspace/tests-ui5/test-session-group-unlink-db.spec.ts` ✅ CREATED
+
+**Bug Fixed**: SessionGroupManager.linkVectorDatabase() and unlinkVectorDatabase() now persist changes to S5 storage (was cache-only, causing linked database state to be lost between tests)
 
 ### Sub-phase 4.5: Delete Session Group
 - [ ] Navigate back to session groups list
