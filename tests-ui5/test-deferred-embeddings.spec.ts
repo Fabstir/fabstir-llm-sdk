@@ -56,6 +56,40 @@ test.describe('Deferred Embeddings - Background Processing Workflow', () => {
     await page.waitForSelector('text=Vector Databases', { timeout: 10000 });
     console.log('[Test] Vector databases page loaded');
 
+    // Create Test Database 1 if it doesn't exist
+    const existingDatabase = page.locator('text=Test Database 1').first();
+    const databaseExists = await existingDatabase.count() > 0;
+
+    if (!databaseExists) {
+      console.log('[Test] Test Database 1 not found, creating it...');
+
+      // Click "+ Create Database" button
+      await page.click('button:has-text("+ Create Database"), button:has-text("Create Database")');
+      await page.waitForSelector('text=Create Vector Database', { timeout: 5000 });
+      console.log('[Test] Create database modal opened');
+
+      // Fill in database name
+      const nameInput = page.locator('input[id="name"]');
+      await nameInput.fill('Test Database 1');
+      console.log('[Test] Filled database name');
+
+      // Submit the form - use type="submit" selector to be specific
+      const submitButton = page.locator('button[type="submit"]:has-text("Create Database")');
+      await submitButton.waitFor({ state: 'visible', timeout: 5000 });
+      await expect(submitButton).toBeEnabled({ timeout: 5000 });
+      await submitButton.click();
+      console.log('[Test] Clicked create button');
+
+      // Wait for modal to close
+      await page.waitForSelector('text=Create Vector Database', { state: 'hidden', timeout: 10000 });
+      console.log('[Test] ✅ Test Database 1 created');
+
+      // Wait for database to appear in list
+      await page.waitForSelector('text=Test Database 1', { timeout: 5000 });
+    } else {
+      console.log('[Test] Test Database 1 already exists');
+    }
+
     // Open Test Database 1
     const databaseCard = page.locator('text=Test Database 1').first();
     await expect(databaseCard).toBeVisible({ timeout: 10000 });

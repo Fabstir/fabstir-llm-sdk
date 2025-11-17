@@ -180,7 +180,7 @@ export class UI5SDK {
     }
 
     return {
-      sessionGroupManager: {} as ISessionGroupManager, // TODO: Not yet available in SDK
+      sessionGroupManager: this.sdk.getSessionGroupManager(),
       sessionManager: this.sdk.getSessionManager(),
       vectorRAGManager: this.sdk.getVectorRAGManager(),
       hostManager: this.sdk.getHostManager(),
