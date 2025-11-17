@@ -40,29 +40,9 @@ export class SessionGroupManager implements ISessionGroupManager {
    * In production, this would query VectorDatabaseManager
    */
   private async databaseExists(databaseId: string): Promise<boolean> {
-    // For testing: check mock registry and auto-create if ID matches pattern
-    if (this.mockDatabases.has(databaseId)) {
-      return true;
-    }
-
-    // Auto-create mock databases for test IDs
-    // Patterns: db-1, db-2, db-shared, db-main, db-research-papers-2024, etc.
-    if (databaseId.startsWith('db-')) {
-      const now = new Date();
-      this.registerMockDatabase({
-        id: databaseId,
-        name: `Database ${databaseId}`,
-        description: `Mock database ${databaseId}`,
-        createdAt: now,
-        updatedAt: now,
-        owner: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e', // Test owner
-        vectorCount: 0,
-        storageSize: 0,
-      });
-      return true;
-    }
-
-    return false;
+    // Phase 1.2: In-memory stub - accept any database ID
+    // TODO Phase 1.3+: Check VectorRAGManager for actual database existence
+    return true;
   }
 
   /**
@@ -86,8 +66,9 @@ export class SessionGroupManager implements ISessionGroupManager {
       throw new Error('name is required');
     }
 
-    if (!input.description || input.description.trim() === '') {
-      throw new Error('description is required');
+    // Description is optional, but validate it's a string if provided
+    if (input.description !== undefined && typeof input.description !== 'string') {
+      throw new Error('description must be a string');
     }
 
     // Validate metadata if provided

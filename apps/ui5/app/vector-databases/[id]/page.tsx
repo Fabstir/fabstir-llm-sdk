@@ -291,6 +291,9 @@ export default function VectorDatabaseDetailPage() {
     }
 
     // Upload each document to S5 storage WITHOUT generating embeddings
+    // Collect all document metadata first to avoid race condition on metadata.json
+    const uploadedDocs: import('@/hooks/use-vector-databases').DocumentMetadata[] = [];
+
     for (const file of files) {
       try {
         console.log(`[Page] 📄 Uploading document to S5: ${file.name}`);
@@ -298,8 +301,8 @@ export default function VectorDatabaseDetailPage() {
         // Read file content
         const fileContent = await file.text();
 
-        // Generate unique document ID
-        const documentId = `${file.name}-${Date.now()}`;
+        // Generate unique document ID with random component to ensure uniqueness
+        const documentId = `${file.name}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
         // Upload document content to S5
         const { uploadDocumentToS5 } = await import('@/lib/s5-utils');
@@ -320,21 +323,38 @@ export default function VectorDatabaseDetailPage() {
           embeddingProgress: 0
         };
 
-        // Add to pendingDocuments array (no vector generation)
-        await addPendingDocument(databaseName, docMetadata);
+        uploadedDocs.push(docMetadata);
+        console.log(`[Page] ✅ Document ${file.name} uploaded to S5`);
 
-        console.log(`[Page] ✅ Document metadata saved with status: pending`);
-        // Optimistically update local state (don't wait for S5 P2P propagation)
+      } catch (error) {
+        console.error(`[Page] ❌ Failed to upload ${file.name}:`, error);
+      }
+    }
+
+    // Batch update metadata.json once to avoid race condition
+    if (uploadedDocs.length > 0) {
+      try {
+        console.log(`[Page] 📝 Saving metadata for ${uploadedDocs.length} documents...`);
+        await addPendingDocument(databaseName, uploadedDocs[0]); // First doc
+
+        // Add remaining docs one at a time with small delay to avoid write conflicts
+        for (let i = 1; i < uploadedDocs.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
+          await addPendingDocument(databaseName, uploadedDocs[i]);
+        }
+
+        console.log(`[Page] ✅ Metadata saved for all ${uploadedDocs.length} documents`);
+
+        // Optimistically update local state with all documents
         setDatabase(prevDb => {
           if (!prevDb) return prevDb;
           return {
             ...prevDb,
-            pendingDocuments: [...(prevDb.pendingDocuments || []), docMetadata]
+            pendingDocuments: [...(prevDb.pendingDocuments || []), ...uploadedDocs]
           };
         });
-
       } catch (error) {
-        console.error(`[Page] ❌ Failed to upload ${file.name}:`, error);
+        console.error('[Page] ❌ Failed to save metadata:', error);
       }
     }
 

@@ -36,6 +36,7 @@ import { TreasuryManager } from './managers/TreasuryManager';
 import { ClientManager } from './managers/ClientManager';
 import { EncryptionManager } from './managers/EncryptionManager';
 import { VectorRAGManager } from './managers/VectorRAGManager';
+import { SessionGroupManager } from './managers/SessionGroupManager';
 import { DEFAULT_RAG_CONFIG } from './rag/config';
 import { ContractManager, ContractAddresses } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
@@ -104,6 +105,7 @@ export class FabstirSDKCore extends EventEmitter {
   private treasuryManager?: ITreasuryManager;
   private encryptionManager?: EncryptionManager;
   private vectorRAGManager?: IVectorRAGManager;
+  private sessionGroupManager?: SessionGroupManager;
   
   private authenticated = false;
   private s5Seed?: string;
@@ -552,9 +554,9 @@ export class FabstirSDKCore extends EventEmitter {
    */
   private async initializeManagers(): Promise<void> {
     console.log('Creating AuthManager...');
-    // Create auth manager - AuthManager doesn't have initialize method
-    this.authManager = new AuthManager();
-    console.log('AuthManager created');
+    // Create auth manager with authenticated data
+    this.authManager = new AuthManager(this.signer, this.provider, this.userAddress, this.s5Seed);
+    console.log('AuthManager created with user address:', this.userAddress);
     
     // Create other managers
     console.log('Creating PaymentManager...');
@@ -709,11 +711,16 @@ export class FabstirSDKCore extends EventEmitter {
           encryptionManager: this.encryptionManager!
         });
         console.log('VectorRAGManager created with database management enabled');
+
+        // Initialize SessionGroupManager
+        console.log('Creating SessionGroupManager...');
+        this.sessionGroupManager = new SessionGroupManager();
+        console.log('SessionGroupManager created');
       } else {
         console.warn('VectorRAGManager initialization skipped: missing userAddress or s5Seed');
       }
     }
-    
+
     // Initialize bridge client if configured
     if (this.config.bridgeConfig?.url) {
       this.bridgeClient = new UnifiedBridgeClient(
@@ -800,6 +807,14 @@ export class FabstirSDKCore extends EventEmitter {
   getVectorRAGManager(): IVectorRAGManager {
     this.ensureAuthenticated();
     return this.vectorRAGManager!;
+  }
+
+  /**
+   * Get session group manager for organizing sessions
+   */
+  getSessionGroupManager(): SessionGroupManager {
+    this.ensureAuthenticated();
+    return this.sessionGroupManager!;
   }
 
   /**

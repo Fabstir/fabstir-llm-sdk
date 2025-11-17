@@ -84,7 +84,14 @@ export function useVectorDatabases() {
       setError(null);
       const vectorRAGManager = managers.vectorRAGManager;
       const dbs = await vectorRAGManager.listDatabases();
-      setDatabases(dbs);
+
+      // Transform SDK's DatabaseMetadata (with databaseName) to UI's format (with name)
+      const transformedDbs = dbs.map(db => ({
+        ...db,
+        name: db.databaseName  // Map databaseName to name for UI compatibility
+      }));
+
+      setDatabases(transformedDbs);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch databases');
       console.error('Failed to fetch databases:', err);

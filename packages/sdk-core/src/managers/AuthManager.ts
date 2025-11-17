@@ -37,7 +37,20 @@ export class AuthManager {
   private eoaAddress?: string;
   private isSmartWallet: boolean = false;
 
-  constructor() {}
+  constructor(
+    signer?: ethers.Signer,
+    provider?: ethers.BrowserProvider | ethers.JsonRpcProvider,
+    userAddress?: string,
+    s5Seed?: string
+  ) {
+    if (signer) this.signer = signer;
+    if (provider) this.provider = provider;
+    if (userAddress) {
+      this.userAddress = userAddress;
+      this.eoaAddress = userAddress;
+    }
+    if (s5Seed) this.s5Seed = s5Seed;
+  }
 
   /**
    * Authenticate with various providers

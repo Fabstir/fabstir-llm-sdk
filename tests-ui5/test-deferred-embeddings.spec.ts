@@ -34,6 +34,18 @@ test.describe('Deferred Embeddings - Background Processing Workflow', () => {
     // Extended timeout for full workflow (upload + session + embeddings)
     test.setTimeout(300000); // 5 minutes
 
+    // Capture console logs and errors
+    page.on('console', msg => {
+      const type = msg.type();
+      if (type === 'error' || type === 'warning') {
+        console.log(`[Browser ${type.toUpperCase()}]`, msg.text());
+      }
+    });
+
+    page.on('pageerror', error => {
+      console.log('[Browser PAGE ERROR]', error.message);
+    });
+
     console.log('[Test] ========================================');
     console.log('[Test] Starting Deferred Embeddings Workflow Test');
     console.log('[Test] ========================================');
@@ -55,6 +67,9 @@ test.describe('Deferred Embeddings - Background Processing Workflow', () => {
     await page.click('a[href="/vector-databases"]');
     await page.waitForSelector('text=Vector Databases', { timeout: 10000 });
     console.log('[Test] Vector databases page loaded');
+
+    // Wait for databases to load from S5 storage (5 seconds should be enough)
+    await page.waitForTimeout(5000);
 
     // Create Test Database 1 if it doesn't exist
     const existingDatabase = page.locator('text=Test Database 1').first();

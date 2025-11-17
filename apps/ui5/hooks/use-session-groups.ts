@@ -62,12 +62,15 @@ export function useSessionGroups(): UseSessionGroupsReturn {
   const [error, setError] = useState<string | null>(null);
 
   const loadSessionGroups = useCallback(async () => {
-    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) return;
+    if (!managers?.sessionGroupManager || !managers?.authManager) return;
+
+    const userAddress = managers.authManager.getUserAddress();
+    if (!userAddress) return;
 
     try {
       setIsLoading(true);
       setError(null);
-      const groups = await managers.sessionGroupManager.listSessionGroups(managers.authManager.userAddress);
+      const groups = await managers.sessionGroupManager.listSessionGroups(userAddress);
       setSessionGroups(groups);
     } catch (err) {
       console.error('[useSessionGroups] Failed to load groups:', err);
@@ -88,8 +91,13 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     name: string,
     options?: { description?: string; databases?: string[] }
   ): Promise<SessionGroup> => {
-    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) {
+    if (!managers?.sessionGroupManager || !managers?.authManager) {
       throw new Error('SDK not initialized');
+    }
+
+    const userAddress = managers.authManager.getUserAddress();
+    if (!userAddress) {
+      throw new Error('User address not available');
     }
 
     try {
@@ -98,7 +106,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
       const group = await managers.sessionGroupManager.createSessionGroup({
         name,
         description: options?.description || '',
-        owner: managers.authManager.userAddress,
+        owner: userAddress,
         metadata: {}
       });
       await loadSessionGroups(); // Refresh list
@@ -114,12 +122,12 @@ export function useSessionGroups(): UseSessionGroupsReturn {
   }, [managers, loadSessionGroups]);
 
   const selectGroup = useCallback(async (groupId: string): Promise<void> => {
-    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) return;
+    if (!managers?.sessionGroupManager || !managers?.authManager) return;
 
     try {
       setIsLoading(true);
       setError(null);
-      const group = await managers.sessionGroupManager.getSessionGroup(groupId, managers.authManager.userAddress);
+      const group = await managers.sessionGroupManager.getSessionGroup(groupId, managers.authManager.getUserAddress());
       setSelectedGroup(group);
     } catch (err) {
       console.error('[useSessionGroups] Failed to select group:', err);
@@ -130,12 +138,12 @@ export function useSessionGroups(): UseSessionGroupsReturn {
   }, [managers]);
 
   const deleteGroup = useCallback(async (groupId: string): Promise<void> => {
-    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) return;
+    if (!managers?.sessionGroupManager || !managers?.authManager) return;
 
     try {
       setIsLoading(true);
       setError(null);
-      await managers.sessionGroupManager.deleteSessionGroup(groupId, managers.authManager.userAddress);
+      await managers.sessionGroupManager.deleteSessionGroup(groupId, managers.authManager.getUserAddress());
 
       // Clear selected group if it was deleted
       if (selectedGroup?.id === groupId) {
@@ -157,7 +165,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     groupId: string,
     updates: Partial<SessionGroup>
   ): Promise<SessionGroup> => {
-    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) {
+    if (!managers?.sessionGroupManager || !managers?.authManager) {
       throw new Error('SDK not initialized');
     }
 
@@ -166,7 +174,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
       setError(null);
       const updated = await managers.sessionGroupManager.updateSessionGroup(
         groupId,
-        managers.authManager.userAddress,
+        managers.authManager.getUserAddress(),
         {
           name: updates.name,
           description: updates.description,
@@ -195,11 +203,11 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     groupId: string,
     databaseName: string
   ): Promise<void> => {
-    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) return;
+    if (!managers?.sessionGroupManager || !managers?.authManager) return;
 
     try {
       setError(null);
-      await managers.sessionGroupManager.linkVectorDatabase(groupId, managers.authManager.userAddress, databaseName);
+      await managers.sessionGroupManager.linkVectorDatabase(groupId, managers.authManager.getUserAddress(), databaseName);
 
       // Refresh selected group if it was updated
       if (selectedGroup?.id === groupId) {
@@ -219,11 +227,11 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     groupId: string,
     databaseName: string
   ): Promise<void> => {
-    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) return;
+    if (!managers?.sessionGroupManager || !managers?.authManager) return;
 
     try {
       setError(null);
-      await managers.sessionGroupManager.unlinkVectorDatabase(groupId, managers.authManager.userAddress, databaseName);
+      await managers.sessionGroupManager.unlinkVectorDatabase(groupId, managers.authManager.getUserAddress(), databaseName);
 
       // Refresh selected group if it was updated
       if (selectedGroup?.id === groupId) {
@@ -359,12 +367,12 @@ export function useSessionGroups(): UseSessionGroupsReturn {
   const listChatSessionsWithData = useCallback(async (
     groupId: string
   ): Promise<ChatSession[]> => {
-    if (!managers?.sessionGroupManager || !managers?.authManager?.userAddress) return [];
+    if (!managers?.sessionGroupManager || !managers?.authManager) return [];
 
     try {
       setError(null);
       // Get session IDs
-      const sessionIds = await managers.sessionGroupManager.listChatSessions(groupId, managers.authManager.userAddress);
+      const sessionIds = await managers.sessionGroupManager.listChatSessions(groupId, managers.authManager.getUserAddress());
 
       // Fetch full data for each session
       const sessions: ChatSession[] = [];
