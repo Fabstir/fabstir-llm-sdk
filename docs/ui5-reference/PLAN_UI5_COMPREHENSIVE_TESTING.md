@@ -778,17 +778,40 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 - Test 1: Send follow-up message with conversation context ✅
 - Test 2: Multiple follow-ups (stress test) ✅
 
-### Sub-phase 5.4: Navigate Away and Return
-- [ ] Click "Dashboard" in navbar
-- [ ] Wait 2 seconds
-- [ ] Click "Sessions" to return
-- [ ] Click on session group
-- [ ] Click on chat session
-- [ ] Verify conversation history intact (all messages visible)
-- [ ] Verify no data loss
-- [ ] Take screenshot
+### Sub-phase 5.4: Navigate Away and Return ❌ **BUG DISCOVERED**
 
-**Expected Duration**: 5-10 seconds
+**Test Steps Executed**:
+- [x] Navigate to session groups page
+- [x] Open session group detail
+- [x] Create chat session (sess-1763384610829-km1q4lm)
+- [x] Send 2 messages to establish conversation history
+- [x] Verify messages visible before navigation
+- [x] Navigate to Dashboard
+- [x] Navigate to Session Groups
+- [x] Navigate back to Session Group Detail
+- [x] Attempt to find session in list ❌ **FAILED**
+
+**🐛 Bug Discovered**:
+- ✅ Session creation works (sess-1763384610829-km1q4lm created successfully)
+- ✅ Message sending works (both messages visible before navigation)
+- ✅ Navigation flow works (Dashboard → Session Groups → Group Detail)
+- ❌ **SESSION PERSISTENCE BUG**: Sessions don't appear in session list after page reload
+- ❌ UI shows "Chat Sessions (0)" after returning to group detail page
+- ❌ Session created during chat is not being saved to S5 or not being retrieved correctly
+
+**Root Cause Analysis Needed**:
+1. Is the session being saved to S5 properly when created?
+2. Is the session group's session list being updated in S5?
+3. Is there a mismatch between session ID format when saving vs. querying?
+4. Check `SessionGroupManager.listChatSessions()` - is it querying S5 correctly?
+
+**Automated Test**: `/workspace/tests-ui5/test-chat-navigation.spec.ts` ❌ (2/2 tests FAILED - legitimate bug)
+- Test 1: Navigate away and return ❌ (session not found in list after navigation)
+- Test 2: Multiple navigation cycles ❌ (same issue, timeout waiting for session link)
+
+**Expected Duration**: 5-10 seconds (actual: 90 seconds for comprehensive test)
+
+**Next Steps**: Investigate SessionGroupManager to understand why sessions aren't persisting properly
 
 ### Sub-phase 5.5: Delete Chat Session
 - [ ] On chat session, find delete button

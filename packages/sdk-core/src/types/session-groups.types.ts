@@ -68,6 +68,7 @@ export interface SessionGroup {
   owner: string;
   linkedDatabases: string[]; // Database IDs
   chatSessions: string[]; // Session IDs
+  chatSessionsData?: Record<string, ChatSession>; // Full session objects (for persistence)
   documents?: GroupDocumentMetadata[]; // Group documents
   metadata: Record<string, any>;
   deleted: boolean;

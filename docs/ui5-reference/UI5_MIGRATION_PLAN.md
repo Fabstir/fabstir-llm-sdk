@@ -1412,6 +1412,213 @@ await page.waitForSelector('text=Transaction confirmed', { timeout: TX_TIMEOUT }
 
 ---
 
+### 5.7: SDK Core Bug Fix - Chat Session Persistence to S5 ⏳
+
+**Background**: Phase 5.4 automated testing (`test-chat-navigation.spec.ts`) discovered that chat sessions created via `SessionGroupManager.startChatSession()` are not persisting to S5 storage. Sessions are created successfully in memory but disappear after page navigation/reload.
+
+**Bug Discovery**:
+- Test created session: `sess-1763384610829-km1q4lm`
+- Messages sent successfully (both visible before navigation)
+- Navigation flow successful: Dashboard → Session Groups → Group Detail
+- **FAILURE**: Session link not found after returning to group detail page
+- UI shows "Chat Sessions (0)" - session was never saved to S5
+
+**Root Cause**: `/workspace/packages/sdk-core/src/managers/SessionGroupManager.ts` lines 497-530
+
+**Problem Analysis**:
+```typescript
+async startChatSession(groupId: string, initialMessage?: string): Promise<ChatSession> {
+  // ... creates session object ...
+
+  // ❌ BUG: Store chat session IN MEMORY ONLY
+  this.chatStorage.set(sessionId, session);
+
+  // ❌ BUG: Add session ID to group IN MEMORY ONLY
+  if (!group.chatSessions.includes(sessionId)) {
+    group.chatSessions.push(sessionId);
+    group.updatedAt = new Date();
+    this.groups.set(groupId, group);
+    // ❌ MISSING: No call to this.storage.save(group) here!
+  }
+
+  return session;
+  // ❌ MISSING: No S5 persistence for the session itself!
+}
+```
+
+**Correct Pattern** (from `removeGroupDocument()` line 482-484):
+```typescript
+// Persist to S5 storage
+if (this.storage) {
+  await this.storage.save(group);
+}
+```
+
+**Impact**:
+- ❌ Chat sessions don't appear in session list after page reload
+- ❌ Created sessions are lost on navigation
+- ❌ Test Phase 5.4 fails: "Session link not found" (timeout 5000ms)
+- ❌ User experience broken: Cannot return to existing chat sessions
+
+**Implementation Tasks**:
+
+#### Sub-phase 5.7.1: Add S5 Persistence to startChatSession()
+
+**File**: `/workspace/packages/sdk-core/src/managers/SessionGroupManager.ts`
+
+**Changes Required**:
+- [ ] Add S5 persistence after updating group's session list (line ~520)
+  ```typescript
+  if (!group.chatSessions.includes(sessionId)) {
+    group.chatSessions.push(sessionId);
+    group.updatedAt = new Date();
+    this.groups.set(groupId, group);
+
+    // ADD THIS: Persist group to S5
+    if (this.storage) {
+      await this.storage.save(group);
+    }
+  }
+  ```
+
+- [ ] Implement S5 persistence for individual ChatSession objects
+  - [ ] Research: Where should ChatSession be stored? (S5 path structure)
+  - [ ] Option 1: Store sessions within group metadata
+  - [ ] Option 2: Store sessions as separate S5 files (more scalable)
+  - [ ] Implement chosen approach
+
+#### Sub-phase 5.7.2: Update getChatSession() to Load from S5
+
+**File**: `/workspace/packages/sdk-core/src/managers/SessionGroupManager.ts`
+
+**Changes Required**:
+- [ ] Update `getChatSession()` to check S5 if not in memory
+  ```typescript
+  async getChatSession(groupId: string, sessionId: string): Promise<ChatSession | null> {
+    // First check memory
+    let session = this.chatStorage.get(sessionId);
+
+    // If not in memory, load from S5
+    if (!session && this.storage) {
+      session = await this.storage.loadChatSession(sessionId);
+      if (session) {
+        this.chatStorage.set(sessionId, session);
+      }
+    }
+
+    return session || null;
+  }
+  ```
+
+#### Sub-phase 5.7.3: Add Persistence to addMessage()
+
+**File**: `/workspace/packages/sdk-core/src/managers/SessionGroupManager.ts`
+
+**Current Code Check**:
+- [ ] Review `addMessage()` method
+- [ ] Verify if it already persists to S5
+- [ ] If not, add S5 save after updating session:
+  ```typescript
+  session.messages.push(message);
+  session.updated = Date.now();
+  this.chatStorage.set(sessionId, session);
+
+  // ADD THIS: Persist session to S5
+  if (this.storage) {
+    await this.storage.saveChatSession(session);
+  }
+  ```
+
+#### Sub-phase 5.7.4: Review All SessionGroupManager Methods
+
+**Review for Missing S5 Persistence**:
+- [ ] `updateChatSession()` - Check if persists
+- [ ] `deleteChatSession()` - Check if removes from S5
+- [ ] `listChatSessions()` - Verify queries S5 correctly
+- [ ] Any other mutation methods - Add persistence
+
+**Pattern to Follow**:
+```typescript
+// After any mutation to group or session:
+if (this.storage) {
+  await this.storage.save(group); // or saveChatSession(session)
+}
+```
+
+#### Sub-phase 5.7.5: Build and Test SDK
+
+**Build**:
+- [ ] Navigate to SDK: `cd /workspace/packages/sdk-core`
+- [ ] Clean build: `rm -rf dist/`
+- [ ] Build SDK: `pnpm build`
+- [ ] Verify no TypeScript errors
+- [ ] Verify build artifacts created
+
+**Unit Tests** (if exist):
+- [ ] Run SessionGroupManager tests
+- [ ] Verify persistence tests pass
+- [ ] Add new tests if coverage gaps exist
+
+#### Sub-phase 5.7.6: Re-run Phase 5.4 Navigation Tests
+
+**Test Execution**:
+- [ ] Ensure UI5 is running: `cd /workspace/apps/ui5 && pnpm dev --port 3002`
+- [ ] Run navigation tests: `cd /workspace/tests-ui5 && npx playwright test test-chat-navigation.spec.ts`
+- [ ] Verify Test 1 passes: "should preserve conversation history after navigation"
+- [ ] Verify Test 2 passes: "should handle multiple navigation cycles without data loss"
+
+**Expected Results**:
+- ✅ Session link found after navigation (no timeout)
+- ✅ Session appears in "Chat Sessions" list
+- ✅ Conversation messages preserved after reload
+- ✅ Both tests pass without errors
+
+#### Sub-phase 5.7.7: Update Documentation
+
+**Files to Update**:
+- [ ] `/workspace/docs/ui5-reference/PLAN_UI5_COMPREHENSIVE_TESTING.md`
+  - [ ] Update Phase 5.4 status from ❌ to ✅
+  - [ ] Remove "BUG DISCOVERED" section
+  - [ ] Add "✅ FIXED" note with bug fix reference
+
+- [ ] `/workspace/docs/SDK_API.md` (if needed)
+  - [ ] Document S5 persistence behavior
+  - [ ] Note that sessions persist across navigation
+
+**Success Criteria**:
+- [  ] `startChatSession()` persists group to S5 after adding session ID
+- [  ] Individual chat sessions persist to S5
+- [  ] `getChatSession()` loads from S5 if not in memory
+- [  ] `addMessage()` persists updated session to S5
+- [  ] All SessionGroupManager mutation methods have S5 persistence
+- [  ] SDK builds without errors
+- [  ] Phase 5.4 navigation tests pass (2/2)
+- [  ] Sessions survive page reload and navigation
+- [  ] Documentation updated
+
+**Time Estimate**: 3-4 hours
+- Sub-phase 5.7.1: Add persistence to startChatSession (30 min)
+- Sub-phase 5.7.2: Update getChatSession (30 min)
+- Sub-phase 5.7.3: Add persistence to addMessage (20 min)
+- Sub-phase 5.7.4: Review all methods (45 min)
+- Sub-phase 5.7.5: Build and test SDK (30 min)
+- Sub-phase 5.7.6: Re-run tests (30 min)
+- Sub-phase 5.7.7: Update documentation (20 min)
+
+**Dependencies**:
+- Enhanced S5.js for storage operations
+- SessionGroupManager already has `this.storage` reference
+- Storage service must support ChatSession persistence
+
+**Reference Files**:
+- Test that discovered bug: `/workspace/tests-ui5/test-chat-navigation.spec.ts`
+- Test output log: `/tmp/test-phase-5-4.log`
+- Test screenshot: `/workspace/tests-ui5/test-results/.../test-failed-1.png`
+- Bug location: `/workspace/packages/sdk-core/src/managers/SessionGroupManager.ts:497-530`
+- Working reference: `/workspace/apps/harness/pages/chat-context-rag-demo.tsx` (uses session persistence)
+
+---
+
 ## Phase 6: Production Preparation
 
 ### 6.1: Environment Configuration

@@ -757,14 +757,10 @@ export default function SessionGroupDetailPage() {
                   {[...chatSessions]
                     .sort((a, b) => b.timestamp - a.timestamp)
                     .map((session) => (
-                      <div
+                      <Link
                         key={session.sessionId}
-                        className="group border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
-                        onClick={() =>
-                          router.push(
-                            `/session-groups/${groupId}/${session.sessionId}`
-                          )
-                        }
+                        href={`/session-groups/${groupId}/${session.sessionId}`}
+                        className="group border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer block"
                       >
                         <div className="flex items-start justify-between mb-2">
                           <h4 className="font-medium text-gray-900">
@@ -781,9 +777,11 @@ export default function SessionGroupDetailPage() {
                               {session.active ? "Active" : "Archived"}
                             </span>
                             <button
-                              onClick={(e) =>
-                                handleDeleteSession(session.sessionId, e)
-                              }
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleDeleteSession(session.sessionId, e);
+                              }}
                               className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 transition-opacity"
                               title="Delete session"
                             >
@@ -804,7 +802,7 @@ export default function SessionGroupDetailPage() {
                               : 'recently'}
                           </span>
                         </div>
-                      </div>
+                      </Link>
                     ))}
                 </div>
               ) : (

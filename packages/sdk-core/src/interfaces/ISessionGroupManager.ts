@@ -196,4 +196,18 @@ export interface ISessionGroupManager {
     groupId: string,
     documentId: string
   ): Promise<SessionGroup>;
+
+  /**
+   * Add a message to a chat session
+   *
+   * @param groupId - Session group ID
+   * @param sessionId - Chat session ID
+   * @param message - Message to add
+   * @throws {Error} If group or session not found
+   */
+  addMessage(
+    groupId: string,
+    sessionId: string,
+    message: { role: 'user' | 'assistant' | 'system'; content: string; timestamp: number }
+  ): Promise<void>;
 }

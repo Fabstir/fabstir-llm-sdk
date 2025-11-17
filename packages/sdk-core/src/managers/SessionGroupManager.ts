@@ -98,6 +98,7 @@ export class SessionGroupManager implements ISessionGroupManager {
       owner: input.owner,
       linkedDatabases: [],
       chatSessions: [],
+      chatSessionsData: {}, // Initialize for session persistence
       documents: [],
       metadata: input.metadata || {},
       deleted: false,
@@ -167,15 +168,31 @@ export class SessionGroupManager implements ISessionGroupManager {
     // If not in cache and S5 storage is available, try loading from S5
     if (!group && this.storage) {
       try {
+        console.log(`[SessionGroupManager.getSessionGroup] Loading group ${groupId} from S5...`);
         group = await this.storage.load(groupId);
         if (group) {
+          console.log(`[SessionGroupManager.getSessionGroup] ✅ Loaded from S5: ${group.chatSessions.length} session IDs`);
+          console.log(`[SessionGroupManager.getSessionGroup] chatSessionsData exists: ${!!group.chatSessionsData}, count: ${group.chatSessionsData ? Object.keys(group.chatSessionsData).length : 0}`);
+
           // Update in-memory cache
           this.groups.set(groupId, group);
+
+          // Populate chat sessions from chatSessionsData
+          if (group.chatSessionsData) {
+            for (const [sessionId, session] of Object.entries(group.chatSessionsData)) {
+              this.chatStorage.set(sessionId, session);
+              console.log(`[SessionGroupManager.getSessionGroup] Cached session ${sessionId} in chatStorage`);
+            }
+          }
+        } else {
+          console.warn(`[SessionGroupManager.getSessionGroup] ⚠️  Group ${groupId} not found in S5`);
         }
       } catch (err) {
         console.error('[SessionGroupManager.getSessionGroup] Failed to load from S5 storage:', err);
         // Continue with cache-only check below
       }
+    } else if (group) {
+      console.log(`[SessionGroupManager.getSessionGroup] Found group ${groupId} in memory cache`);
     }
 
     if (!group) {
@@ -516,14 +533,37 @@ export class SessionGroupManager implements ISessionGroupManager {
       updated: now
     };
 
-    // Store chat session
+    // Store chat session in memory
     this.chatStorage.set(sessionId, session);
 
     // Add session ID to group
     if (!group.chatSessions.includes(sessionId)) {
       group.chatSessions.push(sessionId);
       group.updatedAt = new Date();
+
+      // Initialize chatSessionsData if not exists
+      if (!group.chatSessionsData) {
+        group.chatSessionsData = {};
+      }
+
+      // Store session data in group for persistence
+      group.chatSessionsData[sessionId] = session;
+
+      // Update in-memory cache
       this.groups.set(groupId, group);
+
+      // Persist to S5
+      if (this.storage) {
+        try {
+          await this.storage.save(group);
+          console.log(`[SessionGroupManager.startChatSession] ✅ Saved session ${sessionId} to S5`);
+        } catch (error) {
+          console.error(`[SessionGroupManager.startChatSession] ❌ Failed to save to S5:`, error);
+          // Don't throw - session is already in memory, S5 is best-effort
+        }
+      } else {
+        console.warn('[SessionGroupManager.startChatSession] ⚠️  S5 storage not available, session only in memory');
+      }
     }
 
     return session;
@@ -535,7 +575,22 @@ export class SessionGroupManager implements ISessionGroupManager {
    * NOTE: This is a minimal implementation for UI testing compatibility with mock SDK.
    */
   async getChatSession(groupId: string, sessionId: string): Promise<ChatSession | null> {
-    const session = this.chatStorage.get(sessionId);
+    // First check memory
+    let session = this.chatStorage.get(sessionId);
+
+    // If not in memory, load group from S5 (this populates chatStorage from chatSessionsData)
+    if (!session) {
+      // Note: We can't call getSessionGroup without a requestor, so we check the cache directly
+      // If group is not in cache, it won't be loaded. The caller (listChatSessionsWithData)
+      // should call listChatSessions first, which calls getSessionGroup and populates the cache.
+      const group = this.groups.get(groupId);
+      if (group?.chatSessionsData?.[sessionId]) {
+        session = group.chatSessionsData[sessionId];
+        // Cache in memory
+        this.chatStorage.set(sessionId, session);
+      }
+    }
+
     if (!session) {
       return null;
     }
@@ -545,6 +600,60 @@ export class SessionGroupManager implements ISessionGroupManager {
     }
 
     return session;
+  }
+
+  /**
+   * Add a message to a chat session
+   *
+   * NOTE: This is a minimal implementation for UI testing compatibility.
+   * Persists the updated session to S5 storage.
+   */
+  async addMessage(
+    groupId: string,
+    sessionId: string,
+    message: ChatMessage
+  ): Promise<void> {
+    // Get session (from memory or load from S5)
+    const session = await this.getChatSession(groupId, sessionId);
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found in group ${groupId}`);
+    }
+
+    // Add message to session
+    session.messages.push(message);
+    session.updated = Date.now();
+
+    // Update memory cache
+    this.chatStorage.set(sessionId, session);
+
+    // Get group and update chatSessionsData
+    const group = this.groups.get(groupId);
+    if (group) {
+      // Initialize chatSessionsData if not exists
+      if (!group.chatSessionsData) {
+        group.chatSessionsData = {};
+      }
+
+      // Update session data in group
+      group.chatSessionsData[sessionId] = session;
+      group.updatedAt = new Date();
+
+      // Update in-memory cache
+      this.groups.set(groupId, group);
+
+      // Persist to S5
+      if (this.storage) {
+        try {
+          await this.storage.save(group);
+          console.log(`[SessionGroupManager.addMessage] ✅ Saved message to S5 for session ${sessionId}`);
+        } catch (error) {
+          console.error(`[SessionGroupManager.addMessage] ❌ Failed to save to S5:`, error);
+          // Don't throw - message is already in memory, S5 is best-effort
+        }
+      } else {
+        console.warn('[SessionGroupManager.addMessage] ⚠️  S5 storage not available, message only in memory');
+      }
+    }
   }
 
   /**
