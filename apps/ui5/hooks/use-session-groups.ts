@@ -25,6 +25,17 @@ export interface UseSessionGroupsReturn {
 
   // Chat Session Operations
   startChat: (groupId: string, initialMessage?: string) => Promise<ChatSession>;
+  startAIChat: (
+    groupId: string,
+    hostConfig: {
+      address: string;
+      endpoint: string;
+      models: string[];
+      pricing: number;
+    },
+    depositAmount: string,
+    initialMessage?: string
+  ) => Promise<ChatSession & { jobId?: bigint }>;
   continueChat: (groupId: string, sessionId: string) => Promise<ChatSession>;
   getChatSession: (groupId: string, sessionId: string) => Promise<ChatSession | null>;
   listChatSessionsWithData: (groupId: string) => Promise<ChatSession[]>;
@@ -275,6 +286,100 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     }
   }, [managers, selectedGroup, selectGroup]);
 
+  /**
+   * Start AI-powered chat session with blockchain payment
+   *
+   * Creates a blockchain job via SessionManager.startSession() and links it
+   * to a session group chat session for persistence.
+   *
+   * Based on implementation from apps/harness/pages/chat-context-rag-demo.tsx
+   */
+  const startAIChat = useCallback(async (
+    groupId: string,
+    hostConfig: {
+      address: string;
+      endpoint: string;
+      models: string[];
+      pricing: number;
+    },
+    depositAmount: string,
+    initialMessage?: string
+  ): Promise<ChatSession & { jobId?: bigint }> => {
+    if (!managers?.sessionManager || !managers?.sessionGroupManager) {
+      throw new Error('SDK not initialized');
+    }
+
+    try {
+      setError(null);
+      console.log('[useSessionGroups] 🚀 Starting AI chat session...', {
+        groupId,
+        host: hostConfig.address,
+        model: hostConfig.models[0],
+        pricing: hostConfig.pricing,
+        deposit: depositAmount,
+      });
+
+      // 1. Create blockchain job via SessionManager.startSession()
+      const sessionConfig = {
+        depositAmount,
+        pricePerToken: hostConfig.pricing,
+        proofInterval: 1000, // Checkpoint every 1000 tokens
+        paymentToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
+        provider: hostConfig.address,
+        endpoint: hostConfig.endpoint,
+        model: hostConfig.models[0],
+        chainId: 84532, // Base Sepolia
+        useDeposit: false, // Use spend permissions (gasless)
+      };
+
+      console.log('[useSessionGroups] Creating blockchain job...');
+      const result = await managers.sessionManager.startSession(sessionConfig);
+      const { sessionId, jobId } = result;
+
+      console.log('[useSessionGroups] ✅ Blockchain job created:', {
+        sessionId: sessionId.toString(),
+        jobId: jobId?.toString(),
+      });
+
+      // 2. Create S5 chat session metadata linked to blockchain session
+      console.log('[useSessionGroups] Creating S5 session metadata...');
+      const chatSession = await managers.sessionGroupManager.startChatSession(
+        groupId,
+        initialMessage
+      );
+
+      // 3. Store blockchain metadata in session
+      // Note: ChatSession interface may need extension to include jobId
+      const aiSession = {
+        ...chatSession,
+        jobId,
+        // Store metadata for UI to distinguish AI vs mock sessions
+        metadata: {
+          ...chatSession.metadata,
+          sessionType: 'ai' as const,
+          blockchainSessionId: sessionId.toString(),
+          hostAddress: hostConfig.address,
+          model: hostConfig.models[0],
+          pricing: hostConfig.pricing,
+        },
+      };
+
+      console.log('[useSessionGroups] ✅ AI chat session created successfully');
+
+      // Refresh selected group to show new session
+      if (selectedGroup?.id === groupId) {
+        await selectGroup(groupId);
+      }
+
+      return aiSession;
+    } catch (err) {
+      console.error('[useSessionGroups] ❌ Failed to start AI chat:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to start AI chat session';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [managers, selectedGroup, selectGroup]);
+
   const continueChat = useCallback(async (
     groupId: string,
     sessionId: string
@@ -513,6 +618,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     linkDatabase,
     unlinkDatabase,
     startChat,
+    startAIChat,
     continueChat,
     getChatSession,
     listChatSessionsWithData,

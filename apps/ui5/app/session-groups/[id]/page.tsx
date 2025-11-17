@@ -9,8 +9,10 @@ import { useWallet } from "@/hooks/use-wallet";
 import { useSDK } from "@/hooks/use-sdk";
 import { useSessionGroups } from "@/hooks/use-session-groups";
 import { useVectorDatabases, type EmbeddingProgress } from "@/hooks/use-vector-databases";
+import { useHostDiscovery } from "@/hooks/use-host-discovery";
 import { downloadFromS5 } from "@/lib/s5-utils";
 import { EmbeddingProgressBar } from "@/components/vector-databases/embedding-progress-bar";
+import { PaymentPanel } from "@/components/payment/payment-panel";
 
 interface ChatSession {
   sessionId: string;
@@ -29,12 +31,13 @@ interface ChatSession {
 export default function SessionGroupDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { isConnected } = useWallet();
+  const { isConnected, signer, address } = useWallet();
   const { managers, isInitialized } = useSDK();
   const {
     selectedGroup,
     selectGroup,
     startChat,
+    startAIChat,
     deleteChat,
     listChatSessionsWithData,
     addGroupDocument,
@@ -47,10 +50,26 @@ export default function SessionGroupDetailPage() {
 
   const { databases } = useVectorDatabases();
 
+  // --- Host Discovery (Phase 2) ---
+  const {
+    hosts,
+    selectedHost: discoveredHost,
+    isDiscovering,
+    error: hostDiscoveryError,
+    selectHost,
+  } = useHostDiscovery();
+
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [uploading, setUploading] = useState(false);
   const [showLinkDatabaseModal, setShowLinkDatabaseModal] = useState(false);
   const [embeddingProgress, setEmbeddingProgress] = useState<EmbeddingProgress | null>(null);
+
+  // --- AI Mode State (Phase 1) ---
+  const [aiModeEnabled, setAiModeEnabled] = useState(false);
+
+  // --- AI Session Creation State (Phase 3) ---
+  const [isCreatingAISession, setIsCreatingAISession] = useState(false);
+  const [aiSessionError, setAiSessionError] = useState<string | null>(null);
 
   // --- Sub-phase 5.4: Document Queue Tracking ---
   const [documentQueue, setDocumentQueue] = useState<string[]>([]); // List of document names in queue
@@ -415,6 +434,43 @@ export default function SessionGroupDetailPage() {
     }
   };
 
+  // --- Start AI Chat Session (Phase 3) ---
+  const handleStartAIChat = async () => {
+    if (!discoveredHost) {
+      setAiSessionError('No host selected. Please enable AI mode and wait for host discovery.');
+      return;
+    }
+
+    setIsCreatingAISession(true);
+    setAiSessionError(null);
+
+    try {
+      console.log('[handleStartAIChat] Starting AI chat session...');
+
+      const aiSession = await startAIChat(
+        groupId,
+        {
+          address: discoveredHost.address,
+          endpoint: discoveredHost.endpoint,
+          models: discoveredHost.models,
+          pricing: discoveredHost.pricing,
+        },
+        '2', // $2 USDC deposit
+        undefined // No initial message
+      );
+
+      console.log('[handleStartAIChat] ✅ AI session created:', aiSession.sessionId);
+
+      // Navigate to the new AI session
+      router.push(`/session-groups/${groupId}/${aiSession.sessionId}`);
+    } catch (error: any) {
+      console.error('[handleStartAIChat] ❌ Failed to create AI session:', error);
+      setAiSessionError(error.message || 'Failed to create AI session');
+    } finally {
+      setIsCreatingAISession(false);
+    }
+  };
+
   // --- Load session group on mount ---
   useEffect(() => {
     // Wait for both wallet connection AND SDK initialization
@@ -552,21 +608,42 @@ export default function SessionGroupDetailPage() {
             </div>
 
             <div className="flex gap-2">
-              <button
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                onClick={async () => {
-                  try {
-                    const session = await startChat(groupId);
-                    router.push(
-                      `/session-groups/${groupId}/${session.sessionId}`
-                    );
-                  } catch (err) {
-                    console.error("Failed to start chat:", err);
-                  }
-                }}
-              >
-                + New Chat
-              </button>
+              {/* AI Chat Button (Phase 3) */}
+              {aiModeEnabled && discoveredHost ? (
+                <button
+                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-md hover:from-purple-700 hover:to-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  onClick={handleStartAIChat}
+                  disabled={isCreatingAISession || !discoveredHost}
+                  title="Create AI chat session with blockchain payment"
+                >
+                  {isCreatingAISession ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Creating AI Session...
+                    </>
+                  ) : (
+                    <>
+                      💎 New AI Chat
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                  onClick={async () => {
+                    try {
+                      const session = await startChat(groupId);
+                      router.push(
+                        `/session-groups/${groupId}/${session.sessionId}`
+                      );
+                    } catch (err) {
+                      console.error("Failed to start chat:", err);
+                    }
+                  }}
+                >
+                  + New Chat (Mock)
+                </button>
+              )}
               <button
                 className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
                 onClick={() =>
@@ -582,6 +659,18 @@ export default function SessionGroupDetailPage() {
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Payment Panel (Phase 1 + 2) */}
+        <PaymentPanel
+          signer={signer}
+          address={address}
+          aiModeEnabled={aiModeEnabled}
+          onToggleAIMode={setAiModeEnabled}
+          selectedHost={discoveredHost || undefined}
+          hosts={hosts}
+          onSelectHost={selectHost}
+          isDiscovering={isDiscovering}
+        />
+
         {/* Embedding Progress Bar (Sub-phase 5.3 + 5.4) */}
         {embeddingProgress && (
           <div className="mb-6">
@@ -772,7 +861,11 @@ export default function SessionGroupDetailPage() {
                         className="group border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer block"
                       >
                         <div className="flex items-start justify-between mb-2">
-                          <h4 className="font-medium text-gray-900">
+                          <h4 className="font-medium text-gray-900 flex items-center gap-2">
+                            {/* Phase 5: AI session indicator */}
+                            {(session as any).metadata?.sessionType === 'ai' && (
+                              <span className="text-purple-600" title="AI Session (Blockchain)">💎</span>
+                            )}
                             {session.title}
                           </h4>
                           <div className="flex items-center gap-2">
@@ -832,6 +925,53 @@ export default function SessionGroupDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* AI Session Creation Loading Modal (Phase 3) */}
+      {isCreatingAISession && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-purple-600 mx-auto mb-4"></div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                Creating AI Session...
+              </h3>
+              <p className="text-sm text-gray-600 mb-4">
+                Please wait while we create your blockchain job and connect to the production host.
+              </p>
+              <div className="space-y-2 text-xs text-gray-500">
+                <p>✓ Depositing USDC payment ($2)</p>
+                <p>✓ Creating blockchain job</p>
+                <p className="animate-pulse">⏳ Waiting for 3 confirmations...</p>
+                <p>⏳ Connecting to host via WebSocket</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Session Error Modal (Phase 3) */}
+      {aiSessionError && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setAiSessionError(null)}
+        >
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-red-600 mb-2">
+              Failed to Create AI Session
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              {aiSessionError}
+            </p>
+            <button
+              onClick={() => setAiSessionError(null)}
+              className="w-full px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Link Database Modal */}
       {showLinkDatabaseModal && (

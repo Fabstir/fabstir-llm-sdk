@@ -43,6 +43,10 @@ export default function ChatSessionPage() {
   const [groupName, setGroupName] = useState('Session Group');
   const [linkedDatabases, setLinkedDatabases] = useState<any[]>([]);
 
+  // --- Phase 4: Session Type Detection ---
+  const [sessionType, setSessionType] = useState<'mock' | 'ai'>('mock');
+  const [sessionMetadata, setSessionMetadata] = useState<any>(null);
+
   // Embedding progress state
   const [embeddingProgress, setEmbeddingProgress] = useState<EmbeddingProgress | null>(null);
   const [documentQueue, setDocumentQueue] = useState<string[]>([]);
@@ -202,6 +206,22 @@ export default function ChatSessionPage() {
       const session = await getChatSession(groupId, sessionId);
       if (session) {
         setMessages(session.messages || []);
+
+        // --- Phase 4: Detect session type from metadata ---
+        const metadata = (session as any).metadata;
+        if (metadata && metadata.sessionType === 'ai') {
+          console.log('[ChatSession] ✅ AI session detected:', {
+            jobId: metadata.blockchainSessionId,
+            hostAddress: metadata.hostAddress,
+            model: metadata.model,
+          });
+          setSessionType('ai');
+          setSessionMetadata(metadata);
+        } else {
+          console.log('[ChatSession] Mock session detected');
+          setSessionType('mock');
+          setSessionMetadata(null);
+        }
       } else {
         setMessages([]);
       }
@@ -242,46 +262,109 @@ export default function ChatSessionPage() {
     }
   }, [selectedGroup, groupId]);
 
-  // Handle sending a message
-  const handleSendMessage = async (message: string, files?: File[]) => {
-    setLoading(true);
-
-    // Build message content with file info
-    let messageContent = message;
-    if (files && files.length > 0) {
-      const fileList = files.map(f => f.name).join(', ');
-      messageContent = message
-        ? `${message}\n\n📎 Attached: ${fileList}`
-        : `📎 Attached: ${fileList}`;
+  // --- Phase 4: Handle AI Message via WebSocket ---
+  const handleAIMessage = async (message: string, files?: File[]) => {
+    if (!sessionMetadata || !sessionMetadata.blockchainSessionId) {
+      throw new Error('AI session metadata not available');
     }
 
     // Add user message (optimistic update)
     const userMessage: ChatMessage = {
       role: 'user',
-      content: messageContent,
+      content: message,
       timestamp: Date.now(),
     };
 
     setMessages(prev => [...prev, userMessage]);
 
     try {
-      // TODO: Upload files to session-specific database via SDK
-      // For now, just log them
-      if (files && files.length > 0) {
-        console.log('[Mock] Uploading files to session database:', files.map(f => f.name));
-      }
+      // Send message via SessionManager (WebSocket to production host)
+      const blockchainSessionId = BigInt(sessionMetadata.blockchainSessionId);
 
-      // Send message via SDK - this will automatically generate AI response in mock SDK
+      console.log('[ChatSession] 🚀 Sending AI message via WebSocket...', {
+        sessionId: blockchainSessionId.toString(),
+        message: message.substring(0, 50) + '...',
+      });
+
+      // Use SessionManager.sendPromptStreaming for real-time responses
+      const response = await managers!.sessionManager.sendPromptStreaming(
+        blockchainSessionId,
+        message
+      );
+
+      console.log('[ChatSession] ✅ AI response received:', response.substring(0, 100) + '...');
+
+      // Add AI response message
+      const aiMessage: ChatMessage = {
+        role: 'assistant',
+        content: response,
+        timestamp: Date.now(),
+      };
+
+      setMessages(prev => [...prev, aiMessage]);
+
+      // Save messages to session group storage
       await sdkAddMessage(groupId, sessionId, userMessage);
-
-      // Wait for SDK to generate AI response (mock SDK adds response automatically)
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // Reload messages from SDK to get the AI-generated response
-      await loadMessages();
+      await sdkAddMessage(groupId, sessionId, aiMessage);
 
       // Refresh group to update session metadata
       await selectGroup(groupId);
+
+      return response;
+    } catch (error: any) {
+      console.error('[ChatSession] ❌ AI message failed:', error);
+      throw error;
+    }
+  };
+
+  // Handle sending a message (routes to mock or AI based on session type)
+  const handleSendMessage = async (message: string, files?: File[]) => {
+    setLoading(true);
+
+    try {
+      // --- Phase 4: Route to AI or mock based on session type ---
+      if (sessionType === 'ai') {
+        console.log('[ChatSession] Routing to AI message handler');
+        await handleAIMessage(message, files);
+      } else {
+        console.log('[ChatSession] Routing to mock message handler');
+
+        // Build message content with file info
+        let messageContent = message;
+        if (files && files.length > 0) {
+          const fileList = files.map(f => f.name).join(', ');
+          messageContent = message
+            ? `${message}\n\n📎 Attached: ${fileList}`
+            : `📎 Attached: ${fileList}`;
+        }
+
+        // Add user message (optimistic update)
+        const userMessage: ChatMessage = {
+          role: 'user',
+          content: messageContent,
+          timestamp: Date.now(),
+        };
+
+        setMessages(prev => [...prev, userMessage]);
+
+        // TODO: Upload files to session-specific database via SDK
+        // For now, just log them
+        if (files && files.length > 0) {
+          console.log('[Mock] Uploading files to session database:', files.map(f => f.name));
+        }
+
+        // Send message via SDK - this will automatically generate AI response in mock SDK
+        await sdkAddMessage(groupId, sessionId, userMessage);
+
+        // Wait for SDK to generate AI response (mock SDK adds response automatically)
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+
+        // Reload messages from SDK to get the AI-generated response
+        await loadMessages();
+
+        // Refresh group to update session metadata
+        await selectGroup(groupId);
+      }
     } catch (error: any) {
       console.error('Failed to send message:', error);
 
@@ -369,19 +452,39 @@ export default function ChatSessionPage() {
                 <ArrowLeft className="h-4 w-4" />
                 Back to {groupName}
               </Link>
-              <h1 className="text-2xl font-bold text-gray-900">
+              <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                {/* Phase 5: AI session indicator */}
+                {sessionType === 'ai' && (
+                  <span className="text-purple-600" title="AI Session (Blockchain)">💎</span>
+                )}
                 {sessions.find((s) => s.id === sessionId)?.title ||
                   sessions.find((s) => s.id === sessionId)?.lastMessage ||
                   'New Session'}
               </h1>
+              {/* Phase 5: Show JobID for AI sessions */}
+              {sessionType === 'ai' && sessionMetadata && (
+                <p className="text-sm text-gray-600 mt-1">
+                  Job ID: {sessionMetadata.blockchainSessionId?.substring(0, 10)}...
+                  {' '} • Model: {sessionMetadata.model}
+                  {' '} • Host: {sessionMetadata.hostAddress?.substring(0, 8)}...
+                </p>
+              )}
             </div>
 
-            {linkedDatabases.length > 0 && (
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <Database className="h-4 w-4" />
-                <span>{linkedDatabases.length} database(s) linked</span>
-              </div>
-            )}
+            <div className="flex flex-col items-end gap-2">
+              {linkedDatabases.length > 0 && (
+                <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <Database className="h-4 w-4" />
+                  <span>{linkedDatabases.length} database(s) linked</span>
+                </div>
+              )}
+              {/* Phase 5: AI session badge */}
+              {sessionType === 'ai' && (
+                <div className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                  AI Session (Live)
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
