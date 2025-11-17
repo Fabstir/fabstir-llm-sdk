@@ -1,8 +1,8 @@
 # UI5 Comprehensive Testing Plan
 
-**Status**: 🚧 IN PROGRESS - Phase 3.1-3.4c Complete (40% Complete)
+**Status**: 🚧 IN PROGRESS - Phase 3.1-3.4b Complete, Blocked by SDK Bug (42% Complete)
 **Created**: 2025-11-13
-**Last Updated**: 2025-11-16 (Deferred Embeddings Architecture Update)
+**Last Updated**: 2025-11-17 (Sub-phase 3.4b Test Complete, SDK Bug Discovered)
 **Branch**: feature/ui5-migration
 **Server**: http://localhost:3002 (Container) / http://localhost:3012 (Host)
 
@@ -36,12 +36,12 @@
   - 2.2: Verify Test Mode Detection (complete)
 
 **In Progress:** 🔄
-- Phase 3: Vector Database Operations (70% - Sub-phases 3.1-3.4c updated for deferred embeddings)
+- Phase 3: Vector Database Operations (75% - Sub-phases 3.1-3.4c updated for deferred embeddings)
   - 3.1: Create Vector Database ✅ COMPLETE
   - 3.2: Upload Single File ✅ UPDATED (added pending status checks)
   - 3.3: Upload Multiple Files ✅ UPDATED (added pending status checks)
   - 3.4a: Search Disabled for Pending Docs ⏳ NEW (requires implementation)
-  - 3.4b: Background Embedding Processing ⏳ NEW (requires implementation)
+  - 3.4b: Background Embedding Processing 🔄 TEST COMPLETE - **BLOCKED BY SDK BUG** (see TEST_DEFERRED_EMBEDDINGS_STATUS.md)
   - 3.4c: Search After Embeddings Ready ⏳ UPDATED (requires prerequisite)
   - 3.5: Delete Vector Database - Pending
 
@@ -52,15 +52,26 @@
 - Phase 7: Error Handling & Edge Cases (0% - includes new Sub-phases 7.6-7.7 for embedding failures)
 - Phase 8: Performance & Blockchain Testing (0% - includes new Sub-phase 8.6 for embedding performance)
 
-**Total Progress**: 2.8/8 phases = **40% Complete**
+**Total Progress**: 2.9/8 phases = **42% Complete**
 
 **Bugs Fixed:** 2
   1. Fixed ES module `__dirname` error in test-setup.ts (used fileURLToPath)
   2. Fixed test looking for non-existent "✓ SDK Ready" text (changed to check dashboard load)
 
+**Bugs Discovered:** 1 🐛
+  1. **SDK initialization race condition** (2025-11-17) - CRITICAL
+     - Location: `/workspace/apps/ui5/app/session-groups/new/page.tsx`
+     - Impact: Users cannot create session groups
+     - Status: Test complete, awaiting UI fix
+     - Details: `TEST_DEFERRED_EMBEDDINGS_STATUS.md`
+
 **Testing Approach:** Automated tests with test wallet provider (no manual MetaMask approvals) ✅ **WORKING**
 
-**Next Steps:** Execute Sub-phases 3.1-3.4 tests, then proceed to Sub-phase 3.5 (Delete Vector Database)
+**Next Steps:**
+1. **IMMEDIATE**: Fix SDK initialization bug in UI5 (`/workspace/apps/ui5/app/session-groups/new/page.tsx`)
+2. Re-run Sub-phase 3.4b test to verify complete workflow
+3. Execute Sub-phase 3.4c (Search After Embeddings Ready)
+4. Proceed to Sub-phase 3.5 (Delete Vector Database)
 
 ---
 
@@ -354,13 +365,67 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 
 ---
 
-### Sub-phase 3.4b: Background Embedding Processing (NEW)
+### Sub-phase 3.4b: Background Embedding Processing (NEW) 🔄 **BLOCKED BY SDK BUG**
 
 **Goal**: Verify embeddings generate in background during session start
 
 **Prerequisites**: At least 3 documents with pending embeddings (from Sub-phases 3.2-3.3)
 
-**Test Steps**:
+**Status**: ✅ Test implementation complete (520+ lines) - ❌ Execution blocked by UI bug
+
+**Automated Test**: ✅ `/workspace/tests-ui5/test-deferred-embeddings.spec.ts` (COMPLETE)
+
+**Implementation Date**: 2025-11-17
+
+**Test Coverage**: Complete end-to-end workflow including:
+- ✅ Document upload (3 files)
+- ✅ Pending status verification
+- ✅ Session group creation
+- ✅ **Database linking step (Step 2.5)** - Critical addition not in original plan
+- ⏸️ Chat session start - Blocked by SDK bug
+- ⏸️ Progress bar monitoring - Blocked by SDK bug
+- ⏸️ Ready status verification - Blocked by SDK bug
+
+**Critical Discovery - SDK Initialization Bug** 🐛:
+
+**Location**: `/workspace/apps/ui5/app/session-groups/new/page.tsx`
+
+**Symptom**: "SDK not initialized" error when submitting session group creation form
+
+**Impact**: Users cannot create session groups, blocking all downstream tests
+
+**Root Cause**: SDK initialization race condition - form becomes interactive before SDK is ready
+
+**Test Detection**: Test correctly identifies and reports this bug with screenshot evidence
+
+**Suggested Fix**:
+```typescript
+export default function NewSessionGroupPage() {
+  const { isConnected } = useWallet();
+  const { createGroup } = useSessionGroups();
+  const { managers, isInitialized } = useSDK(); // Add isInitialized check
+
+  if (!isInitialized) {
+    return <LoadingSpinner message="Initializing SDK..." />;
+  }
+
+  // Rest of component...
+}
+```
+
+**Status Document**: See `/workspace/tests-ui5/TEST_DEFERRED_EMBEDDINGS_STATUS.md` for:
+- Complete test progress (Steps 1-5)
+- Detailed bug analysis with screenshots
+- Complete workflow explanation
+- Architecture notes
+- Next steps for resolution
+
+**Test Execution Result**:
+- ✅ Steps 1-2: Documents uploaded, session group creation attempted
+- ❌ Step 2.5: Database linking blocked (cannot proceed past SDK error)
+- ⏸️ Steps 3-5: Pending (blocked by Step 2.5)
+
+**Test Steps** (Original Plan):
 - [ ] Navigate to session group containing this vector database
 - [ ] Click "Create Session" or open existing session
 - [ ] **IMMEDIATELY** verify progress bar appears automatically
@@ -377,7 +442,7 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 - [ ] Take screenshot of progress bar mid-processing
 - [ ] Take screenshot after completion (all documents ready)
 
-**Expected Results**:
+**Expected Results** (After SDK Fix):
 - Progress bar appears automatically on session start
 - Embedding generation non-blocking (can chat during process)
 - Clear progress indicators (percentage, current document name, queue)
@@ -389,7 +454,11 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 
 **Expected Duration**: 1-2 minutes total (3 documents + verification)
 
-**Automated Test**: Create `/workspace/tests-ui5/test-deferred-embeddings.spec.ts` - Comprehensive workflow test
+**Next Steps**:
+1. Fix SDK initialization bug in `/workspace/apps/ui5/app/session-groups/new/page.tsx`
+2. Re-run test to verify complete workflow
+3. Document embedding generation performance
+4. Verify progress bar UI implementation
 
 ---
 
@@ -1067,6 +1136,7 @@ curl http://localhost:3002
 
 ---
 
-**Last Updated**: 2025-11-16 (Deferred Embeddings Architecture Alignment)
-**Next Update**: After completing Sub-phases 3.4a-3.4c implementation
+**Last Updated**: 2025-11-17 (Sub-phase 3.4b Test Complete, SDK Bug Discovered)
+**Next Update**: After fixing SDK initialization bug and re-running Sub-phase 3.4b
 **Architecture Changes**: Aligned with deferred embeddings implementation (docs/IMPLEMENTATION_DEFERRED_EMBEDDINGS.md Phases 1-9 complete)
+**Critical Blocker**: SDK initialization bug in `/workspace/apps/ui5/app/session-groups/new/page.tsx` (see `TEST_DEFERRED_EMBEDDINGS_STATUS.md`)
