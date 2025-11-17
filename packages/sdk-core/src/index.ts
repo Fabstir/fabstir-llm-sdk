@@ -73,6 +73,7 @@ export type { SessionJobParams, DepositBalances } from './managers/PaymentManage
 export * from './types';
 export * from './types/models';
 export * from './types/chain.types';
+export * from './types/session-groups.types';
 
 // Export chain configuration
 export { ChainRegistry } from './config/ChainRegistry';

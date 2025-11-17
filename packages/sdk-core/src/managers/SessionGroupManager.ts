@@ -7,6 +7,8 @@ import type {
   CreateSessionGroupInput,
   UpdateSessionGroupInput,
   VectorDatabaseMetadata,
+  ChatSession,
+  ChatMessage,
 } from '../types/session-groups.types';
 
 /**
@@ -22,6 +24,8 @@ export class SessionGroupManager implements ISessionGroupManager {
   // Mock database registry for testing (Phase 1 in-memory only)
   // In production, this would be replaced with VectorDatabaseManager
   private mockDatabases: Map<string, VectorDatabaseMetadata> = new Map();
+  // Chat session storage (for UI testing - production uses SessionManager)
+  private chatStorage: Map<string, ChatSession> = new Map();
 
   constructor() {
     // Future: Initialize with storage manager for S5 persistence
@@ -358,6 +362,66 @@ export class SessionGroupManager implements ISessionGroupManager {
   async listChatSessions(groupId: string, requestor: string): Promise<string[]> {
     const group = await this.getSessionGroup(groupId, requestor);
     return [...group.chatSessions]; // Return copy
+  }
+
+  /**
+   * Start a chat session (for UI compatibility - real implementation uses SessionManager)
+   *
+   * NOTE: This is a minimal implementation for UI testing compatibility with mock SDK.
+   * In production, the actual LLM session is created via SessionManager.startSession() in the page component.
+   * This method only creates the metadata tracking structure.
+   */
+  async startChatSession(groupId: string, initialMessage?: string): Promise<ChatSession> {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      throw new Error(`Session group not found: ${groupId}`);
+    }
+
+    const sessionId = `sess-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    const now = Date.now();
+
+    // Create minimal chat session metadata
+    const session: ChatSession = {
+      sessionId,
+      groupId,
+      title: initialMessage || 'New Chat',
+      messages: [],
+      metadata: {
+        databasesUsed: group.linkedDatabases
+      },
+      created: now,
+      updated: now
+    };
+
+    // Store chat session
+    this.chatStorage.set(sessionId, session);
+
+    // Add session ID to group
+    if (!group.chatSessions.includes(sessionId)) {
+      group.chatSessions.push(sessionId);
+      group.updatedAt = new Date();
+      this.groups.set(groupId, group);
+    }
+
+    return session;
+  }
+
+  /**
+   * Get a chat session by ID
+   *
+   * NOTE: This is a minimal implementation for UI testing compatibility with mock SDK.
+   */
+  async getChatSession(groupId: string, sessionId: string): Promise<ChatSession | null> {
+    const session = this.chatStorage.get(sessionId);
+    if (!session) {
+      return null;
+    }
+
+    if (session.groupId !== groupId) {
+      throw new Error(`Session ${sessionId} does not belong to group ${groupId}`);
+    }
+
+    return session;
   }
 
   /**

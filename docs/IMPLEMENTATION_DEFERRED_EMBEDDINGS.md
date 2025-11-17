@@ -32,6 +32,135 @@ Implement deferred embeddings architecture to solve the timing mismatch between 
 
 ---
 
+## ⚠️ ARCHITECTURE: TWO-PHASE APPROACH (2025-11-17)
+
+**IMPORTANT**: Deferred embeddings will be implemented in two phases for pragmatic, incremental delivery.
+
+### Phase 1: Pre-MVP (Current - UI5 Release)
+
+**Goal**: Get deferred embeddings workflow working end-to-end
+
+**Flow**:
+1. **Documents uploaded to S5** (unencrypted for pre-MVP)
+   - User uploads documents → S5 storage
+   - Documents stored with S5 paths
+   - Status: `embeddingStatus: 'pending'`
+
+2. **Session starts** → user selects host
+   - User creates chat session
+   - User selects host from available hosts
+
+3. **SDK downloads and sends documents**
+   - ✅ **SDK downloads documents from S5** (has user's S5 access)
+   - ✅ **SDK sends full document text to host** via HTTP POST `/v1/embed`
+   - 📡 Uses existing fabstir-llm-node endpoint (no node changes needed)
+
+4. **Host generates embeddings**
+   - ✅ **Host receives document text** via HTTP
+   - ✅ **Host generates embeddings** (all-MiniLM-L6-v2, 384 dimensions)
+   - ✅ **Host returns vectors** via HTTP response
+
+5. **User stores embeddings to S5**
+   - ✅ **SDK receives vectors** from HTTP response
+   - ✅ **SDK stores in S5VectorStore** (user's own S5 storage)
+   - ✅ **SDK updates document status**: pending → ready
+
+**Trade-offs**:
+- ⚠️ Documents not encrypted at rest on S5 (acceptable for pre-MVP testing)
+- ⚠️ 2x data transfer (SDK downloads, then sends to host)
+- ✅ Zero host-side changes needed (uses existing endpoint)
+- ✅ Simpler debugging (plaintext)
+- ✅ Faster delivery (proven code path)
+
+### Phase 2: Post-MVP (Future - Production Security)
+
+**Goal**: Add production-grade security for sensitive documents
+
+**Flow**:
+1. **Documents uploaded to S5** (encrypted at rest)
+   - User uploads documents → S5 storage with user-key encryption
+   - Documents have S5 paths
+   - Status: `embeddingStatus: 'pending'`
+
+2. **Session starts** → ECDH key exchange
+   - User creates chat session
+   - User selects host
+   - **ECDH key exchange** establishes shared secret (no keys transmitted)
+
+3. **SDK downloads and sends encrypted documents**
+   - ✅ **SDK downloads encrypted documents from S5**
+   - ✅ **SDK sends via WebSocket** (ECDH encrypted in transit)
+   - 📡 New WebSocket protocol (see HOST_EMBEDDING_WEBSOCKET_GUIDE.md)
+
+4. **Host decrypts and generates embeddings**
+   - ✅ **Host decrypts using ECDH shared secret**
+   - ✅ **Host generates embeddings**
+   - ✅ **Host streams vectors back** via WebSocket (encrypted)
+   - ⏱️ Real-time progress updates
+
+5. **User stores embeddings to S5**
+   - ✅ **SDK receives encrypted streamed vectors**
+   - ✅ **SDK decrypts and stores in S5VectorStore**
+   - ✅ **SDK updates document status**: pending → ready
+
+**Security Benefits**:
+- 🔐 Documents encrypted at rest on S5 (user-controlled keys)
+- 🔐 Documents encrypted in transit (ECDH session encryption)
+- 🔐 No encryption keys transmitted over network
+- 🔐 Forward secrecy (ephemeral keys per session)
+- 🔐 Streaming progress updates
+
+### Key Principles (Both Phases)
+
+| Component | Responsibility |
+|-----------|---------------|
+| **User/SDK** | Upload documents to S5, store vectors to S5, search vectors locally |
+| **Host** | Generate embeddings from document text (source varies by phase) |
+| **S5 Network** | Persistent storage for documents AND vectors (user-owned) |
+
+### Phase Comparison
+
+| Aspect | Phase 1 (Pre-MVP) | Phase 2 (Post-MVP) |
+|--------|-------------------|---------------------|
+| **Document Encryption** | None (plaintext on S5) | User-key encrypted at rest |
+| **SDK → Host** | Full document text via HTTP (10KB-10MB) | S5 path via WebSocket (< 1KB) |
+| **Protocol** | HTTP POST/Response | WebSocket streaming |
+| **Document Download** | SDK downloads from S5 | Host downloads from S5 |
+| **Transit Security** | HTTPS (transport layer) | ECDH session encryption |
+| **Progress Updates** | None (single response) | Real-time per chunk |
+| **Host Changes** | None (uses existing `/v1/embed` endpoint) | New WebSocket handlers + S5 client |
+| **Development Time** | Immediate (current code works) | +10-15 hours |
+| **Use Case** | Pre-MVP testing, public docs | Production, sensitive documents |
+
+### Why Phase 1 First?
+
+**Pragmatic Delivery**:
+- ✅ Uses existing `/v1/embed` HTTP endpoint (zero host changes)
+- ✅ Proven code path (HTTP embedding generation already works)
+- ✅ Faster UI5 release (focus on workflow, not crypto)
+- ✅ Easier debugging (plaintext visible in logs)
+
+**Acceptable for Pre-MVP**:
+- ⚠️ Documents not encrypted at rest (use public/non-sensitive docs for testing)
+- ⚠️ 2x data transfer vs Phase 2 (acceptable trade-off for faster delivery)
+- ⚠️ No streaming progress (acceptable for small test documents)
+
+### Why Phase 2 After MVP?
+
+**Production-Ready Security**:
+- 🔐 Documents encrypted at rest and in transit
+- 🔐 ECDH key exchange (no keys transmitted)
+- 🔐 Forward secrecy (ephemeral session keys)
+
+**Better Performance**:
+- 📊 1x data transfer (host downloads directly)
+- 📊 Streaming progress updates
+- 📊 Handles large documents (100MB+)
+
+**Time to Implement**: ~10-15 hours (SDK + node changes)
+
+---
+
 ## Architecture
 
 ### Data Structures
@@ -447,19 +576,252 @@ Key Design Principles
 
 ### Phase 3: SDK Methods for Background Processing (3-4 hours)
 
-**Goal**: Add SDK methods to generate embeddings via WebSocket when session is active
+**Goal**: Add SDK methods to generate embeddings when session is active
 
-#### Sub-phase 3.1: Add SessionManager.generateEmbeddings
-- [x] Create `generateEmbeddings(sessionId, fileContent, options)` method
-- [x] Send HTTP POST to `/v1/embed` endpoint on host
-- [x] Request format: `{ texts: string[], model: "all-MiniLM-L6-v2", chainId: number }`
-- [x] Response format: `{ embeddings: [{ embedding: number[], text: string, tokenCount: number }], ...metadata }`
-- [x] Convert file content into chunks (512 chars each, 50 char overlap)
-- [x] Return `Promise<Vector[]>` with generated 384-dimensional embeddings
-- [x] Add timeout (120 seconds for large documents)
-- [x] **File**: `/workspace/packages/sdk-core/src/managers/SessionManager.ts` (lines 2397-2520)
-- [x] **Test**: Method sends correct HTTP request and receives 384D vectors
-- [x] **Reference**: `docs/node-reference/API.md` lines 805-918 (Generate Embeddings endpoint)
+#### ⚠️ IMPLEMENTATION NOTE (2025-11-17): TWO-PHASE APPROACH
+
+**This section documents BOTH Phase 1 (current HTTP) and Phase 2 (future WebSocket) approaches.**
+
+### Phase 1: HTTP-Based Approach (✅ CURRENT - Pre-MVP)
+
+**What's Implemented**:
+- ✅ **Sub-phase 3.1**: `SessionManager.generateEmbeddings(sessionId, fileContent)` - HTTP POST to `/v1/embed`
+- ✅ **Sub-phase 3.4**: `downloadFromS5(s5Path)` - SDK downloads documents from S5
+- ✅ Uses existing fabstir-llm-node endpoint (no host changes needed)
+
+**How It Works**:
+1. SDK downloads document from S5 using `downloadFromS5()`
+2. SDK sends full document text to host via HTTP POST `/v1/embed`
+3. Host generates embeddings using existing endpoint
+4. Host returns all vectors in HTTP response
+5. SDK stores vectors to S5
+
+**Status**: ✅ **Ready for UI5 release** (this code is functional and tested)
+
+### Phase 2: WebSocket Approach (🔮 FUTURE - Post-MVP)
+
+**What Will Be Implemented Later**:
+- 🔮 **New Method**: `SessionManager.requestEmbeddings(sessionId, documentCids, onProgress)` - WebSocket-based
+- 🔮 **Host Downloads**: Host downloads from S5 (not SDK)
+- 🔮 **Streaming**: Real-time progress updates and vector streaming
+
+**Benefits Over Phase 1**:
+- 📊 1x data transfer (host downloads directly, no SDK→Host send)
+- 📊 Streaming progress updates
+- 🔐 ECDH encryption support
+- 🚀 Handles large documents better
+
+**When**: After UI5 MVP release (~10-15 hours development time)
+
+**Reference**: See `docs/node-reference/HOST_EMBEDDING_WEBSOCKET_GUIDE.md` for Phase 2 implementation details
+
+---
+
+#### Sub-phase 3.1: SessionManager.generateEmbeddings (✅ Phase 1 - Current)
+
+**Purpose**: Send document S5 CIDs to host via WebSocket, receive streaming embeddings back
+
+**Method Signature**:
+```typescript
+async requestEmbeddings(
+  sessionId: string,
+  documentCids: Array<{ cid: string; documentId: string; fileName: string }>,
+  onProgress?: (update: EmbeddingProgressUpdate) => void
+): Promise<void>
+```
+
+**Implementation Steps**:
+- [ ] Remove old `generateEmbeddings(sessionId, fileContent)` HTTP-based method
+- [ ] Create new `requestEmbeddings()` method that sends WebSocket message
+- [ ] Message type: `generate_embeddings`
+- [ ] Payload: `{ documentCids: [...], model: "all-MiniLM-L6-v2", chainId: number }`
+- [ ] Register event listeners for:
+  - `embedding_progress` → call `onProgress()` callback
+  - `embedding_chunk` → accumulate vectors per document
+  - `embedding_complete` → resolve promise
+  - `embedding_error` → reject promise
+- [ ] Store accumulated vectors in session state
+- [ ] Emit events for UI consumption
+- [ ] **File**: `/workspace/packages/sdk-core/src/managers/SessionManager.ts`
+- [ ] **Test**: WebSocket message sent correctly, vectors received and accumulated
+
+**WebSocket Message Format (SDK → Host)**:
+```typescript
+{
+  type: 'generate_embeddings',
+  session_id: 'sess_abc123',
+  chain_id: 84532,
+  documents: [
+    {
+      cid: '0x7a6f8b9c...', // S5 CID (host downloads from here)
+      documentId: 'doc_xyz',
+      fileName: 'api-docs.pdf'
+    }
+  ],
+  model: 'all-MiniLM-L6-v2',
+  chunk_size: 512,
+  chunk_overlap: 50
+}
+```
+
+**WebSocket Message Formats (Host → SDK)**:
+
+```typescript
+// Progress update (sent periodically during processing)
+{
+  type: 'embedding_progress',
+  session_id: 'sess_abc123',
+  document_id: 'doc_xyz',
+  file_name: 'api-docs.pdf',
+  total_chunks: 120,
+  processed_chunks: 45,
+  percentage: 37.5,
+  status: 'processing'
+}
+
+// Vector chunk (sent as embeddings are generated)
+{
+  type: 'embedding_chunk',
+  session_id: 'sess_abc123',
+  document_id: 'doc_xyz',
+  chunk_index: 45,
+  vectors: [
+    {
+      id: 'vec_doc_xyz_chunk_45',
+      embedding: [0.123, -0.456, ...], // 384 dimensions
+      text: '...chunk text...',
+      metadata: {
+        source: 'api-docs.pdf',
+        chunk: 45,
+        documentId: 'doc_xyz'
+      }
+    }
+  ]
+}
+
+// Completion (sent when all chunks done)
+{
+  type: 'embedding_complete',
+  session_id: 'sess_abc123',
+  document_id: 'doc_xyz',
+  total_vectors: 120,
+  total_chunks: 120,
+  model: 'all-MiniLM-L6-v2',
+  dimensions: 384
+}
+
+// Error (sent if processing fails)
+{
+  type: 'embedding_error',
+  session_id: 'sess_abc123',
+  document_id: 'doc_xyz',
+  error: 'Failed to download from S5: CID not found',
+  error_code: 'S5_DOWNLOAD_FAILED'
+}
+```
+
+**Code Example**:
+```typescript
+// In SessionManager.ts
+async requestEmbeddings(
+  sessionId: string,
+  documentCids: Array<{ cid: string; documentId: string; fileName: string }>,
+  onProgress?: (update: EmbeddingProgressUpdate) => void
+): Promise<void> {
+  const session = this.sessions.get(sessionId);
+  if (!session || !session.wsClient) {
+    throw new Error('Session not active or WebSocket not connected');
+  }
+
+  // Store accumulated vectors per document
+  const accumulatedVectors = new Map<string, Vector[]>();
+
+  // Send request to host
+  session.wsClient.send({
+    type: 'generate_embeddings',
+    session_id: sessionId,
+    chain_id: this.chainId,
+    documents: documentCids,
+    model: 'all-MiniLM-L6-v2',
+    chunk_size: 512,
+    chunk_overlap: 50
+  });
+
+  // Set up event listeners
+  return new Promise((resolve, reject) => {
+    let completedDocs = 0;
+    const totalDocs = documentCids.length;
+
+    session.wsClient.on('embedding_progress', (data) => {
+      if (onProgress) {
+        onProgress({
+          sessionId,
+          documentId: data.document_id,
+          fileName: data.file_name,
+          totalChunks: data.total_chunks,
+          processedChunks: data.processed_chunks,
+          percentage: data.percentage,
+          status: data.status
+        });
+      }
+    });
+
+    session.wsClient.on('embedding_chunk', (data) => {
+      const vectors = accumulatedVectors.get(data.document_id) || [];
+      vectors.push(...data.vectors);
+      accumulatedVectors.set(data.document_id, vectors);
+
+      // Emit event for external listeners
+      this.emit('embedding_chunk_received', {
+        sessionId,
+        documentId: data.document_id,
+        chunkIndex: data.chunk_index,
+        vectors: data.vectors
+      });
+    });
+
+    session.wsClient.on('embedding_complete', (data) => {
+      completedDocs++;
+
+      // Emit completion event with all vectors for this document
+      const vectors = accumulatedVectors.get(data.document_id) || [];
+      this.emit('embedding_document_complete', {
+        sessionId,
+        documentId: data.document_id,
+        vectors,
+        totalVectors: data.total_vectors
+      });
+
+      // Resolve when all documents complete
+      if (completedDocs === totalDocs) {
+        resolve();
+      }
+    });
+
+    session.wsClient.on('embedding_error', (data) => {
+      this.emit('embedding_document_failed', {
+        sessionId,
+        documentId: data.document_id,
+        error: data.error,
+        errorCode: data.error_code
+      });
+
+      // Don't reject on single doc failure - continue processing others
+      completedDocs++;
+      if (completedDocs === totalDocs) {
+        resolve(); // Still resolve, let caller handle failures via events
+      }
+    });
+
+    // Timeout after 10 minutes (large documents can take time)
+    setTimeout(() => {
+      reject(new Error('Embedding generation timeout (10 minutes)'));
+    }, 600000);
+  });
+}
+```
+
+**Reference**: `docs/node-reference/API.md` (WebSocket protocol, to be updated with embedding message types)
 
 #### Sub-phase 3.2: Add VectorRAGManager.getPendingDocuments
 - [x] Create `getPendingDocuments(sessionGroupId)` method
@@ -478,26 +840,107 @@ Key Design Principles
 - [x] **File**: `/workspace/packages/sdk-core/src/managers/VectorRAGManager.ts` (lines 687-794)
 - [x] **Test**: Status updates persist and documents move between arrays
 
-#### Sub-phase 3.4: Add downloadFromS5 Helper
-- [x] Create `downloadFromS5(s5Path)` helper to retrieve document content
-- [x] Use `s5.fs.get(path)` from Enhanced S5.js
-- [x] Automatically decodes (CBOR → JSON → UTF-8 → raw bytes)
-- [x] Returns document content as string
-- [x] **File**: `/workspace/apps/ui5/lib/s5-utils.ts` (lines 62-67, alias for getDocumentFromS5)
-- [x] **Test**: Can retrieve uploaded document using S5 path
-- [x] **Reference**: `docs/s5js-reference/API.md` lines 152-194 (get method)
+#### Sub-phase 3.4: Remove SDK-Side Document Download (CORRECTED)
 
-**Acceptance Criteria**:
-- [x] `generateEmbeddings()` successfully generates vectors via HTTP endpoint
-- [x] `getPendingDocuments()` returns all pending docs across databases
-- [x] `updateDocumentStatus()` correctly updates and persists status
-- [x] Documents can be downloaded from S5 using CID
+**⚠️ CRITICAL**: The SDK should **NOT** download documents from S5. The host downloads documents.
+
+**What to Remove**:
+- [ ] Remove `downloadFromS5()` calls from `processPendingEmbeddings()` in UI code
+- [ ] Remove `sessionManager.generateEmbeddings(sessionId, fileContent)` calls
+- [ ] Remove HTTP-based `generateEmbeddings()` method from SessionManager
+
+**What to Add**:
+- [ ] Use `sessionManager.requestEmbeddings(sessionId, documentCids, onProgress)` instead
+- [ ] Document CIDs are already in `DocumentMetadata.s5Cid` field
+- [ ] Pass CIDs to host via WebSocket message
+- [ ] Host downloads documents using its own S5 client
+
+**Why**:
+- **Performance**: Sending CID (< 1KB) vs downloading + sending content (10KB-10MB)
+- **Architecture**: Host is responsible for compute operations (download + embed)
+- **Consistency**: Matches LLM inference pattern (host does the work, SDK coordinates)
+
+**Updated Flow**:
+```typescript
+// OLD (WRONG) - SDK downloads document
+const fileContent = await downloadFromS5(s5, doc.s5Cid);
+const vectors = await sessionManager.generateEmbeddings(sessionId, fileContent);
+await vectorRAGManager.addVectors(databaseName, vectors);
+
+// NEW (CORRECT) - SDK sends CID, host downloads
+const documentCids = pendingDocs.map(doc => ({
+  cid: doc.s5Cid,
+  documentId: doc.id,
+  fileName: doc.fileName
+}));
+
+await sessionManager.requestEmbeddings(sessionId, documentCids, (progress) => {
+  // Update UI progress bar
+  setEmbeddingProgress(progress);
+});
+
+// Listen for vectors streaming back
+sessionManager.on('embedding_document_complete', async (event) => {
+  // Store vectors to S5 as they arrive
+  await vectorRAGManager.addVectors(databaseName, event.vectors);
+  await vectorRAGManager.updateDocumentStatus(event.documentId, 'ready', {
+    vectorCount: event.vectors.length
+  });
+});
+```
+
+**Reference**: See Sub-phase 3.1 for complete WebSocket protocol specification
+
+**Acceptance Criteria** (UPDATED FOR CORRECTED APPROACH):
+- [ ] `requestEmbeddings()` sends WebSocket message with document CIDs (not content)
+- [ ] Host receives CIDs and downloads documents from S5 (verified via logs)
+- [ ] Vectors stream back to SDK via WebSocket (not HTTP response)
+- [ ] SDK accumulates vectors and emits events for UI consumption
+- [x] `getPendingDocuments()` returns all pending docs across databases (✅ already implemented correctly)
+- [x] `updateDocumentStatus()` correctly updates and persists status (✅ already implemented correctly)
+- [ ] SDK does NOT download documents from S5 (host does this)
 
 ---
 
 ### Phase 4: Session Start Flow (2-3 hours) ✅ COMPLETE
 
 **Goal**: Process pending embeddings in background when user starts chat session
+
+#### ⚠️ IMPLEMENTATION NOTE (2025-11-17): NEEDS UPDATE FOR WEBSOCKET
+
+**Current Implementation**: Uses HTTP-based `generateEmbeddings()` with SDK downloading documents.
+**Required Update**: Switch to WebSocket-based `requestEmbeddings()` with host downloading documents.
+
+**Changes Needed in `processPendingEmbeddings()`**:
+```typescript
+// REMOVE these lines:
+const fileContent = await downloadFromS5(s5, doc.s5Cid);
+const vectors = await sessionManager.generateEmbeddings(sessionId, fileContent);
+await vectorRAGManager.addVectors(databaseName, vectors);
+
+// ADD these lines:
+const documentCids = pendingDocs.map(doc => ({
+  cid: doc.s5Cid,
+  documentId: doc.id,
+  fileName: doc.fileName
+}));
+
+await sessionManager.requestEmbeddings(sessionId, documentCids, (progress) => {
+  onProgress?.(progress); // Forward to UI
+});
+
+// Listen for vectors and store them as they arrive
+sessionManager.on('embedding_document_complete', async (event) => {
+  await vectorRAGManager.addVectors(databaseName, event.vectors);
+  await vectorRAGManager.updateDocumentStatus(event.documentId, 'ready', {
+    vectorCount: event.vectors.length
+  });
+});
+```
+
+**See Phase 3 Sub-phase 3.1 for complete WebSocket protocol.**
+
+---
 
 #### Sub-phase 4.1: Add processPendingEmbeddings Function ✅
 - [x] Create `processPendingEmbeddings(sessionId, host, onProgress)` function
@@ -852,6 +1295,150 @@ Key Design Principles
 
 ---
 
+## ⚠️ IMPLEMENTATION APPROACH COMPARISON (2025-11-17)
+
+### Summary of Architectural Correction
+
+This section provides a side-by-side comparison of the **current (incorrect)** implementation vs the **corrected (WebSocket-based)** approach.
+
+### Old Approach (HTTP-based) ❌ INCORRECT
+
+**Flow**:
+1. SDK downloads document content from S5 (10KB-10MB)
+2. SDK sends full text to host via HTTP POST to `/v1/embed`
+3. Host generates embeddings
+4. Host returns all vectors in HTTP response
+5. SDK stores vectors to S5
+
+**Problems**:
+- ❌ **Performance**: Downloading 10MB document from S5 to SDK, then sending 10MB to host (double transfer)
+- ❌ **Architecture**: SDK is doing compute work (download) that host should do
+- ❌ **Protocol**: HTTP request/response doesn't support streaming progress
+- ❌ **Scalability**: Large documents timeout, no incremental feedback
+- ❌ **Consistency**: Doesn't match LLM inference pattern (WebSocket streaming)
+
+**Code (WRONG)**:
+```typescript
+// SDK downloads document (WRONG - SDK shouldn't download)
+const fileContent = await downloadFromS5(s5, doc.s5Cid);
+
+// SDK sends full content via HTTP (WRONG - should send CID via WebSocket)
+const vectors = await sessionManager.generateEmbeddings(sessionId, fileContent);
+
+// SDK stores vectors (THIS PART IS CORRECT ✅)
+await vectorRAGManager.addVectors(databaseName, vectors);
+```
+
+### New Approach (WebSocket-based) ✅ CORRECT
+
+**Flow**:
+1. SDK sends document S5 CID to host via WebSocket (< 1KB)
+2. Host downloads document from S5 using its own S5 client
+3. Host generates embeddings
+4. Host streams vectors back to SDK via WebSocket (chunk by chunk)
+5. SDK stores vectors to S5 as they arrive
+
+**Benefits**:
+- ✅ **Performance**: Only CID sent (< 1KB), host downloads directly from S5 (no double transfer)
+- ✅ **Architecture**: Host does compute work (download + embed), SDK coordinates
+- ✅ **Protocol**: WebSocket supports streaming progress updates
+- ✅ **Scalability**: Large documents stream incrementally, real-time feedback
+- ✅ **Consistency**: Matches LLM inference pattern (WebSocket streaming)
+
+**Code (CORRECT)**:
+```typescript
+// SDK sends CID only (CORRECT ✅)
+const documentCids = pendingDocs.map(doc => ({
+  cid: doc.s5Cid,
+  documentId: doc.id,
+  fileName: doc.fileName
+}));
+
+// SDK sends via WebSocket, host downloads from S5 (CORRECT ✅)
+await sessionManager.requestEmbeddings(sessionId, documentCids, (progress) => {
+  setEmbeddingProgress(progress); // Real-time UI updates
+});
+
+// SDK listens for streaming vectors (CORRECT ✅)
+sessionManager.on('embedding_document_complete', async (event) => {
+  // Store vectors to S5 as they arrive (CORRECT ✅)
+  await vectorRAGManager.addVectors(databaseName, event.vectors);
+  await vectorRAGManager.updateDocumentStatus(event.documentId, 'ready', {
+    vectorCount: event.vectors.length
+  });
+});
+```
+
+### Comparison Table
+
+| Aspect | Old Approach (HTTP) ❌ | New Approach (WebSocket) ✅ |
+|--------|----------------------|---------------------------|
+| **SDK → Host** | Full document text (10KB-10MB) | S5 CID only (< 1KB) |
+| **Document Download** | SDK downloads from S5 | Host downloads from S5 |
+| **Protocol** | HTTP POST/Response | WebSocket bidirectional streaming |
+| **Progress Updates** | None (single response) | Real-time per chunk/document |
+| **Method** | `generateEmbeddings(sessionId, fileContent)` | `requestEmbeddings(sessionId, documentCids, onProgress)` |
+| **Response** | All vectors at once | Streaming: chunk by chunk |
+| **Timeout Risk** | High (large documents) | Low (streaming incremental) |
+| **User Feedback** | Only at start/end | Real-time progress bar |
+| **Consistency** | Different from LLM inference | Same as LLM inference (WebSocket) |
+| **Host Responsibility** | Only embedding generation | Download + chunk + embed |
+| **SDK Responsibility** | Download + send + store | Coordinate + store |
+
+### Required Changes
+
+**SessionManager** (`/workspace/packages/sdk-core/src/managers/SessionManager.ts`):
+- [ ] Remove: `generateEmbeddings(sessionId, fileContent)` HTTP method (lines 2397-2520)
+- [ ] Add: `requestEmbeddings(sessionId, documentCids, onProgress)` WebSocket method
+- [ ] Add: WebSocket event listeners for `embedding_progress`, `embedding_chunk`, `embedding_complete`, `embedding_error`
+- [ ] Add: Vector accumulation per document in session state
+- [ ] Add: Event emissions for UI consumption
+
+**UI processPendingEmbeddings** (`/workspace/apps/ui5/app/session-groups/[id]/page.tsx`):
+- [ ] Remove: `downloadFromS5(s5, doc.s5Cid)` calls (lines 291-306)
+- [ ] Remove: `sessionManager.generateEmbeddings(sessionId, fileContent)` calls
+- [ ] Add: `sessionManager.requestEmbeddings(sessionId, documentCids, onProgress)` call
+- [ ] Add: Event listener for `embedding_document_complete` to store vectors
+
+**Node-side** (`fabstir-llm-node` - external project):
+- [ ] Add: WebSocket message handler for `generate_embeddings` message type
+- [ ] Add: S5 client for downloading documents from CIDs
+- [ ] Add: Streaming embeddings back via `embedding_chunk` messages
+- [ ] Add: Progress updates via `embedding_progress` messages
+- [ ] Add: Completion notification via `embedding_complete` message
+
+### WebSocket Protocol Messages
+
+See **Phase 3, Sub-phase 3.1** (lines 544-748) for complete WebSocket message format specifications.
+
+Key message types:
+- `generate_embeddings` (SDK → Host) - Request with document CIDs
+- `embedding_progress` (Host → SDK) - Progress updates
+- `embedding_chunk` (Host → SDK) - Streaming vectors
+- `embedding_complete` (Host → SDK) - Document processing complete
+- `embedding_error` (Host → SDK) - Processing failed
+
+### Impact on Timeline
+
+**Additional Work Required**:
+- SDK Implementation: +4-6 hours (remove old method, add WebSocket-based method)
+- UI Update: +1-2 hours (update processPendingEmbeddings)
+- Node Implementation: +6-8 hours (WebSocket handlers, S5 integration) - **EXTERNAL PROJECT**
+- Testing: +2-3 hours (verify WebSocket flow, S5 download, streaming)
+
+**Total Additional Time**: 13-19 hours (including node-side implementation)
+
+### References
+
+- **Architecture Clarification**: Lines 35-96 (complete 5-step flow)
+- **Phase 3 Sub-phase 3.1**: Lines 544-748 (WebSocket protocol, code examples)
+- **Phase 3 Sub-phase 3.4**: Lines 767-816 (what to remove, what to add)
+- **Phase 4 Implementation Note**: Lines 833-865 (UI code changes)
+- **Node API Reference**: `docs/node-reference/API.md` (to be updated with WebSocket protocol)
+- **S5.js Reference**: `docs/s5js-reference/API.md` (host-side S5 download)
+
+---
+
 ## Timeline Estimate
 
 | Phase | Estimated Time | Dependencies |
@@ -894,4 +1481,4 @@ Key Design Principles
 - [ ] Phase 8: Testing & Validation
 - [ ] Phase 9: Documentation
 
-**Last Updated**: 2025-11-15 (Plan created)
+**Last Updated**: 2025-11-17 (Two-phase approach: Phase 1 HTTP (pre-MVP) + Phase 2 WebSocket (post-MVP))
