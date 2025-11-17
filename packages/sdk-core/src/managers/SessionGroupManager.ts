@@ -10,6 +10,7 @@ import type {
   ChatSession,
   ChatMessage,
 } from '../types/session-groups.types';
+import { SessionGroupStorage } from '../storage/SessionGroupStorage';
 
 /**
  * Session Group Manager
@@ -17,7 +18,7 @@ import type {
  * Manages Session Groups (Claude Projects-style organization).
  * Groups organize related chat sessions and vector databases.
  *
- * Storage: In-memory for now (Phase 1.2 will add S5 persistence)
+ * Storage: S5-backed with in-memory caching for performance
  */
 export class SessionGroupManager implements ISessionGroupManager {
   private groups: Map<string, SessionGroup> = new Map();
@@ -26,9 +27,13 @@ export class SessionGroupManager implements ISessionGroupManager {
   private mockDatabases: Map<string, VectorDatabaseMetadata> = new Map();
   // Chat session storage (for UI testing - production uses SessionManager)
   private chatStorage: Map<string, ChatSession> = new Map();
+  // S5 storage for persistence
+  private storage: SessionGroupStorage | null = null;
+  private storageInitialized: boolean = false;
 
-  constructor() {
-    // Future: Initialize with storage manager for S5 persistence
+  constructor(storage?: SessionGroupStorage) {
+    this.storage = storage || null;
+    this.storageInitialized = !!storage;
   }
 
   /**
@@ -97,7 +102,20 @@ export class SessionGroupManager implements ISessionGroupManager {
       deleted: false,
     };
 
+    // Store in memory cache
     this.groups.set(id, group);
+
+    // Persist to S5 storage if available
+    if (this.storage) {
+      try {
+        await this.storage.save(group);
+      } catch (err) {
+        console.error('[SessionGroupManager.createSessionGroup] Failed to save to S5 storage:', err);
+        // Don't throw - allow operation to continue with in-memory only
+        // This allows testing without full S5 setup
+      }
+    }
+
     return group;
   }
 
@@ -105,8 +123,25 @@ export class SessionGroupManager implements ISessionGroupManager {
    * List all session groups for a user
    */
   async listSessionGroups(owner: string): Promise<SessionGroup[]> {
-    const result: SessionGroup[] = [];
+    // If S5 storage is available, load from S5
+    if (this.storage) {
+      try {
+        const allGroups = await this.storage.loadAll();
 
+        // Filter by owner and non-deleted
+        const userGroups = allGroups.filter(g => g.owner === owner && !g.deleted);
+
+        // Update in-memory cache
+        userGroups.forEach(g => this.groups.set(g.id, g));
+        return userGroups;
+      } catch (err) {
+        console.error('[SessionGroupManager.listSessionGroups] Failed to load from S5 storage:', err);
+        // Fall back to in-memory cache
+      }
+    }
+
+    // Fallback: use in-memory cache only
+    const result: SessionGroup[] = [];
     for (const group of this.groups.values()) {
       if (group.owner === owner && !group.deleted) {
         result.push(group);

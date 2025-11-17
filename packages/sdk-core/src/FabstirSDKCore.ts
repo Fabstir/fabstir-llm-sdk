@@ -37,6 +37,7 @@ import { ClientManager } from './managers/ClientManager';
 import { EncryptionManager } from './managers/EncryptionManager';
 import { VectorRAGManager } from './managers/VectorRAGManager';
 import { SessionGroupManager } from './managers/SessionGroupManager';
+import { SessionGroupStorage } from './storage/SessionGroupStorage';
 import { DEFAULT_RAG_CONFIG } from './rag/config';
 import { ContractManager, ContractAddresses } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
@@ -712,9 +713,18 @@ export class FabstirSDKCore extends EventEmitter {
         });
         console.log('VectorRAGManager created with database management enabled');
 
-        // Initialize SessionGroupManager
-        console.log('Creating SessionGroupManager...');
-        this.sessionGroupManager = new SessionGroupManager();
+        // Initialize SessionGroupManager with S5 storage
+        console.log('Creating SessionGroupStorage...');
+        const sessionGroupStorage = new SessionGroupStorage(
+          this.storageManager!.getS5Client(),
+          this.s5Seed,
+          this.userAddress,
+          this.encryptionManager
+        );
+        console.log('SessionGroupStorage created');
+
+        console.log('Creating SessionGroupManager with S5 storage...');
+        this.sessionGroupManager = new SessionGroupManager(sessionGroupStorage);
         console.log('SessionGroupManager created');
       } else {
         console.warn('VectorRAGManager initialization skipped: missing userAddress or s5Seed');
