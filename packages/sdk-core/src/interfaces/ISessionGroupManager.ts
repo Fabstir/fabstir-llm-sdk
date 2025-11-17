@@ -6,6 +6,7 @@ import type {
   CreateSessionGroupInput,
   UpdateSessionGroupInput,
   VectorDatabaseMetadata,
+  GroupDocumentMetadata,
 } from '../types/session-groups.types';
 
 /**
@@ -169,4 +170,30 @@ export interface ISessionGroupManager {
    * @throws {Error} If requestor lacks permission
    */
   listChatSessions(groupId: string, requestor: string): Promise<string[]>;
+
+  /**
+   * Add a document to a session group
+   *
+   * @param groupId - Session group ID
+   * @param document - Document metadata to add
+   * @returns Updated session group
+   * @throws {Error} If group not found
+   */
+  addGroupDocument(
+    groupId: string,
+    document: GroupDocumentMetadata
+  ): Promise<SessionGroup>;
+
+  /**
+   * Remove a document from a session group
+   *
+   * @param groupId - Session group ID
+   * @param documentId - Document ID to remove
+   * @returns Updated session group
+   * @throws {Error} If group not found
+   */
+  removeGroupDocument(
+    groupId: string,
+    documentId: string
+  ): Promise<SessionGroup>;
 }

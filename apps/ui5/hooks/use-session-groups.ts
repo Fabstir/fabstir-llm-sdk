@@ -453,15 +453,17 @@ export function useSessionGroups(): UseSessionGroupsReturn {
 
     try {
       setError(null);
-      await managers.sessionGroupManager.addGroupDocument(groupId, document);
-      // Refresh to get updated group with new document
-      await selectGroup(groupId);
+      const updatedGroup = await managers.sessionGroupManager.addGroupDocument(groupId, document);
+      // Update selected group if it matches
+      if (selectedGroup?.id === groupId) {
+        setSelectedGroup(updatedGroup);
+      }
     } catch (err) {
       console.error('[useSessionGroups] Failed to add group document:', err);
       setError(err instanceof Error ? err.message : 'Failed to add document');
       throw err;
     }
-  }, [managers, selectGroup]);
+  }, [managers, selectedGroup]);
 
   const removeGroupDocument = useCallback(async (
     groupId: string,
@@ -471,15 +473,17 @@ export function useSessionGroups(): UseSessionGroupsReturn {
 
     try {
       setError(null);
-      await managers.sessionGroupManager.removeGroupDocument(groupId, documentId);
-      // Refresh to get updated group without removed document
-      await selectGroup(groupId);
+      const updatedGroup = await managers.sessionGroupManager.removeGroupDocument(groupId, documentId);
+      // Update selected group if it matches
+      if (selectedGroup?.id === groupId) {
+        setSelectedGroup(updatedGroup);
+      }
     } catch (err) {
       console.error('[useSessionGroups] Failed to remove group document:', err);
       setError(err instanceof Error ? err.message : 'Failed to remove document');
       throw err;
     }
-  }, [managers, selectGroup]);
+  }, [managers, selectedGroup]);
 
   const refresh = useCallback(async () => {
     await loadSessionGroups();

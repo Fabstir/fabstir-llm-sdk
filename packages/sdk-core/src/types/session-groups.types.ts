@@ -42,6 +42,19 @@ export interface ChatSession {
 }
 
 /**
+ * Group Document Metadata
+ *
+ * Metadata for documents uploaded to a session group
+ */
+export interface GroupDocumentMetadata {
+  id: string;
+  name: string;
+  size: number;
+  uploaded: number;
+  contentType?: string;
+}
+
+/**
  * Session Group
  *
  * Organizes related chat sessions and vector databases (Claude Projects-style)
@@ -55,6 +68,7 @@ export interface SessionGroup {
   owner: string;
   linkedDatabases: string[]; // Database IDs
   chatSessions: string[]; // Session IDs
+  documents?: GroupDocumentMetadata[]; // Group documents
   metadata: Record<string, any>;
   deleted: boolean;
 }

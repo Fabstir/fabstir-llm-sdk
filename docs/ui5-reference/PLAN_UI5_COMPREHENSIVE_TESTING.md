@@ -1,8 +1,8 @@
 # UI5 Comprehensive Testing Plan
 
-**Status**: 🚧 IN PROGRESS - Phase 4.1 Complete (Session Groups - Create) (52% Complete)
+**Status**: 🚧 IN PROGRESS - Phase 4.2 Complete (Session Groups - Upload Documents) (54% Complete)
 **Created**: 2025-11-13
-**Last Updated**: 2025-11-17 (Phase 4.1 COMPLETE - Session group S5 persistence implemented and tested)
+**Last Updated**: 2025-11-17 (Phase 4.2 COMPLETE - Group document upload with S5 persistence working)
 **Branch**: feature/ui5-migration
 **Server**: http://localhost:3002 (Container) / http://localhost:3012 (Host)
 
@@ -46,9 +46,9 @@
 **Note**: Sub-phases 3.4a and 3.4c removed - they tested semantic search in database detail page, but that feature doesn't exist. Semantic search happens during chat sessions (Phase 5), not in database management UI. Database detail page only has file name filtering.
 
 **In Progress:** 🔄
-- Phase 4: Session Group Operations (20% - Sub-phase 4.1 complete)
+- Phase 4: Session Group Operations (40% - Sub-phases 4.1-4.2 complete)
   - 4.1: Create Session Group ✅ COMPLETE (S5 persistence working, 2/2 tests passing)
-  - 4.2: Upload Group Documents - Pending
+  - 4.2: Upload Group Documents ✅ COMPLETE (S5 storage working, 2/2 tests passing)
   - 4.3: Link Vector Database to Group - Pending
   - 4.4: Unlink Vector Database - Pending
   - 4.5: Delete Session Group - Pending
@@ -59,9 +59,9 @@
 - Phase 7: Error Handling & Edge Cases (0%)
 - Phase 8: Performance & Blockchain Testing (0%)
 
-**Total Progress**: 4.2/8 phases = **52% Complete**
+**Total Progress**: 4.4/8 phases = **54% Complete**
 
-**Bugs Fixed:** 7
+**Bugs Fixed:** 13
   1. Fixed ES module `__dirname` error in test-setup.ts (used fileURLToPath)
   2. Fixed test looking for non-existent "✓ SDK Ready" text (changed to check dashboard load)
   3. Fixed AuthManager constructor to accept authentication data from SDK core
@@ -69,14 +69,21 @@
   5. Fixed database name field mismatch (SDK uses databaseName, UI expects name)
   6. Fixed SessionGroupManager.databaseExists() stub for Phase 1.2
   7. Fixed S5 metadata.json race condition during concurrent document uploads
+  8. **Phase 4.2**: Implemented missing `addGroupDocument()` and `removeGroupDocument()` SDK methods
+  9. **Phase 4.2**: Added `GroupDocumentMetadata` interface to SDK types
+  10. **Phase 4.2**: Fixed storage method name from `saveSessionGroup()` to `save()`
+  11. **Phase 4.2**: Fixed UI field name mismatch (`groupDocuments` → `documents`)
+  12. **Phase 4.2**: Fixed hook state management (removed re-fetch loop causing hang)
+  13. **Phase 4.2**: Fixed test selectors to find card container instead of heading row
 
 **Testing Approach:** Automated tests with test wallet provider (no manual MetaMask approvals) ✅ **WORKING**
 
 **Next Steps:**
 1. ✅ Phase 4.1 COMPLETE - Session group creation with S5 persistence verified
-2. 🔄 Execute Phase 4.2-4.5 (Remaining Session Group Operations)
-3. ⏳ Execute Phase 5 (Chat Session Operations with semantic search)
-4. ⏳ Execute remaining phases (6-8)
+2. ✅ Phase 4.2 COMPLETE - Group document upload with S5 storage working
+3. 🔄 Execute Phase 4.3-4.5 (Link/unlink databases, delete session group)
+4. ⏳ Execute Phase 5 (Chat Session Operations with semantic search)
+5. ⏳ Execute remaining phases (6-8)
 
 ---
 
@@ -500,20 +507,31 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 
 **Key Achievement**: Session groups now persist across page navigations via S5 storage with graceful in-memory fallback.
 
-### Sub-phase 4.2: Upload Group Documents
-- [ ] Click on "Test Project" to open detail page
-- [ ] Take screenshot of group detail page
-- [ ] Find "Group Documents" section
-- [ ] Click "+ Upload" button
-- [ ] Select test-doc-1.txt
-- [ ] **WAIT: 2-10 seconds for S5 upload**
-- [ ] Verify document appears in list
-- [ ] Verify document metadata correct
-- [ ] Take screenshot
+### Sub-phase 4.2: Upload Group Documents ✅ **COMPLETE**
+- [x] Click on "Test Project" to open detail page
+- [x] Take screenshot of group detail page
+- [x] Find "Group Documents" section
+- [x] Click "+ Upload" button
+- [x] Select test-doc-1.txt
+- [x] **WAIT: 2-10 seconds for S5 upload**
+- [x] Verify document appears in list
+- [x] Verify document metadata correct
+- [x] Take screenshot
 
 **Expected Duration**: 5-15 seconds (S5 upload)
 
-**Automated Test**: Create `/workspace/tests-ui5/test-session-group-upload.spec.ts`
+**Automated Test**: `/workspace/tests-ui5/test-session-group-upload.spec.ts` ✅
+
+**Test Results**: 2/2 passing (31.4s)
+- ✅ Main test: Document upload with 8-step verification (upload, S5 persistence, UI display)
+- ✅ Edge case: Empty file selection handling
+
+**Implementation Notes**:
+- Implemented missing SDK methods: `addGroupDocument()` and `removeGroupDocument()`
+- Added `GroupDocumentMetadata` type to SDK
+- Fixed UI field name mismatch (`groupDocuments` → `documents`)
+- Fixed hook state management to prevent re-fetch loops
+- S5 storage integration working correctly
 
 ### Sub-phase 4.3: Link Vector Database to Group
 - [ ] On group detail page, find "Linked Databases" section

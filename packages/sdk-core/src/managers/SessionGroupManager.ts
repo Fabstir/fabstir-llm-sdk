@@ -98,6 +98,7 @@ export class SessionGroupManager implements ISessionGroupManager {
       owner: input.owner,
       linkedDatabases: [],
       chatSessions: [],
+      documents: [],
       metadata: input.metadata || {},
       deleted: false,
     };
@@ -397,6 +398,63 @@ export class SessionGroupManager implements ISessionGroupManager {
   async listChatSessions(groupId: string, requestor: string): Promise<string[]> {
     const group = await this.getSessionGroup(groupId, requestor);
     return [...group.chatSessions]; // Return copy
+  }
+
+  /**
+   * Add a document to a session group
+   */
+  async addGroupDocument(
+    groupId: string,
+    document: import('../types/session-groups.types').GroupDocumentMetadata
+  ): Promise<import('../types/session-groups.types').SessionGroup> {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      throw new Error(`Session group not found: ${groupId}`);
+    }
+
+    // Initialize documents array if not exists
+    if (!group.documents) {
+      group.documents = [];
+    }
+
+    // Add document
+    group.documents.push(document);
+    group.updatedAt = new Date();
+    this.groups.set(groupId, group);
+
+    // Persist to S5 storage
+    if (this.storage) {
+      await this.storage.save(group);
+    }
+
+    return { ...group }; // Return copy
+  }
+
+  /**
+   * Remove a document from a session group
+   */
+  async removeGroupDocument(
+    groupId: string,
+    documentId: string
+  ): Promise<import('../types/session-groups.types').SessionGroup> {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      throw new Error(`Session group not found: ${groupId}`);
+    }
+
+    // Remove document
+    if (group.documents) {
+      group.documents = group.documents.filter(doc => doc.id !== documentId);
+      group.updatedAt = new Date();
+      this.groups.set(groupId, group);
+
+      // Persist to S5 storage
+      if (this.storage) {
+        await this.storage.save(group);
+      }
+    }
+
+    return { ...group }; // Return copy
   }
 
   /**

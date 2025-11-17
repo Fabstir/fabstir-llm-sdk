@@ -1359,6 +1359,59 @@ await page.waitForSelector('text=Transaction confirmed', { timeout: TX_TIMEOUT }
 
 ---
 
+### 5.6: UI Improvements (File Search Enhancement)
+
+**Goal**: Implement cross-folder file search for consistency with other pages
+
+**Status**: ⏳ Not started (identified during Phase 3.5 testing)
+
+**Reference**: See `docs/ui4-reference/UI_IMPLEMENTATION_SESSION_GROUPS.md` - Sub-phase 2.4
+
+**Problem**: Current file search only searches files in current folder, creating inconsistent UX:
+- Session Groups page: searches all session groups ✅
+- Vector Databases page: searches all vector databases ✅
+- Vector Database detail page: only searches files in current folder ❌
+
+**Changes Required** (applies to UI5):
+1. Update placeholder: "Search files..." → "Search files and folders"
+2. Update search logic: When query active, search all folders (not just current)
+3. Add folder column to file list table
+
+**Files to Modify**:
+- `/workspace/apps/ui5/components/vector-databases/file-browser.tsx`
+
+**Implementation Details**: See Sub-phase 2.4 in `docs/ui4-reference/UI_IMPLEMENTATION_SESSION_GROUPS.md` for complete specification including:
+- Code changes (placeholder, search logic, table column)
+- Component tests (7 tests)
+- Manual testing checklist (8 tests)
+- Expected behavior and success criteria
+
+**Dependencies**:
+- Phase 5.2 complete (testing infrastructure in place)
+- UI5 application running successfully
+
+**Testing**:
+- [ ] Update test scripts to verify cross-folder search
+- [ ] Add test for folder column display
+- [ ] Verify performance with 1000+ files
+
+**Success Criteria**:
+- [ ] Search works across all folders when query active
+- [ ] Folder column shows correct paths
+- [ ] Behavior matches Session Groups and Vector Databases pages
+- [ ] No performance degradation (search 1000 files < 100ms)
+
+**Time Estimate**: 2-3 hours
+
+**Notes**:
+- This improvement was identified during Phase 3.5 testing (delete vector database)
+- Same changes needed for UI4 (documented in UI_IMPLEMENTATION_SESSION_GROUPS.md)
+- No SDK changes required (purely UI enhancement)
+- File list already has `folderPath` property
+- This is separate from semantic search (which happens during chat sessions)
+
+---
+
 ## Phase 6: Production Preparation
 
 ### 6.1: Environment Configuration

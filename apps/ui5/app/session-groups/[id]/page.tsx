@@ -655,9 +655,9 @@ export default function SessionGroupDetailPage() {
                 Documents uploaded here are available in ALL chat sessions
               </p>
 
-              {(selectedGroup.groupDocuments || []).length > 0 ? (
+              {(selectedGroup.documents || []).length > 0 ? (
                 <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {(selectedGroup.groupDocuments || []).map((doc) => (
+                  {(selectedGroup.documents || []).map((doc) => (
                     <div
                       key={doc.id}
                       className="flex items-center gap-2 p-2 border border-gray-200 rounded-md hover:bg-gray-50 group"

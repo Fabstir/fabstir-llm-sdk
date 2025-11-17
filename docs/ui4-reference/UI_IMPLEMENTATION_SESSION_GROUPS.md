@@ -249,6 +249,129 @@ This document contains all UI implementation tasks extracted from the Session Gr
 
 ---
 
+### Sub-phase 2.4: Cross-Folder File Search Enhancement
+
+**Goal**: Improve file search to work across all folders (not just current folder)
+
+**Status**: ⏳ Not started (identified during UI5 testing)
+
+**Problem**: Current implementation only searches files in the current folder, creating inconsistent UX:
+- Session Groups page: searches all session groups
+- Vector Databases page: searches all vector databases
+- Vector Database detail page: only searches files in current folder ❌
+
+**Files to Modify**:
+- `apps/ui4/components/vector-databases/file-browser.tsx` (≤350 lines)
+- `apps/ui5/components/vector-databases/file-browser.tsx` (≤350 lines)
+
+**Changes Required**:
+
+1. **Update placeholder text** (line ~119):
+   ```typescript
+   // Before
+   placeholder="Search files..."
+
+   // After
+   placeholder="Search files and folders"
+   ```
+
+2. **Update search logic** (lines ~43-49):
+   ```typescript
+   // Before
+   const filteredFiles = useMemo(() => {
+     return files.filter((file) => {
+       const matchesPath = file.folderPath === currentPath;  // Only current folder
+       const matchesSearch = file.name.toLowerCase().includes(searchQuery.toLowerCase());
+       return matchesPath && matchesSearch;
+     });
+   }, [files, currentPath, searchQuery]);
+
+   // After
+   const filteredFiles = useMemo(() => {
+     return files.filter((file) => {
+       // When searching, show files from all folders; otherwise only current folder
+       const matchesPath = searchQuery ? true : file.folderPath === currentPath;
+       const matchesSearch =
+         file.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+         file.folderPath.toLowerCase().includes(searchQuery.toLowerCase());
+       return matchesPath && matchesSearch;
+     });
+   }, [files, currentPath, searchQuery]);
+   ```
+
+3. **Add folder column to table** (add after "Name" column):
+   ```typescript
+   <thead className="bg-gray-50">
+     <tr>
+       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+         Name
+       </th>
+       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+         Folder
+       </th>
+       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+         Size
+       </th>
+       {/* ... other columns ... */}
+     </tr>
+   </thead>
+   <tbody>
+     {filteredFiles.map((file) => (
+       <tr key={file.id}>
+         <td className="px-4 py-3 text-sm font-medium text-gray-900">{file.name}</td>
+         <td className="px-4 py-3 text-sm text-gray-600">{file.folderPath}</td>
+         <td className="px-4 py-3 text-sm text-gray-600">{formatBytes(file.size)}</td>
+         {/* ... other columns ... */}
+       </tr>
+     ))}
+   </tbody>
+   ```
+
+**Component Tests**:
+- [ ] Search finds files in current folder
+- [ ] Search finds files in subdirectories (when query active)
+- [ ] Search finds files by folder path (partial match)
+- [ ] Search clears → returns to current folder only
+- [ ] Folder column shows correct paths
+- [ ] Folder column truncates long paths gracefully
+- [ ] Empty search results message when no matches
+
+**Manual Testing Checklist**:
+- [ ] Create database with nested folders (3+ levels deep)
+- [ ] Add files to different folders
+- [ ] From root, search for filename → finds files in subdirectories
+- [ ] From subfolder, search for filename → finds files in all folders
+- [ ] Search for folder name → finds files in that folder
+- [ ] Clear search → returns to current folder view only
+- [ ] Verify folder column shows paths correctly
+- [ ] Test with 50+ files across 10+ folders
+
+**Expected Behavior**:
+- **No search query**: Shows files in current folder only (existing behavior)
+- **With search query**: Shows matching files from ALL folders (new behavior)
+- **Folder column**: Always visible, shows relative path from database root
+
+**Why This Matters**:
+- **Consistency**: Search behavior matches Session Groups and Vector Databases pages
+- **Discoverability**: Users can find files without navigating folder tree
+- **Context**: Folder column shows where files are located when searching
+
+**Success Criteria**:
+- ✅ 7/7 tests passing
+- ✅ Search works across all folders
+- ✅ Folder column displays correctly
+- ✅ Performance: Search 1000 files < 100ms
+
+**Estimated Time**: 2-3 hours (for both UI4 and UI5)
+
+**Notes**:
+- This improvement applies to both UI4 (mock SDK) and UI5 (production SDK)
+- File list already has `folderPath` property, no backend changes needed
+- This is purely a UI enhancement, no SDK changes required
+- Semantic search during chat sessions (Phase 5) is separate from this file filtering
+
+---
+
 ## Phase 3: RAG Sources Transparency UI
 
 **Goal**: Show users which documents were used to generate responses
