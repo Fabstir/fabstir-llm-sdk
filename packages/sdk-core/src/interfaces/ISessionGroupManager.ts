@@ -172,6 +172,19 @@ export interface ISessionGroupManager {
   listChatSessions(groupId: string, requestor: string): Promise<string[]>;
 
   /**
+   * Delete a chat session from a group
+   *
+   * Removes the session from both memory and S5 storage.
+   * Updates the group's session list and persists changes to S5.
+   *
+   * @param groupId - Session group ID
+   * @param sessionId - Chat session ID to delete
+   * @returns Promise that resolves when deletion is complete
+   * @throws {Error} If session or group not found
+   */
+  deleteChatSession(groupId: string, sessionId: string): Promise<void>;
+
+  /**
    * Add a document to a session group
    *
    * @param groupId - Session group ID

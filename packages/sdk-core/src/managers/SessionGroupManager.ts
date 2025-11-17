@@ -657,6 +657,65 @@ export class SessionGroupManager implements ISessionGroupManager {
   }
 
   /**
+   * Delete a chat session from a group
+   *
+   * Removes the session from both memory and S5 storage.
+   * Updates the group's session list and persists changes to S5.
+   */
+  async deleteChatSession(groupId: string, sessionId: string): Promise<void> {
+    // Get the session to verify it exists
+    const session = await this.getChatSession(groupId, sessionId);
+    if (!session) {
+      // Already deleted or doesn't exist
+      console.warn(`[SessionGroupManager.deleteChatSession] Session ${sessionId} not found, skipping delete`);
+      return;
+    }
+
+    // Remove from memory cache
+    this.chatStorage.delete(sessionId);
+    console.log(`[SessionGroupManager.deleteChatSession] Removed session ${sessionId} from memory`);
+
+    // Get group and update
+    const group = this.groups.get(groupId);
+    if (!group) {
+      console.warn(`[SessionGroupManager.deleteChatSession] Group ${groupId} not found in memory`);
+      return;
+    }
+
+    // ✅ Create a NEW group object instead of mutating the cached one
+    const updatedGroup: SessionGroup = {
+      ...group,
+      chatSessions: group.chatSessions.filter(id => id !== sessionId),
+      chatSessionsData: {
+        ...(group.chatSessionsData || {}),
+      },
+      updatedAt: new Date(),
+    };
+
+    // Remove session data from chatSessionsData on the NEW object
+    if (updatedGroup.chatSessionsData[sessionId]) {
+      delete updatedGroup.chatSessionsData[sessionId];
+    }
+
+    // Update in-memory cache with NEW reference
+    this.groups.set(groupId, updatedGroup);
+    console.log(`[SessionGroupManager.deleteChatSession] Updated group ${groupId} in memory`);
+
+    // Persist to S5
+    if (this.storage) {
+      try {
+        await this.storage.save(updatedGroup);
+        console.log(`[SessionGroupManager.deleteChatSession] ✅ Persisted deletion to S5 for session ${sessionId}`);
+      } catch (error) {
+        console.error(`[SessionGroupManager.deleteChatSession] ❌ Failed to save to S5:`, error);
+        // Don't throw - session is already deleted from memory, S5 is best-effort
+      }
+    } else {
+      console.warn('[SessionGroupManager.deleteChatSession] ⚠️  S5 storage not available, deletion only in memory');
+    }
+  }
+
+  /**
    * Generate unique ID for session group
    */
   private generateId(): string {

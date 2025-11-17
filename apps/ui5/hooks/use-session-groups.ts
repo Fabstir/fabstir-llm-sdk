@@ -331,18 +331,30 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     groupId: string,
     sessionId: string
   ): Promise<void> => {
-    if (!managers?.sessionGroupManager) return;
+    console.log(`[useSessionGroups.deleteChat] START: Deleting session ${sessionId} from group ${groupId}`);
+
+    if (!managers?.sessionGroupManager) {
+      console.warn('[useSessionGroups.deleteChat] No sessionGroupManager available');
+      return;
+    }
 
     try {
       setError(null);
+      console.log('[useSessionGroups.deleteChat] Calling SDK deleteChatSession...');
       await managers.sessionGroupManager.deleteChatSession(groupId, sessionId);
+      console.log('[useSessionGroups.deleteChat] SDK deleteChatSession completed');
 
       // Refresh selected group to remove deleted session
       if (selectedGroup?.id === groupId) {
+        console.log('[useSessionGroups.deleteChat] Refreshing selected group...');
         await selectGroup(groupId);
+        console.log('[useSessionGroups.deleteChat] Group refreshed');
+      } else {
+        console.log('[useSessionGroups.deleteChat] Skipping refresh - not currently selected group');
       }
+      console.log('[useSessionGroups.deleteChat] COMPLETE');
     } catch (err) {
-      console.error('[useSessionGroups] Failed to delete chat:', err);
+      console.error('[useSessionGroups.deleteChat] ERROR:', err);
       const errorMsg = err instanceof Error ? err.message : 'Failed to delete chat session';
       setError(errorMsg);
       throw err;

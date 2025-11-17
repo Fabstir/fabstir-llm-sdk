@@ -395,14 +395,23 @@ export default function SessionGroupDetailPage() {
     sessionId: string,
     e: React.MouseEvent
   ) => {
+    console.log(`[handleDeleteSession] START: ${sessionId}`);
     e.stopPropagation();
-    if (!confirm("Delete this session? This action cannot be undone.")) return;
+
+    console.log('[handleDeleteSession] Showing confirm dialog...');
+    if (!confirm("Delete this session? This action cannot be undone.")) {
+      console.log('[handleDeleteSession] User cancelled');
+      return;
+    }
+    console.log('[handleDeleteSession] User confirmed, calling deleteChat...');
 
     try {
       await deleteChat(groupId, sessionId);
+      console.log('[handleDeleteSession] deleteChat completed, calling selectGroup...');
       await selectGroup(groupId);
+      console.log('[handleDeleteSession] selectGroup completed');
     } catch (error) {
-      console.error("Failed to delete session:", error);
+      console.error("[handleDeleteSession] ERROR:", error);
     }
   };
 
