@@ -330,50 +330,29 @@ Expected performance:
     // ========================================
     console.log('\n[Test] === STEP 2.5: Link Vector Database to Session Group ===');
 
-    // Navigate to databases management page
-    // Look for "Databases" link/button in the session group page
-    const databasesLink = page.locator('a[href*="/databases"], button:has-text("Databases")').first();
-    await databasesLink.waitFor({ state: 'visible', timeout: 10000 });
-    await databasesLink.click();
-    console.log('[Test] Clicked databases link');
+    // Find and click "+ Link Database" button on session group detail page
+    const linkDatabaseButton = page.locator('button:has-text("+ Link Database"), button:has-text("Link Database")').first();
+    await linkDatabaseButton.waitFor({ state: 'visible', timeout: 10000 });
+    await linkDatabaseButton.click();
+    console.log('[Test] Clicked "+ Link Database" button');
 
-    // Wait for databases page to load
-    await page.waitForURL(/\/session-groups\/[^\/]+\/databases/, { timeout: 10000 });
-    console.log('[Test] Navigated to databases management page');
+    // Wait for modal to appear
+    await page.waitForSelector('text=Link Vector Database', { timeout: 5000 });
+    console.log('[Test] Link database modal opened');
 
-    // Wait for the page to be ready
+    // Wait a moment for modal to fully render
+    await page.waitForTimeout(1000);
+
+    // Find and click on "Test Database 1" in the modal
+    // The database name is displayed as a button that triggers linking
+    const testDb1Button = page.locator('button:has-text("Test Database 1")').first();
+    await testDb1Button.waitFor({ state: 'visible', timeout: 5000 });
+    await testDb1Button.click();
+    console.log('[Test] Clicked "Test Database 1" to link it');
+
+    // Wait for link operation to complete (modal should close)
     await page.waitForTimeout(2000);
-
-    // Look for "Test Database 1" in the available databases list and click "Link" button
-    // The button should be next to the database name
-    const linkButton = page.locator('button:has-text("Link")').filter({
-      has: page.locator('text=Test Database 1')
-    }).or(
-      page.locator('text=Test Database 1').locator('..').locator('button:has-text("Link")')
-    ).first();
-
-    // Try alternative: find the row containing "Test Database 1" and then find Link button
-    const testDb1Row = page.locator('text=Test Database 1').locator('..');
-    const linkBtn = testDb1Row.locator('button:has-text("Link")').first();
-
-    try {
-      await linkBtn.waitFor({ state: 'visible', timeout: 5000 });
-      await linkBtn.click();
-      console.log('[Test] Clicked link button for Test Database 1');
-
-      // Wait for link operation to complete
-      await page.waitForTimeout(2000);
-      console.log('[Test] ✅ Vector database linked to session group');
-    } catch (e) {
-      console.log('[Test] ⚠️ Could not find link button, database may already be linked or UI structure different');
-    }
-
-    // Navigate back to session group detail page
-    const backLink = page.locator('a:has-text("Back"), a[href*="/session-groups/"]:not([href*="/databases"])').first();
-    await backLink.waitFor({ state: 'visible', timeout: 5000 });
-    await backLink.click();
-    await page.waitForURL(/\/session-groups\/[^\/]+$/, { timeout: 10000 });
-    console.log('[Test] Navigated back to session group detail page');
+    console.log('[Test] ✅ Vector database linked to session group');
 
     // ========================================
     // STEP 3: Start Chat Session (Triggers Embeddings)

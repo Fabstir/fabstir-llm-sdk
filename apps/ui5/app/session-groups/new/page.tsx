@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useWallet } from '@/hooks/use-wallet';
+import { useSDK } from '@/hooks/use-sdk';
 import { useSessionGroups } from '@/hooks/use-session-groups';
 import { SessionGroupForm } from '@/components/session-groups/session-group-form';
 
@@ -14,6 +15,7 @@ import { SessionGroupForm } from '@/components/session-groups/session-group-form
 export default function NewSessionGroupPage() {
   const router = useRouter();
   const { isConnected } = useWallet();
+  const { isInitialized } = useSDK();
   const { createGroup } = useSessionGroups();
 
   const handleSubmit = async (data: {
@@ -50,6 +52,22 @@ export default function NewSessionGroupPage() {
           >
             Go to Home
           </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isInitialized) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">
+            Initializing SDK...
+          </h2>
+          <p className="text-gray-600">
+            Connecting to decentralized storage
+          </p>
         </div>
       </div>
     );
