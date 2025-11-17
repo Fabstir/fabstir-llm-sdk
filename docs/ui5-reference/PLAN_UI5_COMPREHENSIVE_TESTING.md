@@ -1,8 +1,8 @@
 # UI5 Comprehensive Testing Plan
 
-**Status**: 🚧 IN PROGRESS - Phase 5 Started (Chat Session Operations) (72% Complete)
+**Status**: 🚧 IN PROGRESS - Phase 5 Started (Chat Session Operations) (60% Complete)
 **Created**: 2025-11-13
-**Last Updated**: 2025-11-17 (Phase 5.3 COMPLETE - Follow-up messages and context verified)
+**Last Updated**: 2025-11-17 (Phase 5.4 COMPLETE - Navigation persistence verified with Phase 5.7 bug fix)
 **Branch**: feature/ui5-migration
 **Server**: http://localhost:3002 (Container) / http://localhost:3012 (Host)
 
@@ -54,19 +54,20 @@
   - 4.5: Delete Session Group ✅ COMPLETE (2/2 tests passing)
 
 **In Progress:** 🔄
-- Phase 5: Chat Session Operations (80% - 4/5 sub-phases complete)
+- Phase 5: Chat Session Operations (83% - 5/6 sub-phases complete)
   - 5.1: Create Chat Session ✅ COMPLETE (2/2 tests passing)
   - 5.1b: Background Embedding During Chat ✅ COMPLETE (2/2 tests passing)
   - 5.2: Send Text Message ✅ COMPLETE (2/2 tests passing)
   - 5.3: Send Follow-up Message ✅ COMPLETE (2/2 tests passing)
-  - 5.4-5.5: Pending
+  - 5.4: Navigate Away and Return ✅ COMPLETE (2/2 tests passing - Phase 5.7 bug fix)
+  - 5.5: Delete Chat Session - Pending
 
 **Pending:** ⏳
 - Phase 6: Navigation & UI Flow Testing (0%)
 - Phase 7: Error Handling & Edge Cases (0%)
 - Phase 8: Performance & Blockchain Testing (0%)
 
-**Total Progress**: 5.4/8 phases = **68% Complete**
+**Total Progress**: 4.83/8 phases = **60% Complete** (Phases 1-4 complete, Phase 5: 83% - 5/6 sub-phases)
 
 **Bugs Fixed:** 16
   1. Fixed ES module `__dirname` error in test-setup.ts (used fileURLToPath)
@@ -98,8 +99,9 @@
 7. ✅ Phase 5.1b COMPLETE - Background embedding during chat verified
 8. ✅ Phase 5.2 COMPLETE - Message sending and optimistic UI updates verified
 9. ✅ Phase 5.3 COMPLETE - Follow-up messages and conversation context verified
-10. 🔄 Execute Phase 5.4-5.5 (Navigation and conversation persistence)
-11. ⏳ Execute remaining phases (6-8)
+10. ✅ Phase 5.4 COMPLETE - Navigation persistence verified (Phase 5.7 SDK bug fix applied)
+11. 🔄 Execute Phase 5.5 (Delete Chat Session)
+12. ⏳ Execute remaining phases (6-8)
 
 ---
 
@@ -778,7 +780,7 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 - Test 1: Send follow-up message with conversation context ✅
 - Test 2: Multiple follow-ups (stress test) ✅
 
-### Sub-phase 5.4: Navigate Away and Return ❌ **BUG DISCOVERED**
+### Sub-phase 5.4: Navigate Away and Return ✅ **COMPLETE**
 
 **Test Steps Executed**:
 - [x] Navigate to session groups page
@@ -789,29 +791,31 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 - [x] Navigate to Dashboard
 - [x] Navigate to Session Groups
 - [x] Navigate back to Session Group Detail
-- [x] Attempt to find session in list ❌ **FAILED**
+- [x] Find session in list ✅ **SUCCESS**
 
-**🐛 Bug Discovered**:
+**✅ Tests Passing**:
 - ✅ Session creation works (sess-1763384610829-km1q4lm created successfully)
 - ✅ Message sending works (both messages visible before navigation)
 - ✅ Navigation flow works (Dashboard → Session Groups → Group Detail)
-- ❌ **SESSION PERSISTENCE BUG**: Sessions don't appear in session list after page reload
-- ❌ UI shows "Chat Sessions (0)" after returning to group detail page
-- ❌ Session created during chat is not being saved to S5 or not being retrieved correctly
+- ✅ **SESSION PERSISTENCE FIXED**: Sessions now appear in session list after page reload
+- ✅ UI shows correct session count (e.g., "Chat Sessions (8)") after returning to group detail page
+- ✅ Session data persisted to S5 via `chatSessionsData` field
+- ✅ UI renders sessions as `<Link>` components with proper href attributes
 
-**Root Cause Analysis Needed**:
-1. Is the session being saved to S5 properly when created?
-2. Is the session group's session list being updated in S5?
-3. Is there a mismatch between session ID format when saving vs. querying?
-4. Check `SessionGroupManager.listChatSessions()` - is it querying S5 correctly?
+**Bug Fix Implemented (Phase 5.7)**:
+1. **SDK Fix**: Added `chatSessionsData` field to SessionGroup interface for S5 persistence
+2. **SDK Fix**: Updated `startChatSession()` to persist full session objects to S5
+3. **SDK Fix**: Updated `getSessionGroup()` to load sessions from S5 and populate cache
+4. **SDK Fix**: Implemented `addMessage()` method with S5 persistence for message updates
+5. **UI Fix**: Converted session list items from `<div onClick>` to `<Link href>` components
 
-**Automated Test**: `/workspace/tests-ui5/test-chat-navigation.spec.ts` ❌ (2/2 tests FAILED - legitimate bug)
-- Test 1: Navigate away and return ❌ (session not found in list after navigation)
-- Test 2: Multiple navigation cycles ❌ (same issue, timeout waiting for session link)
+**Automated Test**: `/workspace/tests-ui5/test-chat-navigation.spec.ts` ✅ (2/2 tests PASSED)
+- Test 1: Navigate away and return ✅ (session persists and appears in list after navigation)
+- Test 2: Multiple navigation cycles ✅ (conversation history preserved across 3 navigation cycles)
 
-**Expected Duration**: 5-10 seconds (actual: 90 seconds for comprehensive test)
+**Actual Duration**: 1.4 minutes (test execution time)
 
-**Next Steps**: Investigate SessionGroupManager to understand why sessions aren't persisting properly
+**Phase 5.7 Reference**: See `/workspace/docs/ui5-reference/PHASE_5_7_BUG_FIX_SUMMARY.md` for complete bug fix documentation
 
 ### Sub-phase 5.5: Delete Chat Session
 - [ ] On chat session, find delete button
@@ -1223,7 +1227,8 @@ curl http://localhost:3002
 
 ---
 
-**Last Updated**: 2025-11-17 (Sub-phase 3.4b COMPLETE - SDK Integration Bugs Fixed)
-**Next Update**: After executing Sub-phase 3.4c (Search After Embeddings Ready)
+**Last Updated**: 2025-11-17 (Phase 5.4 COMPLETE - Navigation persistence verified with Phase 5.7 bug fix)
+**Next Update**: After executing Sub-phase 5.5 (Delete Chat Session)
 **Architecture Changes**: Aligned with deferred embeddings implementation (docs/IMPLEMENTATION_DEFERRED_EMBEDDINGS.md Phases 1-9 complete)
 **SDK Bugs Resolved**: 5 critical bugs fixed - AuthManager constructor, SessionGroupManager validation, database name mapping, databaseExists stub, S5 race condition
+**Phase 5.7 Bug Fix**: Session persistence to S5 storage implemented - added `chatSessionsData` field, updated SDK methods, converted UI session list to Link components (2/2 tests passing)
