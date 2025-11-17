@@ -1,8 +1,8 @@
 # UI5 Comprehensive Testing Plan
 
-**Status**: 🚧 IN PROGRESS - Phase 4.2 Complete (Session Groups - Upload Documents) (54% Complete)
+**Status**: 🚧 IN PROGRESS - Phase 4.3 Complete (Session Groups - Link Database to Group) (58% Complete)
 **Created**: 2025-11-13
-**Last Updated**: 2025-11-17 (Phase 4.2 COMPLETE - Group document upload with S5 persistence working)
+**Last Updated**: 2025-11-17 (Phase 4.3 COMPLETE - Link database to session group with S5 cache fix)
 **Branch**: feature/ui5-migration
 **Server**: http://localhost:3002 (Container) / http://localhost:3012 (Host)
 
@@ -46,10 +46,10 @@
 **Note**: Sub-phases 3.4a and 3.4c removed - they tested semantic search in database detail page, but that feature doesn't exist. Semantic search happens during chat sessions (Phase 5), not in database management UI. Database detail page only has file name filtering.
 
 **In Progress:** 🔄
-- Phase 4: Session Group Operations (40% - Sub-phases 4.1-4.2 complete)
+- Phase 4: Session Group Operations (60% - Sub-phases 4.1-4.3 complete)
   - 4.1: Create Session Group ✅ COMPLETE (S5 persistence working, 2/2 tests passing)
   - 4.2: Upload Group Documents ✅ COMPLETE (S5 storage working, 2/2 tests passing)
-  - 4.3: Link Vector Database to Group - Pending
+  - 4.3: Link Vector Database to Group ✅ COMPLETE (2/2 tests passing)
   - 4.4: Unlink Vector Database - Pending
   - 4.5: Delete Session Group - Pending
 
@@ -59,9 +59,9 @@
 - Phase 7: Error Handling & Edge Cases (0%)
 - Phase 8: Performance & Blockchain Testing (0%)
 
-**Total Progress**: 4.4/8 phases = **54% Complete**
+**Total Progress**: 4.6/8 phases = **58% Complete**
 
-**Bugs Fixed:** 13
+**Bugs Fixed:** 14
   1. Fixed ES module `__dirname` error in test-setup.ts (used fileURLToPath)
   2. Fixed test looking for non-existent "✓ SDK Ready" text (changed to check dashboard load)
   3. Fixed AuthManager constructor to accept authentication data from SDK core
@@ -75,15 +75,17 @@
   11. **Phase 4.2**: Fixed UI field name mismatch (`groupDocuments` → `documents`)
   12. **Phase 4.2**: Fixed hook state management (removed re-fetch loop causing hang)
   13. **Phase 4.2**: Fixed test selectors to find card container instead of heading row
+  14. **Phase 4.3**: Fixed SessionGroupManager.getSessionGroup() cache-only lookup preventing direct navigation to group detail pages
 
 **Testing Approach:** Automated tests with test wallet provider (no manual MetaMask approvals) ✅ **WORKING**
 
 **Next Steps:**
 1. ✅ Phase 4.1 COMPLETE - Session group creation with S5 persistence verified
 2. ✅ Phase 4.2 COMPLETE - Group document upload with S5 storage working
-3. 🔄 Execute Phase 4.3-4.5 (Link/unlink databases, delete session group)
-4. ⏳ Execute Phase 5 (Chat Session Operations with semantic search)
-5. ⏳ Execute remaining phases (6-8)
+3. ✅ Phase 4.3 COMPLETE - Link database to session group working
+4. 🔄 Execute Phase 4.4-4.5 (Unlink databases, delete session group)
+5. ⏳ Execute Phase 5 (Chat Session Operations with semantic search)
+6. ⏳ Execute remaining phases (6-8)
 
 ---
 
@@ -533,21 +535,35 @@ Perform comprehensive end-to-end testing of UI5 application with focus on:
 - Fixed hook state management to prevent re-fetch loops
 - S5 storage integration working correctly
 
-### Sub-phase 4.3: Link Vector Database to Group
-- [ ] On group detail page, find "Linked Databases" section
-- [ ] Click "+ Link Database" button
-- [ ] Verify modal opens with available databases
-- [ ] Select a database from list
-- [ ] Click "Link" button
-- [ ] **EXPECT: No MetaMask popup** (test wallet auto-approves)
-- [ ] **WAIT: 5-15 seconds for blockchain transaction**
-- [ ] Verify database appears in Linked Databases section
-- [ ] Verify statistics updated
-- [ ] Take screenshot
+### Sub-phase 4.3: Link Vector Database to Group ✅ COMPLETE
+- [x] On group detail page, find "Linked Databases" section
+- [x] Click "+ Link Database" button
+- [x] Verify modal opens with available databases
+- [x] Select a database from list
+- [x] Click "Link" button
+- [x] **EXPECT: No MetaMask popup** (test wallet auto-approves)
+- [x] **WAIT: 5-15 seconds for blockchain transaction**
+- [x] Verify database appears in Linked Databases section
+- [x] Verify statistics updated
+- [x] Take screenshot
+
+**Status**: ✅ COMPLETE (2025-11-17)
+
+**Actual Duration**: 27.3 seconds (2 tests)
+
+**Test Results**:
+- ✅ Test 1: Link database to session group (2/2 assertions passed)
+  - Modal opened with 4 available databases
+  - Selected "Test Database 1"
+  - Database appeared in linked list (count: 0 → 1)
+  - Statistics updated correctly
+- ✅ Test 2: Edge case - no databases available (cancel button works)
 
 **Expected Duration**: 15-30 seconds (blockchain confirmation)
 
-**Automated Test**: Create `/workspace/tests-ui5/test-session-group-link-db.spec.ts`
+**Automated Test**: `/workspace/tests-ui5/test-session-group-link-db.spec.ts` ✅ CREATED
+
+**Bug Fixed**: SessionGroupManager.getSessionGroup() now loads from S5 storage when group not in cache (was cache-only, causing "Session Group Not Found" on direct navigation)
 
 ### Sub-phase 4.4: Unlink Vector Database
 - [ ] Hover over linked database
