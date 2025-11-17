@@ -58,20 +58,22 @@ The following sub-phases have automated tests that are passing:
 
 ### Sub-phase 7.2: Insufficient Gas Fees
 
-**Why Manual**: Requires specific wallet balance manipulation that's not part of automated test setup.
+**Why Manual**: Requires UI features that trigger blockchain transactions. Currently, UI5 does not expose deposit/withdrawal features that would require gas fees.
 
-**Test Procedure**:
+**Current Status**: ⚠️ **BLOCKED** - UI5 does not have blockchain transaction features exposed in the UI yet. Session groups and vector databases are S5-storage only (no gas required).
+
+**Test Procedure** (when blockchain features are added):
 
 1. **Setup**: Create or use test account with minimal ETH (< 0.0001 ETH)
 2. **Connect Wallet**: Connect the low-balance account to UI5
-3. **Test Operation**: Try to create a session group (requires blockchain transaction)
+3. **Test Operation**: Try to deposit funds, withdraw earnings, or perform another blockchain transaction
 4. **Verify**:
    - Error message appears about insufficient funds/gas
    - Message is user-friendly (not "UNPREDICTABLE_GAS_LIMIT" or similar)
    - Suggests adding ETH to account
    - Transaction doesn't get stuck in pending state
 5. **Add ETH**: Transfer 0.01 ETH to test account
-6. **Retry Operation**: Try creating session group again
+6. **Retry Operation**: Try the same blockchain operation again
 7. **Verify**: Operation succeeds with sufficient balance
 
 **Expected Duration**: 10 minutes (includes ETH transfer time)
@@ -82,7 +84,9 @@ The following sub-phases have automated tests that are passing:
 - ✅ No stuck transactions
 - ✅ Retry succeeds after adding funds
 
-**Note**: This test is specific to EOA (Externally Owned Account) wallets. Base Account Kit with gasless transactions would not encounter this error, but it's still important to test for compatibility with standard wallets.
+**Notes**:
+- This test is specific to EOA (Externally Owned Account) wallets. Base Account Kit with gasless transactions would not encounter this error, but it's still important to test for compatibility with standard wallets.
+- **Update (2025-11-17)**: Automated test attempted but UI5 does not have deposit/withdrawal features yet. Test will remain manual until blockchain transaction UI is implemented.
 
 ---
 
