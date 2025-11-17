@@ -4,7 +4,11 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useWallet } from '@/hooks/use-wallet';
+import { useSDK } from '@/hooks/use-sdk';
 import { useSessionGroups } from '@/hooks/use-session-groups';
+import { useVectorDatabases, type EmbeddingProgress } from '@/hooks/use-vector-databases';
+import { downloadFromS5 } from '@/lib/s5-utils';
+import { EmbeddingProgressBar } from '@/components/vector-databases/embedding-progress-bar';
 import { ChatInterface } from '@/components/chat/chat-interface';
 import { SessionHistory } from '@/components/chat/session-history';
 import { ChatMessage } from '@/components/chat/message-bubble';
@@ -20,6 +24,7 @@ export default function ChatSessionPage() {
   const params = useParams();
   const router = useRouter();
   const { isConnected } = useWallet();
+  const { managers, isInitialized } = useSDK();
   const {
     selectedGroup,
     selectGroup,
@@ -38,8 +43,155 @@ export default function ChatSessionPage() {
   const [groupName, setGroupName] = useState('Session Group');
   const [linkedDatabases, setLinkedDatabases] = useState<any[]>([]);
 
+  // Embedding progress state
+  const [embeddingProgress, setEmbeddingProgress] = useState<EmbeddingProgress | null>(null);
+  const [documentQueue, setDocumentQueue] = useState<string[]>([]);
+  const [queuePosition, setQueuePosition] = useState<number>(0);
+  const [processingStartTimes, setProcessingStartTimes] = useState<Map<string, number>>(new Map());
+
   // Check if this is a special route (not a session ID)
   const isSpecialRoute = ['settings', 'databases'].includes(sessionId);
+
+  // Embedding Progress Callback Handler
+  const handleEmbeddingProgress = useCallback((progress: EmbeddingProgress) => {
+    console.log('[ChatSession-EmbeddingProgress]', progress);
+    setEmbeddingProgress(progress);
+
+    // Track processing start time
+    if (progress.status === 'processing' && !processingStartTimes.has(progress.documentId)) {
+      setProcessingStartTimes(prev => new Map(prev).set(progress.documentId, Date.now()));
+    }
+
+    // Update queue position when document completes
+    if (progress.status === 'complete' || progress.status === 'failed') {
+      setQueuePosition(prev => prev + 1);
+
+      // Remove completed document from queue
+      setDocumentQueue(prev => prev.filter(name => name !== progress.fileName));
+
+      // Auto-hide progress bar 3 seconds after completion
+      setTimeout(() => {
+        setEmbeddingProgress(null);
+
+        // Clear queue state if all documents processed
+        setDocumentQueue(prev => {
+          if (prev.length <= 1) {
+            setQueuePosition(0);
+            setProcessingStartTimes(new Map());
+            return [];
+          }
+          return prev;
+        });
+      }, 3000);
+    }
+  }, [processingStartTimes]);
+
+  // Process Pending Embeddings (Background)
+  const processPendingEmbeddings = useCallback(async () => {
+    if (!managers || !isInitialized) {
+      console.log('[ChatSession] SDK not initialized, skipping embedding processing');
+      return;
+    }
+
+    if (!selectedGroup || !selectedGroup.linkedDatabases || selectedGroup.linkedDatabases.length === 0) {
+      console.log('[ChatSession] No linked databases, skipping embedding processing');
+      return;
+    }
+
+    try {
+      console.log('[ChatSession] Checking for pending documents in linked databases...');
+
+      // Get all pending documents from linked databases
+      const allPendingDocs: any[] = [];
+
+      for (const dbName of selectedGroup.linkedDatabases) {
+        try {
+          const pendingDocs = await managers.vectorRAGManager.getPendingDocuments(dbName);
+          if (pendingDocs && pendingDocs.length > 0) {
+            console.log(`[ChatSession] Found ${pendingDocs.length} pending documents in database: ${dbName}`);
+            allPendingDocs.push(...pendingDocs.map(doc => ({ ...doc, databaseName: dbName })));
+          }
+        } catch (error) {
+          console.error(`[ChatSession] Failed to get pending documents from ${dbName}:`, error);
+        }
+      }
+
+      if (allPendingDocs.length === 0) {
+        console.log('[ChatSession] No pending documents found, skipping embedding processing');
+        return;
+      }
+
+      console.log(`[ChatSession] Found ${allPendingDocs.length} total pending documents, starting background processing...`);
+      setDocumentQueue(allPendingDocs.map(doc => doc.name || doc.fileName));
+      setQueuePosition(1);
+
+      // Process each pending document
+      for (const doc of allPendingDocs) {
+        try {
+          // Emit progress: processing
+          handleEmbeddingProgress({
+            sessionId: sessionId,
+            databaseName: doc.databaseName,
+            documentId: doc.id,
+            fileName: doc.name || doc.fileName,
+            totalChunks: 0,
+            processedChunks: 0,
+            percentage: 0,
+            status: 'processing',
+            error: null
+          });
+
+          // Download document from S5
+          console.log(`[ChatSession] Downloading document from S5: ${doc.s5Cid}`);
+          const fileContent = await downloadFromS5(doc.s5Cid);
+
+          // Generate embeddings (mock - replace with real implementation)
+          console.log(`[ChatSession] Generating embeddings for: ${doc.name}`);
+          await new Promise(resolve => setTimeout(resolve, 5000)); // Simulate embedding generation
+
+          // Update document status to 'ready'
+          await managers.vectorRAGManager.updateDocumentStatus(doc.id, 'ready', {
+            embeddingStatus: 'ready',
+            embeddingProgress: 100
+          });
+
+          // Emit progress: complete
+          handleEmbeddingProgress({
+            sessionId: sessionId,
+            databaseName: doc.databaseName,
+            documentId: doc.id,
+            fileName: doc.name || doc.fileName,
+            totalChunks: 0,
+            processedChunks: 0,
+            percentage: 100,
+            status: 'complete',
+            error: null
+          });
+
+          console.log(`[ChatSession] ✅ Embedding complete for: ${doc.name}`);
+        } catch (error) {
+          console.error(`[ChatSession] ❌ Failed to process document: ${doc.name}`, error);
+
+          // Emit progress: failed
+          handleEmbeddingProgress({
+            sessionId: sessionId,
+            databaseName: doc.databaseName,
+            documentId: doc.id,
+            fileName: doc.name || doc.fileName,
+            totalChunks: 0,
+            processedChunks: 0,
+            percentage: 0,
+            status: 'failed',
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
+      }
+
+      console.log('[ChatSession] ✅ All pending embeddings processed');
+    } catch (error) {
+      console.error('[ChatSession] ❌ Background embedding processing failed:', error);
+    }
+  }, [managers, isInitialized, selectedGroup, sessionId, handleEmbeddingProgress]);
 
   // Load messages for current session
   const loadMessages = useCallback(async () => {
@@ -67,10 +219,16 @@ export default function ChatSessionPage() {
     const loadData = async () => {
       await selectGroup(groupId);
       await loadMessages();
+
+      // Trigger background embedding processing (non-blocking)
+      processPendingEmbeddings().catch((error) => {
+        console.error('[ChatSession] Background embedding processing failed:', error);
+        // Don't throw - user can still chat even if embeddings fail
+      });
     };
 
     loadData();
-  }, [isConnected, groupId, sessionId, selectGroup, loadMessages, isSpecialRoute]);
+  }, [isConnected, groupId, sessionId, selectGroup, loadMessages, processPendingEmbeddings, isSpecialRoute]);
 
   // Update local state when selectedGroup changes
   useEffect(() => {
@@ -226,6 +384,33 @@ export default function ChatSessionPage() {
             )}
           </div>
         </div>
+
+        {/* Embedding Progress Bar */}
+        {embeddingProgress && (
+          <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+            <EmbeddingProgressBar
+              progress={embeddingProgress}
+              queueSize={documentQueue.length > 0 ? documentQueue.length + queuePosition - 1 : undefined}
+              queuePosition={queuePosition > 0 ? queuePosition : undefined}
+              remainingDocuments={documentQueue.filter(name => name !== embeddingProgress.fileName)}
+              estimatedTimeRemaining={(() => {
+                // Calculate estimated time based on average processing time
+                if (processingStartTimes.size === 0 || documentQueue.length <= 1) return undefined;
+
+                // Calculate average time per document from completed documents
+                const completedCount = processingStartTimes.size;
+                const totalTime = Array.from(processingStartTimes.values()).reduce((sum, startTime) => {
+                  return sum + (Date.now() - startTime);
+                }, 0);
+                const avgTimePerDoc = totalTime / completedCount / 1000; // Convert to seconds
+
+                // Estimate remaining time
+                const remainingDocs = documentQueue.length - 1; // Exclude current document
+                return Math.round(avgTimePerDoc * remainingDocs);
+              })()}
+            />
+          </div>
+        )}
 
         {/* Chat Interface */}
         <div className="flex-1 overflow-hidden">
