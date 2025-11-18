@@ -60,11 +60,15 @@ Implement production payment flow in UI5 to enable:
 
 ## Implementation Plan
 
-### Sub-phase 8.1.1: Payment Panel Component ✅ PLANNING
+### Sub-phase 8.1.1: Payment Panel Component ✅ COMPLETE
+
+**Status**: ✅ **COMPLETE** (pre-existing, discovered 2025-11-18)
+**Location**: `components/payment/payment-panel.tsx` (392 lines)
+**Utils**: `lib/payment-utils.ts` (217 lines)
 
 **Goal**: Create UI component for USDC deposit and balance display
 
-**Tasks**:
+**What Was Already Implemented**:
 - [ ] Create `components/payment/payment-panel.tsx`
 - [ ] Display user balances (EOA, smart wallet, sub-account)
 - [ ] Display host earnings (accumulated, wallet)
@@ -99,11 +103,15 @@ export interface PaymentPanelProps {
 
 ---
 
-### Sub-phase 8.1.2: Host Discovery UI ✅ PLANNING
+### Sub-phase 8.1.2: Host Discovery UI ✅ COMPLETE
+
+**Status**: ✅ **COMPLETE** (pre-existing, discovered 2025-11-18)
+**Location**: `hooks/use-host-discovery.ts` (123 lines)
+**Integration**: Already integrated in `app/session-groups/[id]/page.tsx`
 
 **Goal**: Implement host discovery and selection before session start
 
-**Tasks**:
+**What Was Already Implemented**:
 - [ ] Add "Discover Hosts" button to chat page
 - [ ] Display list of active hosts with:
   - Host address (truncated)
@@ -135,11 +143,15 @@ export interface PaymentPanelProps {
 
 ---
 
-### Sub-phase 8.1.3: USDC Approval Flow ✅ PLANNING
+### Sub-phase 8.1.3: USDC Approval Flow ✅ COMPLETE
+
+**Status**: ✅ **COMPLETE** (implemented 2025-11-18)
+**Location**: `hooks/use-session-groups.ts` (startAIChat function, lines 322-358)
+**Completion Date**: 2025-11-18
 
 **Goal**: Implement USDC approval for JobMarketplace contract
 
-**Tasks**:
+**What Was Implemented**:
 - [ ] Check current USDC allowance for JobMarketplace
 - [ ] If allowance insufficient, request approval
 - [ ] Approve 1000 USDC (for multiple sessions)
@@ -530,17 +542,23 @@ Already configured from previous phases - no changes needed.
 - ⚠️ BLOCKED - Sub-phase waiting on dependencies
 
 ### Current Progress:
-- Sub-phase 8.1.1: 📋 PLANNING
-- Sub-phase 8.1.2: 📋 PLANNING
-- Sub-phase 8.1.3: 📋 PLANNING
-- Sub-phase 8.1.4: 📋 PLANNING
-- Sub-phase 8.1.5: 📋 PLANNING
-- Sub-phase 8.1.6: 📋 PLANNING
-- Sub-phase 8.1.7: 📋 PLANNING
-- Sub-phase 8.1.8: 📋 PLANNING
-- Sub-phase 8.1.9: 📋 PLANNING
+- Sub-phase 8.1.1: ✅ COMPLETE (PaymentPanel already implemented)
+- Sub-phase 8.1.2: ✅ COMPLETE (Host discovery hook already implemented)
+- Sub-phase 8.1.3: ✅ COMPLETE (USDC approval added to startAIChat - 2025-11-18)
+- Sub-phase 8.1.4: 🔄 IN PROGRESS (SessionManager integration already in startAIChat, needs WebSocket verification)
+- Sub-phase 8.1.5: 📋 PLANNING (WebSocket connection pending)
+- Sub-phase 8.1.6: 📋 PLANNING (Message sending pending)
+- Sub-phase 8.1.7: 📋 PLANNING (Payment settlement tracking pending)
+- Sub-phase 8.1.8: 📋 PLANNING (Session cleanup pending)
+- Sub-phase 8.1.9: 📋 PLANNING (Testing pending)
 
-**Overall Phase 8.1 Progress**: 0/9 sub-phases = 0% complete
+**Overall Phase 8.1 Progress**: 3.5/9 sub-phases = 39% complete
+
+**Recent Accomplishments** (2025-11-18):
+- ✅ Discovered PaymentPanel component already existed with full UI implementation
+- ✅ Discovered use-host-discovery hook already existed with auto-discovery
+- ✅ Added USDC approval flow to startAIChat function (Sub-phase 8.1.3)
+- ✅ SessionManager.startSession() already being called (Sub-phase 8.1.4 partial)
 
 ---
 

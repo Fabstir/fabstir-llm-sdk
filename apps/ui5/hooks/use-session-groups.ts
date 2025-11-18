@@ -319,12 +319,50 @@ export function useSessionGroups(): UseSessionGroupsReturn {
         deposit: depositAmount,
       });
 
+      // Sub-phase 8.1.3: Approve USDC for JobMarketplace
+      console.log('[useSessionGroups] 💰 Checking USDC approval...');
+      const paymentManager = managers.paymentManager;
+      const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
+      const jobMarketplaceAddress = process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!;
+
+      // Check current allowance
+      const signer = await paymentManager.getSigner();
+      const userAddress = await signer.getAddress();
+
+      const { ethers } = await import('ethers');
+      const usdcContract = new ethers.Contract(
+        usdcAddress,
+        [
+          'function allowance(address owner, address spender) view returns (uint256)',
+          'function approve(address spender, uint256 amount) returns (bool)',
+        ],
+        signer
+      );
+
+      const currentAllowance = await usdcContract.allowance(userAddress, jobMarketplaceAddress);
+      const { parseUnits } = await import('viem');
+      const requiredAmount = parseUnits(depositAmount, 6);
+
+      if (currentAllowance < requiredAmount) {
+        console.log('[useSessionGroups] 🔐 Requesting USDC approval (popup may appear)...');
+        // Approve 1000 USDC for multiple sessions
+        const approveTx = await usdcContract.approve(
+          jobMarketplaceAddress,
+          parseUnits('1000', 6)
+        );
+        console.log('[useSessionGroups] ⏳ Waiting for approval confirmation...');
+        await approveTx.wait(3); // Wait for 3 confirmations
+        console.log('[useSessionGroups] ✅ USDC approved for JobMarketplace');
+      } else {
+        console.log('[useSessionGroups] ✅ USDC already approved (sufficient allowance)');
+      }
+
       // 1. Create blockchain job via SessionManager.startSession()
       const sessionConfig = {
         depositAmount,
         pricePerToken: hostConfig.pricing,
         proofInterval: 1000, // Checkpoint every 1000 tokens
-        paymentToken: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
+        paymentToken: usdcAddress,
         provider: hostConfig.address,
         endpoint: hostConfig.endpoint,
         model: hostConfig.models[0],
