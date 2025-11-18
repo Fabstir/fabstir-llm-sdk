@@ -403,6 +403,82 @@ export default function ChatSessionPage() {
     }
   };
 
+  // --- Sub-phase 8.1.8: End Session and Cleanup ---
+  const handleEndSession = useCallback(async () => {
+    if (!managers || !sessionMetadata || !sessionMetadata.blockchainSessionId) {
+      console.error('[ChatSession] Cannot end session: missing managers or session metadata');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const blockchainSessionId = BigInt(sessionMetadata.blockchainSessionId);
+
+      console.log('[ChatSession] 🛑 Ending session...', {
+        sessionId: blockchainSessionId.toString(),
+        totalTokens,
+        totalCost: totalCost.toFixed(4),
+      });
+
+      // Add system message for session ending
+      const endingMsg: ChatMessage = {
+        role: 'system',
+        content: '🛑 Ending session...',
+        timestamp: Date.now(),
+      };
+      setMessages(prev => [...prev, endingMsg]);
+
+      // Step 1: Save conversation to S5 (already done via sdkAddMessage, but ensure it's saved)
+      console.log('[ChatSession] 💾 Conversation already saved to S5 via session group');
+
+      // Step 2: Display final payment breakdown
+      const hostPayment = totalCost * 0.9; // 90% to host
+      const treasuryPayment = totalCost * 0.1; // 10% to treasury
+
+      const summaryMsg: ChatMessage = {
+        role: 'system',
+        content: `📊 Final Session Summary:
+💎 Total tokens: ${totalTokens.toLocaleString()}
+💰 Total cost: $${totalCost.toFixed(6)} USDC
+📈 Host earns: $${hostPayment.toFixed(6)} USDC (90%)
+🏦 Treasury fee: $${treasuryPayment.toFixed(6)} USDC (10%)`,
+        timestamp: Date.now(),
+      };
+      setMessages(prev => [...prev, summaryMsg]);
+
+      // Step 3: End the session (close WebSocket)
+      await managers.sessionManager.endSession(blockchainSessionId);
+
+      const successMsg: ChatMessage = {
+        role: 'system',
+        content: '✅ Session ended successfully\n🔐 WebSocket disconnected\n⏳ Host will finalize payment on blockchain',
+        timestamp: Date.now(),
+      };
+      setMessages(prev => [...prev, successMsg]);
+
+      // Step 4: Clear session state
+      setSessionMetadata(null);
+      setSessionType('mock');
+      setTotalTokens(0);
+      setTotalCost(0);
+      setLastCheckpointTokens(0);
+
+      console.log('[ChatSession] ✅ Session ended and cleaned up');
+    } catch (error: any) {
+      console.error('[ChatSession] ❌ Failed to end session:', error);
+
+      const errorMsg: ChatMessage = {
+        role: 'system',
+        content: `❌ Error ending session: ${error.message}`,
+        timestamp: Date.now(),
+      };
+      setMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setLoading(false);
+    }
+  }, [managers, sessionMetadata, totalTokens, totalCost]);
+
   // Handle sending a message (routes to mock or AI based on session type)
   const handleSendMessage = async (message: string, files?: File[]) => {
     setLoading(true);
@@ -564,12 +640,24 @@ export default function ChatSessionPage() {
                   <span>{linkedDatabases.length} database(s) linked</span>
                 </div>
               )}
-              {/* Phase 5: AI session badge */}
-              {sessionType === 'ai' && (
-                <div className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
-                  AI Session (Live)
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                {/* Phase 5: AI session badge */}
+                {sessionType === 'ai' && (
+                  <div className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                    AI Session (Live)
+                  </div>
+                )}
+                {/* Sub-phase 8.1.8: End Session button */}
+                {sessionType === 'ai' && sessionMetadata && (
+                  <button
+                    onClick={handleEndSession}
+                    disabled={loading}
+                    className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    End Session
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
