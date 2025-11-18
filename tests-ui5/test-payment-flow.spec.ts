@@ -96,44 +96,69 @@ test.describe('Phase 8.1: Production Payment Flow', () => {
     console.log('[Test] ✅ Session group created\n');
 
     // ========================================
-    // STEP 3: Start AI Chat (triggers approval + job creation)
+    // STEP 3: Enable AI Mode
     // ========================================
-    console.log('[Test] === STEP 3: Start AI Chat Session ===');
+    console.log('[Test] === STEP 3: Enable AI Mode ===');
 
     // Navigate to session group detail (should auto-navigate after creation)
-    // Wait for "Start Chat" or equivalent button
     await page.waitForTimeout(2000);
 
-    // Look for "Start New Chat" or "+ New Chat" button
-    const newChatButton = page.locator('button:has-text("New Chat"), button:has-text("Start Chat")').first();
-    const chatButtonVisible = await newChatButton.isVisible({ timeout: 10000 }).catch(() => false);
+    // Find and enable AI Mode toggle switch in PaymentPanel
+    console.log('[Test] Looking for AI Mode toggle...');
+    const aiModeToggle = page.locator('#ai-mode').first();
+    await aiModeToggle.waitFor({ state: 'visible', timeout: 10000 });
 
-    if (!chatButtonVisible) {
-      console.log('[Test] ⚠️  Chat button not found, trying to navigate to group');
-      // May need to click on the group card
-      await page.click(`text=${groupName}`);
-      await page.waitForTimeout(2000);
+    // Check if already enabled
+    const isAlreadyEnabled = await aiModeToggle.isChecked().catch(() => false);
+    console.log('[Test] AI Mode already enabled?', isAlreadyEnabled);
+
+    if (!isAlreadyEnabled) {
+      console.log('[Test] Enabling AI Mode...');
+      await aiModeToggle.click();
+      await page.waitForTimeout(2000); // Wait for host discovery to start
     }
 
+    // Wait for host discovery to complete
+    console.log('[Test] Waiting for host discovery...');
+    const hostDiscoveryComplete = await page.locator('text=/host.*discovered|Selected host/i').first().isVisible({ timeout: 15000 }).catch(() => false);
+    console.log('[Test] Host discovery complete?', hostDiscoveryComplete);
+
+    // Take screenshot
+    await page.screenshot({ path: 'test-results/phase-8-1-ai-mode-enabled.png', fullPage: true });
+    console.log('[Test] Screenshot: phase-8-1-ai-mode-enabled.png');
+
+    console.log('[Test] ✅ AI Mode enabled and host discovered\n');
+
     // ========================================
-    // STEP 4: Measure USDC Approval
+    // STEP 4: Start AI Chat (triggers USDC approval + job creation)
     // ========================================
-    console.log('[Test] === STEP 4: Measure USDC Approval ===');
+    console.log('[Test] === STEP 4: Start AI Chat (Measure Approval + Job Creation) ===');
 
     const approvalStartTime = Date.now();
 
-    // Click "New Chat" to start AI session (triggers approval check)
-    await page.click('button:has-text("New Chat"), button:has-text("Start Chat")').catch(async () => {
-      // Alternative: look for link
-      await page.click('a:has-text("New Chat"), a:has-text("Start Chat")');
-    });
+    // Look for "💎 New AI Chat" button (only appears when AI mode enabled)
+    const newAIChatButton = page.locator('button:has-text("New AI Chat")').first();
+    const aiChatButtonVisible = await newAIChatButton.isVisible({ timeout: 10000 }).catch(() => false);
+    console.log('[Test] "New AI Chat" button visible?', aiChatButtonVisible);
 
-    await page.waitForTimeout(2000);
+    if (!aiChatButtonVisible) {
+      console.log('[Test] ⚠️  New AI Chat button not found, may still be loading');
+      await page.waitForTimeout(3000);
+    }
 
-    // Wait for AI mode toggle or session creation
-    // The approval may happen automatically in the background
-    // Look for "AI Session (Live)" badge or similar indicator
-    const aiSessionBadge = page.locator('text=/AI Session|Live/i').first();
+    // Click "💎 New AI Chat" to start AI session (triggers USDC approval + job creation)
+    console.log('[Test] Clicking "New AI Chat" button...');
+    await newAIChatButton.click();
+
+    console.log('[Test] Waiting for AI session to be created...');
+    await page.waitForTimeout(5000); // Wait for blockchain transaction + session creation
+
+    // Wait for navigation to chat session page
+    await page.waitForURL(/\/session-groups\/.*\/sess-/, { timeout: 30000 });
+    console.log('[Test] ✅ Navigated to chat session page');
+
+    // Wait for "AI Session (Live)" badge to appear
+    const aiSessionBadge = page.locator('text=/AI Session.*Live/i').first();
 
     // Wait up to 30 seconds for approval + job creation
     await aiSessionBadge.waitFor({ state: 'visible', timeout: 30000 }).catch(() => {
@@ -152,9 +177,9 @@ test.describe('Phase 8.1: Production Payment Flow', () => {
     console.log('[Test] ✅ USDC approved and job created\n');
 
     // ========================================
-    // STEP 5: Verify Job Created
+    // STEP 5: Verify Job Created and AI Session Active
     // ========================================
-    console.log('[Test] === STEP 5: Verify Job Creation ===');
+    console.log('[Test] === STEP 5: Verify Job Created and AI Session Active ===');
 
     // Look for Job ID in UI (may be in session metadata display)
     const jobIdDisplay = page.locator('text=/Job ID|JobID/i').first();
@@ -325,14 +350,15 @@ test.describe('Phase 8.1: Production Payment Flow', () => {
     }
     console.log(`Total Test Time:              ${totalTestTime}ms (${(totalTestTime / 1000).toFixed(1)}s)`);
     console.log('========================================');
-    console.log('Screenshots captured: 8');
+    console.log('Screenshots captured: 9');
     console.log('  1. phase-8-1-wallet-connected.png');
     console.log('  2. phase-8-1-group-created.png');
-    console.log('  3. phase-8-1-approval-complete.png');
-    console.log('  4. phase-8-1-job-created.png');
-    console.log('  5. phase-8-1-message-sent.png');
-    console.log('  6. phase-8-1-cost-tracking.png');
-    console.log('  7. phase-8-1-session-ended.png');
+    console.log('  3. phase-8-1-ai-mode-enabled.png');
+    console.log('  4. phase-8-1-approval-complete.png');
+    console.log('  5. phase-8-1-job-created.png');
+    console.log('  6. phase-8-1-message-sent.png');
+    console.log('  7. phase-8-1-cost-tracking.png');
+    console.log('  8. phase-8-1-session-ended.png');
     console.log('========================================\n');
 
     // Final assertions

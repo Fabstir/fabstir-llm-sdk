@@ -326,7 +326,11 @@ export function useSessionGroups(): UseSessionGroupsReturn {
       const jobMarketplaceAddress = process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!;
 
       // Check current allowance
-      const signer = await paymentManager.getSigner();
+      // Access signer from payment manager's internal property
+      const signer = (paymentManager as any).signer;
+      if (!signer) {
+        throw new Error('Signer not available from PaymentManager');
+      }
       const userAddress = await signer.getAddress();
 
       const { ethers } = await import('ethers');
@@ -401,6 +405,33 @@ export function useSessionGroups(): UseSessionGroupsReturn {
           pricing: hostConfig.pricing,
         },
       };
+
+      // 4. Update session metadata in S5 storage and memory cache
+      console.log('[useSessionGroups] 💾 Updating session metadata in S5 and memory...');
+      const currentUserAddress = managers.authManager.getUserAddress();
+      if (!currentUserAddress) {
+        console.error('[useSessionGroups] ❌ User address not available, cannot save session metadata');
+      } else {
+        const group = await managers.sessionGroupManager.getSessionGroup(groupId, currentUserAddress);
+        if (group && group.chatSessionsData && group.chatSessionsData[chatSession.sessionId]) {
+          // Update the session in the group's chatSessionsData
+          group.chatSessionsData[chatSession.sessionId] = aiSession;
+
+          // Update the chatStorage cache (critical for getChatSession to return updated metadata)
+          (managers.sessionGroupManager as any).chatStorage.set(chatSession.sessionId, aiSession);
+          console.log('[useSessionGroups] ✅ Session metadata updated in memory cache');
+
+          // Save the updated group to S5
+          await managers.sessionGroupManager.updateSessionGroup(
+            groupId,
+            currentUserAddress,
+            { chatSessionsData: group.chatSessionsData }
+          );
+          console.log('[useSessionGroups] ✅ Session metadata saved to S5');
+        } else {
+          console.warn('[useSessionGroups] ⚠️  Could not update session metadata in S5 (group or session not found)');
+        }
+      }
 
       console.log('[useSessionGroups] ✅ AI chat session created successfully');
 
