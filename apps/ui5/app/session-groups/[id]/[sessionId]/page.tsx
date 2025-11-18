@@ -277,6 +277,16 @@ export default function ChatSessionPage() {
 
     setMessages(prev => [...prev, userMessage]);
 
+    // Create placeholder for AI response (for streaming)
+    const aiMessageId = Date.now();
+    const aiMessagePlaceholder: ChatMessage = {
+      role: 'assistant',
+      content: '',
+      timestamp: aiMessageId,
+    };
+
+    setMessages(prev => [...prev, aiMessagePlaceholder]);
+
     try {
       // Send message via SessionManager (WebSocket to production host)
       const blockchainSessionId = BigInt(sessionMetadata.blockchainSessionId);
@@ -286,26 +296,43 @@ export default function ChatSessionPage() {
         message: message.substring(0, 50) + '...',
       });
 
-      // Use SessionManager.sendPromptStreaming for real-time responses
+      // Sub-phase 8.1.6: Use SessionManager.sendPromptStreaming with streaming callback
+      let streamedContent = '';
       const response = await managers!.sessionManager.sendPromptStreaming(
         blockchainSessionId,
-        message
+        message,
+        // Streaming callback - updates UI in real-time as tokens arrive
+        (token: string) => {
+          streamedContent += token;
+          // Update the AI message with accumulated content
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.timestamp === aiMessageId
+                ? { ...msg, content: streamedContent }
+                : msg
+            )
+          );
+        }
       );
 
-      console.log('[ChatSession] ✅ AI response received:', response.substring(0, 100) + '...');
+      console.log('[ChatSession] ✅ AI response complete:', response.substring(0, 100) + '...');
 
-      // Add AI response message
-      const aiMessage: ChatMessage = {
+      // Final update with complete response (in case streaming missed anything)
+      const finalAIMessage: ChatMessage = {
         role: 'assistant',
         content: response,
-        timestamp: Date.now(),
+        timestamp: aiMessageId,
       };
 
-      setMessages(prev => [...prev, aiMessage]);
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.timestamp === aiMessageId ? finalAIMessage : msg
+        )
+      );
 
       // Save messages to session group storage
       await sdkAddMessage(groupId, sessionId, userMessage);
-      await sdkAddMessage(groupId, sessionId, aiMessage);
+      await sdkAddMessage(groupId, sessionId, finalAIMessage);
 
       // Refresh group to update session metadata
       await selectGroup(groupId);
@@ -313,6 +340,18 @@ export default function ChatSessionPage() {
       return response;
     } catch (error: any) {
       console.error('[ChatSession] ❌ AI message failed:', error);
+
+      // Remove placeholder message on error
+      setMessages(prev => prev.filter(msg => msg.timestamp !== aiMessageId));
+
+      // Add error message
+      const errorMessage: ChatMessage = {
+        role: 'assistant',
+        content: `❌ Error: ${error.message}`,
+        timestamp: Date.now(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+
       throw error;
     }
   };
