@@ -78,15 +78,15 @@
   - 7.6: Embedding Generation Failure ⏳ MANUAL (requires host node failure simulation)
   - 7.7: Large Document Timeout ⏳ MANUAL (requires 10MB+ file and 2-minute timeout)
 
-- Phase 8: Performance & Blockchain Testing (33.3% - 2/6 complete, 1 blocked)
-  - 8.4: Page Load Performance ✅ COMPLETE (avg 5.57s, 30.1s test time)
+- Phase 8: Performance & Blockchain Testing (66.7% - 4/6 complete, 1 blocked)
+  - 8.2: S5 Upload Times ✅ COMPLETE (avg 0.02s, 22.3s test time, 3/3 files passing)
+  - 8.3: WebSocket Latency ✅ COMPLETE (avg 5.36s, 45.2s test time, 3/3 messages passing)
+  - 8.4: Page Load Performance ✅ COMPLETE (avg 5.57s, 46.4s test time, 5/5 pages passing)
   - 8.6: Embedding Performance ✅ COMPLETE (avg 2.5s/doc, 6.9s upload, 2/2 tests passing)
   - 8.1: Transaction Times ⚠️ BLOCKED (no blockchain transaction UI)
-  - 8.2: S5 Upload Times ⏳ PENDING (test timeout - needs fix)
-  - 8.3: WebSocket Latency ⏳ PENDING (no session groups in test env)
   - 8.5: Network Status 📋 MANUAL (informational only)
 
-**Total Progress**: 6.83/8 phases = **85.4% Complete** (Phases 1-6 complete, Phase 7: 57%, Phase 8: 33.3%, 40/48 sub-phase tests measurable)
+**Total Progress**: 7.24/8 phases = **90.5% Complete** (Phases 1-6 complete, Phase 7: 57%, Phase 8: 66.7%, 42/48 sub-phase tests measurable)
 
 **Bugs Fixed:** 33 (17 new from Phase 8.6)
   1. Fixed ES module `__dirname` error in test-setup.ts (used fileURLToPath)
@@ -1230,53 +1230,85 @@ The following sub-phases require manual testing as documented in `/workspace/doc
 **Test Reference**: Working implementation in harness at `/chat-context-rag-demo`
 
 ### Sub-phase 8.2: Measure S5 Upload Times ✅ COMPLETE
+
+**Goal**: Measure S5 upload performance with deferred embeddings
+
+**Status**: ✅ **COMPLETE** (2025-11-18)
+**Test File**: `/workspace/tests-ui5/test-performance.spec.ts` (Test 1)
+**Test Results**: 3/3 files passing (22.3 seconds)
+**Date Completed**: 2025-11-18
+
+**Test Steps**:
 - [x] Upload 3 files (varying sizes: 1KB, 100KB, 1MB) - reduced for speed
 - [x] Measure upload time for each:
   - 1KB file: **0.03s**
-  - 100KB file: **0.01s**
-  - 1MB file: **0.01s**
+  - 100KB file: **0.02s**
+  - 1MB file: **0.02s**
 - [x] Calculate average: **0.02s**
 - [x] **VERIFY**: All uploads < 2 seconds ✅ (deferred embeddings: S5 upload only, no vectorization)
 - [x] Note: Embedding generation now happens during session start (see Sub-phase 8.6)
 - [x] Take screenshots
 
-**Actual Duration**: 21.0 seconds (test execution time)
-**Status**: ✅ COMPLETE (automated test passing)
-**Automated Test**: test-performance.spec.ts (Test 1)
+**Performance Results**:
+```
+Upload Times (Deferred - No Embeddings):
+  1KB:    0.03s
+  100KB:  0.02s
+  1MB:    0.02s
+  Average: 0.02s
+  ✅ Target: < 2s per file PASS
 
-**Results**:
-- **Average Upload Time**: 0.02s ✅ (target: < 2s per file)
-- **Best**: 100KB and 1MB files (0.01s each)
-- **Total Upload Time**: 0.06s for all 3 files
-- **Key Finding**: Uploads are extremely fast with deferred embeddings architecture
+Total Upload Time: 0.07s for all 3 files
+Test Duration: 22.3 seconds
+```
+
+**Key Achievements**:
+- ✅ All uploads under 2 seconds (deferred embeddings working)
+- ✅ Average upload time: 0.02s (100x faster than target)
+- ✅ Extremely fast S5-only uploads (no embedding generation during upload)
+- ✅ Consistent performance across file sizes
 
 **Expected Range**: < 2 seconds per file (S5 upload only, embeddings deferred to session start)
 **Note**: Previous range was 2-10s when embeddings were generated during upload. With deferred embeddings, upload is S5-only and much faster.
 
 ### Sub-phase 8.3: Measure WebSocket Latency ✅ COMPLETE
+
+**Goal**: Measure WebSocket message latency for chat responses
+
+**Status**: ✅ **COMPLETE** (2025-11-18)
+**Test File**: `/workspace/tests-ui5/test-performance.spec.ts` (Test 3)
+**Test Results**: 3/3 messages passing (45.2 seconds)
+**Date Completed**: 2025-11-18
+
+**Test Steps**:
 - [x] Send 3 chat messages (reduced for speed)
-- [x] Measure time to first chunk for each
-- [x] Calculate average TTFB: **2.11s** (estimated)
+- [x] Measure time to first byte (TTFB) for each
+- [x] Calculate average TTFB: **1.61s** (estimated)
 - [x] Measure total response time
-- [x] Calculate average: **7.04s**
+- [x] Calculate average total: **5.36s**
 - [x] Take screenshots
 
-**Actual Duration**: 63.9 seconds (test execution time)
-**Status**: ✅ COMPLETE (automated test passing)
-**Automated Test**: test-performance.spec.ts (Test 3)
+**Performance Results**:
+```
+Message Latencies:
+  Message 1: TTFB 1.81s, Total 6.02s ✅ Within target
+  Message 2: TTFB 1.22s, Total 4.05s ✅ Fast response
+  Message 3: TTFB 1.81s, Total 6.02s ✅ Within target
 
-**Results**:
-| Message | TTFB | Total Time | Status |
-|---------|------|------------|--------|
-| Message 1 | 2.00s | 6.66s | ✅ Fast |
-| Message 2 | 2.01s | 6.69s | ✅ Fast |
-| Message 3 | 2.32s | 7.75s | ✅ Fast |
+Average TTFB:  1.61s (estimated)
+Average Total: 5.36s
+✅ Target: < 15s PASS (Good latency)
 
-- **Average TTFB**: 2.11s (estimated)
-- **Average Total**: 7.04s ✅ (target: < 15s)
-- **Key Finding**: Excellent latency - all messages respond in < 8s
+Test Duration: 45.2 seconds
+```
 
-**Expected Range**: 5-15 seconds per response
+**Key Achievements**:
+- ✅ All messages respond in < 7 seconds (64% under 15s target)
+- ✅ Average total time: 5.36s (excellent latency)
+- ✅ Average TTFB: 1.61s (fast first byte)
+- ✅ Consistent performance across all messages
+
+**Expected Range**: 5-15 seconds per response (all messages well under target)
 
 ### Sub-phase 8.4: Page Load Performance ✅ COMPLETE
 - [x] Measure dashboard load time: **7.96s**
@@ -1529,7 +1561,7 @@ curl http://localhost:3002
 
 ---
 
-**Last Updated**: 2025-11-18 (Phase 8.6 COMPLETE - Deferred embeddings performance validated, 17 fixes applied, 2/2 tests passing)
+**Last Updated**: 2025-11-18 (Phase 8: 66.7% COMPLETE - 4/6 sub-phases passing: 8.2 S5 uploads, 8.3 WebSocket latency, 8.4 page loads, 8.6 embedding performance)
 **Next Update**: After completing Phase 7 manual tests and remaining Phase 8 sub-phases
 **Architecture Changes**: Aligned with deferred embeddings implementation (docs/IMPLEMENTATION_DEFERRED_EMBEDDINGS.md Phases 1-9 complete)
 **SDK Bugs Resolved**: 6 critical bugs fixed - AuthManager constructor, SessionGroupManager validation, database name mapping, databaseExists stub, S5 race condition, SessionGroupManager object mutation
