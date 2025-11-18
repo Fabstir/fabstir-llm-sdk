@@ -70,7 +70,7 @@ export default function NotificationsPage() {
           {
             id: 'notif-3',
             type: 'system',
-            title: 'Welcome to Fabstir UI4',
+            title: 'Welcome to Fabstir UI5',
             message: 'Thanks for trying out the notification system!',
             timestamp: Date.now() - 86400000,
             read: true,

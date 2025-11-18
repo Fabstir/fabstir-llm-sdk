@@ -391,15 +391,14 @@ export function useSessionGroups(): UseSessionGroupsReturn {
       );
 
       // 3. Store blockchain metadata in session
-      // Note: ChatSession interface may need extension to include jobId
       const aiSession = {
         ...chatSession,
-        jobId,
         // Store metadata for UI to distinguish AI vs mock sessions
         metadata: {
           ...chatSession.metadata,
           sessionType: 'ai' as const,
           blockchainSessionId: sessionId.toString(),
+          blockchainJobId: jobId?.toString(), // Convert BigInt to string for JSON serialization
           hostAddress: hostConfig.address,
           model: hostConfig.models[0],
           pricing: hostConfig.pricing,
@@ -440,7 +439,11 @@ export function useSessionGroups(): UseSessionGroupsReturn {
         await selectGroup(groupId);
       }
 
-      return aiSession;
+      // Return session with jobId for caller (in-memory only, not persisted)
+      return {
+        ...aiSession,
+        jobId, // BigInt - only in return value, not persisted to S5
+      };
     } catch (err) {
       console.error('[useSessionGroups] ❌ Failed to start AI chat:', err);
       const errorMsg = err instanceof Error ? err.message : 'Failed to start AI chat session';

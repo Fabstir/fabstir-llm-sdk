@@ -57,7 +57,7 @@ export function useHostDiscovery() {
         address: h.address,
         endpoint: h.apiUrl,
         models: h.supportedModels || [],
-        pricing: h.minPricePerTokenStable || 2000, // Default 0.002 USDC per token
+        pricing: Number(h.minPricePerTokenStable || 2000n), // Convert BigInt to number
         stake: h.stake?.toString() || '0',
         status: h.isActive ? 'active' : 'inactive',
       }));

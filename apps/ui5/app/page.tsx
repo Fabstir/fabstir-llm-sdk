@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useWallet } from '@/hooks/use-wallet';
+import { useWallet } from '@/contexts/wallet-context';
 import { useSDK } from '@/hooks/use-sdk';
 import { StatsCard } from '@/components/dashboard/stats-card';
 import {
@@ -44,11 +44,28 @@ export default function HomePage() {
   const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Debug logging
+  useEffect(() => {
+    const state = { isConnected, isInitialized, loading, managers: !!managers };
+    console.log('[Dashboard] State:', state);
+
+    // Also log to see in server logs
+    if (typeof window !== 'undefined') {
+      console.warn('[Dashboard] VISIBLE LOG:', JSON.stringify(state));
+    }
+  }, [isConnected, isInitialized, loading, managers]);
+
   // Load dashboard stats
   useEffect(() => {
     async function loadStats() {
-      if (!isConnected || !isInitialized || !managers) {
+      // Keep loading true until both wallet connected AND SDK initialized
+      if (!isConnected) {
         setLoading(false);
+        return;
+      }
+
+      if (!isInitialized || !managers) {
+        setLoading(true);  // Show loading spinner while SDK initializes
         return;
       }
 
@@ -184,41 +201,39 @@ export default function HomePage() {
     loadStats();
   }, [isConnected, isInitialized, managers]);
 
-  if (!isConnected) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-4xl font-bold tracking-tight">
-            Welcome to Fabstir UI4
-          </h1>
-          <p className="mt-4 text-lg text-muted-foreground">
-            Connect your wallet to get started
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>
-          <p className="mt-4 text-muted-foreground">Loading dashboard...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-8">
-      {/* Header */}
+      {/* Header - always visible */}
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
         <p className="mt-2 text-muted-foreground">
           Overview of your AI sessions and vector databases
         </p>
       </div>
+
+      {/* Not connected state */}
+      {!isConnected ? (
+        <div className="flex min-h-[40vh] items-center justify-center">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold tracking-tight">
+              Welcome to Fabstir UI5
+            </h2>
+            <p className="mt-4 text-lg text-muted-foreground">
+              Connect your wallet to get started
+            </p>
+          </div>
+        </div>
+      ) : loading ? (
+        /* Loading state - inline, doesn't block navigation */
+        <div className="text-center py-12">
+          <div className="inline-block h-12 w-12 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>
+          <p className="mt-4 text-muted-foreground">
+            {!isInitialized ? 'Initializing SDK...' : 'Loading dashboard...'}
+          </p>
+        </div>
+      ) : (
+        /* Dashboard content */
+        <>
 
       {/* Stats Grid */}
       <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
@@ -353,6 +368,8 @@ export default function HomePage() {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }

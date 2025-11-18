@@ -5,7 +5,9 @@ import { useAppShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { ShortcutsModal } from '@/components/shortcuts-modal';
 import { GlobalSearch } from '@/components/global-search';
 import { Breadcrumbs } from '@/components/breadcrumbs';
+import { Navbar } from '@/components/layout/navbar';
 import { ToastProvider } from '@/contexts/toast-context';
+import { WalletProvider } from '@/contexts/wallet-context';
 
 export function ClientLayout({ children }: { children: React.ReactNode }) {
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -28,17 +30,22 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <ToastProvider>
-      <Breadcrumbs />
-      {children}
-      <ShortcutsModal
-        isOpen={showShortcuts}
-        onClose={() => setShowShortcuts(false)}
-      />
-      <GlobalSearch
-        isOpen={showSearch}
-        onClose={() => setShowSearch(false)}
-      />
-    </ToastProvider>
+    <WalletProvider>
+      <ToastProvider>
+        <Navbar />
+        <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+          <Breadcrumbs />
+          {children}
+        </main>
+        <ShortcutsModal
+          isOpen={showShortcuts}
+          onClose={() => setShowShortcuts(false)}
+        />
+        <GlobalSearch
+          isOpen={showSearch}
+          onClose={() => setShowSearch(false)}
+        />
+      </ToastProvider>
+    </WalletProvider>
   );
 }

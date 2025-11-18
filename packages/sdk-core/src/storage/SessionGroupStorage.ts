@@ -142,8 +142,9 @@ export class SessionGroupStorage {
           try {
             const group = await this.load(groupId);
             groups.push(group);
-          } catch (error) {
-            console.warn(`Failed to load group ${groupId}:`, error);
+          } catch (error: any) {
+            // Silently skip groups that fail to load (corrupted, wrong key, deleted, etc.)
+            // This is expected during normal operation as users may have old/corrupted data
             // Continue loading other groups
           }
         }

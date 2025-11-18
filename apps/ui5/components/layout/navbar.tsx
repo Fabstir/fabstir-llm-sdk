@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useWallet } from '@/hooks/use-wallet';
+import { useWallet } from '@/contexts/wallet-context';
 import { useSDK } from '@/hooks/use-sdk';
 import { useEffect, useState } from 'react';
 import { cn, truncateAddress } from '@/lib/utils';
@@ -84,7 +84,7 @@ export function Navbar() {
           {/* Logo and Navigation */}
           <div className="flex items-center gap-8">
             <Link href="/" className="text-xl font-bold text-primary">
-              Fabstir UI4
+              Fabstir UI5
             </Link>
 
             {/* Desktop Navigation */}

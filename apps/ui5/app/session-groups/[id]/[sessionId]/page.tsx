@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useWallet } from '@/hooks/use-wallet';
+import { useWallet } from '@/contexts/wallet-context';
 import { useSDK } from '@/hooks/use-sdk';
 import { useSessionGroups } from '@/hooks/use-session-groups';
 import { useVectorDatabases, type EmbeddingProgress } from '@/hooks/use-vector-databases';
@@ -246,8 +246,22 @@ export default function ChatSessionPage() {
     if (isSpecialRoute) return;
 
     try {
+      console.log('[ChatSession] 🔄 Loading messages from storage...', {
+        groupId,
+        sessionId,
+        timestamp: new Date().toISOString()
+      });
       const session = await getChatSession(groupId, sessionId);
+      console.log('[ChatSession] 🔍 getChatSession result:', {
+        found: !!session,
+        hasMessages: !!session?.messages,
+        messageCount: session?.messages?.length || 0
+      });
       if (session) {
+        console.log('[ChatSession] 📦 Loaded messages from storage:', {
+          count: session.messages?.length || 0,
+          messages: session.messages?.map(m => ({ role: m.role, content: m.content.substring(0, 50) }))
+        });
         setMessages(session.messages || []);
 
         // --- Phase 4: Detect session type from metadata ---
@@ -266,7 +280,11 @@ export default function ChatSessionPage() {
           setSessionMetadata(null);
         }
       } else {
-        setMessages([]);
+        // Session not found in storage - could be timing issue with S5 save
+        // Don't clear messages if we already have some (preserve optimistic updates)
+        console.log('[ChatSession] ⚠️  Session not found in storage, preserving any existing messages');
+        // Note: We don't call setMessages([]) here to preserve optimistic updates
+        // The session might still be saving to S5 in the background
       }
     } catch (error) {
       console.error('Failed to load messages:', error);
@@ -274,12 +292,20 @@ export default function ChatSessionPage() {
     }
   }, [getChatSession, groupId, sessionId, isSpecialRoute]);
 
-  // Load session data on mount
+  // Load session data on mount and when route changes
+  // Note: Only reload when groupId/sessionId change, NOT when function refs change
   useEffect(() => {
+    console.log('[ChatSession] useEffect triggered:', {
+      isConnected,
+      isSpecialRoute,
+      groupId,
+      sessionId
+    });
     if (!isConnected) return;
     if (isSpecialRoute) return; // Skip for special routes
 
     const loadData = async () => {
+      console.log('[ChatSession] 📥 Loading data for session...');
       await selectGroup(groupId);
       await loadMessages();
 
@@ -291,7 +317,8 @@ export default function ChatSessionPage() {
     };
 
     loadData();
-  }, [isConnected, groupId, sessionId, selectGroup, loadMessages, processPendingEmbeddings, isSpecialRoute]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, groupId, sessionId, isSpecialRoute]);
 
   // Update local state when selectedGroup changes
   useEffect(() => {
@@ -306,8 +333,11 @@ export default function ChatSessionPage() {
   }, [selectedGroup, groupId]);
 
   // --- Phase 4: Handle AI Message via WebSocket ---
-  const handleAIMessage = async (message: string, files?: File[]) => {
-    if (!sessionMetadata || !sessionMetadata.blockchainSessionId) {
+  const handleAIMessage = async (message: string, files?: File[], metadata?: any) => {
+    // Use provided metadata or fall back to state (for backward compatibility)
+    const activeMetadata = metadata || sessionMetadata;
+
+    if (!activeMetadata || !activeMetadata.blockchainSessionId) {
       throw new Error('AI session metadata not available');
     }
 
@@ -318,7 +348,16 @@ export default function ChatSessionPage() {
       timestamp: Date.now(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    console.log('[ChatSession] 📝 Adding user message to state:', {
+      currentMessageCount: messages.length,
+      newMessage: { role: userMessage.role, content: userMessage.content.substring(0, 50) }
+    });
+    setMessages(prev => {
+      console.log('[ChatSession] 📝 User message - prev state:', prev.length);
+      const newState = [...prev, userMessage];
+      console.log('[ChatSession] 📝 User message - new state:', newState.length);
+      return newState;
+    });
 
     // Create placeholder for AI response (for streaming)
     const aiMessageId = Date.now();
@@ -328,29 +367,72 @@ export default function ChatSessionPage() {
       timestamp: aiMessageId,
     };
 
-    setMessages(prev => [...prev, aiMessagePlaceholder]);
+    console.log('[ChatSession] 📝 Adding AI placeholder to state');
+    setMessages(prev => {
+      console.log('[ChatSession] 📝 AI placeholder - prev state:', prev.length);
+      const newState = [...prev, aiMessagePlaceholder];
+      console.log('[ChatSession] 📝 AI placeholder - new state:', newState.length);
+      return newState;
+    });
 
     try {
       // Send message via SessionManager (WebSocket to production host)
-      const blockchainSessionId = BigInt(sessionMetadata.blockchainSessionId);
+      const blockchainSessionId = BigInt(activeMetadata.blockchainSessionId);
 
       console.log('[ChatSession] 🚀 Sending AI message via WebSocket...', {
         sessionId: blockchainSessionId.toString(),
         message: message.substring(0, 50) + '...',
       });
 
+      // Build conversation context - hosts are STATELESS, client maintains conversation state
+      // For GPT-OSS-20B, node expects Harmony format multi-turn conversation
+      // Format: <|start|>user<|message|>...<|end|><|start|>assistant<|channel|>final<|message|>...<|end|>
+
+      // Get previous exchanges (filter out system messages)
+      const previousExchanges = messages.filter(m => m.role !== 'system');
+
+      // Build Harmony format conversation history
+      let fullPrompt = '';
+
+      if (previousExchanges.length > 0) {
+        // Include previous conversation in Harmony format
+        const harmonyHistory = previousExchanges
+          .map(m => {
+            if (m.role === 'user') {
+              return `<|start|>user<|message|>${m.content}<|end|>`;
+            } else {
+              // assistant
+              return `<|start|>assistant<|channel|>final<|message|>${m.content}<|end|>`;
+            }
+          })
+          .join('\n');
+
+        // Add current user message (node will add assistant prompt)
+        fullPrompt = `${harmonyHistory}\n<|start|>user<|message|>${message}<|end|>`;
+      } else {
+        // First message
+        fullPrompt = message;
+      }
+
+      console.log('[ChatSession] 📜 Conversation context:', {
+        previousMessageCount: previousExchanges.length,
+        fullPromptLength: fullPrompt.length,
+        fullPromptPreview: fullPrompt.substring(0, 200) + '...'
+      });
+
       // Sub-phase 8.1.6: Use SessionManager.sendPromptStreaming with streaming callback
       let streamedContent = '';
       const response = await managers!.sessionManager.sendPromptStreaming(
         blockchainSessionId,
-        message,
+        fullPrompt, // Send full conversation history, not just current message
         // Streaming callback - updates UI in real-time as tokens arrive
         (token: string) => {
           streamedContent += token;
           // Update the AI message with accumulated content
+          // CRITICAL: Also check role to prevent updating user messages if timestamps collide
           setMessages(prev =>
             prev.map(msg =>
-              msg.timestamp === aiMessageId
+              msg.timestamp === aiMessageId && msg.role === 'assistant'
                 ? { ...msg, content: streamedContent }
                 : msg
             )
@@ -367,22 +449,32 @@ export default function ChatSessionPage() {
         timestamp: aiMessageId,
       };
 
-      setMessages(prev =>
-        prev.map(msg =>
-          msg.timestamp === aiMessageId ? finalAIMessage : msg
-        )
-      );
+      console.log('[ChatSession] 📝 Updating AI placeholder with final response');
+      setMessages(prev => {
+        console.log('[ChatSession] 📝 Final update - prev state:', prev.length, prev.map(m => m.role));
+        // CRITICAL: Also check role to prevent replacing user messages if timestamps collide
+        const newState = prev.map(msg =>
+          msg.timestamp === aiMessageId && msg.role === 'assistant' ? finalAIMessage : msg
+        );
+        console.log('[ChatSession] 📝 Final update - new state:', newState.length, newState.map(m => m.role));
+        return newState;
+      });
 
       // Sub-phase 8.1.7: Track tokens and cost for user message + AI response
       trackTokensAndCost(message); // User input tokens
       trackTokensAndCost(response); // AI response tokens
 
       // Save messages to session group storage
+      console.log('[ChatSession] 💾 Saving messages to S5...', {
+        userMessage: { role: userMessage.role, content: userMessage.content.substring(0, 50) },
+        aiMessage: { role: finalAIMessage.role, content: finalAIMessage.content.substring(0, 50) }
+      });
       await sdkAddMessage(groupId, sessionId, userMessage);
       await sdkAddMessage(groupId, sessionId, finalAIMessage);
 
-      // Refresh group to update session metadata
-      await selectGroup(groupId);
+      // Note: Don't call selectGroup here - it triggers useEffect which reloads messages
+      // Messages are already in state via optimistic updates, and SDK saves handle persistence
+      console.log('[ChatSession] ✅ Messages saved to storage');
 
       return response;
     } catch (error: any) {
@@ -485,9 +577,28 @@ export default function ChatSessionPage() {
 
     try {
       // --- Phase 4: Route to AI or mock based on session type ---
-      if (sessionType === 'ai') {
+      // Check session metadata directly to avoid stale state issues
+      const session = await getChatSession(groupId, sessionId);
+      const isAISession = session?.metadata?.sessionType === 'ai';
+
+      console.log('[ChatSession] 🔍 Session type check:', {
+        stateValue: sessionType,
+        metadataValue: session?.metadata?.sessionType,
+        sessionFound: !!session,
+        hasMetadata: !!session?.metadata,
+        willRouteToAI: isAISession
+      });
+
+      if (isAISession) {
         console.log('[ChatSession] Routing to AI message handler');
-        await handleAIMessage(message, files);
+        // Use session metadata if available, otherwise fall back to state
+        const metadata = session?.metadata || sessionMetadata;
+        console.log('[ChatSession] Using metadata:', {
+          fromSession: !!session?.metadata,
+          fromState: !session?.metadata && !!sessionMetadata,
+          hasBlockchainSessionId: !!metadata?.blockchainSessionId
+        });
+        await handleAIMessage(message, files, metadata);
       } else {
         console.log('[ChatSession] Routing to mock message handler');
 
@@ -524,8 +635,8 @@ export default function ChatSessionPage() {
         // Reload messages from SDK to get the AI-generated response
         await loadMessages();
 
-        // Refresh group to update session metadata
-        await selectGroup(groupId);
+        // Note: Don't call selectGroup - it triggers useEffect which causes extra reloads
+        console.log('[ChatSession] ✅ Mock message saved and AI response loaded');
       }
     } catch (error: any) {
       console.error('Failed to send message:', error);

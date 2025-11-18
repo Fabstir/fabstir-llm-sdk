@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { Trash2, X, FileText, Database } from "lucide-react";
-import { useWallet } from "@/hooks/use-wallet";
+import { useWallet } from "@/contexts/wallet-context";
 import { useSDK } from "@/hooks/use-sdk";
 import { useSessionGroups } from "@/hooks/use-session-groups";
 import { useVectorDatabases, type EmbeddingProgress } from "@/hooks/use-vector-databases";
@@ -65,7 +65,8 @@ export default function SessionGroupDetailPage() {
   const [embeddingProgress, setEmbeddingProgress] = useState<EmbeddingProgress | null>(null);
 
   // --- AI Mode State (Phase 1) ---
-  const [aiModeEnabled, setAiModeEnabled] = useState(false);
+  // Default to true in UI5 (production app) - users want real AI, not mock
+  const [aiModeEnabled, setAiModeEnabled] = useState(true);
 
   // --- AI Session Creation State (Phase 3) ---
   const [isCreatingAISession, setIsCreatingAISession] = useState(false);
@@ -609,17 +610,22 @@ export default function SessionGroupDetailPage() {
 
             <div className="flex gap-2">
               {/* AI Chat Button (Phase 3) */}
-              {aiModeEnabled && discoveredHost ? (
+              {aiModeEnabled ? (
                 <button
                   className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-md hover:from-purple-700 hover:to-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                   onClick={handleStartAIChat}
                   disabled={isCreatingAISession || !discoveredHost}
-                  title="Create AI chat session with blockchain payment"
+                  title={discoveredHost ? "Create AI chat session with blockchain payment" : "Waiting for host discovery..."}
                 >
                   {isCreatingAISession ? (
                     <>
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                       Creating AI Session...
+                    </>
+                  ) : !discoveredHost ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Discovering Hosts...
                     </>
                   ) : (
                     <>

@@ -136,8 +136,11 @@ export class SessionGroupManager implements ISessionGroupManager {
         // Update in-memory cache
         userGroups.forEach(g => this.groups.set(g.id, g));
         return userGroups;
-      } catch (err) {
-        console.error('[SessionGroupManager.listSessionGroups] Failed to load from S5 storage:', err);
+      } catch (err: any) {
+        // Only log unexpected errors (directory not found is expected on first load)
+        if (!err.message?.includes('not found') && !err.message?.includes('does not exist')) {
+          console.error('[SessionGroupManager.listSessionGroups] Failed to load from S5 storage:', err);
+        }
         // Fall back to in-memory cache
       }
     }
