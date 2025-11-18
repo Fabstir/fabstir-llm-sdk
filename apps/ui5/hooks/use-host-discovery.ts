@@ -47,7 +47,7 @@ export function useHostDiscovery() {
 
       // Filter hosts that support models
       const hostsWithModels = discoveredHosts.filter(
-        (h: any) => h.models && h.models.length > 0
+        (h: any) => h.supportedModels && h.supportedModels.length > 0
       );
 
       console.log(`[HostDiscovery] ✅ Found ${hostsWithModels.length} hosts with models`);
@@ -55,11 +55,11 @@ export function useHostDiscovery() {
       // Convert to our interface format
       const formattedHosts: DiscoveredHost[] = hostsWithModels.map((h: any) => ({
         address: h.address,
-        endpoint: h.endpoint,
-        models: h.models || [],
-        pricing: h.pricing || 2000, // Default 0.002 USDC per token
+        endpoint: h.apiUrl,
+        models: h.supportedModels || [],
+        pricing: h.minPricePerTokenStable || 2000, // Default 0.002 USDC per token
         stake: h.stake?.toString() || '0',
-        status: h.status || 'active',
+        status: h.isActive ? 'active' : 'inactive',
       }));
 
       setHosts(formattedHosts);

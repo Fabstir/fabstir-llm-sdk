@@ -136,7 +136,7 @@ export function PaymentPanel({
   };
 
   const estimatedCost = selectedHost
-    ? `~$${((selectedHost.pricing / 1000000) * 1000).toFixed(2)} per 1K tokens`
+    ? `~$${((Number(selectedHost.pricing) / 1000000) * 1000).toFixed(2)} per 1K tokens`
     : 'Select a host to see pricing';
 
   return (
@@ -207,7 +207,7 @@ export function PaymentPanel({
                             Model: {selectedHost.models[0] || 'Unknown'}
                           </p>
                           <p className="text-xs text-blue-700">
-                            Pricing: ${(selectedHost.pricing / 1000000).toFixed(4)} per token
+                            Pricing: ${(Number(selectedHost.pricing) / 1000000).toFixed(4)} per token
                           </p>
                           <p className="text-xs text-blue-700">
                             Endpoint: {selectedHost.endpoint}
@@ -255,7 +255,7 @@ export function PaymentPanel({
                             {host.address.slice(0, 10)}...{host.address.slice(-8)}
                           </p>
                           <p className="text-xs text-gray-600">
-                            {host.models[0] || 'Unknown'} • ${(host.pricing / 1000000).toFixed(4)}/token
+                            {host.models[0] || 'Unknown'} • ${(Number(host.pricing) / 1000000).toFixed(4)}/token
                           </p>
                         </button>
                       ))}
