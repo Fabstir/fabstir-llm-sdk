@@ -224,9 +224,18 @@ test.describe('Phase 8.1: Production Payment Flow', () => {
     await messageInput.fill(testMessage);
     console.log(`[Test] Typed message: "${testMessage}"`);
 
-    // Click send button
-    const sendButton = page.locator('button[type="submit"], button:has-text("Send")').first();
-    await sendButton.click();
+    // Click send button (blue icon button on the right side of input)
+    // The button should be visible next to the input field
+    const sendButton = page.locator('button:near(textarea, 100):has(svg)').last();
+    // Alternative: just find any button with SVG near the textarea
+    const sendButtonAlt = page.locator('form button').last();
+
+    // Try to click - use whichever is visible
+    const buttonToClick = await sendButton.isVisible().then(visible =>
+      visible ? sendButton : sendButtonAlt
+    ).catch(() => sendButtonAlt);
+
+    await buttonToClick.click({ timeout: 10000 });
     console.log('[Test] Clicked send button');
 
     // Wait for AI response to appear
