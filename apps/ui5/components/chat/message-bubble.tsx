@@ -34,9 +34,13 @@ export function MessageBubble({ message, onSourceClick }: MessageBubbleProps) {
   const isAssistant = message.role === 'assistant';
 
   if (isSystem) {
+    // Sub-phase 8.1.7: Different styling for checkpoint vs other system messages
+    const isCheckpoint = message.content.includes('💎 Checkpoint');
+    const bgColor = isCheckpoint ? 'bg-purple-50 border-purple-200 text-purple-800' : 'bg-yellow-50 border-yellow-200 text-yellow-800';
+
     return (
       <div className="flex justify-center my-4">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-2 flex items-center gap-2 text-sm text-yellow-800">
+        <div className={`${bgColor} border rounded-lg px-4 py-2 flex items-center gap-2 text-sm`}>
           <AlertCircle className="h-4 w-4" />
           <span>{message.content}</span>
         </div>

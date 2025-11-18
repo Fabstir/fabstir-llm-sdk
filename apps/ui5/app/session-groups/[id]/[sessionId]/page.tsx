@@ -47,6 +47,13 @@ export default function ChatSessionPage() {
   const [sessionType, setSessionType] = useState<'mock' | 'ai'>('mock');
   const [sessionMetadata, setSessionMetadata] = useState<any>(null);
 
+  // --- Sub-phase 8.1.7: Payment Settlement Tracking ---
+  const [totalTokens, setTotalTokens] = useState(0);
+  const [totalCost, setTotalCost] = useState(0);
+  const [lastCheckpointTokens, setLastCheckpointTokens] = useState(0);
+  const PROOF_INTERVAL = 1000; // Checkpoint every 1000 tokens
+  const PRICE_PER_TOKEN = 2000; // 0.002 USDC per token (from session config)
+
   // Embedding progress state
   const [embeddingProgress, setEmbeddingProgress] = useState<EmbeddingProgress | null>(null);
   const [documentQueue, setDocumentQueue] = useState<string[]>([]);
@@ -89,6 +96,42 @@ export default function ChatSessionPage() {
       }, 3000);
     }
   }, [processingStartTimes]);
+
+  // --- Sub-phase 8.1.7: Token Tracking Helper ---
+  const trackTokensAndCost = useCallback((text: string) => {
+    // Rough estimate: ~4 characters per token (GPT tokenization)
+    const estimatedTokens = Math.ceil(text.length / 4);
+
+    console.log(`[ChatSession] 💰 Tracking ${estimatedTokens} tokens`);
+
+    setTotalTokens(prev => {
+      const newTotal = prev + estimatedTokens;
+      console.log(`[ChatSession] Total tokens: ${prev} → ${newTotal}`);
+
+      // Check if we've crossed a checkpoint threshold
+      if (Math.floor(newTotal / PROOF_INTERVAL) > Math.floor(prev / PROOF_INTERVAL)) {
+        const checkpointNumber = Math.floor(newTotal / PROOF_INTERVAL);
+        console.log(`[ChatSession] 💎 Checkpoint ${checkpointNumber} reached!`);
+
+        // Add system message for checkpoint
+        const checkpointMsg: ChatMessage = {
+          role: 'system',
+          content: `💎 Checkpoint: ${checkpointNumber * PROOF_INTERVAL} tokens processed`,
+          timestamp: Date.now(),
+        };
+        setMessages(prev => [...prev, checkpointMsg]);
+      }
+
+      return newTotal;
+    });
+
+    setTotalCost(prev => {
+      const cost = (estimatedTokens * PRICE_PER_TOKEN) / 1_000_000; // Convert to USDC
+      const newCost = prev + cost;
+      console.log(`[ChatSession] Cost: $${prev.toFixed(4)} → $${newCost.toFixed(4)} USDC`);
+      return newCost;
+    });
+  }, [PROOF_INTERVAL, PRICE_PER_TOKEN]);
 
   // Process Pending Embeddings (Background)
   const processPendingEmbeddings = useCallback(async () => {
@@ -330,6 +373,10 @@ export default function ChatSessionPage() {
         )
       );
 
+      // Sub-phase 8.1.7: Track tokens and cost for user message + AI response
+      trackTokensAndCost(message); // User input tokens
+      trackTokensAndCost(response); // AI response tokens
+
       // Save messages to session group storage
       await sdkAddMessage(groupId, sessionId, userMessage);
       await sdkAddMessage(groupId, sessionId, finalAIMessage);
@@ -526,6 +573,29 @@ export default function ChatSessionPage() {
             </div>
           </div>
         </div>
+
+        {/* Sub-phase 8.1.7: Payment Cost Display */}
+        {sessionType === 'ai' && totalTokens > 0 && (
+          <div className="px-6 py-3 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-blue-50">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-700">💎 Tokens:</span>
+                  <span className="text-sm font-bold text-purple-700">{totalTokens.toLocaleString()}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-700">💰 Cost:</span>
+                  <span className="text-sm font-bold text-blue-700">${totalCost.toFixed(4)} USDC</span>
+                </div>
+              </div>
+              {totalTokens >= PROOF_INTERVAL && (
+                <div className="text-xs text-gray-500">
+                  Next checkpoint: {PROOF_INTERVAL - (totalTokens % PROOF_INTERVAL)} tokens
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Embedding Progress Bar */}
         {embeddingProgress && (
