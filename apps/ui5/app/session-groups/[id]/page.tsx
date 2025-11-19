@@ -875,15 +875,36 @@ export default function SessionGroupDetailPage() {
                             {session.title}
                           </h4>
                           <div className="flex items-center gap-2">
-                            <span
-                              className={`text-xs px-2 py-1 rounded ${
-                                session.active
-                                  ? "bg-green-100 text-green-700"
-                                  : "bg-gray-100 text-gray-600"
-                              }`}
-                            >
-                              {session.active ? "Active" : "Archived"}
-                            </span>
+                            {/* Session status badge - read from metadata.blockchainStatus */}
+                            {(() => {
+                              const status = (session as any).metadata?.blockchainStatus;
+                              if (status === 'active') {
+                                return (
+                                  <span className="text-xs px-2 py-1 rounded bg-green-100 text-green-700">
+                                    🟢 Active
+                                  </span>
+                                );
+                              } else if (status === 'ended') {
+                                return (
+                                  <span className="text-xs px-2 py-1 rounded bg-red-100 text-red-700">
+                                    🔴 Ended
+                                  </span>
+                                );
+                              } else if (status === 'completed') {
+                                return (
+                                  <span className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700">
+                                    ✅ Completed
+                                  </span>
+                                );
+                              } else {
+                                // Mock/local session (no blockchain status)
+                                return (
+                                  <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600">
+                                    Local
+                                  </span>
+                                );
+                              }
+                            })()}
                             <button
                               onClick={(e) => {
                                 e.preventDefault();

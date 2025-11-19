@@ -44,6 +44,7 @@ export interface UseSessionGroupsReturn {
   listChatSessionsWithData: (groupId: string) => Promise<ChatSession[]>;
   addMessage: (groupId: string, sessionId: string, message: ChatMessage) => Promise<void>;
   deleteChat: (groupId: string, sessionId: string) => Promise<void>;
+  endAISession: (groupId: string, sessionId: string) => Promise<void>;
   searchChats: (groupId: string, query: string) => Promise<ChatSession[]>;
 
   // Sharing Operations
@@ -404,8 +405,10 @@ export function useSessionGroups(): UseSessionGroupsReturn {
           blockchainSessionId: sessionId.toString(),
           blockchainJobId: jobId?.toString(), // Convert BigInt to string for JSON serialization
           hostAddress: hostConfig.address,
+          hostEndpoint: hostConfig.endpoint, // Store endpoint for session continuation
           model: hostConfig.models[0],
           pricing: hostConfig.pricing,
+          blockchainStatus: 'active' as const, // Track session status for UX
         },
       };
 
@@ -561,6 +564,81 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     } catch (err) {
       console.error('[useSessionGroups.deleteChat] ERROR:', err);
       const errorMsg = err instanceof Error ? err.message : 'Failed to delete chat session';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [managers, selectedGroup, selectGroup]);
+
+  const endAISession = useCallback(async (
+    groupId: string,
+    sessionId: string
+  ): Promise<void> => {
+    console.log(`[useSessionGroups.endAISession] Ending AI session ${sessionId}`);
+
+    if (!managers?.sessionManager || !managers?.sessionGroupManager || !managers?.authManager) {
+      console.warn('[useSessionGroups.endAISession] Required managers not available');
+      return;
+    }
+
+    try {
+      setError(null);
+
+      // Get the session to retrieve blockchain metadata
+      const userAddress = managers.authManager.getUserAddress();
+      if (!userAddress) {
+        throw new Error('User address not available');
+      }
+
+      const session = await managers.sessionGroupManager.getChatSession(groupId, sessionId, userAddress);
+      if (!session || !session.metadata) {
+        throw new Error('Session not found');
+      }
+
+      const blockchainSessionId = session.metadata.blockchainSessionId;
+      if (!blockchainSessionId) {
+        throw new Error('Not an AI session (no blockchain session ID)');
+      }
+
+      // 1. End the blockchain session (closes WebSocket)
+      console.log('[useSessionGroups.endAISession] Calling SessionManager.endSession...');
+      await managers.sessionManager.endSession(BigInt(blockchainSessionId));
+      console.log('[useSessionGroups.endAISession] ✅ Blockchain session ended');
+
+      // 2. Update session metadata with 'ended' status
+      const updatedSession = {
+        ...session,
+        metadata: {
+          ...session.metadata,
+          blockchainStatus: 'ended' as const,
+        },
+      };
+
+      // 3. Save updated session to S5
+      const group = await managers.sessionGroupManager.getSessionGroup(groupId, userAddress);
+      if (group && group.chatSessionsData && group.chatSessionsData[sessionId]) {
+        group.chatSessionsData[sessionId] = updatedSession;
+
+        // Update memory cache
+        (managers.sessionGroupManager as any).chatStorage.set(sessionId, updatedSession);
+
+        // Save to S5
+        await managers.sessionGroupManager.updateSessionGroup(
+          groupId,
+          userAddress,
+          { chatSessionsData: group.chatSessionsData }
+        );
+        console.log('[useSessionGroups.endAISession] ✅ Session status updated to "ended"');
+      }
+
+      // Refresh selected group if it matches
+      if (selectedGroup?.id === groupId) {
+        await selectGroup(groupId);
+      }
+
+      console.log('[useSessionGroups.endAISession] COMPLETE');
+    } catch (err) {
+      console.error('[useSessionGroups.endAISession] ERROR:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to end AI session';
       setError(errorMsg);
       throw err;
     }
@@ -735,6 +813,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     listChatSessionsWithData,
     addMessage,
     deleteChat,
+    endAISession,
     searchChats,
     shareGroup,
     unshareGroup,

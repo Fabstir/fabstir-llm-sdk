@@ -13,6 +13,8 @@ import {
   Clock,
   Plus,
   Upload,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -43,6 +45,8 @@ export default function HomePage() {
   });
   const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   // Debug logging
   useEffect(() => {
@@ -54,6 +58,13 @@ export default function HomePage() {
       console.warn('[Dashboard] VISIBLE LOG:', JSON.stringify(state));
     }
   }, [isConnected, isInitialized, loading, managers]);
+
+  // Retry handler
+  const handleRetry = () => {
+    console.log('[Dashboard] User triggered retry, attempt:', retryCount + 1);
+    setLoadError(null);
+    setRetryCount(prev => prev + 1);
+  };
 
   // Load dashboard stats
   useEffect(() => {
@@ -71,6 +82,7 @@ export default function HomePage() {
 
       try {
         setLoading(true);
+        setLoadError(null); // Clear previous errors
 
         // Get user address for filtering
         const userAddress = managers.authManager?.userAddress;
@@ -80,11 +92,14 @@ export default function HomePage() {
           return;
         }
 
-        // Get session groups with timeout
+        // Get session groups with extended timeout (S5 can be slow on first load)
+        // Get timeout from environment (default 60 seconds)
+        const dashboardTimeout = parseInt(process.env.NEXT_PUBLIC_DASHBOARD_LOAD_TIMEOUT || '60', 10) * 1000;
+
         console.log('[Dashboard] Loading session groups for user:', userAddress);
         const groupsPromise = managers.sessionGroupManager.listSessionGroups(userAddress);
         const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Session groups load timeout after 10s')), 10000)
+          setTimeout(() => reject(new Error(`Session groups load timeout after ${dashboardTimeout / 1000}s`)), dashboardTimeout)
         );
         const groups = await Promise.race([groupsPromise, timeoutPromise]) as any[];
         console.log('[Dashboard] Loaded session groups:', groups.length, groups);
@@ -198,6 +213,11 @@ export default function HomePage() {
 
       } catch (error) {
         console.error('[Dashboard] Failed to load dashboard stats:', error);
+
+        // Set user-friendly error message
+        const errorMsg = error instanceof Error ? error.message : 'Failed to load dashboard data';
+        setLoadError(errorMsg);
+
         // Show empty stats on error/timeout
         setStats({
           sessionGroups: 0,
@@ -213,7 +233,7 @@ export default function HomePage() {
     }
 
     loadStats();
-  }, [isConnected, isInitialized, managers]);
+  }, [isConnected, isInitialized, managers, retryCount]);
 
   return (
     <div className="space-y-8">
@@ -244,6 +264,30 @@ export default function HomePage() {
           <p className="mt-4 text-muted-foreground">
             {!isInitialized ? 'Initializing SDK...' : 'Loading dashboard...'}
           </p>
+        </div>
+      ) : loadError ? (
+        /* Error state - show error message with retry button */
+        <div className="flex min-h-[40vh] items-center justify-center">
+          <div className="text-center max-w-md">
+            <AlertCircle className="h-16 w-16 mx-auto mb-4 text-red-500" />
+            <h2 className="text-2xl font-bold tracking-tight mb-2">
+              Failed to Load Dashboard
+            </h2>
+            <p className="text-muted-foreground mb-6">
+              {loadError}
+            </p>
+            <button
+              onClick={handleRetry}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors font-medium"
+            >
+              <RefreshCw className="h-5 w-5" />
+              Retry Loading
+            </button>
+            <p className="text-xs text-muted-foreground mt-4">
+              Attempt {retryCount > 0 ? retryCount + 1 : 1}
+              {retryCount > 2 && ' - If this persists, try refreshing the page'}
+            </p>
+          </div>
         </div>
       ) : (
         /* Dashboard content */

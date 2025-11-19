@@ -31,6 +31,8 @@ export default function ChatSessionPage() {
     getChatSession,
     addMessage: sdkAddMessage,
     startChat,
+    startAIChat,
+    endAISession,
     deleteChat,
   } = useSessionGroups();
 
@@ -279,14 +281,77 @@ export default function ChatSessionPage() {
             model: metadata.model,
           });
           setSessionType('ai');
-          setSessionMetadata(metadata);
-          // CRITICAL: Store in window for cleanup (survives navigation)
-          (window as any).__activeSessionMetadata = metadata;
-          console.log('[ChatSession] 💾 Stored in window.__activeSessionMetadata:', {
-            blockchainSessionId: metadata.blockchainSessionId,
-            hasWindow: !!window,
-            stored: !!(window as any).__activeSessionMetadata
-          });
+
+          // Check if blockchain session is still active
+          // If metadata says 'active' but session is actually ended, update metadata
+          if (managers?.sessionManager && metadata.blockchainSessionId && metadata.blockchainStatus !== 'ended') {
+            try {
+              const blockchainSessionId = BigInt(metadata.blockchainSessionId);
+              const sessionState = managers.sessionManager.getSession(blockchainSessionId.toString());
+              console.log('[ChatSession] 🔍 Blockchain session state:', {
+                exists: !!sessionState,
+                status: sessionState?.status
+              });
+
+              // Session is ended if:
+              // 1. Not in memory (undefined) - can't send messages
+              // 2. Status is 'ended', 'completed', or 'failed'
+              if (!sessionState || sessionState.status === 'ended' || sessionState.status === 'completed' || sessionState.status === 'failed') {
+                console.log('[ChatSession] 🔴 Session already ended - updating metadata...');
+                const updatedMetadata = {
+                  ...metadata,
+                  blockchainStatus: 'ended' as const,
+                };
+
+                // Update S5 storage
+                const updatedSession = {
+                  ...session,
+                  metadata: updatedMetadata,
+                };
+                const group = await managers.sessionGroupManager!.getSessionGroup(
+                  groupId,
+                  managers.authManager!.getUserAddress()!
+                );
+                if (group && group.chatSessionsData && group.chatSessionsData[sessionId]) {
+                  group.chatSessionsData[sessionId] = updatedSession;
+                  (managers.sessionGroupManager as any).chatStorage.set(sessionId, updatedSession);
+                  await managers.sessionGroupManager!.updateSessionGroup(
+                    groupId,
+                    managers.authManager!.getUserAddress()!,
+                    { chatSessionsData: group.chatSessionsData }
+                  );
+                  console.log('[ChatSession] ✅ Metadata updated to "ended"');
+                }
+
+                setSessionMetadata(updatedMetadata);
+                (window as any).__activeSessionMetadata = updatedMetadata;
+                console.log('[ChatSession] 💾 Updated window.__activeSessionMetadata with ended status');
+              } else {
+                setSessionMetadata(metadata);
+                // CRITICAL: Store in window for cleanup (survives navigation)
+                (window as any).__activeSessionMetadata = metadata;
+                console.log('[ChatSession] 💾 Stored in window.__activeSessionMetadata:', {
+                  blockchainSessionId: metadata.blockchainSessionId,
+                  hasWindow: !!window,
+                  stored: !!(window as any).__activeSessionMetadata
+                });
+              }
+            } catch (error) {
+              console.error('[ChatSession] ❌ Failed to check session status:', error);
+              // Fallback to using metadata as-is
+              setSessionMetadata(metadata);
+              (window as any).__activeSessionMetadata = metadata;
+            }
+          } else {
+            setSessionMetadata(metadata);
+            // CRITICAL: Store in window for cleanup (survives navigation)
+            (window as any).__activeSessionMetadata = metadata;
+            console.log('[ChatSession] 💾 Stored in window.__activeSessionMetadata:', {
+              blockchainSessionId: metadata.blockchainSessionId,
+              hasWindow: !!window,
+              stored: !!(window as any).__activeSessionMetadata
+            });
+          }
         } else {
           console.log('[ChatSession] Mock session detected');
           setSessionType('mock');
@@ -504,23 +569,37 @@ export default function ChatSessionPage() {
 
       // Sub-phase 8.1.6: Use SessionManager.sendPromptStreaming with streaming callback
       let streamedContent = '';
-      const response = await managers!.sessionManager.sendPromptStreaming(
-        blockchainSessionId,
-        fullPrompt, // Send full conversation history, not just current message
-        // Streaming callback - updates UI in real-time as tokens arrive
-        (token: string) => {
-          streamedContent += token;
-          // Update the AI message with accumulated content
-          // CRITICAL: Also check role to prevent updating user messages if timestamps collide
-          setMessages(prev =>
-            prev.map(msg =>
-              msg.timestamp === aiMessageId && msg.role === 'assistant'
-                ? { ...msg, content: streamedContent }
-                : msg
-            )
-          );
-        }
-      );
+
+      // Get timeout from environment (default 120 seconds = 2 minutes)
+      const aiResponseTimeout = parseInt(process.env.NEXT_PUBLIC_AI_RESPONSE_TIMEOUT || '120', 10) * 1000;
+
+      // Add configurable timeout for WebSocket connection and first response
+      const sendPromptWithTimeout = () => {
+        return Promise.race([
+          managers!.sessionManager.sendPromptStreaming(
+            blockchainSessionId,
+            fullPrompt, // Send full conversation history, not just current message
+            // Streaming callback - updates UI in real-time as tokens arrive
+            (token: string) => {
+              streamedContent += token;
+              // Update the AI message with accumulated content
+              // CRITICAL: Also check role to prevent updating user messages if timestamps collide
+              setMessages(prev =>
+                prev.map(msg =>
+                  msg.timestamp === aiMessageId && msg.role === 'assistant'
+                    ? { ...msg, content: streamedContent }
+                    : msg
+                )
+              );
+            }
+          ),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`AI response timeout after ${aiResponseTimeout / 1000} seconds (WebSocket connection issue)`)), aiResponseTimeout)
+          )
+        ]);
+      };
+
+      const response = await sendPromptWithTimeout() as string;
 
       console.log('[ChatSession] ✅ AI response complete:', response.substring(0, 100) + '...');
 
@@ -564,6 +643,54 @@ export default function ChatSessionPage() {
 
       // Remove placeholder message on error
       setMessages(prev => prev.filter(msg => msg.timestamp !== aiMessageId));
+
+      // Check if session ended error - update metadata and trigger UI update
+      if (error.message && error.message.includes('Session is ended')) {
+        console.log('[ChatSession] 🔴 Session ended - updating metadata...');
+
+        // Update session metadata to 'ended' status
+        try {
+          // This will update metadata and trigger UI to show Continue Chat button
+          if (managers?.sessionGroupManager && managers?.authManager) {
+            const session = await managers.sessionGroupManager.getChatSession(
+              groupId,
+              sessionId,
+              managers.authManager.getUserAddress()!
+            );
+            if (session && session.metadata) {
+              const updatedMetadata = {
+                ...session.metadata,
+                blockchainStatus: 'ended' as const,
+              };
+
+              const updatedSession = {
+                ...session,
+                metadata: updatedMetadata,
+              };
+
+              const group = await managers.sessionGroupManager.getSessionGroup(
+                groupId,
+                managers.authManager.getUserAddress()!
+              );
+              if (group && group.chatSessionsData && group.chatSessionsData[sessionId]) {
+                group.chatSessionsData[sessionId] = updatedSession;
+                (managers.sessionGroupManager as any).chatStorage.set(sessionId, updatedSession);
+                await managers.sessionGroupManager.updateSessionGroup(
+                  groupId,
+                  managers.authManager.getUserAddress()!,
+                  { chatSessionsData: group.chatSessionsData }
+                );
+                console.log('[ChatSession] ✅ Session status updated to "ended"');
+
+                // Update local state to trigger Continue Chat UI (no page reload needed)
+                setSessionMetadata(updatedMetadata);
+              }
+            }
+          }
+        } catch (updateError) {
+          console.error('[ChatSession] ❌ Failed to update session status:', updateError);
+        }
+      }
 
       // Add error message
       const errorMessage: ChatMessage = {
@@ -621,19 +748,22 @@ export default function ChatSessionPage() {
       };
       setMessages(prev => [...prev, summaryMsg]);
 
-      // Step 3: End the session (close WebSocket)
-      await managers.sessionManager.endSession(blockchainSessionId);
+      // Step 3: End the session (close WebSocket and update status in S5)
+      await endAISession(groupId, sessionId);
 
       const successMsg: ChatMessage = {
         role: 'system',
-        content: '✅ Session ended successfully\n🔐 WebSocket disconnected\n⏳ Host will finalize payment on blockchain',
+        content: '✅ Session ended successfully\n🔐 WebSocket disconnected\n📝 Status updated to "ended"\n⏳ Host will finalize payment on blockchain',
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, successMsg]);
 
-      // Step 4: Clear session state
-      setSessionMetadata(null);
-      setSessionType('mock');
+      // Step 4: Update session status in local state (keep metadata for Continue Chat button)
+      setSessionMetadata(prev => ({
+        ...prev,
+        blockchainStatus: 'ended',
+      }));
+      // Note: Don't clear sessionType or metadata - needed for Continue Chat button
       setTotalTokens(0);
       setTotalCost(0);
       setLastCheckpointTokens(0);
@@ -748,6 +878,60 @@ export default function ChatSessionPage() {
       router.push(`/session-groups/${groupId}/${session.sessionId}`);
     } catch (error) {
       console.error('Failed to create new session:', error);
+    }
+  };
+
+  // Handle continue chat - creates new AI session with same host/model
+  const handleContinueChat = async () => {
+    if (!sessionMetadata || sessionType !== 'ai') {
+      console.error('[ChatSession] Cannot continue: not an AI session');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      console.log('[ChatSession] 🔄 Continuing chat with same host/model...');
+
+      // Save current conversation history to copy to new session
+      const conversationHistory = [...messages];
+      console.log('[ChatSession] 💾 Preserving conversation history:', {
+        messageCount: conversationHistory.length
+      });
+
+      // Get host config from current session metadata
+      const hostConfig = {
+        address: sessionMetadata.hostAddress,
+        endpoint: sessionMetadata.hostEndpoint || `http://localhost:8080/ws`, // Use stored endpoint or fallback
+        models: [sessionMetadata.model],
+        pricing: sessionMetadata.pricing,
+      };
+
+      console.log('[ChatSession] 🔍 Using host config:', {
+        address: hostConfig.address,
+        endpoint: hostConfig.endpoint,
+        model: hostConfig.models[0]
+      });
+
+      // Create new AI session with same configuration
+      const depositAmount = '10.0'; // Default deposit amount (could be configurable)
+      const newSession = await startAIChat(groupId, hostConfig, depositAmount);
+
+      console.log('[ChatSession] ✅ New session created:', newSession.sessionId);
+
+      // Copy conversation history to new session
+      console.log('[ChatSession] 📋 Copying conversation history to new session...');
+      for (const message of conversationHistory) {
+        await sdkAddMessage(groupId, newSession.sessionId, message);
+      }
+      console.log('[ChatSession] ✅ Conversation history copied');
+
+      // Navigate to new session (conversation history will now be loaded)
+      router.push(`/session-groups/${groupId}/${newSession.sessionId}`);
+    } catch (error) {
+      console.error('[ChatSession] ❌ Failed to continue chat:', error);
+      alert(`Failed to continue chat: ${error.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -905,14 +1089,69 @@ export default function ChatSessionPage() {
           </div>
         )}
 
-        {/* Chat Interface */}
+        {/* Chat Interface or Continue Chat UI */}
         <div className="flex-1 overflow-hidden">
-          <ChatInterface
-            messages={messages}
-            onSendMessage={handleSendMessage}
-            loading={loading}
-            sessionTitle={groupName}
-          />
+          {sessionMetadata?.blockchainStatus === 'ended' ? (
+            /* Session Ended - Show Continue Chat UI */
+            <div className="flex flex-col h-full">
+              {/* Conversation History (Read-Only) */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {messages.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[70%] rounded-lg px-4 py-2 ${
+                        msg.role === 'user'
+                          ? 'bg-blue-600 text-white'
+                          : msg.role === 'assistant'
+                          ? 'bg-gray-100 text-gray-900'
+                          : 'bg-yellow-50 text-yellow-900 border border-yellow-200'
+                      }`}
+                    >
+                      <div className="whitespace-pre-wrap">{msg.content}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Session Ended Banner + Continue Button */}
+              <div className="border-t border-gray-200 bg-gray-50 p-6">
+                <div className="max-w-3xl mx-auto space-y-4">
+                  <div className="text-center">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                      🔴 This session has ended
+                    </h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                      The AI session was closed. You can continue this conversation with a new blockchain job.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={handleContinueChat}
+                    disabled={loading}
+                    className="w-full px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+                  >
+                    {loading ? '🔄 Creating New Session...' : '💎 Continue Chat (New AI Session)'}
+                  </button>
+
+                  <p className="text-xs text-center text-gray-500">
+                    A new blockchain job will be created with the same host and model.
+                    {' '}Your conversation history will be preserved.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Active Session - Normal Chat Interface */
+            <ChatInterface
+              messages={messages}
+              onSendMessage={handleSendMessage}
+              loading={loading}
+              sessionTitle={groupName}
+            />
+          )}
         </div>
       </div>
     </div>
