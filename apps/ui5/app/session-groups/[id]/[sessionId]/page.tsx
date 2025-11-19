@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useWallet } from '@/contexts/wallet-context';
@@ -266,6 +266,12 @@ export default function ChatSessionPage() {
 
         // --- Phase 4: Detect session type from metadata ---
         const metadata = (session as any).metadata;
+        console.log('[ChatSession] 🔍 Session metadata loaded:', {
+          hasMetadata: !!metadata,
+          sessionType: metadata?.sessionType,
+          blockchainSessionId: metadata?.blockchainSessionId,
+          fullMetadata: metadata
+        });
         if (metadata && metadata.sessionType === 'ai') {
           console.log('[ChatSession] ✅ AI session detected:', {
             jobId: metadata.blockchainSessionId,
@@ -274,10 +280,18 @@ export default function ChatSessionPage() {
           });
           setSessionType('ai');
           setSessionMetadata(metadata);
+          // CRITICAL: Store in window for cleanup (survives navigation)
+          (window as any).__activeSessionMetadata = metadata;
+          console.log('[ChatSession] 💾 Stored in window.__activeSessionMetadata:', {
+            blockchainSessionId: metadata.blockchainSessionId,
+            hasWindow: !!window,
+            stored: !!(window as any).__activeSessionMetadata
+          });
         } else {
           console.log('[ChatSession] Mock session detected');
           setSessionType('mock');
           setSessionMetadata(null);
+          (window as any).__activeSessionMetadata = null;
         }
       } else {
         // Session not found in storage - could be timing issue with S5 save
@@ -332,6 +346,61 @@ export default function ChatSessionPage() {
     }
   }, [selectedGroup, groupId]);
 
+  // Store latest values in ref for cleanup (avoids stale closure)
+  const cleanupDataRef = useRef({ sessionMetadata, managers });
+  useEffect(() => {
+    cleanupDataRef.current = { sessionMetadata, managers };
+  }, [sessionMetadata, managers]);
+
+  // Cleanup: Close WebSocket when navigating away from page
+  useEffect(() => {
+    console.log('[ChatSession] 🔍 Cleanup effect mounted', {
+      hasSessionMetadata: !!sessionMetadata,
+      blockchainSessionId: sessionMetadata?.blockchainSessionId,
+      hasManagers: !!managers,
+      hasSessionManager: !!managers?.sessionManager
+    });
+
+    return () => {
+      // Read latest values from ref to avoid stale closure
+      const { sessionMetadata: currentMetadata, managers: currentManagers } = cleanupDataRef.current;
+
+      // CRITICAL: Fallback to window object if state was cleared during navigation
+      const windowMetadata = (window as any).__activeSessionMetadata;
+      const metadata = currentMetadata || windowMetadata;
+      const managers = currentManagers;
+
+      console.log('[ChatSession] 🔍 Cleanup function called on unmount', {
+        hasCurrentMetadata: !!currentMetadata,
+        hasWindowMetadata: !!windowMetadata,
+        hasFinalMetadata: !!metadata,
+        blockchainSessionId: metadata?.blockchainSessionId,
+        hasManagers: !!managers,
+        hasSessionManager: !!managers?.sessionManager,
+        usedWindowFallback: !!(!currentMetadata && windowMetadata)
+      });
+
+      if (metadata?.blockchainSessionId && managers?.sessionManager) {
+        const blockchainSessionId = BigInt(metadata.blockchainSessionId);
+        console.log('[ChatSession] 🧹 Cleanup: Ending WebSocket session on unmount', {
+          blockchainSessionId: blockchainSessionId.toString()
+        });
+        managers.sessionManager.endSession(blockchainSessionId).catch(err => {
+          console.error('[ChatSession] Failed to end session on cleanup:', err);
+        });
+        // Clear window storage after cleanup
+        (window as any).__activeSessionMetadata = null;
+      } else {
+        console.log('[ChatSession] ❌ Cleanup skipped - missing required data', {
+          missingSessionMetadata: !metadata,
+          missingBlockchainSessionId: !metadata?.blockchainSessionId,
+          missingManagers: !managers,
+          missingSessionManager: !managers?.sessionManager
+        });
+      }
+    };
+  }, []); // Empty deps - cleanup function always uses latest values from ref
+
   // --- Phase 4: Handle AI Message via WebSocket ---
   const handleAIMessage = async (message: string, files?: File[], metadata?: any) => {
     // Use provided metadata or fall back to state (for backward compatibility)
@@ -378,6 +447,14 @@ export default function ChatSessionPage() {
     try {
       // Send message via SessionManager (WebSocket to production host)
       const blockchainSessionId = BigInt(activeMetadata.blockchainSessionId);
+
+      // CRITICAL: Store metadata immediately for cleanup (don't wait for S5 reload)
+      setSessionMetadata(activeMetadata);
+      (window as any).__activeSessionMetadata = activeMetadata;
+      console.log('[ChatSession] ✅ Stored session metadata for cleanup:', {
+        blockchainSessionId: activeMetadata.blockchainSessionId,
+        sessionType: activeMetadata.sessionType
+      });
 
       console.log('[ChatSession] 🚀 Sending AI message via WebSocket...', {
         sessionId: blockchainSessionId.toString(),

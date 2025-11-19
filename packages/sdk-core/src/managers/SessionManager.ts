@@ -1,4 +1,5 @@
 // Copyright (c) 2025 Fabstir
+import { LLM_MAX_TOKENS } from '../config/llm-config';
 // SPDX-License-Identifier: BUSL-1.1
 
 /**
@@ -417,7 +418,7 @@ export class SessionManager implements ISessionManager {
       const requestBody = {
         model: session.model,
         prompt: augmentedPrompt,  // Use RAG-augmented prompt
-        max_tokens: 200,  // Allow longer responses for poems, stories, etc.
+        max_tokens: LLM_MAX_TOKENS,  // Allow longer responses for poems, stories, etc.
         temperature: 0.7,  // Add temperature for better responses
         sessionId: sessionId.toString(),
         jobId: session.jobId.toString()
@@ -798,7 +799,7 @@ export class SessionManager implements ISessionManager {
             request: {
               model: session.model,
               prompt: augmentedPrompt,  // Use RAG-augmented prompt
-              max_tokens: 50,
+              max_tokens: LLM_MAX_TOKENS,  // Support comprehensive responses from large models
               temperature: 0.7,
               stream: true
             }
@@ -935,7 +936,7 @@ export class SessionManager implements ISessionManager {
             request: {
               model: session.model,
               prompt: augmentedPrompt,  // Use RAG-augmented prompt
-              max_tokens: 50,
+              max_tokens: LLM_MAX_TOKENS,  // Support comprehensive responses from large models
               temperature: 0.7,
               stream: false
             }
@@ -1769,7 +1770,7 @@ export class SessionManager implements ISessionManager {
       const requestBody = {
         model: session.model,
         prompt: prompt,
-        max_tokens: 200,  // Allow longer responses for poems, stories, etc.
+        max_tokens: LLM_MAX_TOKENS,  // Allow longer responses for poems, stories, etc.
         temperature: 0.7,  // Add temperature for better responses
         sessionId: sessionId.toString(),
         jobId: session.jobId.toString()

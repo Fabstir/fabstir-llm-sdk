@@ -88,7 +88,7 @@
 
 **Total Progress**: 7.69/8 phases = **96.1% Complete** (Phases 1-6 complete, Phase 7: 85.7%, Phase 8: 83.3%, 46/48 sub-phase tests measurable)
 
-**Bugs Fixed:** 45 (6 new from Phase 7.1 + 8.1 UI fixes, 1 from manual testing, 6 from Phase 8.1.9 conversation history)
+**Bugs Fixed:** 49 (6 new from Phase 7.1 + 8.1 UI fixes, 1 from manual testing, 6 from Phase 8.1.9 conversation history, 4 from Phase 8.1.10 payment/truncation fixes)
   1. Fixed ES module `__dirname` error in test-setup.ts (used fileURLToPath)
   2. Fixed test looking for non-existent "✓ SDK Ready" text (changed to check dashboard load)
   3. Fixed AuthManager constructor to accept authentication data from SDK core
@@ -134,6 +134,10 @@
   43. **Phase 8.1.9**: Fixed session type routing - Check metadata directly from storage instead of relying on stale React state
   44. **Phase 8.1.9**: Fixed optimistic updates being cleared - Don't call `setMessages([])` when session not found in S5 (race condition during save)
   45. **Phase 8.1.9**: Fixed missing conversation history - AI now maintains memory by sending full conversation context in Harmony format with each prompt (hosts are STATELESS, client maintains conversation state)
+  46. **Phase 8.1.10**: Fixed payment settlement - Changed `proofInterval` from 1000 to 100 tokens for testing (short conversations now trigger proof submissions and payment distribution)
+  47. **Phase 8.1.10**: Fixed session expiry - Added `duration: 86400` (1 day) to prevent sessions from expiring during testing
+  48. **Phase 8.1.10**: Fixed WebSocket cleanup - Added useEffect cleanup to properly close WebSocket on navigation, triggering automatic payment settlement
+  49. **Phase 8.1.10**: Fixed response truncation - Increased `max_tokens` from 50 to 500 in SessionManager WebSocket streaming paths to allow complete detailed responses
 
 **Testing Approach:** Automated tests with test wallet provider (no manual MetaMask approvals) ✅ **WORKING**
 

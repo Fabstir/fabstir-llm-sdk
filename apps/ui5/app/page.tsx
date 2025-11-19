@@ -80,8 +80,13 @@ export default function HomePage() {
           return;
         }
 
-        // Get session groups
-        const groups = await managers.sessionGroupManager.listSessionGroups(userAddress);
+        // Get session groups with timeout
+        console.log('[Dashboard] Loading session groups for user:', userAddress);
+        const groupsPromise = managers.sessionGroupManager.listSessionGroups(userAddress);
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Session groups load timeout after 10s')), 10000)
+        );
+        const groups = await Promise.race([groupsPromise, timeoutPromise]) as any[];
         console.log('[Dashboard] Loaded session groups:', groups.length, groups);
 
         // Get vector databases (if available)
@@ -192,8 +197,17 @@ export default function HomePage() {
         setRecentActivity(activity.slice(0, 10));
 
       } catch (error) {
-        console.error('Failed to load dashboard stats:', error);
+        console.error('[Dashboard] Failed to load dashboard stats:', error);
+        // Show empty stats on error/timeout
+        setStats({
+          sessionGroups: 0,
+          totalSessions: 0,
+          vectorDatabases: 0,
+          totalDocuments: 0,
+        });
+        setRecentActivity([]);
       } finally {
+        console.log('[Dashboard] Setting loading to false');
         setLoading(false);
       }
     }

@@ -365,7 +365,8 @@ export function useSessionGroups(): UseSessionGroupsReturn {
       const sessionConfig = {
         depositAmount,
         pricePerToken: hostConfig.pricing,
-        proofInterval: 1000, // Checkpoint every 1000 tokens
+        proofInterval: 100, // Checkpoint every 100 tokens (testing-friendly)
+        duration: 86400, // 1 day (prevents session expiry)
         paymentToken: usdcAddress,
         provider: hostConfig.address,
         endpoint: hostConfig.endpoint,
