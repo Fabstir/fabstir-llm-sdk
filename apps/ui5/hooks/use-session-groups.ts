@@ -8,6 +8,9 @@ import type {
   ChatMessage,
 } from '@fabstir/sdk-core';
 
+// LLM Configuration - reads from environment variables
+const LLM_PROOF_INTERVAL = parseInt(process.env.NEXT_PUBLIC_LLM_PROOF_INTERVAL || '1000', 10);
+
 export interface UseSessionGroupsReturn {
   // Session Groups
   sessionGroups: SessionGroup[];
@@ -365,7 +368,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
       const sessionConfig = {
         depositAmount,
         pricePerToken: hostConfig.pricing,
-        proofInterval: 100, // Checkpoint every 100 tokens (testing-friendly)
+        proofInterval: LLM_PROOF_INTERVAL, // Read from environment (NEXT_PUBLIC_LLM_PROOF_INTERVAL)
         duration: 86400, // 1 day (prevents session expiry)
         paymentToken: usdcAddress,
         provider: hostConfig.address,

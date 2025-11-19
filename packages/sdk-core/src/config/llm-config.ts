@@ -13,9 +13,9 @@ export const LLM_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS || process.env
 
 /**
  * Proof submission interval (tokens per checkpoint)
- * Default: 100 (testing-friendly, production default is 1000)
+ * Default: 1000 (production default, optimal gas efficiency)
  */
-export const LLM_PROOF_INTERVAL = parseInt(process.env.LLM_PROOF_INTERVAL || process.env.NEXT_PUBLIC_LLM_PROOF_INTERVAL || '100', 10);
+export const LLM_PROOF_INTERVAL = parseInt(process.env.LLM_PROOF_INTERVAL || process.env.NEXT_PUBLIC_LLM_PROOF_INTERVAL || '1000', 10);
 
 /**
  * Session duration in seconds
@@ -29,7 +29,7 @@ if (isNaN(LLM_MAX_TOKENS) || LLM_MAX_TOKENS < 1 || LLM_MAX_TOKENS > 32000) {
 }
 
 if (isNaN(LLM_PROOF_INTERVAL) || LLM_PROOF_INTERVAL < 1) {
-  console.warn(`[LLM Config] Invalid LLM_PROOF_INTERVAL: ${process.env.LLM_PROOF_INTERVAL}, using default 100`);
+  console.warn(`[LLM Config] Invalid LLM_PROOF_INTERVAL: ${process.env.LLM_PROOF_INTERVAL}, using default 1000`);
 }
 
 if (isNaN(LLM_SESSION_DURATION) || LLM_SESSION_DURATION < 60) {

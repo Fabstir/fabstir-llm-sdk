@@ -100,6 +100,7 @@ export class SessionManager implements ISessionManager {
   private sessionKey?: Uint8Array; // NEW: Store session key for Phase 4.2
   private messageIndex: number = 0; // NEW: For Phase 4.2 replay protection
   private pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: any) => void; timeoutId: NodeJS.Timeout }> = new Map(); // Host-side RAG request tracking
+  private ragHandlerUnsubscribe?: () => void; // NEW: Store RAG handler unsubscribe function to prevent duplicate handlers
 
   constructor(
     paymentManager: PaymentManager,
@@ -666,11 +667,12 @@ export class SessionManager implements ISessionManager {
           }
 
           response = await new Promise<string>((resolve, reject) => {
-            const timeout = setTimeout(() => {
+            // Use sliding timeout window - resets on each chunk received
+            let timeout = setTimeout(() => {
               console.log('[SessionManager] ⏰ TIMEOUT - fullResponse at timeout:', `"${fullResponse}"`);
               console.log('[SessionManager] ⏰ TIMEOUT - this.sessionKey still exists:', !!this.sessionKey);
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
-            }, 30000);
+            }, 60000); // 60 seconds for complex queries (sliding window)
 
             console.log('[SessionManager] 📋 BEFORE registering handler:');
             console.log('[SessionManager]   - Current handlers count:', (this.wsClient as any).messageHandlers?.size);
@@ -703,6 +705,13 @@ export class SessionManager implements ISessionManager {
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
                 console.log('[SessionManager] ✅ CONDITION TRUE - Processing encrypted_chunk...');
                 try {
+                  // Reset timeout on each chunk (sliding window)
+                  clearTimeout(timeout);
+                  timeout = setTimeout(() => {
+                    console.log('[SessionManager] ⏰ TIMEOUT - No chunks received for 60s');
+                    reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
+                  }, 60000);
+
                   console.log('[SessionManager] 🔓 About to decrypt chunk...');
                   const decrypted = await this.decryptIncomingMessage(data);
                   console.log('[SessionManager] ✅ Chunk decrypted successfully:', `"${decrypted}"`);
@@ -872,10 +881,11 @@ export class SessionManager implements ISessionManager {
           // Wait for encrypted response (non-streaming) - MUST accumulate chunks!
           let accumulatedResponse = '';  // Accumulate chunks even in non-streaming mode
           response = await new Promise<string>((resolve, reject) => {
-            const timeout = setTimeout(() => {
+            // Use sliding timeout window - resets on each chunk received
+            let timeout = setTimeout(() => {
               console.log('[SessionManager] ⏰ NON-STREAMING TIMEOUT - accumulated response:', `"${accumulatedResponse}"`);
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
-            }, 30000);
+            }, 60000); // 60 seconds for complex queries (sliding window)
 
             console.log('[SessionManager] 📋 Registering NON-STREAMING handler...');
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
@@ -885,6 +895,13 @@ export class SessionManager implements ISessionManager {
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
                 console.log('[SessionManager] 🔓 Decrypting encrypted chunk in NON-STREAMING mode...');
                 try {
+                  // Reset timeout on each chunk (sliding window)
+                  clearTimeout(timeout);
+                  timeout = setTimeout(() => {
+                    console.log('[SessionManager] ⏰ TIMEOUT - No chunks received for 60s (NON-STREAMING)');
+                    reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
+                  }, 60000);
+
                   const decrypted = await this.decryptIncomingMessage(data);
                   console.log('[SessionManager] ✅ Chunk decrypted:', `"${decrypted}"`);
                   accumulatedResponse += decrypted;
@@ -1147,6 +1164,13 @@ export class SessionManager implements ISessionManager {
     const sessionIdStr = sessionId.toString();
 
     try {
+      // Clean up RAG handler before closing WebSocket
+      if (this.ragHandlerUnsubscribe) {
+        console.log('[SessionManager] Cleaning up RAG handler on session end');
+        this.ragHandlerUnsubscribe();
+        this.ragHandlerUnsubscribe = undefined;
+      }
+
       // Close WebSocket connection if active
       if (this.wsClient && this.wsClient.isConnected()) {
         console.log(`Closing WebSocket connection for session ${sessionIdStr}`);
@@ -2294,14 +2318,25 @@ export class SessionManager implements ISessionManager {
       return;
     }
 
-    // Register handler for RAG-related messages
-    this.wsClient.onMessage((data: any) => {
+    // Clean up existing handler if present to prevent duplicate handlers
+    if (this.ragHandlerUnsubscribe) {
+      console.log('[SessionManager] Cleaning up existing RAG handler before registering new one');
+      this.ragHandlerUnsubscribe();
+      this.ragHandlerUnsubscribe = undefined;
+    }
+
+    // Register handler for RAG-related messages and store unsubscribe function
+    this.ragHandlerUnsubscribe = this.wsClient.onMessage((data: any) => {
+      // ONLY handle RAG-specific message types - don't process other messages
       if (data.type === 'uploadVectorsResponse') {
         this._handleUploadVectorsResponse(data as UploadVectorsResponse);
       } else if (data.type === 'searchVectorsResponse') {
         this._handleSearchVectorsResponse(data as SearchVectorsResponse);
       }
+      // Explicitly ignore all other message types (encrypted_chunk, etc.)
+      // Those will be handled by dedicated handlers in sendPromptStreaming()
     });
+    console.log('[SessionManager] RAG handler registered');
   }
 
   /**
