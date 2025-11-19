@@ -479,11 +479,35 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     groupId: string,
     sessionId: string
   ): Promise<ChatSession | null> => {
-    if (!managers?.sessionGroupManager) return null;
+    console.log('[useSessionGroups.getChatSession] Called with:', { groupId, sessionId });
+    console.log('[useSessionGroups.getChatSession] Managers available:', {
+      hasManagers: !!managers,
+      hasSessionGroupManager: !!managers?.sessionGroupManager,
+      hasAuthManager: !!managers?.authManager
+    });
+
+    if (!managers?.sessionGroupManager || !managers?.authManager) {
+      console.error('[useSessionGroups.getChatSession] Missing managers');
+      return null;
+    }
+
+    const userAddress = managers.authManager.getUserAddress();
+    console.log('[useSessionGroups.getChatSession] User address:', userAddress);
+    if (!userAddress) {
+      console.error('[useSessionGroups] Cannot get chat session - no user address');
+      return null;
+    }
 
     try {
       setError(null);
-      return await managers.sessionGroupManager.getChatSession(groupId, sessionId);
+      console.log('[useSessionGroups.getChatSession] Calling SDK getChatSession...');
+      const result = await managers.sessionGroupManager.getChatSession(groupId, sessionId, userAddress);
+      console.log('[useSessionGroups.getChatSession] SDK result:', {
+        found: !!result,
+        hasMessages: !!result?.messages,
+        messageCount: result?.messages?.length || 0
+      });
+      return result;
     } catch (err) {
       console.error('[useSessionGroups] Failed to get chat session:', err);
       return null;
@@ -562,20 +586,31 @@ export function useSessionGroups(): UseSessionGroupsReturn {
   ): Promise<ChatSession[]> => {
     if (!managers?.sessionGroupManager || !managers?.authManager) return [];
 
+    const userAddress = managers.authManager.getUserAddress();
+    if (!userAddress) {
+      console.error('[useSessionGroups.listChatSessionsWithData] No user address');
+      return [];
+    }
+
     try {
       setError(null);
       // Get session IDs
-      const sessionIds = await managers.sessionGroupManager.listChatSessions(groupId, managers.authManager.getUserAddress());
+      console.log(`[listChatSessionsWithData] Getting session IDs for group ${groupId}...`);
+      const sessionIds = await managers.sessionGroupManager.listChatSessions(groupId, userAddress);
+      console.log(`[listChatSessionsWithData] Got ${sessionIds.length} session IDs:`, sessionIds);
 
       // Fetch full data for each session
       const sessions: ChatSession[] = [];
       for (const sessionId of sessionIds) {
-        const session = await managers.sessionGroupManager.getChatSession(groupId, sessionId);
+        console.log(`[listChatSessionsWithData] Fetching session ${sessionId}...`);
+        const session = await managers.sessionGroupManager.getChatSession(groupId, sessionId, userAddress);
+        console.log(`[listChatSessionsWithData] Session ${sessionId} result:`, session ? 'found' : 'null');
         if (session) {
           sessions.push(session);
         }
       }
 
+      console.log(`[listChatSessionsWithData] Returning ${sessions.length} sessions`);
       return sessions;
     } catch (err) {
       console.error('[useSessionGroups] Failed to list chat sessions:', err);

@@ -196,6 +196,16 @@ export class SessionGroupManager implements ISessionGroupManager {
       }
     } else if (group) {
       console.log(`[SessionGroupManager.getSessionGroup] Found group ${groupId} in memory cache`);
+      // Populate chat sessions from chatSessionsData even when from cache
+      if (group.chatSessionsData) {
+        for (const [sessionId, session] of Object.entries(group.chatSessionsData)) {
+          // Only populate if not already in chatStorage to avoid unnecessary work
+          if (!this.chatStorage.has(sessionId)) {
+            this.chatStorage.set(sessionId, session);
+            console.log(`[SessionGroupManager.getSessionGroup] Cached session ${sessionId} from memory group`);
+          }
+        }
+      }
     }
 
     if (!group) {
@@ -575,23 +585,36 @@ export class SessionGroupManager implements ISessionGroupManager {
   /**
    * Get a chat session by ID
    *
-   * NOTE: This is a minimal implementation for UI testing compatibility with mock SDK.
+   * Loads from S5 if requestor is provided and session not in cache.
+   * If requestor is not provided, only checks memory cache.
    */
-  async getChatSession(groupId: string, sessionId: string): Promise<ChatSession | null> {
-    // First check memory
+  async getChatSession(groupId: string, sessionId: string, requestor?: string): Promise<ChatSession | null> {
+    // First check memory cache
     let session = this.chatStorage.get(sessionId);
 
-    // If not in memory, load group from S5 (this populates chatStorage from chatSessionsData)
-    if (!session) {
-      // Note: We can't call getSessionGroup without a requestor, so we check the cache directly
-      // If group is not in cache, it won't be loaded. The caller (listChatSessionsWithData)
-      // should call listChatSessions first, which calls getSessionGroup and populates the cache.
-      const group = this.groups.get(groupId);
-      if (group?.chatSessionsData?.[sessionId]) {
-        session = group.chatSessionsData[sessionId];
-        // Cache in memory
-        this.chatStorage.set(sessionId, session);
+    // If not in memory and requestor provided, load group from S5
+    if (!session && requestor) {
+      try {
+        console.log(`[SessionGroupManager.getChatSession] Session ${sessionId} not in cache, loading group ${groupId} from S5...`);
+        // Load group from S5 - this will populate chatStorage with all sessions
+        await this.getSessionGroup(groupId, requestor);
+
+        // Check cache again after loading
+        session = this.chatStorage.get(sessionId);
+
+        if (session) {
+          console.log(`[SessionGroupManager.getChatSession] ✅ Session ${sessionId} found after loading from S5`);
+        } else {
+          console.warn(`[SessionGroupManager.getChatSession] ⚠️  Session ${sessionId} not found in group ${groupId} even after S5 load`);
+        }
+      } catch (err) {
+        console.error('[SessionGroupManager.getChatSession] Failed to load group from S5:', err);
+        return null;
       }
+    } else if (!session && !requestor) {
+      console.log(`[SessionGroupManager.getChatSession] Session ${sessionId} not in cache and no requestor provided`);
+    } else {
+      console.log(`[SessionGroupManager.getChatSession] Found session ${sessionId} in memory cache`);
     }
 
     if (!session) {

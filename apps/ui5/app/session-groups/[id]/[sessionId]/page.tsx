@@ -311,11 +311,16 @@ export default function ChatSessionPage() {
   useEffect(() => {
     console.log('[ChatSession] useEffect triggered:', {
       isConnected,
+      isInitialized,
       isSpecialRoute,
       groupId,
       sessionId
     });
     if (!isConnected) return;
+    if (!isInitialized) {
+      console.log('[ChatSession] ⏳ Waiting for SDK initialization...');
+      return;
+    }
     if (isSpecialRoute) return; // Skip for special routes
 
     const loadData = async () => {
@@ -332,7 +337,7 @@ export default function ChatSessionPage() {
 
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, groupId, sessionId, isSpecialRoute]);
+  }, [isConnected, isInitialized, groupId, sessionId, isSpecialRoute]);
 
   // Update local state when selectedGroup changes
   useEffect(() => {
