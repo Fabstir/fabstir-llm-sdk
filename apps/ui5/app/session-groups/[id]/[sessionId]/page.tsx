@@ -196,7 +196,34 @@ export default function ChatSessionPage() {
       }
 
       if (allPendingDocs.length === 0) {
-        console.log('[ChatSession] No pending documents found, skipping embedding processing');
+        console.log('[ChatSession] No pending documents found, checking for ready documents to upload...');
+
+        // Even if no pending documents, we need to upload existing "ready" vectors to THIS session
+        // so they're available for search
+        try {
+          const blockchainSessionId = sessionMetadata?.blockchainSessionId;
+          if (!blockchainSessionId) {
+            console.warn('[ChatSession] ⚠️ No blockchain session ID, cannot upload vectors');
+            return;
+          }
+
+          // Check all linked databases for ready documents
+          for (const dbName of validDatabases) {
+            try {
+              const allVectors = await managers.vectorRAGManager.listVectors(dbName);
+              if (allVectors.length > 0) {
+                console.log(`[ChatSession] 📤 Uploading ${allVectors.length} existing vectors from "${dbName}" to session...`);
+                await managers.sessionManager.uploadVectors(blockchainSessionId, allVectors);
+                console.log(`[ChatSession] ✅ Uploaded ${allVectors.length} vectors from "${dbName}"`);
+              }
+            } catch (dbError) {
+              console.warn(`[ChatSession] Failed to upload vectors from "${dbName}":`, dbError);
+            }
+          }
+        } catch (error) {
+          console.error('[ChatSession] Failed to upload existing vectors:', error);
+        }
+
         return;
       }
 
@@ -236,16 +263,42 @@ export default function ChatSessionPage() {
 
           console.log(`[ChatSession] Generating embeddings for: ${doc.fileName || doc.name} (${text.length} chars)`);
 
-          // TODO: Implement real embedding generation
-          // For now, skip embedding generation and just mark as ready
-          // This allows testing the document upload/storage flow
-          console.warn('[ChatSession] ⚠️ Real embedding generation not yet implemented - document marked as ready without vectors');
+          // Get host endpoint from session metadata
+          const hostEndpoint = sessionMetadata?.hostEndpoint;
+          if (!hostEndpoint) {
+            throw new Error('Host endpoint not available in session metadata');
+          }
+
+          // Generate embeddings via host's /v1/embed endpoint
+          const { generateDocumentEmbeddings } = await import('@/lib/embedding-utils');
+          const vectors = await generateDocumentEmbeddings(
+            hostEndpoint,
+            text,
+            doc.id,
+            84532 // Base Sepolia
+          );
+
+          console.log(`[ChatSession] ✅ Generated ${vectors.length} vectors for: ${doc.fileName || doc.name}`);
+
+          // Store vectors in S5VectorStore (for persistence)
+          console.log(`[ChatSession] Storing vectors in database: ${doc.databaseName}`);
+          await managers.vectorRAGManager.addVectorsToDatabase(doc.databaseName, vectors);
+          console.log(`[ChatSession] ✅ Stored ${vectors.length} vectors in S5`);
+
+          // Upload vectors to host session (for search)
+          const blockchainSessionId = sessionMetadata?.blockchainSessionId;
+          if (!blockchainSessionId) {
+            throw new Error('No blockchain session ID available for vector upload');
+          }
+          console.log(`[ChatSession] Uploading ${vectors.length} vectors to host session (blockchain ID: ${blockchainSessionId})...`);
+          await managers.sessionManager.uploadVectors(blockchainSessionId, vectors);
+          console.log(`[ChatSession] ✅ Uploaded ${vectors.length} vectors to host`);
 
           // Update document status to 'ready'
           await managers.vectorRAGManager.updateDocumentStatus(doc.id, 'ready', {
             embeddingStatus: 'ready',
             embeddingProgress: 100,
-            vectorCount: 0 // No vectors stored yet
+            vectorCount: vectors.length
           });
 
           // Emit progress: complete
@@ -632,30 +685,49 @@ export default function ChatSessionPage() {
           console.log('[ChatSession] 🔍 Searching linked databases for RAG context...');
           const allRelevantChunks: Array<{ content: string; metadata: any; score: number; database: string }> = [];
 
-          for (const dbName of selectedGroup.linkedDatabases) {
-            if (!dbName || typeof dbName !== 'string' || dbName === 'undefined') continue;
+          // Generate query embedding via host endpoint
+          const hostEndpoint = sessionMetadata?.hostEndpoint;
+          if (!hostEndpoint) {
+            console.warn('[ChatSession] ⚠️ Host endpoint not available, skipping RAG search');
+          } else {
+            const { generateEmbeddings } = await import('@/lib/embedding-utils');
+            console.log(`[ChatSession] Generating query embedding for: "${message.substring(0, 50)}..."`);
+            const embedResult = await generateEmbeddings(hostEndpoint, [message], 84532);
+            const queryVector = embedResult.embeddings[0].embedding;
+            console.log(`[ChatSession] ✅ Query embedding generated (${queryVector.length} dimensions)`);
 
+            // Search host session for relevant vectors (host-side search, not client-side!)
             try {
-              // Search this database for relevant chunks (top 3 per database)
-              const searchResults = await managers!.vectorRAGManager.searchVectors(
-                dbName,
-                message, // Use user's message as the search query
-                3 // Top 3 results per database
+              // CRITICAL: searchVectors expects blockchain session ID, not S5 session ID
+              const blockchainSessionId = sessionMetadata?.blockchainSessionId;
+              if (!blockchainSessionId) {
+                console.warn('[ChatSession] ⚠️ No blockchain session ID available for RAG search');
+                throw new Error('No blockchain session ID available');
+              }
+
+              console.log(`[ChatSession] Searching host session for relevant vectors (blockchain session: ${blockchainSessionId})...`);
+              const searchResults = await managers!.sessionManager.searchVectors(
+                blockchainSessionId,  // Use blockchain session ID, not S5 session ID!
+                queryVector,
+                5, // Top 5 results overall
+                0.2 // Minimum similarity threshold (lowered for better recall)
               );
 
               if (searchResults && searchResults.length > 0) {
-                console.log(`[ChatSession] Found ${searchResults.length} relevant chunks in "${dbName}"`);
+                console.log(`[ChatSession] Found ${searchResults.length} relevant chunks from host`);
                 searchResults.forEach(result => {
                   allRelevantChunks.push({
-                    content: result.content,
+                    content: result.text || result.content || result.metadata?.text || 'No text found',
                     metadata: result.metadata,
                     score: result.score,
-                    database: dbName
+                    database: result.metadata?.databaseName || 'unknown'
                   });
                 });
+              } else {
+                console.log(`[ChatSession] No relevant chunks found (documents may not be uploaded yet)`);
               }
-            } catch (dbError) {
-              console.warn(`[ChatSession] Failed to search database "${dbName}":`, dbError);
+            } catch (searchError) {
+              console.warn(`[ChatSession] Host search failed:`, searchError);
             }
           }
 

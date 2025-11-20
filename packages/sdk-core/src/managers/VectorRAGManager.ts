@@ -542,6 +542,97 @@ export class VectorRAGManager implements IVectorRAGManager {
     await this.vectorStore.addVector(dbName, id, values, metadata);
   }
 
+  /**
+   * Add multiple vectors directly to database (without session)
+   *
+   * Used for deferred embeddings workflow where documents are processed
+   * in background without an active RAG session.
+   *
+   * @param databaseName - Database identifier
+   * @param vectors - Array of vectors with IDs, embeddings, and metadata
+   */
+  async addVectorsToDatabase(databaseName: string, vectors: Array<{ id: string; vector: number[]; metadata: Record<string, any> }>): Promise<void> {
+    this.ensureNotDisposed();
+    await this.vectorStore.addVectors(databaseName, vectors);
+  }
+
+  /**
+   * Search database directly without requiring an active session
+   *
+   * Used for deferred embeddings workflow where we need to search vectors
+   * that were stored outside of a RAG session.
+   *
+   * @param databaseName - Database identifier
+   * @param queryVector - Query embedding vector (384 dimensions)
+   * @param topK - Number of results to return (default: 5)
+   * @param threshold - Minimum similarity threshold (default: 0.7)
+   * @returns Search results with scores and metadata
+   */
+  async searchDatabaseDirect(
+    databaseName: string,
+    queryVector: number[],
+    topK: number = 5,
+    threshold: number = 0.7
+  ): Promise<Array<{ id: string; score: number; content: string; metadata: any }>> {
+    this.ensureNotDisposed();
+
+    // Load all vectors from database
+    const allVectors = await this.vectorStore.listVectors(databaseName);
+
+    if (allVectors.length === 0) {
+      return [];
+    }
+
+    // Calculate cosine similarity for each vector
+    const results: Array<{ id: string; score: number; content: string; metadata: any }> = [];
+
+    for (const vector of allVectors) {
+      const similarity = this._cosineSimilarity(queryVector, vector.vector);
+
+      if (similarity >= threshold) {
+        results.push({
+          id: vector.id,
+          score: similarity,
+          content: vector.metadata?.text || '',
+          metadata: vector.metadata || {}
+        });
+      }
+    }
+
+    // Sort by similarity score (descending) and take top K
+    results.sort((a, b) => b.score - a.score);
+    return results.slice(0, topK);
+  }
+
+  /**
+   * Calculate cosine similarity between two vectors
+   * @private
+   */
+  private _cosineSimilarity(a: number[], b: number[]): number {
+    if (a.length !== b.length) {
+      throw new Error(`Vector dimension mismatch: ${a.length} vs ${b.length}`);
+    }
+
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+
+    for (let i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+
+    normA = Math.sqrt(normA);
+    normB = Math.sqrt(normB);
+
+    if (normA === 0 || normB === 0) {
+      return 0;
+    }
+
+    return dotProduct / (normA * normB);
+  }
+
   /** Get specific vectors by IDs */
   async getVectors(databaseName: string, vectorIds: string[]): Promise<Vector[]> {
     return await this.vectorStore.getVectors(databaseName, vectorIds);
