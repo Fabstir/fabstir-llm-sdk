@@ -11,7 +11,7 @@ import { downloadFromS5 } from '@/lib/s5-utils';
 import { EmbeddingProgressBar } from '@/components/vector-databases/embedding-progress-bar';
 import { ChatInterface } from '@/components/chat/chat-interface';
 import { SessionHistory } from '@/components/chat/session-history';
-import { ChatMessage } from '@/components/chat/message-bubble';
+import { ChatMessage, MessageBubble } from '@/components/chat/message-bubble';
 import { Session } from '@/components/chat/session-card';
 import { ArrowLeft, Database } from 'lucide-react';
 
@@ -351,7 +351,8 @@ export default function ChatSessionPage() {
       console.log('[ChatSession] 🔄 Loading messages from storage...', {
         groupId,
         sessionId,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        stackTrace: new Error().stack?.split('\n')[2] // Log where this was called from
       });
       const session = await getChatSession(groupId, sessionId);
       console.log('[ChatSession] 🔍 getChatSession result:', {
@@ -361,10 +362,28 @@ export default function ChatSessionPage() {
       });
       if (session) {
         console.log('[ChatSession] 📦 Loaded messages from storage:', {
-          count: session.messages?.length || 0,
-          messages: session.messages?.map(m => ({ role: m.role, content: m.content.substring(0, 50) }))
+          count: session.messages?.length || 0
         });
+
+        // Log each message in detail with JSON.stringify
+        session.messages?.forEach((m, idx) => {
+          console.log(`MESSAGE ${idx} [LOADED]:`, JSON.stringify({
+            role: m.role,
+            contentLength: m.content.length,
+            contentPreview: m.content.substring(0, 100),
+            hasFileMarkers: m.content.includes('=== FILE:'),
+            displayContent: (m as any).displayContent,
+            displayContentType: typeof (m as any).displayContent,
+            hasAttachments: !!(m as any).attachments,
+            attachments: (m as any).attachments,
+            timestamp: m.timestamp,
+            id: (m as any).id
+          }, null, 2));
+        });
+
+        console.log('[ChatSession] 📌 About to call setMessages with', session.messages?.length || 0, 'messages');
         setMessages(session.messages || []);
+        console.log('[ChatSession] ✅ setMessages completed');
 
         // --- Phase 4: Detect session type from metadata ---
         const metadata = (session as any).metadata;
@@ -505,6 +524,27 @@ export default function ChatSessionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, isInitialized, groupId, sessionId, isSpecialRoute]);
 
+  // Debug: Log messages state whenever it changes
+  useEffect(() => {
+    console.log('[ChatSession] 📋 Messages state changed:', {
+      count: messages.length,
+      timestamp: new Date().toISOString()
+    });
+    messages.forEach((m, idx) => {
+      if (m.role === 'user') {
+        console.log(`[ChatSession] MESSAGE ${idx} [STATE]:`, {
+          role: m.role,
+          hasDisplayContent: !!(m as any).displayContent,
+          displayContent: (m as any).displayContent,
+          hasAttachments: !!(m as any).attachments,
+          contentLength: m.content.length,
+          contentPreview: m.content.substring(0, 100),
+          timestamp: m.timestamp
+        });
+      }
+    });
+  }, [messages]);
+
   // Update local state when selectedGroup changes
   useEffect(() => {
     if (selectedGroup) {
@@ -591,41 +631,91 @@ export default function ChatSessionPage() {
       throw new Error('AI session metadata not available');
     }
 
-    // Add user message (optimistic update)
-    const userMessage: ChatMessage = {
-      role: 'user',
-      content: message,
-      timestamp: Date.now(),
-    };
-
-    console.log('[ChatSession] 📝 Adding user message to state:', {
-      currentMessageCount: messages.length,
-      newMessage: { role: userMessage.role, content: userMessage.content.substring(0, 50) }
-    });
-    setMessages(prev => {
-      console.log('[ChatSession] 📝 User message - prev state:', prev.length);
-      const newState = [...prev, userMessage];
-      console.log('[ChatSession] 📝 User message - new state:', newState.length);
-      return newState;
-    });
-
-    // Create placeholder for AI response (for streaming)
-    const aiMessageId = Date.now();
-    const aiMessagePlaceholder: ChatMessage = {
-      role: 'assistant',
-      content: '',
-      timestamp: aiMessageId,
-    };
-
-    console.log('[ChatSession] 📝 Adding AI placeholder to state');
-    setMessages(prev => {
-      console.log('[ChatSession] 📝 AI placeholder - prev state:', prev.length);
-      const newState = [...prev, aiMessagePlaceholder];
-      console.log('[ChatSession] 📝 AI placeholder - new state:', newState.length);
-      return newState;
-    });
-
     try {
+      // Process attached files FIRST (before creating user message)
+      let fileContext = '';
+      let userMessageContent = message;
+      if (files && files.length > 0) {
+        console.log(`[ChatSession] 📎 Processing ${files.length} attached file(s)...`);
+
+        for (const file of files) {
+          try {
+            // Validate file type (only text-based files)
+            const ext = file.name.split('.').pop()?.toLowerCase();
+            if (!['txt', 'md', 'html', 'json', 'csv'].includes(ext || '')) {
+              console.warn(`[ChatSession] ⚠️ Skipping non-text file: ${file.name}`);
+              continue;
+            }
+
+            // Validate file size (max 1 MB for direct injection)
+            if (file.size > 1024 * 1024) {
+              console.warn(`[ChatSession] ⚠️ File too large (${file.size} bytes): ${file.name}`);
+              continue;
+            }
+
+            // Read file content
+            const content = await file.text();
+            console.log(`[ChatSession] ✅ Read file: ${file.name} (${content.length} chars)`);
+
+            // Append to file context
+            fileContext += `\n\n=== FILE: ${file.name} ===\n${content}\n=== END OF FILE ===\n`;
+          } catch (error) {
+            console.error(`[ChatSession] ❌ Failed to read file ${file.name}:`, error);
+          }
+        }
+
+        if (fileContext) {
+          console.log(`[ChatSession] ✅ File context prepared (${fileContext.length} chars)`);
+          // Include file content in user message so it's available for follow-up questions
+          userMessageContent = `${fileContext}\n\nUser question: ${message}`;
+        }
+      }
+
+      // Create user message with embedded metadata (survives S5 serialization)
+      // Embed displayContent and attachments in content field using markers
+      const attachmentsJSON = files && files.length > 0
+        ? JSON.stringify(files.map(f => ({ name: f.name, size: f.size, type: f.type })))
+        : '';
+
+      const contentWithMetadata = attachmentsJSON
+        ? `<<DISPLAY>>${message}<</DISPLAY>><<ATTACHMENTS>>${attachmentsJSON}<</ATTACHMENTS>>\n${userMessageContent}`
+        : userMessageContent;
+
+      const userMessage: ChatMessage = {
+        id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        role: 'user',
+        content: contentWithMetadata,
+        timestamp: Date.now(),
+      };
+
+      console.log('[ChatSession] 📝 Adding user message to state:', {
+        currentMessageCount: messages.length,
+        newMessage: { role: userMessage.role, content: userMessage.content.substring(0, 100) }
+      });
+      setMessages(prev => {
+        console.log('[ChatSession] 📝 User message - prev state:', prev.length);
+        const newState = [...prev, userMessage];
+        console.log('[ChatSession] 📝 User message - new state:', newState.length);
+        return newState;
+      });
+
+      // Create placeholder for AI response (for streaming)
+      const aiMessageId = Date.now();
+      const aiMessagePlaceholder: ChatMessage = {
+        id: `msg-${aiMessageId}-${Math.random().toString(36).substr(2, 9)}`,
+        role: 'assistant',
+        content: '',
+        timestamp: aiMessageId,
+      };
+
+      console.log('[ChatSession] 📝 Adding AI placeholder to state');
+      setMessages(prev => {
+        console.log('[ChatSession] 📝 AI placeholder - prev state:', prev.length);
+        const newState = [...prev, aiMessagePlaceholder];
+        console.log('[ChatSession] 📝 AI placeholder - new state:', newState.length);
+        return newState;
+      });
+
       // Send message via SessionManager (WebSocket to production host)
       const blockchainSessionId = BigInt(activeMetadata.blockchainSessionId);
 
@@ -666,10 +756,11 @@ export default function ChatSessionPage() {
           .join('\n');
 
         // Add current user message (node will add assistant prompt)
-        fullPrompt = `${harmonyHistory}\n<|start|>user<|message|>${message}<|end|>`;
+        // Use userMessageContent which includes file context if files were attached
+        fullPrompt = `${harmonyHistory}\n<|start|>user<|message|>${userMessageContent}<|end|>`;
       } else {
-        // First message
-        fullPrompt = message;
+        // First message - use userMessageContent which includes file context if files were attached
+        fullPrompt = userMessageContent;
       }
 
       console.log('[ChatSession] 📜 Conversation context:', {
@@ -777,6 +868,9 @@ export default function ChatSessionPage() {
         }
       }
 
+      // NOTE: File context is now included in userMessage.content, so it's automatically
+      // part of the conversation history. No need for separate injection.
+
       // Sub-phase 8.1.6: Use SessionManager.sendPromptStreaming with streaming callback
       let streamedContent = '';
 
@@ -813,6 +907,25 @@ export default function ChatSessionPage() {
 
       console.log('[ChatSession] ✅ AI response complete:', response.substring(0, 100) + '...');
 
+      // Check if response is an error from the host
+      if (response.includes('Error:') && (response.includes('NoKvCacheSlot') || response.includes('Decode failed'))) {
+        console.log('[ChatSession] 🔴 Host returned error in response - treating as exception');
+
+        // Remove placeholder message
+        setMessages(prev => prev.filter(msg => msg.timestamp !== aiMessageId));
+
+        // Add error message as system message
+        const errorMessage: ChatMessage = {
+          id: `msg-error-${Date.now()}`,
+          role: 'system',
+          content: '⚠️ Host is at capacity (no available cache slots). This usually happens when the host is serving many concurrent sessions. Please try:\n\n1. Wait a few minutes and retry your message\n2. Select a different host from the dashboard\n3. End and restart this session to get a fresh cache slot\n\nYour message was not processed, but you can retry it once capacity is available.',
+          timestamp: Date.now()
+        };
+
+        setMessages(prev => [...prev, errorMessage]);
+        throw new Error('Host at capacity - no KV cache slots available. Please retry or select a different host.');
+      }
+
       // Final update with complete response (in case streaming missed anything)
       const finalAIMessage: ChatMessage = {
         role: 'assistant',
@@ -836,10 +949,21 @@ export default function ChatSessionPage() {
       trackTokensAndCost(response); // AI response tokens
 
       // Save messages to session group storage
-      console.log('[ChatSession] 💾 Saving messages to S5...', {
-        userMessage: { role: userMessage.role, content: userMessage.content.substring(0, 50) },
-        aiMessage: { role: finalAIMessage.role, content: finalAIMessage.content.substring(0, 50) }
-      });
+      console.log('[ChatSession] 💾 Saving messages to S5...');
+      console.log('USER MESSAGE:', JSON.stringify({
+        role: userMessage.role,
+        contentLength: userMessage.content.length,
+        contentPreview: userMessage.content.substring(0, 100),
+        hasFileMarkers: userMessage.content.includes('=== FILE:'),
+        displayContent: userMessage.displayContent,
+        attachments: userMessage.attachments,
+        timestamp: userMessage.timestamp
+      }, null, 2));
+      console.log('AI MESSAGE:', JSON.stringify({
+        role: finalAIMessage.role,
+        contentPreview: finalAIMessage.content.substring(0, 100)
+      }, null, 2));
+
       await sdkAddMessage(groupId, sessionId, userMessage);
       await sdkAddMessage(groupId, sessionId, finalAIMessage);
 
@@ -853,6 +977,22 @@ export default function ChatSessionPage() {
 
       // Remove placeholder message on error
       setMessages(prev => prev.filter(msg => msg.timestamp !== aiMessageId));
+
+      // Check for NoKvCacheSlot error - host resource limitation
+      if (error.message && (error.message.includes('NoKvCacheSlot') || error.message.includes('Decode failed'))) {
+        console.log('[ChatSession] 🔴 Host KV cache full - adding helpful error message');
+
+        // Add error message as system message to help user understand what happened
+        const errorMessage: ChatMessage = {
+          id: `msg-error-${Date.now()}`,
+          role: 'system',
+          content: '⚠️ Host is at capacity (no available cache slots). This usually happens when the host is serving many concurrent sessions. Please try:\n\n1. Wait a few minutes and retry your message\n2. Select a different host from the dashboard\n3. End and restart this session to get a fresh cache slot\n\nYour message was not processed, but you can retry it once capacity is available.',
+          timestamp: Date.now()
+        };
+
+        setMessages(prev => [...prev, errorMessage]);
+        throw new Error('Host at capacity - no KV cache slots available. Please retry or select a different host.');
+      }
 
       // Check if session ended error - update metadata and trigger UI update
       if (error.message && error.message.includes('Session is ended')) {
@@ -959,14 +1099,22 @@ export default function ChatSessionPage() {
       setMessages(prev => [...prev, summaryMsg]);
 
       // Step 3: End the session (close WebSocket and update status in S5)
+      console.log('[ChatSession.handleEndSession] 🔴 About to call endAISession...');
+      console.log('[ChatSession.handleEndSession] 📊 Current messages count BEFORE endAISession:', messages.length);
       await endAISession(groupId, sessionId);
+      console.log('[ChatSession.handleEndSession] ✅ endAISession completed');
+      console.log('[ChatSession.handleEndSession] 📊 Current messages count AFTER endAISession:', messages.length);
 
       const successMsg: ChatMessage = {
         role: 'system',
         content: '✅ Session ended successfully\n🔐 WebSocket disconnected\n📝 Status updated to "ended"\n⏳ Host will finalize payment on blockchain',
         timestamp: Date.now(),
       };
-      setMessages(prev => [...prev, successMsg]);
+      console.log('[ChatSession.handleEndSession] 📌 Adding success message to state');
+      setMessages(prev => {
+        console.log('[ChatSession.handleEndSession] 📊 Previous messages count:', prev.length);
+        return [...prev, successMsg];
+      });
 
       // Step 4: Update session status in local state (keep metadata for Continue Chat button)
       setSessionMetadata(prev => ({
@@ -1307,22 +1455,7 @@ export default function ChatSessionPage() {
               {/* Conversation History (Read-Only) */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {messages.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div
-                      className={`max-w-[70%] rounded-lg px-4 py-2 ${
-                        msg.role === 'user'
-                          ? 'bg-blue-600 text-white'
-                          : msg.role === 'assistant'
-                          ? 'bg-gray-100 text-gray-900'
-                          : 'bg-yellow-50 text-yellow-900 border border-yellow-200'
-                      }`}
-                    >
-                      <div className="whitespace-pre-wrap">{msg.content}</div>
-                    </div>
-                  </div>
+                  <MessageBubble key={idx} message={msg} />
                 ))}
               </div>
 

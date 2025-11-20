@@ -4,9 +4,10 @@ import { formatDistanceToNow } from 'date-fns';
 import { User, Bot, AlertCircle } from 'lucide-react';
 
 export interface ChatMessage {
-  id: string;
+  id?: string;
   role: 'user' | 'assistant' | 'system';
-  content: string;
+  content: string;  // Full content (includes file context for AI)
+  displayContent?: string;  // Optional: Original message for display (without file context)
   timestamp: number;
   tokens?: number;
   sources?: {
@@ -16,11 +17,49 @@ export interface ChatMessage {
     filePath?: string;
     vectorId?: string;
   }[];
+  attachments?: {
+    name: string;
+    size: number;
+    type: string;
+  }[];
 }
 
 interface MessageBubbleProps {
   message: ChatMessage;
   onSourceClick?: (source: any) => void;
+}
+
+/**
+ * Parse message content to extract display text and attachments from embedded markers
+ * Format: <<DISPLAY>>text<</DISPLAY>><<ATTACHMENTS>>[...]<</ATTACHMENTS>>...rest of content
+ */
+function parseMessageContent(content: string): {
+  displayText: string;
+  attachments: Array<{ name: string; size: number; type: string }>;
+} {
+  // Check for embedded markers using RegExp constructor
+  const displayMatch = content.match(new RegExp('<<DISPLAY>>([\\s\\S]*?)<</DISPLAY>>'));
+  const attachmentsMatch = content.match(new RegExp('<<ATTACHMENTS>>([\\s\\S]*?)<</ATTACHMENTS>>'));
+
+  if (displayMatch) {
+    // Has embedded metadata
+    const displayText = displayMatch[1];
+    const attachments = attachmentsMatch
+      ? JSON.parse(attachmentsMatch[1])
+      : [];
+    return { displayText, attachments };
+  }
+
+  // No embedded metadata - return full content
+  return { displayText: content, attachments: [] };
+}
+
+/**
+ * Get what should be displayed in the message bubble
+ */
+function getDisplayContent(message: ChatMessage): string {
+  const { displayText } = parseMessageContent(message.content);
+  return displayText;
 }
 
 /**
@@ -32,6 +71,11 @@ export function MessageBubble({ message, onSourceClick }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
   const isAssistant = message.role === 'assistant';
+
+  // Parse message content to get display text and attachments
+  const { displayText: parsedDisplayText, attachments: parsedAttachments } = parseMessageContent(message.content);
+  const displayText = isUser || isAssistant ? parsedDisplayText : message.content;
+  const attachments = isUser ? parsedAttachments : [];
 
   if (isSystem) {
     // Sub-phase 8.1.7: Different styling for checkpoint vs other system messages
@@ -68,7 +112,29 @@ export function MessageBubble({ message, onSourceClick }: MessageBubbleProps) {
               : 'bg-gray-100 text-gray-900 border border-gray-200'
           }`}
         >
-          <p className="whitespace-pre-wrap break-words">{message.content}</p>
+          <div>
+            <p className="whitespace-pre-wrap break-words">
+              {displayText}
+            </p>
+          </div>
+
+          {/* Attachments (only for user messages) */}
+          {isUser && attachments.length > 0 && (
+            <div className="mt-3 space-y-1">
+              {attachments.map((attachment, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center gap-2 text-xs bg-blue-500 bg-opacity-20 rounded px-2 py-1"
+                >
+                  <span className="font-mono">📎</span>
+                  <span className="font-medium">{attachment.name}</span>
+                  <span className="text-blue-200">
+                    ({(attachment.size / 1024).toFixed(1)} KB)
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Metadata */}
           <div

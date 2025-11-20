@@ -937,15 +937,47 @@ export default function SessionGroupDetailPage() {
               ) : (
                 <div className="text-center py-12">
                   <p className="text-gray-600 mb-4">No chat sessions yet</p>
-                  <button
-                    onClick={() => {
-                      const newSessionId = `sess-${Date.now()}`;
-                      router.push(`/session-groups/${groupId}/${newSessionId}`);
-                    }}
-                    className="px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
-                  >
-                    Start Your First Chat
-                  </button>
+                  {isConnected && aiModeEnabled ? (
+                    <button
+                      onClick={handleStartAIChat}
+                      disabled={isCreatingAISession || !discoveredHost}
+                      className="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-md hover:from-purple-700 hover:to-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 mx-auto"
+                      title={discoveredHost ? "Create AI chat session with blockchain payment" : "Waiting for host discovery..."}
+                    >
+                      {isCreatingAISession ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Creating AI Session...
+                        </>
+                      ) : !discoveredHost ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Discovering Hosts...
+                        </>
+                      ) : (
+                        <>
+                          💎 Start Your First Chat
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={async () => {
+                        try {
+                          const session = await startChat(groupId);
+                          router.push(`/session-groups/${groupId}/${session.sessionId}`);
+                        } catch (err) {
+                          console.error("Failed to start chat:", err);
+                        }
+                      }}
+                      className="px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
+                    >
+                      Start Your First Chat (Mock)
+                    </button>
+                  )}
+                  {aiSessionError && (
+                    <p className="text-red-600 text-sm mt-2">{aiSessionError}</p>
+                  )}
                 </div>
               )}
             </div>
