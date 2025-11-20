@@ -191,10 +191,67 @@ export function useVectorDatabases() {
       if (!managers) throw new Error('SDK not initialized');
 
       const vectorRAGManager = managers.vectorRAGManager;
+      const storageManager = managers.storageManager;
+      const userAddress = managers.authManager.getUserAddress();
+      const s5 = storageManager.s5Client;
+
+      if (!s5) {
+        throw new Error('S5 storage not initialized');
+      }
+
+      // Step 1: Delete from SDK's in-memory metadata service
       await vectorRAGManager.deleteDatabase(name);
 
-      // Optimistic UI update - remove from local state immediately
+      // Step 2: Delete from S5 storage
+      // CRITICAL: SDK's deleteDatabase() only removes from in-memory cache, not S5!
+      // We must manually delete the entire database folder from S5 storage.
+      // Path format: home/vector-databases/{userAddress}/{databaseName}/
+      const databasePath = `home/vector-databases/${userAddress}/${name}`;
+
+      try {
+        // Delete manifest.json
+        const manifestPath = `${databasePath}/manifest.json`;
+        await s5.fs.delete(manifestPath);
+        console.log(`[deleteDatabase] ✅ Deleted manifest: ${manifestPath}`);
+      } catch (error) {
+        console.warn(`[deleteDatabase] Failed to delete manifest (may not exist):`, error);
+      }
+
+      try {
+        // Delete vectors (if they exist)
+        const vectorsPath = `${databasePath}/vectors`;
+        await s5.fs.delete(vectorsPath);
+        console.log(`[deleteDatabase] ✅ Deleted vectors: ${vectorsPath}`);
+      } catch (error) {
+        console.warn(`[deleteDatabase] Failed to delete vectors (may not exist):`, error);
+      }
+
+      try {
+        // Delete documents folder (if it exists)
+        const documentsPath = `${databasePath}/documents`;
+        await s5.fs.delete(documentsPath);
+        console.log(`[deleteDatabase] ✅ Deleted documents: ${documentsPath}`);
+      } catch (error) {
+        console.warn(`[deleteDatabase] Failed to delete documents (may not exist):`, error);
+      }
+
+      // Step 3: Clear SDK's vectorStore cache
+      // CRITICAL: Without this, the cache will still contain the database and it will
+      // reappear on page refresh when initialize() loads from cache instead of S5.
+      if (managers.vectorRAGManager?.vectorStore) {
+        console.log(`[deleteDatabase] Invalidating cache for: ${name}`);
+
+        const vectorStore = managers.vectorRAGManager.vectorStore as any;
+        if (vectorStore.manifestCache) {
+          vectorStore.manifestCache.delete(name);
+          console.log(`[deleteDatabase] ✅ Cleared cache entry for: ${name}`);
+        }
+      }
+
+      // Step 4: Optimistic UI update - remove from local state immediately
       setDatabases(prevDbs => prevDbs.filter(db => db.name !== name));
+
+      console.log(`[deleteDatabase] ✅ Successfully deleted database "${name}" from all locations`);
 
       // NOTE: Caller must NOT rely on immediate S5 consistency.
       // S5 will sync in background. Don't call fetchDatabases() immediately.
