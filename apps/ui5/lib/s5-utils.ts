@@ -20,6 +20,7 @@ interface S5Client {
  *
  * @param s5 - S5 client instance (from StorageManager.s5Client)
  * @param fileContent - File content (text or binary)
+ * @param userAddress - User wallet address (for path isolation)
  * @param databaseName - Vector database name
  * @param documentId - Unique document identifier
  * @returns S5 CID (path) for later retrieval
@@ -27,11 +28,13 @@ interface S5Client {
 export async function uploadDocumentToS5(
   s5: S5Client,
   fileContent: string | Uint8Array,
+  userAddress: string,
   databaseName: string,
   documentId: string
 ): Promise<string> {
-  // Path format: home/vector-databases/{databaseName}/documents/{documentId}.txt
-  const path = `home/vector-databases/${databaseName}/documents/${documentId}.txt`;
+  // Path format: home/vector-databases/{userAddress}/{databaseName}/documents/{documentId}.txt
+  // IMPORTANT: Must match SDK path structure (S5VectorStore._getManifestPath)
+  const path = `home/vector-databases/${userAddress}/${databaseName}/documents/${documentId}.txt`;
 
   await s5.fs.put(path, fileContent);
 

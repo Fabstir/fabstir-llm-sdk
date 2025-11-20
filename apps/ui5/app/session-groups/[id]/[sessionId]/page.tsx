@@ -62,6 +62,9 @@ export default function ChatSessionPage() {
   const [queuePosition, setQueuePosition] = useState<number>(0);
   const [processingStartTimes, setProcessingStartTimes] = useState<Map<string, number>>(new Map());
 
+  // Processing lock to prevent duplicate embedding processing
+  const isProcessingEmbeddings = useRef(false);
+
   // Check if this is a special route (not a session ID)
   const isSpecialRoute = ['settings', 'databases'].includes(sessionId);
 
@@ -136,24 +139,51 @@ export default function ChatSessionPage() {
   }, [PROOF_INTERVAL, PRICE_PER_TOKEN]);
 
   // Process Pending Embeddings (Background)
-  const processPendingEmbeddings = useCallback(async () => {
+  const processPendingEmbeddings = useCallback(async (groupOverride?: any) => {
+    // Check if already processing (prevent duplicate calls)
+    if (isProcessingEmbeddings.current) {
+      console.log('[ChatSession] Already processing embeddings, skipping duplicate call');
+      return;
+    }
+
     if (!managers || !isInitialized) {
       console.log('[ChatSession] SDK not initialized, skipping embedding processing');
       return;
     }
 
-    if (!selectedGroup || !selectedGroup.linkedDatabases || selectedGroup.linkedDatabases.length === 0) {
+    // Use passed group or fall back to selectedGroup from state
+    const group = groupOverride || selectedGroup;
+
+    if (!group || !group.linkedDatabases || group.linkedDatabases.length === 0) {
       console.log('[ChatSession] No linked databases, skipping embedding processing');
       return;
     }
 
+    // Set processing lock
+    isProcessingEmbeddings.current = true;
+
     try {
       console.log('[ChatSession] Checking for pending documents in linked databases...');
+      console.log('[ChatSession] Raw linkedDatabases array:', JSON.stringify(group.linkedDatabases));
+
+      // Filter out invalid database names
+      const validDatabases = group.linkedDatabases.filter((db: any) => {
+        const isValid = db && typeof db === 'string' && db !== 'undefined' && db !== 'null';
+        console.log(`[ChatSession] Database "${db}" - type: ${typeof db}, isValid: ${isValid}`);
+        return isValid;
+      });
+
+      if (validDatabases.length === 0) {
+        console.log('[ChatSession] No valid database names found in linkedDatabases:', group.linkedDatabases);
+        return;
+      }
+
+      console.log('[ChatSession] Valid databases to check:', validDatabases);
 
       // Get all pending documents from linked databases
       const allPendingDocs: any[] = [];
 
-      for (const dbName of selectedGroup.linkedDatabases) {
+      for (const dbName of validDatabases) {
         try {
           const pendingDocs = await managers.vectorRAGManager.getPendingDocuments(dbName);
           if (pendingDocs && pendingDocs.length > 0) {
@@ -171,7 +201,7 @@ export default function ChatSessionPage() {
       }
 
       console.log(`[ChatSession] Found ${allPendingDocs.length} total pending documents, starting background processing...`);
-      setDocumentQueue(allPendingDocs.map(doc => doc.name || doc.fileName));
+      setDocumentQueue(allPendingDocs.map(doc => doc.fileName || doc.name));
       setQueuePosition(1);
 
       // Process each pending document
@@ -182,7 +212,7 @@ export default function ChatSessionPage() {
             sessionId: sessionId,
             databaseName: doc.databaseName,
             documentId: doc.id,
-            fileName: doc.name || doc.fileName,
+            fileName: doc.fileName || doc.name,
             totalChunks: 0,
             processedChunks: 0,
             percentage: 0,
@@ -192,16 +222,30 @@ export default function ChatSessionPage() {
 
           // Download document from S5
           console.log(`[ChatSession] Downloading document from S5: ${doc.s5Cid}`);
-          const fileContent = await downloadFromS5(doc.s5Cid);
+          const s5Client = managers.storageManager.s5Client;
+          const fileContent = await downloadFromS5(s5Client, doc.s5Cid);
 
-          // Generate embeddings (mock - replace with real implementation)
-          console.log(`[ChatSession] Generating embeddings for: ${doc.name}`);
-          await new Promise(resolve => setTimeout(resolve, 5000)); // Simulate embedding generation
+          if (!fileContent) {
+            throw new Error(`Failed to download document from S5: ${doc.s5Cid}`);
+          }
+
+          // Convert to text (fileContent can be string or Uint8Array)
+          const text = typeof fileContent === 'string'
+            ? fileContent
+            : new TextDecoder().decode(fileContent);
+
+          console.log(`[ChatSession] Generating embeddings for: ${doc.fileName || doc.name} (${text.length} chars)`);
+
+          // TODO: Implement real embedding generation
+          // For now, skip embedding generation and just mark as ready
+          // This allows testing the document upload/storage flow
+          console.warn('[ChatSession] ⚠️ Real embedding generation not yet implemented - document marked as ready without vectors');
 
           // Update document status to 'ready'
           await managers.vectorRAGManager.updateDocumentStatus(doc.id, 'ready', {
             embeddingStatus: 'ready',
-            embeddingProgress: 100
+            embeddingProgress: 100,
+            vectorCount: 0 // No vectors stored yet
           });
 
           // Emit progress: complete
@@ -209,7 +253,7 @@ export default function ChatSessionPage() {
             sessionId: sessionId,
             databaseName: doc.databaseName,
             documentId: doc.id,
-            fileName: doc.name || doc.fileName,
+            fileName: doc.fileName || doc.name,
             totalChunks: 0,
             processedChunks: 0,
             percentage: 100,
@@ -217,16 +261,16 @@ export default function ChatSessionPage() {
             error: null
           });
 
-          console.log(`[ChatSession] ✅ Embedding complete for: ${doc.name}`);
+          console.log(`[ChatSession] ✅ Embedding complete for: ${doc.fileName || doc.name}`);
         } catch (error) {
-          console.error(`[ChatSession] ❌ Failed to process document: ${doc.name}`, error);
+          console.error(`[ChatSession] ❌ Failed to process document: ${doc.fileName || doc.name}`, error);
 
           // Emit progress: failed
           handleEmbeddingProgress({
             sessionId: sessionId,
             databaseName: doc.databaseName,
             documentId: doc.id,
-            fileName: doc.name || doc.fileName,
+            fileName: doc.fileName || doc.name,
             totalChunks: 0,
             processedChunks: 0,
             percentage: 0,
@@ -239,6 +283,9 @@ export default function ChatSessionPage() {
       console.log('[ChatSession] ✅ All pending embeddings processed');
     } catch (error) {
       console.error('[ChatSession] ❌ Background embedding processing failed:', error);
+    } finally {
+      // Release processing lock
+      isProcessingEmbeddings.current = false;
     }
   }, [managers, isInitialized, selectedGroup, sessionId, handleEmbeddingProgress]);
 
@@ -390,11 +437,12 @@ export default function ChatSessionPage() {
 
     const loadData = async () => {
       console.log('[ChatSession] 📥 Loading data for session...');
-      await selectGroup(groupId);
+      const freshGroup = await selectGroup(groupId);
       await loadMessages();
 
-      // Trigger background embedding processing (non-blocking)
-      processPendingEmbeddings().catch((error) => {
+      // Trigger background embedding processing with fresh group data (non-blocking)
+      // Pass fresh group to avoid race condition with React state updates
+      processPendingEmbeddings(freshGroup).catch((error) => {
         console.error('[ChatSession] Background embedding processing failed:', error);
         // Don't throw - user can still chat even if embeddings fail
       });
@@ -415,6 +463,16 @@ export default function ChatSessionPage() {
       setSessions([]);
     }
   }, [selectedGroup, groupId]);
+
+  // Re-run embedding processing when linked databases change
+  useEffect(() => {
+    if (selectedGroup?.linkedDatabases && selectedGroup.linkedDatabases.length > 0) {
+      console.log('[ChatSession] 🔄 Linked databases detected, processing embeddings...');
+      processPendingEmbeddings().catch((error) => {
+        console.error('[ChatSession] Embedding processing failed:', error);
+      });
+    }
+  }, [selectedGroup?.linkedDatabases, processPendingEmbeddings]);
 
   // Store latest values in ref for cleanup (avoids stale closure)
   const cleanupDataRef = useRef({ sessionMetadata, managers });
@@ -566,6 +624,86 @@ export default function ChatSessionPage() {
         fullPromptLength: fullPrompt.length,
         fullPromptPreview: fullPrompt.substring(0, 200) + '...'
       });
+
+      // RAG Context Retrieval - Search linked databases for relevant content
+      let ragContext = '';
+      if (selectedGroup?.linkedDatabases && selectedGroup.linkedDatabases.length > 0) {
+        try {
+          console.log('[ChatSession] 🔍 Searching linked databases for RAG context...');
+          const allRelevantChunks: Array<{ content: string; metadata: any; score: number; database: string }> = [];
+
+          for (const dbName of selectedGroup.linkedDatabases) {
+            if (!dbName || typeof dbName !== 'string' || dbName === 'undefined') continue;
+
+            try {
+              // Search this database for relevant chunks (top 3 per database)
+              const searchResults = await managers!.vectorRAGManager.searchVectors(
+                dbName,
+                message, // Use user's message as the search query
+                3 // Top 3 results per database
+              );
+
+              if (searchResults && searchResults.length > 0) {
+                console.log(`[ChatSession] Found ${searchResults.length} relevant chunks in "${dbName}"`);
+                searchResults.forEach(result => {
+                  allRelevantChunks.push({
+                    content: result.content,
+                    metadata: result.metadata,
+                    score: result.score,
+                    database: dbName
+                  });
+                });
+              }
+            } catch (dbError) {
+              console.warn(`[ChatSession] Failed to search database "${dbName}":`, dbError);
+            }
+          }
+
+          // Sort by relevance score and take top 5 overall
+          allRelevantChunks.sort((a, b) => b.score - a.score);
+          const topChunks = allRelevantChunks.slice(0, 5);
+
+          if (topChunks.length > 0) {
+            console.log(`[ChatSession] ✅ Using ${topChunks.length} relevant chunks as RAG context`);
+
+            // Build RAG context string
+            ragContext = '\n\n--- Relevant Information from Knowledge Base ---\n';
+            topChunks.forEach((chunk, index) => {
+              ragContext += `\n[${index + 1}] From "${chunk.database}":\n${chunk.content}\n`;
+            });
+            ragContext += '\n--- End of Knowledge Base Context ---\n\n';
+
+            // Inject RAG context into the prompt (before the current user message)
+            if (previousExchanges.length > 0) {
+              // Insert context before the final user message
+              const harmonyHistory = previousExchanges
+                .map(m => {
+                  if (m.role === 'user') {
+                    return `<|start|>user<|message|>${m.content}<|end|>`;
+                  } else {
+                    return `<|start|>assistant<|channel|>final<|message|>${m.content}<|end|>`;
+                  }
+                })
+                .join('\n');
+              fullPrompt = `${harmonyHistory}\n<|start|>user<|message|>${ragContext}${message}<|end|>`;
+            } else {
+              // First message - prepend RAG context
+              fullPrompt = ragContext + message;
+            }
+
+            console.log('[ChatSession] 📝 Enhanced prompt with RAG context:', {
+              originalLength: message.length,
+              contextLength: ragContext.length,
+              enhancedLength: fullPrompt.length
+            });
+          } else {
+            console.log('[ChatSession] No relevant chunks found in linked databases');
+          }
+        } catch (ragError) {
+          console.error('[ChatSession] Failed to retrieve RAG context:', ragError);
+          // Continue without RAG context
+        }
+      }
 
       // Sub-phase 8.1.6: Use SessionManager.sendPromptStreaming with streaming callback
       let streamedContent = '';

@@ -20,6 +20,9 @@ interface DatabaseManifest {
   chunkCount: number;
   folderPaths: string[];
   deleted?: boolean;
+  // Document metadata for deferred embeddings workflow
+  pendingDocuments?: any[];
+  readyDocuments?: any[];
 }
 
 interface ChunkMetadata {
@@ -256,6 +259,48 @@ export class S5VectorStore {
   }
 
   /**
+   * Update database metadata
+   *
+   * Loads the current manifest, updates it with the provided metadata fields,
+   * and saves it back to S5. Used for updating document arrays and other metadata.
+   *
+   * @param databaseName - Database identifier
+   * @param metadata - Partial metadata to update (pendingDocuments, readyDocuments, etc.)
+   * @throws Error if database not found
+   */
+  async updateDatabaseMetadata(databaseName: string, metadata: Partial<DatabaseMetadata>): Promise<void> {
+    const manifest = await this._loadManifest(databaseName);
+    if (!manifest) throw new Error(`Database "${databaseName}" not found`);
+
+    // Update manifest fields from metadata (reverse of _manifestToMetadata)
+    if (metadata.pendingDocuments !== undefined) {
+      manifest.pendingDocuments = metadata.pendingDocuments;
+    }
+    if (metadata.readyDocuments !== undefined) {
+      manifest.readyDocuments = metadata.readyDocuments;
+    }
+
+    if (metadata.vectorCount !== undefined) {
+      manifest.vectorCount = metadata.vectorCount;
+    }
+    if (metadata.storageSizeBytes !== undefined) {
+      manifest.storageSizeBytes = metadata.storageSizeBytes;
+    }
+    if (metadata.description !== undefined) {
+      manifest.description = metadata.description;
+    }
+    if (metadata.dimensions !== undefined) {
+      manifest.dimensions = metadata.dimensions;
+    }
+
+    // Update lastAccessed timestamp
+    manifest.lastAccessed = Date.now();
+    manifest.updated = Date.now();
+
+    await this._saveManifest(databaseName, manifest);
+  }
+
+  /**
    * Check if a database exists
    *
    * @param databaseName - Database identifier
@@ -404,15 +449,6 @@ export class S5VectorStore {
     const db = await this.getDatabase(databaseName);
     if (!db) throw new Error(`Database "${databaseName}" not found`);
     return db;
-  }
-
-  async updateDatabaseMetadata(databaseName: string, updates: Partial<DatabaseMetadata>): Promise<void> {
-    const manifest = await this._loadManifest(databaseName);
-    if (!manifest || manifest.deleted) throw new Error(`Database "${databaseName}" not found`);
-    if (updates.description !== undefined) manifest.description = updates.description;
-    if (updates.dimensions !== undefined) manifest.dimensions = updates.dimensions;
-    manifest.updated = Date.now();
-    await this._saveManifest(databaseName, manifest);
   }
 
   async addVector(databaseName: string, id: string, vector: number[], metadata?: Record<string, any>): Promise<void> {
@@ -730,7 +766,10 @@ export class S5VectorStore {
       vectorCount: manifest.vectorCount,
       storageSizeBytes: manifest.storageSizeBytes,
       description: manifest.description,
-    };
+      // Preserve document metadata arrays for deferred embeddings workflow
+      pendingDocuments: manifest.pendingDocuments,
+      readyDocuments: manifest.readyDocuments,
+    } as any;
   }
 
   private _matchesFilter(metadata: Record<string, any>, filter: Record<string, any>): boolean {

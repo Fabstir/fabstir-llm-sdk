@@ -136,17 +136,19 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     }
   }, [managers, loadSessionGroups]);
 
-  const selectGroup = useCallback(async (groupId: string): Promise<void> => {
-    if (!managers?.sessionGroupManager || !managers?.authManager) return;
+  const selectGroup = useCallback(async (groupId: string): Promise<any> => {
+    if (!managers?.sessionGroupManager || !managers?.authManager) return null;
 
     try {
       setIsLoading(true);
       setError(null);
       const group = await managers.sessionGroupManager.getSessionGroup(groupId, managers.authManager.getUserAddress());
       setSelectedGroup(group);
+      return group; // Return the fresh group data
     } catch (err) {
       console.error('[useSessionGroups] Failed to select group:', err);
       setError(err instanceof Error ? err.message : 'Failed to load session group');
+      return null;
     } finally {
       setIsLoading(false);
     }

@@ -645,41 +645,52 @@ export class VectorRAGManager implements IVectorRAGManager {
   }
 
   /**
-   * Get all pending documents across all vector databases
+   * Get pending documents from a specific vector database or all databases
    *
-   * Retrieves documents that have embeddingStatus: 'pending' from all databases
-   * in the current user's storage. Used for deferred embeddings workflow.
+   * Retrieves documents that have embeddingStatus: 'pending' from the specified
+   * database or all databases if no database name is provided.
    *
-   * @param sessionGroupId - Optional session group ID to filter databases (not yet implemented)
+   * @param databaseName - Optional database name to filter results
    * @returns Array of DocumentMetadata objects with pending embeddings
    */
-  async getPendingDocuments(sessionGroupId?: string): Promise<any[]> {
+  async getPendingDocuments(databaseName?: string): Promise<any[]> {
     this.ensureNotDisposed();
 
     // Get all vector databases
-    const databases = this.listDatabases();
+    const allDatabases = this.listDatabases();
+
+    // Filter to specific database if provided
+    const databases = databaseName
+      ? allDatabases.filter(db => db.databaseName === databaseName)
+      : allDatabases;
+
+    if (databaseName && databases.length === 0) {
+      console.warn(`[VectorRAGManager] Database "${databaseName}" not found`);
+      return [];
+    }
+
     const allPendingDocs: any[] = [];
 
     // Collect pending documents from each database
     for (const db of databases) {
       try {
-        const metadata = await this.vectorStore.getDatabaseMetadata(db.name);
+        const metadata = await this.vectorStore.getDatabaseMetadata(db.databaseName);
 
         if (metadata.pendingDocuments && Array.isArray(metadata.pendingDocuments)) {
           // Add database name to each document for context
           const docsWithDbName = metadata.pendingDocuments.map(doc => ({
             ...doc,
-            databaseName: db.name
+            databaseName: db.databaseName
           }));
           allPendingDocs.push(...docsWithDbName);
         }
       } catch (error) {
-        console.warn(`[VectorRAGManager] Failed to get pending docs from ${db.name}:`, error);
+        console.warn(`[VectorRAGManager] Failed to get pending docs from ${db.databaseName}:`, error);
         // Continue with other databases
       }
     }
 
-    console.log(`[VectorRAGManager] Found ${allPendingDocs.length} pending documents across ${databases.length} databases`);
+    console.log(`[VectorRAGManager] Found ${allPendingDocs.length} pending documents in ${databases.length} database(s)${databaseName ? ` (filtered to: ${databaseName})` : ''}`);
 
     return allPendingDocs;
   }
@@ -712,12 +723,12 @@ export class VectorRAGManager implements IVectorRAGManager {
 
     for (const db of databases) {
       try {
-        const metadata = await this.vectorStore.getDatabaseMetadata(db.name);
+        const metadata = await this.vectorStore.getDatabaseMetadata(db.databaseName);
 
         if (metadata.pendingDocuments && Array.isArray(metadata.pendingDocuments)) {
           const docIndex = metadata.pendingDocuments.findIndex(doc => doc.id === documentId);
           if (docIndex !== -1) {
-            foundDatabase = db.name;
+            foundDatabase = db.databaseName;
             foundDocument = metadata.pendingDocuments[docIndex];
             break;
           }
@@ -727,13 +738,13 @@ export class VectorRAGManager implements IVectorRAGManager {
         if (metadata.readyDocuments && Array.isArray(metadata.readyDocuments)) {
           const docIndex = metadata.readyDocuments.findIndex(doc => doc.id === documentId);
           if (docIndex !== -1) {
-            foundDatabase = db.name;
+            foundDatabase = db.databaseName;
             foundDocument = metadata.readyDocuments[docIndex];
             break;
           }
         }
       } catch (error) {
-        console.warn(`[VectorRAGManager] Failed to search ${db.name}:`, error);
+        console.warn(`[VectorRAGManager] Failed to search ${db.databaseName}:`, error);
       }
     }
 
@@ -787,7 +798,7 @@ export class VectorRAGManager implements IVectorRAGManager {
     }
 
     // Save updated metadata to S5
-    await this.vectorStore.updateVectorDatabaseMetadata(foundDatabase, metadata);
+    await this.vectorStore.updateDatabaseMetadata(foundDatabase, metadata);
 
     console.log(`[VectorRAGManager] ✅ Document ${documentId} status updated to ${status}`);
   }

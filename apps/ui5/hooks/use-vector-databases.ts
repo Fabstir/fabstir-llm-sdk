@@ -371,13 +371,15 @@ export function useVectorDatabases() {
 
       const storageManager = managers.storageManager;
       const s5 = storageManager.s5Client;
+      const userAddress = managers.authManager.getUserAddress();
 
       if (!s5) {
         throw new Error('S5 storage not initialized');
       }
 
       // Load existing database metadata from S5
-      const metadataPath = `home/vector-databases/${databaseName}/metadata.json`;
+      // IMPORTANT: Must match SDK path structure: home/vector-databases/{userAddress}/{dbName}/manifest.json
+      const metadataPath = `home/vector-databases/${userAddress}/${databaseName}/manifest.json`;
       let metadata: DatabaseMetadata;
 
       try {
@@ -389,10 +391,12 @@ export function useVectorDatabases() {
         } else {
           // If metadata doesn't exist, create new structure
           metadata = {
-            name: databaseName,
+            databaseName: databaseName,  // SDK expects "databaseName", not "name"
+            type: 'vector' as const,     // SDK requires database type
+            owner: userAddress,           // SDK requires owner address
             vectorCount: 0,
             storageSizeBytes: 0,
-            lastAccessed: Date.now(),
+            lastAccessedAt: Date.now(),  // SDK expects "lastAccessedAt", not "lastAccessed"
             createdAt: Date.now(),
             dimensions: 384,
             pendingDocuments: [],
@@ -402,10 +406,12 @@ export function useVectorDatabases() {
       } catch (error) {
         console.error('Failed to load metadata, creating new:', error);
         metadata = {
-          name: databaseName,
+          databaseName: databaseName,  // SDK expects "databaseName", not "name"
+          type: 'vector' as const,     // SDK requires database type
+          owner: userAddress,           // SDK requires owner address
           vectorCount: 0,
           storageSizeBytes: 0,
-          lastAccessed: Date.now(),
+          lastAccessedAt: Date.now(),  // SDK expects "lastAccessedAt", not "lastAccessed"
           createdAt: Date.now(),
           dimensions: 384,
           pendingDocuments: [],
@@ -423,10 +429,25 @@ export function useVectorDatabases() {
 
       // Append to pendingDocuments array
       metadata.pendingDocuments.push(docMetadata);
-      metadata.lastAccessed = Date.now();
+      metadata.lastAccessedAt = Date.now();
 
       // Save updated metadata to S5
       await s5.fs.put(metadataPath, metadata);
+
+      // CRITICAL: Invalidate SDK cache to prevent stale reads on next page load
+      // The SDK's S5VectorStore caches manifests, so writing directly to S5 doesn't update the cache
+      // We need to clear the cache and force re-initialization
+      if (managers.vectorRAGManager?.vectorStore) {
+        console.log('[addPendingDocument] Invalidating cache for:', databaseName);
+
+        // Access the private manifestCache and delete this database's entry
+        // This forces the next getDatabaseMetadata() call to reload from S5
+        const vectorStore = managers.vectorRAGManager.vectorStore as any;
+        if (vectorStore.manifestCache) {
+          vectorStore.manifestCache.delete(databaseName);
+          console.log('[addPendingDocument] ✅ Cleared cache entry for:', databaseName);
+        }
+      }
 
       // NOTE: Caller must handle UI updates optimistically to avoid S5 P2P propagation delay.
       // Do NOT call fetchDatabases() here - it reads from S5 immediately after write,

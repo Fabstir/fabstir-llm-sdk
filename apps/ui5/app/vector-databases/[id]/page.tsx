@@ -305,8 +305,9 @@ export default function VectorDatabaseDetailPage() {
         const documentId = `${file.name}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
         // Upload document content to S5
+        const userAddress = managers.authManager.getUserAddress();
         const { uploadDocumentToS5 } = await import('@/lib/s5-utils');
-        const s5Cid = await uploadDocumentToS5(s5, fileContent, databaseName, documentId);
+        const s5Cid = await uploadDocumentToS5(s5, fileContent, userAddress, databaseName, documentId);
 
         console.log(`[Page] ✅ Document uploaded to S5: ${s5Cid}`);
 
