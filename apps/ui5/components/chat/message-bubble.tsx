@@ -2,6 +2,7 @@
 
 import { formatDistanceToNow } from 'date-fns';
 import { User, Bot, AlertCircle } from 'lucide-react';
+import { MarkdownRenderer } from './markdown-renderer';
 
 export interface ChatMessage {
   id?: string;
@@ -113,9 +114,15 @@ export function MessageBubble({ message, onSourceClick }: MessageBubbleProps) {
           }`}
         >
           <div>
-            <p className="whitespace-pre-wrap break-words">
-              {displayText}
-            </p>
+            {isAssistant ? (
+              // Assistant messages: Render with markdown and LaTeX math support
+              <MarkdownRenderer content={displayText} className="text-inherit" />
+            ) : (
+              // User messages: Plain text with preserved whitespace
+              <p className="whitespace-pre-wrap break-words">
+                {displayText}
+              </p>
+            )}
           </div>
 
           {/* Attachments (only for user messages) */}

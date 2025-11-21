@@ -56,3 +56,47 @@
     color: hsl(var(--foreground));
   }
 }
+
+/* Markdown content styling */
+.markdown-content {
+  line-height: 1.6;
+}
+
+.markdown-content p:first-child {
+  margin-top: 0;
+}
+
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+/* KaTeX math equations */
+.markdown-content .katex {
+  font-size: 1em;
+}
+
+.markdown-content .katex-display {
+  margin: 0.5em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* Code blocks in markdown */
+.markdown-content pre {
+  max-width: 100%;
+}
+
+.markdown-content code {
+  word-wrap: break-word;
+}
+
+/* Lists in markdown */
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 1.5em;
+}
+
+/* Links in markdown */
+.markdown-content a {
+  word-break: break-word;
+}
