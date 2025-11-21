@@ -981,35 +981,32 @@ export default function SessionGroupDetailPage() {
                             {session.title}
                           </h4>
                           <div className="flex items-center gap-2">
-                            {/* Session status badge - read from metadata.blockchainStatus */}
+                            {/* Session status badge - only show for active or special states */}
                             {(() => {
-                              const status = (session as any).metadata?.blockchainStatus;
+                              const metadata = (session as any).metadata;
+                              const status = metadata?.blockchainStatus;
+
+                              // Active session - show green badge
                               if (status === 'active') {
                                 return (
                                   <span className="text-xs px-2 py-1 rounded bg-green-100 text-green-700">
                                     🟢 Active
                                   </span>
                                 );
-                              } else if (status === 'ended') {
+                              }
+
+                              // AI session not started yet - show pending badge
+                              if (metadata?.sessionType === 'ai' && !metadata?.blockchainSessionId) {
                                 return (
-                                  <span className="text-xs px-2 py-1 rounded bg-red-100 text-red-700">
-                                    🔴 Ended
-                                  </span>
-                                );
-                              } else if (status === 'completed') {
-                                return (
-                                  <span className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700">
-                                    ✅ Completed
-                                  </span>
-                                );
-                              } else {
-                                // Mock/local session (no blockchain status)
-                                return (
-                                  <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600">
-                                    Local
+                                  <span className="text-xs px-2 py-1 rounded bg-yellow-100 text-yellow-700">
+                                    ⏳ Not Started
                                   </span>
                                 );
                               }
+
+                              // Ended/completed - show nothing (normal state)
+                              // Mock/local sessions - show nothing (normal state)
+                              return null;
                             })()}
                             <button
                               onClick={(e) => {
