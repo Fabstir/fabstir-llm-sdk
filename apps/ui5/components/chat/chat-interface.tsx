@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MessageBubble, ChatMessage } from './message-bubble';
 import { MessageInput } from './message-input';
+import { FileUploadProgress } from './file-upload-progress';
 import { DocumentViewerModal } from './document-viewer-modal';
 import { Loader2 } from 'lucide-react';
 
@@ -11,6 +12,13 @@ interface ChatInterfaceProps {
   onSendMessage: (message: string) => Promise<void>;
   loading?: boolean;
   sessionTitle?: string;
+  uploadProgress?: {
+    currentFile: string;
+    filesProcessed: number;
+    totalFiles: number;
+    status: 'reading' | 'complete' | 'error';
+    error?: string;
+  } | null;
 }
 
 /**
@@ -27,6 +35,7 @@ export function ChatInterface({
   onSendMessage,
   loading = false,
   sessionTitle = 'Chat Session',
+  uploadProgress = null,
 }: ChatInterfaceProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -76,14 +85,14 @@ export function ChatInterface({
   };
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="flex flex-col flex-1 bg-white min-h-0">
       {/* Messages Area */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-6 py-4">
         {messages.length === 0 ? (
-          <div className="flex items-center justify-center h-full">
+          <div className="py-8">
             <div className="text-center">
               <h3 className="text-xl font-semibold text-gray-900 mb-2">{sessionTitle}</h3>
-              <p className="text-gray-500">Start a conversation by sending a message below</p>
+              <p className="text-gray-500">Start a conversation by typing a message below ⬇️</p>
             </div>
           </div>
         ) : (
@@ -107,6 +116,17 @@ export function ChatInterface({
           </div>
         )}
       </div>
+
+      {/* File Upload Progress */}
+      {uploadProgress && uploadProgress.status !== 'complete' && (
+        <FileUploadProgress
+          currentFile={uploadProgress.currentFile}
+          filesProcessed={uploadProgress.filesProcessed}
+          totalFiles={uploadProgress.totalFiles}
+          status={uploadProgress.status}
+          error={uploadProgress.error}
+        />
+      )}
 
       {/* Input Area */}
       <MessageInput onSend={onSendMessage} disabled={loading} loading={loading} />

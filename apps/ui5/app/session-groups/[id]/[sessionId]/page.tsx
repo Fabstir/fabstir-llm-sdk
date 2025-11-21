@@ -12,6 +12,7 @@ import { EmbeddingProgressBar } from '@/components/vector-databases/embedding-pr
 import { ChatInterface } from '@/components/chat/chat-interface';
 import { SessionHistory } from '@/components/chat/session-history';
 import { ChatMessage, MessageBubble } from '@/components/chat/message-bubble';
+import { FileUploadProgress } from '@/components/chat/file-upload-progress';
 import { Session } from '@/components/chat/session-card';
 import { ArrowLeft, Database } from 'lucide-react';
 
@@ -61,6 +62,15 @@ export default function ChatSessionPage() {
   const [documentQueue, setDocumentQueue] = useState<string[]>([]);
   const [queuePosition, setQueuePosition] = useState<number>(0);
   const [processingStartTimes, setProcessingStartTimes] = useState<Map<string, number>>(new Map());
+
+  // File upload progress state
+  const [uploadProgress, setUploadProgress] = useState<{
+    currentFile: string;
+    filesProcessed: number;
+    totalFiles: number;
+    status: 'reading' | 'complete' | 'error';
+    error?: string;
+  } | null>(null);
 
   // Processing lock to prevent duplicate embedding processing
   const isProcessingEmbeddings = useRef(false);
@@ -551,11 +561,58 @@ export default function ChatSessionPage() {
       setGroupName(selectedGroup.name);
       setLinkedDatabases(selectedGroup.linkedDatabases || []);
 
-      // Note: chatSessions is now string[] (just IDs), not full objects
-      // Sessions sidebar is not used in this layout, so we can skip loading them
-      setSessions([]);
+      // Helper to extract display text from content with embedded markers
+      const extractDisplayText = (content: string): string => {
+        const displayMatch = content.match(new RegExp('<<DISPLAY>>([\\s\\S]*?)<</DISPLAY>>'));
+        if (displayMatch) {
+          return displayMatch[1];
+        }
+        return content;
+      };
+
+      // Load full session objects from session IDs
+      const loadSessions = async () => {
+        if (selectedGroup.chatSessions && selectedGroup.chatSessions.length > 0) {
+          const sessionObjects = await Promise.all(
+            selectedGroup.chatSessions.map(async (sessionId: string) => {
+              try {
+                const chatSession = await getChatSession(groupId, sessionId);
+                if (chatSession && chatSession.messages && chatSession.messages.length > 0) {
+                  // Get first user message for title (skip system messages)
+                  const firstUserMsg = chatSession.messages.find(m => m.role === 'user');
+                  const rawTitle = firstUserMsg?.content || chatSession.messages[0]?.content || '';
+                  const cleanTitle = extractDisplayText(rawTitle).substring(0, 50).trim();
+
+                  // Get last message for preview
+                  const lastMsg = chatSession.messages[chatSession.messages.length - 1];
+                  const rawLastMsg = lastMsg?.content || '';
+                  const cleanLastMsg = extractDisplayText(rawLastMsg).substring(0, 100).trim();
+
+                  console.log(`[SessionLoad] ${sessionId.substring(0, 15)}... - Title: "${cleanTitle.substring(0, 30)}..." - Messages: ${chatSession.messages.length}`);
+
+                  return {
+                    id: sessionId,
+                    title: cleanTitle || 'Untitled Session',
+                    lastMessage: cleanLastMsg,
+                    updated: chatSession.metadata?.updatedAt || Date.now(),
+                  };
+                }
+                return null;
+              } catch (error) {
+                console.error(`[ChatSession] Failed to load session ${sessionId}:`, error);
+                return null;
+              }
+            })
+          );
+          setSessions(sessionObjects.filter((s): s is Session => s !== null));
+        } else {
+          setSessions([]);
+        }
+      };
+
+      loadSessions();
     }
-  }, [selectedGroup, groupId]);
+  }, [selectedGroup, groupId, getChatSession]);
 
   // Re-run embedding processing when linked databases change
   useEffect(() => {
@@ -638,18 +695,47 @@ export default function ChatSessionPage() {
       if (files && files.length > 0) {
         console.log(`[ChatSession] 📎 Processing ${files.length} attached file(s)...`);
 
+        let filesProcessed = 0;
         for (const file of files) {
           try {
+            // Update progress - show current file being processed
+            setUploadProgress({
+              currentFile: file.name,
+              filesProcessed,
+              totalFiles: files.length,
+              status: 'reading',
+            });
+
             // Validate file type (only text-based files)
             const ext = file.name.split('.').pop()?.toLowerCase();
             if (!['txt', 'md', 'html', 'json', 'csv'].includes(ext || '')) {
+              setUploadProgress({
+                currentFile: file.name,
+                filesProcessed,
+                totalFiles: files.length,
+                status: 'error',
+                error: `Invalid file type: .${ext}. Only txt, md, html, json, csv are supported.`,
+              });
+              // Wait a bit so user can see the error
+              await new Promise(resolve => setTimeout(resolve, 2000));
               console.warn(`[ChatSession] ⚠️ Skipping non-text file: ${file.name}`);
+              filesProcessed++;
               continue;
             }
 
             // Validate file size (max 1 MB for direct injection)
             if (file.size > 1024 * 1024) {
+              setUploadProgress({
+                currentFile: file.name,
+                filesProcessed,
+                totalFiles: files.length,
+                status: 'error',
+                error: `File too large: ${(file.size / 1024 / 1024).toFixed(2)} MB. Maximum 1 MB allowed.`,
+              });
+              // Wait a bit so user can see the error
+              await new Promise(resolve => setTimeout(resolve, 2000));
               console.warn(`[ChatSession] ⚠️ File too large (${file.size} bytes): ${file.name}`);
+              filesProcessed++;
               continue;
             }
 
@@ -659,10 +745,30 @@ export default function ChatSessionPage() {
 
             // Append to file context
             fileContext += `\n\n=== FILE: ${file.name} ===\n${content}\n=== END OF FILE ===\n`;
+
+            filesProcessed++;
           } catch (error) {
             console.error(`[ChatSession] ❌ Failed to read file ${file.name}:`, error);
+            setUploadProgress({
+              currentFile: file.name,
+              filesProcessed,
+              totalFiles: files.length,
+              status: 'error',
+              error: `Failed to read file: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            });
+            // Wait a bit so user can see the error
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            filesProcessed++;
           }
         }
+
+        // Clear progress indicator
+        setUploadProgress({
+          currentFile: '',
+          filesProcessed: files.length,
+          totalFiles: files.length,
+          status: 'complete',
+        });
 
         if (fileContext) {
           console.log(`[ChatSession] ✅ File context prepared (${fileContext.length} chars)`);
@@ -1324,7 +1430,7 @@ export default function ChatSessionPage() {
   }
 
   return (
-    <div className="flex h-screen">
+    <div className="fixed inset-0 flex overflow-hidden">
       {/* Session History Sidebar */}
       <div className="w-80 flex-shrink-0">
         <SessionHistory
@@ -1337,9 +1443,9 @@ export default function ChatSessionPage() {
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-h-0">
         {/* Header */}
-        <div className="border-b border-gray-200 bg-white px-6 py-4">
+        <div className="flex-shrink-0 border-b border-gray-200 bg-white px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
               <Link
@@ -1376,14 +1482,20 @@ export default function ChatSessionPage() {
                 </div>
               )}
               <div className="flex items-center gap-2">
-                {/* Phase 5: AI session badge */}
-                {sessionType === 'ai' && (
+                {/* Phase 5: AI session badge - only show if session is actually active */}
+                {sessionType === 'ai' && sessionMetadata?.blockchainStatus !== 'ended' && (
                   <div className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
                     AI Session (Live)
                   </div>
                 )}
-                {/* Sub-phase 8.1.8: End Session button */}
-                {sessionType === 'ai' && sessionMetadata && (
+                {/* Show pending state for AI sessions without blockchain session */}
+                {sessionType === 'ai' && !sessionMetadata?.blockchainSessionId && (
+                  <div className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-xs font-medium">
+                    Not Started
+                  </div>
+                )}
+                {/* Sub-phase 8.1.8: End Session button - only if session is active */}
+                {sessionType === 'ai' && sessionMetadata?.blockchainSessionId && sessionMetadata?.blockchainStatus !== 'ended' && (
                   <button
                     onClick={handleEndSession}
                     disabled={loading}
@@ -1399,7 +1511,7 @@ export default function ChatSessionPage() {
 
         {/* Sub-phase 8.1.7: Payment Cost Display */}
         {sessionType === 'ai' && totalTokens > 0 && (
-          <div className="px-6 py-3 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-blue-50">
+          <div className="flex-shrink-0 px-6 py-3 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-blue-50">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
@@ -1422,7 +1534,7 @@ export default function ChatSessionPage() {
 
         {/* Embedding Progress Bar */}
         {embeddingProgress && (
-          <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+          <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 bg-gray-50">
             <EmbeddingProgressBar
               progress={embeddingProgress}
               queueSize={documentQueue.length > 0 ? documentQueue.length + queuePosition - 1 : undefined}
@@ -1448,7 +1560,7 @@ export default function ChatSessionPage() {
         )}
 
         {/* Chat Interface or Continue Chat UI */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {sessionMetadata?.blockchainStatus === 'ended' ? (
             /* Session Ended - Show Continue Chat UI */
             <div className="flex flex-col h-full">
@@ -1493,6 +1605,7 @@ export default function ChatSessionPage() {
               onSendMessage={handleSendMessage}
               loading={loading}
               sessionTitle={groupName}
+              uploadProgress={uploadProgress}
             />
           )}
         </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { Trash2, X, FileText, Database } from "lucide-react";
@@ -21,6 +21,16 @@ interface ChatSession {
   messageCount: number;
   timestamp: number;
   active: boolean;
+  metadata?: {
+    sessionType?: 'ai' | 'mock';
+    blockchainSessionId?: string;
+    blockchainJobId?: string;
+    blockchainStatus?: 'active' | 'ended' | 'completed';
+    hostAddress?: string;
+    hostEndpoint?: string;
+    model?: string;
+    pricing?: number;
+  };
 }
 
 /**
@@ -31,6 +41,7 @@ interface ChatSession {
 export default function SessionGroupDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const pathname = usePathname();
   const { isConnected, signer, address } = useWallet();
   const { managers, isInitialized } = useSDK();
   const {
@@ -480,6 +491,15 @@ export default function SessionGroupDetailPage() {
     }
   }, [isConnected, isInitialized, groupId, selectGroup]);
 
+  // --- Helper function to extract display text from embedded markers ---
+  const extractDisplayText = (content: string): string => {
+    const displayMatch = content.match(new RegExp('<<DISPLAY>>([\\s\\S]*?)<</DISPLAY>>'));
+    if (displayMatch) {
+      return displayMatch[1];
+    }
+    return content;
+  };
+
   // --- Load chat sessions when selectedGroup changes ---
   useEffect(() => {
     async function loadChatSessions() {
@@ -487,13 +507,59 @@ export default function SessionGroupDetailPage() {
         try {
           const sessions = await listChatSessionsWithData(groupId);
           // Convert ChatSession to local ChatSession format with computed properties
-          const formattedSessions = sessions.map((s) => ({
-            sessionId: s.sessionId,
-            title: s.title,
-            lastMessage: s.messages.length > 0 ? s.messages[s.messages.length - 1].content.substring(0, 100) : undefined,
-            messageCount: s.messages.length,
-            timestamp: s.updated,
-            active: true, // All sessions are active by default
+          const formattedSessions = await Promise.all(sessions.map(async (s) => {
+            // Extract clean title from first user message (skip system messages)
+            const firstUserMsg = s.messages.find(m => m.role === 'user');
+            const rawTitle = firstUserMsg?.content || s.messages[0]?.content || '';
+            const cleanTitle = extractDisplayText(rawTitle).substring(0, 50).trim();
+
+            // Extract clean last message
+            const lastMsg = s.messages.length > 0 ? s.messages[s.messages.length - 1] : null;
+            const rawLastMsg = lastMsg?.content || '';
+            const cleanLastMsg = extractDisplayText(rawLastMsg).substring(0, 100).trim();
+
+            // Check if AI session is actually still active (similar to session detail page logic)
+            let correctedMetadata = s.metadata;
+            if (s.metadata?.sessionType === 'ai' && s.metadata?.blockchainSessionId && s.metadata?.blockchainStatus !== 'ended') {
+              try {
+                const sessionState = managers?.sessionManager?.getSession(s.metadata.blockchainSessionId);
+                // Session is ended if not in memory or status is ended/completed/failed
+                if (!sessionState || sessionState.status === 'ended' || sessionState.status === 'completed' || sessionState.status === 'failed') {
+                  console.log(`[SessionGroupDetail] Session ${s.sessionId} blockchain status stale, correcting to 'ended'`);
+                  correctedMetadata = {
+                    ...s.metadata,
+                    blockchainStatus: 'ended' as const,
+                  };
+
+                  // Update S5 storage with corrected status (async, don't wait)
+                  if (managers?.sessionGroupManager && managers?.authManager) {
+                    const userAddress = managers.authManager.getUserAddress();
+                    if (userAddress) {
+                      const updatedSession = { ...s, metadata: correctedMetadata };
+                      const group = await managers.sessionGroupManager.getSessionGroup(groupId, userAddress);
+                      if (group?.chatSessionsData?.[s.sessionId]) {
+                        group.chatSessionsData[s.sessionId] = updatedSession;
+                        (managers.sessionGroupManager as any).chatStorage.set(s.sessionId, updatedSession);
+                        managers.sessionGroupManager.updateSessionGroup(groupId, userAddress, { chatSessionsData: group.chatSessionsData })
+                          .catch(err => console.error('[SessionGroupDetail] Failed to update session status in S5:', err));
+                      }
+                    }
+                  }
+                }
+              } catch (error) {
+                console.warn(`[SessionGroupDetail] Failed to check session ${s.sessionId} status:`, error);
+              }
+            }
+
+            return {
+              sessionId: s.sessionId,
+              title: cleanTitle || 'Untitled Session',
+              lastMessage: cleanLastMsg || undefined,
+              messageCount: s.messages.length,
+              timestamp: s.updated,
+              active: true, // All sessions are active by default
+              metadata: correctedMetadata, // Use corrected metadata
+            };
           }));
           setChatSessions(formattedSessions);
         } catch (err) {
@@ -506,7 +572,47 @@ export default function SessionGroupDetailPage() {
     }
 
     loadChatSessions();
-  }, [selectedGroup, groupId, listChatSessionsWithData]);
+  }, [selectedGroup, groupId, listChatSessionsWithData, managers]);
+
+  // --- Reload sessions when navigating back to this page (e.g., from session detail page) ---
+  useEffect(() => {
+    // When pathname changes back to this overview page, reload sessions
+    // This catches status updates that happened on the session detail page
+    if (pathname && pathname.match(/^\/session-groups\/[^\/]+\/?$/)) {
+      console.log('[SessionGroupDetail] Route changed to overview page, will reload after delay...');
+
+      // Clear SessionGroupManager cache to force fresh load from S5
+      if (managers?.sessionGroupManager) {
+        try {
+          // Clear the internal cache
+          const cache = (managers.sessionGroupManager as any).groupCache;
+          const chatCache = (managers.sessionGroupManager as any).chatStorage;
+          if (cache) {
+            cache.clear();
+            console.log('[SessionGroupDetail] ✅ Cleared group cache');
+          }
+          if (chatCache) {
+            chatCache.clear();
+            console.log('[SessionGroupDetail] ✅ Cleared chat cache');
+          }
+        } catch (error) {
+          console.warn('[SessionGroupDetail] Failed to clear cache:', error);
+        }
+      }
+
+      // Delay reload to ensure session page metadata update completes
+      const timer = setTimeout(() => {
+        if (groupId && isConnected && isInitialized) {
+          console.log('[SessionGroupDetail] Reloading sessions from S5...');
+          selectGroup(groupId); // Refresh group data and trigger session reload
+        }
+      }, 500); // 500ms delay
+
+      return () => clearTimeout(timer);
+    }
+    // Note: Only pathname as dependency to avoid infinite loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   // --- Fix: prevent reload when window regains focus after file picker ---
   useEffect(() => {
