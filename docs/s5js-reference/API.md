@@ -2099,74 +2099,42 @@ const binaryData = new Uint8Array([1, 2, 3, 4, 5]);
 const binaryCID = await advanced.putByCID(binaryData);
 ```
 
-#### putWithCID(path, data, options?)
+### Composition Patterns
 
-Store data at a path and return both the path and CID in a single operation.
+The FS5Advanced API is intentionally minimal with just 4 core methods. For common workflows, compose these with regular FS5 methods:
 
-```typescript
-async putWithCID(
-  path: string,
-  data: any,
-  options?: PutOptions
-): Promise<{ path: string; cid: Uint8Array }>
-```
-
-**Parameters:**
-- `path: string` - The path where to store the data
-- `data: any` - The data to store
-- `options?: PutOptions` - Optional put options (encryption, media type, etc.)
-
-**Returns:**
-- `Promise<{ path: string; cid: Uint8Array }>` - Object containing both path and CID
-
-**Example:**
+#### Store with Path and Get CID
 
 ```typescript
-// Store and get both path and CID
-const result = await advanced.putWithCID('home/file.txt', 'Content');
-console.log(result.path); // "home/file.txt"
-console.log(formatCID(result.cid)); // "bafybeif..."
+// Instead of putWithCID(path, data) - use composition:
+await s5.fs.put('home/file.txt', 'Content');
+const cid = await advanced.pathToCID('home/file.txt');
+
+console.log(`Stored at: home/file.txt`);
+console.log(`CID: ${formatCID(cid)}`); // "bafybeif..."
 
 // With encryption
-const encrypted = await advanced.putWithCID(
-  'home/secret.txt',
-  'Secret data',
-  { encrypt: true }
-);
+await s5.fs.put('home/secret.txt', 'Secret data', {
+  encryption: { algorithm: 'xchacha20-poly1305' }
+});
+const secretCid = await advanced.pathToCID('home/secret.txt');
 
 // Can retrieve by either path or CID
 const byPath = await s5.fs.get('home/secret.txt');
-const byCID = await advanced.getByCID(encrypted.cid);
+const byCID = await advanced.getByCID(secretCid);
 console.log(byPath === byCID); // true
 ```
 
-#### getMetadataWithCID(path)
-
-Get metadata for a file or directory along with its CID.
+#### Get Metadata with CID
 
 ```typescript
-async getMetadataWithCID(path: string): Promise<{
-  metadata: any;
-  cid: Uint8Array;
-}>
-```
-
-**Parameters:**
-- `path: string` - The file or directory path
-
-**Returns:**
-- `Promise<{ metadata: any; cid: Uint8Array }>` - Object containing metadata and CID
-
-**Throws:**
-- `Error` if path does not exist
-
-**Example:**
-
-```typescript
+// Instead of getMetadataWithCID(path) - use composition:
 await s5.fs.put('home/data.txt', 'Content');
 
-const result = await advanced.getMetadataWithCID('home/data.txt');
-console.log(result.metadata);
+const metadata = await s5.fs.getMetadata('home/data.txt');
+const cid = await advanced.pathToCID('home/data.txt');
+
+console.log(metadata);
 // {
 //   type: 'file',
 //   size: 7,
@@ -2174,8 +2142,14 @@ console.log(result.metadata);
 //   modified: 1234567890
 // }
 
-console.log(formatCID(result.cid)); // "bafybeih..."
+console.log(formatCID(cid)); // "bafybeih..."
 ```
+
+**Why Composition?**
+- Keeps API minimal and easy to learn (4 methods vs 6)
+- Makes intent explicit (store *then* extract CID)
+- Reduces maintenance burden
+- Still provides all functionality
 
 ### CID Utility Functions
 
@@ -2293,16 +2267,17 @@ import { JSCryptoImplementation } from 's5/core';
 const crypto = new JSCryptoImplementation();
 const data = new TextEncoder().encode('Hello, World!');
 
-// Store data
-const result = await advanced.putWithCID('home/data.txt', 'Hello, World!');
+// Store data and get CID
+await s5.fs.put('home/data.txt', 'Hello, World!');
+const cid = await advanced.pathToCID('home/data.txt');
 
 // Verify CID matches
-const isValid = await verifyCID(result.cid, data, crypto);
+const isValid = await verifyCID(cid, data, crypto);
 console.log(isValid); // true
 
 // Tampered data fails verification
 const tamperedData = new TextEncoder().encode('Goodbye, World!');
-const isInvalid = await verifyCID(result.cid, tamperedData, crypto);
+const isInvalid = await verifyCID(cid, tamperedData, crypto);
 console.log(isInvalid); // false
 ```
 
@@ -2354,18 +2329,19 @@ await s5.recoverIdentityFromSeedPhrase(seedPhrase);
 const advanced = new FS5Advanced(s5.fs);
 const crypto = new JSCryptoImplementation();
 
-// 1. Store data and get CID
-const result = await advanced.putWithCID('home/document.txt', 'Important data');
-console.log(`Stored at: ${result.path}`);
-console.log(`CID: ${formatCID(result.cid, 'base32')}`);
+// 1. Store data and get CID (composition pattern)
+await s5.fs.put('home/document.txt', 'Important data');
+const cid = await advanced.pathToCID('home/document.txt');
+console.log(`Stored at: home/document.txt`);
+console.log(`CID: ${formatCID(cid, 'base32')}`);
 
 // 2. Verify the CID
 const data = new TextEncoder().encode('Important data');
-const isValid = await verifyCID(result.cid, data, crypto);
+const isValid = await verifyCID(cid, data, crypto);
 console.log(`CID valid: ${isValid}`); // true
 
 // 3. Share the CID (as string)
-const cidString = formatCID(result.cid, 'base58btc');
+const cidString = formatCID(cid, 'base58btc');
 console.log(`Share this CID: ${cidString}`);
 
 // 4. Recipient: parse CID and retrieve data
@@ -2377,13 +2353,12 @@ console.log(`Retrieved: ${retrievedData}`); // "Important data"
 const foundPath = await advanced.cidToPath(receivedCID);
 console.log(`Path: ${foundPath}`); // "home/document.txt"
 
-// 6. Get metadata with CID
-const metadata = await advanced.getMetadataWithCID(foundPath);
+// 6. Get metadata and CID (composition pattern)
+const metadata = await s5.fs.getMetadata(foundPath);
+const metaCid = await advanced.pathToCID(foundPath);
 console.log(metadata);
-// {
-//   metadata: { type: 'file', size: 14, ... },
-//   cid: Uint8Array(32) [...]
-// }
+// { type: 'file', size: 14, ... }
+console.log(`CID: ${formatCID(metaCid)}`)
 
 // 7. CID-only storage (no path)
 const tempCID = await advanced.putByCID('Temporary content');

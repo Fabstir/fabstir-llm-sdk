@@ -36,6 +36,9 @@ import { TreasuryManager } from './managers/TreasuryManager';
 import { ClientManager } from './managers/ClientManager';
 import { EncryptionManager } from './managers/EncryptionManager';
 import { VectorRAGManager } from './managers/VectorRAGManager';
+import { SessionGroupManager } from './managers/SessionGroupManager';
+import { SessionGroupStorage } from './storage/SessionGroupStorage';
+import { DEFAULT_RAG_CONFIG } from './rag/config';
 import { ContractManager, ContractAddresses } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 import { SDKConfig, SDKError } from './types';
@@ -103,6 +106,7 @@ export class FabstirSDKCore extends EventEmitter {
   private treasuryManager?: ITreasuryManager;
   private encryptionManager?: EncryptionManager;
   private vectorRAGManager?: IVectorRAGManager;
+  private sessionGroupManager?: SessionGroupManager;
   
   private authenticated = false;
   private s5Seed?: string;
@@ -551,9 +555,9 @@ export class FabstirSDKCore extends EventEmitter {
    */
   private async initializeManagers(): Promise<void> {
     console.log('Creating AuthManager...');
-    // Create auth manager - AuthManager doesn't have initialize method
-    this.authManager = new AuthManager();
-    console.log('AuthManager created');
+    // Create auth manager with authenticated data
+    this.authManager = new AuthManager(this.signer, this.provider, this.userAddress, this.s5Seed);
+    console.log('AuthManager created with user address:', this.userAddress);
     
     // Create other managers
     console.log('Creating PaymentManager...');
@@ -572,8 +576,9 @@ export class FabstirSDKCore extends EventEmitter {
     console.log('SessionManager created');
 
     console.log('Creating VectorRAGManager...');
-    this.vectorRAGManager = new VectorRAGManager(this.sessionManager);
-    console.log('VectorRAGManager created');
+    // VectorRAGManager needs userAddress, seedPhrase, config, and sessionManager
+    // These will be set after authentication, so we defer initialization
+    console.log('VectorRAGManager will be initialized after authentication');
 
     console.log('Creating TreasuryManager...');
     this.treasuryManager = new TreasuryManager(this.contractManager!);
@@ -690,8 +695,42 @@ export class FabstirSDKCore extends EventEmitter {
       console.log('Initializing TreasuryManager...');
       await (this.treasuryManager as any).initialize(this.signer);
       console.log('TreasuryManager initialized');
+
+      // Initialize VectorRAGManager after authentication (needs userAddress and s5Seed)
+      if (this.userAddress && this.s5Seed && this.sessionManager) {
+        console.log('Creating VectorRAGManager with userAddress and s5Seed...');
+        const ragConfig = {
+          ...DEFAULT_RAG_CONFIG,
+          s5Portal: this.config.s5Config?.portalUrl || DEFAULT_RAG_CONFIG.s5Portal
+        };
+        this.vectorRAGManager = new VectorRAGManager({
+          userAddress: this.userAddress,
+          seedPhrase: this.s5Seed,
+          config: ragConfig,
+          sessionManager: this.sessionManager as SessionManager,
+          s5Client: this.storageManager!.getS5Client(),
+          encryptionManager: this.encryptionManager!
+        });
+        console.log('VectorRAGManager created with database management enabled');
+
+        // Initialize SessionGroupManager with S5 storage
+        console.log('Creating SessionGroupStorage...');
+        const sessionGroupStorage = new SessionGroupStorage(
+          this.storageManager!.getS5Client(),
+          this.s5Seed,
+          this.userAddress,
+          this.encryptionManager
+        );
+        console.log('SessionGroupStorage created');
+
+        console.log('Creating SessionGroupManager with S5 storage...');
+        this.sessionGroupManager = new SessionGroupManager(sessionGroupStorage);
+        console.log('SessionGroupManager created');
+      } else {
+        console.warn('VectorRAGManager initialization skipped: missing userAddress or s5Seed');
+      }
     }
-    
+
     // Initialize bridge client if configured
     if (this.config.bridgeConfig?.url) {
       this.bridgeClient = new UnifiedBridgeClient(
@@ -778,6 +817,14 @@ export class FabstirSDKCore extends EventEmitter {
   getVectorRAGManager(): IVectorRAGManager {
     this.ensureAuthenticated();
     return this.vectorRAGManager!;
+  }
+
+  /**
+   * Get session group manager for organizing sessions
+   */
+  getSessionGroupManager(): SessionGroupManager {
+    this.ensureAuthenticated();
+    return this.sessionGroupManager!;
   }
 
   /**

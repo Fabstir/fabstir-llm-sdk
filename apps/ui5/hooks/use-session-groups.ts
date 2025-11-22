@@ -1,0 +1,827 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useSDK } from './use-sdk';
+import type {
+  SessionGroup,
+  ChatSession,
+  ChatMessage,
+} from '@fabstir/sdk-core';
+
+// LLM Configuration - reads from environment variables
+const LLM_PROOF_INTERVAL = parseInt(process.env.NEXT_PUBLIC_LLM_PROOF_INTERVAL || '1000', 10);
+
+export interface UseSessionGroupsReturn {
+  // Session Groups
+  sessionGroups: SessionGroup[];
+  selectedGroup: SessionGroup | null;
+  isLoading: boolean;
+  error: string | null;
+
+  // Session Group Operations
+  createGroup: (name: string, options?: { description?: string; databases?: string[] }) => Promise<SessionGroup>;
+  selectGroup: (groupId: string) => Promise<void>;
+  deleteGroup: (groupId: string) => Promise<void>;
+  updateGroup: (groupId: string, updates: Partial<SessionGroup>) => Promise<SessionGroup>;
+  linkDatabase: (groupId: string, databaseName: string) => Promise<void>;
+  unlinkDatabase: (groupId: string, databaseName: string) => Promise<void>;
+
+  // Chat Session Operations
+  startChat: (groupId: string, initialMessage?: string) => Promise<ChatSession>;
+  startAIChat: (
+    groupId: string,
+    hostConfig: {
+      address: string;
+      endpoint: string;
+      models: string[];
+      pricing: number;
+    },
+    depositAmount: string,
+    initialMessage?: string
+  ) => Promise<ChatSession & { jobId?: bigint }>;
+  continueChat: (groupId: string, sessionId: string) => Promise<ChatSession>;
+  getChatSession: (groupId: string, sessionId: string) => Promise<ChatSession | null>;
+  listChatSessionsWithData: (groupId: string) => Promise<ChatSession[]>;
+  addMessage: (groupId: string, sessionId: string, message: ChatMessage) => Promise<void>;
+  deleteChat: (groupId: string, sessionId: string) => Promise<void>;
+  endAISession: (groupId: string, sessionId: string) => Promise<void>;
+  searchChats: (groupId: string, query: string) => Promise<ChatSession[]>;
+
+  // Sharing Operations
+  shareGroup: (groupId: string, userAddress: string, role: 'reader' | 'writer') => Promise<void>;
+  unshareGroup: (groupId: string, userAddress: string) => Promise<void>;
+  getPermissions: (groupId: string) => Promise<{ readers: string[]; writers: string[] }>;
+
+  // Group Document Operations
+  addGroupDocument: (groupId: string, document: { id: string; name: string; size: number; uploaded: number; contentType?: string }) => Promise<void>;
+  removeGroupDocument: (groupId: string, documentId: string) => Promise<void>;
+
+  // Refresh
+  refresh: () => Promise<void>;
+}
+
+/**
+ * Hook for managing session groups and chat sessions
+ *
+ * Provides operations for:
+ * - Creating and managing session groups
+ * - Starting and continuing chat sessions
+ * - Managing permissions and sharing
+ * - Linking vector databases to groups
+ */
+export function useSessionGroups(): UseSessionGroupsReturn {
+  const { managers, isInitialized } = useSDK();
+  const [sessionGroups, setSessionGroups] = useState<SessionGroup[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<SessionGroup | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadSessionGroups = useCallback(async () => {
+    if (!managers?.sessionGroupManager || !managers?.authManager) return;
+
+    const userAddress = managers.authManager.getUserAddress();
+    if (!userAddress) return;
+
+    try {
+      setIsLoading(true);
+      setError(null);
+      const groups = await managers.sessionGroupManager.listSessionGroups(userAddress);
+      setSessionGroups(groups);
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to load groups:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load session groups');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [managers]);
+
+  // Load session groups on initialization
+  useEffect(() => {
+    if (isInitialized && managers) {
+      loadSessionGroups();
+    }
+  }, [isInitialized, managers, loadSessionGroups]);
+
+  const createGroup = useCallback(async (
+    name: string,
+    options?: { description?: string; databases?: string[] }
+  ): Promise<SessionGroup> => {
+    if (!managers?.sessionGroupManager || !managers?.authManager) {
+      throw new Error('SDK not initialized');
+    }
+
+    const userAddress = managers.authManager.getUserAddress();
+    if (!userAddress) {
+      throw new Error('User address not available');
+    }
+
+    try {
+      setIsLoading(true);
+      setError(null);
+      const group = await managers.sessionGroupManager.createSessionGroup({
+        name,
+        description: options?.description || '',
+        owner: userAddress,
+        metadata: {}
+      });
+      await loadSessionGroups(); // Refresh list
+      return group;
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to create group:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to create session group';
+      setError(errorMsg);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [managers, loadSessionGroups]);
+
+  const selectGroup = useCallback(async (groupId: string): Promise<any> => {
+    if (!managers?.sessionGroupManager || !managers?.authManager) return null;
+
+    try {
+      setIsLoading(true);
+      setError(null);
+      const group = await managers.sessionGroupManager.getSessionGroup(groupId, managers.authManager.getUserAddress());
+      setSelectedGroup(group);
+      return group; // Return the fresh group data
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to select group:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load session group');
+      return null;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [managers]);
+
+  const deleteGroup = useCallback(async (groupId: string): Promise<void> => {
+    if (!managers?.sessionGroupManager || !managers?.authManager) return;
+
+    try {
+      setIsLoading(true);
+      setError(null);
+      await managers.sessionGroupManager.deleteSessionGroup(groupId, managers.authManager.getUserAddress());
+
+      // Clear selected group if it was deleted
+      if (selectedGroup?.id === groupId) {
+        setSelectedGroup(null);
+      }
+
+      await loadSessionGroups(); // Refresh list
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to delete group:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to delete session group';
+      setError(errorMsg);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [managers, selectedGroup, loadSessionGroups]);
+
+  const updateGroup = useCallback(async (
+    groupId: string,
+    updates: Partial<SessionGroup>
+  ): Promise<SessionGroup> => {
+    if (!managers?.sessionGroupManager || !managers?.authManager) {
+      throw new Error('SDK not initialized');
+    }
+
+    try {
+      setIsLoading(true);
+      setError(null);
+      const updated = await managers.sessionGroupManager.updateSessionGroup(
+        groupId,
+        managers.authManager.getUserAddress(),
+        {
+          name: updates.name,
+          description: updates.description,
+          metadata: updates.metadata
+        }
+      );
+
+      // Update selected group if it was updated
+      if (selectedGroup?.id === groupId) {
+        setSelectedGroup(updated);
+      }
+
+      await loadSessionGroups(); // Refresh list
+      return updated;
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to update group:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to update session group';
+      setError(errorMsg);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [managers, selectedGroup, loadSessionGroups]);
+
+  const linkDatabase = useCallback(async (
+    groupId: string,
+    databaseName: string
+  ): Promise<void> => {
+    if (!managers?.sessionGroupManager || !managers?.authManager) return;
+
+    try {
+      setError(null);
+      await managers.sessionGroupManager.linkVectorDatabase(groupId, managers.authManager.getUserAddress(), databaseName);
+
+      // Refresh selected group if it was updated
+      if (selectedGroup?.id === groupId) {
+        await selectGroup(groupId);
+      }
+
+      await loadSessionGroups(); // Refresh list
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to link database:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to link database';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [managers, selectedGroup, selectGroup, loadSessionGroups]);
+
+  const unlinkDatabase = useCallback(async (
+    groupId: string,
+    databaseName: string
+  ): Promise<void> => {
+    if (!managers?.sessionGroupManager || !managers?.authManager) return;
+
+    try {
+      setError(null);
+      await managers.sessionGroupManager.unlinkVectorDatabase(groupId, managers.authManager.getUserAddress(), databaseName);
+
+      // Refresh selected group if it was updated
+      if (selectedGroup?.id === groupId) {
+        await selectGroup(groupId);
+      }
+
+      await loadSessionGroups(); // Refresh list
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to unlink database:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to unlink database';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [managers, selectedGroup, selectGroup, loadSessionGroups]);
+
+  // Chat Session Operations
+
+  const startChat = useCallback(async (
+    groupId: string,
+    initialMessage?: string
+  ): Promise<ChatSession> => {
+    if (!managers?.sessionGroupManager) {
+      throw new Error('SDK not initialized');
+    }
+
+    try {
+      setError(null);
+      const session = await managers.sessionGroupManager.startChatSession(groupId, initialMessage);
+
+      // Refresh selected group to show new session
+      if (selectedGroup?.id === groupId) {
+        await selectGroup(groupId);
+      }
+
+      return session;
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to start chat:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to start chat session';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [managers, selectedGroup, selectGroup]);
+
+  /**
+   * Start AI-powered chat session with blockchain payment
+   *
+   * Creates a blockchain job via SessionManager.startSession() and links it
+   * to a session group chat session for persistence.
+   *
+   * Based on implementation from apps/harness/pages/chat-context-rag-demo.tsx
+   */
+  const startAIChat = useCallback(async (
+    groupId: string,
+    hostConfig: {
+      address: string;
+      endpoint: string;
+      models: string[];
+      pricing: number;
+    },
+    depositAmount: string,
+    initialMessage?: string
+  ): Promise<ChatSession & { jobId?: bigint }> => {
+    if (!managers?.sessionManager || !managers?.sessionGroupManager) {
+      throw new Error('SDK not initialized');
+    }
+
+    try {
+      setError(null);
+      console.log('[useSessionGroups] 🚀 Starting AI chat session...', {
+        groupId,
+        host: hostConfig.address,
+        model: hostConfig.models[0],
+        pricing: hostConfig.pricing,
+        deposit: depositAmount,
+      });
+
+      // Sub-phase 8.1.3: Approve USDC for JobMarketplace
+      console.log('[useSessionGroups] 💰 Checking USDC approval...');
+      const paymentManager = managers.paymentManager;
+      const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
+      const jobMarketplaceAddress = process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!;
+
+      // Check current allowance
+      // Access signer from payment manager's internal property
+      const signer = (paymentManager as any).signer;
+      if (!signer) {
+        throw new Error('Signer not available from PaymentManager');
+      }
+      const userAddress = await signer.getAddress();
+
+      const { ethers } = await import('ethers');
+      const usdcContract = new ethers.Contract(
+        usdcAddress,
+        [
+          'function allowance(address owner, address spender) view returns (uint256)',
+          'function approve(address spender, uint256 amount) returns (bool)',
+        ],
+        signer
+      );
+
+      const currentAllowance = await usdcContract.allowance(userAddress, jobMarketplaceAddress);
+      const { parseUnits } = await import('viem');
+      const requiredAmount = parseUnits(depositAmount, 6);
+
+      if (currentAllowance < requiredAmount) {
+        console.log('[useSessionGroups] 🔐 Requesting USDC approval (popup may appear)...');
+        // Approve 1000 USDC for multiple sessions
+        const approveTx = await usdcContract.approve(
+          jobMarketplaceAddress,
+          parseUnits('1000', 6)
+        );
+        console.log('[useSessionGroups] ⏳ Waiting for approval confirmation...');
+        await approveTx.wait(3); // Wait for 3 confirmations
+        console.log('[useSessionGroups] ✅ USDC approved for JobMarketplace');
+      } else {
+        console.log('[useSessionGroups] ✅ USDC already approved (sufficient allowance)');
+      }
+
+      // 1. Create blockchain job via SessionManager.startSession()
+      const sessionConfig = {
+        depositAmount,
+        pricePerToken: hostConfig.pricing,
+        proofInterval: LLM_PROOF_INTERVAL, // Read from environment (NEXT_PUBLIC_LLM_PROOF_INTERVAL)
+        duration: 86400, // 1 day (prevents session expiry)
+        paymentToken: usdcAddress,
+        provider: hostConfig.address,
+        endpoint: hostConfig.endpoint,
+        model: hostConfig.models[0],
+        chainId: 84532, // Base Sepolia
+        useDeposit: false, // Use spend permissions (gasless)
+      };
+
+      console.log('[useSessionGroups] Creating blockchain job...');
+      const result = await managers.sessionManager.startSession(sessionConfig);
+      const { sessionId, jobId } = result;
+
+      console.log('[useSessionGroups] ✅ Blockchain job created:', {
+        sessionId: sessionId.toString(),
+        jobId: jobId?.toString(),
+      });
+
+      // 2. Create S5 chat session metadata linked to blockchain session
+      console.log('[useSessionGroups] Creating S5 session metadata...');
+      const chatSession = await managers.sessionGroupManager.startChatSession(
+        groupId,
+        initialMessage
+      );
+
+      // 3. Store blockchain metadata in session
+      const aiSession = {
+        ...chatSession,
+        // Store metadata for UI to distinguish AI vs mock sessions
+        metadata: {
+          ...chatSession.metadata,
+          sessionType: 'ai' as const,
+          blockchainSessionId: sessionId.toString(),
+          blockchainJobId: jobId?.toString(), // Convert BigInt to string for JSON serialization
+          hostAddress: hostConfig.address,
+          hostEndpoint: hostConfig.endpoint, // Store endpoint for session continuation
+          model: hostConfig.models[0],
+          pricing: hostConfig.pricing,
+          blockchainStatus: 'active' as const, // Track session status for UX
+        },
+      };
+
+      // 4. Update session metadata in S5 storage and memory cache
+      console.log('[useSessionGroups] 💾 Updating session metadata in S5 and memory...');
+      const currentUserAddress = managers.authManager.getUserAddress();
+      if (!currentUserAddress) {
+        console.error('[useSessionGroups] ❌ User address not available, cannot save session metadata');
+      } else {
+        const group = await managers.sessionGroupManager.getSessionGroup(groupId, currentUserAddress);
+        if (group && group.chatSessionsData && group.chatSessionsData[chatSession.sessionId]) {
+          // Update the session in the group's chatSessionsData
+          group.chatSessionsData[chatSession.sessionId] = aiSession;
+
+          // Update the chatStorage cache (critical for getChatSession to return updated metadata)
+          (managers.sessionGroupManager as any).chatStorage.set(chatSession.sessionId, aiSession);
+          console.log('[useSessionGroups] ✅ Session metadata updated in memory cache');
+
+          // Save the updated group to S5
+          await managers.sessionGroupManager.updateSessionGroup(
+            groupId,
+            currentUserAddress,
+            { chatSessionsData: group.chatSessionsData }
+          );
+          console.log('[useSessionGroups] ✅ Session metadata saved to S5');
+        } else {
+          console.warn('[useSessionGroups] ⚠️  Could not update session metadata in S5 (group or session not found)');
+        }
+      }
+
+      console.log('[useSessionGroups] ✅ AI chat session created successfully');
+
+      // Refresh selected group to show new session
+      if (selectedGroup?.id === groupId) {
+        await selectGroup(groupId);
+      }
+
+      // Return session with jobId for caller (in-memory only, not persisted)
+      return {
+        ...aiSession,
+        jobId, // BigInt - only in return value, not persisted to S5
+      };
+    } catch (err) {
+      console.error('[useSessionGroups] ❌ Failed to start AI chat:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to start AI chat session';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [managers, selectedGroup, selectGroup]);
+
+  const continueChat = useCallback(async (
+    groupId: string,
+    sessionId: string
+  ): Promise<ChatSession> => {
+    if (!managers?.sessionGroupManager) {
+      throw new Error('SDK not initialized');
+    }
+
+    try {
+      setError(null);
+      return await managers.sessionGroupManager.continueChatSession(groupId, sessionId);
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to continue chat:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to continue chat session';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [managers]);
+
+  const getChatSession = useCallback(async (
+    groupId: string,
+    sessionId: string
+  ): Promise<ChatSession | null> => {
+    console.log('[useSessionGroups.getChatSession] Called with:', { groupId, sessionId });
+    console.log('[useSessionGroups.getChatSession] Managers available:', {
+      hasManagers: !!managers,
+      hasSessionGroupManager: !!managers?.sessionGroupManager,
+      hasAuthManager: !!managers?.authManager
+    });
+
+    if (!managers?.sessionGroupManager || !managers?.authManager) {
+      console.error('[useSessionGroups.getChatSession] Missing managers');
+      return null;
+    }
+
+    const userAddress = managers.authManager.getUserAddress();
+    console.log('[useSessionGroups.getChatSession] User address:', userAddress);
+    if (!userAddress) {
+      console.error('[useSessionGroups] Cannot get chat session - no user address');
+      return null;
+    }
+
+    try {
+      setError(null);
+      console.log('[useSessionGroups.getChatSession] Calling SDK getChatSession...');
+      const result = await managers.sessionGroupManager.getChatSession(groupId, sessionId, userAddress);
+      console.log('[useSessionGroups.getChatSession] SDK result:', {
+        found: !!result,
+        hasMessages: !!result?.messages,
+        messageCount: result?.messages?.length || 0
+      });
+      return result;
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to get chat session:', err);
+      return null;
+    }
+  }, [managers]);
+
+  const addMessage = useCallback(async (
+    groupId: string,
+    sessionId: string,
+    message: ChatMessage
+  ): Promise<void> => {
+    if (!managers?.sessionGroupManager) return;
+
+    try {
+      setError(null);
+      await managers.sessionGroupManager.addMessage(groupId, sessionId, message);
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to add message:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to add message';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [managers]);
+
+  const deleteChat = useCallback(async (
+    groupId: string,
+    sessionId: string
+  ): Promise<void> => {
+    console.log(`[useSessionGroups.deleteChat] START: Deleting session ${sessionId} from group ${groupId}`);
+
+    if (!managers?.sessionGroupManager) {
+      console.warn('[useSessionGroups.deleteChat] No sessionGroupManager available');
+      return;
+    }
+
+    try {
+      setError(null);
+      console.log('[useSessionGroups.deleteChat] Calling SDK deleteChatSession...');
+      await managers.sessionGroupManager.deleteChatSession(groupId, sessionId);
+      console.log('[useSessionGroups.deleteChat] SDK deleteChatSession completed');
+
+      // Refresh selected group to remove deleted session
+      if (selectedGroup?.id === groupId) {
+        console.log('[useSessionGroups.deleteChat] Refreshing selected group...');
+        await selectGroup(groupId);
+        console.log('[useSessionGroups.deleteChat] Group refreshed');
+      } else {
+        console.log('[useSessionGroups.deleteChat] Skipping refresh - not currently selected group');
+      }
+      console.log('[useSessionGroups.deleteChat] COMPLETE');
+    } catch (err) {
+      console.error('[useSessionGroups.deleteChat] ERROR:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to delete chat session';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [managers, selectedGroup, selectGroup]);
+
+  const endAISession = useCallback(async (
+    groupId: string,
+    sessionId: string
+  ): Promise<void> => {
+    console.log(`[useSessionGroups.endAISession] Ending AI session ${sessionId}`);
+
+    if (!managers?.sessionManager || !managers?.sessionGroupManager || !managers?.authManager) {
+      console.warn('[useSessionGroups.endAISession] Required managers not available');
+      return;
+    }
+
+    try {
+      setError(null);
+
+      // Get the session to retrieve blockchain metadata
+      const userAddress = managers.authManager.getUserAddress();
+      if (!userAddress) {
+        throw new Error('User address not available');
+      }
+
+      const session = await managers.sessionGroupManager.getChatSession(groupId, sessionId, userAddress);
+      if (!session || !session.metadata) {
+        throw new Error('Session not found');
+      }
+
+      const blockchainSessionId = session.metadata.blockchainSessionId;
+      if (!blockchainSessionId) {
+        throw new Error('Not an AI session (no blockchain session ID)');
+      }
+
+      // 1. End the blockchain session (closes WebSocket)
+      console.log('[useSessionGroups.endAISession] Calling SessionManager.endSession...');
+      await managers.sessionManager.endSession(BigInt(blockchainSessionId));
+      console.log('[useSessionGroups.endAISession] ✅ Blockchain session ended');
+
+      // 2. Update session metadata with 'ended' status
+      const updatedSession = {
+        ...session,
+        metadata: {
+          ...session.metadata,
+          blockchainStatus: 'ended' as const,
+        },
+      };
+
+      // 3. Save updated session to S5
+      const group = await managers.sessionGroupManager.getSessionGroup(groupId, userAddress);
+      if (group && group.chatSessionsData && group.chatSessionsData[sessionId]) {
+        group.chatSessionsData[sessionId] = updatedSession;
+
+        // Update memory cache
+        (managers.sessionGroupManager as any).chatStorage.set(sessionId, updatedSession);
+
+        // Save to S5
+        await managers.sessionGroupManager.updateSessionGroup(
+          groupId,
+          userAddress,
+          { chatSessionsData: group.chatSessionsData }
+        );
+        console.log('[useSessionGroups.endAISession] ✅ Session status updated to "ended"');
+      }
+
+      // Refresh selected group if it matches
+      if (selectedGroup?.id === groupId) {
+        await selectGroup(groupId);
+      }
+
+      console.log('[useSessionGroups.endAISession] COMPLETE');
+    } catch (err) {
+      console.error('[useSessionGroups.endAISession] ERROR:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to end AI session';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [managers, selectedGroup, selectGroup]);
+
+  const searchChats = useCallback(async (
+    groupId: string,
+    query: string
+  ): Promise<ChatSession[]> => {
+    if (!managers?.sessionGroupManager) return [];
+
+    try {
+      setError(null);
+      return await managers.sessionGroupManager.searchChatSessions(groupId, query);
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to search chats:', err);
+      return [];
+    }
+  }, [managers]);
+
+  const listChatSessionsWithData = useCallback(async (
+    groupId: string
+  ): Promise<ChatSession[]> => {
+    if (!managers?.sessionGroupManager || !managers?.authManager) return [];
+
+    const userAddress = managers.authManager.getUserAddress();
+    if (!userAddress) {
+      console.error('[useSessionGroups.listChatSessionsWithData] No user address');
+      return [];
+    }
+
+    try {
+      setError(null);
+      // Get session IDs
+      console.log(`[listChatSessionsWithData] Getting session IDs for group ${groupId}...`);
+      const sessionIds = await managers.sessionGroupManager.listChatSessions(groupId, userAddress);
+      console.log(`[listChatSessionsWithData] Got ${sessionIds.length} session IDs:`, sessionIds);
+
+      // Fetch full data for each session
+      const sessions: ChatSession[] = [];
+      for (const sessionId of sessionIds) {
+        console.log(`[listChatSessionsWithData] Fetching session ${sessionId}...`);
+        const session = await managers.sessionGroupManager.getChatSession(groupId, sessionId, userAddress);
+        console.log(`[listChatSessionsWithData] Session ${sessionId} result:`, session ? 'found' : 'null');
+        if (session) {
+          sessions.push(session);
+        }
+      }
+
+      console.log(`[listChatSessionsWithData] Returning ${sessions.length} sessions`);
+      return sessions;
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to list chat sessions:', err);
+      return [];
+    }
+  }, [managers]);
+
+  // Sharing Operations
+
+  const shareGroup = useCallback(async (
+    groupId: string,
+    userAddress: string,
+    role: 'reader' | 'writer'
+  ): Promise<void> => {
+    if (!managers?.sessionGroupManager) return;
+
+    try {
+      setError(null);
+      await managers.sessionGroupManager.shareGroup(groupId, userAddress, role);
+      await loadSessionGroups(); // Refresh to show updated permissions
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to share group:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to share group';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [managers, loadSessionGroups]);
+
+  const unshareGroup = useCallback(async (
+    groupId: string,
+    userAddress: string
+  ): Promise<void> => {
+    if (!managers?.sessionGroupManager) return;
+
+    try {
+      setError(null);
+      await managers.sessionGroupManager.unshareGroup(groupId, userAddress);
+      await loadSessionGroups(); // Refresh to show updated permissions
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to unshare group:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to unshare group';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [managers, loadSessionGroups]);
+
+  const getPermissions = useCallback(async (
+    groupId: string
+  ): Promise<{ readers: string[]; writers: string[] }> => {
+    if (!managers?.sessionGroupManager) {
+      return { readers: [], writers: [] };
+    }
+
+    try {
+      setError(null);
+      return await managers.sessionGroupManager.getGroupPermissions(groupId);
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to get permissions:', err);
+      return { readers: [], writers: [] };
+    }
+  }, [managers]);
+
+  const addGroupDocument = useCallback(async (
+    groupId: string,
+    document: { id: string; name: string; size: number; uploaded: number; contentType?: string }
+  ): Promise<void> => {
+    if (!managers?.sessionGroupManager) return;
+
+    try {
+      setError(null);
+      const updatedGroup = await managers.sessionGroupManager.addGroupDocument(groupId, document);
+      // Update selected group if it matches
+      if (selectedGroup?.id === groupId) {
+        setSelectedGroup(updatedGroup);
+      }
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to add group document:', err);
+      setError(err instanceof Error ? err.message : 'Failed to add document');
+      throw err;
+    }
+  }, [managers, selectedGroup]);
+
+  const removeGroupDocument = useCallback(async (
+    groupId: string,
+    documentId: string
+  ): Promise<void> => {
+    if (!managers?.sessionGroupManager) return;
+
+    try {
+      setError(null);
+      const updatedGroup = await managers.sessionGroupManager.removeGroupDocument(groupId, documentId);
+      // Update selected group if it matches
+      if (selectedGroup?.id === groupId) {
+        setSelectedGroup(updatedGroup);
+      }
+    } catch (err) {
+      console.error('[useSessionGroups] Failed to remove group document:', err);
+      setError(err instanceof Error ? err.message : 'Failed to remove document');
+      throw err;
+    }
+  }, [managers, selectedGroup]);
+
+  const refresh = useCallback(async () => {
+    await loadSessionGroups();
+  }, [loadSessionGroups]);
+
+  return {
+    sessionGroups,
+    selectedGroup,
+    isLoading,
+    error,
+    createGroup,
+    selectGroup,
+    deleteGroup,
+    updateGroup,
+    linkDatabase,
+    unlinkDatabase,
+    startChat,
+    startAIChat,
+    continueChat,
+    getChatSession,
+    listChatSessionsWithData,
+    addMessage,
+    deleteChat,
+    endAISession,
+    searchChats,
+    shareGroup,
+    unshareGroup,
+    getPermissions,
+    addGroupDocument,
+    removeGroupDocument,
+    refresh,
+  };
+}

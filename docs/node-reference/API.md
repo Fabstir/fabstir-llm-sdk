@@ -79,6 +79,260 @@ Or when issues are present:
 
 ---
 
+### Version Information
+
+Get detailed version information and feature flags for the node.
+
+#### Request
+
+```http
+GET /v1/version
+```
+
+#### Response
+
+```json
+{
+  "version": "8.4.1",
+  "build": "v8.4.1-s5-integration-tests-2025-11-15",
+  "date": "2025-11-15",
+  "features": [
+    "multi-chain",
+    "base-sepolia",
+    "opbnb-testnet",
+    "chain-aware-sessions",
+    "auto-settlement",
+    "websocket-compression",
+    "rate-limiting",
+    "job-auth",
+    "dual-pricing",
+    "native-stable-pricing",
+    "end-to-end-encryption",
+    "ecdh-key-exchange",
+    "xchacha20-poly1305",
+    "encrypted-sessions",
+    "session-key-management",
+    "ecdsa-authentication",
+    "perfect-forward-secrecy",
+    "replay-protection",
+    "gpu-stark-proofs",
+    "risc0-zkvm",
+    "cuda-acceleration",
+    "zero-knowledge-proofs",
+    "s5-proof-storage",
+    "off-chain-proofs",
+    "proof-hash-cid",
+    "host-side-rag",
+    "session-vector-storage",
+    "384d-embeddings",
+    "cosine-similarity-search",
+    "chat-templates",
+    "model-specific-formatting",
+    "s5-vector-loading",
+    "encrypted-vector-database-paths"
+  ],
+  "chains": [84532, 5611],
+  "breaking_changes": [
+    "S5 Integration Testing Complete (v8.4.1)",
+    "All 19 S5 vector loading tests passing (100%)",
+    "Enhanced S5.js bridge integration verified"
+  ]
+}
+```
+
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | String | Semantic version number (e.g., "8.4.1") |
+| `build` | String | Full build string with feature tag and date |
+| `date` | String | Build date (YYYY-MM-DD) |
+| `features` | Array<String> | List of supported features |
+| `chains` | Array<Integer> | Supported blockchain network IDs |
+| `breaking_changes` | Array<String> | Notable changes from previous version |
+
+#### Status Codes
+
+- `200 OK` - Successfully retrieved version info
+
+---
+
+### Node Status
+
+Get current node status, capabilities, and configuration.
+
+#### Request
+
+```http
+GET /status
+```
+
+#### Response
+
+```json
+{
+  "status": "active",
+  "node_id": "12D3KooWRj7G...",
+  "peer_id": "QmYxRc...",
+  "uptime_seconds": 86400,
+  "active_sessions": 5,
+  "total_jobs_completed": 342,
+  "capabilities": {
+    "inference": true,
+    "encryption": true,
+    "rag": true,
+    "s5_vector_loading": true,
+    "proof_generation": "risc0"
+  },
+  "models_loaded": ["tinyllama", "tiny-vicuna"],
+  "chain_id": 84532,
+  "version": "8.4.1"
+}
+```
+
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | String | Node status: "active", "busy", "maintenance" |
+| `node_id` | String | Libp2p node identifier |
+| `peer_id` | String | P2P peer identifier |
+| `uptime_seconds` | Integer | Seconds since node started |
+| `active_sessions` | Integer | Current active WebSocket sessions |
+| `total_jobs_completed` | Integer | Lifetime completed jobs |
+| `capabilities` | Object | Node feature support flags |
+| `capabilities.inference` | Boolean | LLM inference support |
+| `capabilities.encryption` | Boolean | End-to-end encryption available |
+| `capabilities.rag` | Boolean | RAG vector storage support |
+| `capabilities.s5_vector_loading` | Boolean | S5 vector database loading |
+| `capabilities.proof_generation` | String | Proof type: "risc0", "simple", "none" |
+| `models_loaded` | Array<String> | Currently loaded models |
+| `chain_id` | Integer | Active blockchain network ID |
+| `version` | String | Node version |
+
+#### Status Codes
+
+- `200 OK` - Successfully retrieved status
+- `503 Service Unavailable` - Node is offline or unreachable
+
+---
+
+### List Supported Chains
+
+Get all blockchain networks supported by this node.
+
+#### Request
+
+```http
+GET /chains
+```
+
+#### Response
+
+```json
+{
+  "chains": [
+    {
+      "chain_id": 84532,
+      "chain_name": "Base Sepolia",
+      "native_token": "ETH",
+      "rpc_url": "https://sepolia.base.org",
+      "contracts": {
+        "node_registry": "0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6",
+        "job_marketplace": "0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E",
+        "payment_escrow": "0x...",
+        "host_earnings": "0x..."
+      },
+      "active": true
+    },
+    {
+      "chain_id": 5611,
+      "chain_name": "opBNB Testnet",
+      "native_token": "BNB",
+      "rpc_url": "https://opbnb-testnet-rpc.bnbchain.org",
+      "contracts": {
+        "node_registry": "0x...",
+        "job_marketplace": "0x...",
+        "payment_escrow": "0x...",
+        "host_earnings": "0x..."
+      },
+      "active": false
+    }
+  ],
+  "default_chain_id": 84532
+}
+```
+
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `chains` | Array | List of supported blockchain networks |
+| `chains[].chain_id` | Integer | Network chain ID |
+| `chains[].chain_name` | String | Human-readable network name |
+| `chains[].native_token` | String | Native token symbol (ETH, BNB, etc.) |
+| `chains[].rpc_url` | String | RPC endpoint URL |
+| `chains[].contracts` | Object | Deployed contract addresses |
+| `chains[].active` | Boolean | Whether chain is currently active |
+| `default_chain_id` | Integer | Default chain when not specified |
+
+#### Status Codes
+
+- `200 OK` - Successfully retrieved chains
+
+---
+
+### Get Chain Configuration
+
+Get detailed configuration for a specific blockchain network.
+
+#### Request
+
+```http
+GET /chain/{chain_id}
+```
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `chain_id` | Integer | Network chain ID (84532, 5611) |
+
+#### Response
+
+```json
+{
+  "chain_id": 84532,
+  "chain_name": "Base Sepolia",
+  "native_token": "ETH",
+  "rpc_url": "https://sepolia.base.org",
+  "contracts": {
+    "node_registry": "0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6",
+    "job_marketplace": "0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E",
+    "payment_escrow": "0x...",
+    "host_earnings": "0x..."
+  },
+  "pricing": {
+    "native_min": "2272727273",
+    "native_max": "22727272727273",
+    "stable_min": "10",
+    "stable_max": "100000",
+    "decimals_native": 18,
+    "decimals_stable": 6
+  },
+  "active": true,
+  "block_time_ms": 2000,
+  "confirmation_blocks": 1
+}
+```
+
+#### Status Codes
+
+- `200 OK` - Successfully retrieved chain config
+- `404 Not Found` - Chain ID not supported
+
+---
+
 ### List Available Models
 
 Retrieve a list of models available on this node. With the new model governance system, only approved models from the ModelRegistry are available. Models can be queried for specific blockchain networks.
@@ -235,6 +489,101 @@ data: {"content": "", "tokens": 245, "finish_reason": "complete", "chain_id": 84
 - `429 Too Many Requests` - Rate limit exceeded
 - `500 Internal Server Error` - Inference failed
 - `503 Service Unavailable` - Node or model unavailable
+
+---
+
+### Chat Templates (v8.3.13+)
+
+**Status**: Production Ready
+**Feature**: Model-specific prompt formatting with automatic template detection
+
+The node automatically formats prompts using model-specific chat templates to ensure optimal inference quality. Templates are detected based on model metadata and applied transparently.
+
+#### Supported Templates
+
+| Template | Models | Format |
+|----------|--------|--------|
+| **Harmony** | Harmony models | `<\|im_start\|>system\n{system}<\|im_end\|>\n<\|im_start\|>user\n{user}<\|im_end\|>\n<\|im_start\|>assistant\n` |
+| **Llama** | Llama 2/3 models | `[INST] {system}\n\n{user} [/INST]` |
+| **ChatML** | GPT-style models | `<\|im_start\|>user\n{user}<\|im_end\|>\n<\|im_start\|>assistant\n` |
+| **Vicuna** | Vicuna models | `USER: {user}\nASSISTANT:` |
+| **Plain** | Fallback | No special formatting |
+
+#### Automatic Template Detection
+
+The node detects templates based on model name patterns:
+
+```javascript
+// Model name → Template mapping
+{
+  "harmony": "Harmony template",
+  "llama": "Llama template",
+  "vicuna": "Vicuna template",
+  "chatml": "ChatML template",
+  "default": "Plain template"
+}
+```
+
+#### Example: Harmony Template
+
+**Input Prompt**:
+```json
+{
+  "model": "harmony-1b",
+  "prompt": "What is machine learning?",
+  "system_prompt": "You are a helpful AI assistant."
+}
+```
+
+**Formatted for Model** (automatic):
+```
+<|im_start|>system
+You are a helpful AI assistant.<|im_end|>
+<|im_start|>user
+What is machine learning?<|im_end|>
+<|im_start|>assistant
+```
+
+#### Multi-Turn Conversations
+
+Templates handle conversation history automatically:
+
+```json
+{
+  "model": "harmony-1b",
+  "conversation": [
+    {"role": "system", "content": "You are a helpful AI assistant."},
+    {"role": "user", "content": "What is AI?"},
+    {"role": "assistant", "content": "AI is artificial intelligence..."},
+    {"role": "user", "content": "Tell me more."}
+  ]
+}
+```
+
+**Formatted** (automatic):
+```
+<|im_start|>system
+You are a helpful AI assistant.<|im_end|>
+<|im_start|>user
+What is AI?<|im_end|>
+<|im_start|>assistant
+AI is artificial intelligence...<|im_end|>
+<|im_start|>user
+Tell me more.<|im_end|>
+<|im_start|>assistant
+```
+
+#### Configuration
+
+Templates are configured per model in the node's model registry:
+
+```rust
+// Automatic detection based on model metadata
+let template = detect_template(&model_name);
+let formatted_prompt = template.apply(prompt, conversation_history);
+```
+
+**No client-side formatting required** - the node handles all template formatting internally based on the model being used.
 
 ---
 
@@ -453,6 +802,246 @@ GET /v1/session/{session_id}/info
 
 ---
 
+### Generate Embeddings
+
+Generate 384-dimensional text embeddings using host-side ONNX models. This endpoint provides **zero-cost embeddings** as an alternative to expensive external APIs (OpenAI, Cohere), enabling efficient vector database operations and semantic search.
+
+#### Request
+
+```http
+POST /v1/embed
+Content-Type: application/json
+```
+
+```json
+{
+  "texts": [
+    "Machine learning is a subset of artificial intelligence",
+    "Deep learning uses neural networks with multiple layers"
+  ],
+  "model": "all-MiniLM-L6-v2",
+  "chainId": 84532
+}
+```
+
+#### Request Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `texts` | Array<String> | Yes | - | Array of texts to embed (1-96 texts) |
+| `model` | String | No | "all-MiniLM-L6-v2" | Embedding model to use (or "default") |
+| `chainId` | Integer | No | 84532 | Blockchain network ID (84532 for Base Sepolia, 5611 for opBNB Testnet) |
+
+#### Request Validation
+
+- **Text Count**: 1-96 texts per request
+- **Text Length**: 1-8192 characters per text
+- **No Empty/Whitespace-Only**: All texts must contain non-whitespace characters
+- **Supported Chains**: 84532 (Base Sepolia) or 5611 (opBNB Testnet)
+
+#### Response
+
+```json
+{
+  "embeddings": [
+    {
+      "embedding": [0.123, -0.456, 0.789, ...],
+      "text": "Machine learning is a subset of artificial intelligence",
+      "tokenCount": 12
+    },
+    {
+      "embedding": [0.234, -0.567, 0.891, ...],
+      "text": "Deep learning uses neural networks with multiple layers",
+      "tokenCount": 10
+    }
+  ],
+  "model": "all-MiniLM-L6-v2",
+  "provider": "host",
+  "totalTokens": 22,
+  "cost": 0.0,
+  "chainId": 84532,
+  "chainName": "Base Sepolia",
+  "nativeToken": "ETH"
+}
+```
+
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `embeddings` | Array | Array of embedding results, one per input text |
+| `embeddings[].embedding` | Array<Float> | 384-dimensional embedding vector |
+| `embeddings[].text` | String | Original input text |
+| `embeddings[].tokenCount` | Integer | Number of tokens in this text (excluding padding) |
+| `model` | String | Actual model name used for generation |
+| `provider` | String | Always "host" for node-generated embeddings |
+| `totalTokens` | Integer | Sum of all token counts |
+| `cost` | Float | Always 0.0 (zero-cost embeddings) |
+| `chainId` | Integer | Chain ID used for this request |
+| `chainName` | String | Human-readable chain name |
+| `nativeToken` | String | Native token symbol (ETH or BNB) |
+
+#### Embedding Dimensions
+
+All embeddings are **exactly 384 dimensions** to match the vector database requirements. This is validated at runtime:
+
+- Model outputs are verified to be 384-dimensional
+- Dimension mismatches return HTTP 500 with error details
+- Compatible with Fabstir Vector DB (384D indexes)
+
+#### Model Selection
+
+Request "default" model or specify by name:
+
+```json
+{
+  "texts": ["Example text"],
+  "model": "default"  // Uses default model
+}
+```
+
+```json
+{
+  "texts": ["Example text"],
+  "model": "all-MiniLM-L6-v2"  // Specific model
+}
+```
+
+Available models can be discovered via `GET /v1/models?type=embedding`.
+
+#### Status Codes
+
+- `200 OK` - Successfully generated embeddings
+- `400 Bad Request` - Invalid request parameters (see error codes below)
+- `404 Not Found` - Model not found or not loaded
+- `500 Internal Server Error` - Embedding generation failed or dimension mismatch
+- `503 Service Unavailable` - Embedding service not available (model manager not initialized)
+
+#### Error Codes
+
+| Code | HTTP Status | Description | Example |
+|------|-------------|-------------|---------|
+| `VALIDATION_ERROR` | 400 | Invalid request parameters | Empty texts array, text too long |
+| `INVALID_CHAIN_ID` | 400 | Unsupported chain ID | Using chain_id other than 84532 or 5611 |
+| `MODEL_NOT_FOUND` | 404 | Requested model not available | Typo in model name |
+| `DIMENSION_MISMATCH` | 500 | Model outputs wrong dimensions | Model not configured for 384D |
+| `SERVICE_UNAVAILABLE` | 503 | Embedding manager not loaded | Node started without embedding support |
+| `INFERENCE_FAILED` | 500 | ONNX inference error | Model file corrupted |
+
+#### Error Response Format
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Validation error: Text length exceeds maximum of 8192 characters (got 10000)",
+    "field": "texts",
+    "details": "Text at index 0 is too long"
+  }
+}
+```
+
+#### Performance Characteristics
+
+**Single Text Embedding:**
+- **CPU**: <100ms per embedding (typical: 76ms)
+- **GPU** (optional): <50ms per embedding
+- **Memory**: ~90MB model size (all-MiniLM-L6-v2)
+
+**Batch Embedding:**
+- **Batch 10**: <500ms total (CPU)
+- **Batch 96** (max): <3s total (CPU)
+- **Throughput**: ~500 embeddings/second (CPU)
+
+**Model Specs:**
+- **Model**: all-MiniLM-L6-v2 (sentence-transformers)
+- **Size**: 90MB ONNX format
+- **Dimensions**: 384 (fixed)
+- **Max Input**: 128 tokens (truncated if longer)
+- **Runtime**: ONNX Runtime (CPU optimized)
+
+---
+
+### List Embedding Models
+
+Discover available embedding models on the node. This extends the existing `/v1/models` endpoint with a `type` query parameter.
+
+#### Request
+
+```http
+GET /v1/models?type=embedding&chain_id=84532
+```
+
+#### Query Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `type` | String | No | "inference" | Model type: "embedding" or "inference" |
+| `chain_id` | Integer | No | 84532 | Chain ID (84532 or 5611) |
+
+#### Response
+
+```json
+{
+  "models": [
+    {
+      "name": "all-MiniLM-L6-v2",
+      "dimensions": 384,
+      "available": true,
+      "is_default": true
+    }
+  ],
+  "chain_id": 84532,
+  "chain_name": "Base Sepolia"
+}
+```
+
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `models` | Array | List of available embedding models |
+| `models[].name` | String | Model identifier (e.g., "all-MiniLM-L6-v2") |
+| `models[].dimensions` | Integer | Embedding vector dimensions (always 384) |
+| `models[].available` | Boolean | Whether model is currently loaded |
+| `models[].is_default` | Boolean | Whether this is the default model |
+| `chain_id` | Integer | Chain ID for this response |
+| `chain_name` | String | Human-readable chain name |
+
+#### Default Behavior
+
+Without `type` parameter, endpoint returns inference models (backward compatible):
+
+```bash
+# Returns inference models (Llama, TinyVicuna, etc.)
+curl "http://localhost:8080/v1/models"
+
+# Returns embedding models
+curl "http://localhost:8080/v1/models?type=embedding"
+
+# Explicit inference models
+curl "http://localhost:8080/v1/models?type=inference"
+```
+
+#### Empty Models Array
+
+If no embedding models are loaded, the endpoint returns an empty array (not an error):
+
+```json
+{
+  "models": [],
+  "chain_id": 84532,
+  "chain_name": "Base Sepolia"
+}
+```
+
+#### Status Codes
+
+- `200 OK` - Successfully retrieved models (even if empty array)
+- `400 Bad Request` - Invalid query parameters
+
+---
+
 ## WebSocket API (Production Ready - Phases 8.7-8.12)
 
 For real-time bidirectional communication and conversation management, connect via WebSocket. The WebSocket API has been completely rebuilt with production features including stateless memory caching, compression, rate limiting, JWT authentication, Ed25519 signatures, and **automatic payment settlement on disconnect (v5+)**.
@@ -645,6 +1234,220 @@ ws.send(JSON.stringify({
 - **Automatic Detection**: Message type determines protocol
 - **Deprecation Warnings**: Plaintext messages log warnings
 - **Default Mode**: SDK Phase 6.2+ uses encryption by default
+
+### RAG (Retrieval-Augmented Generation)
+
+**Status**: Production Ready (v8.3.0+, Enhanced in v8.4.0+)
+**Feature**: Host-Side RAG with session-scoped vector storage and S5 vector loading
+
+The WebSocket API supports RAG functionality for document-based context retrieval. Vectors are stored in session memory and automatically cleared on disconnect.
+
+**See**: `docs/RAG_SDK_INTEGRATION.md` for comprehensive integration guide
+
+#### Upload Vectors
+
+Upload document embeddings to session storage for semantic search.
+
+**Request**:
+```json
+{
+  "type": "uploadVectors",
+  "sessionId": "session-123",
+  "requestId": "upload-456",
+  "vectors": [
+    {
+      "id": "chunk-0",
+      "vector": [0.12, 0.45, ..., 0.89],
+      "metadata": {
+        "text": "Machine learning is a subset of AI.",
+        "page": 1,
+        "source": "ml_guide.pdf"
+      }
+    }
+  ],
+  "replace": false
+}
+```
+
+**Response**:
+```json
+{
+  "type": "uploadVectorsResponse",
+  "requestId": "upload-456",
+  "uploaded": 1,
+  "rejected": 0,
+  "errors": []
+}
+```
+
+#### Search Vectors
+
+Search uploaded vectors using semantic similarity.
+
+**Request**:
+```json
+{
+  "type": "searchVectors",
+  "sessionId": "session-123",
+  "requestId": "search-789",
+  "queryVector": [0.23, 0.56, ..., 0.78],
+  "k": 5,
+  "threshold": 0.7
+}
+```
+
+**Response**:
+```json
+{
+  "type": "searchVectorsResponse",
+  "requestId": "search-789",
+  "results": [
+    {
+      "id": "chunk-0",
+      "score": 0.95,
+      "metadata": {
+        "text": "Machine learning is a subset of AI.",
+        "page": 1
+      }
+    }
+  ],
+  "totalVectors": 10,
+  "searchTimeMs": 2.3
+}
+```
+
+**Requirements**:
+- Embeddings must be 384-dimensional (from `POST /v1/embed`)
+- Maximum 100,000 vectors per session
+- Vectors cleared automatically on disconnect
+- Session must be created before upload
+
+### S5 Vector Database Loading (v8.4.0+)
+
+**Status**: Production Ready (v8.4.1+)
+**Feature**: Load pre-built vector databases from S5 decentralized storage
+
+The WebSocket API supports loading complete vector databases from S5 storage, enabling efficient distribution of large document collections without manual upload. Supports both plaintext and encrypted CID paths.
+
+**See**: `docs/sdk-reference/S5_VECTOR_LOADING.md` for SDK integration guide
+
+#### Load Vector Database
+
+Load a complete vector database from S5 storage using a CID (Content Identifier).
+
+**Request**:
+```json
+{
+  "type": "LoadVectorDatabase",
+  "sessionId": "session-123",
+  "requestId": "load-001",
+  "cid": "z4QmX7Kd9...",
+  "metadata": {
+    "source": "legal_docs_corpus",
+    "version": "v1.2.0",
+    "documentCount": 5000
+  }
+}
+```
+
+**Request with Encrypted Path** (v8.4.0+):
+```json
+{
+  "type": "LoadVectorDatabase",
+  "sessionId": "session-123",
+  "requestId": "load-001",
+  "vector_database": "enc:0x4a7b2c...",  // Encrypted CID
+  "metadata": {
+    "source": "private_corpus",
+    "encrypted": true
+  }
+}
+```
+
+**Success Response**:
+```json
+{
+  "type": "VectorDatabaseLoaded",
+  "requestId": "load-001",
+  "sessionId": "session-123",
+  "vectorsLoaded": 5000,
+  "loadTimeMs": 234,
+  "metadata": {
+    "source": "legal_docs_corpus",
+    "version": "v1.2.0"
+  }
+}
+```
+
+**Progress Updates** (during load):
+```json
+{
+  "type": "VectorLoadProgress",
+  "requestId": "load-001",
+  "sessionId": "session-123",
+  "stage": "downloading",  // downloading | parsing | indexing
+  "progress": 45,          // Percentage (0-100)
+  "message": "Downloading vectors from S5..."
+}
+```
+
+**Error Response**:
+```json
+{
+  "type": "VectorDatabaseError",
+  "requestId": "load-001",
+  "sessionId": "session-123",
+  "error": "S5_FETCH_FAILED",
+  "message": "Failed to fetch CID z4QmX7Kd9... from S5 network",
+  "details": {
+    "cid": "z4QmX7Kd9...",
+    "retries": 3
+  }
+}
+```
+
+#### Error Codes
+
+| Code | Description | Recovery Action |
+|------|-------------|-----------------|
+| `S5_FETCH_FAILED` | Failed to download from S5 | Verify CID exists and S5 network is accessible |
+| `INVALID_CID_FORMAT` | Malformed CID | Use valid base58btc CID format (z...) |
+| `PARSE_ERROR` | Invalid vector data format | Verify vectors match expected schema |
+| `DIMENSION_MISMATCH` | Vectors not 384D | Regenerate with correct embedding model |
+| `SESSION_NOT_FOUND` | Invalid session ID | Create session before loading |
+| `DECRYPTION_FAILED` | Failed to decrypt vector_database | Verify session has correct decryption key |
+| `VECTOR_LIMIT_EXCEEDED` | Too many vectors (>100K) | Split into smaller databases |
+
+#### Vector Database Format
+
+S5 vector databases must be JSON arrays with this schema:
+
+```json
+[
+  {
+    "id": "chunk-0",
+    "vector": [0.12, 0.45, ..., 0.89],  // 384 dimensions
+    "metadata": {
+      "text": "Document content...",
+      "page": 1,
+      "source": "document.pdf"
+    }
+  }
+]
+```
+
+**Requirements**:
+- Each vector must be exactly 384 dimensions
+- `id` field must be unique within the database
+- `metadata` is optional but recommended
+- Maximum 100,000 vectors per database
+- S5 CID must be in base58btc format (starts with 'z')
+
+**Integration with Enhanced S5.js**:
+- Uses HTTP bridge API at `ENHANCED_S5_URL` (default: http://localhost:5522)
+- Falls back to native S5 network if bridge unavailable
+- Automatic retry with exponential backoff
+- Supports encrypted `vector_database` paths from job parameters
 
 ### Simple Inference (No Auth Required)
 
@@ -920,18 +1723,42 @@ The server maintains conversation context in memory during active sessions:
 
 ---
 
-## EZKL Proof Generation (NEW - Sub-phase 8.13)
+## Zero-Knowledge Proof Generation (v8.1.0+)
 
-The API now supports cryptographic proof generation for inference results, critical for payment security and dispute prevention.
+**Status**: Production Ready (Risc0 zkVM v3.0 with CUDA acceleration)
+
+The node generates cryptographic proofs for all inference results to ensure payment security and enable trustless verification. Proofs are generated using **GPU-accelerated STARK proofs** and stored off-chain in the S5 decentralized network.
+
+### Proof System Architecture (v8.1.2+)
+
+**Production Configuration**:
+- **Proof Engine**: Risc0 zkVM v3.0 (enabled with `--features real-ezkl` build flag)
+- **Acceleration**: CUDA GPU acceleration (0.2-2.3s per proof)
+- **Proof Size**: ~221KB per proof
+- **Storage**: Off-chain in S5 network (737x size reduction on-chain)
+- **On-Chain Submission**: Only hash + CID (hash: 32 bytes, CID: ~50 bytes)
+- **Contract Function**: `submitProofOfWork(jobId, tokensClaimed, proofHash, proofCID)`
+- **Contract Address**: `0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E` (Base Sepolia)
+
+**🚨 CRITICAL**: Nodes built without `--features real-ezkl` generate **mock proofs** (126 bytes) which are NOT valid for production use!
 
 ### Proof Types
 
-The system supports three proof types:
+The system supports multiple proof types:
 
-```json
-{
-  "proof_type": "EZKL"  // Options: "EZKL", "Risc0", "Simple"
-}
+| Type | Status | Size | Use Case |
+|------|--------|------|----------|
+| **Risc0** | ✅ Production (Default) | ~221KB | GPU-accelerated STARK proofs with S5 storage |
+| Simple | ⚠️ Development Only | ~126 bytes | Testing and development (mock proofs) |
+| EZKL | 🚧 Deprecated | N/A | Legacy support only |
+
+**Production Deployment**:
+```bash
+# ✅ CORRECT - Real Risc0 STARK proofs
+cargo build --release --features real-ezkl -j 4
+
+# ❌ WRONG - Mock proofs (not production-ready!)
+cargo build --release
 ```
 
 ### Proof-Enhanced Response
@@ -947,41 +1774,97 @@ When proof generation is enabled, responses include cryptographic verification:
   "message_index": 6,
   "completion_time_ms": 1234,
   "proof": {
-    "job_id": "0x123...",
+    "job_id": 123,
     "model_hash": "sha256:abc123...",
     "input_hash": "sha256:def456...",
     "output_hash": "sha256:ghi789...",
-    "proof_type": "EZKL",
-    "proof_data": "0xEF...",  // Base64 encoded proof
-    "timestamp": "2025-01-07T12:00:00Z",
-    "prover_id": "node_123"
-  },
-  "verification_key": "0x01020304..."  // For client-side verification
+    "proof_type": "risc0",
+    "proof_hash": "0x7f3a...",     // SHA256 hash of proof
+    "proof_cid": "z5bmX...",       // S5 CID where proof is stored
+    "proof_size": 221184,          // Proof size in bytes (~221KB)
+    "timestamp": 1737000000,       // Unix timestamp
+    "tokens_claimed": 45
+  }
 }
+```
+
+**Note**: The full proof (~221KB) is stored in S5 decentralized storage. Only the `proof_hash` and `proof_cid` are submitted on-chain, achieving 737x size reduction.
+
+### Automatic Checkpoint Submission (v8.1.0+)
+
+**Trigger**: Every 50 tokens generated during inference
+
+The node automatically generates and submits checkpoints to verify work progress:
+
+1. **Token Tracking**: Node counts tokens in both streaming and non-streaming inference
+2. **Checkpoint Trigger**: Every 50 tokens, checkpoint submission is triggered
+3. **Proof Generation**: Risc0 zkVM generates ~221KB STARK proof (0.2-2.3s with CUDA)
+4. **S5 Upload**: Proof uploaded to S5 decentralized network, receives CID
+5. **Hash Calculation**: SHA256 hash computed for proof integrity
+6. **On-Chain Submission**: `submitProofOfWork(jobId, tokensClaimed, proofHash, proofCID)`
+7. **Gas Optimization**: Only ~82 bytes submitted on-chain (hash: 32 bytes, CID: ~50 bytes)
+
+**Log Messages to Watch**:
+```
+📊 Tracking: job_id=123, tokens=25, total=25
+🚨 TRIGGERING checkpoint: job_id=123, tokens_claimed=50
+🔐 Generating real Risc0 STARK proof for job 123
+✅ Checkpoint submitted: job_id=123, hash=0x7f3a..., cid=z5bmX...
+```
+
+**Contract Integration**:
+```solidity
+// JobMarketplace contract function (v8.1.2+)
+function submitProofOfWork(
+    uint256 jobId,
+    uint256 tokensClaimed,
+    bytes32 proofHash,      // SHA256 hash of proof
+    string memory proofCID  // S5 CID for off-chain retrieval
+) external;
+```
+
+**S5 Proof Retrieval**:
+```javascript
+// Retrieve full proof from S5 for verification
+const proofCID = "z5bmX7Kd9...";
+const s5Url = `https://s5.vup.cx/s5/blob/${proofCID}`;
+const proofBytes = await fetch(s5Url).then(r => r.arrayBuffer());
+
+// Verify hash matches on-chain submission
+const calculatedHash = sha256(proofBytes);
+assert(calculatedHash === onChainProofHash);
 ```
 
 ### Proof Verification
 
-Clients can verify proofs before accepting results:
+Clients can verify proofs by retrieving them from S5 and checking the hash:
 
 ```javascript
 // Example verification (client-side)
-async function verifyProof(response) {
-  const { proof, verification_key } = response;
-  
-  // Verify hashes match
-  const inputHash = sha256(response.prompt);
-  const outputHash = sha256(response.content);
-  
-  if (proof.input_hash !== inputHash || 
-      proof.output_hash !== outputHash) {
-    throw new Error('Hash mismatch - proof invalid');
+async function verifyProof(jobId, proofHash, proofCID) {
+  // 1. Retrieve proof from S5
+  const s5Url = `https://s5.vup.cx/s5/blob/${proofCID}`;
+  const proofBytes = await fetch(s5Url).then(r => r.arrayBuffer());
+
+  // 2. Verify hash matches on-chain submission
+  const calculatedHash = sha256(proofBytes);
+  if (calculatedHash !== proofHash) {
+    throw new Error('Proof hash mismatch - tampered data');
   }
-  
-  // Additional cryptographic verification
-  // (Implementation depends on proof type)
+
+  // 3. Verify proof with Risc0 zkVM verifier
+  const isValid = await risc0Verifier.verify(proofBytes);
+  if (!isValid) {
+    throw new Error('Invalid Risc0 STARK proof');
+  }
+
   return true;
 }
+
+// Monitor checkpoint submissions
+const filter = jobMarketplace.filters.ProofOfWorkSubmitted(jobId);
+const events = await jobMarketplace.queryFilter(filter);
+console.log(`Checkpoints submitted: ${events.length}`);
 ```
 
 ### Payment Security Flow
@@ -1132,6 +2015,81 @@ ApiConfig {
 }
 ```
 
+### Smart Contract Addresses
+
+**Single Source of Truth**: `.env.contracts` file
+
+All contract addresses are defined in the `.env.contracts` file at the repository root. This file serves as the single source of truth for all deployments.
+
+#### Base Sepolia (Chain ID: 84532)
+
+**Current Deployment** (v8.1.2+):
+
+| Contract | Address | Version | Features |
+|----------|---------|---------|----------|
+| **NodeRegistry** | `0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6` | v7.0.29+ | Dual pricing support (native + stable) |
+| **JobMarketplace** | `0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E` | v8.1.2+ | S5 off-chain proof storage (hash + CID) |
+| **PaymentEscrow** | `PAYMENT_ESCROW_WITH_EARNINGS_ADDRESS` | Current | Payment escrow with earnings tracking |
+| **HostEarnings** | `HOST_EARNINGS_ADDRESS` | Current | Host earnings accumulator (90% share) |
+| **ProofSystem** | `PROOF_SYSTEM_ADDRESS` | Current | Proof verification system |
+| **ReputationSystem** | `REPUTATION_SYSTEM_ADDRESS` | Current | Node reputation tracking |
+
+**Deprecated Addresses** (Do not use):
+- Old NodeRegistry: `0xC8dDD546e0993eEB4Df03591208aEDF6336342D7` (pre-v7.0.29, no dual pricing)
+- Old JobMarketplace (full proof): `0x462050a4a551c4292586D9c1DE23e3158a9bF3B3` (pre-v8.1.2)
+- Old JobMarketplace (pre-S5): `0xe169A4B57700080725f9553E3Cc69885fea13629` (pre-v8.1.2)
+
+#### opBNB Testnet (Chain ID: 5611)
+
+**Status**: Supported but currently inactive
+
+Contract addresses for opBNB Testnet are defined in `.env.contracts` but the chain is not actively used in production deployments.
+
+#### Contract Features by Version
+
+**NodeRegistry (v7.0.29+)**:
+- Dual pricing: `minPricePerTokenNative` and `minPricePerTokenStable`
+- Pricing validation against contract constants
+- Native: MIN=2,272,727,273 wei, MAX=22,727,272,727,273 wei
+- Stable: MIN=10, MAX=100,000 (6 decimals)
+
+**JobMarketplace (v8.1.2+)**:
+- Off-chain proof storage in S5 network
+- `submitProofOfWork(jobId, tokensClaimed, proofHash, proofCID)` function
+- 737x size reduction on-chain (221KB → ~82 bytes)
+- Proof retrieval from S5 using CID
+
+#### Environment Configuration
+
+```bash
+# From .env.contracts
+NODE_REGISTRY_FAB_ADDRESS=0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6
+JOB_MARKETPLACE_FAB_WITH_S5_ADDRESS=0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E
+PAYMENT_ESCROW_WITH_EARNINGS_ADDRESS=<from .env.contracts>
+HOST_EARNINGS_ADDRESS=<from .env.contracts>
+
+# Test accounts (from .env.test.local)
+TEST_USER_1_ADDRESS=<from .env.test.local>
+TEST_USER_1_PRIVATE_KEY=<from .env.test.local>
+TEST_HOST_1_ADDRESS=<from .env.test.local>
+TEST_HOST_1_PRIVATE_KEY=<from .env.test.local>
+```
+
+#### Contract ABIs
+
+Contract ABIs are located in:
+- `contracts/` - Full contract ABIs
+- `docs/compute-contracts-reference/client-abis/` - Client-optimized ABIs
+  - `JobMarketplaceWithModels-CLIENT-ABI.json`
+  - `NodeRegistryWithModels-CLIENT-ABI.json`
+
+#### Documentation References
+
+- **Host Registration**: `docs/compute-contracts-reference/HOST_REGISTRATION_GUIDE.md`
+- **JobMarketplace**: `docs/compute-contracts-reference/JobMarketplace.md`
+- **S5 Integration**: `docs/compute-contracts-reference/S5_NODE_INTEGRATION_GUIDE.md`
+- **Dual Pricing**: `docs/NODE_DUAL_PRICING_UPDATE_v7.0.29.md`
+
 ---
 
 ## Client Examples
@@ -1163,6 +2121,33 @@ curl -X POST http://localhost:8080/v1/inference \
     "max_tokens": 200,
     "stream": true
   }'
+```
+
+#### Generate Embeddings
+
+```bash
+# Single text embedding
+curl -X POST http://localhost:8080/v1/embed \
+  -H "Content-Type: application/json" \
+  -d '{
+    "texts": ["What is machine learning?"]
+  }'
+
+# Batch embedding with explicit model
+curl -X POST http://localhost:8080/v1/embed \
+  -H "Content-Type: application/json" \
+  -d '{
+    "texts": [
+      "Machine learning is a subset of AI",
+      "Deep learning uses neural networks",
+      "Neural networks mimic biological neurons"
+    ],
+    "model": "all-MiniLM-L6-v2",
+    "chainId": 84532
+  }'
+
+# List available embedding models
+curl "http://localhost:8080/v1/models?type=embedding"
 ```
 
 ### Python
@@ -1205,6 +2190,46 @@ def streaming_inference(prompt, model="llama-2-7b"):
                     print(data['content'], end='', flush=True)
                     if data.get('finish_reason'):
                         break
+
+# Generate embeddings
+def generate_embeddings(texts, model="all-MiniLM-L6-v2", chain_id=84532):
+    """Generate embeddings for multiple texts"""
+    url = "http://localhost:8080/v1/embed"
+    payload = {
+        "texts": texts,
+        "model": model,
+        "chainId": chain_id
+    }
+
+    response = requests.post(url, json=payload)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        raise Exception(f"Embedding error: {response.status_code} - {response.text}")
+
+# List embedding models
+def list_embedding_models(chain_id=84532):
+    """Get available embedding models"""
+    url = f"http://localhost:8080/v1/models?type=embedding&chain_id={chain_id}"
+    response = requests.get(url)
+    return response.json()
+
+# Example usage
+texts = [
+    "Machine learning is a subset of AI",
+    "Deep learning uses neural networks",
+    "Transformers revolutionized NLP"
+]
+
+result = generate_embeddings(texts)
+print(f"Generated {len(result['embeddings'])} embeddings")
+print(f"Total tokens: {result['totalTokens']}")
+print(f"Cost: ${result['cost']} (zero-cost!)")
+print(f"Dimensions: {len(result['embeddings'][0]['embedding'])}")
+
+# List available models
+models = list_embedding_models()
+print(f"Available models: {[m['name'] for m in models['models']]}")
 ```
 
 ### JavaScript/TypeScript
@@ -1257,6 +2282,78 @@ function streamingInference(prompt, model = 'llama-2-7b') {
     console.error('EventSource error:', error);
     eventSource.close();
   };
+}
+
+// Generate embeddings
+async function generateEmbeddings(texts, model = 'all-MiniLM-L6-v2', chainId = 84532) {
+  const response = await fetch('http://localhost:8080/v1/embed', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      texts,
+      model,
+      chainId,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Embedding error! status: ${response.status}`);
+  }
+
+  return await response.json();
+}
+
+// List embedding models
+async function listEmbeddingModels(chainId = 84532) {
+  const response = await fetch(
+    `http://localhost:8080/v1/models?type=embedding&chain_id=${chainId}`
+  );
+  return await response.json();
+}
+
+// Example usage with TypeScript types
+interface EmbeddingResult {
+  embedding: number[];  // 384-dimensional vector
+  text: string;
+  tokenCount: number;
+}
+
+interface EmbedResponse {
+  embeddings: EmbeddingResult[];
+  model: string;
+  provider: string;
+  totalTokens: number;
+  cost: number;
+  chainId: number;
+  chainName: string;
+  nativeToken: string;
+}
+
+async function example() {
+  const texts = [
+    "Machine learning is a subset of AI",
+    "Deep learning uses neural networks",
+    "Transformers revolutionized NLP"
+  ];
+
+  try {
+    const result: EmbedResponse = await generateEmbeddings(texts);
+    console.log(`Generated ${result.embeddings.length} embeddings`);
+    console.log(`Total tokens: ${result.totalTokens}`);
+    console.log(`Cost: $${result.cost} (zero-cost!)`);
+    console.log(`Dimensions: ${result.embeddings[0].embedding.length}`);
+
+    // Use embeddings for similarity search, RAG, etc.
+    const embeddings = result.embeddings.map(e => e.embedding);
+
+    // List available models
+    const models = await listEmbeddingModels();
+    console.log(`Available models: ${models.models.map(m => m.name).join(', ')}`);
+  } catch (error) {
+    console.error('Error generating embeddings:', error);
+  }
 }
 ```
 
@@ -2462,33 +3559,109 @@ Future versions will maintain backward compatibility where possible. Breaking ch
 
 ### Version History
 
-- **v1.5** (Current) - Automatic Payment Settlement on WebSocket Disconnect (September 2024)
+- **v8.4.1** (Current) - S5 Vector Loading Production Ready (November 2025)
+  - S5 Integration Testing Complete: All 19 tests passing (100%)
+  - Enhanced S5.js bridge integration with real HTTP API
+  - `LoadVectorDatabase`, `VectorDatabaseLoaded`, `VectorLoadProgress`, `VectorDatabaseError` message types
+  - Support for encrypted `vector_database` paths in job parameters
+  - Bridge unavailability testing and fallback handling verified
+  - Production-ready S5 vector database loading from decentralized storage
+  - Documentation updates across all SDK and node reference docs
+
+- **v8.4.0** - S5 Vector Loading Feature Complete (November 2025)
+  - Complete implementation of S5 vector database loading
+  - Integration with Enhanced S5.js bridge (HTTP API)
+  - Support for encrypted vector database paths
+  - 384-dimensional vector validation and indexing
+  - Progress tracking during vector load operations
+  - Comprehensive error handling for S5 fetch failures
+  - Session-scoped vector storage with automatic cleanup
+
+- **v8.3.13** - Chat Templates and Harmony Support (November 2025)
+  - Model-specific chat template formatting (Harmony, Llama, ChatML, Vicuna)
+  - Automatic template detection based on model metadata
+  - Multi-turn conversation formatting
+  - Harmony chat template with `<|im_start|>` tokens
+  - Improved inference quality through proper prompt formatting
+
+- **v8.3.6** - Host-Side RAG Enhancements (November 2025)
+  - Session-scoped vector storage optimizations
+  - Improved cosine similarity search performance (<50ms for 10K vectors)
+  - Enhanced vector upload/search WebSocket messages
+  - Better memory management for large vector collections
+
+- **v8.3.0** - Host-Side RAG Introduction (October 2025)
+  - Session-scoped vector storage for document retrieval
+  - 384-dimensional embeddings via `/v1/embed` endpoint
+  - `uploadVectors` and `searchVectors` WebSocket messages
+  - Cosine similarity search with configurable thresholds
+  - Automatic cleanup on session disconnect
+  - Support for up to 100,000 vectors per session
+
+- **v8.2.0** - Production Hardening (October 2025)
+  - Enhanced error handling and logging
+  - Improved WebSocket stability and reconnection
+  - Better metrics and monitoring
+  - Performance optimizations for high-load scenarios
+
+- **v8.1.2** - S5 Off-Chain Proof Storage (September 2025)
+  - Off-chain proof storage in S5 decentralized network
+  - On-chain submission of hash + CID only (737x size reduction)
+  - `submitProofOfWork(jobId, tokensClaimed, proofHash, proofCID)` contract function
+  - New JobMarketplace contract: `0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E`
+  - ~82 bytes on-chain per checkpoint (hash: 32B, CID: ~50B)
+  - Full ~221KB proofs retrievable from S5 for verification
+
+- **v8.1.0** - Risc0 zkVM Integration (September 2025)
+  - GPU-accelerated STARK proof generation via Risc0 zkVM v3.0
+  - CUDA support for fast proof generation (0.2-2.3s per proof)
+  - Automatic checkpoint submission every 50 tokens
+  - SHA256 hash calculation for proof integrity
+  - Proof size: ~221KB (real Risc0) vs 126 bytes (mock)
+  - **Critical**: Requires `--features real-ezkl` build flag for production
+
+- **v8.0.0** - End-to-End Encryption (August 2025)
+  - ECDH key exchange on secp256k1 (Ethereum-compatible)
+  - XChaCha20-Poly1305 AEAD for symmetric encryption
+  - HKDF-SHA256 for key derivation
+  - ECDSA signature recovery for client authentication
+  - Perfect forward secrecy via ephemeral keys
+  - Session key management with TTL-based expiration
+  - 111 comprehensive tests (87 unit, 14 integration, 10 security)
+  - `encrypted_session_init`, `encrypted_message`, `encrypted_chunk` message types
+
+- **v7.0.29** - Dual Pricing System (July 2025)
+  - Separate pricing for native tokens (ETH/BNB) and stablecoins (USDC)
+  - `minPricePerTokenNative` and `minPricePerTokenStable` in NodeRegistry
+  - Geometric mean pricing as default (MIN × MAX)^0.5
+  - Pricing validation against contract constants
+  - New contract: `0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6` (NodeRegistry with dual pricing)
+
+- **v1.5** - Automatic Payment Settlement on WebSocket Disconnect (September 2024)
   - WebSocket disconnect triggers `completeSessionJob()` automatically
   - Ensures payment distribution even on unexpected disconnects
   - Host earnings (90%) automatically sent to HostEarnings contract
   - Treasury fee (10%) and user refund handled automatically
   - Requires HOST_PRIVATE_KEY configuration
-  - Available in node v5-payment-settlement and later
+
 - **v1.3** - Model Governance and Registry Integration
   - Integration with ModelRegistry smart contract for approved models
   - Model validation with SHA256 hash verification
   - Node registration with validated model IDs
   - Support for NodeRegistryWithModels contract
-  - Only approved models (TinyVicuna, TinyLlama) available for inference
-- **v1.2** - Enhanced proof integration in WebSocket messages (Sub-phases 8.14-8.15)
+
+- **v1.2** - Enhanced proof integration in WebSocket messages
   - ProofData structure in ConversationMessage and StreamToken
-  - ProofManager with LRU cache eviction (HashMap + VecDeque)
-  - ProofConfig for environment-based configuration
+  - ProofManager with LRU cache eviction
   - Streaming integration with proofs in final tokens
-  - Millisecond timestamp precision for better granularity
-  - 28 comprehensive tests for proof functionality
-- **v1.1** - Added EZKL proof generation for payment security (Sub-phase 8.13)
+
+- **v1.1** - Initial proof generation support
   - Cryptographic verification of inference results
-  - Support for EZKL, Risc0, and Simple proof types
-  - Integration with PackagedResult for job context
+  - Support for multiple proof types
   - Hash-based verification of model, input, and output
-- **v1.0** - Initial API release with core inference capabilities
-  - WebSocket production features (Phases 8.7-8.12)
+
+- **v1.0** - Initial API release
+  - WebSocket production features
   - Session management with stateless memory cache
   - JWT authentication and Ed25519 signatures
   - Message compression and rate limiting
@@ -2654,6 +3827,213 @@ Future versions will maintain backward compatibility where possible. Breaking ch
   export MODEL_CACHE_SIZE=2
   cargo run --release
   ```
+
+#### Embedding Issues
+
+**Problem: "Embedding service not available" (503 error)**
+- **Cause**: Embedding model manager not initialized
+- **Solution**: Download embedding models and verify model path
+- **Steps**:
+  ```bash
+  # Download embedding model
+  ./scripts/download_embedding_model.sh
+
+  # Verify model files exist
+  ls -lh models/all-MiniLM-L6-v2-onnx/
+
+  # Should see:
+  # - model.onnx (~90MB)
+  # - tokenizer.json (~500KB)
+
+  # Restart node with embedding support
+  cargo run --release
+  ```
+
+**Problem: "Model not found" when requesting embedding model**
+- **Cause**: Model name typo or model not loaded
+- **Solution**: List available models and use exact name
+- **Debug**:
+  ```bash
+  # List available embedding models
+  curl "http://localhost:8080/v1/models?type=embedding"
+
+  # Use exact name from response
+  curl -X POST http://localhost:8080/v1/embed \
+    -H "Content-Type: application/json" \
+    -d '{"texts": ["test"], "model": "all-MiniLM-L6-v2"}'
+  ```
+
+**Problem: "Dimension mismatch" error (500 error)**
+- **Cause**: Model outputs wrong dimensions (not 384)
+- **Solution**: Re-download model files or use different model
+- **Verification**:
+  ```bash
+  # Re-download model with correct dimensions
+  ./scripts/download_embedding_model.sh
+
+  # Check model config in logs
+  RUST_LOG=debug cargo run 2>&1 | grep "dimension"
+  ```
+
+**Problem: Embedding request times out**
+- **Cause**: Too many texts in batch or texts too long
+- **Solution**: Reduce batch size or text length
+- **Limits**:
+  - Maximum texts per request: 96
+  - Maximum text length: 8192 characters
+  - Recommended batch size: 10-20 for optimal performance
+- **Example**:
+  ```bash
+  # Split large batch into smaller chunks
+  # Bad: 200 texts at once
+  # Good: 10 batches of 20 texts each
+  ```
+
+**Problem: "Text too long" validation error (400 error)**
+- **Cause**: Individual text exceeds 8192 character limit
+- **Solution**: Truncate or split long texts
+- **Example**:
+  ```python
+  def chunk_text(text, max_length=8000):
+      """Split long text into chunks"""
+      return [text[i:i+max_length] for i in range(0, len(text), max_length)]
+
+  # Use chunked texts
+  long_text = "very long document..."
+  chunks = chunk_text(long_text)
+  embeddings = generate_embeddings(chunks)
+  ```
+
+**Problem: "Empty texts" validation error (400 error)**
+- **Cause**: Sending empty array or whitespace-only strings
+- **Solution**: Filter empty/whitespace strings before sending
+- **Example**:
+  ```python
+  # Filter out empty and whitespace-only strings
+  texts = [t.strip() for t in raw_texts if t and t.strip()]
+  if texts:
+      embeddings = generate_embeddings(texts)
+  ```
+
+**Problem: Slow embedding generation**
+- **Cause**: CPU-only inference or large batch size
+- **Solution**: Optimize batch size or consider GPU acceleration (optional)
+- **Performance Tips**:
+  - Optimal batch size: 10-20 texts per request
+  - CPU performance: ~76ms per embedding (~13 embeddings/second)
+  - Memory usage: ~90MB for model
+  - Use concurrent requests for higher throughput
+- **Example Parallel Processing**:
+  ```python
+  import asyncio
+  import aiohttp
+
+  async def embed_batch(session, texts):
+      async with session.post(
+          'http://localhost:8080/v1/embed',
+          json={'texts': texts}
+      ) as response:
+          return await response.json()
+
+  async def embed_large_dataset(all_texts, batch_size=20):
+      async with aiohttp.ClientSession() as session:
+          tasks = []
+          for i in range(0, len(all_texts), batch_size):
+              batch = all_texts[i:i+batch_size]
+              tasks.append(embed_batch(session, batch))
+          return await asyncio.gather(*tasks)
+  ```
+
+**Problem: Model download fails**
+- **Cause**: Network issues or incorrect model repository
+- **Solution**: Verify network connection and use pinned model version
+- **Manual Download**:
+  ```bash
+  # Download from HuggingFace (if script fails)
+  cd models/
+  mkdir -p all-MiniLM-L6-v2-onnx
+  cd all-MiniLM-L6-v2-onnx
+
+  # Download model file
+  wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/refs%2Fpr%2F21/onnx/model.onnx
+
+  # Download tokenizer
+  wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/raw/refs%2Fpr%2F21/tokenizer.json
+
+  # Verify file sizes
+  ls -lh
+  # model.onnx should be ~90MB
+  # tokenizer.json should be ~500KB
+  ```
+
+### Model Download Instructions
+
+The embedding endpoint requires ONNX models to be downloaded before use.
+
+#### Automatic Download (Recommended)
+
+```bash
+# Download all required embedding models
+./scripts/download_embedding_model.sh
+
+# This downloads:
+# - all-MiniLM-L6-v2 ONNX model (~90MB)
+# - Tokenizer files (~500KB)
+# To: models/all-MiniLM-L6-v2-onnx/
+```
+
+#### Manual Download
+
+If the automatic script fails, download manually:
+
+```bash
+cd models/
+mkdir -p all-MiniLM-L6-v2-onnx
+cd all-MiniLM-L6-v2-onnx
+
+# Download model (ONNX format, 384 dimensions)
+curl -L -o model.onnx \
+  "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/refs%2Fpr%2F21/onnx/model.onnx"
+
+# Download tokenizer
+curl -L -o tokenizer.json \
+  "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/raw/refs%2Fpr%2F21/tokenizer.json"
+
+# Verify downloads
+ls -lh
+# Should see:
+#   model.onnx      ~90MB
+#   tokenizer.json  ~500KB
+```
+
+#### Verify Model Files
+
+```bash
+# Check file integrity
+sha256sum models/all-MiniLM-L6-v2-onnx/model.onnx
+sha256sum models/all-MiniLM-L6-v2-onnx/tokenizer.json
+
+# Test embedding generation
+curl -X POST http://localhost:8080/v1/embed \
+  -H "Content-Type: application/json" \
+  -d '{"texts": ["test embedding"]}'
+
+# Should return 384-dimensional embedding
+```
+
+#### Alternative Models (Future)
+
+Currently, only all-MiniLM-L6-v2 is supported. To add more models:
+
+1. Ensure model outputs exactly 384 dimensions
+2. Download ONNX format model and tokenizer
+3. Add model config to embedding manager initialization
+4. Restart node to load new model
+
+**Supported Formats**:
+- ONNX models only (for CPU/GPU compatibility)
+- Sentence-transformer architecture
+- Output dimension: 384 (required)
 
 ### Debug Commands
 

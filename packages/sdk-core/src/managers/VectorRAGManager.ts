@@ -2,267 +2,895 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 /**
- * VectorRAGManager (Simplified - Host Delegation)
- * Thin wrapper around SessionManager for RAG vector operations
- * Delegates all vector storage/search to host via WebSocket
+ * VectorRAGManager (Hybrid Architecture)
+ * Client-side database management + host-side search delegation
+ *
+ * Architecture:
+ * - Client-side: S5VectorStore for persistent storage in S5 (browser-compatible, ~5KB)
+ * - Host-side: SessionManager for stateless search operations (Rust)
  */
 
+import { S5VectorStore } from '../storage/S5VectorStore';
+import type { S5 } from '@julesl23/s5js';
 import { SessionManager } from './SessionManager';
+import { EncryptionManager } from './EncryptionManager';
 import { IVectorRAGManager } from './interfaces/IVectorRAGManager';
-import type {
-  VectorRecord,
-  SearchResult,
-  UploadVectorsResult,
-  MetadataFilter
-} from '../types';
+import { RAGConfig, PartialRAGConfig, VectorRecord, SearchResult, SearchResultWithSource } from '../rag/types';
+import { validateRAGConfig, mergeRAGConfig } from '../rag/config';
+import { SessionCache } from '../rag/session-cache';
+import { DatabaseMetadataService } from '../database/DatabaseMetadataService';
+import type { DatabaseMetadata } from '../database/types';
+import { PermissionManager } from '../permissions/PermissionManager';
+import type { Vector, VectorDatabaseMetadata, FolderStats } from '../types';
 
 /**
- * Simplified VectorRAGManager
- *
- * **Architecture Change (Phase 3, Sub-phase 3.1)**:
- * - Removed `@fabstir/vector-db-native` dependency (client-side vector DB)
- * - Removed S5 persistence (host is stateless)
- * - Delegates to SessionManager WebSocket methods
- * - Host stores vectors in session memory (Rust backend)
- *
- * **Migration from 961 lines to ~200 lines**:
- * - ❌ Removed: Native VectorDbSession, S5 storage, session caching, folder hierarchies
- * - ✅ Kept: Simple delegation to SessionManager.uploadVectors/searchVectors
+ * Session status
+ */
+type SessionStatus = 'active' | 'closed' | 'unknown';
+
+/**
+ * Internal session object
+ */
+interface Session {
+  sessionId: string;
+  databaseName: string;
+  status: SessionStatus;
+  createdAt: number;
+  lastAccessedAt: number;
+  config: RAGConfig;
+  folderPaths: Set<string>; // Track unique folder paths
+}
+
+/**
+ * Database statistics
+ */
+export interface DatabaseStats {
+  databaseName: string;
+  vectorCount: number;
+  storageSizeBytes: number;
+  sessionCount: number;
+}
+
+/**
+ * Vector RAG Manager (Hybrid)
+ * Manages client-side vector databases with host-side search
  */
 export class VectorRAGManager implements IVectorRAGManager {
-  private sessionManager: SessionManager;
+  public readonly userAddress: string;
+  public readonly config: RAGConfig;
+  private readonly seedPhrase: string;
+  private readonly metadataService: DatabaseMetadataService;
+  private readonly permissionManager?: PermissionManager;
+  private readonly sessionManager: SessionManager;
+  private readonly vectorStore: S5VectorStore;
+  private sessions: Map<string, Session>;
+  private sessionCache: SessionCache<Session>;
+  private dbNameToSessionId: Map<string, string>;
+  private disposed: boolean = false;
 
   /**
    * Create a new VectorRAGManager
    *
-   * **BREAKING CHANGE**: Constructor signature changed
-   *
-   * @param sessionManager - SessionManager instance for WebSocket delegation
-   *
-   * @example
-   * ```typescript
-   * const sessionManager = await sdk.getSessionManager();
-   * const vectorManager = new VectorRAGManager(sessionManager);
-   * ```
+   * @param options - Manager options
    */
-  constructor(sessionManager: SessionManager) {
-    if (!sessionManager) {
-      throw new Error('SessionManager is required');
+  constructor(options: {
+    userAddress: string;
+    seedPhrase: string;
+    config: RAGConfig;
+    sessionManager: SessionManager;
+    s5Client: S5;
+    encryptionManager: EncryptionManager;
+    metadataService?: DatabaseMetadataService;
+    permissionManager?: PermissionManager;
+  }) {
+    // Validate required fields
+    if (!options.userAddress) {
+      throw new Error('userAddress is required');
     }
-    this.sessionManager = sessionManager;
+    if (!options.seedPhrase) {
+      throw new Error('seedPhrase is required');
+    }
+    if (!options.sessionManager) {
+      throw new Error('sessionManager is required');
+    }
+    if (!options.s5Client) {
+      throw new Error('s5Client is required');
+    }
+    if (!options.encryptionManager) {
+      throw new Error('encryptionManager is required');
+    }
+
+    // Validate configuration
+    validateRAGConfig(options.config);
+
+    this.userAddress = options.userAddress;
+    this.seedPhrase = options.seedPhrase;
+    this.config = options.config;
+    this.sessionManager = options.sessionManager;
+    this.metadataService = options.metadataService || new DatabaseMetadataService();
+    this.permissionManager = options.permissionManager;
+    this.sessions = new Map();
+    this.sessionCache = new SessionCache<Session>(50);
+    this.dbNameToSessionId = new Map();
+
+    // Initialize S5VectorStore (shared across all sessions)
+    this.vectorStore = new S5VectorStore({
+      s5Client: options.s5Client,
+      userAddress: options.userAddress,
+      encryptionManager: options.encryptionManager
+    });
   }
 
   /**
-   * Add vectors to session vector store
+   * Initialize the VectorRAGManager by loading existing databases from S5 storage
    *
-   * Delegates to `SessionManager.uploadVectors()` which sends vectors to host via WebSocket.
-   * Host stores vectors in session memory (Rust) for the duration of the WebSocket connection.
+   * IMPORTANT: This method MUST be called after construction to load existing vector databases
+   * from S5 storage. Without this call, listDatabases() will return an empty array even when
+   * databases exist.
    *
-   * @param sessionId - Active session ID
-   * @param vectors - Vectors to upload (384 dimensions)
-   * @param replace - If true, replace all existing vectors; if false, append (default: false)
-   * @returns Upload result with counts
-   *
-   * @throws Error if vector dimensions are invalid (must be 384)
-   * @throws Error if session is not active or WebSocket not connected
+   * This method should be called once after creating the VectorRAGManager instance:
+   * ```typescript
+   * const vectorRAGManager = new VectorRAGManager(options);
+   * await vectorRAGManager.initialize();
+   * ```
    */
-  async addVectors(
-    sessionId: string,
-    vectors: VectorRecord[],
-    replace: boolean = false
-  ): Promise<UploadVectorsResult> {
-    // Validate vector dimensions (384 for all-MiniLM-L6-v2)
-    for (const vector of vectors) {
-      if (vector.vector.length !== 384) {
-        throw new Error(
-          `Invalid vector dimensions for vector "${vector.id}": expected 384, got ${vector.vector.length}`
-        );
+  async initialize(): Promise<void> {
+    console.log('[VectorRAGManager] Initialize called - about to call vectorStore.initialize()');
+    await this.vectorStore.initialize();
+    console.log('[VectorRAGManager] ✅ VectorStore initialized');
+
+    // Populate metadataService from loaded databases
+    const loadedDatabases = await this.vectorStore.listDatabases();
+    for (const db of loadedDatabases) {
+      if (!this.metadataService.exists(db.databaseName)) {
+        this.metadataService.create(db.databaseName, 'vector', this.userAddress, {
+          vectorCount: db.vectorCount,
+          storageSizeBytes: db.storageSizeBytes,
+          description: db.description
+        });
+      }
+    }
+    console.log(`[VectorRAGManager] ✅ Populated metadata for ${loadedDatabases.length} existing database(s)`);
+  }
+
+  /**
+   * Create a new vector database session (client-side)
+   * This creates a persistent vector database using S5VectorStore
+   */
+  async createSession(databaseName: string, config?: PartialRAGConfig): Promise<string> {
+    this.ensureNotDisposed();
+
+    // Validate database name
+    if (!databaseName || databaseName.trim() === '') {
+      throw new Error('Database name cannot be empty');
+    }
+
+    // Merge config with defaults
+    const sessionConfig = config ? mergeRAGConfig({ ...this.config, ...config }) : this.config;
+
+    // Generate unique session ID
+    const sessionId = `rag-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    try {
+      // Create database in S5VectorStore (client-side storage)
+      await this.vectorStore.createDatabase({
+        name: databaseName,
+        owner: this.userAddress,
+        description: sessionConfig.description
+      });
+
+      // Create session object
+      const session: Session = {
+        sessionId,
+        databaseName,
+        status: 'active',
+        createdAt: Date.now(),
+        lastAccessedAt: Date.now(),
+        config: sessionConfig,
+        folderPaths: new Set<string>()
+      };
+
+      // Store session
+      this.sessions.set(sessionId, session);
+      this.sessionCache.set(sessionId, session);
+      this.dbNameToSessionId.set(databaseName, sessionId);
+
+      // Initialize database metadata if this is the first session for this database
+      if (!this.metadataService.exists(databaseName)) {
+        this.metadataService.create(databaseName, 'vector', this.userAddress);
+      } else {
+        // Database exists - check user has at least read access
+        this.checkPermission(databaseName, 'read');
+      }
+
+      return sessionId;
+    } catch (error) {
+      throw new Error(`Failed to create session: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Get session by ID
+   */
+  getSession(sessionId: string): Session | null {
+    // Try cache first
+    const cached = this.sessionCache.get(sessionId);
+    if (cached) {
+      cached.lastAccessedAt = Date.now();
+      return cached;
+    }
+
+    // Try main store
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.lastAccessedAt = Date.now();
+      this.sessionCache.set(sessionId, session);
+      return session;
+    }
+
+    return null;
+  }
+
+  /**
+   * List all active sessions
+   */
+  listSessions(databaseName?: string): Session[] {
+    const allSessions = Array.from(this.sessions.values());
+
+    if (databaseName) {
+      return allSessions.filter(s => s.databaseName === databaseName);
+    }
+
+    return allSessions;
+  }
+
+  /**
+   * Close a session
+   */
+  async closeSession(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    session.status = 'closed';
+  }
+
+  /**
+   * Destroy a session
+   */
+  async destroySession(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    // S5VectorStore auto-saves - no cleanup needed
+    // Update status and remove from caches
+    session.status = 'closed';
+    this.sessionCache.delete(sessionId);
+    this.sessions.delete(sessionId);
+    this.dbNameToSessionId.delete(session.databaseName);
+  }
+
+  /**
+   * Add vectors to client-side storage
+   * Stores vectors in S5 via S5VectorStore
+   */
+  async addVectors(sessionId: string, vectors: VectorRecord[]): Promise<void> {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+    if (session.status !== 'active') {
+      throw new Error('Session is closed');
+    }
+
+    // Check write permission
+    this.checkPermission(session.databaseName, 'write');
+
+    // Validate vector dimensions (S5VectorStore also validates, but check here for better error messages)
+    if (vectors.length > 0) {
+      const expectedDim = vectors[0].vector.length;
+      for (const vec of vectors) {
+        if (vec.vector.length !== expectedDim) {
+          throw new Error('Vector dimension mismatch');
+        }
       }
     }
 
-    // Delegate to SessionManager
-    return await this.sessionManager.uploadVectors(sessionId, vectors, replace);
+    // Add vectors to S5VectorStore (auto-saved)
+    await this.vectorStore.addVectors(session.databaseName, vectors);
+    session.lastAccessedAt = Date.now();
+
+    // Update metadata with actual vector count
+    const stats = await this.vectorStore.getStats(session.databaseName);
+    this.metadataService.update(session.databaseName, {
+      vectorCount: stats.vectorCount || 0
+    });
   }
 
   /**
-   * Search for similar vectors
+   * Convenience method: Add a single vector
+   */
+  async addVector(
+    dbName: string,
+    id: string,
+    values: number[],
+    metadata: Record<string, any> = {}
+  ): Promise<void> {
+    // Get or create session
+    let sessionId = this.dbNameToSessionId.get(dbName);
+    if (!sessionId) {
+      sessionId = await this.createSession(dbName);
+    }
+
+    const vectorRecord: VectorRecord = {
+      id,
+      vector: values,
+      metadata
+    };
+
+    await this.addVectors(sessionId, [vectorRecord]);
+  }
+
+  /**
+   * Search vectors using host-side search (delegated to SessionManager)
    *
-   * Delegates to `SessionManager.searchVectors()` which performs cosine similarity search
-   * on the host side (Rust vector store in session memory).
+   * This method delegates to SessionManager which performs search on the host via WebSocket.
+   * Vectors must first be uploaded to the host session using SessionManager.uploadVectors().
    *
-   * @param sessionId - Active session ID
-   * @param queryVector - Query embedding (384 dimensions)
-   * @param k - Number of results to return (default: 5, max: 20)
-   * @param threshold - Minimum similarity score (default: 0.7, range: 0.0-1.0)
-   * @returns Search results sorted by score (descending)
-   *
-   * @throws Error if query vector dimensions are invalid
-   * @throws Error if session is not active or WebSocket not connected
+   * @param sessionId - Host session ID (NOT VectorRAGManager sessionId)
+   * @param queryVector - Query embedding
+   * @param topK - Number of results
+   * @param threshold - Similarity threshold
+   * @returns Search results from host
    */
   async search(
     sessionId: string,
     queryVector: number[],
-    k: number = 5,
+    topK: number = 5,
     threshold: number = 0.7
   ): Promise<SearchResult[]> {
-    // Delegate to SessionManager
-    return await this.sessionManager.searchVectors(sessionId, queryVector, k, threshold);
+    // Delegate to SessionManager for host-side search
+    return await this.sessionManager.searchVectors(sessionId, queryVector, topK, threshold);
   }
 
   /**
-   * Delete vectors by metadata filter (soft delete)
-   *
-   * **Implementation**: Marks vectors as deleted in metadata instead of physically removing them.
-   * This is because the host is stateless - vectors only exist during WebSocket session.
-   *
-   * **Workflow**:
-   * 1. Search for vectors matching metadata filter (threshold=0.0 to match all)
-   * 2. Mark matching vectors with `{ ...metadata, deleted: true }`
-   * 3. Re-upload marked vectors (replace=false to update metadata)
-   * 4. Client filters out `{ deleted: true }` in future searches
-   *
-   * @param sessionId - Active session ID
-   * @param filter - Metadata filter (MongoDB-style query)
-   * @returns Number of vectors marked as deleted
-   *
-   * @example
-   * ```typescript
-   * // Delete all vectors from a specific source
-   * const count = await vectorManager.deleteByMetadata(sessionId, {
-   *   source: 'obsolete-docs'
-   * });
-   * console.log(`Marked ${count} vectors as deleted`);
-   * ```
+   * Alias for search() - for backward compatibility
    */
-  async deleteByMetadata(
+  async searchVectors(
     sessionId: string,
-    filter: MetadataFilter
-  ): Promise<number> {
-    // Step 1: Search for all vectors (threshold=0.0 to get all results)
-    // Note: This is a simplified approach. A production implementation would:
-    // - Use a dedicated "searchByMetadata" WebSocket method
-    // - Or maintain a client-side metadata index
-    // For now, we use a zero vector to match all (host returns by metadata filter)
-    const queryVector = new Array(384).fill(0);
-
-    let matchingVectors: SearchResult[];
-    try {
-      // Search with threshold=0.0 to get all vectors
-      matchingVectors = await this.sessionManager.searchVectors(
-        sessionId,
-        queryVector,
-        20, // Max results per search
-        0.0 // Match all
-      );
-    } catch (error) {
-      // If search fails (e.g., no vectors in session), return 0
-      return 0;
-    }
-
-    // Step 2: Filter by metadata on client side
-    const vectorsToDelete = matchingVectors.filter(result => {
-      return this.matchesFilter(result.metadata, filter);
-    });
-
-    if (vectorsToDelete.length === 0) {
-      return 0;
-    }
-
-    // Step 3: Mark vectors as deleted
-    const updatedVectors: VectorRecord[] = vectorsToDelete.map(result => ({
-      id: result.id,
-      vector: result.vector,
-      metadata: {
-        ...result.metadata,
-        deleted: true
-      }
-    }));
-
-    // Step 4: Re-upload with deleted flag (replace=false to update)
-    await this.sessionManager.uploadVectors(sessionId, updatedVectors, false);
-
-    return updatedVectors.length;
-  }
-
-  /**
-   * Check if metadata matches filter (simple implementation)
-   *
-   * @private
-   * @param metadata - Vector metadata
-   * @param filter - Filter criteria
-   * @returns True if metadata matches all filter conditions
-   */
-  private matchesFilter(metadata: Record<string, any>, filter: MetadataFilter): boolean {
-    for (const [key, value] of Object.entries(filter)) {
-      if (metadata[key] !== value) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /**
-   * @deprecated Host is stateless - vectors only exist during WebSocket session
-   * Use SessionManager.startSession() to create a new session with vectors
-   */
-  async createSession(_databaseName: string): Promise<string> {
-    throw new Error(
-      'createSession() is deprecated. Use SessionManager.startSession() instead.\n' +
-      'Vectors are stored in host session memory (stateless) for WebSocket duration only.'
-    );
-  }
-
-  /**
-   * @deprecated Host is stateless - no session persistence needed
-   */
-  async closeSession(_sessionId: string): Promise<void> {
-    throw new Error(
-      'closeSession() is deprecated. Use SessionManager.endSession() instead.\n' +
-      'Vectors are automatically cleared when WebSocket disconnects.'
-    );
-  }
-
-  /**
-   * @deprecated S5 persistence removed - host is stateless
-   */
-  async saveSession(_sessionId: string): Promise<string> {
-    throw new Error(
-      'saveSession() is deprecated. Host does not persist vectors to S5.\n' +
-      'Vectors only exist in session memory during WebSocket connection.'
-    );
-  }
-
-  /**
-   * @deprecated S5 persistence removed - host is stateless
-   */
-  async loadSession(_sessionId: string, _cid: string): Promise<void> {
-    throw new Error(
-      'loadSession() is deprecated. Host does not load vectors from S5.\n' +
-      'Upload vectors using addVectors() after starting a session.'
-    );
-  }
-
-  /**
-   * @deprecated Native bindings removed - no session stats available
-   */
-  async getSessionStats(_sessionId: string): Promise<any> {
-    throw new Error(
-      'getSessionStats() is deprecated. Native VectorDbSession stats not available.\n' +
-      'Host does not expose vector store statistics via WebSocket.'
-    );
-  }
-
-  /**
-   * @deprecated Multi-database search removed - host stores per-session
-   */
-  async searchMultipleDatabases(
-    _databaseNames: string[],
-    _queryVector: number[],
-    _k?: number
+    queryVector: number[],
+    topK: number = 5,
+    threshold: number = 0.7
   ): Promise<SearchResult[]> {
-    throw new Error(
-      'searchMultipleDatabases() is deprecated. Host stores vectors per-session, not per-database.\n' +
-      'Use search() with a single sessionId instead.'
-    );
+    return await this.search(sessionId, queryVector, topK, threshold);
+  }
+
+  /**
+   * Delete vectors by IDs (client-side storage)
+   */
+  async deleteVectors(sessionId: string, vectorIds: string[]): Promise<void> {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+    if (session.status !== 'active') {
+      throw new Error('Session is closed');
+    }
+
+    // Delete each vector individually
+    for (const vectorId of vectorIds) {
+      await this.vectorStore.deleteVector(session.databaseName, vectorId);
+    }
+    session.lastAccessedAt = Date.now();
+  }
+
+  /**
+   * Delete vectors by metadata filter (client-side storage)
+   */
+  async deleteByMetadata(sessionId: string, filter: Record<string, any>): Promise<number> {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+    if (session.status !== 'active') {
+      throw new Error('Session is closed');
+    }
+
+    const deletedCount = await this.vectorStore.deleteByMetadata(session.databaseName, filter);
+    session.lastAccessedAt = Date.now();
+
+    return deletedCount;
+  }
+
+  /**
+   * Save session to S5 (client-side persistence)
+   * S5VectorStore auto-saves on every operation, so this returns a dummy CID
+   */
+  async saveSession(sessionId: string): Promise<string> {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    session.lastAccessedAt = Date.now();
+    return 'auto-saved'; // S5VectorStore auto-saves
+  }
+
+  /**
+   * Load session from S5 (client-side persistence)
+   * S5VectorStore auto-loads on access, so this is a no-op
+   */
+  async loadSession(sessionId: string, cid: string): Promise<void> {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+    if (session.status !== 'active') {
+      throw new Error('Session is closed');
+    }
+
+    // S5VectorStore auto-loads on access - no action needed
+    session.lastAccessedAt = Date.now();
+  }
+
+  /**
+   * Get session statistics
+   */
+  async getSessionStats(identifier: string): Promise<any> {
+    // Try as dbName first, then as sessionId
+    const sessionId = this.dbNameToSessionId.get(identifier) || identifier;
+    const session = this.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    const stats = await this.vectorStore.getStats(session.databaseName);
+    session.lastAccessedAt = Date.now();
+
+    return {
+      vectorCount: stats.vectorCount || 0,
+      totalVectors: stats.vectorCount || 0,
+      totalChunks: stats.chunkCount || 0,
+      memoryUsageMb: (stats.storageSizeBytes || 0) / (1024 * 1024),
+      lastUpdated: stats.lastUpdated || Date.now()
+    };
+  }
+
+  /**
+   * List all databases with metadata
+   */
+  listDatabases(): DatabaseMetadata[] {
+    return this.metadataService.list({ type: 'vector' });
+  }
+
+  /**
+   * Get database metadata
+   */
+  getDatabaseMetadata(databaseName: string): DatabaseMetadata | null {
+    return this.metadataService.get(databaseName);
+  }
+
+  /**
+   * Get database statistics
+   */
+  getDatabaseStats(databaseName: string): DatabaseStats | null {
+    const metadata = this.metadataService.get(databaseName);
+    if (!metadata) {
+      return null;
+    }
+
+    const sessions = this.listSessions(databaseName);
+
+    return {
+      databaseName: metadata.databaseName,
+      vectorCount: metadata.vectorCount,
+      storageSizeBytes: metadata.storageSizeBytes,
+      sessionCount: sessions.length
+    };
+  }
+
+  /**
+   * Delete a database and all its sessions
+   */
+  async deleteDatabase(databaseName: string): Promise<void> {
+    if (!this.metadataService.exists(databaseName)) {
+      throw new Error('Database not found');
+    }
+
+    // Destroy all sessions for this database
+    const sessions = this.listSessions(databaseName);
+    for (const session of sessions) {
+      await this.destroySession(session.sessionId);
+    }
+
+    // Remove metadata
+    this.metadataService.delete(databaseName);
+  }
+
+  /**
+   * Update database metadata
+   */
+  updateDatabaseMetadata(
+    databaseName: string,
+    updates: Partial<Omit<DatabaseMetadata, 'databaseName' | 'owner' | 'createdAt'>>
+  ): void {
+    this.metadataService.update(databaseName, updates);
+  }
+
+  // ===== MOCK SDK PARITY METHODS (for UI4→UI5 Migration) =====
+
+  /** Get vector database metadata */
+  async getVectorDatabaseMetadata(databaseName: string): Promise<VectorDatabaseMetadata> {
+    return await this.vectorStore.getVectorDatabaseMetadata(databaseName);
+  }
+
+  /** Alias for getVectorDatabaseMetadata() */
+  async getDatabaseMetadata(databaseName: string): Promise<VectorDatabaseMetadata> {
+    return await this.vectorStore.getDatabaseMetadata(databaseName);
+  }
+
+  /** Update vector database metadata */
+  async updateVectorDatabaseMetadata(databaseName: string, updates: Partial<VectorDatabaseMetadata>): Promise<void> {
+    await this.vectorStore.updateVectorDatabaseMetadata(databaseName, updates);
+  }
+
+  /** Add single vector to database */
+  async addVector(dbName: string, id: string, values: number[], metadata: Record<string, any> = {}): Promise<void> {
+    await this.vectorStore.addVector(dbName, id, values, metadata);
+  }
+
+  /**
+   * Add multiple vectors directly to database (without session)
+   *
+   * Used for deferred embeddings workflow where documents are processed
+   * in background without an active RAG session.
+   *
+   * @param databaseName - Database identifier
+   * @param vectors - Array of vectors with IDs, embeddings, and metadata
+   */
+  async addVectorsToDatabase(databaseName: string, vectors: Array<{ id: string; vector: number[]; metadata: Record<string, any> }>): Promise<void> {
+    this.ensureNotDisposed();
+    await this.vectorStore.addVectors(databaseName, vectors);
+  }
+
+  /**
+   * Search database directly without requiring an active session
+   *
+   * Used for deferred embeddings workflow where we need to search vectors
+   * that were stored outside of a RAG session.
+   *
+   * @param databaseName - Database identifier
+   * @param queryVector - Query embedding vector (384 dimensions)
+   * @param topK - Number of results to return (default: 5)
+   * @param threshold - Minimum similarity threshold (default: 0.7)
+   * @returns Search results with scores and metadata
+   */
+  async searchDatabaseDirect(
+    databaseName: string,
+    queryVector: number[],
+    topK: number = 5,
+    threshold: number = 0.7
+  ): Promise<Array<{ id: string; score: number; content: string; metadata: any }>> {
+    this.ensureNotDisposed();
+
+    // Load all vectors from database
+    const allVectors = await this.vectorStore.listVectors(databaseName);
+
+    if (allVectors.length === 0) {
+      return [];
+    }
+
+    // Calculate cosine similarity for each vector
+    const results: Array<{ id: string; score: number; content: string; metadata: any }> = [];
+
+    for (const vector of allVectors) {
+      const similarity = this._cosineSimilarity(queryVector, vector.vector);
+
+      if (similarity >= threshold) {
+        results.push({
+          id: vector.id,
+          score: similarity,
+          content: vector.metadata?.text || '',
+          metadata: vector.metadata || {}
+        });
+      }
+    }
+
+    // Sort by similarity score (descending) and take top K
+    results.sort((a, b) => b.score - a.score);
+    return results.slice(0, topK);
+  }
+
+  /**
+   * Calculate cosine similarity between two vectors
+   * @private
+   */
+  private _cosineSimilarity(a: number[], b: number[]): number {
+    if (a.length !== b.length) {
+      throw new Error(`Vector dimension mismatch: ${a.length} vs ${b.length}`);
+    }
+
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+
+    for (let i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+
+    normA = Math.sqrt(normA);
+    normB = Math.sqrt(normB);
+
+    if (normA === 0 || normB === 0) {
+      return 0;
+    }
+
+    return dotProduct / (normA * normB);
+  }
+
+  /** Get specific vectors by IDs */
+  async getVectors(databaseName: string, vectorIds: string[]): Promise<Vector[]> {
+    return await this.vectorStore.getVectors(databaseName, vectorIds);
+  }
+
+  /** List all vectors in database */
+  async listVectors(databaseName: string): Promise<Vector[]> {
+    return await this.vectorStore.listVectors(databaseName);
+  }
+
+  /** List all folder paths */
+  async listFolders(databaseName: string): Promise<string[]> {
+    return await this.vectorStore.listFolders(databaseName);
+  }
+
+  /** Get all folders with vector counts */
+  async getAllFoldersWithCounts(databaseName: string): Promise<Array<{ path: string; fileCount: number }>> {
+    return await this.vectorStore.getAllFoldersWithCounts(databaseName);
+  }
+
+  /** Get folder statistics */
+  async getFolderStatistics(databaseName: string, folderPath: string): Promise<FolderStats> {
+    return await this.vectorStore.getFolderStatistics(databaseName, folderPath);
+  }
+
+  /** Create empty folder */
+  async createFolder(databaseName: string, folderPath: string): Promise<void> {
+    await this.vectorStore.createFolder(databaseName, folderPath);
+  }
+
+  /** Rename folder and update all vectors */
+  async renameFolder(databaseName: string, oldPath: string, newPath: string): Promise<number> {
+    return await this.vectorStore.renameFolder(databaseName, oldPath, newPath);
+  }
+
+  /** Delete folder and all vectors */
+  async deleteFolder(databaseName: string, folderPath: string): Promise<number> {
+    return await this.vectorStore.deleteFolder(databaseName, folderPath);
+  }
+
+  /** Move single vector to folder */
+  async moveToFolder(databaseName: string, vectorId: string, targetFolder: string): Promise<void> {
+    await this.vectorStore.moveToFolder(databaseName, vectorId, targetFolder);
+  }
+
+  /** Move all vectors from one folder to another */
+  async moveFolderContents(databaseName: string, sourceFolder: string, targetFolder: string): Promise<number> {
+    return await this.vectorStore.moveFolderContents(databaseName, sourceFolder, targetFolder);
+  }
+
+  /** Search within a specific folder (requires host support via SessionManager) */
+  async searchInFolder(databaseName: string, folderPath: string, queryVector: number[], k?: number, threshold?: number): Promise<SearchResult[]> {
+    return await this.vectorStore.searchInFolder(databaseName, folderPath, queryVector, k, threshold);
+  }
+
+  /**
+   * Check permission
+   * @private
+   */
+  private checkPermission(databaseName: string, action: 'read' | 'write'): void {
+    if (!this.permissionManager) {
+      return;
+    }
+
+    const metadata = this.metadataService.get(databaseName);
+    if (!metadata) {
+      throw new Error(`Database not found: ${databaseName}`);
+    }
+
+    const allowed = this.permissionManager.checkAndLog(metadata, this.userAddress, action);
+    if (!allowed) {
+      throw new Error('Permission denied: insufficient permissions for this operation');
+    }
+  }
+
+  /**
+   * Dispose manager and cleanup all resources
+   */
+  async dispose(): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
+
+    const sessionIds = Array.from(this.sessions.keys());
+    for (const sessionId of sessionIds) {
+      await this.destroySession(sessionId);
+    }
+
+    this.sessionCache.clear();
+    this.disposed = true;
+  }
+
+  /**
+   * Ensure manager is not disposed
+   * @private
+   */
+  private ensureNotDisposed(): void {
+    if (this.disposed) {
+      throw new Error('Manager has been disposed');
+    }
+  }
+
+  /**
+   * Get pending documents from a specific vector database or all databases
+   *
+   * Retrieves documents that have embeddingStatus: 'pending' from the specified
+   * database or all databases if no database name is provided.
+   *
+   * @param databaseName - Optional database name to filter results
+   * @returns Array of DocumentMetadata objects with pending embeddings
+   */
+  async getPendingDocuments(databaseName?: string): Promise<any[]> {
+    this.ensureNotDisposed();
+
+    // Get all vector databases
+    const allDatabases = this.listDatabases();
+
+    // Filter to specific database if provided
+    const databases = databaseName
+      ? allDatabases.filter(db => db.databaseName === databaseName)
+      : allDatabases;
+
+    if (databaseName && databases.length === 0) {
+      console.warn(`[VectorRAGManager] Database "${databaseName}" not found`);
+      return [];
+    }
+
+    const allPendingDocs: any[] = [];
+
+    // Collect pending documents from each database
+    for (const db of databases) {
+      try {
+        const metadata = await this.vectorStore.getDatabaseMetadata(db.databaseName);
+
+        if (metadata.pendingDocuments && Array.isArray(metadata.pendingDocuments)) {
+          // Add database name to each document for context
+          const docsWithDbName = metadata.pendingDocuments.map(doc => ({
+            ...doc,
+            databaseName: db.databaseName
+          }));
+          allPendingDocs.push(...docsWithDbName);
+        }
+      } catch (error) {
+        console.warn(`[VectorRAGManager] Failed to get pending docs from ${db.databaseName}:`, error);
+        // Continue with other databases
+      }
+    }
+
+    console.log(`[VectorRAGManager] Found ${allPendingDocs.length} pending documents in ${databases.length} database(s)${databaseName ? ` (filtered to: ${databaseName})` : ''}`);
+
+    return allPendingDocs;
+  }
+
+  /**
+   * Update document embedding status
+   *
+   * Finds a document by ID across all databases and updates its status.
+   * If status is 'ready', moves document from pendingDocuments[] to readyDocuments[].
+   *
+   * @param documentId - Unique document identifier
+   * @param status - New embedding status
+   * @param updates - Optional fields to update (vectorCount, embeddingProgress, embeddingError)
+   */
+  async updateDocumentStatus(
+    documentId: string,
+    status: 'pending' | 'processing' | 'ready' | 'failed',
+    updates?: {
+      vectorCount?: number;
+      embeddingProgress?: number;
+      embeddingError?: string;
+    }
+  ): Promise<void> {
+    this.ensureNotDisposed();
+
+    // Find document across all databases
+    const databases = this.listDatabases();
+    let foundDatabase: string | null = null;
+    let foundDocument: any | null = null;
+
+    for (const db of databases) {
+      try {
+        const metadata = await this.vectorStore.getDatabaseMetadata(db.databaseName);
+
+        if (metadata.pendingDocuments && Array.isArray(metadata.pendingDocuments)) {
+          const docIndex = metadata.pendingDocuments.findIndex(doc => doc.id === documentId);
+          if (docIndex !== -1) {
+            foundDatabase = db.databaseName;
+            foundDocument = metadata.pendingDocuments[docIndex];
+            break;
+          }
+        }
+
+        // Also check readyDocuments in case status is being updated again
+        if (metadata.readyDocuments && Array.isArray(metadata.readyDocuments)) {
+          const docIndex = metadata.readyDocuments.findIndex(doc => doc.id === documentId);
+          if (docIndex !== -1) {
+            foundDatabase = db.databaseName;
+            foundDocument = metadata.readyDocuments[docIndex];
+            break;
+          }
+        }
+      } catch (error) {
+        console.warn(`[VectorRAGManager] Failed to search ${db.databaseName}:`, error);
+      }
+    }
+
+    if (!foundDatabase || !foundDocument) {
+      throw new Error(`Document ${documentId} not found in any database`);
+    }
+
+    console.log(`[VectorRAGManager] Updating document ${documentId} in ${foundDatabase}: ${foundDocument.embeddingStatus} → ${status}`);
+
+    // Load current metadata
+    const metadata = await this.vectorStore.getDatabaseMetadata(foundDatabase);
+
+    // Initialize arrays if they don't exist
+    if (!metadata.pendingDocuments) {
+      metadata.pendingDocuments = [];
+    }
+    if (!metadata.readyDocuments) {
+      metadata.readyDocuments = [];
+    }
+
+    // Update document fields
+    const updatedDoc = {
+      ...foundDocument,
+      embeddingStatus: status,
+      lastEmbeddingAttempt: Date.now(),
+      ...(updates?.vectorCount !== undefined && { vectorCount: updates.vectorCount }),
+      ...(updates?.embeddingProgress !== undefined && { embeddingProgress: updates.embeddingProgress }),
+      ...(updates?.embeddingError !== undefined && { embeddingError: updates.embeddingError })
+    };
+
+    // Move document between arrays if status changed to 'ready'
+    if (status === 'ready' && foundDocument.embeddingStatus !== 'ready') {
+      // Remove from pendingDocuments
+      metadata.pendingDocuments = metadata.pendingDocuments.filter(doc => doc.id !== documentId);
+
+      // Add to readyDocuments
+      metadata.readyDocuments.push(updatedDoc);
+
+      console.log(`[VectorRAGManager] Moved document ${documentId} to readyDocuments`);
+    } else {
+      // Update in-place in current array
+      const pendingIndex = metadata.pendingDocuments.findIndex(doc => doc.id === documentId);
+      if (pendingIndex !== -1) {
+        metadata.pendingDocuments[pendingIndex] = updatedDoc;
+      }
+
+      const readyIndex = metadata.readyDocuments.findIndex(doc => doc.id === documentId);
+      if (readyIndex !== -1) {
+        metadata.readyDocuments[readyIndex] = updatedDoc;
+      }
+    }
+
+    // Save updated metadata to S5
+    await this.vectorStore.updateDatabaseMetadata(foundDatabase, metadata);
+
+    console.log(`[VectorRAGManager] ✅ Document ${documentId} status updated to ${status}`);
   }
 }

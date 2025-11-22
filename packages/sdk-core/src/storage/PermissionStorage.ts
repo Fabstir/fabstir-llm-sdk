@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 import type { Permission } from '../types/permissions.types';
-import type { EncryptionManager } from '../encryption/EncryptionManager';
+import type { EncryptionManager } from '../managers/EncryptionManager';
 
 /**
  * Permission Storage
@@ -62,12 +62,8 @@ export class PermissionStorage {
     // Build path
     const path = this.buildPath(permission.resourceId, permission.grantedTo);
 
-    // Convert to bytes
-    const data = JSON.stringify(encrypted);
-    const bytes = new TextEncoder().encode(data);
-
-    // Write to S5
-    await this.s5Client.fs.writeFile(path, bytes);
+    // Write to S5 - S5 handles CBOR encoding automatically
+    await this.s5Client.fs.put(path, encrypted);
   }
 
   /**
@@ -81,18 +77,21 @@ export class PermissionStorage {
     }
 
     try {
-      // Load from S5
+      // Load from S5 - S5 decodes CBOR automatically
       const path = this.buildPath(resourceId, granteeAddress);
-      const bytes = await this.s5Client.fs.readFile(path);
-      const data = new TextDecoder().decode(bytes);
-      const encrypted = JSON.parse(data);
+      const encrypted = await this.s5Client.fs.get(path);
+
+      if (!encrypted) {
+        return null;
+      }
 
       // Decrypt
       if (!this.encryptionManager) {
         throw new Error('EncryptionManager required for storage operations');
       }
 
-      const permission = await this.encryptionManager.decryptFromStorage(encrypted);
+      const { data } = await this.encryptionManager.decryptFromStorage(encrypted);
+      const permission = data as Permission;
 
       // Convert date strings to Date objects
       permission.grantedAt = new Date(permission.grantedAt);
@@ -125,24 +124,21 @@ export class PermissionStorage {
     const dirPath = this.buildResourcePath(resourceId);
 
     try {
-      // List all permission files in resource directory
-      const entries = await this.s5Client.fs.readdir(dirPath);
-      const jsonFiles = entries.filter(
-        (entry: any) => entry.type === 1 && entry.name.endsWith('.json')
-      );
-
       const permissions: Permission[] = [];
 
-      for (const file of jsonFiles) {
-        const granteeAddress = file.name.replace('.json', '');
-        try {
-          const permission = await this.load(resourceId, granteeAddress);
-          if (permission && !permission.deleted) {
-            permissions.push(permission);
+      // List all permission files using async iterator
+      for await (const entry of this.s5Client.fs.list(dirPath)) {
+        if (entry.type === 'file' && entry.name.endsWith('.json')) {
+          const granteeAddress = entry.name.replace('.json', '');
+          try {
+            const permission = await this.load(resourceId, granteeAddress);
+            if (permission && !permission.deleted) {
+              permissions.push(permission);
+            }
+          } catch (error) {
+            console.warn(`Failed to load permission ${resourceId}:${granteeAddress}:`, error);
+            // Continue loading other permissions
           }
-        } catch (error) {
-          console.warn(`Failed to load permission ${resourceId}:${granteeAddress}:`, error);
-          // Continue loading other permissions
         }
       }
 
@@ -165,7 +161,7 @@ export class PermissionStorage {
   async delete(resourceId: string, granteeAddress: string): Promise<void> {
     try {
       const path = this.buildPath(resourceId, granteeAddress);
-      await this.s5Client.fs.deleteFile(path);
+      await this.s5Client.fs.delete(path);
 
       // Remove from cache
       this.removeCachedPermission(resourceId, granteeAddress);
@@ -199,16 +195,12 @@ export class PermissionStorage {
     const dirPath = this.buildResourcePath(resourceId);
 
     try {
-      // List all permission files
-      const entries = await this.s5Client.fs.readdir(dirPath);
-      const jsonFiles = entries.filter(
-        (entry: any) => entry.type === 1 && entry.name.endsWith('.json')
-      );
-
-      // Delete each permission file
-      for (const file of jsonFiles) {
-        const granteeAddress = file.name.replace('.json', '');
-        await this.delete(resourceId, granteeAddress);
+      // List all permission files using async iterator
+      for await (const entry of this.s5Client.fs.list(dirPath)) {
+        if (entry.type === 'file' && entry.name.endsWith('.json')) {
+          const granteeAddress = entry.name.replace('.json', '');
+          await this.delete(resourceId, granteeAddress);
+        }
       }
 
       // Clear cache for resource

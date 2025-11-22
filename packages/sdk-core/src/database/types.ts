@@ -43,6 +43,15 @@ export interface DatabaseMetadata {
    * @default false
    */
   isPublic?: boolean;
+
+  /** Vector dimensions (for vector databases) */
+  dimensions?: number;
+
+  /** Documents pending embedding (deferred embeddings workflow) */
+  pendingDocuments?: any[];
+
+  /** Documents with ready embeddings */
+  readyDocuments?: any[];
 }
 
 /**

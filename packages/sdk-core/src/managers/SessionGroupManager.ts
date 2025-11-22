@@ -7,7 +7,10 @@ import type {
   CreateSessionGroupInput,
   UpdateSessionGroupInput,
   VectorDatabaseMetadata,
+  ChatSession,
+  ChatMessage,
 } from '../types/session-groups.types';
+import { SessionGroupStorage } from '../storage/SessionGroupStorage';
 
 /**
  * Session Group Manager
@@ -15,16 +18,22 @@ import type {
  * Manages Session Groups (Claude Projects-style organization).
  * Groups organize related chat sessions and vector databases.
  *
- * Storage: In-memory for now (Phase 1.2 will add S5 persistence)
+ * Storage: S5-backed with in-memory caching for performance
  */
 export class SessionGroupManager implements ISessionGroupManager {
   private groups: Map<string, SessionGroup> = new Map();
   // Mock database registry for testing (Phase 1 in-memory only)
   // In production, this would be replaced with VectorDatabaseManager
   private mockDatabases: Map<string, VectorDatabaseMetadata> = new Map();
+  // Chat session storage (for UI testing - production uses SessionManager)
+  private chatStorage: Map<string, ChatSession> = new Map();
+  // S5 storage for persistence
+  private storage: SessionGroupStorage | null = null;
+  private storageInitialized: boolean = false;
 
-  constructor() {
-    // Future: Initialize with storage manager for S5 persistence
+  constructor(storage?: SessionGroupStorage) {
+    this.storage = storage || null;
+    this.storageInitialized = !!storage;
   }
 
   /**
@@ -40,29 +49,9 @@ export class SessionGroupManager implements ISessionGroupManager {
    * In production, this would query VectorDatabaseManager
    */
   private async databaseExists(databaseId: string): Promise<boolean> {
-    // For testing: check mock registry and auto-create if ID matches pattern
-    if (this.mockDatabases.has(databaseId)) {
-      return true;
-    }
-
-    // Auto-create mock databases for test IDs
-    // Patterns: db-1, db-2, db-shared, db-main, db-research-papers-2024, etc.
-    if (databaseId.startsWith('db-')) {
-      const now = new Date();
-      this.registerMockDatabase({
-        id: databaseId,
-        name: `Database ${databaseId}`,
-        description: `Mock database ${databaseId}`,
-        createdAt: now,
-        updatedAt: now,
-        owner: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e', // Test owner
-        vectorCount: 0,
-        storageSize: 0,
-      });
-      return true;
-    }
-
-    return false;
+    // Phase 1.2: In-memory stub - accept any database ID
+    // TODO Phase 1.3+: Check VectorRAGManager for actual database existence
+    return true;
   }
 
   /**
@@ -86,8 +75,9 @@ export class SessionGroupManager implements ISessionGroupManager {
       throw new Error('name is required');
     }
 
-    if (!input.description || input.description.trim() === '') {
-      throw new Error('description is required');
+    // Description is optional, but validate it's a string if provided
+    if (input.description !== undefined && typeof input.description !== 'string') {
+      throw new Error('description must be a string');
     }
 
     // Validate metadata if provided
@@ -108,11 +98,26 @@ export class SessionGroupManager implements ISessionGroupManager {
       owner: input.owner,
       linkedDatabases: [],
       chatSessions: [],
+      chatSessionsData: {}, // Initialize for session persistence
+      documents: [],
       metadata: input.metadata || {},
       deleted: false,
     };
 
+    // Store in memory cache
     this.groups.set(id, group);
+
+    // Persist to S5 storage if available
+    if (this.storage) {
+      try {
+        await this.storage.save(group);
+      } catch (err) {
+        console.error('[SessionGroupManager.createSessionGroup] Failed to save to S5 storage:', err);
+        // Don't throw - allow operation to continue with in-memory only
+        // This allows testing without full S5 setup
+      }
+    }
+
     return group;
   }
 
@@ -120,8 +125,28 @@ export class SessionGroupManager implements ISessionGroupManager {
    * List all session groups for a user
    */
   async listSessionGroups(owner: string): Promise<SessionGroup[]> {
-    const result: SessionGroup[] = [];
+    // If S5 storage is available, load from S5
+    if (this.storage) {
+      try {
+        const allGroups = await this.storage.loadAll();
 
+        // Filter by owner and non-deleted
+        const userGroups = allGroups.filter(g => g.owner === owner && !g.deleted);
+
+        // Update in-memory cache
+        userGroups.forEach(g => this.groups.set(g.id, g));
+        return userGroups;
+      } catch (err: any) {
+        // Only log unexpected errors (directory not found is expected on first load)
+        if (!err.message?.includes('not found') && !err.message?.includes('does not exist')) {
+          console.error('[SessionGroupManager.listSessionGroups] Failed to load from S5 storage:', err);
+        }
+        // Fall back to in-memory cache
+      }
+    }
+
+    // Fallback: use in-memory cache only
+    const result: SessionGroup[] = [];
     for (const group of this.groups.values()) {
       if (group.owner === owner && !group.deleted) {
         result.push(group);
@@ -140,7 +165,48 @@ export class SessionGroupManager implements ISessionGroupManager {
       throw new Error('Invalid group ID');
     }
 
-    const group = this.groups.get(groupId);
+    // Check in-memory cache first
+    let group = this.groups.get(groupId);
+
+    // If not in cache and S5 storage is available, try loading from S5
+    if (!group && this.storage) {
+      try {
+        console.log(`[SessionGroupManager.getSessionGroup] Loading group ${groupId} from S5...`);
+        group = await this.storage.load(groupId);
+        if (group) {
+          console.log(`[SessionGroupManager.getSessionGroup] ✅ Loaded from S5: ${group.chatSessions.length} session IDs`);
+          console.log(`[SessionGroupManager.getSessionGroup] chatSessionsData exists: ${!!group.chatSessionsData}, count: ${group.chatSessionsData ? Object.keys(group.chatSessionsData).length : 0}`);
+
+          // Update in-memory cache
+          this.groups.set(groupId, group);
+
+          // Populate chat sessions from chatSessionsData
+          if (group.chatSessionsData) {
+            for (const [sessionId, session] of Object.entries(group.chatSessionsData)) {
+              this.chatStorage.set(sessionId, session);
+              console.log(`[SessionGroupManager.getSessionGroup] Cached session ${sessionId} in chatStorage`);
+            }
+          }
+        } else {
+          console.warn(`[SessionGroupManager.getSessionGroup] ⚠️  Group ${groupId} not found in S5`);
+        }
+      } catch (err) {
+        console.error('[SessionGroupManager.getSessionGroup] Failed to load from S5 storage:', err);
+        // Continue with cache-only check below
+      }
+    } else if (group) {
+      console.log(`[SessionGroupManager.getSessionGroup] Found group ${groupId} in memory cache`);
+      // Populate chat sessions from chatSessionsData even when from cache
+      if (group.chatSessionsData) {
+        for (const [sessionId, session] of Object.entries(group.chatSessionsData)) {
+          // Only populate if not already in chatStorage to avoid unnecessary work
+          if (!this.chatStorage.has(sessionId)) {
+            this.chatStorage.set(sessionId, session);
+            console.log(`[SessionGroupManager.getSessionGroup] Cached session ${sessionId} from memory group`);
+          }
+        }
+      }
+    }
 
     if (!group) {
       throw new Error('Session group not found');
@@ -218,6 +284,11 @@ export class SessionGroupManager implements ISessionGroupManager {
     group.updatedAt = new Date();
 
     this.groups.set(groupId, group);
+
+    // Persist to S5 storage
+    if (this.storage) {
+      await this.storage.save(group);
+    }
   }
 
   /**
@@ -241,6 +312,11 @@ export class SessionGroupManager implements ISessionGroupManager {
       group.linkedDatabases.push(databaseId);
       group.updatedAt = new Date();
       this.groups.set(groupId, group);
+
+      // Persist to S5 storage
+      if (this.storage) {
+        await this.storage.save(group);
+      }
     }
 
     return group;
@@ -266,6 +342,11 @@ export class SessionGroupManager implements ISessionGroupManager {
 
     group.updatedAt = new Date();
     this.groups.set(groupId, group);
+
+    // Persist to S5 storage
+    if (this.storage) {
+      await this.storage.save(group);
+    }
 
     return group;
   }
@@ -377,6 +458,287 @@ export class SessionGroupManager implements ISessionGroupManager {
   async listChatSessions(groupId: string, requestor: string): Promise<string[]> {
     const group = await this.getSessionGroup(groupId, requestor);
     return [...group.chatSessions]; // Return copy
+  }
+
+  /**
+   * Add a document to a session group
+   */
+  async addGroupDocument(
+    groupId: string,
+    document: import('../types/session-groups.types').GroupDocumentMetadata
+  ): Promise<import('../types/session-groups.types').SessionGroup> {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      throw new Error(`Session group not found: ${groupId}`);
+    }
+
+    // Initialize documents array if not exists
+    if (!group.documents) {
+      group.documents = [];
+    }
+
+    // Add document
+    group.documents.push(document);
+    group.updatedAt = new Date();
+    this.groups.set(groupId, group);
+
+    // Persist to S5 storage
+    if (this.storage) {
+      await this.storage.save(group);
+    }
+
+    return { ...group }; // Return copy
+  }
+
+  /**
+   * Remove a document from a session group
+   */
+  async removeGroupDocument(
+    groupId: string,
+    documentId: string
+  ): Promise<import('../types/session-groups.types').SessionGroup> {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      throw new Error(`Session group not found: ${groupId}`);
+    }
+
+    // Remove document
+    if (group.documents) {
+      group.documents = group.documents.filter(doc => doc.id !== documentId);
+      group.updatedAt = new Date();
+      this.groups.set(groupId, group);
+
+      // Persist to S5 storage
+      if (this.storage) {
+        await this.storage.save(group);
+      }
+    }
+
+    return { ...group }; // Return copy
+  }
+
+  /**
+   * Start a chat session (for UI compatibility - real implementation uses SessionManager)
+   *
+   * NOTE: This is a minimal implementation for UI testing compatibility with mock SDK.
+   * In production, the actual LLM session is created via SessionManager.startSession() in the page component.
+   * This method only creates the metadata tracking structure.
+   */
+  async startChatSession(groupId: string, initialMessage?: string): Promise<ChatSession> {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      throw new Error(`Session group not found: ${groupId}`);
+    }
+
+    const sessionId = `sess-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    const now = Date.now();
+
+    // Create minimal chat session metadata
+    const session: ChatSession = {
+      sessionId,
+      groupId,
+      title: initialMessage || 'New Chat',
+      messages: [],
+      metadata: {
+        databasesUsed: group.linkedDatabases
+      },
+      created: now,
+      updated: now
+    };
+
+    // Store chat session in memory
+    this.chatStorage.set(sessionId, session);
+
+    // Add session ID to group
+    if (!group.chatSessions.includes(sessionId)) {
+      group.chatSessions.push(sessionId);
+      group.updatedAt = new Date();
+
+      // Initialize chatSessionsData if not exists
+      if (!group.chatSessionsData) {
+        group.chatSessionsData = {};
+      }
+
+      // Store session data in group for persistence
+      group.chatSessionsData[sessionId] = session;
+
+      // Update in-memory cache
+      this.groups.set(groupId, group);
+
+      // Persist to S5
+      if (this.storage) {
+        try {
+          await this.storage.save(group);
+          console.log(`[SessionGroupManager.startChatSession] ✅ Saved session ${sessionId} to S5`);
+        } catch (error) {
+          console.error(`[SessionGroupManager.startChatSession] ❌ Failed to save to S5:`, error);
+          // Don't throw - session is already in memory, S5 is best-effort
+        }
+      } else {
+        console.warn('[SessionGroupManager.startChatSession] ⚠️  S5 storage not available, session only in memory');
+      }
+    }
+
+    return session;
+  }
+
+  /**
+   * Get a chat session by ID
+   *
+   * Loads from S5 if requestor is provided and session not in cache.
+   * If requestor is not provided, only checks memory cache.
+   */
+  async getChatSession(groupId: string, sessionId: string, requestor?: string): Promise<ChatSession | null> {
+    // First check memory cache
+    let session = this.chatStorage.get(sessionId);
+
+    // If not in memory and requestor provided, load group from S5
+    if (!session && requestor) {
+      try {
+        console.log(`[SessionGroupManager.getChatSession] Session ${sessionId} not in cache, loading group ${groupId} from S5...`);
+        // Load group from S5 - this will populate chatStorage with all sessions
+        await this.getSessionGroup(groupId, requestor);
+
+        // Check cache again after loading
+        session = this.chatStorage.get(sessionId);
+
+        if (session) {
+          console.log(`[SessionGroupManager.getChatSession] ✅ Session ${sessionId} found after loading from S5`);
+        } else {
+          console.warn(`[SessionGroupManager.getChatSession] ⚠️  Session ${sessionId} not found in group ${groupId} even after S5 load`);
+        }
+      } catch (err) {
+        console.error('[SessionGroupManager.getChatSession] Failed to load group from S5:', err);
+        return null;
+      }
+    } else if (!session && !requestor) {
+      console.log(`[SessionGroupManager.getChatSession] Session ${sessionId} not in cache and no requestor provided`);
+    } else {
+      console.log(`[SessionGroupManager.getChatSession] Found session ${sessionId} in memory cache`);
+    }
+
+    if (!session) {
+      return null;
+    }
+
+    if (session.groupId !== groupId) {
+      throw new Error(`Session ${sessionId} does not belong to group ${groupId}`);
+    }
+
+    return session;
+  }
+
+  /**
+   * Add a message to a chat session
+   *
+   * NOTE: This is a minimal implementation for UI testing compatibility.
+   * Persists the updated session to S5 storage.
+   */
+  async addMessage(
+    groupId: string,
+    sessionId: string,
+    message: ChatMessage
+  ): Promise<void> {
+    // Get session (from memory or load from S5)
+    const session = await this.getChatSession(groupId, sessionId);
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found in group ${groupId}`);
+    }
+
+    // Add message to session
+    session.messages.push(message);
+    session.updated = Date.now();
+
+    // Update memory cache
+    this.chatStorage.set(sessionId, session);
+
+    // Get group and update chatSessionsData
+    const group = this.groups.get(groupId);
+    if (group) {
+      // Initialize chatSessionsData if not exists
+      if (!group.chatSessionsData) {
+        group.chatSessionsData = {};
+      }
+
+      // Update session data in group
+      group.chatSessionsData[sessionId] = session;
+      group.updatedAt = new Date();
+
+      // Update in-memory cache
+      this.groups.set(groupId, group);
+
+      // Persist to S5
+      if (this.storage) {
+        try {
+          await this.storage.save(group);
+          console.log(`[SessionGroupManager.addMessage] ✅ Saved message to S5 for session ${sessionId}`);
+        } catch (error) {
+          console.error(`[SessionGroupManager.addMessage] ❌ Failed to save to S5:`, error);
+          // Don't throw - message is already in memory, S5 is best-effort
+        }
+      } else {
+        console.warn('[SessionGroupManager.addMessage] ⚠️  S5 storage not available, message only in memory');
+      }
+    }
+  }
+
+  /**
+   * Delete a chat session from a group
+   *
+   * Removes the session from both memory and S5 storage.
+   * Updates the group's session list and persists changes to S5.
+   */
+  async deleteChatSession(groupId: string, sessionId: string): Promise<void> {
+    // Get the session to verify it exists
+    const session = await this.getChatSession(groupId, sessionId);
+    if (!session) {
+      // Already deleted or doesn't exist
+      console.warn(`[SessionGroupManager.deleteChatSession] Session ${sessionId} not found, skipping delete`);
+      return;
+    }
+
+    // Remove from memory cache
+    this.chatStorage.delete(sessionId);
+    console.log(`[SessionGroupManager.deleteChatSession] Removed session ${sessionId} from memory`);
+
+    // Get group and update
+    const group = this.groups.get(groupId);
+    if (!group) {
+      console.warn(`[SessionGroupManager.deleteChatSession] Group ${groupId} not found in memory`);
+      return;
+    }
+
+    // ✅ Create a NEW group object instead of mutating the cached one
+    const updatedGroup: SessionGroup = {
+      ...group,
+      chatSessions: group.chatSessions.filter(id => id !== sessionId),
+      chatSessionsData: {
+        ...(group.chatSessionsData || {}),
+      },
+      updatedAt: new Date(),
+    };
+
+    // Remove session data from chatSessionsData on the NEW object
+    if (updatedGroup.chatSessionsData[sessionId]) {
+      delete updatedGroup.chatSessionsData[sessionId];
+    }
+
+    // Update in-memory cache with NEW reference
+    this.groups.set(groupId, updatedGroup);
+    console.log(`[SessionGroupManager.deleteChatSession] Updated group ${groupId} in memory`);
+
+    // Persist to S5
+    if (this.storage) {
+      try {
+        await this.storage.save(updatedGroup);
+        console.log(`[SessionGroupManager.deleteChatSession] ✅ Persisted deletion to S5 for session ${sessionId}`);
+      } catch (error) {
+        console.error(`[SessionGroupManager.deleteChatSession] ❌ Failed to save to S5:`, error);
+        // Don't throw - session is already deleted from memory, S5 is best-effort
+      }
+    } else {
+      console.warn('[SessionGroupManager.deleteChatSession] ⚠️  S5 storage not available, deletion only in memory');
+    }
   }
 
   /**

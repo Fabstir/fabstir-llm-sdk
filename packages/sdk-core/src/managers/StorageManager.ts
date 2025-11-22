@@ -116,6 +116,13 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
+   * Get S5 client instance (for VectorRAGManager)
+   */
+  getS5Client(): any {
+    return this.s5Client;
+  }
+
+  /**
    * Initialize storage with S5 seed
    */
   async initialize(seed: string, userAddress?: string): Promise<void> {
@@ -239,12 +246,11 @@ export class StorageManager implements IStorageManager {
       // Store to S5
       await this.s5Client.fs.put(path, storageData);
 
-      // Get CID for the stored data
-      const metadata = await this.s5Client.fs.getMetadata(path);
-      
+      // Return immediately using generated key (no getMetadata to avoid race condition)
+      // Note: If S5 CID is needed later, fetch it separately with retry logic
       return {
-        cid: metadata?.cid || key,
-        url: `s5://${metadata?.cid || key}`,
+        cid: key,
+        url: `s5://${key}`,
         size: JSON.stringify(storageData).length,
         timestamp
       };
@@ -511,14 +517,14 @@ export class StorageManager implements IStorageManager {
 
     try {
       const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversation.id}/conversation.json`;
-      
+
       await this.s5Client.fs.put(path, conversation);
-      
-      const metadata = await this.s5Client.fs.getMetadata(path);
-      
+
+      // Return immediately using conversation ID (no getMetadata to avoid race condition)
+      // Note: If S5 CID is needed later, fetch it separately with retry logic
       return {
-        cid: metadata?.cid || conversation.id,
-        url: `s5://${metadata?.cid || conversation.id}`,
+        cid: conversation.id,
+        url: `s5://${conversation.id}`,
         size: JSON.stringify(conversation).length,
         timestamp: conversation.updatedAt
       };
@@ -1070,11 +1076,11 @@ export class StorageManager implements IStorageManager {
       const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversation.id}/conversation-encrypted.json`;
       await this.s5Client.fs.put(path, encryptedWrapper);
 
-      const metadata = await this.s5Client.fs.getMetadata(path);
-
+      // Return immediately using conversation ID (no getMetadata to avoid race condition)
+      // Note: If S5 CID is needed later, fetch it separately with retry logic
       return {
-        cid: metadata?.cid || conversation.id,
-        url: `s5://${metadata?.cid || conversation.id}`,
+        cid: conversation.id,
+        url: `s5://${conversation.id}`,
         size: JSON.stringify(encryptedWrapper).length,
         timestamp: Date.now()
       };
@@ -1158,11 +1164,11 @@ export class StorageManager implements IStorageManager {
       const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversation.id}/conversation-plaintext.json`;
       await this.s5Client.fs.put(path, plaintextWrapper);
 
-      const metadata = await this.s5Client.fs.getMetadata(path);
-
+      // Return immediately using conversation ID (no getMetadata to avoid race condition)
+      // Note: If S5 CID is needed later, fetch it separately with retry logic
       return {
-        cid: metadata?.cid || conversation.id,
-        url: `s5://${metadata?.cid || conversation.id}`,
+        cid: conversation.id,
+        url: `s5://${conversation.id}`,
         size: JSON.stringify(plaintextWrapper).length,
         timestamp: Date.now()
       };
@@ -1404,17 +1410,18 @@ export class StorageManager implements IStorageManager {
    * @returns CID of saved hierarchy
    */
   async saveHierarchy(databaseName: string): Promise<string> {
-    const hierarchyJson = this.folderHierarchy.serialize(databaseName);
+    const hierarchyData = this.folderHierarchy.serialize(databaseName);
 
     if (this.s5Client) {
       const hierarchyPath = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${databaseName}/hierarchy.json`;
-      await this.s5Client.fs.put(hierarchyPath, hierarchyJson);
+      // S5 handles CBOR encoding automatically - pass object directly
+      await this.s5Client.fs.put(hierarchyPath, hierarchyData);
       return `s5://hierarchy-${databaseName}-${Date.now()}`;
     } else {
       // Fallback for testing without S5
       // Store by database name for auto-discovery
       const storageKey = `${this.userAddress}-${databaseName}`;
-      StorageManager.hierarchyStorage.set(storageKey, hierarchyJson);
+      StorageManager.hierarchyStorage.set(storageKey, hierarchyData);
       return `memory://hierarchy-${databaseName}-${Date.now()}`;
     }
   }
@@ -1430,8 +1437,9 @@ export class StorageManager implements IStorageManager {
       const hierarchyPath = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${databaseName}/hierarchy.json`;
 
       try {
-        const hierarchyJson = await this.s5Client.fs.get(hierarchyPath);
-        this.folderHierarchy.deserialize(databaseName, hierarchyJson);
+        // S5 returns object directly (CBOR decoded automatically)
+        const hierarchyData = await this.s5Client.fs.get(hierarchyPath);
+        this.folderHierarchy.deserialize(databaseName, hierarchyData);
       } catch (error: any) {
         // If hierarchy doesn't exist, start fresh
         if (error.message?.includes('not found')) {
@@ -1447,9 +1455,9 @@ export class StorageManager implements IStorageManager {
       // Fallback for testing without S5
       // Auto-discover by database name
       const storageKey = `${this.userAddress}-${databaseName}`;
-      const hierarchyJson = StorageManager.hierarchyStorage.get(storageKey);
-      if (hierarchyJson) {
-        this.folderHierarchy.deserialize(databaseName, hierarchyJson);
+      const hierarchyData = StorageManager.hierarchyStorage.get(storageKey);
+      if (hierarchyData) {
+        this.folderHierarchy.deserialize(databaseName, hierarchyData);
       }
       // If not found, just start with empty hierarchy (no error)
     }

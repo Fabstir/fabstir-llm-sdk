@@ -1,4 +1,5 @@
 // Copyright (c) 2025 Fabstir
+import { LLM_MAX_TOKENS } from '../config/llm-config';
 // SPDX-License-Identifier: BUSL-1.1
 
 /**
@@ -80,6 +81,11 @@ export interface ExtendedSessionConfig extends SessionConfig {
   depositAmount?: ethers.BigNumberish;
   encryption?: boolean; // NEW: Enable E2EE
   groupId?: string; // NEW: Session Groups integration
+  vectorDatabase?: {
+    // NEW: S5 vector database for RAG (Sub-phase 5.1.3)
+    manifestPath: string; // S5 path to manifest.json (e.g., "home/vector-databases/{user}/{db}/manifest.json")
+    userAddress: string; // Owner address for verification
+  };
 }
 
 export class SessionManager implements ISessionManager {
@@ -94,6 +100,7 @@ export class SessionManager implements ISessionManager {
   private sessionKey?: Uint8Array; // NEW: Store session key for Phase 4.2
   private messageIndex: number = 0; // NEW: For Phase 4.2 replay protection
   private pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: any) => void; timeoutId: NodeJS.Timeout }> = new Map(); // Host-side RAG request tracking
+  private ragHandlerUnsubscribe?: () => void; // NEW: Store RAG handler unsubscribe function to prevent duplicate handlers
 
   constructor(
     paymentManager: PaymentManager,
@@ -412,7 +419,7 @@ export class SessionManager implements ISessionManager {
       const requestBody = {
         model: session.model,
         prompt: augmentedPrompt,  // Use RAG-augmented prompt
-        max_tokens: 200,  // Allow longer responses for poems, stories, etc.
+        max_tokens: LLM_MAX_TOKENS,  // Allow longer responses for poems, stories, etc.
         temperature: 0.7,  // Add temperature for better responses
         sessionId: sessionId.toString(),
         jobId: session.jobId.toString()
@@ -660,11 +667,12 @@ export class SessionManager implements ISessionManager {
           }
 
           response = await new Promise<string>((resolve, reject) => {
-            const timeout = setTimeout(() => {
+            // Use sliding timeout window - resets on each chunk received
+            let timeout = setTimeout(() => {
               console.log('[SessionManager] ⏰ TIMEOUT - fullResponse at timeout:', `"${fullResponse}"`);
               console.log('[SessionManager] ⏰ TIMEOUT - this.sessionKey still exists:', !!this.sessionKey);
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
-            }, 30000);
+            }, 60000); // 60 seconds for complex queries (sliding window)
 
             console.log('[SessionManager] 📋 BEFORE registering handler:');
             console.log('[SessionManager]   - Current handlers count:', (this.wsClient as any).messageHandlers?.size);
@@ -697,6 +705,13 @@ export class SessionManager implements ISessionManager {
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
                 console.log('[SessionManager] ✅ CONDITION TRUE - Processing encrypted_chunk...');
                 try {
+                  // Reset timeout on each chunk (sliding window)
+                  clearTimeout(timeout);
+                  timeout = setTimeout(() => {
+                    console.log('[SessionManager] ⏰ TIMEOUT - No chunks received for 60s');
+                    reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
+                  }, 60000);
+
                   console.log('[SessionManager] 🔓 About to decrypt chunk...');
                   const decrypted = await this.decryptIncomingMessage(data);
                   console.log('[SessionManager] ✅ Chunk decrypted successfully:', `"${decrypted}"`);
@@ -793,7 +808,7 @@ export class SessionManager implements ISessionManager {
             request: {
               model: session.model,
               prompt: augmentedPrompt,  // Use RAG-augmented prompt
-              max_tokens: 50,
+              max_tokens: LLM_MAX_TOKENS,  // Support comprehensive responses from large models
               temperature: 0.7,
               stream: true
             }
@@ -866,10 +881,11 @@ export class SessionManager implements ISessionManager {
           // Wait for encrypted response (non-streaming) - MUST accumulate chunks!
           let accumulatedResponse = '';  // Accumulate chunks even in non-streaming mode
           response = await new Promise<string>((resolve, reject) => {
-            const timeout = setTimeout(() => {
+            // Use sliding timeout window - resets on each chunk received
+            let timeout = setTimeout(() => {
               console.log('[SessionManager] ⏰ NON-STREAMING TIMEOUT - accumulated response:', `"${accumulatedResponse}"`);
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
-            }, 30000);
+            }, 60000); // 60 seconds for complex queries (sliding window)
 
             console.log('[SessionManager] 📋 Registering NON-STREAMING handler...');
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
@@ -879,6 +895,13 @@ export class SessionManager implements ISessionManager {
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
                 console.log('[SessionManager] 🔓 Decrypting encrypted chunk in NON-STREAMING mode...');
                 try {
+                  // Reset timeout on each chunk (sliding window)
+                  clearTimeout(timeout);
+                  timeout = setTimeout(() => {
+                    console.log('[SessionManager] ⏰ TIMEOUT - No chunks received for 60s (NON-STREAMING)');
+                    reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
+                  }, 60000);
+
                   const decrypted = await this.decryptIncomingMessage(data);
                   console.log('[SessionManager] ✅ Chunk decrypted:', `"${decrypted}"`);
                   accumulatedResponse += decrypted;
@@ -930,7 +953,7 @@ export class SessionManager implements ISessionManager {
             request: {
               model: session.model,
               prompt: augmentedPrompt,  // Use RAG-augmented prompt
-              max_tokens: 50,
+              max_tokens: LLM_MAX_TOKENS,  // Support comprehensive responses from large models
               temperature: 0.7,
               stream: false
             }
@@ -1141,6 +1164,13 @@ export class SessionManager implements ISessionManager {
     const sessionIdStr = sessionId.toString();
 
     try {
+      // Clean up RAG handler before closing WebSocket
+      if (this.ragHandlerUnsubscribe) {
+        console.log('[SessionManager] Cleaning up RAG handler on session end');
+        this.ragHandlerUnsubscribe();
+        this.ragHandlerUnsubscribe = undefined;
+      }
+
       // Close WebSocket connection if active
       if (this.wsClient && this.wsClient.isConnected()) {
         console.log(`Closing WebSocket connection for session ${sessionIdStr}`);
@@ -1236,12 +1266,22 @@ export class SessionManager implements ISessionManager {
 
     // 3. Prepare session init payload (per docs lines 469-477)
     console.log('[SessionManager] 📦 STEP 3: Preparing init payload...');
-    const initPayload = {
+    const initPayload: any = {
       sessionKey: sessionKeyHex,
       jobId: jobId.toString(),  // MUST be string per docs
       modelName: config.modelId,
       pricePerToken: config.pricePerToken || 0  // MUST be number in wei/smallest units
     };
+
+    // NEW (Sub-phase 5.1.3): Include vector database info if provided
+    if (config.vectorDatabase) {
+      initPayload.vectorDatabase = {
+        manifestPath: config.vectorDatabase.manifestPath,
+        userAddress: config.vectorDatabase.userAddress
+      };
+      console.log('[SessionManager] 📁 Vector database included:', config.vectorDatabase.manifestPath);
+    }
+
     console.log('[SessionManager] initPayload:', JSON.stringify(initPayload, null, 2));
 
     // 4. Encrypt with EncryptionManager
@@ -1289,13 +1329,24 @@ export class SessionManager implements ISessionManager {
     userAddress: string
   ): Promise<void> {
     // Existing plaintext logic (lines 467-473 from sendPromptStreaming)
-    await ws.sendMessage({
+    const initMessage: any = {
       type: 'session_init',
       chain_id: config.chainId,
       session_id: sessionId.toString(),
       jobId: jobId.toString(),
       user_address: userAddress
-    });
+    };
+
+    // NEW (Sub-phase 5.1.3): Include vector database info if provided
+    if (config.vectorDatabase) {
+      initMessage.vector_database = {
+        manifest_path: config.vectorDatabase.manifestPath,
+        user_address: config.vectorDatabase.userAddress
+      };
+      console.log('[SessionManager] 📁 Vector database included (plaintext):', config.vectorDatabase.manifestPath);
+    }
+
+    await ws.sendMessage(initMessage);
 
     console.log('[SessionManager] Plaintext session init sent');
   }
@@ -1743,7 +1794,7 @@ export class SessionManager implements ISessionManager {
       const requestBody = {
         model: session.model,
         prompt: prompt,
-        max_tokens: 200,  // Allow longer responses for poems, stories, etc.
+        max_tokens: LLM_MAX_TOKENS,  // Allow longer responses for poems, stories, etc.
         temperature: 0.7,  // Add temperature for better responses
         sessionId: sessionId.toString(),
         jobId: session.jobId.toString()
@@ -2267,14 +2318,25 @@ export class SessionManager implements ISessionManager {
       return;
     }
 
-    // Register handler for RAG-related messages
-    this.wsClient.onMessage((data: any) => {
+    // Clean up existing handler if present to prevent duplicate handlers
+    if (this.ragHandlerUnsubscribe) {
+      console.log('[SessionManager] Cleaning up existing RAG handler before registering new one');
+      this.ragHandlerUnsubscribe();
+      this.ragHandlerUnsubscribe = undefined;
+    }
+
+    // Register handler for RAG-related messages and store unsubscribe function
+    this.ragHandlerUnsubscribe = this.wsClient.onMessage((data: any) => {
+      // ONLY handle RAG-specific message types - don't process other messages
       if (data.type === 'uploadVectorsResponse') {
         this._handleUploadVectorsResponse(data as UploadVectorsResponse);
       } else if (data.type === 'searchVectorsResponse') {
         this._handleSearchVectorsResponse(data as SearchVectorsResponse);
       }
+      // Explicitly ignore all other message types (encrypted_chunk, etc.)
+      // Those will be handled by dedicated handlers in sendPromptStreaming()
     });
+    console.log('[SessionManager] RAG handler registered');
   }
 
   /**
@@ -2366,5 +2428,129 @@ export class SessionManager implements ISessionManager {
     history.sort((a, b) => b.startTime - a.startTime);
 
     return history;
+  }
+
+  /**
+   * Generate embeddings for document chunks
+   *
+   * Sends text to host's /v1/embed endpoint to generate 384-dimensional embeddings
+   * using the all-MiniLM-L6-v2 model. Automatically chunks large documents.
+   *
+   * @param sessionId - Active session ID (for host endpoint)
+   * @param fileContent - Document content to embed
+   * @param options - Optional configuration
+   * @param options.chunkSize - Characters per chunk (default: 512)
+   * @param options.chunkOverlap - Overlap between chunks (default: 50)
+   * @param options.chainId - Blockchain chain ID (default: from session)
+   * @returns Promise<Vector[]> Array of vectors with embeddings and metadata
+   *
+   * @throws Error if session not found or not active
+   * @throws Error if embedding generation fails
+   * @throws Error if timeout (120 seconds)
+   */
+  async generateEmbeddings(
+    sessionId: bigint,
+    fileContent: string,
+    options?: {
+      chunkSize?: number;
+      chunkOverlap?: number;
+      chainId?: number;
+    }
+  ): Promise<Vector[]> {
+    const session = this.sessions.get(sessionId.toString());
+    if (!session) {
+      throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
+    }
+
+    if (session.status !== 'active') {
+      throw new SDKError('Session must be active to generate embeddings', 'SESSION_INACTIVE');
+    }
+
+    // Chunk configuration
+    const chunkSize = options?.chunkSize || 512;
+    const chunkOverlap = options?.chunkOverlap || 50;
+    const chainId = options?.chainId || session.chainId;
+
+    // Split file content into chunks with overlap
+    const chunks: string[] = [];
+    for (let i = 0; i < fileContent.length; i += chunkSize - chunkOverlap) {
+      const chunk = fileContent.slice(i, i + chunkSize).trim();
+      if (chunk.length > 0) {
+        chunks.push(chunk);
+      }
+    }
+
+    if (chunks.length === 0) {
+      throw new SDKError('No valid chunks generated from file content', 'INVALID_CONTENT');
+    }
+
+    console.log(`[SessionManager] 🧩 Generated ${chunks.length} chunks from document`);
+
+    // Get HTTP endpoint from session
+    const endpoint = session.endpoint || 'http://localhost:8080';
+    const httpUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
+    const embedUrl = `${httpUrl}/v1/embed`;
+
+    console.log(`[SessionManager] 🌐 Calling embedding endpoint: ${embedUrl}`);
+
+    // Send request to /v1/embed endpoint
+    const requestBody = {
+      texts: chunks,
+      model: 'all-MiniLM-L6-v2',
+      chainId: chainId
+    };
+
+    let fetchResponse;
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 second timeout
+
+      fetchResponse = await fetch(embedUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+    } catch (fetchError: any) {
+      if (fetchError.name === 'AbortError') {
+        throw new SDKError('Embedding generation timeout (120s)', 'EMBEDDING_TIMEOUT');
+      }
+      console.error('[SessionManager] ❌ Fetch error:', fetchError);
+      throw new SDKError(`Network error calling embedding API: ${fetchError.message}`, 'NETWORK_ERROR');
+    }
+
+    if (!fetchResponse.ok) {
+      const errorText = await fetchResponse.text();
+      throw new SDKError(`Embedding generation failed: ${fetchResponse.status} - ${errorText}`, 'EMBEDDING_FAILED');
+    }
+
+    const result = await fetchResponse.json();
+    console.log(`[SessionManager] ✅ Received ${result.embeddings?.length || 0} embeddings`);
+
+    if (!result.embeddings || !Array.isArray(result.embeddings)) {
+      throw new SDKError('Invalid response format from embedding endpoint', 'INVALID_RESPONSE');
+    }
+
+    // Convert to Vector[] format
+    const vectors: Vector[] = result.embeddings.map((item: any, index: number) => ({
+      id: `chunk-${Date.now()}-${index}`,
+      values: item.embedding,
+      metadata: {
+        text: item.text,
+        tokenCount: item.tokenCount,
+        chunkIndex: index,
+        totalChunks: chunks.length,
+        model: result.model,
+        chainId: result.chainId
+      }
+    }));
+
+    console.log(`[SessionManager] 🎯 Generated ${vectors.length} vectors with 384D embeddings`);
+
+    return vectors;
   }
 }

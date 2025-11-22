@@ -538,6 +538,7 @@ export class HostManager {
     }
 
     try {
+      console.log('[HostManager] getHostStatus - Contract address:', await this.nodeRegistry.getAddress());
       const info = await this.nodeRegistry['getNodeFullInfo'](hostAddress);
 
       // Check if registered (operator address will be non-zero)
@@ -661,6 +662,7 @@ export class HostManager {
     }
 
     try {
+      console.log('[HostManager] discoverAll - Contract address:', await this.nodeRegistry.getAddress());
       // Get all active nodes
       const activeNodes = await this.nodeRegistry['getAllActiveNodes']();
       const hosts: HostInfo[] = [];
@@ -679,6 +681,12 @@ export class HostManager {
           priceNative: info[6]?.toString(),
           priceStable: info[7]?.toString()
         });
+        console.log(`[HostManager] ⚠️ CRITICAL - models array (info[5]):`, info[5]);
+        console.log(`[HostManager] ⚠️ CRITICAL - models type:`, typeof info[5]);
+        console.log(`[HostManager] ⚠️ CRITICAL - models length:`, info[5]?.length);
+        console.log(`[HostManager] ⚠️ CRITICAL - is array?:`, Array.isArray(info[5]));
+        console.log(`[HostManager] ⚠️ CRITICAL - model[0]:`, info[5]?.[0]);
+        console.log(`[HostManager] ⚠️ CRITICAL - Array.from(info[5]):`, Array.from(info[5] || []));
 
         // Parse metadata
         let metadata: HostMetadata;

@@ -6,6 +6,7 @@ import type {
   CreateSessionGroupInput,
   UpdateSessionGroupInput,
   VectorDatabaseMetadata,
+  GroupDocumentMetadata,
 } from '../types/session-groups.types';
 
 /**
@@ -169,4 +170,57 @@ export interface ISessionGroupManager {
    * @throws {Error} If requestor lacks permission
    */
   listChatSessions(groupId: string, requestor: string): Promise<string[]>;
+
+  /**
+   * Delete a chat session from a group
+   *
+   * Removes the session from both memory and S5 storage.
+   * Updates the group's session list and persists changes to S5.
+   *
+   * @param groupId - Session group ID
+   * @param sessionId - Chat session ID to delete
+   * @returns Promise that resolves when deletion is complete
+   * @throws {Error} If session or group not found
+   */
+  deleteChatSession(groupId: string, sessionId: string): Promise<void>;
+
+  /**
+   * Add a document to a session group
+   *
+   * @param groupId - Session group ID
+   * @param document - Document metadata to add
+   * @returns Updated session group
+   * @throws {Error} If group not found
+   */
+  addGroupDocument(
+    groupId: string,
+    document: GroupDocumentMetadata
+  ): Promise<SessionGroup>;
+
+  /**
+   * Remove a document from a session group
+   *
+   * @param groupId - Session group ID
+   * @param documentId - Document ID to remove
+   * @returns Updated session group
+   * @throws {Error} If group not found
+   */
+  removeGroupDocument(
+    groupId: string,
+    documentId: string
+  ): Promise<SessionGroup>;
+
+  /**
+   * Add a message to a chat session
+   *
+   * @param groupId - Session group ID
+   * @param sessionId - Chat session ID
+   * @param message - Message to add
+   * @throws {Error} If group or session not found
+   */
+  addMessage(
+    groupId: string,
+    sessionId: string,
+    message: { role: 'user' | 'assistant' | 'system'; content: string; timestamp: number }
+  ): Promise<void>;
 }

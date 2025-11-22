@@ -26,6 +26,7 @@ import {
   ChainMismatchError,
   InsufficientDepositError
 } from '../errors/ChainErrors';
+import { LLM_PROOF_INTERVAL } from '../config/llm-config';
 
 export interface SessionJobParams {
   host: string;
@@ -48,7 +49,6 @@ export class PaymentManager implements IPaymentManager {
   static readonly TOKENS_PER_PROOF = 100;
   static readonly DEFAULT_PRICE_PER_TOKEN = 1000000;
   static readonly DEFAULT_DURATION = 3600;
-  static readonly DEFAULT_PROOF_INTERVAL = 300;
   private static readonly USDC_DECIMALS = 6;
 
   private signer?: Signer;
@@ -273,7 +273,7 @@ export class PaymentManager implements IPaymentManager {
     // Set defaults
     const pricePerToken = params.pricePerToken || PaymentManager.DEFAULT_PRICE_PER_TOKEN;
     const duration = params.duration || PaymentManager.DEFAULT_DURATION;
-    const proofInterval = params.proofInterval || PaymentManager.DEFAULT_PROOF_INTERVAL;
+    const proofInterval = params.proofInterval || LLM_PROOF_INTERVAL;
 
     console.log('[PaymentManager] createSessionJob params:', {
       host: params.host,

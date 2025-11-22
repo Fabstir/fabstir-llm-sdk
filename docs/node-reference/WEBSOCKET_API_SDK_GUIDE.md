@@ -132,9 +132,16 @@ const initMessage = {
     model: 'llama-2-7b',
     max_tokens: 2048,
     temperature: 0.7
+  },
+  // NEW (v8.4+): Optional S5 vector database for RAG (Sub-phase 5.1.3)
+  vector_database?: {
+    manifest_path: 'home/vector-databases/0xABC.../my-docs/manifest.json',
+    user_address: '0xABC...'
   }
 };
 ```
+
+**Note**: `vector_database` is **optional** (v8.4+). When provided, host should load pre-existing vectors from S5 instead of expecting `uploadVectors` messages. See `S5_VECTOR_LOADING.md` for host-side implementation details.
 
 #### Session Resume (After Disconnect)
 ```typescript

@@ -26,7 +26,6 @@ export class PaymentManager implements IPaymentManager {
   static readonly TOKENS_PER_PROOF = 1000;
   static readonly DEFAULT_PRICE_PER_TOKEN = 5000;
   static readonly DEFAULT_DURATION = 3600;
-  static readonly DEFAULT_PROOF_INTERVAL = 300;
   private static readonly USDC_DECIMALS = 6;
   
   private contractManager: ContractManager;

@@ -9,7 +9,7 @@
  */
 
 import { ethers } from 'ethers';
-import NodeRegistryABI from '../contracts/abis/NodeRegistry.json';
+import NodeRegistryABI from '../contracts/abis/NodeRegistryWithModels-CLIENT-ABI.json';
 
 export interface NodeInfo {
   nodeAddress: string;
@@ -98,8 +98,8 @@ export class HostDiscoveryService {
         metadata: nodeFullInfo[3], // metadata string
         apiUrl: apiUrl,
         endpoint: apiUrl,
-        supportedModels: parsedMetadata.supportedModels || [],
-        models: parsedMetadata.models || [],
+        supportedModels: nodeFullInfo[5] || [], // From contract (index 5)
+        models: nodeFullInfo[5] || [], // From contract (index 5) - alias
         region: parsedMetadata.region || '',
         reputation: parsedMetadata.reputation || 95,
         pricePerToken: parsedMetadata.pricePerToken || 2000,
@@ -157,6 +157,11 @@ export class HostDiscoveryService {
             console.warn(`Failed to parse metadata for ${address}:`, e);
           }
 
+          // Debug log to see what we're getting from contract
+          console.log(`[HostDiscovery] Contract supportedModels for ${address}:`, nodeFullInfo[5]);
+          console.log(`[HostDiscovery] Full nodeFullInfo type:`, Array.isArray(nodeFullInfo) ? 'array' : 'object');
+          console.log(`[HostDiscovery] nodeFullInfo length:`, nodeFullInfo.length);
+
           // Build complete node info with all metadata
           const nodeInfo: NodeInfo = {
             nodeAddress: address.toLowerCase(),
@@ -168,8 +173,8 @@ export class HostDiscoveryService {
             metadata: nodeFullInfo[3], // Raw metadata string
             apiUrl: nodeFullInfo[4] || parsedMetadata.apiUrl || parsedMetadata.endpoint || '',
             endpoint: nodeFullInfo[4] || parsedMetadata.apiUrl || parsedMetadata.endpoint || '', // Alias
-            supportedModels: parsedMetadata.supportedModels || [], // From metadata
-            models: parsedMetadata.models || [], // From parsed metadata
+            supportedModels: nodeFullInfo[5] || [], // From contract (index 5)
+            models: nodeFullInfo[5] || [], // From contract (index 5) - alias
             region: parsedMetadata.region || '',
             reputation: parsedMetadata.reputation || 95,
             pricePerToken: parsedMetadata.pricePerToken || 2000,

@@ -23,14 +23,40 @@ describe('SessionGroupStorage', () => {
   const testHostPubKey = '0x03' + '1'.repeat(64); // Mock compressed public key
 
   beforeEach(async () => {
-    // Create mock S5 client
+    // Create mock S5 client with correct Enhanced s5.js API methods
+    const mockData = new Map<string, any>();
+
     mockS5Client = {
       fs: {
-        writeFile: vi.fn().mockResolvedValue(undefined),
-        readFile: vi.fn().mockResolvedValue(new Uint8Array()),
-        readdir: vi.fn().mockResolvedValue([]),
-        exists: vi.fn().mockResolvedValue(false),
-        rm: vi.fn().mockResolvedValue(undefined),
+        // ✅ CORRECT: Enhanced s5.js API methods
+        put: vi.fn(async (path: string, data: any) => {
+          mockData.set(path, data);
+          return true;
+        }),
+        get: vi.fn(async (path: string) => {
+          return mockData.get(path) || null;
+        }),
+        list: vi.fn(async function* (path: string) {
+          // Async iterator - yield entries that match the path
+          for (const [key, value] of mockData.entries()) {
+            if (key.startsWith(path) && key !== path) {
+              const name = key.split('/').pop();
+              if (name) {
+                yield {
+                  type: 'file',
+                  name: name
+                };
+              }
+            }
+          }
+        }),
+        delete: vi.fn(async (path: string) => {
+          mockData.delete(path);
+          return true;
+        }),
+        getMetadata: vi.fn(async (path: string) => {
+          return mockData.has(path) ? { cid: 'mock-cid' } : null;
+        })
       },
     };
 
@@ -90,10 +116,10 @@ describe('SessionGroupStorage', () => {
         group
       );
 
-      // Verify S5 writeFile was called with correct path
-      expect(mockS5Client.fs.writeFile).toHaveBeenCalled();
-      const writeCall = mockS5Client.fs.writeFile.mock.calls[0];
-      expect(writeCall[0]).toContain(
+      // Verify S5 put was called with correct path (✅ correct API)
+      expect(mockS5Client.fs.put).toHaveBeenCalled();
+      const putCall = mockS5Client.fs.put.mock.calls[0];
+      expect(putCall[0]).toContain(
         `home/session-groups/${testUserAddress}/sg-123.json`
       );
     });
@@ -118,8 +144,8 @@ describe('SessionGroupStorage', () => {
       const loaded = await storage.load('sg-456');
 
       expect(loaded).toEqual(group);
-      // Should not call readFile because it's cached
-      expect(mockS5Client.fs.readFile).not.toHaveBeenCalled();
+      // Should not call get because it's cached (✅ correct API)
+      expect(mockS5Client.fs.get).not.toHaveBeenCalled();
     });
   });
 
@@ -138,22 +164,17 @@ describe('SessionGroupStorage', () => {
         deleted: false,
       };
 
-      // Setup mock to return encrypted data
-      mockS5Client.fs.exists.mockResolvedValue(true);
-      mockS5Client.fs.readFile.mockResolvedValue(
-        new TextEncoder().encode(
-          JSON.stringify({
-            payload: {
-              ciphertextHex: Buffer.from(JSON.stringify(group)).toString('hex'),
-              nonceHex: '000000000000000000000000',
-              ephemeralPubKeyHex: '0x03' + '2'.repeat(64),
-              signatureHex: '0x' + '3'.repeat(130),
-            },
-            storedAt: new Date().toISOString(),
-            conversationId: 'session-group-storage',
-          })
-        )
-      );
+      // Setup mock to return encrypted data (✅ correct API)
+      mockS5Client.fs.get.mockResolvedValueOnce({
+        payload: {
+          ciphertextHex: Buffer.from(JSON.stringify(group)).toString('hex'),
+          nonceHex: '000000000000000000000000',
+          ephemeralPubKeyHex: '0x03' + '2'.repeat(64),
+          signatureHex: '0x' + '3'.repeat(130),
+        },
+        storedAt: new Date().toISOString(),
+        conversationId: 'session-group-storage',
+      });
 
       const loaded = await storage.load('sg-789');
 
@@ -166,7 +187,8 @@ describe('SessionGroupStorage', () => {
     });
 
     it('should throw error if group does not exist', async () => {
-      mockS5Client.fs.exists.mockResolvedValue(false);
+      // ✅ correct API: get() returns null when not found
+      mockS5Client.fs.get.mockResolvedValueOnce(null);
 
       await expect(storage.load('nonexistent-id')).rejects.toThrow(
         'Session group not found: nonexistent-id'
@@ -202,47 +224,14 @@ describe('SessionGroupStorage', () => {
         deleted: false,
       };
 
-      // Setup mock directory listing
-      mockS5Client.fs.readdir.mockResolvedValue([
-        { name: 'sg-001.json', type: 1 },
-        { name: 'sg-002.json', type: 1 },
-      ]);
+      // Save groups first (will populate mock data via put)
+      await storage.save(group1);
+      await storage.save(group2);
 
-      mockS5Client.fs.exists.mockResolvedValue(true);
-      mockS5Client.fs.readFile
-        .mockResolvedValueOnce(
-          new TextEncoder().encode(
-            JSON.stringify({
-              payload: {
-                ciphertextHex: Buffer.from(JSON.stringify(group1)).toString(
-                  'hex'
-                ),
-                nonceHex: '000000000000000000000000',
-                ephemeralPubKeyHex: '0x03' + '2'.repeat(64),
-                signatureHex: '0x' + '3'.repeat(130),
-              },
-              storedAt: new Date().toISOString(),
-              conversationId: 'session-group-storage',
-            })
-          )
-        )
-        .mockResolvedValueOnce(
-          new TextEncoder().encode(
-            JSON.stringify({
-              payload: {
-                ciphertextHex: Buffer.from(JSON.stringify(group2)).toString(
-                  'hex'
-                ),
-                nonceHex: '000000000000000000000000',
-                ephemeralPubKeyHex: '0x03' + '2'.repeat(64),
-                signatureHex: '0x' + '3'.repeat(130),
-              },
-              storedAt: new Date().toISOString(),
-              conversationId: 'session-group-storage',
-            })
-          )
-        );
+      // Clear cache so loadAll() actually loads from mock S5
+      storage.clearCache();
 
+      // loadAll() will use list() iterator and load() for each file
       const groups = await storage.loadAll();
 
       expect(groups).toHaveLength(2);
@@ -251,8 +240,7 @@ describe('SessionGroupStorage', () => {
     });
 
     it('should return empty array if no groups exist', async () => {
-      mockS5Client.fs.readdir.mockResolvedValue([]);
-
+      // Empty mock data - list() will yield nothing
       const groups = await storage.loadAll();
 
       expect(groups).toEqual([]);
@@ -280,14 +268,13 @@ describe('SessionGroupStorage', () => {
       // Now delete
       await storage.delete('sg-delete');
 
-      // Verify S5 rm was called
-      expect(mockS5Client.fs.rm).toHaveBeenCalledWith(
-        `home/session-groups/${testUserAddress}/sg-delete.json`,
-        { recursive: false }
+      // Verify S5 delete was called (✅ correct API)
+      expect(mockS5Client.fs.delete).toHaveBeenCalledWith(
+        `home/session-groups/${testUserAddress}/sg-delete.json`
       );
 
-      // Verify removed from cache
-      mockS5Client.fs.exists.mockResolvedValue(false);
+      // Verify removed from cache and S5
+      // get() will return null because delete() removed it from mock data
       await expect(storage.load('sg-delete')).rejects.toThrow(
         'Session group not found'
       );
@@ -296,21 +283,23 @@ describe('SessionGroupStorage', () => {
 
   describe('exists()', () => {
     it('should check if group ID exists without loading', async () => {
-      mockS5Client.fs.exists.mockResolvedValue(true);
+      // Setup mock getMetadata to return metadata (✅ correct API)
+      mockS5Client.fs.getMetadata.mockResolvedValueOnce({ cid: 'mock-cid' });
 
       const result = await storage.exists('sg-exists');
 
       expect(result).toBe(true);
-      expect(mockS5Client.fs.exists).toHaveBeenCalledWith(
+      expect(mockS5Client.fs.getMetadata).toHaveBeenCalledWith(
         `home/session-groups/${testUserAddress}/sg-exists.json`
       );
 
-      // Should not load the file
-      expect(mockS5Client.fs.readFile).not.toHaveBeenCalled();
+      // Should not load the file content
+      expect(mockS5Client.fs.get).not.toHaveBeenCalled();
     });
 
     it('should return false if group does not exist', async () => {
-      mockS5Client.fs.exists.mockResolvedValue(false);
+      // getMetadata returns null when file doesn't exist (✅ correct API)
+      mockS5Client.fs.getMetadata.mockResolvedValueOnce(null);
 
       const result = await storage.exists('sg-nonexistent');
 
@@ -341,11 +330,9 @@ describe('SessionGroupStorage', () => {
         group
       );
 
-      // Verify encrypted payload was written to S5
-      const writeCall = mockS5Client.fs.writeFile.mock.calls[0];
-      const writtenData = JSON.parse(
-        new TextDecoder().decode(writeCall[1] as Uint8Array)
-      );
+      // Verify encrypted payload was written to S5 (✅ correct API)
+      const putCall = mockS5Client.fs.put.mock.calls[0];
+      const writtenData = putCall[1]; // Second argument is the data object
 
       // Should have encrypted storage structure
       expect(writtenData).toHaveProperty('payload');
@@ -388,12 +375,12 @@ describe('SessionGroupStorage', () => {
 
       await storageA.save(groupA);
 
-      // Verify paths are different
-      const writeCallA = mockS5Client.fs.writeFile.mock.calls[0];
-      expect(writeCallA[0]).toContain(`home/session-groups/${userA}/`);
+      // Verify paths are different (✅ correct API)
+      const putCallA = mockS5Client.fs.put.mock.calls[0];
+      expect(putCallA[0]).toContain(`home/session-groups/${userA}/`);
 
-      // User B cannot access User A's groups
-      mockS5Client.fs.exists.mockResolvedValue(false);
+      // User B cannot access User A's groups (different path)
+      // get() will return null because User B's path is different
       await expect(storageB.load('sg-userA')).rejects.toThrow(
         'Session group not found'
       );
@@ -402,7 +389,8 @@ describe('SessionGroupStorage', () => {
 
   describe('Error handling', () => {
     it('should handle network errors gracefully', async () => {
-      mockS5Client.fs.writeFile.mockRejectedValue(
+      // Make put() throw network error (✅ correct API)
+      mockS5Client.fs.put.mockRejectedValueOnce(
         new Error('Network timeout')
       );
 
@@ -423,10 +411,8 @@ describe('SessionGroupStorage', () => {
     });
 
     it('should handle corrupt data during load', async () => {
-      mockS5Client.fs.exists.mockResolvedValue(true);
-      mockS5Client.fs.readFile.mockResolvedValue(
-        new TextEncoder().encode('invalid-json-data')
-      );
+      // Return invalid data structure (✅ correct API)
+      mockS5Client.fs.get.mockResolvedValueOnce('invalid-data-structure');
 
       await expect(storage.load('sg-corrupt')).rejects.toThrow();
     });
@@ -485,8 +471,7 @@ describe('SessionGroupStorage', () => {
 
       expect(saveTime).toBeLessThan(1000); // Should save in < 1 second
 
-      // Load it back
-      mockS5Client.fs.exists.mockResolvedValue(true);
+      // Load it back from cache
       const loadStart = Date.now();
       const loaded = await storage.load('sg-large');
       const loadTime = Date.now() - loadStart;
@@ -511,32 +496,13 @@ describe('SessionGroupStorage', () => {
         deleted: false,
       }));
 
-      // Mock directory with 50 files
-      mockS5Client.fs.readdir.mockResolvedValue(
-        groups.map((g) => ({ name: `${g.id}.json`, type: 1 }))
-      );
+      // Save all groups to populate mock S5 storage (✅ correct API)
+      for (const group of groups) {
+        await storage.save(group);
+      }
 
-      mockS5Client.fs.exists.mockResolvedValue(true);
-
-      // Mock readFile to return each group
-      groups.forEach((group) => {
-        mockS5Client.fs.readFile.mockResolvedValueOnce(
-          new TextEncoder().encode(
-            JSON.stringify({
-              payload: {
-                ciphertextHex: Buffer.from(JSON.stringify(group)).toString(
-                  'hex'
-                ),
-                nonceHex: '000000000000000000000000',
-                ephemeralPubKeyHex: '0x03' + '2'.repeat(64),
-                signatureHex: '0x' + '3'.repeat(130),
-              },
-              storedAt: new Date().toISOString(),
-              conversationId: 'session-group-storage',
-            })
-          )
-        );
-      });
+      // Clear cache to force reload from mock S5
+      storage.clearCache();
 
       const startTime = Date.now();
       const loaded = await storage.loadAll();
