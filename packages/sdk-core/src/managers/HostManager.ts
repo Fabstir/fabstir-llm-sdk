@@ -96,17 +96,9 @@ export class HostManager {
     this.contractManager = contractManager;
 
     // Initialize contract with full NodeRegistryWithModels ABI
-    console.log('Initializing NodeRegistry contract with full ABI');
-    console.log('Contract address:', nodeRegistryAddress);
-    console.log('NodeRegistryABI type:', typeof NodeRegistryABI);
-    console.log('NodeRegistryABI is array?', Array.isArray(NodeRegistryABI));
-    console.log('NodeRegistryABI length:', NodeRegistryABI?.length || 0);
     if (Array.isArray(NodeRegistryABI) && NodeRegistryABI.length > 0) {
-      console.log('First ABI entry:', JSON.stringify(NodeRegistryABI[0]).substring(0, 200));
-      console.log('Second ABI entry:', JSON.stringify(NodeRegistryABI[1]).substring(0, 200));
       // Count function entries
       const funcs = NodeRegistryABI.filter((item: any) => item.type === 'function');
-      console.log('Number of function entries in ABI:', funcs.length);
     } else {
       console.error('NodeRegistryABI is NOT a valid array:', NodeRegistryABI);
     }
@@ -119,17 +111,13 @@ export class HostManager {
 
     // Verify the contract interface is loaded
     if (this.nodeRegistry.interface) {
-      console.log('Contract interface initialized successfully');
-      console.log('Interface fragments length:', this.nodeRegistry.interface.fragments?.length || 0);
 
       // In ethers v6, use fragments to count functions
       const functionFragments = this.nodeRegistry.interface.fragments.filter((f: any) => f.type === 'function');
-      console.log(`Loaded ${functionFragments.length} contract functions via fragments`);
 
       // Test if registerNode function exists
       try {
         const registerNodeFunc = this.nodeRegistry.interface.getFunction('registerNode');
-        console.log('Has registerNode?', !!registerNodeFunc);
       } catch (e) {
         console.error('registerNode not found:', e.message);
       }
@@ -223,10 +211,8 @@ export class HostManager {
         // Direct extraction from private key (works for hardcoded keys)
         const pubKeyBytes = secp.getPublicKey(privKey, true);
         publicKey = bytesToHex(pubKeyBytes);
-        console.log('✓ Extracted public key from private key (hardcoded wallet)');
       } else {
         // Signature-based recovery (works for MetaMask/browser providers)
-        console.log('⚠️  Private key not accessible, using signature-based recovery (MetaMask)');
         const message = 'Fabstir Host Registration Public Key';
         const signature = await this.signer.signMessage(message);
 
@@ -240,7 +226,6 @@ export class HostManager {
         const compressedBytes = toCompressedPub(uncompressedBytes);
         publicKey = bytesToHex(compressedBytes);
 
-        console.log('✓ Recovered public key from signature:', publicKey);
       }
 
       // Format metadata as JSON (new requirement)
@@ -259,7 +244,6 @@ export class HostManager {
 
       // Check if node is already registered
       const signerAddress = await this.signer.getAddress();
-      console.log('Checking registration for address:', signerAddress);
 
       const nodeInfo = await this.nodeRegistry['nodes'](signerAddress);
       console.log('Node info from contract:', {
@@ -272,16 +256,13 @@ export class HostManager {
       const isAlreadyRegistered = nodeInfo[0] !== ethers.ZeroAddress; // operator address at index 0
 
       if (isAlreadyRegistered) {
-        console.log('Node is already registered with operator:', nodeInfo[0]);
         throw new ModelRegistryError(
           'Node is already registered. Use updateNodeInfo to modify metadata or addStake to increase stake.',
           this.nodeRegistry?.address
         );
       }
-      console.log('Node is not registered, proceeding with registration');
 
       // Get FAB token contract address
-      console.log('FAB token address from constructor:', this.fabTokenAddress);
       if (!this.fabTokenAddress) {
         throw new ModelRegistryError(
           'FAB token address not configured',
@@ -295,8 +276,6 @@ export class HostManager {
       );
 
       // Step 1: Create FAB token contract interface
-      console.log('Creating FAB token contract with address:', this.fabTokenAddress);
-      console.log('NodeRegistry address for operations:', this.nodeRegistryAddress);
 
       const fabToken = new Contract(
         this.fabTokenAddress,
@@ -310,7 +289,6 @@ export class HostManager {
 
       // Check FAB token balance
       const fabBalance = await fabToken.balanceOf(signerAddress);
-      console.log(`FAB token balance: ${ethers.formatEther(fabBalance)} FAB`);
 
       if (fabBalance < stakeAmount) {
         throw new ModelRegistryError(
@@ -320,19 +298,13 @@ export class HostManager {
       }
 
       // Step 2: Approve FAB tokens for the NodeRegistry contract
-      console.log(`Approving ${ethers.formatEther(stakeAmount)} FAB tokens for NodeRegistry...`);
       const approveTx = await fabToken.approve(this.nodeRegistryAddress, stakeAmount);
       await approveTx.wait(3); // Wait for 3 confirmations as per CLAUDE.local.md
-      console.log('FAB token approval successful');
 
       // Verify approval
       const allowance = await fabToken.allowance(signerAddress, this.nodeRegistryAddress);
-      console.log(`Allowance after approval: ${ethers.formatEther(allowance)} FAB`);
 
       // Step 3: Register node with models (no ETH value needed, dual pricing validated)
-      console.log('Registering node with models...');
-      console.log('Minimum price native:', minPriceNative);
-      console.log('Minimum price stable:', minPriceStable);
 
       // Debug: Check if method exists
       if (!this.nodeRegistry || !this.nodeRegistry['registerNode']) {
@@ -342,14 +314,6 @@ export class HostManager {
         throw new Error('registerNode method not found on NodeRegistry contract');
       }
 
-      console.log('REGISTRATION DEBUG - About to call registerNode with DUAL PRICING:');
-      console.log('  metadataJson:', metadataJson);
-      console.log('  apiUrl:', request.apiUrl);
-      console.log('  modelIds:', modelIds);
-      console.log('  minPriceNative:', minPriceNative);
-      console.log('  minPriceStable:', minPriceStable);
-      console.log('  Contract address:', this.nodeRegistry.target || this.nodeRegistry.address);
-      console.log('  Contract interface exists?', !!this.nodeRegistry.interface);
 
       // Try to encode the transaction data manually to see what's being sent
       try {
@@ -360,8 +324,6 @@ export class HostManager {
           minPriceNative,
           minPriceStable
         ]);
-        console.log('  Encoded transaction data:', encodedData);
-        console.log('  Encoded data length:', encodedData.length);
       } catch (encodeError) {
         console.error('  ERROR encoding transaction data:', encodeError);
       }
@@ -377,13 +339,8 @@ export class HostManager {
         }
       );
 
-      console.log('REGISTRATION DEBUG - Transaction created:');
-      console.log('  Transaction hash:', tx.hash);
-      console.log('  Transaction to:', tx.to);
-      console.log('  Transaction data:', tx.data);
 
       const receipt = await tx.wait(3); // Wait for 3 confirmations
-      console.log('Node registration successful');
 
       // NodeRegistryWithModels automatically handles staking during registerNode()
       // No separate stake() call needed
@@ -538,7 +495,6 @@ export class HostManager {
     }
 
     try {
-      console.log('[HostManager] getHostStatus - Contract address:', await this.nodeRegistry.getAddress());
       const info = await this.nodeRegistry['getNodeFullInfo'](hostAddress);
 
       // Check if registered (operator address will be non-zero)
@@ -662,7 +618,6 @@ export class HostManager {
     }
 
     try {
-      console.log('[HostManager] discoverAll - Contract address:', await this.nodeRegistry.getAddress());
       // Get all active nodes
       const activeNodes = await this.nodeRegistry['getAllActiveNodes']();
       const hosts: HostInfo[] = [];
@@ -681,18 +636,11 @@ export class HostManager {
           priceNative: info[6]?.toString(),
           priceStable: info[7]?.toString()
         });
-        console.log(`[HostManager] ⚠️ CRITICAL - models array (info[5]):`, info[5]);
-        console.log(`[HostManager] ⚠️ CRITICAL - models type:`, typeof info[5]);
-        console.log(`[HostManager] ⚠️ CRITICAL - models length:`, info[5]?.length);
-        console.log(`[HostManager] ⚠️ CRITICAL - is array?:`, Array.isArray(info[5]));
-        console.log(`[HostManager] ⚠️ CRITICAL - model[0]:`, info[5]?.[0]);
-        console.log(`[HostManager] ⚠️ CRITICAL - Array.from(info[5]):`, Array.from(info[5] || []));
 
         // Parse metadata
         let metadata: HostMetadata;
         try {
           metadata = JSON.parse(info[3]);
-          console.log(`[HostManager] Successfully parsed metadata for ${address}:`, metadata);
         } catch (e) {
           console.error(`[HostManager] Failed to parse metadata for ${address}:`, e);
           console.error(`[HostManager] Raw metadata value: "${info[3]}"`);
@@ -766,18 +714,14 @@ export class HostManager {
         return ethers.zeroPadValue(ethers.toBeHex(BigInt(id)), 32);
       });
 
-      console.log('Updating supported models with IDs:', modelIdsBytes32);
-      console.log('Contract address:', this.nodeRegistry.target || this.nodeRegistry.address);
 
       // Ensure the contract interface has the function
       if (!this.nodeRegistry.updateSupportedModels) {
         console.error('updateSupportedModels function not found on contract');
-        console.log('Available functions:', Object.keys(this.nodeRegistry.functions || {}));
         throw new Error('Contract method updateSupportedModels not found');
       }
 
       // Call updateSupportedModels on the NodeRegistry contract
-      console.log('Calling updateSupportedModels...');
       const tx = await this.nodeRegistry.updateSupportedModels(
         modelIdsBytes32,
         { gasLimit: 500000n }
@@ -792,7 +736,6 @@ export class HostManager {
         );
       }
 
-      console.log('Successfully updated supported models');
       return receipt.hash;
     } catch (error: any) {
       throw new ModelRegistryError(
@@ -884,7 +827,6 @@ export class HostManager {
     }
 
     try {
-      console.log('Updating API URL to:', apiUrl);
 
       // Call updateApiUrl on the NodeRegistry contract
       const tx = await this.nodeRegistry.updateApiUrl(
@@ -901,7 +843,6 @@ export class HostManager {
         );
       }
 
-      console.log('Successfully updated API URL');
       return receipt.hash;
     } catch (error: any) {
       throw new ModelRegistryError(
@@ -937,7 +878,6 @@ export class HostManager {
         );
       }
 
-      console.log('Updating pricing to:', price);
 
       const tx = await this.nodeRegistry.updatePricing(
         price,
@@ -953,7 +893,6 @@ export class HostManager {
         );
       }
 
-      console.log('Successfully updated pricing');
       return receipt.hash;
     } catch (error: any) {
       if (error instanceof PricingValidationError) {
@@ -992,7 +931,6 @@ export class HostManager {
         );
       }
 
-      console.log('Updating native token pricing to:', price);
 
       const tx = await this.nodeRegistry.updatePricingNative(
         price,
@@ -1008,7 +946,6 @@ export class HostManager {
         );
       }
 
-      console.log('Successfully updated native pricing');
       return receipt.hash;
     } catch (error: any) {
       if (error instanceof PricingValidationError) {
@@ -1047,7 +984,6 @@ export class HostManager {
         );
       }
 
-      console.log('Updating stablecoin pricing to:', price);
 
       const tx = await this.nodeRegistry.updatePricingStable(
         price,
@@ -1063,7 +999,6 @@ export class HostManager {
         );
       }
 
-      console.log('Successfully updated stablecoin pricing');
       return receipt.hash;
     } catch (error: any) {
       if (error instanceof PricingValidationError) {
@@ -1214,7 +1149,6 @@ export class HostManager {
     }
 
     try {
-      console.log('Updating metadata...');
 
       // Call updateMetadata on the NodeRegistry contract
       const tx = await this.nodeRegistry.updateMetadata(
@@ -1231,7 +1165,6 @@ export class HostManager {
         );
       }
 
-      console.log('Successfully updated metadata');
       return receipt.hash;
     } catch (error: any) {
       throw new ModelRegistryError(
@@ -1262,10 +1195,8 @@ export class HostManager {
       if (typeof amount === 'string') {
         // Convert FAB to wei (18 decimals)
         stakeAmountWei = ethers.parseEther(amount);
-        console.log('Adding stake:', amount, 'FAB (', stakeAmountWei.toString(), 'wei)');
       } else {
         stakeAmountWei = amount;
-        console.log('Adding stake:', ethers.formatEther(stakeAmountWei), 'FAB');
       }
 
       // Call stake on the NodeRegistry contract
@@ -1280,7 +1211,6 @@ export class HostManager {
         throw new SDKError('Failed to add stake', 'STAKE_FAILED');
       }
 
-      console.log('Successfully added stake');
       return receipt.hash;
     } catch (error: any) {
       throw new SDKError(

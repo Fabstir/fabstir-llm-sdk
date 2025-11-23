@@ -199,22 +199,16 @@ export class FabstirSDKCore extends EventEmitter {
       }
       
       this.authenticated = true;
-      console.log('Authentication flag set to true');
 
       // Initialize contract manager
-      console.log('Creating ContractManager...');
       this.contractManager = new ContractManager(
         this.provider!,
         this.config.contractAddresses! as ContractAddresses
       );
-      console.log('Setting signer on ContractManager...');
       await this.contractManager.setSigner(this.signer!);
-      console.log('ContractManager ready');
       
       // Initialize managers
-      console.log('Initializing managers...');
       await this.initializeManagers();
-      console.log('All managers initialized');
       
     } catch (error: any) {
       console.error('Authentication error details:', error);
@@ -309,15 +303,12 @@ export class FabstirSDKCore extends EventEmitter {
     try {
       // Check if we have a cached seed for this wallet
       const hasCached = hasCachedSeed(this.userAddress);
-      console.log(`[S5 Seed] Wallet ${this.userAddress} has cached seed: ${hasCached}`);
       
       // Get or generate the seed (will use cache if available)
       this.s5Seed = await getOrGenerateS5Seed(this.signer);
       
       if (!hasCached) {
-        console.log('[S5 Seed] Generated new deterministic seed from wallet signature');
       } else {
-        console.log('[S5 Seed] Retrieved cached seed (no popup required)');
       }
     } catch (error: any) {
       console.warn('[S5 Seed] Failed to generate deterministic seed:', error);
@@ -343,35 +334,26 @@ export class FabstirSDKCore extends EventEmitter {
       throw new SDKError('RPC URL required for private key auth', 'RPC_URL_REQUIRED');
     }
     
-    console.log('Creating JsonRpcProvider with URL:', this.config.rpcUrl);
     this.provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
     
-    console.log('Creating wallet WITHOUT provider first (for signing)...');
     // Create wallet without provider first (for offline signing)
     const wallet = new ethers.Wallet(privateKey);
     
-    console.log('Connecting wallet to provider...');
     this.signer = wallet.connect(this.provider);
     
-    console.log('Getting signer address...');
     this.userAddress = await this.signer.getAddress();
-    console.log('Got address:', this.userAddress);
     
     // Generate or retrieve S5 seed deterministically
-    console.log('Starting S5 seed generation...');
     
     try {
       // Check if we have a cached seed for this wallet
       const hasCached = hasCachedSeed(this.userAddress);
-      console.log(`[S5 Seed] Wallet ${this.userAddress} has cached seed: ${hasCached}`);
       
       // Get or generate the seed (will use cache if available)
       this.s5Seed = await getOrGenerateS5Seed(this.signer);
       
       if (!hasCached) {
-        console.log('[S5 Seed] Generated new deterministic seed from wallet signature');
       } else {
-        console.log('[S5 Seed] Retrieved cached seed (no popup required)');
       }
     } catch (error: any) {
       console.error('[S5 Seed] Failed to generate deterministic seed:', error);
@@ -404,25 +386,19 @@ export class FabstirSDKCore extends EventEmitter {
       throw new SDKError('Provider or RPC URL required', 'PROVIDER_REQUIRED');
     }
     
-    console.log('Getting signer address...');
     this.userAddress = await this.signer.getAddress();
-    console.log('Got address:', this.userAddress);
     
     // Generate or retrieve S5 seed deterministically
-    console.log('Starting S5 seed generation...');
     
     try {
       // Check if we have a cached seed for this wallet
       const hasCached = hasCachedSeed(this.userAddress);
-      console.log(`[S5 Seed] Wallet ${this.userAddress} has cached seed: ${hasCached}`);
       
       // Get or generate the seed (will use cache if available)
       this.s5Seed = await getOrGenerateS5Seed(this.signer);
       
       if (!hasCached) {
-        console.log('[S5 Seed] Generated new deterministic seed from wallet signature');
       } else {
-        console.log('[S5 Seed] Retrieved cached seed (no popup required)');
       }
     } catch (error: any) {
       console.error('[S5 Seed] Failed to generate deterministic seed:', error);
@@ -476,9 +452,6 @@ export class FabstirSDKCore extends EventEmitter {
       );
     }
 
-    console.log('[BaseAccount Auth] Starting authentication with Base Account Kit');
-    console.log('[BaseAccount Auth] Primary account:', primaryAccount);
-    console.log('[BaseAccount Auth] Chain ID:', chainId);
 
     // 1. Ensure sub-account exists with spend permissions
     const subAccountResult = await ensureSubAccount(provider, primaryAccount, {
@@ -488,8 +461,6 @@ export class FabstirSDKCore extends EventEmitter {
       periodDays,
     });
 
-    console.log('[BaseAccount Auth] Sub-account:', subAccountResult.address);
-    console.log('[BaseAccount Auth] Is existing:', subAccountResult.isExisting);
 
     // 2. Pre-cache S5 seed for sub-account to avoid signature popup
     const subAccountLower = subAccountResult.address.toLowerCase();
@@ -498,7 +469,6 @@ export class FabstirSDKCore extends EventEmitter {
       const seedToCache = this.config.s5Config?.seedPhrase ||
         'yield organic score bishop free juice atop village video element unless sneak care rock update';
       cacheSeed(subAccountLower, seedToCache);
-      console.log('[BaseAccount Auth] Pre-cached S5 seed for sub-account');
     }
 
     // 3. Create custom signer that uses wallet_sendCalls
@@ -509,18 +479,15 @@ export class FabstirSDKCore extends EventEmitter {
       chainId,
     });
 
-    console.log('[BaseAccount Auth] Created custom sub-account signer');
 
     // 4. Authenticate SDK with the custom signer
     await this.authenticate('signer', { signer: customSigner });
 
-    console.log('[BaseAccount Auth] SDK authenticated successfully');
 
     // 5. Approve JobMarketplace to spend USDC from sub-account
     // This is required for createSessionJob to work
     if (this.config.contractAddresses?.jobMarketplace) {
       try {
-        console.log('[BaseAccount Auth] Approving JobMarketplace to spend USDC...');
         const ethersProvider = new ethers.BrowserProvider(provider);
         const usdcContract = new ethers.Contract(
           tokenAddress,
@@ -535,14 +502,12 @@ export class FabstirSDKCore extends EventEmitter {
           approvalAmount
         );
         await approveTx.wait(1);
-        console.log('[BaseAccount Auth] JobMarketplace approval complete');
       } catch (error) {
         console.warn('[BaseAccount Auth] Failed to approve JobMarketplace:', error);
         // Don't throw - approval might already exist or can be done later
       }
     }
 
-    console.log('[BaseAccount Auth] All transactions will now be popup-free!');
 
     return {
       subAccount: subAccountResult.address,
@@ -554,50 +519,34 @@ export class FabstirSDKCore extends EventEmitter {
    * Initialize all managers
    */
   private async initializeManagers(): Promise<void> {
-    console.log('Creating AuthManager...');
     // Create auth manager with authenticated data
     this.authManager = new AuthManager(this.signer, this.provider, this.userAddress, this.s5Seed);
-    console.log('AuthManager created with user address:', this.userAddress);
     
     // Create other managers
-    console.log('Creating PaymentManager...');
     // Use PaymentManagerMultiChain for deposit/withdrawal support
     this.paymentManager = new PaymentManagerMultiChain(undefined, this.currentChainId);
-    console.log('PaymentManager created');
     
-    console.log('Creating StorageManager...');
     // StorageManager constructor takes s5PortalUrl - don't pass undefined
     const s5PortalUrl = this.config.s5Config?.portalUrl;
     this.storageManager = s5PortalUrl ? new StorageManager(s5PortalUrl) : new StorageManager();
-    console.log('StorageManager created');
     
-    console.log('Creating SessionManager...');
     this.sessionManager = new SessionManager(this.paymentManager as any, this.storageManager);
-    console.log('SessionManager created');
 
-    console.log('Creating VectorRAGManager...');
     // VectorRAGManager needs userAddress, seedPhrase, config, and sessionManager
     // These will be set after authentication, so we defer initialization
-    console.log('VectorRAGManager will be initialized after authentication');
 
-    console.log('Creating TreasuryManager...');
     this.treasuryManager = new TreasuryManager(this.contractManager!);
-    console.log('TreasuryManager created');
 
     // Note: HostManager and ModelManager will be created after authentication
     // when we have a signer available
 
     // Initialize managers that need a signer
     if (this.signer) {
-      console.log('Initializing PaymentManager...');
       await (this.paymentManager as any).initialize(this.signer);
-      console.log('PaymentManager initialized');
 
       // Initialize storage manager with S5 seed (required - fail fast if unavailable)
       if (this.s5Seed && this.userAddress) {
-        console.log('Initializing StorageManager...');
         await this.storageManager.initialize(this.s5Seed);
-        console.log('StorageManager initialized successfully');
       } else {
         throw new SDKError(
           'S5 seed and user address required for StorageManager initialization',
@@ -606,12 +555,10 @@ export class FabstirSDKCore extends EventEmitter {
       }
 
       // Create EncryptionManager (Phase 6.2 - supports both Wallet and browser signers)
-      console.log('Creating EncryptionManager...');
       if (this.signer) {
         // For Wallet instances with direct privateKey access
         if ('privateKey' in this.signer) {
           this.encryptionManager = new EncryptionManager(this.signer as ethers.Wallet);
-          console.log('EncryptionManager created from Wallet');
         } else {
           // For browser wallets (MetaMask, etc.), derive encryption key via signature
           try {
@@ -619,7 +566,6 @@ export class FabstirSDKCore extends EventEmitter {
             const signature = await this.signer.signMessage(message);
             const address = await this.signer.getAddress();
             this.encryptionManager = EncryptionManager.fromSignature(signature, address);
-            console.log('EncryptionManager created from browser wallet signature');
           } catch (error: any) {
             console.warn('[EncryptionManager] Failed to create from signature:', error.message);
             throw new SDKError(
@@ -634,27 +580,21 @@ export class FabstirSDKCore extends EventEmitter {
         throw new SDKError('Signer required for encryption', 'SIGNER_NOT_AVAILABLE');
       }
 
-      console.log('Initializing SessionManager...');
       await (this.sessionManager as any).initialize();  // SessionManager doesn't take signer
-      console.log('SessionManager initialized');
 
       // Create and initialize ModelManager and HostManager now that we have a signer
-      console.log('Creating ModelManager...');
       const modelRegistryAddress = this.config.contractAddresses?.modelRegistry;
       if (!modelRegistryAddress) {
         throw new SDKError('Model Registry address not configured', 'CONFIG_ERROR');
       }
       this.modelManager = new ModelManager(this.provider!, modelRegistryAddress);
-      console.log('ModelManager created');
 
-      console.log('Creating HostManager...');
       const nodeRegistryAddress = this.config.contractAddresses?.nodeRegistry;
       if (!nodeRegistryAddress) {
         throw new SDKError('Node Registry address not configured', 'CONFIG_ERROR');
       }
       const fabTokenAddress = this.config.contractAddresses?.fabToken;
       const hostEarningsAddress = this.config.contractAddresses?.hostEarnings;
-      console.log('FAB token address from config:', fabTokenAddress);
       this.hostManager = new HostManager(
         this.signer,
         nodeRegistryAddress,
@@ -663,42 +603,31 @@ export class FabstirSDKCore extends EventEmitter {
         hostEarningsAddress,
         this.contractManager
       );
-      console.log('HostManager created with FAB token:', fabTokenAddress);
 
-      console.log('Initializing HostManager...');
       await (this.hostManager as any).initialize();
 
       // NEW: Enable price validation in SessionManager
       if (this.sessionManager) {
         (this.sessionManager as any).setHostManager(this.hostManager);
-        console.log('SessionManager price validation enabled');
       }
 
       // NEW: Enable encryption in SessionManager (if EncryptionManager available)
       if (this.sessionManager && this.encryptionManager) {
         (this.sessionManager as any).setEncryptionManager(this.encryptionManager);
-        console.log('SessionManager encryption enabled');
       }
-      console.log('HostManager initialized');
 
       // Create ClientManager after ModelManager and HostManager are available
-      console.log('Creating ClientManager...');
       this.clientManager = new ClientManager(
         this.modelManager,
         this.hostManager as HostManager,
         this.contractManager!
       );
-      console.log('Initializing ClientManager...');
       await this.clientManager.initialize(this.signer);
-      console.log('ClientManager initialized');
 
-      console.log('Initializing TreasuryManager...');
       await (this.treasuryManager as any).initialize(this.signer);
-      console.log('TreasuryManager initialized');
 
       // Initialize VectorRAGManager after authentication (needs userAddress and s5Seed)
       if (this.userAddress && this.s5Seed && this.sessionManager) {
-        console.log('Creating VectorRAGManager with userAddress and s5Seed...');
         const ragConfig = {
           ...DEFAULT_RAG_CONFIG,
           s5Portal: this.config.s5Config?.portalUrl || DEFAULT_RAG_CONFIG.s5Portal
@@ -711,21 +640,16 @@ export class FabstirSDKCore extends EventEmitter {
           s5Client: this.storageManager!.getS5Client(),
           encryptionManager: this.encryptionManager!
         });
-        console.log('VectorRAGManager created with database management enabled');
 
         // Initialize SessionGroupManager with S5 storage
-        console.log('Creating SessionGroupStorage...');
         const sessionGroupStorage = new SessionGroupStorage(
           this.storageManager!.getS5Client(),
           this.s5Seed,
           this.userAddress,
           this.encryptionManager
         );
-        console.log('SessionGroupStorage created');
 
-        console.log('Creating SessionGroupManager with S5 storage...');
         this.sessionGroupManager = new SessionGroupManager(sessionGroupStorage);
-        console.log('SessionGroupManager created');
       } else {
         console.warn('VectorRAGManager initialization skipped: missing userAddress or s5Seed');
       }

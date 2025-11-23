@@ -80,7 +80,7 @@ export default function ChatSessionPage() {
 
   // Embedding Progress Callback Handler
   const handleEmbeddingProgress = useCallback((progress: EmbeddingProgress) => {
-    console.log('[ChatSession-EmbeddingProgress]', progress);
+    console.debug('[ChatSession-EmbeddingProgress]', progress);
     setEmbeddingProgress(progress);
 
     // Track processing start time
@@ -117,16 +117,16 @@ export default function ChatSessionPage() {
     // Rough estimate: ~4 characters per token (GPT tokenization)
     const estimatedTokens = Math.ceil(text.length / 4);
 
-    console.log(`[ChatSession] 💰 Tracking ${estimatedTokens} tokens`);
+    console.debug(`[ChatSession] 💰 Tracking ${estimatedTokens} tokens`);
 
     setTotalTokens(prev => {
       const newTotal = prev + estimatedTokens;
-      console.log(`[ChatSession] Total tokens: ${prev} → ${newTotal}`);
+      console.debug(`[ChatSession] Total tokens: ${prev} → ${newTotal}`);
 
       // Check if we've crossed a checkpoint threshold
       if (Math.floor(newTotal / PROOF_INTERVAL) > Math.floor(prev / PROOF_INTERVAL)) {
         const checkpointNumber = Math.floor(newTotal / PROOF_INTERVAL);
-        console.log(`[ChatSession] 💎 Checkpoint ${checkpointNumber} reached!`);
+        console.debug(`[ChatSession] 💎 Checkpoint ${checkpointNumber} reached!`);
 
         // Add system message for checkpoint
         const checkpointMsg: ChatMessage = {
@@ -143,7 +143,7 @@ export default function ChatSessionPage() {
     setTotalCost(prev => {
       const cost = (estimatedTokens * PRICE_PER_TOKEN) / 1_000_000; // Convert to USDC
       const newCost = prev + cost;
-      console.log(`[ChatSession] Cost: $${prev.toFixed(4)} → $${newCost.toFixed(4)} USDC`);
+      console.debug(`[ChatSession] Cost: $${prev.toFixed(4)} → $${newCost.toFixed(4)} USDC`);
       return newCost;
     });
   }, [PROOF_INTERVAL, PRICE_PER_TOKEN]);
@@ -152,12 +152,12 @@ export default function ChatSessionPage() {
   const processPendingEmbeddings = useCallback(async (groupOverride?: any) => {
     // Check if already processing (prevent duplicate calls)
     if (isProcessingEmbeddings.current) {
-      console.log('[ChatSession] Already processing embeddings, skipping duplicate call');
+      console.debug('[ChatSession] Already processing embeddings, skipping duplicate call');
       return;
     }
 
     if (!managers || !isInitialized) {
-      console.log('[ChatSession] SDK not initialized, skipping embedding processing');
+      console.debug('[ChatSession] SDK not initialized, skipping embedding processing');
       return;
     }
 
@@ -165,7 +165,7 @@ export default function ChatSessionPage() {
     const group = groupOverride || selectedGroup;
 
     if (!group || !group.linkedDatabases || group.linkedDatabases.length === 0) {
-      console.log('[ChatSession] No linked databases, skipping embedding processing');
+      console.debug('[ChatSession] No linked databases, skipping embedding processing');
       return;
     }
 
@@ -173,22 +173,22 @@ export default function ChatSessionPage() {
     isProcessingEmbeddings.current = true;
 
     try {
-      console.log('[ChatSession] Checking for pending documents in linked databases...');
-      console.log('[ChatSession] Raw linkedDatabases array:', JSON.stringify(group.linkedDatabases));
+      console.debug('[ChatSession] Checking for pending documents in linked databases...');
+      console.debug('[ChatSession] Raw linkedDatabases array:', JSON.stringify(group.linkedDatabases));
 
       // Filter out invalid database names
       const validDatabases = group.linkedDatabases.filter((db: any) => {
         const isValid = db && typeof db === 'string' && db !== 'undefined' && db !== 'null';
-        console.log(`[ChatSession] Database "${db}" - type: ${typeof db}, isValid: ${isValid}`);
+        console.debug(`[ChatSession] Database "${db}" - type: ${typeof db}, isValid: ${isValid}`);
         return isValid;
       });
 
       if (validDatabases.length === 0) {
-        console.log('[ChatSession] No valid database names found in linkedDatabases:', group.linkedDatabases);
+        console.debug('[ChatSession] No valid database names found in linkedDatabases:', group.linkedDatabases);
         return;
       }
 
-      console.log('[ChatSession] Valid databases to check:', validDatabases);
+      console.debug('[ChatSession] Valid databases to check:', validDatabases);
 
       // Get all pending documents from linked databases
       const allPendingDocs: any[] = [];
@@ -197,7 +197,7 @@ export default function ChatSessionPage() {
         try {
           const pendingDocs = await managers.vectorRAGManager.getPendingDocuments(dbName);
           if (pendingDocs && pendingDocs.length > 0) {
-            console.log(`[ChatSession] Found ${pendingDocs.length} pending documents in database: ${dbName}`);
+            console.debug(`[ChatSession] Found ${pendingDocs.length} pending documents in database: ${dbName}`);
             allPendingDocs.push(...pendingDocs.map(doc => ({ ...doc, databaseName: dbName })));
           }
         } catch (error) {
@@ -206,7 +206,7 @@ export default function ChatSessionPage() {
       }
 
       if (allPendingDocs.length === 0) {
-        console.log('[ChatSession] No pending documents found, checking for ready documents to upload...');
+        console.debug('[ChatSession] No pending documents found, checking for ready documents to upload...');
 
         // Even if no pending documents, we need to upload existing "ready" vectors to THIS session
         // so they're available for search
@@ -222,9 +222,9 @@ export default function ChatSessionPage() {
             try {
               const allVectors = await managers.vectorRAGManager.listVectors(dbName);
               if (allVectors.length > 0) {
-                console.log(`[ChatSession] 📤 Uploading ${allVectors.length} existing vectors from "${dbName}" to session...`);
+                console.debug(`[ChatSession] 📤 Uploading ${allVectors.length} existing vectors from "${dbName}" to session...`);
                 await managers.sessionManager.uploadVectors(blockchainSessionId, allVectors);
-                console.log(`[ChatSession] ✅ Uploaded ${allVectors.length} vectors from "${dbName}"`);
+                console.debug(`[ChatSession] ✅ Uploaded ${allVectors.length} vectors from "${dbName}"`);
               }
             } catch (dbError) {
               console.warn(`[ChatSession] Failed to upload vectors from "${dbName}":`, dbError);
@@ -237,7 +237,7 @@ export default function ChatSessionPage() {
         return;
       }
 
-      console.log(`[ChatSession] Found ${allPendingDocs.length} total pending documents, starting background processing...`);
+      console.debug(`[ChatSession] Found ${allPendingDocs.length} total pending documents, starting background processing...`);
       setDocumentQueue(allPendingDocs.map(doc => doc.fileName || doc.name));
       setQueuePosition(1);
 
@@ -258,7 +258,7 @@ export default function ChatSessionPage() {
           });
 
           // Download document from S5
-          console.log(`[ChatSession] Downloading document from S5: ${doc.s5Cid}`);
+          console.debug(`[ChatSession] Downloading document from S5: ${doc.s5Cid}`);
           const s5Client = managers.storageManager.s5Client;
           const fileContent = await downloadFromS5(s5Client, doc.s5Cid);
 
@@ -271,7 +271,7 @@ export default function ChatSessionPage() {
             ? fileContent
             : new TextDecoder().decode(fileContent);
 
-          console.log(`[ChatSession] Generating embeddings for: ${doc.fileName || doc.name} (${text.length} chars)`);
+          console.debug(`[ChatSession] Generating embeddings for: ${doc.fileName || doc.name} (${text.length} chars)`);
 
           // Get host endpoint from session metadata
           const hostEndpoint = sessionMetadata?.hostEndpoint;
@@ -288,21 +288,21 @@ export default function ChatSessionPage() {
             84532 // Base Sepolia
           );
 
-          console.log(`[ChatSession] ✅ Generated ${vectors.length} vectors for: ${doc.fileName || doc.name}`);
+          console.debug(`[ChatSession] ✅ Generated ${vectors.length} vectors for: ${doc.fileName || doc.name}`);
 
           // Store vectors in S5VectorStore (for persistence)
-          console.log(`[ChatSession] Storing vectors in database: ${doc.databaseName}`);
+          console.debug(`[ChatSession] Storing vectors in database: ${doc.databaseName}`);
           await managers.vectorRAGManager.addVectorsToDatabase(doc.databaseName, vectors);
-          console.log(`[ChatSession] ✅ Stored ${vectors.length} vectors in S5`);
+          console.debug(`[ChatSession] ✅ Stored ${vectors.length} vectors in S5`);
 
           // Upload vectors to host session (for search)
           const blockchainSessionId = sessionMetadata?.blockchainSessionId;
           if (!blockchainSessionId) {
             throw new Error('No blockchain session ID available for vector upload');
           }
-          console.log(`[ChatSession] Uploading ${vectors.length} vectors to host session (blockchain ID: ${blockchainSessionId})...`);
+          console.debug(`[ChatSession] Uploading ${vectors.length} vectors to host session (blockchain ID: ${blockchainSessionId})...`);
           await managers.sessionManager.uploadVectors(blockchainSessionId, vectors);
-          console.log(`[ChatSession] ✅ Uploaded ${vectors.length} vectors to host`);
+          console.debug(`[ChatSession] ✅ Uploaded ${vectors.length} vectors to host`);
 
           // Update document status to 'ready'
           await managers.vectorRAGManager.updateDocumentStatus(doc.id, 'ready', {
@@ -324,7 +324,7 @@ export default function ChatSessionPage() {
             error: null
           });
 
-          console.log(`[ChatSession] ✅ Embedding complete for: ${doc.fileName || doc.name}`);
+          console.debug(`[ChatSession] ✅ Embedding complete for: ${doc.fileName || doc.name}`);
         } catch (error) {
           console.error(`[ChatSession] ❌ Failed to process document: ${doc.fileName || doc.name}`, error);
 
@@ -343,7 +343,7 @@ export default function ChatSessionPage() {
         }
       }
 
-      console.log('[ChatSession] ✅ All pending embeddings processed');
+      console.debug('[ChatSession] ✅ All pending embeddings processed');
     } catch (error) {
       console.error('[ChatSession] ❌ Background embedding processing failed:', error);
     } finally {
@@ -358,26 +358,26 @@ export default function ChatSessionPage() {
     if (isSpecialRoute) return;
 
     try {
-      console.log('[ChatSession] 🔄 Loading messages from storage...', {
+      console.debug('[ChatSession] 🔄 Loading messages from storage...', {
         groupId,
         sessionId,
         timestamp: new Date().toISOString(),
         stackTrace: new Error().stack?.split('\n')[2] // Log where this was called from
       });
       const session = await getChatSession(groupId, sessionId);
-      console.log('[ChatSession] 🔍 getChatSession result:', {
+      console.debug('[ChatSession] 🔍 getChatSession result:', {
         found: !!session,
         hasMessages: !!session?.messages,
         messageCount: session?.messages?.length || 0
       });
       if (session) {
-        console.log('[ChatSession] 📦 Loaded messages from storage:', {
+        console.debug('[ChatSession] 📦 Loaded messages from storage:', {
           count: session.messages?.length || 0
         });
 
         // Log each message in detail with JSON.stringify
         session.messages?.forEach((m, idx) => {
-          console.log(`MESSAGE ${idx} [LOADED]:`, JSON.stringify({
+          console.debug(`MESSAGE ${idx} [LOADED]:`, JSON.stringify({
             role: m.role,
             contentLength: m.content.length,
             contentPreview: m.content.substring(0, 100),
@@ -391,20 +391,20 @@ export default function ChatSessionPage() {
           }, null, 2));
         });
 
-        console.log('[ChatSession] 📌 About to call setMessages with', session.messages?.length || 0, 'messages');
+        console.debug('[ChatSession] 📌 About to call setMessages with', session.messages?.length || 0, 'messages');
         setMessages(session.messages || []);
-        console.log('[ChatSession] ✅ setMessages completed');
+        console.debug('[ChatSession] ✅ setMessages completed');
 
         // --- Phase 4: Detect session type from metadata ---
         const metadata = (session as any).metadata;
-        console.log('[ChatSession] 🔍 Session metadata loaded:', {
+        console.debug('[ChatSession] 🔍 Session metadata loaded:', {
           hasMetadata: !!metadata,
           sessionType: metadata?.sessionType,
           blockchainSessionId: metadata?.blockchainSessionId,
           fullMetadata: metadata
         });
         if (metadata && metadata.sessionType === 'ai') {
-          console.log('[ChatSession] ✅ AI session detected:', {
+          console.debug('[ChatSession] ✅ AI session detected:', {
             jobId: metadata.blockchainSessionId,
             hostAddress: metadata.hostAddress,
             model: metadata.model,
@@ -417,7 +417,7 @@ export default function ChatSessionPage() {
             try {
               const blockchainSessionId = BigInt(metadata.blockchainSessionId);
               const sessionState = managers.sessionManager.getSession(blockchainSessionId.toString());
-              console.log('[ChatSession] 🔍 Blockchain session state:', {
+              console.debug('[ChatSession] 🔍 Blockchain session state:', {
                 exists: !!sessionState,
                 status: sessionState?.status
               });
@@ -426,7 +426,7 @@ export default function ChatSessionPage() {
               // 1. Not in memory (undefined) - can't send messages
               // 2. Status is 'ended', 'completed', or 'failed'
               if (!sessionState || sessionState.status === 'ended' || sessionState.status === 'completed' || sessionState.status === 'failed') {
-                console.log('[ChatSession] 🔴 Session already ended - updating metadata...');
+                console.debug('[ChatSession] 🔴 Session already ended - updating metadata...');
                 const updatedMetadata = {
                   ...metadata,
                   blockchainStatus: 'ended' as const,
@@ -449,17 +449,17 @@ export default function ChatSessionPage() {
                     managers.authManager!.getUserAddress()!,
                     { chatSessionsData: group.chatSessionsData }
                   );
-                  console.log('[ChatSession] ✅ Metadata updated to "ended"');
+                  console.debug('[ChatSession] ✅ Metadata updated to "ended"');
                 }
 
                 setSessionMetadata(updatedMetadata);
                 (window as any).__activeSessionMetadata = updatedMetadata;
-                console.log('[ChatSession] 💾 Updated window.__activeSessionMetadata with ended status');
+                console.debug('[ChatSession] 💾 Updated window.__activeSessionMetadata with ended status');
               } else {
                 setSessionMetadata(metadata);
                 // CRITICAL: Store in window for cleanup (survives navigation)
                 (window as any).__activeSessionMetadata = metadata;
-                console.log('[ChatSession] 💾 Stored in window.__activeSessionMetadata:', {
+                console.debug('[ChatSession] 💾 Stored in window.__activeSessionMetadata:', {
                   blockchainSessionId: metadata.blockchainSessionId,
                   hasWindow: !!window,
                   stored: !!(window as any).__activeSessionMetadata
@@ -475,14 +475,14 @@ export default function ChatSessionPage() {
             setSessionMetadata(metadata);
             // CRITICAL: Store in window for cleanup (survives navigation)
             (window as any).__activeSessionMetadata = metadata;
-            console.log('[ChatSession] 💾 Stored in window.__activeSessionMetadata:', {
+            console.debug('[ChatSession] 💾 Stored in window.__activeSessionMetadata:', {
               blockchainSessionId: metadata.blockchainSessionId,
               hasWindow: !!window,
               stored: !!(window as any).__activeSessionMetadata
             });
           }
         } else {
-          console.log('[ChatSession] Mock session detected');
+          console.debug('[ChatSession] Mock session detected');
           setSessionType('mock');
           setSessionMetadata(null);
           (window as any).__activeSessionMetadata = null;
@@ -490,7 +490,7 @@ export default function ChatSessionPage() {
       } else {
         // Session not found in storage - could be timing issue with S5 save
         // Don't clear messages if we already have some (preserve optimistic updates)
-        console.log('[ChatSession] ⚠️  Session not found in storage, preserving any existing messages');
+        console.debug('[ChatSession] ⚠️  Session not found in storage, preserving any existing messages');
         // Note: We don't call setMessages([]) here to preserve optimistic updates
         // The session might still be saving to S5 in the background
       }
@@ -503,7 +503,7 @@ export default function ChatSessionPage() {
   // Load session data on mount and when route changes
   // Note: Only reload when groupId/sessionId change, NOT when function refs change
   useEffect(() => {
-    console.log('[ChatSession] useEffect triggered:', {
+    console.debug('[ChatSession] useEffect triggered:', {
       isConnected,
       isInitialized,
       isSpecialRoute,
@@ -512,13 +512,13 @@ export default function ChatSessionPage() {
     });
     if (!isConnected) return;
     if (!isInitialized) {
-      console.log('[ChatSession] ⏳ Waiting for SDK initialization...');
+      console.debug('[ChatSession] ⏳ Waiting for SDK initialization...');
       return;
     }
     if (isSpecialRoute) return; // Skip for special routes
 
     const loadData = async () => {
-      console.log('[ChatSession] 📥 Loading data for session...');
+      console.debug('[ChatSession] 📥 Loading data for session...');
       const freshGroup = await selectGroup(groupId);
       await loadMessages();
 
@@ -536,13 +536,13 @@ export default function ChatSessionPage() {
 
   // Debug: Log messages state whenever it changes
   useEffect(() => {
-    console.log('[ChatSession] 📋 Messages state changed:', {
+    console.debug('[ChatSession] 📋 Messages state changed:', {
       count: messages.length,
       timestamp: new Date().toISOString()
     });
     messages.forEach((m, idx) => {
       if (m.role === 'user') {
-        console.log(`[ChatSession] MESSAGE ${idx} [STATE]:`, {
+        console.debug(`[ChatSession] MESSAGE ${idx} [STATE]:`, {
           role: m.role,
           hasDisplayContent: !!(m as any).displayContent,
           displayContent: (m as any).displayContent,
@@ -588,7 +588,7 @@ export default function ChatSessionPage() {
                   const rawLastMsg = lastMsg?.content || '';
                   const cleanLastMsg = extractDisplayText(rawLastMsg).substring(0, 100).trim();
 
-                  console.log(`[SessionLoad] ${sessionId.substring(0, 15)}... - Title: "${cleanTitle.substring(0, 30)}..." - Messages: ${chatSession.messages.length}`);
+                  console.debug(`[SessionLoad] ${sessionId.substring(0, 15)}... - Title: "${cleanTitle.substring(0, 30)}..." - Messages: ${chatSession.messages.length}`);
 
                   return {
                     id: sessionId,
@@ -617,7 +617,7 @@ export default function ChatSessionPage() {
   // Re-run embedding processing when linked databases change
   useEffect(() => {
     if (selectedGroup?.linkedDatabases && selectedGroup.linkedDatabases.length > 0) {
-      console.log('[ChatSession] 🔄 Linked databases detected, processing embeddings...');
+      console.debug('[ChatSession] 🔄 Linked databases detected, processing embeddings...');
       processPendingEmbeddings().catch((error) => {
         console.error('[ChatSession] Embedding processing failed:', error);
       });
@@ -632,7 +632,7 @@ export default function ChatSessionPage() {
 
   // Cleanup: Close WebSocket when navigating away from page
   useEffect(() => {
-    console.log('[ChatSession] 🔍 Cleanup effect mounted', {
+    console.debug('[ChatSession] 🔍 Cleanup effect mounted', {
       hasSessionMetadata: !!sessionMetadata,
       blockchainSessionId: sessionMetadata?.blockchainSessionId,
       hasManagers: !!managers,
@@ -648,7 +648,7 @@ export default function ChatSessionPage() {
       const metadata = currentMetadata || windowMetadata;
       const managers = currentManagers;
 
-      console.log('[ChatSession] 🔍 Cleanup function called on unmount', {
+      console.debug('[ChatSession] 🔍 Cleanup function called on unmount', {
         hasCurrentMetadata: !!currentMetadata,
         hasWindowMetadata: !!windowMetadata,
         hasFinalMetadata: !!metadata,
@@ -660,7 +660,7 @@ export default function ChatSessionPage() {
 
       if (metadata?.blockchainSessionId && managers?.sessionManager) {
         const blockchainSessionId = BigInt(metadata.blockchainSessionId);
-        console.log('[ChatSession] 🧹 Cleanup: Ending WebSocket session on unmount', {
+        console.debug('[ChatSession] 🧹 Cleanup: Ending WebSocket session on unmount', {
           blockchainSessionId: blockchainSessionId.toString()
         });
         managers.sessionManager.endSession(blockchainSessionId).catch(err => {
@@ -669,7 +669,7 @@ export default function ChatSessionPage() {
         // Clear window storage after cleanup
         (window as any).__activeSessionMetadata = null;
       } else {
-        console.log('[ChatSession] ❌ Cleanup skipped - missing required data', {
+        console.debug('[ChatSession] ❌ Cleanup skipped - missing required data', {
           missingSessionMetadata: !metadata,
           missingBlockchainSessionId: !metadata?.blockchainSessionId,
           missingManagers: !managers,
@@ -693,7 +693,7 @@ export default function ChatSessionPage() {
       let fileContext = '';
       let userMessageContent = message;
       if (files && files.length > 0) {
-        console.log(`[ChatSession] 📎 Processing ${files.length} attached file(s)...`);
+        console.debug(`[ChatSession] 📎 Processing ${files.length} attached file(s)...`);
 
         let filesProcessed = 0;
         for (const file of files) {
@@ -741,7 +741,7 @@ export default function ChatSessionPage() {
 
             // Read file content
             const content = await file.text();
-            console.log(`[ChatSession] ✅ Read file: ${file.name} (${content.length} chars)`);
+            console.debug(`[ChatSession] ✅ Read file: ${file.name} (${content.length} chars)`);
 
             // Append to file context
             fileContext += `\n\n=== FILE: ${file.name} ===\n${content}\n=== END OF FILE ===\n`;
@@ -771,7 +771,7 @@ export default function ChatSessionPage() {
         });
 
         if (fileContext) {
-          console.log(`[ChatSession] ✅ File context prepared (${fileContext.length} chars)`);
+          console.debug(`[ChatSession] ✅ File context prepared (${fileContext.length} chars)`);
           // Include file content in user message so it's available for follow-up questions
           userMessageContent = `${fileContext}\n\nUser question: ${message}`;
         }
@@ -794,14 +794,14 @@ export default function ChatSessionPage() {
         timestamp: Date.now(),
       };
 
-      console.log('[ChatSession] 📝 Adding user message to state:', {
+      console.debug('[ChatSession] 📝 Adding user message to state:', {
         currentMessageCount: messages.length,
         newMessage: { role: userMessage.role, content: userMessage.content.substring(0, 100) }
       });
       setMessages(prev => {
-        console.log('[ChatSession] 📝 User message - prev state:', prev.length);
+        console.debug('[ChatSession] 📝 User message - prev state:', prev.length);
         const newState = [...prev, userMessage];
-        console.log('[ChatSession] 📝 User message - new state:', newState.length);
+        console.debug('[ChatSession] 📝 User message - new state:', newState.length);
         return newState;
       });
 
@@ -814,11 +814,11 @@ export default function ChatSessionPage() {
         timestamp: aiMessageId,
       };
 
-      console.log('[ChatSession] 📝 Adding AI placeholder to state');
+      console.debug('[ChatSession] 📝 Adding AI placeholder to state');
       setMessages(prev => {
-        console.log('[ChatSession] 📝 AI placeholder - prev state:', prev.length);
+        console.debug('[ChatSession] 📝 AI placeholder - prev state:', prev.length);
         const newState = [...prev, aiMessagePlaceholder];
-        console.log('[ChatSession] 📝 AI placeholder - new state:', newState.length);
+        console.debug('[ChatSession] 📝 AI placeholder - new state:', newState.length);
         return newState;
       });
 
@@ -828,12 +828,12 @@ export default function ChatSessionPage() {
       // CRITICAL: Store metadata immediately for cleanup (don't wait for S5 reload)
       setSessionMetadata(activeMetadata);
       (window as any).__activeSessionMetadata = activeMetadata;
-      console.log('[ChatSession] ✅ Stored session metadata for cleanup:', {
+      console.debug('[ChatSession] ✅ Stored session metadata for cleanup:', {
         blockchainSessionId: activeMetadata.blockchainSessionId,
         sessionType: activeMetadata.sessionType
       });
 
-      console.log('[ChatSession] 🚀 Sending AI message via WebSocket...', {
+      console.debug('[ChatSession] 🚀 Sending AI message via WebSocket...', {
         sessionId: blockchainSessionId.toString(),
         message: message.substring(0, 50) + '...',
       });
@@ -869,7 +869,7 @@ export default function ChatSessionPage() {
         fullPrompt = userMessageContent;
       }
 
-      console.log('[ChatSession] 📜 Conversation context:', {
+      console.debug('[ChatSession] 📜 Conversation context:', {
         previousMessageCount: previousExchanges.length,
         fullPromptLength: fullPrompt.length,
         fullPromptPreview: fullPrompt.substring(0, 200) + '...'
@@ -879,7 +879,7 @@ export default function ChatSessionPage() {
       let ragContext = '';
       if (selectedGroup?.linkedDatabases && selectedGroup.linkedDatabases.length > 0) {
         try {
-          console.log('[ChatSession] 🔍 Searching linked databases for RAG context...');
+          console.debug('[ChatSession] 🔍 Searching linked databases for RAG context...');
           const allRelevantChunks: Array<{ content: string; metadata: any; score: number; database: string }> = [];
 
           // Generate query embedding via host endpoint
@@ -888,10 +888,10 @@ export default function ChatSessionPage() {
             console.warn('[ChatSession] ⚠️ Host endpoint not available, skipping RAG search');
           } else {
             const { generateEmbeddings } = await import('@/lib/embedding-utils');
-            console.log(`[ChatSession] Generating query embedding for: "${message.substring(0, 50)}..."`);
+            console.debug(`[ChatSession] Generating query embedding for: "${message.substring(0, 50)}..."`);
             const embedResult = await generateEmbeddings(hostEndpoint, [message], 84532);
             const queryVector = embedResult.embeddings[0].embedding;
-            console.log(`[ChatSession] ✅ Query embedding generated (${queryVector.length} dimensions)`);
+            console.debug(`[ChatSession] ✅ Query embedding generated (${queryVector.length} dimensions)`);
 
             // Search host session for relevant vectors (host-side search, not client-side!)
             try {
@@ -902,7 +902,7 @@ export default function ChatSessionPage() {
                 throw new Error('No blockchain session ID available');
               }
 
-              console.log(`[ChatSession] Searching host session for relevant vectors (blockchain session: ${blockchainSessionId})...`);
+              console.debug(`[ChatSession] Searching host session for relevant vectors (blockchain session: ${blockchainSessionId})...`);
               const searchResults = await managers!.sessionManager.searchVectors(
                 blockchainSessionId,  // Use blockchain session ID, not S5 session ID!
                 queryVector,
@@ -911,7 +911,7 @@ export default function ChatSessionPage() {
               );
 
               if (searchResults && searchResults.length > 0) {
-                console.log(`[ChatSession] Found ${searchResults.length} relevant chunks from host`);
+                console.debug(`[ChatSession] Found ${searchResults.length} relevant chunks from host`);
                 searchResults.forEach(result => {
                   allRelevantChunks.push({
                     content: result.text || result.content || result.metadata?.text || 'No text found',
@@ -921,7 +921,7 @@ export default function ChatSessionPage() {
                   });
                 });
               } else {
-                console.log(`[ChatSession] No relevant chunks found (documents may not be uploaded yet)`);
+                console.debug(`[ChatSession] No relevant chunks found (documents may not be uploaded yet)`);
               }
             } catch (searchError) {
               console.warn(`[ChatSession] Host search failed:`, searchError);
@@ -933,7 +933,7 @@ export default function ChatSessionPage() {
           const topChunks = allRelevantChunks.slice(0, 5);
 
           if (topChunks.length > 0) {
-            console.log(`[ChatSession] ✅ Using ${topChunks.length} relevant chunks as RAG context`);
+            console.debug(`[ChatSession] ✅ Using ${topChunks.length} relevant chunks as RAG context`);
 
             // Build RAG context string
             ragContext = '\n\n--- Relevant Information from Knowledge Base ---\n';
@@ -960,13 +960,13 @@ export default function ChatSessionPage() {
               fullPrompt = ragContext + message;
             }
 
-            console.log('[ChatSession] 📝 Enhanced prompt with RAG context:', {
+            console.debug('[ChatSession] 📝 Enhanced prompt with RAG context:', {
               originalLength: message.length,
               contextLength: ragContext.length,
               enhancedLength: fullPrompt.length
             });
           } else {
-            console.log('[ChatSession] No relevant chunks found in linked databases');
+            console.debug('[ChatSession] No relevant chunks found in linked databases');
           }
         } catch (ragError) {
           console.error('[ChatSession] Failed to retrieve RAG context:', ragError);
@@ -1011,11 +1011,11 @@ export default function ChatSessionPage() {
 
       const response = await sendPromptWithTimeout() as string;
 
-      console.log('[ChatSession] ✅ AI response complete:', response.substring(0, 100) + '...');
+      console.debug('[ChatSession] ✅ AI response complete:', response.substring(0, 100) + '...');
 
       // Check if response is an error from the host
       if (response.includes('Error:') && (response.includes('NoKvCacheSlot') || response.includes('Decode failed'))) {
-        console.log('[ChatSession] 🔴 Host returned error in response - treating as exception');
+        console.debug('[ChatSession] 🔴 Host returned error in response - treating as exception');
 
         // Remove placeholder message
         setMessages(prev => prev.filter(msg => msg.timestamp !== aiMessageId));
@@ -1039,14 +1039,14 @@ export default function ChatSessionPage() {
         timestamp: aiMessageId,
       };
 
-      console.log('[ChatSession] 📝 Updating AI placeholder with final response');
+      console.debug('[ChatSession] 📝 Updating AI placeholder with final response');
       setMessages(prev => {
-        console.log('[ChatSession] 📝 Final update - prev state:', prev.length, prev.map(m => m.role));
+        console.debug('[ChatSession] 📝 Final update - prev state:', prev.length, prev.map(m => m.role));
         // CRITICAL: Also check role to prevent replacing user messages if timestamps collide
         const newState = prev.map(msg =>
           msg.timestamp === aiMessageId && msg.role === 'assistant' ? finalAIMessage : msg
         );
-        console.log('[ChatSession] 📝 Final update - new state:', newState.length, newState.map(m => m.role));
+        console.debug('[ChatSession] 📝 Final update - new state:', newState.length, newState.map(m => m.role));
         return newState;
       });
 
@@ -1055,8 +1055,8 @@ export default function ChatSessionPage() {
       trackTokensAndCost(response); // AI response tokens
 
       // Save messages to session group storage
-      console.log('[ChatSession] 💾 Saving messages to S5...');
-      console.log('USER MESSAGE:', JSON.stringify({
+      console.debug('[ChatSession] 💾 Saving messages to S5...');
+      console.debug('USER MESSAGE:', JSON.stringify({
         role: userMessage.role,
         contentLength: userMessage.content.length,
         contentPreview: userMessage.content.substring(0, 100),
@@ -1065,7 +1065,7 @@ export default function ChatSessionPage() {
         attachments: userMessage.attachments,
         timestamp: userMessage.timestamp
       }, null, 2));
-      console.log('AI MESSAGE:', JSON.stringify({
+      console.debug('AI MESSAGE:', JSON.stringify({
         role: finalAIMessage.role,
         contentPreview: finalAIMessage.content.substring(0, 100)
       }, null, 2));
@@ -1075,7 +1075,7 @@ export default function ChatSessionPage() {
 
       // Note: Don't call selectGroup here - it triggers useEffect which reloads messages
       // Messages are already in state via optimistic updates, and SDK saves handle persistence
-      console.log('[ChatSession] ✅ Messages saved to storage');
+      console.debug('[ChatSession] ✅ Messages saved to storage');
 
       return response;
     } catch (error: any) {
@@ -1086,7 +1086,7 @@ export default function ChatSessionPage() {
 
       // Check for NoKvCacheSlot error - host resource limitation
       if (error.message && (error.message.includes('NoKvCacheSlot') || error.message.includes('Decode failed'))) {
-        console.log('[ChatSession] 🔴 Host KV cache full - adding helpful error message');
+        console.debug('[ChatSession] 🔴 Host KV cache full - adding helpful error message');
 
         // Add error message as system message to help user understand what happened
         const errorMessage: ChatMessage = {
@@ -1102,7 +1102,7 @@ export default function ChatSessionPage() {
 
       // Check if session ended error - update metadata and trigger UI update
       if (error.message && error.message.includes('Session is ended')) {
-        console.log('[ChatSession] 🔴 Session ended - updating metadata...');
+        console.debug('[ChatSession] 🔴 Session ended - updating metadata...');
 
         // Update session metadata to 'ended' status
         try {
@@ -1136,7 +1136,7 @@ export default function ChatSessionPage() {
                   managers.authManager.getUserAddress()!,
                   { chatSessionsData: group.chatSessionsData }
                 );
-                console.log('[ChatSession] ✅ Session status updated to "ended"');
+                console.debug('[ChatSession] ✅ Session status updated to "ended"');
 
                 // Update local state to trigger Continue Chat UI (no page reload needed)
                 setSessionMetadata(updatedMetadata);
@@ -1172,7 +1172,7 @@ export default function ChatSessionPage() {
     try {
       const blockchainSessionId = BigInt(sessionMetadata.blockchainSessionId);
 
-      console.log('[ChatSession] 🛑 Ending session...', {
+      console.debug('[ChatSession] 🛑 Ending session...', {
         sessionId: blockchainSessionId.toString(),
         totalTokens,
         totalCost: totalCost.toFixed(4),
@@ -1187,7 +1187,7 @@ export default function ChatSessionPage() {
       setMessages(prev => [...prev, endingMsg]);
 
       // Step 1: Save conversation to S5 (already done via sdkAddMessage, but ensure it's saved)
-      console.log('[ChatSession] 💾 Conversation already saved to S5 via session group');
+      console.debug('[ChatSession] 💾 Conversation already saved to S5 via session group');
 
       // Step 2: Display final payment breakdown
       const hostPayment = totalCost * 0.9; // 90% to host
@@ -1205,20 +1205,20 @@ export default function ChatSessionPage() {
       setMessages(prev => [...prev, summaryMsg]);
 
       // Step 3: End the session (close WebSocket and update status in S5)
-      console.log('[ChatSession.handleEndSession] 🔴 About to call endAISession...');
-      console.log('[ChatSession.handleEndSession] 📊 Current messages count BEFORE endAISession:', messages.length);
+      console.debug('[ChatSession.handleEndSession] 🔴 About to call endAISession...');
+      console.debug('[ChatSession.handleEndSession] 📊 Current messages count BEFORE endAISession:', messages.length);
       await endAISession(groupId, sessionId);
-      console.log('[ChatSession.handleEndSession] ✅ endAISession completed');
-      console.log('[ChatSession.handleEndSession] 📊 Current messages count AFTER endAISession:', messages.length);
+      console.debug('[ChatSession.handleEndSession] ✅ endAISession completed');
+      console.debug('[ChatSession.handleEndSession] 📊 Current messages count AFTER endAISession:', messages.length);
 
       const successMsg: ChatMessage = {
         role: 'system',
         content: '✅ Session ended successfully\n🔐 WebSocket disconnected\n📝 Status updated to "ended"\n⏳ Host will finalize payment on blockchain',
         timestamp: Date.now(),
       };
-      console.log('[ChatSession.handleEndSession] 📌 Adding success message to state');
+      console.debug('[ChatSession.handleEndSession] 📌 Adding success message to state');
       setMessages(prev => {
-        console.log('[ChatSession.handleEndSession] 📊 Previous messages count:', prev.length);
+        console.debug('[ChatSession.handleEndSession] 📊 Previous messages count:', prev.length);
         return [...prev, successMsg];
       });
 
@@ -1232,7 +1232,7 @@ export default function ChatSessionPage() {
       setTotalCost(0);
       setLastCheckpointTokens(0);
 
-      console.log('[ChatSession] ✅ Session ended and cleaned up');
+      console.debug('[ChatSession] ✅ Session ended and cleaned up');
     } catch (error: any) {
       console.error('[ChatSession] ❌ Failed to end session:', error);
 
@@ -1257,7 +1257,7 @@ export default function ChatSessionPage() {
       const session = await getChatSession(groupId, sessionId);
       const isAISession = session?.metadata?.sessionType === 'ai';
 
-      console.log('[ChatSession] 🔍 Session type check:', {
+      console.debug('[ChatSession] 🔍 Session type check:', {
         stateValue: sessionType,
         metadataValue: session?.metadata?.sessionType,
         sessionFound: !!session,
@@ -1266,17 +1266,17 @@ export default function ChatSessionPage() {
       });
 
       if (isAISession) {
-        console.log('[ChatSession] Routing to AI message handler');
+        console.debug('[ChatSession] Routing to AI message handler');
         // Use session metadata if available, otherwise fall back to state
         const metadata = session?.metadata || sessionMetadata;
-        console.log('[ChatSession] Using metadata:', {
+        console.debug('[ChatSession] Using metadata:', {
           fromSession: !!session?.metadata,
           fromState: !session?.metadata && !!sessionMetadata,
           hasBlockchainSessionId: !!metadata?.blockchainSessionId
         });
         await handleAIMessage(message, files, metadata);
       } else {
-        console.log('[ChatSession] Routing to mock message handler');
+        console.debug('[ChatSession] Routing to mock message handler');
 
         // Build message content with file info
         let messageContent = message;
@@ -1299,7 +1299,7 @@ export default function ChatSessionPage() {
         // TODO: Upload files to session-specific database via SDK
         // For now, just log them
         if (files && files.length > 0) {
-          console.log('[Mock] Uploading files to session database:', files.map(f => f.name));
+          console.debug('[Mock] Uploading files to session database:', files.map(f => f.name));
         }
 
         // Send message via SDK - this will automatically generate AI response in mock SDK
@@ -1312,7 +1312,7 @@ export default function ChatSessionPage() {
         await loadMessages();
 
         // Note: Don't call selectGroup - it triggers useEffect which causes extra reloads
-        console.log('[ChatSession] ✅ Mock message saved and AI response loaded');
+        console.debug('[ChatSession] ✅ Mock message saved and AI response loaded');
       }
     } catch (error: any) {
       console.error('Failed to send message:', error);
@@ -1354,11 +1354,11 @@ export default function ChatSessionPage() {
 
     try {
       setLoading(true);
-      console.log('[ChatSession] 🔄 Continuing chat with same host/model...');
+      console.debug('[ChatSession] 🔄 Continuing chat with same host/model...');
 
       // Save current conversation history to copy to new session
       const conversationHistory = [...messages];
-      console.log('[ChatSession] 💾 Preserving conversation history:', {
+      console.debug('[ChatSession] 💾 Preserving conversation history:', {
         messageCount: conversationHistory.length
       });
 
@@ -1370,7 +1370,7 @@ export default function ChatSessionPage() {
         pricing: sessionMetadata.pricing,
       };
 
-      console.log('[ChatSession] 🔍 Using host config:', {
+      console.debug('[ChatSession] 🔍 Using host config:', {
         address: hostConfig.address,
         endpoint: hostConfig.endpoint,
         model: hostConfig.models[0]
@@ -1380,14 +1380,14 @@ export default function ChatSessionPage() {
       const depositAmount = '10.0'; // Default deposit amount (could be configurable)
       const newSession = await startAIChat(groupId, hostConfig, depositAmount);
 
-      console.log('[ChatSession] ✅ New session created:', newSession.sessionId);
+      console.debug('[ChatSession] ✅ New session created:', newSession.sessionId);
 
       // Copy conversation history to new session
-      console.log('[ChatSession] 📋 Copying conversation history to new session...');
+      console.debug('[ChatSession] 📋 Copying conversation history to new session...');
       for (const message of conversationHistory) {
         await sdkAddMessage(groupId, newSession.sessionId, message);
       }
-      console.log('[ChatSession] ✅ Conversation history copied');
+      console.debug('[ChatSession] ✅ Conversation history copied');
 
       // Navigate to new session (conversation history will now be loaded)
       router.push(`/session-groups/${groupId}/${newSession.sessionId}`);

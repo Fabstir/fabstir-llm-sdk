@@ -58,7 +58,6 @@ export class WebSocketClient {
         this.ws = new WebSocket(this.url);
 
         this.ws.onopen = () => {
-          console.log(`WebSocket connected to ${this.url}`);
           this.reconnectAttempts = 0;
           this.isReconnecting = false;
           
@@ -73,9 +72,7 @@ export class WebSocketClient {
 
         this.ws.onmessage = (event) => {
           try {
-            console.log('WebSocket received raw message:', event.data);
             const data = JSON.parse(event.data);
-            console.log('WebSocket parsed message:', data);
             this.handleMessage(data);
           } catch (error) {
             console.error('Failed to parse WebSocket message:', error, 'Raw data:', event.data);
@@ -94,7 +91,6 @@ export class WebSocketClient {
         };
 
         this.ws.onclose = (event) => {
-          console.log('WebSocket disconnected', event.code, event.reason);
           this.stopHeartbeat();
           this.connectionPromise = undefined;
           
@@ -161,7 +157,6 @@ export class WebSocketClient {
 
     try {
       const messageStr = JSON.stringify(message);
-      console.log('WebSocket sending message (no response expected):', messageStr);
       this.ws!.send(messageStr);
     } catch (error: any) {
       throw new SDKError(
@@ -277,13 +272,11 @@ export class WebSocketClient {
 
         // Send message
         const messageStr = JSON.stringify(messageWithId);
-        console.log('WebSocket sending message:', messageStr);
         this.ws!.send(messageStr);
 
         // Set timeout for response (v1.3.29: capture timeout ID for cleanup)
         timeoutId = window.setTimeout(() => {
           this.messageHandlers.delete(responseHandler);
-          console.log(`WebSocket timeout for message ${messageId} - no response received within 30s`);
           reject(new SDKError('Request timeout', 'WS_TIMEOUT'));
         }, 30000);
       } catch (error: any) {
@@ -301,12 +294,10 @@ export class WebSocketClient {
    */
   onMessage(handler: (data: any) => void): () => void {
     this.messageHandlers.add(handler);
-    console.log(`[WebSocketClient] Handler registered. Total handlers: ${this.messageHandlers.size}`);
 
     // Return unsubscribe function
     return () => {
       this.messageHandlers.delete(handler);
-      console.log(`[WebSocketClient] Handler unregistered. Total handlers: ${this.messageHandlers.size}`);
     };
   }
 
@@ -328,21 +319,17 @@ export class WebSocketClient {
    * Handle incoming messages
    */
   private handleMessage(data: any): void {
-    console.log(`[WebSocketClient] handleMessage called for type: ${data.type}, Total handlers: ${this.messageHandlers.size}`);
 
     // Call all registered handlers
     let handlerIndex = 0;
     for (const handler of this.messageHandlers) {
       handlerIndex++;
-      console.log(`[WebSocketClient] Calling handler ${handlerIndex}/${this.messageHandlers.size}`);
       try {
         handler(data);
-        console.log(`[WebSocketClient] Handler ${handlerIndex} completed`);
       } catch (error) {
         console.error(`[WebSocketClient] Handler ${handlerIndex} error:`, error);
       }
     }
-    console.log(`[WebSocketClient] All handlers called for message type: ${data.type}`);
   }
 
   /**
@@ -358,7 +345,6 @@ export class WebSocketClient {
       this.options.reconnect
     ) {
       this.reconnectAttempts++;
-      console.log(`Reconnection attempt ${this.reconnectAttempts}/${this.options.maxReconnectAttempts}`);
       
       await new Promise(resolve => 
         setTimeout(resolve, this.options.reconnectInterval)

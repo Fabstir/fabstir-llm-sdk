@@ -75,7 +75,7 @@ export async function generateEmbeddings(
   // Construct endpoint URL
   const embedUrl = `${hostUrl}/v1/embed`;
 
-  console.log(`[EmbeddingUtils] Calling ${embedUrl} with ${texts.length} texts`);
+  console.debug(`[EmbeddingUtils] Calling ${embedUrl} with ${texts.length} texts`);
 
   // Make HTTP POST request
   const response = await fetch(embedUrl, {
@@ -110,7 +110,7 @@ export async function generateEmbeddings(
     }
   }
 
-  console.log(`[EmbeddingUtils] ✅ Generated ${result.embeddings.length} embeddings (${result.totalTokens} tokens)`);
+  console.debug(`[EmbeddingUtils] ✅ Generated ${result.embeddings.length} embeddings (${result.totalTokens} tokens)`);
 
   return result;
 }
@@ -157,13 +157,13 @@ export async function generateDocumentEmbeddings(
   };
 }>> {
   // Step 1: Chunk the document
-  console.log(`[EmbeddingUtils] Chunking document (${documentText.length} chars)...`);
+  console.debug(`[EmbeddingUtils] Chunking document (${documentText.length} chars)...`);
   const chunks = chunkText(documentText, 1000, 200);
-  console.log(`[EmbeddingUtils] Created ${chunks.length} chunks`);
+  console.debug(`[EmbeddingUtils] Created ${chunks.length} chunks`);
 
   // Step 2: Batch chunks into groups of 96
   const batches = batchTexts(chunks);
-  console.log(`[EmbeddingUtils] Split into ${batches.length} batches`);
+  console.debug(`[EmbeddingUtils] Split into ${batches.length} batches`);
 
   // Step 3: Generate embeddings for each batch
   const allVectors: Array<{
@@ -181,7 +181,7 @@ export async function generateDocumentEmbeddings(
 
   for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
     const batch = batches[batchIdx];
-    console.log(`[EmbeddingUtils] Processing batch ${batchIdx + 1}/${batches.length} (${batch.length} chunks)...`);
+    console.debug(`[EmbeddingUtils] Processing batch ${batchIdx + 1}/${batches.length} (${batch.length} chunks)...`);
 
     const result = await generateEmbeddings(hostUrl, batch, chainId);
 
@@ -202,7 +202,7 @@ export async function generateDocumentEmbeddings(
     }
   }
 
-  console.log(`[EmbeddingUtils] ✅ Generated ${allVectors.length} vectors total`);
+  console.debug(`[EmbeddingUtils] ✅ Generated ${allVectors.length} vectors total`);
 
   return allVectors;
 }

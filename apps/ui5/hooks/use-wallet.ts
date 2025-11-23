@@ -40,13 +40,13 @@ export function useWallet(): UseWalletReturn {
     // CHECK FOR TEST MODE FIRST
     const testWallet = typeof window !== 'undefined' ? (window as any).__TEST_WALLET__ : null;
     if (testWallet && testWallet.autoApprove) {
-      console.log('[useWallet] 🧪 Test mode detected - auto-connecting test wallet');
+      console.debug('[useWallet] 🧪 Test mode detected - auto-connecting test wallet');
       setAddress(testWallet.address);
       setIsConnected(true);
       setWalletMode('metamask'); // Use metamask mode for test wallet
 
       // Initialize SDK with test signer - create from privateKey
-      console.log(`[useWallet] 🔍 Debug: testWallet.privateKey exists? ${!!testWallet.privateKey}`);
+      console.debug(`[useWallet] 🔍 Debug: testWallet.privateKey exists? ${!!testWallet.privateKey}`);
       if (testWallet.privateKey) {
         // Create signer from private key using TestWalletAdapter
         import('../lib/wallet-adapter').then(({ TestWalletAdapter }) => {
@@ -59,25 +59,25 @@ export function useWallet(): UseWalletReturn {
           );
 
           adapter.getSigner().then((testSigner) => {
-            console.log('[useWallet] ✅ Test signer created from privateKey');
+            console.debug('[useWallet] ✅ Test signer created from privateKey');
             setSigner(testSigner);
 
             const isAlreadyInitialized = ui5SDK.isInitialized();
-            console.log(`[useWallet] 🔍 Debug: SDK already initialized? ${isAlreadyInitialized}`);
+            console.debug(`[useWallet] 🔍 Debug: SDK already initialized? ${isAlreadyInitialized}`);
 
             if (!isAlreadyInitialized) {
-              console.log('[useWallet] Auto-initializing SDK with test wallet...');
+              console.debug('[useWallet] Auto-initializing SDK with test wallet...');
               ui5SDK.initialize(testSigner)
                 .then(() => {
                   setIsInitialized(true);
-                  console.log('[useWallet] SDK initialized successfully in test mode');
+                  console.debug('[useWallet] SDK initialized successfully in test mode');
                 })
                 .catch((err) => {
                   console.error('[useWallet] Failed to initialize SDK in test mode:', err);
                   setError(err.message);
                 });
             } else {
-              console.log('[useWallet] ⚠️ SDK already initialized - skipping initialization');
+              console.debug('[useWallet] ⚠️ SDK already initialized - skipping initialization');
               setIsInitialized(true);
             }
           }).catch((err) => {
@@ -101,7 +101,7 @@ export function useWallet(): UseWalletReturn {
       const walletAddress = baseWallet.getAddress();
       const mode = baseWallet.getMode();
 
-      console.log('[useWallet] Wallet already connected:', walletAddress);
+      console.debug('[useWallet] Wallet already connected:', walletAddress);
       setAddress(walletAddress);
       setIsConnected(true);
       setWalletMode(mode);
@@ -113,10 +113,10 @@ export function useWallet(): UseWalletReturn {
 
           // Initialize SDK if not already initialized
           if (!ui5SDK.isInitialized()) {
-            console.log('[useWallet] Auto-initializing SDK...');
+            console.debug('[useWallet] Auto-initializing SDK...');
             await ui5SDK.initialize(walletSigner);
             setIsInitialized(true);
-            console.log('[useWallet] SDK initialized successfully');
+            console.debug('[useWallet] SDK initialized successfully');
           } else {
             setIsInitialized(true);
           }
@@ -133,7 +133,7 @@ export function useWallet(): UseWalletReturn {
    */
   const connect = useCallback(async () => {
     if (isConnecting || isConnected) {
-      console.log('[useWallet] Already connected or connecting');
+      console.debug('[useWallet] Already connected or connecting');
       return;
     }
 
@@ -144,18 +144,18 @@ export function useWallet(): UseWalletReturn {
       const baseWallet = getBaseWallet();
       const mode = baseWallet.getMode();
 
-      console.log(`[useWallet] Connecting wallet via ${mode}...`);
+      console.debug(`[useWallet] Connecting wallet via ${mode}...`);
 
       // Step 1: Connect wallet
       const walletAddress = await baseWallet.connect();
       setAddress(walletAddress);
       setIsConnected(true);
       setWalletMode(mode);
-      console.log('[useWallet] Wallet connected:', walletAddress);
+      console.debug('[useWallet] Wallet connected:', walletAddress);
 
       // Step 2: Try to create sub-account (only works with Base Account Kit)
       if (mode === 'base-account-kit') {
-        console.log('[useWallet] Setting up sub-account with spend permissions...');
+        console.debug('[useWallet] Setting up sub-account with spend permissions...');
         try {
           const subAccountResult = await baseWallet.ensureSubAccount({
             tokenAddress: process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!,
@@ -166,9 +166,9 @@ export function useWallet(): UseWalletReturn {
           setSubAccountAddress(subAccountResult.address);
 
           if (subAccountResult.isExisting) {
-            console.log('[useWallet] Using existing sub-account');
+            console.debug('[useWallet] Using existing sub-account');
           } else {
-            console.log('[useWallet] Created new sub-account');
+            console.debug('[useWallet] Created new sub-account');
           }
         } catch (subAccountError) {
           console.warn('[useWallet] Sub-account creation failed, continuing anyway:', subAccountError);
@@ -181,15 +181,15 @@ export function useWallet(): UseWalletReturn {
       // Step 3: Get signer
       const walletSigner = await baseWallet.getSigner();
       setSigner(walletSigner);
-      console.log('[useWallet] Got signer from wallet');
+      console.debug('[useWallet] Got signer from wallet');
 
       // Step 4: Initialize SDK
-      console.log('[useWallet] Initializing SDK with wallet signer...');
+      console.debug('[useWallet] Initializing SDK with wallet signer...');
       await ui5SDK.initialize(walletSigner);
       setIsInitialized(true);
-      console.log('[useWallet] SDK initialized successfully!');
+      console.debug('[useWallet] SDK initialized successfully!');
 
-      console.log('[useWallet] Connection complete!');
+      console.debug('[useWallet] Connection complete!');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to connect wallet';
       console.error('[useWallet] Connection error:', errorMessage);
@@ -224,7 +224,7 @@ export function useWallet(): UseWalletReturn {
       setWalletMode(null);
       setError(null);
 
-      console.log('[useWallet] Disconnected successfully');
+      console.debug('[useWallet] Disconnected successfully');
     } catch (err) {
       console.error('[useWallet] Disconnect error:', err);
     }

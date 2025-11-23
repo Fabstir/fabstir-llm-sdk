@@ -75,15 +75,15 @@ export async function depositUSDC(
     }
 
     // Transfer USDC to recipient
-    console.log(`[Payment] Transferring ${amount} USDC from faucet to ${recipientAddress}`);
+    console.debug(`[Payment] Transferring ${amount} USDC from faucet to ${recipientAddress}`);
     const tx = await usdcContract.transfer(recipientAddress, amountWei);
 
-    console.log(`[Payment] Transaction sent: ${tx.hash}`);
-    console.log(`[Payment] Waiting for 3 confirmations...`);
+    console.debug(`[Payment] Transaction sent: ${tx.hash}`);
+    console.debug(`[Payment] Waiting for 3 confirmations...`);
 
     await tx.wait(3); // Wait for 3 confirmations
 
-    console.log(`[Payment] ✅ Deposit complete`);
+    console.debug(`[Payment] ✅ Deposit complete`);
 
     return {
       success: true,
@@ -123,7 +123,7 @@ export async function approveUSDC(
     );
 
     // Check current allowance
-    console.log(`[Payment] Checking current USDC allowance...`);
+    console.debug(`[Payment] Checking current USDC allowance...`);
     const currentAllowance = await usdcContract.allowance(
       userAddress,
       jobMarketplaceAddress
@@ -131,29 +131,29 @@ export async function approveUSDC(
 
     const requiredAmount = parseUnits(amount, 6);
 
-    console.log(`[Payment] Current allowance: ${formatUnits(currentAllowance, 6)} USDC`);
-    console.log(`[Payment] Required: ${amount} USDC`);
+    console.debug(`[Payment] Current allowance: ${formatUnits(currentAllowance, 6)} USDC`);
+    console.debug(`[Payment] Required: ${amount} USDC`);
 
     if (currentAllowance >= requiredAmount) {
-      console.log(`[Payment] ✅ Already approved (sufficient allowance)`);
+      console.debug(`[Payment] ✅ Already approved (sufficient allowance)`);
       return {
         success: true,
       };
     }
 
     // Approve USDC (approve large amount for multiple sessions)
-    console.log(`[Payment] Approving ${amount} USDC for JobMarketplace...`);
+    console.debug(`[Payment] Approving ${amount} USDC for JobMarketplace...`);
     const tx = await usdcContract.approve(
       jobMarketplaceAddress,
       requiredAmount
     );
 
-    console.log(`[Payment] Approval transaction sent: ${tx.hash}`);
-    console.log(`[Payment] Waiting for 3 confirmations...`);
+    console.debug(`[Payment] Approval transaction sent: ${tx.hash}`);
+    console.debug(`[Payment] Waiting for 3 confirmations...`);
 
     await tx.wait(3);
 
-    console.log(`[Payment] ✅ USDC approved`);
+    console.debug(`[Payment] ✅ USDC approved`);
 
     return {
       success: true,

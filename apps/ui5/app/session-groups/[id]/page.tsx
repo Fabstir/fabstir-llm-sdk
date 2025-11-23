@@ -106,7 +106,7 @@ export default function SessionGroupDetailPage() {
 
     setUploading(true);
     try {
-      console.log(
+      console.debug(
         "Uploading files:",
         Array.from(files).map((f) => f.name)
       );
@@ -148,7 +148,7 @@ export default function SessionGroupDetailPage() {
     }
 
     try {
-      console.log("[Mock] Removing document from group database:", docId);
+      console.debug("[Mock] Removing document from group database:", docId);
       await removeGroupDocument(groupId, docId);
     } catch (error) {
       console.error("Failed to remove document:", error);
@@ -158,7 +158,7 @@ export default function SessionGroupDetailPage() {
   // --- Link Vector Database ---
   const handleLinkDatabase = async (databaseName: string) => {
     try {
-      console.log("[Mock] Linking database to group:", databaseName);
+      console.debug("[Mock] Linking database to group:", databaseName);
       await linkDatabase(groupId, databaseName);
       setShowLinkDatabaseModal(false);
     } catch (error) {
@@ -177,7 +177,7 @@ export default function SessionGroupDetailPage() {
     }
 
     try {
-      console.log("[Mock] Unlinking database from group:", databaseName);
+      console.debug("[Mock] Unlinking database from group:", databaseName);
       await unlinkDatabase(groupId, databaseName);
     } catch (error) {
       console.error("Failed to unlink database:", error);
@@ -186,7 +186,7 @@ export default function SessionGroupDetailPage() {
 
   // --- Embedding Progress Callback (Sub-phase 4.3 + 5.2 + 5.4) ---
   const handleEmbeddingProgress = (progress: EmbeddingProgress) => {
-    console.log('[EmbeddingProgress]', progress);
+    console.debug('[EmbeddingProgress]', progress);
     setEmbeddingProgress(progress);
 
     // Track processing start time (Sub-phase 5.4)
@@ -229,7 +229,7 @@ export default function SessionGroupDetailPage() {
     }
 
     try {
-      console.log('[handleStartSession] 🚀 Starting LLM session...', { hostUrl, modelId });
+      console.debug('[handleStartSession] 🚀 Starting LLM session...', { hostUrl, modelId });
 
       // Start LLM session via SessionManager
       const sessionConfig = {
@@ -246,7 +246,7 @@ export default function SessionGroupDetailPage() {
       const result = await managers.sessionManager.startSession(sessionConfig);
       const sessionId = result.sessionId;
 
-      console.log('[handleStartSession] ✅ LLM session started:', sessionId.toString());
+      console.debug('[handleStartSession] ✅ LLM session started:', sessionId.toString());
 
       // Trigger background embedding processing (non-blocking)
       processPendingEmbeddings(sessionId, hostUrl, handleEmbeddingProgress).catch((error) => {
@@ -273,7 +273,7 @@ export default function SessionGroupDetailPage() {
     }
 
     try {
-      console.log('[ProcessPendingEmbeddings] 🚀 Starting background embedding generation...');
+      console.debug('[ProcessPendingEmbeddings] 🚀 Starting background embedding generation...');
 
       // Get all pending documents via VectorRAGManager
       const vectorRAGManager = managers.vectorRAGManager;
@@ -283,11 +283,11 @@ export default function SessionGroupDetailPage() {
       const pendingDocs = await vectorRAGManager.getPendingDocuments();
 
       if (pendingDocs.length === 0) {
-        console.log('[ProcessPendingEmbeddings] ✅ No pending documents to process');
+        console.debug('[ProcessPendingEmbeddings] ✅ No pending documents to process');
         return;
       }
 
-      console.log(`[ProcessPendingEmbeddings] 📋 Found ${pendingDocs.length} pending documents`);
+      console.debug(`[ProcessPendingEmbeddings] 📋 Found ${pendingDocs.length} pending documents`);
 
       // Initialize document queue (Sub-phase 5.4)
       setDocumentQueue(pendingDocs.map((doc: any) => doc.fileName));
@@ -298,7 +298,7 @@ export default function SessionGroupDetailPage() {
         const doc = pendingDocs[i];
 
         try {
-          console.log(`[ProcessPendingEmbeddings] 📄 Processing document ${i + 1}/${pendingDocs.length}: ${doc.fileName}`);
+          console.debug(`[ProcessPendingEmbeddings] 📄 Processing document ${i + 1}/${pendingDocs.length}: ${doc.fileName}`);
 
           // Update status to 'processing'
           await vectorRAGManager.updateDocumentStatus(doc.id, 'processing', {
@@ -331,12 +331,12 @@ export default function SessionGroupDetailPage() {
             ? fileContent
             : new TextDecoder().decode(fileContent);
 
-          console.log(`[ProcessPendingEmbeddings] ✅ Downloaded ${contentString.length} chars from S5`);
+          console.debug(`[ProcessPendingEmbeddings] ✅ Downloaded ${contentString.length} chars from S5`);
 
           // Generate embeddings via SessionManager
           const vectors = await sessionManager.generateEmbeddings(sessionId, contentString);
 
-          console.log(`[ProcessPendingEmbeddings] ✅ Generated ${vectors.length} vectors`);
+          console.debug(`[ProcessPendingEmbeddings] ✅ Generated ${vectors.length} vectors`);
 
           // Update progress mid-way
           if (onProgress) {
@@ -363,7 +363,7 @@ export default function SessionGroupDetailPage() {
             );
           }
 
-          console.log(`[ProcessPendingEmbeddings] ✅ Stored ${vectors.length} vectors in S5`);
+          console.debug(`[ProcessPendingEmbeddings] ✅ Stored ${vectors.length} vectors in S5`);
 
           // Update status to 'ready'
           await vectorRAGManager.updateDocumentStatus(doc.id, 'ready', {
@@ -385,7 +385,7 @@ export default function SessionGroupDetailPage() {
             });
           }
 
-          console.log(`[ProcessPendingEmbeddings] ✅ Document ${doc.fileName} complete`);
+          console.debug(`[ProcessPendingEmbeddings] ✅ Document ${doc.fileName} complete`);
 
         } catch (error: any) {
           console.error(`[ProcessPendingEmbeddings] ❌ Failed to process ${doc.fileName}:`, error);
@@ -414,7 +414,7 @@ export default function SessionGroupDetailPage() {
         }
       }
 
-      console.log('[ProcessPendingEmbeddings] 🎉 All documents processed');
+      console.debug('[ProcessPendingEmbeddings] 🎉 All documents processed');
 
     } catch (error) {
       console.error('[ProcessPendingEmbeddings] ❌ Fatal error:', error);
@@ -426,21 +426,21 @@ export default function SessionGroupDetailPage() {
     sessionId: string,
     e: React.MouseEvent
   ) => {
-    console.log(`[handleDeleteSession] START: ${sessionId}`);
+    console.debug(`[handleDeleteSession] START: ${sessionId}`);
     e.stopPropagation();
 
-    console.log('[handleDeleteSession] Showing confirm dialog...');
+    console.debug('[handleDeleteSession] Showing confirm dialog...');
     if (!confirm("Delete this session? This action cannot be undone.")) {
-      console.log('[handleDeleteSession] User cancelled');
+      console.debug('[handleDeleteSession] User cancelled');
       return;
     }
-    console.log('[handleDeleteSession] User confirmed, calling deleteChat...');
+    console.debug('[handleDeleteSession] User confirmed, calling deleteChat...');
 
     try {
       await deleteChat(groupId, sessionId);
-      console.log('[handleDeleteSession] deleteChat completed, calling selectGroup...');
+      console.debug('[handleDeleteSession] deleteChat completed, calling selectGroup...');
       await selectGroup(groupId);
-      console.log('[handleDeleteSession] selectGroup completed');
+      console.debug('[handleDeleteSession] selectGroup completed');
     } catch (error) {
       console.error("[handleDeleteSession] ERROR:", error);
     }
@@ -457,7 +457,7 @@ export default function SessionGroupDetailPage() {
     setAiSessionError(null);
 
     try {
-      console.log('[handleStartAIChat] Starting AI chat session...');
+      console.debug('[handleStartAIChat] Starting AI chat session...');
 
       const aiSession = await startAIChat(
         groupId,
@@ -471,7 +471,7 @@ export default function SessionGroupDetailPage() {
         undefined // No initial message
       );
 
-      console.log('[handleStartAIChat] ✅ AI session created:', aiSession.sessionId);
+      console.debug('[handleStartAIChat] ✅ AI session created:', aiSession.sessionId);
 
       // Navigate to the new AI session
       router.push(`/session-groups/${groupId}/${aiSession.sessionId}`);
@@ -525,7 +525,7 @@ export default function SessionGroupDetailPage() {
                 const sessionState = managers?.sessionManager?.getSession(s.metadata.blockchainSessionId);
                 // Session is ended if not in memory or status is ended/completed/failed
                 if (!sessionState || sessionState.status === 'ended' || sessionState.status === 'completed' || sessionState.status === 'failed') {
-                  console.log(`[SessionGroupDetail] Session ${s.sessionId} blockchain status stale, correcting to 'ended'`);
+                  console.debug(`[SessionGroupDetail] Session ${s.sessionId} blockchain status stale, correcting to 'ended'`);
                   correctedMetadata = {
                     ...s.metadata,
                     blockchainStatus: 'ended' as const,
@@ -579,7 +579,7 @@ export default function SessionGroupDetailPage() {
     // When pathname changes back to this overview page, reload sessions
     // This catches status updates that happened on the session detail page
     if (pathname && pathname.match(/^\/session-groups\/[^\/]+\/?$/)) {
-      console.log('[SessionGroupDetail] Route changed to overview page, will reload after delay...');
+      console.debug('[SessionGroupDetail] Route changed to overview page, will reload after delay...');
 
       // Clear SessionGroupManager cache to force fresh load from S5
       if (managers?.sessionGroupManager) {
@@ -589,11 +589,11 @@ export default function SessionGroupDetailPage() {
           const chatCache = (managers.sessionGroupManager as any).chatStorage;
           if (cache) {
             cache.clear();
-            console.log('[SessionGroupDetail] ✅ Cleared group cache');
+            console.debug('[SessionGroupDetail] ✅ Cleared group cache');
           }
           if (chatCache) {
             chatCache.clear();
-            console.log('[SessionGroupDetail] ✅ Cleared chat cache');
+            console.debug('[SessionGroupDetail] ✅ Cleared chat cache');
           }
         } catch (error) {
           console.warn('[SessionGroupDetail] Failed to clear cache:', error);
@@ -603,7 +603,7 @@ export default function SessionGroupDetailPage() {
       // Delay reload to ensure session page metadata update completes
       const timer = setTimeout(() => {
         if (groupId && isConnected && isInitialized) {
-          console.log('[SessionGroupDetail] Reloading sessions from S5...');
+          console.debug('[SessionGroupDetail] Reloading sessions from S5...');
           selectGroup(groupId); // Refresh group data and trigger session reload
         }
       }, 500); // 500ms delay

@@ -31,16 +31,16 @@ export default function NewChatPage() {
       setIsStarting(true);
       setError(null);
 
-      console.log('[NewChat] Starting chat for group:', groupId);
+      console.debug('[NewChat] Starting chat for group:', groupId);
       const session = await startChat(groupId, initialMessage);
-      console.log('[NewChat] Chat started, session:', session);
+      console.debug('[NewChat] Chat started, session:', session);
 
       if (!session || !session.sessionId) {
         throw new Error('Failed to create chat session - no session ID returned');
       }
 
       // Navigate to the chat session
-      console.log('[NewChat] Navigating to:', `/session-groups/${groupId}/chat/${session.sessionId}`);
+      console.debug('[NewChat] Navigating to:', `/session-groups/${groupId}/chat/${session.sessionId}`);
       router.push(`/session-groups/${groupId}/chat/${session.sessionId}`);
     } catch (err) {
       console.error('Failed to start chat:', err);

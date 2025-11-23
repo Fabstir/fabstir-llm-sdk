@@ -36,13 +36,13 @@ export function useSDK(signer?: Signer | null): UseSDKReturn {
       setIsInitializing(true);
       setError(null);
 
-      console.log('[useSDK] Initializing SDK with signer...');
+      console.debug('[useSDK] Initializing SDK with signer...');
       await ui5SDK.initialize(walletSigner);
       const sdkManagers = await ui5SDK.getManagers();
 
       setManagers(sdkManagers);
       setIsInitialized(true);
-      console.log('[useSDK] SDK initialized successfully');
+      console.debug('[useSDK] SDK initialized successfully');
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Failed to initialize SDK');
       setError(error);
@@ -104,7 +104,7 @@ export function useSDK(signer?: Signer | null): UseSDKReturn {
   // Auto-initialize when signer is provided
   useEffect(() => {
     if (signer && !isInitialized && !isInitializing) {
-      console.log('[useSDK] Auto-initializing with provided signer');
+      console.debug('[useSDK] Auto-initializing with provided signer');
       initialize(signer);
     }
   }, [signer, isInitialized, isInitializing, initialize]);

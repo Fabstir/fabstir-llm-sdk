@@ -49,32 +49,32 @@ export default function VectorDatabaseDetailPage() {
   const loadData = useCallback(async () => {
     // Re-check managers on each call (handles case where managers becomes available)
     if (!isConnected || !isInitialized || !managers) {
-      console.log(`[Page] Skipping loadData: isConnected=${isConnected}, isInitialized=${isInitialized}, managers=${!!managers}`);
+      console.debug(`[Page] Skipping loadData: isConnected=${isConnected}, isInitialized=${isInitialized}, managers=${!!managers}`);
       return;
     }
 
-    console.log(`[Page] Loading data for database: ${databaseName}`);
+    console.debug(`[Page] Loading data for database: ${databaseName}`);
 
     try {
       setIsLoading(true);
       setError(null);
 
-      console.log('[Page] About to call getDatabaseMetadata...');
+      console.debug('[Page] About to call getDatabaseMetadata...');
       // Get database metadata directly from vectorRAGManager
       const vectorRAGManager = managers.vectorRAGManager;
       const db = await vectorRAGManager.getDatabaseMetadata(databaseName);
-      console.log('[Page] ✅ getDatabaseMetadata succeeded:', db.databaseName);
+      console.debug('[Page] ✅ getDatabaseMetadata succeeded:', db.databaseName);
       setDatabase(db);
 
       // Get all vectors from database
       const dbVectors = await vectorRAGManager.listVectors(databaseName);
-      console.log('[Page] ✅ listVectors succeeded, count:', dbVectors.length);
+      console.debug('[Page] ✅ listVectors succeeded, count:', dbVectors.length);
       setVectors(dbVectors);
 
       // Get folders with counts (includes empty folders)
       if (db?.folderStructure) {
         const folders = await vectorRAGManager.getAllFoldersWithCounts(databaseName);
-        console.log('[Page] ✅ getAllFoldersWithCounts succeeded, count:', folders.length);
+        console.debug('[Page] ✅ getAllFoldersWithCounts succeeded, count:', folders.length);
         setFoldersWithCounts(folders);
       }
     } catch (err) {
@@ -214,18 +214,18 @@ export default function VectorDatabaseDetailPage() {
         const parentPath = path || folderAction.parentPath || '/';
         const fullPath = parentPath === '/' ? `/${folderName}` : `${parentPath}/${folderName}`;
         await createFolder(databaseName, fullPath);
-        console.log('Created folder:', fullPath);
+        console.debug('Created folder:', fullPath);
       } else if (folderAction.action === 'rename' && folderAction.folder) {
         // Rename existing folder
         const oldPath = folderAction.folder.path;
         const parentPath = oldPath.split('/').slice(0, -1).join('/') || '/';
         const newPath = parentPath === '/' ? `/${folderName}` : `${parentPath}/${folderName}`;
         const updatedCount = await renameFolder(databaseName, oldPath, newPath);
-        console.log(`Renamed folder ${oldPath} to ${newPath} (${updatedCount} vectors updated)`);
+        console.debug(`Renamed folder ${oldPath} to ${newPath} (${updatedCount} vectors updated)`);
       } else if (folderAction.action === 'delete' && folderAction.folder) {
         // Delete folder and all its contents
         const deletedCount = await deleteFolder(databaseName, folderAction.folder.path);
-        console.log(`Deleted folder ${folderAction.folder.path} (${deletedCount} vectors removed)`);
+        console.debug(`Deleted folder ${folderAction.folder.path} (${deletedCount} vectors removed)`);
 
         // Optimistic UI update - remove folder and its vectors
         setFoldersWithCounts(prev =>
@@ -275,7 +275,7 @@ export default function VectorDatabaseDetailPage() {
 
   // Upload handler
   const handleUploadDocuments = async (files: File[], folderPath?: string) => {
-    console.log('[Page] 🚀 DEFERRED EMBEDDINGS: handleUploadDocuments called with:', { fileCount: files.length, folderPath });
+    console.debug('[Page] 🚀 DEFERRED EMBEDDINGS: handleUploadDocuments called with:', { fileCount: files.length, folderPath });
 
     if (!managers) {
       console.error('[Page] ❌ Cannot upload - managers not initialized');
@@ -296,7 +296,7 @@ export default function VectorDatabaseDetailPage() {
 
     for (const file of files) {
       try {
-        console.log(`[Page] 📄 Uploading document to S5: ${file.name}`);
+        console.debug(`[Page] 📄 Uploading document to S5: ${file.name}`);
 
         // Read file content
         const fileContent = await file.text();
@@ -309,7 +309,7 @@ export default function VectorDatabaseDetailPage() {
         const { uploadDocumentToS5 } = await import('@/lib/s5-utils');
         const s5Cid = await uploadDocumentToS5(s5, fileContent, userAddress, databaseName, documentId);
 
-        console.log(`[Page] ✅ Document uploaded to S5: ${s5Cid}`);
+        console.debug(`[Page] ✅ Document uploaded to S5: ${s5Cid}`);
 
         // Create DocumentMetadata with "pending" embedding status
         const docMetadata: import('@/hooks/use-vector-databases').DocumentMetadata = {
@@ -325,7 +325,7 @@ export default function VectorDatabaseDetailPage() {
         };
 
         uploadedDocs.push(docMetadata);
-        console.log(`[Page] ✅ Document ${file.name} uploaded to S5`);
+        console.debug(`[Page] ✅ Document ${file.name} uploaded to S5`);
 
       } catch (error) {
         console.error(`[Page] ❌ Failed to upload ${file.name}:`, error);
@@ -335,7 +335,7 @@ export default function VectorDatabaseDetailPage() {
     // Batch update metadata.json once to avoid race condition
     if (uploadedDocs.length > 0) {
       try {
-        console.log(`[Page] 📝 Saving metadata for ${uploadedDocs.length} documents...`);
+        console.debug(`[Page] 📝 Saving metadata for ${uploadedDocs.length} documents...`);
         await addPendingDocument(databaseName, uploadedDocs[0]); // First doc
 
         // Add remaining docs one at a time with small delay to avoid write conflicts
@@ -344,7 +344,7 @@ export default function VectorDatabaseDetailPage() {
           await addPendingDocument(databaseName, uploadedDocs[i]);
         }
 
-        console.log(`[Page] ✅ Metadata saved for all ${uploadedDocs.length} documents`);
+        console.debug(`[Page] ✅ Metadata saved for all ${uploadedDocs.length} documents`);
 
         // Optimistically update local state with all documents
         setDatabase(prevDb => {
@@ -359,7 +359,7 @@ export default function VectorDatabaseDetailPage() {
       }
     }
 
-    console.log('[Page] ✅ DEFERRED EMBEDDINGS: Upload complete - documents shown with "pending" status (optimistic UI update)');
+    console.debug('[Page] ✅ DEFERRED EMBEDDINGS: Upload complete - documents shown with "pending" status (optimistic UI update)');
     // Note: S5 will sync in background. Don't call loadData() immediately as P2P network needs time to propagate.
   };
 

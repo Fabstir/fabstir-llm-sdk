@@ -25,13 +25,13 @@ export function CreateDatabaseModal({ isOpen, onClose, onCreate }: CreateDatabas
 
   // Handle mounting for SSR
   useEffect(() => {
-    console.log('[CreateDatabaseModal] Component mounted, setting mounted=true');
+    console.debug('[CreateDatabaseModal] Component mounted, setting mounted=true');
     setMounted(true);
   }, []);
 
   // Log whenever props change
   useEffect(() => {
-    console.log('[CreateDatabaseModal] Render - isOpen:', isOpen, 'mounted:', mounted);
+    console.debug('[CreateDatabaseModal] Render - isOpen:', isOpen, 'mounted:', mounted);
   }, [isOpen, mounted]);
 
   // Prevent body scroll when modal is open
@@ -73,33 +73,33 @@ export function CreateDatabaseModal({ isOpen, onClose, onCreate }: CreateDatabas
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('[CreateDatabaseModal] handleSubmit() called');
+    console.debug('[CreateDatabaseModal] handleSubmit() called');
 
     // Validation
     if (!name.trim()) {
-      console.log('[CreateDatabaseModal] Validation failed: name is required');
+      console.debug('[CreateDatabaseModal] Validation failed: name is required');
       setError('Database name is required');
       return;
     }
 
     if (name.length > 50) {
-      console.log('[CreateDatabaseModal] Validation failed: name too long');
+      console.debug('[CreateDatabaseModal] Validation failed: name too long');
       setError('Database name must be 50 characters or less');
       return;
     }
 
     if (!/^[a-zA-Z0-9-_ ]+$/.test(name)) {
-      console.log('[CreateDatabaseModal] Validation failed: invalid characters');
+      console.debug('[CreateDatabaseModal] Validation failed: invalid characters');
       setError('Database name can only contain letters, numbers, spaces, hyphens, and underscores');
       return;
     }
 
-    console.log('[CreateDatabaseModal] Validation passed');
+    console.debug('[CreateDatabaseModal] Validation passed');
     setIsCreating(true);
     setError(null);
 
     try {
-      console.log('[CreateDatabaseModal] About to call onCreate() with:', {
+      console.debug('[CreateDatabaseModal] About to call onCreate() with:', {
         name: name.trim(),
         dimensions,
         folderStructure,
@@ -110,14 +110,14 @@ export function CreateDatabaseModal({ isOpen, onClose, onCreate }: CreateDatabas
         folderStructure,
         description: description.trim() || undefined
       });
-      console.log('[CreateDatabaseModal] ✅ onCreate() completed successfully');
+      console.debug('[CreateDatabaseModal] ✅ onCreate() completed successfully');
       onClose();
     } catch (err) {
       console.error('[CreateDatabaseModal] ❌ onCreate() failed:', err);
       setError(err instanceof Error ? err.message : 'Failed to create database');
     } finally {
       setIsCreating(false);
-      console.log('[CreateDatabaseModal] handleSubmit() finished (isCreating set to false)');
+      console.debug('[CreateDatabaseModal] handleSubmit() finished (isCreating set to false)');
     }
   };
 

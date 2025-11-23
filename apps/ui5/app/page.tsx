@@ -51,7 +51,7 @@ export default function HomePage() {
   // Debug logging
   useEffect(() => {
     const state = { isConnected, isInitialized, loading, managers: !!managers };
-    console.log('[Dashboard] State:', state);
+    console.debug('[Dashboard] State:', state);
 
     // Also log to see in server logs
     if (typeof window !== 'undefined') {
@@ -61,7 +61,7 @@ export default function HomePage() {
 
   // Retry handler
   const handleRetry = () => {
-    console.log('[Dashboard] User triggered retry, attempt:', retryCount + 1);
+    console.debug('[Dashboard] User triggered retry, attempt:', retryCount + 1);
     setLoadError(null);
     setRetryCount(prev => prev + 1);
   };
@@ -96,25 +96,25 @@ export default function HomePage() {
         // Get timeout from environment (default 60 seconds)
         const dashboardTimeout = parseInt(process.env.NEXT_PUBLIC_DASHBOARD_LOAD_TIMEOUT || '60', 10) * 1000;
 
-        console.log('[Dashboard] Loading session groups for user:', userAddress);
+        console.debug('[Dashboard] Loading session groups for user:', userAddress);
         const groupsPromise = managers.sessionGroupManager.listSessionGroups(userAddress);
         const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error(`Session groups load timeout after ${dashboardTimeout / 1000}s`)), dashboardTimeout)
         );
         const groups = await Promise.race([groupsPromise, timeoutPromise]) as any[];
-        console.log('[Dashboard] Loaded session groups:', groups.length, groups);
+        console.debug('[Dashboard] Loaded session groups:', groups.length, groups);
 
         // Get vector databases (if available)
         let databases: any[] = [];
         if (managers.vectorRAGManager && typeof managers.vectorRAGManager.listDatabases === 'function') {
           databases = await managers.vectorRAGManager.listDatabases();
-          console.log('[Dashboard] Loaded vector databases:', databases.length, databases);
+          console.debug('[Dashboard] Loaded vector databases:', databases.length, databases);
         }
 
         // Calculate total sessions across all groups
         const totalSessions = groups.reduce((sum, group) => {
           const sessionCount = group.chatSessions?.length || 0;
-          console.log(`[Dashboard] Group "${group.name}" has ${sessionCount} sessions`);
+          console.debug(`[Dashboard] Group "${group.name}" has ${sessionCount} sessions`);
           return sum + sessionCount;
         }, 0);
 
@@ -122,11 +122,11 @@ export default function HomePage() {
         // Note: vectorCount represents document chunks (embedded vectors), not raw files
         const totalDocuments = databases.reduce((sum, db) => {
           const vectorCount = db.vectorCount || 0;
-          console.log(`[Dashboard] Database "${db.name}" has ${vectorCount} vectors`);
+          console.debug(`[Dashboard] Database "${db.name}" has ${vectorCount} vectors`);
           return sum + vectorCount;
         }, 0);
 
-        console.log('[Dashboard] Final stats:', {
+        console.debug('[Dashboard] Final stats:', {
           sessionGroups: groups.length,
           totalSessions,
           vectorDatabases: databases.length,
@@ -227,7 +227,7 @@ export default function HomePage() {
         });
         setRecentActivity([]);
       } finally {
-        console.log('[Dashboard] Setting loading to false');
+        console.debug('[Dashboard] Setting loading to false');
         setLoading(false);
       }
     }

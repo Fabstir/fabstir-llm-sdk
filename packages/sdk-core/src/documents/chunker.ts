@@ -89,25 +89,19 @@ function chunkByWords(
   let chunkIndex = 0;
   let startWordIdx = 0;
 
-  console.log('[CHUNKER DEBUG] Starting chunkByWords');
-  console.log(`[CHUNKER DEBUG] Text length: ${text.length} chars, ${words.length} words`);
-  console.log(`[CHUNKER DEBUG] Chunk size: ${chunkWordCount} words, Overlap: ${overlapWordCount} words`);
 
   let iterationCount = 0;
   while (startWordIdx < words.length) {
     iterationCount++;
-    console.log(`[CHUNKER DEBUG] Iteration ${iterationCount}: startWordIdx=${startWordIdx}/${words.length}`);
 
     // Take chunkWordCount words
     const endWordIdx = Math.min(startWordIdx + chunkWordCount, words.length);
     const chunkWords = words.slice(startWordIdx, endWordIdx);
     const chunkText = chunkWords.join(' ');
 
-    console.log(`[CHUNKER DEBUG] Chunk ${chunkIndex}: ${chunkWords.length} words (${chunkText.length} chars)`);
 
     // Calculate character offsets
     const approxOffset = startWordIdx === 0 ? 0 : getApproximateOffset(text, startWordIdx);
-    console.log(`[CHUNKER DEBUG] Searching for "${chunkWords[0]}" starting at offset ${approxOffset}`);
 
     const indexOfStart = performance.now();
     let startOffset = text.indexOf(chunkWords[0], approxOffset);
@@ -115,17 +109,14 @@ function chunkByWords(
 
     // If word not found from approxOffset, search from beginning
     if (startOffset === -1) {
-      console.log(`[CHUNKER DEBUG] Word not found at approxOffset, searching from start`);
       startOffset = text.indexOf(chunkWords[0]);
     }
 
     // If still not found, use approximate offset as fallback
     if (startOffset === -1) {
-      console.log(`[CHUNKER DEBUG] Word still not found, using approxOffset as fallback`);
       startOffset = approxOffset;
     }
 
-    console.log(`[CHUNKER DEBUG] indexOf took ${indexOfTime.toFixed(2)}ms, found at ${startOffset}`);
 
     const endOffset = startOffset + chunkText.length;
 
@@ -136,17 +127,14 @@ function chunkByWords(
     // Move to next chunk with overlap
     startWordIdx = endWordIdx - overlapWordCount;
 
-    console.log(`[CHUNKER DEBUG] Next startWordIdx: ${startWordIdx}`);
 
     // If we've reached the end of the document, break
     if (endWordIdx >= words.length) {
-      console.log('[CHUNKER DEBUG] Breaking: reached end of document');
       break;
     }
 
     // If overlap would cause infinite loop (chunk too small), break
     if (startWordIdx >= endWordIdx) {
-      console.log('[CHUNKER DEBUG] Breaking: overlap would cause infinite loop');
       break;
     }
 
@@ -157,7 +145,6 @@ function chunkByWords(
     }
   }
 
-  console.log(`[CHUNKER DEBUG] Chunking complete: ${chunks.length} chunks created in ${iterationCount} iterations`);
   return chunks;
 }
 

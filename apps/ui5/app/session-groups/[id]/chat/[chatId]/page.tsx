@@ -58,15 +58,15 @@ export default function ChatSessionPage() {
   useEffect(() => {
     // Only reload if we're loading a different chat
     if (lastLoadedChatId.current === chatId) {
-      console.log('[ChatSession] Skipping reload - already loaded this chat');
+      console.debug('[ChatSession] Skipping reload - already loaded this chat');
       return;
     }
 
     const loadSession = async () => {
       try {
-        console.log('[ChatSession] Loading session:', { groupId, chatId });
+        console.debug('[ChatSession] Loading session:', { groupId, chatId });
         const chatSession = await getChatSession(groupId, chatId);
-        console.log('[ChatSession] Session loaded:', chatSession);
+        console.debug('[ChatSession] Session loaded:', chatSession);
 
         if (chatSession) {
           setSession(chatSession);
@@ -77,9 +77,9 @@ export default function ChatSessionPage() {
           if (chatSession.messages.length === 1 && chatSession.messages[0].role === 'user') {
             // Prevent duplicate generation (e.g., from React StrictMode)
             if (initialResponseGenerated.current.has(chatId)) {
-              console.log('[ChatSession] Initial response already generated for this chat');
+              console.debug('[ChatSession] Initial response already generated for this chat');
             } else {
-              console.log('[ChatSession] New chat detected - generating initial AI response');
+              console.debug('[ChatSession] New chat detected - generating initial AI response');
               initialResponseGenerated.current.add(chatId);
 
               setTimeout(async () => {
@@ -91,7 +91,7 @@ export default function ChatSessionPage() {
                     timestamp: Date.now(),
                   };
 
-                  console.log('[ChatSession] Adding initial AI response');
+                  console.debug('[ChatSession] Adding initial AI response');
                   await addMessage(groupId, chatId, aiResponse);
 
                   // Update local state
@@ -151,48 +151,48 @@ export default function ChatSessionPage() {
       setMessage('');
 
       // Send message to backend
-      console.log('[ChatSession] Adding message to backend:', newMessage.content);
+      console.debug('[ChatSession] Adding message to backend:', newMessage.content);
       await addMessage(groupId, chatId, newMessage);
-      console.log('[ChatSession] Message added successfully');
+      console.debug('[ChatSession] Message added successfully');
 
       // Simulate AI response (in real implementation, this would come from the backend)
-      console.log('[ChatSession] Setting up AI response timer...');
+      console.debug('[ChatSession] Setting up AI response timer...');
       const generateAIResponse = async () => {
         try {
-          console.log('[ChatSession] Timer fired - generating simulated AI response');
+          console.debug('[ChatSession] Timer fired - generating simulated AI response');
           const aiResponse: ChatMessage = {
             role: 'assistant',
             content: generateMockResponse(newMessage.content),
             timestamp: Date.now(),
           };
 
-          console.log('[ChatSession] AI response created:', aiResponse.content.substring(0, 50));
+          console.debug('[ChatSession] AI response created:', aiResponse.content.substring(0, 50));
 
           // Persist AI response to backend
-          console.log('[ChatSession] Persisting AI response to backend');
+          console.debug('[ChatSession] Persisting AI response to backend');
           await addMessage(groupId, chatId, aiResponse);
-          console.log('[ChatSession] AI response persisted successfully');
+          console.debug('[ChatSession] AI response persisted successfully');
 
           // Update local state
-          console.log('[ChatSession] Updating local state with AI response');
+          console.debug('[ChatSession] Updating local state with AI response');
           setSession(prev => {
             if (!prev) {
               console.error('[ChatSession] No session in state - cannot add AI response');
               return null;
             }
-            console.log('[ChatSession] Current message count:', prev.messages.length);
+            console.debug('[ChatSession] Current message count:', prev.messages.length);
             const updated = {
               ...prev,
               messages: [...prev.messages, aiResponse],
             };
-            console.log('[ChatSession] Updated message count:', updated.messages.length);
+            console.debug('[ChatSession] Updated message count:', updated.messages.length);
             return updated;
           });
-          console.log('[ChatSession] AI response added to state');
+          console.debug('[ChatSession] AI response added to state');
         } catch (err) {
           console.error('[ChatSession] Error in AI response generation:', err);
         } finally {
-          console.log('[ChatSession] Clearing sending state');
+          console.debug('[ChatSession] Clearing sending state');
           setIsSending(false);
         }
       };

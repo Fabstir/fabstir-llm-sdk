@@ -69,13 +69,13 @@ export class UI5SDK {
   async initialize(signer: Signer): Promise<void> {
     // Check if already initialized
     if (this.initialized && this.sdk) {
-      console.log('[UI5SDK] Already initialized');
+      console.debug('[UI5SDK] Already initialized');
       return;
     }
 
     // Check if initialization is in progress - wait for it to complete
     if (this.initializing) {
-      console.log('[UI5SDK] Initialization already in progress, waiting...');
+      console.debug('[UI5SDK] Initialization already in progress, waiting...');
       // Wait for initialization to complete (poll every 100ms, timeout after 30 seconds)
       // Longer timeout needed for S5 storage initialization which can be slow
       let waitTime = 0;
@@ -101,10 +101,10 @@ export class UI5SDK {
       // Check for test mode
       const isTestMode = typeof window !== 'undefined' && (window as any).__TEST_WALLET__;
       if (isTestMode) {
-        console.log('[UI5SDK] 🧪 Test mode detected - using test wallet');
+        console.debug('[UI5SDK] 🧪 Test mode detected - using test wallet');
       }
 
-      console.log('[UI5SDK] Initializing SDK with production configuration...');
+      console.debug('[UI5SDK] Initializing SDK with production configuration...');
 
       // Validate environment variables
       if (!process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA) {
@@ -140,26 +140,26 @@ export class UI5SDK {
       // Authenticate with wallet signer
       const address = await signer.getAddress();
       const testMode = typeof window !== 'undefined' && (window as any).__TEST_WALLET__;
-      console.log(`[UI5SDK] Authenticating with address: ${address}${testMode ? ' (TEST MODE)' : ''}`);
+      console.debug(`[UI5SDK] Authenticating with address: ${address}${testMode ? ' (TEST MODE)' : ''}`);
 
-      console.log('[UI5SDK] Step 1: About to authenticate...');
+      console.debug('[UI5SDK] Step 1: About to authenticate...');
       await this.sdk.authenticate('signer', {
         signer  // Pass signer for real transactions
       });
-      console.log('[UI5SDK] Step 1: ✅ Authentication complete');
+      console.debug('[UI5SDK] Step 1: ✅ Authentication complete');
 
       // Initialize VectorRAGManager to load existing databases from S5
-      console.log('[UI5SDK] Step 2: About to get VectorRAGManager...');
+      console.debug('[UI5SDK] Step 2: About to get VectorRAGManager...');
       const vectorRAGManager = this.sdk.getVectorRAGManager();
-      console.log('[UI5SDK] Step 2: ✅ VectorRAGManager obtained:', !!vectorRAGManager);
+      console.debug('[UI5SDK] Step 2: ✅ VectorRAGManager obtained:', !!vectorRAGManager);
 
-      console.log('[UI5SDK] Step 3: About to call vectorRAGManager.initialize()...');
+      console.debug('[UI5SDK] Step 3: About to call vectorRAGManager.initialize()...');
       await vectorRAGManager.initialize();
-      console.log('[UI5SDK] Step 3: ✅ VectorRAGManager initialized');
+      console.debug('[UI5SDK] Step 3: ✅ VectorRAGManager initialized');
 
       this.initialized = true;
       this.notify(); // Notify all hooks
-      console.log('[UI5SDK] ✅✅✅ SDK initialized successfully');
+      console.debug('[UI5SDK] ✅✅✅ SDK initialized successfully');
     } catch (error) {
       console.error('[UI5SDK] Initialization failed:', error);
       this.sdk = null;

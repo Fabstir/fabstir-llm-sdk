@@ -317,7 +317,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
 
     try {
       setError(null);
-      console.log('[useSessionGroups] 🚀 Starting AI chat session...', {
+      console.debug('[useSessionGroups] 🚀 Starting AI chat session...', {
         groupId,
         host: hostConfig.address,
         model: hostConfig.models[0],
@@ -326,7 +326,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
       });
 
       // Sub-phase 8.1.3: Approve USDC for JobMarketplace
-      console.log('[useSessionGroups] 💰 Checking USDC approval...');
+      console.debug('[useSessionGroups] 💰 Checking USDC approval...');
       const paymentManager = managers.paymentManager;
       const usdcAddress = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN!;
       const jobMarketplaceAddress = process.env.NEXT_PUBLIC_CONTRACT_JOB_MARKETPLACE!;
@@ -354,17 +354,17 @@ export function useSessionGroups(): UseSessionGroupsReturn {
       const requiredAmount = parseUnits(depositAmount, 6);
 
       if (currentAllowance < requiredAmount) {
-        console.log('[useSessionGroups] 🔐 Requesting USDC approval (popup may appear)...');
+        console.debug('[useSessionGroups] 🔐 Requesting USDC approval (popup may appear)...');
         // Approve 1000 USDC for multiple sessions
         const approveTx = await usdcContract.approve(
           jobMarketplaceAddress,
           parseUnits('1000', 6)
         );
-        console.log('[useSessionGroups] ⏳ Waiting for approval confirmation...');
+        console.debug('[useSessionGroups] ⏳ Waiting for approval confirmation...');
         await approveTx.wait(3); // Wait for 3 confirmations
-        console.log('[useSessionGroups] ✅ USDC approved for JobMarketplace');
+        console.debug('[useSessionGroups] ✅ USDC approved for JobMarketplace');
       } else {
-        console.log('[useSessionGroups] ✅ USDC already approved (sufficient allowance)');
+        console.debug('[useSessionGroups] ✅ USDC already approved (sufficient allowance)');
       }
 
       // 1. Create blockchain job via SessionManager.startSession()
@@ -381,17 +381,17 @@ export function useSessionGroups(): UseSessionGroupsReturn {
         useDeposit: false, // Use spend permissions (gasless)
       };
 
-      console.log('[useSessionGroups] Creating blockchain job...');
+      console.debug('[useSessionGroups] Creating blockchain job...');
       const result = await managers.sessionManager.startSession(sessionConfig);
       const { sessionId, jobId } = result;
 
-      console.log('[useSessionGroups] ✅ Blockchain job created:', {
+      console.debug('[useSessionGroups] ✅ Blockchain job created:', {
         sessionId: sessionId.toString(),
         jobId: jobId?.toString(),
       });
 
       // 2. Create S5 chat session metadata linked to blockchain session
-      console.log('[useSessionGroups] Creating S5 session metadata...');
+      console.debug('[useSessionGroups] Creating S5 session metadata...');
       const chatSession = await managers.sessionGroupManager.startChatSession(
         groupId,
         initialMessage
@@ -415,7 +415,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
       };
 
       // 4. Update session metadata in S5 storage and memory cache
-      console.log('[useSessionGroups] 💾 Updating session metadata in S5 and memory...');
+      console.debug('[useSessionGroups] 💾 Updating session metadata in S5 and memory...');
       const currentUserAddress = managers.authManager.getUserAddress();
       if (!currentUserAddress) {
         console.error('[useSessionGroups] ❌ User address not available, cannot save session metadata');
@@ -427,7 +427,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
 
           // Update the chatStorage cache (critical for getChatSession to return updated metadata)
           (managers.sessionGroupManager as any).chatStorage.set(chatSession.sessionId, aiSession);
-          console.log('[useSessionGroups] ✅ Session metadata updated in memory cache');
+          console.debug('[useSessionGroups] ✅ Session metadata updated in memory cache');
 
           // Save the updated group to S5
           await managers.sessionGroupManager.updateSessionGroup(
@@ -435,13 +435,13 @@ export function useSessionGroups(): UseSessionGroupsReturn {
             currentUserAddress,
             { chatSessionsData: group.chatSessionsData }
           );
-          console.log('[useSessionGroups] ✅ Session metadata saved to S5');
+          console.debug('[useSessionGroups] ✅ Session metadata saved to S5');
         } else {
           console.warn('[useSessionGroups] ⚠️  Could not update session metadata in S5 (group or session not found)');
         }
       }
 
-      console.log('[useSessionGroups] ✅ AI chat session created successfully');
+      console.debug('[useSessionGroups] ✅ AI chat session created successfully');
 
       // Refresh selected group to show new session
       if (selectedGroup?.id === groupId) {
@@ -484,8 +484,8 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     groupId: string,
     sessionId: string
   ): Promise<ChatSession | null> => {
-    console.log('[useSessionGroups.getChatSession] Called with:', { groupId, sessionId });
-    console.log('[useSessionGroups.getChatSession] Managers available:', {
+    console.debug('[useSessionGroups.getChatSession] Called with:', { groupId, sessionId });
+    console.debug('[useSessionGroups.getChatSession] Managers available:', {
       hasManagers: !!managers,
       hasSessionGroupManager: !!managers?.sessionGroupManager,
       hasAuthManager: !!managers?.authManager
@@ -497,7 +497,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     }
 
     const userAddress = managers.authManager.getUserAddress();
-    console.log('[useSessionGroups.getChatSession] User address:', userAddress);
+    console.debug('[useSessionGroups.getChatSession] User address:', userAddress);
     if (!userAddress) {
       console.error('[useSessionGroups] Cannot get chat session - no user address');
       return null;
@@ -505,9 +505,9 @@ export function useSessionGroups(): UseSessionGroupsReturn {
 
     try {
       setError(null);
-      console.log('[useSessionGroups.getChatSession] Calling SDK getChatSession...');
+      console.debug('[useSessionGroups.getChatSession] Calling SDK getChatSession...');
       const result = await managers.sessionGroupManager.getChatSession(groupId, sessionId, userAddress);
-      console.log('[useSessionGroups.getChatSession] SDK result:', {
+      console.debug('[useSessionGroups.getChatSession] SDK result:', {
         found: !!result,
         hasMessages: !!result?.messages,
         messageCount: result?.messages?.length || 0
@@ -541,7 +541,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     groupId: string,
     sessionId: string
   ): Promise<void> => {
-    console.log(`[useSessionGroups.deleteChat] START: Deleting session ${sessionId} from group ${groupId}`);
+    console.debug(`[useSessionGroups.deleteChat] START: Deleting session ${sessionId} from group ${groupId}`);
 
     if (!managers?.sessionGroupManager) {
       console.warn('[useSessionGroups.deleteChat] No sessionGroupManager available');
@@ -550,19 +550,19 @@ export function useSessionGroups(): UseSessionGroupsReturn {
 
     try {
       setError(null);
-      console.log('[useSessionGroups.deleteChat] Calling SDK deleteChatSession...');
+      console.debug('[useSessionGroups.deleteChat] Calling SDK deleteChatSession...');
       await managers.sessionGroupManager.deleteChatSession(groupId, sessionId);
-      console.log('[useSessionGroups.deleteChat] SDK deleteChatSession completed');
+      console.debug('[useSessionGroups.deleteChat] SDK deleteChatSession completed');
 
       // Refresh selected group to remove deleted session
       if (selectedGroup?.id === groupId) {
-        console.log('[useSessionGroups.deleteChat] Refreshing selected group...');
+        console.debug('[useSessionGroups.deleteChat] Refreshing selected group...');
         await selectGroup(groupId);
-        console.log('[useSessionGroups.deleteChat] Group refreshed');
+        console.debug('[useSessionGroups.deleteChat] Group refreshed');
       } else {
-        console.log('[useSessionGroups.deleteChat] Skipping refresh - not currently selected group');
+        console.debug('[useSessionGroups.deleteChat] Skipping refresh - not currently selected group');
       }
-      console.log('[useSessionGroups.deleteChat] COMPLETE');
+      console.debug('[useSessionGroups.deleteChat] COMPLETE');
     } catch (err) {
       console.error('[useSessionGroups.deleteChat] ERROR:', err);
       const errorMsg = err instanceof Error ? err.message : 'Failed to delete chat session';
@@ -575,7 +575,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     groupId: string,
     sessionId: string
   ): Promise<void> => {
-    console.log(`[useSessionGroups.endAISession] Ending AI session ${sessionId}`);
+    console.debug(`[useSessionGroups.endAISession] Ending AI session ${sessionId}`);
 
     if (!managers?.sessionManager || !managers?.sessionGroupManager || !managers?.authManager) {
       console.warn('[useSessionGroups.endAISession] Required managers not available');
@@ -602,9 +602,9 @@ export function useSessionGroups(): UseSessionGroupsReturn {
       }
 
       // 1. End the blockchain session (closes WebSocket)
-      console.log('[useSessionGroups.endAISession] Calling SessionManager.endSession...');
+      console.debug('[useSessionGroups.endAISession] Calling SessionManager.endSession...');
       await managers.sessionManager.endSession(BigInt(blockchainSessionId));
-      console.log('[useSessionGroups.endAISession] ✅ Blockchain session ended');
+      console.debug('[useSessionGroups.endAISession] ✅ Blockchain session ended');
 
       // 2. Update session metadata with 'ended' status
       const updatedSession = {
@@ -629,7 +629,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
           userAddress,
           { chatSessionsData: group.chatSessionsData }
         );
-        console.log('[useSessionGroups.endAISession] ✅ Session status updated to "ended"');
+        console.debug('[useSessionGroups.endAISession] ✅ Session status updated to "ended"');
       }
 
       // Refresh selected group if it matches
@@ -637,7 +637,7 @@ export function useSessionGroups(): UseSessionGroupsReturn {
         await selectGroup(groupId);
       }
 
-      console.log('[useSessionGroups.endAISession] COMPLETE');
+      console.debug('[useSessionGroups.endAISession] COMPLETE');
     } catch (err) {
       console.error('[useSessionGroups.endAISession] ERROR:', err);
       const errorMsg = err instanceof Error ? err.message : 'Failed to end AI session';
@@ -675,22 +675,22 @@ export function useSessionGroups(): UseSessionGroupsReturn {
     try {
       setError(null);
       // Get session IDs
-      console.log(`[listChatSessionsWithData] Getting session IDs for group ${groupId}...`);
+      console.debug(`[listChatSessionsWithData] Getting session IDs for group ${groupId}...`);
       const sessionIds = await managers.sessionGroupManager.listChatSessions(groupId, userAddress);
-      console.log(`[listChatSessionsWithData] Got ${sessionIds.length} session IDs:`, sessionIds);
+      console.debug(`[listChatSessionsWithData] Got ${sessionIds.length} session IDs:`, sessionIds);
 
       // Fetch full data for each session
       const sessions: ChatSession[] = [];
       for (const sessionId of sessionIds) {
-        console.log(`[listChatSessionsWithData] Fetching session ${sessionId}...`);
+        console.debug(`[listChatSessionsWithData] Fetching session ${sessionId}...`);
         const session = await managers.sessionGroupManager.getChatSession(groupId, sessionId, userAddress);
-        console.log(`[listChatSessionsWithData] Session ${sessionId} result:`, session ? 'found' : 'null');
+        console.debug(`[listChatSessionsWithData] Session ${sessionId} result:`, session ? 'found' : 'null');
         if (session) {
           sessions.push(session);
         }
       }
 
-      console.log(`[listChatSessionsWithData] Returning ${sessions.length} sessions`);
+      console.debug(`[listChatSessionsWithData] Returning ${sessions.length} sessions`);
       return sessions;
     } catch (err) {
       console.error('[useSessionGroups] Failed to list chat sessions:', err);

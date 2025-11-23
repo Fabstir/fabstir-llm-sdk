@@ -63,10 +63,10 @@ export default function VectorDatabasesPage() {
     name: string,
     options: { dimensions?: number; folderStructure?: boolean; description?: string }
   ) => {
-    console.log('[VectorDatabasesPage] handleCreateDatabase() called with:', { name, options });
+    console.debug('[VectorDatabasesPage] handleCreateDatabase() called with:', { name, options });
     try {
       await createDatabase(name, options);
-      console.log('[VectorDatabasesPage] ✅ createDatabase() completed');
+      console.debug('[VectorDatabasesPage] ✅ createDatabase() completed');
     } catch (error) {
       console.error('[VectorDatabasesPage] ❌ createDatabase() failed:', error);
       throw error; // Re-throw to propagate to modal
@@ -104,9 +104,9 @@ export default function VectorDatabasesPage() {
         {/* Create Button */}
         <button
           onClick={() => {
-            console.log('[CreateDatabaseButton] clicked - setting isCreateModalOpen to true');
+            console.debug('[CreateDatabaseButton] clicked - setting isCreateModalOpen to true');
             setIsCreateModalOpen(true);
-            console.log('[CreateDatabaseButton] state should now be true');
+            console.debug('[CreateDatabaseButton] state should now be true');
           }}
           className="flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors font-medium whitespace-nowrap"
         >

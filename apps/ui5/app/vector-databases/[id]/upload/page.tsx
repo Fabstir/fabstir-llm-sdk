@@ -76,17 +76,17 @@ export default function UploadDocumentsPage() {
   }, [isConnected, databaseId]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    console.log('[Upload] handleFileSelect called');
+    console.debug('[Upload] handleFileSelect called');
     const files = event.target.files;
-    console.log('[Upload] files from event:', files);
+    console.debug('[Upload] files from event:', files);
     if (files) {
       const fileArray = Array.from(files);
-      console.log('[Upload] Setting selectedFiles to:', fileArray);
+      console.debug('[Upload] Setting selectedFiles to:', fileArray);
       setSelectedFiles(fileArray);
       setError(null);
       setSuccess(false);
     } else {
-      console.log('[Upload] No files in event');
+      console.debug('[Upload] No files in event');
     }
   };
 
@@ -95,17 +95,17 @@ export default function UploadDocumentsPage() {
   };
 
   const handleUpload = async () => {
-    console.log('[Upload] handleUpload called!');
-    console.log('[Upload] selectedFiles.length:', selectedFiles.length);
-    console.log('[Upload] selectedFiles:', selectedFiles);
+    console.debug('[Upload] handleUpload called!');
+    console.debug('[Upload] selectedFiles.length:', selectedFiles.length);
+    console.debug('[Upload] selectedFiles:', selectedFiles);
 
     if (selectedFiles.length === 0) {
-      console.log('[Upload] ERROR: No files selected');
+      console.debug('[Upload] ERROR: No files selected');
       setError('Please select at least one file');
       return;
     }
 
-    console.log('[Upload] Validation passed, starting upload...');
+    console.debug('[Upload] Validation passed, starting upload...');
 
     try {
       setUploading(true);
@@ -115,14 +115,14 @@ export default function UploadDocumentsPage() {
       // Simulate upload delay
       await new Promise(resolve => setTimeout(resolve, 1500));
 
-      console.log('[Upload] Starting document upload for database:', databaseId);
-      console.log('[Upload] Selected files:', selectedFiles.length, selectedFiles.map(f => f.name));
+      console.debug('[Upload] Starting document upload for database:', databaseId);
+      console.debug('[Upload] Selected files:', selectedFiles.length, selectedFiles.map(f => f.name));
 
       // Create mock files with folder support
       const filesKey = `mock_vector_db_files_${databaseId}`;
       const existingFiles = localStorage.getItem(filesKey);
       const currentFiles: Document[] = existingFiles ? JSON.parse(existingFiles) : [];
-      console.log('[Upload] Existing files:', currentFiles.length);
+      console.debug('[Upload] Existing files:', currentFiles.length);
 
       const newFiles: Document[] = selectedFiles.map(file => ({
         id: `doc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -131,16 +131,16 @@ export default function UploadDocumentsPage() {
         uploaded: Date.now(),
         folderPath: folderPath,
       }));
-      console.log('[Upload] New files created:', newFiles.length);
+      console.debug('[Upload] New files created:', newFiles.length);
 
       const updatedFiles = [...currentFiles, ...newFiles];
-      console.log('[Upload] Total files after upload:', updatedFiles.length);
-      console.log('[Upload] Saving to localStorage with key:', filesKey);
+      console.debug('[Upload] Total files after upload:', updatedFiles.length);
+      console.debug('[Upload] Saving to localStorage with key:', filesKey);
       localStorage.setItem(filesKey, JSON.stringify(updatedFiles));
 
       // Verify it was saved
       const verification = localStorage.getItem(filesKey);
-      console.log('[Upload] Verification - files saved:', verification ? JSON.parse(verification).length : 0);
+      console.debug('[Upload] Verification - files saved:', verification ? JSON.parse(verification).length : 0);
 
       // Update database document count
       const stored = localStorage.getItem('mock_vector_databases');
@@ -152,7 +152,7 @@ export default function UploadDocumentsPage() {
             : db
         );
         localStorage.setItem('mock_vector_databases', JSON.stringify(updated));
-        console.log('[Upload] Updated database document count to:', updatedFiles.length);
+        console.debug('[Upload] Updated database document count to:', updatedFiles.length);
 
         const updatedDb = updated.find(db => db.id === databaseId);
         if (updatedDb) {

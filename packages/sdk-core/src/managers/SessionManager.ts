@@ -195,7 +195,6 @@ export class SessionManager implements ISessionManager {
           // Default to host minimum if not provided
           if (validatedPrice === undefined || validatedPrice === null) {
             validatedPrice = hostMinPrice;
-            console.log(`Using host minimum ${pricingType} price: ${hostMinPrice}`);
           }
 
           // Validate client price >= host minimum
@@ -207,7 +206,6 @@ export class SessionManager implements ISessionManager {
             );
           }
 
-          console.log(`✓ Pricing validated: ${validatedPrice} >= ${hostMinPrice} (${pricingType})`);
         } catch (error) {
           if (error instanceof PricingValidationError) {
             throw error; // Re-throw pricing errors
@@ -410,7 +408,6 @@ export class SessionManager implements ISessionManager {
       session.prompts.push(prompt);
 
       // Use REST API instead of WebSocket (as per node implementation)
-      console.log('Session endpoint from storage:', session.endpoint);
       const endpoint = session.endpoint || 'http://localhost:8080';
       const httpUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
 
@@ -425,8 +422,6 @@ export class SessionManager implements ISessionManager {
         jobId: session.jobId.toString()
       };
       
-      console.log('Sending inference request to:', inferenceUrl);
-      console.log('Request body:', requestBody);
       
       let fetchResponse;
       try {
@@ -448,7 +443,6 @@ export class SessionManager implements ISessionManager {
       }
       
       const result = await fetchResponse.json();
-      console.log('Inference API response:', result);
       
       // Try different possible response fields
       let response = result.response || result.text || result.content || result.generated_text;
@@ -521,7 +515,6 @@ export class SessionManager implements ISessionManager {
 
     // If session not in memory, try to load from storage (handles SessionManager recreation)
     if (!session && this.storageManager) {
-      console.log(`Session ${sessionIdStr} not in memory, attempting to load from storage...`);
       try {
         const conversation = await this.storageManager.loadConversation(sessionIdStr);
         if (conversation && conversation.metadata) {
@@ -544,7 +537,6 @@ export class SessionManager implements ISessionManager {
 
           // Add to memory for subsequent calls
           this.sessions.set(sessionIdStr, session);
-          console.log(`Session ${sessionIdStr} restored from storage`);
         }
       } catch (err) {
         console.warn(`Could not load session ${sessionIdStr} from storage:`, err);
@@ -574,25 +566,16 @@ export class SessionManager implements ISessionManager {
         : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
 
       // Initialize WebSocket client if not already connected
-      console.log('[SessionManager] 🔌 Checking WebSocket connection...');
-      console.log('[SessionManager] wsClient exists:', !!this.wsClient);
-      console.log('[SessionManager] wsClient connected:', this.wsClient?.isConnected());
-      console.log('[SessionManager] sessionKey exists BEFORE init:', !!this.sessionKey);
-      console.log('[SessionManager] sessionKey length BEFORE init:', this.sessionKey?.length);
 
       if (!this.wsClient || !this.wsClient.isConnected()) {
-        console.log('[SessionManager] 🆕 Creating NEW WebSocket connection to:', wsUrl);
         this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
         await this.wsClient.connect();
-        console.log('[SessionManager] ✅ WebSocket connected successfully');
 
         // Set up global RAG message handlers
         this._setupRAGMessageHandlers();
 
         // NEW (Phase 6.2): Use encryption by default
         if (session.encryption && this.encryptionManager) {
-          console.log('[SessionManager] 🔐 Session encryption ENABLED - calling sendEncryptedInit...');
-          console.log('[SessionManager] sessionKey BEFORE sendEncryptedInit:', !!this.sessionKey);
 
           // Send encrypted session init
           const config: ExtendedSessionConfig = {
@@ -605,13 +588,9 @@ export class SessionManager implements ISessionManager {
           };
           await this.sendEncryptedInit(this.wsClient, config, sessionId, session.jobId);
 
-          console.log('[SessionManager] sessionKey AFTER sendEncryptedInit:', !!this.sessionKey);
-          console.log('[SessionManager] sessionKey length AFTER sendEncryptedInit:', this.sessionKey?.length);
           if (this.sessionKey) {
-            console.log('[SessionManager] sessionKey (first 16 hex chars):', Array.from(this.sessionKey.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(''));
           }
         } else {
-          console.log('[SessionManager] ⚠️ Session encryption DISABLED - calling sendPlaintextInit...');
           // Send plaintext session init (opt-out or no encryption manager)
           const signer = (this.paymentManager as any).signer;
           if (!signer) {
@@ -633,9 +612,6 @@ export class SessionManager implements ISessionManager {
           await this.sendPlaintextInit(this.wsClient, config, sessionId, session.jobId, userAddress);
         }
       } else {
-        console.log('[SessionManager] ♻️ REUSING existing WebSocket connection');
-        console.log('[SessionManager] sessionKey exists (reused connection):', !!this.sessionKey);
-        console.log('[SessionManager] sessionKey length (reused connection):', this.sessionKey?.length);
       }
 
       // Collect full response
@@ -655,69 +631,34 @@ export class SessionManager implements ISessionManager {
           }
 
           // Send encrypted message and wait for complete response
-          console.log('[SessionManager] ===== STARTING ENCRYPTED STREAMING =====');
-          console.log('[SessionManager] Initial fullResponse:', `"${fullResponse}"`);
-          console.log('[SessionManager] 🔑 Session key status BEFORE registering handler:');
-          console.log('[SessionManager]   - this.sessionKey exists:', !!this.sessionKey);
-          console.log('[SessionManager]   - this.sessionKey length:', this.sessionKey?.length);
-          console.log('[SessionManager]   - this.sessionKey type:', typeof this.sessionKey);
-          console.log('[SessionManager]   - this.sessionKey is Uint8Array:', this.sessionKey instanceof Uint8Array);
           if (this.sessionKey) {
-            console.log('[SessionManager]   - sessionKey (first 8 bytes hex):', Array.from(this.sessionKey.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(''));
           }
 
           response = await new Promise<string>((resolve, reject) => {
             // Use sliding timeout window - resets on each chunk received
             let timeout = setTimeout(() => {
-              console.log('[SessionManager] ⏰ TIMEOUT - fullResponse at timeout:', `"${fullResponse}"`);
-              console.log('[SessionManager] ⏰ TIMEOUT - this.sessionKey still exists:', !!this.sessionKey);
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
             }, 60000); // 60 seconds for complex queries (sliding window)
 
-            console.log('[SessionManager] 📋 BEFORE registering handler:');
-            console.log('[SessionManager]   - Current handlers count:', (this.wsClient as any).messageHandlers?.size);
-            console.log('[SessionManager]   - this.sessionKey exists:', !!this.sessionKey);
-            console.log('[SessionManager]   - this.sessionKey length:', this.sessionKey?.length);
 
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
-              console.log(`[SessionManager] ⚡⚡⚡ ========== HANDLER CALLED ========== ⚡⚡⚡`);
-              console.log(`[SessionManager] ⚡ Message type: "${data.type}"`);
-              console.log(`[SessionManager] ⚡ Message keys:`, Object.keys(data));
-              console.log(`[SessionManager] ⚡ Full message:`, JSON.stringify(data));
 
-              console.log(`[SessionManager] 🔑 Session key status AT HANDLER EXECUTION:`);
-              console.log(`[SessionManager]   - this.sessionKey exists:`, !!this.sessionKey);
-              console.log(`[SessionManager]   - this.sessionKey === undefined:`, this.sessionKey === undefined);
-              console.log(`[SessionManager]   - this.sessionKey === null:`, this.sessionKey === null);
-              console.log(`[SessionManager]   - this.sessionKey length:`, this.sessionKey?.length);
-              console.log(`[SessionManager]   - this.sessionKey type:`, typeof this.sessionKey);
-              console.log(`[SessionManager]   - this.sessionKey is Uint8Array:`, this.sessionKey instanceof Uint8Array);
               if (this.sessionKey) {
-                console.log(`[SessionManager]   - sessionKey (first 8 bytes hex):`, Array.from(this.sessionKey.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(''));
               }
 
               // Check encrypted_chunk condition
-              console.log(`[SessionManager] 🔍 Checking encrypted_chunk condition:`);
-              console.log(`[SessionManager]   - data.type === 'encrypted_chunk': ${data.type === 'encrypted_chunk'}`);
-              console.log(`[SessionManager]   - this.sessionKey (truthy): ${!!this.sessionKey}`);
-              console.log(`[SessionManager]   - FULL CONDITION: ${data.type === 'encrypted_chunk' && this.sessionKey}`);
 
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
-                console.log('[SessionManager] ✅ CONDITION TRUE - Processing encrypted_chunk...');
                 try {
                   // Reset timeout on each chunk (sliding window)
                   clearTimeout(timeout);
                   timeout = setTimeout(() => {
-                    console.log('[SessionManager] ⏰ TIMEOUT - No chunks received for 60s');
                     reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
                   }, 60000);
 
-                  console.log('[SessionManager] 🔓 About to decrypt chunk...');
                   const decrypted = await this.decryptIncomingMessage(data);
-                  console.log('[SessionManager] ✅ Chunk decrypted successfully:', `"${decrypted}"`);
                   onToken(decrypted);
                   fullResponse += decrypted;
-                  console.log('[SessionManager] fullResponse is now:', `"${fullResponse}"`);
                 } catch (err) {
                   console.error('[SessionManager] ❌ Failed to decrypt chunk:', err);
                   console.error('[SessionManager] Error stack:', (err as Error).stack);
@@ -728,17 +669,13 @@ export class SessionManager implements ISessionManager {
                 console.error('[SessionManager] Message type:', data.type);
                 console.error('[SessionManager] Session key exists:', !!this.sessionKey);
               } else if (data.type === 'encrypted_response' && this.sessionKey) {
-                console.log('[SessionManager] ✅ Got encrypted_response, fullResponse before resolve:', `"${fullResponse}"`);
                 clearTimeout(timeout);
                 unsubscribe();
                 try {
                   // Decrypt final message if not empty
                   if (data.payload && data.payload.ciphertextHex) {
-                    console.log('[SessionManager] 🔓 Decrypting final encrypted response...');
                     const finalMsg = await this.decryptIncomingMessage(data);
-                    console.log('[SessionManager] ✅ Final encrypted message:', finalMsg);
                   }
-                  console.log('[SessionManager] RESOLVING with fullResponse:', `"${fullResponse}"`);
                   resolve(fullResponse);
                 } catch (err) {
                   console.error('[SessionManager] ❌ Error in encrypted_response handler:', err);
@@ -750,42 +687,22 @@ export class SessionManager implements ISessionManager {
                 unsubscribe();
                 reject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
               } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
-                console.log(`[SessionManager] 📜 PROOF SUBMITTED by host:`, data);
               } else if (data.type === 'session_completed') {
-                console.log(`[SessionManager] ✅ SESSION COMPLETED by host:`, data);
               } else {
-                console.log(`[SessionManager] ⚠️ Message type "${data.type}" not handled by any condition`);
-                console.log(`[SessionManager] Available conditions checked:`);
-                console.log(`[SessionManager]   - encrypted_chunk && sessionKey: ${data.type === 'encrypted_chunk' && this.sessionKey}`);
-                console.log(`[SessionManager]   - encrypted_response && sessionKey: ${data.type === 'encrypted_response' && this.sessionKey}`);
-                console.log(`[SessionManager]   - error: ${data.type === 'error'}`);
-                console.log(`[SessionManager]   - proof_submitted/checkpoint_submitted: ${data.type === 'proof_submitted' || data.type === 'checkpoint_submitted'}`);
-                console.log(`[SessionManager]   - session_completed: ${data.type === 'session_completed'}`);
               }
-              console.log(`[SessionManager] ⚡⚡⚡ ========== HANDLER END ========== ⚡⚡⚡`);
             });
 
-            console.log('[SessionManager] 📋 AFTER registering handler:');
-            console.log('[SessionManager]   - Current handlers count:', (this.wsClient as any).messageHandlers?.size);
-            console.log('[SessionManager]   - Handler registered successfully');
-            console.log('[SessionManager]   - this.sessionKey still exists:', !!this.sessionKey);
-            console.log('[SessionManager]   - this.sessionKey length:', this.sessionKey?.length);
 
             // Send encrypted message after handler is set up
-            console.log('[SessionManager] 📤 About to send encrypted message...');
-            console.log('[SessionManager] this.sessionKey exists before sending:', !!this.sessionKey);
             this.sendEncryptedMessage(prompt).catch((err) => {
               console.error('[SessionManager] ❌ Failed to send encrypted message:', err);
               reject(err);
             });
           });
 
-          console.log('[SessionManager] Promise resolved, response:', `"${response}"`);
-          console.log('[SessionManager] fullResponse after Promise:', `"${fullResponse}"`);
         } else {
           // Plaintext streaming mode
           const unsubscribe = this.wsClient.onMessage(async (data: any) => {
-            console.log(`[SessionManager] WebSocket message received:`, JSON.stringify(data));
 
             if (data.type === 'stream_chunk' && data.content) {
               onToken(data.content);
@@ -793,9 +710,7 @@ export class SessionManager implements ISessionManager {
             } else if (data.type === 'response') {
               fullResponse = data.content || fullResponse;
             } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
-              console.log(`[SessionManager] PROOF SUBMITTED by host:`, data);
             } else if (data.type === 'session_completed') {
-              console.log(`[SessionManager] SESSION COMPLETED by host:`, data);
             }
           });
 
@@ -819,11 +734,7 @@ export class SessionManager implements ISessionManager {
         }
         
         // Use collected response or fallback to returned response
-        console.log('[SessionManager] ===== FINAL RESPONSE ASSEMBLY =====');
-        console.log('[SessionManager] fullResponse:', `"${fullResponse}"`);
-        console.log('[SessionManager] response:', `"${response}"`);
         const finalResponse = fullResponse || response;
-        console.log('[SessionManager] finalResponse (return value):', `"${finalResponse}"`);
 
         // Add response to session
         session.responses.push(finalResponse);
@@ -872,8 +783,6 @@ export class SessionManager implements ISessionManager {
             );
           }
 
-          console.log('[SessionManager] 📝 NON-STREAMING MODE - Encryption enabled');
-          console.log('[SessionManager] Session key available:', !!this.sessionKey);
 
           // Send encrypted message
           await this.sendEncryptedMessage(prompt);
@@ -883,46 +792,34 @@ export class SessionManager implements ISessionManager {
           response = await new Promise<string>((resolve, reject) => {
             // Use sliding timeout window - resets on each chunk received
             let timeout = setTimeout(() => {
-              console.log('[SessionManager] ⏰ NON-STREAMING TIMEOUT - accumulated response:', `"${accumulatedResponse}"`);
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
             }, 60000); // 60 seconds for complex queries (sliding window)
 
-            console.log('[SessionManager] 📋 Registering NON-STREAMING handler...');
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
-              console.log('[SessionManager] 📨 NON-STREAMING handler received message type:', data.type);
 
               // MUST handle encrypted_chunk messages!
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
-                console.log('[SessionManager] 🔓 Decrypting encrypted chunk in NON-STREAMING mode...');
                 try {
                   // Reset timeout on each chunk (sliding window)
                   clearTimeout(timeout);
                   timeout = setTimeout(() => {
-                    console.log('[SessionManager] ⏰ TIMEOUT - No chunks received for 60s (NON-STREAMING)');
                     reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
                   }, 60000);
 
                   const decrypted = await this.decryptIncomingMessage(data);
-                  console.log('[SessionManager] ✅ Chunk decrypted:', `"${decrypted}"`);
                   accumulatedResponse += decrypted;
-                  console.log('[SessionManager] Accumulated so far:', `"${accumulatedResponse}"`);
                 } catch (err) {
                   console.error('[SessionManager] ❌ Failed to decrypt chunk:', err);
                 }
               } else if (data.type === 'encrypted_response' && this.sessionKey) {
-                console.log('[SessionManager] ✅ Got encrypted_response in NON-STREAMING mode');
-                console.log('[SessionManager] Final accumulated response:', `"${accumulatedResponse}"`);
                 clearTimeout(timeout);
                 unsubscribe();
                 try {
                   // Decrypt final message if present
                   if (data.payload && data.payload.ciphertextHex) {
-                    console.log('[SessionManager] 🔓 Decrypting final encrypted response...');
                     const finalMsg = await this.decryptIncomingMessage(data);
-                    console.log('[SessionManager] Final message:', finalMsg);
                   }
                   // Return accumulated chunks, not just the final "stop" message
-                  console.log('[SessionManager] RESOLVING with accumulated response:', `"${accumulatedResponse}"`);
                   resolve(accumulatedResponse);
                 } catch (err) {
                   console.error('[SessionManager] ❌ Error in encrypted_response handler:', err);
@@ -934,14 +831,10 @@ export class SessionManager implements ISessionManager {
                 unsubscribe();
                 reject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
               } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
-                console.log(`[SessionManager] 📜 PROOF SUBMITTED:`, data);
               } else if (data.type === 'session_completed') {
-                console.log(`[SessionManager] ✅ SESSION COMPLETED:`, data);
               } else {
-                console.log('[SessionManager] ⚠️ Unhandled message type in NON-STREAMING mode:', data.type);
               }
             });
-            console.log('[SessionManager] 📋 NON-STREAMING handler registered');
           });
         } else {
           // Send plaintext message (only if session explicitly opted out of encryption)
@@ -1072,7 +965,6 @@ export class SessionManager implements ISessionManager {
 
     // If session not in memory, try to load from storage (handles page refresh case)
     if (!session && this.storageManager) {
-      console.log(`Session ${sessionIdStr} not in memory, attempting to load from storage...`);
       try {
         const conversation = await this.storageManager.loadConversation(sessionIdStr);
         if (conversation && conversation.metadata) {
@@ -1092,7 +984,6 @@ export class SessionManager implements ISessionManager {
 
           // Add to memory for this session
           this.sessions.set(sessionIdStr, session);
-          console.log(`Session ${sessionIdStr} restored from storage`);
         }
       } catch (err) {
         console.warn(`Could not load session ${sessionIdStr} from storage:`, err);
@@ -1101,7 +992,6 @@ export class SessionManager implements ISessionManager {
 
     // If still no session, it might already be completed by host
     if (!session) {
-      console.log(`Session ${sessionIdStr} not found - may already be completed by host`);
       // Don't throw error - just try to complete it anyway
       // The contract will handle if it's already completed
     }
@@ -1122,7 +1012,6 @@ export class SessionManager implements ISessionManager {
         sessionAfterTx.totalTokens = totalTokens;
         sessionAfterTx.endTime = Date.now();
       } else {
-        console.log(`Session ${sessionIdStr} not in memory after transaction - likely completed by host`);
       }
       
       // Clean up WebSocket connection if active
@@ -1166,14 +1055,12 @@ export class SessionManager implements ISessionManager {
     try {
       // Clean up RAG handler before closing WebSocket
       if (this.ragHandlerUnsubscribe) {
-        console.log('[SessionManager] Cleaning up RAG handler on session end');
         this.ragHandlerUnsubscribe();
         this.ragHandlerUnsubscribe = undefined;
       }
 
       // Close WebSocket connection if active
       if (this.wsClient && this.wsClient.isConnected()) {
-        console.log(`Closing WebSocket connection for session ${sessionIdStr}`);
         await this.wsClient.disconnect();
         this.wsClient = undefined;
       }
@@ -1194,7 +1081,6 @@ export class SessionManager implements ISessionManager {
         await this.storageManager.saveConversation(conversation);
       }
 
-      console.log(`Session ${sessionIdStr} ended by user - host will complete contract`);
     } catch (error: any) {
       throw new SDKError(
         `Failed to end session: ${error.message}`,
@@ -1214,10 +1100,6 @@ export class SessionManager implements ISessionManager {
     sessionId: bigint,
     jobId: bigint
   ): Promise<void> {
-    console.log('[SessionManager] 🔐 === ENTERING sendEncryptedInit ===');
-    console.log('[SessionManager] sessionId:', sessionId.toString());
-    console.log('[SessionManager] jobId:', jobId.toString());
-    console.log('[SessionManager] config.host:', config.host);
 
     if (!this.encryptionManager) {
       console.error('[SessionManager] ❌ EncryptionManager NOT available!');
@@ -1226,7 +1108,6 @@ export class SessionManager implements ISessionManager {
         'ENCRYPTION_NOT_AVAILABLE'
       );
     }
-    console.log('[SessionManager] ✅ EncryptionManager available');
 
     if (!this.hostManager) {
       console.error('[SessionManager] ❌ HostManager NOT available!');
@@ -1235,37 +1116,21 @@ export class SessionManager implements ISessionManager {
         'HOST_MANAGER_NOT_AVAILABLE'
       );
     }
-    console.log('[SessionManager] ✅ HostManager available');
 
     // 1. Generate random session key (32 bytes)
-    console.log('[SessionManager] 🔑 STEP 1: Generating session key...');
-    console.log('[SessionManager] this.sessionKey BEFORE generation:', !!this.sessionKey);
     this.sessionKey = crypto.getRandomValues(new Uint8Array(32));
-    console.log('[SessionManager] ✅ Session key GENERATED');
-    console.log('[SessionManager] this.sessionKey AFTER generation:', !!this.sessionKey);
-    console.log('[SessionManager] this.sessionKey length:', this.sessionKey?.length);
-    console.log('[SessionManager] this.sessionKey type:', typeof this.sessionKey);
-    console.log('[SessionManager] this.sessionKey is Uint8Array:', this.sessionKey instanceof Uint8Array);
 
     const sessionKeyHex = bytesToHex(this.sessionKey);
-    console.log('[SessionManager] sessionKeyHex length:', sessionKeyHex.length, '(should be 64 hex chars for 32 bytes)');
-    console.log('[SessionManager] sessionKeyHex (first 16 chars):', sessionKeyHex.substring(0, 16));
 
     this.messageIndex = 0;
-    console.log('[SessionManager] messageIndex reset to:', this.messageIndex);
 
     // 2. Get host public key (uses cache, metadata, or signature recovery)
-    console.log('[SessionManager] 🔑 STEP 2: Retrieving host public key...');
-    console.log('[SessionManager] config.host:', config.host);
-    console.log('[SessionManager] config.endpoint:', config.endpoint);
     const hostPubKey = await this.hostManager.getHostPublicKey(
       config.host,
       config.endpoint  // API URL for fallback
     );
-    console.log('[SessionManager] ✅ Host public key retrieved:', hostPubKey.substring(0, 20) + '...');
 
     // 3. Prepare session init payload (per docs lines 469-477)
-    console.log('[SessionManager] 📦 STEP 3: Preparing init payload...');
     const initPayload: any = {
       sessionKey: sessionKeyHex,
       jobId: jobId.toString(),  // MUST be string per docs
@@ -1279,22 +1144,16 @@ export class SessionManager implements ISessionManager {
         manifestPath: config.vectorDatabase.manifestPath,
         userAddress: config.vectorDatabase.userAddress
       };
-      console.log('[SessionManager] 📁 Vector database included:', config.vectorDatabase.manifestPath);
     }
 
-    console.log('[SessionManager] initPayload:', JSON.stringify(initPayload, null, 2));
 
     // 4. Encrypt with EncryptionManager
-    console.log('[SessionManager] 🔐 STEP 4: Encrypting init payload...');
     const encrypted = await this.encryptionManager.encryptSessionInit(
       hostPubKey,
       initPayload
     );
-    console.log('[SessionManager] ✅ Init payload encrypted');
-    console.log('[SessionManager] encrypted.type:', encrypted.type);
 
     // 5. Send encrypted init message
-    console.log('[SessionManager] 📤 STEP 5: Sending encrypted init message...');
     const messageToSend = {
       ...encrypted,  // { type: 'encrypted_session_init', payload: {...} }
       chain_id: config.chainId,
@@ -1310,11 +1169,7 @@ export class SessionManager implements ISessionManager {
     }, null, 2));
 
     await ws.sendMessage(messageToSend);
-    console.log('[SessionManager] ✅ Encrypted init message sent');
 
-    console.log('[SessionManager] 🔐 === EXITING sendEncryptedInit ===');
-    console.log('[SessionManager] FINAL CHECK - this.sessionKey exists:', !!this.sessionKey);
-    console.log('[SessionManager] FINAL CHECK - this.sessionKey length:', this.sessionKey?.length);
   }
 
   /**
@@ -1343,12 +1198,10 @@ export class SessionManager implements ISessionManager {
         manifest_path: config.vectorDatabase.manifestPath,
         user_address: config.vectorDatabase.userAddress
       };
-      console.log('[SessionManager] 📁 Vector database included (plaintext):', config.vectorDatabase.manifestPath);
     }
 
     await ws.sendMessage(initMessage);
 
-    console.log('[SessionManager] Plaintext session init sent');
   }
 
   /**
@@ -1356,16 +1209,7 @@ export class SessionManager implements ISessionManager {
    * @private
    */
   private async sendEncryptedMessage(message: string): Promise<void> {
-    console.log('[SessionManager] 📤 === ENTERING sendEncryptedMessage ===');
-    console.log('[SessionManager] Message to encrypt:', message.substring(0, 50) + (message.length > 50 ? '...' : ''));
-    console.log('[SessionManager] Message length:', message.length);
 
-    console.log('[SessionManager] 🔑 Session key status at sendEncryptedMessage:');
-    console.log('[SessionManager]   - this.sessionKey exists:', !!this.sessionKey);
-    console.log('[SessionManager]   - this.sessionKey === undefined:', this.sessionKey === undefined);
-    console.log('[SessionManager]   - this.sessionKey === null:', this.sessionKey === null);
-    console.log('[SessionManager]   - this.sessionKey length:', this.sessionKey?.length);
-    console.log('[SessionManager]   - this.sessionKey type:', typeof this.sessionKey);
 
     if (!this.sessionKey) {
       console.error('[SessionManager] ❌ Session key NOT available!');
@@ -1374,7 +1218,6 @@ export class SessionManager implements ISessionManager {
         'SESSION_KEY_NOT_AVAILABLE'
       );
     }
-    console.log('[SessionManager] ✅ Session key IS available');
 
     if (!this.encryptionManager) {
       console.error('[SessionManager] ❌ EncryptionManager NOT available!');
@@ -1383,7 +1226,6 @@ export class SessionManager implements ISessionManager {
         'ENCRYPTION_NOT_AVAILABLE'
       );
     }
-    console.log('[SessionManager] ✅ EncryptionManager IS available');
 
     if (!this.wsClient) {
       console.error('[SessionManager] ❌ WebSocket client NOT available!');
@@ -1392,12 +1234,9 @@ export class SessionManager implements ISessionManager {
         'WEBSOCKET_NOT_AVAILABLE'
       );
     }
-    console.log('[SessionManager] ✅ WebSocket client IS available');
 
     // Get current session for session_id
-    console.log('[SessionManager] 🔍 Finding active session...');
     const sessions = Array.from(this.sessions.values());
-    console.log('[SessionManager] Total sessions in memory:', sessions.length);
     const currentSession = sessions.find(s => s.status === 'active');
     if (!currentSession) {
       console.error('[SessionManager] ❌ No active session found!');
@@ -1407,7 +1246,6 @@ export class SessionManager implements ISessionManager {
         'NO_ACTIVE_SESSION'
       );
     }
-    console.log('[SessionManager] ✅ Active session found:', currentSession.sessionId.toString());
     console.log('[SessionManager] Session details:', {
       sessionId: currentSession.sessionId.toString(),
       jobId: currentSession.jobId.toString(),
@@ -1417,16 +1255,11 @@ export class SessionManager implements ISessionManager {
 
     try {
       // Encrypt message with session key (returns payload only)
-      console.log('[SessionManager] 🔐 Encrypting message...');
-      console.log('[SessionManager] Current messageIndex:', this.messageIndex);
       const payload = this.encryptionManager.encryptMessage(
         this.sessionKey,
         message,
         this.messageIndex++
       );
-      console.log('[SessionManager] ✅ Message encrypted successfully');
-      console.log('[SessionManager] Payload keys:', Object.keys(payload));
-      console.log('[SessionManager] New messageIndex:', this.messageIndex);
 
       // Wrap payload with message structure (per docs lines 498-508)
       // Use sendWithoutResponse to avoid conflicting handlers (v1.3.28 fix)
@@ -1443,11 +1276,8 @@ export class SessionManager implements ISessionManager {
         payload_keys: Object.keys(messageToSend.payload)
       });
 
-      console.log('[SessionManager] 📤 Sending encrypted message via WebSocket...');
       await this.wsClient.sendWithoutResponse(messageToSend);
-      console.log('[SessionManager] ✅ Encrypted message sent successfully');
 
-      console.log(`[SessionManager] 📤 === EXITING sendEncryptedMessage (index: ${this.messageIndex - 1}) ===`);
     } catch (error: any) {
       console.error('[SessionManager] ❌ Failed to encrypt/send message:', error);
       console.error('[SessionManager] Error stack:', error.stack);
@@ -1478,7 +1308,6 @@ export class SessionManager implements ISessionManager {
       prompt: message
     });
 
-    console.log('[SessionManager] Plaintext message sent');
   }
 
   /**
@@ -1486,15 +1315,7 @@ export class SessionManager implements ISessionManager {
    * @private
    */
   private async decryptIncomingMessage(encryptedMessage: any): Promise<string> {
-    console.log('[SessionManager] 🔓 === ENTERING decryptIncomingMessage ===');
-    console.log('[SessionManager] Message type:', encryptedMessage.type);
-    console.log('[SessionManager] Message keys:', Object.keys(encryptedMessage));
 
-    console.log('[SessionManager] 🔑 Session key status at decryptIncomingMessage:');
-    console.log('[SessionManager]   - this.sessionKey exists:', !!this.sessionKey);
-    console.log('[SessionManager]   - this.sessionKey === undefined:', this.sessionKey === undefined);
-    console.log('[SessionManager]   - this.sessionKey === null:', this.sessionKey === null);
-    console.log('[SessionManager]   - this.sessionKey length:', this.sessionKey?.length);
 
     if (!this.sessionKey) {
       console.error('[SessionManager] ❌ Session key NOT available for decryption!');
@@ -1503,7 +1324,6 @@ export class SessionManager implements ISessionManager {
         'SESSION_KEY_NOT_AVAILABLE'
       );
     }
-    console.log('[SessionManager] ✅ Session key IS available for decryption');
 
     if (!this.encryptionManager) {
       console.error('[SessionManager] ❌ EncryptionManager NOT available!');
@@ -1512,14 +1332,11 @@ export class SessionManager implements ISessionManager {
         'ENCRYPTION_NOT_AVAILABLE'
       );
     }
-    console.log('[SessionManager] ✅ EncryptionManager IS available');
 
     try {
       // Extract payload from message (per docs lines 514-527 for encrypted_chunk)
       // Message structure: { type, session_id, id, payload: { ciphertextHex, nonceHex, aadHex } }
-      console.log('[SessionManager] 📦 Extracting payload from message...');
       const payload = encryptedMessage.payload || encryptedMessage;
-      console.log('[SessionManager] Payload keys:', Object.keys(payload));
       console.log('[SessionManager] Payload structure:', {
         hasCiphertextHex: !!payload.ciphertextHex,
         hasNonceHex: !!payload.nonceHex,
@@ -1530,16 +1347,11 @@ export class SessionManager implements ISessionManager {
       });
 
       // Decrypt message with session key
-      console.log('[SessionManager] 🔐 Calling EncryptionManager.decryptMessage...');
       const plaintext = this.encryptionManager.decryptMessage(
         this.sessionKey,
         payload
       );
-      console.log('[SessionManager] ✅ Decryption successful');
-      console.log('[SessionManager] Plaintext length:', plaintext.length);
-      console.log('[SessionManager] Plaintext:', `"${plaintext}"`);
 
-      console.log('[SessionManager] 🔓 === EXITING decryptIncomingMessage ===');
       return plaintext;
     } catch (error: any) {
       console.error('[SessionManager] ❌ Decryption FAILED:', error);
@@ -1580,7 +1392,6 @@ export class SessionManager implements ISessionManager {
     // If we removed a lot of repetitions, add a note
     const finalText = result.join('. ') + '.';
     if (sentences.length > result.length * 2) {
-      console.log(`Cleaned up repetitive response: ${sentences.length} sentences -> ${result.length} unique`);
     }
     
     return finalText;
@@ -1922,7 +1733,6 @@ export class SessionManager implements ISessionManager {
 
     // 2. Ensure WebSocket is connected (initialize if needed)
     if (!this.wsClient || !this.wsClient.isConnected()) {
-      console.log('[SessionManager] 🔌 Initializing WebSocket for vector upload...');
 
       // Get WebSocket URL from endpoint
       const endpoint = session.endpoint || 'http://localhost:8080';
@@ -1930,17 +1740,14 @@ export class SessionManager implements ISessionManager {
         ? endpoint
         : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
 
-      console.log('[SessionManager] Connecting to:', wsUrl);
       this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
       await this.wsClient.connect();
-      console.log('[SessionManager] ✅ WebSocket connected');
 
       // Set up global RAG message handlers
       this._setupRAGMessageHandlers();
 
       // Send session init (encryption support)
       if (session.encryption && this.encryptionManager) {
-        console.log('[SessionManager] 🔐 Sending encrypted session init...');
         const config: ExtendedSessionConfig = {
           chainId: session.chainId,
           host: session.provider,
@@ -1951,7 +1758,6 @@ export class SessionManager implements ISessionManager {
         };
         await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
       } else {
-        console.log('[SessionManager] 📤 Sending plaintext session init...');
         const signer = (this.paymentManager as any).signer;
         if (!signer) {
           throw new Error('PaymentManager signer not available');
@@ -1972,7 +1778,6 @@ export class SessionManager implements ISessionManager {
         await this.sendPlaintextInit(this.wsClient, config, session.sessionId, session.jobId, userAddress);
       }
 
-      console.log('[SessionManager] ✅ Session initialized, ready for vector upload');
     }
 
     // 3. Handle empty vectors array
@@ -2320,7 +2125,6 @@ export class SessionManager implements ISessionManager {
 
     // Clean up existing handler if present to prevent duplicate handlers
     if (this.ragHandlerUnsubscribe) {
-      console.log('[SessionManager] Cleaning up existing RAG handler before registering new one');
       this.ragHandlerUnsubscribe();
       this.ragHandlerUnsubscribe = undefined;
     }
@@ -2336,7 +2140,6 @@ export class SessionManager implements ISessionManager {
       // Explicitly ignore all other message types (encrypted_chunk, etc.)
       // Those will be handled by dedicated handlers in sendPromptStreaming()
     });
-    console.log('[SessionManager] RAG handler registered');
   }
 
   /**
@@ -2484,14 +2287,12 @@ export class SessionManager implements ISessionManager {
       throw new SDKError('No valid chunks generated from file content', 'INVALID_CONTENT');
     }
 
-    console.log(`[SessionManager] 🧩 Generated ${chunks.length} chunks from document`);
 
     // Get HTTP endpoint from session
     const endpoint = session.endpoint || 'http://localhost:8080';
     const httpUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
     const embedUrl = `${httpUrl}/v1/embed`;
 
-    console.log(`[SessionManager] 🌐 Calling embedding endpoint: ${embedUrl}`);
 
     // Send request to /v1/embed endpoint
     const requestBody = {
@@ -2529,7 +2330,6 @@ export class SessionManager implements ISessionManager {
     }
 
     const result = await fetchResponse.json();
-    console.log(`[SessionManager] ✅ Received ${result.embeddings?.length || 0} embeddings`);
 
     if (!result.embeddings || !Array.isArray(result.embeddings)) {
       throw new SDKError('Invalid response format from embedding endpoint', 'INVALID_RESPONSE');
@@ -2549,7 +2349,6 @@ export class SessionManager implements ISessionManager {
       }
     }));
 
-    console.log(`[SessionManager] 🎯 Generated ${vectors.length} vectors with 384D embeddings`);
 
     return vectors;
   }

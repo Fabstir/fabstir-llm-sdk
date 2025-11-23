@@ -126,11 +126,9 @@ export class StorageManager implements IStorageManager {
    * Initialize storage with S5 seed
    */
   async initialize(seed: string, userAddress?: string): Promise<void> {
-    console.log('StorageManager.initialize: Starting...');
 
     // Skip S5 initialization if explicitly disabled (e.g., for hosts)
     if (process.env.SKIP_S5_STORAGE === 'true') {
-      console.log('⚠️ StorageManager: S5 storage disabled (SKIP_S5_STORAGE=true)');
       this.initialized = true;
       return;
     }
@@ -139,14 +137,12 @@ export class StorageManager implements IStorageManager {
       this.userSeed = seed;
       this.userAddress = userAddress || '';
 
-      console.log('StorageManager.initialize: Dynamically loading S5...');
 
       // Dynamically import S5 when needed
       let S5: any;
       try {
         const s5Module = await import('@julesl23/s5js');
         S5 = s5Module.S5;
-        console.log('✅ S5 module loaded successfully');
       } catch (importError: any) {
         console.error('❌ Failed to import S5:', importError.message);
         throw new SDKError(
@@ -156,12 +152,9 @@ export class StorageManager implements IStorageManager {
         );
       }
 
-      console.log('StorageManager.initialize: Creating S5 instance with timeout...');
-      console.log('StorageManager.initialize: Using portal URL:', this.s5PortalUrl);
 
       // Use the correct portal URL or empty array to skip default peers
       const peersToUse = this.s5PortalUrl ? [this.s5PortalUrl] : [];
-      console.log('StorageManager.initialize: Peers to use:', peersToUse);
 
       // Create S5 instance with timeout protection
       const s5CreatePromise = S5.create({
@@ -169,15 +162,14 @@ export class StorageManager implements IStorageManager {
         // No Node.js specific options
       });
 
-      // Add a 5-second timeout
+      // Add a 30-second timeout (S5 can take time to connect to peers)
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('S5 client creation timed out after 5 seconds')), 5000);
+        setTimeout(() => reject(new Error('S5 client creation timed out after 30 seconds')), 30000);
       });
 
       let s5Instance: any;
       try {
         s5Instance = await Promise.race([s5CreatePromise, timeoutPromise]);
-        console.log('✅ StorageManager.initialize: S5 instance created SUCCESSFULLY!');
       } catch (timeoutError: any) {
         console.warn('⚠️ StorageManager.initialize: S5 instance creation failed or timed out:', timeoutError.message);
         console.warn('⚠️ StorageManager: Continuing without S5 storage (operations will fail gracefully)');
@@ -185,26 +177,19 @@ export class StorageManager implements IStorageManager {
         return;
       }
 
-      console.log('🔐 Recovering identity from seed phrase...');
       await s5Instance.recoverIdentityFromSeedPhrase(this.userSeed);
-      console.log('✅ Identity recovered successfully');
 
       // Store the S5 instance - we'll use s5Instance.fs for file operations
       this.s5Client = s5Instance;
       
       // Optional portal registration
       try {
-        console.log('📡 Attempting portal registration...');
         await s5Instance.registerOnNewPortal('https://s5.vup.cx');
-        console.log('✅ Portal registration successful');
       } catch (error) {
-        console.log('ℹ️ Portal registration skipped (optional)');
       }
 
-      console.log('🔧 Ensuring identity is initialized...');
       await s5Instance.fs.ensureIdentityInitialized();
       this.initialized = true;
-      console.log('🎉 StorageManager fully initialized and ready!');
     } catch (error: any) {
       throw new SDKError(
         `Failed to initialize StorageManager: ${error.message}`,
@@ -849,7 +834,6 @@ export class StorageManager implements IStorageManager {
         data: settings,
         timestamp: Date.now(),
       };
-      console.log('[StorageManager] Cache updated after save');
     } catch (error: any) {
       throw new SDKError(
         `Failed to save user settings: ${error.message}`,
@@ -873,10 +857,8 @@ export class StorageManager implements IStorageManager {
     if (this.settingsCache) {
       const age = Date.now() - this.settingsCache.timestamp;
       if (age < this.CACHE_TTL) {
-        console.log('[StorageManager] Cache hit for user settings');
         return this.settingsCache.data;
       }
-      console.log('[StorageManager] Cache expired, fetching from S5');
     }
 
     const settingsPath = 'home/user/settings.json';
@@ -1020,7 +1002,6 @@ export class StorageManager implements IStorageManager {
 
       // Invalidate cache
       this.settingsCache = null;
-      console.log('[StorageManager] Cache invalidated after clear');
     } catch (error: any) {
       throw new SDKError(
         `Failed to clear user settings: ${error.message}`,

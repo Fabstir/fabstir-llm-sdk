@@ -161,7 +161,6 @@ export function entropyToS5Phrase(entropy: Uint8Array): string {
 
   // Convert entropy to seed words
   const seedWords = entropyToSeedWords(entropy);
-  console.log('[S5 Phrase Generation] Seed words:', Array.from(seedWords));
 
   // Convert seed words back to seed bytes (required for checksum)
   const seedBytes = seedWordsToSeed(seedWords);
@@ -170,7 +169,6 @@ export function entropyToS5Phrase(entropy: Uint8Array): string {
 
   // Generate Blake3 checksum words (S5.js requirement)
   const checksumWords = generateChecksumWords(seedBytes);
-  console.log('[S5 Phrase Generation] Checksum words:', Array.from(checksumWords));
 
   // Build the phrase
   const phraseWords: string[] = [];
@@ -188,7 +186,6 @@ export function entropyToS5Phrase(entropy: Uint8Array): string {
   const phrase = phraseWords.join(' ');
   console.log('[S5 Phrase Generation] Final phrase (first 3 words):',
     phraseWords.slice(0, 3).join(' ') + '...');
-  console.log('[S5 Phrase Generation] Total words:', phraseWords.length);
 
   return phrase;
 }
@@ -207,29 +204,23 @@ function getCacheKey(walletAddress: string): string {
  */
 export function getCachedSeed(walletAddress: string): string | null {
   if (typeof window === 'undefined' || !window.localStorage) {
-    console.log('[S5 Seed Cache] No localStorage available');
     return null; // No localStorage in Node.js or SSR
   }
   
   try {
     const cacheKey = getCacheKey(walletAddress);
-    console.log('[S5 Seed Cache] Looking for cache key:', cacheKey);
     const cached = localStorage.getItem(cacheKey);
     
     if (cached) {
-      console.log('[S5 Seed Cache] Found cached data');
       // Parse the cached data
       const data = JSON.parse(cached);
       
       // Check if cache is still valid (could add expiry later)
       if (data.version === CACHE_VERSION && data.seed) {
-        console.log('[S5 Seed Cache] Cache is valid, returning seed');
         return data.seed;
       } else {
-        console.log('[S5 Seed Cache] Cache version mismatch or missing seed');
       }
     } else {
-      console.log('[S5 Seed Cache] No cached data found for key:', cacheKey);
     }
   } catch (error) {
     console.warn('Failed to read cached S5 seed:', error);
@@ -324,26 +315,21 @@ export async function getOrGenerateS5Seed(
   forceRegenerate = false
 ): Promise<string> {
   const walletAddress = await signer.getAddress();
-  console.log('[S5 Seed] getOrGenerateS5Seed called for address:', walletAddress);
   
   // Check cache first (unless forced to regenerate)
   if (!forceRegenerate) {
     const cached = getCachedSeed(walletAddress);
-    console.log('[S5 Seed] Cached seed found:', !!cached);
     
     if (cached) {
       const isValid = await verifyCachedSeed(walletAddress, cached);
-      console.log('[S5 Seed] Cached seed valid:', isValid);
       
       if (isValid) {
-        console.log('[S5 Seed] Using cached seed for wallet:', walletAddress);
         return cached;
       }
     }
   }
   
   // Generate new seed deterministically
-  console.log('[S5 Seed] Generating new seed for wallet:', walletAddress);
   
   // Sign message to get deterministic entropy
   const signature = await signer.signMessage(SEED_MESSAGE);
@@ -357,7 +343,6 @@ export async function getOrGenerateS5Seed(
   // Cache for future use
   cacheSeed(walletAddress, seedPhrase);
   
-  console.log('[S5 Seed] Generated and cached new seed');
   return seedPhrase;
 }
 

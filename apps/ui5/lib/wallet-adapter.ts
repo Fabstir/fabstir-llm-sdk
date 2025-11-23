@@ -67,7 +67,7 @@ export class MetaMaskAdapter implements WalletAdapter {
       throw new Error('MetaMask not installed');
     }
 
-    console.log('[MetaMaskAdapter] Connecting...');
+    console.debug('[MetaMaskAdapter] Connecting...');
 
     this.provider = new ethers.BrowserProvider(window.ethereum);
     await this.provider.send('eth_requestAccounts', []);
@@ -81,7 +81,7 @@ export class MetaMaskAdapter implements WalletAdapter {
       await this.switchNetwork();
     }
 
-    console.log('[MetaMaskAdapter] Connected:', this.address);
+    console.debug('[MetaMaskAdapter] Connected:', this.address);
     return this.address;
   }
 
@@ -89,7 +89,7 @@ export class MetaMaskAdapter implements WalletAdapter {
     this.signer = null;
     this.address = null;
     this.provider = null;
-    console.log('[MetaMaskAdapter] Disconnected');
+    console.debug('[MetaMaskAdapter] Disconnected');
   }
 
   async getSigner(): Promise<Signer> {
@@ -160,17 +160,17 @@ export class TestWalletAdapter implements WalletAdapter {
     this.config = config;
     this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
     this.wallet = new ethers.Wallet(privateKey, this.provider);
-    console.log('[TestWalletAdapter] Initialized with address:', this.wallet.address);
+    console.debug('[TestWalletAdapter] Initialized with address:', this.wallet.address);
   }
 
   async connect(): Promise<string> {
     // Test wallet is always "connected" since we have the private key
-    console.log('[TestWalletAdapter] Connected:', this.wallet.address);
+    console.debug('[TestWalletAdapter] Connected:', this.wallet.address);
     return this.wallet.address;
   }
 
   async disconnect(): Promise<void> {
-    console.log('[TestWalletAdapter] Disconnected (note: test wallet cannot truly disconnect)');
+    console.debug('[TestWalletAdapter] Disconnected (note: test wallet cannot truly disconnect)');
     // Note: Can't actually disconnect a private key wallet
     // This is just for interface compatibility
   }
@@ -236,7 +236,7 @@ export class BaseAccountKitAdapter implements WalletAdapter {
     this.provider = await accountSDK.getProvider();
     this.signer = await this.provider.getSigner();
 
-    console.log('[BaseAccountKitAdapter] Connected:', this.address);
+    console.debug('[BaseAccountKitAdapter] Connected:', this.address);
     return this.address;
     */
   }
@@ -245,7 +245,7 @@ export class BaseAccountKitAdapter implements WalletAdapter {
     this.signer = null;
     this.address = null;
     this.provider = null;
-    console.log('[BaseAccountKitAdapter] Disconnected');
+    console.debug('[BaseAccountKitAdapter] Disconnected');
   }
 
   async getSigner(): Promise<Signer> {
@@ -316,7 +316,7 @@ export class ParticleNetworkAdapter implements WalletAdapter {
     this.provider = new ethers.BrowserProvider(particle.ethereum);
     this.signer = await this.provider.getSigner();
 
-    console.log('[ParticleNetworkAdapter] Connected:', this.address);
+    console.debug('[ParticleNetworkAdapter] Connected:', this.address);
     return this.address;
     */
   }
@@ -325,7 +325,7 @@ export class ParticleNetworkAdapter implements WalletAdapter {
     this.signer = null;
     this.address = null;
     this.provider = null;
-    console.log('[ParticleNetworkAdapter] Disconnected');
+    console.debug('[ParticleNetworkAdapter] Disconnected');
   }
 
   async getSigner(): Promise<Signer> {

@@ -45,8 +45,8 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
 
   // Debug logging (uncomment for troubleshooting)
   // if (content.includes('Einstein') || content.includes('boxed')) {
-  //   console.log('[MarkdownRenderer] Original:', content.substring(0, 300));
-  //   console.log('[MarkdownRenderer] Converted:', processedContent.substring(0, 300));
+  //   console.debug('[MarkdownRenderer] Original:', content.substring(0, 300));
+  //   console.debug('[MarkdownRenderer] Converted:', processedContent.substring(0, 300));
   // }
 
   return (

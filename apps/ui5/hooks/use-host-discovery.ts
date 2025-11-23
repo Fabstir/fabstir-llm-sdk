@@ -30,7 +30,7 @@ export function useHostDiscovery() {
    */
   const discoverHosts = useCallback(async () => {
     if (!managers || !isInitialized) {
-      console.log('[HostDiscovery] SDK not initialized, skipping discovery');
+      console.debug('[HostDiscovery] SDK not initialized, skipping discovery');
       return;
     }
 
@@ -38,19 +38,19 @@ export function useHostDiscovery() {
     setError(null);
 
     try {
-      console.log('[HostDiscovery] 🔍 Discovering active hosts...');
+      console.debug('[HostDiscovery] 🔍 Discovering active hosts...');
 
       const hostManager = managers.hostManager;
       const discoveredHosts = await hostManager.discoverAllActiveHostsWithModels();
 
-      console.log(`[HostDiscovery] ✅ Found ${discoveredHosts.length} total hosts`);
+      console.debug(`[HostDiscovery] ✅ Found ${discoveredHosts.length} total hosts`);
 
       // Filter hosts that support models
       const hostsWithModels = discoveredHosts.filter(
         (h: any) => h.supportedModels && h.supportedModels.length > 0
       );
 
-      console.log(`[HostDiscovery] ✅ Found ${hostsWithModels.length} hosts with models`);
+      console.debug(`[HostDiscovery] ✅ Found ${hostsWithModels.length} hosts with models`);
 
       // Convert to our interface format
       const formattedHosts: DiscoveredHost[] = hostsWithModels.map((h: any) => ({
@@ -69,7 +69,7 @@ export function useHostDiscovery() {
         const randomIndex = Math.floor(Math.random() * formattedHosts.length);
         const autoSelectedHost = formattedHosts[randomIndex];
         setSelectedHost(autoSelectedHost);
-        console.log(`[HostDiscovery] ✅ Auto-selected host: ${autoSelectedHost.address}`);
+        console.debug(`[HostDiscovery] ✅ Auto-selected host: ${autoSelectedHost.address}`);
       }
     } catch (err: any) {
       console.error('[HostDiscovery] ❌ Discovery failed:', err);
@@ -87,7 +87,7 @@ export function useHostDiscovery() {
     const host = hosts.find((h) => h.address === hostAddress);
     if (host) {
       setSelectedHost(host);
-      console.log(`[HostDiscovery] ✅ Manually selected host: ${hostAddress}`);
+      console.debug(`[HostDiscovery] ✅ Manually selected host: ${hostAddress}`);
     } else {
       console.error(`[HostDiscovery] ❌ Host not found: ${hostAddress}`);
     }
@@ -98,7 +98,7 @@ export function useHostDiscovery() {
    */
   const clearSelectedHost = useCallback(() => {
     setSelectedHost(null);
-    console.log('[HostDiscovery] Cleared selected host');
+    console.debug('[HostDiscovery] Cleared selected host');
   }, []);
 
   /**

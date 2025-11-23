@@ -44,7 +44,7 @@ function detectWalletType(): WalletType {
   if (typeof window !== 'undefined') {
     const testWallet = (window as any).__TEST_WALLET__;
     if (testWallet && testWallet.privateKey) {
-      console.log('[BaseWallet] 🧪 Test wallet detected');
+      console.debug('[BaseWallet] 🧪 Test wallet detected');
       return 'test-wallet';
     }
   }
@@ -55,13 +55,13 @@ function detectWalletType(): WalletType {
     process.env.NEXT_PUBLIC_BASE_ACCOUNT_KIT_PROJECT_ID
   );
   if (hasBaseAccountKit) {
-    console.log('[BaseWallet] Base Account Kit configured');
+    console.debug('[BaseWallet] Base Account Kit configured');
     return 'base-account-kit';
   }
 
   // Default to MetaMask
   if (typeof window !== 'undefined' && window.ethereum) {
-    console.log('[BaseWallet] MetaMask detected');
+    console.debug('[BaseWallet] MetaMask detected');
     return 'metamask';
   }
 
@@ -85,7 +85,7 @@ export class BaseWalletProvider {
   async connect(): Promise<string> {
     try {
       const walletType = detectWalletType();
-      console.log(`[BaseWallet] Connecting via ${walletType}...`);
+      console.debug(`[BaseWallet] Connecting via ${walletType}...`);
 
       const manager = getWalletManager();
 
@@ -110,7 +110,7 @@ export class BaseWalletProvider {
       const address = await manager.connect(walletType, adapterConfig, options);
       this.adapter = manager.getAdapter();
 
-      console.log(`[BaseWallet] Connected via ${walletType}:`, address);
+      console.debug(`[BaseWallet] Connected via ${walletType}:`, address);
       return address;
     } catch (error) {
       console.error('[BaseWallet] Connection failed:', error);
@@ -135,7 +135,7 @@ export class BaseWalletProvider {
     if (walletType !== 'base-account-kit') {
       // MetaMask and Test Wallet don't support sub-accounts
       const address = this.adapter.getAddress();
-      console.log(
+      console.debug(
         `[BaseWallet] Sub-accounts not supported with ${walletType}. Using primary address.`
       );
       return { address: address!, isExisting: true };
@@ -190,7 +190,7 @@ export class BaseWalletProvider {
     await manager.disconnect();
 
     this.adapter = null;
-    console.log('[BaseWallet] Disconnected');
+    console.debug('[BaseWallet] Disconnected');
   }
 
   /**

@@ -15,7 +15,7 @@ export function AppReadyMarker() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    console.log('[AppReadyMarker] React hydration complete');
+    console.debug('[AppReadyMarker] React hydration complete');
     setReady(true);
   }, []);
 
