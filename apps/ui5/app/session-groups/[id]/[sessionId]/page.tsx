@@ -636,9 +636,12 @@ export default function ChatSessionPage() {
 
                   return {
                     id: sessionId,
+                    groupId: groupId,
                     title: cleanTitle || 'Untitled Session',
                     lastMessage: cleanLastMsg,
-                    updated: chatSession.metadata?.updatedAt || Date.now(),
+                    messageCount: chatSession.messages.length,
+                    created: chatSession.created || Date.now(),
+                    updated: chatSession.updated || chatSession.created || Date.now(),
                   };
                 }
                 return null;
