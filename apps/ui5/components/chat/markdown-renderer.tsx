@@ -11,6 +11,17 @@ interface MarkdownRendererProps {
 }
 
 /**
+ * Convert common HTML tags to markdown equivalents
+ * AI models sometimes return HTML instead of markdown
+ */
+function convertHtmlToMarkdown(content: string): string {
+  // Convert <br> tags (all variants) to markdown line breaks
+  content = content.replace(/<br\s*\/?>/gi, '  \n');
+
+  return content;
+}
+
+/**
  * Convert LaTeX-style math delimiters to markdown-style
  * remarkMath expects $...$ and $$...$$ but AI sends \(...\) and \[...\]
  */
@@ -40,8 +51,10 @@ function convertLatexDelimiters(content: string): string {
  * - Links, images, lists, blockquotes, etc.
  */
 export function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
-  // Convert LaTeX-style delimiters to markdown-style for remarkMath
-  const processedContent = convertLatexDelimiters(content);
+  // Convert HTML to markdown, then LaTeX delimiters to markdown-style for remarkMath
+  const processedContent = convertLatexDelimiters(
+    convertHtmlToMarkdown(content)
+  );
 
   // Debug logging (uncomment for troubleshooting)
   // if (content.includes('Einstein') || content.includes('boxed')) {
