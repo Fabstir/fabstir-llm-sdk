@@ -173,11 +173,13 @@ export class VectorRAGManager implements IVectorRAGManager {
 
     try {
       // Create database in S5VectorStore (client-side storage)
+      console.log(`[Enhanced S5.js] Creating vector database: /home/vector-databases/${databaseName}/`);
       await this.vectorStore.createDatabase({
         name: databaseName,
         owner: this.userAddress,
         description: sessionConfig.description
       });
+      console.log(`[Enhanced S5.js] Vector database created successfully`);
 
       // Create session object
       const session: Session = {
@@ -300,11 +302,16 @@ export class VectorRAGManager implements IVectorRAGManager {
     }
 
     // Add vectors to S5VectorStore (auto-saved)
+    if (vectors.length > 0) {
+      const dimension = vectors[0].vector.length;
+      console.log(`[Enhanced S5.js] Storing ${vectors.length} vector embeddings: Float32Array[${dimension}]`);
+    }
     await this.vectorStore.addVectors(session.databaseName, vectors);
     session.lastAccessedAt = Date.now();
 
     // Update metadata with actual vector count
     const stats = await this.vectorStore.getStats(session.databaseName);
+    console.log(`[Enhanced S5.js] Vector database now has ${stats.vectorCount} embeddings`);
     this.metadataService.update(session.databaseName, {
       vectorCount: stats.vectorCount || 0
     });

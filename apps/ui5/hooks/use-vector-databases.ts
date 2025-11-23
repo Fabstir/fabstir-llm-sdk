@@ -19,7 +19,8 @@ export interface DatabaseMetadata {
 
 export interface Vector {
   id: string;
-  values: number[];
+  vector: number[];  // Changed from "values" to match SDK (@fabstir/sdk-core)
+  values?: number[]; // Keep for backward compatibility during transition
   metadata?: Record<string, any>;
 }
 
@@ -416,10 +417,20 @@ export function useVectorDatabases() {
         }
       }
 
-      await fetchDatabases(); // Refresh to update stats
+      // Update local state with actual vector count instead of stale S5 metadata
+      // Load actual vectors to get real count (metadata is never updated after creation)
+      const allVectors = await vectorRAGManager.getAllVectors(databaseName);
+      setDatabases(prev =>
+        prev.map(db =>
+          db.databaseName === databaseName
+            ? { ...db, vectorCount: allVectors.length }
+            : db
+        )
+      );
+
       return { success, failed };
     },
-    [managers, fetchDatabases]
+    [managers]
   );
 
   const addPendingDocument = useCallback(

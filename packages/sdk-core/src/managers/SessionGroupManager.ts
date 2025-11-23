@@ -110,7 +110,9 @@ export class SessionGroupManager implements ISessionGroupManager {
     // Persist to S5 storage if available
     if (this.storage) {
       try {
+        console.log(`[Enhanced S5.js] Creating session group: /home/session-groups/${id}/`);
         await this.storage.save(group);
+        console.log(`[Enhanced S5.js] Session group saved successfully`);
       } catch (err) {
         console.error('[SessionGroupManager.createSessionGroup] Failed to save to S5 storage:', err);
         // Don't throw - allow operation to continue with in-memory only
@@ -128,10 +130,12 @@ export class SessionGroupManager implements ISessionGroupManager {
     // If S5 storage is available, load from S5
     if (this.storage) {
       try {
+        console.log(`[Enhanced S5.js] Listing directory: /home/session-groups/`);
         const allGroups = await this.storage.loadAll();
 
         // Filter by owner and non-deleted
         const userGroups = allGroups.filter(g => g.owner === owner && !g.deleted);
+        console.log(`[Enhanced S5.js] Found ${userGroups.length} session groups`);
 
         // Update in-memory cache
         userGroups.forEach(g => this.groups.set(g.id, g));

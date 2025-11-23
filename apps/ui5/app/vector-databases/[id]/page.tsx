@@ -146,23 +146,79 @@ export default function VectorDatabaseDetailPage() {
   const fileItems = useMemo((): FileItem[] => {
     const items: FileItem[] = [];
 
+    console.log('🔍 [VectorDB Page] Starting fileItems build:', {
+      totalVectors: vectors.length,
+      pendingDocs: database?.pendingDocuments?.length || 0,
+      timestamp: new Date().toISOString()
+    });
+
     // Add ready documents from vectors
     const vectorsByDoc = new Map<string, Vector[]>();
-    vectors.forEach((vector) => {
-      const fileName = vector.metadata?.fileName || vector.id;
+    vectors.forEach((vector, idx) => {
+      const fileName = vector.metadata?.fileName;
+
+      // Log first 5 vectors in detail
+      if (idx < 5) {
+        console.log(`🔍 [VectorDB Page] Vector ${idx} details:`, {
+          id: vector.id,
+          hasMetadata: !!vector.metadata,
+          fileName: fileName,
+          metadata: vector.metadata,
+          vectorArrayLength: (vector as any).vector?.length || (vector as any).values?.length || 0,
+          vectorArrayType: (vector as any).vector ? 'vector' : (vector as any).values ? 'values' : 'MISSING'
+        });
+      }
+
+      // Skip vectors without fileName metadata
+      if (!fileName) {
+        console.warn(`⚠️ [VectorDB Page] Vector ${vector.id} missing fileName metadata, skipping`);
+        return;
+      }
+
       if (!vectorsByDoc.has(fileName)) {
         vectorsByDoc.set(fileName, []);
       }
       vectorsByDoc.get(fileName)!.push(vector);
     });
 
+    console.log('🔍 [VectorDB Page] Grouping result:', {
+      uniqueFiles: vectorsByDoc.size,
+      fileNames: Array.from(vectorsByDoc.keys()),
+      chunksPerFile: Array.from(vectorsByDoc.entries()).map(([name, vecs]) => ({
+        fileName: name,
+        chunkCount: vecs.length
+      }))
+    });
+
     // Create FileItems from grouped vectors (ready documents)
+    const readyFileNames = new Set<string>();
     vectorsByDoc.forEach((docVectors, fileName) => {
       const firstVector = docVectors[0];
+      readyFileNames.add(fileName);  // Track files that already have vectors
+
+      // Calculate size from vector arrays
+      const totalSize = docVectors.reduce((sum, v) => {
+        const vecArray = (v as any).vector || (v as any).values || [];
+        const arraySize = Array.isArray(vecArray) ? vecArray.length * 4 : 0;
+        return sum + arraySize;
+      }, 0);
+
+      // Get file size from metadata if available (more accurate than vector size)
+      const fileSize = firstVector.metadata?.fileSize || totalSize;
+
+      console.log(`🔍 [VectorDB Page] Creating FileItem for "${fileName}":`, {
+        chunkCount: docVectors.length,
+        calculatedSize: totalSize,
+        metadataFileSize: firstVector.metadata?.fileSize,
+        finalSize: fileSize,
+        folderPath: firstVector.metadata?.folderPath || '/',
+        createdAt: firstVector.metadata?.createdAt
+      });
+
       items.push({
         id: firstVector.id,
         name: fileName,
-        size: docVectors.reduce((sum, v) => sum + v.values.length * 4, 0),
+        size: fileSize,
         uploaded: firstVector.metadata?.createdAt || Date.now(),
         folderPath: firstVector.metadata?.folderPath || '/',
         vectorCount: docVectors.length,
@@ -170,9 +226,34 @@ export default function VectorDatabaseDetailPage() {
       });
     });
 
-    // Add pending documents from database metadata
-    if (database?.pendingDocuments) {
+    // Add pending documents from database metadata (skip duplicates)
+    if (database?.pendingDocuments && database.pendingDocuments.length > 0) {
+      console.log('🔍 [VectorDB Page] Processing pending documents:', {
+        count: database.pendingDocuments.length,
+        documents: database.pendingDocuments.map(d => ({
+          fileName: d.fileName,
+          status: d.embeddingStatus,
+          fileSize: d.fileSize
+        }))
+      });
+
       database.pendingDocuments.forEach((doc: any) => {
+        // Skip if this file already appears in vectors list (prevents duplicates)
+        if (readyFileNames.has(doc.fileName)) {
+          console.warn(`⚠️ [VectorDB Page] DUPLICATE DETECTED: "${doc.fileName}" exists in both vectors and pendingDocuments!`, {
+            inVectors: true,
+            inPending: true,
+            action: 'skipping pending entry'
+          });
+          return;
+        }
+
+        console.log(`🔍 [VectorDB Page] Adding pending document: "${doc.fileName}"`, {
+          fileSize: doc.fileSize,
+          status: doc.embeddingStatus,
+          progress: doc.embeddingProgress
+        });
+
         items.push({
           id: doc.id,
           name: doc.fileName,
@@ -187,8 +268,23 @@ export default function VectorDatabaseDetailPage() {
       });
     }
 
+    console.log('🔍 [VectorDB Page] Final result:', {
+      totalFileItems: items.length,
+      readyFiles: vectorsByDoc.size,
+      pendingFiles: (database?.pendingDocuments?.length || 0) - (items.length - vectorsByDoc.size),
+      fileNames: items.map(item => item.name)
+    });
+
     return items;
   }, [vectors, database]);
+
+  // Calculate actual storage size from loaded vectors (more accurate than stale metadata)
+  const actualStorageSize = useMemo(() => {
+    return vectors.reduce((total, vector) => {
+      const vecArray = (vector as any).vector || (vector as any).values || [];
+      return total + vecArray.length * 4; // 4 bytes per float32
+    }, 0);
+  }, [vectors]);
 
   const handleDeleteVector = async (vectorId: string) => {
     try {
@@ -463,7 +559,8 @@ export default function VectorDatabaseDetailPage() {
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mt-6">
           <div className="p-4 bg-gray-50 rounded-lg">
             <p className="text-sm text-gray-600">Vectors</p>
-            <p className="text-2xl font-bold text-gray-900">{database.vectorCount.toLocaleString()}</p>
+            {/* Use actual loaded vectors count instead of stale metadata */}
+            <p className="text-2xl font-bold text-gray-900">{vectors.length.toLocaleString()}</p>
           </div>
           <div className="p-4 bg-gray-50 rounded-lg">
             <p className="text-sm text-gray-600">Dimensions</p>
@@ -471,7 +568,8 @@ export default function VectorDatabaseDetailPage() {
           </div>
           <div className="p-4 bg-gray-50 rounded-lg">
             <p className="text-sm text-gray-600">Storage</p>
-            <p className="text-2xl font-bold text-gray-900">{formatSize(database.storageSizeBytes)}</p>
+            {/* Use actual calculated storage from loaded vectors */}
+            <p className="text-2xl font-bold text-gray-900">{formatSize(actualStorageSize)}</p>
           </div>
           <div className="p-4 bg-gray-50 rounded-lg">
             <p className="text-sm text-gray-600">Last Updated</p>

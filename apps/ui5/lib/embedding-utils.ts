@@ -139,13 +139,20 @@ export function batchTexts(texts: string[]): string[][] {
  * @param documentText - Full document text
  * @param documentId - Document identifier for vector IDs
  * @param chainId - Blockchain chain ID
+ * @param metadata - Additional metadata to include with each vector (fileName, fileSize, etc.)
  * @returns Array of vectors ready for S5VectorStore
  */
 export async function generateDocumentEmbeddings(
   hostUrl: string,
   documentText: string,
   documentId: string,
-  chainId: number = 84532
+  chainId: number = 84532,
+  metadata: {
+    fileName: string;
+    fileSize?: number;
+    folderPath?: string;
+    createdAt?: number;
+  } = { fileName: 'unknown' }
 ): Promise<Array<{
   id: string;
   vector: number[];
@@ -154,9 +161,19 @@ export async function generateDocumentEmbeddings(
     chunkIndex: number;
     documentId: string;
     tokenCount: number;
+    fileName: string;
+    fileSize?: number;
+    folderPath?: string;
+    createdAt?: number;
   };
 }>> {
   // Step 1: Chunk the document
+  console.log('🔧 [EmbeddingUtils] Starting embedding generation with metadata:', {
+    fileName: metadata.fileName,
+    fileSize: metadata.fileSize,
+    folderPath: metadata.folderPath,
+    documentLength: documentText.length
+  });
   console.debug(`[EmbeddingUtils] Chunking document (${documentText.length} chars)...`);
   const chunks = chunkText(documentText, 1000, 200);
   console.debug(`[EmbeddingUtils] Created ${chunks.length} chunks`);
@@ -174,6 +191,10 @@ export async function generateDocumentEmbeddings(
       chunkIndex: number;
       documentId: string;
       tokenCount: number;
+      fileName: string;
+      fileSize?: number;
+      folderPath?: string;
+      createdAt?: number;
     };
   }> = [];
 
@@ -196,13 +217,25 @@ export async function generateDocumentEmbeddings(
           chunkIndex: chunkIndex,
           documentId: documentId,
           tokenCount: embedding.tokenCount,
+          // CRITICAL: Include fileName and other metadata for UI display
+          fileName: metadata.fileName,
+          fileSize: metadata.fileSize,
+          folderPath: metadata.folderPath || '/',
+          createdAt: metadata.createdAt || Date.now(),
         },
       });
       chunkIndex++;
     }
   }
 
-  console.debug(`[EmbeddingUtils] ✅ Generated ${allVectors.length} vectors total`);
+  console.log(`🔧 [EmbeddingUtils] ✅ Generated ${allVectors.length} vectors total. First vector metadata:`, {
+    id: allVectors[0]?.id,
+    fileName: allVectors[0]?.metadata.fileName,
+    fileSize: allVectors[0]?.metadata.fileSize,
+    folderPath: allVectors[0]?.metadata.folderPath,
+    hasVectorArray: !!allVectors[0]?.vector,
+    vectorLength: allVectors[0]?.vector?.length || 0
+  });
 
   return allVectors;
 }

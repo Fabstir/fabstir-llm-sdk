@@ -228,8 +228,12 @@ export class StorageManager implements IStorageManager {
         }
       };
 
-      // Store to S5
+      // Store to S5 with performance tracking
+      const startTime = performance.now();
+      console.log(`[Enhanced S5.js] PUT ${path}`);
       await this.s5Client.fs.put(path, storageData);
+      const duration = Math.round(performance.now() - startTime);
+      console.log(`[Enhanced S5.js] Operation: Store data - Time: ${duration}ms`);
 
       // Return immediately using generated key (no getMetadata to avoid race condition)
       // Note: If S5 CID is needed later, fetch it separately with retry logic
@@ -258,13 +262,18 @@ export class StorageManager implements IStorageManager {
 
     try {
       // Try to retrieve by path or CID
-      const path = cid.includes('/') 
-        ? cid 
+      const path = cid.includes('/')
+        ? cid
         : `${StorageManager.CONVERSATION_PATH}/${this.userAddress}/${cid}.json`;
-      
+
+      const startTime = performance.now();
+      console.log(`[Enhanced S5.js] GET ${path}`);
       const retrievedData = await this.s5Client.fs.get(path);
+      const duration = Math.round(performance.now() - startTime);
+      console.log(`[Enhanced S5.js] Operation: Retrieve data - Time: ${duration}ms`);
+
       if (!retrievedData) return null;
-      
+
       return retrievedData.data || retrievedData;
     } catch (error: any) {
       if (error.message?.includes('not found') || error.message?.includes('does not exist')) {
@@ -827,7 +836,11 @@ export class StorageManager implements IStorageManager {
 
     try {
       // S5 automatically encodes object as CBOR
+      const startTime = performance.now();
+      console.log(`[Enhanced S5.js] PUT ${settingsPath}`);
       await this.s5Client.fs.put(settingsPath, settings);
+      const duration = Math.round(performance.now() - startTime);
+      console.log(`[Enhanced S5.js] Operation: Save settings - Time: ${duration}ms`);
 
       // Update cache
       this.settingsCache = {
@@ -857,6 +870,7 @@ export class StorageManager implements IStorageManager {
     if (this.settingsCache) {
       const age = Date.now() - this.settingsCache.timestamp;
       if (age < this.CACHE_TTL) {
+        console.log('[Enhanced S5.js] Cache hit for user settings');
         return this.settingsCache.data;
       }
     }
@@ -865,7 +879,11 @@ export class StorageManager implements IStorageManager {
 
     try {
       // S5 automatically decodes CBOR to object
+      console.log('[Enhanced S5.js] Cache miss, fetching from S5');
+      const startTime = performance.now();
       const settings = await this.s5Client.fs.get(settingsPath);
+      const duration = Math.round(performance.now() - startTime);
+      console.log(`[Enhanced S5.js] Operation: Load settings - Time: ${duration}ms`);
 
       // Return null if no settings file exists (first-time user)
       if (!settings) {

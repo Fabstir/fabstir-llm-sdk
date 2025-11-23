@@ -169,6 +169,15 @@ export default function ChatSessionPage() {
       return;
     }
 
+    // CRITICAL: Extract session metadata from group data instead of relying on React state
+    // This avoids race condition where state hasn't updated yet but group data is fresh
+    const freshSessionMetadata = group.chatSessionsData?.[sessionId]?.metadata || sessionMetadata;
+    console.debug('[ChatSession] Using metadata:', {
+      hasStateMetadata: !!sessionMetadata,
+      hasFreshMetadata: !!freshSessionMetadata,
+      source: freshSessionMetadata === sessionMetadata ? 'state' : 'group'
+    });
+
     // Set processing lock
     isProcessingEmbeddings.current = true;
 
@@ -211,7 +220,7 @@ export default function ChatSessionPage() {
         // Even if no pending documents, we need to upload existing "ready" vectors to THIS session
         // so they're available for search
         try {
-          const blockchainSessionId = sessionMetadata?.blockchainSessionId;
+          const blockchainSessionId = freshSessionMetadata?.blockchainSessionId;
           if (!blockchainSessionId) {
             console.warn('[ChatSession] ⚠️ No blockchain session ID, cannot upload vectors');
             return;
@@ -273,10 +282,38 @@ export default function ChatSessionPage() {
 
           console.debug(`[ChatSession] Generating embeddings for: ${doc.fileName || doc.name} (${text.length} chars)`);
 
-          // Get host endpoint from session metadata
-          const hostEndpoint = sessionMetadata?.hostEndpoint;
+          // Get host endpoint from fresh session metadata (not React state) with fallback
+          let hostEndpoint = freshSessionMetadata?.hostEndpoint;
+
           if (!hostEndpoint) {
-            throw new Error('Host endpoint not available in session metadata');
+            console.debug('[ChatSession] hostEndpoint not in UI metadata, trying fallbacks...');
+
+            // Fallback 1: Try SessionManager's endpoint field (different metadata structure)
+            const blockchainSessionId = freshSessionMetadata?.blockchainSessionId;
+            if (blockchainSessionId && managers?.sessionManager) {
+              const sessionState = managers.sessionManager.getSession(blockchainSessionId.toString());
+              if (sessionState && (sessionState as any).endpoint) {
+                hostEndpoint = (sessionState as any).endpoint;
+                console.debug('[ChatSession] ✅ Derived hostEndpoint from SessionManager:', hostEndpoint);
+              }
+            }
+
+            // Fallback 2: Query NodeRegistry contract for host's apiUrl
+            if (!hostEndpoint && freshSessionMetadata?.hostAddress && managers?.hostManager) {
+              try {
+                const hostInfo = await managers.hostManager.getHostInfo(freshSessionMetadata.hostAddress);
+                if (hostInfo?.metadata?.apiUrl) {
+                  hostEndpoint = hostInfo.metadata.apiUrl;
+                  console.debug('[ChatSession] ✅ Derived hostEndpoint from NodeRegistry:', hostEndpoint);
+                }
+              } catch (err) {
+                console.warn('[ChatSession] Failed to query NodeRegistry:', err);
+              }
+            }
+
+            if (!hostEndpoint) {
+              throw new Error('Host endpoint not available in session metadata. Please ensure session was created with AI mode enabled.');
+            }
           }
 
           // Generate embeddings via host's /v1/embed endpoint
@@ -285,7 +322,14 @@ export default function ChatSessionPage() {
             hostEndpoint,
             text,
             doc.id,
-            84532 // Base Sepolia
+            84532, // Base Sepolia
+            // CRITICAL: Pass metadata for UI display (fileName, fileSize, etc.)
+            {
+              fileName: doc.fileName || doc.name || 'Unknown',
+              fileSize: doc.fileSize || text.length,
+              folderPath: doc.folderPath || '/',
+              createdAt: doc.createdAt || Date.now()
+            }
           );
 
           console.debug(`[ChatSession] ✅ Generated ${vectors.length} vectors for: ${doc.fileName || doc.name}`);
@@ -296,7 +340,7 @@ export default function ChatSessionPage() {
           console.debug(`[ChatSession] ✅ Stored ${vectors.length} vectors in S5`);
 
           // Upload vectors to host session (for search)
-          const blockchainSessionId = sessionMetadata?.blockchainSessionId;
+          const blockchainSessionId = freshSessionMetadata?.blockchainSessionId;
           if (!blockchainSessionId) {
             throw new Error('No blockchain session ID available for vector upload');
           }
@@ -883,7 +927,32 @@ export default function ChatSessionPage() {
           const allRelevantChunks: Array<{ content: string; metadata: any; score: number; database: string }> = [];
 
           // Generate query embedding via host endpoint
-          const hostEndpoint = sessionMetadata?.hostEndpoint;
+          let hostEndpoint = sessionMetadata?.hostEndpoint;
+
+          // Try fallbacks if not in UI metadata
+          if (!hostEndpoint) {
+            const blockchainSessionId = sessionMetadata?.blockchainSessionId;
+            if (blockchainSessionId && managers?.sessionManager) {
+              const sessionState = managers.sessionManager.getSession(blockchainSessionId.toString());
+              if (sessionState && (sessionState as any).endpoint) {
+                hostEndpoint = (sessionState as any).endpoint;
+                console.debug('[ChatSession] ✅ Derived hostEndpoint from SessionManager for RAG');
+              }
+            }
+
+            if (!hostEndpoint && sessionMetadata?.hostAddress && managers?.hostManager) {
+              try {
+                const hostInfo = await managers.hostManager.getHostInfo(sessionMetadata.hostAddress);
+                if (hostInfo?.metadata?.apiUrl) {
+                  hostEndpoint = hostInfo.metadata.apiUrl;
+                  console.debug('[ChatSession] ✅ Derived hostEndpoint from NodeRegistry for RAG');
+                }
+              } catch (err) {
+                console.warn('[ChatSession] Failed to query NodeRegistry for RAG:', err);
+              }
+            }
+          }
+
           if (!hostEndpoint) {
             console.warn('[ChatSession] ⚠️ Host endpoint not available, skipping RAG search');
           } else {
@@ -1362,10 +1431,44 @@ export default function ChatSessionPage() {
         messageCount: conversationHistory.length
       });
 
+      // Derive host endpoint with fallback mechanisms
+      let hostEndpoint = sessionMetadata.hostEndpoint;
+
+      if (!hostEndpoint) {
+        console.debug('[ChatSession] hostEndpoint not in UI metadata, trying fallbacks for continue...');
+
+        // Fallback 1: Try SessionManager's endpoint field
+        const blockchainSessionId = sessionMetadata?.blockchainSessionId;
+        if (blockchainSessionId && managers?.sessionManager) {
+          const sessionState = managers.sessionManager.getSession(blockchainSessionId.toString());
+          if (sessionState && (sessionState as any).endpoint) {
+            hostEndpoint = (sessionState as any).endpoint;
+            console.debug('[ChatSession] ✅ Derived hostEndpoint from SessionManager for continue');
+          }
+        }
+
+        // Fallback 2: Query NodeRegistry contract
+        if (!hostEndpoint && sessionMetadata?.hostAddress && managers?.hostManager) {
+          try {
+            const hostInfo = await managers.hostManager.getHostInfo(sessionMetadata.hostAddress);
+            if (hostInfo?.metadata?.apiUrl) {
+              hostEndpoint = hostInfo.metadata.apiUrl;
+              console.debug('[ChatSession] ✅ Derived hostEndpoint from NodeRegistry for continue');
+            }
+          } catch (err) {
+            console.warn('[ChatSession] Failed to query NodeRegistry for continue:', err);
+          }
+        }
+
+        if (!hostEndpoint) {
+          throw new Error('Cannot continue chat: Host endpoint not available in session metadata');
+        }
+      }
+
       // Get host config from current session metadata
       const hostConfig = {
         address: sessionMetadata.hostAddress,
-        endpoint: sessionMetadata.hostEndpoint || `http://localhost:8080/ws`, // Use stored endpoint or fallback
+        endpoint: hostEndpoint,
         models: [sessionMetadata.model],
         pricing: sessionMetadata.pricing,
       };
