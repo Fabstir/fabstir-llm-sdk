@@ -38,8 +38,11 @@ export function Breadcrumbs() {
       return;
     }
 
+    // Decode URL-encoded segment (e.g., "Movie%20Info" -> "Movie Info")
+    const decodedSegment = decodeURIComponent(segment);
+
     // Format segment label
-    let label = segment
+    let label = decodedSegment
       .split('-')
       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
@@ -58,16 +61,16 @@ export function Breadcrumbs() {
     }
 
     // Check if this is a dynamic ID (starts with db-, group-, sess-)
-    if (segment.match(/^(db-|group-|sess-)/)) {
+    if (decodedSegment.match(/^(db-|group-|sess-)/)) {
       // Try to get the name from localStorage
-      const storedName = getResourceName(segment);
+      const storedName = getResourceName(decodedSegment);
       if (storedName) {
         label = storedName;
       } else {
         // Generic label for IDs
-        if (segment.startsWith('db-')) label = 'Database';
-        else if (segment.startsWith('group-')) label = 'Session Group';
-        else if (segment.startsWith('sess-')) label = 'Chat Session';
+        if (decodedSegment.startsWith('db-')) label = 'Database';
+        else if (decodedSegment.startsWith('group-')) label = 'Session Group';
+        else if (decodedSegment.startsWith('sess-')) label = 'Chat Session';
       }
     }
 

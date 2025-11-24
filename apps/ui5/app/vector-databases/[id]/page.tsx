@@ -110,7 +110,7 @@ export default function VectorDatabaseDetailPage() {
         if (!pathMap.has(currentPath)) {
           pathMap.set(currentPath, {
             id: currentPath,
-            name: part,
+            name: decodeURIComponent(part),
             path: currentPath,
             children: [],
             fileCount: 0,
@@ -555,7 +555,7 @@ export default function VectorDatabaseDetailPage() {
               <Database className="h-8 w-8 text-purple-600" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">{database.databaseName}</h1>
+              <h1 className="text-2xl font-bold text-gray-900">{decodeURIComponent(database.databaseName)}</h1>
               {database.description && (
                 <p className="text-gray-600 mt-1">{database.description}</p>
               )}
@@ -618,7 +618,7 @@ export default function VectorDatabaseDetailPage() {
         <div className="p-6 border-b border-gray-200">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">
-              Documents ({database.vectorCount.toLocaleString()})
+              Documents ({vectors.length.toLocaleString()})
             </h2>
             <div className="flex items-center gap-2">
               {database.folderStructure && (
@@ -721,7 +721,17 @@ export default function VectorDatabaseDetailPage() {
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <p className="text-gray-600">Owner</p>
-            <p className="text-gray-900 font-mono text-xs">{database.owner}</p>
+            <p
+              className="text-gray-900 font-mono text-xs cursor-help group relative"
+              title={database.owner}
+            >
+              <span className="group-hover:hidden">
+                {database.owner.slice(0, 6)}...{database.owner.slice(-4)}
+              </span>
+              <span className="hidden group-hover:inline break-all">
+                {database.owner}
+              </span>
+            </p>
           </div>
           <div>
             <p className="text-gray-600">Created</p>
@@ -731,6 +741,22 @@ export default function VectorDatabaseDetailPage() {
             <p className="text-gray-600">Folder Structure</p>
             <p className="text-gray-900">{database.folderStructure ? 'Enabled' : 'Disabled'}</p>
           </div>
+          {(database as any).s5Portal && (
+            <div className="col-span-2">
+              <p className="text-gray-600">Endpoint</p>
+              <p
+                className="text-gray-900 font-mono text-xs cursor-help group relative"
+                title={(database as any).s5Portal}
+              >
+                <span className="group-hover:hidden">
+                  {((database as any).s5Portal as string).replace(/https?:\/\/([^:\/]+).*/, '$1...')}
+                </span>
+                <span className="hidden group-hover:inline break-all">
+                  {(database as any).s5Portal}
+                </span>
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>

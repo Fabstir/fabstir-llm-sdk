@@ -209,8 +209,16 @@ export function PaymentPanel({
                           <p className="text-xs text-blue-700">
                             Pricing: ${(Number(selectedHost.pricing) / 1000000).toFixed(4)} per token
                           </p>
-                          <p className="text-xs text-blue-700">
-                            Endpoint: {selectedHost.endpoint}
+                          <p
+                            className="text-xs text-blue-700 cursor-help group/endpoint relative"
+                            title={selectedHost.endpoint}
+                          >
+                            <span className="group-hover/endpoint:hidden">
+                              Endpoint: {selectedHost.endpoint.replace(/https?:\/\/(\d+)\.(\d+)\.(\d+)\.(\d+)(:\d+)?/, 'http://$1.$2.*.*$5')}
+                            </span>
+                            <span className="hidden group-hover/endpoint:inline">
+                              Endpoint: {selectedHost.endpoint}
+                            </span>
                           </p>
                         </div>
                         {hosts.length > 1 && (

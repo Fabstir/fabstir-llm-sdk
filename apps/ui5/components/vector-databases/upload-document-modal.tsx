@@ -160,7 +160,7 @@ export function UploadDocumentModal({ isOpen, onClose, databaseName, onUpload, i
             <Upload className="h-6 w-6 text-purple-600" />
             <div>
               <h2 className="text-xl font-semibold text-gray-900">Upload Documents</h2>
-              <p className="text-sm text-gray-600 mt-0.5">to {databaseName}</p>
+              <p className="text-sm text-gray-600 mt-0.5">to {decodeURIComponent(databaseName)}</p>
             </div>
           </div>
           <button

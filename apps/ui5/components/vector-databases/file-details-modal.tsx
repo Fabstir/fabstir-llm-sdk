@@ -125,7 +125,7 @@ export function FileDetailsModal({ isOpen, onClose, file }: FileDetailsModalProp
               <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-md">
                 <Folder className="h-5 w-5 text-gray-400" />
                 <span className="text-gray-900 font-mono text-sm">
-                  {file.folderPath || '/'}
+                  {file.folderPath ? decodeURIComponent(file.folderPath) : '/'}
                 </span>
               </div>
             </div>
