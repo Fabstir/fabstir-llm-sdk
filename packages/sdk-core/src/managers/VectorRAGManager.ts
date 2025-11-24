@@ -234,6 +234,57 @@ export class VectorRAGManager implements IVectorRAGManager {
   }
 
   /**
+   * Get existing session ID for a database, or create a new one if it doesn't exist
+   *
+   * @param databaseName - Database name
+   * @param config - Optional RAG configuration for new session
+   * @returns Session ID
+   */
+  async getOrCreateSessionId(databaseName: string, config?: PartialRAGConfig): Promise<string> {
+    this.ensureNotDisposed();
+
+    // Check if session already exists for this database
+    let sessionId = this.dbNameToSessionId.get(databaseName);
+    if (sessionId) {
+      return sessionId;
+    }
+
+    // Create new session (will reuse existing database if it exists)
+    try {
+      sessionId = await this.createSession(databaseName, config);
+      return sessionId;
+    } catch (error: any) {
+      // If database already exists, just create a session without creating database
+      if (error.message?.includes('already exists')) {
+        // Generate unique session ID
+        sessionId = `rag-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+        // Merge config with defaults
+        const sessionConfig = config ? mergeRAGConfig({ ...this.config, ...config }) : this.config;
+
+        // Create session object
+        const session: Session = {
+          sessionId,
+          databaseName,
+          status: 'active',
+          createdAt: Date.now(),
+          lastAccessedAt: Date.now(),
+          config: sessionConfig,
+          folderPaths: new Set<string>()
+        };
+
+        // Store session
+        this.sessions.set(sessionId, session);
+        this.sessionCache.set(sessionId, session);
+        this.dbNameToSessionId.set(databaseName, sessionId);
+
+        return sessionId;
+      }
+      throw error;
+    }
+  }
+
+  /**
    * List all active sessions
    */
   listSessions(databaseName?: string): Session[] {

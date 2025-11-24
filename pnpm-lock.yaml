@@ -383,11 +383,8 @@ importers:
   packages/sdk-core:
     dependencies:
       '@fabstir/llm-auth':
-        specifier: file:../../../fabstir-llm-auth
-        version: file:../fabstir-llm-auth(@types/react@19.2.2)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@19.2.0)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
-      '@fabstir/vector-db-native':
-        specifier: file:../../fabstir-vector-db-native-0.3.0.tgz
-        version: file:fabstir-vector-db-native-0.3.0.tgz
+        specifier: file:../../fabstir-llm-auth-0.1.0.tgz
+        version: file:fabstir-llm-auth-0.1.0.tgz(@types/react@19.2.2)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@19.2.0)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
       '@julesl23/s5js':
         specifier: file:../../julesl23-s5js-0.9.0-beta.4.tgz
         version: file:julesl23-s5js-0.9.0-beta.4.tgz(bufferutil@4.0.9)(utf-8-validate@5.0.10)
@@ -1184,16 +1181,16 @@ packages:
     resolution: {directory: ../fabstir-llm-auth, type: directory}
     engines: {node: '>=16.0.0'}
 
+  '@fabstir/llm-auth@file:fabstir-llm-auth-0.1.0.tgz':
+    resolution: {integrity: sha512-5WJNtG3G4nGxN5PA+lAEp6oSbtWTRxJu9wGBVgVYPz+Wgmw2HimXa/ZYun7g3QG/xaapP4xkYdVwKbLb3ZBz+w==, tarball: file:fabstir-llm-auth-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=16.0.0'}
+
   '@fabstir/sdk-core@file:packages/sdk-core':
     resolution: {directory: packages/sdk-core, type: directory}
     engines: {node: '>=18.0.0'}
     peerDependencies:
       ethers: ^6.9.0
-
-  '@fabstir/vector-db-native@file:fabstir-vector-db-native-0.3.0.tgz':
-    resolution: {integrity: sha512-uaySW2ykiiQaUghMCHkbVidg/zzRUo6A7b6O53LxVckI/zbNAUJpgo9N/VZHwnYNW1KDmw7MjH6/vthYJKtIfA==, tarball: file:fabstir-vector-db-native-0.3.0.tgz}
-    version: 0.3.0
-    engines: {node: '>= 16'}
 
   '@humanwhocodes/config-array@0.13.0':
     resolution: {integrity: sha512-DZLEEqFWQFiyK6h5YIeynKx7JlvCYWL0cImfSRXZ9l4Sg2efkFGTuFf6vzXjK1cq6IYkU+Eg/JizXw+TD2vRNw==}
@@ -7491,7 +7488,25 @@ snapshots:
       '@ethersproject/properties': 5.8.0
       '@ethersproject/strings': 5.8.0
 
-  '@fabstir/llm-auth@file:../fabstir-llm-auth(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)':
+  '@fabstir/llm-auth@file:../fabstir-llm-auth(@types/react@19.2.2)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@19.2.0)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)':
+    dependencies:
+      '@base-org/account': 2.3.1(@types/react@19.2.2)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@19.2.0)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
+      '@coinbase/wallet-sdk': 4.3.7(bufferutil@4.0.9)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
+      ethers: 5.8.0(bufferutil@4.0.9)(utf-8-validate@5.0.10)
+    transitivePeerDependencies:
+      - '@types/react'
+      - bufferutil
+      - debug
+      - encoding
+      - fastestsmallesttextencoderdecoder
+      - immer
+      - react
+      - typescript
+      - use-sync-external-store
+      - utf-8-validate
+      - zod
+
+  '@fabstir/llm-auth@file:fabstir-llm-auth-0.1.0.tgz(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)':
     dependencies:
       '@base-org/account': 2.3.1(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
       '@coinbase/wallet-sdk': 4.3.7(bufferutil@4.0.9)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
@@ -7509,7 +7524,7 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@fabstir/llm-auth@file:../fabstir-llm-auth(@types/react@19.2.2)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@19.2.0)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)':
+  '@fabstir/llm-auth@file:fabstir-llm-auth-0.1.0.tgz(@types/react@19.2.2)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@19.2.0)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)':
     dependencies:
       '@base-org/account': 2.3.1(@types/react@19.2.2)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@19.2.0)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
       '@coinbase/wallet-sdk': 4.3.7(bufferutil@4.0.9)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
@@ -7529,8 +7544,7 @@ snapshots:
 
   '@fabstir/sdk-core@file:packages/sdk-core(@types/react@18.3.24)(bufferutil@4.0.9)(ethers@6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(ws@8.18.3(bufferutil@4.0.9)(utf-8-validate@5.0.10))(zod@3.25.76)':
     dependencies:
-      '@fabstir/llm-auth': file:../fabstir-llm-auth(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
-      '@fabstir/vector-db-native': file:fabstir-vector-db-native-0.3.0.tgz
+      '@fabstir/llm-auth': file:fabstir-llm-auth-0.1.0.tgz(@types/react@18.3.24)(bufferutil@4.0.9)(fastestsmallesttextencoderdecoder@1.0.22)(react@18.3.1)(typescript@5.9.2)(utf-8-validate@5.0.10)(zod@3.25.76)
       '@julesl23/s5js': file:julesl23-s5js-0.9.0-beta.4.tgz(bufferutil@4.0.9)(utf-8-validate@5.0.10)
       '@noble/ciphers': 0.4.1
       '@noble/hashes': 1.8.0
@@ -7555,8 +7569,6 @@ snapshots:
       - utf-8-validate
       - ws
       - zod
-
-  '@fabstir/vector-db-native@file:fabstir-vector-db-native-0.3.0.tgz': {}
 
   '@humanwhocodes/config-array@0.13.0':
     dependencies:

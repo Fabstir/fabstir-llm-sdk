@@ -55,7 +55,7 @@ export default function ChatSessionPage() {
   const [totalCost, setTotalCost] = useState(0);
   const [lastCheckpointTokens, setLastCheckpointTokens] = useState(0);
   const PROOF_INTERVAL = 1000; // Checkpoint every 1000 tokens
-  const PRICE_PER_TOKEN = 2000; // 0.002 USDC per token (from session config)
+  const DEFAULT_PRICE_PER_TOKEN = 50; // Default: 50 = $0.00005/token = $50/million tokens
 
   // Embedding progress state
   const [embeddingProgress, setEmbeddingProgress] = useState<EmbeddingProgress | null>(null);
@@ -141,12 +141,13 @@ export default function ChatSessionPage() {
     });
 
     setTotalCost(prev => {
-      const cost = (estimatedTokens * PRICE_PER_TOKEN) / 1_000_000; // Convert to USDC
+      const pricePerToken = sessionMetadata?.pricePerToken || DEFAULT_PRICE_PER_TOKEN;
+      const cost = (estimatedTokens * pricePerToken) / 1_000_000; // Convert to USDC
       const newCost = prev + cost;
-      console.debug(`[ChatSession] Cost: $${prev.toFixed(4)} → $${newCost.toFixed(4)} USDC`);
+      console.debug(`[ChatSession] Cost: $${prev.toFixed(4)} → $${newCost.toFixed(4)} USDC (${estimatedTokens} tokens @ ${pricePerToken}/token)`);
       return newCost;
     });
-  }, [PROOF_INTERVAL, PRICE_PER_TOKEN]);
+  }, [PROOF_INTERVAL, DEFAULT_PRICE_PER_TOKEN, sessionMetadata]);
 
   // Process Pending Embeddings (Background)
   const processPendingEmbeddings = useCallback(async (groupOverride?: any) => {

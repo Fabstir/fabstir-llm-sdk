@@ -253,7 +253,7 @@ export function FileBrowser({ files, currentPath, onFileClick, onFileDelete, onF
                         <button
                           onClick={() => {
                             if (confirm(`Delete ${file.name}?`)) {
-                              onFileDelete(file.id);
+                              onFileDelete(file.name);
                             }
                           }}
                           className="p-1 rounded hover:bg-red-50 transition-colors"

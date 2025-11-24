@@ -23,7 +23,7 @@ export default function VectorDatabaseDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { isConnected } = useWallet();
-  const { managers, getDatabase, listVectors, deleteVector, addVectors, addPendingDocument, isInitialized, createFolder, renameFolder, deleteFolder, getAllFoldersWithCounts, searchVectors } = useVectorDatabases();
+  const { managers, getDatabase, listVectors, deleteVector, deleteVectorsByFileName, addVectors, addPendingDocument, isInitialized, createFolder, renameFolder, deleteFolder, getAllFoldersWithCounts, searchVectors } = useVectorDatabases();
 
   const databaseName = decodeURIComponent(params.id as string);
 
@@ -365,8 +365,16 @@ export default function VectorDatabaseDetailPage() {
     // 4. Update progress UI
   };
 
-  const handleFileDelete = async (fileId: string) => {
-    await handleDeleteVector(fileId);
+  const handleFileDelete = async (fileName: string) => {
+    try {
+      // Delete all vector chunks for this file by fileName metadata
+      const deletedCount = await deleteVectorsByFileName(databaseName, fileName);
+      console.debug(`[Page] Deleted ${deletedCount} vector chunks for "${fileName}"`);
+      await loadData(); // Refresh
+    } catch (err) {
+      console.error('Failed to delete file:', err);
+      alert('Failed to delete file');
+    }
   };
 
   // Upload handler

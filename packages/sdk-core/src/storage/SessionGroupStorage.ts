@@ -64,6 +64,9 @@ export class SessionGroupStorage {
       throw new Error('EncryptionManager required for storage operations');
     }
 
+    const groupSize = JSON.stringify(group).length;
+    console.log(`[Enhanced S5.js] 💾 Saving session group "${group.name}" (${groupSize} bytes plaintext)`);
+
     // Encrypt group data
     const encrypted = await this.encryptionManager.encryptForStorage(
       this.hostPubKey,
@@ -73,8 +76,14 @@ export class SessionGroupStorage {
     // Build S5 path
     const path = this.buildPath(group.id);
 
+    console.log(`[Enhanced S5.js] 📤 Uploading encrypted session group to S5: ${path}`);
+
     // Write to S5 - S5 handles CBOR encoding automatically
+    const startTime = performance.now();
     await this.s5Client.fs.put(path, encrypted);
+    const duration = Math.round(performance.now() - startTime);
+
+    console.log(`[Enhanced S5.js] ✅ Session group saved to S5 in ${duration}ms (encrypted)`);
 
     // Update cache
     this.cache.set(group.id, group);
@@ -91,6 +100,7 @@ export class SessionGroupStorage {
   async load(groupId: string): Promise<SessionGroup> {
     // Check cache first
     if (this.cache.has(groupId)) {
+      console.log(`[Enhanced S5.js] ⚡ Session group loaded from cache: ${groupId}`);
       return this.cache.get(groupId)!;
     }
 
@@ -101,12 +111,18 @@ export class SessionGroupStorage {
     // Build S5 path
     const path = this.buildPath(groupId);
 
+    console.log(`[Enhanced S5.js] 📥 Downloading encrypted session group from S5: ${path}`);
+
     // Read encrypted data from S5 - S5 decodes CBOR automatically
+    const startTime = performance.now();
     const encrypted = await this.s5Client.fs.get(path);
+    const downloadDuration = Math.round(performance.now() - startTime);
 
     if (!encrypted) {
       throw new Error(`Session group not found: ${groupId}`);
     }
+
+    console.log(`[Enhanced S5.js] ✅ Encrypted data downloaded in ${downloadDuration}ms`);
 
     // Decrypt (encrypted is already an object from S5)
     const { data: group } = await this.encryptionManager.decryptFromStorage<SessionGroup>(
@@ -116,6 +132,8 @@ export class SessionGroupStorage {
     // Deserialize dates (they may be strings after decryption)
     group.createdAt = new Date(group.createdAt);
     group.updatedAt = new Date(group.updatedAt);
+
+    console.log(`[Enhanced S5.js] ✅ Session group "${group.name}" loaded and decrypted successfully`);
 
     // Update cache
     this.cache.set(groupId, group);

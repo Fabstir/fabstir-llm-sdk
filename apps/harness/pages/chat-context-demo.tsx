@@ -64,7 +64,7 @@ const TEST_TREASURY_PRIVATE_KEY =
 
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = "2"; // $2 USDC
-const PRICE_PER_TOKEN = 2000; // 0.002 USDC per token
+const DEFAULT_PRICE_PER_TOKEN = 50; // 0.00005 USDC per token ($50 per million tokens)
 const PROOF_INTERVAL = 1000; // Checkpoint every 1000 tokens (production default)
 const SESSION_DURATION = 86400; // 1 day
 
@@ -177,7 +177,10 @@ export default function ChatContextDemo() {
 
     if (tokens) {
       setTotalTokens((prev) => prev + tokens);
-      setTotalCost((prev) => prev + (tokens * PRICE_PER_TOKEN) / 1000000); // Convert to USDC
+      const pricePerToken = activeHostRef.current?.pricePerToken || DEFAULT_PRICE_PER_TOKEN;
+      const cost = (tokens * pricePerToken) / 1000000;
+      console.log('Cost calculation:', { tokens, pricePerToken, cost, activeHost: activeHostRef.current });
+      setTotalCost((prev) => prev + cost); // Convert to USDC
     }
   };
 
@@ -989,12 +992,21 @@ export default function ChatContextDemo() {
       }
 
       // Parse host metadata
-      const parsedHosts = hosts.map((host: any) => ({
-        address: host.address,
-        endpoint: host.apiUrl || host.endpoint,
-        models: host.supportedModels || [],
-        pricePerToken: PRICE_PER_TOKEN,
-      }));
+      const parsedHosts = hosts.map((host: any) => {
+        const pricePerToken = Number(host.minPricePerTokenStable || host.metadata?.costPerToken || DEFAULT_PRICE_PER_TOKEN);
+        console.log('Host pricing data:', {
+          address: host.address,
+          minPricePerTokenStable: host.minPricePerTokenStable,
+          metadataCostPerToken: host.metadata?.costPerToken,
+          finalPricePerToken: pricePerToken
+        });
+        return {
+          address: host.address,
+          endpoint: host.apiUrl || host.endpoint,
+          models: host.supportedModels || [],
+          pricePerToken,
+        };
+      });
 
       // Filter hosts that support models
       const modelSupported = parsedHosts.filter(
@@ -1066,7 +1078,7 @@ export default function ChatContextDemo() {
       // Create session configuration with direct payment
       const sessionConfig = {
         depositAmount: SESSION_DEPOSIT_AMOUNT,
-        pricePerToken: Number(host.pricePerToken || PRICE_PER_TOKEN),
+        pricePerToken: Number(host.pricePerToken || DEFAULT_PRICE_PER_TOKEN),
         proofInterval: PROOF_INTERVAL,
         duration: SESSION_DURATION,
         paymentToken: contracts.USDC,
@@ -1490,13 +1502,14 @@ export default function ChatContextDemo() {
       addMessage("system", "⏳ Host will detect disconnect and complete contract to claim earnings");
 
       // Calculate expected payment distribution
-      const tokensCost = (totalTokens * PRICE_PER_TOKEN) / 1000000; // Convert to USDC
+      const pricePerToken = activeHostRef.current?.pricePerToken || DEFAULT_PRICE_PER_TOKEN;
+      const tokensCost = (totalTokens * pricePerToken) / 1000000; // Convert to USDC
       const hostPayment = tokensCost * 0.9; // 90% to host
       const treasuryPayment = tokensCost * 0.1; // 10% to treasury
 
       addMessage("system", `📊 Tokens used in session: ${totalTokens}`);
       addMessage("system", `💰 Expected payment distribution (when host completes):`);
-      addMessage("system", `   Total cost: ${tokensCost.toFixed(6)} USDC (${totalTokens} tokens × $${PRICE_PER_TOKEN/1000000}/token)`);
+      addMessage("system", `   Total cost: ${tokensCost.toFixed(6)} USDC (${totalTokens} tokens × $${pricePerToken/1000000}/token)`);
       addMessage("system", `   Host will receive: ${hostPayment.toFixed(6)} USDC (90%)`);
       addMessage("system", `   Treasury will receive: ${treasuryPayment.toFixed(6)} USDC (10%)`);
 

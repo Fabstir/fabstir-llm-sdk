@@ -550,12 +550,41 @@ export function useVectorDatabases() {
       if (!managers) throw new Error('SDK not initialized');
 
       const vectorRAGManager = managers.vectorRAGManager;
-      await vectorRAGManager.deleteVector(databaseName, vectorId);
+
+      // Get or create session for this database (VectorRAGManager requires sessionId)
+      const sessionId = await vectorRAGManager.getOrCreateSessionId(databaseName);
+
+      // Delete the vector (deleteVectors expects an array)
+      await vectorRAGManager.deleteVectors(sessionId, [vectorId]);
 
       // NOTE: Caller must handle UI updates optimistically to avoid S5 P2P propagation delay.
       // Do NOT call fetchDatabases() here - it reads from S5 immediately after write,
       // which returns stale data due to P2P network propagation time.
       // See: /workspace/tests-ui5/S5_WRITE_READ_ANTI_PATTERN_AUDIT.md
+    },
+    [managers]
+  );
+
+  const deleteVectorsByFileName = useCallback(
+    async (databaseName: string, fileName: string) => {
+      if (!managers) throw new Error('SDK not initialized');
+
+      const vectorRAGManager = managers.vectorRAGManager;
+
+      // Get or create session for this database (VectorRAGManager requires sessionId)
+      const sessionId = await vectorRAGManager.getOrCreateSessionId(databaseName);
+
+      // Delete all vectors with matching fileName metadata
+      const deletedCount = await vectorRAGManager.deleteByMetadata(sessionId, { fileName });
+
+      console.debug(`[useVectorDatabases] Deleted ${deletedCount} vectors for file "${fileName}"`);
+
+      // NOTE: Caller must handle UI updates optimistically to avoid S5 P2P propagation delay.
+      // Do NOT call fetchDatabases() here - it reads from S5 immediately after write,
+      // which returns stale data due to P2P network propagation time.
+      // See: /workspace/tests-ui5/S5_WRITE_READ_ANTI_PATTERN_AUDIT.md
+
+      return deletedCount;
     },
     [managers]
   );
@@ -637,6 +666,7 @@ export function useVectorDatabases() {
     getVectors,
     listVectors,
     deleteVector,
+    deleteVectorsByFileName,
 
     // Search operations
     searchVectors,

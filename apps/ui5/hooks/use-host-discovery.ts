@@ -57,7 +57,7 @@ export function useHostDiscovery() {
         address: h.address,
         endpoint: h.apiUrl,
         models: h.supportedModels || [],
-        pricing: Number(h.minPricePerTokenStable || 2000n), // Convert BigInt to number
+        pricing: Number(h.minPricePerTokenStable || 50n), // Default: 50 = $0.00005/token = $50/million tokens
         stake: h.stake?.toString() || '0',
         status: h.isActive ? 'active' : 'inactive',
       }));

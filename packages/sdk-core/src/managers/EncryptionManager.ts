@@ -268,16 +268,25 @@ export class EncryptionManager implements IEncryptionManager {
   ): Promise<EncryptedStorage> {
     // Serialize data to JSON
     const plaintext = JSON.stringify(data);
+    const plaintextSize = plaintext.length;
+
+    console.log(`[Enhanced S5.js] 🔐 Encrypting data for storage (${plaintextSize} bytes)`);
+    console.log(`[Enhanced S5.js] Algorithm: XChaCha20-Poly1305 AEAD with ephemeral-static ECDH`);
 
     // Encrypt with ephemeral-static ECDH (includes full signature)
+    const startTime = performance.now();
     const payload = await encryptForEphemeral(
       hostPubKey,
       this.clientPrivateKey,
       plaintext
     );
+    const duration = Math.round(performance.now() - startTime);
 
     // Generate unique conversation ID (simple random hex)
     const conversationId = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
+
+    const encryptedSize = JSON.stringify(payload).length;
+    console.log(`[Enhanced S5.js] ✅ Encryption complete: ${plaintextSize} → ${encryptedSize} bytes (+${Math.round((encryptedSize - plaintextSize) / plaintextSize * 100)}% overhead) in ${duration}ms`);
 
     return {
       payload,
@@ -302,12 +311,18 @@ export class EncryptionManager implements IEncryptionManager {
   async decryptFromStorage<T>(
     encrypted: EncryptedStorage
   ): Promise<{ data: T; senderAddress: string }> {
+    const encryptedSize = JSON.stringify(encrypted.payload).length;
+    console.log(`[Enhanced S5.js] 🔓 Decrypting data from storage (${encryptedSize} bytes encrypted)`);
+    console.log(`[Enhanced S5.js] Algorithm: XChaCha20-Poly1305 AEAD with ephemeral-static ECDH`);
+
     // Decrypt with ephemeral-static ECDH
+    const startTime = performance.now();
     const plaintext = decryptFromEphemeral(
       this.clientPrivateKey,
       this.clientPublicKey,
       encrypted.payload
     );
+    const duration = Math.round(performance.now() - startTime);
 
     // Recover sender address from signature
     const senderAddress = recoverSenderAddress(
@@ -317,6 +332,10 @@ export class EncryptionManager implements IEncryptionManager {
 
     // Parse JSON to restore original data
     const data = JSON.parse(plaintext) as T;
+
+    const plaintextSize = plaintext.length;
+    console.log(`[Enhanced S5.js] ✅ Decryption complete: ${encryptedSize} → ${plaintextSize} bytes in ${duration}ms`);
+    console.log(`[Enhanced S5.js] Verified sender: ${senderAddress.substring(0, 10)}...${senderAddress.substring(senderAddress.length - 8)}`);
 
     return { data, senderAddress };
   }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet } from '@/hooks/use-wallet';
 import { useVectorDatabases } from '@/hooks/use-vector-databases';
@@ -20,11 +20,31 @@ type SortOption = 'name' | 'date' | 'size' | 'vectors';
 export default function VectorDatabasesPage() {
   const router = useRouter();
   const { isConnected } = useWallet();
-  const { databases, isLoading, createDatabase, deleteDatabase } = useVectorDatabases();
+  const { databases, isLoading, createDatabase, deleteDatabase, refreshDatabases } = useVectorDatabases();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('date');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+
+  // Refresh database list on mount and when page becomes visible
+  useEffect(() => {
+    // Refresh on mount (e.g., after navigating back from detail page)
+    if (refreshDatabases) {
+      console.debug('[VectorDatabasesPage] Component mounted, refreshing database list');
+      refreshDatabases();
+    }
+
+    // Also refresh when browser tab/window becomes visible
+    const handleVisibilityChange = () => {
+      if (!document.hidden && refreshDatabases) {
+        console.debug('[VectorDatabasesPage] Page visible, refreshing database list');
+        refreshDatabases();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [refreshDatabases]);
 
   // Filter and sort databases
   const filteredDatabases = useMemo(() => {
