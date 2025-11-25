@@ -1,5 +1,8 @@
 'use client';
 
+// Force dynamic rendering to prevent prerendering issues with React hooks
+export const dynamic = 'force-dynamic';
+
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet } from '@/hooks/use-wallet';

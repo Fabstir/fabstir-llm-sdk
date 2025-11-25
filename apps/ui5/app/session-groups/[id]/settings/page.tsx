@@ -17,7 +17,7 @@ export default function SessionGroupSettingsPage() {
   const { isConnected } = useWallet();
   const { selectedGroup, selectGroup, updateGroup, deleteGroup, isLoading } = useSessionGroups();
 
-  const groupId = params.id as string;
+  const groupId = params?.id as string || '';
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -166,7 +166,7 @@ export default function SessionGroupSettingsPage() {
               </div>
               <div className="bg-gray-50 rounded-lg p-4">
                 <p className="text-sm text-gray-500">Linked Databases</p>
-                <p className="text-2xl font-bold text-gray-900">{selectedGroup.databases?.length || 0}</p>
+                <p className="text-2xl font-bold text-gray-900">{(selectedGroup as any).databases?.length || 0}</p>
               </div>
             </div>
           </div>

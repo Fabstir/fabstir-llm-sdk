@@ -37,7 +37,7 @@ export function GroupSettingsModal({
   const [name, setName] = useState(group.name);
   const [description, setDescription] = useState(group.description || '');
   const [linkedDatabases, setLinkedDatabases] = useState<string[]>(group.linkedDatabases || []);
-  const [defaultDatabase, setDefaultDatabase] = useState<string | null>(group.defaultDatabase || null);
+  const [defaultDatabase, setDefaultDatabase] = useState<string | null>((group as any).defaultDatabase || null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +63,7 @@ export function GroupSettingsModal({
     setName(group.name);
     setDescription(group.description || '');
     setLinkedDatabases(group.linkedDatabases || []);
-    setDefaultDatabase(group.defaultDatabase || null);
+    setDefaultDatabase((group as any).defaultDatabase || null);
     setError(null);
   }, [group]);
 
@@ -72,7 +72,7 @@ export function GroupSettingsModal({
     setName(group.name);
     setDescription(group.description || '');
     setLinkedDatabases(group.linkedDatabases || []);
-    setDefaultDatabase(group.defaultDatabase || null);
+    setDefaultDatabase((group as any).defaultDatabase || null);
     setError(null);
     setActiveTab('general');
     onClose();
@@ -110,7 +110,7 @@ export function GroupSettingsModal({
         description: description.trim() || undefined,
         linkedDatabases: linkedDatabases,
         defaultDatabase: defaultDatabase || undefined,
-      });
+      } as any);
       handleClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');

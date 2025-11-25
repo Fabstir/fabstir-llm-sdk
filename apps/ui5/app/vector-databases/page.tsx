@@ -8,7 +8,7 @@ import { DatabaseCard } from '@/components/vector-databases/database-card';
 import { CreateDatabaseModal } from '@/components/vector-databases/create-database-modal';
 import { AppReadyMarker } from '@/components/app-ready-marker';
 import { Database, Search, Plus, ArrowUpDown } from 'lucide-react';
-import type { DatabaseMetadata } from '../../../hooks/use-vector-databases';
+import type { DatabaseMetadata } from '@/hooks/use-vector-databases';
 
 type SortOption = 'name' | 'date' | 'size' | 'vectors';
 
@@ -55,7 +55,7 @@ export default function VectorDatabasesPage() {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
         (db) =>
-          db.databaseName?.toLowerCase().includes(query) ||
+          ((db as any).databaseName || db.name)?.toLowerCase().includes(query) ||
           db.description?.toLowerCase().includes(query)
       );
     }
@@ -64,11 +64,11 @@ export default function VectorDatabasesPage() {
     filtered = [...filtered].sort((a, b) => {
       switch (sortBy) {
         case 'name':
-          return (a.databaseName || '').localeCompare(b.databaseName || '');
+          return ((a as any).databaseName || a.name || '').localeCompare((b as any).databaseName || b.name || '');
         case 'date':
-          return (b.lastAccessedAt || 0) - (a.lastAccessedAt || 0); // Newest first
+          return ((b as any).lastAccessedAt || b.lastAccessed || 0) - ((a as any).lastAccessedAt || a.lastAccessed || 0); // Newest first
         case 'size':
-          return (b.storageSizeBytes || 0) - (a.storageSizeBytes || 0); // Largest first
+          return ((b as any).storageSizeBytes || 0) - ((a as any).storageSizeBytes || 0); // Largest first
         case 'vectors':
           return (b.vectorCount || 0) - (a.vectorCount || 0); // Most vectors first
         default:
@@ -182,7 +182,7 @@ export default function VectorDatabasesPage() {
           <p className="text-sm text-gray-600">Total Storage</p>
           <p className="text-2xl font-bold text-gray-900">
             {(() => {
-              const totalBytes = databases.reduce((sum, db) => sum + db.storageSizeBytes, 0);
+              const totalBytes = databases.reduce((sum, db) => sum + ((db as any).storageSizeBytes || 0), 0);
               if (totalBytes === 0) return '0 B';
               const k = 1024;
               const sizes = ['B', 'KB', 'MB', 'GB'];
@@ -234,7 +234,7 @@ export default function VectorDatabasesPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredDatabases.map((database) => (
             <DatabaseCard
-              key={database.databaseName}
+              key={(database as any).databaseName || database.name}
               database={database}
               onDelete={handleDeleteDatabase}
             />

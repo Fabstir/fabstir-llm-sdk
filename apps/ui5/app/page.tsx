@@ -162,7 +162,7 @@ export default function HomePage() {
 
           // Recent chat sessions within each group
           if (group.chatSessions && group.chatSessions.length > 0) {
-            group.chatSessions.forEach(session => {
+            group.chatSessions.forEach((session: any) => {
               // Chat session metadata uses 'timestamp' not 'created'
               const sessionTime = session.timestamp || session.created;
               if (isValidTimestamp(sessionTime)) {

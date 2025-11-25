@@ -21,7 +21,7 @@ export default function SessionGroupDatabasesPage() {
   const { databases: availableDatabases, isLoading: loadingDatabases } = useVectorDatabases();
   const { managers } = useSDK();
 
-  const groupId = params.id as string;
+  const groupId = params?.id as string || '';
 
   const [error, setError] = useState<string | null>(null);
   const [actionInProgress, setActionInProgress] = useState(false);
@@ -110,7 +110,7 @@ export default function SessionGroupDatabasesPage() {
   }
 
   // Session groups store database names, not IDs
-  const linkedDatabaseNames = new Set(selectedGroup.databases || []);
+  const linkedDatabaseNames = new Set((selectedGroup as any).databases || []);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -233,7 +233,7 @@ export default function SessionGroupDatabasesPage() {
                         </button>
                       </div>
                       <p className="text-xs text-gray-400">
-                        Created {new Date(db.created).toLocaleDateString()}
+                        Created {new Date(db.createdAt || Date.now()).toLocaleDateString()}
                       </p>
                     </div>
                   ))}

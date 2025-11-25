@@ -18,8 +18,8 @@ interface BreadcrumbItem {
 export function Breadcrumbs() {
   const pathname = usePathname();
 
-  // Don't show breadcrumbs on home page
-  if (pathname === '/') {
+  // Don't show breadcrumbs on home page or if pathname is null
+  if (!pathname || pathname === '/') {
     return null;
   }
 

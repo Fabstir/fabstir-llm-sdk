@@ -88,7 +88,7 @@ export default function SessionGroupDetailPage() {
   const [queuePosition, setQueuePosition] = useState<number>(0); // Current position (1-indexed)
   const [processingStartTimes, setProcessingStartTimes] = useState<Map<string, number>>(new Map()); // Track start time per document
 
-  const groupId = params.id as string;
+  const groupId = params?.id as string || '';
 
   // --- FIX: add refs to control focus behavior ---
   const fileDialogOpen = useRef(false);
@@ -541,7 +541,7 @@ export default function SessionGroupDetailPage() {
                         group.chatSessionsData[s.sessionId] = updatedSession;
                         (managers.sessionGroupManager as any).chatStorage.set(s.sessionId, updatedSession);
                         managers.sessionGroupManager.updateSessionGroup(groupId, userAddress, { chatSessionsData: group.chatSessionsData })
-                          .catch(err => console.error('[SessionGroupDetail] Failed to update session status in S5:', err));
+                          .catch((err: any) => console.error('[SessionGroupDetail] Failed to update session status in S5:', err));
                       }
                     }
                   }
@@ -1169,7 +1169,7 @@ export default function SessionGroupDetailPage() {
                       </p>
                       <p className="text-xs text-gray-500">
                         {db.vectorCount.toLocaleString()} vectors •{" "}
-                        {(db.storageSize / (1024 * 1024)).toFixed(1)} MB
+                        {(((db as any).storageSize || 0) / (1024 * 1024)).toFixed(1)} MB
                       </p>
                     </div>
                   </button>

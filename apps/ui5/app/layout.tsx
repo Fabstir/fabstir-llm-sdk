@@ -4,6 +4,9 @@ import './globals.css';
 import 'katex/dist/katex.min.css';
 import { ClientLayout } from '@/components/layout/client-layout';
 
+// Force dynamic rendering for all pages to prevent prerendering issues with hooks
+export const dynamic = 'force-dynamic';
+
 const inter = Inter({
   subsets: ['latin'],
   variable: '--font-inter',

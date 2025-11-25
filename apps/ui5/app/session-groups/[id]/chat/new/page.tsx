@@ -12,7 +12,7 @@ import { useSessionGroups } from '@/hooks/use-session-groups';
 export default function NewChatPage() {
   const router = useRouter();
   const params = useParams();
-  const groupId = params.id as string;
+  const groupId = params?.id as string || '';
 
   const { startChat } = useSessionGroups();
   const [initialMessage, setInitialMessage] = useState('');

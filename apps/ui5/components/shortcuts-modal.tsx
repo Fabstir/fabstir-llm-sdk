@@ -45,7 +45,7 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
       { key: '?', description: 'Show this help dialog' },
       { key: 'Escape', description: 'Close modals and dialogs' },
     ],
-  } as Record<string, KeyboardShortcut[]>;
+  } as any;
 
   const modalContent = (
     <div
@@ -92,7 +92,7 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
                 Navigation
               </h3>
               <div className="space-y-2">
-                {shortcuts.navigation.map((shortcut, index) => (
+                {shortcuts.navigation.map((shortcut: any, index: number) => (
                   <div
                     key={index}
                     className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0"
@@ -112,7 +112,7 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
                 General
               </h3>
               <div className="space-y-2">
-                {shortcuts.general.map((shortcut, index) => (
+                {shortcuts.general.map((shortcut: any, index: number) => (
                   <div
                     key={index}
                     className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0"

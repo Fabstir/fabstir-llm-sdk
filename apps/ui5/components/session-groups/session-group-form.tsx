@@ -45,8 +45,8 @@ export function SessionGroupForm({
       await onSubmit({
         name: name.trim(),
         description: description.trim() || undefined,
-        databases: initialData?.databases || [],
-      });
+        databases: (initialData as any)?.databases || [],
+      } as any);
     } catch (err) {
       console.error('Form submission error:', err);
       setError(err instanceof Error ? err.message : 'Failed to save session group');

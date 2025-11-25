@@ -34,9 +34,9 @@ export default function UploadDocumentsPage() {
   const searchParams = useSearchParams();
   const { isConnected } = useWallet();
 
-  const databaseId = params.id as string;
-  const returnTo = searchParams.get('returnTo');
-  const folderPath = searchParams.get('folder') || '/';
+  const databaseId = params?.id as string || '';
+  const returnTo = searchParams?.get('returnTo');
+  const folderPath = searchParams?.get('folder') || '/';
 
   const [database, setDatabase] = useState<VectorDatabase | null>(null);
   const [loading, setLoading] = useState(true);

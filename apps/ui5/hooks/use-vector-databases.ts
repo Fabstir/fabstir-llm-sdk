@@ -87,7 +87,7 @@ export function useVectorDatabases() {
       const dbs = await vectorRAGManager.listDatabases();
 
       // Transform SDK's DatabaseMetadata (with databaseName) to UI's format (with name)
-      const transformedDbs = dbs.map(db => ({
+      const transformedDbs = dbs.map((db: any) => ({
         ...db,
         name: db.databaseName  // Map databaseName to name for UI compatibility
       }));
@@ -422,7 +422,7 @@ export function useVectorDatabases() {
       const allVectors = await vectorRAGManager.getAllVectors(databaseName);
       setDatabases(prev =>
         prev.map(db =>
-          db.databaseName === databaseName
+          ((db as any).databaseName || db.name) === databaseName
             ? { ...db, vectorCount: allVectors.length }
             : db
         )
@@ -469,7 +469,7 @@ export function useVectorDatabases() {
             dimensions: 384,
             pendingDocuments: [],
             readyDocuments: []
-          };
+          } as any;
         }
       } catch (error) {
         console.error('Failed to load metadata, creating new:', error);
@@ -484,7 +484,7 @@ export function useVectorDatabases() {
           dimensions: 384,
           pendingDocuments: [],
           readyDocuments: []
-        };
+        } as any;
       }
 
       // Initialize arrays if they don't exist (backward compatibility)
@@ -497,7 +497,7 @@ export function useVectorDatabases() {
 
       // Append to pendingDocuments array
       metadata.pendingDocuments.push(docMetadata);
-      metadata.lastAccessedAt = Date.now();
+      (metadata as any).lastAccessedAt = Date.now();
 
       // Save updated metadata to S5
       await s5.fs.put(metadataPath, metadata);

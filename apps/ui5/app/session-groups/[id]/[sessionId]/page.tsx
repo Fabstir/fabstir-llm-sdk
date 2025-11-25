@@ -37,8 +37,8 @@ export default function ChatSessionPage() {
     deleteChat,
   } = useSessionGroups();
 
-  const groupId = params.id as string;
-  const sessionId = params.sessionId as string;
+  const groupId = params?.id as string || '';
+  const sessionId = params?.sessionId as string || '';
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -208,7 +208,7 @@ export default function ChatSessionPage() {
           const pendingDocs = await managers.vectorRAGManager.getPendingDocuments(dbName);
           if (pendingDocs && pendingDocs.length > 0) {
             console.debug(`[ChatSession] Found ${pendingDocs.length} pending documents in database: ${dbName}`);
-            allPendingDocs.push(...pendingDocs.map(doc => ({ ...doc, databaseName: dbName })));
+            allPendingDocs.push(...pendingDocs.map((doc: any) => ({ ...doc, databaseName: dbName })));
           }
         } catch (error) {
           console.error(`[ChatSession] Failed to get pending documents from ${dbName}:`, error);
@@ -264,7 +264,7 @@ export default function ChatSessionPage() {
             processedChunks: 0,
             percentage: 0,
             status: 'processing',
-            error: null
+            error: undefined
           });
 
           // Download document from S5
@@ -366,7 +366,7 @@ export default function ChatSessionPage() {
             processedChunks: 0,
             percentage: 100,
             status: 'complete',
-            error: null
+            error: undefined
           });
 
           console.debug(`[ChatSession] ✅ Embedding complete for: ${doc.fileName || doc.name}`);
@@ -437,7 +437,7 @@ export default function ChatSessionPage() {
         });
 
         console.debug('[ChatSession] 📌 About to call setMessages with', session.messages?.length || 0, 'messages');
-        setMessages(session.messages || []);
+        setMessages((session.messages || []) as any);
         console.debug('[ChatSession] ✅ setMessages completed');
 
         // --- Phase 4: Detect session type from metadata ---
@@ -652,7 +652,7 @@ export default function ChatSessionPage() {
               }
             })
           );
-          setSessions(sessionObjects.filter((s): s is Session => s !== null));
+          setSessions(sessionObjects.filter(s => s !== null) as any);
         } else {
           setSessions([]);
         }
@@ -711,7 +711,7 @@ export default function ChatSessionPage() {
         console.debug('[ChatSession] 🧹 Cleanup: Ending WebSocket session on unmount', {
           blockchainSessionId: blockchainSessionId.toString()
         });
-        managers.sessionManager.endSession(blockchainSessionId).catch(err => {
+        managers.sessionManager.endSession(blockchainSessionId).catch((err: any) => {
           console.error('[ChatSession] Failed to end session on cleanup:', err);
         });
         // Clear window storage after cleanup
@@ -735,6 +735,9 @@ export default function ChatSessionPage() {
     if (!activeMetadata || !activeMetadata.blockchainSessionId) {
       throw new Error('AI session metadata not available');
     }
+
+    // Declare aiMessageId outside try block so it's accessible in catch block
+    let aiMessageId: number = 0;
 
     try {
       // Process attached files FIRST (before creating user message)
@@ -854,7 +857,7 @@ export default function ChatSessionPage() {
       });
 
       // Create placeholder for AI response (for streaming)
-      const aiMessageId = Date.now();
+      aiMessageId = Date.now();
       const aiMessagePlaceholder: ChatMessage = {
         id: `msg-${aiMessageId}-${Math.random().toString(36).substr(2, 9)}`,
         role: 'assistant',
@@ -985,7 +988,7 @@ export default function ChatSessionPage() {
 
               if (searchResults && searchResults.length > 0) {
                 console.debug(`[ChatSession] Found ${searchResults.length} relevant chunks from host`);
-                searchResults.forEach(result => {
+                searchResults.forEach((result: any) => {
                   allRelevantChunks.push({
                     content: result.text || result.content || result.metadata?.text || 'No text found',
                     metadata: result.metadata,
@@ -1143,8 +1146,8 @@ export default function ChatSessionPage() {
         contentPreview: finalAIMessage.content.substring(0, 100)
       }, null, 2));
 
-      await sdkAddMessage(groupId, sessionId, userMessage);
-      await sdkAddMessage(groupId, sessionId, finalAIMessage);
+      await sdkAddMessage(groupId, sessionId, userMessage as any);
+      await sdkAddMessage(groupId, sessionId, finalAIMessage as any);
 
       // Note: Don't call selectGroup here - it triggers useEffect which reloads messages
       // Messages are already in state via optimistic updates, and SDK saves handle persistence
@@ -1296,7 +1299,7 @@ export default function ChatSessionPage() {
       });
 
       // Step 4: Update session status in local state (keep metadata for Continue Chat button)
-      setSessionMetadata(prev => ({
+      setSessionMetadata((prev: any) => ({
         ...prev,
         blockchainStatus: 'ended',
       }));
@@ -1376,7 +1379,7 @@ export default function ChatSessionPage() {
         }
 
         // Send message via SDK - this will automatically generate AI response in mock SDK
-        await sdkAddMessage(groupId, sessionId, userMessage);
+        await sdkAddMessage(groupId, sessionId, userMessage as any);
 
         // Wait for SDK to generate AI response (mock SDK adds response automatically)
         await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -1492,13 +1495,13 @@ export default function ChatSessionPage() {
       // Copy conversation history to new session
       console.debug('[ChatSession] 📋 Copying conversation history to new session...');
       for (const message of conversationHistory) {
-        await sdkAddMessage(groupId, newSession.sessionId, message);
+        await sdkAddMessage(groupId, newSession.sessionId, message as any);
       }
       console.debug('[ChatSession] ✅ Conversation history copied');
 
       // Navigate to new session (conversation history will now be loaded)
       router.push(`/session-groups/${groupId}/${newSession.sessionId}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('[ChatSession] ❌ Failed to continue chat:', error);
       alert(`Failed to continue chat: ${error.message}`);
     } finally {

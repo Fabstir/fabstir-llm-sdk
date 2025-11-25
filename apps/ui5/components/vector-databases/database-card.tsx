@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 import { Database, Trash2, Eye, Folder, HardDrive } from 'lucide-react';
-import type { DatabaseMetadata } from '@fabstir/sdk-core';
+import type { DatabaseMetadata } from '@/hooks/use-vector-databases';
 
 interface DatabaseCardProps {
   database: DatabaseMetadata;
@@ -19,8 +19,8 @@ export function DatabaseCard({ database, onDelete }: DatabaseCardProps) {
     e.preventDefault();
     e.stopPropagation();
 
-    if (confirm(`Delete database "${decodeURIComponent(database.databaseName)}"? This will remove all ${database.vectorCount} vectors. This action cannot be undone.`)) {
-      onDelete(database.databaseName);
+    if (confirm(`Delete database "${decodeURIComponent(((database as any).databaseName || database.name))}"? This will remove all ${database.vectorCount} vectors. This action cannot be undone.`)) {
+      onDelete(((database as any).databaseName || database.name));
     }
   };
 
@@ -35,7 +35,7 @@ export function DatabaseCard({ database, onDelete }: DatabaseCardProps) {
 
   return (
     <Link
-      href={`/vector-databases/${encodeURIComponent(database.databaseName)}`}
+      href={`/vector-databases/${encodeURIComponent(((database as any).databaseName || database.name))}`}
       className="block bg-white rounded-lg border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all p-6 group"
     >
       {/* Header */}
@@ -46,7 +46,7 @@ export function DatabaseCard({ database, onDelete }: DatabaseCardProps) {
           </div>
           <div className="flex-1 min-w-0">
             <h3 className="text-lg font-semibold text-gray-900 truncate group-hover:text-blue-600 transition-colors">
-              {decodeURIComponent(database.databaseName)}
+              {decodeURIComponent(((database as any).databaseName || database.name))}
             </h3>
             {database.description && (
               <p className="text-sm text-gray-600 truncate mt-0.5">{database.description}</p>

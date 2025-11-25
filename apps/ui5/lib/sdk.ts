@@ -135,7 +135,7 @@ export class UI5SDK {
         encryptionConfig: {
           enabled: process.env.NEXT_PUBLIC_ENABLE_ENCRYPTION === 'true',
         },
-      });
+      } as any);
 
       // Authenticate with wallet signer
       const address = await signer.getAddress();
@@ -154,7 +154,7 @@ export class UI5SDK {
       console.debug('[UI5SDK] Step 2: ✅ VectorRAGManager obtained:', !!vectorRAGManager);
 
       console.debug('[UI5SDK] Step 3: About to call vectorRAGManager.initialize()...');
-      await vectorRAGManager.initialize();
+      await (vectorRAGManager as any).initialize();
       console.debug('[UI5SDK] Step 3: ✅ VectorRAGManager initialized');
 
       this.initialized = true;

@@ -18,6 +18,19 @@ import {
   type WalletConfig as AdapterWalletConfig,
 } from './wallet-adapter';
 
+// Extend Window interface for ethereum provider
+declare global {
+  interface Window {
+    ethereum?: {
+      request: (args: { method: string; params?: any[] }) => Promise<any>;
+      on: (event: string, handler: (...args: any[]) => void) => void;
+      removeListener: (event: string, handler: (...args: any[]) => void) => void;
+      isMetaMask?: boolean;
+      selectedAddress?: string;
+    };
+  }
+}
+
 export interface WalletConfig {
   // Base Account Kit configuration (optional - for gasless transactions)
   baseAccountKit?: {

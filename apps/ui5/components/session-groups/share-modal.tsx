@@ -109,11 +109,11 @@ export function ShareModal({ isOpen, onClose, group, onShare, onUnshare }: Share
   };
 
   // Get list of shared users from permissions
-  const readers = group.permissions?.readers || [];
-  const writers = group.permissions?.writers || [];
+  const readers = (group as any).permissions?.readers || [];
+  const writers = (group as any).permissions?.writers || [];
   const allSharedUsers = [
-    ...readers.map(addr => ({ address: addr, role: 'reader' as const })),
-    ...writers.map(addr => ({ address: addr, role: 'writer' as const }))
+    ...readers.map((addr: any) => ({ address: addr, role: 'reader' as const })),
+    ...writers.map((addr: any) => ({ address: addr, role: 'writer' as const }))
   ];
 
   const modalContent = (

@@ -25,7 +25,7 @@ export default function VectorDatabaseDetailPage() {
   const { isConnected } = useWallet();
   const { managers, getDatabase, listVectors, deleteVector, deleteVectorsByFileName, addVectors, addPendingDocument, isInitialized, createFolder, renameFolder, deleteFolder, getAllFoldersWithCounts, searchVectors } = useVectorDatabases();
 
-  const databaseName = decodeURIComponent(params.id as string);
+  const databaseName = decodeURIComponent(params?.id as string || '');
 
   const [database, setDatabase] = useState<DatabaseMetadata | null>(null);
   const [vectors, setVectors] = useState<Vector[]>([]);
@@ -72,7 +72,7 @@ export default function VectorDatabaseDetailPage() {
       setVectors(dbVectors);
 
       // Get folders with counts (includes empty folders)
-      if (db?.folderStructure) {
+      if ((db as any)?.folderStructure) {
         const folders = await vectorRAGManager.getAllFoldersWithCounts(databaseName);
         console.debug('[Page] ✅ getAllFoldersWithCounts succeeded, count:', folders.length);
         setFoldersWithCounts(folders);
@@ -93,7 +93,7 @@ export default function VectorDatabaseDetailPage() {
 
   // Build folder tree from folders with counts
   const folderTree = useMemo((): FolderNode[] => {
-    if (!database?.folderStructure) return [];
+    if (!(database as any)?.folderStructure) return [];
 
     const pathMap = new Map<string, FolderNode>();
 
@@ -140,7 +140,7 @@ export default function VectorDatabaseDetailPage() {
     });
 
     return rootFolders;
-  }, [foldersWithCounts, database?.folderStructure]);
+  }, [foldersWithCounts, (database as any)?.folderStructure]);
 
   // Convert vectors + pending/ready documents to FileItem format (Sub-phase 6.1)
   const fileItems = useMemo((): FileItem[] => {
@@ -555,7 +555,7 @@ export default function VectorDatabaseDetailPage() {
               <Database className="h-8 w-8 text-purple-600" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">{decodeURIComponent(database.databaseName)}</h1>
+              <h1 className="text-2xl font-bold text-gray-900">{decodeURIComponent((database as any).databaseName || database.name)}</h1>
               {database.description && (
                 <p className="text-gray-600 mt-1">{database.description}</p>
               )}
@@ -582,7 +582,7 @@ export default function VectorDatabaseDetailPage() {
           <div className="p-4 bg-gray-50 rounded-lg">
             <p className="text-sm text-gray-600">Last Updated</p>
             <p className="text-xl font-bold text-gray-900">
-              {formatDistanceToNow(database.lastAccessedAt, { addSuffix: true })}
+              {formatDistanceToNow(database.lastAccessed || Date.now(), { addSuffix: true })}
             </p>
           </div>
         </div>
@@ -607,7 +607,7 @@ export default function VectorDatabaseDetailPage() {
 
       {/* Vector Search Panel */}
       <VectorSearchPanel
-        databaseName={database.databaseName}
+        databaseName={(database as any).databaseName || database.name}
         dimensions={database.dimensions || 384}
         onSearch={handleVectorSearch}
         readyDocumentCount={database.readyDocuments?.length || 0}
@@ -621,7 +621,7 @@ export default function VectorDatabaseDetailPage() {
               Documents ({vectors.length.toLocaleString()})
             </h2>
             <div className="flex items-center gap-2">
-              {database.folderStructure && (
+              {(database as any).folderStructure && (
                 <button
                   onClick={() => setFolderAction({ action: 'create', parentPath: selectedPath })}
                   className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors text-sm"
@@ -641,7 +641,7 @@ export default function VectorDatabaseDetailPage() {
           </div>
         </div>
 
-        {database.folderStructure ? (
+        {(database as any).folderStructure ? (
           <div className="grid grid-cols-12 divide-x divide-gray-200" style={{ height: '600px' }}>
             {/* Folder Tree (Left Sidebar) */}
             <div className="col-span-3 overflow-auto p-4">
@@ -710,7 +710,7 @@ export default function VectorDatabaseDetailPage() {
       <UploadDocumentModal
         isOpen={isUploadModalOpen}
         onClose={() => setIsUploadModalOpen(false)}
-        databaseName={database.databaseName}
+        databaseName={(database as any).databaseName || database.name}
         onUpload={handleUploadDocuments}
         initialFolderPath={selectedPath}
       />
@@ -723,23 +723,23 @@ export default function VectorDatabaseDetailPage() {
             <p className="text-gray-600">Owner</p>
             <p
               className="text-gray-900 font-mono text-xs cursor-help group relative"
-              title={database.owner}
+              title={(database as any).owner || ''}
             >
               <span className="group-hover:hidden">
-                {database.owner.slice(0, 6)}...{database.owner.slice(-4)}
+                {((database as any).owner || '').slice(0, 6)}...{((database as any).owner || '').slice(-4)}
               </span>
               <span className="hidden group-hover:inline break-all">
-                {database.owner}
+                {(database as any).owner || 'Unknown'}
               </span>
             </p>
           </div>
           <div>
             <p className="text-gray-600">Created</p>
-            <p className="text-gray-900">{new Date(database.created).toLocaleDateString()}</p>
+            <p className="text-gray-900">{new Date((database as any).created || database.createdAt || Date.now()).toLocaleDateString()}</p>
           </div>
           <div>
             <p className="text-gray-600">Folder Structure</p>
-            <p className="text-gray-900">{database.folderStructure ? 'Enabled' : 'Disabled'}</p>
+            <p className="text-gray-900">{(database as any).folderStructure ? 'Enabled' : 'Disabled'}</p>
           </div>
           {(database as any).s5Portal && (
             <div className="col-span-2">

@@ -112,7 +112,7 @@ export function SessionGroupCard({
         </p>
 
         {(() => {
-          const sharedUserCount = (group.permissions?.readers?.length || 0) + (group.permissions?.writers?.length || 0);
+          const sharedUserCount = ((group as any).permissions?.readers?.length || 0) + ((group as any).permissions?.writers?.length || 0);
           if (sharedUserCount > 0) {
             return (
               <p className="text-sm text-gray-600">
@@ -149,7 +149,7 @@ export function SessionGroupCard({
           <div className="pt-2 border-t border-gray-100">
             <p className="text-xs text-gray-500 mb-1">Last message:</p>
             <p className="text-sm text-gray-700 line-clamp-2">
-              &quot;{lastSession.lastMessage || lastSession.title}&quot;
+              &quot;{(lastSession as any).lastMessage || (lastSession as any).title || lastSession}&quot;
             </p>
           </div>
         )}

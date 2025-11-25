@@ -41,8 +41,8 @@ function generateMockResponse(userMessage: string): string {
 export default function ChatSessionPage() {
   const router = useRouter();
   const params = useParams();
-  const groupId = params.id as string;
-  const chatId = params.chatId as string;
+  const groupId = params?.id as string || '';
+  const chatId = params?.chatId as string || '';
 
   const { getChatSession, addMessage } = useSessionGroups();
 

@@ -173,8 +173,8 @@ export function GroupSelector({
                     </p>
                     <p className="text-xs text-gray-500 truncate">
                       {group.chatSessions.length} session
-                      {group.chatSessions.length !== 1 ? 's' : ''} • {group.databases.length} database
-                      {group.databases.length !== 1 ? 's' : ''}
+                      {group.chatSessions.length !== 1 ? 's' : ''} • {((group as any).databases || []).length} database
+                      {((group as any).databases || []).length !== 1 ? 's' : ''}
                     </p>
                   </div>
                 </button>
