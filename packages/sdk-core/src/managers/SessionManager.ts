@@ -638,18 +638,10 @@ export class SessionManager implements ISessionManager {
             // Use sliding timeout window - resets on each chunk received
             let timeout = setTimeout(() => {
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
-            }, 60000);
+            }, 60000); // 60 seconds for complex queries (sliding window)
 
-            // Guard against double resolution
+            // Guard against double resolution (mobile browser race condition fix)
             let isResolved = false;
-
-            // MOBILE FIX: Queue-based processing to handle rapid message batching
-            // On mobile browsers, messages can arrive in batches and async handlers
-            // create race conditions. We use a synchronous queue + microtask processing.
-            let pendingChunks: any[] = [];
-            let completionSignalReceived = false;
-            let isProcessing = false;
-
             const safeResolve = (value: string) => {
               if (!isResolved) {
                 isResolved = true;
@@ -658,7 +650,6 @@ export class SessionManager implements ISessionManager {
                 resolve(value);
               }
             };
-
             const safeReject = (err: Error) => {
               if (!isResolved) {
                 isResolved = true;
@@ -668,69 +659,85 @@ export class SessionManager implements ISessionManager {
               }
             };
 
-            // Check if we should resolve (called after queue processing or completion signal)
-            const checkResolve = () => {
-              if (completionSignalReceived && pendingChunks.length === 0 && !isProcessing && !isResolved) {
-                safeResolve(fullResponse);
+            let chunkCount = 0;
+            const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
+              // Log EVERY message with full details
+              console.log('[SessionManager] 📨 RAW MESSAGE:', JSON.stringify({
+                type: data.type,
+                final: data.final,
+                finalType: typeof data.final,
+                hasPayload: !!data.payload,
+                keys: Object.keys(data)
+              }));
+
+              // Skip processing if already resolved
+              if (isResolved) {
+                console.log('[SessionManager] ⏭️ Skipping - already resolved');
+                return;
               }
-            };
-
-            // Process queued chunks sequentially
-            const processQueue = async () => {
-              if (isProcessing || isResolved) return;
-              isProcessing = true;
-
-              while (pendingChunks.length > 0 && !isResolved) {
-                const chunk = pendingChunks.shift();
-                try {
-                  const decrypted = await this.decryptIncomingMessage(chunk);
-                  onToken(decrypted);
-                  fullResponse += decrypted;
-                } catch (err) {
-                  console.error('[SessionManager] Failed to decrypt chunk:', err);
-                }
-              }
-
-              isProcessing = false;
-              checkResolve();
-            };
-
-            // SYNCHRONOUS message handler - no async/await at top level
-            const unsubscribe = this.wsClient!.onMessage((data: any) => {
-              if (isResolved) return;
-
-              // Reset timeout on any message
-              clearTimeout(timeout);
-              timeout = setTimeout(() => {
-                safeReject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
-              }, 60000);
 
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
-                // Queue chunk for processing (don't await here!)
-                pendingChunks.push(data);
-                // MOBILE FIX: Check for "final" flag embedded in chunk
-                // Mobile browsers buffer small messages, so separate stream_end may never arrive
-                if (data.final === true) {
-                  completionSignalReceived = true;
+                chunkCount++;
+                console.log('[SessionManager] 📦 Chunk #' + chunkCount + ', final=' + data.final + ' (type: ' + typeof data.final + ')');
+
+                // Reset timeout on each chunk (sliding window)
+                clearTimeout(timeout);
+                timeout = setTimeout(() => {
+                  console.log('[SessionManager] ⏰ TIMEOUT after ' + chunkCount + ' chunks');
+                  safeReject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
+                }, 60000);
+
+                try {
+                  const decrypted = await this.decryptIncomingMessage(data);
+                  onToken(decrypted);
+                  fullResponse += decrypted;
+                  console.log('[SessionManager] ✓ Decrypted chunk #' + chunkCount + ', total length: ' + fullResponse.length);
+                } catch (err) {
+                  console.error('[SessionManager] ❌ Failed to decrypt chunk #' + chunkCount + ':', err);
                 }
-                // Process queue in next microtask
-                queueMicrotask(() => processQueue());
 
-              } else if (data.type === 'encrypted_response' || data.type === 'stream_end') {
-                // Mark completion signal received (backup for desktop)
-                completionSignalReceived = true;
-                // Check immediately in case queue is already empty
-                queueMicrotask(() => checkResolve());
-
+                // Check for final chunk OUTSIDE try/catch (primary mobile completion signal)
+                if (data.final === true) {
+                  console.log('[SessionManager] ✅ FINAL CHUNK (===true), resolving with ' + fullResponse.length + ' chars');
+                  safeResolve(fullResponse);
+                  return;
+                } else if (data.final) {
+                  console.log('[SessionManager] ⚠️ final is truthy but not ===true:', data.final, typeof data.final);
+                  safeResolve(fullResponse);
+                  return;
+                }
+              } else if (data.type === 'encrypted_chunk' && !this.sessionKey) {
+                console.error('[SessionManager] ❌ CHUNK WITHOUT SESSION KEY');
+              } else if (data.type === 'encrypted_response') {
+                console.log('[SessionManager] 📬 encrypted_response received, resolving with ' + fullResponse.length + ' chars');
+                try {
+                  if (this.sessionKey && data.payload && data.payload.ciphertextHex) {
+                    await this.decryptIncomingMessage(data);
+                  }
+                  safeResolve(fullResponse);
+                } catch (err) {
+                  console.error('[SessionManager] ❌ Error in encrypted_response:', err);
+                  safeResolve(fullResponse);
+                }
+              } else if (data.type === 'stream_end') {
+                console.log('[SessionManager] 🏁 stream_end received, resolving with ' + fullResponse.length + ' chars');
+                safeResolve(fullResponse);
               } else if (data.type === 'error') {
+                console.error('[SessionManager] ❌ Error:', data.message);
                 safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
+              } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
+                console.log('[SessionManager] 📝 ' + data.type);
+              } else if (data.type === 'session_completed') {
+                console.log('[SessionManager] 🎉 session_completed');
+              } else {
               }
-              // Ignore other message types (proof_submitted, session_completed, etc.)
             });
+
 
             // Send encrypted message after handler is set up
             this.sendEncryptedMessage(prompt).catch((err) => {
-              safeReject(err);
+              console.error('[SessionManager] ❌ Failed to send encrypted message:', err);
+              reject(err);
             });
           });
 
@@ -772,35 +779,33 @@ export class SessionManager implements ISessionManager {
 
         // Add response to session
         session.responses.push(finalResponse);
-        
-        // Update storage
-        await this.storageManager.appendMessage(
+
+        // Update storage (non-blocking to prevent S5 connection issues from freezing UI)
+        this.storageManager.appendMessage(
           sessionId.toString(),
           {
             role: 'user',
             content: prompt,
             timestamp: Date.now()
           }
-        );
+        ).catch(err => console.warn('[SessionManager] Failed to store user message:', err));
 
-        await this.storageManager.appendMessage(
+        this.storageManager.appendMessage(
           sessionId.toString(),
           {
             role: 'assistant',
             content: finalResponse,
             timestamp: Date.now()
           }
-        );
+        ).catch(err => console.warn('[SessionManager] Failed to store assistant message:', err));
 
-        // Store in conversation memory if enabled
+        // Store in conversation memory if enabled (non-blocking)
         const conversationMemory = this.conversationMemories?.get(sessionIdStr);
         if (conversationMemory) {
-          try {
-            await conversationMemory.addMessage('user', prompt);
-            await conversationMemory.addMessage('assistant', finalResponse);
-          } catch (memError: any) {
-            console.warn(`Failed to store messages in conversation memory: ${memError.message}`);
-          }
+          Promise.all([
+            conversationMemory.addMessage('user', prompt),
+            conversationMemory.addMessage('assistant', finalResponse)
+          ]).catch(memError => console.warn('[SessionManager] Failed to store in conversation memory:', memError));
         }
 
         return finalResponse;
@@ -822,19 +827,15 @@ export class SessionManager implements ISessionManager {
           await this.sendEncryptedMessage(prompt);
 
           // Wait for encrypted response (non-streaming) - MUST accumulate chunks!
-          let accumulatedResponse = '';
+          let accumulatedResponse = '';  // Accumulate chunks even in non-streaming mode
           response = await new Promise<string>((resolve, reject) => {
+            // Use sliding timeout window - resets on each chunk received
             let timeout = setTimeout(() => {
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
-            }, 60000);
+            }, 60000); // 60 seconds for complex queries (sliding window)
 
+            // Guard against double resolution (mobile browser race condition fix)
             let isResolved = false;
-
-            // MOBILE FIX: Queue-based processing (same as streaming path)
-            let pendingChunks: any[] = [];
-            let completionSignalReceived = false;
-            let isProcessing = false;
-
             const safeResolve = (value: string) => {
               if (!isResolved) {
                 isResolved = true;
@@ -843,7 +844,6 @@ export class SessionManager implements ISessionManager {
                 resolve(value);
               }
             };
-
             const safeReject = (err: Error) => {
               if (!isResolved) {
                 isResolved = true;
@@ -853,53 +853,54 @@ export class SessionManager implements ISessionManager {
               }
             };
 
-            const checkResolve = () => {
-              if (completionSignalReceived && pendingChunks.length === 0 && !isProcessing && !isResolved) {
-                safeResolve(accumulatedResponse);
-              }
-            };
-
-            const processQueue = async () => {
-              if (isProcessing || isResolved) return;
-              isProcessing = true;
-
-              while (pendingChunks.length > 0 && !isResolved) {
-                const chunk = pendingChunks.shift();
-                try {
-                  const decrypted = await this.decryptIncomingMessage(chunk);
-                  accumulatedResponse += decrypted;
-                } catch (err) {
-                  console.error('[SessionManager] Failed to decrypt chunk:', err);
-                }
-              }
-
-              isProcessing = false;
-              checkResolve();
-            };
-
-            // SYNCHRONOUS message handler
-            const unsubscribe = this.wsClient!.onMessage((data: any) => {
+            const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
+              // Skip processing if already resolved
               if (isResolved) return;
 
-              clearTimeout(timeout);
-              timeout = setTimeout(() => {
-                safeReject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
-              }, 60000);
-
+              // MUST handle encrypted_chunk messages!
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
-                pendingChunks.push(data);
-                // MOBILE FIX: Check for "final" flag embedded in chunk
-                if (data.final === true) {
-                  completionSignalReceived = true;
+                // Reset timeout on each chunk (sliding window)
+                clearTimeout(timeout);
+                timeout = setTimeout(() => {
+                  safeReject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
+                }, 60000);
+
+                try {
+                  const decrypted = await this.decryptIncomingMessage(data);
+                  accumulatedResponse += decrypted;
+                } catch (err) {
+                  console.error('[SessionManager] ❌ Failed to decrypt chunk:', err);
                 }
-                queueMicrotask(() => processQueue());
 
-              } else if (data.type === 'encrypted_response' || data.type === 'stream_end') {
-                completionSignalReceived = true;
-                queueMicrotask(() => checkResolve());
-
+                // Check for final chunk OUTSIDE try/catch (primary mobile completion signal)
+                if (data.final === true) {
+                  safeResolve(accumulatedResponse);
+                  return;
+                }
+              } else if (data.type === 'encrypted_response') {
+                // Handle encrypted_response (primary completion signal)
+                try {
+                  // Decrypt final message if we have the key and payload
+                  if (this.sessionKey && data.payload && data.payload.ciphertextHex) {
+                    await this.decryptIncomingMessage(data);
+                  }
+                  // Return accumulated chunks, not just the final "stop" message
+                  safeResolve(accumulatedResponse);
+                } catch (err) {
+                  console.error('[SessionManager] ❌ Error in encrypted_response handler:', err);
+                  // Still resolve with accumulated content on decryption error
+                  safeResolve(accumulatedResponse);
+                }
+              } else if (data.type === 'stream_end') {
+                // Fallback completion signal (mobile browser compatibility)
+                console.log('[SessionManager] 📱 stream_end received (fallback completion)');
+                safeResolve(accumulatedResponse);
               } else if (data.type === 'error') {
+                console.error('[SessionManager] ❌ Error received:', data.message);
                 safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
+              } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
+              } else if (data.type === 'session_completed') {
+              } else {
               }
             });
           });
@@ -923,34 +924,32 @@ export class SessionManager implements ISessionManager {
         // Add response to session
         session.responses.push(response);
 
-        // Update storage
-        await this.storageManager.appendMessage(
+        // Update storage (non-blocking to prevent S5 connection issues from freezing UI)
+        this.storageManager.appendMessage(
           sessionId.toString(),
           {
             role: 'user',
             content: prompt,
             timestamp: Date.now()
           }
-        );
+        ).catch(err => console.warn('[SessionManager] Failed to store user message:', err));
 
-        await this.storageManager.appendMessage(
+        this.storageManager.appendMessage(
           sessionId.toString(),
           {
             role: 'assistant',
             content: response,
             timestamp: Date.now()
           }
-        );
+        ).catch(err => console.warn('[SessionManager] Failed to store assistant message:', err));
 
-        // Store in conversation memory if enabled
+        // Store in conversation memory if enabled (non-blocking)
         const conversationMemory = this.conversationMemories?.get(sessionIdStr);
         if (conversationMemory) {
-          try {
-            await conversationMemory.addMessage('user', prompt);
-            await conversationMemory.addMessage('assistant', response);
-          } catch (memError: any) {
-            console.warn(`Failed to store messages in conversation memory: ${memError.message}`);
-          }
+          Promise.all([
+            conversationMemory.addMessage('user', prompt),
+            conversationMemory.addMessage('assistant', response)
+          ]).catch(memError => console.warn('[SessionManager] Failed to store in conversation memory:', memError));
         }
 
         return response;

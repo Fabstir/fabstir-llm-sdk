@@ -1146,12 +1146,14 @@ export default function ChatSessionPage() {
         contentPreview: finalAIMessage.content.substring(0, 100)
       }, null, 2));
 
-      await sdkAddMessage(groupId, sessionId, userMessage as any);
-      await sdkAddMessage(groupId, sessionId, finalAIMessage as any);
-
-      // Note: Don't call selectGroup here - it triggers useEffect which reloads messages
-      // Messages are already in state via optimistic updates, and SDK saves handle persistence
-      console.debug('[ChatSession] ✅ Messages saved to storage');
+      // Save messages to S5 (non-blocking to prevent S5 connection issues from freezing UI)
+      // Messages are already shown via optimistic updates above
+      sdkAddMessage(groupId, sessionId, userMessage as any)
+        .then(() => console.debug('[ChatSession] ✅ User message saved to S5'))
+        .catch(err => console.warn('[ChatSession] Failed to save user message to S5:', err));
+      sdkAddMessage(groupId, sessionId, finalAIMessage as any)
+        .then(() => console.debug('[ChatSession] ✅ AI message saved to S5'))
+        .catch(err => console.warn('[ChatSession] Failed to save AI message to S5:', err));
 
       return response;
     } catch (error: any) {
