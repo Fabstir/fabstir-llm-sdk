@@ -93,7 +93,7 @@ export class WebSocketClient {
         this.ws.onclose = (event) => {
           this.stopHeartbeat();
           this.connectionPromise = undefined;
-          
+
           if (this.options.reconnect && !this.isReconnecting) {
             this.handleReconnect();
           }
