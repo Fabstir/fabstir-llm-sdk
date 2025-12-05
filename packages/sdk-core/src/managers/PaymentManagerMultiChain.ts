@@ -47,7 +47,7 @@ export interface DepositBalances {
 export class PaymentManager implements IPaymentManager {
   static readonly MIN_ETH_PAYMENT = '0.0002'; // Updated for multi-chain
   static readonly TOKENS_PER_PROOF = 100;
-  static readonly DEFAULT_PRICE_PER_TOKEN = 1000000;
+  // NO DEFAULT PRICE - must be explicitly set from host's registered price
   static readonly DEFAULT_DURATION = 3600;
   private static readonly USDC_DECIMALS = 6;
 
@@ -270,8 +270,14 @@ export class PaymentManager implements IPaymentManager {
 
     const wrapper = this.getWrapper(params.chainId);
 
-    // Set defaults
-    const pricePerToken = params.pricePerToken || PaymentManager.DEFAULT_PRICE_PER_TOKEN;
+    // Price MUST be explicitly set - no fallback to arbitrary defaults
+    if (!params.pricePerToken || params.pricePerToken <= 0) {
+      throw new SDKError(
+        'pricePerToken is required and must be positive. Use host.pricePerToken from the registered host.',
+        'MISSING_PRICE'
+      );
+    }
+    const pricePerToken = params.pricePerToken;
     const duration = params.duration || PaymentManager.DEFAULT_DURATION;
     const proofInterval = params.proofInterval || LLM_PROOF_INTERVAL;
 
@@ -360,20 +366,10 @@ export class PaymentManager implements IPaymentManager {
   // Legacy IPaymentManager interface implementation
 
   async createJob(request: JobCreationRequest): Promise<JobResult> {
-    // Convert to new session job
-    const jobId = await this.createSessionJob({
-      host: request.hostAddress || '',
-      amount: request.paymentAmount.toString(),
-      pricePerToken: PaymentManager.DEFAULT_PRICE_PER_TOKEN,
-      duration: PaymentManager.DEFAULT_DURATION
-    });
-
-    return {
-      jobId: jobId.toString(),
-      success: true,
-      transactionHash: '',
-      timestamp: Date.now()
-    };
+    throw new SDKError(
+      'createJob() is deprecated. Use createSessionJob() with explicit pricePerToken from host registration.',
+      'DEPRECATED_METHOD'
+    );
   }
 
   async processPayment(jobId: string, options: PaymentOptions): Promise<TransactionResult> {

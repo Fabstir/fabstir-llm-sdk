@@ -24,7 +24,7 @@ import { SessionJobManager, SessionConfig, SessionJobParams } from '../contracts
 export class PaymentManager implements IPaymentManager {
   static readonly MIN_ETH_PAYMENT = '0.005';
   static readonly TOKENS_PER_PROOF = 1000;
-  static readonly DEFAULT_PRICE_PER_TOKEN = 5000;
+  // NO DEFAULT PRICE - must be explicitly set from host's registered price
   static readonly DEFAULT_DURATION = 3600;
   private static readonly USDC_DECIMALS = 6;
   
