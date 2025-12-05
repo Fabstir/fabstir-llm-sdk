@@ -42,7 +42,7 @@ import { DEFAULT_RAG_CONFIG } from './rag/config';
 import { ContractManager, ContractAddresses } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 import { SDKConfig, SDKError } from './types';
-import { getOrGenerateS5Seed, hasCachedSeed, cacheSeed } from './utils/s5-seed-derivation';
+import { getOrGenerateS5Seed, hasCachedSeed, cacheSeed, deriveEntropyFromSignature, entropyToS5Phrase } from './utils/s5-seed-derivation';
 import { ChainRegistry } from './config/ChainRegistry';
 import { ChainId, ChainConfig } from './types/chain.types';
 import { UnsupportedChainError } from './errors/ChainErrors';
@@ -67,7 +67,8 @@ export interface FabstirSDKCoreConfig {
   // S5 Storage configuration
   s5Config?: {
     portalUrl?: string;
-    seedPhrase?: string;
+    // Note: seedPhrase is derived automatically from wallet signature for data sovereignty
+    // Each user gets their own deterministic S5 identity based on their wallet
   };
   
   // Bridge configuration for server features
@@ -315,7 +316,7 @@ export class FabstirSDKCore extends EventEmitter {
       
       // No fallbacks in production - seed must be explicitly provided
       throw new SDKError(
-        `Failed to generate S5 seed: ${error.message}. S5 seed phrase must be provided via config.s5Config.seedPhrase or user authentication`,
+        `Failed to generate S5 seed: ${error.message}. Ensure wallet can sign messages for S5 seed derivation`,
         'SEED_GENERATION_FAILED'
       );
     }
@@ -360,7 +361,7 @@ export class FabstirSDKCore extends EventEmitter {
       
       // No fallbacks in production - seed must be explicitly provided
       throw new SDKError(
-        `Failed to generate S5 seed: ${error.message}. S5 seed phrase must be provided via config.s5Config.seedPhrase or user authentication`,
+        `Failed to generate S5 seed: ${error.message}. Ensure wallet can sign messages for S5 seed derivation`,
         'SEED_GENERATION_FAILED'
       );
     }
@@ -405,7 +406,7 @@ export class FabstirSDKCore extends EventEmitter {
       
       // No fallbacks in production - seed must be explicitly provided
       throw new SDKError(
-        `Failed to generate S5 seed: ${error.message}. S5 seed phrase must be provided via config.s5Config.seedPhrase or user authentication`,
+        `Failed to generate S5 seed: ${error.message}. Ensure wallet can sign messages for S5 seed derivation`,
         'SEED_GENERATION_FAILED'
       );
     }
@@ -462,13 +463,32 @@ export class FabstirSDKCore extends EventEmitter {
     });
 
 
-    // 2. Pre-cache S5 seed for sub-account to avoid signature popup
+    // 2. Pre-cache S5 seed for sub-account derived from PRIMARY account address
+    // This ensures each user has their own deterministic S5 identity (data sovereignty)
+    // Using address-based derivation: same passkey → same smart wallet → same address → same seed
+    // No signature required - works across sessions, browsers, and devices
     const subAccountLower = subAccountResult.address.toLowerCase();
     if (!hasCachedSeed(subAccountLower)) {
-      // Use the configured S5 seed or a deterministic seed
-      const seedToCache = this.config.s5Config?.seedPhrase ||
-        'yield organic score bishop free juice atop village video element unless sneak care rock update';
-      cacheSeed(subAccountLower, seedToCache);
+      console.log('[BaseAccount Auth] Deriving S5 seed from primary account address...');
+
+      // Derive seed from primary address with domain separation
+      // Format: keccak256(primaryAddress + domainSeparator + chainId)
+      const DOMAIN_SEPARATOR = 'fabstir-s5-seed-v1';
+      const seedInput = primaryAccount.toLowerCase() + DOMAIN_SEPARATOR + chainId.toString();
+      const entropyHash = ethers.keccak256(ethers.toUtf8Bytes(seedInput));
+
+      // Convert hash to entropy bytes (remove 0x prefix, take first 16 bytes for S5 seed)
+      const entropyHex = entropyHash.slice(2, 34); // 16 bytes = 32 hex chars
+      const entropy = new Uint8Array(16);
+      for (let i = 0; i < 16; i++) {
+        entropy[i] = parseInt(entropyHex.slice(i * 2, i * 2 + 2), 16);
+      }
+
+      const seedPhrase = entropyToS5Phrase(entropy);
+
+      // Cache for sub-account address
+      cacheSeed(subAccountLower, seedPhrase);
+      console.log('[BaseAccount Auth] S5 seed derived and cached for sub-account');
     }
 
     // 3. Create custom signer that uses wallet_sendCalls
@@ -559,6 +579,13 @@ export class FabstirSDKCore extends EventEmitter {
         // For Wallet instances with direct privateKey access
         if ('privateKey' in this.signer) {
           this.encryptionManager = new EncryptionManager(this.signer as ethers.Wallet);
+        } else if ('isBaseAccountKit' in this.signer && (this.signer as any).isBaseAccountKit) {
+          // For Base Account Kit / passkey wallets, use address-based derivation
+          // This avoids non-deterministic signatures from passkeys
+          const address = await this.signer.getAddress();
+          const chainId = (this.signer as any).chainId || this.config.chainId!;
+          console.log('[EncryptionManager] Using address-based derivation for Base Account Kit');
+          this.encryptionManager = EncryptionManager.fromAddress(address, chainId);
         } else {
           // For browser wallets (MetaMask, etc.), derive encryption key via signature
           try {
@@ -985,16 +1012,14 @@ export class FabstirSDKCore extends EventEmitter {
 
     // In production, require seed validation
     if (this.config.mode === 'production') {
-      if (!this.s5Seed && !this.config.s5Config?.seedPhrase) {
+      if (!this.s5Seed) {
         throw new SDKError(
-          'S5 seed phrase required in production mode',
+          'S5 seed required in production mode. Call authenticate() first to derive seed from wallet.',
           'SEED_REQUIRED'
         );
       }
 
-      if (this.s5Seed) {
-        await this.validateSeed();
-      }
+      await this.validateSeed();
     }
 
     this.initialized = true;

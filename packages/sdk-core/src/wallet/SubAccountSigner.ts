@@ -39,6 +39,12 @@ export function createSubAccountSigner(options: SubAccountSignerOptions) {
 
   // Create a wrapper that properly exposes both signer and provider methods
   const signer = {
+    // Flag to identify this as a Base Account Kit signer
+    // Used by EncryptionManager to use address-based key derivation
+    isBaseAccountKit: true,
+    primaryAccount: primaryAccount,
+    chainId: chainId,
+
     // Expose the provider properly for contract calls
     provider: ethersProvider,
 
@@ -70,12 +76,16 @@ export function createSubAccountSigner(options: SubAccountSignerOptions) {
       }
 
       // For other messages or if no cache, use the primary account
+      // IMPORTANT: Base Account Kit requires hex-encoded messages for personal_sign
+      const messageHex = typeof message === 'string'
+        ? ethers.hexlify(ethers.toUtf8Bytes(message))
+        : ethers.hexlify(message);
+
+      console.log('[SubAccountSigner] Signing message with primary account:', primaryAccount);
+
       const signature = await provider.request({
         method: 'personal_sign',
-        params: [
-          typeof message === 'string' ? message : ethers.hexlify(message),
-          primaryAccount,
-        ],
+        params: [messageHex, primaryAccount],
       });
       return signature;
     },

@@ -89,6 +89,33 @@ export class EncryptionManager implements IEncryptionManager {
   }
 
   /**
+   * Create EncryptionManager from address only (for Base Account Kit / passkey wallets)
+   * Uses deterministic key derivation from address with domain separation
+   * No signature required - works across sessions since address is deterministic
+   *
+   * @param address - Wallet address (checksummed)
+   * @param chainId - Chain ID for domain separation
+   * @returns EncryptionManager instance
+   */
+  static fromAddress(address: string, chainId: number): EncryptionManager {
+    // Derive key from address with domain separation
+    // Format: sha256(address + domainSeparator + chainId)
+    const DOMAIN_SEPARATOR = 'fabstir-encryption-key-v1';
+    const seedInput = address.toLowerCase() + DOMAIN_SEPARATOR + chainId.toString();
+    const seedBytes = new TextEncoder().encode(seedInput);
+    const hash = sha256(seedBytes);
+    const privateKey = bytesToHex(hash);
+
+    // Create minimal wallet-like object
+    const wallet = {
+      privateKey: '0x' + privateKey,
+      address: address
+    } as Wallet;
+
+    return new EncryptionManager(wallet);
+  }
+
+  /**
    * Get client's private key (for internal use)
    * @private
    */

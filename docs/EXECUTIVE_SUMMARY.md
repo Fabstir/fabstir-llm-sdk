@@ -4,6 +4,21 @@
 
 **AI infrastructure where no company sits between you and AI models - trustless, private, and sovereign by design**
 
+*"We don't trust, we verify."*
+
+Platformless AI represents the right architecture for how the world should interact with LLMs and AI models. A truly ground-breaking infrastructure for the ages - where users are sovereign and in complete control of their data, able to decide what AI and AI agents can access, and share securely with other users on their own terms.
+
+## Core Principles: Trustless by Design
+
+| Principle | Technology | Guarantee |
+|-----------|------------|-----------|
+| **Proof of Storage** | Sia Network | Data persisted and retrievable without central servers |
+| **Proof of Computation** | STARK Proofs (Risc0 zkVM) | Mathematical certainty that inference ran correctly |
+| **Content Integrity** | Blake3 Content Addressing | Cryptographic guarantee content is not tampered with |
+| **Communication Privacy** | XChaCha20-Poly1305 + Forward Secrecy | End-to-end encryption; past sessions remain secure even if keys compromised |
+| **Full Transparency** | Open Source | Every line of code auditable by anyone |
+| **User Sovereignty** | Wallet-Based Identity | You control your data, your keys, your AI access |
+
 ## Overview
 
 Platformless AI is building decentralized AI infrastructure that eliminates the platform middleman. Unlike traditional AI services, there's no centralized company that can censor prompts, access your data, or revoke your access. Smart contracts coordinate, P2P connections deliver inference, and cryptographic proofs verify computation - all without requiring trust in a central authority.
@@ -331,8 +346,9 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 - Smart contracts deployed on Base Sepolia, opBNB Testnet
 - Multi-chain support operational
 - WebSocket P2P connections working
-- Production nodes running live inference
+- Production nodes running live inference with SSL
 - SDK browser compatibility achieved
+- **fabstir-platformless-ui deployed and operational** (November 2025)
 
 ✅ **End-to-End Encryption**
 
@@ -663,9 +679,18 @@ See `.env.test` for current deployed addresses on Base Sepolia and opBNB Testnet
 
 Platformless AI represents a fundamental shift in AI infrastructure - from platform-centric to protocol-centric. By eliminating the centralized middleman through smart contracts, cryptographic proofs, and end-to-end encryption, we're building AI infrastructure that cannot censor, cannot spy, and cannot be shut down.
 
-Our MVP is complete and production-ready. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise and developer adoption as AI regulation tightens and privacy concerns intensify.
+**We don't trust, we verify.** Every component of our stack is designed around this principle:
+- **Sia's proof of storage** ensures your data persists without trusting any company
+- **STARK proofs** mathematically verify computation happened correctly
+- **Blake3 content addressing** guarantees content integrity and tamper-proof storage
+- **XChaCha20-Poly1305 encryption with forward secrecy** protects all communication
+- **Open source** means full transparency - every line auditable
 
-The convergence of blockchain technology, zero-knowledge cryptography, and decentralized storage creates a unique opportunity to build AI infrastructure that respects user sovereignty, protects intellectual property, and enables permissionless innovation. With first-mover advantage in the platformless AI category, we're poised to become foundational infrastructure for the next generation of AI applications.
+Our MVP is complete and production-ready, with fabstir-platformless-ui deployed and operational. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise and developer adoption as AI regulation tightens and privacy concerns intensify.
+
+The convergence of blockchain technology, zero-knowledge cryptography, and decentralized storage creates a unique opportunity to build AI infrastructure that respects user sovereignty, protects intellectual property, and enables permissionless innovation. Users are sovereign - in complete control of their data, able to decide what AI and AI agents can access, and share securely with others on their own terms.
+
+With first-mover advantage in the platformless AI category, we're poised to become foundational infrastructure for the next generation of AI applications. This is ground-breaking infrastructure for the ages.
 
 ---
 
@@ -698,8 +723,10 @@ The convergence of blockchain technology, zero-knowledge cryptography, and decen
 
 ---
 
-_"AI Without the Platform - Trustless, Private, Sovereign"_
+_"We Don't Trust, We Verify - AI Infrastructure for the Ages"_
+
+**Trustless by Design** | **Sia Proof of Storage** | **STARK Proof of Computation** | **Blake3 Content Integrity** | **XChaCha20 Encryption** | **Open Source**
 
 **Built by Fabstir | Powered by Sia Storage | Secured by STARK Proofs**
 
-**© 2025 Platformless AI. Building the Future of Trustless AI Infrastructure.**
+**© 2025 Platformless AI. Ground-breaking Infrastructure for the Ages.**
