@@ -640,20 +640,35 @@ export class SessionManager implements ISessionManager {
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
             }, 60000); // 60 seconds for complex queries (sliding window)
 
+            // Guard against double resolution (mobile browser race condition fix)
+            let isResolved = false;
+            const safeResolve = (value: string) => {
+              if (!isResolved) {
+                isResolved = true;
+                clearTimeout(timeout);
+                unsubscribe();
+                resolve(value);
+              }
+            };
+            const safeReject = (err: Error) => {
+              if (!isResolved) {
+                isResolved = true;
+                clearTimeout(timeout);
+                unsubscribe();
+                reject(err);
+              }
+            };
 
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
-
-              if (this.sessionKey) {
-              }
-
-              // Check encrypted_chunk condition
+              // Skip processing if already resolved
+              if (isResolved) return;
 
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
                 try {
                   // Reset timeout on each chunk (sliding window)
                   clearTimeout(timeout);
                   timeout = setTimeout(() => {
-                    reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
+                    safeReject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
                   }, 60000);
 
                   const decrypted = await this.decryptIncomingMessage(data);
@@ -668,24 +683,29 @@ export class SessionManager implements ISessionManager {
                 console.error('[SessionManager] This is the BUG! Session key should have been set in sendEncryptedInit!');
                 console.error('[SessionManager] Message type:', data.type);
                 console.error('[SessionManager] Session key exists:', !!this.sessionKey);
-              } else if (data.type === 'encrypted_response' && this.sessionKey) {
-                clearTimeout(timeout);
-                unsubscribe();
+              } else if (data.type === 'encrypted_response') {
+                // Handle encrypted_response (primary completion signal)
+                // Note: Don't require sessionKey here - the response signals completion regardless
                 try {
-                  // Decrypt final message if not empty
-                  if (data.payload && data.payload.ciphertextHex) {
-                    const finalMsg = await this.decryptIncomingMessage(data);
+                  // Decrypt final message if we have the key and payload
+                  if (this.sessionKey && data.payload && data.payload.ciphertextHex) {
+                    await this.decryptIncomingMessage(data);
                   }
-                  resolve(fullResponse);
+                  safeResolve(fullResponse);
                 } catch (err) {
                   console.error('[SessionManager] ❌ Error in encrypted_response handler:', err);
-                  reject(err);
+                  // Still resolve with accumulated content on decryption error
+                  // The chunks were already decrypted successfully
+                  safeResolve(fullResponse);
                 }
+              } else if (data.type === 'stream_end') {
+                // Fallback completion signal (mobile browser compatibility)
+                // Node sends this as backup after encrypted_response
+                console.log('[SessionManager] 📱 stream_end received (fallback completion)');
+                safeResolve(fullResponse);
               } else if (data.type === 'error') {
                 console.error('[SessionManager] ❌ Error message received:', data.message);
-                clearTimeout(timeout);
-                unsubscribe();
-                reject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
+                safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
               } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
               } else if (data.type === 'session_completed') {
               } else {
@@ -795,7 +815,28 @@ export class SessionManager implements ISessionManager {
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
             }, 60000); // 60 seconds for complex queries (sliding window)
 
+            // Guard against double resolution (mobile browser race condition fix)
+            let isResolved = false;
+            const safeResolve = (value: string) => {
+              if (!isResolved) {
+                isResolved = true;
+                clearTimeout(timeout);
+                unsubscribe();
+                resolve(value);
+              }
+            };
+            const safeReject = (err: Error) => {
+              if (!isResolved) {
+                isResolved = true;
+                clearTimeout(timeout);
+                unsubscribe();
+                reject(err);
+              }
+            };
+
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
+              // Skip processing if already resolved
+              if (isResolved) return;
 
               // MUST handle encrypted_chunk messages!
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
@@ -803,7 +844,7 @@ export class SessionManager implements ISessionManager {
                   // Reset timeout on each chunk (sliding window)
                   clearTimeout(timeout);
                   timeout = setTimeout(() => {
-                    reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
+                    safeReject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
                   }, 60000);
 
                   const decrypted = await this.decryptIncomingMessage(data);
@@ -811,25 +852,27 @@ export class SessionManager implements ISessionManager {
                 } catch (err) {
                   console.error('[SessionManager] ❌ Failed to decrypt chunk:', err);
                 }
-              } else if (data.type === 'encrypted_response' && this.sessionKey) {
-                clearTimeout(timeout);
-                unsubscribe();
+              } else if (data.type === 'encrypted_response') {
+                // Handle encrypted_response (primary completion signal)
                 try {
-                  // Decrypt final message if present
-                  if (data.payload && data.payload.ciphertextHex) {
-                    const finalMsg = await this.decryptIncomingMessage(data);
+                  // Decrypt final message if we have the key and payload
+                  if (this.sessionKey && data.payload && data.payload.ciphertextHex) {
+                    await this.decryptIncomingMessage(data);
                   }
                   // Return accumulated chunks, not just the final "stop" message
-                  resolve(accumulatedResponse);
+                  safeResolve(accumulatedResponse);
                 } catch (err) {
                   console.error('[SessionManager] ❌ Error in encrypted_response handler:', err);
-                  reject(err);
+                  // Still resolve with accumulated content on decryption error
+                  safeResolve(accumulatedResponse);
                 }
+              } else if (data.type === 'stream_end') {
+                // Fallback completion signal (mobile browser compatibility)
+                console.log('[SessionManager] 📱 stream_end received (fallback completion)');
+                safeResolve(accumulatedResponse);
               } else if (data.type === 'error') {
                 console.error('[SessionManager] ❌ Error received:', data.message);
-                clearTimeout(timeout);
-                unsubscribe();
-                reject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
+                safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
               } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
               } else if (data.type === 'session_completed') {
               } else {
