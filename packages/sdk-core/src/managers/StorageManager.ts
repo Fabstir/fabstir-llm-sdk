@@ -80,6 +80,30 @@ export interface LoadConversationResult {
  * Browser-compatible StorageManager implementation
  * Uses S5.js for decentralized storage operations
  */
+/**
+ * S5 connection status type (matches Enhanced S5.js v0.9.0-beta.5)
+ */
+export type S5ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
+
+/**
+ * Sync status for UI display
+ */
+export type SyncStatus = 'synced' | 'syncing' | 'pending' | 'error';
+
+/**
+ * Queued operation for retry when disconnected
+ */
+interface QueuedOperation {
+  id: string;
+  type: 'put' | 'get' | 'delete';
+  path: string;
+  data?: any;
+  resolve: (value: any) => void;
+  reject: (error: Error) => void;
+  attempts: number;
+  createdAt: number;
+}
+
 export class StorageManager implements IStorageManager {
   static readonly DEFAULT_S5_PORTAL = 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p';
   static readonly SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM';
@@ -87,11 +111,25 @@ export class StorageManager implements IStorageManager {
   static readonly CONVERSATION_PATH = 'home/conversations';
   static readonly SESSIONS_PATH = 'home/sessions';
 
+  // Retry configuration
+  private static readonly MAX_RETRIES = 5;
+  private static readonly BASE_DELAY_MS = 1000;
+  private static readonly MAX_QUEUE_SIZE = 100;
+
   private s5Client?: any;
   private userSeed?: string;
   private userAddress?: string;
   private initialized = false;
   private encryptionManager?: EncryptionManager; // NEW: Optional encryption support
+
+  // Connection handling (v0.9.0-beta.5)
+  private connectionStatus: S5ConnectionStatus = 'disconnected';
+  private connectionUnsubscribe?: () => void;
+  private operationQueue: QueuedOperation[] = [];
+  private isProcessingQueue = false;
+  private syncStatus: SyncStatus = 'synced';
+  private syncListeners: Array<(status: SyncStatus) => void> = [];
+  private lastError: Error | null = null;
 
   // User settings cache
   private settingsCache: {
@@ -181,7 +219,10 @@ export class StorageManager implements IStorageManager {
 
       // Store the S5 instance - we'll use s5Instance.fs for file operations
       this.s5Client = s5Instance;
-      
+
+      // Setup connection change listener (v0.9.0-beta.5)
+      this.setupConnectionHandling(s5Instance);
+
       // Optional portal registration
       try {
         await s5Instance.registerOnNewPortal('https://s5.vup.cx');
@@ -190,6 +231,9 @@ export class StorageManager implements IStorageManager {
 
       await s5Instance.fs.ensureIdentityInitialized();
       this.initialized = true;
+
+      // Setup auto-reconnect handlers for browser environment
+      this.setupAutoReconnect();
     } catch (error: any) {
       throw new SDKError(
         `Failed to initialize StorageManager: ${error.message}`,
@@ -648,16 +692,6 @@ export class StorageManager implements IStorageManager {
    */
   isInitialized(): boolean {
     return this.initialized;
-  }
-
-  /**
-   * Get S5 client instance (for advanced usage)
-   */
-  getS5Client(): any {
-    if (!this.initialized) {
-      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
-    }
-    return this.s5Client;
   }
 
   // ============= Session-Based Methods =============
@@ -1560,5 +1594,386 @@ export class StorageManager implements IStorageManager {
 
     await collectDescendants(path);
     return descendants;
+  }
+
+  // ============================================================================
+  // S5 Connection Handling (v0.9.0-beta.5)
+  // ============================================================================
+
+  /**
+   * Setup connection change listener
+   */
+  private setupConnectionHandling(s5Instance: any): void {
+    // Check if the new connection API is available
+    if (typeof s5Instance.onConnectionChange !== 'function') {
+      console.warn('[StorageManager] S5 v0.9.0-beta.5 connection API not available');
+      this.connectionStatus = 'connected'; // Assume connected for older versions
+      return;
+    }
+
+    // Subscribe to connection changes (fires immediately with current status)
+    this.connectionUnsubscribe = s5Instance.onConnectionChange((status: S5ConnectionStatus) => {
+      const previousStatus = this.connectionStatus;
+      this.connectionStatus = status;
+
+      console.log(`[StorageManager] S5 connection: ${previousStatus} → ${status}`);
+
+      if (status === 'connected' && previousStatus === 'disconnected') {
+        // Connection restored - flush queued operations
+        this.flushQueue();
+      } else if (status === 'disconnected') {
+        // Connection lost - update sync status
+        if (this.operationQueue.length > 0) {
+          this.updateSyncStatus('pending');
+        }
+      }
+    });
+  }
+
+  /**
+   * Setup auto-reconnect handlers for browser environment
+   */
+  private setupAutoReconnect(): void {
+    // Only setup in browser environment
+    if (typeof document === 'undefined' && typeof window === 'undefined') {
+      return;
+    }
+
+    // Reconnect when tab becomes visible
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && this.connectionStatus === 'disconnected') {
+          console.log('[StorageManager] Tab visible, attempting S5 reconnect...');
+          this.attemptReconnect();
+        }
+      });
+    }
+
+    // Reconnect when network comes back online
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => {
+        if (this.connectionStatus === 'disconnected') {
+          console.log('[StorageManager] Network online, attempting S5 reconnect...');
+          this.attemptReconnect();
+        }
+      });
+    }
+  }
+
+  /**
+   * Attempt to reconnect to S5
+   */
+  private async attemptReconnect(): Promise<void> {
+    if (!this.s5Client || typeof this.s5Client.reconnect !== 'function') {
+      console.warn('[StorageManager] S5 reconnect() not available');
+      return;
+    }
+
+    try {
+      await this.s5Client.reconnect();
+      console.log('[StorageManager] S5 reconnected successfully');
+    } catch (error: any) {
+      console.warn('[StorageManager] S5 reconnect failed:', error.message);
+      // Connection change listener will update status
+    }
+  }
+
+  /**
+   * Get current S5 connection status
+   */
+  getConnectionStatus(): S5ConnectionStatus {
+    return this.connectionStatus;
+  }
+
+  /**
+   * Get current sync status for UI
+   */
+  getSyncStatus(): SyncStatus {
+    return this.syncStatus;
+  }
+
+  /**
+   * Get number of pending operations in queue
+   */
+  getPendingOperationCount(): number {
+    return this.operationQueue.length;
+  }
+
+  /**
+   * Get last error if sync status is 'error'
+   */
+  getLastError(): Error | null {
+    return this.lastError;
+  }
+
+  /**
+   * Subscribe to sync status changes
+   * @returns Unsubscribe function
+   */
+  onSyncStatusChange(callback: (status: SyncStatus) => void): () => void {
+    this.syncListeners.push(callback);
+    // Immediately call with current status
+    callback(this.syncStatus);
+    return () => {
+      this.syncListeners = this.syncListeners.filter(cb => cb !== callback);
+    };
+  }
+
+  /**
+   * Update sync status and notify listeners
+   */
+  private updateSyncStatus(status: SyncStatus, error?: Error): void {
+    this.syncStatus = status;
+    this.lastError = error || null;
+
+    for (const listener of this.syncListeners) {
+      try {
+        listener(status);
+      } catch (e) {
+        console.error('[StorageManager] Sync status listener error:', e);
+      }
+    }
+  }
+
+  /**
+   * Check if an error is a connection error
+   */
+  private isConnectionError(error: any): boolean {
+    const msg = (error?.message || '').toLowerCase();
+    return msg.includes('websocket') ||
+           msg.includes('closing') ||
+           msg.includes('closed') ||
+           msg.includes('connection') ||
+           msg.includes('network') ||
+           msg.includes('timeout');
+  }
+
+  /**
+   * Execute S5 operation with retry logic
+   */
+  private async executeWithRetry<T>(
+    operation: () => Promise<T>,
+    operationType: string
+  ): Promise<T> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < StorageManager.MAX_RETRIES; attempt++) {
+      // Check connection status before attempting
+      if (this.connectionStatus === 'disconnected' && attempt > 0) {
+        console.log(`[StorageManager] S5 disconnected, attempt ${attempt + 1} waiting for reconnect...`);
+        await this.attemptReconnect();
+      }
+
+      try {
+        const result = await operation();
+        // Success - clear any error state
+        if (this.syncStatus === 'error') {
+          this.updateSyncStatus(this.operationQueue.length > 0 ? 'pending' : 'synced');
+        }
+        return result;
+      } catch (error: any) {
+        lastError = error;
+        console.warn(`[StorageManager] ${operationType} failed (attempt ${attempt + 1}/${StorageManager.MAX_RETRIES}):`, error.message);
+
+        if (this.isConnectionError(error)) {
+          // Connection error - wait with exponential backoff
+          const delay = StorageManager.BASE_DELAY_MS * Math.pow(2, attempt);
+          console.log(`[StorageManager] Connection error, retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        } else {
+          // Non-connection error - don't retry
+          throw error;
+        }
+      }
+    }
+
+    // All retries exhausted
+    this.updateSyncStatus('error', lastError!);
+    throw new SDKError(
+      `${operationType} failed after ${StorageManager.MAX_RETRIES} attempts: ${lastError?.message}`,
+      'STORAGE_RETRY_EXHAUSTED',
+      { originalError: lastError }
+    );
+  }
+
+  /**
+   * Queue an operation for later execution
+   */
+  private queueOperation<T>(
+    type: 'put' | 'get' | 'delete',
+    path: string,
+    data?: any
+  ): Promise<T> {
+    return new Promise((resolve, reject) => {
+      // Check queue size limit
+      if (this.operationQueue.length >= StorageManager.MAX_QUEUE_SIZE) {
+        const error = new SDKError(
+          'Operation queue full - too many pending operations',
+          'STORAGE_QUEUE_FULL'
+        );
+        this.updateSyncStatus('error', error);
+        reject(error);
+        return;
+      }
+
+      const op: QueuedOperation = {
+        id: `${Date.now()}-${Math.random().toString(36).substring(7)}`,
+        type,
+        path,
+        data,
+        resolve,
+        reject,
+        attempts: 0,
+        createdAt: Date.now()
+      };
+
+      this.operationQueue.push(op);
+      console.log(`[StorageManager] Queued ${type} operation for ${path} (queue size: ${this.operationQueue.length})`);
+      this.updateSyncStatus('pending');
+    });
+  }
+
+  /**
+   * Flush queued operations when connection is restored
+   */
+  private async flushQueue(): Promise<void> {
+    if (this.isProcessingQueue || this.operationQueue.length === 0) {
+      return;
+    }
+
+    this.isProcessingQueue = true;
+    this.updateSyncStatus('syncing');
+    console.log(`[StorageManager] Flushing ${this.operationQueue.length} queued operations`);
+
+    while (this.operationQueue.length > 0) {
+      const op = this.operationQueue[0];
+
+      try {
+        let result: any;
+
+        switch (op.type) {
+          case 'put':
+            result = await this.executeWithRetry(
+              () => this.s5Client.fs.put(op.path, op.data),
+              `PUT ${op.path}`
+            );
+            break;
+          case 'get':
+            result = await this.executeWithRetry(
+              () => this.s5Client.fs.get(op.path),
+              `GET ${op.path}`
+            );
+            break;
+          case 'delete':
+            result = await this.executeWithRetry(
+              () => this.s5Client.fs.delete(op.path),
+              `DELETE ${op.path}`
+            );
+            break;
+        }
+
+        // Success - remove from queue and resolve
+        this.operationQueue.shift();
+        op.resolve(result);
+        console.log(`[StorageManager] Queued ${op.type} completed for ${op.path}`);
+
+      } catch (error: any) {
+        // Failed after retries - reject and remove from queue
+        this.operationQueue.shift();
+        op.reject(error);
+        console.error(`[StorageManager] Queued ${op.type} failed for ${op.path}:`, error.message);
+      }
+    }
+
+    this.isProcessingQueue = false;
+    this.updateSyncStatus(this.lastError ? 'error' : 'synced');
+    console.log('[StorageManager] Queue flush complete');
+  }
+
+  /**
+   * S5 PUT with retry and queue support
+   */
+  async putWithRetry(path: string, data: any): Promise<void> {
+    if (!this.initialized || !this.s5Client) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+
+    // If disconnected, queue the operation
+    if (this.connectionStatus === 'disconnected') {
+      console.log(`[StorageManager] S5 disconnected, queueing PUT for ${path}`);
+      return this.queueOperation('put', path, data);
+    }
+
+    // Execute with retry
+    return this.executeWithRetry(
+      () => this.s5Client.fs.put(path, data),
+      `PUT ${path}`
+    );
+  }
+
+  /**
+   * S5 GET with retry support (no queue - reads need immediate response)
+   */
+  async getWithRetry(path: string): Promise<any> {
+    if (!this.initialized || !this.s5Client) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+
+    return this.executeWithRetry(
+      () => this.s5Client.fs.get(path),
+      `GET ${path}`
+    );
+  }
+
+  /**
+   * S5 DELETE with retry and queue support
+   */
+  async deleteWithRetry(path: string): Promise<boolean> {
+    if (!this.initialized || !this.s5Client) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+
+    // If disconnected, queue the operation
+    if (this.connectionStatus === 'disconnected') {
+      console.log(`[StorageManager] S5 disconnected, queueing DELETE for ${path}`);
+      return this.queueOperation('delete', path);
+    }
+
+    return this.executeWithRetry(
+      () => this.s5Client.fs.delete(path),
+      `DELETE ${path}`
+    );
+  }
+
+  /**
+   * Force a sync attempt - useful for UI "retry" buttons
+   */
+  async forceSync(): Promise<void> {
+    if (this.connectionStatus === 'disconnected') {
+      await this.attemptReconnect();
+    }
+
+    if (this.connectionStatus === 'connected' && this.operationQueue.length > 0) {
+      await this.flushQueue();
+    }
+  }
+
+  /**
+   * Cleanup connection handlers
+   */
+  cleanup(): void {
+    if (this.connectionUnsubscribe) {
+      this.connectionUnsubscribe();
+      this.connectionUnsubscribe = undefined;
+    }
+
+    // Clear pending operations
+    for (const op of this.operationQueue) {
+      op.reject(new SDKError('StorageManager cleanup', 'STORAGE_CLEANUP'));
+    }
+    this.operationQueue = [];
+
+    // Clear listeners
+    this.syncListeners = [];
   }
 }

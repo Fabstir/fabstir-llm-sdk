@@ -2450,6 +2450,259 @@ const loaded = await sdk.loadConversation(cid);
 console.log('Loaded messages:', loaded.messages.length);
 ```
 
+### S5 Connection Handling (v1.4.24+)
+
+The StorageManager includes robust connection handling for mobile browsers where WebSocket connections frequently die due to background tab throttling, device sleep, or network switching.
+
+#### Connection Status
+
+##### getConnectionStatus(): S5ConnectionStatus
+
+Get the current S5 WebSocket connection status.
+
+**Returns:**
+- `'connected'` - WebSocket is open and ready
+- `'connecting'` - WebSocket is establishing connection
+- `'disconnected'` - WebSocket is closed or in error state
+
+**Example:**
+```typescript
+const storageManager = await sdk.getStorageManager();
+const status = storageManager.getConnectionStatus();
+console.log('S5 connection:', status); // 'connected' | 'connecting' | 'disconnected'
+```
+
+#### Sync Status
+
+##### getSyncStatus(): SyncStatus
+
+Get the current sync status for UI indicators.
+
+**Returns:**
+- `'synced'` - All operations completed successfully
+- `'syncing'` - Currently processing queued operations
+- `'pending'` - Operations queued, waiting for connection
+- `'error'` - Last operation failed after retries
+
+**Example:**
+```typescript
+const status = storageManager.getSyncStatus();
+if (status === 'pending') {
+  console.log(`${storageManager.getPendingOperationCount()} operations waiting`);
+}
+```
+
+##### getPendingOperationCount(): number
+
+Get the number of operations waiting in the queue.
+
+**Returns:**
+- `number` - Count of pending PUT/DELETE operations
+
+##### getLastError(): Error | null
+
+Get the last error if sync status is 'error'.
+
+**Returns:**
+- `Error` - The error that caused the 'error' status
+- `null` - No error (status is not 'error')
+
+##### onSyncStatusChange(callback): () => void
+
+Subscribe to sync status changes. Callback fires immediately with current status.
+
+**Parameters:**
+- `callback` (function) - Called with new status on each change
+
+**Returns:**
+- `() => void` - Unsubscribe function
+
+**Example:**
+```typescript
+const unsubscribe = storageManager.onSyncStatusChange((status) => {
+  switch (status) {
+    case 'synced':
+      hideSpinner();
+      showGreenCheck();
+      break;
+    case 'syncing':
+      showSpinner();
+      break;
+    case 'pending':
+      showYellowWarning(`${storageManager.getPendingOperationCount()} pending`);
+      break;
+    case 'error':
+      showRedError(storageManager.getLastError()?.message);
+      break;
+  }
+});
+
+// Cleanup on component unmount
+useEffect(() => unsubscribe, []);
+```
+
+#### Retry Operations
+
+##### putWithRetry(path, data): Promise<void>
+
+PUT operation with automatic retry and queue support.
+
+**Behavior:**
+- If connected: Executes with up to 5 retries (exponential backoff: 1s, 2s, 4s, 8s, 16s)
+- If disconnected: Queues operation, resolves when connection restored and operation succeeds
+
+**Parameters:**
+- `path` (string) - S5 storage path
+- `data` (any) - Data to store
+
+**Throws:**
+- `SDKError` with code `STORAGE_NOT_INITIALIZED` - StorageManager not initialized
+- `SDKError` with code `STORAGE_RETRY_EXHAUSTED` - Failed after 5 retries
+- `SDKError` with code `STORAGE_QUEUE_FULL` - Queue exceeded 100 operations
+
+##### getWithRetry(path): Promise<any>
+
+GET operation with automatic retry (no queue - reads need immediate response).
+
+**Parameters:**
+- `path` (string) - S5 storage path
+
+**Returns:**
+- `Promise<any>` - Retrieved data
+
+**Throws:**
+- `SDKError` with code `STORAGE_NOT_INITIALIZED` - StorageManager not initialized
+- `SDKError` with code `STORAGE_RETRY_EXHAUSTED` - Failed after 5 retries
+
+##### deleteWithRetry(path): Promise<boolean>
+
+DELETE operation with automatic retry and queue support.
+
+**Parameters:**
+- `path` (string) - S5 storage path
+
+**Returns:**
+- `Promise<boolean>` - True if deleted
+
+**Throws:**
+- `SDKError` with code `STORAGE_NOT_INITIALIZED` - StorageManager not initialized
+- `SDKError` with code `STORAGE_RETRY_EXHAUSTED` - Failed after 5 retries
+- `SDKError` with code `STORAGE_QUEUE_FULL` - Queue exceeded 100 operations
+
+#### Manual Sync
+
+##### forceSync(): Promise<void>
+
+Manually trigger reconnection and flush queued operations. Useful for UI "retry" buttons.
+
+**Example:**
+```typescript
+// Retry button handler
+retryButton.onclick = async () => {
+  try {
+    await storageManager.forceSync();
+    console.log('Sync successful');
+  } catch (error) {
+    console.error('Sync failed:', error.message);
+  }
+};
+```
+
+#### Cleanup
+
+##### cleanup(): void
+
+Clean up connection handlers and reject pending operations. Call when disposing the SDK.
+
+**Example:**
+```typescript
+// On app shutdown
+storageManager.cleanup();
+```
+
+#### Auto-Reconnect Behavior
+
+The SDK automatically attempts to reconnect in these scenarios:
+
+1. **Tab becomes visible** - When user returns to the tab after it was backgrounded
+2. **Network comes online** - When device regains network connectivity
+
+When reconnection succeeds, queued operations are automatically flushed.
+
+#### Complete UI Integration Example
+
+```typescript
+import { FabstirSDKCore, SyncStatus } from '@fabstir/sdk-core';
+
+function ChatApp() {
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
+  const [pendingCount, setPendingCount] = useState(0);
+  const storageManagerRef = useRef<StorageManager | null>(null);
+
+  useEffect(() => {
+    const init = async () => {
+      const sdk = new FabstirSDKCore({ /* config */ });
+      await sdk.authenticate('privatekey', { privateKey });
+      const storageManager = await sdk.getStorageManager();
+      storageManagerRef.current = storageManager;
+
+      // Subscribe to sync status
+      const unsubscribe = storageManager.onSyncStatusChange((status) => {
+        setSyncStatus(status);
+        setPendingCount(storageManager.getPendingOperationCount());
+      });
+
+      return () => {
+        unsubscribe();
+        storageManager.cleanup();
+      };
+    };
+
+    init();
+  }, []);
+
+  const handleRetry = async () => {
+    await storageManagerRef.current?.forceSync();
+  };
+
+  return (
+    <div>
+      {/* Sync status indicator */}
+      <SyncIndicator status={syncStatus} pendingCount={pendingCount} />
+
+      {syncStatus === 'error' && (
+        <button onClick={handleRetry}>Retry Sync</button>
+      )}
+
+      {/* Chat UI */}
+    </div>
+  );
+}
+
+function SyncIndicator({ status, pendingCount }: { status: SyncStatus; pendingCount: number }) {
+  switch (status) {
+    case 'synced':
+      return <span className="text-green-500">✓ Synced</span>;
+    case 'syncing':
+      return <span className="text-blue-500">⟳ Syncing...</span>;
+    case 'pending':
+      return <span className="text-yellow-500">⏳ {pendingCount} pending</span>;
+    case 'error':
+      return <span className="text-red-500">✗ Sync error</span>;
+  }
+}
+```
+
+#### Types
+
+```typescript
+// Connection status from S5.js
+export type S5ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
+
+// Sync status for UI
+export type SyncStatus = 'synced' | 'syncing' | 'pending' | 'error';
+```
+
 ## RAG and Vector Databases
 
 The SDK includes a complete **Retrieval-Augmented Generation (RAG)** system that enhances LLM responses by retrieving relevant context from user documents.

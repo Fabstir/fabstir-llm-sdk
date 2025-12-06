@@ -29,6 +29,7 @@ export { AuthManager } from './managers/AuthManager';
 export { PaymentManager } from './managers/PaymentManager';
 export { PaymentManager as PaymentManagerMultiChain } from './managers/PaymentManagerMultiChain';
 export { StorageManager } from './managers/StorageManager';
+export type { S5ConnectionStatus, SyncStatus } from './managers/StorageManager';
 export { SessionManager } from './managers/SessionManager';
 export {
   HostManager,

@@ -16,6 +16,7 @@ An enhanced JavaScript/TypeScript SDK for the S5 decentralized storage network, 
 - 🖼️ **Media Processing**: WASM-based image metadata extraction with Canvas fallback
 - 🎨 **Color Analysis**: Dominant color extraction and palette generation
 - 📊 **Bundle Optimization**: Code-splitting support (~70KB gzipped total)
+- 📡 **Connection API**: Monitor and manage P2P connections for mobile apps
 - ✅ **Real S5 Portal Integration**: Fully tested with s5.vup.cx portal
 
 ## Key Components
@@ -24,6 +25,7 @@ An enhanced JavaScript/TypeScript SDK for the S5 decentralized storage network, 
 - **S5**: Main client class for connection and identity management
 - **FS5**: File system operations with path-based API
 - **S5UserIdentity**: User identity and authentication
+- **Connection API**: `getConnectionStatus()`, `onConnectionChange()`, `reconnect()` for mobile apps
 
 ### Utility Classes
 - **DirectoryWalker**: Recursive directory traversal with cursor support
@@ -132,6 +134,44 @@ const imageBlob = await fetch('/path/to/image.jpg').then(r => r.blob());
 const metadata = await MediaProcessor.extractMetadata(imageBlob);
 console.log(`Image: ${metadata.width}x${metadata.height} ${metadata.format}`);
 console.log(`Dominant colors:`, metadata.dominantColors);
+```
+
+### Connection Management (Mobile Apps)
+
+```typescript
+import { S5, ConnectionStatus } from "@julesl23/s5js";
+
+const s5 = await S5.create({ initialPeers: [...] });
+
+// Check current connection status
+const status = s5.getConnectionStatus();
+console.log(status); // 'connected' | 'connecting' | 'disconnected'
+
+// Subscribe to connection changes
+const unsubscribe = s5.onConnectionChange((status) => {
+  if (status === 'disconnected') {
+    showOfflineIndicator();
+  } else if (status === 'connected') {
+    hideOfflineIndicator();
+  }
+});
+
+// Handle app returning to foreground
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible') {
+    if (s5.getConnectionStatus() === 'disconnected') {
+      try {
+        await s5.reconnect();
+        console.log('Reconnected successfully');
+      } catch (error) {
+        console.error('Reconnection failed:', error.message);
+      }
+    }
+  }
+});
+
+// Cleanup when done
+unsubscribe();
 ```
 
 ## Testing with Real S5 Portal

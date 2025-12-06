@@ -7,10 +7,11 @@ Browser-compatible SDK for the Fabstir P2P LLM marketplace.
 - ✅ **Browser-ready**: Runs in modern browsers without polyfills
 - ✅ **Contract interactions**: Direct blockchain communication via ethers.js
 - ✅ **Wallet management**: Support for MetaMask and Coinbase Wallet
-- ✅ **S5 Storage**: Decentralized storage via S5.js
+- ✅ **S5 Storage**: Decentralized storage via S5.js with mobile-resilient connection handling
 - ✅ **Session management**: Persistent conversation handling
 - ✅ **Payment processing**: ETH and USDC payment support
 - ✅ **TypeScript**: Full type safety and IntelliSense support
+- ✅ **Mobile support**: Auto-reconnect, operation queuing, and sync status for mobile browsers
 
 ## Installation
 

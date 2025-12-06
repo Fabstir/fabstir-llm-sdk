@@ -7,6 +7,10 @@
   - [Overview](#overview)
   - [Installation](#installation)
   - [Quick Start](#quick-start)
+  - [Connection API](#connection-api)
+    - [getConnectionStatus()](#getconnectionstatus)
+    - [onConnectionChange(callback)](#onconnectionchangecallback)
+    - [reconnect()](#reconnect)
   - [Core API Methods](#core-api-methods)
     - [get(path, options?)](#getpath-options)
       - [Parameters](#parameters)
@@ -144,6 +148,248 @@ console.log(content); // "Hello, S5!"
 // List directory contents
 for await (const item of s5.fs.list("home/documents")) {
   console.log(`${item.type}: ${item.name}`);
+}
+```
+
+## Connection API
+
+The Connection API provides methods for monitoring and managing WebSocket connections to the S5 peer-to-peer network. This is particularly useful for mobile applications where connections can be interrupted by background tabs, network switching, or device sleep.
+
+### ConnectionStatus Type
+
+```typescript
+type ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
+```
+
+- **`connected`**: At least one peer has completed the handshake
+- **`connecting`**: At least one peer socket is open but handshake not complete
+- **`disconnected`**: No peers or all sockets closed
+
+### getConnectionStatus()
+
+Get the current connection status to the S5 network.
+
+```typescript
+getConnectionStatus(): ConnectionStatus
+```
+
+#### Returns
+
+- `'connected'` if at least one peer has completed handshake
+- `'connecting'` if at least one peer socket is open but handshake not complete
+- `'disconnected'` if no peers or all sockets closed
+
+#### Example
+
+```typescript
+const s5 = await S5.create({ initialPeers: [...] });
+
+const status = s5.getConnectionStatus();
+console.log(`Current status: ${status}`);
+
+if (status === 'disconnected') {
+  console.log('Not connected to network');
+} else if (status === 'connecting') {
+  console.log('Connection in progress...');
+} else {
+  console.log('Connected and ready');
+}
+```
+
+### onConnectionChange(callback)
+
+Subscribe to connection status changes. The callback is called immediately with the current status, then again whenever the status changes.
+
+```typescript
+onConnectionChange(callback: (status: ConnectionStatus) => void): () => void
+```
+
+#### Parameters
+
+- **callback** `(status: ConnectionStatus) => void`: Function called when connection status changes
+
+#### Returns
+
+- Unsubscribe function that removes the listener when called
+
+#### Example
+
+```typescript
+const s5 = await S5.create({ initialPeers: [...] });
+
+// Subscribe to changes
+const unsubscribe = s5.onConnectionChange((status) => {
+  console.log(`Connection status: ${status}`);
+
+  if (status === 'disconnected') {
+    showOfflineIndicator();
+  } else if (status === 'connected') {
+    hideOfflineIndicator();
+  }
+});
+
+// Later: stop listening
+unsubscribe();
+```
+
+#### Multiple Listeners
+
+Multiple listeners can subscribe independently:
+
+```typescript
+// UI listener
+const unsubscribe1 = s5.onConnectionChange((status) => {
+  updateStatusBadge(status);
+});
+
+// Analytics listener
+const unsubscribe2 = s5.onConnectionChange((status) => {
+  trackConnectionEvent(status);
+});
+
+// Cleanup both
+unsubscribe1();
+unsubscribe2();
+```
+
+#### Error Isolation
+
+Listener errors are isolated - one failing listener won't break others:
+
+```typescript
+s5.onConnectionChange((status) => {
+  throw new Error('This error is caught');
+});
+
+s5.onConnectionChange((status) => {
+  // This still runs even if above listener throws
+  console.log(status);
+});
+```
+
+### reconnect()
+
+Force reconnection to the S5 network. Closes all existing connections and re-establishes them to the initial peer URIs.
+
+```typescript
+async reconnect(): Promise<void>
+```
+
+#### Throws
+
+- `Error` if reconnection fails after 10 second timeout
+
+#### Example
+
+```typescript
+const s5 = await S5.create({ initialPeers: [...] });
+
+// Detect disconnection and reconnect
+s5.onConnectionChange(async (status) => {
+  if (status === 'disconnected') {
+    try {
+      await s5.reconnect();
+      console.log('Reconnected successfully');
+    } catch (error) {
+      console.error('Reconnection failed:', error.message);
+    }
+  }
+});
+```
+
+#### Manual Reconnection
+
+```typescript
+// Force reconnect (e.g., when app returns to foreground)
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible') {
+    if (s5.getConnectionStatus() === 'disconnected') {
+      try {
+        await s5.reconnect();
+      } catch (error) {
+        console.error('Failed to reconnect:', error);
+      }
+    }
+  }
+});
+```
+
+#### Concurrent Calls
+
+Concurrent `reconnect()` calls are handled safely - subsequent calls wait for the first to complete:
+
+```typescript
+// These don't create duplicate connections
+const promise1 = s5.reconnect();
+const promise2 = s5.reconnect();
+
+await Promise.all([promise1, promise2]); // Both resolve when first completes
+```
+
+### Mobile App Example
+
+Complete example for handling connection in a mobile web app:
+
+```typescript
+import { S5, ConnectionStatus } from '@julesl23/s5js';
+
+class S5ConnectionManager {
+  private s5: S5;
+  private unsubscribe?: () => void;
+
+  async initialize() {
+    this.s5 = await S5.create({
+      initialPeers: [
+        'wss://z2Das8aEF7oNoxkcrfvzerZ1iBPWfm6D7gy3hVE4ALGSpVB@node.sfive.net/s5/p2p'
+      ]
+    });
+
+    // Monitor connection
+    this.unsubscribe = this.s5.onConnectionChange((status) => {
+      this.handleStatusChange(status);
+    });
+
+    // Handle app lifecycle
+    document.addEventListener('visibilitychange', () => {
+      this.handleVisibilityChange();
+    });
+  }
+
+  private handleStatusChange(status: ConnectionStatus) {
+    switch (status) {
+      case 'connected':
+        this.showOnline();
+        break;
+      case 'connecting':
+        this.showConnecting();
+        break;
+      case 'disconnected':
+        this.showOffline();
+        break;
+    }
+  }
+
+  private async handleVisibilityChange() {
+    if (document.visibilityState === 'visible') {
+      // App came to foreground - check connection
+      if (this.s5.getConnectionStatus() === 'disconnected') {
+        try {
+          await this.s5.reconnect();
+        } catch (error) {
+          this.showReconnectionFailed();
+        }
+      }
+    }
+  }
+
+  private showOnline() { /* Update UI */ }
+  private showConnecting() { /* Update UI */ }
+  private showOffline() { /* Update UI */ }
+  private showReconnectionFailed() { /* Update UI */ }
+
+  destroy() {
+    this.unsubscribe?.();
+  }
 }
 ```
 
