@@ -1845,49 +1845,52 @@ export class StorageManager implements IStorageManager {
     this.updateSyncStatus('syncing');
     console.log(`[StorageManager] Flushing ${this.operationQueue.length} queued operations`);
 
-    while (this.operationQueue.length > 0) {
-      const op = this.operationQueue[0];
+    try {
+      while (this.operationQueue.length > 0) {
+        const op = this.operationQueue[0];
 
-      try {
-        let result: any;
+        try {
+          let result: any;
 
-        switch (op.type) {
-          case 'put':
-            result = await this.executeWithRetry(
-              () => this.s5Client.fs.put(op.path, op.data),
-              `PUT ${op.path}`
-            );
-            break;
-          case 'get':
-            result = await this.executeWithRetry(
-              () => this.s5Client.fs.get(op.path),
-              `GET ${op.path}`
-            );
-            break;
-          case 'delete':
-            result = await this.executeWithRetry(
-              () => this.s5Client.fs.delete(op.path),
-              `DELETE ${op.path}`
-            );
-            break;
+          switch (op.type) {
+            case 'put':
+              result = await this.executeWithRetry(
+                () => this.s5Client.fs.put(op.path, op.data),
+                `PUT ${op.path}`
+              );
+              break;
+            case 'get':
+              result = await this.executeWithRetry(
+                () => this.s5Client.fs.get(op.path),
+                `GET ${op.path}`
+              );
+              break;
+            case 'delete':
+              result = await this.executeWithRetry(
+                () => this.s5Client.fs.delete(op.path),
+                `DELETE ${op.path}`
+              );
+              break;
+          }
+
+          // Success - remove from queue and resolve
+          this.operationQueue.shift();
+          op.resolve(result);
+          console.log(`[StorageManager] Queued ${op.type} completed for ${op.path}`);
+
+        } catch (error: any) {
+          // Failed after retries - reject and remove from queue
+          this.operationQueue.shift();
+          op.reject(error);
+          console.error(`[StorageManager] Queued ${op.type} failed for ${op.path}:`, error.message);
         }
-
-        // Success - remove from queue and resolve
-        this.operationQueue.shift();
-        op.resolve(result);
-        console.log(`[StorageManager] Queued ${op.type} completed for ${op.path}`);
-
-      } catch (error: any) {
-        // Failed after retries - reject and remove from queue
-        this.operationQueue.shift();
-        op.reject(error);
-        console.error(`[StorageManager] Queued ${op.type} failed for ${op.path}:`, error.message);
       }
+    } finally {
+      // CRITICAL: Always reset flag even if an unexpected exception occurs
+      this.isProcessingQueue = false;
+      this.updateSyncStatus(this.lastError ? 'error' : 'synced');
+      console.log('[StorageManager] Queue flush complete');
     }
-
-    this.isProcessingQueue = false;
-    this.updateSyncStatus(this.lastError ? 'error' : 'synced');
-    console.log('[StorageManager] Queue flush complete');
   }
 
   /**

@@ -668,12 +668,13 @@ export class FabstirSDKCore extends EventEmitter {
           encryptionManager: this.encryptionManager!
         });
 
-        // Initialize SessionGroupManager with S5 storage
+        // Initialize SessionGroupManager with S5 storage and retry/reconnect support (v1.4.26+)
         const sessionGroupStorage = new SessionGroupStorage(
           this.storageManager!.getS5Client(),
           this.s5Seed,
           this.userAddress,
-          this.encryptionManager
+          this.encryptionManager,
+          this.storageManager  // Pass StorageManager for auto-retry/reconnect
         );
 
         this.sessionGroupManager = new SessionGroupManager(sessionGroupStorage);
