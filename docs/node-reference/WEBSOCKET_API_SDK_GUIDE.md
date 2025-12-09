@@ -53,7 +53,7 @@ This document describes the current state of the fabstir-llm-node WebSocket API 
 - **Payment Distribution**: Host receives 90%, Treasury 10%, User gets refund
 - **No User Action Required**: Payments settle even on unexpected disconnects
 - **Session Cleanup**: Token trackers and state cleared after settlement
-- **Blockchain Integration**: Direct contract calls to JobMarketplace (0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944)
+- **Blockchain Integration**: Direct contract calls to JobMarketplace (0xfD764804C5A5808b79D66746BAF4B65fb4413731)
 
 ### ⚠️ Phase 8.11: Core Functionality (Skipped - To Be Done)
 - Real blockchain job verification (currently using mock)
@@ -132,16 +132,9 @@ const initMessage = {
     model: 'llama-2-7b',
     max_tokens: 2048,
     temperature: 0.7
-  },
-  // NEW (v8.4+): Optional S5 vector database for RAG (Sub-phase 5.1.3)
-  vector_database?: {
-    manifest_path: 'home/vector-databases/0xABC.../my-docs/manifest.json',
-    user_address: '0xABC...'
   }
 };
 ```
-
-**Note**: `vector_database` is **optional** (v8.4+). When provided, host should load pre-existing vectors from S5 instead of expecting `uploadVectors` messages. See `S5_VECTOR_LOADING.md` for host-side implementation details.
 
 #### Session Resume (After Disconnect)
 ```typescript
@@ -297,7 +290,7 @@ jobMarketplace.on(filter, (jobId, host, tokensUsed, event) => {
 **Requirements:**
 - Node must have `HOST_PRIVATE_KEY` configured
 - Node version v5-payment-settlement or later
-- JobMarketplace: 0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E (v8.1.2+)
+- JobMarketplace: 0xfD764804C5A5808b79D66746BAF4B65fb4413731 (v8.4.22+ with PRICE_PRECISION=1000)
 
 ## Compression Support
 
