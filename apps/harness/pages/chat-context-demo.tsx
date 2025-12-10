@@ -58,6 +58,9 @@ const TEST_HOST_1_PRIVATE_KEY =
 const TEST_HOST_2_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_2_ADDRESS!;
 const TEST_HOST_2_PRIVATE_KEY =
   process.env.NEXT_PUBLIC_TEST_HOST_2_PRIVATE_KEY!;
+// TEST_HOST_4 - P2P connected host for testing new contracts
+const TEST_HOST_4_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_4_ADDRESS || '0x048afA7126A3B684832886b78e7cC1Dd4019557E';
+const TEST_HOST_4_URL = process.env.NEXT_PUBLIC_TEST_HOST_4_URL || 'https://hostl.fabstir.net:8443';
 const TEST_TREASURY_ADDRESS = process.env.NEXT_PUBLIC_TEST_TREASURY_ADDRESS!;
 const TEST_TREASURY_PRIVATE_KEY =
   process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_KEY!;
@@ -990,7 +993,19 @@ export default function ChatContextDemo() {
       }
 
       if (hosts.length === 0) {
-        throw new Error("No active hosts available");
+        // Fallback to TEST_HOST_4 (P2P connected host) for testing new contracts
+        console.log("No hosts discovered from contract, using TEST_HOST_4 fallback");
+        addMessage("system", "⚠️ No registered hosts found, using TEST_HOST_4 fallback...");
+        hosts = [{
+          address: TEST_HOST_4_ADDRESS,
+          apiUrl: TEST_HOST_4_URL,
+          endpoint: TEST_HOST_4_URL,
+          supportedModels: ['CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf'],
+          models: ['CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf'],
+          isActive: true,
+          minPricePerTokenStable: 50000n, // $50/million tokens with PRICE_PRECISION=1000
+          metadata: { costPerToken: 50000 }
+        }];
       }
 
       // Parse host metadata

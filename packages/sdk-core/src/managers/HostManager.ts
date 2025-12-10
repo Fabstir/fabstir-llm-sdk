@@ -576,20 +576,57 @@ export class HostManager {
       const activeNodes = await this.discoveryService.getAllActiveNodes();
 
       // Transform NodeInfo to HostInfo format
-      return activeNodes.map(node => ({
-        address: node.nodeAddress,
-        isRegistered: true,
-        isActive: node.isActive,
-        stakedAmount: (node as any).stakedAmount || 1000000000000000000n,
-        metadata: (node as any).metadata || JSON.stringify({
-          models: (node as any).models || [],
-          endpoint: node.apiUrl
-        }),
-        models: (node as any).models || [],
-        endpoint: node.apiUrl,
-        reputation: (node as any).reputation || 95,
-        pricePerToken: (node as any).pricePerToken || Number(MIN_PRICE_PER_TOKEN)
-      } as HostInfo));
+      return activeNodes.map(node => {
+        // Parse metadata if it's a string
+        let metadata: HostMetadata;
+        if (typeof node.metadata === 'string' && node.metadata.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(node.metadata);
+            metadata = {
+              hardware: parsed.hardware || { gpu: 'Unknown', vram: 0, ram: 0 },
+              capabilities: parsed.capabilities || ['inference', 'streaming'],
+              location: parsed.location || 'Unknown',
+              maxConcurrent: parsed.maxConcurrent || 10,
+              costPerToken: Number(node.minPricePerTokenStable || 0),
+              publicKey: parsed.publicKey
+            };
+          } catch {
+            metadata = {
+              hardware: { gpu: 'Unknown', vram: 0, ram: 0 },
+              capabilities: ['inference', 'streaming'],
+              location: 'Unknown',
+              maxConcurrent: 10,
+              costPerToken: Number(node.minPricePerTokenStable || 0)
+            };
+          }
+        } else {
+          metadata = {
+            hardware: { gpu: 'Unknown', vram: 0, ram: 0 },
+            capabilities: ['inference', 'streaming'],
+            location: 'Unknown',
+            maxConcurrent: 10,
+            costPerToken: Number(node.minPricePerTokenStable || 0)
+          };
+        }
+
+        return {
+          address: node.nodeAddress,
+          apiUrl: node.apiUrl,
+          endpoint: node.apiUrl, // Alias for backward compatibility
+          metadata,
+          supportedModels: node.models || [],
+          models: node.models || [], // Alias for backward compatibility
+          isActive: node.isActive,
+          isRegistered: true, // Backward compatibility
+          stake: node.stakedAmount || 1000000000000000000n,
+          stakedAmount: node.stakedAmount || 1000000000000000000n, // Alias for backward compatibility
+          reputation: node.reputation || 95, // Backward compatibility
+          // Use actual pricing from contract
+          pricePerToken: Number(node.minPricePerTokenStable || 0), // Backward compatibility - stable price
+          minPricePerTokenNative: node.minPricePerTokenNative || 0n,
+          minPricePerTokenStable: node.minPricePerTokenStable || 0n
+        } as HostInfo;
+      });
     } catch (error: any) {
       console.error('Failed to get active hosts:', error);
       // Return empty array - let UI handle empty state properly

@@ -1833,12 +1833,12 @@ const NodeManagementClient: React.FC = () => {
                   type="text"
                   value={minPricePerTokenNative}
                   onChange={(e) => setMinPricePerTokenNative(e.target.value)}
-                  placeholder="11363636363636"
+                  placeholder="3000000"
                   style={{ padding: '5px', width: '300px', fontFamily: 'monospace' }}
                 />
                 <div style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>
                   {(() => {
-                    const formatted = formatNativePrice(minPricePerTokenNative || '11363636363636');
+                    const formatted = formatNativePrice(minPricePerTokenNative || '3000000');
                     return (
                       <>
                         <div>⛽ {formatted.eth} ETH per token (~${formatted.usd} @ $4400 ETH)</div>
@@ -1848,7 +1848,7 @@ const NodeManagementClient: React.FC = () => {
                   })()}
                 </div>
                 <small style={{ color: '#666', display: 'block', marginTop: '5px' }}>
-                  Range: 2,272,727,273 to 22,727,272,727,273 wei (~$0.00001 to $0.1 @ $4400 ETH)
+                  Range: 227,273 to 22,727,272,727,273,000 wei (PRICE_PRECISION=1000)
                 </small>
               </div>
 
@@ -1858,14 +1858,14 @@ const NodeManagementClient: React.FC = () => {
                   type="number"
                   value={minPricePerTokenStable}
                   onChange={(e) => setMinPricePerTokenStable(e.target.value)}
-                  min="10"
-                  max="100000"
-                  step="10"
+                  min="1"
+                  max="100000000"
+                  step="1"
                   style={{ padding: '5px', width: '200px' }}
                 />
                 <div style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>
                   {(() => {
-                    const formatted = formatStablePrice(minPricePerTokenStable || '316');
+                    const formatted = formatStablePrice(minPricePerTokenStable || '5000');
                     return (
                       <>
                         <div>💵 ${formatted.usdc} USDC per token</div>
@@ -1875,7 +1875,7 @@ const NodeManagementClient: React.FC = () => {
                   })()}
                 </div>
                 <small style={{ color: '#666', display: 'block', marginTop: '5px' }}>
-                  Range: 10-100,000 (0.00001-0.1 USDC per token)
+                  Range: 1-100,000,000 ($0.001 to $100,000 per million tokens)
                 </small>
               </div>
 
@@ -2017,8 +2017,8 @@ const NodeManagementClient: React.FC = () => {
                 {/* Native Pricing Section */}
                 <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#f9f9f9', borderRadius: '5px' }}>
                   <div style={{ marginBottom: '10px', fontSize: '13px', color: '#555' }}>
-                    <strong>Current Native Price (ETH/BNB):</strong> {nodeInfo?.minPricePerTokenNative?.toString() || '11363636363636'} wei
-                    {' '}(~${formatNativePrice(nodeInfo?.minPricePerTokenNative?.toString() || '11363636363636').usd})
+                    <strong>Current Native Price (ETH/BNB):</strong> {nodeInfo?.minPricePerTokenNative?.toString() || '3000000'} wei
+                    {' '}(~${formatNativePrice(nodeInfo?.minPricePerTokenNative?.toString() || '3000000').perMillion}/million tokens)
                   </div>
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                     <input
@@ -2066,15 +2066,15 @@ const NodeManagementClient: React.FC = () => {
                     </div>
                   )}
                   <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '5px' }}>
-                    Valid range: 2,272,727,273 to 22,727,272,727,273 wei
+                    Valid range: 227,273 to 22,727,272,727,273,000 wei (PRICE_PRECISION=1000)
                   </small>
                 </div>
 
                 {/* Stable Pricing Section */}
                 <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#f9f9f9', borderRadius: '5px' }}>
                   <div style={{ marginBottom: '10px', fontSize: '13px', color: '#555' }}>
-                    <strong>Current Stable Price (USDC):</strong> {nodeInfo?.minPricePerTokenStable?.toString() || '316'}
-                    {' '}(${formatStablePrice(nodeInfo?.minPricePerTokenStable?.toString() || '316').usdc}/token)
+                    <strong>Current Stable Price (USDC):</strong> {nodeInfo?.minPricePerTokenStable?.toString() || '5000'}
+                    {' '}(${formatStablePrice(nodeInfo?.minPricePerTokenStable?.toString() || '5000').perMillion}/million tokens)
                   </div>
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                     <input

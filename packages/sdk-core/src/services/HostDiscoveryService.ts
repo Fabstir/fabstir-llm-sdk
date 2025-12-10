@@ -26,7 +26,9 @@ export interface NodeInfo {
   models?: string[];
   reputation?: number;
   pricePerToken?: number;
-  minPricePerToken?: bigint; // NEW: Minimum price from contract
+  minPricePerToken?: bigint; // Legacy - use minPricePerTokenNative
+  minPricePerTokenNative?: bigint; // Native token pricing (ETH/BNB)
+  minPricePerTokenStable?: bigint; // Stablecoin pricing (USDC)
 }
 
 export interface HostDiscoveryOptions {
@@ -65,7 +67,7 @@ export class HostDiscoveryService {
 
     try {
       const nodeFullInfo = await this.contract.getNodeFullInfo(nodeAddress);
-      // Returns: [nodeOperator, stakedAmount, active, metadata, apiUrl, supportedModels, minPricePerToken]
+      // Contract returns: [operator, stake, active, metadata, apiUrl, models, nativePrice, stablePrice]
 
       // Check if node is active (index 2)
       if (!nodeFullInfo[2]) {
@@ -87,6 +89,10 @@ export class HostDiscoveryService {
         // Ignore parse errors
       }
 
+      // Read pricing from contract
+      const minPriceNative = nodeFullInfo[6] || 0n;
+      const minPriceStable = nodeFullInfo[7] || 0n;
+
       // Cache the complete result
       const info: NodeInfo = {
         nodeAddress: nodeAddress.toLowerCase(),
@@ -102,8 +108,10 @@ export class HostDiscoveryService {
         models: nodeFullInfo[5] || [], // From contract (index 5) - alias
         region: parsedMetadata.region || '',
         reputation: parsedMetadata.reputation || 95,
-        pricePerToken: parsedMetadata.pricePerToken || 2000,
-        minPricePerToken: nodeFullInfo[6] || 0n // NEW: 7th field (index 6)
+        pricePerToken: Number(minPriceStable), // Use actual stable price from contract
+        minPricePerToken: minPriceNative, // Legacy alias
+        minPricePerTokenNative: minPriceNative, // Native pricing (index 6)
+        minPricePerTokenStable: minPriceStable // Stable pricing (index 7)
       };
 
       this.nodeCache.set(nodeAddress.toLowerCase(), info);
@@ -163,6 +171,10 @@ export class HostDiscoveryService {
           console.log(`[HostDiscovery] nodeFullInfo length:`, nodeFullInfo.length);
 
           // Build complete node info with all metadata
+          // Contract returns: [operator, stake, active, metadata, apiUrl, models, nativePrice, stablePrice]
+          const minPriceNative = nodeFullInfo[6] || 0n;
+          const minPriceStable = nodeFullInfo[7] || 0n;
+
           const nodeInfo: NodeInfo = {
             nodeAddress: address.toLowerCase(),
             address: address.toLowerCase(), // Alias for compatibility
@@ -177,8 +189,10 @@ export class HostDiscoveryService {
             models: nodeFullInfo[5] || [], // From contract (index 5) - alias
             region: parsedMetadata.region || '',
             reputation: parsedMetadata.reputation || 95,
-            pricePerToken: parsedMetadata.pricePerToken || 2000,
-            minPricePerToken: nodeFullInfo[6] || 0n // NEW: 7th field (index 6)
+            pricePerToken: Number(minPriceStable), // Use actual stable price from contract
+            minPricePerToken: minPriceNative, // Legacy alias
+            minPricePerTokenNative: minPriceNative, // Native pricing (index 6)
+            minPricePerTokenStable: minPriceStable // Stable pricing (index 7)
           };
 
           activeNodes.push(nodeInfo);
