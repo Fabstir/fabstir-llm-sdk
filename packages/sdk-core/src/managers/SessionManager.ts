@@ -26,7 +26,7 @@ import {
 } from '../types';
 import { PaymentManager } from './PaymentManager';
 import { StorageManager } from './StorageManager';
-import { HostManager } from './HostManager';
+import { HostManager, PRICE_PRECISION } from './HostManager';
 import { EncryptionManager } from './EncryptionManager';
 import { WebSocketClient } from '../websocket/WebSocketClient';
 import { ChainRegistry } from '../config/ChainRegistry';
@@ -1735,14 +1735,20 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Calculate session cost
+   * Calculate session cost with PRICE_PRECISION
+   *
+   * Formula: cost = (tokensUsed * pricePerToken) / PRICE_PRECISION
+   *
+   * With PRICE_PRECISION=1000, prices are stored with 1000x multiplier.
+   * Example: $5/million = pricePerToken 5000
+   *   1,000,000 tokens at 5000 = (1,000,000 * 5000) / 1000 = 5,000,000 USDC units
    */
   calculateCost(
     tokensUsed: number,
     pricePerToken: number
   ): bigint {
-    // Price per token is in smallest unit (e.g., wei or nano-USDC)
-    return BigInt(tokensUsed) * BigInt(pricePerToken);
+    // Price includes PRICE_PRECISION multiplier, divide to get actual cost
+    return (BigInt(tokensUsed) * BigInt(pricePerToken)) / PRICE_PRECISION;
   }
 
   /**

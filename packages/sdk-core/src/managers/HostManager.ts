@@ -33,22 +33,33 @@ import { requestHostPublicKey } from './HostKeyRecovery';
 /**
  * Pricing constants for host registration - DUAL PRICING
  * Exported for use in host-cli and other consumers
+ *
+ * PRICE_PRECISION=1000: All prices are stored with a 1000x multiplier
+ * to support sub-$1/million token pricing for budget AI models.
+ *
+ * Conversion: pricePerToken = USD_per_million * 1000
+ * Examples:
+ *   - $0.06/million (Llama 3.2 3B) → pricePerToken = 60
+ *   - $5/million → pricePerToken = 5000
+ *   - $10/million → pricePerToken = 10000
  */
-// Native token pricing (ETH/BNB)
-export const MIN_PRICE_NATIVE = 2_272_727_273n;
-export const MAX_PRICE_NATIVE = 22_727_272_727_273n;
-export const DEFAULT_PRICE_NATIVE = '11363636363636'; // ~$0.00005 @ $4400 ETH
+export const PRICE_PRECISION = 1000n;
 
-// Stablecoin pricing (USDC)
-export const MIN_PRICE_STABLE = 10n;
-export const MAX_PRICE_STABLE = 100_000n;
-export const DEFAULT_PRICE_STABLE = '316'; // ~$0.000316 USDC
+// Native token pricing (ETH/BNB) - with PRICE_PRECISION
+export const MIN_PRICE_NATIVE = 227_273n;                    // ~$0.001/million @ $4400 ETH
+export const MAX_PRICE_NATIVE = 22_727_272_727_273_000n;     // ~$100,000/million @ $4400 ETH
+export const DEFAULT_PRICE_NATIVE = '3000000';               // ~$0.013/million @ $4400 ETH
 
-// Legacy constants (deprecated - use dual pricing above)
+// Stablecoin pricing (USDC) - with PRICE_PRECISION
+export const MIN_PRICE_STABLE = 1n;                          // $0.001 per million tokens
+export const MAX_PRICE_STABLE = 100_000_000n;                // $100,000 per million tokens
+export const DEFAULT_PRICE_STABLE = '5000';                  // $5/million (5 * 1000)
+
+// Legacy constants (for backward compatibility - point to new values)
 export const MIN_PRICE_PER_TOKEN = MIN_PRICE_STABLE;
 export const MAX_PRICE_PER_TOKEN = MAX_PRICE_STABLE;
 export const DEFAULT_PRICE_PER_TOKEN = DEFAULT_PRICE_STABLE;
-export const DEFAULT_PRICE_PER_TOKEN_NUMBER = 316;
+export const DEFAULT_PRICE_PER_TOKEN_NUMBER = 5000;
 
 /**
  * Host registration parameters with model validation and DUAL pricing
@@ -908,7 +919,7 @@ export class HostManager {
 
   /**
    * Update host minimum pricing for native tokens (ETH/BNB)
-   * @param newMinPrice - New minimum price in wei (2,272,727,273 to 22,727,272,727,273)
+   * @param newMinPrice - New minimum price in wei (227,273 to 22,727,272,727,273,000 with PRICE_PRECISION)
    * @returns Transaction hash
    */
   async updatePricingNative(newMinPrice: string): Promise<string> {
@@ -961,7 +972,7 @@ export class HostManager {
 
   /**
    * Update host minimum pricing for stablecoins (USDC)
-   * @param newMinPrice - New minimum price (10 to 100,000)
+   * @param newMinPrice - New minimum price (1 to 100,000,000 with PRICE_PRECISION)
    * @returns Transaction hash
    */
   async updatePricingStable(newMinPrice: string): Promise<string> {

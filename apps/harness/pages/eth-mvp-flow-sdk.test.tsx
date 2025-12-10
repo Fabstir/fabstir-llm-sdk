@@ -55,7 +55,7 @@ const SESSION_DEPOSIT_AMOUNT = '0.012'; // 0.012 ETH deposit (~$52 at $4400 ETH)
 const PROOF_INTERVAL = 1000; // Proof every 1000 tokens (production default)
 const SESSION_DURATION = 86400; // 1 day
 const EXPECTED_TOKENS = 100; // Expected tokens to generate in test
-const DEFAULT_PRICE_NATIVE_WEI = '11363636363636'; // Fallback native pricing: ~0.0000114 ETH per token (~$0.00005 @ $4400 ETH)
+const DEFAULT_PRICE_NATIVE_WEI = '3000000'; // Fallback native pricing with PRICE_PRECISION=1000: ~$6/million @ $4400 ETH
 const DEFAULT_PRICE_PER_TOKEN = ethers.formatEther(DEFAULT_PRICE_NATIVE_WEI); // Convert to ETH for display
 // Contract now accepts: 0.0006 ETH deposit, varies by host pricing, covers ~120 tokens
 

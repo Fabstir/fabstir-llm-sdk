@@ -114,8 +114,8 @@ const NodeManagementClient: React.FC = () => {
   const [additionalStakeAmount, setAdditionalStakeAmount] = useState('100');
   const [apiUrl, setApiUrl] = useState('http://localhost:8083');
   const [supportedModels, setSupportedModels] = useState(''); // Empty by default - user will type model or load from blockchain hashes
-  const [minPricePerTokenNative, setMinPricePerTokenNative] = useState('11363636363636'); // Default native pricing (ETH/BNB)
-  const [minPricePerTokenStable, setMinPricePerTokenStable] = useState('316'); // Default stable pricing (USDC)
+  const [minPricePerTokenNative, setMinPricePerTokenNative] = useState('3000000'); // Default native pricing (ETH/BNB) with PRICE_PRECISION=1000
+  const [minPricePerTokenStable, setMinPricePerTokenStable] = useState('5000'); // Default stable pricing (USDC) with PRICE_PRECISION=1000 ($5/million)
   const [newPriceNativeValue, setNewPriceNativeValue] = useState('');
   const [newPriceStableValue, setNewPriceStableValue] = useState('');
 
@@ -786,32 +786,40 @@ const NodeManagementClient: React.FC = () => {
     }
   };
 
-  // Price calculation helpers for UI display (DUAL PRICING)
+  // Price calculation helpers for UI display (DUAL PRICING with PRICE_PRECISION=1000)
   const formatNativePrice = (weiPrice: string, ethPriceUSD = 4400) => {
     try {
+      const PRICE_PRECISION = 1000;
+      // weiPrice is wei per token * PRICE_PRECISION
       const ethAmount = parseFloat(ethers.formatEther(BigInt(weiPrice)));
-      const usdAmount = ethAmount * ethPriceUSD;
+      const usdPerToken = (ethAmount * ethPriceUSD) / PRICE_PRECISION;
+      const usdPerMillion = usdPerToken * 1_000_000;
       return {
         wei: weiPrice,
         eth: ethAmount.toFixed(18),
-        usd: usdAmount.toFixed(6),
-        per1000: (usdAmount * 1000).toFixed(4)
+        usd: usdPerToken.toFixed(9),
+        perMillion: usdPerMillion.toFixed(3),
+        per1000: (usdPerToken * 1000).toFixed(6)
       };
     } catch {
-      return { wei: '0', eth: '0', usd: '0', per1000: '0' };
+      return { wei: '0', eth: '0', usd: '0', perMillion: '0', per1000: '0' };
     }
   };
 
   const formatStablePrice = (rawPrice: string) => {
     try {
-      const usdAmount = Number(rawPrice) / 1_000_000;
+      const PRICE_PRECISION = 1000;
+      // Price per token = rawPrice / PRICE_PRECISION / 1_000_000
+      const usdPerToken = Number(rawPrice) / PRICE_PRECISION / 1_000_000;
+      const usdPerMillion = Number(rawPrice) / PRICE_PRECISION;
       return {
         raw: rawPrice,
-        usdc: usdAmount.toFixed(6),
-        per1000: (usdAmount * 1000).toFixed(4)
+        usdc: usdPerToken.toFixed(9),
+        perMillion: usdPerMillion.toFixed(3),
+        per1000: (1000 * Number(rawPrice) / PRICE_PRECISION / 1_000_000).toFixed(6)
       };
     } catch {
-      return { raw: '0', usdc: '0', per1000: '0' };
+      return { raw: '0', usdc: '0', perMillion: '0', per1000: '0' };
     }
   };
 

@@ -9,6 +9,7 @@
 import { ethers, Contract, Signer } from 'ethers';
 import { ContractManager } from './ContractManager';
 import { TransactionHelper } from './TransactionHelper';
+import { PRICE_PRECISION } from '../managers/HostManager';
 
 export interface SessionConfig {
   depositAmount: string; // e.g., '2' for $2 USDC
@@ -77,9 +78,9 @@ export class SessionJobManager {
     const depositAmount = ethers.parseUnits(params.sessionConfig.depositAmount, 6);
     
     // Calculate minimum required balance (actual session cost)
-    // pricePerToken is in units of 1/1000000 USDC per token
-    // proofInterval is the number of tokens per session
-    const actualCost = BigInt(params.sessionConfig.pricePerToken) * BigInt(params.sessionConfig.proofInterval);
+    // With PRICE_PRECISION=1000, pricePerToken includes 1000x multiplier
+    // Formula: actualCost = (pricePerToken * proofInterval) / PRICE_PRECISION
+    const actualCost = (BigInt(params.sessionConfig.pricePerToken) * BigInt(params.sessionConfig.proofInterval)) / PRICE_PRECISION;
     const minRequired = actualCost; // This is the actual amount that will be consumed
     
     // Check USDC balance

@@ -30,7 +30,7 @@ export function registerRegisterCommand(program: Command): void {
     .option('--stake <amount>', 'Stake amount in FAB (default: 1000)', '1000')
     .option('--models <models>', 'Comma-separated list of supported models')
     .option('--url <url>', 'Public URL for your host')
-    .option('--price <amount>', `Minimum price per token (100-100,000, default: ${DEFAULT_PRICE_PER_TOKEN})`, DEFAULT_PRICE_PER_TOKEN)
+    .option('--price <amount>', `Minimum price per token (1-100,000,000, default: ${DEFAULT_PRICE_PER_TOKEN})`, DEFAULT_PRICE_PER_TOKEN)
     .option('--force', 'Skip confirmation prompts')
     .option('-k, --private-key <key>', 'Private key to use (otherwise uses wallet file)')
     .option('-r, --rpc-url <url>', 'RPC URL', process.env.RPC_URL_BASE_SEPOLIA)
@@ -110,10 +110,12 @@ export async function executeRegistration(
     console.log(chalk.gray(`  Models: ${config.models.join(', ')}`));
     console.log(chalk.gray(`  Stake: ${ethers.formatUnits(config.stakeAmount || 1000000000000000000000n, 18)} FAB`));
 
-    // Show pricing
+    // Show pricing (with PRICE_PRECISION=1000)
     const priceNum = parseInt(config.minPricePerToken || DEFAULT_PRICE_PER_TOKEN);
-    const priceInUSDC = (priceNum / 1000000).toFixed(6);
-    console.log(chalk.gray(`  Min Price: ${priceNum} (${priceInUSDC} USDC/token)`));
+    const PRICE_PRECISION = 1000;
+    const priceInUSDC = (priceNum / PRICE_PRECISION / 1000000).toFixed(9);
+    const pricePerMillion = (priceNum / PRICE_PRECISION).toFixed(3);
+    console.log(chalk.gray(`  Min Price: ${priceNum} ($${pricePerMillion}/million tokens, ${priceInUSDC} USDC/token)`));
 
     if (config.metadata?.name) {
       console.log(chalk.gray(`  Name: ${config.metadata.name}`));
