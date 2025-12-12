@@ -451,13 +451,15 @@ async getModelPricing(
 
 ## Phase 4: SDK Version & Exports
 
-### Sub-phase 4.1: Update Exports
+### Sub-phase 4.1: Update Exports ✅ COMPLETE
 **Goal**: Export new methods and types from SDK
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/exports/model-pricing-exports.test.ts` (30 lines)
-- [ ] Verify `ModelPricing` type is exported from `@fabstir/sdk-core`
-- [ ] Verify new methods are accessible via HostManager
+- [x] Write tests in `packages/sdk-core/tests/exports/model-pricing-exports.test.ts` (30 lines)
+- [x] Verify `ModelPricing` type is exported from `@fabstir/sdk-core`
+- [x] Verify new methods are accessible via HostManager
+
+**Result**: 5/5 tests passing (42 total per-model pricing tests)
 
 **Test Requirements**:
 ```typescript
