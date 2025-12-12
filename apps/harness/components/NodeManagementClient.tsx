@@ -2225,6 +2225,129 @@ const NodeManagementClient: React.FC = () => {
                 </div>
               </div>
 
+              {/* Per-Model Pricing Section */}
+              {nodeInfo?.supportedModels?.length > 0 && (
+                <div style={{ marginBottom: '20px', padding: '15px', border: '1px solid #ddd', borderRadius: '5px', backgroundColor: '#fafafa' }}>
+                  <h4 style={{ marginBottom: '15px', marginTop: 0 }}>📦 Per-Model Pricing (Optional Overrides)</h4>
+
+                  {/* Model Selector */}
+                  <div style={{ marginBottom: '15px' }}>
+                    <label>Select Model:</label><br />
+                    <select
+                      value={selectedModelForPricing}
+                      onChange={(e) => setSelectedModelForPricing(e.target.value)}
+                      style={{ padding: '8px', width: '100%', maxWidth: '400px' }}
+                    >
+                      <option value="">-- Select a model --</option>
+                      {nodeInfo.supportedModels.map((modelId: string) => (
+                        <option key={modelId} value={modelId}>
+                          {getModelNameFromId(modelId)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Price Inputs */}
+                  {selectedModelForPricing && (
+                    <div style={{ marginBottom: '15px' }}>
+                      <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+                        <div>
+                          <label>Native Price (0 = use default):</label><br />
+                          <input
+                            type="text"
+                            value={modelPriceNative}
+                            onChange={(e) => setModelPriceNative(e.target.value)}
+                            placeholder="0"
+                            style={{ padding: '8px', width: '150px', fontFamily: 'monospace' }}
+                          />
+                        </div>
+                        <div>
+                          <label>Stable Price (0 = use default):</label><br />
+                          <input
+                            type="text"
+                            value={modelPriceStable}
+                            onChange={(e) => setModelPriceStable(e.target.value)}
+                            placeholder="0"
+                            style={{ padding: '8px', width: '150px', fontFamily: 'monospace' }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
+                        <button
+                          onClick={handleSetModelPricing}
+                          disabled={loading}
+                          style={{ padding: '8px 15px', backgroundColor: '#4CAF50', color: 'white', border: 'none', borderRadius: '4px', cursor: loading ? 'not-allowed' : 'pointer' }}
+                        >
+                          {loading ? 'Setting...' : 'Set Model Price'}
+                        </button>
+                        <button
+                          onClick={handleClearModelPricing}
+                          disabled={loading}
+                          style={{ padding: '8px 15px', backgroundColor: '#ff9800', color: 'white', border: 'none', borderRadius: '4px', cursor: loading ? 'not-allowed' : 'pointer' }}
+                        >
+                          {loading ? 'Clearing...' : 'Clear to Default'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Model Prices Table */}
+                  <div style={{ marginTop: '20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                      <strong>Current Model Prices:</strong>
+                      <button
+                        onClick={fetchHostModelPrices}
+                        disabled={loadingModelPrices}
+                        style={{ padding: '4px 10px', fontSize: '12px' }}
+                      >
+                        {loadingModelPrices ? '...' : '🔄 Refresh'}
+                      </button>
+                    </div>
+
+                    {hostModelPrices.length > 0 ? (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                        <thead>
+                          <tr style={{ backgroundColor: '#f0f0f0' }}>
+                            <th style={{ padding: '8px', textAlign: 'left', border: '1px solid #ddd' }}>Model</th>
+                            <th style={{ padding: '8px', textAlign: 'right', border: '1px solid #ddd' }}>Native Price</th>
+                            <th style={{ padding: '8px', textAlign: 'right', border: '1px solid #ddd' }}>Stable Price</th>
+                            <th style={{ padding: '8px', textAlign: 'center', border: '1px solid #ddd' }}>Custom?</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {hostModelPrices.map((price: any) => (
+                            <tr key={price.modelId}>
+                              <td style={{ padding: '8px', border: '1px solid #ddd' }}>
+                                {getModelNameFromId(price.modelId)}
+                              </td>
+                              <td style={{ padding: '8px', textAlign: 'right', border: '1px solid #ddd', fontFamily: 'monospace' }}>
+                                {price.nativePrice.toString()}
+                              </td>
+                              <td style={{ padding: '8px', textAlign: 'right', border: '1px solid #ddd', fontFamily: 'monospace' }}>
+                                {price.stablePrice.toString()}
+                                {' '}
+                                <span style={{ color: '#666', fontSize: '11px' }}>
+                                  (${(Number(price.stablePrice) / 1000).toFixed(3)}/M)
+                                </span>
+                              </td>
+                              <td style={{ padding: '8px', textAlign: 'center', border: '1px solid #ddd' }}>
+                                {price.isCustom ? '✅' : '➖'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div style={{ color: '#666', fontStyle: 'italic' }}>
+                        {loadingModelPrices ? 'Loading...' : 'No model prices loaded. Click Refresh to load.'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
                 <button onClick={updateModels} disabled={loading}>Update Models</button>
                 <button onClick={withdrawEarnings} disabled={loading}>Withdraw Earnings</button>

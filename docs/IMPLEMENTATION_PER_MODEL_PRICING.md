@@ -40,7 +40,7 @@ The NodeRegistryWithModels contract already supports per-model pricing:
 |-----------|--------|
 | Contract | ✅ Full per-model pricing support deployed |
 | SDK (HostManager) | ✅ All 4 per-model pricing methods complete |
-| UI (NodeManagementClient) | ⏳ State & functions complete, UI section pending |
+| UI (NodeManagementClient) | ✅ Complete - state, functions, and UI section |
 
 ---
 
@@ -629,14 +629,16 @@ const getModelNameFromId = (modelId: string): string => {
 
 ## Phase 6: UI Implementation - Components
 
-### Sub-phase 6.1: Add Per-Model Pricing UI Section
+### Sub-phase 6.1: Add Per-Model Pricing UI Section ✅ COMPLETE
 **Goal**: Add UI section for per-model pricing management
 
 **Tasks**:
-- [ ] Add model selector dropdown
-- [ ] Add native/stable price inputs
-- [ ] Add Set/Clear buttons
-- [ ] Add model prices table
+- [x] Add model selector dropdown
+- [x] Add native/stable price inputs
+- [x] Add Set/Clear buttons
+- [x] Add model prices table
+
+**Result**: ~120 lines of UI added (lines 2228-2349)
 
 **File Changes** (120 lines max):
 ```tsx
