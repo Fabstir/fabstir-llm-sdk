@@ -205,14 +205,16 @@ async setModelPricing(
 }
 ```
 
-### Sub-phase 2.2: Add clearModelPricing() Method
+### Sub-phase 2.2: Add clearModelPricing() Method ✅ COMPLETE
 **Goal**: Implement SDK method to clear per-model pricing (revert to default)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/managers/host-model-pricing-clear.test.ts` (60 lines)
-- [ ] Add `clearModelPricing()` method to `packages/sdk-core/src/managers/HostManager.ts`
-- [ ] Call contract `clearModelPricing()` function
-- [ ] Return transaction hash
+- [x] Write tests in `packages/sdk-core/tests/managers/host-model-pricing-clear.test.ts` (60 lines)
+- [x] Add `clearModelPricing()` method to `packages/sdk-core/src/managers/HostManager.ts`
+- [x] Call contract `clearModelPricing()` function
+- [x] Return transaction hash
+
+**Result**: 8/8 tests passing (22 total per-model pricing tests)
 
 **Test Requirements**:
 ```typescript

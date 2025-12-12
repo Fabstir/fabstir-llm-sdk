@@ -1128,6 +1128,47 @@ export class HostManager {
   }
 
   /**
+   * Clear custom pricing for a model (revert to host default pricing)
+   * @param modelId - Model ID (bytes32 hash from contract)
+   * @returns Transaction hash
+   */
+  async clearModelPricing(modelId: string): Promise<string> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      const tx = await this.nodeRegistry.clearModelPricing(
+        modelId,
+        { gasLimit: 150000n }
+      );
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Clear model pricing transaction failed',
+          this.nodeRegistry.address
+        );
+      }
+
+      return receipt.hash;
+    } catch (error: any) {
+      if (error instanceof SDKError) {
+        throw error;
+      }
+      throw new ModelRegistryError(
+        `Failed to clear model pricing: ${error.message}`,
+        this.nodeRegistry?.address
+      );
+    }
+  }
+
+  /**
    * Get host minimum pricing
    * @param hostAddress - Host address to query pricing for
    * @returns Minimum price per token as bigint (0 if not registered)
