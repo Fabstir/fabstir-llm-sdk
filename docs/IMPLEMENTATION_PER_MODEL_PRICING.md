@@ -39,7 +39,7 @@ The NodeRegistryWithModels contract already supports per-model pricing:
 | Component | Status |
 |-----------|--------|
 | Contract | ✅ Full per-model pricing support deployed |
-| SDK (HostManager) | ❌ Only host-level pricing methods |
+| SDK (HostManager) | ✅ All 4 per-model pricing methods complete |
 | UI (NodeManagementClient) | ❌ Only host default pricing inputs |
 
 ---
@@ -276,15 +276,17 @@ async clearModelPricing(modelId: string): Promise<string> {
 
 ## Phase 3: SDK Methods - Read Operations
 
-### Sub-phase 3.1: Add getHostModelPrices() Method
+### Sub-phase 3.1: Add getHostModelPrices() Method ✅ COMPLETE
 **Goal**: Implement SDK method to get all model prices for a host
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/managers/host-model-pricing-get-all.test.ts` (80 lines)
-- [ ] Add `getHostModelPrices()` method to `packages/sdk-core/src/managers/HostManager.ts`
-- [ ] Call contract `getHostModelPrices()` function
-- [ ] Transform response to `ModelPricing[]` array
-- [ ] Determine `isCustom` flag by comparing to host defaults
+- [x] Write tests in `packages/sdk-core/tests/managers/host-model-pricing-get-all.test.ts` (80 lines)
+- [x] Add `getHostModelPrices()` method to `packages/sdk-core/src/managers/HostManager.ts`
+- [x] Call contract `getHostModelPrices()` function
+- [x] Transform response to `ModelPricing[]` array
+- [x] Determine `isCustom` flag by comparing to host defaults
+
+**Result**: 7/7 tests passing (29 total per-model pricing tests)
 
 **Test Requirements**:
 ```typescript
@@ -366,14 +368,16 @@ async getHostModelPrices(hostAddress: string): Promise<ModelPricing[]> {
 }
 ```
 
-### Sub-phase 3.2: Add getModelPricing() Method
+### Sub-phase 3.2: Add getModelPricing() Method ✅ COMPLETE
 **Goal**: Implement SDK method to get effective price for a specific model
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/managers/host-model-pricing-get-single.test.ts` (60 lines)
-- [ ] Add `getModelPricing()` method to `packages/sdk-core/src/managers/HostManager.ts`
-- [ ] Call contract `getModelPricing()` function
-- [ ] Return effective price (custom or default fallback)
+- [x] Write tests in `packages/sdk-core/tests/managers/host-model-pricing-get-single.test.ts` (60 lines)
+- [x] Add `getModelPricing()` method to `packages/sdk-core/src/managers/HostManager.ts`
+- [x] Call contract `getModelPricing()` function
+- [x] Return effective price (custom or default fallback)
+
+**Result**: 8/8 tests passing (37 total per-model pricing tests)
 
 **Test Requirements**:
 ```typescript

@@ -11,7 +11,8 @@ import { ethers, Contract, Provider, Signer, isAddress } from 'ethers';
 import {
   HostInfo,
   HostMetadata,
-  ModelSpec
+  ModelSpec,
+  ModelPricing
 } from '../types/models';
 import {
   ModelNotApprovedError,
@@ -1165,6 +1166,82 @@ export class HostManager {
         `Failed to clear model pricing: ${error.message}`,
         this.nodeRegistry?.address
       );
+    }
+  }
+
+  /**
+   * Get all model prices for a host
+   * @param hostAddress - Host's EVM address
+   * @returns Array of ModelPricing objects with effective prices and isCustom flag
+   */
+  async getHostModelPrices(hostAddress: string): Promise<ModelPricing[]> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      // Get host defaults for comparison
+      const hostStatus = await this.getHostStatus(hostAddress);
+      const defaultNative = hostStatus.minPricePerTokenNative || 0n;
+      const defaultStable = hostStatus.minPricePerTokenStable || 0n;
+
+      // Get all model prices from contract
+      const [modelIds, nativePrices, stablePrices] = await this.nodeRegistry.getHostModelPrices(hostAddress);
+
+      const result: ModelPricing[] = [];
+      for (let i = 0; i < modelIds.length; i++) {
+        const nativePrice = BigInt(nativePrices[i] || 0n);
+        const stablePrice = BigInt(stablePrices[i] || 0n);
+
+        // Check if custom (different from host default)
+        const isCustom = nativePrice !== defaultNative || stablePrice !== defaultStable;
+
+        result.push({
+          modelId: modelIds[i],
+          nativePrice,
+          stablePrice,
+          isCustom
+        });
+      }
+
+      return result;
+    } catch (error: any) {
+      console.error('Error fetching host model prices:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get effective pricing for a specific model
+   * Returns the custom price if set, otherwise returns the host's default price
+   * @param hostAddress - Host's EVM address
+   * @param modelId - Model ID (bytes32 hash)
+   * @param tokenAddress - Token address (ethers.ZeroAddress for native, USDC address for stable)
+   * @returns Effective price as bigint (custom if set, otherwise default)
+   */
+  async getModelPricing(
+    hostAddress: string,
+    modelId: string,
+    tokenAddress: string
+  ): Promise<bigint> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      const price = await this.nodeRegistry.getModelPricing(hostAddress, modelId, tokenAddress);
+      return BigInt(price);
+    } catch (error: any) {
+      console.error('Error fetching model pricing:', error);
+      return 0n;
     }
   }
 
