@@ -487,11 +487,11 @@ export { ModelPricing } from './models';
 // ModelPricing is already exported via types barrel export
 ```
 
-### Sub-phase 4.2: Bump SDK Version
+### Sub-phase 4.2: Bump SDK Version ✅ COMPLETE
 **Goal**: Update SDK version to indicate new feature
 
 **Tasks**:
-- [ ] Update `packages/sdk-core/package.json` version to 1.5.4
+- [x] Update `packages/sdk-core/package.json` version to 1.5.4
 
 **File Changes** (1 line):
 ```json
