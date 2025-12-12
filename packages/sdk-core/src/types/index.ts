@@ -277,3 +277,7 @@ export * from './rag-websocket';
 // ============= Permission Types =============
 
 export * from './permissions.types';
+
+// ============= Model Types =============
+
+export type { ModelPricing } from './models';
