@@ -99,15 +99,17 @@ export interface ModelPricing {
 
 ## Phase 2: SDK Methods - Write Operations
 
-### Sub-phase 2.1: Add setModelPricing() Method
+### Sub-phase 2.1: Add setModelPricing() Method ✅ COMPLETE
 **Goal**: Implement SDK method to set per-model pricing
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/managers/host-model-pricing-set.test.ts` (100 lines)
-- [ ] Add `setModelPricing()` method to `packages/sdk-core/src/managers/HostManager.ts`
-- [ ] Validate model is in host's supported models
-- [ ] Call contract `setModelPricing()` function
-- [ ] Return transaction hash
+- [x] Write tests in `packages/sdk-core/tests/managers/host-model-pricing-set.test.ts` (100 lines)
+- [x] Add `setModelPricing()` method to `packages/sdk-core/src/managers/HostManager.ts`
+- [x] Validate price ranges (0 = use default, or within MIN/MAX bounds)
+- [x] Call contract `setModelPricing()` function
+- [x] Return transaction hash
+
+**Result**: 9/9 tests passing
 
 **Test Requirements**:
 ```typescript

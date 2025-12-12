@@ -1061,6 +1061,73 @@ export class HostManager {
   }
 
   /**
+   * Set custom pricing for a specific model (overrides host default pricing)
+   * @param modelId - Model ID (bytes32 hash from contract)
+   * @param nativePrice - Native token price (0 = use default, or MIN_PRICE_NATIVE to MAX_PRICE_NATIVE)
+   * @param stablePrice - Stablecoin price (0 = use default, or MIN_PRICE_STABLE to MAX_PRICE_STABLE)
+   * @returns Transaction hash
+   */
+  async setModelPricing(
+    modelId: string,
+    nativePrice: string,
+    stablePrice: string
+  ): Promise<string> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      const priceNative = BigInt(nativePrice);
+      const priceStable = BigInt(stablePrice);
+
+      // Validate price ranges (0 is allowed = use default)
+      if (priceNative !== 0n && (priceNative < MIN_PRICE_NATIVE || priceNative > MAX_PRICE_NATIVE)) {
+        throw new PricingValidationError(
+          `nativePrice must be 0 (default) or between ${MIN_PRICE_NATIVE} and ${MAX_PRICE_NATIVE}, got ${priceNative}`,
+          priceNative
+        );
+      }
+
+      if (priceStable !== 0n && (priceStable < MIN_PRICE_STABLE || priceStable > MAX_PRICE_STABLE)) {
+        throw new PricingValidationError(
+          `stablePrice must be 0 (default) or between ${MIN_PRICE_STABLE} and ${MAX_PRICE_STABLE}, got ${priceStable}`,
+          priceStable
+        );
+      }
+
+      const tx = await this.nodeRegistry.setModelPricing(
+        modelId,
+        priceNative,
+        priceStable,
+        { gasLimit: 200000n }
+      );
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Set model pricing transaction failed',
+          this.nodeRegistry.address
+        );
+      }
+
+      return receipt.hash;
+    } catch (error: any) {
+      if (error instanceof PricingValidationError || error instanceof SDKError) {
+        throw error;
+      }
+      throw new ModelRegistryError(
+        `Failed to set model pricing: ${error.message}`,
+        this.nodeRegistry?.address
+      );
+    }
+  }
+
+  /**
    * Get host minimum pricing
    * @param hostAddress - Host address to query pricing for
    * @returns Minimum price per token as bigint (0 if not registered)
