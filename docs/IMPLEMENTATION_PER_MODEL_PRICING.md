@@ -40,7 +40,7 @@ The NodeRegistryWithModels contract already supports per-model pricing:
 |-----------|--------|
 | Contract | ✅ Full per-model pricing support deployed |
 | SDK (HostManager) | ✅ All 4 per-model pricing methods complete |
-| UI (NodeManagementClient) | ❌ Only host default pricing inputs |
+| UI (NodeManagementClient) | ⏳ State & functions complete, UI section pending |
 
 ---
 
@@ -504,12 +504,12 @@ export { ModelPricing } from './models';
 
 ## Phase 5: UI Implementation - State & Functions
 
-### Sub-phase 5.1: Add State Variables
+### Sub-phase 5.1: Add State Variables ✅ COMPLETE
 **Goal**: Add React state for per-model pricing in NodeManagementClient
 
 **Tasks**:
-- [ ] Add state variables for selected model, price inputs, and cached prices
-- [ ] Add useEffect to fetch model prices when nodeInfo updates
+- [x] Add state variables for selected model, price inputs, and cached prices
+- [x] Add useEffect to fetch model prices when nodeInfo updates
 
 **File Changes** (25 lines max):
 ```typescript
@@ -530,14 +530,14 @@ useEffect(() => {
 }, [sdk, nodeInfo, walletAddress]);
 ```
 
-### Sub-phase 5.2: Add Action Functions
+### Sub-phase 5.2: Add Action Functions ✅ COMPLETE
 **Goal**: Add functions for setting/clearing model prices
 
 **Tasks**:
-- [ ] Add `fetchHostModelPrices()` function
-- [ ] Add `handleSetModelPricing()` function
-- [ ] Add `handleClearModelPricing()` function
-- [ ] Add model name helper function
+- [x] Add `fetchHostModelPrices()` function
+- [x] Add `handleSetModelPricing()` function
+- [x] Add `handleClearModelPricing()` function
+- [x] Add model name helper function
 
 **File Changes** (80 lines max):
 ```typescript

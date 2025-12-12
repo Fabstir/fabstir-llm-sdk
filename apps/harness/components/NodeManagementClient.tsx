@@ -150,6 +150,13 @@ const NodeManagementClient: React.FC = () => {
   const [sdk, setSdk] = useState<any>(null);
   const [isConnecting, setIsConnecting] = useState(false);
 
+  // Per-model pricing state
+  const [selectedModelForPricing, setSelectedModelForPricing] = useState<string>('');
+  const [modelPriceNative, setModelPriceNative] = useState('');
+  const [modelPriceStable, setModelPriceStable] = useState('');
+  const [hostModelPrices, setHostModelPrices] = useState<any[]>([]);
+  const [loadingModelPrices, setLoadingModelPrices] = useState(false);
+
   // Detect if the connected wallet is registered to a local vs remote node
   // Check discoveredApiUrl (from blockchain) rather than nodePublicUrl (from local management API)
   const isLocalNode = useMemo(() => {
@@ -293,6 +300,14 @@ const NodeManagementClient: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [mgmtApiClient, statusPollingActive]);
+
+  // Fetch model prices when node info loads (for per-model pricing)
+  useEffect(() => {
+    if (sdk && nodeInfo?.supportedModels?.length > 0 && walletAddress) {
+      fetchHostModelPrices();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sdk, nodeInfo?.supportedModels?.length, walletAddress]);
 
   // Helper: Add log message
   const addLog = (message: string) => {
@@ -876,6 +891,87 @@ const NodeManagementClient: React.FC = () => {
       setNewPriceStableValue(''); // Clear input
     } catch (error: any) {
       addLog(`❌ Stable pricing update failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Helper to get model name from ID
+  const getModelNameFromId = (modelId: string): string => {
+    const knownModels: Record<string, string> = {
+      '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced': 'TinyVicuna-1B',
+      '0x14843424179fbcb9aeb7fd446fa97143300609757bd49ffb3ec7fb2f75aed1ca': 'TinyLlama-1.1B',
+      '0x7583557c14f71d2bf21d48ffb7cde9329f9494090869d2d311ea481b26e7e06c': 'GPT-OSS-20B'
+    };
+    return knownModels[modelId] || `${modelId.slice(0, 10)}...`;
+  };
+
+  // Fetch all model prices for the connected host
+  const fetchHostModelPrices = async () => {
+    if (!sdk || !walletAddress) return;
+
+    setLoadingModelPrices(true);
+    try {
+      const hostManager = sdk.getHostManager();
+      const prices = await hostManager.getHostModelPrices(walletAddress);
+      setHostModelPrices(prices);
+      addLog(`📊 Fetched ${prices.length} model prices`);
+    } catch (error: any) {
+      addLog(`❌ Failed to fetch model prices: ${error.message}`);
+    } finally {
+      setLoadingModelPrices(false);
+    }
+  };
+
+  // Set custom pricing for selected model
+  const handleSetModelPricing = async () => {
+    if (!sdk || !selectedModelForPricing) {
+      addLog('❌ Select a model first');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog(`💰 Setting pricing for model ${getModelNameFromId(selectedModelForPricing)}...`);
+
+      const hostManager = sdk.getHostManager();
+      const txHash = await hostManager.setModelPricing(
+        selectedModelForPricing,
+        modelPriceNative || '0',
+        modelPriceStable || '0'
+      );
+
+      addLog(`✅ Model pricing set! TX: ${txHash}`);
+
+      // Refresh model prices
+      await fetchHostModelPrices();
+    } catch (error: any) {
+      addLog(`❌ Failed to set model pricing: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Clear custom pricing for selected model
+  const handleClearModelPricing = async () => {
+    if (!sdk || !selectedModelForPricing) {
+      addLog('❌ Select a model first');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog(`🔄 Clearing custom pricing for model ${getModelNameFromId(selectedModelForPricing)}...`);
+
+      const hostManager = sdk.getHostManager();
+      const txHash = await hostManager.clearModelPricing(selectedModelForPricing);
+
+      addLog(`✅ Model pricing cleared! TX: ${txHash}`);
+
+      // Refresh model prices
+      await fetchHostModelPrices();
+    } catch (error: any) {
+      addLog(`❌ Failed to clear model pricing: ${error.message}`);
     } finally {
       setLoading(false);
     }
