@@ -2107,13 +2107,16 @@ const NodeManagementClient: React.FC = () => {
               {/* Dual Pricing Management */}
               <div style={{ marginBottom: '15px' }}>
                 <label style={{ fontSize: '14px', marginBottom: '10px', display: 'block', fontWeight: 'bold' }}>
-                  💰 Dual Pricing Management:
+                  💰 Dual Pricing Management (Host Defaults):
                 </label>
+                <small style={{ color: '#666', fontSize: '12px', display: 'block', marginBottom: '10px' }}>
+                  These are your default minimum prices. Per-model overrides below take precedence.
+                </small>
 
                 {/* Native Pricing Section */}
                 <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#f9f9f9', borderRadius: '5px' }}>
                   <div style={{ marginBottom: '10px', fontSize: '13px', color: '#555' }}>
-                    <strong>Current Native Price (ETH/BNB):</strong> {nodeInfo?.minPricePerTokenNative?.toString() || '3000000'} wei
+                    <strong>Default Native Price (ETH/BNB):</strong> {nodeInfo?.minPricePerTokenNative?.toString() || '3000000'} wei
                     {' '}(~${formatNativePrice(nodeInfo?.minPricePerTokenNative?.toString() || '3000000').perMillion}/million tokens)
                   </div>
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
@@ -2169,7 +2172,7 @@ const NodeManagementClient: React.FC = () => {
                 {/* Stable Pricing Section */}
                 <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#f9f9f9', borderRadius: '5px' }}>
                   <div style={{ marginBottom: '10px', fontSize: '13px', color: '#555' }}>
-                    <strong>Current Stable Price (USDC):</strong> {nodeInfo?.minPricePerTokenStable?.toString() || '5000'}
+                    <strong>Default Stable Price (USDC):</strong> {nodeInfo?.minPricePerTokenStable?.toString() || '5000'}
                     {' '}(${formatStablePrice(nodeInfo?.minPricePerTokenStable?.toString() || '5000').perMillion}/million tokens)
                   </div>
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
