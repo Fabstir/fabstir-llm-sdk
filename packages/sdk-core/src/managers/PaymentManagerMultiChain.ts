@@ -37,6 +37,7 @@ export interface SessionJobParams {
   useDeposit?: boolean;
   paymentToken?: string;
   proofInterval?: number;
+  modelId?: string;  // Optional bytes32 model ID for model-specific pricing
 }
 
 export interface DepositBalances {
@@ -294,23 +295,27 @@ export class PaymentManager implements IPaymentManager {
     // Create from deposit or direct payment
     if (params.useDeposit) {
       // Create session from pre-funded deposit
+      // Note: createSessionFromDeposit doesn't support model-specific pricing
+      // For model pricing, use direct payment (useDeposit: false)
       return await wrapper.createSessionFromDeposit({
         host: params.host,
         paymentToken: params.paymentToken || ethers.ZeroAddress,
         deposit: params.amount,
         pricePerToken,
         duration,
-        proofInterval
+        proofInterval,
+        modelId: params.modelId  // Will warn if model pricing needed
       });
     } else {
-      // Create session with direct payment
+      // Create session with direct payment - supports model-specific pricing
       return await wrapper.createSessionJob({
         host: params.host,
         pricePerToken,
         duration,
         proofInterval,
         paymentAmount: params.amount,
-        paymentToken: params.paymentToken || ethers.ZeroAddress
+        paymentToken: params.paymentToken || ethers.ZeroAddress,
+        modelId: params.modelId  // Uses createSessionJobForModel when set
       });
     }
   }

@@ -1,6 +1,56 @@
-# Breaking Changes: PRICE_PRECISION Update
+# Breaking Changes
 
-**Date**: December 2025
+---
+
+## December 14, 2025: Minimum Deposit Reduction + UUPS Migration
+
+**Contracts Affected**: `JobMarketplaceWithModelsUpgradeable`
+**Impact Level**: LOW - Non-breaking, reduces minimum requirements
+
+### Summary
+
+Minimum session deposits have been reduced from ~$0.80 to ~$0.50:
+
+| Parameter | Old Value | New Value |
+|-----------|-----------|-----------|
+| `MIN_DEPOSIT` (ETH) | 0.0002 ETH (~$0.88) | 0.0001 ETH (~$0.50) |
+| `USDC_MIN_DEPOSIT` | 800,000 ($0.80) | 500,000 ($0.50) |
+
+### New Admin Function
+
+A new function allows admins to update minimum deposits without contract redeployment:
+
+```solidity
+function updateTokenMinDeposit(address token, uint256 minDeposit) external
+```
+
+**Event emitted:**
+```solidity
+event TokenMinDepositUpdated(address indexed token, uint256 oldMinDeposit, uint256 newMinDeposit)
+```
+
+### Contract Addresses (UUPS Proxies)
+
+All contracts are now UUPS upgradeable:
+
+| Contract | Proxy Address | Implementation |
+|----------|---------------|----------------|
+| JobMarketplace | `0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D` | `0xe0ee96FC4Cc7a05a6e9d5191d070c5d1d13f143F` |
+| NodeRegistry | `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22` | `0x68298e2b74a106763aC99E3D973E98012dB5c75F` |
+| ModelRegistry | `0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2` | `0xd7Df5c6D4ffe6961d47753D1dd32f844e0F73f50` |
+| ProofSystem | `0x5afB91977e69Cc5003288849059bc62d47E7deeb` | `0x83eB050Aa3443a76a4De64aBeD90cA8d525E7A3A` |
+| HostEarnings | `0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0` | `0x588c42249F85C6ac4B4E27f97416C0289980aabB` |
+
+### Migration Required
+
+1. **Update contract addresses** to use proxy addresses (if using old non-upgradeable addresses)
+2. **Update ABIs** to use `*Upgradeable-CLIENT-ABI.json` files
+3. **No code changes needed** for minimum deposit reduction (it's backwards compatible)
+
+---
+
+## December 2025: PRICE_PRECISION Update
+
 **Contracts Affected**: `NodeRegistryWithModels`, `JobMarketplaceWithModels`
 **Impact Level**: HIGH - Requires SDK and Node operator updates
 
@@ -256,12 +306,16 @@ const [operator, stake, active, metadata, apiUrl, models, nativePrice, stablePri
 
 ## Contract Addresses
 
-The following contracts have been updated with PRICE_PRECISION:
+> **Note:** As of December 14, 2025, all contracts have been migrated to UUPS upgradeable pattern. See the December 14, 2025 section above for current proxy addresses.
+
+### Legacy (Non-Upgradeable) - DEPRECATED
 
 | Contract | Address (Base Sepolia) | Status |
 |----------|------------------------|--------|
-| NodeRegistryWithModels | `0x906F4A8Cb944E4fe12Fb85Be7E627CeDAA8B8999` | ✅ Deployed Dec 9, 2025 |
-| JobMarketplaceWithModels | `0xfD764804C5A5808b79D66746BAF4B65fb4413731` | ✅ Deployed Dec 9, 2025 |
+| NodeRegistryWithModels | `0x906F4A8Cb944E4fe12Fb85Be7E627CeDAA8B8999` | ⚠️ DEPRECATED Dec 14, 2025 |
+| JobMarketplaceWithModels | `0x75C72e8C3eC707D8beF5Ba9b9C4f75CbB5bced97` | ⚠️ DEPRECATED Dec 14, 2025 |
+| JobMarketplaceWithModels (200 tok/sec) | `0x5497a28B4bE6b1219F93e6Fcd631E8aCdC173709` | ⚠️ DEPRECATED Dec 10, 2025 |
+| JobMarketplaceWithModels (20 tok/sec) | `0xfD764804C5A5808b79D66746BAF4B65fb4413731` | ⚠️ DEPRECATED Dec 10, 2025 |
 
 ## Questions?
 
