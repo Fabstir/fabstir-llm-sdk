@@ -114,8 +114,8 @@ const NodeManagementClient: React.FC = () => {
   const [additionalStakeAmount, setAdditionalStakeAmount] = useState('100');
   const [apiUrl, setApiUrl] = useState('http://localhost:8083');
   const [supportedModels, setSupportedModels] = useState(''); // Empty by default - user will type model or load from blockchain hashes
-  const [minPricePerTokenNative, setMinPricePerTokenNative] = useState('11363636363636'); // Default native pricing (ETH/BNB)
-  const [minPricePerTokenStable, setMinPricePerTokenStable] = useState('316'); // Default stable pricing (USDC)
+  const [minPricePerTokenNative, setMinPricePerTokenNative] = useState('3000000'); // Default native pricing (ETH/BNB) with PRICE_PRECISION=1000
+  const [minPricePerTokenStable, setMinPricePerTokenStable] = useState('5000'); // Default stable pricing (USDC) with PRICE_PRECISION=1000 ($5/million)
   const [newPriceNativeValue, setNewPriceNativeValue] = useState('');
   const [newPriceStableValue, setNewPriceStableValue] = useState('');
 
@@ -149,6 +149,13 @@ const NodeManagementClient: React.FC = () => {
   // SDK instance
   const [sdk, setSdk] = useState<any>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+
+  // Per-model pricing state
+  const [selectedModelForPricing, setSelectedModelForPricing] = useState<string>('');
+  const [modelPriceNative, setModelPriceNative] = useState('');
+  const [modelPriceStable, setModelPriceStable] = useState('');
+  const [hostModelPrices, setHostModelPrices] = useState<any[]>([]);
+  const [loadingModelPrices, setLoadingModelPrices] = useState(false);
 
   // Detect if the connected wallet is registered to a local vs remote node
   // Check discoveredApiUrl (from blockchain) rather than nodePublicUrl (from local management API)
@@ -293,6 +300,14 @@ const NodeManagementClient: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [mgmtApiClient, statusPollingActive]);
+
+  // Fetch model prices when node info loads (for per-model pricing)
+  useEffect(() => {
+    if (sdk && nodeInfo?.supportedModels?.length > 0 && walletAddress) {
+      fetchHostModelPrices();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sdk, nodeInfo?.supportedModels?.length, walletAddress]);
 
   // Helper: Add log message
   const addLog = (message: string) => {
@@ -786,32 +801,40 @@ const NodeManagementClient: React.FC = () => {
     }
   };
 
-  // Price calculation helpers for UI display (DUAL PRICING)
+  // Price calculation helpers for UI display (DUAL PRICING with PRICE_PRECISION=1000)
   const formatNativePrice = (weiPrice: string, ethPriceUSD = 4400) => {
     try {
+      const PRICE_PRECISION = 1000;
+      // weiPrice is wei per token * PRICE_PRECISION
       const ethAmount = parseFloat(ethers.formatEther(BigInt(weiPrice)));
-      const usdAmount = ethAmount * ethPriceUSD;
+      const usdPerToken = (ethAmount * ethPriceUSD) / PRICE_PRECISION;
+      const usdPerMillion = usdPerToken * 1_000_000;
       return {
         wei: weiPrice,
         eth: ethAmount.toFixed(18),
-        usd: usdAmount.toFixed(6),
-        per1000: (usdAmount * 1000).toFixed(4)
+        usd: usdPerToken.toFixed(9),
+        perMillion: usdPerMillion.toFixed(3),
+        per1000: (usdPerToken * 1000).toFixed(6)
       };
     } catch {
-      return { wei: '0', eth: '0', usd: '0', per1000: '0' };
+      return { wei: '0', eth: '0', usd: '0', perMillion: '0', per1000: '0' };
     }
   };
 
   const formatStablePrice = (rawPrice: string) => {
     try {
-      const usdAmount = Number(rawPrice) / 1_000_000;
+      const PRICE_PRECISION = 1000;
+      // Price per token = rawPrice / PRICE_PRECISION / 1_000_000
+      const usdPerToken = Number(rawPrice) / PRICE_PRECISION / 1_000_000;
+      const usdPerMillion = Number(rawPrice) / PRICE_PRECISION;
       return {
         raw: rawPrice,
-        usdc: usdAmount.toFixed(6),
-        per1000: (usdAmount * 1000).toFixed(4)
+        usdc: usdPerToken.toFixed(9),
+        perMillion: usdPerMillion.toFixed(3),
+        per1000: (1000 * Number(rawPrice) / PRICE_PRECISION / 1_000_000).toFixed(6)
       };
     } catch {
-      return { raw: '0', usdc: '0', per1000: '0' };
+      return { raw: '0', usdc: '0', perMillion: '0', per1000: '0' };
     }
   };
 
@@ -868,6 +891,87 @@ const NodeManagementClient: React.FC = () => {
       setNewPriceStableValue(''); // Clear input
     } catch (error: any) {
       addLog(`❌ Stable pricing update failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Helper to get model name from ID
+  const getModelNameFromId = (modelId: string): string => {
+    const knownModels: Record<string, string> = {
+      '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced': 'TinyVicuna-1B',
+      '0x14843424179fbcb9aeb7fd446fa97143300609757bd49ffb3ec7fb2f75aed1ca': 'TinyLlama-1.1B',
+      '0x7583557c14f71d2bf21d48ffb7cde9329f9494090869d2d311ea481b26e7e06c': 'GPT-OSS-20B'
+    };
+    return knownModels[modelId] || `${modelId.slice(0, 10)}...`;
+  };
+
+  // Fetch all model prices for the connected host
+  const fetchHostModelPrices = async () => {
+    if (!sdk || !walletAddress) return;
+
+    setLoadingModelPrices(true);
+    try {
+      const hostManager = sdk.getHostManager();
+      const prices = await hostManager.getHostModelPrices(walletAddress);
+      setHostModelPrices(prices);
+      addLog(`📊 Fetched ${prices.length} model prices`);
+    } catch (error: any) {
+      addLog(`❌ Failed to fetch model prices: ${error.message}`);
+    } finally {
+      setLoadingModelPrices(false);
+    }
+  };
+
+  // Set custom pricing for selected model
+  const handleSetModelPricing = async () => {
+    if (!sdk || !selectedModelForPricing) {
+      addLog('❌ Select a model first');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog(`💰 Setting pricing for model ${getModelNameFromId(selectedModelForPricing)}...`);
+
+      const hostManager = sdk.getHostManager();
+      const txHash = await hostManager.setModelPricing(
+        selectedModelForPricing,
+        modelPriceNative || '0',
+        modelPriceStable || '0'
+      );
+
+      addLog(`✅ Model pricing set! TX: ${txHash}`);
+
+      // Refresh model prices
+      await fetchHostModelPrices();
+    } catch (error: any) {
+      addLog(`❌ Failed to set model pricing: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Clear custom pricing for selected model
+  const handleClearModelPricing = async () => {
+    if (!sdk || !selectedModelForPricing) {
+      addLog('❌ Select a model first');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog(`🔄 Clearing custom pricing for model ${getModelNameFromId(selectedModelForPricing)}...`);
+
+      const hostManager = sdk.getHostManager();
+      const txHash = await hostManager.clearModelPricing(selectedModelForPricing);
+
+      addLog(`✅ Model pricing cleared! TX: ${txHash}`);
+
+      // Refresh model prices
+      await fetchHostModelPrices();
+    } catch (error: any) {
+      addLog(`❌ Failed to clear model pricing: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -1825,12 +1929,12 @@ const NodeManagementClient: React.FC = () => {
                   type="text"
                   value={minPricePerTokenNative}
                   onChange={(e) => setMinPricePerTokenNative(e.target.value)}
-                  placeholder="11363636363636"
+                  placeholder="3000000"
                   style={{ padding: '5px', width: '300px', fontFamily: 'monospace' }}
                 />
                 <div style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>
                   {(() => {
-                    const formatted = formatNativePrice(minPricePerTokenNative || '11363636363636');
+                    const formatted = formatNativePrice(minPricePerTokenNative || '3000000');
                     return (
                       <>
                         <div>⛽ {formatted.eth} ETH per token (~${formatted.usd} @ $4400 ETH)</div>
@@ -1840,7 +1944,7 @@ const NodeManagementClient: React.FC = () => {
                   })()}
                 </div>
                 <small style={{ color: '#666', display: 'block', marginTop: '5px' }}>
-                  Range: 2,272,727,273 to 22,727,272,727,273 wei (~$0.00001 to $0.1 @ $4400 ETH)
+                  Range: 227,273 to 22,727,272,727,273,000 wei (PRICE_PRECISION=1000)
                 </small>
               </div>
 
@@ -1850,14 +1954,14 @@ const NodeManagementClient: React.FC = () => {
                   type="number"
                   value={minPricePerTokenStable}
                   onChange={(e) => setMinPricePerTokenStable(e.target.value)}
-                  min="10"
-                  max="100000"
-                  step="10"
+                  min="1"
+                  max="100000000"
+                  step="1"
                   style={{ padding: '5px', width: '200px' }}
                 />
                 <div style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>
                   {(() => {
-                    const formatted = formatStablePrice(minPricePerTokenStable || '316');
+                    const formatted = formatStablePrice(minPricePerTokenStable || '5000');
                     return (
                       <>
                         <div>💵 ${formatted.usdc} USDC per token</div>
@@ -1867,7 +1971,7 @@ const NodeManagementClient: React.FC = () => {
                   })()}
                 </div>
                 <small style={{ color: '#666', display: 'block', marginTop: '5px' }}>
-                  Range: 10-100,000 (0.00001-0.1 USDC per token)
+                  Range: 1-100,000,000 ($0.001 to $100,000 per million tokens)
                 </small>
               </div>
 
@@ -2003,14 +2107,17 @@ const NodeManagementClient: React.FC = () => {
               {/* Dual Pricing Management */}
               <div style={{ marginBottom: '15px' }}>
                 <label style={{ fontSize: '14px', marginBottom: '10px', display: 'block', fontWeight: 'bold' }}>
-                  💰 Dual Pricing Management:
+                  💰 Dual Pricing Management (Host Defaults):
                 </label>
+                <small style={{ color: '#666', fontSize: '12px', display: 'block', marginBottom: '10px' }}>
+                  These are your default minimum prices. Per-model overrides below take precedence.
+                </small>
 
                 {/* Native Pricing Section */}
                 <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#f9f9f9', borderRadius: '5px' }}>
                   <div style={{ marginBottom: '10px', fontSize: '13px', color: '#555' }}>
-                    <strong>Current Native Price (ETH/BNB):</strong> {nodeInfo?.minPricePerTokenNative?.toString() || '11363636363636'} wei
-                    {' '}(~${formatNativePrice(nodeInfo?.minPricePerTokenNative?.toString() || '11363636363636').usd})
+                    <strong>Default Native Price (ETH/BNB):</strong> {nodeInfo?.minPricePerTokenNative?.toString() || '3000000'} wei
+                    {' '}(~${formatNativePrice(nodeInfo?.minPricePerTokenNative?.toString() || '3000000').perMillion}/million tokens)
                   </div>
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                     <input
@@ -2058,15 +2165,15 @@ const NodeManagementClient: React.FC = () => {
                     </div>
                   )}
                   <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '5px' }}>
-                    Valid range: 2,272,727,273 to 22,727,272,727,273 wei
+                    Valid range: 227,273 to 22,727,272,727,273,000 wei (PRICE_PRECISION=1000)
                   </small>
                 </div>
 
                 {/* Stable Pricing Section */}
                 <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#f9f9f9', borderRadius: '5px' }}>
                   <div style={{ marginBottom: '10px', fontSize: '13px', color: '#555' }}>
-                    <strong>Current Stable Price (USDC):</strong> {nodeInfo?.minPricePerTokenStable?.toString() || '316'}
-                    {' '}(${formatStablePrice(nodeInfo?.minPricePerTokenStable?.toString() || '316').usdc}/token)
+                    <strong>Default Stable Price (USDC):</strong> {nodeInfo?.minPricePerTokenStable?.toString() || '5000'}
+                    {' '}(${formatStablePrice(nodeInfo?.minPricePerTokenStable?.toString() || '5000').perMillion}/million tokens)
                   </div>
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                     <input
@@ -2120,6 +2227,129 @@ const NodeManagementClient: React.FC = () => {
                   </small>
                 </div>
               </div>
+
+              {/* Per-Model Pricing Section */}
+              {nodeInfo?.supportedModels?.length > 0 && (
+                <div style={{ marginBottom: '20px', padding: '15px', border: '1px solid #ddd', borderRadius: '5px', backgroundColor: '#fafafa' }}>
+                  <h4 style={{ marginBottom: '15px', marginTop: 0 }}>📦 Per-Model Pricing (Optional Overrides)</h4>
+
+                  {/* Model Selector */}
+                  <div style={{ marginBottom: '15px' }}>
+                    <label>Select Model:</label><br />
+                    <select
+                      value={selectedModelForPricing}
+                      onChange={(e) => setSelectedModelForPricing(e.target.value)}
+                      style={{ padding: '8px', width: '100%', maxWidth: '400px' }}
+                    >
+                      <option value="">-- Select a model --</option>
+                      {nodeInfo.supportedModels.map((modelId: string) => (
+                        <option key={modelId} value={modelId}>
+                          {getModelNameFromId(modelId)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Price Inputs */}
+                  {selectedModelForPricing && (
+                    <div style={{ marginBottom: '15px' }}>
+                      <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+                        <div>
+                          <label>Native Price (0 = use default):</label><br />
+                          <input
+                            type="text"
+                            value={modelPriceNative}
+                            onChange={(e) => setModelPriceNative(e.target.value)}
+                            placeholder="0"
+                            style={{ padding: '8px', width: '150px', fontFamily: 'monospace' }}
+                          />
+                        </div>
+                        <div>
+                          <label>Stable Price (0 = use default):</label><br />
+                          <input
+                            type="text"
+                            value={modelPriceStable}
+                            onChange={(e) => setModelPriceStable(e.target.value)}
+                            placeholder="0"
+                            style={{ padding: '8px', width: '150px', fontFamily: 'monospace' }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
+                        <button
+                          onClick={handleSetModelPricing}
+                          disabled={loading}
+                          style={{ padding: '8px 15px', backgroundColor: '#4CAF50', color: 'white', border: 'none', borderRadius: '4px', cursor: loading ? 'not-allowed' : 'pointer' }}
+                        >
+                          {loading ? 'Setting...' : 'Set Model Price'}
+                        </button>
+                        <button
+                          onClick={handleClearModelPricing}
+                          disabled={loading}
+                          style={{ padding: '8px 15px', backgroundColor: '#ff9800', color: 'white', border: 'none', borderRadius: '4px', cursor: loading ? 'not-allowed' : 'pointer' }}
+                        >
+                          {loading ? 'Clearing...' : 'Clear to Default'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Model Prices Table */}
+                  <div style={{ marginTop: '20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                      <strong>Current Model Prices:</strong>
+                      <button
+                        onClick={fetchHostModelPrices}
+                        disabled={loadingModelPrices}
+                        style={{ padding: '4px 10px', fontSize: '12px' }}
+                      >
+                        {loadingModelPrices ? '...' : '🔄 Refresh'}
+                      </button>
+                    </div>
+
+                    {hostModelPrices.length > 0 ? (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                        <thead>
+                          <tr style={{ backgroundColor: '#f0f0f0' }}>
+                            <th style={{ padding: '8px', textAlign: 'left', border: '1px solid #ddd' }}>Model</th>
+                            <th style={{ padding: '8px', textAlign: 'right', border: '1px solid #ddd' }}>Native Price</th>
+                            <th style={{ padding: '8px', textAlign: 'right', border: '1px solid #ddd' }}>Stable Price</th>
+                            <th style={{ padding: '8px', textAlign: 'center', border: '1px solid #ddd' }}>Custom?</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {hostModelPrices.map((price: any) => (
+                            <tr key={price.modelId}>
+                              <td style={{ padding: '8px', border: '1px solid #ddd' }}>
+                                {getModelNameFromId(price.modelId)}
+                              </td>
+                              <td style={{ padding: '8px', textAlign: 'right', border: '1px solid #ddd', fontFamily: 'monospace' }}>
+                                {price.nativePrice.toString()}
+                              </td>
+                              <td style={{ padding: '8px', textAlign: 'right', border: '1px solid #ddd', fontFamily: 'monospace' }}>
+                                {price.stablePrice.toString()}
+                                {' '}
+                                <span style={{ color: '#666', fontSize: '11px' }}>
+                                  (${(Number(price.stablePrice) / 1000).toFixed(3)}/M)
+                                </span>
+                              </td>
+                              <td style={{ padding: '8px', textAlign: 'center', border: '1px solid #ddd' }}>
+                                {price.isCustom ? '✅' : '➖'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div style={{ color: '#666', fontStyle: 'italic' }}>
+                        {loadingModelPrices ? 'Loading...' : 'No model prices loaded. Click Refresh to load.'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
                 <button onClick={updateModels} disabled={loading}>Update Models</button>

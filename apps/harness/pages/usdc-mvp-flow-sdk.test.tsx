@@ -55,7 +55,7 @@ const SESSION_DEPOSIT_AMOUNT = '2'; // $2 USDC
 const PROOF_INTERVAL = 1000; // Proof every 1000 tokens (production default)
 const SESSION_DURATION = 86400; // 1 day
 const EXPECTED_TOKENS = 100; // Expected tokens to generate in test
-const DEFAULT_PRICE_STABLE = 316; // Fallback stable pricing: 0.000316 USDC per token (default for stablecoin sessions)
+const DEFAULT_PRICE_STABLE = 5000; // Fallback stable pricing with PRICE_PRECISION=1000: $5/million tokens
 
 // ERC20 ABIs
 const erc20BalanceOfAbi = [{

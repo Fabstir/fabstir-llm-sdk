@@ -58,13 +58,16 @@ const TEST_HOST_1_PRIVATE_KEY =
 const TEST_HOST_2_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_2_ADDRESS!;
 const TEST_HOST_2_PRIVATE_KEY =
   process.env.NEXT_PUBLIC_TEST_HOST_2_PRIVATE_KEY!;
+// TEST_HOST_4 - P2P connected host for testing new contracts
+const TEST_HOST_4_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_4_ADDRESS || '0x048afA7126A3B684832886b78e7cC1Dd4019557E';
+const TEST_HOST_4_URL = process.env.NEXT_PUBLIC_TEST_HOST_4_URL || 'https://hostl.fabstir.net:8443';
 const TEST_TREASURY_ADDRESS = process.env.NEXT_PUBLIC_TEST_TREASURY_ADDRESS!;
 const TEST_TREASURY_PRIVATE_KEY =
   process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_KEY!;
 
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = "2"; // $2 USDC
-const DEFAULT_PRICE_PER_TOKEN = 50; // 0.00005 USDC per token ($50 per million tokens)
+const DEFAULT_PRICE_PER_TOKEN = 5000; // With PRICE_PRECISION=1000: $5 per million tokens
 const PROOF_INTERVAL = 1000; // Checkpoint every 1000 tokens (production default)
 const SESSION_DURATION = 86400; // 1 day
 
@@ -177,8 +180,10 @@ export default function ChatContextDemo() {
 
     if (tokens) {
       setTotalTokens((prev) => prev + tokens);
+      const PRICE_PRECISION = 1000;
       const pricePerToken = activeHostRef.current?.pricePerToken || DEFAULT_PRICE_PER_TOKEN;
-      const cost = (tokens * pricePerToken) / 1000000;
+      // Cost = (tokens * pricePerToken) / PRICE_PRECISION / 1_000_000
+      const cost = (tokens * pricePerToken) / PRICE_PRECISION / 1000000;
       console.log('Cost calculation:', { tokens, pricePerToken, cost, activeHost: activeHostRef.current });
       setTotalCost((prev) => prev + cost); // Convert to USDC
     }
@@ -988,7 +993,19 @@ export default function ChatContextDemo() {
       }
 
       if (hosts.length === 0) {
-        throw new Error("No active hosts available");
+        // Fallback to TEST_HOST_4 (P2P connected host) for testing new contracts
+        console.log("No hosts discovered from contract, using TEST_HOST_4 fallback");
+        addMessage("system", "⚠️ No registered hosts found, using TEST_HOST_4 fallback...");
+        hosts = [{
+          address: TEST_HOST_4_ADDRESS,
+          apiUrl: TEST_HOST_4_URL,
+          endpoint: TEST_HOST_4_URL,
+          supportedModels: ['CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf'],
+          models: ['CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf'],
+          isActive: true,
+          minPricePerTokenStable: 50000n, // $50/million tokens with PRICE_PRECISION=1000
+          metadata: { costPerToken: 50000 }
+        }];
       }
 
       // Parse host metadata
@@ -1501,15 +1518,17 @@ export default function ChatContextDemo() {
       addMessage("system", "🔐 WebSocket disconnected");
       addMessage("system", "⏳ Host will detect disconnect and complete contract to claim earnings");
 
-      // Calculate expected payment distribution
+      // Calculate expected payment distribution (with PRICE_PRECISION=1000)
+      const PRICE_PRECISION = 1000;
       const pricePerToken = activeHostRef.current?.pricePerToken || DEFAULT_PRICE_PER_TOKEN;
-      const tokensCost = (totalTokens * pricePerToken) / 1000000; // Convert to USDC
+      const tokensCost = (totalTokens * pricePerToken) / PRICE_PRECISION / 1000000; // Convert to USDC
       const hostPayment = tokensCost * 0.9; // 90% to host
       const treasuryPayment = tokensCost * 0.1; // 10% to treasury
+      const pricePerMillion = pricePerToken / PRICE_PRECISION;
 
       addMessage("system", `📊 Tokens used in session: ${totalTokens}`);
       addMessage("system", `💰 Expected payment distribution (when host completes):`);
-      addMessage("system", `   Total cost: ${tokensCost.toFixed(6)} USDC (${totalTokens} tokens × $${pricePerToken/1000000}/token)`);
+      addMessage("system", `   Total cost: ${tokensCost.toFixed(6)} USDC (${totalTokens} tokens @ $${pricePerMillion}/million)`);
       addMessage("system", `   Host will receive: ${hostPayment.toFixed(6)} USDC (90%)`);
       addMessage("system", `   Treasury will receive: ${treasuryPayment.toFixed(6)} USDC (10%)`);
 

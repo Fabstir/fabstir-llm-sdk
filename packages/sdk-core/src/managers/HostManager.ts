@@ -11,7 +11,8 @@ import { ethers, Contract, Provider, Signer, isAddress } from 'ethers';
 import {
   HostInfo,
   HostMetadata,
-  ModelSpec
+  ModelSpec,
+  ModelPricing
 } from '../types/models';
 import {
   ModelNotApprovedError,
@@ -33,22 +34,33 @@ import { requestHostPublicKey } from './HostKeyRecovery';
 /**
  * Pricing constants for host registration - DUAL PRICING
  * Exported for use in host-cli and other consumers
+ *
+ * PRICE_PRECISION=1000: All prices are stored with a 1000x multiplier
+ * to support sub-$1/million token pricing for budget AI models.
+ *
+ * Conversion: pricePerToken = USD_per_million * 1000
+ * Examples:
+ *   - $0.06/million (Llama 3.2 3B) → pricePerToken = 60
+ *   - $5/million → pricePerToken = 5000
+ *   - $10/million → pricePerToken = 10000
  */
-// Native token pricing (ETH/BNB)
-export const MIN_PRICE_NATIVE = 2_272_727_273n;
-export const MAX_PRICE_NATIVE = 22_727_272_727_273n;
-export const DEFAULT_PRICE_NATIVE = '11363636363636'; // ~$0.00005 @ $4400 ETH
+export const PRICE_PRECISION = 1000n;
 
-// Stablecoin pricing (USDC)
-export const MIN_PRICE_STABLE = 10n;
-export const MAX_PRICE_STABLE = 100_000n;
-export const DEFAULT_PRICE_STABLE = '316'; // ~$0.000316 USDC
+// Native token pricing (ETH/BNB) - with PRICE_PRECISION
+export const MIN_PRICE_NATIVE = 227_273n;                    // ~$0.001/million @ $4400 ETH
+export const MAX_PRICE_NATIVE = 22_727_272_727_273_000n;     // ~$100,000/million @ $4400 ETH
+export const DEFAULT_PRICE_NATIVE = '3000000';               // ~$0.013/million @ $4400 ETH
 
-// Legacy constants (deprecated - use dual pricing above)
+// Stablecoin pricing (USDC) - with PRICE_PRECISION
+export const MIN_PRICE_STABLE = 1n;                          // $0.001 per million tokens
+export const MAX_PRICE_STABLE = 100_000_000n;                // $100,000 per million tokens
+export const DEFAULT_PRICE_STABLE = '5000';                  // $5/million (5 * 1000)
+
+// Legacy constants (for backward compatibility - point to new values)
 export const MIN_PRICE_PER_TOKEN = MIN_PRICE_STABLE;
 export const MAX_PRICE_PER_TOKEN = MAX_PRICE_STABLE;
 export const DEFAULT_PRICE_PER_TOKEN = DEFAULT_PRICE_STABLE;
-export const DEFAULT_PRICE_PER_TOKEN_NUMBER = 316;
+export const DEFAULT_PRICE_PER_TOKEN_NUMBER = 5000;
 
 /**
  * Host registration parameters with model validation and DUAL pricing
@@ -565,20 +577,57 @@ export class HostManager {
       const activeNodes = await this.discoveryService.getAllActiveNodes();
 
       // Transform NodeInfo to HostInfo format
-      return activeNodes.map(node => ({
-        address: node.nodeAddress,
-        isRegistered: true,
-        isActive: node.isActive,
-        stakedAmount: (node as any).stakedAmount || 1000000000000000000n,
-        metadata: (node as any).metadata || JSON.stringify({
-          models: (node as any).models || [],
-          endpoint: node.apiUrl
-        }),
-        models: (node as any).models || [],
-        endpoint: node.apiUrl,
-        reputation: (node as any).reputation || 95,
-        pricePerToken: (node as any).pricePerToken || Number(MIN_PRICE_PER_TOKEN)
-      } as HostInfo));
+      return activeNodes.map(node => {
+        // Parse metadata if it's a string
+        let metadata: HostMetadata;
+        if (typeof node.metadata === 'string' && node.metadata.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(node.metadata);
+            metadata = {
+              hardware: parsed.hardware || { gpu: 'Unknown', vram: 0, ram: 0 },
+              capabilities: parsed.capabilities || ['inference', 'streaming'],
+              location: parsed.location || 'Unknown',
+              maxConcurrent: parsed.maxConcurrent || 10,
+              costPerToken: Number(node.minPricePerTokenStable || 0),
+              publicKey: parsed.publicKey
+            };
+          } catch {
+            metadata = {
+              hardware: { gpu: 'Unknown', vram: 0, ram: 0 },
+              capabilities: ['inference', 'streaming'],
+              location: 'Unknown',
+              maxConcurrent: 10,
+              costPerToken: Number(node.minPricePerTokenStable || 0)
+            };
+          }
+        } else {
+          metadata = {
+            hardware: { gpu: 'Unknown', vram: 0, ram: 0 },
+            capabilities: ['inference', 'streaming'],
+            location: 'Unknown',
+            maxConcurrent: 10,
+            costPerToken: Number(node.minPricePerTokenStable || 0)
+          };
+        }
+
+        return {
+          address: node.nodeAddress,
+          apiUrl: node.apiUrl,
+          endpoint: node.apiUrl, // Alias for backward compatibility
+          metadata,
+          supportedModels: node.models || [],
+          models: node.models || [], // Alias for backward compatibility
+          isActive: node.isActive,
+          isRegistered: true, // Backward compatibility
+          stake: node.stakedAmount || 1000000000000000000n,
+          stakedAmount: node.stakedAmount || 1000000000000000000n, // Alias for backward compatibility
+          reputation: node.reputation || 95, // Backward compatibility
+          // Use actual pricing from contract
+          pricePerToken: Number(node.minPricePerTokenStable || 0), // Backward compatibility - stable price
+          minPricePerTokenNative: node.minPricePerTokenNative || 0n,
+          minPricePerTokenStable: node.minPricePerTokenStable || 0n
+        } as HostInfo;
+      });
     } catch (error: any) {
       console.error('Failed to get active hosts:', error);
       // Return empty array - let UI handle empty state properly
@@ -908,7 +957,7 @@ export class HostManager {
 
   /**
    * Update host minimum pricing for native tokens (ETH/BNB)
-   * @param newMinPrice - New minimum price in wei (2,272,727,273 to 22,727,272,727,273)
+   * @param newMinPrice - New minimum price in wei (227,273 to 22,727,272,727,273,000 with PRICE_PRECISION)
    * @returns Transaction hash
    */
   async updatePricingNative(newMinPrice: string): Promise<string> {
@@ -961,7 +1010,7 @@ export class HostManager {
 
   /**
    * Update host minimum pricing for stablecoins (USDC)
-   * @param newMinPrice - New minimum price (10 to 100,000)
+   * @param newMinPrice - New minimum price (1 to 100,000,000 with PRICE_PRECISION)
    * @returns Transaction hash
    */
   async updatePricingStable(newMinPrice: string): Promise<string> {
@@ -1009,6 +1058,190 @@ export class HostManager {
         `Failed to update stablecoin pricing: ${error.message}`,
         this.nodeRegistry?.address
       );
+    }
+  }
+
+  /**
+   * Set custom pricing for a specific model (overrides host default pricing)
+   * @param modelId - Model ID (bytes32 hash from contract)
+   * @param nativePrice - Native token price (0 = use default, or MIN_PRICE_NATIVE to MAX_PRICE_NATIVE)
+   * @param stablePrice - Stablecoin price (0 = use default, or MIN_PRICE_STABLE to MAX_PRICE_STABLE)
+   * @returns Transaction hash
+   */
+  async setModelPricing(
+    modelId: string,
+    nativePrice: string,
+    stablePrice: string
+  ): Promise<string> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      const priceNative = BigInt(nativePrice);
+      const priceStable = BigInt(stablePrice);
+
+      // Validate price ranges (0 is allowed = use default)
+      if (priceNative !== 0n && (priceNative < MIN_PRICE_NATIVE || priceNative > MAX_PRICE_NATIVE)) {
+        throw new PricingValidationError(
+          `nativePrice must be 0 (default) or between ${MIN_PRICE_NATIVE} and ${MAX_PRICE_NATIVE}, got ${priceNative}`,
+          priceNative
+        );
+      }
+
+      if (priceStable !== 0n && (priceStable < MIN_PRICE_STABLE || priceStable > MAX_PRICE_STABLE)) {
+        throw new PricingValidationError(
+          `stablePrice must be 0 (default) or between ${MIN_PRICE_STABLE} and ${MAX_PRICE_STABLE}, got ${priceStable}`,
+          priceStable
+        );
+      }
+
+      const tx = await this.nodeRegistry.setModelPricing(
+        modelId,
+        priceNative,
+        priceStable,
+        { gasLimit: 200000n }
+      );
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Set model pricing transaction failed',
+          this.nodeRegistry.address
+        );
+      }
+
+      return receipt.hash;
+    } catch (error: any) {
+      if (error instanceof PricingValidationError || error instanceof SDKError) {
+        throw error;
+      }
+      throw new ModelRegistryError(
+        `Failed to set model pricing: ${error.message}`,
+        this.nodeRegistry?.address
+      );
+    }
+  }
+
+  /**
+   * Clear custom pricing for a model (revert to host default pricing)
+   * @param modelId - Model ID (bytes32 hash from contract)
+   * @returns Transaction hash
+   */
+  async clearModelPricing(modelId: string): Promise<string> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      const tx = await this.nodeRegistry.clearModelPricing(
+        modelId,
+        { gasLimit: 150000n }
+      );
+
+      const receipt = await tx.wait(3); // Wait for 3 confirmations
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Clear model pricing transaction failed',
+          this.nodeRegistry.address
+        );
+      }
+
+      return receipt.hash;
+    } catch (error: any) {
+      if (error instanceof SDKError) {
+        throw error;
+      }
+      throw new ModelRegistryError(
+        `Failed to clear model pricing: ${error.message}`,
+        this.nodeRegistry?.address
+      );
+    }
+  }
+
+  /**
+   * Get all model prices for a host
+   * @param hostAddress - Host's EVM address
+   * @returns Array of ModelPricing objects with effective prices and isCustom flag
+   */
+  async getHostModelPrices(hostAddress: string): Promise<ModelPricing[]> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      // Get host defaults for comparison
+      const hostStatus = await this.getHostStatus(hostAddress);
+      const defaultNative = hostStatus.minPricePerTokenNative || 0n;
+      const defaultStable = hostStatus.minPricePerTokenStable || 0n;
+
+      // Get all model prices from contract
+      const [modelIds, nativePrices, stablePrices] = await this.nodeRegistry.getHostModelPrices(hostAddress);
+
+      const result: ModelPricing[] = [];
+      for (let i = 0; i < modelIds.length; i++) {
+        const nativePrice = BigInt(nativePrices[i] || 0n);
+        const stablePrice = BigInt(stablePrices[i] || 0n);
+
+        // Check if custom (different from host default)
+        const isCustom = nativePrice !== defaultNative || stablePrice !== defaultStable;
+
+        result.push({
+          modelId: modelIds[i],
+          nativePrice,
+          stablePrice,
+          isCustom
+        });
+      }
+
+      return result;
+    } catch (error: any) {
+      console.error('Error fetching host model prices:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get effective pricing for a specific model
+   * Returns the custom price if set, otherwise returns the host's default price
+   * @param hostAddress - Host's EVM address
+   * @param modelId - Model ID (bytes32 hash)
+   * @param tokenAddress - Token address (ethers.ZeroAddress for native, USDC address for stable)
+   * @returns Effective price as bigint (custom if set, otherwise default)
+   */
+  async getModelPricing(
+    hostAddress: string,
+    modelId: string,
+    tokenAddress: string
+  ): Promise<bigint> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    try {
+      const price = await this.nodeRegistry.getModelPricing(hostAddress, modelId, tokenAddress);
+      return BigInt(price);
+    } catch (error: any) {
+      console.error('Error fetching model pricing:', error);
+      return 0n;
     }
   }
 

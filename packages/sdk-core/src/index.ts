@@ -33,6 +33,17 @@ export type { S5ConnectionStatus, SyncStatus } from './managers/StorageManager';
 export { SessionManager } from './managers/SessionManager';
 export {
   HostManager,
+  // PRICE_PRECISION constant (1000x multiplier for sub-$1/million pricing)
+  PRICE_PRECISION,
+  // Native token pricing (ETH/BNB)
+  MIN_PRICE_NATIVE,
+  MAX_PRICE_NATIVE,
+  DEFAULT_PRICE_NATIVE,
+  // Stablecoin pricing (USDC)
+  MIN_PRICE_STABLE,
+  MAX_PRICE_STABLE,
+  DEFAULT_PRICE_STABLE,
+  // Legacy constants (backward compatibility)
   MIN_PRICE_PER_TOKEN,
   MAX_PRICE_PER_TOKEN,
   DEFAULT_PRICE_PER_TOKEN,

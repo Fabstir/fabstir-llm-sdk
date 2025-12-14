@@ -213,17 +213,21 @@ function displayFormattedInfo(info: HostDisplayInfo, isOwnAddress: boolean) {
       console.log(chalk.gray('Models:       '), chalk.gray('None'));
     }
 
-    // Pricing
+    // Pricing (with PRICE_PRECISION=1000)
     if (info.minPricePerToken) {
       const priceNum = parseInt(info.minPricePerToken);
-      const pricePerToken = (priceNum / 1000000).toFixed(6);
-      const pricePer1K = (priceNum * 1000 / 1000000).toFixed(6);
-      const pricePer10K = (priceNum * 10000 / 1000000).toFixed(6);
+      const PRICE_PRECISION = 1000;
+      const pricePerToken = (priceNum / PRICE_PRECISION / 1000000).toFixed(9);
+      const pricePerMillion = (priceNum / PRICE_PRECISION).toFixed(3);
+      const pricePer1K = (1000 * priceNum / PRICE_PRECISION / 1000000).toFixed(6);
+      const pricePer10K = (10000 * priceNum / PRICE_PRECISION / 1000000).toFixed(6);
 
       console.log(chalk.gray('\nPricing:'));
-      console.log(chalk.gray('  Per Token:  '), `${priceNum} (${pricePerToken} USDC)`);
-      console.log(chalk.gray('  Per 1K:     '), `${pricePerToken * 1000} (${pricePer1K} USDC)`);
-      console.log(chalk.gray('  Per 10K:    '), `${pricePerToken * 10000} (${pricePer10K} USDC)`);
+      console.log(chalk.gray('  Raw Value:  '), `${priceNum}`);
+      console.log(chalk.gray('  Per Million:'), `$${pricePerMillion}`);
+      console.log(chalk.gray('  Per Token:  '), `${pricePerToken} USDC`);
+      console.log(chalk.gray('  Per 1K:     '), `${pricePer1K} USDC`);
+      console.log(chalk.gray('  Per 10K:    '), `${pricePer10K} USDC`);
     }
 
     // Metadata

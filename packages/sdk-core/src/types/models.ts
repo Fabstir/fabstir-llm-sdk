@@ -122,3 +122,18 @@ export interface ModelRequirements {
   location?: string;        // Preferred location
   minStake?: string;       // Minimum host stake
 }
+
+/**
+ * Per-model pricing information
+ * Hosts can set custom prices for individual models that override their default host-level pricing
+ */
+export interface ModelPricing {
+  /** Model ID (bytes32 hash from contract) */
+  modelId: string;
+  /** Native token price (ETH/BNB) with PRICE_PRECISION=1000 multiplier */
+  nativePrice: bigint;
+  /** Stablecoin price (USDC) with PRICE_PRECISION=1000 multiplier */
+  stablePrice: bigint;
+  /** True if this is a custom override, false if using host default pricing */
+  isCustom: boolean;
+}

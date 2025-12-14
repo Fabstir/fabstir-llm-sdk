@@ -173,9 +173,9 @@ describe('update-pricing Command', () => {
       throw new Error(`Process.exit(${code})`);
     });
 
-    // Test price too low
+    // Test price too low (0 is now invalid, min is 1)
     await expect(async () => {
-      await program.parseAsync(['node', 'test', 'update-pricing', '--price', '50']);
+      await program.parseAsync(['node', 'test', 'update-pricing', '--price', '0']);
     }).rejects.toThrow('Process.exit');
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -185,11 +185,11 @@ describe('update-pricing Command', () => {
 
     vi.clearAllMocks();
 
-    // Test price too high
+    // Test price too high (max is now 100,000,000)
     await expect(async () => {
       const program2 = new Command();
       registerUpdatePricingCommand(program2);
-      await program2.parseAsync(['node', 'test', 'update-pricing', '--price', '200000']);
+      await program2.parseAsync(['node', 'test', 'update-pricing', '--price', '100000001']);
     }).rejects.toThrow('Process.exit');
 
     consoleErrorSpy.mockRestore();
