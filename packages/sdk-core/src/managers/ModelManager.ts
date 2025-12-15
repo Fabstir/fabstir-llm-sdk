@@ -19,7 +19,7 @@ import {
   ModelRegistryError,
   ModelValidationError
 } from '../errors/model-errors';
-import ModelRegistryABI from '../contracts/abis/ModelRegistry-CLIENT-ABI.json';
+import ModelRegistryABI from '../contracts/abis/ModelRegistryUpgradeable-CLIENT-ABI.json';
 
 export class ModelManager {
   private modelRegistry: Contract;

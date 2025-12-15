@@ -2,12 +2,91 @@
 
 This directory contains the Application Binary Interfaces (ABIs) for client integration.
 
-## Current Deployed Contracts (December 9, 2025 - PRICE_PRECISION)
+---
+
+## UPGRADEABLE CONTRACTS (December 14, 2025 - UUPS Proxy Pattern)
+
+> **RECOMMENDED**: Use these upgradeable contracts for all new integrations. They support future upgrades without data migration.
+
+### JobMarketplaceWithModelsUpgradeable
+- **Proxy Address**: `0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D`
+- **Implementation**: `0xe0ee96FC4Cc7a05a6e9d5191d070c5d1d13f143F`
+- **Network**: Base Sepolia
+- **Status**: ✅ ACTIVE - UUPS Upgradeable
+- **ABI File**: `JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json`
+- **Minimum Deposits**:
+  - ETH: 0.0001 ETH (~$0.50)
+  - USDC: 500000 (0.50 USDC)
+- **Key Features**:
+  - All features from non-upgradeable version
+  - UUPS proxy pattern for future upgrades
+  - Emergency pause/unpause functions
+  - Owner-only upgrade authorization
+  - `updateTokenMinDeposit(address, uint256)` - Admin function to update minimum deposits
+  - `TokenMinDepositUpdated` event - Emitted when minimum deposit is changed
+
+### NodeRegistryWithModelsUpgradeable
+- **Proxy Address**: `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22`
+- **Implementation**: `0x68298e2b74a106763aC99E3D973E98012dB5c75F`
+- **Network**: Base Sepolia
+- **Status**: ✅ ACTIVE - UUPS Upgradeable
+- **ABI File**: `NodeRegistryWithModelsUpgradeable-CLIENT-ABI.json`
+- **Key Features**:
+  - All features from non-upgradeable version
+  - UUPS proxy pattern for future upgrades
+  - Owner-only upgrade authorization
+
+### ModelRegistryUpgradeable
+- **Proxy Address**: `0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2`
+- **Implementation**: `0xd7Df5c6D4ffe6961d47753D1dd32f844e0F73f50`
+- **Network**: Base Sepolia
+- **Status**: ✅ ACTIVE - UUPS Upgradeable
+- **ABI File**: `ModelRegistryUpgradeable-CLIENT-ABI.json`
+- **Approved Models** (2 models):
+  - TinyVicuna-1B-32k (CohereForAI/TinyVicuna-1B-32k-GGUF)
+  - TinyLlama-1.1B Chat (TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF)
+
+### HostEarningsUpgradeable
+- **Proxy Address**: `0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0`
+- **Implementation**: `0x588c42249F85C6ac4B4E27f97416C0289980aabB`
+- **Network**: Base Sepolia
+- **Status**: ✅ ACTIVE - UUPS Upgradeable
+- **ABI File**: `HostEarningsUpgradeable-CLIENT-ABI.json`
+
+### ProofSystemUpgradeable
+- **Proxy Address**: `0x5afB91977e69Cc5003288849059bc62d47E7deeb`
+- **Implementation**: `0x83eB050Aa3443a76a4De64aBeD90cA8d525E7A3A`
+- **Network**: Base Sepolia
+- **Status**: ✅ ACTIVE - UUPS Upgradeable
+- **ABI File**: `ProofSystemUpgradeable-CLIENT-ABI.json`
+
+### Upgradeable Contracts Configuration
+
+```javascript
+// Use these addresses for all new integrations
+const upgradeableContracts = {
+  jobMarketplace: "0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D",
+  nodeRegistry: "0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22",
+  modelRegistry: "0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2",
+  hostEarnings: "0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0",
+  proofSystem: "0x5afB91977e69Cc5003288849059bc62d47E7deeb",
+  fabToken: "0xC78949004B4EB6dEf2D66e49Cd81231472612D62",
+  usdcToken: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+};
+```
+
+---
+
+## LEGACY CONTRACTS (Deprecated - December 10, 2025)
+
+> **WARNING**: These contracts are deprecated. Migrate to upgradeable versions above.
+
+## Current Deployed Contracts (December 10, 2025 - Rate Limit Fix) ⚠️ DEPRECATED
 
 ### JobMarketplaceWithModels
-- **Address**: 0xfD764804C5A5808b79D66746BAF4B65fb4413731
+- **Address**: 0x75C72e8C3eC707D8beF5Ba9b9C4f75CbB5bced97
 - **Network**: Base Sepolia
-- **Status**: ✅ PRICE_PRECISION=1000 (December 9, 2025)
+- **Status**: ✅ PRICE_PRECISION=1000, 2000 tokens/sec rate limit (December 10, 2025)
 - **Configuration**:
   - ProofSystem: 0x2ACcc60893872A499700908889B38C5420CBcFD1 ✅ SET
   - Authorized in HostEarnings: ✅ CONFIRMED
@@ -95,7 +174,7 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
 - **Address**: 0x908962e8c6CE72610021586f85ebDE09aAc97776
 - **Network**: Base Sepolia
 - **Purpose**: Tracks accumulated earnings for hosts with batch withdrawal support
-- **Authorized Marketplace**: 0xfD764804C5A5808b79D66746BAF4B65fb4413731 ✅ UPDATED (PRICE_PRECISION - Dec 9, 2025)
+- **Authorized Marketplace**: 0x75C72e8C3eC707D8beF5Ba9b9C4f75CbB5bced97 ✅ UPDATED (2000 tok/sec Rate Limit - Dec 10, 2025)
 
 ## Model Registry Usage (NEW)
 
@@ -130,7 +209,7 @@ console.log(`Active: ${model.active}`);
 
 // For hosts - register with approved models AND dual pricing
 const nodeRegistry = new ethers.Contract(
-  '0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6',  // NodeRegistryWithModels - Corrected dual pricing
+  '0x906F4A8Cb944E4fe12Fb85Be7E627CeDAA8B8999',  // NodeRegistryWithModels - PRICE_PRECISION=1000
   NodeRegistryABI,
   signer
 );
@@ -163,7 +242,7 @@ import NodeRegistryABI from './NodeRegistryWithModels-CLIENT-ABI.json';
 import { ethers } from 'ethers';
 
 const nodeRegistry = new ethers.Contract(
-  '0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6',
+  '0x906F4A8Cb944E4fe12Fb85Be7E627CeDAA8B8999',
   NodeRegistryABI,
   signer
 );
@@ -205,13 +284,13 @@ import NodeRegistryABI from './NodeRegistryWithModels-CLIENT-ABI.json';
 import { ethers } from 'ethers';
 
 const nodeRegistry = new ethers.Contract(
-  '0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6',
+  '0x906F4A8Cb944E4fe12Fb85Be7E627CeDAA8B8999',
   NodeRegistryABI,
   provider
 );
 
 const marketplace = new ethers.Contract(
-  '0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E',  // S5 Proof Storage
+  '0x75C72e8C3eC707D8beF5Ba9b9C4f75CbB5bced97',  // PRICE_PRECISION + 2000 tok/sec
   JobMarketplaceABI,
   signer
 );
@@ -335,7 +414,7 @@ import { ethers } from 'ethers';
 
 const s5 = new S5Client('https://s5.lumeweb.com');
 const marketplace = new ethers.Contract(
-  '0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E',
+  '0x75C72e8C3eC707D8beF5Ba9b9C4f75CbB5bced97',
   JobMarketplaceABI,
   signer
 );
@@ -380,7 +459,7 @@ import { ethers } from 'ethers';
 
 const s5 = new S5Client('https://s5.lumeweb.com');
 const marketplace = new ethers.Contract(
-  '0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E',
+  '0x75C72e8C3eC707D8beF5Ba9b9C4f75CbB5bced97',
   JobMarketplaceABI,
   signer
 );
@@ -516,7 +595,7 @@ import { ethers } from 'ethers';
 
 const provider = new ethers.providers.JsonRpcProvider('https://base-sepolia.g.alchemy.com/v2/YOUR_KEY');
 const nodeRegistry = new ethers.Contract(
-  '0x2B745E45818e1dE570f253259dc46b91A82E3204',
+  '0x906F4A8Cb944E4fe12Fb85Be7E627CeDAA8B8999',
   NodeRegistryABI,
   provider
 );
@@ -553,13 +632,13 @@ const provider = new ethers.providers.JsonRpcProvider('https://base-sepolia.g.al
 
 // Create contract instances
 const marketplace = new ethers.Contract(
-  '0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E', // CURRENT deployment with S5 proof storage
+  '0x75C72e8C3eC707D8beF5Ba9b9C4f75CbB5bced97', // CURRENT - PRICE_PRECISION + 2000 tok/sec
   JobMarketplaceABI,
   provider
 );
 
 const nodeRegistry = new ethers.Contract(
-  '0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6', // NodeRegistryWithModels with corrected dual pricing
+  '0x906F4A8Cb944E4fe12Fb85Be7E627CeDAA8B8999', // NodeRegistryWithModels - PRICE_PRECISION=1000
   NodeRegistryABI,
   provider
 );
@@ -631,7 +710,8 @@ For treasury address only:
 
 ## Constants
 
-- `MIN_DEPOSIT`: 200000000000000 wei (0.0002 ETH)
+- `MIN_DEPOSIT`: 100000000000000 wei (0.0001 ETH ~$0.50)
+- `USDC_MIN_DEPOSIT`: 500000 (0.50 USDC)
 - `MIN_PROVEN_TOKENS`: 100
 - `TREASURY_FEE_PERCENT`: 2.5
 - `MIN_SESSION_DURATION`: 1 hour
@@ -653,8 +733,8 @@ await nodeRegistry.updateApiUrl('http://your-host.com:8080');
 ### For SDK Developers
 Update contract addresses and integrate S5 proof storage:
 ```javascript
-const NODE_REGISTRY = '0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6'; // Dual pricing
-const JOB_MARKETPLACE = '0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E'; // ✅ S5 Proof Storage (Oct 14, 2025)
+const NODE_REGISTRY = '0x906F4A8Cb944E4fe12Fb85Be7E627CeDAA8B8999'; // PRICE_PRECISION=1000
+const JOB_MARKETPLACE = '0x75C72e8C3eC707D8beF5Ba9b9C4f75CbB5bced97'; // ✅ PRICE_PRECISION + 2000 tok/sec (Dec 10, 2025)
 const MODEL_REGISTRY = '0x92b2De840bB2171203011A6dBA928d855cA8183E';
 const PROOF_SYSTEM = '0x2ACcc60893872A499700908889B38C5420CBcFD1';
 const HOST_EARNINGS = '0x908962e8c6CE72610021586f85ebDE09aAc97776';
@@ -671,11 +751,25 @@ const HOST_EARNINGS = '0x908962e8c6CE72610021586f85ebDE09aAc97776';
 
 ## Deprecated Contracts
 
+### JobMarketplaceWithModels (200 tok/sec Rate Limit)
+- **Address**: 0x5497a28B4bE6b1219F93e6Fcd631E8aCdC173709
+- **Deprecated**: December 10, 2025
+- **Reason**: Rate limit of 200 tokens/sec still too slow for small models on high-end GPUs (800-1500 tok/sec)
+- **Replacement**: 0x75C72e8C3eC707D8beF5Ba9b9C4f75CbB5bced97
+- **Migration Required**: Update contract address in SDK config
+
+### JobMarketplaceWithModels (20 tok/sec Rate Limit)
+- **Address**: 0xfD764804C5A5808b79D66746BAF4B65fb4413731
+- **Deprecated**: December 10, 2025
+- **Reason**: Rate limit of 20 tokens/sec was too slow for real LLM inference (50-100+ tokens/sec)
+- **Replacement**: 0x5497a28B4bE6b1219F93e6Fcd631E8aCdC173709 (also deprecated)
+- **Migration Required**: Update contract address in SDK config
+
 ### JobMarketplaceWithModels (Pre-S5 Storage)
 - **Address**: 0xe169A4B57700080725f9553E3Cc69885fea13629
 - **Deprecated**: October 14, 2025
 - **Reason**: Replaced by S5 proof storage (on-chain proofs exceeded 128KB RPC limit, causing 100% failure rate)
-- **Replacement**: 0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E
+- **Replacement**: 0xfD764804C5A5808b79D66746BAF4B65fb4413731 (also deprecated)
 - **Migration Required**: Update to S5 proof submission workflow (4-parameter submitProofOfWork)
 
 ### JobMarketplaceWithModels (Incorrect MAX_PRICE_NATIVE)
@@ -691,7 +785,7 @@ const HOST_EARNINGS = '0x908962e8c6CE72610021586f85ebDE09aAc97776';
 - **Replacement**: 0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6
 
 ## Last Updated
-December 9, 2025 - PRICE_PRECISION=1000 deployment for sub-$1/million token pricing
+December 14, 2025 - UUPS Upgradeable + Minimum deposits reduced to ~$0.50 + updateTokenMinDeposit function
 
 ### PRICE_PRECISION Breaking Change
 

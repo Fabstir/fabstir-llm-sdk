@@ -1,6 +1,6 @@
 # Fabstir LLM Marketplace - API Reference
 
-**Last Updated:** December 9, 2025
+**Last Updated:** December 14, 2025
 **Network:** Base Sepolia (Chain ID: 84532)
 **PRICE_PRECISION:** 1000 (all prices multiplied by 1000 for sub-$1/million support)
 
@@ -8,17 +8,32 @@
 
 ## Quick Start
 
-### Contract Addresses
+### Contract Addresses (Upgradeable - UUPS Proxy Pattern)
+
+> **NEW (December 14, 2025):** All contracts have been upgraded to UUPS proxy pattern for future upgradeability. Use the **proxy addresses** for all interactions.
 
 ```javascript
+// UPGRADEABLE CONTRACTS (UUPS Proxies) - Use these addresses
 const contracts = {
-  jobMarketplace: "0x0c942eADAF86855F69Ee4fa7f765bc6466f254A1",
-  nodeRegistry: "0x48aa4A8047A45862Da8412FAB71ef66C17c7766d",
-  modelRegistry: "0x92b2De840bB2171203011A6dBA928d855cA8183E",
-  proofSystem: "0x2ACcc60893872A499700908889B38C5420CBcFD1",
-  hostEarnings: "0x908962e8c6CE72610021586f85ebDE09aAc97776",
+  // Proxy addresses (interact with these)
+  jobMarketplace: "0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D",
+  nodeRegistry: "0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22",
+  modelRegistry: "0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2",
+  proofSystem: "0x5afB91977e69Cc5003288849059bc62d47E7deeb",
+  hostEarnings: "0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0",
+
+  // Tokens (unchanged)
   fabToken: "0xC78949004B4EB6dEf2D66e49Cd81231472612D62",
   usdcToken: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+};
+
+// Implementation addresses (for verification only)
+const implementations = {
+  jobMarketplace: "0xe0ee96FC4Cc7a05a6e9d5191d070c5d1d13f143F",
+  nodeRegistry: "0x68298e2b74a106763aC99E3D973E98012dB5c75F",
+  modelRegistry: "0xd7Df5c6D4ffe6961d47753D1dd32f844e0F73f50",
+  proofSystem: "0x83eB050Aa3443a76a4De64aBeD90cA8d525E7A3A",
+  hostEarnings: "0x588c42249F85C6ac4B4E27f97416C0289980aabB"
 };
 ```
 
@@ -41,11 +56,12 @@ const GPT_OSS_20B = "0x7583557c14f71d2bf21d48ffb7cde9329f9494090869d2d311ea481b2
 
 ---
 
-## NodeRegistryWithModels
+## NodeRegistryWithModels (Upgradeable)
 
 Host registration and pricing management.
 
-**Address:** `0x48aa4A8047A45862Da8412FAB71ef66C17c7766d`
+**Proxy Address:** `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22`
+**Implementation:** `0x68298e2b74a106763aC99E3D973E98012dB5c75F`
 
 ### Constants
 
@@ -340,18 +356,19 @@ function isActiveNode(address operator) external view returns (bool)
 
 ---
 
-## JobMarketplaceWithModels
+## JobMarketplaceWithModels (Upgradeable)
 
 Session management and payments.
 
-**Address:** `0x0c942eADAF86855F69Ee4fa7f765bc6466f254A1`
+**Proxy Address:** `0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D`
+**Implementation:** `0xe0ee96FC4Cc7a05a6e9d5191d070c5d1d13f143F`
 
 ### Constants
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `MIN_DEPOSIT` | 0.0002 ETH | Minimum ETH deposit |
-| `USDC_MIN_DEPOSIT` | 800,000 (0.80 USDC) | Minimum USDC deposit |
+| `MIN_DEPOSIT` | 0.0001 ETH (~$0.50) | Minimum ETH deposit |
+| `USDC_MIN_DEPOSIT` | 500,000 (0.50 USDC) | Minimum USDC deposit |
 | `PRICE_PRECISION` | 1000 | Prices stored with 1000x multiplier |
 | `FEE_BASIS_POINTS` | 1000 | 10% platform fee |
 | `DISPUTE_WINDOW` | 30 seconds | Time for disputes |
@@ -379,7 +396,7 @@ function createSessionJob(
 ```
 
 **Requirements:**
-- `msg.value >= MIN_DEPOSIT` (0.0002 ETH)
+- `msg.value >= MIN_DEPOSIT` (0.0001 ETH)
 - `pricePerToken >= host's minPricePerTokenNative`
 - Host must be registered and active
 
@@ -735,6 +752,37 @@ Add a new accepted payment token (treasury only).
 function addAcceptedToken(address token, uint256 minDeposit) external
 ```
 
+#### `updateTokenMinDeposit`
+
+Update minimum deposit for an accepted token (treasury or owner only).
+
+```solidity
+function updateTokenMinDeposit(address token, uint256 minDeposit) external
+```
+
+**Requirements:**
+- Caller must be treasury or owner
+- Token must already be accepted
+- minDeposit must be > 0
+
+**Events:**
+```solidity
+event TokenMinDepositUpdated(
+    address indexed token,
+    uint256 oldMinDeposit,
+    uint256 newMinDeposit
+)
+```
+
+**Example:**
+```javascript
+// Update USDC minimum deposit to $0.25
+await marketplace.updateTokenMinDeposit(
+  "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // USDC
+  250000  // 0.25 USDC (6 decimals)
+);
+```
+
 ---
 
 ## Common Workflows
@@ -906,14 +954,25 @@ const config = {
   chainId: 84532,
   rpcUrl: "https://sepolia.base.org",
   explorer: "https://sepolia.basescan.org",
+
+  // UPGRADEABLE CONTRACTS (UUPS Proxies) - December 14, 2025
   contracts: {
-    jobMarketplace: "0x0c942eADAF86855F69Ee4fa7f765bc6466f254A1",
-    nodeRegistry: "0x48aa4A8047A45862Da8412FAB71ef66C17c7766d",
-    modelRegistry: "0x92b2De840bB2171203011A6dBA928d855cA8183E",
-    proofSystem: "0x2ACcc60893872A499700908889B38C5420CBcFD1",
-    hostEarnings: "0x908962e8c6CE72610021586f85ebDE09aAc97776",
+    jobMarketplace: "0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D",
+    nodeRegistry: "0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22",
+    modelRegistry: "0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2",
+    proofSystem: "0x5afB91977e69Cc5003288849059bc62d47E7deeb",
+    hostEarnings: "0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0",
     fabToken: "0xC78949004B4EB6dEf2D66e49Cd81231472612D62",
     usdcToken: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+  },
+
+  // Implementation addresses (for contract verification)
+  implementations: {
+    jobMarketplace: "0xe0ee96FC4Cc7a05a6e9d5191d070c5d1d13f143F",
+    nodeRegistry: "0x68298e2b74a106763aC99E3D973E98012dB5c75F",
+    modelRegistry: "0xd7Df5c6D4ffe6961d47753D1dd32f844e0F73f50",
+    proofSystem: "0x83eB050Aa3443a76a4De64aBeD90cA8d525E7A3A",
+    hostEarnings: "0x588c42249F85C6ac4B4E27f97416C0289980aabB"
   }
 };
 ```

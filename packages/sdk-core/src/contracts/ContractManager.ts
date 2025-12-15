@@ -7,11 +7,12 @@
  */
 
 import { ethers, Contract, ContractInterface, Signer } from 'ethers';
-import JobMarketplaceABI from './abis/JobMarketplaceFABWithS5-CLIENT-ABI.json';
-import NodeRegistryABI from './abis/NodeRegistry.json';
-import HostEarningsABI from './abis/HostEarnings-CLIENT-ABI.json';
+// Using Upgradeable ABIs for UUPS proxy pattern support
+import JobMarketplaceABI from './abis/JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json';
+import NodeRegistryABI from './abis/NodeRegistryWithModelsUpgradeable-CLIENT-ABI.json';
+import HostEarningsABI from './abis/HostEarningsUpgradeable-CLIENT-ABI.json';
 import PaymentEscrowABI from './abis/PaymentEscrowWithEarnings-CLIENT-ABI.json';
-import ProofSystemABI from './abis/ProofSystem-CLIENT-ABI.json';
+import ProofSystemABI from './abis/ProofSystemUpgradeable-CLIENT-ABI.json';
 import ERC20ABI from './abis/ERC20-ABI.json';
 import BaseAccountFactoryABI from './abis/BaseAccountFactory-ABI.json';
 import BaseSmartAccountABI from './abis/BaseSmartAccount-ABI.json';

@@ -35,6 +35,48 @@ import { PricingValidationError } from '../errors/pricing-errors';
 import { bytesToHex } from '../crypto/utilities';
 
 /**
+ * Check if a string is a bytes32 hash (0x + 64 hex chars)
+ */
+function isBytes32Hash(value: string): boolean {
+  return /^0x[a-fA-F0-9]{64}$/.test(value);
+}
+
+/**
+ * Convert model string (repo:file format) to bytes32 hash
+ * If already a bytes32 hash, returns as-is
+ * Format: "repo:file" -> keccak256("repo/file")
+ */
+function convertModelToBytes32(modelString: string): string {
+  // Already a hash
+  if (isBytes32Hash(modelString)) {
+    return modelString;
+  }
+
+  // Parse "repo:file" format (colon-separated)
+  const colonIndex = modelString.indexOf(':');
+  if (colonIndex === -1) {
+    throw new Error(
+      `Invalid model format: "${modelString}". ` +
+      `Expected either bytes32 hash (0x...) or "repo:filename" format.`
+    );
+  }
+
+  const repo = modelString.substring(0, colonIndex);
+  const filename = modelString.substring(colonIndex + 1);
+
+  if (!repo || !filename) {
+    throw new Error(
+      `Invalid model format: "${modelString}". ` +
+      `Both repo and filename are required in "repo:filename" format.`
+    );
+  }
+
+  // Hash is calculated as keccak256("repo/filename") - note slash, not colon
+  const input = `${repo}/${filename}`;
+  return ethers.keccak256(ethers.toUtf8Bytes(input));
+}
+
+/**
  * Convert model hash to short name that nodes expect in their .env MODEL_NAME
  * If not a known hash, return as-is (could be a short name already)
  */
@@ -174,45 +216,55 @@ export class SessionManager implements ISessionManager {
     try {
       // NEW: Price validation against host minimum
       let validatedPrice = config.pricePerToken;
+      let modelIdBytes32: string | undefined;
 
-      if (this.hostManager && provider) {
+      if (this.hostManager && provider && model) {
         try {
-          // Fetch host info to get minimum price (DUAL PRICING)
-          const hostInfo = await this.hostManager.getHostInfo(provider);
-
-          // Determine if this is native token (ETH/BNB) or stablecoin (USDC) payment
+          // Determine if this is native token (ETH/BNB) or stablecoin payment
           const isNativePayment = !config.paymentToken ||
                                   config.paymentToken === '0x0000000000000000000000000000000000000000' ||
                                   config.paymentToken === ethers.ZeroAddress;
 
-          // Select the appropriate pricing field
-          const hostMinPrice = isNativePayment
-            ? Number(hostInfo.minPricePerTokenNative || 0n)
-            : Number(hostInfo.minPricePerTokenStable || 0n);
+          const pricingType = isNativePayment ? 'native (ETH/BNB)' : 'stablecoin';
 
-          const pricingType = isNativePayment ? 'native (ETH/BNB)' : 'stablecoin (USDC)';
-
-          // Default to host minimum if not provided
-          if (validatedPrice === undefined || validatedPrice === null) {
-            validatedPrice = hostMinPrice;
+          // For stablecoin payments, paymentToken MUST be provided - no fallbacks
+          if (!isNativePayment && !config.paymentToken) {
+            throw new Error('paymentToken address required for stablecoin payments');
           }
 
-          // Validate client price >= host minimum
-          if (validatedPrice < hostMinPrice) {
-            throw new PricingValidationError(
-              `Price ${validatedPrice} is below host minimum ${pricingType} price ${hostMinPrice}. ` +
-              `Host "${provider}" requires at least ${hostMinPrice} per token for ${pricingType} payments.`,
-              BigInt(validatedPrice)
-            );
-          }
+          const tokenAddress = isNativePayment ? ethers.ZeroAddress : config.paymentToken!;
+
+          // Convert model string to bytes32 hash if needed (Bug 3 fix)
+          // Model can be "repo:file" format or already a bytes32 hash
+          modelIdBytes32 = convertModelToBytes32(model);
+          console.log(`[SessionManager] Model "${model}" -> bytes32: ${modelIdBytes32}`);
+
+          // Fetch per-model pricing - contract returns effective price (custom if set, otherwise host default)
+          const modelPrice = await this.hostManager.getModelPricing(provider, modelIdBytes32, tokenAddress);
+          const hostModelPrice = Number(modelPrice);
+
+          // Use the model price directly - model-specific contract functions validate correctly
+          validatedPrice = hostModelPrice;
+          console.log(`[SessionManager] Using model price for ${model} (${pricingType}): ${validatedPrice}`);
 
         } catch (error) {
+          // All pricing errors should fail the session - no silent fallbacks
           if (error instanceof PricingValidationError) {
-            throw error; // Re-throw pricing errors
+            throw error;
           }
-          // Log but don't fail for other errors (host lookup failures)
-          console.warn('Could not validate pricing against host:', error);
+          // Wrap other errors (host lookup failures, etc.) in a clear error message
+          throw new Error(
+            `Failed to fetch model pricing for ${model} from host ${provider}: ${error instanceof Error ? error.message : String(error)}`
+          );
         }
+      }
+
+      // Bug 4 fix: Validate that we have a valid price
+      if (validatedPrice === undefined || validatedPrice === null || validatedPrice <= 0) {
+        throw new Error(
+          `Invalid price for session: ${validatedPrice}. ` +
+          `Price must be a positive number. Ensure host has pricing configured for this model.`
+        );
       }
 
       // Create session job with payment
@@ -221,12 +273,13 @@ export class SessionManager implements ISessionManager {
         host: provider,
         model: model,
         amount: config.depositAmount,  // PaymentManagerMultiChain expects 'amount', not 'depositAmount'
-        pricePerToken: validatedPrice, // NEW: Use validated price
+        pricePerToken: validatedPrice, // Use model price from contract
         proofInterval: config.proofInterval,
         duration: config.duration,
         chainId: config.chainId,
         paymentToken: config.paymentToken,
-        useDeposit: config.useDeposit
+        useDeposit: config.useDeposit,
+        modelId: modelIdBytes32  // Pass model ID for model-specific contract function
       };
 
       const result = await this.paymentManager.createSessionJob(sessionJobParams);

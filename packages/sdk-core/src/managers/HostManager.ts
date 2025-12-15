@@ -25,8 +25,8 @@ import { SDKError } from '../errors';
 import { ContractManager } from '../contracts/ContractManager';
 import { ModelManager } from './ModelManager';
 import { HostDiscoveryService } from '../services/HostDiscoveryService';
-// Import the correct NodeRegistry ABI directly
-import NodeRegistryABI from '../contracts/abis/NodeRegistryWithModels-CLIENT-ABI.json';
+// Import the Upgradeable NodeRegistry ABI directly
+import NodeRegistryABI from '../contracts/abis/NodeRegistryWithModelsUpgradeable-CLIENT-ABI.json';
 import * as secp from '@noble/secp256k1';
 import { bytesToHex, hexToBytes, toCompressedPub } from '../crypto/utilities';
 import { requestHostPublicKey } from './HostKeyRecovery';
@@ -1236,13 +1236,26 @@ export class HostManager {
       throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
     }
 
-    try {
-      const price = await this.nodeRegistry.getModelPricing(hostAddress, modelId, tokenAddress);
-      return BigInt(price);
-    } catch (error: any) {
-      console.error('Error fetching model pricing:', error);
-      return 0n;
+    // Validate modelId is a bytes32 hash (0x + 64 hex chars)
+    if (!modelId.match(/^0x[a-fA-F0-9]{64}$/)) {
+      throw new SDKError(
+        `Invalid modelId format: ${modelId}. Expected bytes32 hash (0x + 64 hex chars). ` +
+        `If you have a model string like "repo:file", convert it to a hash first.`,
+        'INVALID_MODEL_ID'
+      );
     }
+
+    const price = await this.nodeRegistry.getModelPricing(hostAddress, modelId, tokenAddress);
+    const priceValue = BigInt(price);
+
+    if (priceValue === 0n) {
+      throw new SDKError(
+        `Model pricing returned 0 for model ${modelId}. This may indicate the model is not registered with this host.`,
+        'ZERO_MODEL_PRICE'
+      );
+    }
+
+    return priceValue;
   }
 
   /**

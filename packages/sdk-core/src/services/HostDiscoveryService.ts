@@ -9,7 +9,7 @@
  */
 
 import { ethers } from 'ethers';
-import NodeRegistryABI from '../contracts/abis/NodeRegistryWithModels-CLIENT-ABI.json';
+import NodeRegistryABI from '../contracts/abis/NodeRegistryWithModelsUpgradeable-CLIENT-ABI.json';
 
 export interface NodeInfo {
   nodeAddress: string;

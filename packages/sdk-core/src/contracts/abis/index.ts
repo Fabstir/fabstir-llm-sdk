@@ -12,10 +12,11 @@
  */
 
 // Import all ABIs from local folder using require() for CommonJS compatibility
-const JobMarketplaceABI = require('./JobMarketplaceWithModels-CLIENT-ABI.json');
-const HostEarningsABI = require('./HostEarnings-CLIENT-ABI.json');
-const NodeRegistryABI = require('./NodeRegistryWithModels-CLIENT-ABI.json');
-const ProofSystemABI = require('./ProofSystem-CLIENT-ABI.json');
+// Using Upgradeable versions for UUPS proxy pattern support
+const JobMarketplaceABI = require('./JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json');
+const HostEarningsABI = require('./HostEarningsUpgradeable-CLIENT-ABI.json');
+const NodeRegistryABI = require('./NodeRegistryWithModelsUpgradeable-CLIENT-ABI.json');
+const ProofSystemABI = require('./ProofSystemUpgradeable-CLIENT-ABI.json');
 const ERC20ABI = require('./ERC20-ABI.json');
 const BaseAccountFactoryABI = require('./BaseAccountFactory-ABI.json');
 const BaseSmartAccountABI = require('./BaseSmartAccount-ABI.json');

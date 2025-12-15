@@ -9,7 +9,8 @@ import {
   ChainMismatchError,
   InsufficientDepositError
 } from '../errors/ChainErrors';
-import JobMarketplaceABI from './abis/JobMarketplaceWithModels.json';
+// Use Upgradeable CLIENT-ABI which has model-specific functions and UUPS support
+import JobMarketplaceABI from './abis/JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json';
 
 export interface SessionCreationParams {
   host: string;
@@ -18,6 +19,7 @@ export interface SessionCreationParams {
   pricePerToken: number;
   duration: number;
   proofInterval: number;
+  modelId?: string;  // Optional bytes32 model ID for model-specific pricing
 }
 
 export interface DirectSessionParams {
@@ -26,6 +28,7 @@ export interface DirectSessionParams {
   duration: number;
   proofInterval: number;
   paymentAmount: string;
+  modelId?: string;  // Optional bytes32 model ID for model-specific pricing
 }
 
 export interface SessionJob {
@@ -206,6 +209,13 @@ export class JobMarketplaceWrapper {
         : ethers.parseUnits(params.deposit, 18);
     }
 
+    // Note: createSessionFromDeposit doesn't support model-specific pricing
+    // For model-specific pricing, use createSessionJob with useDeposit: false
+    if (params.modelId) {
+      console.warn(`[JobMarketplace] createSessionFromDeposit doesn't support model-specific pricing. ` +
+        `Using host default minimum. For model pricing, use direct payment (useDeposit: false).`);
+    }
+
     const tx = await this.contract.createSessionFromDeposit(
       params.host,
       params.paymentToken,
@@ -227,20 +237,42 @@ export class JobMarketplaceWrapper {
   async createSessionJob(params: DirectSessionParams & { paymentToken?: string }): Promise<number> {
     await this.verifyChain();
 
+    // UUPS upgrade: Check if contract is paused before creating session
+    const isPaused = await this.contract.paused();
+    if (isPaused) {
+      throw new Error('Contract is paused for maintenance - cannot create sessions');
+    }
+
     // Check if we're using USDC or ETH
     const isUSDC = params.paymentToken && params.paymentToken !== ethers.ZeroAddress;
 
     if (isUSDC) {
-      // For USDC, use createSessionJobWithToken (no ETH value needed)
+      // For USDC, use createSessionJobWithToken or createSessionJobForModelWithToken
       const amountInUSDC = ethers.parseUnits(params.paymentAmount, 6); // USDC has 6 decimals
-      const tx = await this.contract.createSessionJobWithToken(
-        params.host,
-        params.paymentToken,  // token address
-        amountInUSDC,         // deposit amount
-        params.pricePerToken,
-        params.duration,
-        params.proofInterval
-      );
+
+      let tx;
+      if (params.modelId) {
+        // Use model-specific function - validates against model price, not host default
+        console.log(`[JobMarketplace] Using createSessionJobForModelWithToken with modelId: ${params.modelId}`);
+        tx = await this.contract.createSessionJobForModelWithToken(
+          params.host,
+          params.modelId,       // bytes32 model ID
+          params.paymentToken,  // token address
+          amountInUSDC,         // deposit amount
+          params.pricePerToken,
+          params.duration,
+          params.proofInterval
+        );
+      } else {
+        tx = await this.contract.createSessionJobWithToken(
+          params.host,
+          params.paymentToken,  // token address
+          amountInUSDC,         // deposit amount
+          params.pricePerToken,
+          params.duration,
+          params.proofInterval
+        );
+      }
 
       const receipt = await tx.wait();
       const event = receipt.logs.find((log: any) =>
@@ -248,7 +280,7 @@ export class JobMarketplaceWrapper {
       );
       return event ? Number(event.args[0]) : 0;
     } else {
-      // For ETH, use the original method with ETH value
+      // For ETH, use createSessionJob or createSessionJobForModel
       const value = ethers.parseEther(params.paymentAmount);
 
       console.log('[JobMarketplace] Creating ETH session job:');
@@ -256,17 +288,31 @@ export class JobMarketplaceWrapper {
       console.log('  Payment amount:', params.paymentAmount, 'ETH');
       console.log('  Payment amount in wei:', value.toString());
       console.log('  Price per token:', params.pricePerToken);
-      console.log('  Price per token type:', typeof params.pricePerToken);
+      console.log('  Model ID:', params.modelId || 'none');
       console.log('  Duration:', params.duration);
       console.log('  Proof interval:', params.proofInterval);
 
-      const tx = await this.contract.createSessionJob(
-        params.host,
-        params.pricePerToken,
-        params.duration,
-        params.proofInterval,
-        { value }
-      );
+      let tx;
+      if (params.modelId) {
+        // Use model-specific function - validates against model price, not host default
+        console.log(`[JobMarketplace] Using createSessionJobForModel with modelId: ${params.modelId}`);
+        tx = await this.contract.createSessionJobForModel(
+          params.host,
+          params.modelId,       // bytes32 model ID
+          params.pricePerToken,
+          params.duration,
+          params.proofInterval,
+          { value }
+        );
+      } else {
+        tx = await this.contract.createSessionJob(
+          params.host,
+          params.pricePerToken,
+          params.duration,
+          params.proofInterval,
+          { value }
+        );
+      }
 
       const receipt = await tx.wait();
       const event = receipt.logs.find((log: any) =>
