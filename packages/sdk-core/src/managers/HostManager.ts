@@ -25,8 +25,8 @@ import { SDKError } from '../errors';
 import { ContractManager } from '../contracts/ContractManager';
 import { ModelManager } from './ModelManager';
 import { HostDiscoveryService } from '../services/HostDiscoveryService';
-// Import the correct NodeRegistry ABI directly
-import NodeRegistryABI from '../contracts/abis/NodeRegistryWithModels-CLIENT-ABI.json';
+// Import the Upgradeable NodeRegistry ABI directly
+import NodeRegistryABI from '../contracts/abis/NodeRegistryWithModelsUpgradeable-CLIENT-ABI.json';
 import * as secp from '@noble/secp256k1';
 import { bytesToHex, hexToBytes, toCompressedPub } from '../crypto/utilities';
 import { requestHostPublicKey } from './HostKeyRecovery';

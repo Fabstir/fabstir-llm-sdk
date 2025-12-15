@@ -30,7 +30,7 @@ export class ChainRegistry {
           nativeToken: 'ETH' as NativeToken,
           rpcUrl: baseSepolia.rpcUrl,
           contracts: baseSepolia.contracts,
-          minDeposit: '0.0002',
+          minDeposit: '0.0001',
           blockExplorer: 'https://sepolia.basescan.org',
         },
       ],

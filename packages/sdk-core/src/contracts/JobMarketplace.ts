@@ -9,8 +9,8 @@ import {
   ChainMismatchError,
   InsufficientDepositError
 } from '../errors/ChainErrors';
-// Use CLIENT-ABI which has model-specific functions (createSessionJobForModel, etc.)
-import JobMarketplaceABI from './abis/JobMarketplaceWithModels-CLIENT-ABI.json';
+// Use Upgradeable CLIENT-ABI which has model-specific functions and UUPS support
+import JobMarketplaceABI from './abis/JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json';
 
 export interface SessionCreationParams {
   host: string;
@@ -236,6 +236,12 @@ export class JobMarketplaceWrapper {
 
   async createSessionJob(params: DirectSessionParams & { paymentToken?: string }): Promise<number> {
     await this.verifyChain();
+
+    // UUPS upgrade: Check if contract is paused before creating session
+    const isPaused = await this.contract.paused();
+    if (isPaused) {
+      throw new Error('Contract is paused for maintenance - cannot create sessions');
+    }
 
     // Check if we're using USDC or ETH
     const isUSDC = params.paymentToken && params.paymentToken !== ethers.ZeroAddress;

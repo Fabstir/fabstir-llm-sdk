@@ -46,7 +46,7 @@ export interface DepositBalances {
 }
 
 export class PaymentManager implements IPaymentManager {
-  static readonly MIN_ETH_PAYMENT = '0.0002'; // Updated for multi-chain
+  static readonly MIN_ETH_PAYMENT = '0.0001'; // UUPS upgrade - reduced minimum
   static readonly TOKENS_PER_PROOF = 100;
   // NO DEFAULT PRICE - must be explicitly set from host's registered price
   static readonly DEFAULT_DURATION = 3600;

@@ -61,8 +61,8 @@
       "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
       "decimals": 6,
       "usage": "Job payments",
-      "minimumDeposit": 800000,
-      "minimumDepositFormatted": "0.80 USDC"
+      "minimumDeposit": 500000,
+      "minimumDepositFormatted": "0.50 USDC"
     }
   },
   "platform": {
