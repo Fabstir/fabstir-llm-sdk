@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding model and host selection with persistent user preferences to Fabstir LLM SDK
 >
-> **Status**: 🚧 IN PROGRESS (1/6 phases complete, ~17%) | **Target**: User-selectable models and hosts with weighted selection algorithm | **Progress**: Phase 1 ✅, Phase 2 ⏳, Phase 3 ⏳, Phase 4 ⏳, Phase 5 ⏳, Phase 6 ⏳
+> **Status**: 🚧 IN PROGRESS (1/6 phases complete, ~25%) | **Target**: User-selectable models and hosts with weighted selection algorithm | **Progress**: Phase 1 ✅, Phase 2 (1/2) 🚧, Phase 3 ⏳, Phase 4 ⏳, Phase 5 ⏳, Phase 6 ⏳
 
 ## Overview
 
@@ -328,30 +328,32 @@ export function runMigrations(settings: UserSettings): UserSettings {
 
 **Goal**: Create HostSelectionService with scoring algorithm
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (Dec 16, 2025)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/services/host-selection.test.ts` (250 lines max)
-  - [ ] Test: calculateHostScore returns value between 0-1
-  - [ ] Test: AUTO mode uses standard weights (stake=0.35, price=0.30, uptime=0.20, latency=0.15)
-  - [ ] Test: CHEAPEST mode prioritizes price (0.70)
-  - [ ] Test: RELIABLE mode prioritizes stake+uptime (0.50+0.40)
-  - [ ] Test: FASTEST mode prioritizes latency (0.60)
-  - [ ] Test: Higher stake hosts score higher (stake factor)
-  - [ ] Test: Lower price hosts score higher (price factor)
-  - [ ] Test: Score factors are normalized 0-1
-- [ ] Create `packages/sdk-core/src/services/HostSelectionService.ts` (200 lines max)
-  - [ ] Define IHostSelectionService interface
-  - [ ] Define RankedHost interface
-  - [ ] Define weight constants per mode
-  - [ ] Implement calculateHostScore() method
-  - [ ] Implement normalizeStake() helper
-  - [ ] Implement normalizePrice() helper
-  - [ ] Placeholder uptimeScore (0.95)
-  - [ ] Placeholder latencyScore (0.9)
-- [ ] Create `packages/sdk-core/src/interfaces/IHostSelectionService.ts` (40 lines)
-- [ ] Export from `packages/sdk-core/src/services/index.ts`
-- [ ] Verify all tests pass (8/8)
+- [x] Write tests in `packages/sdk-core/tests/services/host-selection.test.ts` (248 lines)
+  - [x] Test: calculateHostScore returns value between 0-1
+  - [x] Test: AUTO mode uses standard weights (stake=0.35, price=0.30, uptime=0.20, latency=0.15)
+  - [x] Test: CHEAPEST mode prioritizes price (0.70)
+  - [x] Test: RELIABLE mode prioritizes stake+uptime (0.50+0.40)
+  - [x] Test: FASTEST mode prioritizes latency (0.60)
+  - [x] Test: Higher stake hosts score higher (stake factor)
+  - [x] Test: Lower price hosts score higher (price factor)
+  - [x] Test: Score factors are normalized 0-1
+- [x] Create `packages/sdk-core/src/services/HostSelectionService.ts` (270 lines)
+  - [x] Implement calculateHostScore() method
+  - [x] Implement getScoreFactors() method
+  - [x] Implement selectHostForModel() with SPECIFIC mode support
+  - [x] Implement getRankedHostsForModel()
+  - [x] Implement normalizeStake() and normalizePrice() helpers
+  - [x] Implement weightedRandomSelect() for non-deterministic selection
+  - [x] Placeholder uptimeScore (0.95) and latencyScore (0.9)
+- [x] Create `packages/sdk-core/src/interfaces/IHostSelectionService.ts` (87 lines)
+  - [x] Define ModeWeights, ScoreFactors, RankedHost interfaces
+  - [x] Define IHostSelectionService interface
+- [x] Create `packages/sdk-core/src/services/index.ts` (exports all services)
+- [x] Export from `packages/sdk-core/src/interfaces/index.ts`
+- [x] Verify all tests pass (15/15)
 
 **Implementation Requirements**:
 ```typescript
