@@ -13,6 +13,38 @@
 export enum UserSettingsVersion {
   /** Initial version (v1.2.0) */
   V1 = 1,
+  /** V2: Added model/host selection preferences (v1.6.0) */
+  V2 = 2,
+}
+
+/**
+ * Host selection algorithm mode
+ * Determines how hosts are selected for sessions
+ *
+ * @example
+ * ```typescript
+ * // Use weighted algorithm (default)
+ * settings.hostSelectionMode = HostSelectionMode.AUTO;
+ *
+ * // Always pick cheapest host
+ * settings.hostSelectionMode = HostSelectionMode.CHEAPEST;
+ *
+ * // Use a specific preferred host
+ * settings.hostSelectionMode = HostSelectionMode.SPECIFIC;
+ * settings.preferredHostAddress = '0x...';
+ * ```
+ */
+export enum HostSelectionMode {
+  /** Weighted algorithm balancing price, stake, uptime, and latency (default) */
+  AUTO = 'auto',
+  /** Select lowest price host first */
+  CHEAPEST = 'cheapest',
+  /** Prioritize hosts with highest stake and uptime */
+  RELIABLE = 'reliable',
+  /** Prioritize hosts with lowest latency */
+  FASTEST = 'fastest',
+  /** Use preferredHostAddress (throws error if unavailable) */
+  SPECIFIC = 'specific',
 }
 
 /**
@@ -44,10 +76,33 @@ export interface UserSettings {
   /** Currently selected model (e.g., "tiny-vicuna-1b.q4_k_m.gguf") */
   selectedModel: string;
 
+  /**
+   * Default model ID (bytes32 hash) to use for new sessions
+   * Set to null if no default is configured
+   * @since V2
+   */
+  defaultModelId: string | null;
+
   /** Recently used models (max 5) */
   lastUsedModels?: string[];
 
   // ============ Host Preferences ============
+
+  /**
+   * Host selection algorithm mode
+   * Determines how hosts are selected when no explicit host is specified
+   * @default HostSelectionMode.AUTO
+   * @since V2
+   */
+  hostSelectionMode: HostSelectionMode;
+
+  /**
+   * Preferred host address for SPECIFIC mode
+   * Only used when hostSelectionMode is SPECIFIC
+   * Set to null for other modes
+   * @since V2
+   */
+  preferredHostAddress: string | null;
 
   /** Last successfully used host address */
   lastHostAddress?: string;
