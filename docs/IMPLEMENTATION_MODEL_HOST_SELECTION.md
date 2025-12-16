@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding model and host selection with persistent user preferences to Fabstir LLM SDK
 >
-> **Status**: 🚧 IN PROGRESS (4/6 phases complete, ~67%) | **Target**: User-selectable models and hosts with weighted selection algorithm | **Progress**: Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 5 ⏳, Phase 6 ⏳
+> **Status**: 🚧 IN PROGRESS (5/6 phases complete, ~83%) | **Target**: User-selectable models and hosts with weighted selection algorithm | **Progress**: Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 5 ✅, Phase 6 ⏳
 
 ## Overview
 
@@ -721,25 +721,27 @@ async clearAIPreferences(): Promise<void> {
 
 **Goal**: Use HostSelectionService when no host specified in startSession
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (Dec 16, 2025)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/managers/session-host-selection.test.ts` (150 lines max)
-  - [ ] Test: startSession without host uses HostSelectionService
-  - [ ] Test: startSession without host uses user's preferred mode
-  - [ ] Test: startSession with explicit host skips selection
-  - [ ] Test: startSession stores selected host in lastHostAddress
-  - [ ] Test: SPECIFIC mode error propagates to caller
-- [ ] Update `packages/sdk-core/src/managers/SessionManager.ts` (+50 lines)
-  - [ ] Add hostSelectionService field
-  - [ ] Add setHostSelectionService() method
-  - [ ] Update startSession() to use selection service when no host
-  - [ ] Read user's hostSelectionMode from storageManager
-  - [ ] Store selected host in lastHostAddress
-- [ ] Update `packages/sdk-core/src/FabstirSDKCore.ts` (+10 lines)
-  - [ ] Initialize HostSelectionService
-  - [ ] Wire up to SessionManager
-- [ ] Verify all tests pass (5/5)
+- [x] Write tests in `packages/sdk-core/tests/managers/session-host-selection.test.ts` (270 lines)
+  - [x] Test: startSession without host uses HostSelectionService
+  - [x] Test: startSession uses user's preferred mode from settings
+  - [x] Test: startSession passes preferredHostAddress for SPECIFIC mode
+  - [x] Test: startSession with explicit host skips selection
+  - [x] Test: startSession stores selected host in lastHostAddress
+  - [x] Test: startSession throws error when no hosts available
+  - [x] Test: SPECIFIC mode error propagates to caller
+  - [x] Test: setHostSelectionService allows setting after construction
+- [x] Update `packages/sdk-core/src/managers/SessionManager.ts` (+35 lines)
+  - [x] Add IHostSelectionService import
+  - [x] Add HostSelectionMode import
+  - [x] Add hostSelectionService field
+  - [x] Add setHostSelectionService() method
+  - [x] Update startSession() to use selection service when no host
+  - [x] Read user's hostSelectionMode from storageManager
+  - [x] Store selected host in lastHostAddress
+- [x] Verify all tests pass (8/8)
 
 **Implementation Requirements**:
 ```typescript
