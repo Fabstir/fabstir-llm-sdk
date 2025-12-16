@@ -20,6 +20,8 @@ import {
   PartialUserSettings,
   UserSettingsVersion
 } from '../types';
+import { HostSelectionMode } from '../types/settings.types';
+import { ModelInfo } from '../types/models';
 import { migrateUserSettings } from './migrations/user-settings';
 import type { EncryptionManager } from './EncryptionManager';
 import type { EncryptedStorage } from '../interfaces/IEncryptionManager';
@@ -121,6 +123,7 @@ export class StorageManager implements IStorageManager {
   private userAddress?: string;
   private initialized = false;
   private encryptionManager?: EncryptionManager; // NEW: Optional encryption support
+  private modelManager?: { getModelDetails(modelId: string): Promise<ModelInfo | null> }; // For preference helpers
 
   // Connection handling (v0.9.0-beta.5)
   private connectionStatus: S5ConnectionStatus = 'disconnected';
@@ -1978,5 +1981,100 @@ export class StorageManager implements IStorageManager {
 
     // Clear listeners
     this.syncListeners = [];
+  }
+
+  // ============= AI Preference Helper Methods (Phase 4.1) =============
+
+  /**
+   * Set ModelManager for preference helpers
+   * Required for getDefaultModel() and setDefaultModel() validation
+   */
+  setModelManager(modelManager: { getModelDetails(modelId: string): Promise<ModelInfo | null> }): void {
+    this.modelManager = modelManager;
+  }
+
+  /**
+   * Get user's default model
+   * Returns ModelInfo if a default is set, null otherwise
+   */
+  async getDefaultModel(): Promise<ModelInfo | null> {
+    if (!this.modelManager) {
+      throw new SDKError('ModelManager not set', 'MODEL_MANAGER_NOT_SET');
+    }
+
+    const settings = await this.getUserSettings();
+    if (!settings?.defaultModelId) {
+      return null;
+    }
+
+    return this.modelManager.getModelDetails(settings.defaultModelId);
+  }
+
+  /**
+   * Set user's default model
+   * Pass null to clear the default
+   * Validates model exists before setting
+   */
+  async setDefaultModel(modelId: string | null): Promise<void> {
+    if (modelId !== null) {
+      if (!this.modelManager) {
+        throw new SDKError('ModelManager not set', 'MODEL_MANAGER_NOT_SET');
+      }
+
+      // Validate model exists
+      const model = await this.modelManager.getModelDetails(modelId);
+      if (!model) {
+        throw new SDKError(
+          `Model ${modelId} not found in registry`,
+          'MODEL_NOT_FOUND'
+        );
+      }
+    }
+
+    await this.updateUserSettings({
+      defaultModelId: modelId,
+    });
+  }
+
+  /**
+   * Get user's host selection mode
+   * Returns AUTO if not set or no settings exist
+   */
+  async getHostSelectionMode(): Promise<HostSelectionMode> {
+    const settings = await this.getUserSettings();
+    return settings?.hostSelectionMode ?? HostSelectionMode.AUTO;
+  }
+
+  /**
+   * Set user's host selection mode
+   * For SPECIFIC mode, preferredHostAddress is required
+   */
+  async setHostSelectionMode(
+    mode: HostSelectionMode,
+    preferredHostAddress?: string
+  ): Promise<void> {
+    if (mode === HostSelectionMode.SPECIFIC && !preferredHostAddress) {
+      throw new SDKError(
+        'preferredHostAddress required for SPECIFIC mode',
+        'INVALID_HOST_SELECTION_MODE'
+      );
+    }
+
+    await this.updateUserSettings({
+      hostSelectionMode: mode,
+      preferredHostAddress: mode === HostSelectionMode.SPECIFIC ? preferredHostAddress : null,
+    });
+  }
+
+  /**
+   * Clear all AI preferences (model and host)
+   * Resets to defaults without affecting other settings
+   */
+  async clearAIPreferences(): Promise<void> {
+    await this.updateUserSettings({
+      defaultModelId: null,
+      hostSelectionMode: HostSelectionMode.AUTO,
+      preferredHostAddress: null,
+    });
   }
 }

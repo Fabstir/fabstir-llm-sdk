@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding model and host selection with persistent user preferences to Fabstir LLM SDK
 >
-> **Status**: 🚧 IN PROGRESS (3/6 phases complete, ~50%) | **Target**: User-selectable models and hosts with weighted selection algorithm | **Progress**: Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ⏳, Phase 5 ⏳, Phase 6 ⏳
+> **Status**: 🚧 IN PROGRESS (4/6 phases complete, ~67%) | **Target**: User-selectable models and hosts with weighted selection algorithm | **Progress**: Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅, Phase 5 ⏳, Phase 6 ⏳
 
 ## Overview
 
@@ -618,27 +618,37 @@ async getModelPriceRange(modelId: string): Promise<{
 
 **Goal**: Add helper methods for default model and host selection mode
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (Dec 16, 2025)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/managers/storage-preferences.test.ts` (180 lines max)
-  - [ ] Test: getDefaultModel returns null when not set
-  - [ ] Test: getDefaultModel returns ModelInfo when set
-  - [ ] Test: setDefaultModel validates model exists
-  - [ ] Test: setDefaultModel(null) clears default
-  - [ ] Test: getHostSelectionMode returns AUTO by default
-  - [ ] Test: setHostSelectionMode updates mode
-  - [ ] Test: setHostSelectionMode with SPECIFIC requires preferredHostAddress
-  - [ ] Test: clearAIPreferences resets all to defaults
-- [ ] Update `packages/sdk-core/src/managers/StorageManager.ts` (+80 lines)
-  - [ ] Add getDefaultModel() method
-  - [ ] Add setDefaultModel() method with validation
-  - [ ] Add getHostSelectionMode() method
-  - [ ] Add setHostSelectionMode() method with validation
-  - [ ] Add clearAIPreferences() method
-- [ ] Update `packages/sdk-core/src/interfaces/IStorageManager.ts` (+20 lines)
-  - [ ] Add new method signatures
-- [ ] Verify all tests pass (8/8)
+- [x] Write tests in `packages/sdk-core/tests/managers/storage-preferences.test.ts` (290 lines)
+  - [x] Test: getDefaultModel returns null when not set
+  - [x] Test: getDefaultModel returns ModelInfo when set
+  - [x] Test: getDefaultModel returns null when model doesn't exist
+  - [x] Test: getDefaultModel throws error if ModelManager not set
+  - [x] Test: setDefaultModel validates model exists
+  - [x] Test: setDefaultModel(null) clears default
+  - [x] Test: setDefaultModel throws error when model doesn't exist
+  - [x] Test: setDefaultModel throws error if ModelManager not set
+  - [x] Test: getHostSelectionMode returns AUTO by default
+  - [x] Test: getHostSelectionMode returns stored mode
+  - [x] Test: getHostSelectionMode returns AUTO for V1 settings
+  - [x] Test: setHostSelectionMode updates mode
+  - [x] Test: setHostSelectionMode sets preferredHostAddress for SPECIFIC
+  - [x] Test: setHostSelectionMode throws error for SPECIFIC without address
+  - [x] Test: setHostSelectionMode clears preferredHostAddress when switching modes
+  - [x] Test: clearAIPreferences resets all to defaults
+  - [x] Test: clearAIPreferences works with no existing settings
+- [x] Update `packages/sdk-core/src/managers/StorageManager.ts` (+95 lines)
+  - [x] Add modelManager field and setModelManager() method
+  - [x] Add getDefaultModel() method
+  - [x] Add setDefaultModel() method with validation
+  - [x] Add getHostSelectionMode() method
+  - [x] Add setHostSelectionMode() method with validation
+  - [x] Add clearAIPreferences() method
+- [x] Update `packages/sdk-core/src/interfaces/IStorageManager.ts` (+83 lines)
+  - [x] Add new method signatures with JSDoc
+- [x] Verify all tests pass (17/17)
 
 **Implementation Requirements**:
 ```typescript

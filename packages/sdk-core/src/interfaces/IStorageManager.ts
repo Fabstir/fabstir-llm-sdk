@@ -7,7 +7,8 @@
  */
 
 import { StorageOptions, StorageResult, ConversationData, Message } from '../types';
-import { UserSettings, PartialUserSettings } from '../types/settings.types';
+import { UserSettings, PartialUserSettings, HostSelectionMode } from '../types/settings.types';
+import { ModelInfo } from '../types/models';
 
 export interface IStorageManager {
   /**
@@ -151,4 +152,87 @@ export interface IStorageManager {
    * ```
    */
   clearUserSettings(): Promise<void>;
+
+  // ============= AI Preference Helper Methods (Phase 4.1) =============
+
+  /**
+   * Set ModelManager for preference helpers
+   * Required for getDefaultModel() and setDefaultModel() validation
+   *
+   * @param modelManager - ModelManager instance with getModelDetails method
+   */
+  setModelManager(modelManager: { getModelDetails(modelId: string): Promise<ModelInfo | null> }): void;
+
+  /**
+   * Get user's default model
+   * Returns ModelInfo if a default is set, null otherwise
+   *
+   * @returns ModelInfo if default is set and model exists, null otherwise
+   * @throws Error if ModelManager not set
+   * @example
+   * ```typescript
+   * const defaultModel = await storageManager.getDefaultModel();
+   * if (defaultModel) {
+   *   console.log('Default model:', defaultModel.fileName);
+   * }
+   * ```
+   */
+  getDefaultModel(): Promise<ModelInfo | null>;
+
+  /**
+   * Set user's default model
+   * Pass null to clear the default
+   * Validates model exists before setting
+   *
+   * @param modelId - Model ID to set as default, or null to clear
+   * @throws Error if ModelManager not set or model not found
+   * @example
+   * ```typescript
+   * await storageManager.setDefaultModel('0x...'); // Set default
+   * await storageManager.setDefaultModel(null);    // Clear default
+   * ```
+   */
+  setDefaultModel(modelId: string | null): Promise<void>;
+
+  /**
+   * Get user's host selection mode
+   * Returns AUTO if not set or no settings exist
+   *
+   * @returns Current HostSelectionMode
+   * @example
+   * ```typescript
+   * const mode = await storageManager.getHostSelectionMode();
+   * console.log('Selection mode:', mode); // 'auto', 'cheapest', etc.
+   * ```
+   */
+  getHostSelectionMode(): Promise<HostSelectionMode>;
+
+  /**
+   * Set user's host selection mode
+   * For SPECIFIC mode, preferredHostAddress is required
+   *
+   * @param mode - HostSelectionMode to set
+   * @param preferredHostAddress - Required for SPECIFIC mode
+   * @throws Error if SPECIFIC mode without preferredHostAddress
+   * @example
+   * ```typescript
+   * await storageManager.setHostSelectionMode(HostSelectionMode.CHEAPEST);
+   * await storageManager.setHostSelectionMode(HostSelectionMode.SPECIFIC, '0x...');
+   * ```
+   */
+  setHostSelectionMode(mode: HostSelectionMode, preferredHostAddress?: string): Promise<void>;
+
+  /**
+   * Clear all AI preferences (model and host)
+   * Resets to defaults without affecting other settings
+   *
+   * @example
+   * ```typescript
+   * await storageManager.clearAIPreferences();
+   * // defaultModelId = null
+   * // hostSelectionMode = AUTO
+   * // preferredHostAddress = null
+   * ```
+   */
+  clearAIPreferences(): Promise<void>;
 }
