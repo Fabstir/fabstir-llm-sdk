@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding model and host selection with persistent user preferences to Fabstir LLM SDK
 >
-> **Status**: 🚧 IN PROGRESS (1/6 phases complete, ~25%) | **Target**: User-selectable models and hosts with weighted selection algorithm | **Progress**: Phase 1 ✅, Phase 2 (1/2) 🚧, Phase 3 ⏳, Phase 4 ⏳, Phase 5 ⏳, Phase 6 ⏳
+> **Status**: 🚧 IN PROGRESS (2/6 phases complete, ~33%) | **Target**: User-selectable models and hosts with weighted selection algorithm | **Progress**: Phase 1 ✅, Phase 2 ✅, Phase 3 ⏳, Phase 4 ⏳, Phase 5 ⏳, Phase 6 ⏳
 
 ## Overview
 
@@ -413,24 +413,30 @@ export class HostSelectionService implements IHostSelectionService {
 
 **Goal**: Implement selectHostForModel and getRankedHostsForModel
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (Dec 16, 2025)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/services/host-selection-methods.test.ts` (200 lines max)
-  - [ ] Test: selectHostForModel returns highest-scoring host
-  - [ ] Test: selectHostForModel uses weighted random (not always top)
-  - [ ] Test: getRankedHostsForModel returns sorted list with scores
-  - [ ] Test: SPECIFIC mode returns preferred host if available
-  - [ ] Test: SPECIFIC mode throws error if preferred host unavailable
-  - [ ] Test: SPECIFIC mode throws error if preferred host doesn't support model
-  - [ ] Test: Empty host list returns null
-- [ ] Update `packages/sdk-core/src/services/HostSelectionService.ts` (+80 lines)
-  - [ ] Add constructor accepting HostManager
-  - [ ] Implement selectHostForModel() with weighted random
-  - [ ] Implement getRankedHostsForModel()
-  - [ ] Implement SPECIFIC mode with error handling
-  - [ ] Add weightedRandomSelect() helper
-- [ ] Verify all tests pass (7/7)
+- [x] Write tests in `packages/sdk-core/tests/services/host-selection-methods.test.ts` (258 lines)
+  - [x] Test: selectHostForModel returns host when available
+  - [x] Test: selectHostForModel uses weighted random (not always top)
+  - [x] Test: selectHostForModel returns null for empty host list
+  - [x] Test: getRankedHostsForModel returns sorted list with scores
+  - [x] Test: getRankedHostsForModel includes score factors
+  - [x] Test: getRankedHostsForModel respects limit parameter
+  - [x] Test: getRankedHostsForModel uses mode-specific scoring
+  - [x] Test: SPECIFIC mode returns preferred host if available
+  - [x] Test: SPECIFIC mode throws error if preferredHostAddress not provided
+  - [x] Test: SPECIFIC mode throws error if preferred host unavailable
+  - [x] Test: SPECIFIC mode throws error if preferred host inactive
+  - [x] Test: SPECIFIC mode throws error if preferred host doesn't support model
+  - [x] Test: setHostManager allows late initialization
+- [x] Implementation already complete in Sub-phase 2.1:
+  - [x] Constructor accepting HostManager (optional)
+  - [x] selectHostForModel() with weighted random
+  - [x] getRankedHostsForModel() with limit
+  - [x] SPECIFIC mode with full error handling
+  - [x] weightedRandomSelect() helper
+- [x] Verify all tests pass (15/15 method tests + 15/15 scoring tests = 30 total)
 
 **Implementation Requirements**:
 ```typescript
