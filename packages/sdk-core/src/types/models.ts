@@ -137,3 +137,30 @@ export interface ModelPricing {
   /** True if this is a custom override, false if using host default pricing */
   isCustom: boolean;
 }
+
+/**
+ * Price range for a model across all hosts
+ */
+export interface PriceRange {
+  /** Minimum price per token (stablecoin) */
+  min: bigint;
+  /** Maximum price per token (stablecoin) */
+  max: bigint;
+  /** Average price per token (stablecoin) */
+  avg: bigint;
+}
+
+/**
+ * Model with host availability information
+ * Used by getAvailableModelsWithHosts() to show models with their host counts
+ */
+export interface ModelWithAvailability {
+  /** Model information */
+  model: ModelInfo;
+  /** Number of hosts serving this model */
+  hostCount: number;
+  /** Price range across all hosts */
+  priceRange: PriceRange;
+  /** Whether the model is currently available (hostCount > 0) */
+  isAvailable: boolean;
+}

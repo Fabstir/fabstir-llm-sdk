@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding model and host selection with persistent user preferences to Fabstir LLM SDK
 >
-> **Status**: 🚧 IN PROGRESS (2/6 phases complete, ~33%) | **Target**: User-selectable models and hosts with weighted selection algorithm | **Progress**: Phase 1 ✅, Phase 2 ✅, Phase 3 ⏳, Phase 4 ⏳, Phase 5 ⏳, Phase 6 ⏳
+> **Status**: 🚧 IN PROGRESS (3/6 phases complete, ~50%) | **Target**: User-selectable models and hosts with weighted selection algorithm | **Progress**: Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ⏳, Phase 5 ⏳, Phase 6 ⏳
 
 ## Overview
 
@@ -522,25 +522,26 @@ private weightedRandomSelect(rankedHosts: RankedHost[]): HostInfo {
 
 **Goal**: Implement getAvailableModelsWithHosts and getModelPriceRange
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (Dec 16, 2025)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/managers/model-availability.test.ts` (150 lines max)
-  - [ ] Test: getAvailableModelsWithHosts returns models with host counts
-  - [ ] Test: getAvailableModelsWithHosts includes price ranges
-  - [ ] Test: getAvailableModelsWithHosts marks unavailable models (hostCount=0)
-  - [ ] Test: getModelPriceRange returns min/max/avg for model
-  - [ ] Test: getModelPriceRange returns 0s for model with no hosts
-- [ ] Update `packages/sdk-core/src/managers/ModelManager.ts` (+60 lines)
-  - [ ] Add ModelWithAvailability interface (or import from types)
-  - [ ] Implement getAvailableModelsWithHosts()
-  - [ ] Implement getModelPriceRange()
-  - [ ] Use HostManager.findHostsForModel() for host counts
-- [ ] Update `packages/sdk-core/src/interfaces/IModelManager.ts` (+15 lines)
-  - [ ] Add getAvailableModelsWithHosts() signature
-  - [ ] Add getModelPriceRange() signature
-- [ ] Add ModelWithAvailability to types
-- [ ] Verify all tests pass (5/5)
+- [x] Write tests in `packages/sdk-core/tests/managers/model-availability.test.ts` (297 lines)
+  - [x] Test: getAvailableModelsWithHosts returns models with host counts
+  - [x] Test: getAvailableModelsWithHosts includes price ranges
+  - [x] Test: getAvailableModelsWithHosts marks unavailable models (hostCount=0)
+  - [x] Test: getAvailableModelsWithHosts throws error if HostManager not set
+  - [x] Test: getModelPriceRange returns min/max/avg for model
+  - [x] Test: getModelPriceRange returns 0s for model with no hosts
+  - [x] Test: getModelPriceRange handles single host correctly
+  - [x] Test: getModelPriceRange throws error if HostManager not set
+- [x] Update `packages/sdk-core/src/managers/ModelManager.ts` (+75 lines)
+  - [x] Add hostManager field and setHostManager() method
+  - [x] Implement getAvailableModelsWithHosts()
+  - [x] Implement getModelPriceRange()
+  - [x] Implement calculatePriceRange() helper
+- [x] Add ModelWithAvailability and PriceRange to `packages/sdk-core/src/types/models.ts`
+- [x] Export new types from `packages/sdk-core/src/types/index.ts`
+- [x] Verify all tests pass (8/8)
 
 **Implementation Requirements**:
 ```typescript
