@@ -2,7 +2,7 @@
 
 > Complete implementation plan for adding model and host selection with persistent user preferences to Fabstir LLM SDK
 >
-> **Status**: 🚧 IN PROGRESS (0/6 phases complete, ~8%) | **Target**: User-selectable models and hosts with weighted selection algorithm | **Progress**: Phase 1 (1/2) 🚧, Phase 2 ⏳, Phase 3 ⏳, Phase 4 ⏳, Phase 5 ⏳, Phase 6 ⏳
+> **Status**: 🚧 IN PROGRESS (1/6 phases complete, ~17%) | **Target**: User-selectable models and hosts with weighted selection algorithm | **Progress**: Phase 1 ✅, Phase 2 ⏳, Phase 3 ⏳, Phase 4 ⏳, Phase 5 ⏳, Phase 6 ⏳
 
 ## Overview
 
@@ -269,20 +269,21 @@ export type UserSettings = UserSettingsV1 | UserSettingsV2;
 
 **Goal**: Implement migration logic to upgrade V1 settings to V2
 
-**Status**: ⏳ Not started
+**Status**: ✅ Complete (Dec 16, 2025)
 
 **Tasks**:
-- [ ] Write tests in `packages/sdk-core/tests/managers/settings-migration-v2.test.ts` (100 lines max)
-  - [ ] Test: V1 settings migrate to V2 with defaults
-  - [ ] Test: V2 settings pass through unchanged
-  - [ ] Test: Migration preserves existing fields
-  - [ ] Test: defaultModelId defaults to null
-  - [ ] Test: hostSelectionMode defaults to AUTO
-- [ ] Update `packages/sdk-core/src/managers/migrations/user-settings.ts` (+40 lines)
-  - [ ] Add migrateV1ToV2() function
-  - [ ] Update runMigrations() to include V1→V2
-  - [ ] Set default values for new fields
-- [ ] Verify all tests pass
+- [x] Write tests in `packages/sdk-core/tests/managers/settings-migration-v2.test.ts` (158 lines)
+  - [x] Test: V1 settings migrate to V2 with defaults
+  - [x] Test: V2 settings pass through unchanged
+  - [x] Test: Migration preserves existing fields
+  - [x] Test: defaultModelId defaults to null
+  - [x] Test: hostSelectionMode defaults to AUTO
+- [x] Update `packages/sdk-core/src/managers/migrations/user-settings.ts` (+25 lines)
+  - [x] Add migrateV1ToV2() function
+  - [x] Update migrateUserSettings() to handle V1→V2
+  - [x] Set default values for new fields
+- [x] Update existing migration tests for V1→V2 behavior
+- [x] Verify all tests pass (10/10 new + 23/25 existing migration tests)
 
 **Implementation Requirements**:
 ```typescript

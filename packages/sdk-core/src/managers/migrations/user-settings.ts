@@ -8,7 +8,11 @@
  * As the UserSettings schema evolves, this system ensures backward compatibility.
  */
 
-import { UserSettings, UserSettingsVersion } from '../../types/settings.types';
+import {
+  UserSettings,
+  UserSettingsVersion,
+  HostSelectionMode,
+} from '../../types/settings.types';
 
 /**
  * Migrate UserSettings to the current schema version
@@ -28,33 +32,38 @@ export function migrateUserSettings(settings: any): UserSettings {
     throw new Error('UserSettings missing lastUpdated field');
   }
 
-  // Currently only V1 exists - pass through unchanged
+  // V1 → V2 migration
   if (settings.version === UserSettingsVersion.V1) {
-    return settings as UserSettings;
+    return migrateV1ToV2(settings);
   }
 
-  // Future migrations will be added here as new versions are introduced
-  // Example for V2 migration:
-  // if (settings.version === UserSettingsVersion.V1) {
-  //   return migrateV1toV2(settings);
-  // }
-  // if (settings.version === UserSettingsVersion.V2) {
-  //   return settings as UserSettings;
-  // }
+  // V2 - current version, pass through unchanged
+  if (settings.version === UserSettingsVersion.V2) {
+    return settings as UserSettings;
+  }
 
   // Unknown version
   throw new Error(`Unsupported UserSettings version: ${settings.version}`);
 }
 
 /**
- * Example V1 → V2 migration (for future use)
+ * Migrate V1 settings to V2
  *
- * function migrateV1toV2(v1Settings: any): UserSettings {
- *   return {
- *     ...v1Settings,
- *     version: UserSettingsVersion.V2,
- *     // Add new V2 fields with defaults
- *     newV2Field: 'default-value',
- *   };
- * }
+ * Adds model and host selection preferences:
+ * - defaultModelId: null (no default set)
+ * - hostSelectionMode: AUTO (weighted algorithm)
+ * - preferredHostAddress: null (not in SPECIFIC mode)
+ *
+ * @param v1Settings - V1 settings object
+ * @returns V2 settings with new fields added
  */
+function migrateV1ToV2(v1Settings: any): UserSettings {
+  return {
+    ...v1Settings,
+    version: UserSettingsVersion.V2,
+    // Add V2 fields with defaults
+    defaultModelId: null,
+    hostSelectionMode: HostSelectionMode.AUTO,
+    preferredHostAddress: null,
+  };
+}
