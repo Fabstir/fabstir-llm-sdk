@@ -1678,6 +1678,84 @@ async verifyModelHash(
 ): Promise<boolean>
 ```
 
+### getAvailableModelsWithHosts
+
+Gets all approved models with host availability and pricing information.
+
+```typescript
+async getAvailableModelsWithHosts(): Promise<ModelWithAvailability[]>
+```
+
+**Returns:**
+```typescript
+interface ModelWithAvailability {
+  model: ModelInfo;
+  hostCount: number;        // Number of hosts serving this model
+  priceRange: {
+    min: bigint;            // Lowest host price
+    max: bigint;            // Highest host price
+    avg: bigint;            // Average price
+  };
+  isAvailable: boolean;     // hostCount > 0
+}
+```
+
+**Throws:**
+- `Error` if HostManager not set via `setHostManager()`
+
+**Example:**
+```typescript
+const modelManager = sdk.getModelManager();
+modelManager.setHostManager(sdk.getHostManager());
+
+const models = await modelManager.getAvailableModelsWithHosts();
+
+// Show available models
+models
+  .filter(m => m.isAvailable)
+  .forEach(m => {
+    console.log(`${m.model.fileName}: ${m.hostCount} hosts`);
+    console.log(`  Price range: ${m.priceRange.min} - ${m.priceRange.max}`);
+  });
+```
+
+### getModelPriceRange
+
+Gets price range for a specific model across all hosts.
+
+```typescript
+async getModelPriceRange(modelId: string): Promise<{
+  min: bigint;
+  max: bigint;
+  avg: bigint;
+  hostCount: number;
+}>
+```
+
+**Parameters:**
+- `modelId` - Model ID to get pricing for
+
+**Returns:**
+- Price range with min, max, avg, and host count
+- All values are 0 if no hosts serve this model
+
+**Example:**
+```typescript
+const modelManager = sdk.getModelManager();
+modelManager.setHostManager(sdk.getHostManager());
+
+const pricing = await modelManager.getModelPriceRange(modelId);
+
+if (pricing.hostCount > 0) {
+  console.log(`${pricing.hostCount} hosts available`);
+  console.log(`Cheapest: ${pricing.min} (raw USDC units)`);
+  console.log(`Average: ${pricing.avg}`);
+  console.log(`Most expensive: ${pricing.max}`);
+} else {
+  console.log('No hosts available for this model');
+}
+```
+
 ## Host Management
 
 The HostManager provides comprehensive host management with model governance support.
@@ -2208,7 +2286,31 @@ The SDK supports schema migrations for future UserSettings versions:
 **Current Version:**
 ```typescript
 export enum UserSettingsVersion {
-  V1 = 1  // Initial version
+  V1 = 1,  // Initial version
+  V2 = 2   // Model/host selection preferences
+}
+```
+
+**Version 2 New Fields:**
+```typescript
+// Host selection mode (added in V2)
+export enum HostSelectionMode {
+  AUTO = 'auto',           // Weighted algorithm (default)
+  CHEAPEST = 'cheapest',   // Lowest price first
+  RELIABLE = 'reliable',   // Highest stake + reputation
+  FASTEST = 'fastest',     // Lowest latency (placeholder)
+  SPECIFIC = 'specific'    // Use preferredHostAddress
+}
+
+interface UserSettingsV2 {
+  // ... V1 fields preserved ...
+
+  // Model Preferences (NEW in V2)
+  defaultModelId: string | null;     // User's default model
+
+  // Host Preferences (NEW in V2)
+  hostSelectionMode: HostSelectionMode;  // Selection algorithm
+  preferredHostAddress: string | null;   // For SPECIFIC mode
 }
 ```
 
@@ -2245,6 +2347,134 @@ try {
     });
   }
 }
+```
+
+### AI Preference Helper Methods
+
+The StorageManager provides convenience methods for managing model and host selection preferences.
+
+#### getDefaultModel(): Promise<ModelInfo | null>
+
+Get the user's default model. Returns `null` if no default is set.
+
+**Returns:**
+- `ModelInfo` if a default model is set and exists
+- `null` if no default is set or model doesn't exist
+
+**Throws:**
+- `Error` if ModelManager not set via `setModelManager()`
+
+**Example:**
+```typescript
+const storageManager = await sdk.getStorageManager();
+storageManager.setModelManager(sdk.getModelManager());
+
+const defaultModel = await storageManager.getDefaultModel();
+if (defaultModel) {
+  console.log('Default model:', defaultModel.fileName);
+} else {
+  console.log('No default model set');
+}
+```
+
+#### setDefaultModel(modelId: string | null): Promise<void>
+
+Set the user's default model. Pass `null` to clear the default.
+
+**Parameters:**
+- `modelId` - Model ID to set as default, or `null` to clear
+
+**Throws:**
+- `Error` if ModelManager not set
+- `Error` if model not found in registry
+
+**Example:**
+```typescript
+const storageManager = await sdk.getStorageManager();
+storageManager.setModelManager(sdk.getModelManager());
+
+// Set a default model
+await storageManager.setDefaultModel('0xabc123...'); // Model ID
+
+// Clear the default
+await storageManager.setDefaultModel(null);
+```
+
+#### getHostSelectionMode(): Promise<HostSelectionMode>
+
+Get the user's host selection mode. Returns `AUTO` if not set.
+
+**Returns:**
+- `HostSelectionMode` - Current selection mode
+
+**Example:**
+```typescript
+import { HostSelectionMode } from '@fabstir/sdk-core';
+
+const storageManager = await sdk.getStorageManager();
+const mode = await storageManager.getHostSelectionMode();
+
+switch (mode) {
+  case HostSelectionMode.AUTO:
+    console.log('Using weighted algorithm');
+    break;
+  case HostSelectionMode.CHEAPEST:
+    console.log('Selecting cheapest hosts');
+    break;
+  case HostSelectionMode.RELIABLE:
+    console.log('Selecting most reliable hosts');
+    break;
+  case HostSelectionMode.SPECIFIC:
+    console.log('Using specific preferred host');
+    break;
+}
+```
+
+#### setHostSelectionMode(mode: HostSelectionMode, preferredHostAddress?: string): Promise<void>
+
+Set the user's host selection mode.
+
+**Parameters:**
+- `mode` - HostSelectionMode to set
+- `preferredHostAddress` - Required for `SPECIFIC` mode
+
+**Throws:**
+- `Error` if `SPECIFIC` mode without `preferredHostAddress`
+
+**Example:**
+```typescript
+import { HostSelectionMode } from '@fabstir/sdk-core';
+
+const storageManager = await sdk.getStorageManager();
+
+// Use cheapest hosts
+await storageManager.setHostSelectionMode(HostSelectionMode.CHEAPEST);
+
+// Use a specific host
+await storageManager.setHostSelectionMode(
+  HostSelectionMode.SPECIFIC,
+  '0x1234567890123456789012345678901234567890'
+);
+
+// Back to auto
+await storageManager.setHostSelectionMode(HostSelectionMode.AUTO);
+```
+
+#### clearAIPreferences(): Promise<void>
+
+Reset all AI preferences to defaults without affecting other settings.
+
+**Behavior:**
+- `defaultModelId` → `null`
+- `hostSelectionMode` → `AUTO`
+- `preferredHostAddress` → `null`
+
+**Example:**
+```typescript
+const storageManager = await sdk.getStorageManager();
+
+// Reset AI preferences (keeps theme, payment token, etc.)
+await storageManager.clearAIPreferences();
 ```
 
 ### Encrypted Storage (Phase 5.3)
@@ -3824,6 +4054,141 @@ if (capabilities.hasP2P) {
 if (capabilities.hasWebSockets) {
   // WebSocket features available
 }
+```
+
+### HostSelectionService
+
+Provides intelligent host selection with weighted scoring algorithm.
+
+```typescript
+import { HostSelectionService, HostSelectionMode } from '@fabstir/sdk-core';
+
+const hostSelectionService = new HostSelectionService();
+hostSelectionService.setHostManager(sdk.getHostManager());
+```
+
+#### selectHostForModel
+
+Select the best host for a model based on user preferences.
+
+```typescript
+async selectHostForModel(
+  modelId: string,
+  mode: HostSelectionMode,
+  preferredHostAddress?: string
+): Promise<HostInfo | null>
+```
+
+**Parameters:**
+- `modelId` - Model ID to find hosts for
+- `mode` - Selection mode (AUTO, CHEAPEST, RELIABLE, FASTEST, SPECIFIC)
+- `preferredHostAddress` - Required for SPECIFIC mode
+
+**Returns:**
+- `HostInfo` if a host is found
+- `null` if no hosts available (for non-SPECIFIC modes)
+
+**Throws:**
+- `Error` for SPECIFIC mode when host unavailable or doesn't support model
+
+**Example:**
+```typescript
+// Auto mode - weighted random selection
+const host = await hostSelectionService.selectHostForModel(
+  modelId,
+  HostSelectionMode.AUTO
+);
+
+// Cheapest mode - prioritize low price
+const cheapHost = await hostSelectionService.selectHostForModel(
+  modelId,
+  HostSelectionMode.CHEAPEST
+);
+
+// Specific mode - use preferred host (throws if unavailable)
+const specificHost = await hostSelectionService.selectHostForModel(
+  modelId,
+  HostSelectionMode.SPECIFIC,
+  '0x1234...'
+);
+```
+
+#### getRankedHostsForModel
+
+Get all hosts for a model with scores and ranking.
+
+```typescript
+async getRankedHostsForModel(
+  modelId: string,
+  mode: HostSelectionMode,
+  limit?: number
+): Promise<RankedHost[]>
+```
+
+**Parameters:**
+- `modelId` - Model ID to find hosts for
+- `mode` - Selection mode for scoring weights
+- `limit` - Maximum hosts to return (default: 10)
+
+**Returns:**
+```typescript
+interface RankedHost {
+  host: HostInfo;
+  score: number;          // 0-1 composite score
+  factors: {
+    stakeScore: number;   // 0-1 (higher stake = higher score)
+    priceScore: number;   // 0-1 (lower price = higher score)
+    uptimeScore: number;  // 0-1 (placeholder: 0.95)
+    latencyScore: number; // 0-1 (placeholder: 0.9)
+  };
+}
+```
+
+**Example:**
+```typescript
+// Get top 5 hosts ranked for cheapest mode
+const rankedHosts = await hostSelectionService.getRankedHostsForModel(
+  modelId,
+  HostSelectionMode.CHEAPEST,
+  5
+);
+
+// Display options to user
+rankedHosts.forEach((rh, i) => {
+  console.log(`${i + 1}. ${rh.host.address}`);
+  console.log(`   Score: ${(rh.score * 100).toFixed(1)}%`);
+  console.log(`   Price: ${rh.host.minPricePerTokenStable}`);
+  console.log(`   Stake: ${rh.host.stake}`);
+});
+```
+
+#### calculateHostScore
+
+Calculate a host's score for a given mode.
+
+```typescript
+calculateHostScore(host: HostInfo, mode: HostSelectionMode): number
+```
+
+**Weighted Scoring Algorithm:**
+
+| Mode | Stake | Price | Uptime | Latency |
+|------|-------|-------|--------|---------|
+| AUTO | 35% | 30% | 20% | 15% |
+| CHEAPEST | 15% | 70% | 10% | 5% |
+| RELIABLE | 50% | 5% | 40% | 5% |
+| FASTEST | 10% | 20% | 10% | 60% |
+
+**Note:** Uptime (95%) and latency (0.9) are placeholder values until metrics system is implemented.
+
+**Example:**
+```typescript
+const host = await hostManager.getHostInfo('0x1234...');
+const autoScore = hostSelectionService.calculateHostScore(host, HostSelectionMode.AUTO);
+const cheapScore = hostSelectionService.calculateHostScore(host, HostSelectionMode.CHEAPEST);
+
+console.log(`Auto score: ${(autoScore * 100).toFixed(1)}%`);
+console.log(`Cheap score: ${(cheapScore * 100).toFixed(1)}%`);
 ```
 
 ## Error Handling
