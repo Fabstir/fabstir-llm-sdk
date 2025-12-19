@@ -28,6 +28,7 @@ import { registerWithdrawCommand } from './commands/withdraw';
 import { registerLogsCommand } from './commands/logs';
 import { registerStopCommand } from './commands/stop';
 import { registerServeCommand } from './commands/serve';
+import { registerDashboardCommand } from './commands/dashboard';
 
 const program = new Command();
 
@@ -54,6 +55,7 @@ registerWithdrawCommand(program);
 registerLogsCommand(program);
 registerStopCommand(program);
 registerServeCommand(program);
+registerDashboardCommand(program);
 
 // Show help if no command provided
 if (!process.argv.slice(2).length) {

@@ -161,6 +161,8 @@ ENV API_PORT=8083
 ENV INTERNAL_PORT=8083
 ENV P2P_PORT=9000
 ENV SKIP_S5_STORAGE=true
+# TUI Dashboard support - ensures box drawing characters render correctly
+ENV TERM=xterm-256color
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
