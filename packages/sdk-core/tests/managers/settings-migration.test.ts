@@ -12,18 +12,22 @@ import { migrateUserSettings } from '../../src/managers/migrations/user-settings
 
 describe('UserSettings Migration', () => {
   describe('V1 Migration', () => {
-    it('should pass V1 settings through unchanged', () => {
-      const v1Settings: UserSettings = {
+    it('should migrate V1 settings to V2', () => {
+      const v1Settings = {
         version: UserSettingsVersion.V1,
         lastUpdated: Date.now(),
         selectedModel: 'test-model',
-        preferredPaymentToken: 'USDC',
-        theme: 'dark',
+        preferredPaymentToken: 'USDC' as const,
+        theme: 'dark' as const,
       };
 
       const migrated = migrateUserSettings(v1Settings);
-      expect(migrated).toEqual(v1Settings);
-      expect(migrated.version).toBe(UserSettingsVersion.V1);
+      // V1 is now migrated to V2
+      expect(migrated.version).toBe(UserSettingsVersion.V2);
+      // V1 fields preserved
+      expect(migrated.selectedModel).toBe('test-model');
+      expect(migrated.preferredPaymentToken).toBe('USDC');
+      expect(migrated.theme).toBe('dark');
     });
 
     it('should preserve all V1 fields', () => {
@@ -90,7 +94,7 @@ describe('UserSettings Migration', () => {
 
   describe('Migration Integrity', () => {
     it('should not modify original object', () => {
-      const original: UserSettings = {
+      const original = {
         version: UserSettingsVersion.V1,
         lastUpdated: Date.now(),
         selectedModel: 'original-model',
@@ -99,19 +103,23 @@ describe('UserSettings Migration', () => {
       const originalCopy = { ...original };
       const migrated = migrateUserSettings(original);
 
+      // Original should not be modified
       expect(original).toEqual(originalCopy);
-      expect(migrated).toEqual(original);
+      // Migrated should be V2 (not equal to original V1)
+      expect(migrated.version).toBe(UserSettingsVersion.V2);
+      expect(migrated.selectedModel).toBe('original-model');
     });
 
-    it('should handle minimal V1 settings', () => {
-      const minimalSettings: UserSettings = {
+    it('should handle minimal V1 settings and migrate to V2', () => {
+      const minimalSettings = {
         version: UserSettingsVersion.V1,
         lastUpdated: Date.now(),
         selectedModel: 'minimal-model',
       };
 
       const migrated = migrateUserSettings(minimalSettings);
-      expect(migrated.version).toBe(UserSettingsVersion.V1);
+      // V1 migrates to V2
+      expect(migrated.version).toBe(UserSettingsVersion.V2);
       expect(migrated.selectedModel).toBe('minimal-model');
       expect(migrated.lastUpdated).toBeDefined();
     });

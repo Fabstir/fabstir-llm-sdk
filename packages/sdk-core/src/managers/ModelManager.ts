@@ -9,8 +9,11 @@ import { Contract, Provider, Signer, isAddress, keccak256, toUtf8Bytes } from 'e
 import {
   ModelInfo,
   ModelSpec,
-  ModelValidation
+  ModelValidation,
+  ModelWithAvailability,
+  PriceRange,
 } from '../types/models';
+import { IHostManager } from '../interfaces/IHostManager';
 import { DEFAULT_MODEL_CONFIG } from '../constants/models';
 import {
   ModelNotApprovedError,
@@ -26,6 +29,7 @@ export class ModelManager {
   private modelCache: Map<string, { info: ModelInfo; timestamp: number }>;
   private cacheTimeout: number;
   private initialized: boolean = false;
+  private hostManager?: IHostManager;
 
   constructor(
     provider: Provider,
@@ -371,5 +375,81 @@ export class ModelManager {
   isValidModelId(modelId: string): boolean {
     // Model ID should be a 66-character hex string (0x + 64 hex chars)
     return /^0x[a-fA-F0-9]{64}$/.test(modelId);
+  }
+
+  /**
+   * Set the HostManager instance for host-related queries
+   */
+  setHostManager(hostManager: IHostManager): void {
+    this.hostManager = hostManager;
+  }
+
+  /**
+   * Get all approved models with host availability information
+   * Returns models with host counts and price ranges
+   */
+  async getAvailableModelsWithHosts(): Promise<ModelWithAvailability[]> {
+    this.ensureInitialized();
+
+    if (!this.hostManager) {
+      throw new Error('HostManager not set');
+    }
+
+    const models = await this.getAllApprovedModels();
+    const results: ModelWithAvailability[] = [];
+
+    for (const model of models) {
+      const hosts = await this.hostManager.findHostsForModel(model.modelId);
+      const priceRange = this.calculatePriceRange(hosts);
+
+      results.push({
+        model,
+        hostCount: hosts.length,
+        priceRange,
+        isAvailable: hosts.length > 0,
+      });
+    }
+
+    return results;
+  }
+
+  /**
+   * Get price range for a specific model
+   */
+  async getModelPriceRange(
+    modelId: string
+  ): Promise<PriceRange & { hostCount: number }> {
+    this.ensureInitialized();
+
+    if (!this.hostManager) {
+      throw new Error('HostManager not set');
+    }
+
+    const hosts = await this.hostManager.findHostsForModel(modelId);
+    const priceRange = this.calculatePriceRange(hosts);
+
+    return {
+      ...priceRange,
+      hostCount: hosts.length,
+    };
+  }
+
+  /**
+   * Calculate price range from hosts
+   */
+  private calculatePriceRange(
+    hosts: { minPricePerTokenStable: bigint }[]
+  ): PriceRange {
+    if (hosts.length === 0) {
+      return { min: 0n, max: 0n, avg: 0n };
+    }
+
+    const prices = hosts.map((h) => h.minPricePerTokenStable);
+    const min = prices.reduce((a, b) => (a < b ? a : b), prices[0]);
+    const max = prices.reduce((a, b) => (a > b ? a : b), prices[0]);
+    const sum = prices.reduce((a, b) => a + b, 0n);
+    const avg = sum / BigInt(prices.length);
+
+    return { min, max, avg };
   }
 }

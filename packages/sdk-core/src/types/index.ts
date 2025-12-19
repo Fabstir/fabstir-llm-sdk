@@ -280,4 +280,4 @@ export * from './permissions.types';
 
 // ============= Model Types =============
 
-export type { ModelPricing } from './models';
+export type { ModelPricing, ModelWithAvailability, PriceRange } from './models';

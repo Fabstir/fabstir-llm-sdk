@@ -10,7 +10,7 @@ import { LLM_MAX_TOKENS } from '../config/llm-config';
  */
 
 import { ethers } from 'ethers';
-import { ISessionManager } from '../interfaces';
+import { ISessionManager, IHostSelectionService } from '../interfaces';
 import {
   SDKError,
   SessionConfig,
@@ -24,6 +24,7 @@ import {
   SearchVectorsResponse,
   SearchResult
 } from '../types';
+import { HostSelectionMode } from '../types/settings.types';
 import { PaymentManager } from './PaymentManager';
 import { StorageManager } from './StorageManager';
 import { HostManager, PRICE_PRECISION } from './HostManager';
@@ -136,6 +137,7 @@ export class SessionManager implements ISessionManager {
   private hostManager?: HostManager; // Optional until set after auth
   private encryptionManager?: EncryptionManager; // NEW: Optional until set after auth
   private sessionGroupManager?: any; // NEW: Session Groups integration (SessionGroupManager)
+  private hostSelectionService?: IHostSelectionService; // NEW: Host selection (Phase 5.1)
   private wsClient?: WebSocketClient;
   private sessions: Map<string, SessionState> = new Map();
   private initialized = false;
@@ -166,6 +168,13 @@ export class SessionManager implements ISessionManager {
    */
   setEncryptionManager(encryptionManager: EncryptionManager): void {
     this.encryptionManager = encryptionManager;
+  }
+
+  /**
+   * Set HostSelectionService for automatic host selection (Phase 5.1)
+   */
+  setHostSelectionService(hostSelectionService: IHostSelectionService): void {
+    this.hostSelectionService = hostSelectionService;
   }
 
   /**
@@ -207,8 +216,39 @@ export class SessionManager implements ISessionManager {
 
     // Extract parameters for backward compatibility
     const model = config.modelId || config.model;
-    const provider = config.host || config.provider;
+    let provider = config.host || config.provider;
     const endpoint = config.endpoint;
+
+    // NEW (Phase 5.1): Automatic host selection when no host is provided
+    if (!provider && this.hostSelectionService) {
+      // Get user's preferred host selection mode
+      const mode = await this.storageManager.getHostSelectionMode();
+      const settings = await this.storageManager.getUserSettings();
+      const preferredHostAddress = settings?.preferredHostAddress ?? undefined;
+
+      // Convert model to bytes32 for host lookup
+      const modelIdForSelection = convertModelToBytes32(model);
+
+      // Select host using user's preferences
+      const selectedHost = await this.hostSelectionService.selectHostForModel(
+        modelIdForSelection,
+        mode,
+        preferredHostAddress
+      );
+
+      if (!selectedHost) {
+        throw new SDKError('No hosts available for the selected model', 'NO_HOSTS_AVAILABLE');
+      }
+
+      provider = selectedHost.address;
+
+      // Store selected host for next time
+      await this.storageManager.updateUserSettings({
+        lastHostAddress: selectedHost.address,
+      });
+
+      console.log(`[SessionManager] Auto-selected host: ${selectedHost.address} (mode: ${mode})`);
+    }
 
     // NEW (Phase 6.2): Enable encryption by default (opt-out with encryption: false)
     const enableEncryption = config.encryption !== false;

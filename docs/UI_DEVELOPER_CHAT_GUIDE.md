@@ -2306,6 +2306,241 @@ export function HostSelector({
 
 ---
 
+## 🎛️ Part 4.5: Model and Host Selection with User Preferences
+
+The SDK provides persistent user preferences for model and host selection. These preferences are stored on S5 decentralized storage and sync across devices.
+
+### Host Selection Modes
+
+```typescript
+import { HostSelectionMode } from '@fabstir/sdk-core';
+
+// Available modes:
+// - AUTO: Weighted algorithm balancing stake, price, uptime, latency
+// - CHEAPEST: Prioritize lowest price (70% weight)
+// - RELIABLE: Prioritize highest stake and uptime (50% + 40%)
+// - FASTEST: Prioritize lowest latency (60% weight) - placeholder until metrics available
+// - SPECIFIC: Use a specific preferred host (throws error if unavailable)
+```
+
+### Settings Page: Host Selection Mode Picker
+
+```typescript
+'use client';
+
+import { HostSelectionMode } from '@fabstir/sdk-core';
+import { useSDK } from '@/hooks/use-sdk';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
+
+const HOST_MODE_OPTIONS = [
+  { value: HostSelectionMode.AUTO, label: 'Auto', description: 'Balanced selection' },
+  { value: HostSelectionMode.CHEAPEST, label: 'Cheapest', description: 'Lowest price first' },
+  { value: HostSelectionMode.RELIABLE, label: 'Reliable', description: 'Highest stake + uptime' },
+  { value: HostSelectionMode.FASTEST, label: 'Fastest', description: 'Lowest latency' },
+  { value: HostSelectionMode.SPECIFIC, label: 'Specific', description: 'Choose a specific host' },
+];
+
+export function HostSelectionSettings() {
+  const { sdk } = useSDK();
+  const queryClient = useQueryClient();
+
+  const { data: currentMode, isLoading } = useQuery({
+    queryKey: ['hostSelectionMode'],
+    queryFn: async () => {
+      const storageManager = await sdk.getStorageManager();
+      return storageManager.getHostSelectionMode();
+    },
+    enabled: !!sdk,
+  });
+
+  const updateMode = useMutation({
+    mutationFn: async (mode: HostSelectionMode) => {
+      const storageManager = await sdk.getStorageManager();
+      await storageManager.setHostSelectionMode(mode);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['hostSelectionMode'] }),
+  });
+
+  if (isLoading) return <div>Loading preferences...</div>;
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-lg font-medium">Host Selection Mode</h3>
+      <RadioGroup
+        value={currentMode}
+        onValueChange={(value) => updateMode.mutate(value as HostSelectionMode)}
+      >
+        {HOST_MODE_OPTIONS.map((option) => (
+          <div key={option.value} className="flex items-center space-x-2">
+            <RadioGroupItem value={option.value} id={option.value} />
+            <Label htmlFor={option.value}>
+              <span className="font-medium">{option.label}</span>
+              <span className="text-muted-foreground ml-2">{option.description}</span>
+            </Label>
+          </div>
+        ))}
+      </RadioGroup>
+    </div>
+  );
+}
+```
+
+### Model Selector with Availability
+
+```typescript
+'use client';
+
+import { useSDK } from '@/hooks/use-sdk';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+export function ModelSelector() {
+  const { sdk } = useSDK();
+  const queryClient = useQueryClient();
+
+  // Fetch models with availability
+  const { data: models, isLoading } = useQuery({
+    queryKey: ['availableModels'],
+    queryFn: async () => {
+      const modelManager = sdk.getModelManager();
+      modelManager.setHostManager(sdk.getHostManager());
+      return modelManager.getAvailableModelsWithHosts();
+    },
+    enabled: !!sdk,
+  });
+
+  // Get current default
+  const { data: defaultModel } = useQuery({
+    queryKey: ['defaultModel'],
+    queryFn: async () => {
+      const storageManager = await sdk.getStorageManager();
+      storageManager.setModelManager(sdk.getModelManager());
+      return storageManager.getDefaultModel();
+    },
+    enabled: !!sdk,
+  });
+
+  // Set default model
+  const setDefault = useMutation({
+    mutationFn: async (modelId: string | null) => {
+      const storageManager = await sdk.getStorageManager();
+      storageManager.setModelManager(sdk.getModelManager());
+      await storageManager.setDefaultModel(modelId);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['defaultModel'] }),
+  });
+
+  if (isLoading) return <div>Loading models...</div>;
+
+  const availableModels = models?.filter((m) => m.isAvailable) || [];
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-lg font-medium">Default Model</h3>
+      <Select
+        value={defaultModel?.id || 'none'}
+        onValueChange={(value) => setDefault.mutate(value === 'none' ? null : value)}
+      >
+        <SelectTrigger>
+          <SelectValue placeholder="Select a default model" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">No default</SelectItem>
+          {availableModels.map((m) => (
+            <SelectItem key={m.model.id} value={m.model.id}>
+              <div className="flex justify-between w-full">
+                <span>{m.model.fileName}</span>
+                <span className="text-muted-foreground">
+                  {m.hostCount} hosts • ${(Number(m.priceRange.min) / 1000000).toFixed(4)}/token
+                </span>
+              </div>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+```
+
+### Host Rankings Display
+
+```typescript
+'use client';
+
+import { HostSelectionMode } from '@fabstir/sdk-core';
+import { HostSelectionService } from '@fabstir/sdk-core';
+import { useSDK } from '@/hooks/use-sdk';
+import { useQuery } from '@tanstack/react-query';
+
+interface HostRankingsProps {
+  modelId: string;
+  mode: HostSelectionMode;
+}
+
+export function HostRankings({ modelId, mode }: HostRankingsProps) {
+  const { sdk } = useSDK();
+
+  const { data: rankedHosts, isLoading } = useQuery({
+    queryKey: ['rankedHosts', modelId, mode],
+    queryFn: async () => {
+      const hostSelectionService = new HostSelectionService();
+      hostSelectionService.setHostManager(sdk.getHostManager());
+      return hostSelectionService.getRankedHostsForModel(modelId, mode, 10);
+    },
+    enabled: !!sdk && !!modelId,
+  });
+
+  if (isLoading) return <div>Loading hosts...</div>;
+  if (!rankedHosts?.length) return <div>No hosts available</div>;
+
+  return (
+    <div className="space-y-2">
+      <h4 className="font-medium">Top Hosts ({mode})</h4>
+      {rankedHosts.map((rh, i) => (
+        <div key={rh.host.address} className="p-3 border rounded-lg">
+          <div className="flex justify-between items-center">
+            <span className="font-mono text-sm">
+              {i + 1}. {rh.host.address.slice(0, 10)}...
+            </span>
+            <span className="text-green-600 font-medium">
+              {(rh.score * 100).toFixed(1)}%
+            </span>
+          </div>
+          <div className="text-sm text-muted-foreground mt-1">
+            Price: {rh.host.minPricePerTokenStable.toString()} |
+            Stake: {(Number(rh.host.stake) / 1e18).toFixed(0)} FAB
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+### Automatic Host Selection on Session Start
+
+The SDK automatically uses user preferences when starting a session without specifying a host:
+
+```typescript
+// SessionManager will automatically:
+// 1. Load user's hostSelectionMode from settings
+// 2. Use HostSelectionService to select best host
+// 3. Store selected host in lastHostAddress
+const { sessionId } = await sessionManager.startSession({
+  modelId,
+  chainId,
+  // host not specified → automatic selection
+  paymentMethod: 'deposit',
+  depositAmount: 1000000n,
+  paymentToken: usdcAddress,
+});
+```
+
+---
+
 ## 📚 Part 5: SDK Method Reference
 
 ### FabstirSDKCore Methods
@@ -2402,6 +2637,25 @@ if (settings) {
 } else {
   console.log('First-time user - show setup wizard');
 }
+
+// AI Preference Helpers (V2)
+import { HostSelectionMode } from '@fabstir/sdk-core';
+
+// Get/set default model
+storageManager.setModelManager(modelManager); // Required first
+getDefaultModel(): Promise<ModelInfo | null>
+setDefaultModel(modelId: string | null): Promise<void>
+
+// Get/set host selection mode
+getHostSelectionMode(): Promise<HostSelectionMode>  // AUTO if not set
+setHostSelectionMode(mode: HostSelectionMode, preferredHostAddress?: string): Promise<void>
+
+// Reset AI preferences
+clearAIPreferences(): Promise<void>
+
+// Example: Host selection mode
+await storageManager.setHostSelectionMode(HostSelectionMode.CHEAPEST);
+const mode = await storageManager.getHostSelectionMode(); // 'cheapest'
 ```
 
 ---
