@@ -19,6 +19,7 @@ import { extractHostPort, verifyPublicEndpoint, warnIfLocalhost } from '../utils
 import { showNetworkTroubleshooting } from '../utils/diagnostics';
 import { saveConfig, loadConfig } from '../config/storage';
 import { DEFAULT_PRICE_PER_TOKEN } from '@fabstir/sdk-core';
+import { validateModelString, fetchAllModels } from '../services/ModelRegistryClient.js';
 
 /**
  * Register the register command with the CLI
@@ -36,6 +37,38 @@ export function registerRegisterCommand(program: Command): void {
     .option('-r, --rpc-url <url>', 'RPC URL', process.env.RPC_URL_BASE_SEPOLIA)
     .action(async (options) => {
       try {
+        const rpcUrl = options.rpcUrl || process.env.RPC_URL_BASE_SEPOLIA || 'https://sepolia.base.org';
+
+        // Pre-validate model strings before any other operations
+        const modelStrings = options.models ? options.models.split(',') : [];
+        if (modelStrings.length > 0) {
+          console.log(chalk.blue('Validating model(s)...'));
+
+          for (const modelString of modelStrings) {
+            const trimmed = modelString.trim();
+            const result = await validateModelString(rpcUrl, trimmed);
+
+            if (!result.valid) {
+              console.error(chalk.red(`\n❌ Model "${trimmed}" is not approved`));
+              if (result.error) {
+                console.error(chalk.red(`   ${result.error}`));
+              }
+
+              // Show suggestions
+              console.log(chalk.yellow('\nDid you mean one of these approved models?'));
+              const approvedModels = await fetchAllModels(rpcUrl);
+              approvedModels.slice(0, 5).forEach((m, i) => {
+                console.log(chalk.white(`  ${i + 1}. ${m.modelString}`));
+              });
+
+              console.log(chalk.gray("\nRun 'fabstir-host models list' to see all approved models"));
+              process.exit(1);
+            }
+
+            console.log(chalk.green(`  ✓ ${trimmed}`));
+          }
+        }
+
         // Initialize and authenticate SDK
         await initializeSDK('base-sepolia');
         await authenticateSDK(options.privateKey);
@@ -43,7 +76,7 @@ export function registerRegisterCommand(program: Command): void {
         const config: RegistrationConfig = {
           stakeAmount: ethers.parseEther(options.stake),
           apiUrl: options.url || 'http://localhost:8080',
-          models: options.models ? options.models.split(',') : ['gpt-3.5-turbo'],
+          models: modelStrings.length > 0 ? modelStrings : ['gpt-3.5-turbo'],
           minPricePerTokenNative: options.price || DEFAULT_PRICE_PER_TOKEN,
           minPricePerTokenStable: options.price || DEFAULT_PRICE_PER_TOKEN
         };

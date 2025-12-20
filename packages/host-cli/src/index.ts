@@ -29,6 +29,7 @@ import { registerLogsCommand } from './commands/logs';
 import { registerStopCommand } from './commands/stop';
 import { registerServeCommand } from './commands/serve';
 import { registerDashboardCommand } from './commands/dashboard';
+import { registerModelsCommand } from './commands/models';
 
 const program = new Command();
 
@@ -56,6 +57,7 @@ registerLogsCommand(program);
 registerStopCommand(program);
 registerServeCommand(program);
 registerDashboardCommand(program);
+registerModelsCommand(program);
 
 // Show help if no command provided
 if (!process.argv.slice(2).length) {
