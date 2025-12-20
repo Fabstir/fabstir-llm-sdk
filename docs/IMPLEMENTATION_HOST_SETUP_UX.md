@@ -417,7 +417,7 @@ packages/host-cli/src/
 | Phase 2: Model Download | ✅ Complete | Download with progress, SHA256 verification, HF token support |
 | Phase 3: Pre-Validation | ✅ Complete | Invalid models rejected with suggestions |
 | Phase 4: Interactive Selection | ✅ Complete | Interactive selector when `--model` not provided |
-| Phase 5: Setup Wizard | ⏳ Not Started | |
+| Phase 5: Setup Wizard | ✅ Complete | Full 5-step guided wizard with config generation |
 
 ### Implementation Notes (Dec 20, 2025)
 
@@ -443,11 +443,25 @@ packages/host-cli/src/
 - Validates selected/entered model before proceeding
 - Removed fallback to hardcoded default model ('gpt-3.5-turbo')
 
+**Phase 5 Completed:**
+- Created `PrerequisiteChecker.ts` service for Docker/GPU detection
+- Created `setup.ts` 5-step wizard:
+  1. Check Prerequisites (Docker, GPU, disk space)
+  2. Select Model (with GPU-based recommendations)
+  3. Download Model (with progress bar and verification)
+  4. Configure Node (URL, pricing, stake, private key)
+  5. Register on Blockchain
+- Generates `docker-compose.yml` and `.env` configuration files
+- Graceful handling of missing prerequisites with user confirmation
+- Fallback instructions if registration fails
+
 **Files Created:**
 - `packages/host-cli/src/services/ModelRegistryClient.ts`
 - `packages/host-cli/src/services/ModelDownloader.ts`
+- `packages/host-cli/src/services/PrerequisiteChecker.ts`
 - `packages/host-cli/src/commands/models.ts`
+- `packages/host-cli/src/commands/setup.ts`
 
 **Files Modified:**
-- `packages/host-cli/src/index.ts` - Added models command
+- `packages/host-cli/src/index.ts` - Added models and setup commands
 - `packages/host-cli/src/commands/register.ts` - Added pre-validation and interactive selection

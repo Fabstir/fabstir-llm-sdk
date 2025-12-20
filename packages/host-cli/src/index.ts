@@ -30,6 +30,7 @@ import { registerStopCommand } from './commands/stop';
 import { registerServeCommand } from './commands/serve';
 import { registerDashboardCommand } from './commands/dashboard';
 import { registerModelsCommand } from './commands/models';
+import { registerSetupCommand } from './commands/setup';
 
 const program = new Command();
 
@@ -58,6 +59,7 @@ registerStopCommand(program);
 registerServeCommand(program);
 registerDashboardCommand(program);
 registerModelsCommand(program);
+registerSetupCommand(program);
 
 // Show help if no command provided
 if (!process.argv.slice(2).length) {
