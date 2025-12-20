@@ -38,6 +38,16 @@ interface VectorChunk {
   vectors: Vector[];
 }
 
+/**
+ * Statistics for a folder in a vector database
+ */
+export interface FolderStats {
+  path: string;
+  vectorCount: number;
+  sizeBytes: number;
+  lastModified: number;
+}
+
 export interface S5VectorStoreOptions {
   s5Client: S5;
   userAddress: string;

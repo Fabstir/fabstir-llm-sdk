@@ -153,7 +153,7 @@ export interface ContextRetrievalOptions extends SearchOptions {
 /**
  * Default RAG configuration
  */
-export const DEFAULT_RAG_CONFIG: Required<Omit<RAGSessionConfig, 'vectorDbSessionId' | 'databaseName' | 'metadataFilter' | 'conversationMemory'>> = {
+export const DEFAULT_RAG_CONFIG: Required<Omit<RAGSessionConfig, 'vectorDbSessionId' | 'databaseNames' | 'metadataFilter' | 'conversationMemory'>> = {
   enabled: false,
   topK: 5,
   similarityThreshold: 0.7,
@@ -172,14 +172,14 @@ export function validateRAGConfig(config: PartialRAGSessionConfig): void {
     return; // No validation needed if disabled
   }
 
-  // Must provide either vectorDbSessionId or databaseName
-  if (!config.vectorDbSessionId && !config.databaseName) {
-    throw new Error('RAG config requires either vectorDbSessionId or databaseName when enabled');
+  // Must provide either vectorDbSessionId or databaseNames
+  if (!config.vectorDbSessionId && !config.databaseNames) {
+    throw new Error('RAG config requires either vectorDbSessionId or databaseNames when enabled');
   }
 
   // Can't provide both
-  if (config.vectorDbSessionId && config.databaseName) {
-    throw new Error('RAG config cannot have both vectorDbSessionId and databaseName');
+  if (config.vectorDbSessionId && config.databaseNames) {
+    throw new Error('RAG config cannot have both vectorDbSessionId and databaseNames');
   }
 
   // Validate numeric ranges
