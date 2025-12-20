@@ -271,6 +271,57 @@ Or use the convenient startup script:
 
 **Recommendation**: Use browser UI for learning and debugging. Use CLI for production and scripts.
 
+## Terminal Dashboard (TUI)
+
+For **headless servers** without a browser, use the interactive terminal dashboard:
+
+```bash
+# Start the dashboard (requires management server running)
+fabstir-host dashboard
+```
+
+### Features
+
+- **📊 Real-Time Status** - Node status, PID, uptime displayed live
+- **📝 Live Log Streaming** - WebSocket-based log streaming in terminal
+- **⌨️ Keyboard Controls** - Start/stop node with single keystrokes
+- **🔄 Auto-Refresh** - Status updates at configurable intervals
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `q` | Quit dashboard |
+| `r` | Refresh status |
+| `s` | Start node |
+| `x` | Stop node |
+| `p` | Update pricing (coming soon) |
+| `w` | Withdraw earnings (coming soon) |
+
+### Usage
+
+```bash
+# Start management server first
+fabstir-host serve --port 3001
+
+# Then launch dashboard (in another terminal)
+fabstir-host dashboard
+
+# With custom options
+fabstir-host dashboard --mgmt-url http://localhost:3001 --refresh-interval 5000
+```
+
+### When to Use
+
+| Scenario | CLI | Browser UI | TUI Dashboard |
+|----------|-----|------------|---------------|
+| **SSH Session** | ✅ Works | ❌ Not available | ✅ Perfect |
+| **Docker/Headless** | ✅ Works | ❌ Not available | ✅ Perfect |
+| **Visual Monitoring** | ⚠️ Limited | ✅ Excellent | ✅ Good |
+| **Quick Actions** | ⚠️ Multi-command | ✅ One-click | ✅ Single-key |
+
+See [docs/DASHBOARD_GUIDE.md](docs/DASHBOARD_GUIDE.md) for complete documentation.
+
 ## SDK Integration Benefits
 
 After the recent SDK refactoring (Oct 2024), the Host CLI:
