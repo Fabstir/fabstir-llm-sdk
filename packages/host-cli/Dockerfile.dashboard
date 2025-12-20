@@ -1,0 +1,40 @@
+# Copyright (c) 2025 Fabstir
+# SPDX-License-Identifier: BUSL-1.1
+
+# Fabstir Host CLI - Lightweight Dashboard Image
+# For monitoring nodes - does NOT include fabstir-llm-node
+#
+# PREREQUISITE: Run `pnpm build` in packages/host-cli before building this image
+#
+# ENVIRONMENT VARIABLES:
+#   HOST_PRIVATE_KEY - Host wallet private key (required for earnings display)
+#   RPC_URL - Blockchain RPC URL (default: https://sepolia.base.org)
+
+FROM node:20-alpine
+
+# Install docker CLI (for log streaming)
+RUN apk add --no-cache docker-cli
+
+WORKDIR /app
+
+# Copy pre-built dist (must run pnpm build first!)
+COPY packages/host-cli/dist ./dist
+
+# Copy package.json and modify for standalone use
+COPY packages/host-cli/package.json ./package.json.orig
+
+# Remove workspace dependencies and install runtime deps only
+RUN sed 's|"@fabstir/sdk-core": "workspace:\*",||g' package.json.orig > package.json && \
+    rm package.json.orig && \
+    npm install --omit=dev --ignore-scripts blessed blessed-contrib chalk commander ethers 2>/dev/null || \
+    npm install --production blessed blessed-contrib chalk commander ethers
+
+# TUI Dashboard support
+ENV TERM=xterm-256color
+ENV NODE_ENV=production
+
+# Entry point - use standalone dashboard (no sdk-core dependency)
+ENTRYPOINT ["node", "dist/dashboard-standalone.js"]
+
+# Default: run dashboard
+CMD ["dashboard"]

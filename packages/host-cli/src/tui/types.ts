@@ -12,12 +12,28 @@ export interface DashboardState {
   isRefreshing: boolean;
 }
 
+/**
+ * NodeStatus matches fabstir-llm-node /status endpoint response
+ * Falls back to /health + /v1/version when /status unavailable
+ */
 export interface NodeStatus {
-  status: 'running' | 'stopped';
-  pid?: number;
-  uptime?: number;
-  publicUrl?: string;
-  version?: string;
+  status: 'active' | 'busy' | 'maintenance';
+  node_id?: string;
+  peer_id?: string;
+  uptime_seconds: number;
+  active_sessions: number;
+  total_jobs_completed: number;
+  capabilities?: {
+    inference: boolean;
+    encryption: boolean;
+    rag: boolean;
+    s5_vector_loading: boolean;
+    proof_generation: string;
+  };
+  models_loaded: string[];
+  chain_id: number;
+  version: string;
+  health_issues?: string[] | null; // From /health endpoint fallback
 }
 
 export interface LogEntry {
@@ -27,8 +43,6 @@ export interface LogEntry {
 }
 
 export interface EarningsData {
-  today: string;
-  week: string;
-  total: string;
-  currency: string;
+  eth: string;   // ETH balance (formatted)
+  usdc: string;  // USDC balance (formatted)
 }
