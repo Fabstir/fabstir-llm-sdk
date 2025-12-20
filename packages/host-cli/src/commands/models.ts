@@ -9,6 +9,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { fetchAllModels, fetchModelById, ModelInfo } from '../services/ModelRegistryClient.js';
+import { downloadModel as downloadModelFile, formatBytes, createProgressBar, getModelsDirectory } from '../services/ModelDownloader.js';
 
 const DEFAULT_RPC_URL = process.env.RPC_URL_BASE_SEPOLIA || 'https://sepolia.base.org';
 
@@ -157,18 +158,19 @@ async function showModelInfo(identifier: string, options: { rpcUrl?: string }): 
 }
 
 /**
- * Download a model (placeholder for Phase 2)
+ * Download a model from HuggingFace with progress and verification
  */
-async function downloadModel(identifier: string, options: { rpcUrl?: string; output?: string }): Promise<void> {
+async function downloadModel(identifier: string, options: { rpcUrl?: string; output?: string; skipVerify?: boolean; hfToken?: string }): Promise<void> {
   const rpcUrl = options.rpcUrl || DEFAULT_RPC_URL;
+  const outputDir = options.output || getModelsDirectory();
+  const hfToken = options.hfToken || process.env.HF_TOKEN || process.env.HUGGING_FACE_TOKEN;
 
-  console.log(chalk.yellow('Model download functionality coming soon.'));
-  console.log('');
-
-  // For now, just show the download URL
   try {
+    // Resolve model by identifier
     const numId = parseInt(identifier, 10);
     let model: ModelInfo | null = null;
+
+    console.log(chalk.gray('Fetching model info...'));
 
     if (!isNaN(numId) && numId > 0) {
       const models = await fetchAllModels(rpcUrl);
@@ -178,20 +180,94 @@ async function downloadModel(identifier: string, options: { rpcUrl?: string; out
       }
     } else if (identifier.startsWith('0x')) {
       model = await fetchModelById(rpcUrl, identifier);
+    } else {
+      console.error(chalk.red('Invalid identifier. Use a number (e.g., 1) or model ID (0x...).'));
+      process.exit(1);
     }
 
-    if (model) {
-      console.log(chalk.blue(`To download ${model.displayName} manually:`));
-      console.log('');
-      console.log(chalk.white(`  wget "${model.downloadUrl}"`));
-      console.log('');
-      console.log(chalk.gray(`Expected SHA256: ${model.sha256Hash}`));
-    } else {
+    if (!model) {
       console.error(chalk.red('Model not found.'));
+      process.exit(1);
+    }
+
+    console.log('');
+    console.log(chalk.bold.blue(`Downloading ${model.displayName}...`));
+    console.log(chalk.gray(`URL: ${model.downloadUrl}`));
+    console.log('');
+
+    let lastPercent = -1;
+
+    const result = await downloadModelFile(
+      model.downloadUrl,
+      model.fileName,
+      model.modelId,
+      rpcUrl,
+      {
+        outputDir,
+        skipVerification: options.skipVerify,
+        hfToken,
+        onProgress: (progress) => {
+          const percent = Math.floor(progress.percent);
+          if (percent !== lastPercent) {
+            lastPercent = percent;
+            const bar = createProgressBar(percent);
+            const downloaded = formatBytes(progress.downloaded);
+            const total = formatBytes(progress.total);
+            const speed = formatBytes(progress.speed) + '/s';
+            process.stdout.write(`\r${bar} ${percent}% | ${downloaded}/${total} | ${speed}   `);
+          }
+        },
+        onStatus: (status) => {
+          console.log(chalk.gray(`  ${status}`));
+        },
+      }
+    );
+
+    // Clear progress line
+    process.stdout.write('\n');
+
+    if (result.success) {
+      console.log('');
+      if (result.hashVerified) {
+        console.log(chalk.green('✓ SHA256 hash verified'));
+      } else {
+        console.log(chalk.yellow('⚠ Hash verification skipped (no hash on-chain)'));
+      }
+      console.log(chalk.green(`✓ Saved to: ${result.filePath}`));
+      console.log('');
+      console.log(chalk.bold('To register with this model:'));
+      console.log(chalk.white(`  fabstir-host register --model "${model.modelString}" --stake 1000 --url <your-url> --price 2000`));
+    } else {
+      console.log('');
+      console.error(chalk.red(`✗ Download failed: ${result.error}`));
+
+      // Check for auth error
+      if (result.error?.includes('401') || result.error?.includes('Unauthorized')) {
+        console.log('');
+        console.log(chalk.yellow('HuggingFace requires authentication for model downloads.'));
+        console.log(chalk.gray('Set your HuggingFace token using one of these methods:'));
+        console.log(chalk.white('  1. export HF_TOKEN=your_token'));
+        console.log(chalk.white('  2. fabstir-host models download 1 --hf-token your_token'));
+        console.log('');
+        console.log(chalk.gray('Get your token at: https://huggingface.co/settings/tokens'));
+      }
+      process.exit(1);
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : 'Unknown error';
     console.error(chalk.red(`Error: ${errMsg}`));
+
+    // Check for auth error
+    if (errMsg.includes('401') || errMsg.includes('Unauthorized')) {
+      console.log('');
+      console.log(chalk.yellow('HuggingFace requires authentication for model downloads.'));
+      console.log(chalk.gray('Set your HuggingFace token using one of these methods:'));
+      console.log(chalk.white('  1. export HF_TOKEN=your_token'));
+      console.log(chalk.white('  2. fabstir-host models download 1 --hf-token your_token'));
+      console.log('');
+      console.log(chalk.gray('Get your token at: https://huggingface.co/settings/tokens'));
+    }
+    process.exit(1);
   }
 }
 
@@ -223,5 +299,7 @@ export function registerModelsCommand(program: Command): void {
     .description('Download a model file (by number or model ID)')
     .option('-r, --rpc-url <url>', 'RPC URL', DEFAULT_RPC_URL)
     .option('-o, --output <path>', 'Output directory')
+    .option('--skip-verify', 'Skip SHA256 hash verification')
+    .option('--hf-token <token>', 'HuggingFace API token (or set HF_TOKEN env var)')
     .action(downloadModel);
 }

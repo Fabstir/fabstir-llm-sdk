@@ -413,8 +413,8 @@ packages/host-cli/src/
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| Phase 1: Model Discovery | ✅ Complete | `models list`, `models info`, `models download` (placeholder) |
-| Phase 2: Model Download | ⏳ Not Started | Download with SHA256 verification |
+| Phase 1: Model Discovery | ✅ Complete | `models list`, `models info` |
+| Phase 2: Model Download | ✅ Complete | Download with progress, SHA256 verification, HF token support |
 | Phase 3: Pre-Validation | ✅ Complete | Invalid models rejected with suggestions |
 | Phase 4: Interactive Selection | ⏳ Not Started | |
 | Phase 5: Setup Wizard | ⏳ Not Started | |
@@ -428,8 +428,17 @@ packages/host-cli/src/
 - All model metadata derived from on-chain data (no static JSON)
 - Uses minimal inline ABI for clean dependency-free code
 
+**Phase 2 Completed:**
+- Created `ModelDownloader.ts` service with:
+  - Progress bar during download
+  - SHA256 hash verification from on-chain data
+  - HuggingFace token authentication support (`--hf-token` or `HF_TOKEN` env var)
+  - Helpful error messages for 401 auth errors
+- Downloads to `~/fabstir-node/models/` by default
+
 **Files Created:**
 - `packages/host-cli/src/services/ModelRegistryClient.ts`
+- `packages/host-cli/src/services/ModelDownloader.ts`
 - `packages/host-cli/src/commands/models.ts`
 
 **Files Modified:**
