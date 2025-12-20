@@ -41,7 +41,7 @@ export async function handleStart(
     });
 
     if (!response.ok) {
-      const data = await response.json();
+      const data = (await response.json()) as { error?: string };
       return {
         success: false,
         error: data.error || 'Unknown error',
@@ -75,7 +75,7 @@ export async function handleStop(
     });
 
     if (!response.ok) {
-      const data = await response.json();
+      const data = (await response.json()) as { error?: string };
       return {
         success: false,
         error: data.error || 'Unknown error',

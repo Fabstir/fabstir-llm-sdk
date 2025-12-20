@@ -19,7 +19,7 @@ export async function fetchStatus(mgmtUrl: string): Promise<NodeStatus | null> {
     if (!response.ok) {
       return null;
     }
-    return await response.json();
+    return (await response.json()) as NodeStatus;
   } catch {
     return null;
   }
@@ -36,7 +36,7 @@ export async function startNode(mgmtUrl: string): Promise<{ success: boolean; er
       body: JSON.stringify({ daemon: true }),
     });
     if (!response.ok) {
-      const data = await response.json();
+      const data = (await response.json()) as { error?: string };
       return { success: false, error: data.error || 'Unknown error' };
     }
     return { success: true };
@@ -55,7 +55,7 @@ export async function stopNode(mgmtUrl: string): Promise<{ success: boolean; err
       headers: { 'Content-Type': 'application/json' },
     });
     if (!response.ok) {
-      const data = await response.json();
+      const data = (await response.json()) as { error?: string };
       return { success: false, error: data.error || 'Unknown error' };
     }
     return { success: true };
