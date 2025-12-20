@@ -142,11 +142,100 @@ export async function updateStablePricing(
 }
 
 /**
- * Formats price for display
+ * Updates the native (ETH) pricing for the host
+ * Native price is stored as wei per million tokens in contract
+ * User inputs in Gwei for convenience (1 Gwei = 10^9 wei)
+ *
+ * @param privateKey The host's private key for signing
+ * @param rpcUrl RPC URL for the blockchain
+ * @param newPriceGwei New price in Gwei per million tokens (e.g., 500000 = 0.0005 ETH)
+ * @param onStatus Callback for status updates
+ * @returns UpdatePricingResult
+ */
+export async function updateNativePricing(
+  privateKey: string,
+  rpcUrl: string,
+  newPriceGwei: number,
+  onStatus?: (status: string) => void
+): Promise<UpdatePricingResult> {
+  try {
+    // Contract minimum is 227273 wei per million tokens
+    // That's about 0.000227 Gwei, so any reasonable Gwei value should work
+    const MIN_NATIVE_RAW = 227273n;
+    const priceInWei = BigInt(Math.round(newPriceGwei * 1e9)); // Gwei to wei
+
+    if (priceInWei < MIN_NATIVE_RAW) {
+      return {
+        success: false,
+        error: `Price must be at least ${Number(MIN_NATIVE_RAW) / 1e9} Gwei/million tokens`,
+      };
+    }
+
+    // Normalize private key
+    const normalizedKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
+
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const wallet = new ethers.Wallet(normalizedKey, provider);
+    const contract = new ethers.Contract(NODE_REGISTRY_ADDRESS, NODE_REGISTRY_ABI, wallet);
+
+    onStatus?.(`Updating ETH price to ${newPriceGwei} Gwei/million tokens...`);
+
+    const tx = await contract.updatePricingNative(priceInWei);
+    onStatus?.(`Transaction sent: ${tx.hash.slice(0, 10)}...`);
+    onStatus?.('Waiting for confirmation...');
+
+    const receipt = await tx.wait(1);
+
+    if (receipt.status === 1) {
+      return {
+        success: true,
+        txHash: tx.hash,
+        newPrice: newPriceGwei.toString(),
+      };
+    } else {
+      return {
+        success: false,
+        error: 'Transaction reverted',
+        txHash: tx.hash,
+      };
+    }
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+    if (errorMsg.includes('insufficient funds')) {
+      return { success: false, error: 'Insufficient ETH for gas' };
+    }
+    if (errorMsg.includes('nonce')) {
+      return { success: false, error: 'Nonce error - try again' };
+    }
+    if (errorMsg.includes('below minimum')) {
+      return { success: false, error: 'Price below contract minimum (try higher value)' };
+    }
+    return { success: false, error: errorMsg.slice(0, 100) };
+  }
+}
+
+/**
+ * Formats stable price for display
  * @param priceRaw Raw price from contract
  * @returns Formatted string like "$5.00/million"
  */
 export function formatPrice(priceRaw: bigint): string {
   const priceNum = Number(priceRaw) / PRICE_PRECISION;
   return `$${priceNum.toFixed(2)}/million`;
+}
+
+/**
+ * Formats native price for display
+ * Native price is stored as wei per million tokens
+ * @param priceRaw Raw price from contract (in wei)
+ * @returns Formatted string like "8990.22 Gwei/M" or "0.009 ETH/M"
+ */
+export function formatNativePrice(priceRaw: bigint): string {
+  const priceInGwei = Number(priceRaw) / 1e9;
+  if (priceInGwei >= 1000000) {
+    // Show as ETH if very large
+    const priceInEth = Number(priceRaw) / 1e18;
+    return `${priceInEth.toFixed(4)} ETH/M`;
+  }
+  return `${priceInGwei.toFixed(2)} Gwei/M`;
 }

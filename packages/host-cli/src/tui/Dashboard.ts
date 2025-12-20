@@ -16,7 +16,7 @@ import { formatLogEntry } from './components/LogsPanel.js';
 import { fetchStatus } from './services/MgmtClient.js';
 import { fetchEarnings, deriveAddressFromPrivateKey } from './services/EarningsClient.js';
 import { withdrawAllEarnings } from './services/WithdrawalService.js';
-import { fetchCurrentPricing, updateStablePricing, formatPrice } from './services/PricingService.js';
+import { fetchCurrentPricing, updateStablePricing, updateNativePricing, formatPrice, formatNativePrice } from './services/PricingService.js';
 import { DockerLogStream } from './services/DockerLogs.js';
 import { showMessage, showError } from './actions.js';
 
@@ -174,64 +174,121 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
       return;
     }
 
-    logsBox.log(`[PRICING] Current USDC price: ${formatPrice(pricing.stablePriceRaw)}`);
+    logsBox.log(`[PRICING] USDC: ${formatPrice(pricing.stablePriceRaw)} | ETH: ${formatNativePrice(pricing.nativePriceRaw)}`);
     screen.render();
 
-    // Create input prompt for new price
-    const inputBox = blessed.textbox({
+    // Create menu to choose price type
+    const menuBox = blessed.list({
       parent: screen,
       top: 'center',
       left: 'center',
-      width: 50,
-      height: 3,
+      width: 40,
+      height: 6,
       border: { type: 'line' },
-      label: ' New price ($/million tokens) or ESC to cancel ',
+      label: ' Select price to update ',
       style: {
         fg: 'white',
         bg: 'blue',
         border: { fg: 'white' },
+        selected: { bg: 'green', fg: 'white' },
       },
-      inputOnFocus: true,
+      keys: true,
+      vi: true,
+      items: ['[U] USDC (stablecoin)', '[E] ETH (native token)', '[ESC] Cancel'],
     });
 
-    inputBox.focus();
+    menuBox.focus();
     screen.render();
 
-    inputBox.on('submit', async (value: string) => {
-      inputBox.destroy();
+    const handlePriceUpdate = async (priceType: 'usdc' | 'eth') => {
+      menuBox.destroy();
       screen.render();
 
-      const newPrice = parseFloat(value);
-      if (isNaN(newPrice) || newPrice <= 0) {
-        logsBox.log(showError('Invalid price entered'));
+      const label = priceType === 'usdc'
+        ? ' New USDC price ($/million) or ESC to cancel '
+        : ' New ETH price (Gwei/million) or ESC to cancel ';
+
+      const inputBox = blessed.textbox({
+        parent: screen,
+        top: 'center',
+        left: 'center',
+        width: 50,
+        height: 3,
+        border: { type: 'line' },
+        label,
+        style: { fg: 'white', bg: 'blue', border: { fg: 'white' } },
+        inputOnFocus: true,
+      });
+
+      inputBox.focus();
+      screen.render();
+
+      inputBox.on('submit', async (value: string) => {
+        inputBox.destroy();
         screen.render();
-        return;
-      }
 
-      logsBox.log(`[PRICING] Updating to $${newPrice.toFixed(2)}/million tokens...`);
-      screen.render();
+        const newPrice = parseFloat(value);
+        if (isNaN(newPrice) || newPrice <= 0) {
+          logsBox.log(showError('Invalid price entered'));
+          screen.render();
+          return;
+        }
 
-      const result = await updateStablePricing(hostPrivateKey, rpcUrl, newPrice, (status) => {
-        logsBox.log(`[PRICING] ${status}`);
+        if (priceType === 'usdc') {
+          logsBox.log(`[PRICING] Updating USDC to $${newPrice.toFixed(2)}/million...`);
+          screen.render();
+          const result = await updateStablePricing(hostPrivateKey, rpcUrl, newPrice, (status) => {
+            logsBox.log(`[PRICING] ${status}`);
+            screen.render();
+          });
+          if (result.success) {
+            logsBox.log(showMessage(`USDC price updated to $${result.newPrice}/million`));
+            logsBox.log(`[PRICING] TX: ${result.txHash}`);
+          } else {
+            logsBox.log(showError(`Price update failed: ${result.error}`));
+          }
+        } else {
+          logsBox.log(`[PRICING] Updating ETH to ${newPrice} Gwei/million...`);
+          screen.render();
+          const result = await updateNativePricing(hostPrivateKey, rpcUrl, newPrice, (status) => {
+            logsBox.log(`[PRICING] ${status}`);
+            screen.render();
+          });
+          if (result.success) {
+            logsBox.log(showMessage(`ETH price updated to ${result.newPrice} Gwei/million`));
+            logsBox.log(`[PRICING] TX: ${result.txHash}`);
+          } else {
+            logsBox.log(showError(`Price update failed: ${result.error}`));
+          }
+        }
         screen.render();
       });
 
-      if (result.success) {
-        logsBox.log(showMessage(`Price updated to $${result.newPrice}/million tokens`));
-        logsBox.log(`[PRICING] TX: ${result.txHash}`);
-      } else {
-        logsBox.log(showError(`Price update failed: ${result.error}`));
-      }
-      screen.render();
-    });
+      inputBox.on('cancel', () => {
+        inputBox.destroy();
+        logsBox.log('[PRICING] Cancelled');
+        screen.render();
+      });
 
-    inputBox.on('cancel', () => {
-      inputBox.destroy();
+      inputBox.readInput();
+    };
+
+    menuBox.key(['u'], () => handlePriceUpdate('usdc'));
+    menuBox.key(['e'], () => handlePriceUpdate('eth'));
+    menuBox.key(['escape'], () => {
+      menuBox.destroy();
       logsBox.log('[PRICING] Cancelled');
       screen.render();
     });
-
-    inputBox.readInput();
+    menuBox.on('select', (_item: blessed.Widgets.BoxElement, index: number) => {
+      if (index === 0) handlePriceUpdate('usdc');
+      else if (index === 1) handlePriceUpdate('eth');
+      else {
+        menuBox.destroy();
+        logsBox.log('[PRICING] Cancelled');
+        screen.render();
+      }
+    });
   });
 
   screen.key(['w'], async () => {
@@ -280,7 +337,7 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
 
   // Initial refresh
   await Promise.all([refreshStatus(), refreshEarnings()]);
-  logsBox.log('Dashboard v1.1.0 (Phase 4: Pricing). Press R to refresh, Q to quit.');
+  logsBox.log('Dashboard v1.2.1 (USDC+Gwei Pricing). Press R to refresh, Q to quit.');
 
   // Set up Docker log streaming (auto-detects container)
   const logStream = new DockerLogStream();
