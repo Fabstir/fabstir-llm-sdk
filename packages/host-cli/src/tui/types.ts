@@ -43,8 +43,6 @@ export interface LogEntry {
 }
 
 export interface EarningsData {
-  today: string;
-  week: string;
-  total: string;
-  currency: string;
+  eth: string;   // ETH balance (formatted)
+  usdc: string;  // USDC balance (formatted)
 }

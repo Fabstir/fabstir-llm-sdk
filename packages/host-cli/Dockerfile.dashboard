@@ -5,6 +5,10 @@
 # For monitoring nodes - does NOT include fabstir-llm-node
 #
 # PREREQUISITE: Run `pnpm build` in packages/host-cli before building this image
+#
+# ENVIRONMENT VARIABLES:
+#   HOST_PRIVATE_KEY - Host wallet private key (required for earnings display)
+#   RPC_URL - Blockchain RPC URL (default: https://sepolia.base.org)
 
 FROM node:20-alpine
 
@@ -22,8 +26,8 @@ COPY packages/host-cli/package.json ./package.json.orig
 # Remove workspace dependencies and install runtime deps only
 RUN sed 's|"@fabstir/sdk-core": "workspace:\*",||g' package.json.orig > package.json && \
     rm package.json.orig && \
-    npm install --omit=dev --ignore-scripts blessed blessed-contrib chalk commander 2>/dev/null || \
-    npm install --production blessed blessed-contrib chalk commander
+    npm install --omit=dev --ignore-scripts blessed blessed-contrib chalk commander ethers 2>/dev/null || \
+    npm install --production blessed blessed-contrib chalk commander ethers
 
 # TUI Dashboard support
 ENV TERM=xterm-256color

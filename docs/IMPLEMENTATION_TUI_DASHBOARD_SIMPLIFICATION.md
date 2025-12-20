@@ -1,6 +1,6 @@
 # TUI Dashboard Simplification - Implementation Plan
 
-**Status:** Complete ✅
+**Status:** Phase 1 Complete ✅ | Phase 2 (Earnings) Complete ✅ | Phase 3 (Withdrawal) Complete ✅
 **Branch:** `feature/host-tui-dashboard`
 **Created:** 2025-12-20
 
@@ -263,3 +263,285 @@ docker run --rm -it --network host fabstir/host-cli:latest dashboard --url http:
 | Log source | WebSocket to mgmt server | Docker logs (auto-detect) |
 | Required processes | Node + Management server | Node only |
 | User input needed | Container name, port, etc. | None (auto-detect) |
+
+---
+
+## Phase 2: Earnings Panel Implementation
+
+**Status:** Complete ✅
+
+### Problem
+
+The Earnings panel currently shows "Loading..." and never updates. Host operators need to see their accumulated earnings from the HostEarnings contract.
+
+### Solution
+
+Query the HostEarnings contract on-chain via RPC to display:
+- ETH balance (native token earnings)
+- USDC balance (stablecoin earnings)
+- Total value in USD (optional)
+
+### Requirements
+
+To query earnings, the dashboard needs:
+1. **Host wallet address** - Derived from `HOST_PRIVATE_KEY` environment variable
+2. **RPC URL** - To query Base Sepolia blockchain
+3. **Contract addresses** - HostEarnings and USDC token
+
+### HostEarnings Contract API
+
+**Contract Address:** `0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0` (Base Sepolia)
+
+```typescript
+// Get balance for a specific token
+function getBalance(address host, address token) external view returns (uint256)
+
+// Get balances for multiple tokens at once
+function getBalances(address host, address[] tokens) external view returns (uint256[])
+
+// Token addresses:
+// - Native ETH: address(0) or 0x0000000000000000000000000000000000000000
+// - USDC: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
+```
+
+### Implementation Tasks
+
+#### Task 2.1: Add Environment Variables Support
+- [x] Read `HOST_PRIVATE_KEY` from environment to derive host address
+- [x] Read `RPC_URL` from environment (default: `https://sepolia.base.org`)
+- [x] Add `--rpc-url` CLI option to override
+
+**File:** `packages/host-cli/src/dashboard-standalone.ts`
+
+#### Task 2.2: Create EarningsClient Service
+- [x] Create `EarningsClient.ts` in `src/tui/services/`
+- [x] Implement `fetchEarnings(hostAddress, rpcUrl)` function
+- [x] Query HostEarnings contract for ETH balance (address(0))
+- [x] Query HostEarnings contract for USDC balance
+- [x] Return `EarningsData` interface
+
+**File:** `packages/host-cli/src/tui/services/EarningsClient.ts`
+
+```typescript
+import { ethers } from 'ethers';
+import { EarningsData } from '../types';
+
+const HOST_EARNINGS_ADDRESS = '0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0';
+const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+
+const HOST_EARNINGS_ABI = [
+  'function getBalance(address host, address token) view returns (uint256)',
+  'function getBalances(address host, address[] tokens) view returns (uint256[])'
+];
+
+export async function fetchEarnings(
+  hostAddress: string,
+  rpcUrl: string
+): Promise<EarningsData | null> {
+  try {
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const contract = new ethers.Contract(HOST_EARNINGS_ADDRESS, HOST_EARNINGS_ABI, provider);
+
+    // Query both ETH and USDC balances in one call
+    const [ethBalance, usdcBalance] = await contract.getBalances(
+      hostAddress,
+      [ethers.ZeroAddress, USDC_ADDRESS]
+    );
+
+    return {
+      eth: ethers.formatEther(ethBalance),
+      usdc: ethers.formatUnits(usdcBalance, 6),
+      currency: 'USD'
+    };
+  } catch (error) {
+    console.error('Failed to fetch earnings:', error);
+    return null;
+  }
+}
+
+export function deriveAddressFromPrivateKey(privateKey: string): string {
+  const wallet = new ethers.Wallet(privateKey);
+  return wallet.address;
+}
+```
+
+#### Task 2.3: Update EarningsData Type
+- [x] Update `EarningsData` interface to match contract data
+- [x] Remove `today`/`week` fields (not available on-chain)
+- [x] Add `eth` and `usdc` fields
+
+**File:** `packages/host-cli/src/tui/types.ts`
+
+```typescript
+export interface EarningsData {
+  eth: string;      // ETH balance (formatted)
+  usdc: string;     // USDC balance (formatted)
+  currency: string; // Display currency
+}
+```
+
+#### Task 2.4: Create EarningsPanel Component
+- [x] Create `EarningsPanel.ts` in `src/tui/components/`
+- [x] Format earnings display with ETH and USDC amounts
+- [x] Show "No earnings yet" when balances are zero
+- [x] Handle loading and error states
+
+**File:** `packages/host-cli/src/tui/components/EarningsPanel.ts`
+
+```typescript
+import { EarningsData } from '../types';
+
+export function formatEarningsPanel(earnings: EarningsData | null): string {
+  if (!earnings) {
+    return '⚠️ Unable to fetch earnings\n\nCheck HOST_PRIVATE_KEY and RPC_URL';
+  }
+
+  const ethNum = parseFloat(earnings.eth);
+  const usdcNum = parseFloat(earnings.usdc);
+
+  if (ethNum === 0 && usdcNum === 0) {
+    return 'No earnings yet\n\nComplete jobs to earn rewards';
+  }
+
+  const lines: string[] = [
+    '💰 Available Balance',
+    '',
+    `ETH:  ${earnings.eth} ETH`,
+    `USDC: ${earnings.usdc} USDC`,
+    '',
+    'Press [W] to withdraw'
+  ];
+
+  return lines.join('\n');
+}
+```
+
+#### Task 2.5: Update Dashboard.ts
+- [x] Import `fetchEarnings` and `deriveAddressFromPrivateKey`
+- [x] Import `formatEarningsPanel`
+- [x] Read `HOST_PRIVATE_KEY` from environment
+- [x] Derive host address from private key
+- [x] Add `refreshEarnings()` function
+- [x] Call `refreshEarnings()` on initial load and with status refresh
+- [x] Update earnings box content
+
+**File:** `packages/host-cli/src/tui/Dashboard.ts`
+
+#### Task 2.6: Update dashboard-standalone.ts
+- [x] Add `--rpc-url` option
+- [x] Pass RPC URL to dashboard options
+- [x] Document required environment variables
+
+**File:** `packages/host-cli/src/dashboard-standalone.ts`
+
+#### Task 2.7: Update Dockerfile.dashboard
+- [x] Add `ethers` to npm install command
+- [x] Document `HOST_PRIVATE_KEY` environment variable requirement
+
+**File:** `packages/host-cli/Dockerfile.dashboard`
+
+### Task 2.8: Build and Test
+- [x] Run `pnpm build` in packages/host-cli
+- [x] Fix any TypeScript errors
+- [ ] Test on production server with real HOST_PRIVATE_KEY
+
+### User Experience
+
+**Before:**
+```
+┌─ Earnings ─────────┐
+│ Loading...         │
+│                    │
+└────────────────────┘
+```
+
+**After:**
+```
+┌─ Earnings ─────────┐
+│ 💰 Available Balance│
+│                    │
+│ ETH:  0.0123 ETH   │
+│ USDC: 45.67 USDC   │
+│                    │
+│ Press [W] to withdraw│
+└────────────────────┘
+```
+
+### Docker Run Command (Updated)
+
+```bash
+docker run --rm -it \
+  --network host \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e HOST_PRIVATE_KEY=your_private_key_here \
+  -e RPC_URL=https://sepolia.base.org \
+  julesl123/fabstir-host-cli:latest
+```
+
+### Dependencies
+
+Need to add `ethers` to the dashboard Docker image:
+
+```dockerfile
+RUN npm install --omit=dev blessed blessed-contrib chalk commander ethers
+```
+
+### Security Considerations
+
+- Private key is used to derive address and sign withdrawal transactions
+- Private key never leaves the local environment
+- Only the host can withdraw their own earnings
+
+---
+
+## Phase 3: Withdrawal Functionality
+
+**Status:** Complete ✅
+
+### Problem
+
+Users can see their earnings but cannot withdraw them from the dashboard.
+
+### Solution
+
+Implement withdrawal when user presses [W]:
+1. Check if HOST_PRIVATE_KEY is set
+2. Check if there are earnings to withdraw
+3. Call `withdrawAll()` or `withdrawMultiple()` on HostEarnings contract
+4. Display transaction status in logs
+5. Refresh earnings display after success
+
+### Implementation
+
+#### Task 3.1: Create WithdrawalService.ts
+- [x] Create service to sign and send withdrawal transactions
+- [x] Support both ETH and USDC withdrawals
+- [x] Handle common errors (insufficient gas, nonce issues)
+
+**File:** `packages/host-cli/src/tui/services/WithdrawalService.ts`
+
+#### Task 3.2: Update Dashboard.ts
+- [x] Import WithdrawalService
+- [x] Update 'w' key handler to call withdrawal
+- [x] Show status updates in logs panel
+- [x] Refresh earnings after successful withdrawal
+
+**File:** `packages/host-cli/src/tui/Dashboard.ts`
+
+### User Experience
+
+When user presses [W]:
+```
+[WITHDRAW] Checking balances...
+[WITHDRAW] Sending withdrawal transaction...
+[WITHDRAW] Transaction sent: 0x1234abcd...
+[WITHDRAW] Waiting for confirmation...
+✅ Withdrawn: $0.26 USDC
+[WITHDRAW] TX: 0x1234abcdef...
+```
+
+### Security Notes
+
+- Private key is required for signing withdrawal transactions
+- Only the host's own earnings can be withdrawn
+- Transaction is signed locally, private key never sent over network

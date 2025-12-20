@@ -8,17 +8,21 @@
 
 import blessed from 'blessed';
 import contrib from 'blessed-contrib';
-import { DashboardState } from './types';
-import { formatHeader } from './components/Header';
-import { formatStatusPanel } from './components/StatusPanel';
-import { formatLogEntry } from './components/LogsPanel';
-import { fetchStatus } from './services/MgmtClient';
-import { DockerLogStream } from './services/DockerLogs';
-import { showMessage, showError } from './actions';
+import { DashboardState } from './types.js';
+import { formatHeader } from './components/Header.js';
+import { formatStatusPanel } from './components/StatusPanel.js';
+import { formatEarningsPanel } from './components/EarningsPanel.js';
+import { formatLogEntry } from './components/LogsPanel.js';
+import { fetchStatus } from './services/MgmtClient.js';
+import { fetchEarnings, deriveAddressFromPrivateKey } from './services/EarningsClient.js';
+import { withdrawAllEarnings } from './services/WithdrawalService.js';
+import { DockerLogStream } from './services/DockerLogs.js';
+import { showMessage, showError } from './actions.js';
 
 export interface CreateDashboardOptions {
   nodeUrl: string;
   refreshInterval: number;
+  rpcUrl?: string;
   testMode?: boolean;
   hostAddress?: string;
   chainName?: string;
@@ -31,6 +35,19 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
     return;
   }
 
+  // Derive host address from private key if available
+  const hostPrivateKey = process.env.HOST_PRIVATE_KEY;
+  let hostAddress = options.hostAddress;
+  if (!hostAddress && hostPrivateKey) {
+    try {
+      hostAddress = deriveAddressFromPrivateKey(hostPrivateKey);
+    } catch {
+      // Invalid private key, will show error in earnings panel
+    }
+  }
+
+  const rpcUrl = options.rpcUrl || process.env.RPC_URL || 'https://sepolia.base.org';
+
   const screen = blessed.screen({
     smartCSR: true,
     title: 'Fabstir Host Dashboard',
@@ -39,9 +56,9 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
   const grid = new contrib.grid({ rows: 12, cols: 12, screen });
 
   // Header (row 0)
-  const headerContent = options.hostAddress
-    ? formatHeader(options.hostAddress, options.chainName || 'Unknown', options.stake || '0')
-    : ' Fabstir Host Dashboard | Loading...';
+  const headerContent = hostAddress
+    ? formatHeader(hostAddress, options.chainName || 'Base Sepolia', options.stake || '0')
+    : ' Fabstir Host Dashboard | Set HOST_PRIVATE_KEY to see earnings';
   const header = grid.set(0, 0, 1, 12, blessed.box, {
     content: headerContent,
     style: { fg: 'white', bg: 'blue' },
@@ -96,12 +113,35 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
       if (status) {
         statusBox.setContent(formatStatusPanel(status));
       } else {
-        statusBox.setContent('⚠️ Unable to connect to node at ' + options.nodeUrl);
+        statusBox.setContent('Unable to connect to node at ' + options.nodeUrl);
       }
 
       screen.render();
     } finally {
       state.isRefreshing = false;
+    }
+  }
+
+  // Update earnings display
+  async function refreshEarnings(): Promise<void> {
+    if (!hostAddress) {
+      earningsBox.setContent('No HOST_PRIVATE_KEY set');
+      screen.render();
+      return;
+    }
+
+    try {
+      earningsBox.setContent(`Fetching...\n\n${hostAddress.slice(0, 10)}...`);
+      screen.render();
+
+      const earnings = await fetchEarnings(hostAddress, rpcUrl);
+      state.earnings = earnings;
+      earningsBox.setContent(formatEarningsPanel(earnings, hostAddress));
+      screen.render();
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Unknown error';
+      earningsBox.setContent(`Error:\n${errMsg.slice(0, 50)}`);
+      screen.render();
     }
   }
 
@@ -112,8 +152,8 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
   });
 
   screen.key(['r'], async () => {
-    logsBox.log('Refreshing status...');
-    await refreshStatus();
+    logsBox.log('Refreshing...');
+    await Promise.all([refreshStatus(), refreshEarnings()]);
   });
 
   screen.key(['p'], () => {
@@ -121,14 +161,53 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
     screen.render();
   });
 
-  screen.key(['w'], () => {
-    logsBox.log(showError('Withdrawal not yet implemented'));
+  screen.key(['w'], async () => {
+    if (!hostPrivateKey) {
+      logsBox.log(showError('Cannot withdraw: HOST_PRIVATE_KEY not set'));
+      screen.render();
+      return;
+    }
+
+    if (!state.earnings) {
+      logsBox.log(showError('Cannot withdraw: No earnings data'));
+      screen.render();
+      return;
+    }
+
+    const ethNum = parseFloat(state.earnings.eth);
+    const usdcNum = parseFloat(state.earnings.usdc);
+
+    if (ethNum === 0 && usdcNum === 0) {
+      logsBox.log(showError('No earnings to withdraw'));
+      screen.render();
+      return;
+    }
+
+    logsBox.log('Starting withdrawal...');
+    screen.render();
+
+    const result = await withdrawAllEarnings(hostPrivateKey, rpcUrl, (status) => {
+      logsBox.log(`[WITHDRAW] ${status}`);
+      screen.render();
+    });
+
+    if (result.success) {
+      const amounts = [];
+      if (result.ethAmount) amounts.push(`${result.ethAmount} ETH`);
+      if (result.usdcAmount) amounts.push(`$${result.usdcAmount} USDC`);
+      logsBox.log(showMessage(`Withdrawn: ${amounts.join(' + ')}`));
+      logsBox.log(`[WITHDRAW] TX: ${result.txHash}`);
+      // Refresh earnings after withdrawal
+      await refreshEarnings();
+    } else {
+      logsBox.log(showError(`Withdrawal failed: ${result.error}`));
+    }
     screen.render();
   });
 
   // Initial refresh
-  await refreshStatus();
-  logsBox.log('Dashboard started. Press Q to quit.');
+  await Promise.all([refreshStatus(), refreshEarnings()]);
+  logsBox.log('Dashboard started. Press R to refresh, Q to quit.');
 
   // Set up Docker log streaming (auto-detects container)
   const logStream = new DockerLogStream();
@@ -158,7 +237,7 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
 
   // Set up refresh interval
   const refreshTimer = setInterval(async () => {
-    await refreshStatus();
+    await Promise.all([refreshStatus(), refreshEarnings()]);
   }, options.refreshInterval);
 
   // Cleanup on exit

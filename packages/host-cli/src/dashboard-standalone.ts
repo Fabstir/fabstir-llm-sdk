@@ -20,11 +20,13 @@ program
   .command('dashboard')
   .description('Open interactive TUI dashboard for node monitoring')
   .option('--url <url>', 'Node URL (fabstir-llm-node)', 'http://localhost:8080')
+  .option('--rpc-url <url>', 'Blockchain RPC URL', 'https://sepolia.base.org')
   .option('--refresh-interval <ms>', 'Status refresh interval in milliseconds', '5000')
   .action(async (options) => {
     const { createDashboard } = await import('./tui/Dashboard.js');
     await createDashboard({
       nodeUrl: options.url,
+      rpcUrl: options.rpcUrl,
       refreshInterval: parseInt(options.refreshInterval, 10),
     });
   });
