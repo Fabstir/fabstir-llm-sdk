@@ -12,12 +12,26 @@ export interface DashboardState {
   isRefreshing: boolean;
 }
 
+/**
+ * NodeStatus matches fabstir-llm-node /status endpoint response
+ */
 export interface NodeStatus {
-  status: 'running' | 'stopped';
-  pid?: number;
-  uptime?: number;
-  publicUrl?: string;
-  version?: string;
+  status: 'active' | 'busy' | 'maintenance';
+  node_id?: string;
+  peer_id?: string;
+  uptime_seconds: number;
+  active_sessions: number;
+  total_jobs_completed: number;
+  capabilities?: {
+    inference: boolean;
+    encryption: boolean;
+    rag: boolean;
+    s5_vector_loading: boolean;
+    proof_generation: string;
+  };
+  models_loaded: string[];
+  chain_id: number;
+  version: string;
 }
 
 export interface LogEntry {

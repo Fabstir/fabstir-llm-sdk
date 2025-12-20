@@ -2,20 +2,20 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 /**
- * Management API Client
- * Fetches node status from the management server
+ * Node API Client
+ * Fetches node status directly from fabstir-llm-node
  */
 
 import { NodeStatus } from '../types';
 
 /**
- * Fetches node status from the management API
- * @param mgmtUrl Base URL of the management server
+ * Fetches node status from fabstir-llm-node /status endpoint
+ * @param nodeUrl Base URL of the node (e.g., http://localhost:8080)
  * @returns NodeStatus object or null on error
  */
-export async function fetchStatus(mgmtUrl: string): Promise<NodeStatus | null> {
+export async function fetchStatus(nodeUrl: string): Promise<NodeStatus | null> {
   try {
-    const response = await fetch(`${mgmtUrl}/api/status`);
+    const response = await fetch(`${nodeUrl}/status`);
     if (!response.ok) {
       return null;
     }
@@ -26,40 +26,18 @@ export async function fetchStatus(mgmtUrl: string): Promise<NodeStatus | null> {
 }
 
 /**
- * Starts the node via management API
+ * Fetches health status from fabstir-llm-node /health endpoint
+ * @param nodeUrl Base URL of the node
+ * @returns Health status or null on error
  */
-export async function startNode(mgmtUrl: string): Promise<{ success: boolean; error?: string }> {
+export async function fetchHealth(nodeUrl: string): Promise<{ status: string; issues: string[] | null } | null> {
   try {
-    const response = await fetch(`${mgmtUrl}/api/start`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ daemon: true }),
-    });
+    const response = await fetch(`${nodeUrl}/health`);
     if (!response.ok) {
-      const data = (await response.json()) as { error?: string };
-      return { success: false, error: data.error || 'Unknown error' };
+      return null;
     }
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: String(e) };
-  }
-}
-
-/**
- * Stops the node via management API
- */
-export async function stopNode(mgmtUrl: string): Promise<{ success: boolean; error?: string }> {
-  try {
-    const response = await fetch(`${mgmtUrl}/api/stop`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (!response.ok) {
-      const data = (await response.json()) as { error?: string };
-      return { success: false, error: data.error || 'Unknown error' };
-    }
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: String(e) };
+    return (await response.json()) as { status: string; issues: string[] | null };
+  } catch {
+    return null;
   }
 }

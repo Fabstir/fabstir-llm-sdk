@@ -9,7 +9,7 @@
 import { Command } from 'commander';
 
 export interface DashboardOptions {
-  mgmtUrl: string;
+  url: string;
   refreshInterval: string;
 }
 
@@ -18,9 +18,9 @@ export function registerDashboardCommand(program: Command): void {
     .command('dashboard')
     .description('Open interactive TUI dashboard for node management')
     .option(
-      '--mgmt-url <url>',
-      'Management server URL',
-      'http://localhost:3001'
+      '--url <url>',
+      'Node URL (fabstir-llm-node)',
+      'http://localhost:8080'
     )
     .option(
       '--refresh-interval <ms>',
@@ -31,7 +31,7 @@ export function registerDashboardCommand(program: Command): void {
       // Import dynamically to avoid loading blessed on every CLI invocation
       const { createDashboard } = await import('../tui/Dashboard');
       await createDashboard({
-        mgmtUrl: options.mgmtUrl,
+        nodeUrl: options.url,
         refreshInterval: parseInt(options.refreshInterval, 10),
       });
     });

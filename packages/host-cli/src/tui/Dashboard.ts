@@ -13,11 +13,11 @@ import { formatHeader } from './components/Header';
 import { formatStatusPanel } from './components/StatusPanel';
 import { formatLogEntry } from './components/LogsPanel';
 import { fetchStatus } from './services/MgmtClient';
-import { LogStreamClient } from './services/LogStream';
-import { handleStart, handleStop, showMessage, showError } from './actions';
+import { DockerLogStream } from './services/DockerLogs';
+import { showMessage, showError } from './actions';
 
 export interface CreateDashboardOptions {
-  mgmtUrl: string;
+  nodeUrl: string;
   refreshInterval: number;
   testMode?: boolean;
   hostAddress?: string;
@@ -72,7 +72,7 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
 
   // Actions bar (row 11)
   const actionsBar = grid.set(11, 0, 1, 12, blessed.box, {
-    content: ' [R]efresh  [S]tart  [X]Stop  [P]ricing  [W]ithdraw  [Q]uit ',
+    content: ' [R]efresh  [P]ricing  [W]ithdraw  [Q]uit ',
     style: { fg: 'white', bg: 'gray' },
   });
 
@@ -90,13 +90,13 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
     state.isRefreshing = true;
 
     try {
-      const status = await fetchStatus(options.mgmtUrl);
+      const status = await fetchStatus(options.nodeUrl);
       state.nodeStatus = status;
 
       if (status) {
         statusBox.setContent(formatStatusPanel(status));
       } else {
-        statusBox.setContent('⚠️ Unable to connect to management server');
+        statusBox.setContent('⚠️ Unable to connect to node at ' + options.nodeUrl);
       }
 
       screen.render();
@@ -116,32 +116,6 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
     await refreshStatus();
   });
 
-  screen.key(['s'], async () => {
-    logsBox.log('Starting node...');
-    const result = await handleStart(options.mgmtUrl, async () => {
-      await refreshStatus();
-    });
-    if (result.success) {
-      logsBox.log(showMessage('Node started'));
-    } else {
-      logsBox.log(showError(`Start failed: ${result.error}`));
-    }
-    screen.render();
-  });
-
-  screen.key(['x'], async () => {
-    logsBox.log('Stopping node...');
-    const result = await handleStop(options.mgmtUrl, async () => {
-      await refreshStatus();
-    });
-    if (result.success) {
-      logsBox.log(showMessage('Node stopped'));
-    } else {
-      logsBox.log(showError(`Stop failed: ${result.error}`));
-    }
-    screen.render();
-  });
-
   screen.key(['p'], () => {
     logsBox.log(showError('Pricing management not yet implemented'));
     screen.render();
@@ -156,30 +130,30 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
   await refreshStatus();
   logsBox.log('Dashboard started. Press Q to quit.');
 
-  // Set up log streaming
-  const logStream = new LogStreamClient(options.mgmtUrl);
+  // Set up Docker log streaming (auto-detects container)
+  const logStream = new DockerLogStream();
 
   logStream.on('log', (entry) => {
     logsBox.log(formatLogEntry(entry));
     screen.render();
   });
 
-  logStream.on('connect', () => {
-    logsBox.log('[STREAM] Connected to log stream');
+  logStream.on('connect', (containerName: string) => {
+    logsBox.log(`[DOCKER] Connected to container: ${containerName}`);
     screen.render();
   });
 
   logStream.on('disconnect', () => {
-    logsBox.log('[STREAM] Disconnected from log stream');
+    logsBox.log('[DOCKER] Disconnected from container logs');
     screen.render();
   });
 
   logStream.on('error', (error: Error) => {
-    logsBox.log(`[STREAM] Error: ${error.message}`);
+    logsBox.log(`[DOCKER] ${error.message}`);
     screen.render();
   });
 
-  // Connect to log stream
+  // Connect to Docker logs
   logStream.connect();
 
   // Set up refresh interval
