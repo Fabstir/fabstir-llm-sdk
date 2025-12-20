@@ -1,6 +1,6 @@
 # TUI Dashboard Simplification - Implementation Plan
 
-**Status:** Phase 1 Complete ✅ | Phase 2 (Earnings) Complete ✅ | Phase 3 (Withdrawal) Complete ✅
+**Status:** Phase 1 Complete ✅ | Phase 2 (Earnings) Complete ✅ | Phase 3 (Withdrawal) Complete ✅ | Phase 4 (Pricing) Complete ✅
 **Branch:** `feature/host-tui-dashboard`
 **Created:** 2025-12-20
 
@@ -545,3 +545,86 @@ When user presses [W]:
 - Private key is required for signing withdrawal transactions
 - Only the host's own earnings can be withdrawn
 - Transaction is signed locally, private key never sent over network
+
+---
+
+## Phase 4: Pricing Management
+
+**Status:** Complete ✅
+
+### Problem
+
+The [P] key in the TUI dashboard shows "Pricing management not yet implemented". Host operators need to view and update their pricing from the dashboard.
+
+### Solution
+
+Implement pricing management when user presses [P]:
+1. Show current pricing (ETH and USDC per million tokens)
+2. Prompt for new USDC price via text input
+3. Sign and send transaction to NodeRegistry contract
+4. Display result in logs panel
+
+### NodeRegistry Contract API
+
+**Contract Address:** `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22` (Base Sepolia)
+
+```typescript
+// Read current pricing
+function getNodePricing(address operator, address token) view returns (uint256)
+function nodes(address) view returns (address, uint256, bool, string, string, uint256 minPricePerTokenNative, uint256 minPricePerTokenStable)
+
+// Update pricing
+function updatePricingStable(uint256 newMinPrice) external
+function updatePricingNative(uint256 newMinPrice) external
+```
+
+### Price Format
+
+- PRICE_PRECISION = 1000
+- Price is per million tokens
+- Example: $5/million tokens = 5000 (5 * 1000)
+- Range: $0.001 to $100,000 per million tokens
+
+### Implementation
+
+#### Task 4.1: Create PricingService.ts
+- [x] Create service to query and update pricing
+- [x] Implement `fetchCurrentPricing(hostAddress, rpcUrl)`
+- [x] Implement `updateStablePricing(privateKey, rpcUrl, newPrice)`
+- [x] Handle price formatting (contract units ↔ USD)
+
+**File:** `packages/host-cli/src/tui/services/PricingService.ts`
+
+#### Task 4.2: Update Dashboard.ts
+- [x] Import PricingService functions
+- [x] Update 'p' key handler to fetch and display current price
+- [x] Create blessed textbox for price input
+- [x] Call updateStablePricing() on submit
+- [x] Show result in logs panel
+
+**File:** `packages/host-cli/src/tui/Dashboard.ts`
+
+### User Experience
+
+When user presses [P]:
+```
+[PRICING] Fetching current pricing...
+[PRICING] Current USDC price: $2.00/million
+
+┌─ New price ($/million tokens) or ESC to cancel ─┐
+│ 6.50                                              │
+└───────────────────────────────────────────────────┘
+
+[PRICING] Updating to $6.50/million tokens...
+[PRICING] Updating price to $6.50/million tokens...
+[PRICING] Transaction sent: 0x1234...
+[PRICING] Waiting for confirmation...
+✅ Price updated to $6.50/million tokens
+[PRICING] TX: 0x1234abcdef...
+```
+
+### Security Notes
+
+- Private key required for signing price update transactions
+- Only the host can update their own pricing
+- Transaction signed locally, private key never sent over network

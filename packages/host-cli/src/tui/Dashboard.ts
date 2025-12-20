@@ -16,6 +16,7 @@ import { formatLogEntry } from './components/LogsPanel.js';
 import { fetchStatus } from './services/MgmtClient.js';
 import { fetchEarnings, deriveAddressFromPrivateKey } from './services/EarningsClient.js';
 import { withdrawAllEarnings } from './services/WithdrawalService.js';
+import { fetchCurrentPricing, updateStablePricing, formatPrice } from './services/PricingService.js';
 import { DockerLogStream } from './services/DockerLogs.js';
 import { showMessage, showError } from './actions.js';
 
@@ -156,9 +157,81 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
     await Promise.all([refreshStatus(), refreshEarnings()]);
   });
 
-  screen.key(['p'], () => {
-    logsBox.log(showError('Pricing management not yet implemented'));
+  screen.key(['p'], async () => {
+    if (!hostPrivateKey || !hostAddress) {
+      logsBox.log(showError('Cannot manage pricing: HOST_PRIVATE_KEY not set'));
+      screen.render();
+      return;
+    }
+
+    logsBox.log('[PRICING] Fetching current pricing...');
     screen.render();
+
+    const pricing = await fetchCurrentPricing(hostAddress, rpcUrl);
+    if (!pricing) {
+      logsBox.log(showError('Failed to fetch current pricing'));
+      screen.render();
+      return;
+    }
+
+    logsBox.log(`[PRICING] Current USDC price: ${formatPrice(pricing.stablePriceRaw)}`);
+    screen.render();
+
+    // Create input prompt for new price
+    const inputBox = blessed.textbox({
+      parent: screen,
+      top: 'center',
+      left: 'center',
+      width: 50,
+      height: 3,
+      border: { type: 'line' },
+      label: ' New price ($/million tokens) or ESC to cancel ',
+      style: {
+        fg: 'white',
+        bg: 'blue',
+        border: { fg: 'white' },
+      },
+      inputOnFocus: true,
+    });
+
+    inputBox.focus();
+    screen.render();
+
+    inputBox.on('submit', async (value: string) => {
+      inputBox.destroy();
+      screen.render();
+
+      const newPrice = parseFloat(value);
+      if (isNaN(newPrice) || newPrice <= 0) {
+        logsBox.log(showError('Invalid price entered'));
+        screen.render();
+        return;
+      }
+
+      logsBox.log(`[PRICING] Updating to $${newPrice.toFixed(2)}/million tokens...`);
+      screen.render();
+
+      const result = await updateStablePricing(hostPrivateKey, rpcUrl, newPrice, (status) => {
+        logsBox.log(`[PRICING] ${status}`);
+        screen.render();
+      });
+
+      if (result.success) {
+        logsBox.log(showMessage(`Price updated to $${result.newPrice}/million tokens`));
+        logsBox.log(`[PRICING] TX: ${result.txHash}`);
+      } else {
+        logsBox.log(showError(`Price update failed: ${result.error}`));
+      }
+      screen.render();
+    });
+
+    inputBox.on('cancel', () => {
+      inputBox.destroy();
+      logsBox.log('[PRICING] Cancelled');
+      screen.render();
+    });
+
+    inputBox.readInput();
   });
 
   screen.key(['w'], async () => {
@@ -207,7 +280,7 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
 
   // Initial refresh
   await Promise.all([refreshStatus(), refreshEarnings()]);
-  logsBox.log('Dashboard started. Press R to refresh, Q to quit.');
+  logsBox.log('Dashboard v1.1.0 (Phase 4: Pricing). Press R to refresh, Q to quit.');
 
   // Set up Docker log streaming (auto-detects container)
   const logStream = new DockerLogStream();
