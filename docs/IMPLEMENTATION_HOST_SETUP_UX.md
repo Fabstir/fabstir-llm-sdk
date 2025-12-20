@@ -416,7 +416,7 @@ packages/host-cli/src/
 | Phase 1: Model Discovery | ✅ Complete | `models list`, `models info` |
 | Phase 2: Model Download | ✅ Complete | Download with progress, SHA256 verification, HF token support |
 | Phase 3: Pre-Validation | ✅ Complete | Invalid models rejected with suggestions |
-| Phase 4: Interactive Selection | ⏳ Not Started | |
+| Phase 4: Interactive Selection | ✅ Complete | Interactive selector when `--model` not provided |
 | Phase 5: Setup Wizard | ⏳ Not Started | |
 
 ### Implementation Notes (Dec 20, 2025)
@@ -436,6 +436,13 @@ packages/host-cli/src/
   - Helpful error messages for 401 auth errors
 - Downloads to `~/fabstir-node/models/` by default
 
+**Phase 4 Completed:**
+- Added interactive model selector using `inquirer` package
+- Shows list of approved models with arrow key navigation
+- Allows manual entry of model string
+- Validates selected/entered model before proceeding
+- Removed fallback to hardcoded default model ('gpt-3.5-turbo')
+
 **Files Created:**
 - `packages/host-cli/src/services/ModelRegistryClient.ts`
 - `packages/host-cli/src/services/ModelDownloader.ts`
@@ -443,4 +450,4 @@ packages/host-cli/src/
 
 **Files Modified:**
 - `packages/host-cli/src/index.ts` - Added models command
-- `packages/host-cli/src/commands/register.ts` - Added pre-validation
+- `packages/host-cli/src/commands/register.ts` - Added pre-validation and interactive selection

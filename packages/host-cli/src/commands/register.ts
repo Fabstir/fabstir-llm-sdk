@@ -14,12 +14,72 @@ import { validateRegistrationRequirements } from '../registration/manager';
 import { initializeSDK, authenticateSDK } from '../sdk/client';
 import { ethers } from 'ethers';
 import chalk from 'chalk';
+import inquirer from 'inquirer';
 import { spawnInferenceServer, stopInferenceServer, ProcessHandle } from '../process/manager';
 import { extractHostPort, verifyPublicEndpoint, warnIfLocalhost } from '../utils/network';
 import { showNetworkTroubleshooting } from '../utils/diagnostics';
 import { saveConfig, loadConfig } from '../config/storage';
 import { DEFAULT_PRICE_PER_TOKEN } from '@fabstir/sdk-core';
-import { validateModelString, fetchAllModels } from '../services/ModelRegistryClient.js';
+import { validateModelString, fetchAllModels, ModelInfo } from '../services/ModelRegistryClient.js';
+
+/**
+ * Interactive model selector when --model is not provided
+ */
+async function selectModelInteractively(rpcUrl: string): Promise<string[]> {
+  console.log(chalk.blue('Fetching approved models from ModelRegistry...'));
+  const models = await fetchAllModels(rpcUrl);
+
+  if (models.length === 0) {
+    console.error(chalk.red('No approved models found in ModelRegistry.'));
+    process.exit(1);
+  }
+
+  console.log('');
+
+  // Build choices for inquirer
+  const choices = models.map((model, index) => ({
+    name: `${index + 1}. ${model.displayName} (${model.huggingfaceRepo})`,
+    value: model.modelString,
+    short: model.displayName,
+  }));
+
+  // Add manual entry option
+  choices.push({
+    name: chalk.gray('Enter model string manually...'),
+    value: '__MANUAL__',
+    short: 'Manual',
+  });
+
+  const { selectedModel } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'selectedModel',
+      message: 'Select a model to register:',
+      choices,
+      pageSize: 10,
+    },
+  ]);
+
+  // Handle manual entry
+  if (selectedModel === '__MANUAL__') {
+    const { manualModel } = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'manualModel',
+        message: 'Enter model string (format: repo:fileName):',
+        validate: (input: string) => {
+          if (!input || !input.includes(':')) {
+            return 'Invalid format. Expected "repo:fileName"';
+          }
+          return true;
+        },
+      },
+    ]);
+    return [manualModel];
+  }
+
+  return [selectedModel];
+}
 
 /**
  * Register the register command with the CLI
@@ -39,17 +99,19 @@ export function registerRegisterCommand(program: Command): void {
       try {
         const rpcUrl = options.rpcUrl || process.env.RPC_URL_BASE_SEPOLIA || 'https://sepolia.base.org';
 
-        // Pre-validate model strings before any other operations
-        const modelStrings = options.models ? options.models.split(',') : [];
-        if (modelStrings.length > 0) {
+        // Get model strings - either from --models option or interactive selection
+        let modelStrings: string[] = [];
+
+        if (options.models) {
+          // Model provided via --models option, validate it
+          modelStrings = options.models.split(',').map((s: string) => s.trim());
           console.log(chalk.blue('Validating model(s)...'));
 
           for (const modelString of modelStrings) {
-            const trimmed = modelString.trim();
-            const result = await validateModelString(rpcUrl, trimmed);
+            const result = await validateModelString(rpcUrl, modelString);
 
             if (!result.valid) {
-              console.error(chalk.red(`\n❌ Model "${trimmed}" is not approved`));
+              console.error(chalk.red(`\n❌ Model "${modelString}" is not approved`));
               if (result.error) {
                 console.error(chalk.red(`   ${result.error}`));
               }
@@ -65,7 +127,23 @@ export function registerRegisterCommand(program: Command): void {
               process.exit(1);
             }
 
-            console.log(chalk.green(`  ✓ ${trimmed}`));
+            console.log(chalk.green(`  ✓ ${modelString}`));
+          }
+        } else {
+          // No model provided - show interactive selector
+          modelStrings = await selectModelInteractively(rpcUrl);
+
+          // Validate the selected model (in case of manual entry)
+          for (const modelString of modelStrings) {
+            const result = await validateModelString(rpcUrl, modelString);
+            if (!result.valid) {
+              console.error(chalk.red(`\n❌ Model "${modelString}" is not approved`));
+              if (result.error) {
+                console.error(chalk.red(`   ${result.error}`));
+              }
+              process.exit(1);
+            }
+            console.log(chalk.green(`✓ Model validated: ${modelString}`));
           }
         }
 
@@ -76,7 +154,7 @@ export function registerRegisterCommand(program: Command): void {
         const config: RegistrationConfig = {
           stakeAmount: ethers.parseEther(options.stake),
           apiUrl: options.url || 'http://localhost:8080',
-          models: modelStrings.length > 0 ? modelStrings : ['gpt-3.5-turbo'],
+          models: modelStrings,
           minPricePerTokenNative: options.price || DEFAULT_PRICE_PER_TOKEN,
           minPricePerTokenStable: options.price || DEFAULT_PRICE_PER_TOKEN
         };
