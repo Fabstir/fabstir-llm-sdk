@@ -55,7 +55,7 @@ export async function getGasPrice(options: GasPriceOptions = {}): Promise<any> {
     throw new Error('SDK not authenticated');
   }
 
-  const provider = sdk.provider;
+  const provider = sdk.getProvider();
   if (!provider) {
     throw new Error('No provider available');
   }
@@ -123,27 +123,15 @@ export async function estimateWithdrawalGas(
   }
 
   try {
-    const provider = sdk.provider;
+    const provider = sdk.getProvider();
     if (!provider) {
       throw new Error('No provider available');
     }
 
-    const treasuryManager = sdk.getTreasuryManager();
-
     // Estimate gas for the withdrawal
-    let gasEstimate: bigint;
-
-    try {
-      if (type === 'host') {
-        // Try to estimate actual gas
-        gasEstimate = await treasuryManager.estimateGas?.withdrawHostEarnings?.(amount) || 100000n;
-      } else {
-        gasEstimate = await treasuryManager.estimateGas?.withdrawTreasury?.(amount) || 100000n;
-      }
-    } catch {
-      // Use default estimates
-      gasEstimate = type === 'host' ? BigInt(100000) : BigInt(120000);
-    }
+    // TODO: Implement proper gas estimation via contract
+    // ITreasuryManager doesn't have estimateGas method
+    const gasEstimate = type === 'host' ? 100000n : 120000n;
 
     // Apply buffer (default 20%)
     const buffer = options.buffer || 1.2;

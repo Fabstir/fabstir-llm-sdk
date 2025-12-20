@@ -52,10 +52,8 @@ export function getStakingRequirements(): {
   minimumStake: bigint;
   contractAddress: string;
 } {
-  const sdk = getSDK();
-  const contractAddress = sdk.config.contractAddresses.nodeRegistry ||
-                          sdk.config.contractAddresses.hostRegistry ||
-                          '';
+  // Get contract address from environment variable
+  const contractAddress = process.env.CONTRACT_NODE_REGISTRY || '';
 
   return {
     minimumStake: 1000000000000000000000n, // 1000 FAB
@@ -79,14 +77,15 @@ export async function checkAllowance(): Promise<bigint> {
 
   try {
     const paymentManager = sdk.getPaymentManager();
-    const fabTokenAddress = sdk.config.contractAddresses.fabToken;
+    const fabTokenAddress = process.env.CONTRACT_FAB_TOKEN || '';
     const spenderAddress = getStakingRequirements().contractAddress;
 
     // Use SDK PaymentManager instead of direct contract calls
+    // checkAllowance(tokenAddress, ownerAddress, spenderAddress)
     const allowance = await paymentManager.checkAllowance(
+      fabTokenAddress,
       address,
-      spenderAddress,
-      fabTokenAddress
+      spenderAddress
     );
 
     return allowance;
@@ -148,14 +147,15 @@ export async function approveTokens(
 
     // Execute approval using SDK PaymentManager
     const paymentManager = sdk.getPaymentManager();
-    const fabTokenAddress = sdk.config.contractAddresses.fabToken;
+    const fabTokenAddress = process.env.CONTRACT_FAB_TOKEN || '';
     const spenderAddress = getStakingRequirements().contractAddress;
 
     // Use SDK method instead of direct contract calls
+    // approveToken(tokenAddress, spenderAddress, amount)
     const receipt = await paymentManager.approveToken(
+      fabTokenAddress,
       spenderAddress,
-      amount,
-      fabTokenAddress
+      amount
     );
 
     return {
@@ -198,7 +198,7 @@ export async function checkStakedAmount(): Promise<bigint> {
       const hostInfo = await hostManager.getHostInfo?.(address) ||
                        await hostManager.getHostStatus?.(address);
 
-      const stake = hostInfo?.stake || hostInfo?.stakedAmount || 0n;
+      const stake = hostInfo?.stake || 0n;
       // Ensure we return a bigint
       if (typeof stake === 'string') {
         return BigInt(stake);
@@ -274,6 +274,9 @@ export async function stakeTokens(config: StakingConfig): Promise<StakingResult>
       // Estimate gas for registration
       const estimatedGas = BigInt(500000); // Typical gas for registration
       const provider = sdk.getProvider();
+      if (!provider) {
+        throw new Error('Provider not available');
+      }
       const feeData = await provider.getFeeData();
       const gasPrice = config.gasPrice || feeData.gasPrice || ethers.parseUnits('0.001', 'gwei');
 
@@ -416,7 +419,7 @@ export async function withdrawStake(amount?: bigint): Promise<{
     // Check if host is active
     const hostInfo = await hostManager.getHostInfo?.(address) ||
                      await hostManager.getHostStatus?.(address);
-    if (hostInfo && hostInfo.active !== false) {
+    if (hostInfo && hostInfo.isActive !== false) {
       throw new RegistrationError(
         'Cannot withdraw stake while host is active',
         ErrorCode.WITHDRAWAL_NOT_ALLOWED,

@@ -111,7 +111,7 @@ export class TransactionRetry {
   }
 
   async sendTransactionWithBalanceCheck(tx: TransactionRequest): Promise<ethers.TransactionResponse> {
-    const balance = await this.config.wallet.getBalance();
+    const balance = await this.config.provider.getBalance(this.config.wallet.address);
     const gasPrice = await this.getGasPrice();
     const totalCost = await this.estimateTotalCost(tx, gasPrice);
 

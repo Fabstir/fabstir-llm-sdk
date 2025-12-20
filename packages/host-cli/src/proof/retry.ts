@@ -38,7 +38,7 @@ interface CircuitState {
   failures: number;
   lastFailure?: Date;
   isOpen: boolean;
-  resetTimer?: NodeJS.Timer;
+  resetTimer?: NodeJS.Timeout;
 }
 
 export class ProofRetryManager extends EventEmitter {
@@ -51,7 +51,7 @@ export class ProofRetryManager extends EventEmitter {
     currentQueueSize: 0,
     successRate: 0
   };
-  private autoRetryTimer?: NodeJS.Timer;
+  private autoRetryTimer?: NodeJS.Timeout;
   private circuitBreaker?: CircuitState;
   private circuitBreakerConfig?: CircuitBreakerConfig;
   private jitter: number = 0;

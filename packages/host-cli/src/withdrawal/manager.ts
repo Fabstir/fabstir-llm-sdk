@@ -44,16 +44,14 @@ export async function checkWithdrawableBalance(
   }
 
   try {
-    const treasuryManager = sdk.getTreasuryManager();
-
+    // TODO: Implement proper balance checking via HostEarnings contract
+    // ITreasuryManager uses getBalance(tokenAddress) not getHostEarnings/getTreasuryBalance
     if (type === 'host') {
-      // Get host earnings balance
-      const balance = await treasuryManager.getHostEarnings?.(address) || 0n;
-      return balance;
+      // Host earnings balance - stub until HostEarnings contract integration
+      return 0n;
     } else {
-      // Get treasury balance
-      const balance = await treasuryManager.getTreasuryBalance?.() || 0n;
-      return balance;
+      // Treasury balance - stub until proper token address is configured
+      return 0n;
     }
   } catch (error) {
     console.debug('Error checking withdrawable balance:', error);
@@ -106,13 +104,20 @@ export async function processWithdrawal(
     }
 
     // Execute withdrawal
+    // TODO: Implement proper withdrawal via ITreasuryManager.withdraw(tokenAddress, amount, recipient)
+    // The current interface doesn't match host CLI expectations
+    return {
+      success: false,
+      amount: 0n,
+      error: 'Withdrawal not yet implemented - ITreasuryManager interface mismatch'
+    };
+
+    /* Original code - commented until proper integration
     let tx: ethers.TransactionResponse;
 
     if (type === 'host') {
-      // Withdraw host earnings
       tx = await treasuryManager.withdrawHostEarnings?.(amount, txOptions);
     } else {
-      // Withdraw treasury earnings
       tx = await treasuryManager.withdrawTreasury?.(amount, txOptions);
     }
 
@@ -145,6 +150,7 @@ export async function processWithdrawal(
       receipt,
       gasUsed: receipt.gasUsed
     };
+    */
   } catch (error: any) {
     console.error('Error processing withdrawal:', error);
 
@@ -186,21 +192,16 @@ export async function estimateWithdrawal(
   }
 
   try {
-    const treasuryManager = sdk.getTreasuryManager();
-    const provider = sdk.provider;
+    const provider = sdk.getProvider();
 
     if (!provider) {
       throw new Error('No provider available');
     }
 
     // Estimate gas for the withdrawal
-    let gasEstimate: bigint;
-
-    if (type === 'host') {
-      gasEstimate = await treasuryManager.estimateGas?.withdrawHostEarnings?.(amount) || 100000n;
-    } else {
-      gasEstimate = await treasuryManager.estimateGas?.withdrawTreasury?.(amount) || 100000n;
-    }
+    // TODO: Implement proper gas estimation via contract
+    // ITreasuryManager doesn't have estimateGas method
+    const gasEstimate = 100000n; // Default estimate
 
     // Get current gas price
     const feeData = await provider.getFeeData();
@@ -236,7 +237,7 @@ export async function canWithdrawTreasury(address: string): Promise<boolean> {
 
   try {
     const treasuryManager = sdk.getTreasuryManager();
-    return await treasuryManager.isTreasuryAdmin?.(address) || false;
+    return await treasuryManager.isAdmin(address);
   } catch {
     return false;
   }

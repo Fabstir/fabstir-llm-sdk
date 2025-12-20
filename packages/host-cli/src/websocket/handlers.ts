@@ -207,8 +207,9 @@ export class MessageHandler extends EventEmitter {
     this.sessions.clear();
   }
 
-  removeAllListeners(): void {
+  removeAllListeners(): this {
     super.removeAllListeners();
     this.handlers.clear();
+    return this;
   }
 }

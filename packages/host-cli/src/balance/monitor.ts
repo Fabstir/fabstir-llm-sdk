@@ -34,7 +34,7 @@ export interface MonitorConfig {
 export class BalanceMonitor extends EventEmitter {
   private interval: number;
   private shouldCheckRequirements: boolean;
-  private timer?: NodeJS.Timer;
+  private timer?: NodeJS.Timeout;
   private lastBalances?: BalanceUpdate;
   private lastRequirementsMet?: boolean;
   public forceError?: boolean; // For testing

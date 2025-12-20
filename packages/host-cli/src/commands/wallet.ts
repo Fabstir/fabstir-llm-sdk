@@ -215,7 +215,8 @@ async function exportWallet(force: boolean): Promise<void> {
 async function importWallet(options: any): Promise<void> {
   const config = await ConfigStorage.loadConfig() || {
     version: '1.0.0',
-    network: 'base-sepolia',
+    walletAddress: '',
+    network: 'base-sepolia' as const,
     rpcUrl: 'https://sepolia.base.org',
     inferencePort: 8080,
     publicUrl: 'http://localhost:8080',
@@ -224,7 +225,7 @@ async function importWallet(options: any): Promise<void> {
     minJobDeposit: 0.001
   };
 
-  let wallet: ethers.Wallet;
+  let wallet: ethers.Wallet | ethers.HDNodeWallet;
 
   if (options.key) {
     // Import from private key
@@ -237,7 +238,7 @@ async function importWallet(options: any): Promise<void> {
   } else if (options.mnemonic) {
     // Import from mnemonic
     try {
-      wallet = ethers.Wallet.fromPhrase(options.mnemonic) as ethers.Wallet;
+      wallet = ethers.Wallet.fromPhrase(options.mnemonic);
       console.log(chalk.green('✅ Wallet imported from mnemonic'));
     } catch (error) {
       throw new Error('Invalid mnemonic phrase');
@@ -292,16 +293,19 @@ async function importWallet(options: any): Promise<void> {
           }
         }
       ]);
-      wallet = ethers.Wallet.fromPhrase(mnemonic) as ethers.Wallet;
+      wallet = ethers.Wallet.fromPhrase(mnemonic);
     }
   }
 
-  // Update configuration
-  config.walletAddress = wallet.address;
-  config.privateKey = wallet.privateKey;
+  // Update configuration with wallet details
+  const updatedConfig = {
+    ...config,
+    walletAddress: wallet.address,
+    privateKey: wallet.privateKey
+  };
 
   // Save configuration
-  await ConfigStorage.saveConfig(config);
+  await ConfigStorage.saveConfig(updatedConfig);
 
   console.log(chalk.green('\n✅ Wallet imported successfully'));
   console.log(chalk.white('Address:'), chalk.cyan(wallet.address));
