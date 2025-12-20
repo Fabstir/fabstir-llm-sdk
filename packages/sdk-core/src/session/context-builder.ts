@@ -84,10 +84,7 @@ export class ContextBuilder {
         this.vectorDbSessionId,
         embeddingResult.embedding,
         options.topK || 5,
-        {
-          threshold: options.threshold,
-          filter: options.filter
-        }
+        options.threshold || 0.7
       );
       const searchTime = performance.now() - searchStart;
 
