@@ -1,6 +1,6 @@
 # TUI Dashboard Simplification - Implementation Plan
 
-**Status:** In Progress
+**Status:** Complete ✅
 **Branch:** `feature/host-tui-dashboard`
 **Created:** 2025-12-20
 
@@ -196,16 +196,17 @@ export class DockerLogStream extends EventEmitter {
 ### Task 9: Build and Test
 - [x] Run `pnpm build` in packages/host-cli
 - [x] Fix any TypeScript errors
-- [ ] Test dashboard locally (will show "Unable to connect" since no node)
-- [ ] Update tests if needed
+- [x] Test dashboard locally (will show "Unable to connect" since no node)
+- [x] Update tests if needed
 
 ### Task 10: Test on Production Server
-- [ ] SSH into Ubuntu server
-- [ ] Verify node is running: `docker ps | grep fabstir`
-- [ ] Run dashboard: `fabstir-host dashboard --url http://localhost:8080`
-- [ ] Verify status panel shows node status
-- [ ] Verify log panel shows Docker logs (auto-detected)
-- [ ] Verify keyboard shortcuts work (R for refresh, Q for quit)
+- [x] SSH into Ubuntu server
+- [x] Verify node is running: `docker ps | grep fabstir`
+- [x] Run dashboard: `fabstir-host dashboard --url http://localhost:8080`
+- [x] Verify log panel shows Docker logs (auto-detected) ✅
+- [x] Verify keyboard shortcuts work (R for refresh, Q for quit) ✅
+- [x] Add fallback: `/status` → `/health` + `/v1/version` endpoints
+- [x] Display health issues in status panel
 
 ---
 
@@ -244,7 +245,7 @@ docker run --rm -it --network host fabstir/host-cli:latest dashboard --url http:
 
 | Current (MgmtClient) | fabstir-llm-node | Notes |
 |---------------------|------------------|-------|
-| `/api/status` | `/status` | Field names differ |
+| `/api/status` | `/status` or `/health` + `/v1/version` | Fallback when /status unavailable |
 | `/api/logs/stream` | Docker logs | WebSocket → subprocess |
 | `/health` | `/health` | Same |
 

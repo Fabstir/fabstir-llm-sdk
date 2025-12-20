@@ -14,6 +14,7 @@ export interface DashboardState {
 
 /**
  * NodeStatus matches fabstir-llm-node /status endpoint response
+ * Falls back to /health + /v1/version when /status unavailable
  */
 export interface NodeStatus {
   status: 'active' | 'busy' | 'maintenance';
@@ -32,6 +33,7 @@ export interface NodeStatus {
   models_loaded: string[];
   chain_id: number;
   version: string;
+  health_issues?: string[] | null; // From /health endpoint fallback
 }
 
 export interface LogEntry {

@@ -60,5 +60,11 @@ export function formatStatusPanel(status: NodeStatus): string {
     lines.push(`Models: ${status.models_loaded.join(', ')}`);
   }
 
+  // Show health issues if present (from /health fallback)
+  if (status.health_issues && status.health_issues.length > 0) {
+    lines.push('');
+    lines.push(`⚠️ Issues: ${status.health_issues.join(', ')}`);
+  }
+
   return lines.join('\n');
 }
