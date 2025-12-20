@@ -10,6 +10,7 @@ import express, { type Request, type Response, type NextFunction, type Applicati
 import cors from 'cors';
 import type { Server } from 'http';
 import { PIDManager } from '../daemon/pid';
+import { ConfigData } from '../config/types';
 import { startHost } from '../commands/start';
 import { stopCommand } from '../commands/stop';
 import type { RegistrationConfig } from '../registration/manager';
@@ -288,9 +289,10 @@ export class ManagementServer {
         ? parseInt(process.env.INTERNAL_PORT, 10)
         : extractHostPort(publicUrl).port;
 
-      const configData = {
+      const configData: ConfigData = {
         version: '1.0',
-        network: 'base-sepolia',
+        walletAddress: walletAddress || currentConfig?.walletAddress || '',
+        network: 'base-sepolia' as const,
         rpcUrl: process.env.RPC_URL_BASE_SEPOLIA || '',
         inferencePort: internalPort,
         publicUrl: publicUrl,

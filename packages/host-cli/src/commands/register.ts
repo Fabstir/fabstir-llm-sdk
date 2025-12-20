@@ -44,7 +44,8 @@ export function registerRegisterCommand(program: Command): void {
           stakeAmount: ethers.parseEther(options.stake),
           apiUrl: options.url || 'http://localhost:8080',
           models: options.models ? options.models.split(',') : ['gpt-3.5-turbo'],
-          minPricePerToken: options.price || DEFAULT_PRICE_PER_TOKEN
+          minPricePerTokenNative: options.price || DEFAULT_PRICE_PER_TOKEN,
+          minPricePerTokenStable: options.price || DEFAULT_PRICE_PER_TOKEN
         };
 
         await executeRegistration(config);
@@ -111,7 +112,7 @@ export async function executeRegistration(
     console.log(chalk.gray(`  Stake: ${ethers.formatUnits(config.stakeAmount || 1000000000000000000000n, 18)} FAB`));
 
     // Show pricing (with PRICE_PRECISION=1000)
-    const priceNum = parseInt(config.minPricePerToken || DEFAULT_PRICE_PER_TOKEN);
+    const priceNum = parseInt(config.minPricePerTokenStable || DEFAULT_PRICE_PER_TOKEN);
     const PRICE_PRECISION = 1000;
     const priceInUSDC = (priceNum / PRICE_PRECISION / 1000000).toFixed(9);
     const pricePerMillion = (priceNum / PRICE_PRECISION).toFixed(3);
@@ -152,7 +153,8 @@ export async function executeRegistration(
 
       const configData = {
         version: '1.0',
-        network: 'base-sepolia',
+        walletAddress: result.hostInfo.hostAddress || currentConfig?.walletAddress || '',
+        network: 'base-sepolia' as const,
         rpcUrl: process.env.RPC_URL_BASE_SEPOLIA || '',
         inferencePort: internalPort,
         publicUrl: config.apiUrl,
@@ -360,6 +362,10 @@ export async function waitForRegistrationConfirmation(
   const sdk = await initializeSDK();
   const provider = sdk.getProvider();
 
+  if (!provider) {
+    throw new Error('Provider not available');
+  }
+
   try {
     // Get transaction receipt
     const receipt = await provider.getTransactionReceipt(transactionHash);
@@ -372,8 +378,13 @@ export async function waitForRegistrationConfirmation(
       };
     }
 
-    // Wait for confirmations
-    await receipt.wait(confirmations);
+    // Wait for additional confirmations by polling block number
+    const currentBlock = await provider.getBlockNumber();
+    const targetBlock = receipt.blockNumber + confirmations;
+    if (currentBlock < targetBlock) {
+      // Wait for blocks (approx 2s per block on Base)
+      await new Promise(resolve => setTimeout(resolve, (targetBlock - currentBlock) * 2000));
+    }
 
     return {
       confirmed: true,

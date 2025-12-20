@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Fabstir
 // SPDX-License-Identifier: BUSL-1.1
 
-import { WebSocket } from 'ws';
+import { WebSocket, RawData } from 'ws';
 import { EventEmitter } from 'events';
 
 export interface WebSocketOptions {
@@ -34,8 +34,8 @@ export class WebSocketClient extends EventEmitter {
   private connectedAt?: Date;
   private disconnectedAt?: Date;
   private connectionConfig?: ConnectionConfig;
-  private pingTimer?: NodeJS.Timer;
-  private pongTimer?: NodeJS.Timer;
+  private pingTimer?: NodeJS.Timeout;
+  private pongTimer?: NodeJS.Timeout;
   private lastPongTime?: Date;
   private options?: WebSocketOptions;
 
@@ -104,7 +104,7 @@ export class WebSocketClient extends EventEmitter {
           }
         });
 
-        this.ws.on('message', (data: WebSocket.RawData) => {
+        this.ws.on('message', (data: RawData) => {
           this.emit('message', data);
         });
 

@@ -314,7 +314,7 @@ export async function withdrawTreasuryEarnings(amount?: bigint): Promise<Withdra
 
   // Check if address is authorized for treasury withdrawal
   const treasuryManager = sdk.getTreasuryManager();
-  const isAuthorized = await treasuryManager.isTreasuryAdmin?.(address) || false;
+  const isAuthorized = await treasuryManager.isAdmin(address);
 
   if (!isAuthorized) {
     return {

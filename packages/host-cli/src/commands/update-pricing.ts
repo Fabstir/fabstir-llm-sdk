@@ -55,7 +55,7 @@ export function registerUpdatePricingCommand(program: Command): void {
 
         // Get current pricing
         const hostInfo = await hostManager.getHostInfo(address);
-        const currentPrice = Number(hostInfo.minPricePerToken || 0n);
+        const currentPrice = Number(hostInfo.minPricePerTokenStable || 0n);
 
         // Display current and new pricing (with PRICE_PRECISION=1000)
         const PRICE_PRECISION = 1000;
@@ -77,7 +77,7 @@ export function registerUpdatePricingCommand(program: Command): void {
 
         // Verify the update (with PRICE_PRECISION=1000)
         const updatedInfo = await hostManager.getHostInfo(address);
-        const updatedPrice = Number(updatedInfo.minPricePerToken);
+        const updatedPrice = Number(updatedInfo.minPricePerTokenStable);
         const updatedPriceUSDC = (updatedPrice / PRICE_PRECISION / 1000000).toFixed(9);
         const updatedPricePerMillion = (updatedPrice / PRICE_PRECISION).toFixed(3);
         console.log(chalk.green(`✓ New price: ${updatedPrice} ($${updatedPricePerMillion}/million, ${updatedPriceUSDC} USDC/token)`));

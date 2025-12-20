@@ -28,7 +28,7 @@ interface CircuitState {
   failures: number;
   lastFailure?: Date;
   isOpen: boolean;
-  resetTimer?: NodeJS.Timer;
+  resetTimer?: NodeJS.Timeout;
 }
 
 export class ReconnectManager extends EventEmitter {
@@ -36,12 +36,12 @@ export class ReconnectManager extends EventEmitter {
   private attempts: number = 0;
   private isReconnecting: boolean = false;
   private lastError?: Error;
-  private nextAttemptTimer?: NodeJS.Timer;
+  private nextAttemptTimer?: NodeJS.Timeout;
   private enabled: boolean = true;
   private jitter: number = 0;
   private healthCheckFn?: () => Promise<boolean>;
   private healthCheckInterval?: number;
-  private healthCheckTimer?: NodeJS.Timer;
+  private healthCheckTimer?: NodeJS.Timeout;
   private circuitBreaker?: CircuitState;
   private circuitBreakerOptions?: CircuitBreakerOptions;
 

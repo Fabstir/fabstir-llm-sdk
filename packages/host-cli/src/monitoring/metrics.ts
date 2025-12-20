@@ -179,11 +179,10 @@ export async function getEarningsBalance(): Promise<EarningsBalance> {
   }
 
   try {
-    const treasuryManager = sdk.getTreasuryManager();
-
-    // Get earnings from contracts
-    const hostEarnings = await treasuryManager.getHostEarnings?.(address) || 0n;
-    const treasuryBalance = await treasuryManager.getTreasuryBalance?.() || 0n;
+    // TODO: Implement proper earnings tracking when HostEarnings contract is integrated
+    // For now, return stub values since ITreasuryManager doesn't have getHostEarnings method
+    const hostEarnings = 0n;
+    const treasuryBalance = 0n;
 
     const total = hostEarnings + treasuryBalance;
     const withdrawn = 0n; // Will be tracked from withdrawal events
@@ -209,11 +208,11 @@ export async function getEarningsBalance(): Promise<EarningsBalance> {
  * Get treasury earnings
  */
 export async function getTreasuryEarnings(): Promise<TreasuryEarnings> {
-  const sdk = getSDK();
-
   try {
-    const treasuryManager = sdk.getTreasuryManager();
-    const balance = await treasuryManager.getTreasuryBalance?.() || 0n;
+    // TODO: Implement when token address is available
+    // const treasuryManager = sdk.getTreasuryManager();
+    // const balance = await treasuryManager.getBalance(tokenAddress);
+    const balance = 0n;
 
     return {
       balance,
@@ -234,7 +233,6 @@ export async function getTreasuryEarnings(): Promise<TreasuryEarnings> {
  * Get host earnings
  */
 export async function getHostEarnings(): Promise<HostEarnings> {
-  const sdk = getSDK();
   const address = getAuthenticatedAddress();
 
   if (!address) {
@@ -246,8 +244,9 @@ export async function getHostEarnings(): Promise<HostEarnings> {
   }
 
   try {
-    const treasuryManager = sdk.getTreasuryManager();
-    const balance = await treasuryManager.getHostEarnings?.(address) || 0n;
+    // TODO: Implement proper host earnings tracking via HostEarnings contract
+    // ITreasuryManager doesn't have getHostEarnings method
+    const balance = 0n;
 
     return {
       balance,
@@ -279,7 +278,8 @@ export async function getEarningsHistory(options?: {
 
   // Apply filters
   if (options?.since) {
-    return history.filter(entry => entry.timestamp >= options.since);
+    const since = options.since;
+    return history.filter(entry => entry.timestamp >= since);
   }
 
   if (options?.limit) {

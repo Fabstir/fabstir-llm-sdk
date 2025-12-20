@@ -278,8 +278,8 @@ export function formatComparison(
   lines.push(chalk.blue.bold('╚════════════════════════════════════════════╝\n'));
 
   // Compare earnings
-  const currentEarnings = current.earnings?.totalEarned || 0n;
-  const previousEarnings = previous.earnings?.totalEarned || 0n;
+  const currentEarnings = BigInt(current.earnings?.totalEarned || 0);
+  const previousEarnings = BigInt(previous.earnings?.totalEarned || 0);
   const earningsChange = currentEarnings - previousEarnings;
   const earningsChangePercent = previousEarnings > 0n ?
     Number((earningsChange * 100n) / previousEarnings) : 0;
