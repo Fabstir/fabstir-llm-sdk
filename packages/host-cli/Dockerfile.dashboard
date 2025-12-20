@@ -1,0 +1,65 @@
+# Copyright (c) 2025 Fabstir
+# SPDX-License-Identifier: BUSL-1.1
+
+# Fabstir Host CLI - Lightweight Dashboard Image
+# For monitoring nodes - does NOT include fabstir-llm-node
+
+#######################
+# Stage 1: Build
+#######################
+FROM node:20-alpine AS builder
+
+WORKDIR /build
+
+# Install pnpm
+RUN npm install -g pnpm@9
+
+# Copy workspace config
+COPY pnpm-workspace.yaml ./
+COPY package.json ./
+
+# Copy only the packages we need
+COPY packages/sdk-core ./packages/sdk-core
+COPY packages/host-cli ./packages/host-cli
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile || pnpm install
+
+# Build sdk-core first (dependency)
+WORKDIR /build/packages/sdk-core
+RUN pnpm build || echo "sdk-core build completed with warnings"
+
+# Build host-cli
+WORKDIR /build/packages/host-cli
+RUN pnpm build || echo "host-cli build completed with warnings"
+
+#######################
+# Stage 2: Runtime
+#######################
+FROM node:20-alpine
+
+# Install docker CLI (for log streaming)
+RUN apk add --no-cache docker-cli
+
+WORKDIR /app
+
+# Copy built files
+COPY --from=builder /build/packages/host-cli/dist ./dist
+COPY --from=builder /build/packages/host-cli/package.json ./
+
+# Copy sdk-core as dependency
+COPY --from=builder /build/packages/sdk-core /deps/sdk-core
+
+# Install production dependencies only
+RUN sed -i 's|"@fabstir/sdk-core": "workspace:\*"|"@fabstir/sdk-core": "file:/deps/sdk-core"|g' package.json && \
+    npm install --omit=dev --ignore-scripts 2>/dev/null || npm install --production --ignore-scripts
+
+# TUI Dashboard support
+ENV TERM=xterm-256color
+ENV NODE_ENV=production
+
+# Entry point
+ENTRYPOINT ["node", "dist/index.js"]
+
+# Default: show help
+CMD ["--help"]

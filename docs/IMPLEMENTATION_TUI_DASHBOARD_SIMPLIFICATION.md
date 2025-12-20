@@ -209,6 +209,37 @@ export class DockerLogStream extends EventEmitter {
 
 ---
 
+## Docker Distribution
+
+### Build the Dashboard Image
+
+From the repo root on your dev machine:
+
+```bash
+# Build
+cd /workspace
+docker build -f packages/host-cli/Dockerfile.dashboard -t fabstir/host-cli:latest .
+
+# Push to Docker Hub
+docker push fabstir/host-cli:latest
+```
+
+### User Experience (After Published)
+
+```bash
+# One command to run dashboard - no installation needed
+docker run --rm -it --network host fabstir/host-cli:latest dashboard
+
+# Or with specific URL
+docker run --rm -it --network host fabstir/host-cli:latest dashboard --url http://localhost:8080
+```
+
+### Files Added
+- `packages/host-cli/Dockerfile.dashboard` - Lightweight CLI image
+- `packages/host-cli/scripts/build-dashboard-image.sh` - Build script
+
+---
+
 ## API Mapping
 
 | Current (MgmtClient) | fabstir-llm-node | Notes |
