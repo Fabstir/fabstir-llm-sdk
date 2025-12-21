@@ -85,6 +85,10 @@ export interface FabstirSDKCoreConfig {
   
   // Development mode
   mode?: 'production' | 'development';
+
+  // Host-only mode: Skip S5/Storage/Session initialization (for host CLI operations)
+  // When true, only HostManager, ModelManager, and PaymentManager are initialized
+  hostOnly?: boolean;
 }
 
 export class FabstirSDKCore extends EventEmitter {
@@ -541,16 +545,21 @@ export class FabstirSDKCore extends EventEmitter {
   private async initializeManagers(): Promise<void> {
     // Create auth manager with authenticated data
     this.authManager = new AuthManager(this.signer, this.provider, this.userAddress, this.s5Seed);
-    
+
     // Create other managers
     // Use PaymentManagerMultiChain for deposit/withdrawal support
     this.paymentManager = new PaymentManagerMultiChain(undefined, this.currentChainId);
-    
-    // StorageManager constructor takes s5PortalUrl - don't pass undefined
-    const s5PortalUrl = this.config.s5Config?.portalUrl;
-    this.storageManager = s5PortalUrl ? new StorageManager(s5PortalUrl) : new StorageManager();
-    
-    this.sessionManager = new SessionManager(this.paymentManager as any, this.storageManager);
+
+    // Host-only mode: Skip S5/Storage/Session/Encryption (for host CLI operations)
+    const hostOnly = this.config.hostOnly === true;
+
+    if (!hostOnly) {
+      // StorageManager constructor takes s5PortalUrl - don't pass undefined
+      const s5PortalUrl = this.config.s5Config?.portalUrl;
+      this.storageManager = s5PortalUrl ? new StorageManager(s5PortalUrl) : new StorageManager();
+
+      this.sessionManager = new SessionManager(this.paymentManager as any, this.storageManager);
+    }
 
     // VectorRAGManager needs userAddress, seedPhrase, config, and sessionManager
     // These will be set after authentication, so we defer initialization
@@ -564,50 +573,54 @@ export class FabstirSDKCore extends EventEmitter {
     if (this.signer) {
       await (this.paymentManager as any).initialize(this.signer);
 
-      // Initialize storage manager with S5 seed (required - fail fast if unavailable)
-      if (this.s5Seed && this.userAddress) {
-        await this.storageManager.initialize(this.s5Seed);
-      } else {
-        throw new SDKError(
-          'S5 seed and user address required for StorageManager initialization',
-          'STORAGE_INIT_FAILED'
-        );
-      }
-
-      // Create EncryptionManager (Phase 6.2 - supports both Wallet and browser signers)
-      if (this.signer) {
-        // For Wallet instances with direct privateKey access
-        if ('privateKey' in this.signer) {
-          this.encryptionManager = new EncryptionManager(this.signer as ethers.Wallet);
-        } else if ('isBaseAccountKit' in this.signer && (this.signer as any).isBaseAccountKit) {
-          // For Base Account Kit / passkey wallets, use address-based derivation
-          // This avoids non-deterministic signatures from passkeys
-          const address = await this.signer.getAddress();
-          const chainId = (this.signer as any).chainId || this.config.chainId!;
-          console.log('[EncryptionManager] Using address-based derivation for Base Account Kit');
-          this.encryptionManager = EncryptionManager.fromAddress(address, chainId);
+      if (!hostOnly) {
+        // Initialize storage manager with S5 seed (required for client operations)
+        if (this.s5Seed && this.userAddress) {
+          await this.storageManager!.initialize(this.s5Seed);
         } else {
-          // For browser wallets (MetaMask, etc.), derive encryption key via signature
-          try {
-            const message = 'Fabstir Encryption Key Derivation - Sign this message to enable end-to-end encryption';
-            const signature = await this.signer.signMessage(message);
-            const address = await this.signer.getAddress();
-            this.encryptionManager = EncryptionManager.fromSignature(signature, address);
-          } catch (error: any) {
-            console.warn('[EncryptionManager] Failed to create from signature:', error.message);
-            throw new SDKError(
-              'Failed to create EncryptionManager. User may have rejected signature request. ' +
-              'Encryption is required by default - set encryption: false in session config to opt-out.',
-              'ENCRYPTION_INIT_FAILED',
-              { originalError: error }
-            );
-          }
+          throw new SDKError(
+            'S5 seed and user address required for StorageManager initialization',
+            'STORAGE_INIT_FAILED'
+          );
         }
-      } else {
-        throw new SDKError('Signer required for encryption', 'SIGNER_NOT_AVAILABLE');
-      }
 
-      await (this.sessionManager as any).initialize();  // SessionManager doesn't take signer
+        // Create EncryptionManager (Phase 6.2 - supports both Wallet and browser signers)
+        if (this.signer) {
+          // For Wallet instances with direct privateKey access
+          if ('privateKey' in this.signer) {
+            this.encryptionManager = new EncryptionManager(this.signer as ethers.Wallet);
+          } else if ('isBaseAccountKit' in this.signer && (this.signer as any).isBaseAccountKit) {
+            // For Base Account Kit / passkey wallets, use address-based derivation
+            // This avoids non-deterministic signatures from passkeys
+            const address = await this.signer.getAddress();
+            const chainId = (this.signer as any).chainId || this.config.chainId!;
+            console.log('[EncryptionManager] Using address-based derivation for Base Account Kit');
+            this.encryptionManager = EncryptionManager.fromAddress(address, chainId);
+          } else {
+            // For browser wallets (MetaMask, etc.), derive encryption key via signature
+            try {
+              const message = 'Fabstir Encryption Key Derivation - Sign this message to enable end-to-end encryption';
+              const signature = await this.signer.signMessage(message);
+              const address = await this.signer.getAddress();
+              this.encryptionManager = EncryptionManager.fromSignature(signature, address);
+            } catch (error: any) {
+              console.warn('[EncryptionManager] Failed to create from signature:', error.message);
+              throw new SDKError(
+                'Failed to create EncryptionManager. User may have rejected signature request. ' +
+                'Encryption is required by default - set encryption: false in session config to opt-out.',
+                'ENCRYPTION_INIT_FAILED',
+                { originalError: error }
+              );
+            }
+          }
+        } else {
+          throw new SDKError('Signer required for encryption', 'SIGNER_NOT_AVAILABLE');
+        }
+
+        await (this.sessionManager as any).initialize();  // SessionManager doesn't take signer
+      } else {
+        console.log('[SDK] Host-only mode: Skipping S5/Storage/Session/Encryption initialization');
+      }
 
       // Create and initialize ModelManager and HostManager now that we have a signer
       const modelRegistryAddress = this.config.contractAddresses?.modelRegistry;
@@ -654,7 +667,8 @@ export class FabstirSDKCore extends EventEmitter {
       await (this.treasuryManager as any).initialize(this.signer);
 
       // Initialize VectorRAGManager after authentication (needs userAddress and s5Seed)
-      if (this.userAddress && this.s5Seed && this.sessionManager) {
+      // Skip in hostOnly mode (no S5 storage available)
+      if (!hostOnly && this.userAddress && this.s5Seed && this.sessionManager) {
         const ragConfig = {
           ...DEFAULT_RAG_CONFIG,
           s5Portal: this.config.s5Config?.portalUrl || DEFAULT_RAG_CONFIG.s5Portal
@@ -678,7 +692,7 @@ export class FabstirSDKCore extends EventEmitter {
         );
 
         this.sessionGroupManager = new SessionGroupManager(sessionGroupStorage);
-      } else {
+      } else if (!hostOnly) {
         console.warn('VectorRAGManager initialization skipped: missing userAddress or s5Seed');
       }
     }

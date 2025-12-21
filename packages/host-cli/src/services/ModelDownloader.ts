@@ -94,6 +94,7 @@ async function downloadFile(
       const totalSize = parseInt(response.headers['content-length'] || '0', 10);
       let downloadedSize = 0;
       let startTime = Date.now();
+      let lastDataTime = Date.now();
 
       // Ensure directory exists
       const dir = path.dirname(destPath);
@@ -103,8 +104,21 @@ async function downloadFile(
 
       const fileStream = fs.createWriteStream(destPath);
 
+      // Idle timeout checker - only timeout if no data for 2 minutes
+      const idleTimeoutMs = 120000;
+      const idleChecker = setInterval(() => {
+        if (Date.now() - lastDataTime > idleTimeoutMs) {
+          clearInterval(idleChecker);
+          request.destroy();
+          fileStream.destroy();
+          fs.unlink(destPath, () => {});
+          reject(new Error('Download stalled - no data received for 2 minutes'));
+        }
+      }, 10000);
+
       response.on('data', (chunk: Buffer) => {
         downloadedSize += chunk.length;
+        lastDataTime = Date.now(); // Reset idle timer on each chunk
 
         if (onProgress && totalSize > 0) {
           const elapsed = (Date.now() - startTime) / 1000;
@@ -122,23 +136,26 @@ async function downloadFile(
       response.pipe(fileStream);
 
       fileStream.on('finish', () => {
+        clearInterval(idleChecker);
         fileStream.close();
         resolve();
       });
 
       fileStream.on('error', (err) => {
+        clearInterval(idleChecker);
         fs.unlink(destPath, () => {}); // Delete partial file
+        reject(err);
+      });
+
+      response.on('error', (err) => {
+        clearInterval(idleChecker);
+        fs.unlink(destPath, () => {});
         reject(err);
       });
     });
 
     request.on('error', (err) => {
       reject(err);
-    });
-
-    request.setTimeout(30000, () => {
-      request.destroy();
-      reject(new Error('Connection timeout'));
     });
   });
 }
@@ -169,7 +186,13 @@ export async function verifyModelFile(
     // Get expected hash from contract
     const expectedHash = await fetchModelHash(rpcUrl, modelId);
 
-    if (!expectedHash || expectedHash === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+    // Skip verification if hash is missing or a placeholder value
+    // Placeholders are typically small numbers like 0x0, 0x1, 0x2, etc.
+    // Real SHA256 hashes have high entropy - check if first 60 chars are zeros (placeholder)
+    const isPlaceholder = !expectedHash ||
+      expectedHash.replace('0x', '').replace(/^0+/, '').length <= 4;
+
+    if (isPlaceholder) {
       return {
         verified: true,
         error: 'No hash stored on-chain (skipped verification)',
