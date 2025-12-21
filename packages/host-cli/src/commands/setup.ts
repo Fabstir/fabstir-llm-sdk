@@ -378,11 +378,22 @@ async function step5Register(
     await initializeSDK('base-sepolia');
     await authenticateSDK(config.privateKey);
 
+    // Convert stable price to native price (wei)
+    // Stable price is in USDC units per million tokens (e.g., 5000 = $5 per million)
+    // Native price is in wei per token
+    // Assuming ETH ~$2200, calculate equivalent wei per token
+    const ETH_PRICE_USD = 2200;
+    const stablePrice = parseInt(config.price);
+    // stablePrice / 1e6 = USD per token
+    // USD per token / ETH price = ETH per token
+    // ETH per token * 1e18 = wei per token
+    const nativePriceWei = BigInt(Math.floor((stablePrice / 1e6 / ETH_PRICE_USD) * 1e18));
+
     const registrationConfig: RegistrationConfig = {
       stakeAmount: ethers.parseEther(config.stake),
       apiUrl: config.url,
       models: [model.modelString],
-      minPricePerTokenNative: config.price,
+      minPricePerTokenNative: nativePriceWei.toString(),
       minPricePerTokenStable: config.price,
       onProgress: (message: string) => {
         console.log(chalk.gray(`  ${message}`));

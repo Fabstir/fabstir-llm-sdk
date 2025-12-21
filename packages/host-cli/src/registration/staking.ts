@@ -81,11 +81,11 @@ export async function checkAllowance(): Promise<bigint> {
     const spenderAddress = getStakingRequirements().contractAddress;
 
     // Use SDK PaymentManager instead of direct contract calls
-    // checkAllowance(tokenAddress, ownerAddress, spenderAddress)
+    // checkAllowance(owner, spender, tokenAddress)
     const allowance = await paymentManager.checkAllowance(
-      fabTokenAddress,
       address,
-      spenderAddress
+      spenderAddress,
+      fabTokenAddress
     );
 
     return allowance;
@@ -151,11 +151,11 @@ export async function approveTokens(
     const spenderAddress = getStakingRequirements().contractAddress;
 
     // Use SDK method instead of direct contract calls
-    // approveToken(tokenAddress, spenderAddress, amount)
+    // approveToken(spender, amount, tokenAddress)
     const receipt = await paymentManager.approveToken(
-      fabTokenAddress,
       spenderAddress,
-      amount
+      amount,
+      fabTokenAddress
     );
 
     return {

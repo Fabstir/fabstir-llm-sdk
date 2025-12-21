@@ -165,7 +165,10 @@ export class FabstirSDKCore extends EventEmitter {
         autoConnect: config.bridgeConfig?.autoConnect ?? false
       },
 
-      smartWallet: config.smartWallet
+      smartWallet: config.smartWallet,
+
+      // Host-only mode: Skip S5/Storage/Session initialization
+      hostOnly: config.hostOnly
     };
 
     // Validate all required contract addresses
@@ -304,29 +307,33 @@ export class FabstirSDKCore extends EventEmitter {
       }
     }
     
-    // Generate or retrieve S5 seed deterministically
-    try {
-      // Check if we have a cached seed for this wallet
-      const hasCached = hasCachedSeed(this.userAddress);
-      
-      // Get or generate the seed (will use cache if available)
-      this.s5Seed = await getOrGenerateS5Seed(this.signer);
-      
-      if (!hasCached) {
-      } else {
+    // Generate or retrieve S5 seed deterministically (skip in hostOnly mode)
+    if (this.config.hostOnly !== true) {
+      try {
+        // Check if we have a cached seed for this wallet
+        const hasCached = hasCachedSeed(this.userAddress);
+
+        // Get or generate the seed (will use cache if available)
+        this.s5Seed = await getOrGenerateS5Seed(this.signer);
+
+        if (!hasCached) {
+        } else {
+        }
+      } catch (error: any) {
+        console.warn('[S5 Seed] Failed to generate deterministic seed:', error);
+
+        // No fallbacks in production - seed must be explicitly provided
+        throw new SDKError(
+          `Failed to generate S5 seed: ${error.message}. Ensure wallet can sign messages for S5 seed derivation`,
+          'SEED_GENERATION_FAILED'
+        );
       }
-    } catch (error: any) {
-      console.warn('[S5 Seed] Failed to generate deterministic seed:', error);
-      
-      // No fallbacks in production - seed must be explicitly provided
-      throw new SDKError(
-        `Failed to generate S5 seed: ${error.message}. Ensure wallet can sign messages for S5 seed derivation`,
-        'SEED_GENERATION_FAILED'
-      );
+    } else {
+      console.log('[SDK] Host-only mode: Skipping S5 seed generation');
     }
   }
-  
-  
+
+
   /**
    * Authenticate with private key (for testing)
    */
@@ -334,40 +341,43 @@ export class FabstirSDKCore extends EventEmitter {
     if (!privateKey) {
       throw new SDKError('Private key required', 'PRIVATE_KEY_REQUIRED');
     }
-    
+
     if (!this.config.rpcUrl) {
       throw new SDKError('RPC URL required for private key auth', 'RPC_URL_REQUIRED');
     }
-    
+
     this.provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
-    
+
     // Create wallet without provider first (for offline signing)
     const wallet = new ethers.Wallet(privateKey);
-    
+
     this.signer = wallet.connect(this.provider);
-    
+
     this.userAddress = await this.signer.getAddress();
-    
-    // Generate or retrieve S5 seed deterministically
-    
-    try {
-      // Check if we have a cached seed for this wallet
-      const hasCached = hasCachedSeed(this.userAddress);
-      
-      // Get or generate the seed (will use cache if available)
-      this.s5Seed = await getOrGenerateS5Seed(this.signer);
-      
-      if (!hasCached) {
-      } else {
+
+    // Generate or retrieve S5 seed deterministically (skip in hostOnly mode)
+    if (this.config.hostOnly !== true) {
+      try {
+        // Check if we have a cached seed for this wallet
+        const hasCached = hasCachedSeed(this.userAddress);
+
+        // Get or generate the seed (will use cache if available)
+        this.s5Seed = await getOrGenerateS5Seed(this.signer);
+
+        if (!hasCached) {
+        } else {
+        }
+      } catch (error: any) {
+        console.error('[S5 Seed] Failed to generate deterministic seed:', error);
+
+        // No fallbacks in production - seed must be explicitly provided
+        throw new SDKError(
+          `Failed to generate S5 seed: ${error.message}. Ensure wallet can sign messages for S5 seed derivation`,
+          'SEED_GENERATION_FAILED'
+        );
       }
-    } catch (error: any) {
-      console.error('[S5 Seed] Failed to generate deterministic seed:', error);
-      
-      // No fallbacks in production - seed must be explicitly provided
-      throw new SDKError(
-        `Failed to generate S5 seed: ${error.message}. Ensure wallet can sign messages for S5 seed derivation`,
-        'SEED_GENERATION_FAILED'
-      );
+    } else {
+      console.log('[SDK] Host-only mode: Skipping S5 seed generation');
     }
   }
   
@@ -393,26 +403,29 @@ export class FabstirSDKCore extends EventEmitter {
     
     this.userAddress = await this.signer.getAddress();
     
-    // Generate or retrieve S5 seed deterministically
-    
-    try {
-      // Check if we have a cached seed for this wallet
-      const hasCached = hasCachedSeed(this.userAddress);
-      
-      // Get or generate the seed (will use cache if available)
-      this.s5Seed = await getOrGenerateS5Seed(this.signer);
-      
-      if (!hasCached) {
-      } else {
+    // Generate or retrieve S5 seed deterministically (skip in hostOnly mode)
+    if (this.config.hostOnly !== true) {
+      try {
+        // Check if we have a cached seed for this wallet
+        const hasCached = hasCachedSeed(this.userAddress);
+
+        // Get or generate the seed (will use cache if available)
+        this.s5Seed = await getOrGenerateS5Seed(this.signer);
+
+        if (!hasCached) {
+        } else {
+        }
+      } catch (error: any) {
+        console.error('[S5 Seed] Failed to generate deterministic seed:', error);
+
+        // No fallbacks in production - seed must be explicitly provided
+        throw new SDKError(
+          `Failed to generate S5 seed: ${error.message}. Ensure wallet can sign messages for S5 seed derivation`,
+          'SEED_GENERATION_FAILED'
+        );
       }
-    } catch (error: any) {
-      console.error('[S5 Seed] Failed to generate deterministic seed:', error);
-      
-      // No fallbacks in production - seed must be explicitly provided
-      throw new SDKError(
-        `Failed to generate S5 seed: ${error.message}. Ensure wallet can sign messages for S5 seed derivation`,
-        'SEED_GENERATION_FAILED'
-      );
+    } else {
+      console.log('[SDK] Host-only mode: Skipping S5 seed generation');
     }
   }
 
