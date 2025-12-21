@@ -259,7 +259,14 @@ async function step4ConfigureNode(): Promise<{
 } | null> {
   printStep(4, 5, 'Configure Node');
 
-  const answers = await inquirer.prompt([
+  // Check if private key is already provided via environment variable
+  const envPrivateKey = process.env.HOST_PRIVATE_KEY;
+  if (envPrivateKey) {
+    console.log(chalk.green('✓ Using private key from HOST_PRIVATE_KEY environment variable'));
+  }
+
+  // Build prompts - only include private key prompt if not already provided
+  const prompts: any[] = [
     {
       type: 'input',
       name: 'url',
@@ -300,7 +307,11 @@ async function step4ConfigureNode(): Promise<{
         return true;
       },
     },
-    {
+  ];
+
+  // Only prompt for private key if not provided via environment variable
+  if (!envPrivateKey) {
+    prompts.push({
       type: 'password',
       name: 'privateKey',
       message: 'Enter your private key (for registration):',
@@ -311,8 +322,15 @@ async function step4ConfigureNode(): Promise<{
         }
         return true;
       },
-    },
-  ]);
+    });
+  }
+
+  const answers = await inquirer.prompt(prompts);
+
+  // Use environment variable if prompt was skipped
+  if (envPrivateKey && !answers.privateKey) {
+    answers.privateKey = envPrivateKey;
+  }
 
   // Display pricing info
   const priceNum = parseInt(answers.price, 10);

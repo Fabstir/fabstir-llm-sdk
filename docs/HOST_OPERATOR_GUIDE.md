@@ -72,13 +72,14 @@ Get testnet tokens:
 The easiest way to get started is using the interactive setup wizard:
 
 ```bash
-docker run --rm -it \
-  --network host \
+docker run -it --rm \
   --gpus all \
-  -v ~/fabstir-node:/root/fabstir-node \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  julesl123/fabstir-host-cli:latest setup
+  -v fabstir-models:/root/fabstir-node/models \
+  -e HOST_PRIVATE_KEY=your_private_key_here \
+  julesl23/fabstir-host-cli:latest setup
 ```
+
+> **Note:** Contract addresses are bundled in the Docker image. If you provide `HOST_PRIVATE_KEY` via environment variable, the wizard will use it automatically and skip the private key prompt.
 
 The wizard guides you through:
 1. **Check Prerequisites** - Verifies Docker, GPU, disk space
@@ -245,7 +246,7 @@ The model string is validated against the blockchain before the transaction is s
 - `--stake`: Amount of FAB tokens to stake (minimum 1000)
 - `--url`: Public URL where your node is accessible
 - `--model`: Model in format `{HuggingFace_Repo}:{filename}` (optional - interactive if omitted)
-- `--pricing`: Price per token in micro-USDC (2000 = $0.002/token)
+- `--pricing`: Price per million tokens in micro-USDC (2000 = $2.00 per million tokens, or $0.000002/token)
 
 ### Option C: Using Web Interface
 
@@ -323,6 +324,8 @@ docker run --rm -it \
   -e HOST_PRIVATE_KEY=your_private_key_here \
   julesl123/fabstir-host-cli:latest update-pricing --price 3000
 ```
+
+> **Pricing Format:** Price is per million tokens. 3000 = $3.00 per million tokens ($0.000003/token).
 
 ### Withdraw Earnings
 
@@ -424,8 +427,11 @@ docker run --rm -it \
   --network host --gpus all \
   -v ~/fabstir-node:/root/fabstir-node \
   -v /var/run/docker.sock:/var/run/docker.sock \
+  -e HOST_PRIVATE_KEY=your_private_key_here \
   julesl123/fabstir-host-cli:latest setup
 ```
+
+> **Note:** Contract addresses are bundled in the Docker image. The wizard will use `HOST_PRIVATE_KEY` automatically and skip the private key prompt.
 
 ### Manual One-Command Setup (After Prerequisites)
 
