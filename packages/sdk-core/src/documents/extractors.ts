@@ -5,6 +5,14 @@
  */
 
 import type { DocumentType, ExtractionResult } from './types.js';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configure PDF.js worker for browser environment
+// Text extraction works without canvas - canvas is only needed for rendering
+if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+}
 
 /**
  * Extract text from a file
@@ -23,7 +31,8 @@ export async function extractText(
 
   switch (type) {
     case 'pdf':
-      throw new Error('PDF processing is not supported in this environment. Please use .txt, .md, or .html files.');
+      text = await extractFromPDF(file);
+      break;
     case 'docx':
       throw new Error('DOCX processing is not supported in this environment. Please use .txt, .md, or .html files.');
     case 'txt':
@@ -49,9 +58,8 @@ export async function extractText(
   };
 }
 
-// PDF and DOCX extraction removed - these require server-side dependencies
-// that cannot be bundled for browser environments (pdfjs-dist + canvas.node, mammoth)
-// For server-side PDF/DOCX processing, implement a separate backend endpoint
+// DOCX extraction requires mammoth.js which has server-side dependencies
+// For DOCX processing, implement a separate backend endpoint or use mammoth in Node.js
 
 /**
  * Extract text from plain text file
@@ -95,6 +103,91 @@ async function extractFromHTML(file: File): Promise<string> {
     }
   } catch (error) {
     throw new Error(`Failed to extract text from HTML: ${(error as Error).message}`);
+  }
+}
+
+/**
+ * Sanitize text to remove invalid Unicode characters
+ * Removes lone surrogates, null bytes, and other problematic characters
+ * that cause JSON serialization to fail
+ *
+ * @param text - Raw text that may contain invalid characters
+ * @returns Sanitized text safe for JSON serialization
+ */
+function sanitizeText(text: string): string {
+  // Remove lone surrogates (unpaired high/low surrogates)
+  // High surrogates: \uD800-\uDBFF, Low surrogates: \uDC00-\uDFFF
+  // A lone surrogate is a high surrogate not followed by a low surrogate,
+  // or a low surrogate not preceded by a high surrogate
+  let result = '';
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+
+    // Check if this is a high surrogate
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      // Check if next char is a low surrogate
+      if (i + 1 < text.length) {
+        const nextCode = text.charCodeAt(i + 1);
+        if (nextCode >= 0xDC00 && nextCode <= 0xDFFF) {
+          // Valid surrogate pair - keep both
+          result += text[i] + text[i + 1];
+          i++; // Skip the next character
+          continue;
+        }
+      }
+      // Lone high surrogate - replace with replacement character
+      result += '\uFFFD';
+      continue;
+    }
+
+    // Check if this is a lone low surrogate
+    if (code >= 0xDC00 && code <= 0xDFFF) {
+      // Lone low surrogate - replace with replacement character
+      result += '\uFFFD';
+      continue;
+    }
+
+    // Remove null bytes and other control characters (except newline, tab, carriage return)
+    if (code === 0 || (code < 32 && code !== 9 && code !== 10 && code !== 13)) {
+      continue;
+    }
+
+    result += text[i];
+  }
+
+  return result;
+}
+
+/**
+ * Extract text from PDF file using pdfjs-dist
+ * Text-only extraction (no canvas required)
+ *
+ * @param file - PDF file
+ * @returns Extracted text from all pages
+ */
+async function extractFromPDF(file: File): Promise<string> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+    const textParts: string[] = [];
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map((item: any) => item.str)
+        .join(' ');
+      textParts.push(pageText);
+    }
+
+    const rawText = textParts.join('\n\n');
+
+    // Sanitize text to remove invalid Unicode characters
+    // PDFs can contain malformed surrogates that break JSON serialization
+    return sanitizeText(rawText);
+  } catch (error) {
+    throw new Error(`Failed to extract text from PDF: ${(error as Error).message}`);
   }
 }
 

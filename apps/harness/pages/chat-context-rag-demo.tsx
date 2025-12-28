@@ -1438,8 +1438,8 @@ export default function ChatContextDemo() {
       const ext = file.name.split(".").pop()?.toLowerCase();
       console.log('[RAG DEBUG] File extension:', ext);
 
-      if (!["txt", "md", "html"].includes(ext || "")) {
-        throw new Error("Only .txt, .md, and .html files are supported");
+      if (!["txt", "md", "html", "pdf"].includes(ext || "")) {
+        throw new Error("Only .txt, .md, .html, and .pdf files are supported");
       }
 
       // Validate file size (max 5 MB)
@@ -2065,13 +2065,13 @@ export default function ChatContextDemo() {
           <div className="flex gap-2 items-center mb-3">
             <input
               type="file"
-              accept=".txt,.md,.html"
+              accept=".txt,.md,.html,.pdf"
               onChange={handleFileUpload}
               disabled={isUploadingDocument || !sessionId}
               className="px-3 py-2 border rounded text-sm disabled:bg-gray-100"
             />
             <span className="text-xs text-gray-600">
-              Supported: .txt, .md, .html (max 5MB)
+              Supported: .txt, .md, .html, .pdf (max 5MB)
             </span>
           </div>
 
