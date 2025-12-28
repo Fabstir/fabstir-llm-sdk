@@ -7,8 +7,45 @@
  * Entry point for the host node management tool
  */
 
+// Auto-load .env.contracts for contract addresses (before any other imports)
+import * as fs from 'fs';
+import * as path from 'path';
+import { config as dotenvConfig } from 'dotenv';
+
+// Look for .env.contracts in current directory, parent, or /app (Docker)
+const envContractsPaths = [
+  path.join(process.cwd(), '.env.contracts'),
+  path.join(process.cwd(), '..', '.env.contracts'),
+  '/app/.env.contracts',
+  path.join(__dirname, '..', '.env.contracts'),
+];
+
+for (const envPath of envContractsPaths) {
+  if (fs.existsSync(envPath)) {
+    dotenvConfig({ path: envPath });
+    break;
+  }
+}
+
+// Also load .env if present (for HOST_PRIVATE_KEY, etc.)
+const envPaths = [
+  path.join(process.cwd(), '.env'),
+  path.join(process.cwd(), '..', '.env'),
+];
+
+for (const envPath of envPaths) {
+  if (fs.existsSync(envPath)) {
+    dotenvConfig({ path: envPath });
+    break;
+  }
+}
+
 // Polyfill IndexedDB for Node.js (required for S5 storage in SDK)
 import 'fake-indexeddb/auto';
+
+// Polyfill WebSocket for Node.js (required for S5 storage in SDK)
+import WebSocket from 'ws';
+(globalThis as any).WebSocket = WebSocket;
 
 import { Command } from 'commander';
 import { registerInitCommand } from './commands/init';
@@ -29,6 +66,8 @@ import { registerLogsCommand } from './commands/logs';
 import { registerStopCommand } from './commands/stop';
 import { registerServeCommand } from './commands/serve';
 import { registerDashboardCommand } from './commands/dashboard';
+import { registerModelsCommand } from './commands/models';
+import { registerSetupCommand } from './commands/setup';
 
 const program = new Command();
 
@@ -56,6 +95,8 @@ registerLogsCommand(program);
 registerStopCommand(program);
 registerServeCommand(program);
 registerDashboardCommand(program);
+registerModelsCommand(program);
+registerSetupCommand(program);
 
 // Show help if no command provided
 if (!process.argv.slice(2).length) {

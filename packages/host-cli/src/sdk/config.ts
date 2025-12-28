@@ -3,8 +3,8 @@
 
 /**
  * SDK Configuration
- * Creates configuration for FabstirSDKCore from environment variables
- * Matches the structure from chat-context-demo.tsx
+ * Creates configuration for FabstirSDKCore
+ * All contract addresses MUST be provided via environment variables
  */
 
 export interface SDKConfig {
@@ -24,44 +24,55 @@ export interface SDKConfig {
     seedPhrase?: string;
   };
   mode?: 'production' | 'development';
+  // Host-only mode: Skip S5/Storage/Session initialization
+  hostOnly?: boolean;
 }
 
 /**
+ * Required environment variables for Base Sepolia
+ */
+const REQUIRED_ENV_VARS = [
+  'CONTRACT_JOB_MARKETPLACE',
+  'CONTRACT_NODE_REGISTRY',
+  'CONTRACT_PROOF_SYSTEM',
+  'CONTRACT_HOST_EARNINGS',
+  'CONTRACT_FAB_TOKEN',
+  'CONTRACT_USDC_TOKEN',
+  'CONTRACT_MODEL_REGISTRY',
+];
+
+/**
  * Create SDK configuration from environment variables
+ * All contract addresses MUST be set - no fallbacks allowed
  */
 export function createSDKConfig(network: 'base-mainnet' | 'base-sepolia'): SDKConfig {
-  // Validate required environment variables
-  const requiredVars = [
-    'CONTRACT_JOB_MARKETPLACE',
-    'CONTRACT_NODE_REGISTRY',
-    'CONTRACT_PROOF_SYSTEM',
-    'CONTRACT_HOST_EARNINGS',
-    'CONTRACT_FAB_TOKEN',
-    'CONTRACT_USDC_TOKEN'
-  ];
+  // Get chain ID based on network
+  const chainId = network === 'base-mainnet' ? 8453 : 84532;
 
-  for (const varName of requiredVars) {
+  // Validate all required environment variables are set
+  const missing: string[] = [];
+  for (const varName of REQUIRED_ENV_VARS) {
     if (!process.env[varName]) {
-      throw new Error(`Missing required environment variable: ${varName}`);
+      missing.push(varName);
     }
   }
 
-  // Model Registry is optional but we should check for it
-  const modelRegistry = process.env.CONTRACT_MODEL_REGISTRY || process.env.CONTRACT_JOB_MARKETPLACE;
-
-  // Get RPC URL based on network
-  const rpcUrl = network === 'base-mainnet'
-    ? process.env.RPC_URL_BASE_MAINNET
-    : process.env.RPC_URL_BASE_SEPOLIA;
-
-  if (!rpcUrl) {
-    throw new Error(`Missing RPC URL for network: ${network}`);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required environment variables:\n` +
+      missing.map(v => `  - ${v}`).join('\n') +
+      `\n\nPlease set these in your environment or .env file.\n` +
+      `See .env.test for current contract addresses.`
+    );
   }
 
-  // Get chain ID based on network
-  const chainId = network === 'base-mainnet' ? 8453 : 84532; // Base mainnet: 8453, Base Sepolia: 84532
+  // Get RPC URL
+  const rpcUrlVar = network === 'base-mainnet' ? 'RPC_URL_BASE_MAINNET' : 'RPC_URL_BASE_SEPOLIA';
+  const rpcUrl = process.env[rpcUrlVar];
+  if (!rpcUrl) {
+    throw new Error(`Missing required environment variable: ${rpcUrlVar}`);
+  }
 
-  // Get S5 configuration
   const s5PortalUrl = process.env.S5_PORTAL_URL || 'https://s5.cx';
 
   return {
@@ -74,13 +85,15 @@ export function createSDKConfig(network: 'base-mainnet' | 'base-sepolia'): SDKCo
       hostEarnings: process.env.CONTRACT_HOST_EARNINGS!,
       fabToken: process.env.CONTRACT_FAB_TOKEN!,
       usdcToken: process.env.CONTRACT_USDC_TOKEN!,
-      modelRegistry: modelRegistry!
+      modelRegistry: process.env.CONTRACT_MODEL_REGISTRY!,
     },
     s5Config: {
       portalUrl: s5PortalUrl,
       seedPhrase: process.env.S5_SEED_PHRASE
     },
-    mode: 'production'
+    mode: 'production',
+    // Host-only mode: Skip S5/Storage/Session initialization (not needed for host operations)
+    hostOnly: true
   };
 }
 

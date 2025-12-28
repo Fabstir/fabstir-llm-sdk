@@ -2,7 +2,7 @@
 
 **Audience:** New users who want to run a Fabstir host node and earn by providing AI inference.
 
-**Time Required:** ~30 minutes for initial setup
+**Time Required:** ~10 minutes with setup wizard, ~30 minutes manual setup
 
 ---
 
@@ -11,9 +11,10 @@
 To become a Fabstir host operator, you need to:
 
 1. **Prerequisites** - Ubuntu server with NVIDIA GPU, Docker installed
-2. **Run fabstir-llm-node** - The AI inference engine
-3. **Register as a host** - Stake tokens and register on-chain
-4. **Monitor with dashboard** - Optional TUI dashboard
+2. **Run Setup Wizard** - Guided setup (recommended) OR manual setup
+3. **Monitor with dashboard** - TUI dashboard for status, earnings, and withdrawals
+
+**Fastest Path:** Run `fabstir-host setup` after prerequisites are met.
 
 ---
 
@@ -66,7 +67,63 @@ Get testnet tokens:
 
 ---
 
-## Step 2: Run fabstir-llm-node
+## Step 2: Setup Wizard (Recommended)
+
+The easiest way to get started is using the interactive setup wizard:
+
+```bash
+docker run -it --rm \
+  --gpus all \
+  -v fabstir-models:/root/fabstir-node/models \
+  -e HOST_PRIVATE_KEY=your_private_key_here \
+  julesl23/fabstir-host-cli:latest setup
+```
+
+> **Note:** Contract addresses are bundled in the Docker image. If you provide `HOST_PRIVATE_KEY` via environment variable, the wizard will use it automatically and skip the private key prompt.
+
+The wizard guides you through:
+1. **Check Prerequisites** - Verifies Docker, GPU, disk space
+2. **Select Model** - Choose from blockchain-approved models (with GPU recommendations)
+3. **Download Model** - Downloads with progress bar and SHA256 verification
+4. **Configure Node** - Set URL, pricing, stake amount
+5. **Register on Blockchain** - Stakes tokens and registers your node
+
+After completion, it generates `docker-compose.yml` and `.env` files in `~/fabstir-node/`.
+
+---
+
+## Step 2b: Discover Models
+
+Before registering, you can explore approved models:
+
+```bash
+# List all approved models from blockchain
+docker run --rm -it julesl123/fabstir-host-cli:latest models list
+
+# Get details on a specific model
+docker run --rm -it julesl123/fabstir-host-cli:latest models info 1
+
+# Download a model (with verification)
+docker run --rm -it \
+  -v ~/fabstir-node/models:/root/fabstir-node/models \
+  julesl123/fabstir-host-cli:latest models download 1
+```
+
+If a model requires HuggingFace authentication:
+```bash
+docker run --rm -it \
+  -e HF_TOKEN=your_huggingface_token \
+  -v ~/fabstir-node/models:/root/fabstir-node/models \
+  julesl123/fabstir-host-cli:latest models download 1
+```
+
+---
+
+## Step 3: Manual Setup (Alternative)
+
+If you prefer manual setup instead of the wizard:
+
+### Run fabstir-llm-node
 
 ### Option A: Docker Compose (Recommended)
 
@@ -152,16 +209,30 @@ docker run -d \
 
 ---
 
-## Step 3: Register as a Host
+## Step 4: Register as a Host
 
-### Option A: Using Host CLI (Recommended)
+### Option A: Interactive Registration (Recommended)
+
+When you omit `--model`, you get an interactive model selector:
 
 ```bash
-# Run registration in Docker (no installation needed)
 docker run --rm -it \
   --network host \
   -e HOST_PRIVATE_KEY=your_private_key_here \
-  -e RPC_URL=https://sepolia.base.org \
+  julesl123/fabstir-host-cli:latest register \
+    --stake 1000 \
+    --url "http://YOUR_SERVER_IP:8080" \
+    --pricing 2000
+```
+
+This shows a list of approved models to choose from, validates your selection, and proceeds with registration.
+
+### Option B: Explicit Model Registration
+
+```bash
+docker run --rm -it \
+  --network host \
+  -e HOST_PRIVATE_KEY=your_private_key_here \
   julesl123/fabstir-host-cli:latest register \
     --stake 1000 \
     --url "http://YOUR_SERVER_IP:8080" \
@@ -169,13 +240,15 @@ docker run --rm -it \
     --pricing 2000
 ```
 
+The model string is validated against the blockchain before the transaction is submitted. If invalid, you'll see suggestions for approved models.
+
 **Parameters:**
 - `--stake`: Amount of FAB tokens to stake (minimum 1000)
 - `--url`: Public URL where your node is accessible
-- `--model`: Model in format `{HuggingFace_Repo}:{filename}`
-- `--pricing`: Price per token in micro-USDC (2000 = $0.002/token)
+- `--model`: Model in format `{HuggingFace_Repo}:{filename}` (optional - interactive if omitted)
+- `--pricing`: Price per million tokens in micro-USDC (2000 = $2.00 per million tokens, or $0.000002/token)
 
-### Option B: Using Web Interface
+### Option C: Using Web Interface
 
 1. Go to https://host.fabstir.com (when available)
 2. Connect your wallet
@@ -195,31 +268,35 @@ docker run --rm -it \
 
 ---
 
-## Step 4: Monitor with Dashboard
+## Step 5: Monitor with Dashboard
 
 Run the TUI dashboard to monitor your node:
 
 ```bash
 docker run --rm -it \
   --network host \
+  -e HOST_PRIVATE_KEY=your_private_key_here \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  julesl123/fabstir-host-cli:latest
+  julesl123/fabstir-host-cli:latest dashboard
 ```
 
 **Dashboard Features:**
 - **Node Status**: Health, uptime, active sessions
 - **Live Logs**: Real-time Docker container logs
-- **Earnings**: (Coming soon) View accumulated earnings
+- **Earnings**: View accumulated USDC and ETH earnings
+- **Pricing**: Update your token pricing
+- **Withdrawals**: Withdraw earnings to your wallet
 
 **Keyboard Shortcuts:**
 - `R` - Refresh status
-- `P` - Update pricing (coming soon)
-- `W` - Withdraw earnings (coming soon)
+- `E` - View earnings breakdown
+- `P` - Update pricing
+- `W` - Withdraw earnings
 - `Q` - Quit
 
 ---
 
-## Step 5: Maintain Your Node
+## Step 6: Maintain Your Node
 
 ### Check Node Health
 
@@ -248,6 +325,8 @@ docker run --rm -it \
   julesl123/fabstir-host-cli:latest update-pricing --price 3000
 ```
 
+> **Pricing Format:** Price is per million tokens. 3000 = $3.00 per million tokens ($0.000003/token).
+
 ### Withdraw Earnings
 
 ```bash
@@ -261,14 +340,20 @@ docker run --rm -it \
 
 ## Approved Models
 
-Currently approved models for the testnet:
+To see the current list of approved models, run:
+
+```bash
+docker run --rm -it julesl123/fabstir-host-cli:latest models list
+```
+
+Example approved models for the testnet:
 
 | Model | Format String | Size |
 |-------|--------------|------|
 | TinyVicuna 1B | `CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf` | 0.6GB |
 | TinyLlama 1.1B | `TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF:tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf` | 0.7GB |
 
-More models will be approved as the network grows.
+Models are approved on-chain in the ModelRegistry contract. Use `models list` to always see the current approved models.
 
 ---
 
@@ -334,13 +419,27 @@ sudo ufw allow 8080/tcp
 
 ## Quick Reference
 
-### One-Command Setup (After Prerequisites)
+### Fastest Setup (Wizard)
 
 ```bash
-# 1. Create directory and download model
-mkdir -p ~/fabstir-node/models && cd ~/fabstir-node
-wget -O models/tiny-vicuna-1b.q4_k_m.gguf \
-  https://huggingface.co/CohereForAI/TinyVicuna-1B-32k-GGUF/resolve/main/tiny-vicuna-1b.q4_k_m.gguf
+# Run the interactive setup wizard - handles everything!
+docker run --rm -it \
+  --network host --gpus all \
+  -v ~/fabstir-node:/root/fabstir-node \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e HOST_PRIVATE_KEY=your_private_key_here \
+  julesl123/fabstir-host-cli:latest setup
+```
+
+> **Note:** Contract addresses are bundled in the Docker image. The wizard will use `HOST_PRIVATE_KEY` automatically and skip the private key prompt.
+
+### Manual One-Command Setup (After Prerequisites)
+
+```bash
+# 1. Discover and download a model
+docker run --rm -it \
+  -v ~/fabstir-node/models:/root/fabstir-node/models \
+  julesl123/fabstir-host-cli:latest models download 1
 
 # 2. Start node (replace YOUR_PRIVATE_KEY)
 docker run -d --name fabstir-llm-node --gpus all -p 8080:8080 \
@@ -348,18 +447,17 @@ docker run -d --name fabstir-llm-node --gpus all -p 8080:8080 \
   -e HOST_PRIVATE_KEY=YOUR_PRIVATE_KEY \
   fabstir/llm-node:latest
 
-# 3. Register (replace YOUR_PRIVATE_KEY and YOUR_SERVER_IP)
+# 3. Register with interactive model selection (replace YOUR_PRIVATE_KEY and YOUR_SERVER_IP)
 docker run --rm -it --network host \
   -e HOST_PRIVATE_KEY=YOUR_PRIVATE_KEY \
   julesl123/fabstir-host-cli:latest register \
-  --stake 1000 --url "http://YOUR_SERVER_IP:8080" \
-  --model "CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf" \
-  --pricing 2000
+  --stake 1000 --url "http://YOUR_SERVER_IP:8080" --pricing 2000
 
-# 4. Monitor
+# 4. Monitor with dashboard
 docker run --rm -it --network host \
+  -e HOST_PRIVATE_KEY=YOUR_PRIVATE_KEY \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  julesl123/fabstir-host-cli:latest
+  julesl123/fabstir-host-cli:latest dashboard
 ```
 
 ---

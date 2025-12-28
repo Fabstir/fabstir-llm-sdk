@@ -40,7 +40,8 @@ export async function initializeSDK(network: 'base-mainnet' | 'base-sepolia' = '
   }
 
   try {
-    // Create config from environment
+    // Create config from environment variables
+    // All contract addresses MUST be set - no fallbacks
     const config = createSDKConfig(network);
 
     // Validate configuration

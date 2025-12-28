@@ -1,0 +1,132 @@
+# Copyright (c) 2025 Fabstir
+# SPDX-License-Identifier: BUSL-1.1
+
+# Fabstir Host CLI - Lightweight CLI Image (no bundled node)
+# For testing CLI commands like models, setup, register
+#
+# Build from repo root:
+#   docker build -f packages/host-cli/Dockerfile.cli -t fabstir-host-cli:local .
+
+# ============================================================================
+# Stage 1: Builder
+# ============================================================================
+FROM node:20-slim AS builder
+
+WORKDIR /build
+
+# Install pnpm and typescript globally
+RUN npm install -g pnpm@8 typescript@5
+
+# Copy sdk-core first (dependency)
+COPY packages/sdk-core ./packages/sdk-core
+
+# Copy host-cli
+COPY packages/host-cli ./packages/host-cli
+
+# Copy s5js distribution and dependencies
+COPY s5js-dist.tar.gz /tmp/
+COPY s5js-0.3.0.tgz /build/
+COPY fabstir-vector-db-native-0.3.0.tgz /build/
+COPY julesl23-s5js-0.9.0-beta.5.tgz /build/
+
+# Extract s5js
+RUN mkdir -p ./packages/s5js && \
+    tar xzf /tmp/s5js-dist.tar.gz -C ./packages/s5js --strip-components=1 && \
+    rm /tmp/s5js-dist.tar.gz
+
+# Create minimal pnpm workspace
+RUN echo "packages:" > pnpm-workspace.yaml && \
+    echo "  - 'packages/*'" >> pnpm-workspace.yaml
+
+# Remove llm-auth dependency from sdk-core (not needed for CLI)
+RUN sed -i '/"@fabstir\/llm-auth":/d' packages/sdk-core/package.json
+
+# Install and build s5js
+WORKDIR /build/packages/s5js
+RUN pnpm install --ignore-scripts
+
+# Install and build sdk-core
+WORKDIR /build/packages/sdk-core
+RUN pnpm install --ignore-scripts
+
+# Install host-cli dependencies
+WORKDIR /build/packages/host-cli
+RUN pnpm install --ignore-scripts
+
+# Build sdk-core
+WORKDIR /build/packages/sdk-core
+RUN sed -i 's/--external:assert/--external:assert --external:@s5-dev\/s5js --external:@fabstir\/llm-auth/' package.json
+RUN pnpm run build
+
+# Build host-cli
+WORKDIR /build/packages/host-cli
+RUN npx tsc 2>&1 | tee build.log || true && \
+    ls -la dist/ && \
+    echo "Build completed"
+
+# ============================================================================
+# Stage 2: Runtime
+# ============================================================================
+FROM node:20-slim
+
+# Install minimal runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install pnpm
+RUN npm install -g pnpm@8
+
+# Copy built artifacts
+COPY --from=builder /build/packages/sdk-core /tmp/deps/sdk-core
+COPY --from=builder /build/packages/s5js /tmp/deps/s5js
+COPY --from=builder /build/fabstir-vector-db-native-0.3.0.tgz /tmp/
+COPY --from=builder /build/julesl23-s5js-0.9.0-beta.5.tgz /tmp/
+
+# Copy host-cli
+COPY --from=builder /build/packages/host-cli/package.json ./package.json
+COPY --from=builder /build/packages/host-cli/dist ./dist
+COPY --from=builder /build/packages/host-cli/.env.contracts ./.env.contracts
+
+# Copy ABIs
+RUN mkdir -p /sdk-core/src/contracts/abis
+COPY --from=builder /build/packages/sdk-core/src/contracts/abis/*.json /sdk-core/src/contracts/abis/
+
+# Fix package.json paths for standalone install
+RUN sed -i 's|"@fabstir/sdk-core": "workspace:\*"|"@fabstir/sdk-core": "file:/tmp/deps/sdk-core"|' package.json && \
+    sed -i 's|"@s5-dev/s5js": "file:../s5js"|"@s5-dev/s5js": "file:/tmp/deps/s5js"|' package.json && \
+    sed -i 's|"@fabstir/vector-db-native": "file:../../fabstir-vector-db-native-0.3.0.tgz"|"@fabstir/vector-db-native": "file:/tmp/fabstir-vector-db-native-0.3.0.tgz"|' package.json
+
+# Fix sdk-core's s5js reference
+RUN sed -i 's|"@s5-dev/s5js": "file:../../julesl23-s5js-0.9.0-beta.5.tgz"|"@s5-dev/s5js": "file:/tmp/julesl23-s5js-0.9.0-beta.5.tgz"|' /tmp/deps/sdk-core/package.json
+
+# Add polyfill wrapper with IndexedDB, WebSocket, and auto-load .env.contracts
+RUN echo "// Fabstir Host CLI Entry Point\n\
+// Auto-load contract addresses from .env.contracts\n\
+const path = require('path');\n\
+const fs = require('fs');\n\
+const envPath = path.join(__dirname, '..', '.env.contracts');\n\
+if (fs.existsSync(envPath)) {\n\
+  require('dotenv').config({ path: envPath });\n\
+}\n\
+// Browser API polyfills for S5 in Node.js\n\
+require('fake-indexeddb/auto');\n\
+const WebSocket = require('ws');\n\
+globalThis.WebSocket = WebSocket;\n\
+require('./index.js');" > dist/cli-entry.js
+
+# Install production dependencies
+RUN pnpm install --prod --ignore-scripts 2>/dev/null || npm install --omit=dev --ignore-scripts
+
+# TUI support
+ENV TERM=xterm-256color
+ENV NODE_ENV=production
+
+# Entry point
+ENTRYPOINT ["node", "dist/cli-entry.js"]
+
+# Default: show help
+CMD []
