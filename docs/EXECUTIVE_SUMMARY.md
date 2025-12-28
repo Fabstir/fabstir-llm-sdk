@@ -110,12 +110,19 @@ A decentralized marketplace where smart contracts handle coordination, P2P conne
 
 6. **Developer-Friendly SDK**
    - Browser-compatible (@fabstir/sdk-core)
-   - 8 specialized managers (Auth, Payment, Session, Host, Storage, Model, Treasury, Client)
+   - 13 specialized managers (Auth, Payment, Session, Host, Storage, Model, Treasury, Client, Encryption, VectorRAG, Document, SessionGroup, Permission)
    - Real-time streaming responses
    - Simple integration (5 lines to start)
    - Open source and auditable
 
-7. **Video Transcoding Marketplace** (Post-MVP)
+7. **Host Operator Tools**
+   - Host CLI (`@fabstir/host-cli`) for server management
+   - TUI dashboard for headless servers (status, logs, earnings, pricing)
+   - Setup wizard for guided host onboarding
+   - Model discovery and download with verification
+   - Earnings tracking and withdrawal
+
+8. **Video Transcoding Marketplace** (Post-MVP)
    - Decentralized video/audio format conversion
    - GPU-accelerated transcoding (h264, AV1, AAC, Opus)
    - GOP-based STARK proofs verify quality (PSNR, SSIM metrics)
@@ -336,6 +343,9 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 - Enhanced S5.js integration (Sia Foundation grant funded)
 - Real-time streaming (low-latency inference)
 - Session-based efficiency (context preservation)
+- RAG infrastructure (vector DB, document management, Claude Projects-style organization)
+- Host-side embedding generation (privacy-preserving, no external API calls)
+- Intelligent host selection (weighted scoring algorithm)
 
 ## Current Status
 
@@ -384,20 +394,44 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 
 ✅ **Developer Tools**
 
-- Browser-compatible SDK (@fabstir/sdk-core)
-- 8 specialized managers (modular architecture)
+- Browser-compatible SDK (@fabstir/sdk-core v1.6.0)
+- 13 specialized managers (modular architecture)
 - Comprehensive API documentation
 - Working demo applications (apps/harness)
 - Integration test suite (7/7 encryption tests passing)
 
+✅ **Host Operator Tools**
+
+- Host CLI package (@fabstir/host-cli) for server management
+- TUI dashboard for headless server monitoring (status, logs, earnings)
+- Interactive setup wizard for guided host onboarding
+- Model discovery with blockchain validation and download verification
+- Pricing management (update rates via CLI or TUI)
+- Earnings tracking and withdrawal commands
+
+✅ **Marketplace Pricing**
+
+- Host-controlled minimum pricing (contract-enforced)
+- Price discovery via SDK HostManager
+- Intelligent host selection (weighted algorithm: stake, price, uptime, latency)
+- User preference persistence (selection mode, default model)
+
+✅ **RAG Infrastructure**
+
+- VectorRAGManager for host-side vector database operations
+- DocumentManager for document chunking and embedding
+- SessionGroupManager for Claude Projects-style organization
+- PermissionManager for access control
+- Host-side embedding via `/v1/embed` endpoint
+
 ### In Deployment
 
-🚀 **Production Deployment** (Q1 2025)
+🚀 **Production Deployment** (Q1 2026)
 
 - Public beta on Base Sepolia
 - Enterprise beta program
 - Web application (platformlessai.org)
-- Host onboarding tools
+- UI5 with Base Account Kit integration
 - Network monitoring dashboard
 
 🚀 **Compliance & Security**
@@ -410,16 +444,26 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 
 ## Roadmap
 
-### Q1 2025 - Public Beta Launch
+### Q4 2025 - Infrastructure Complete ✅
 
 - [x] MVP complete (production-ready)
+- [x] 13 SDK managers implemented
+- [x] Host CLI with TUI dashboard
+- [x] Setup wizard for host onboarding
+- [x] Marketplace pricing (host-controlled, contract-enforced)
+- [x] RAG infrastructure (vector DB, document management)
+- [x] End-to-end encryption by default
+
+### Q1 2026 - Public Beta Launch
+
 - [ ] Public beta on Base Sepolia
 - [ ] Enterprise beta program launch
 - [ ] Web application live (platformlessai.org)
 - [ ] 10+ verified models
 - [ ] 20+ active hosts
+- [ ] UI5 production deployment
 
-### Q2 2025 - Enterprise Adoption
+### Q2 2026 - Enterprise Adoption
 
 - [ ] ISO 27001, SOC 2 certification complete
 - [ ] 3-5 enterprise pilot customers
@@ -427,7 +471,7 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 - [ ] Enhanced host pricing discovery
 - [ ] Mobile-responsive UI improvements
 
-### Q3 2025 - Scale & Expansion
+### Q3 2026 - Scale & Expansion
 
 - [ ] 50+ models available
 - [ ] 100+ active hosts
@@ -435,7 +479,7 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 - [ ] API gateway service (REST abstraction)
 - [ ] Model governance DAO launch
 
-### Q4 2025 - Ecosystem Growth
+### Q4 2026 - Ecosystem Growth
 
 - [ ] Additional L2 chains (Arbitrum, Optimism, Polygon)
 - [ ] RAG/vector database marketplace
@@ -559,7 +603,7 @@ See `.env.test` for current deployed addresses on Base Sepolia and opBNB Testnet
 
 ### SDK Architecture
 
-**8 Specialized Managers**:
+**13 Specialized Managers**:
 
 1. **AuthManager**: Wallet authentication, S5 seed generation
 2. **PaymentManagerMultiChain**: Deposits, withdrawals, multi-chain, multi-token
@@ -569,6 +613,11 @@ See `.env.test` for current deployed addresses on Base Sepolia and opBNB Testnet
 6. **ModelManager**: Model registry, governance, approvals
 7. **TreasuryManager**: Platform fee management, governance funds
 8. **ClientManager**: Client reputation, usage tracking
+9. **EncryptionManager**: End-to-end encryption, key exchange, forward secrecy
+10. **VectorRAGManager**: Host-side vector database operations via WebSocket
+11. **DocumentManager**: Document chunking, embedding, upload
+12. **SessionGroupManager**: Claude Projects-style session organization
+13. **PermissionManager**: Access control for groups and vector databases
 
 ### Encryption Specifications
 
@@ -644,13 +693,13 @@ See `.env.test` for current deployed addresses on Base Sepolia and opBNB Testnet
 ### For Investors
 
 - **Opportunity**: Ground floor in platformless AI infrastructure (new category)
-- **Stage**: MVP complete, deploying to production Q1 2025
+- **Stage**: Infrastructure complete, deploying to production Q1 2026
 - **Contact**: investors@fabstir.com
 - **Ask**: Seed round to scale team, audits, enterprise sales
 
 ### For Enterprise Customers
 
-- **Beta Program**: Limited spots for Q1 2025 enterprise beta
+- **Beta Program**: Limited spots for Q1 2026 enterprise beta
 - **Benefits**: Early access, custom compliance support, dedicated integration help
 - **Contact**: enterprise@fabstir.com or DM on LinkedIn
 - **Industries**: Financial services, healthcare, legal, media & entertainment
@@ -666,7 +715,9 @@ See `.env.test` for current deployed addresses on Base Sepolia and opBNB Testnet
 
 - **Requirements**: RTX 3060+ (8GB VRAM), Docker, stable internet
 - **Earnings**: 90% of inference payments, set your own pricing
-- **Setup**: Host CLI tools, Docker-based deployment
+- **Setup**: Interactive setup wizard via Host CLI (`fabstir-host setup`)
+- **Tools**: TUI dashboard for monitoring, earnings, pricing updates
+- **Documentation**: See `docs/HOST_OPERATOR_GUIDE.md`
 - **Contact**: hosts@fabstir.com or join Discord #hosting
 
 ### For Partners
@@ -686,7 +737,7 @@ Platformless AI represents a fundamental shift in AI infrastructure - from platf
 - **XChaCha20-Poly1305 encryption with forward secrecy** protects all communication
 - **Open source** means full transparency - every line auditable
 
-Our MVP is complete and production-ready, with fabstir-platformless-ui deployed and operational. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise and developer adoption as AI regulation tightens and privacy concerns intensify.
+Our infrastructure is complete and production-ready, with fabstir-platformless-ui deployed and operational. The SDK now includes 13 specialized managers, a comprehensive Host CLI with TUI dashboard, marketplace pricing, and full RAG infrastructure. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise and developer adoption as AI regulation tightens and privacy concerns intensify.
 
 The convergence of blockchain technology, zero-knowledge cryptography, and decentralized storage creates a unique opportunity to build AI infrastructure that respects user sovereignty, protects intellectual property, and enables permissionless innovation. Users are sovereign - in complete control of their data, able to decide what AI and AI agents can access, and share securely with others on their own terms.
 
@@ -696,14 +747,15 @@ With first-mover advantage in the platformless AI category, we're poised to beco
 
 ## Key Metrics
 
-| Metric               | Current (Testnet) | Target Q2 2025 | Target Q4 2025 |
+| Metric               | Current (Q4 2025) | Target Q2 2026 | Target Q4 2026 |
 | -------------------- | ----------------- | -------------- | -------------- |
 | Active Hosts         | 5-10              | 50+            | 100+           |
 | Available Models     | 5                 | 20+            | 50+            |
 | Monthly Sessions     | 100+              | 1,000+         | 10,000+        |
 | Enterprise Customers | 0                 | 3-5 pilots     | 10-20 paying   |
 | Total Value Locked   | $5,000            | $100,000       | $1,000,000     |
-| SDK Downloads        | 50+               | 500+           | 2,000+         |
+| SDK Version          | v1.6.0            | v2.0+          | v2.5+          |
+| SDK Managers         | 13                | 15+            | 18+            |
 | Avg Response Time    | <2s               | <1.5s          | <1s            |
 | Encryption Default   | 100%              | 100%           | 100%           |
 
@@ -729,4 +781,4 @@ _"We Don't Trust, We Verify - AI Infrastructure for the Ages"_
 
 **Built by Fabstir | Powered by Sia Storage | Secured by STARK Proofs**
 
-**© 2025 Platformless AI. Ground-breaking Infrastructure for the Ages.**
+**© 2025-2026 Platformless AI. Ground-breaking Infrastructure for the Ages.**
