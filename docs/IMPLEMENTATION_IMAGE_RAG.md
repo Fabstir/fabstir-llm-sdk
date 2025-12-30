@@ -4,9 +4,9 @@
 
 Enable image upload (PNG, JPEG, WebP, GIF) for RAG by leveraging the node's new `/v1/ocr` and `/v1/describe-image` endpoints (v8.6.0). Images are automatically processed to extract text for embedding and vector search.
 
-## Status: Planning 📋
+## Status: In Progress 🔄
 
-**Implementation**: 0% complete (0/~205 lines)
+**Implementation**: 15% complete (~30/~205 lines)
 **Target SDK Version**: 1.8.0
 **Node Requirement**: v8.6.0+ (with PaddleOCR + Florence-2)
 
@@ -98,26 +98,28 @@ Extend DocumentManager to support image uploads that:
 **Line Budget**: 15 lines (10 types + 5 tests)
 
 #### Tasks
-- [ ] Write test: `detectDocumentType('image.png')` returns `'png'`
-- [ ] Write test: `detectDocumentType('photo.jpg')` returns `'jpeg'`
-- [ ] Write test: `detectDocumentType('photo.jpeg')` returns `'jpeg'`
-- [ ] Write test: `detectDocumentType('image.webp')` returns `'webp'`
-- [ ] Write test: `detectDocumentType('animation.gif')` returns `'gif'`
-- [ ] Add `'png' | 'jpeg' | 'webp' | 'gif'` to DocumentType union in `types.ts`
-- [ ] Add ImageProcessingResult interface to `types.ts`
-- [ ] Verify TypeScript compilation succeeds
+- [x] Write test: `detectDocumentType('image.png')` returns `'png'`
+- [x] Write test: `detectDocumentType('photo.jpg')` returns `'jpeg'`
+- [x] Write test: `detectDocumentType('photo.jpeg')` returns `'jpeg'`
+- [x] Write test: `detectDocumentType('image.webp')` returns `'webp'`
+- [x] Write test: `detectDocumentType('animation.gif')` returns `'gif'`
+- [x] Add `'png' | 'jpeg' | 'webp' | 'gif'` to DocumentType union in `types.ts`
+- [x] Add ImageProcessingResult interface to `types.ts`
+- [x] Verify TypeScript compilation succeeds
 
 **Test Files:**
-- `packages/sdk-core/tests/unit/image-type-detection.test.ts` (NEW, ~30 lines)
+- `packages/sdk-core/tests/unit/image-type-detection.test.ts` (NEW, ~60 lines) ✅
 
 **Implementation Files:**
-- `packages/sdk-core/src/documents/types.ts` (MODIFY, +10 lines)
+- `packages/sdk-core/src/documents/types.ts` (MODIFY, +16 lines) ✅
 
 **Success Criteria:**
-- [ ] DocumentType includes: `'png' | 'jpeg' | 'webp' | 'gif'`
-- [ ] ImageProcessingResult interface defined with: description, extractedText, ocrConfidence, combinedText, processingTimeMs
-- [ ] TypeScript compilation succeeds
-- [ ] All 5 type detection tests pass
+- [x] DocumentType includes: `'png' | 'jpeg' | 'webp' | 'gif'`
+- [x] ImageProcessingResult interface defined with: description, extractedText, ocrConfidence, combinedText, processingTimeMs
+- [x] TypeScript compilation succeeds
+- [x] All detectDocumentType tests pass (completed in Sub-phase 1.2)
+
+**Test Results:** ✅ **16/16 tests passing** (all type + detectDocumentType + isImageType tests pass)
 
 ---
 
@@ -128,27 +130,29 @@ Extend DocumentManager to support image uploads that:
 **Line Budget**: 25 lines (15 implementation + 10 tests)
 
 #### Tasks
-- [ ] Write test: `isImageType('png')` returns `true`
-- [ ] Write test: `isImageType('jpeg')` returns `true`
-- [ ] Write test: `isImageType('webp')` returns `true`
-- [ ] Write test: `isImageType('gif')` returns `true`
-- [ ] Write test: `isImageType('pdf')` returns `false`
-- [ ] Write test: `isImageType('txt')` returns `false`
-- [ ] Add case statements for 'png', 'jpg', 'jpeg', 'webp', 'gif' in `detectDocumentType()`
-- [ ] Add `isImageType(type: DocumentType): boolean` helper function
-- [ ] Export `isImageType` from extractors.ts
-- [ ] Verify all tests pass
+- [x] Write test: `isImageType('png')` returns `true`
+- [x] Write test: `isImageType('jpeg')` returns `true`
+- [x] Write test: `isImageType('webp')` returns `true`
+- [x] Write test: `isImageType('gif')` returns `true`
+- [x] Write test: `isImageType('pdf')` returns `false`
+- [x] Write test: `isImageType('txt')` returns `false`
+- [x] Add case statements for 'png', 'jpg', 'jpeg', 'webp', 'gif' in `detectDocumentType()`
+- [x] Add `isImageType(type: DocumentType): boolean` helper function
+- [x] Export `isImageType` from extractors.ts
+- [x] Verify all tests pass
 
 **Test Files:**
-- `packages/sdk-core/tests/unit/image-type-detection.test.ts` (EXTEND, +15 lines)
+- `packages/sdk-core/tests/unit/image-type-detection.test.ts` (EXTEND, +40 lines) ✅
 
 **Implementation Files:**
-- `packages/sdk-core/src/documents/extractors.ts` (MODIFY, +20 lines)
+- `packages/sdk-core/src/documents/extractors.ts` (MODIFY, +20 lines) ✅
 
 **Success Criteria:**
-- [ ] `detectDocumentType()` returns correct type for all image extensions
-- [ ] `isImageType()` correctly identifies image vs document types
-- [ ] All 11 tests pass (5 from 1.1 + 6 new)
+- [x] `detectDocumentType()` returns correct type for all image extensions
+- [x] `isImageType()` correctly identifies image vs document types
+- [x] All 16 tests pass
+
+**Test Results:** ✅ **16/16 tests passing (100%)**
 
 ---
 

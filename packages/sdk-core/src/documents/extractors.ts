@@ -213,9 +213,29 @@ export function detectDocumentType(fileName: string): DocumentType {
       return 'pdf';
     case 'docx':
       return 'docx';
+    // Image formats (processed via host /v1/ocr and /v1/describe-image)
+    case 'png':
+      return 'png';
+    case 'jpg':
+    case 'jpeg':
+      return 'jpeg';
+    case 'webp':
+      return 'webp';
+    case 'gif':
+      return 'gif';
     default:
       throw new Error(`Unsupported file format: ${ext}`);
   }
+}
+
+/**
+ * Check if document type is an image format
+ *
+ * @param type - Document type to check
+ * @returns True if type is an image format (png, jpeg, webp, gif)
+ */
+export function isImageType(type: DocumentType): boolean {
+  return ['png', 'jpeg', 'webp', 'gif'].includes(type);
 }
 
 /**
