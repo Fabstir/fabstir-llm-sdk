@@ -235,8 +235,9 @@ export class DocumentManager {
     file: File,
     options?: ChunkingOptions & UploadOptions
   ): Promise<ChunkResult[]> {
-    if (!this.initialized) {
-      throw new Error('DocumentManager not initialized');
+    // processDocument only needs embeddingService, not full S5 initialization
+    if (!this.embeddingService) {
+      throw new Error('DocumentManager requires an embeddingService for document processing');
     }
 
     // Validate file
@@ -328,6 +329,28 @@ export class DocumentManager {
     });
 
     return results;
+  }
+
+  /**
+   * Embed a single text string (for RAG query embedding)
+   * @param text - Text to embed
+   * @param type - Embedding type: 'document' or 'query' (affects some embedding models)
+   * @returns Embedding result with vector and metadata
+   */
+  async embedText(
+    text: string,
+    type: 'document' | 'query' = 'query'
+  ): Promise<{ embedding: number[]; text: string; tokenCount: number }> {
+    if (!this.embeddingService) {
+      throw new Error('DocumentManager requires an embeddingService for text embedding');
+    }
+
+    const response = await this.embeddingService.embedBatch([text], type);
+    return {
+      embedding: response.embeddings[0].embedding,
+      text,
+      tokenCount: response.embeddings[0].tokenCount || 0,
+    };
   }
 
   /**

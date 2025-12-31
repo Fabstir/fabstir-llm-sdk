@@ -61,7 +61,7 @@ export { PermissionStorage } from './storage/PermissionStorage';
 
 // RAG and Vector Database managers (host-side via WebSocket)
 export { VectorRAGManager } from './managers/VectorRAGManager';
-export { DocumentManager } from './documents/DocumentManager';
+export { DocumentManager } from './managers/DocumentManager';
 export { HostAdapter } from './embeddings/adapters/HostAdapter';
 export type { IVectorRAGManager } from './managers/interfaces/IVectorRAGManager';
 export type { IDocumentManager } from './documents/interfaces/IDocumentManager';
