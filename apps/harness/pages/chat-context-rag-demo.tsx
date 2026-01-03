@@ -1262,7 +1262,12 @@ export default function ChatContextDemo() {
           console.log('[RAG] Search results (raw):', JSON.stringify(searchResults));
 
           if (searchResults.length > 0) {
-            ragContext = "Relevant information from uploaded documents:\n\n";
+            // System instruction for handling image descriptions and document context
+            ragContext = "IMPORTANT: The following context contains information from uploaded documents. ";
+            ragContext += "Sections marked [Image Description] contain AI-analyzed descriptions of uploaded images - ";
+            ragContext += "use this information to answer questions about those images. ";
+            ragContext += "Sections marked [Extracted Text] contain OCR text from images.\n\n";
+            ragContext += "Relevant information from uploaded documents:\n\n";
             searchResults.forEach((result: any, idx: number) => {
               console.log(`[RAG] Result ${idx}:`, result);
               // Try different field names that might contain the text
@@ -1492,6 +1497,22 @@ export default function ChatContextDemo() {
 
       console.log('[RAG DEBUG] processDocument completed, chunks:', chunks);
       console.log('[RAG DEBUG] Number of chunks:', chunks?.length);
+
+      // Handle empty chunks (image with no text content)
+      if (!chunks || chunks.length === 0) {
+        console.log('[RAG DEBUG] No text content found in document');
+        addMessage("system", `⚠️ No text found in ${file.name} - ensure host has Florence vision model loaded for image descriptions`);
+        // Still add to uploaded list so user knows upload was attempted
+        setUploadedDocuments([
+          ...uploadedDocuments,
+          {
+            id: `doc-${Date.now()}`,
+            name: file.name,
+            chunks: 0,
+          },
+        ]);
+        return;
+      }
 
       // Stage 4: Upload vectors to host via SessionManager
       console.log('[RAG DEBUG] Starting vector upload stage...');

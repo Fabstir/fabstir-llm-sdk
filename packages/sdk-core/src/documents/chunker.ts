@@ -55,9 +55,10 @@ export function chunkText(
   const chunkWordCount = Math.floor(opts.chunkSize * WORDS_PER_TOKEN);
   const overlapWordCount = Math.floor(opts.overlap * WORDS_PER_TOKEN);
 
-  // Handle short documents
-  if (text.length === 0) {
-    throw new Error('Cannot chunk empty text');
+  // Handle empty text (e.g., images without OCR content)
+  if (!text || text.trim().length === 0) {
+    // Return empty array - caller should handle this case
+    return [];
   }
 
   const words = text.split(/\s+/).filter(w => w.length > 0);

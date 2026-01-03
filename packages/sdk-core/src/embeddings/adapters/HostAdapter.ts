@@ -171,6 +171,17 @@ export class HostAdapter extends EmbeddingService {
   }
 
   /**
+   * Create abort signal for image processing (longer timeout than embeddings)
+   * Default: 60 seconds for image processing
+   */
+  private createImageTimeoutSignal(): AbortSignal {
+    const controller = new AbortController();
+    const timeout = this.config.timeout ? this.config.timeout * 2 : 60000; // 60s default
+    setTimeout(() => controller.abort(), timeout);
+    return controller.signal;
+  }
+
+  /**
    * Call host's /v1/ocr endpoint
    * Extracts text from images using PaddleOCR
    *
@@ -182,32 +193,45 @@ export class HostAdapter extends EmbeddingService {
     base64Image: string,
     format: string
   ): Promise<{ text: string; confidence: number; processingTimeMs: number }> {
-    const response = await fetch(`${this.hostUrl}/v1/ocr`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        image: base64Image,
-        format,
-        language: 'en',
-        chainId: this.chainId,
-      }),
-    });
+    try {
+      const response = await fetch(`${this.hostUrl}/v1/ocr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: base64Image,
+          format,
+          language: 'en',
+          chainId: this.chainId,
+        }),
+        signal: this.createImageTimeoutSignal(),
+      });
 
-    if (response.status === 503) {
-      throw new Error('OCR model not loaded on host');
+      if (response.status === 503) {
+        throw new Error('OCR model not loaded on host');
+      }
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: 'Unknown error' }));
+        throw new Error(`OCR failed (${response.status}): ${error.message || error}`);
+      }
+
+      const data = await response.json();
+      return {
+        text: data.text || '',
+        confidence: data.confidence || 0,
+        processingTimeMs: data.processingTimeMs || 0,
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new Error('OCR request timed out (image may be too large)');
+        }
+        if (error.message === 'Failed to fetch') {
+          throw new Error('OCR request failed - check host connectivity and image size (<5MB)');
+        }
+      }
+      throw error;
     }
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Unknown error' }));
-      throw new Error(`OCR failed (${response.status}): ${error.message || error}`);
-    }
-
-    const data = await response.json();
-    return {
-      text: data.text || '',
-      confidence: data.confidence || 0,
-      processingTimeMs: data.processingTimeMs || 0,
-    };
   }
 
   /**
@@ -222,31 +246,44 @@ export class HostAdapter extends EmbeddingService {
     base64Image: string,
     format: string
   ): Promise<{ description: string; processingTimeMs: number }> {
-    const response = await fetch(`${this.hostUrl}/v1/describe-image`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        image: base64Image,
-        format,
-        detail: 'detailed',
-        chainId: this.chainId,
-      }),
-    });
+    try {
+      const response = await fetch(`${this.hostUrl}/v1/describe-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: base64Image,
+          format,
+          detail: 'detailed',
+          chainId: this.chainId,
+        }),
+        signal: this.createImageTimeoutSignal(),
+      });
 
-    if (response.status === 503) {
-      throw new Error('Florence vision model not loaded on host');
+      if (response.status === 503) {
+        throw new Error('Florence vision model not loaded on host');
+      }
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: 'Unknown error' }));
+        throw new Error(`Image description failed (${response.status}): ${error.message || error}`);
+      }
+
+      const data = await response.json();
+      return {
+        description: data.description || '',
+        processingTimeMs: data.processingTimeMs || 0,
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new Error('Image description timed out (image may be too large)');
+        }
+        if (error.message === 'Failed to fetch') {
+          throw new Error('Image description failed - check host connectivity and image size (<5MB)');
+        }
+      }
+      throw error;
     }
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Unknown error' }));
-      throw new Error(`Image description failed (${response.status}): ${error.message || error}`);
-    }
-
-    const data = await response.json();
-    return {
-      description: data.description || '',
-      processingTimeMs: data.processingTimeMs || 0,
-    };
   }
 
   /**

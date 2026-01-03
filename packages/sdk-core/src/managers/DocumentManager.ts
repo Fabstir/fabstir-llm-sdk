@@ -293,6 +293,18 @@ export class DocumentManager {
       options
     );
 
+    // Handle empty chunks (e.g., image with no text content)
+    if (chunks.length === 0) {
+      options?.onProgress?.({
+        stage: 'complete',
+        progress: 100,
+        currentStep: 'No text content found in document',
+      });
+
+      // Return empty array - caller can check length and show appropriate message
+      return [];
+    }
+
     // Generate embeddings for each chunk
     options?.onProgress?.({
       stage: 'embedding',
