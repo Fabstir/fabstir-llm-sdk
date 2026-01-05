@@ -112,6 +112,9 @@ export {
   DepositAccountNotAvailableError
 } from './errors/ChainErrors';
 
+// Export web search errors
+export { WebSearchError } from './errors/web-search-errors';
+
 // Export wallet providers
 export { EOAProvider } from './providers/EOAProvider';
 export { SmartAccountProvider } from './providers/SmartAccountProvider';

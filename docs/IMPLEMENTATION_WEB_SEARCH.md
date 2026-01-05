@@ -4,12 +4,12 @@
 
 Integrate host-side web search (v8.7.0+) into `@fabstir/sdk-core` with **automatic search intent detection**. The SDK analyzes user prompts and automatically enables web search when search intent is detected (e.g., "search for...", "latest...", "find online..."). Users just type naturally - no configuration needed.
 
-## Status: Phase 2 Complete
+## Status: Phase 3 Complete
 
-**Implementation**: Sub-phases 1.1, 2.1, 2.2 Complete
+**Implementation**: Sub-phases 1.1, 2.1, 2.2, 3.1 Complete
 **SDK Version**: TBD (1.9.0)
 **Node Requirement**: v8.7.0+ (with web search enabled)
-**Test Results**: 30/30 tests passing (Phase 1.1 + 2.1 + 2.2)
+**Test Results**: 37/37 tests passing (Phases 1-3)
 
 ---
 
@@ -204,28 +204,30 @@ Extend SessionManager to support automatic web search that:
 **Line Budget**: 40 lines (25 implementation + 15 tests)
 
 #### Tasks
-- [ ] Write test: `WebSearchError` has correct name property
-- [ ] Write test: `WebSearchError` has code property with correct type
-- [ ] Write test: `WebSearchError.isRetryable` returns true for 'rate_limited', 'timeout', 'provider_error'
-- [ ] Write test: `WebSearchError.isRetryable` returns false for 'search_disabled', 'invalid_query', 'no_providers'
-- [ ] Create `packages/sdk-core/src/errors/web-search-errors.ts`
-- [ ] Implement `WebSearchError` class extending Error
-- [ ] Add `code: WebSearchErrorCode` property
-- [ ] Add `retryAfter?: number` property
-- [ ] Add `get isRetryable(): boolean` getter
-- [ ] Export from errors index
+- [x] Write test: `WebSearchError` has correct name property
+- [x] Write test: `WebSearchError` has code property with correct type
+- [x] Write test: `WebSearchError.isRetryable` returns true for 'rate_limited', 'timeout', 'provider_error'
+- [x] Write test: `WebSearchError.isRetryable` returns false for 'search_disabled', 'invalid_query', 'no_providers'
+- [x] Create `packages/sdk-core/src/errors/web-search-errors.ts`
+- [x] Implement `WebSearchError` class extending Error
+- [x] Add `code: WebSearchErrorCode` property
+- [x] Add `retryAfter?: number` property
+- [x] Add `get isRetryable(): boolean` getter
+- [x] Export from main index.ts
 
 **Test Files:**
-- `packages/sdk-core/tests/unit/web-search-errors.test.ts` (NEW, ~40 lines)
+- `packages/sdk-core/tests/unit/web-search-errors.test.ts` (NEW, ~70 lines) ✅
 
 **Implementation Files:**
-- `packages/sdk-core/src/errors/web-search-errors.ts` (NEW, ~25 lines)
-- `packages/sdk-core/src/errors/index.ts` (MODIFY, +1 line export)
+- `packages/sdk-core/src/errors/web-search-errors.ts` (NEW, ~42 lines) ✅
+- `packages/sdk-core/src/index.ts` (MODIFY, +3 lines export) ✅
 
 **Success Criteria:**
-- [ ] WebSearchError properly extends Error
-- [ ] isRetryable correctly identifies retryable error codes
-- [ ] All 4 tests pass
+- [x] WebSearchError properly extends Error
+- [x] isRetryable correctly identifies retryable error codes
+- [x] All 7 tests pass
+
+**Test Results:** ✅ **7/7 tests passing (100%)**
 
 ---
 
