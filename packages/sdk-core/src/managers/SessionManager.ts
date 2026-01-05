@@ -22,7 +22,9 @@ import {
   UploadVectorsResult,
   SearchVectorsMessage,
   SearchVectorsResponse,
-  SearchResult
+  SearchResult,
+  SearchIntentConfig,
+  WebSearchMetadata
 } from '../types';
 import { HostSelectionMode } from '../types/settings.types';
 import { PaymentManager } from './PaymentManager';
@@ -113,6 +115,7 @@ export interface SessionState {
   endTime?: number;
   encryption?: boolean; // NEW: Track if session uses encryption
   groupId?: string; // NEW: Session Groups integration
+  webSearchMetadata?: WebSearchMetadata; // NEW: Web search metadata from response
 }
 
 // Extended SessionConfig with chainId
@@ -129,6 +132,7 @@ export interface ExtendedSessionConfig extends SessionConfig {
     manifestPath: string; // S5 path to manifest.json (e.g., "home/vector-databases/{user}/{db}/manifest.json")
     userAddress: string; // Owner address for verification
   };
+  webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 2.2)
 }
 
 export class SessionManager implements ISessionManager {

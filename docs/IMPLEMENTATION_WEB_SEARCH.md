@@ -4,12 +4,12 @@
 
 Integrate host-side web search (v8.7.0+) into `@fabstir/sdk-core` with **automatic search intent detection**. The SDK analyzes user prompts and automatically enables web search when search intent is detected (e.g., "search for...", "latest...", "find online..."). Users just type naturally - no configuration needed.
 
-## Status: Phase 2 In Progress
+## Status: Phase 2 Complete
 
-**Implementation**: Sub-phases 1.1, 2.1 Complete
+**Implementation**: Sub-phases 1.1, 2.1, 2.2 Complete
 **SDK Version**: TBD (1.9.0)
 **Node Requirement**: v8.7.0+ (with web search enabled)
-**Test Results**: 30/30 tests passing (Phase 1.1 + 2.1)
+**Test Results**: 30/30 tests passing (Phase 1.1 + 2.1 + 2.2)
 
 ---
 
@@ -175,21 +175,23 @@ Extend SessionManager to support automatic web search that:
 **Line Budget**: 20 lines
 
 #### Tasks
-- [ ] Add `webSearch?: SearchIntentConfig` to `ExtendedSessionConfig` in types/index.ts
-- [ ] Add `webSearchMetadata?: WebSearchMetadata` to `SessionState` in types/index.ts
-- [ ] Verify existing tests still pass
-- [ ] Verify TypeScript compilation succeeds
+- [x] Add `webSearch?: SearchIntentConfig` to `ExtendedSessionConfig` in SessionManager.ts
+- [x] Add `webSearchMetadata?: WebSearchMetadata` to `SessionState` in SessionManager.ts
+- [x] Verify existing tests still pass
+- [x] Verify TypeScript compilation succeeds
 
 **Test Files:**
-- None (type-only changes, covered by compilation)
+- None (type-only changes, covered by compilation) ✅
 
 **Implementation Files:**
-- `packages/sdk-core/src/types/index.ts` (MODIFY, +10 lines)
+- `packages/sdk-core/src/managers/SessionManager.ts` (MODIFY, +4 lines) ✅
 
 **Success Criteria:**
-- [ ] ExtendedSessionConfig includes webSearch optional field
-- [ ] SessionState includes webSearchMetadata optional field
-- [ ] No breaking changes to existing types
+- [x] ExtendedSessionConfig includes webSearch optional field
+- [x] SessionState includes webSearchMetadata optional field
+- [x] No breaking changes to existing types
+
+**Test Results:** ✅ **30/30 tests still passing (no regressions)**
 
 ---
 
