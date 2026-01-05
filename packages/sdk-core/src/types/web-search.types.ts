@@ -115,6 +115,10 @@ export interface WebSearchCapabilities {
   supportsWebSearch: boolean;
   /** Host supports web_search in inference */
   supportsInferenceSearch: boolean;
+  /** Host supports web_search with streaming (v8.7.5+) */
+  supportsStreamingSearch: boolean;
+  /** Host supports web_search with WebSocket (v8.7.5+) */
+  supportsWebSocketSearch: boolean;
   /** Search provider available */
   provider: 'brave' | 'duckduckgo' | 'bing' | null;
   /** Rate limit per minute */

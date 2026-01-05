@@ -39,6 +39,8 @@ export async function getWebSearchCapabilitiesFromHost(
   const noCapabilities: WebSearchCapabilities = {
     supportsWebSearch: false,
     supportsInferenceSearch: false,
+    supportsStreamingSearch: false,
+    supportsWebSocketSearch: false,
     provider: null,
     rateLimitPerMinute: 0,
   };
@@ -59,11 +61,16 @@ export async function getWebSearchCapabilitiesFromHost(
 
     const supportsWebSearch = features.includes('host-side-web-search');
     const supportsInferenceSearch = features.includes('inference-web-search');
+    // v8.7.5+ feature flags for streaming/WebSocket support
+    const supportsStreamingSearch = features.includes('streaming-web-search');
+    const supportsWebSocketSearch = features.includes('websocket-web-search');
     const provider = extractSearchProvider(features);
 
     return {
       supportsWebSearch,
       supportsInferenceSearch,
+      supportsStreamingSearch,
+      supportsWebSocketSearch,
       provider,
       rateLimitPerMinute: supportsWebSearch ? 60 : 0, // Default rate limit
     };

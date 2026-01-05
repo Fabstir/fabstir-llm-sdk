@@ -39,8 +39,34 @@ describe('getWebSearchCapabilitiesFromHost', () => {
 
       expect(capabilities.supportsWebSearch).toBe(true);
       expect(capabilities.supportsInferenceSearch).toBe(true);
+      expect(capabilities.supportsStreamingSearch).toBe(false); // Not in v8.7.0
+      expect(capabilities.supportsWebSocketSearch).toBe(false); // Not in v8.7.0
       expect(capabilities.provider).toBe('brave');
       expect(capabilities.rateLimitPerMinute).toBe(60);
+    });
+
+    it('should detect v8.7.5+ streaming and WebSocket search features', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          version: '8.7.5',
+          features: [
+            'host-side-web-search',
+            'inference-web-search',
+            'streaming-web-search',
+            'websocket-web-search',
+            'duckduckgo-fallback'
+          ]
+        })
+      });
+
+      const capabilities = await getWebSearchCapabilitiesFromHost('http://localhost:8080');
+
+      expect(capabilities.supportsWebSearch).toBe(true);
+      expect(capabilities.supportsInferenceSearch).toBe(true);
+      expect(capabilities.supportsStreamingSearch).toBe(true);
+      expect(capabilities.supportsWebSocketSearch).toBe(true);
+      expect(capabilities.provider).toBe('duckduckgo');
     });
 
     it('should detect Brave provider correctly', async () => {
@@ -143,6 +169,8 @@ describe('getWebSearchCapabilitiesFromHost', () => {
 
       expect(capabilities.supportsWebSearch).toBe(false);
       expect(capabilities.supportsInferenceSearch).toBe(false);
+      expect(capabilities.supportsStreamingSearch).toBe(false);
+      expect(capabilities.supportsWebSocketSearch).toBe(false);
       expect(capabilities.provider).toBeNull();
       expect(capabilities.rateLimitPerMinute).toBe(0);
     });

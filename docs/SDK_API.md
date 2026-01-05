@@ -6,6 +6,7 @@
 - [Core SDK](#core-sdk)
 - [Authentication](#authentication)
 - [Session Management](#session-management)
+- [Web Search Integration](#web-search-integration)
 - [Payment Management](#payment-management)
 - [Model Governance](#model-governance)
 - [Host Management](#host-management)
@@ -1186,6 +1187,207 @@ await vectorRAGManager.addVectors(databaseName, vectors);
 **See Also:**
 - `VectorRAGManager.getPendingDocuments()` - Get documents awaiting embeddings
 - `VectorRAGManager.updateDocumentStatus()` - Update document embedding status
+
+## Web Search Integration
+
+The SDK provides automatic web search integration that enhances LLM responses with real-time information from the web. **Web search works seamlessly with both plaintext and encrypted sessions** (requires node v8.7.5+).
+
+### Automatic Intent Detection
+
+The SDK automatically detects when a prompt requires web search based on trigger patterns:
+
+```typescript
+// Triggers detected: "search for", "latest"
+await sessionManager.sendPromptStreaming(sessionId, 'Search for latest NVIDIA GPU specs', onToken);
+// → web_search: true (auto-enabled)
+
+// No triggers detected
+await sessionManager.sendPromptStreaming(sessionId, 'What is 2+2?', onToken);
+// → web_search: false (no search overhead)
+```
+
+**Trigger Patterns:**
+- Keywords: `search`, `find`, `look up`, `google`, `check online`
+- Time references: `latest`, `recent`, `current`, `today`, `2025`, `2026`
+- News patterns: `news about`, `what happened`
+
+### Override Controls
+
+Configure web search behavior on a per-prompt basis:
+
+```typescript
+// Force-enable web search (even without triggers)
+await sessionManager.sendPromptStreaming(
+  sessionId,
+  'Tell me about quantum computing',
+  onToken,
+  { webSearch: { forceEnabled: true } }
+);
+
+// Force-disable web search (even with triggers)
+await sessionManager.sendPromptStreaming(
+  sessionId,
+  'Search for the news',
+  onToken,
+  { webSearch: { forceDisabled: true } }
+);
+
+// Disable automatic detection
+await sessionManager.sendPromptStreaming(
+  sessionId,
+  'Latest AI developments',
+  onToken,
+  { webSearch: { autoDetect: false } }
+);
+
+// Custom search configuration
+await sessionManager.sendPromptStreaming(
+  sessionId,
+  'What is happening in tech?',
+  onToken,
+  {
+    webSearch: {
+      forceEnabled: true,
+      maxSearches: 3,              // Limit number of searches
+      queries: ['tech news 2026']  // Custom search queries
+    }
+  }
+);
+```
+
+### searchDirect (HTTP Path)
+
+Performs a direct web search via HTTP endpoint:
+
+```typescript
+const results = await sessionManager.searchDirect(
+  sessionId,
+  'NVIDIA RTX 5090 specifications',
+  {
+    numResults: 10,  // 1-20, default 10
+    chainId: 84532   // Optional, uses session's chainId
+  }
+);
+
+// Results structure
+interface SearchApiResponse {
+  results: Array<{
+    title: string;
+    url: string;
+    content: string;
+    score?: number;
+  }>;
+  query: string;
+  search_provider: 'brave' | 'duckduckgo' | 'bing';
+  timestamp: number;
+}
+```
+
+### webSearch (WebSocket Path)
+
+Performs a web search via WebSocket (real-time feedback):
+
+```typescript
+const results = await sessionManager.webSearch(
+  sessionId,
+  'latest AI breakthroughs'
+);
+// Returns same SearchApiResponse as searchDirect
+```
+
+### getWebSearchCapabilities
+
+Check if a host supports web search:
+
+```typescript
+const hostManager = sdk.getHostManager();
+const capabilities = await hostManager.getWebSearchCapabilities('http://host:8080');
+
+interface WebSearchCapabilities {
+  supportsWebSearch: boolean;        // Host has web search feature
+  supportsInferenceSearch: boolean;  // Can inject search into inference
+  supportsStreamingSearch: boolean;  // v8.7.5+ streaming support
+  supportsWebSocketSearch: boolean;  // v8.7.5+ WebSocket integration
+  provider: 'brave' | 'duckduckgo' | 'bing' | null;
+  rateLimitPerMinute: number;
+}
+
+if (capabilities.supportsWebSearch) {
+  console.log(`Provider: ${capabilities.provider}`);
+  console.log(`Rate limit: ${capabilities.rateLimitPerMinute}/min`);
+}
+```
+
+### searchWithRetry Utility
+
+Retry search with exponential backoff:
+
+```typescript
+import { searchWithRetry } from '@fabstir/sdk-core';
+
+const results = await searchWithRetry(
+  () => sessionManager.searchDirect(sessionId, 'query'),
+  {
+    maxRetries: 3,           // Default: 3
+    initialDelayMs: 1000,    // Default: 1000ms
+    maxDelayMs: 30000        // Default: 30000ms
+  }
+);
+```
+
+### WebSearchError
+
+Handle web search errors:
+
+```typescript
+import { WebSearchError } from '@fabstir/sdk-core';
+
+try {
+  await sessionManager.searchDirect(sessionId, 'query');
+} catch (error) {
+  if (error instanceof WebSearchError) {
+    switch (error.code) {
+      case 'rate_limited':
+        // Wait for Retry-After header or backoff
+        break;
+      case 'timeout':
+        // Search timed out (30s default)
+        break;
+      case 'provider_error':
+        // Search provider returned error
+        break;
+      case 'not_supported':
+        // Host doesn't support web search
+        break;
+    }
+  }
+}
+```
+
+### Encrypted Session Support
+
+Web search works transparently with encrypted sessions (v8.7.5+ nodes):
+
+```typescript
+// Start encrypted session (default)
+const { sessionId } = await sessionManager.startSession({
+  hostUrl: 'http://localhost:8080',
+  jobId: 123n,
+  modelName: 'llama-3',
+  chainId: ChainId.BASE_SEPOLIA
+  // encryption: true is default
+});
+
+// Web search auto-detected, works with encryption
+await sessionManager.sendPromptStreaming(
+  sessionId,
+  'Search for the latest GPU prices',
+  onToken
+);
+// → Encrypted message with web_search: true at message level
+```
+
+**Important**: The `web_search`, `max_searches`, and `search_queries` fields are sent at the message level (not inside the encrypted payload), allowing the node to perform web search before processing the encrypted content.
 
 ## Payment Management
 

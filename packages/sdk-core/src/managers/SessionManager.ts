@@ -767,31 +767,14 @@ export class SessionManager implements ISessionManager {
               }
             };
 
-            let chunkCount = 0;
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
-              // Log EVERY message with full details
-              console.log('[SessionManager] 📨 RAW MESSAGE:', JSON.stringify({
-                type: data.type,
-                final: data.final,
-                finalType: typeof data.final,
-                hasPayload: !!data.payload,
-                keys: Object.keys(data)
-              }));
-
               // Skip processing if already resolved
-              if (isResolved) {
-                console.log('[SessionManager] ⏭️ Skipping - already resolved');
-                return;
-              }
+              if (isResolved) return;
 
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
-                chunkCount++;
-                console.log('[SessionManager] 📦 Chunk #' + chunkCount + ', final=' + data.final + ' (type: ' + typeof data.final + ')');
-
                 // Reset timeout on each chunk (sliding window)
                 clearTimeout(timeout);
                 timeout = setTimeout(() => {
-                  console.log('[SessionManager] ⏰ TIMEOUT after ' + chunkCount + ' chunks');
                   safeReject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
                 }, 60000);
 
@@ -799,52 +782,55 @@ export class SessionManager implements ISessionManager {
                   const decrypted = await this.decryptIncomingMessage(data);
                   onToken(decrypted);
                   fullResponse += decrypted;
-                  console.log('[SessionManager] ✓ Decrypted chunk #' + chunkCount + ', total length: ' + fullResponse.length);
                 } catch (err) {
-                  console.error('[SessionManager] ❌ Failed to decrypt chunk #' + chunkCount + ':', err);
+                  console.error('[SessionManager] Failed to decrypt chunk:', err);
                 }
 
-                // Check for final chunk OUTSIDE try/catch (primary mobile completion signal)
-                if (data.final === true) {
-                  console.log('[SessionManager] ✅ FINAL CHUNK (===true), resolving with ' + fullResponse.length + ' chars');
-                  safeResolve(fullResponse);
-                  return;
-                } else if (data.final) {
-                  console.log('[SessionManager] ⚠️ final is truthy but not ===true:', data.final, typeof data.final);
+                // Check for final chunk (primary mobile completion signal)
+                if (data.final === true || data.final) {
                   safeResolve(fullResponse);
                   return;
                 }
               } else if (data.type === 'encrypted_chunk' && !this.sessionKey) {
-                console.error('[SessionManager] ❌ CHUNK WITHOUT SESSION KEY');
+                console.error('[SessionManager] Received encrypted chunk without session key');
               } else if (data.type === 'encrypted_response') {
-                console.log('[SessionManager] 📬 encrypted_response received, resolving with ' + fullResponse.length + ' chars');
                 try {
                   if (this.sessionKey && data.payload && data.payload.ciphertextHex) {
                     await this.decryptIncomingMessage(data);
                   }
                   safeResolve(fullResponse);
                 } catch (err) {
-                  console.error('[SessionManager] ❌ Error in encrypted_response:', err);
+                  console.error('[SessionManager] Error in encrypted_response:', err);
                   safeResolve(fullResponse);
                 }
               } else if (data.type === 'stream_end') {
-                console.log('[SessionManager] 🏁 stream_end received, resolving with ' + fullResponse.length + ' chars');
                 safeResolve(fullResponse);
               } else if (data.type === 'error') {
-                console.error('[SessionManager] ❌ Error:', data.message);
+                console.error('[SessionManager] Error:', data.message);
                 safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
-              } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
-                console.log('[SessionManager] 📝 ' + data.type);
-              } else if (data.type === 'session_completed') {
-                console.log('[SessionManager] 🎉 session_completed');
-              } else {
               }
             });
 
+            // AUTOMATIC WEB SEARCH INTENT DETECTION for encrypted path (Phase 5.1)
+            const searchConfigEncrypted = session.webSearch || {};
+            let enableWebSearchEncrypted = false;
 
-            // Send encrypted message after handler is set up
-            this.sendEncryptedMessage(prompt).catch((err) => {
-              console.error('[SessionManager] ❌ Failed to send encrypted message:', err);
+            if (searchConfigEncrypted.forceDisabled) {
+              enableWebSearchEncrypted = false;
+            } else if (searchConfigEncrypted.forceEnabled) {
+              enableWebSearchEncrypted = true;
+            } else if (searchConfigEncrypted.autoDetect !== false) {
+              // Default: auto-detect search intent from prompt
+              enableWebSearchEncrypted = analyzePromptForSearchIntent(prompt);
+            }
+
+            // Send encrypted message with web search options
+            this.sendEncryptedMessage(prompt, {
+              webSearch: enableWebSearchEncrypted,
+              maxSearches: enableWebSearchEncrypted ? (searchConfigEncrypted.maxSearches ?? 5) : 0,
+              searchQueries: searchConfigEncrypted.queries ?? null
+            }).catch((err) => {
+              console.error('[SessionManager] Failed to send encrypted message:', err);
               reject(err);
             });
           });
@@ -874,10 +860,6 @@ export class SessionManager implements ISessionManager {
           } else if (searchConfig.autoDetect !== false) {
             // Default: auto-detect search intent from prompt
             enableWebSearch = analyzePromptForSearchIntent(prompt);
-          }
-
-          if (enableWebSearch) {
-            console.log('[SessionManager] Web search auto-enabled based on prompt intent');
           }
 
           // Send plaintext message (only if session explicitly opted out of encryption)
@@ -958,9 +940,25 @@ export class SessionManager implements ISessionManager {
             );
           }
 
+          // AUTOMATIC WEB SEARCH INTENT DETECTION for non-streaming encrypted path
+          const searchConfigNonStreamEnc = session.webSearch || {};
+          let enableWebSearchNonStreamEnc = false;
 
-          // Send encrypted message
-          await this.sendEncryptedMessage(prompt);
+          if (searchConfigNonStreamEnc.forceDisabled) {
+            enableWebSearchNonStreamEnc = false;
+          } else if (searchConfigNonStreamEnc.forceEnabled) {
+            enableWebSearchNonStreamEnc = true;
+          } else if (searchConfigNonStreamEnc.autoDetect !== false) {
+            // Default: auto-detect search intent from prompt
+            enableWebSearchNonStreamEnc = analyzePromptForSearchIntent(prompt);
+          }
+
+          // Send encrypted message with web search options
+          await this.sendEncryptedMessage(prompt, {
+            webSearch: enableWebSearchNonStreamEnc,
+            maxSearches: enableWebSearchNonStreamEnc ? (searchConfigNonStreamEnc.maxSearches ?? 5) : 0,
+            searchQueries: searchConfigNonStreamEnc.queries ?? null
+          });
 
           // Wait for encrypted response (non-streaming) - MUST accumulate chunks!
           let accumulatedResponse = '';  // Accumulate chunks even in non-streaming mode
@@ -1005,38 +1003,29 @@ export class SessionManager implements ISessionManager {
                   const decrypted = await this.decryptIncomingMessage(data);
                   accumulatedResponse += decrypted;
                 } catch (err) {
-                  console.error('[SessionManager] ❌ Failed to decrypt chunk:', err);
+                  console.error('[SessionManager] Failed to decrypt chunk:', err);
                 }
 
-                // Check for final chunk OUTSIDE try/catch (primary mobile completion signal)
-                if (data.final === true) {
+                // Check for final chunk (primary mobile completion signal)
+                if (data.final === true || data.final) {
                   safeResolve(accumulatedResponse);
                   return;
                 }
               } else if (data.type === 'encrypted_response') {
-                // Handle encrypted_response (primary completion signal)
                 try {
-                  // Decrypt final message if we have the key and payload
                   if (this.sessionKey && data.payload && data.payload.ciphertextHex) {
                     await this.decryptIncomingMessage(data);
                   }
-                  // Return accumulated chunks, not just the final "stop" message
                   safeResolve(accumulatedResponse);
                 } catch (err) {
-                  console.error('[SessionManager] ❌ Error in encrypted_response handler:', err);
-                  // Still resolve with accumulated content on decryption error
+                  console.error('[SessionManager] Error in encrypted_response handler:', err);
                   safeResolve(accumulatedResponse);
                 }
               } else if (data.type === 'stream_end') {
-                // Fallback completion signal (mobile browser compatibility)
-                console.log('[SessionManager] 📱 stream_end received (fallback completion)');
                 safeResolve(accumulatedResponse);
               } else if (data.type === 'error') {
-                console.error('[SessionManager] ❌ Error received:', data.message);
+                console.error('[SessionManager] Error:', data.message);
                 safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
-              } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
-              } else if (data.type === 'session_completed') {
-              } else {
               }
             });
           });
@@ -1052,10 +1041,6 @@ export class SessionManager implements ISessionManager {
           } else if (searchConfigNonStream.autoDetect !== false) {
             // Default: auto-detect search intent from prompt
             enableWebSearchNonStream = analyzePromptForSearchIntent(prompt);
-          }
-
-          if (enableWebSearchNonStream) {
-            console.log('[SessionManager] Web search auto-enabled based on prompt intent (non-streaming)');
           }
 
           // Send plaintext message (only if session explicitly opted out of encryption)
@@ -1481,7 +1466,6 @@ export class SessionManager implements ISessionManager {
   ): Promise<void> {
 
     if (!this.encryptionManager) {
-      console.error('[SessionManager] ❌ EncryptionManager NOT available!');
       throw new SDKError(
         'EncryptionManager not available for encrypted session',
         'ENCRYPTION_NOT_AVAILABLE'
@@ -1489,7 +1473,6 @@ export class SessionManager implements ISessionManager {
     }
 
     if (!this.hostManager) {
-      console.error('[SessionManager] ❌ HostManager NOT available!');
       throw new SDKError(
         'HostManager required for host public key retrieval',
         'HOST_MANAGER_NOT_AVAILABLE'
@@ -1585,13 +1568,21 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Send encrypted message with session key (Phase 4.2)
+   * @param message - The plaintext message to encrypt and send
+   * @param webSearchOptions - Optional web search configuration (v8.7.5+)
    * @private
    */
-  private async sendEncryptedMessage(message: string): Promise<void> {
+  private async sendEncryptedMessage(
+    message: string,
+    webSearchOptions?: {
+      webSearch: boolean;
+      maxSearches: number;
+      searchQueries: string[] | null;
+    }
+  ): Promise<void> {
 
 
     if (!this.sessionKey) {
-      console.error('[SessionManager] ❌ Session key NOT available!');
       throw new SDKError(
         'Session key not available for encrypted messaging',
         'SESSION_KEY_NOT_AVAILABLE'
@@ -1599,7 +1590,6 @@ export class SessionManager implements ISessionManager {
     }
 
     if (!this.encryptionManager) {
-      console.error('[SessionManager] ❌ EncryptionManager NOT available!');
       throw new SDKError(
         'EncryptionManager not available for encrypted messaging',
         'ENCRYPTION_NOT_AVAILABLE'
@@ -1607,7 +1597,6 @@ export class SessionManager implements ISessionManager {
     }
 
     if (!this.wsClient) {
-      console.error('[SessionManager] ❌ WebSocket client NOT available!');
       throw new SDKError(
         'WebSocket client not available',
         'WEBSOCKET_NOT_AVAILABLE'
@@ -1618,19 +1607,11 @@ export class SessionManager implements ISessionManager {
     const sessions = Array.from(this.sessions.values());
     const currentSession = sessions.find(s => s.status === 'active');
     if (!currentSession) {
-      console.error('[SessionManager] ❌ No active session found!');
-      console.error('[SessionManager] Available sessions:', sessions.map(s => ({ id: s.sessionId.toString(), status: s.status })));
       throw new SDKError(
         'No active session found for encrypted messaging',
         'NO_ACTIVE_SESSION'
       );
     }
-    console.log('[SessionManager] Session details:', {
-      sessionId: currentSession.sessionId.toString(),
-      jobId: currentSession.jobId.toString(),
-      status: currentSession.status,
-      encryption: currentSession.encryption
-    });
 
     try {
       // Encrypt message with session key (returns payload only)
@@ -1642,25 +1623,24 @@ export class SessionManager implements ISessionManager {
 
       // Wrap payload with message structure (per docs lines 498-508)
       // Use sendWithoutResponse to avoid conflicting handlers (v1.3.28 fix)
-      const messageToSend = {
+      const messageToSend: any = {
         type: 'encrypted_message',
         session_id: currentSession.sessionId.toString(),
         id: `${Date.now()}-${Math.random().toString(36).substring(7)}`,
         payload: payload
       };
-      console.log('[SessionManager] 📨 Message structure prepared:', {
-        type: messageToSend.type,
-        session_id: messageToSend.session_id,
-        id: messageToSend.id,
-        payload_keys: Object.keys(messageToSend.payload)
-      });
+
+      // Add web search fields if provided (v8.7.5+ - works with WebSocket streaming)
+      if (webSearchOptions) {
+        messageToSend.web_search = webSearchOptions.webSearch;
+        messageToSend.max_searches = webSearchOptions.maxSearches;
+        messageToSend.search_queries = webSearchOptions.searchQueries;
+      }
 
       await this.wsClient.sendWithoutResponse(messageToSend);
 
     } catch (error: any) {
-      console.error('[SessionManager] ❌ Failed to encrypt/send message:', error);
-      console.error('[SessionManager] Error stack:', error.stack);
-      // Wrap encryption errors in SDKError for consistent error handling
+      console.error('[SessionManager] Failed to encrypt/send message:', error.message);
       throw new SDKError(
         `Failed to encrypt message: ${error.message}`,
         'ENCRYPTION_FAILED',
@@ -1694,10 +1674,7 @@ export class SessionManager implements ISessionManager {
    * @private
    */
   private async decryptIncomingMessage(encryptedMessage: any): Promise<string> {
-
-
     if (!this.sessionKey) {
-      console.error('[SessionManager] ❌ Session key NOT available for decryption!');
       throw new SDKError(
         'Session key not available for decryption',
         'SESSION_KEY_NOT_AVAILABLE'
@@ -1705,7 +1682,6 @@ export class SessionManager implements ISessionManager {
     }
 
     if (!this.encryptionManager) {
-      console.error('[SessionManager] ❌ EncryptionManager NOT available!');
       throw new SDKError(
         'EncryptionManager not available for decryption',
         'ENCRYPTION_NOT_AVAILABLE'
@@ -1725,12 +1701,7 @@ export class SessionManager implements ISessionManager {
 
       return plaintext;
     } catch (error: any) {
-      console.error('[SessionManager] ❌ Decryption FAILED:', error);
-      console.error('[SessionManager] Error message:', error.message);
-      console.error('[SessionManager] Error stack:', error.stack);
-      console.error('[SessionManager] Message that failed to decrypt:', JSON.stringify(encryptedMessage));
-
-      // Wrap decryption errors in SDKError for consistent error handling
+      console.error('[SessionManager] Decryption failed:', error.message);
       throw new SDKError(
         `Failed to decrypt message: ${error.message}`,
         'DECRYPTION_FAILED',
@@ -2801,7 +2772,7 @@ export class SessionManager implements ISessionManager {
       if (fetchError.name === 'AbortError') {
         throw new SDKError('Embedding generation timeout (120s)', 'EMBEDDING_TIMEOUT');
       }
-      console.error('[SessionManager] ❌ Fetch error:', fetchError);
+      console.error('[SessionManager] Fetch error:', fetchError.message);
       throw new SDKError(`Network error calling embedding API: ${fetchError.message}`, 'NETWORK_ERROR');
     }
 

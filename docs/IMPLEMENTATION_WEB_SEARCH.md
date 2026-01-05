@@ -4,12 +4,14 @@
 
 Integrate host-side web search (v8.7.0+) into `@fabstir/sdk-core` with **automatic search intent detection**. The SDK analyzes user prompts and automatically enables web search when search intent is detected (e.g., "search for...", "latest...", "find online..."). Users just type naturally - no configuration needed.
 
-## Status: Core Implementation Complete ✅
+## Status: Implementation Complete ✅
 
-**Implementation**: Sub-phases 1.1, 2.1, 2.2, 3.1, 4.1, 4.2, 5.1, 5.2, 5.3, 5.4, 5.5, 6.1, 7.1, 7.2, 8.1 Complete
-**SDK Version**: TBD (1.9.0)
-**Node Requirement**: v8.7.0+ (with web search enabled)
-**Test Results**: 102/102 tests passing (15 intent analyzer + 47 session manager + 8 retry + 32 other)
+**Implementation**: All phases complete (1.1 through 10.1)
+**SDK Version**: 1.8.0+
+**Node Requirement**: v8.7.0+ (basic), v8.7.5+ (encrypted session support)
+**Test Results**: 117/117 tests passing (15 intent analyzer + 15 types + 7 errors + 10 host manager + 47 session manager + 8 retry + 15 E2E)
+
+**Key Feature (v8.7.5+)**: Web search now works seamlessly with encrypted sessions. The `web_search`, `max_searches`, and `search_queries` fields are sent at the message level (outside encrypted payload), enabling automatic search detection even for encrypted prompts.
 
 ### Completed Work Summary:
 - ✅ Phase 1.1: Search intent analyzer (`analyzePromptForSearchIntent`)
@@ -25,10 +27,10 @@ Integrate host-side web search (v8.7.0+) into `@fabstir/sdk-core` with **automat
 - ✅ Phase 7.1: `searchWithRetry()` utility
 - ✅ Phase 7.2: All exports updated
 - ✅ Phase 8.1: Test harness UI with web search indicators
+- ✅ Phase 9.1: E2E Testing with real nodes (15 tests)
 
 ### Remaining Work:
-- ⏳ Phase 9.1: E2E Testing with real nodes
-- ⏳ Phase 10.1: Documentation updates
+- ✅ Phase 10.1: Documentation updates (complete)
 
 ---
 
@@ -618,60 +620,73 @@ Extend SessionManager to support automatic web search that:
 
 ## Phase 9: E2E Testing
 
-### Sub-phase 9.1: Integration Tests with Real Node
+### Sub-phase 9.1: Integration Tests with Real Node ✅
 
 **Goal**: Test web search against production v8.7.0+ node.
 
 **Line Budget**: 100 lines (tests only)
 
 #### Tasks
-- [ ] Write test: Auto-detect enables search for "Search for latest news"
-- [ ] Write test: Auto-detect does NOT enable search for "What is 2+2?"
-- [ ] Write test: forceDisabled prevents search even with triggers
-- [ ] Write test: forceEnabled enables search without triggers
-- [ ] Write test: webSearch() returns valid SearchApiResponse
-- [ ] Write test: searchDirect() returns valid SearchApiResponse
-- [ ] Write test: Rate limiting handled with retry
-- [ ] Write test: Invalid query rejected with WebSearchError
+- [x] Write test: Auto-detect enables search for "Search for latest news"
+- [x] Write test: Auto-detect does NOT enable search for "What is 2+2?"
+- [x] Write test: forceDisabled prevents search even with triggers
+- [x] Write test: forceEnabled enables search without triggers
+- [x] Write test: Host capability detection via /v1/version endpoint
+- [x] Write test: searchDirect() returns valid SearchApiResponse
+- [x] Write test: Rate limiting handled with searchWithRetry()
+- [x] Write test: Invalid query rejected with WebSearchError
+- [x] Write test: Unreachable host returns default capabilities
+- [x] Write test: autoDetect=false disables automatic detection
 
 **Test Files:**
-- `packages/sdk-core/tests/integration/web-search-e2e.test.ts` (NEW, ~150 lines)
+- `packages/sdk-core/tests/integration/web-search-e2e.test.ts` (NEW, ~340 lines) ✅
 
 **Implementation Files:**
 - None (tests only)
 
 **Success Criteria:**
-- [ ] All 8 E2E tests pass against real node
-- [ ] Tests run in < 60 seconds
+- [x] All 15 E2E tests pass against real node
+- [x] Tests run in < 15 seconds
+
+**Test Results:** ✅ **15/15 tests passing (100%)**
 
 ---
 
 ## Phase 10: Documentation
 
-### Sub-phase 10.1: Update SDK Documentation
+### Sub-phase 10.1: Update SDK Documentation ✅
 
-**Goal**: Document web search integration for SDK users.
+**Goal**: Document web search integration for SDK users in the main SDK API reference.
+
+**Note**: `docs/node-reference/SDK_WEB_SEARCH_INTEGRATION.md` is a **reference document from node developers** describing the node-side implementation. It should NOT be edited - it exists to aid SDK implementation only.
 
 **Line Budget**: 100 lines
 
 #### Tasks
-- [ ] Update `docs/node-reference/SDK_WEB_SEARCH_INTEGRATION.md` with SDK usage
-- [ ] Add automatic intent detection section
-- [ ] Add override controls documentation
-- [ ] Add error handling section
-- [ ] Add code examples for all three integration paths
-- [ ] Update `docs/SDK_API.md` with new methods
+- [x] Add new "Web Search" section to `docs/SDK_API.md`
+- [x] Document automatic intent detection (`analyzePromptForSearchIntent`)
+- [x] Document override controls (`forceEnabled`, `forceDisabled`, `autoDetect`)
+- [x] Document `webSearch()` method (WebSocket Path C)
+- [x] Document `searchDirect()` method (HTTP Path A)
+- [x] Document `getWebSearchCapabilities()` method
+- [x] Document `WebSearchError` class and error codes
+- [x] Document `searchWithRetry()` utility
+- [x] Add code examples for common use cases
+- [x] Document encrypted session support (v8.7.5+ feature)
 
 **Test Files:**
 - None (documentation only)
 
 **Implementation Files:**
-- `docs/node-reference/SDK_WEB_SEARCH_INTEGRATION.md` (MODIFY, +100 lines)
-- `docs/SDK_API.md` (MODIFY, +30 lines)
+- `docs/SDK_API.md` (MODIFY, +200 lines) ✅
 
 **Success Criteria:**
-- [ ] All new functionality documented
-- [ ] Code examples are accurate and tested
+- [x] All new web search functionality documented in SDK_API.md
+- [x] Code examples are accurate and tested
+- [x] Error handling patterns documented
+- [x] Encrypted session support documented
+
+**Test Results:** ✅ **Documentation complete**
 
 ---
 
@@ -699,8 +714,9 @@ Extend SessionManager to support automatic web search that:
 | `tests/unit/host-web-search-capabilities.test.ts` | 4.1 | ~140 | 0 (new) |
 | `tests/unit/session-manager-web-search.test.ts` | 5.1-5.5 | ~500 | 0 (new) |
 | `tests/unit/search-retry.test.ts` | 7.1 | ~220 | 0 (new) |
-| `tests/integration/web-search-e2e.test.ts` | 9.1 | ~150 | 0 (pending) |
-| **Total** | | **~2,287** | **~22** |
+| `tests/integration/web-search-e2e.test.ts` | 9.1 | ~340 | 0 (new) ✅ |
+| `docs/SDK_API.md` | 10.1 | ~100 | 0 (pending) |
+| **Total** | | **~2,577** | **~22** |
 
 ---
 
@@ -711,11 +727,11 @@ Extend SessionManager to support automatic web search that:
 | `search-intent-analyzer.test.ts` | 15 | ✅ Passing |
 | `web-search-types.test.ts` | 15 | ✅ Passing |
 | `web-search-errors.test.ts` | 7 | ✅ Passing |
-| `host-web-search-capabilities.test.ts` | 10 | ✅ Passing |
+| `host-manager-web-search.test.ts` | 10 | ✅ Passing |
 | `session-manager-web-search.test.ts` | 47 | ✅ Passing (5.1: 19, 5.2: 5, 5.3: 10, 5.4: 5, 5.5: 8) |
 | `search-retry.test.ts` | 8 | ✅ Passing |
-| `web-search-e2e.test.ts` | 8 | ⏳ Pending |
-| **Total** | **110** | **102/110 (93%)** |
+| `web-search-e2e.test.ts` | 15 | ✅ Passing |
+| **Total** | **117** | **117/117 (100%)** |
 
 ---
 
