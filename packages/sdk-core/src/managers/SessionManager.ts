@@ -38,7 +38,7 @@ import { PricingValidationError } from '../errors/pricing-errors';
 import { WebSearchError } from '../errors/web-search-errors';
 import { bytesToHex } from '../crypto/utilities';
 import { analyzePromptForSearchIntent } from '../utils/search-intent-analyzer';
-import type { SearchApiResponse } from '../types/web-search.types';
+import type { SearchApiResponse, WebSearchStarted, WebSearchResults, WebSearchError as WebSearchErrorMsg } from '../types/web-search.types';
 
 /**
  * Check if a string is a bytes32 hash (0x + 64 hex chars)
@@ -153,6 +153,9 @@ export class SessionManager implements ISessionManager {
   private messageIndex: number = 0; // NEW: For Phase 4.2 replay protection
   private pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: any) => void; timeoutId: NodeJS.Timeout }> = new Map(); // Host-side RAG request tracking
   private ragHandlerUnsubscribe?: () => void; // NEW: Store RAG handler unsubscribe function to prevent duplicate handlers
+  // Web Search (Phase 5.2-5.3): Pending search tracking and handler cleanup
+  private pendingSearches: Map<string, { resolve: (result: SearchApiResponse) => void; reject: (error: Error) => void; timeoutId: NodeJS.Timeout }> = new Map();
+  private searchHandlerUnsubscribe?: () => void;
 
   constructor(
     paymentManager: PaymentManager,
@@ -676,6 +679,9 @@ export class SessionManager implements ISessionManager {
         // Set up global RAG message handlers
         this._setupRAGMessageHandlers();
 
+        // Set up global web search message handlers (Phase 5.2-5.3)
+        this._setupWebSearchMessageHandlers();
+
         // NEW (Phase 6.2): Use encryption by default
         if (session.encryption && this.encryptionManager) {
 
@@ -899,6 +905,13 @@ export class SessionManager implements ISessionManager {
         
         // Use collected response or fallback to returned response
         const finalResponse = fullResponse || response;
+
+        // Capture web search metadata if present (Phase 5.2)
+        const searchMetadata = this._parseSearchMetadata(response);
+        if (searchMetadata) {
+          session.webSearchMetadata = searchMetadata;
+          console.log(`[SessionManager] Web search metadata captured: performed=${searchMetadata.performed}, queries=${searchMetadata.queriesCount}`);
+        }
 
         // Add response to session
         session.responses.push(finalResponse);
@@ -2110,6 +2123,9 @@ export class SessionManager implements ISessionManager {
       // Set up global RAG message handlers
       this._setupRAGMessageHandlers();
 
+      // Set up global web search message handlers (Phase 5.2-5.3)
+      this._setupWebSearchMessageHandlers();
+
       // Send session init (encryption support)
       if (session.encryption && this.encryptionManager) {
         const config: ExtendedSessionConfig = {
@@ -2504,6 +2520,107 @@ export class SessionManager implements ISessionManager {
       // Explicitly ignore all other message types (encrypted_chunk, etc.)
       // Those will be handled by dedicated handlers in sendPromptStreaming()
     });
+  }
+
+  // =============================================================================
+  // Web Search Message Handlers (Phase 5.2-5.3)
+  // =============================================================================
+
+  /**
+   * Parse search metadata from response data.
+   * @private
+   */
+  private _parseSearchMetadata(response: any): WebSearchMetadata | null {
+    if (response.web_search_performed === undefined) {
+      return null;
+    }
+    return {
+      performed: response.web_search_performed === true,
+      queriesCount: response.search_queries_count || 0,
+      provider: response.search_provider || null,
+    };
+  }
+
+  /**
+   * Set up global message handlers for web search operations.
+   * @private
+   */
+  private _setupWebSearchMessageHandlers(): void {
+    if (!this.wsClient) {
+      return;
+    }
+
+    // Clean up existing handler if present to prevent duplicate handlers
+    if (this.searchHandlerUnsubscribe) {
+      this.searchHandlerUnsubscribe();
+      this.searchHandlerUnsubscribe = undefined;
+    }
+
+    // Register handler for web search messages
+    this.searchHandlerUnsubscribe = this.wsClient.onMessage((data: any) => {
+      // Only handle search-specific message types
+      if (data.type === 'searchStarted') {
+        this._handleSearchStarted(data as WebSearchStarted);
+      } else if (data.type === 'searchResults') {
+        this._handleSearchResults(data as WebSearchResults);
+      } else if (data.type === 'searchError') {
+        this._handleSearchError(data as WebSearchErrorMsg);
+      }
+      // Ignore other message types
+    });
+  }
+
+  /**
+   * Handle searchStarted WebSocket message.
+   * @private
+   */
+  private _handleSearchStarted(data: WebSearchStarted): void {
+    console.log(`[SessionManager] Search started: query="${data.query}" provider=${data.provider}`);
+    // This is informational - no pending request resolution needed
+    // Could emit event here for UI progress indication if needed
+  }
+
+  /**
+   * Handle searchResults WebSocket message.
+   * @private
+   */
+  private _handleSearchResults(data: WebSearchResults): void {
+    const requestId = data.request_id || '';
+    const pending = this.pendingSearches.get(requestId);
+
+    if (pending) {
+      clearTimeout(pending.timeoutId);
+      this.pendingSearches.delete(requestId);
+
+      // Convert to SearchApiResponse
+      const response: SearchApiResponse = {
+        query: data.query,
+        results: data.results,
+        resultCount: data.result_count,
+        searchTimeMs: data.search_time_ms,
+        provider: data.provider as 'brave' | 'duckduckgo' | 'bing',
+        cached: data.cached,
+        chainId: 0, // Will be filled by caller if needed
+        chainName: 'Unknown'
+      };
+
+      pending.resolve(response);
+    }
+  }
+
+  /**
+   * Handle searchError WebSocket message.
+   * @private
+   */
+  private _handleSearchError(data: WebSearchErrorMsg): void {
+    const requestId = data.request_id || '';
+    const pending = this.pendingSearches.get(requestId);
+
+    if (pending) {
+      clearTimeout(pending.timeoutId);
+      this.pendingSearches.delete(requestId);
+      pending.reject(new WebSearchError(data.error, data.error_code));
+    }
   }
 
   /**

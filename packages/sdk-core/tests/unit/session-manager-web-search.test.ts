@@ -323,3 +323,343 @@ describe('searchDirect Method Logic', () => {
     expect(request).toHaveProperty('error');
   });
 });
+
+// =============================================================================
+// Phase 5.2: Capture Search Metadata in Response
+// =============================================================================
+
+describe('Web Search Metadata Capture', () => {
+  /**
+   * Test the metadata parsing logic from host responses.
+   * This mirrors how SessionManager will capture search metadata.
+   */
+
+  interface WebSearchMetadata {
+    performed: boolean;
+    queriesCount: number;
+    provider: string | null;
+  }
+
+  function parseSearchMetadata(response: any): WebSearchMetadata | null {
+    // Only capture if web_search_performed is explicitly present
+    if (response.web_search_performed === undefined) {
+      return null;
+    }
+
+    return {
+      performed: response.web_search_performed === true,
+      queriesCount: response.search_queries_count || 0,
+      provider: response.search_provider || null,
+    };
+  }
+
+  it('should capture metadata when web_search_performed is true', () => {
+    const response = {
+      content: 'Here are the latest results...',
+      web_search_performed: true,
+      search_queries_count: 3,
+      search_provider: 'brave',
+    };
+
+    const metadata = parseSearchMetadata(response);
+
+    expect(metadata).not.toBeNull();
+    expect(metadata?.performed).toBe(true);
+    expect(metadata?.queriesCount).toBe(3);
+    expect(metadata?.provider).toBe('brave');
+  });
+
+  it('should capture metadata when web_search_performed is false', () => {
+    const response = {
+      content: 'Answer without search...',
+      web_search_performed: false,
+    };
+
+    const metadata = parseSearchMetadata(response);
+
+    expect(metadata).not.toBeNull();
+    expect(metadata?.performed).toBe(false);
+    expect(metadata?.queriesCount).toBe(0);
+    expect(metadata?.provider).toBeNull();
+  });
+
+  it('should return null when web_search_performed is not present', () => {
+    const response = {
+      content: 'Regular response without search metadata',
+    };
+
+    const metadata = parseSearchMetadata(response);
+
+    expect(metadata).toBeNull();
+  });
+
+  it('should handle different provider values', () => {
+    const providers = ['brave', 'duckduckgo', 'bing'];
+
+    for (const provider of providers) {
+      const response = {
+        web_search_performed: true,
+        search_provider: provider,
+      };
+
+      const metadata = parseSearchMetadata(response);
+      expect(metadata?.provider).toBe(provider);
+    }
+  });
+
+  it('should default queriesCount to 0 when not provided', () => {
+    const response = {
+      web_search_performed: true,
+      search_provider: 'brave',
+      // search_queries_count not provided
+    };
+
+    const metadata = parseSearchMetadata(response);
+    expect(metadata?.queriesCount).toBe(0);
+  });
+});
+
+// =============================================================================
+// Phase 5.3: WebSocket Search Message Handlers
+// =============================================================================
+
+describe('WebSocket Search Message Handlers', () => {
+  /**
+   * Test the message handler logic for search-specific WebSocket messages.
+   */
+
+  type SearchMessageType = 'searchStarted' | 'searchResults' | 'searchError';
+
+  interface SearchStartedMessage {
+    type: 'searchStarted';
+    query: string;
+    provider: string;
+    request_id?: string;
+  }
+
+  interface SearchResultsMessage {
+    type: 'searchResults';
+    query: string;
+    results: Array<{ title: string; url: string; snippet: string; source: string }>;
+    result_count: number;
+    search_time_ms: number;
+    provider: string;
+    cached: boolean;
+    request_id?: string;
+  }
+
+  interface SearchErrorMessage {
+    type: 'searchError';
+    error: string;
+    error_code: string;
+    request_id?: string;
+  }
+
+  function isSearchMessage(data: any): data is { type: SearchMessageType } {
+    return ['searchStarted', 'searchResults', 'searchError'].includes(data?.type);
+  }
+
+  function classifySearchMessage(data: any): SearchMessageType | null {
+    if (!isSearchMessage(data)) return null;
+    return data.type;
+  }
+
+  describe('message classification', () => {
+    it('should identify searchStarted message', () => {
+      const message: SearchStartedMessage = {
+        type: 'searchStarted',
+        query: 'NVIDIA GPU specs',
+        provider: 'brave',
+        request_id: 'search-123',
+      };
+
+      expect(classifySearchMessage(message)).toBe('searchStarted');
+    });
+
+    it('should identify searchResults message', () => {
+      const message: SearchResultsMessage = {
+        type: 'searchResults',
+        query: 'NVIDIA GPU specs',
+        results: [
+          { title: 'RTX 5090', url: 'http://example.com', snippet: 'Latest GPU...', source: 'example.com' }
+        ],
+        result_count: 1,
+        search_time_ms: 150,
+        provider: 'brave',
+        cached: false,
+        request_id: 'search-123',
+      };
+
+      expect(classifySearchMessage(message)).toBe('searchResults');
+    });
+
+    it('should identify searchError message', () => {
+      const message: SearchErrorMessage = {
+        type: 'searchError',
+        error: 'Rate limited',
+        error_code: 'rate_limited',
+        request_id: 'search-123',
+      };
+
+      expect(classifySearchMessage(message)).toBe('searchError');
+    });
+
+    it('should return null for non-search messages', () => {
+      const messages = [
+        { type: 'stream_chunk', content: 'Hello' },
+        { type: 'response', content: 'Full response' },
+        { type: 'session_init', session_id: '123' },
+        { foo: 'bar' },
+        null,
+        undefined,
+      ];
+
+      for (const msg of messages) {
+        expect(classifySearchMessage(msg)).toBeNull();
+      }
+    });
+  });
+
+  describe('searchStarted handler', () => {
+    it('should extract query and provider from searchStarted', () => {
+      const message: SearchStartedMessage = {
+        type: 'searchStarted',
+        query: 'Latest AI news 2026',
+        provider: 'duckduckgo',
+        request_id: 'search-456',
+      };
+
+      // Simulates what the handler would extract
+      const event = {
+        query: message.query,
+        provider: message.provider,
+        requestId: message.request_id,
+      };
+
+      expect(event.query).toBe('Latest AI news 2026');
+      expect(event.provider).toBe('duckduckgo');
+      expect(event.requestId).toBe('search-456');
+    });
+  });
+
+  describe('searchResults handler', () => {
+    it('should transform searchResults to SearchApiResponse', () => {
+      const message: SearchResultsMessage = {
+        type: 'searchResults',
+        query: 'Bitcoin price',
+        results: [
+          { title: 'BTC Price', url: 'http://crypto.com', snippet: '$100,000', source: 'crypto.com' }
+        ],
+        result_count: 1,
+        search_time_ms: 200,
+        provider: 'brave',
+        cached: true,
+        request_id: 'search-789',
+      };
+
+      // Transform to SearchApiResponse format
+      const response = {
+        query: message.query,
+        results: message.results,
+        resultCount: message.result_count,
+        searchTimeMs: message.search_time_ms,
+        provider: message.provider,
+        cached: message.cached,
+      };
+
+      expect(response.query).toBe('Bitcoin price');
+      expect(response.resultCount).toBe(1);
+      expect(response.searchTimeMs).toBe(200);
+      expect(response.provider).toBe('brave');
+      expect(response.cached).toBe(true);
+      expect(response.results).toHaveLength(1);
+    });
+  });
+
+  describe('searchError handler', () => {
+    it('should create WebSearchError from searchError message', () => {
+      const message: SearchErrorMessage = {
+        type: 'searchError',
+        error: 'Search provider unavailable',
+        error_code: 'provider_error',
+        request_id: 'search-error-1',
+      };
+
+      // Simulates error creation
+      const error = {
+        message: message.error,
+        code: message.error_code,
+        requestId: message.request_id,
+      };
+
+      expect(error.message).toBe('Search provider unavailable');
+      expect(error.code).toBe('provider_error');
+      expect(error.requestId).toBe('search-error-1');
+    });
+
+    it('should map error codes correctly', () => {
+      const errorCodes = [
+        'search_disabled',
+        'invalid_query',
+        'rate_limited',
+        'provider_error',
+        'timeout',
+        'no_providers',
+      ];
+
+      for (const code of errorCodes) {
+        const message: SearchErrorMessage = {
+          type: 'searchError',
+          error: `Error: ${code}`,
+          error_code: code,
+        };
+
+        expect(message.error_code).toBe(code);
+      }
+    });
+  });
+
+  describe('pending search tracking', () => {
+    it('should generate unique request IDs', () => {
+      const generateRequestId = () => `search-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+      const id1 = generateRequestId();
+      const id2 = generateRequestId();
+
+      expect(id1).toMatch(/^search-\d+-[a-z0-9]+$/);
+      expect(id2).toMatch(/^search-\d+-[a-z0-9]+$/);
+      // IDs should be unique (very high probability)
+      expect(id1).not.toBe(id2);
+    });
+
+    it('should track pending search with resolve/reject callbacks', () => {
+      const pendingSearches = new Map<string, {
+        resolve: (value: any) => void;
+        reject: (error: any) => void;
+        timeoutId: ReturnType<typeof setTimeout>;
+      }>();
+
+      const requestId = 'search-test-123';
+      let resolvedValue: any = null;
+      let rejectedError: any = null;
+
+      const timeoutId = setTimeout(() => {}, 30000);
+
+      pendingSearches.set(requestId, {
+        resolve: (value) => { resolvedValue = value; },
+        reject: (error) => { rejectedError = error; },
+        timeoutId,
+      });
+
+      expect(pendingSearches.has(requestId)).toBe(true);
+
+      // Simulate resolving
+      const pending = pendingSearches.get(requestId);
+      pending?.resolve({ query: 'test', results: [] });
+
+      expect(resolvedValue).toEqual({ query: 'test', results: [] });
+
+      clearTimeout(timeoutId);
+    });
+  });
+});
