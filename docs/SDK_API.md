@@ -3381,104 +3381,183 @@ for (const doc of pending) {
 
 ### DocumentManager
 
-Handles document processing, chunking, and embedding generation.
+Handles document processing, text extraction, chunking, and embedding generation for RAG.
+
+**Supported File Types:**
+
+| Format | Extension | Processing Method |
+|--------|-----------|-------------------|
+| Plain Text | `.txt` | Direct text extraction |
+| Markdown | `.md` | Direct text extraction |
+| HTML | `.html` | Tag stripping + text |
+| PDF | `.pdf` | Client-side pdfjs extraction |
+| PNG | `.png` | Host OCR + Description |
+| JPEG | `.jpg`, `.jpeg` | Host OCR + Description |
+| WebP | `.webp` | Host OCR + Description |
+| GIF | `.gif` | Host OCR + Description |
 
 #### Constructor
 
 ```typescript
+import { DocumentManager } from '@fabstir/sdk-core';
+
 const documentManager = new DocumentManager({
-  embeddingService: embeddingService,
-  vectorManager: vectorRAGManager,
-  databaseName: 'docs'
+  embeddingService: hostAdapter  // Required for processDocument
 });
 ```
 
+**Options:**
+- `embeddingService` - EmbeddingService instance (HostAdapter, OpenAIAdapter, or CohereAdapter)
+
 #### processDocument
 
-Uploads and processes a document.
+Processes a document or image: extracts text, chunks it, and generates embeddings.
+
+**For images**, automatically uses HostAdapter's `processImage()` to call host OCR and description endpoints.
 
 ```typescript
 async processDocument(
   file: File,
-  options?: ProcessOptions
-): Promise<ProcessResult>
+  options?: ChunkingOptions & UploadOptions
+): Promise<ChunkResult[]>
 ```
 
 **Options:**
 - `chunkSize` - Tokens per chunk (default: 500)
 - `overlap` - Token overlap between chunks (default: 50)
-- `metadata` - Additional metadata for all chunks
-- `folderPath` - Virtual folder path
+- `splitBySentence` - Split on sentence boundaries
+- `splitByParagraph` - Split on paragraph boundaries
 - `onProgress` - Progress callback
 
 **Returns:**
 ```typescript
-interface ProcessResult {
-  documentId: string;
-  chunks: number;
-  tokens: number;
-  processingTime: number;
-  cost?: number;
+interface ChunkResult {
+  chunk: DocumentChunk;
+  embedding: number[];  // 384-dimensional vector
+}
+
+interface DocumentChunk {
+  id: string;
+  text: string;
+  metadata: {
+    documentId: string;
+    documentName: string;
+    documentType: DocumentType;
+    index: number;
+    startOffset: number;
+    endOffset: number;
+    tokenCount?: number;
+  };
 }
 ```
 
-**Example:**
+**Example (Text Document):**
 ```typescript
-const result = await documentManager.processDocument(file, {
+const chunks = await documentManager.processDocument(pdfFile, {
   chunkSize: 500,
   overlap: 50,
-  metadata: { author: 'John Doe', category: 'tutorial' },
-  folderPath: '/tutorials/python',
   onProgress: (progress) => {
-    console.log(`Progress: ${progress.progress}%`);
+    // progress.currentStep: "Extracted 1,234 words"
+    console.log(`${progress.stage}: ${progress.progress}%`);
   }
 });
 
-console.log(`Processed ${result.chunks} chunks in ${result.processingTime}ms`);
+console.log(`Processed ${chunks.length} chunks`);
 ```
 
-#### processBatch
+**Example (Image - automatic OCR):**
+```typescript
+// Images work the same way - SDK handles OCR automatically
+const chunks = await documentManager.processDocument(screenshotPng, {
+  onProgress: (progress) => {
+    // progress.currentStep: "Image processed: OCR confidence 95%"
+    console.log(`${progress.stage}: ${progress.progress}%`);
+  }
+});
 
-Processes multiple documents in parallel.
+// chunks[0].chunk.text contains extracted OCR text
+```
+
+#### embedText
+
+Embeds a single text string for RAG query embedding.
 
 ```typescript
-async processBatch(
-  files: File[],
-  options?: BatchOptions
-): Promise<BatchResult>
+async embedText(
+  text: string,
+  type?: 'document' | 'query'
+): Promise<{ embedding: number[]; text: string; tokenCount: number }>
 ```
 
 **Example:**
 ```typescript
-const result = await documentManager.processBatch(files, {
+// Embed user's question for vector search
+const queryEmbedding = await documentManager.embedText(
+  "What is the main topic?",
+  'query'
+);
+
+// Use queryEmbedding.embedding for vector similarity search
+const results = await sessionManager.searchVectors(
+  sessionId,
+  queryEmbedding.embedding,
+  5,     // topK
+  0.3    // threshold
+);
+```
+
+#### uploadDocument
+
+Uploads a document to S5 storage (requires initialization).
+
+```typescript
+async uploadDocument(
+  file: File,
+  databaseName: string,
+  options?: UploadOptions
+): Promise<UploadResult>
+```
+
+#### uploadBatch
+
+Uploads multiple documents in parallel.
+
+```typescript
+async uploadBatch(
+  files: File[],
+  databaseName: string,
+  options?: BatchOptions
+): Promise<BatchResult[]>
+```
+
+**Example:**
+```typescript
+const results = await documentManager.uploadBatch(files, 'my-docs', {
   concurrency: 3,
-  continueOnError: true
+  continueOnError: true,
+  onProgress: ({ completed, total, currentFile }) => {
+    console.log(`${completed}/${total}: ${currentFile}`);
+  }
 });
 
-console.log(`Success: ${result.successful}, Failed: ${result.failed}`);
+const successful = results.filter(r => r.success).length;
+console.log(`Uploaded ${successful}/${results.length} files`);
 ```
 
 #### deleteDocument
 
-Deletes a document and all its chunks.
+Deletes a document from registry and S5 storage.
 
 ```typescript
-async deleteDocument(documentId: string): Promise<void>
+async deleteDocument(databaseName: string, documentId: string): Promise<void>
 ```
 
-#### estimateCost
+#### listDocuments
 
-Estimates cost before processing.
+Lists all documents in a database.
 
 ```typescript
-async estimateCost(file: File): Promise<CostEstimate>
-```
-
-**Example:**
-```typescript
-const estimate = await documentManager.estimateCost(largePdf);
-console.log(`Estimated cost: $${estimate.estimatedCost}`);
-console.log(`Chunks: ${estimate.estimatedChunks}`);
+async listDocuments(databaseName: string): Promise<DocumentMetadata[]>
 ```
 
 ### Embedding Services
@@ -3487,13 +3566,14 @@ Three embedding adapters for different deployment scenarios.
 
 #### HostAdapter (Recommended for Production)
 
-Zero-cost, host-side embeddings using local models.
+Zero-cost, host-side embeddings using local models. Also supports **image processing** via OCR and description endpoints.
 
 ```typescript
 import { HostAdapter } from '@fabstir/sdk-core/embeddings';
 
-const embeddingService = new HostAdapter({
-  hostUrl: 'http://your-host:8080',
+const hostAdapter = new HostAdapter({
+  hostUrl: 'https://your-host:8080',
+  chainId: 84532,  // Optional, defaults to Base Sepolia
   model: 'all-MiniLM-L6-v2',
   dimensions: 384
 });
@@ -3504,6 +3584,40 @@ const embeddingService = new HostAdapter({
 - 9x faster than target (11ms vs 100ms)
 - No third-party data exposure
 - GDPR compliant
+- **Image OCR support** (PNG, JPEG, WebP, GIF)
+
+##### processImage
+
+Processes an image using host's `/v1/ocr` and `/v1/describe-image` endpoints in parallel.
+
+```typescript
+async processImage(file: File): Promise<ImageProcessingResult>
+```
+
+**Returns:**
+```typescript
+interface ImageProcessingResult {
+  description: string;        // From /v1/describe-image (Florence-2)
+  extractedText: string;      // From /v1/ocr (PaddleOCR)
+  ocrConfidence: number;      // 0.0-1.0
+  combinedText: string;       // "[Image Description]\n...\n\n[Extracted Text]\n..."
+  processingTimeMs: number;
+}
+```
+
+**Example:**
+```typescript
+const result = await hostAdapter.processImage(screenshotFile);
+
+console.log(`OCR confidence: ${(result.ocrConfidence * 100).toFixed(0)}%`);
+console.log(`Extracted text: ${result.extractedText}`);
+console.log(`Description: ${result.description}`);
+
+// Combined text is ready for chunking/embedding
+console.log(`Combined: ${result.combinedText}`);
+```
+
+**Note:** `processImage()` is called automatically by `DocumentManager.processDocument()` when the file is an image type. You typically don't need to call it directly.
 
 #### OpenAIAdapter
 
@@ -3522,6 +3636,8 @@ const embeddingService = new OpenAIAdapter({
 
 **Cost:** ~$0.02 per 1M tokens
 
+**Note:** OpenAIAdapter does not support image processing. Use HostAdapter for image RAG.
+
 #### CohereAdapter
 
 External API using Cohere embeddings.
@@ -3537,6 +3653,8 @@ const embeddingService = new CohereAdapter({
 ```
 
 **Cost:** ~$0.10 per 1M tokens
+
+**Note:** CohereAdapter does not support image processing. Use HostAdapter for image RAG.
 
 ### Permissions and Sharing
 
@@ -4397,6 +4515,48 @@ interface HostMetadata {
   location: string;
   maxConcurrent: number;
   costPerToken: number;
+}
+
+// Document Types
+type DocumentType = 'txt' | 'md' | 'html' | 'pdf' | 'docx' | 'png' | 'jpeg' | 'webp' | 'gif';
+
+interface DocumentMetadata {
+  id: string;
+  name: string;
+  type: DocumentType;
+  size: number;
+  uploadedAt: number;
+  s5Path: string;
+}
+
+interface DocumentChunk {
+  id: string;
+  text: string;
+  metadata: ChunkMetadata;
+}
+
+interface ChunkMetadata {
+  documentId: string;
+  documentName: string;
+  documentType: DocumentType;
+  index: number;
+  startOffset: number;
+  endOffset: number;
+  tokenCount?: number;
+}
+
+interface ChunkResult {
+  chunk: DocumentChunk;
+  embedding: number[];  // 384-dimensional vector
+}
+
+// Image Processing Types (HostAdapter)
+interface ImageProcessingResult {
+  description: string;        // From /v1/describe-image (Florence-2)
+  extractedText: string;      // From /v1/ocr (PaddleOCR)
+  ocrConfidence: number;      // 0.0-1.0
+  combinedText: string;       // Combined text for embedding
+  processingTimeMs: number;
 }
 
 // Chat/Conversation Types

@@ -12,6 +12,7 @@ import {
   EmbeddingResult,
   EmbeddingResponse
 } from '../types.js';
+import type { ImageProcessingResult } from '../../documents/types.js';
 
 /**
  * Host-specific embedding configuration
@@ -151,5 +152,200 @@ export class HostAdapter extends EmbeddingService {
   protected async checkDailyCostLimit(): Promise<void> {
     // Host embeddings are always free, no limit check needed
     return;
+  }
+
+  /**
+   * Convert ArrayBuffer to base64 string
+   * Used for image data encoding before sending to host endpoints
+   *
+   * @param buffer - ArrayBuffer containing binary data
+   * @returns Base64-encoded string
+   */
+  private arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
+  /**
+   * Create abort signal for image processing (longer timeout than embeddings)
+   * Default: 60 seconds for image processing
+   */
+  private createImageTimeoutSignal(): AbortSignal {
+    const controller = new AbortController();
+    const timeout = this.config.timeout ? this.config.timeout * 2 : 60000; // 60s default
+    setTimeout(() => controller.abort(), timeout);
+    return controller.signal;
+  }
+
+  /**
+   * Call host's /v1/ocr endpoint
+   * Extracts text from images using PaddleOCR
+   *
+   * @param base64Image - Base64-encoded image data
+   * @param format - Image format (png, jpeg, webp, gif)
+   * @returns OCR result with text, confidence, and processing time
+   */
+  private async callOcrEndpoint(
+    base64Image: string,
+    format: string
+  ): Promise<{ text: string; confidence: number; processingTimeMs: number }> {
+    try {
+      const response = await fetch(`${this.hostUrl}/v1/ocr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: base64Image,
+          format,
+          language: 'en',
+          chainId: this.chainId,
+        }),
+        signal: this.createImageTimeoutSignal(),
+      });
+
+      if (response.status === 503) {
+        throw new Error('OCR model not loaded on host');
+      }
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: 'Unknown error' }));
+        throw new Error(`OCR failed (${response.status}): ${error.message || error}`);
+      }
+
+      const data = await response.json();
+      return {
+        text: data.text || '',
+        confidence: data.confidence || 0,
+        processingTimeMs: data.processingTimeMs || 0,
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new Error('OCR request timed out (image may be too large)');
+        }
+        if (error.message === 'Failed to fetch') {
+          throw new Error('OCR request failed - check host connectivity and image size (<5MB)');
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Call host's /v1/describe-image endpoint
+   * Generates image description using Florence-2 vision model
+   *
+   * @param base64Image - Base64-encoded image data
+   * @param format - Image format (png, jpeg, webp, gif)
+   * @returns Description result with text and processing time
+   */
+  private async callDescribeEndpoint(
+    base64Image: string,
+    format: string
+  ): Promise<{ description: string; processingTimeMs: number }> {
+    try {
+      const response = await fetch(`${this.hostUrl}/v1/describe-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: base64Image,
+          format,
+          detail: 'detailed',
+          chainId: this.chainId,
+        }),
+        signal: this.createImageTimeoutSignal(),
+      });
+
+      if (response.status === 503) {
+        throw new Error('Florence vision model not loaded on host');
+      }
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: 'Unknown error' }));
+        throw new Error(`Image description failed (${response.status}): ${error.message || error}`);
+      }
+
+      const data = await response.json();
+      return {
+        description: data.description || '',
+        processingTimeMs: data.processingTimeMs || 0,
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new Error('Image description timed out (image may be too large)');
+        }
+        if (error.message === 'Failed to fetch') {
+          throw new Error('Image description failed - check host connectivity and image size (<5MB)');
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Process image using host OCR and description endpoints
+   * Calls BOTH /v1/ocr AND /v1/describe-image in parallel for best RAG results
+   *
+   * @param file - Image file (PNG, JPEG, WebP, GIF)
+   * @returns Combined text from OCR + description
+   */
+  async processImage(file: File): Promise<ImageProcessingResult> {
+    // 1. Convert image to base64
+    const arrayBuffer = await file.arrayBuffer();
+    const base64 = this.arrayBufferToBase64(arrayBuffer);
+    const format = file.name.split('.').pop()?.toLowerCase() || 'png';
+
+    // 2. Call BOTH endpoints in parallel for best results
+    const [ocrResult, describeResult] = await Promise.allSettled([
+      this.callOcrEndpoint(base64, format),
+      this.callDescribeEndpoint(base64, format),
+    ]);
+
+    // 3. Extract results (handle partial failures gracefully)
+    const ocrText = ocrResult.status === 'fulfilled' ? ocrResult.value.text : '';
+    const ocrConfidence = ocrResult.status === 'fulfilled' ? ocrResult.value.confidence : 0;
+    const ocrTime = ocrResult.status === 'fulfilled' ? ocrResult.value.processingTimeMs : 0;
+    const description = describeResult.status === 'fulfilled' ? describeResult.value.description : '';
+    const describeTime = describeResult.status === 'fulfilled' ? describeResult.value.processingTimeMs : 0;
+
+    // 4. If BOTH failed, throw error
+    if (ocrResult.status === 'rejected' && describeResult.status === 'rejected') {
+      throw new Error(
+        `Image processing failed on host. ` +
+        `OCR: ${(ocrResult.reason as Error)?.message || 'Unknown'}. ` +
+        `Describe: ${(describeResult.reason as Error)?.message || 'Unknown'}`
+      );
+    }
+
+    // 5. Combine results
+    const combinedText = this.combineImageText(description, ocrText);
+    const processingTimeMs = ocrTime + describeTime;
+
+    return {
+      description,
+      extractedText: ocrText,
+      ocrConfidence,
+      combinedText,
+      processingTimeMs,
+    };
+  }
+
+  /**
+   * Combine image description and OCR text into formatted string
+   * Format: [Image Description]\n{desc}\n\n[Extracted Text]\n{ocr}
+   */
+  private combineImageText(description: string, ocrText: string): string {
+    const parts: string[] = [];
+    if (description.trim()) {
+      parts.push(`[Image Description]\n${description.trim()}`);
+    }
+    if (ocrText.trim()) {
+      parts.push(`[Extracted Text]\n${ocrText.trim()}`);
+    }
+    return parts.join('\n\n');
   }
 }

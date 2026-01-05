@@ -64,7 +64,7 @@ const TEST_TREASURY_PRIVATE_KEY =
   process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_KEY!;
 
 // Session configuration
-const SESSION_DEPOSIT_AMOUNT = "2"; // $2 USDC
+const SESSION_DEPOSIT_AMOUNT = "0.5"; // $0.5 USDC
 const PRICE_PER_TOKEN = 2000; // 0.002 USDC per token
 const PROOF_INTERVAL = 1000; // Checkpoint every 1000 tokens (production default)
 const SESSION_DURATION = 86400; // 1 day
@@ -1139,23 +1139,28 @@ export default function ChatContextDemo() {
         signer
       );
 
-      // Check current allowance
+      // Check current allowance - use high threshold to avoid running out mid-session
       const currentAllowance = await usdcContract.allowance(
         primaryAccount,
         contracts.JOB_MARKETPLACE
       );
-      const depositAmountWei = parseUnits(SESSION_DEPOSIT_AMOUNT, 6);
+      const minAllowanceThreshold = parseUnits("100", 6); // 100 USDC threshold
 
-      if (currentAllowance < depositAmountWei) {
-        addMessage("system", "🔐 Requesting USDC approval (popup may appear)...");
+      console.log("[Allowance] Current allowance:", formatUnits(currentAllowance, 6), "USDC");
+      console.log("[Allowance] Threshold:", formatUnits(minAllowanceThreshold, 6), "USDC");
+      console.log("[Allowance] Primary account:", primaryAccount);
+      console.log("[Allowance] JobMarketplace:", contracts.JOB_MARKETPLACE);
+
+      if (currentAllowance < minAllowanceThreshold) {
+        addMessage("system", `🔐 Requesting USDC approval (current: ${formatUnits(currentAllowance, 6)} USDC)...`);
         const approveTx = await usdcContract.approve(
           contracts.JOB_MARKETPLACE,
           parseUnits("1000", 6) // Approve 1000 USDC for multiple sessions
         );
         await approveTx.wait(3);
-        addMessage("system", "✅ USDC approved for JobMarketplace");
+        addMessage("system", "✅ USDC approved for JobMarketplace (1000 USDC)");
       } else {
-        addMessage("system", "✅ USDC already approved");
+        addMessage("system", `✅ USDC already approved (${formatUnits(currentAllowance, 6)} USDC)`);
       }
 
       // Start session - with Auto Spend Permissions, payment happens automatically without popups!
@@ -1245,17 +1250,24 @@ export default function ChatContextDemo() {
 
           // Step 2: Search for similar vectors (will return empty if none uploaded)
           // @ts-ignore - searchVectors not yet in ISessionManager interface
+          console.log(`[RAG] Searching session: ${currentSessionId.toString()}`);
           const searchResults = await sm.searchVectors(
             currentSessionId.toString(),
             queryVector,
-            3 // topK - get top 3 most relevant chunks
+            3, // topK - get top 3 most relevant chunks
+            0.2 // threshold - lower to catch more matches
           );
 
           console.log(`[RAG] Found ${searchResults.length} relevant chunks`);
-          console.log('[RAG] Search results:', searchResults);
+          console.log('[RAG] Search results (raw):', JSON.stringify(searchResults));
 
           if (searchResults.length > 0) {
-            ragContext = "Relevant information from uploaded documents:\n\n";
+            // System instruction for handling image descriptions and document context
+            ragContext = "IMPORTANT: The following context contains information from uploaded documents. ";
+            ragContext += "Sections marked [Image Description] contain AI-analyzed descriptions of uploaded images - ";
+            ragContext += "use this information to answer questions about those images. ";
+            ragContext += "Sections marked [Extracted Text] contain OCR text from images.\n\n";
+            ragContext += "Relevant information from uploaded documents:\n\n";
             searchResults.forEach((result: any, idx: number) => {
               console.log(`[RAG] Result ${idx}:`, result);
               // Try different field names that might contain the text
@@ -1371,18 +1383,19 @@ export default function ChatContextDemo() {
   }
 
   // Convert ChunkResult[] to Vector[] format for SessionManager.uploadVectors()
+  // ChunkResult from managers/DocumentManager.ts has nested structure: { chunk: DocumentChunk, embedding: number[] }
   function convertChunksToVectors(chunks: any[]): any[] {
-    return chunks.map((chunk) => ({
-      id: chunk.id,
-      vector: chunk.embedding, // 384-dimensional array
+    return chunks.map((chunkResult) => ({
+      id: chunkResult.chunk.id,
+      vector: chunkResult.embedding, // 384-dimensional array
       metadata: {
-        text: chunk.text,
-        documentId: chunk.metadata.documentId,
-        documentName: chunk.metadata.documentName,
-        documentType: chunk.metadata.documentType,
-        chunkIndex: chunk.metadata.chunkIndex,
-        startOffset: chunk.metadata.startOffset,
-        endOffset: chunk.metadata.endOffset,
+        text: chunkResult.chunk.text,
+        documentId: chunkResult.chunk.metadata.documentId,
+        documentName: chunkResult.chunk.metadata.documentName,
+        documentType: chunkResult.chunk.metadata.documentType,
+        chunkIndex: chunkResult.chunk.metadata.index,
+        startOffset: chunkResult.chunk.metadata.startOffset,
+        endOffset: chunkResult.chunk.metadata.endOffset,
       },
     }));
   }
@@ -1438,8 +1451,8 @@ export default function ChatContextDemo() {
       const ext = file.name.split(".").pop()?.toLowerCase();
       console.log('[RAG DEBUG] File extension:', ext);
 
-      if (!["txt", "md", "html", "pdf"].includes(ext || "")) {
-        throw new Error("Only .txt, .md, .html, and .pdf files are supported");
+      if (!["txt", "md", "html", "pdf", "png", "jpg", "jpeg", "webp", "gif"].includes(ext || "")) {
+        throw new Error("Only .txt, .md, .html, .pdf, .png, .jpg, .webp, .gif files are supported");
       }
 
       // Validate file size (max 5 MB)
@@ -1485,6 +1498,22 @@ export default function ChatContextDemo() {
       console.log('[RAG DEBUG] processDocument completed, chunks:', chunks);
       console.log('[RAG DEBUG] Number of chunks:', chunks?.length);
 
+      // Handle empty chunks (image with no text content)
+      if (!chunks || chunks.length === 0) {
+        console.log('[RAG DEBUG] No text content found in document');
+        addMessage("system", `⚠️ No text found in ${file.name} - ensure host has Florence vision model loaded for image descriptions`);
+        // Still add to uploaded list so user knows upload was attempted
+        setUploadedDocuments([
+          ...uploadedDocuments,
+          {
+            id: `doc-${Date.now()}`,
+            name: file.name,
+            chunks: 0,
+          },
+        ]);
+        return;
+      }
+
       // Stage 4: Upload vectors to host via SessionManager
       console.log('[RAG DEBUG] Starting vector upload stage...');
       setUploadProgress({
@@ -1500,9 +1529,11 @@ export default function ChatContextDemo() {
 
       console.log('[RAG DEBUG] Calling sessionManager.uploadVectors...');
       console.log('[RAG DEBUG] Session ID:', sessionId.toString());
+      console.log('[RAG DEBUG] Vectors to upload:', vectors.length, 'vectors with', vectors[0]?.vector?.length, 'dimensions');
       // @ts-ignore - uploadVectors not yet in ISessionManager interface
-      await sessionManager.uploadVectors(sessionId.toString(), vectors);
-      console.log('[RAG DEBUG] uploadVectors completed successfully');
+      const uploadResult = await sessionManager.uploadVectors(sessionId.toString(), vectors);
+      console.log('[RAG DEBUG] uploadVectors result:', uploadResult);
+      console.log('[RAG DEBUG] Uploaded:', uploadResult?.uploaded, 'Rejected:', uploadResult?.rejected, 'Errors:', uploadResult?.errors);
 
       // Mark upload complete
       setUploadProgress({
@@ -1516,7 +1547,7 @@ export default function ChatContextDemo() {
       setUploadedDocuments([
         ...uploadedDocuments,
         {
-          id: chunks[0]?.metadata.documentId || `doc-${Date.now()}`,
+          id: chunks[0]?.chunk.metadata.documentId || `doc-${Date.now()}`,
           name: file.name,
           chunks: chunks.length,
         },
@@ -2065,13 +2096,13 @@ export default function ChatContextDemo() {
           <div className="flex gap-2 items-center mb-3">
             <input
               type="file"
-              accept=".txt,.md,.html,.pdf"
+              accept=".txt,.md,.html,.pdf,.png,.jpg,.jpeg,.webp,.gif"
               onChange={handleFileUpload}
               disabled={isUploadingDocument || !sessionId}
               className="px-3 py-2 border rounded text-sm disabled:bg-gray-100"
             />
             <span className="text-xs text-gray-600">
-              Supported: .txt, .md, .html, .pdf (max 5MB)
+              Supported: .txt, .md, .html, .pdf, .png, .jpg, .webp, .gif (max 5MB)
             </span>
           </div>
 

@@ -24,6 +24,12 @@ const DEFAULT_OPTIONS: Required<ChunkingOptions> = {
 const WORDS_PER_TOKEN = 0.77; // 1 / 1.3
 
 /**
+ * Maximum characters per chunk - embedding APIs typically have 8192 char limit
+ * Use 7500 to leave some margin for safety
+ */
+const MAX_CHUNK_CHARS = 7500;
+
+/**
  * Chunk a document's text into smaller pieces
  *
  * @param text - Text to chunk
@@ -49,18 +55,26 @@ export function chunkText(
   const chunkWordCount = Math.floor(opts.chunkSize * WORDS_PER_TOKEN);
   const overlapWordCount = Math.floor(opts.overlap * WORDS_PER_TOKEN);
 
-  // Handle short documents
-  if (text.length === 0) {
-    throw new Error('Cannot chunk empty text');
+  // Handle empty text (e.g., images without OCR content)
+  if (!text || text.trim().length === 0) {
+    // Return empty array - caller should handle this case
+    return [];
   }
 
   const words = text.split(/\s+/).filter(w => w.length > 0);
 
-  if (words.length <= chunkWordCount) {
-    // Document is shorter than chunk size, return as single chunk
+  // Check both word count AND character count to decide if chunking is needed
+  // This handles cases where text has few spaces but many characters (e.g., OCR output, code)
+  if (words.length <= chunkWordCount && text.length <= MAX_CHUNK_CHARS) {
+    // Document is shorter than chunk size AND under character limit, return as single chunk
     return [
       createChunk(text, 0, documentId, documentName, documentType, 0, text.length)
     ];
+  }
+
+  // If text exceeds character limit but has few words, force character-based chunking
+  if (text.length > MAX_CHUNK_CHARS && words.length <= chunkWordCount) {
+    return chunkByCharacters(text, documentId, documentName, documentType);
   }
 
   // Perform chunking based on strategy
@@ -94,10 +108,17 @@ function chunkByWords(
   while (startWordIdx < words.length) {
     iterationCount++;
 
-    // Take chunkWordCount words
-    const endWordIdx = Math.min(startWordIdx + chunkWordCount, words.length);
-    const chunkWords = words.slice(startWordIdx, endWordIdx);
-    const chunkText = chunkWords.join(' ');
+    // Take chunkWordCount words, but also respect character limit
+    let endWordIdx = Math.min(startWordIdx + chunkWordCount, words.length);
+    let chunkWords = words.slice(startWordIdx, endWordIdx);
+    let chunkText = chunkWords.join(' ');
+
+    // If chunk exceeds character limit, reduce word count
+    while (chunkText.length > MAX_CHUNK_CHARS && endWordIdx > startWordIdx + 1) {
+      endWordIdx--;
+      chunkWords = words.slice(startWordIdx, endWordIdx);
+      chunkText = chunkWords.join(' ');
+    }
 
 
     // Calculate character offsets
@@ -241,6 +262,58 @@ function chunkByParagraph(
         currentWordCount = 0;
         startOffset = endOffset;
       }
+    }
+  }
+
+  return chunks;
+}
+
+/**
+ * Chunk text by character count when word-based chunking fails
+ * This handles edge cases like OCR output with minimal whitespace
+ */
+function chunkByCharacters(
+  text: string,
+  documentId: string,
+  documentName: string,
+  documentType: DocumentType
+): DocumentChunk[] {
+  const chunks: DocumentChunk[] = [];
+  const overlapChars = Math.floor(MAX_CHUNK_CHARS * 0.1); // 10% overlap
+  let chunkIndex = 0;
+  let startOffset = 0;
+
+  while (startOffset < text.length) {
+    // Calculate end position
+    let endOffset = Math.min(startOffset + MAX_CHUNK_CHARS, text.length);
+
+    // Try to break at a whitespace or newline if not at end
+    if (endOffset < text.length) {
+      // Look back for a good break point (whitespace, newline, punctuation)
+      const searchStart = Math.max(startOffset, endOffset - 500);
+      const searchText = text.slice(searchStart, endOffset);
+      const lastBreak = Math.max(
+        searchText.lastIndexOf('\n'),
+        searchText.lastIndexOf(' '),
+        searchText.lastIndexOf('.'),
+        searchText.lastIndexOf(',')
+      );
+      if (lastBreak > 0) {
+        endOffset = searchStart + lastBreak + 1;
+      }
+    }
+
+    const chunkText = text.slice(startOffset, endOffset);
+    chunks.push(createChunk(chunkText, chunkIndex, documentId, documentName, documentType, startOffset, endOffset));
+
+    chunkIndex++;
+
+    // Move to next chunk with overlap
+    startOffset = endOffset - overlapChars;
+
+    // Prevent infinite loop
+    if (startOffset >= endOffset) {
+      startOffset = endOffset;
     }
   }
 

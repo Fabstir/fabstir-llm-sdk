@@ -1496,14 +1496,6 @@ export class SessionManager implements ISessionManager {
       // Extract payload from message (per docs lines 514-527 for encrypted_chunk)
       // Message structure: { type, session_id, id, payload: { ciphertextHex, nonceHex, aadHex } }
       const payload = encryptedMessage.payload || encryptedMessage;
-      console.log('[SessionManager] Payload structure:', {
-        hasCiphertextHex: !!payload.ciphertextHex,
-        hasNonceHex: !!payload.nonceHex,
-        hasAadHex: !!payload.aadHex,
-        ciphertextLength: payload.ciphertextHex?.length || 0,
-        nonceLength: payload.nonceHex?.length || 0,
-        aadLength: payload.aadHex?.length || 0
-      });
 
       // Decrypt message with session key
       const plaintext = this.encryptionManager.decryptMessage(

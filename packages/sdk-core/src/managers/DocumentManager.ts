@@ -19,9 +19,27 @@ import {
   detectDocumentType,
   validateFileSize,
   extractTextFromBuffer,
-  extractionCache
+  extractionCache,
+  isImageType
 } from '../documents/extractors.js';
 import { chunkText } from '../documents/chunker.js';
+import type { EmbeddingService } from '../embeddings/EmbeddingService.js';
+import { HostAdapter } from '../embeddings/adapters/HostAdapter.js';
+
+/**
+ * Chunk result with embedding
+ */
+export interface ChunkResult {
+  chunk: DocumentChunk;
+  embedding: number[];
+}
+
+/**
+ * DocumentManager constructor options
+ */
+export interface DocumentManagerOptions {
+  embeddingService?: EmbeddingService;
+}
 
 /**
  * Document registry entry
@@ -41,12 +59,17 @@ export class DocumentManager {
   private userAddress?: string;
   private s5Client?: any;
   private initialized = false;
+  private embeddingService?: EmbeddingService;
 
   // Document registry (in-memory for now, can be S5-backed later)
   private documentRegistry = new Map<string, Map<string, DocumentRegistryEntry>>();
 
   // S5 paths
   private static readonly DOCUMENTS_PATH = 'home/documents';
+
+  constructor(options?: DocumentManagerOptions) {
+    this.embeddingService = options?.embeddingService;
+  }
 
   /**
    * Initialize document manager
@@ -198,6 +221,148 @@ export class DocumentManager {
     }
 
     return results;
+  }
+
+  /**
+   * Process a document: extract text, chunk, and embed
+   * For images, uses HostAdapter's processImage() method
+   *
+   * @param file - File to process
+   * @param options - Chunking and upload options
+   * @returns Array of chunk results with embeddings
+   */
+  async processDocument(
+    file: File,
+    options?: ChunkingOptions & UploadOptions
+  ): Promise<ChunkResult[]> {
+    // processDocument only needs embeddingService, not full S5 initialization
+    if (!this.embeddingService) {
+      throw new Error('DocumentManager requires an embeddingService for document processing');
+    }
+
+    // Validate file
+    validateFileSize(file);
+
+    // Detect document type
+    const documentType = detectDocumentType(file.name);
+    let text: string;
+
+    // Check if this is an image
+    if (isImageType(documentType)) {
+      // Images require HostAdapter for processing
+      if (!(this.embeddingService instanceof HostAdapter)) {
+        throw new Error(
+          'Image processing requires HostAdapter. ' +
+          'Initialize DocumentManager with a HostAdapter embedding service.'
+        );
+      }
+
+      const imageResult = await this.embeddingService.processImage(file);
+      text = imageResult.combinedText;
+
+      options?.onProgress?.({
+        stage: 'extracting',
+        progress: 25,
+        currentStep: `Image processed: OCR confidence ${(imageResult.ocrConfidence * 100).toFixed(0)}%`,
+      });
+    } else {
+      // Standard text extraction for documents
+      const extractionResult = await extractText(file, documentType);
+      text = extractionResult.text;
+
+      options?.onProgress?.({
+        stage: 'extracting',
+        progress: 25,
+        currentStep: `Extracted ${extractionResult.metadata.wordCount} words`,
+      });
+    }
+
+    // Chunk the text
+    options?.onProgress?.({
+      stage: 'chunking',
+      progress: 50,
+      currentStep: 'Chunking text',
+    });
+
+    const documentId = this.generateDocumentId(file.name, 'default');
+    const chunks = chunkText(
+      text,
+      documentId,
+      file.name,
+      documentType,
+      options
+    );
+
+    // Handle empty chunks (e.g., image with no text content)
+    if (chunks.length === 0) {
+      options?.onProgress?.({
+        stage: 'complete',
+        progress: 100,
+        currentStep: 'No text content found in document',
+      });
+
+      // Return empty array - caller can check length and show appropriate message
+      return [];
+    }
+
+    // Generate embeddings for each chunk
+    options?.onProgress?.({
+      stage: 'embedding',
+      progress: 75,
+      currentStep: 'Generating embeddings',
+    });
+
+    const results: ChunkResult[] = [];
+
+    if (this.embeddingService) {
+      const texts = chunks.map((c) => c.text);
+      const embeddingResponse = await this.embeddingService.embedBatch(texts);
+
+      for (let i = 0; i < chunks.length; i++) {
+        results.push({
+          chunk: chunks[i],
+          embedding: embeddingResponse.embeddings[i].embedding,
+        });
+      }
+    } else {
+      // No embedding service - return chunks without embeddings
+      for (const chunk of chunks) {
+        results.push({
+          chunk,
+          embedding: [],
+        });
+      }
+    }
+
+    options?.onProgress?.({
+      stage: 'complete',
+      progress: 100,
+      currentStep: `Processed ${results.length} chunks`,
+    });
+
+    return results;
+  }
+
+  /**
+   * Embed a single text string (for RAG query embedding)
+   * @param text - Text to embed
+   * @param type - Embedding type: 'document' or 'query' (affects some embedding models)
+   * @returns Embedding result with vector and metadata
+   */
+  async embedText(
+    text: string,
+    type: 'document' | 'query' = 'query'
+  ): Promise<{ embedding: number[]; text: string; tokenCount: number }> {
+    if (!this.embeddingService) {
+      throw new Error('DocumentManager requires an embeddingService for text embedding');
+    }
+
+    const response = await this.embeddingService.embedBatch([text], type);
+    return {
+      embedding: response.embeddings[0].embedding,
+      text,
+      tokenCount: response.embeddings[0].tokenCount || 0,
+    };
   }
 
   /**
