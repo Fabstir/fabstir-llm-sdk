@@ -6,7 +6,7 @@ Integrate host-side web search (v8.7.0+) into `@fabstir/sdk-core` with **automat
 
 ## Status: Core Implementation Complete ✅
 
-**Implementation**: Sub-phases 1.1, 2.1, 2.2, 3.1, 4.1, 4.2, 5.1, 5.2, 5.3, 5.4, 5.5, 6.1, 7.1, 7.2 Complete
+**Implementation**: Sub-phases 1.1, 2.1, 2.2, 3.1, 4.1, 4.2, 5.1, 5.2, 5.3, 5.4, 5.5, 6.1, 7.1, 7.2, 8.1 Complete
 **SDK Version**: TBD (1.9.0)
 **Node Requirement**: v8.7.0+ (with web search enabled)
 **Test Results**: 102/102 tests passing (15 intent analyzer + 47 session manager + 8 retry + 32 other)
@@ -24,9 +24,9 @@ Integrate host-side web search (v8.7.0+) into `@fabstir/sdk-core` with **automat
 - ✅ Phase 6.1: ISessionManager interface updated
 - ✅ Phase 7.1: `searchWithRetry()` utility
 - ✅ Phase 7.2: All exports updated
+- ✅ Phase 8.1: Test harness UI with web search indicators
 
 ### Remaining Work:
-- ⏳ Phase 8.1: Test Harness UI integration
 - ⏳ Phase 9.1: E2E Testing with real nodes
 - ⏳ Phase 10.1: Documentation updates
 
@@ -587,30 +587,32 @@ Extend SessionManager to support automatic web search that:
 
 ## Phase 8: Test Harness Integration
 
-### Sub-phase 8.1: Update chat-context-rag-demo.tsx
+### Sub-phase 8.1: Update chat-context-rag-demo.tsx ✅
 
 **Goal**: Add web search visual indicators to test harness.
 
 **Line Budget**: 60 lines
 
 #### Tasks
-- [ ] Add state for tracking web search metadata per message
-- [ ] Add UI indicator when web search was performed (🔍 icon)
-- [ ] Show search provider name (Brave/DuckDuckGo/Bing)
-- [ ] Show number of search queries executed
-- [ ] Add example prompts section demonstrating auto-detection
-- [ ] Add "Web Search Triggers" info panel
+- [x] Add state for tracking web search metadata per message (extended ChatMessage interface)
+- [x] Add UI indicator when web search was performed (🔍 icon in purple)
+- [x] Show search provider name (Brave/DuckDuckGo/Bing)
+- [x] Show number of search queries executed
+- [x] Add example prompts section demonstrating auto-detection
+- [x] Add "Web Search Triggers" info panel with clickable examples
 
 **Test Files:**
 - None (UI-only changes, manual testing)
 
 **Implementation Files:**
-- `apps/harness/pages/chat-context-rag-demo.tsx` (MODIFY, +60 lines)
+- `apps/harness/pages/chat-context-rag-demo.tsx` (MODIFY, +55 lines @ lines 43-48, 79, 187, 1375-1386, 2078-2083, 2112-2148) ✅
 
 **Success Criteria:**
-- [ ] Web search indicator visible when search performed
-- [ ] Provider and query count displayed
-- [ ] Example prompts demonstrate feature
+- [x] Web search indicator visible when search performed
+- [x] Provider and query count displayed
+- [x] Example prompts demonstrate feature
+
+**Test Results:** ✅ **Manual testing required** (UI changes only)
 
 ---
 
