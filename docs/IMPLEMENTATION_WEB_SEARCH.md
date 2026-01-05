@@ -4,12 +4,12 @@
 
 Integrate host-side web search (v8.7.0+) into `@fabstir/sdk-core` with **automatic search intent detection**. The SDK analyzes user prompts and automatically enables web search when search intent is detected (e.g., "search for...", "latest...", "find online..."). Users just type naturally - no configuration needed.
 
-## Status: Phase 3 Complete
+## Status: Phase 4 Complete
 
-**Implementation**: Sub-phases 1.1, 2.1, 2.2, 3.1 Complete
+**Implementation**: Sub-phases 1.1, 2.1, 2.2, 3.1, 4.1, 4.2 Complete
 **SDK Version**: TBD (1.9.0)
 **Node Requirement**: v8.7.0+ (with web search enabled)
-**Test Results**: 37/37 tests passing (Phases 1-3)
+**Test Results**: 47/47 tests passing (Phases 1-4)
 
 ---
 
@@ -240,28 +240,31 @@ Extend SessionManager to support automatic web search that:
 **Line Budget**: 50 lines (30 implementation + 20 tests)
 
 #### Tasks
-- [ ] Write test: `getWebSearchCapabilities()` returns capabilities when host supports search
-- [ ] Write test: `getWebSearchCapabilities()` returns `supportsWebSearch: false` when feature missing
-- [ ] Write test: `getWebSearchCapabilities()` correctly detects Brave provider
-- [ ] Write test: `getWebSearchCapabilities()` correctly detects DuckDuckGo fallback
-- [ ] Write test: `getWebSearchCapabilities()` handles network errors gracefully
-- [ ] Add `getWebSearchCapabilities(hostAddress, apiUrl?)` method to HostManager
-- [ ] Fetch `/v1/version` endpoint
-- [ ] Parse `features` array for 'host-side-web-search', 'inference-web-search'
-- [ ] Extract provider from features ('brave-search-api', 'duckduckgo-fallback', 'bing-search-api')
-- [ ] Return `WebSearchCapabilities` object
+- [x] Write test: `getWebSearchCapabilities()` returns capabilities when host supports search
+- [x] Write test: `getWebSearchCapabilities()` returns `supportsWebSearch: false` when feature missing
+- [x] Write test: `getWebSearchCapabilities()` correctly detects Brave provider
+- [x] Write test: `getWebSearchCapabilities()` correctly detects DuckDuckGo fallback
+- [x] Write test: `getWebSearchCapabilities()` handles network errors gracefully
+- [x] Add `getWebSearchCapabilities(hostAddress, apiUrl?)` method to HostManager
+- [x] Fetch `/v1/version` endpoint
+- [x] Parse `features` array for 'host-side-web-search', 'inference-web-search'
+- [x] Extract provider from features ('brave-search-api', 'duckduckgo-fallback', 'bing-search-api')
+- [x] Return `WebSearchCapabilities` object
 
 **Test Files:**
-- `packages/sdk-core/tests/unit/host-manager-web-search.test.ts` (NEW, ~80 lines)
+- `packages/sdk-core/tests/unit/host-manager-web-search.test.ts` (NEW, ~140 lines) ✅
 
 **Implementation Files:**
-- `packages/sdk-core/src/managers/HostManager.ts` (MODIFY, +40 lines)
+- `packages/sdk-core/src/utils/host-web-search-capabilities.ts` (NEW, ~70 lines) ✅
+- `packages/sdk-core/src/managers/HostManager.ts` (MODIFY, +50 lines) ✅
 
 **Success Criteria:**
-- [ ] Method correctly parses host version response
-- [ ] Returns false capabilities when search not supported
-- [ ] Handles network failures gracefully
-- [ ] All 5 tests pass
+- [x] Method correctly parses host version response
+- [x] Returns false capabilities when search not supported
+- [x] Handles network failures gracefully
+- [x] All 10 tests pass
+
+**Test Results:** ✅ **10/10 tests passing (100%)**
 
 ---
 
@@ -272,18 +275,20 @@ Extend SessionManager to support automatic web search that:
 **Line Budget**: 5 lines
 
 #### Tasks
-- [ ] Add `getWebSearchCapabilities(hostAddress: string, apiUrl?: string): Promise<WebSearchCapabilities>` to IHostManager
-- [ ] Verify interface and implementation match
+- [x] Add `getWebSearchCapabilities(hostAddress: string, apiUrl?: string): Promise<WebSearchCapabilities>` to IHostManager
+- [x] Verify interface and implementation match
 
 **Test Files:**
 - None (interface only)
 
 **Implementation Files:**
-- `packages/sdk-core/src/interfaces/IHostManager.ts` (MODIFY, +3 lines)
+- `packages/sdk-core/src/interfaces/IHostManager.ts` (MODIFY, +10 lines) ✅
 
 **Success Criteria:**
-- [ ] Interface matches implementation
-- [ ] TypeScript compilation succeeds
+- [x] Interface matches implementation
+- [x] TypeScript compilation succeeds
+
+**Test Results:** ✅ **Interface matches implementation**
 
 ---
 
