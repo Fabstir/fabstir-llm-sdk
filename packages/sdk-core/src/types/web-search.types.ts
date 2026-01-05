@@ -19,6 +19,10 @@ export interface SearchIntentConfig {
   forceEnabled?: boolean;
   /** Force disable web search regardless of intent detection */
   forceDisabled?: boolean;
+  /** Maximum number of search queries (1-20, default 5) */
+  maxSearches?: number;
+  /** Custom search queries (optional, host extracts from prompt if not provided) */
+  queries?: string[];
 }
 
 // ============= Search API Types =============

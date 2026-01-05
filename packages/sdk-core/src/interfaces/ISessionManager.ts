@@ -7,6 +7,7 @@
  */
 
 import { SessionConfig, SessionJob, CheckpointProof } from '../types';
+import type { SearchApiResponse } from '../types/web-search.types';
 
 export interface ISessionManager {
   /**
@@ -105,4 +106,36 @@ export interface ISessionManager {
    * End a session cleanly (user-initiated)
    */
   endSession(sessionId: bigint): Promise<void>;
+
+  // =============================================================================
+  // Web Search Methods (Phase 4.2, 4.4)
+  // =============================================================================
+
+  /**
+   * Perform a web search via WebSocket (Path C).
+   *
+   * @param sessionId - Active session ID
+   * @param query - Search query (1-500 characters)
+   * @param numResults - Number of results to return (1-20, default 10)
+   * @returns Search results from the host's configured provider
+   */
+  webSearch(
+    sessionId: bigint,
+    query: string,
+    numResults?: number
+  ): Promise<SearchApiResponse>;
+
+  /**
+   * Perform a web search via direct HTTP API (Path A).
+   *
+   * @param hostUrl - Host API base URL
+   * @param query - Search query (1-500 characters)
+   * @param options - Optional numResults and chainId
+   * @returns Search results from the host's configured provider
+   */
+  searchDirect(
+    hostUrl: string,
+    query: string,
+    options?: { numResults?: number; chainId?: number }
+  ): Promise<SearchApiResponse>;
 }

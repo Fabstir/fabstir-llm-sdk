@@ -11,6 +11,7 @@ export * from './WebCrypto';
 export * from './s5-seed-derivation';
 export * from './search-intent-analyzer';
 export * from './host-web-search-capabilities';
+export * from './search-retry';
 
 // Export other utilities as they are created
 export { TransactionHelper } from '../contracts/TransactionHelper';

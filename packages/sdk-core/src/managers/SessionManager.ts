@@ -35,7 +35,10 @@ import { WebSocketClient } from '../websocket/WebSocketClient';
 import { ChainRegistry } from '../config/ChainRegistry';
 import { UnsupportedChainError } from '../errors/ChainErrors';
 import { PricingValidationError } from '../errors/pricing-errors';
+import { WebSearchError } from '../errors/web-search-errors';
 import { bytesToHex } from '../crypto/utilities';
+import { analyzePromptForSearchIntent } from '../utils/search-intent-analyzer';
+import type { SearchApiResponse } from '../types/web-search.types';
 
 /**
  * Check if a string is a bytes32 hash (0x + 64 hex chars)
@@ -116,6 +119,7 @@ export interface SessionState {
   encryption?: boolean; // NEW: Track if session uses encryption
   groupId?: string; // NEW: Session Groups integration
   webSearchMetadata?: WebSearchMetadata; // NEW: Web search metadata from response
+  webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 5.1)
 }
 
 // Extended SessionConfig with chainId
@@ -375,6 +379,7 @@ export class SessionManager implements ISessionManager {
         startTime: Date.now(),
         encryption: enableEncryption,  // NEW (Phase 6.2): Store encryption preference
         groupId: config.groupId,  // NEW: Session Groups integration
+        webSearch: config.webSearch,  // NEW (Phase 5.1): Web search configuration
         ragConfig: ragConfig,  // NEW (Phase 5.1): Store RAG config
         ragMetrics: ragConfig?.enabled ? {
           totalRetrievals: 0,
@@ -852,12 +857,33 @@ export class SessionManager implements ISessionManager {
             }
           });
 
+          // AUTOMATIC WEB SEARCH INTENT DETECTION (Phase 5.1)
+          const searchConfig = session.webSearch || {};
+          let enableWebSearch = false;
+
+          if (searchConfig.forceDisabled) {
+            enableWebSearch = false;
+          } else if (searchConfig.forceEnabled) {
+            enableWebSearch = true;
+          } else if (searchConfig.autoDetect !== false) {
+            // Default: auto-detect search intent from prompt
+            enableWebSearch = analyzePromptForSearchIntent(prompt);
+          }
+
+          if (enableWebSearch) {
+            console.log('[SessionManager] Web search auto-enabled based on prompt intent');
+          }
+
           // Send plaintext message (only if session explicitly opted out of encryption)
           response = await this.wsClient.sendMessage({
             type: 'prompt',
             chain_id: session.chainId,
             jobId: session.jobId.toString(),  // Include jobId for settlement tracking
             prompt: augmentedPrompt,  // Use RAG-augmented prompt
+            // Web search fields (v8.7.0+) - AUTOMATICALLY ENABLED based on intent
+            web_search: enableWebSearch,
+            max_searches: enableWebSearch ? (searchConfig.maxSearches ?? 5) : 0,
+            search_queries: searchConfig.queries ?? null,
             request: {
               model: session.model,
               prompt: augmentedPrompt,  // Use RAG-augmented prompt
@@ -1002,12 +1028,33 @@ export class SessionManager implements ISessionManager {
             });
           });
         } else {
+          // AUTOMATIC WEB SEARCH INTENT DETECTION (Phase 5.1) - Non-streaming path
+          const searchConfigNonStream = session.webSearch || {};
+          let enableWebSearchNonStream = false;
+
+          if (searchConfigNonStream.forceDisabled) {
+            enableWebSearchNonStream = false;
+          } else if (searchConfigNonStream.forceEnabled) {
+            enableWebSearchNonStream = true;
+          } else if (searchConfigNonStream.autoDetect !== false) {
+            // Default: auto-detect search intent from prompt
+            enableWebSearchNonStream = analyzePromptForSearchIntent(prompt);
+          }
+
+          if (enableWebSearchNonStream) {
+            console.log('[SessionManager] Web search auto-enabled based on prompt intent (non-streaming)');
+          }
+
           // Send plaintext message (only if session explicitly opted out of encryption)
           response = await this.wsClient.sendMessage({
             type: 'prompt',
             chain_id: session.chainId,
             jobId: session.jobId.toString(),  // Include jobId for settlement tracking
             prompt: augmentedPrompt,  // Use RAG-augmented prompt
+            // Web search fields (v8.7.0+) - AUTOMATICALLY ENABLED based on intent
+            web_search: enableWebSearchNonStream,
+            max_searches: enableWebSearchNonStream ? (searchConfigNonStream.maxSearches ?? 5) : 0,
+            search_queries: searchConfigNonStream.queries ?? null,
             request: {
               model: session.model,
               prompt: augmentedPrompt,  // Use RAG-augmented prompt
@@ -1056,6 +1103,162 @@ export class SessionManager implements ISessionManager {
         `Failed to send prompt via WebSocket: ${error.message}`,
         'WS_PROMPT_ERROR',
         { originalError: error }
+      );
+    }
+  }
+
+  // =============================================================================
+  // Web Search Methods (Phase 4.2, 4.4)
+  // =============================================================================
+
+  /**
+   * Perform a web search via WebSocket (Path C).
+   *
+   * Sends a search request through the existing WebSocket connection and
+   * waits for results. Requires an active session with WebSocket connection.
+   *
+   * @param sessionId - Active session ID
+   * @param query - Search query (1-500 characters)
+   * @param numResults - Number of results to return (1-20, default 10)
+   * @returns Search results from the host's configured provider
+   * @throws WebSearchError on invalid query, timeout, or provider error
+   *
+   * @example
+   * ```typescript
+   * const results = await sessionManager.webSearch(
+   *   sessionId,
+   *   'latest NVIDIA GPU specs',
+   *   5
+   * );
+   * console.log(`Found ${results.resultCount} results via ${results.provider}`);
+   * ```
+   */
+  async webSearch(
+    sessionId: bigint,
+    query: string,
+    numResults: number = 10
+  ): Promise<SearchApiResponse> {
+    const session = this.getSession(sessionId.toString());
+    if (!session) {
+      throw new SDKError(`Session ${sessionId} not found`, 'SESSION_NOT_FOUND');
+    }
+
+    if (!this.wsClient || !this.wsClient.isConnected()) {
+      throw new SDKError('WebSocket not connected', 'WS_NOT_CONNECTED');
+    }
+
+    // Validate query
+    if (!query || query.trim().length === 0) {
+      throw new WebSearchError('Query cannot be empty', 'invalid_query');
+    }
+    if (query.length > 500) {
+      throw new WebSearchError('Query must be 1-500 characters', 'invalid_query');
+    }
+
+    const requestId = `search-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this.pendingRequests.delete(requestId);
+        reject(new WebSearchError('Search timeout', 'timeout'));
+      }, 30000);
+
+      this.pendingRequests.set(requestId, {
+        resolve: (result) => {
+          clearTimeout(timeoutId);
+          this.pendingRequests.delete(requestId);
+          resolve(result);
+        },
+        reject: (error) => {
+          clearTimeout(timeoutId);
+          this.pendingRequests.delete(requestId);
+          reject(error);
+        },
+        timeoutId
+      });
+
+      // Send search request via WebSocket
+      this.wsClient!.sendWithoutResponse({
+        type: 'searchRequest',
+        query,
+        num_results: Math.min(Math.max(numResults, 1), 20),
+        request_id: requestId,
+        chain_id: session.chainId
+      });
+    });
+  }
+
+  /**
+   * Perform a web search via direct HTTP API (Path A).
+   *
+   * Calls the host's /v1/search endpoint directly, without requiring
+   * an active session or WebSocket connection.
+   *
+   * @param hostUrl - Host API base URL (e.g., 'http://host:8080')
+   * @param query - Search query (1-500 characters)
+   * @param options - Optional numResults (1-20) and chainId
+   * @returns Search results from the host's configured provider
+   * @throws WebSearchError on invalid query, rate limiting, or provider error
+   *
+   * @example
+   * ```typescript
+   * const results = await sessionManager.searchDirect(
+   *   'http://host:8080',
+   *   'AI developments 2026',
+   *   { numResults: 5, chainId: 84532 }
+   * );
+   * ```
+   */
+  async searchDirect(
+    hostUrl: string,
+    query: string,
+    options: { numResults?: number; chainId?: number } = {}
+  ): Promise<SearchApiResponse> {
+    // Validate query
+    if (!query || query.length > 500) {
+      throw new WebSearchError('Query must be 1-500 characters', 'invalid_query');
+    }
+
+    const requestId = `search-${Date.now()}`;
+    const chainId = options.chainId || this.chainId;
+
+    try {
+      const response = await fetch(`${hostUrl}/v1/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          numResults: Math.min(Math.max(options.numResults || 10, 1), 20),
+          chainId,
+          requestId
+        })
+      });
+
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('Retry-After');
+        throw new WebSearchError(
+          `Rate limited. Retry after ${retryAfter}s`,
+          'rate_limited',
+          retryAfter ? parseInt(retryAfter, 10) : undefined
+        );
+      }
+
+      if (response.status === 503) {
+        throw new WebSearchError('Web search disabled on host', 'search_disabled');
+      }
+
+      if (!response.ok) {
+        throw new WebSearchError(`Search failed: ${response.statusText}`, 'provider_error');
+      }
+
+      return await response.json();
+    } catch (error) {
+      if (error instanceof WebSearchError) {
+        throw error;
+      }
+      throw new WebSearchError(
+        `Search request failed: ${(error as Error).message}`,
+        'provider_error'
       );
     }
   }
