@@ -4,12 +4,12 @@
 
 Integrate host-side web search (v8.7.0+) into `@fabstir/sdk-core` with **automatic search intent detection**. The SDK analyzes user prompts and automatically enables web search when search intent is detected (e.g., "search for...", "latest...", "find online..."). Users just type naturally - no configuration needed.
 
-## Status: Phase 1 In Progress
+## Status: Phase 2 In Progress
 
-**Implementation**: Sub-phase 1.1 Complete
+**Implementation**: Sub-phases 1.1, 2.1 Complete
 **SDK Version**: TBD (1.9.0)
 **Node Requirement**: v8.7.0+ (with web search enabled)
-**Test Results**: 15/15 tests passing (Phase 1.1)
+**Test Results**: 30/30 tests passing (Phase 1.1 + 2.1)
 
 ---
 
@@ -139,30 +139,32 @@ Extend SessionManager to support automatic web search that:
 **Line Budget**: 100 lines (types only)
 
 #### Tasks
-- [ ] Create `packages/sdk-core/src/types/web-search.types.ts`
-- [ ] Add `SearchIntentConfig` interface (autoDetect, customTriggers, forceEnabled, forceDisabled)
-- [ ] Add `SearchApiRequest` interface (query, numResults, chainId, requestId)
-- [ ] Add `SearchResultItem` interface (title, url, snippet, source, published_date)
-- [ ] Add `SearchApiResponse` interface (query, results, resultCount, searchTimeMs, provider, cached)
-- [ ] Add `WebSearchOptions` interface (enabled, maxSearches, queries)
-- [ ] Add `WebSearchMetadata` interface (performed, queriesCount, provider)
-- [ ] Add `WebSearchCapabilities` interface (supportsWebSearch, supportsInferenceSearch, provider, rateLimitPerMinute)
-- [ ] Add `WebSearchErrorCode` type union
-- [ ] Add WebSocket message types (WebSearchRequest, WebSearchStarted, WebSearchResults, WebSearchError)
-- [ ] Export all types from `types/index.ts`
-- [ ] Verify TypeScript compilation succeeds
+- [x] Create `packages/sdk-core/src/types/web-search.types.ts`
+- [x] Add `SearchIntentConfig` interface (autoDetect, customTriggers, forceEnabled, forceDisabled)
+- [x] Add `SearchApiRequest` interface (query, numResults, chainId, requestId)
+- [x] Add `SearchResultItem` interface (title, url, snippet, source, published_date)
+- [x] Add `SearchApiResponse` interface (query, results, resultCount, searchTimeMs, provider, cached)
+- [x] Add `WebSearchOptions` interface (enabled, maxSearches, queries)
+- [x] Add `WebSearchMetadata` interface (performed, queriesCount, provider)
+- [x] Add `WebSearchCapabilities` interface (supportsWebSearch, supportsInferenceSearch, provider, rateLimitPerMinute)
+- [x] Add `WebSearchErrorCode` type union
+- [x] Add WebSocket message types (WebSearchRequest, WebSearchStarted, WebSearchResults, WebSearchError)
+- [x] Export all types from `types/index.ts`
+- [x] Verify TypeScript compilation succeeds
 
 **Test Files:**
-- `packages/sdk-core/tests/unit/web-search-types.test.ts` (NEW, ~30 lines - type compilation tests)
+- `packages/sdk-core/tests/unit/web-search-types.test.ts` (NEW, ~160 lines) ✅
 
 **Implementation Files:**
-- `packages/sdk-core/src/types/web-search.types.ts` (NEW, ~90 lines)
-- `packages/sdk-core/src/types/index.ts` (MODIFY, +1 line export)
+- `packages/sdk-core/src/types/web-search.types.ts` (NEW, ~155 lines) ✅
+- `packages/sdk-core/src/types/index.ts` (MODIFY, +3 lines export) ✅
 
 **Success Criteria:**
-- [ ] All interfaces compile without errors
-- [ ] Types exported from main SDK entry point
-- [ ] Type tests verify interface shapes
+- [x] All interfaces compile without errors
+- [x] Types exported from main SDK entry point
+- [x] Type tests verify interface shapes
+
+**Test Results:** ✅ **15/15 tests passing (100%)**
 
 ---
 
