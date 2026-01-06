@@ -40,6 +40,13 @@ import type { IPaymentManager,
  } from '@fabstir/sdk-core';
 import { DocumentManager, HostAdapter } from '@fabstir/sdk-core';
 
+// Web search metadata type (Phase 8.1 - inline to avoid import resolution issues)
+interface WebSearchMetadata {
+  performed: boolean;
+  queriesCount: number;
+  provider: string | null;
+}
+
 // Environment configuration
 const DEFAULT_CHAIN_ID = ChainId.BASE_SEPOLIA;
 const RPC_URLS = {
@@ -75,6 +82,7 @@ interface ChatMessage {
   content: string;
   timestamp: number;
   tokens?: number;
+  webSearchMetadata?: WebSearchMetadata; // Web search info (Phase 8.1)
 }
 
 // Extend Window interface for Ethereum provider
@@ -181,13 +189,15 @@ export default function ChatContextDemo() {
   const addMessage = (
     role: ChatMessage["role"],
     content: string,
-    tokens?: number
+    tokens?: number,
+    webSearchMetadata?: WebSearchMetadata
   ) => {
     const message: ChatMessage = {
       role,
       content,
       timestamp: Date.now(),
       tokens,
+      webSearchMetadata,
     };
 
     setMessages((prev) => [...prev, message]);
@@ -1362,8 +1372,21 @@ export default function ChatContextDemo() {
         (fullPrompt.length + cleanedResponse.length) / 4
       );
 
-      // Add assistant response
-      addMessage("assistant", cleanedResponse, estimatedTokens);
+      // Get web search metadata from session (Phase 8.1)
+      let webSearchMeta: WebSearchMetadata | undefined;
+      try {
+        // getSession is on concrete class, not interface - cast to any
+        const session = (sm as any).getSession?.(currentSessionId.toString());
+        if (session?.webSearchMetadata) {
+          webSearchMeta = session.webSearchMetadata;
+          console.log("[WebSearch] Metadata captured:", webSearchMeta);
+        }
+      } catch (e) {
+        // Session might not have getSession method in all cases
+      }
+
+      // Add assistant response with web search metadata
+      addMessage("assistant", cleanedResponse, estimatedTokens, webSearchMeta);
 
       // Store conversation in S5 if storage manager is available
       if (storageManager && storageManager.isInitialized()) {
@@ -2059,6 +2082,12 @@ export default function ChatContextDemo() {
                     ({msg.tokens} tokens)
                   </span>
                 )}
+                {/* Web Search Indicator (Phase 8.1) */}
+                {msg.webSearchMetadata?.performed && (
+                  <span className="text-xs text-purple-500 ml-2" title={`Web search via ${msg.webSearchMetadata.provider || 'unknown'}`}>
+                    🔍 {msg.webSearchMetadata.provider || 'web'} ({msg.webSearchMetadata.queriesCount} {msg.webSearchMetadata.queriesCount === 1 ? 'query' : 'queries'})
+                  </span>
+                )}
               </div>
             ))}
             <div ref={messagesEndRef} />
@@ -2086,6 +2115,44 @@ export default function ChatContextDemo() {
           {isLoading ? "Sending..." : "Send"}
         </button>
       </div>
+
+      {/* Web Search Triggers Info (Phase 8.1) */}
+      {sessionId && (
+        <div className="bg-purple-50 p-3 rounded-lg mb-4 border border-purple-200">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-lg">🔍</span>
+            <span className="font-semibold text-purple-900 text-sm">Web Search Auto-Detection</span>
+          </div>
+          <p className="text-xs text-purple-700 mb-2">
+            The SDK automatically enables web search when your prompt contains triggers like:
+          </p>
+          <div className="flex flex-wrap gap-1 mb-2">
+            {['search for', 'latest', 'current', 'today', 'recent', 'news', '2025', '2026', 'look up', 'find online'].map((trigger) => (
+              <span key={trigger} className="px-2 py-0.5 bg-purple-200 text-purple-800 rounded text-xs">
+                {trigger}
+              </span>
+            ))}
+          </div>
+          <div className="text-xs text-purple-600">
+            <strong>Try:</strong>{' '}
+            <button
+              onClick={() => setInputMessage('Search for the latest AI news')}
+              className="text-purple-800 underline hover:text-purple-900"
+              disabled={isLoading}
+            >
+              "Search for the latest AI news"
+            </button>
+            {' | '}
+            <button
+              onClick={() => setInputMessage('What is the current weather in Tokyo?')}
+              className="text-purple-800 underline hover:text-purple-900"
+              disabled={isLoading}
+            >
+              "What is the current weather in Tokyo?"
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* RAG Document Upload Section */}
       {sessionId && documentManager && (

@@ -281,3 +281,7 @@ export * from './permissions.types';
 // ============= Model Types =============
 
 export type { ModelPricing, ModelWithAvailability, PriceRange } from './models';
+
+// ============= Web Search Types =============
+
+export * from './web-search.types';

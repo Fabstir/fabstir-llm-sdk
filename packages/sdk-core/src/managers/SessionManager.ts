@@ -22,7 +22,9 @@ import {
   UploadVectorsResult,
   SearchVectorsMessage,
   SearchVectorsResponse,
-  SearchResult
+  SearchResult,
+  SearchIntentConfig,
+  WebSearchMetadata
 } from '../types';
 import { HostSelectionMode } from '../types/settings.types';
 import { PaymentManager } from './PaymentManager';
@@ -33,7 +35,10 @@ import { WebSocketClient } from '../websocket/WebSocketClient';
 import { ChainRegistry } from '../config/ChainRegistry';
 import { UnsupportedChainError } from '../errors/ChainErrors';
 import { PricingValidationError } from '../errors/pricing-errors';
+import { WebSearchError } from '../errors/web-search-errors';
 import { bytesToHex } from '../crypto/utilities';
+import { analyzePromptForSearchIntent } from '../utils/search-intent-analyzer';
+import type { SearchApiResponse, WebSearchStarted, WebSearchResults, WebSearchError as WebSearchErrorMsg } from '../types/web-search.types';
 
 /**
  * Check if a string is a bytes32 hash (0x + 64 hex chars)
@@ -113,6 +118,8 @@ export interface SessionState {
   endTime?: number;
   encryption?: boolean; // NEW: Track if session uses encryption
   groupId?: string; // NEW: Session Groups integration
+  webSearchMetadata?: WebSearchMetadata; // NEW: Web search metadata from response
+  webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 5.1)
 }
 
 // Extended SessionConfig with chainId
@@ -129,6 +136,7 @@ export interface ExtendedSessionConfig extends SessionConfig {
     manifestPath: string; // S5 path to manifest.json (e.g., "home/vector-databases/{user}/{db}/manifest.json")
     userAddress: string; // Owner address for verification
   };
+  webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 2.2)
 }
 
 export class SessionManager implements ISessionManager {
@@ -145,6 +153,9 @@ export class SessionManager implements ISessionManager {
   private messageIndex: number = 0; // NEW: For Phase 4.2 replay protection
   private pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: any) => void; timeoutId: NodeJS.Timeout }> = new Map(); // Host-side RAG request tracking
   private ragHandlerUnsubscribe?: () => void; // NEW: Store RAG handler unsubscribe function to prevent duplicate handlers
+  // Web Search (Phase 5.2-5.3): Pending search tracking and handler cleanup
+  private pendingSearches: Map<string, { resolve: (result: SearchApiResponse) => void; reject: (error: Error) => void; timeoutId: NodeJS.Timeout }> = new Map();
+  private searchHandlerUnsubscribe?: () => void;
 
   constructor(
     paymentManager: PaymentManager,
@@ -371,6 +382,7 @@ export class SessionManager implements ISessionManager {
         startTime: Date.now(),
         encryption: enableEncryption,  // NEW (Phase 6.2): Store encryption preference
         groupId: config.groupId,  // NEW: Session Groups integration
+        webSearch: config.webSearch,  // NEW (Phase 5.1): Web search configuration
         ragConfig: ragConfig,  // NEW (Phase 5.1): Store RAG config
         ragMetrics: ragConfig?.enabled ? {
           totalRetrievals: 0,
@@ -667,6 +679,9 @@ export class SessionManager implements ISessionManager {
         // Set up global RAG message handlers
         this._setupRAGMessageHandlers();
 
+        // Set up global web search message handlers (Phase 5.2-5.3)
+        this._setupWebSearchMessageHandlers();
+
         // NEW (Phase 6.2): Use encryption by default
         if (session.encryption && this.encryptionManager) {
 
@@ -752,31 +767,14 @@ export class SessionManager implements ISessionManager {
               }
             };
 
-            let chunkCount = 0;
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
-              // Log EVERY message with full details
-              console.log('[SessionManager] 📨 RAW MESSAGE:', JSON.stringify({
-                type: data.type,
-                final: data.final,
-                finalType: typeof data.final,
-                hasPayload: !!data.payload,
-                keys: Object.keys(data)
-              }));
-
               // Skip processing if already resolved
-              if (isResolved) {
-                console.log('[SessionManager] ⏭️ Skipping - already resolved');
-                return;
-              }
+              if (isResolved) return;
 
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
-                chunkCount++;
-                console.log('[SessionManager] 📦 Chunk #' + chunkCount + ', final=' + data.final + ' (type: ' + typeof data.final + ')');
-
                 // Reset timeout on each chunk (sliding window)
                 clearTimeout(timeout);
                 timeout = setTimeout(() => {
-                  console.log('[SessionManager] ⏰ TIMEOUT after ' + chunkCount + ' chunks');
                   safeReject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
                 }, 60000);
 
@@ -784,52 +782,55 @@ export class SessionManager implements ISessionManager {
                   const decrypted = await this.decryptIncomingMessage(data);
                   onToken(decrypted);
                   fullResponse += decrypted;
-                  console.log('[SessionManager] ✓ Decrypted chunk #' + chunkCount + ', total length: ' + fullResponse.length);
                 } catch (err) {
-                  console.error('[SessionManager] ❌ Failed to decrypt chunk #' + chunkCount + ':', err);
+                  console.error('[SessionManager] Failed to decrypt chunk:', err);
                 }
 
-                // Check for final chunk OUTSIDE try/catch (primary mobile completion signal)
-                if (data.final === true) {
-                  console.log('[SessionManager] ✅ FINAL CHUNK (===true), resolving with ' + fullResponse.length + ' chars');
-                  safeResolve(fullResponse);
-                  return;
-                } else if (data.final) {
-                  console.log('[SessionManager] ⚠️ final is truthy but not ===true:', data.final, typeof data.final);
+                // Check for final chunk (primary mobile completion signal)
+                if (data.final === true || data.final) {
                   safeResolve(fullResponse);
                   return;
                 }
               } else if (data.type === 'encrypted_chunk' && !this.sessionKey) {
-                console.error('[SessionManager] ❌ CHUNK WITHOUT SESSION KEY');
+                console.error('[SessionManager] Received encrypted chunk without session key');
               } else if (data.type === 'encrypted_response') {
-                console.log('[SessionManager] 📬 encrypted_response received, resolving with ' + fullResponse.length + ' chars');
                 try {
                   if (this.sessionKey && data.payload && data.payload.ciphertextHex) {
                     await this.decryptIncomingMessage(data);
                   }
                   safeResolve(fullResponse);
                 } catch (err) {
-                  console.error('[SessionManager] ❌ Error in encrypted_response:', err);
+                  console.error('[SessionManager] Error in encrypted_response:', err);
                   safeResolve(fullResponse);
                 }
               } else if (data.type === 'stream_end') {
-                console.log('[SessionManager] 🏁 stream_end received, resolving with ' + fullResponse.length + ' chars');
                 safeResolve(fullResponse);
               } else if (data.type === 'error') {
-                console.error('[SessionManager] ❌ Error:', data.message);
+                console.error('[SessionManager] Error:', data.message);
                 safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
-              } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
-                console.log('[SessionManager] 📝 ' + data.type);
-              } else if (data.type === 'session_completed') {
-                console.log('[SessionManager] 🎉 session_completed');
-              } else {
               }
             });
 
+            // AUTOMATIC WEB SEARCH INTENT DETECTION for encrypted path (Phase 5.1)
+            const searchConfigEncrypted = session.webSearch || {};
+            let enableWebSearchEncrypted = false;
 
-            // Send encrypted message after handler is set up
-            this.sendEncryptedMessage(prompt).catch((err) => {
-              console.error('[SessionManager] ❌ Failed to send encrypted message:', err);
+            if (searchConfigEncrypted.forceDisabled) {
+              enableWebSearchEncrypted = false;
+            } else if (searchConfigEncrypted.forceEnabled) {
+              enableWebSearchEncrypted = true;
+            } else if (searchConfigEncrypted.autoDetect !== false) {
+              // Default: auto-detect search intent from prompt
+              enableWebSearchEncrypted = analyzePromptForSearchIntent(prompt);
+            }
+
+            // Send encrypted message with web search options
+            this.sendEncryptedMessage(prompt, {
+              webSearch: enableWebSearchEncrypted,
+              maxSearches: enableWebSearchEncrypted ? (searchConfigEncrypted.maxSearches ?? 5) : 0,
+              searchQueries: searchConfigEncrypted.queries ?? null
+            }).catch((err) => {
+              console.error('[SessionManager] Failed to send encrypted message:', err);
               reject(err);
             });
           });
@@ -848,12 +849,29 @@ export class SessionManager implements ISessionManager {
             }
           });
 
+          // AUTOMATIC WEB SEARCH INTENT DETECTION (Phase 5.1)
+          const searchConfig = session.webSearch || {};
+          let enableWebSearch = false;
+
+          if (searchConfig.forceDisabled) {
+            enableWebSearch = false;
+          } else if (searchConfig.forceEnabled) {
+            enableWebSearch = true;
+          } else if (searchConfig.autoDetect !== false) {
+            // Default: auto-detect search intent from prompt
+            enableWebSearch = analyzePromptForSearchIntent(prompt);
+          }
+
           // Send plaintext message (only if session explicitly opted out of encryption)
           response = await this.wsClient.sendMessage({
             type: 'prompt',
             chain_id: session.chainId,
             jobId: session.jobId.toString(),  // Include jobId for settlement tracking
             prompt: augmentedPrompt,  // Use RAG-augmented prompt
+            // Web search fields (v8.7.0+) - AUTOMATICALLY ENABLED based on intent
+            web_search: enableWebSearch,
+            max_searches: enableWebSearch ? (searchConfig.maxSearches ?? 5) : 0,
+            search_queries: searchConfig.queries ?? null,
             request: {
               model: session.model,
               prompt: augmentedPrompt,  // Use RAG-augmented prompt
@@ -869,6 +887,13 @@ export class SessionManager implements ISessionManager {
         
         // Use collected response or fallback to returned response
         const finalResponse = fullResponse || response;
+
+        // Capture web search metadata if present (Phase 5.2)
+        const searchMetadata = this._parseSearchMetadata(response);
+        if (searchMetadata) {
+          session.webSearchMetadata = searchMetadata;
+          console.log(`[SessionManager] Web search metadata captured: performed=${searchMetadata.performed}, queries=${searchMetadata.queriesCount}`);
+        }
 
         // Add response to session
         session.responses.push(finalResponse);
@@ -915,9 +940,25 @@ export class SessionManager implements ISessionManager {
             );
           }
 
+          // AUTOMATIC WEB SEARCH INTENT DETECTION for non-streaming encrypted path
+          const searchConfigNonStreamEnc = session.webSearch || {};
+          let enableWebSearchNonStreamEnc = false;
 
-          // Send encrypted message
-          await this.sendEncryptedMessage(prompt);
+          if (searchConfigNonStreamEnc.forceDisabled) {
+            enableWebSearchNonStreamEnc = false;
+          } else if (searchConfigNonStreamEnc.forceEnabled) {
+            enableWebSearchNonStreamEnc = true;
+          } else if (searchConfigNonStreamEnc.autoDetect !== false) {
+            // Default: auto-detect search intent from prompt
+            enableWebSearchNonStreamEnc = analyzePromptForSearchIntent(prompt);
+          }
+
+          // Send encrypted message with web search options
+          await this.sendEncryptedMessage(prompt, {
+            webSearch: enableWebSearchNonStreamEnc,
+            maxSearches: enableWebSearchNonStreamEnc ? (searchConfigNonStreamEnc.maxSearches ?? 5) : 0,
+            searchQueries: searchConfigNonStreamEnc.queries ?? null
+          });
 
           // Wait for encrypted response (non-streaming) - MUST accumulate chunks!
           let accumulatedResponse = '';  // Accumulate chunks even in non-streaming mode
@@ -962,48 +1003,56 @@ export class SessionManager implements ISessionManager {
                   const decrypted = await this.decryptIncomingMessage(data);
                   accumulatedResponse += decrypted;
                 } catch (err) {
-                  console.error('[SessionManager] ❌ Failed to decrypt chunk:', err);
+                  console.error('[SessionManager] Failed to decrypt chunk:', err);
                 }
 
-                // Check for final chunk OUTSIDE try/catch (primary mobile completion signal)
-                if (data.final === true) {
+                // Check for final chunk (primary mobile completion signal)
+                if (data.final === true || data.final) {
                   safeResolve(accumulatedResponse);
                   return;
                 }
               } else if (data.type === 'encrypted_response') {
-                // Handle encrypted_response (primary completion signal)
                 try {
-                  // Decrypt final message if we have the key and payload
                   if (this.sessionKey && data.payload && data.payload.ciphertextHex) {
                     await this.decryptIncomingMessage(data);
                   }
-                  // Return accumulated chunks, not just the final "stop" message
                   safeResolve(accumulatedResponse);
                 } catch (err) {
-                  console.error('[SessionManager] ❌ Error in encrypted_response handler:', err);
-                  // Still resolve with accumulated content on decryption error
+                  console.error('[SessionManager] Error in encrypted_response handler:', err);
                   safeResolve(accumulatedResponse);
                 }
               } else if (data.type === 'stream_end') {
-                // Fallback completion signal (mobile browser compatibility)
-                console.log('[SessionManager] 📱 stream_end received (fallback completion)');
                 safeResolve(accumulatedResponse);
               } else if (data.type === 'error') {
-                console.error('[SessionManager] ❌ Error received:', data.message);
+                console.error('[SessionManager] Error:', data.message);
                 safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
-              } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
-              } else if (data.type === 'session_completed') {
-              } else {
               }
             });
           });
         } else {
+          // AUTOMATIC WEB SEARCH INTENT DETECTION (Phase 5.1) - Non-streaming path
+          const searchConfigNonStream = session.webSearch || {};
+          let enableWebSearchNonStream = false;
+
+          if (searchConfigNonStream.forceDisabled) {
+            enableWebSearchNonStream = false;
+          } else if (searchConfigNonStream.forceEnabled) {
+            enableWebSearchNonStream = true;
+          } else if (searchConfigNonStream.autoDetect !== false) {
+            // Default: auto-detect search intent from prompt
+            enableWebSearchNonStream = analyzePromptForSearchIntent(prompt);
+          }
+
           // Send plaintext message (only if session explicitly opted out of encryption)
           response = await this.wsClient.sendMessage({
             type: 'prompt',
             chain_id: session.chainId,
             jobId: session.jobId.toString(),  // Include jobId for settlement tracking
             prompt: augmentedPrompt,  // Use RAG-augmented prompt
+            // Web search fields (v8.7.0+) - AUTOMATICALLY ENABLED based on intent
+            web_search: enableWebSearchNonStream,
+            max_searches: enableWebSearchNonStream ? (searchConfigNonStream.maxSearches ?? 5) : 0,
+            search_queries: searchConfigNonStream.queries ?? null,
             request: {
               model: session.model,
               prompt: augmentedPrompt,  // Use RAG-augmented prompt
@@ -1052,6 +1101,162 @@ export class SessionManager implements ISessionManager {
         `Failed to send prompt via WebSocket: ${error.message}`,
         'WS_PROMPT_ERROR',
         { originalError: error }
+      );
+    }
+  }
+
+  // =============================================================================
+  // Web Search Methods (Phase 4.2, 4.4)
+  // =============================================================================
+
+  /**
+   * Perform a web search via WebSocket (Path C).
+   *
+   * Sends a search request through the existing WebSocket connection and
+   * waits for results. Requires an active session with WebSocket connection.
+   *
+   * @param sessionId - Active session ID
+   * @param query - Search query (1-500 characters)
+   * @param numResults - Number of results to return (1-20, default 10)
+   * @returns Search results from the host's configured provider
+   * @throws WebSearchError on invalid query, timeout, or provider error
+   *
+   * @example
+   * ```typescript
+   * const results = await sessionManager.webSearch(
+   *   sessionId,
+   *   'latest NVIDIA GPU specs',
+   *   5
+   * );
+   * console.log(`Found ${results.resultCount} results via ${results.provider}`);
+   * ```
+   */
+  async webSearch(
+    sessionId: bigint,
+    query: string,
+    numResults: number = 10
+  ): Promise<SearchApiResponse> {
+    const session = this.getSession(sessionId.toString());
+    if (!session) {
+      throw new SDKError(`Session ${sessionId} not found`, 'SESSION_NOT_FOUND');
+    }
+
+    if (!this.wsClient || !this.wsClient.isConnected()) {
+      throw new SDKError('WebSocket not connected', 'WS_NOT_CONNECTED');
+    }
+
+    // Validate query
+    if (!query || query.trim().length === 0) {
+      throw new WebSearchError('Query cannot be empty', 'invalid_query');
+    }
+    if (query.length > 500) {
+      throw new WebSearchError('Query must be 1-500 characters', 'invalid_query');
+    }
+
+    const requestId = `search-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this.pendingRequests.delete(requestId);
+        reject(new WebSearchError('Search timeout', 'timeout'));
+      }, 30000);
+
+      this.pendingRequests.set(requestId, {
+        resolve: (result) => {
+          clearTimeout(timeoutId);
+          this.pendingRequests.delete(requestId);
+          resolve(result);
+        },
+        reject: (error) => {
+          clearTimeout(timeoutId);
+          this.pendingRequests.delete(requestId);
+          reject(error);
+        },
+        timeoutId
+      });
+
+      // Send search request via WebSocket
+      this.wsClient!.sendWithoutResponse({
+        type: 'searchRequest',
+        query,
+        num_results: Math.min(Math.max(numResults, 1), 20),
+        request_id: requestId,
+        chain_id: session.chainId
+      });
+    });
+  }
+
+  /**
+   * Perform a web search via direct HTTP API (Path A).
+   *
+   * Calls the host's /v1/search endpoint directly, without requiring
+   * an active session or WebSocket connection.
+   *
+   * @param hostUrl - Host API base URL (e.g., 'http://host:8080')
+   * @param query - Search query (1-500 characters)
+   * @param options - Optional numResults (1-20) and chainId
+   * @returns Search results from the host's configured provider
+   * @throws WebSearchError on invalid query, rate limiting, or provider error
+   *
+   * @example
+   * ```typescript
+   * const results = await sessionManager.searchDirect(
+   *   'http://host:8080',
+   *   'AI developments 2026',
+   *   { numResults: 5, chainId: 84532 }
+   * );
+   * ```
+   */
+  async searchDirect(
+    hostUrl: string,
+    query: string,
+    options: { numResults?: number; chainId?: number } = {}
+  ): Promise<SearchApiResponse> {
+    // Validate query
+    if (!query || query.length > 500) {
+      throw new WebSearchError('Query must be 1-500 characters', 'invalid_query');
+    }
+
+    const requestId = `search-${Date.now()}`;
+    const chainId = options.chainId || this.chainId;
+
+    try {
+      const response = await fetch(`${hostUrl}/v1/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          numResults: Math.min(Math.max(options.numResults || 10, 1), 20),
+          chainId,
+          requestId
+        })
+      });
+
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('Retry-After');
+        throw new WebSearchError(
+          `Rate limited. Retry after ${retryAfter}s`,
+          'rate_limited',
+          retryAfter ? parseInt(retryAfter, 10) : undefined
+        );
+      }
+
+      if (response.status === 503) {
+        throw new WebSearchError('Web search disabled on host', 'search_disabled');
+      }
+
+      if (!response.ok) {
+        throw new WebSearchError(`Search failed: ${response.statusText}`, 'provider_error');
+      }
+
+      return await response.json();
+    } catch (error) {
+      if (error instanceof WebSearchError) {
+        throw error;
+      }
+      throw new WebSearchError(
+        `Search request failed: ${(error as Error).message}`,
+        'provider_error'
       );
     }
   }
@@ -1261,7 +1466,6 @@ export class SessionManager implements ISessionManager {
   ): Promise<void> {
 
     if (!this.encryptionManager) {
-      console.error('[SessionManager] ❌ EncryptionManager NOT available!');
       throw new SDKError(
         'EncryptionManager not available for encrypted session',
         'ENCRYPTION_NOT_AVAILABLE'
@@ -1269,7 +1473,6 @@ export class SessionManager implements ISessionManager {
     }
 
     if (!this.hostManager) {
-      console.error('[SessionManager] ❌ HostManager NOT available!');
       throw new SDKError(
         'HostManager required for host public key retrieval',
         'HOST_MANAGER_NOT_AVAILABLE'
@@ -1365,13 +1568,21 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Send encrypted message with session key (Phase 4.2)
+   * @param message - The plaintext message to encrypt and send
+   * @param webSearchOptions - Optional web search configuration (v8.7.5+)
    * @private
    */
-  private async sendEncryptedMessage(message: string): Promise<void> {
+  private async sendEncryptedMessage(
+    message: string,
+    webSearchOptions?: {
+      webSearch: boolean;
+      maxSearches: number;
+      searchQueries: string[] | null;
+    }
+  ): Promise<void> {
 
 
     if (!this.sessionKey) {
-      console.error('[SessionManager] ❌ Session key NOT available!');
       throw new SDKError(
         'Session key not available for encrypted messaging',
         'SESSION_KEY_NOT_AVAILABLE'
@@ -1379,7 +1590,6 @@ export class SessionManager implements ISessionManager {
     }
 
     if (!this.encryptionManager) {
-      console.error('[SessionManager] ❌ EncryptionManager NOT available!');
       throw new SDKError(
         'EncryptionManager not available for encrypted messaging',
         'ENCRYPTION_NOT_AVAILABLE'
@@ -1387,7 +1597,6 @@ export class SessionManager implements ISessionManager {
     }
 
     if (!this.wsClient) {
-      console.error('[SessionManager] ❌ WebSocket client NOT available!');
       throw new SDKError(
         'WebSocket client not available',
         'WEBSOCKET_NOT_AVAILABLE'
@@ -1398,19 +1607,11 @@ export class SessionManager implements ISessionManager {
     const sessions = Array.from(this.sessions.values());
     const currentSession = sessions.find(s => s.status === 'active');
     if (!currentSession) {
-      console.error('[SessionManager] ❌ No active session found!');
-      console.error('[SessionManager] Available sessions:', sessions.map(s => ({ id: s.sessionId.toString(), status: s.status })));
       throw new SDKError(
         'No active session found for encrypted messaging',
         'NO_ACTIVE_SESSION'
       );
     }
-    console.log('[SessionManager] Session details:', {
-      sessionId: currentSession.sessionId.toString(),
-      jobId: currentSession.jobId.toString(),
-      status: currentSession.status,
-      encryption: currentSession.encryption
-    });
 
     try {
       // Encrypt message with session key (returns payload only)
@@ -1422,25 +1623,24 @@ export class SessionManager implements ISessionManager {
 
       // Wrap payload with message structure (per docs lines 498-508)
       // Use sendWithoutResponse to avoid conflicting handlers (v1.3.28 fix)
-      const messageToSend = {
+      const messageToSend: any = {
         type: 'encrypted_message',
         session_id: currentSession.sessionId.toString(),
         id: `${Date.now()}-${Math.random().toString(36).substring(7)}`,
         payload: payload
       };
-      console.log('[SessionManager] 📨 Message structure prepared:', {
-        type: messageToSend.type,
-        session_id: messageToSend.session_id,
-        id: messageToSend.id,
-        payload_keys: Object.keys(messageToSend.payload)
-      });
+
+      // Add web search fields if provided (v8.7.5+ - works with WebSocket streaming)
+      if (webSearchOptions) {
+        messageToSend.web_search = webSearchOptions.webSearch;
+        messageToSend.max_searches = webSearchOptions.maxSearches;
+        messageToSend.search_queries = webSearchOptions.searchQueries;
+      }
 
       await this.wsClient.sendWithoutResponse(messageToSend);
 
     } catch (error: any) {
-      console.error('[SessionManager] ❌ Failed to encrypt/send message:', error);
-      console.error('[SessionManager] Error stack:', error.stack);
-      // Wrap encryption errors in SDKError for consistent error handling
+      console.error('[SessionManager] Failed to encrypt/send message:', error.message);
       throw new SDKError(
         `Failed to encrypt message: ${error.message}`,
         'ENCRYPTION_FAILED',
@@ -1474,10 +1674,7 @@ export class SessionManager implements ISessionManager {
    * @private
    */
   private async decryptIncomingMessage(encryptedMessage: any): Promise<string> {
-
-
     if (!this.sessionKey) {
-      console.error('[SessionManager] ❌ Session key NOT available for decryption!');
       throw new SDKError(
         'Session key not available for decryption',
         'SESSION_KEY_NOT_AVAILABLE'
@@ -1485,7 +1682,6 @@ export class SessionManager implements ISessionManager {
     }
 
     if (!this.encryptionManager) {
-      console.error('[SessionManager] ❌ EncryptionManager NOT available!');
       throw new SDKError(
         'EncryptionManager not available for decryption',
         'ENCRYPTION_NOT_AVAILABLE'
@@ -1505,12 +1701,7 @@ export class SessionManager implements ISessionManager {
 
       return plaintext;
     } catch (error: any) {
-      console.error('[SessionManager] ❌ Decryption FAILED:', error);
-      console.error('[SessionManager] Error message:', error.message);
-      console.error('[SessionManager] Error stack:', error.stack);
-      console.error('[SessionManager] Message that failed to decrypt:', JSON.stringify(encryptedMessage));
-
-      // Wrap decryption errors in SDKError for consistent error handling
+      console.error('[SessionManager] Decryption failed:', error.message);
       throw new SDKError(
         `Failed to decrypt message: ${error.message}`,
         'DECRYPTION_FAILED',
@@ -1902,6 +2093,9 @@ export class SessionManager implements ISessionManager {
 
       // Set up global RAG message handlers
       this._setupRAGMessageHandlers();
+
+      // Set up global web search message handlers (Phase 5.2-5.3)
+      this._setupWebSearchMessageHandlers();
 
       // Send session init (encryption support)
       if (session.encryption && this.encryptionManager) {
@@ -2299,6 +2493,107 @@ export class SessionManager implements ISessionManager {
     });
   }
 
+  // =============================================================================
+  // Web Search Message Handlers (Phase 5.2-5.3)
+  // =============================================================================
+
+  /**
+   * Parse search metadata from response data.
+   * @private
+   */
+  private _parseSearchMetadata(response: any): WebSearchMetadata | null {
+    if (response.web_search_performed === undefined) {
+      return null;
+    }
+    return {
+      performed: response.web_search_performed === true,
+      queriesCount: response.search_queries_count || 0,
+      provider: response.search_provider || null,
+    };
+  }
+
+  /**
+   * Set up global message handlers for web search operations.
+   * @private
+   */
+  private _setupWebSearchMessageHandlers(): void {
+    if (!this.wsClient) {
+      return;
+    }
+
+    // Clean up existing handler if present to prevent duplicate handlers
+    if (this.searchHandlerUnsubscribe) {
+      this.searchHandlerUnsubscribe();
+      this.searchHandlerUnsubscribe = undefined;
+    }
+
+    // Register handler for web search messages
+    this.searchHandlerUnsubscribe = this.wsClient.onMessage((data: any) => {
+      // Only handle search-specific message types
+      if (data.type === 'searchStarted') {
+        this._handleSearchStarted(data as WebSearchStarted);
+      } else if (data.type === 'searchResults') {
+        this._handleSearchResults(data as WebSearchResults);
+      } else if (data.type === 'searchError') {
+        this._handleSearchError(data as WebSearchErrorMsg);
+      }
+      // Ignore other message types
+    });
+  }
+
+  /**
+   * Handle searchStarted WebSocket message.
+   * @private
+   */
+  private _handleSearchStarted(data: WebSearchStarted): void {
+    console.log(`[SessionManager] Search started: query="${data.query}" provider=${data.provider}`);
+    // This is informational - no pending request resolution needed
+    // Could emit event here for UI progress indication if needed
+  }
+
+  /**
+   * Handle searchResults WebSocket message.
+   * @private
+   */
+  private _handleSearchResults(data: WebSearchResults): void {
+    const requestId = data.request_id || '';
+    const pending = this.pendingSearches.get(requestId);
+
+    if (pending) {
+      clearTimeout(pending.timeoutId);
+      this.pendingSearches.delete(requestId);
+
+      // Convert to SearchApiResponse
+      const response: SearchApiResponse = {
+        query: data.query,
+        results: data.results,
+        resultCount: data.result_count,
+        searchTimeMs: data.search_time_ms,
+        provider: data.provider as 'brave' | 'duckduckgo' | 'bing',
+        cached: data.cached,
+        chainId: 0, // Will be filled by caller if needed
+        chainName: 'Unknown'
+      };
+
+      pending.resolve(response);
+    }
+  }
+
+  /**
+   * Handle searchError WebSocket message.
+   * @private
+   */
+  private _handleSearchError(data: WebSearchErrorMsg): void {
+    const requestId = data.request_id || '';
+    const pending = this.pendingSearches.get(requestId);
+
+    if (pending) {
+      clearTimeout(pending.timeoutId);
+      this.pendingSearches.delete(requestId);
+      pending.reject(new WebSearchError(data.error, data.error_code));
+    }
+  }
+
   /**
    * Get session history for a session group
    *
@@ -2477,7 +2772,7 @@ export class SessionManager implements ISessionManager {
       if (fetchError.name === 'AbortError') {
         throw new SDKError('Embedding generation timeout (120s)', 'EMBEDDING_TIMEOUT');
       }
-      console.error('[SessionManager] ❌ Fetch error:', fetchError);
+      console.error('[SessionManager] Fetch error:', fetchError.message);
       throw new SDKError(`Network error calling embedding API: ${fetchError.message}`, 'NETWORK_ERROR');
     }
 

@@ -8,6 +8,7 @@
 
 import { HostInfo, HostMetadata, ModelSpec } from '../types/models';
 import { HostRegistrationWithModels } from '../managers/HostManager';
+import type { WebSearchCapabilities } from '../types/web-search.types';
 
 export interface IHostManager {
   /**
@@ -65,6 +66,15 @@ export interface IHostManager {
    * @throws Error if public key cannot be obtained
    */
   getHostPublicKey(hostAddress: string, hostApiUrl?: string): Promise<string>;
+
+  /**
+   * Get web search capabilities for a host.
+   *
+   * @param hostAddress - Host's EVM address (used to lookup API URL from contract)
+   * @param apiUrl - Optional API URL to use instead of looking up from contract
+   * @returns WebSearchCapabilities object
+   */
+  getWebSearchCapabilities(hostAddress: string, apiUrl?: string): Promise<WebSearchCapabilities>;
 
   /**
    * Get host status (with dual pricing support)

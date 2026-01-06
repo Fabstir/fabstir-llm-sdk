@@ -30,6 +30,8 @@ import NodeRegistryABI from '../contracts/abis/NodeRegistryWithModelsUpgradeable
 import * as secp from '@noble/secp256k1';
 import { bytesToHex, hexToBytes, toCompressedPub } from '../crypto/utilities';
 import { requestHostPublicKey } from './HostKeyRecovery';
+import { getWebSearchCapabilitiesFromHost } from '../utils/host-web-search-capabilities';
+import type { WebSearchCapabilities } from '../types/web-search.types';
 
 /**
  * Pricing constants for host registration - DUAL PRICING
@@ -860,6 +862,57 @@ export class HostManager {
     const pubKey = await requestHostPublicKey(apiUrl, hostAddress);
     this.publicKeyCache.set(hostAddress, pubKey);
     return pubKey;
+  }
+
+  /**
+   * Get web search capabilities for a host.
+   *
+   * Fetches the host's /v1/version endpoint to detect if web search
+   * is supported and which provider is configured.
+   *
+   * @param hostAddress - Host's EVM address (used to lookup API URL from contract)
+   * @param apiUrl - Optional API URL to use instead of looking up from contract
+   * @returns WebSearchCapabilities object
+   *
+   * @example
+   * ```typescript
+   * const capabilities = await hostManager.getWebSearchCapabilities(hostAddress);
+   * if (capabilities.supportsWebSearch) {
+   *   console.log(`Host uses ${capabilities.provider} search`);
+   * }
+   * ```
+   */
+  async getWebSearchCapabilities(
+    hostAddress: string,
+    apiUrl?: string
+  ): Promise<WebSearchCapabilities> {
+    // Get API URL from parameter or lookup from contract
+    let hostApiUrl = apiUrl;
+    if (!hostApiUrl) {
+      try {
+        const hostInfo = await this.getHostInfo(hostAddress);
+        hostApiUrl = hostInfo.apiUrl;
+      } catch {
+        // If we can't get host info, return no capabilities
+        return {
+          supportsWebSearch: false,
+          supportsInferenceSearch: false,
+          provider: null,
+          rateLimitPerMinute: 0,
+        };
+      }
+    }
+
+    if (!hostApiUrl) {
+      return {
+        supportsWebSearch: false,
+        supportsInferenceSearch: false,
+        provider: null,
+        rateLimitPerMinute: 0,
+      };
+    }
+
+    return getWebSearchCapabilitiesFromHost(hostApiUrl);
   }
 
   /**
