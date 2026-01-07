@@ -227,26 +227,36 @@ export class SessionJobManager {
 
   /**
    * Submit checkpoint proof for a session
+   *
+   * Security Audit Migration: Now requires ECDSA signature from host
+   *
+   * @param sessionId - The session/job ID
+   * @param tokensClaimed - Number of tokens being claimed
+   * @param proofHash - bytes32 keccak256 hash of the proof data
+   * @param signature - bytes ECDSA signature (65 bytes: r + s + v)
+   * @param proofCID - S5 CID pointing to the full proof data
    */
   async submitCheckpointProof(
     sessionId: bigint,
-    checkpoint: number,
-    tokensGenerated: number,
-    proofData: string
+    tokensClaimed: number,
+    proofHash: string,
+    signature: string,
+    proofCID: string
   ): Promise<string> {
     if (!this.signer) {
       throw new Error('Signer not set');
     }
 
     const jobMarketplace = this.contractManager.getJobMarketplace();
-
-    // The contract method is submitProofOfWork
-    // Correct parameter order: jobId, tokensClaimed, proof
     const jobMarketplaceWithSigner = jobMarketplace.connect(this.signer);
+
+    // Security Audit: New 5-param signature with ECDSA signature
     const tx = await jobMarketplaceWithSigner['submitProofOfWork'](
-      sessionId,  // jobId
-      tokensGenerated,  // tokensClaimed
-      proofData  // proof (bytes)
+      sessionId,        // jobId
+      tokensClaimed,    // tokensClaimed
+      proofHash,        // proofHash (bytes32)
+      signature,        // signature (bytes - 65 bytes ECDSA)
+      proofCID          // proofCID (string - S5 CID)
     );
 
     const receipt = await tx.wait(3); // Wait for 3 confirmations
@@ -255,31 +265,42 @@ export class SessionJobManager {
 
   /**
    * Submit checkpoint proof as host (requires host signer)
+   *
+   * Security Audit Migration: Now requires ECDSA signature from host
+   *
+   * @param sessionId - The session/job ID
+   * @param tokensClaimed - Number of tokens being claimed
+   * @param proofHash - bytes32 keccak256 hash of the proof data
+   * @param signature - bytes ECDSA signature (65 bytes: r + s + v)
+   * @param proofCID - S5 CID pointing to the full proof data
+   * @param hostSigner - Host's signer (must match session.host)
    */
   async submitCheckpointProofAsHost(
     sessionId: bigint,
-    checkpoint: number,
-    tokensGenerated: number,
-    proofData: string,
+    tokensClaimed: number,
+    proofHash: string,
+    signature: string,
+    proofCID: string,
     hostSigner: Signer
   ): Promise<string> {
     // Create a new contract instance with host signer
     const jobMarketplace = this.contractManager.getJobMarketplace();
     const jobMarketplaceAddress = jobMarketplace.target as string;
     const jobMarketplaceAbi = jobMarketplace.interface;
-    
+
     const jobMarketplaceAsHost = new Contract(
       jobMarketplaceAddress,
       jobMarketplaceAbi,
       hostSigner
     );
-    
-    // Submit proof as host
-    // submitProofOfWork expects: jobId, tokensClaimed, proof (in that order)
+
+    // Security Audit: New 5-param signature with ECDSA signature
     const tx = await jobMarketplaceAsHost['submitProofOfWork'](
-      sessionId,  // jobId
-      tokensGenerated,  // tokensClaimed
-      proofData  // proof (bytes)
+      sessionId,        // jobId
+      tokensClaimed,    // tokensClaimed
+      proofHash,        // proofHash (bytes32)
+      signature,        // signature (bytes - 65 bytes ECDSA)
+      proofCID          // proofCID (string - S5 CID)
     );
 
     const receipt = await tx.wait(3); // Wait for 3 confirmations
@@ -420,5 +441,76 @@ export class SessionJobManager {
     const receipt = await tx.wait(3); // Wait for 3 confirmations
 
     return receipt.hash;
+  }
+
+  // ============= Security Audit Migration: New View Methods =============
+
+  /**
+   * Get proof submission details
+   *
+   * @param sessionId - The session/job ID
+   * @param proofIndex - Index of the proof submission (0-based)
+   * @returns ProofSubmissionResult with proofHash, tokensClaimed, timestamp, verified
+   */
+  async getProofSubmission(
+    sessionId: bigint,
+    proofIndex: number
+  ): Promise<{
+    proofHash: string;
+    tokensClaimed: bigint;
+    timestamp: bigint;
+    verified: boolean;
+  }> {
+    const jobMarketplace = this.contractManager.getJobMarketplace();
+    const [proofHash, tokensClaimed, timestamp, verified] =
+      await jobMarketplace.getProofSubmission(sessionId, proofIndex);
+
+    return { proofHash, tokensClaimed, timestamp, verified };
+  }
+
+  /**
+   * Get locked native token balance for an account
+   *
+   * @param account - Account address
+   * @returns Locked balance in wei
+   */
+  async getLockedBalanceNative(account: string): Promise<bigint> {
+    const jobMarketplace = this.contractManager.getJobMarketplace();
+    return jobMarketplace.getLockedBalanceNative(account);
+  }
+
+  /**
+   * Get locked token balance for an account
+   *
+   * @param account - Account address
+   * @param token - Token contract address
+   * @returns Locked balance in token units
+   */
+  async getLockedBalanceToken(account: string, token: string): Promise<bigint> {
+    const jobMarketplace = this.contractManager.getJobMarketplace();
+    return jobMarketplace.getLockedBalanceToken(account, token);
+  }
+
+  /**
+   * Get total native token balance for an account
+   *
+   * @param account - Account address
+   * @returns Total balance in wei
+   */
+  async getTotalBalanceNative(account: string): Promise<bigint> {
+    const jobMarketplace = this.contractManager.getJobMarketplace();
+    return jobMarketplace.getTotalBalanceNative(account);
+  }
+
+  /**
+   * Get total token balance for an account
+   *
+   * @param account - Account address
+   * @param token - Token contract address
+   * @returns Total balance in token units
+   */
+  async getTotalBalanceToken(account: string, token: string): Promise<bigint> {
+    const jobMarketplace = this.contractManager.getJobMarketplace();
+    return jobMarketplace.getTotalBalanceToken(account, token);
   }
 }

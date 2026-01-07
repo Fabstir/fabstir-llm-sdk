@@ -285,3 +285,7 @@ export type { ModelPricing, ModelWithAvailability, PriceRange } from './models';
 // ============= Web Search Types =============
 
 export * from './web-search.types';
+
+// ============= Proof Types (Security Audit Migration) =============
+
+export * from './proof.types';

@@ -1,5 +1,117 @@
 # Client ABIs Changelog
 
+## January 6, 2026 - Phase 6: ProofSystem Integration (BREAKING CHANGE)
+
+### ⚠️ SDK BREAKING CHANGE
+**`submitProofOfWork` signature changed from 4 to 5 parameters**
+
+The ProofSystem's signature verification is now enforced. Hosts must sign their proofs.
+
+**Old signature (no longer works):**
+```solidity
+function submitProofOfWork(
+    uint256 jobId,
+    uint256 tokensClaimed,
+    bytes32 proofHash,
+    string calldata proofCID
+)
+```
+
+**New signature (required):**
+```solidity
+function submitProofOfWork(
+    uint256 jobId,
+    uint256 tokensClaimed,
+    bytes32 proofHash,
+    bytes calldata signature,  // NEW: 65 bytes (r, s, v)
+    string calldata proofCID
+)
+```
+
+### SDK Migration Guide
+```javascript
+// OLD (no longer works):
+await marketplace.submitProofOfWork(jobId, tokensClaimed, proofHash, proofCID);
+
+// NEW (required):
+// 1. Generate proofHash (hash of work done)
+const proofHash = keccak256(workData);
+
+// 2. Sign the proof data
+const dataHash = keccak256(
+  solidityPacked(['bytes32', 'address', 'uint256'], [proofHash, hostAddress, tokensClaimed])
+);
+const signature = await hostWallet.signMessage(getBytes(dataHash));
+
+// 3. Submit with signature
+await marketplace.submitProofOfWork(jobId, tokensClaimed, proofHash, signature, proofCID);
+```
+
+### New Implementation Deployed
+| Contract | Proxy (unchanged) | New Implementation |
+|----------|-------------------|-------------------|
+| JobMarketplace | `0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D` | `0x05c7d3a1b748dEbdbc12dd75D1aC195fb93228a3` |
+
+### New View Function
+- `getProofSubmission(uint256 sessionId, uint256 proofIndex)` - Returns proof details including `verified` flag
+
+### What the Signature Proves
+- The host authorized this specific proof
+- The host claims exactly N tokens
+- Non-repudiation (host signed it)
+
+---
+
+## January 6, 2026 - Security Audit Remediation
+
+### Security Fixes Applied
+All CRITICAL and MEDIUM vulnerabilities from the January 2025 security audit have been fixed:
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| recordVerifiedProof front-running | CRITICAL | ✅ Fixed - Access control added |
+| Missing host validation | CRITICAL | ✅ Fixed - NodeRegistry query |
+| withdrawNative double-spend | CRITICAL | ✅ Fixed - Deposit tracking |
+| Unreachable claimWithProof | MEDIUM | ✅ Fixed - Removed dead code |
+
+### Implementation Upgrades (UUPS)
+Proxies upgraded to new implementations with security fixes:
+
+| Contract | Proxy (unchanged) | New Implementation |
+|----------|-------------------|-------------------|
+| ProofSystem | `0x5afB91977e69Cc5003288849059bc62d47E7deeb` | `0xf0DA90e1ae1A3aB7b9Da47790Abd73D26b17670F` |
+| JobMarketplace | `0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D` | `0xfa6F48eced34294B4FCe3Ae6Bb78d22858AfEe8B` |
+
+### ABI Changes
+
+**Removed from JobMarketplace (legacy dead code):**
+- `claimWithProof()` function
+- `JobPosted`, `JobClaimed`, `JobCompleted` events
+- `Job`, `JobStatus`, `JobType`, `JobDetails`, `JobRequirements` types
+
+**Added to JobMarketplace:**
+- `getLockedBalanceNative(address)` - View locked funds in active sessions
+- `getLockedBalanceToken(address, address)` - View locked token funds
+- `getTotalBalanceNative(address)` - View total balance (withdrawable + locked)
+- `getTotalBalanceToken(address, address)` - View total token balance
+
+**Added to ProofSystem:**
+- `setAuthorizedCaller(address, bool)` - Owner sets authorized callers
+- `authorizedCallers(address)` - Check if address is authorized
+- `AuthorizedCallerUpdated` event
+
+### No SDK Breaking Changes
+- **Proxy addresses unchanged** - Use same addresses as before
+- **submitProofOfWork unchanged** - Same 4-parameter signature
+- **Session flow unchanged** - createSessionJob, submitProofOfWork, completeSessionJob
+
+### Migration Notes
+- No SDK code changes required for existing integrations
+- New view functions available for balance transparency
+- Hosts must be registered in NodeRegistry (was always required for sessions to work)
+
+---
+
 ## December 14, 2025 - UUPS Upgradeable Migration + Minimum Deposit Reduction
 
 ### Major Changes

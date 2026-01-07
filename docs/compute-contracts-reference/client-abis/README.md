@@ -4,13 +4,14 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
 
 ---
 
-## UPGRADEABLE CONTRACTS (December 14, 2025 - UUPS Proxy Pattern)
+## UPGRADEABLE CONTRACTS (January 6, 2026 - Security Audit Fixes)
 
-> **RECOMMENDED**: Use these upgradeable contracts for all new integrations. They support future upgrades without data migration.
+> **🔒 SECURITY UPDATE**: All CRITICAL vulnerabilities from January 2025 audit have been fixed.
+> **RECOMMENDED**: Use these upgradeable contracts for all integrations.
 
 ### JobMarketplaceWithModelsUpgradeable
 - **Proxy Address**: `0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D`
-- **Implementation**: `0xe0ee96FC4Cc7a05a6e9d5191d070c5d1d13f143F`
+- **Implementation**: `0x05c7d3a1b748dEbdbc12dd75D1aC195fb93228a3` ✅ ProofSystem Integration (Jan 6, 2026)
 - **Network**: Base Sepolia
 - **Status**: ✅ ACTIVE - UUPS Upgradeable
 - **ABI File**: `JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json`
@@ -24,6 +25,18 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
   - Owner-only upgrade authorization
   - `updateTokenMinDeposit(address, uint256)` - Admin function to update minimum deposits
   - `TokenMinDepositUpdated` event - Emitted when minimum deposit is changed
+- **Security Fixes (Jan 2026)**:
+  - ✅ Host validation - Hosts must be registered in NodeRegistry
+  - ✅ Double-spend prevention - Fixed deposit tracking for inline sessions
+  - ✅ Legacy dead code removed (claimWithProof, Job types)
+  - NEW: `getLockedBalanceNative(address)` - View locked funds in active sessions
+  - NEW: `getLockedBalanceToken(address, address)` - View locked token funds
+  - NEW: `getTotalBalanceNative(address)` - View total balance (withdrawable + locked)
+  - NEW: `getTotalBalanceToken(address, address)` - View total token balance
+  - NEW: `getProofSubmission(uint256 sessionId, uint256 proofIndex)` - View proof details including verified flag
+- **Breaking Change (Jan 6, 2026)**:
+  - `submitProofOfWork` now requires 5 parameters (added `bytes calldata signature`)
+  - Hosts must sign their proofs with ECDSA for verification
 
 ### NodeRegistryWithModelsUpgradeable
 - **Proxy Address**: `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22`
@@ -55,10 +68,14 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
 
 ### ProofSystemUpgradeable
 - **Proxy Address**: `0x5afB91977e69Cc5003288849059bc62d47E7deeb`
-- **Implementation**: `0x83eB050Aa3443a76a4De64aBeD90cA8d525E7A3A`
+- **Implementation**: `0xf0DA90e1ae1A3aB7b9Da47790Abd73D26b17670F` ✅ Security fixes (Jan 6, 2026)
 - **Network**: Base Sepolia
 - **Status**: ✅ ACTIVE - UUPS Upgradeable
 - **ABI File**: `ProofSystemUpgradeable-CLIENT-ABI.json`
+- **Security Features** (Jan 2026):
+  - `setAuthorizedCaller(address, bool)` - Owner authorizes callers for recordVerifiedProof
+  - `authorizedCallers(address)` - Check if address is authorized
+  - Access control on `recordVerifiedProof()` prevents front-running attacks
 
 ### Upgradeable Contracts Configuration
 
@@ -691,13 +708,24 @@ const response = await fetch(`${hostApiUrl}/api/v1/inference`, {
 Key functions for session jobs:
 - `createSessionJob()` - Create ETH-based session
 - `createSessionJobWithToken()` - Create token-based session
-- `submitProofOfWork(jobId, tokensClaimed, proofHash, proofCID)` - Submit proof hash + S5 CID (4 params - NEW)
+- `submitProofOfWork(jobId, tokensClaimed, proofHash, signature, proofCID)` - Submit signed proof (5 params)
+- `getProofSubmission(sessionId, proofIndex)` - Get proof details with verified status
 - `completeSessionJob(jobId, conversationCID)` - Complete and settle payments
 - `triggerSessionTimeout()` - Handle timeout scenarios
 
-**BREAKING CHANGE**: `submitProofOfWork()` now requires S5 proof storage:
-- Old: `submitProofOfWork(jobId, proofBytes, tokensInBatch)` - 3 params ❌ DEPRECATED
-- New: `submitProofOfWork(jobId, tokensClaimed, proofHash, proofCID)` - 4 params ✅ CURRENT
+**BREAKING CHANGE (Jan 6, 2026)**: `submitProofOfWork()` now requires host signature:
+- Old: `submitProofOfWork(jobId, tokensClaimed, proofHash, proofCID)` - 4 params ❌ DEPRECATED
+- New: `submitProofOfWork(jobId, tokensClaimed, proofHash, signature, proofCID)` - 5 params ✅ CURRENT
+
+```javascript
+// Generate signature for proof submission
+const proofHash = keccak256(workData);
+const dataHash = keccak256(
+  solidityPacked(['bytes32', 'address', 'uint256'], [proofHash, hostAddress, tokensClaimed])
+);
+const signature = await hostWallet.signMessage(getBytes(dataHash));
+await marketplace.submitProofOfWork(jobId, tokensClaimed, proofHash, signature, proofCID);
+```
 
 ## Treasury Functions
 
@@ -785,7 +813,7 @@ const HOST_EARNINGS = '0x908962e8c6CE72610021586f85ebDE09aAc97776';
 - **Replacement**: 0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6
 
 ## Last Updated
-December 14, 2025 - UUPS Upgradeable + Minimum deposits reduced to ~$0.50 + updateTokenMinDeposit function
+January 6, 2026 - Phase 6: ProofSystem Integration (submitProofOfWork signature changed to 5 params)
 
 ### PRICE_PRECISION Breaking Change
 

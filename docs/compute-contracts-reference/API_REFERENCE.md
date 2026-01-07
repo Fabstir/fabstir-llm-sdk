@@ -1,6 +1,6 @@
 # Fabstir LLM Marketplace - API Reference
 
-**Last Updated:** December 14, 2025
+**Last Updated:** January 6, 2026
 **Network:** Base Sepolia (Chain ID: 84532)
 **PRICE_PRECISION:** 1000 (all prices multiplied by 1000 for sub-$1/million support)
 
@@ -29,7 +29,7 @@ const contracts = {
 
 // Implementation addresses (for verification only)
 const implementations = {
-  jobMarketplace: "0xe0ee96FC4Cc7a05a6e9d5191d070c5d1d13f143F",
+  jobMarketplace: "0x05c7d3a1b748dEbdbc12dd75D1aC195fb93228a3",
   nodeRegistry: "0x68298e2b74a106763aC99E3D973E98012dB5c75F",
   modelRegistry: "0xd7Df5c6D4ffe6961d47753D1dd32f844e0F73f50",
   proofSystem: "0x83eB050Aa3443a76a4De64aBeD90cA8d525E7A3A",
@@ -361,7 +361,7 @@ function isActiveNode(address operator) external view returns (bool)
 Session management and payments.
 
 **Proxy Address:** `0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D`
-**Implementation:** `0xe0ee96FC4Cc7a05a6e9d5191d070c5d1d13f143F`
+**Implementation:** `0x05c7d3a1b748dEbdbc12dd75D1aC195fb93228a3`
 
 ### Constants
 
@@ -538,13 +538,14 @@ function createSessionJobForModelWithToken(
 
 #### `submitProofOfWork`
 
-Submit proof of work for tokens generated.
+Submit signed proof of work for tokens generated.
 
 ```solidity
 function submitProofOfWork(
     uint256 jobId,          // Session ID
     uint256 tokensClaimed,  // Number of tokens in this proof
     bytes32 proofHash,      // SHA256 hash of STARK proof
+    bytes calldata signature,  // Host's ECDSA signature (65 bytes)
     string memory proofCID  // S5 CID where proof is stored
 ) external
 ```
@@ -552,20 +553,59 @@ function submitProofOfWork(
 **Requirements:**
 - Only the session host can submit proofs
 - `tokensClaimed >= MIN_PROVEN_TOKENS` (100)
+- `signature.length == 65` bytes (r, s, v format)
+- Signature must be from the session host
 - Session must be Active
 
 **Example:**
 ```javascript
-// Host submits proof after generating tokens
-const proofHash = ethers.keccak256(proofBytes);
-const proofCID = "bafyreib...";  // S5 storage CID
+import { keccak256, solidityPacked, getBytes } from 'ethers';
 
+// Host submits signed proof after generating tokens
+const proofHash = keccak256(proofBytes);
+const proofCID = "bafyreib...";  // S5 storage CID
+const tokensClaimed = 1000;
+
+// 1. Generate signature
+const dataHash = keccak256(
+  solidityPacked(
+    ['bytes32', 'address', 'uint256'],
+    [proofHash, hostAddress, tokensClaimed]
+  )
+);
+const signature = await hostWallet.signMessage(getBytes(dataHash));
+
+// 2. Submit with signature
 await marketplace.submitProofOfWork(
   sessionId,
-  1000,         // 1000 tokens generated
+  tokensClaimed,
   proofHash,
+  signature,
   proofCID
 );
+```
+
+#### `getProofSubmission`
+
+Get details of a specific proof submission.
+
+```solidity
+function getProofSubmission(
+    uint256 sessionId,
+    uint256 proofIndex
+) external view returns (
+    bytes32 proofHash,
+    uint256 tokensClaimed,
+    uint256 timestamp,
+    bool verified
+)
+```
+
+**Example:**
+```javascript
+const [proofHash, tokensClaimed, timestamp, verified] =
+  await marketplace.getProofSubmission(sessionId, 0);
+console.log(`Proof verified: ${verified}`);
 ```
 
 **Events:**
@@ -842,6 +882,8 @@ const { jobId } = (await tx.wait()).logs[0].args;
 ### 3. Host Inference Flow
 
 ```javascript
+import { keccak256, solidityPacked, getBytes } from 'ethers';
+
 // 1. Listen for new sessions
 marketplace.on("SessionJobCreated", async (jobId, requester, host, deposit) => {
   if (host === myAddress) {
@@ -850,12 +892,22 @@ marketplace.on("SessionJobCreated", async (jobId, requester, host, deposit) => {
   }
 });
 
-// 2. Submit proofs periodically
+// 2. Submit signed proofs periodically
+const tokensClaimed = 1000;
+const proofHash = keccak256(proofBytes);
+
+// Generate host signature
+const dataHash = keccak256(
+  solidityPacked(['bytes32', 'address', 'uint256'], [proofHash, hostAddress, tokensClaimed])
+);
+const signature = await hostWallet.signMessage(getBytes(dataHash));
+
 await marketplace.submitProofOfWork(
   sessionId,
-  1000,           // Tokens generated
-  proofHash,      // SHA256 of STARK proof
-  "bafyreib..."   // S5 CID
+  tokensClaimed,
+  proofHash,
+  signature,        // Host's ECDSA signature
+  "bafyreib..."     // S5 CID
 );
 
 // 3. Complete session when done
@@ -968,7 +1020,7 @@ const config = {
 
   // Implementation addresses (for contract verification)
   implementations: {
-    jobMarketplace: "0xe0ee96FC4Cc7a05a6e9d5191d070c5d1d13f143F",
+    jobMarketplace: "0x05c7d3a1b748dEbdbc12dd75D1aC195fb93228a3",
     nodeRegistry: "0x68298e2b74a106763aC99E3D973E98012dB5c75F",
     modelRegistry: "0xd7Df5c6D4ffe6961d47753D1dd32f844e0F73f50",
     proofSystem: "0x83eB050Aa3443a76a4De64aBeD90cA8d525E7A3A",
