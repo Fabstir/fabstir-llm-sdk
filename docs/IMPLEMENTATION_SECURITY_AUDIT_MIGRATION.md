@@ -783,9 +783,9 @@ const CONTRACTS = {
 
 | Task | Description | Status |
 |------|-------------|--------|
-| 8.3.1 | Update legacy `ProofSystem-CLIENT-ABI.json`: rename `verifyEKZL` → `verifyHostSignature` | [ ] |
+| 8.3.1 | Update legacy `ProofSystem-CLIENT-ABI.json`: rename `verifyEKZL` → `verifyHostSignature` | [x] |
 
-**Note:** This is deprecated code but should be updated for consistency.
+**Note:** This is deprecated code but updated for consistency. Stale `dist/` build artifact may still contain old reference.
 
 ---
 
@@ -875,12 +875,12 @@ grep -r "verifyEKZL" --include="*.ts" --include="*.json" packages/ src/ --exclud
 |-----------|-------------|--------|-------|
 | 8.1 | SDK Core ProofSystem ABIs | ✅ Complete | 5/5 |
 | 8.2 | Host CLI ProofSystem ABI | ✅ Complete | 2/2 |
-| 8.3 | Legacy ProofSystem ABI | Not Started | 0/1 |
+| 8.3 | Legacy ProofSystem ABI | ✅ Complete | 1/1 |
 | 8.4 | Contract Address Config | Not Started | 0/3 |
 | 8.5 | Build Verification | Not Started | 0/4 |
 | 8.6 | Integration Verification | Not Started | 0/5 |
 | 8.7 | Version Bump & Package | Not Started | 0/4 |
-| **Total** | | | **7/24** |
+| **Total** | | | **8/24** |
 
 ---
 
