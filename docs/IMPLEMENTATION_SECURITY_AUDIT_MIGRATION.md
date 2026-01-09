@@ -4,14 +4,16 @@
 
 Update SDK to support the security audit remediation changes in ProofSystem and JobMarketplace contracts. The primary breaking change is `submitProofOfWork()` now requires ECDSA signatures from hosts, preventing unauthorized proof submissions.
 
-## Status: Phases 1-5 Complete (28 tests passing)
+## Status: Phases 1-5 Complete, Phase 8 In Progress
 
-**Implementation**: SDK migration complete, awaiting integration testing
-**SDK Version**: Will increment to 1.8.2 on merge
+**Implementation**: SDK migration for January 2026 contract upgrades
+**SDK Version**: Current 1.8.2, will increment to 1.8.3 on completion
 **Contract Branch**: `fix/security-audit-remediation`
 **SDK Branch**: `feature/security-audit-migration`
 **Network**: Base Sepolia (Chain ID: 84532)
-**Source Document**: `docs/compute-contracts-reference/SECURITY-AUDIT-SDK-MIGRATION.md`
+**Source Documents**:
+- `docs/compute-contracts-reference/SECURITY-AUDIT-SDK-MIGRATION.md`
+- `docs/compute-contracts-reference/SDK-MIGRATION-JAN2026.md`
 
 ### Completed:
 - [x] Phase 1: ABIs updated (3 files copied, fragments updated, types added)
@@ -19,6 +21,9 @@ Update SDK to support the security audit remediation changes in ProofSystem and 
 - [x] Phase 3: SessionJobManager updated (7 tests)
 - [x] Phase 4: Harness ProofHandler rewritten
 - [x] Phase 5: Legacy code removed (none found)
+
+### In Progress:
+- [ ] Phase 8: January 2026 Contract Upgrades (ABI rename, address update)
 
 ### Pending:
 - [ ] Phase 6: Integration testing with live contracts
@@ -698,6 +703,182 @@ const CONTRACTS = {
 ```
 
 **Note**: Proxy addresses remain unchanged. Only implementation contracts were upgraded.
+
+---
+
+## Phase 8: January 2026 Contract Upgrades
+
+**Date Added:** January 9, 2026
+**Status:** Not Started
+**Source Document:** `docs/compute-contracts-reference/SDK-MIGRATION-JAN2026.md`
+
+### Summary of Changes
+
+| Change | Old | New | SDK Impact |
+|--------|-----|-----|------------|
+| JobMarketplace Proxy | `0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D` | `0x3CaCbf3f448B420918A93a88706B26Ab27a3523E` | Environment config |
+| ProofSystem function | `verifyEKZL` | `verifyHostSignature` | ABI update |
+| Solidity version | 0.8.x | 0.8.30 | No SDK changes |
+| ReentrancyGuard | Standard | Transient (EIP-1153) | No SDK changes (~4900 gas savings) |
+
+### Sub-phase 8.1: ProofSystem ABI Updates (SDK Core)
+
+**Goal:** Update ProofSystem ABIs to use renamed function `verifyHostSignature`.
+
+**Files to modify:**
+- `packages/sdk-core/src/contracts/abis/ProofSystemUpgradeable-CLIENT-ABI.json`
+- `packages/sdk-core/src/contracts/abis/ProofSystem-CLIENT-ABI.json`
+
+**Tasks:**
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 8.1.1 | Write test: ABI contains `verifyHostSignature` function | [x] |
+| 8.1.2 | Write test: ABI does NOT contain `verifyEKZL` function | [x] |
+| 8.1.3 | Update `ProofSystemUpgradeable-CLIENT-ABI.json`: rename `verifyEKZL` → `verifyHostSignature` | [x] |
+| 8.1.4 | Update `ProofSystem-CLIENT-ABI.json`: rename `verifyEKZL` → `verifyHostSignature` | [x] |
+| 8.1.5 | Run tests to verify ABI changes | [x] |
+
+**Test file:** `packages/sdk-core/tests/contracts/proof-system-abi.test.ts`
+
+**Test Results:** ✅ 6/6 tests passing
+
+**Acceptance criteria:**
+- [x] ABI contains `verifyHostSignature` function
+- [x] ABI does NOT contain `verifyEKZL` function
+- [ ] SDK builds successfully after changes (verified in 8.5)
+
+---
+
+### Sub-phase 8.2: ProofSystem ABI Updates (Host CLI)
+
+**Goal:** Update ProofSystem ABI in host-cli package.
+
+**Files to modify:**
+- `packages/host-cli/src/contracts/abis/ProofSystem.json`
+
+**Tasks:**
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 8.2.1 | Update `ProofSystem.json`: rename `verifyEKZL` → `verifyHostSignature` | [ ] |
+| 8.2.2 | Verify host-cli builds successfully | [ ] |
+
+**Acceptance criteria:**
+- Host CLI builds without errors
+- No references to `verifyEKZL` in host-cli package
+
+---
+
+### Sub-phase 8.3: ProofSystem ABI Updates (Legacy)
+
+**Goal:** Update legacy ProofSystem ABI for consistency.
+
+**Files to modify:**
+- `src/contracts/abis/ProofSystem-CLIENT-ABI.json`
+
+**Tasks:**
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 8.3.1 | Update legacy `ProofSystem-CLIENT-ABI.json`: rename `verifyEKZL` → `verifyHostSignature` | [ ] |
+
+**Note:** This is deprecated code but should be updated for consistency.
+
+---
+
+### Sub-phase 8.4: Contract Address Configuration
+
+**Goal:** Update environment configuration with new JobMarketplace proxy address.
+
+**CRITICAL:** `.env.test` can ONLY be modified by the project owner.
+
+**Tasks:**
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 8.4.1 | **[USER ACTION]** Update `.env.test`: `CONTRACT_JOB_MARKETPLACE=0x3CaCbf3f448B420918A93a88706B26Ab27a3523E` | [ ] |
+| 8.4.2 | Write test: SDK loads correct JobMarketplace address from environment | [ ] |
+| 8.4.3 | Run address verification test | [ ] |
+
+**Test file:** `packages/sdk-core/tests/config/contract-addresses.test.ts`
+
+**New addresses:**
+```
+CONTRACT_JOB_MARKETPLACE=0x3CaCbf3f448B420918A93a88706B26Ab27a3523E  # NEW - Clean slate
+CONTRACT_NODE_REGISTRY=0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22    # Unchanged
+CONTRACT_MODEL_REGISTRY=0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2   # Unchanged
+CONTRACT_PROOF_SYSTEM=0x5afB91977e69Cc5003288849059bc62d47E7deeb     # Unchanged
+CONTRACT_HOST_EARNINGS=0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0    # Unchanged
+```
+
+---
+
+### Sub-phase 8.5: Build Verification
+
+**Goal:** Ensure SDK builds and existing tests pass after all changes.
+
+**Tasks:**
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 8.5.1 | Run `pnpm build` in `packages/sdk-core` | [ ] |
+| 8.5.2 | Run `pnpm build` in `packages/host-cli` | [ ] |
+| 8.5.3 | Run existing unit tests | [ ] |
+| 8.5.4 | Verify no `verifyEKZL` references remain (excluding docs) | [ ] |
+
+**Verification command:**
+```bash
+grep -r "verifyEKZL" --include="*.ts" --include="*.json" packages/ src/ --exclude-dir=node_modules | grep -v "\.md"
+```
+
+---
+
+### Sub-phase 8.6: Integration Verification
+
+**Goal:** Test SDK against new contract deployment on Base Sepolia.
+
+**Tasks:**
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 8.6.1 | Test session creation with new JobMarketplace proxy | [ ] |
+| 8.6.2 | Test proof submission with ECDSA signature | [ ] |
+| 8.6.3 | Test `verifyHostSignature` via ProofSystem (if SDK calls directly) | [ ] |
+| 8.6.4 | Test session completion flow | [ ] |
+| 8.6.5 | Test balance query functions | [ ] |
+
+**Test harness:** `apps/harness/pages/usdc-mvp-flow-sdk.test.tsx`
+
+---
+
+### Sub-phase 8.7: Version Bump and Package
+
+**Goal:** Create final SDK build with version increment.
+
+**Tasks:**
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 8.7.1 | Update `packages/sdk-core/package.json` version to 1.8.3 | [ ] |
+| 8.7.2 | Run final build | [ ] |
+| 8.7.3 | Run all tests | [ ] |
+| 8.7.4 | Create tarball with `pnpm pack` | [ ] |
+
+---
+
+## Phase 8 Progress Summary
+
+| Sub-phase | Description | Status | Tasks |
+|-----------|-------------|--------|-------|
+| 8.1 | SDK Core ProofSystem ABIs | ✅ Complete | 5/5 |
+| 8.2 | Host CLI ProofSystem ABI | Not Started | 0/2 |
+| 8.3 | Legacy ProofSystem ABI | Not Started | 0/1 |
+| 8.4 | Contract Address Config | Not Started | 0/3 |
+| 8.5 | Build Verification | Not Started | 0/4 |
+| 8.6 | Integration Verification | Not Started | 0/5 |
+| 8.7 | Version Bump & Package | Not Started | 0/4 |
+| **Total** | | | **5/24** |
 
 ---
 
