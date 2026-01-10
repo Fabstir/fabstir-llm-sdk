@@ -741,7 +741,46 @@ Download latest ABIs from `client-abis/`:
 
 ---
 
-## 10. Support
+## 10. NodeRegistry: Corrupt Node Recovery (January 10, 2026)
+
+### Problem
+
+During contract upgrades, some registered hosts ended up in a "corrupt" state where:
+- `nodes[host].active = true`
+- `activeNodesIndex[host] = 0`
+- But the host was NOT in `activeNodesList[]`
+
+This caused `unregisterNode()` to fail or corrupt other nodes' data.
+
+### Solution
+
+Two fixes have been deployed:
+
+**1. Safety check in `unregisterNode()`** - Hosts can now unregister even with corrupt state:
+
+```typescript
+// Works even if host has corrupt state
+await nodeRegistry.unregisterNode();
+// Stake is returned, node data is cleared
+```
+
+**2. New `repairCorruptNode()` admin function** - Owner can fix corrupt hosts:
+
+```typescript
+// Owner-only function to repair corrupt nodes
+await nodeRegistry.repairCorruptNode(corruptHostAddress);
+// Emits: CorruptNodeRepaired(address operator, uint256 stakeReturned)
+```
+
+### For SDK Developers
+
+- Update NodeRegistry ABI to include `repairCorruptNode` and `CorruptNodeRepaired` event
+- The `unregisterNode()` function now safely handles corrupt state - no SDK changes required
+- Listen for `CorruptNodeRepaired` event if tracking node lifecycle
+
+---
+
+## 11. Support
 
 - GitHub Issues: https://github.com/fabstirp2p/contracts/issues
 - Documentation: https://docs.fabstir.com

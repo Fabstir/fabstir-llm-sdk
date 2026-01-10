@@ -1,5 +1,84 @@
 # Client ABIs Changelog
 
+## January 10, 2026 - NodeRegistry Corrupt Node Fix
+
+### Bug Fix
+Fixed an edge case where hosts registered during contract upgrades could end up in a "corrupt" state:
+- `nodes[host].active = true`
+- `activeNodesIndex[host] = 0`
+- But host NOT in `activeNodesList[]`
+
+This caused `unregisterNode()` to fail or corrupt other nodes' data.
+
+### Changes
+
+**New Admin Function:**
+```solidity
+function repairCorruptNode(address nodeAddress) external onlyOwner
+```
+- Owner-only function to clean up corrupt node state
+- Returns staked FAB tokens to the host
+- Emits `CorruptNodeRepaired(address operator, uint256 stakeReturned)`
+
+**Safety Check in `unregisterNode()`:**
+- Now detects and handles corrupt state gracefully
+- Hosts can unregister even with corrupt state
+
+### Implementation Upgrade
+| Contract | Proxy (unchanged) | New Implementation |
+|----------|-------------------|-------------------|
+| NodeRegistry | `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22` | `0x4574d6f1D888cF97eBb8E1bb5E02a5A386b6cFA7` |
+
+### Corrupt Host Repaired
+- Host `0x048afA7126A3B684832886b78e7cC1Dd4019557E` fixed
+- 1000 FAB stake returned
+
+### ABI Changes
+**Added to NodeRegistry:**
+- `repairCorruptNode(address)` - Owner-only repair function
+- `CorruptNodeRepaired` event
+
+### No SDK Breaking Changes
+- `unregisterNode()` works as before (now handles edge cases)
+- New function is admin-only
+
+---
+
+## January 9, 2026 - Clean Slate JobMarketplace Deployment
+
+### ⚠️ PROXY ADDRESS CHANGED
+**JobMarketplace proxy address has changed** due to clean slate deployment (removed deprecated storage slots for gas optimization).
+
+| Contract | Old Proxy | New Proxy |
+|----------|-----------|-----------|
+| JobMarketplace | `0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D` | `0x3CaCbf3f448B420918A93a88706B26Ab27a3523E` |
+
+### Implementation Addresses (January 9, 2026)
+| Contract | Proxy | Implementation |
+|----------|-------|----------------|
+| JobMarketplace | `0x3CaCbf3f448B420918A93a88706B26Ab27a3523E` | `0x26f27C19F80596d228D853dC39A204f0f6C45C7E` |
+| NodeRegistry | `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22` | `0xb85424dd91D4ae0C6945e512bfDdF8a494299115` |
+| ModelRegistry | `0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2` | `0x1D31d9688a4ffD2aFE738BC6C9a4cb27C272AA5A` |
+| ProofSystem | `0x5afB91977e69Cc5003288849059bc62d47E7deeb` | `0xCF46BBa79eA69A68001A1c2f5Ad9eFA1AD435EF9` |
+| HostEarnings | `0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0` | `0x8584AeAC9687613095D13EF7be4dE0A796F84D7a` |
+
+### SDK Migration Required
+Update your configuration to use the new JobMarketplace proxy address:
+```javascript
+const CONTRACTS = {
+  jobMarketplace: "0x3CaCbf3f448B420918A93a88706B26Ab27a3523E",  // ⚠️ CHANGED
+  nodeRegistry: "0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22",
+  // ... other addresses unchanged
+};
+```
+
+### Technical Details
+- Solidity upgraded to ^0.8.24 (compiled with 0.8.30)
+- Using OpenZeppelin's ReentrancyGuardTransient (~4,900 gas savings)
+- Requires EIP-1153 (transient storage) - supported on Base since March 2024
+
+---
+
 ## January 6, 2026 - Phase 6: ProofSystem Integration (BREAKING CHANGE)
 
 ### ⚠️ SDK BREAKING CHANGE

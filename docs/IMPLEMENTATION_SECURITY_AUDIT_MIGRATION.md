@@ -4,10 +4,10 @@
 
 Update SDK to support the security audit remediation changes in ProofSystem and JobMarketplace contracts. The primary breaking change is `submitProofOfWork()` now requires ECDSA signatures from hosts, preventing unauthorized proof submissions.
 
-## Status: Phases 1-5 Complete, Phase 8 In Progress
+## Status: Phases 1-5 Complete, Phase 8-9 Complete ✅
 
 **Implementation**: SDK migration for January 2026 contract upgrades
-**SDK Version**: Current 1.8.2, will increment to 1.8.3 on completion
+**SDK Version**: 1.8.5 (Phase 9 session persistence fix)
 **Contract Branch**: `fix/security-audit-remediation`
 **SDK Branch**: `feature/security-audit-migration`
 **Network**: Base Sepolia (Chain ID: 84532)
@@ -853,13 +853,14 @@ Result: No references found ✅
 
 | Task | Description | Status |
 |------|-------------|--------|
-| 8.6.1 | Test session creation with new JobMarketplace proxy | [ ] |
-| 8.6.2 | Test proof submission with ECDSA signature | [ ] |
-| 8.6.3 | Test `verifyHostSignature` via ProofSystem (if SDK calls directly) | [ ] |
-| 8.6.4 | Test session completion flow | [ ] |
-| 8.6.5 | Test balance query functions | [ ] |
+| 8.6.1 | Test session creation with new JobMarketplace proxy | [x] |
+| 8.6.2 | Test proof submission with ECDSA signature | [x] |
+| 8.6.3 | Test `verifyHostSignature` via ProofSystem (if SDK calls directly) | [x] |
+| 8.6.4 | Test session completion flow | [x] |
+| 8.6.5 | Test balance query functions | [x] |
 
-**Test harness:** `apps/harness/pages/usdc-mvp-flow-sdk.test.tsx`
+**Test file:** `packages/sdk-core/tests/integration/jan2026-contract-upgrade.test.ts`
+**Test Results:** ✅ 14/14 tests passing
 
 ---
 
@@ -871,10 +872,10 @@ Result: No references found ✅
 
 | Task | Description | Status |
 |------|-------------|--------|
-| 8.7.1 | Update `packages/sdk-core/package.json` version to 1.8.3 | [ ] |
-| 8.7.2 | Run final build | [ ] |
-| 8.7.3 | Run all tests | [ ] |
-| 8.7.4 | Create tarball with `pnpm pack` | [ ] |
+| 8.7.1 | Update `packages/sdk-core/package.json` version to 1.8.3 | [x] |
+| 8.7.2 | Run final build | [x] |
+| 8.7.3 | Run all tests | [x] |
+| 8.7.4 | Create tarball with `pnpm pack` | [x] |
 
 ---
 
@@ -887,9 +888,49 @@ Result: No references found ✅
 | 8.3 | Legacy ProofSystem ABI | ✅ Complete | 1/1 |
 | 8.4 | Contract Address Config | ✅ Complete | 3/3 |
 | 8.5 | Build Verification | ✅ Complete | 4/4 |
-| 8.6 | Integration Verification | Not Started | 0/5 |
-| 8.7 | Version Bump & Package | Not Started | 0/4 |
-| **Total** | | | **15/24** |
+| 8.6 | Integration Verification | ✅ Complete | 5/5 |
+| 8.7 | Version Bump & Package | ✅ Complete | 4/4 |
+| **Total** | | | **24/24** |
+
+---
+
+---
+
+## Phase 9: Session Persistence Fix (Jan 10, 2026)
+
+### Problem Discovered
+
+After the contract upgrades, RAG operations (uploadVectors, searchVectors) were failing with "Session not found" errors on the node even though:
+1. The encrypted session completed successfully (9 tokens)
+2. Embedding via HTTP worked
+3. WebSocket was still connected
+
+**Root Cause:** The SDK only sent `session_init` when the WebSocket reconnected, not on each prompt or RAG operation. After the node processed a response ("Encrypted session complete"), it cleared the session from its SessionStore. On subsequent operations, the SDK assumed the session was still active because the WebSocket was connected, but the node no longer had it.
+
+### The Fix (SDK v1.8.5)
+
+Modified three methods in `SessionManager.ts` to always send `session_init` before operations:
+
+1. **`sendPromptStreaming`** (lines 685-719): Now sends session_init before every prompt
+2. **`uploadVectors`** (lines 2096-2128): Now sends session_init before vector uploads
+3. **`searchVectors`** (lines 2246-2275): Now sends session_init before vector searches
+
+### Code Changes
+
+```typescript
+// CRITICAL FIX: Always send session_init before each operation
+// The node clears sessions from SessionStore after "Encrypted session complete"
+// so we must re-initialize the session to ensure operations work
+if (session.encryption && this.encryptionManager) {
+  await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
+} else {
+  await this.sendPlaintextInit(this.wsClient, config, session.sessionId, session.jobId, userAddress);
+}
+```
+
+**Overhead:** Minimal - one extra WebSocket message per operation (< 1KB).
+
+**SDK Version:** 1.8.5
 
 ---
 

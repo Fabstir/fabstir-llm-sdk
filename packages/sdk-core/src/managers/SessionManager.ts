@@ -671,7 +671,6 @@ export class SessionManager implements ISessionManager {
         : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
 
       // Initialize WebSocket client if not already connected
-
       if (!this.wsClient || !this.wsClient.isConnected()) {
         this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
         await this.wsClient.connect();
@@ -681,45 +680,42 @@ export class SessionManager implements ISessionManager {
 
         // Set up global web search message handlers (Phase 5.2-5.3)
         this._setupWebSearchMessageHandlers();
+      }
 
-        // NEW (Phase 6.2): Use encryption by default
-        if (session.encryption && this.encryptionManager) {
-
-          // Send encrypted session init
-          const config: ExtendedSessionConfig = {
-            chainId: session.chainId,
-            host: session.provider,
-            modelId: session.model,
-            endpoint: session.endpoint,
-            paymentMethod: 'deposit',
-            encryption: true
-          };
-          await this.sendEncryptedInit(this.wsClient, config, sessionId, session.jobId);
-
-          if (this.sessionKey) {
-          }
-        } else {
-          // Send plaintext session init (opt-out or no encryption manager)
-          const signer = (this.paymentManager as any).signer;
-          if (!signer) {
-            throw new Error('PaymentManager signer not available. Cannot initialize session without authenticated signer.');
-          }
-          const userAddress = await signer.getAddress();
-          if (!userAddress) {
-            throw new Error('Failed to get user address from signer. Cannot initialize session.');
-          }
-
-          const config: ExtendedSessionConfig = {
-            chainId: session.chainId,
-            host: session.provider,
-            modelId: session.model,
-            endpoint: session.endpoint,
-            paymentMethod: 'deposit',
-            encryption: false
-          };
-          await this.sendPlaintextInit(this.wsClient, config, sessionId, session.jobId, userAddress);
-        }
+      // CRITICAL FIX: Always send session_init before each prompt
+      // The node clears sessions from SessionStore after "Encrypted session complete"
+      // so we must re-initialize the session for each prompt to ensure RAG operations work
+      if (session.encryption && this.encryptionManager) {
+        // Send encrypted session init
+        const config: ExtendedSessionConfig = {
+          chainId: session.chainId,
+          host: session.provider,
+          modelId: session.model,
+          endpoint: session.endpoint,
+          paymentMethod: 'deposit',
+          encryption: true
+        };
+        await this.sendEncryptedInit(this.wsClient, config, sessionId, session.jobId);
       } else {
+        // Send plaintext session init (opt-out or no encryption manager)
+        const signer = (this.paymentManager as any).signer;
+        if (!signer) {
+          throw new Error('PaymentManager signer not available. Cannot initialize session without authenticated signer.');
+        }
+        const userAddress = await signer.getAddress();
+        if (!userAddress) {
+          throw new Error('Failed to get user address from signer. Cannot initialize session.');
+        }
+
+        const config: ExtendedSessionConfig = {
+          chainId: session.chainId,
+          host: session.provider,
+          modelId: session.model,
+          endpoint: session.endpoint,
+          paymentMethod: 'deposit',
+          encryption: false
+        };
+        await this.sendPlaintextInit(this.wsClient, config, sessionId, session.jobId, userAddress);
       }
 
       // Collect full response
@@ -2079,9 +2075,8 @@ export class SessionManager implements ISessionManager {
       );
     }
 
-    // 2. Ensure WebSocket is connected (initialize if needed)
+    // 2. Ensure WebSocket is connected
     if (!this.wsClient || !this.wsClient.isConnected()) {
-
       // Get WebSocket URL from endpoint
       const endpoint = session.endpoint || 'http://localhost:8080';
       const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
@@ -2096,39 +2091,40 @@ export class SessionManager implements ISessionManager {
 
       // Set up global web search message handlers (Phase 5.2-5.3)
       this._setupWebSearchMessageHandlers();
+    }
 
-      // Send session init (encryption support)
-      if (session.encryption && this.encryptionManager) {
-        const config: ExtendedSessionConfig = {
-          chainId: session.chainId,
-          host: session.provider,
-          modelId: session.model,
-          endpoint: session.endpoint,
-          paymentMethod: 'deposit',
-          encryption: true
-        };
-        await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
-      } else {
-        const signer = (this.paymentManager as any).signer;
-        if (!signer) {
-          throw new Error('PaymentManager signer not available');
-        }
-        const userAddress = await signer.getAddress();
-        if (!userAddress) {
-          throw new Error('Failed to get user address from signer');
-        }
-
-        const config: ExtendedSessionConfig = {
-          chainId: session.chainId,
-          host: session.provider,
-          modelId: session.model,
-          endpoint: session.endpoint,
-          paymentMethod: 'deposit',
-          encryption: false
-        };
-        await this.sendPlaintextInit(this.wsClient, config, session.sessionId, session.jobId, userAddress);
+    // CRITICAL FIX: Always send session_init before RAG operations
+    // The node clears sessions from SessionStore after "Encrypted session complete"
+    // so we must re-initialize the session to ensure RAG operations work
+    if (session.encryption && this.encryptionManager) {
+      const config: ExtendedSessionConfig = {
+        chainId: session.chainId,
+        host: session.provider,
+        modelId: session.model,
+        endpoint: session.endpoint,
+        paymentMethod: 'deposit',
+        encryption: true
+      };
+      await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
+    } else {
+      const signer = (this.paymentManager as any).signer;
+      if (!signer) {
+        throw new Error('PaymentManager signer not available');
+      }
+      const userAddress = await signer.getAddress();
+      if (!userAddress) {
+        throw new Error('Failed to get user address from signer');
       }
 
+      const config: ExtendedSessionConfig = {
+        chainId: session.chainId,
+        host: session.provider,
+        modelId: session.model,
+        endpoint: session.endpoint,
+        paymentMethod: 'deposit',
+        encryption: false
+      };
+      await this.sendPlaintextInit(this.wsClient, config, session.sessionId, session.jobId, userAddress);
     }
 
     // 3. Handle empty vectors array
@@ -2245,6 +2241,37 @@ export class SessionManager implements ISessionManager {
         'WebSocket not connected - call startSession() first',
         'WEBSOCKET_NOT_CONNECTED'
       );
+    }
+
+    // CRITICAL FIX: Always send session_init before RAG operations
+    // The node clears sessions from SessionStore after "Encrypted session complete"
+    // so we must re-initialize the session to ensure RAG operations work
+    if (session.encryption && this.encryptionManager) {
+      const config: ExtendedSessionConfig = {
+        chainId: session.chainId,
+        host: session.provider,
+        modelId: session.model,
+        endpoint: session.endpoint,
+        paymentMethod: 'deposit',
+        encryption: true
+      };
+      await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
+    } else {
+      const signer = (this.paymentManager as any).signer;
+      if (signer) {
+        const userAddress = await signer.getAddress();
+        if (userAddress) {
+          const config: ExtendedSessionConfig = {
+            chainId: session.chainId,
+            host: session.provider,
+            modelId: session.model,
+            endpoint: session.endpoint,
+            paymentMethod: 'deposit',
+            encryption: false
+          };
+          await this.sendPlaintextInit(this.wsClient, config, session.sessionId, session.jobId, userAddress);
+        }
+      }
     }
 
     // Validate query vector dimensions (384 for all-MiniLM-L6-v2)
