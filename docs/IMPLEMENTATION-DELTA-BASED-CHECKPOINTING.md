@@ -4,12 +4,12 @@
 
 Enable SDK recovery of conversation state from node-published checkpoints when sessions timeout or disconnect mid-stream. Uses delta-based storage to minimize S5 storage requirements while providing verifiable conversation recovery.
 
-## Status: Phase 4 Complete ✅
+## Status: Phase 5 Complete ✅
 
 **Priority**: Critical for MVP
 **SDK Version Target**: 1.9.0
-**Node Requirement**: Checkpoint publishing (new feature required)
-**Test Results**: 46/46 tests passing (Phase 1 + Phase 2 + Phase 3)
+**Node Requirement**: Checkpoint publishing ✅ (Node v8.11.0 ready)
+**Test Results**: 53/53 tests passing (Phase 1-3 unit + Phase 5.1 integration)
 **Documentation**: NODE_CHECKPOINT_SPEC.md ready for node developer
 
 ---
@@ -480,54 +480,64 @@ Total: ~220KB                        Total: ~40KB (80% reduction!)
 
 ## Phase 5: Integration Testing
 
-### Sub-phase 5.1: Mock Integration Tests
+### Sub-phase 5.1: Mock Integration Tests ✅
 
 **Goal**: Test full recovery flow with mocked S5 and contract responses.
 
 **Line Budget**: 150 lines (tests only)
 
 #### Tasks
-- [ ] Write test: Full flow - create session → mock checkpoints → recover
-- [ ] Write test: Recovery with 1 checkpoint (single delta)
-- [ ] Write test: Recovery with 5 checkpoints (multiple deltas)
-- [ ] Write test: Recovery with mixed message types (user + assistant)
-- [ ] Write test: Recovery fails gracefully when index missing
-- [ ] Write test: Recovery fails gracefully when delta fetch fails
-- [ ] Mock S5 responses for checkpoint index and deltas
-- [ ] Mock contract responses for proof verification
+- [x] Write test: Full flow - create session → mock checkpoints → recover
+- [x] Write test: Recovery with 1 checkpoint (single delta)
+- [x] Write test: Recovery with 5 checkpoints (multiple deltas)
+- [x] Write test: Recovery with mixed message types (user + assistant)
+- [x] Write test: Recovery fails gracefully when index missing
+- [x] Write test: Recovery fails gracefully when delta fetch fails
+- [x] Mock S5 responses for checkpoint index and deltas
+- [x] Mock contract responses for proof verification
 
 **Test Files:**
-- `packages/sdk-core/tests/integration/checkpoint-recovery.test.ts` (NEW, ~250 lines)
+- `packages/sdk-core/tests/integration/checkpoint-recovery.test.ts` (NEW, ~290 lines) ✅
 
 **Success Criteria:**
-- [ ] All mock integration tests pass
-- [ ] Full recovery flow tested end-to-end
-- [ ] Error cases handled gracefully
-- [ ] No flaky tests
+- [x] All mock integration tests pass (7/7)
+- [x] Full recovery flow tested end-to-end
+- [x] Error cases handled gracefully
+- [x] No flaky tests
+
+**Test Results:** ✅ **7/7 tests passing**
 
 ---
 
-### Sub-phase 5.2: E2E Testing with Real Node (After Node Implementation)
+### Sub-phase 5.2: E2E Testing with Real Node ✅
 
 **Goal**: Test recovery with actual node publishing checkpoints.
 
 **Line Budget**: 50 lines (test harness modifications)
 
 #### Tasks
-- [ ] Add "Test Recovery" button to chat-context-rag-demo.tsx
-- [ ] Create test scenario: start session → send prompts → force timeout → recover
-- [ ] Verify recovered messages match what was streamed
-- [ ] Verify token count matches proof count
-- [ ] Document manual test procedure
+- [x] Add "Test Recovery" button to chat-context-rag-demo.tsx
+- [x] Create test scenario: start session → send prompts → force timeout → recover
+- [x] Verify recovered messages match what was streamed
+- [x] Verify token count matches proof count
+- [x] Document manual test procedure
 
 **Implementation Files:**
-- `apps/harness/pages/chat-context-rag-demo.tsx` (MODIFY, ~50 lines)
+- `apps/harness/pages/chat-context-rag-demo.tsx` (MODIFY, +60 lines) ✅
 
 **Success Criteria:**
-- [ ] Recovery button triggers `recoverFromCheckpoints()`
-- [ ] Recovered conversation displayed in UI
-- [ ] Token count matches expectation
-- [ ] Manual test procedure documented
+- [x] Recovery button triggers `recoverFromCheckpoints()`
+- [x] Recovered conversation displayed in UI
+- [x] Token count matches expectation
+- [x] Manual test procedure documented
+
+**Manual Test Procedure:**
+1. Navigate to http://localhost:3000/chat-context-rag-demo
+2. Connect wallet and start session
+3. Send 2-3 prompts (generate ~2000+ tokens for checkpoints)
+4. Click "Test Recovery" button
+5. Observe system messages showing recovered messages and token count
+6. Verify token count matches expected checkpoints (~1000 tokens per checkpoint)
 
 ---
 

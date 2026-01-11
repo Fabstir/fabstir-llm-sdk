@@ -53,7 +53,7 @@ Deltas are stored at S5 CIDs. The CID is recorded in the index.
 home/checkpoints/0xabc123def456789012345678901234567890abcd/123/index.json
 
 # Delta CID (stored separately, referenced in index)
-s5://bafybeig123...  (content-addressed)
+bafybeig123...  (content-addressed, raw CID without prefix)
 ```
 
 **Important**: Host addresses in paths MUST be lowercase.
@@ -125,14 +125,14 @@ The index lists all checkpoints for a session.
     {
       "index": 0,
       "proofHash": "0x1234...",
-      "deltaCID": "s5://bafybeig1...",
+      "deltaCID": "bafybeig1...",
       "tokenRange": [0, 1000],
       "timestamp": 1704844800000
     },
     {
       "index": 1,
       "proofHash": "0x5678...",
-      "deltaCID": "s5://bafybeig2...",
+      "deltaCID": "bafybeig2...",
       "tokenRange": [1000, 2000],
       "timestamp": 1704844860000
     }

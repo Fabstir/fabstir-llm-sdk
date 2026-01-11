@@ -159,6 +159,7 @@ export default function ChatContextDemo() {
   // UI State
   const [status, setStatus] = useState("Initializing...");
   const [error, setError] = useState<string>("");
+  const [isRecovering, setIsRecovering] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new messages arrive
@@ -1877,6 +1878,66 @@ export default function ChatContextDemo() {
     }
   }
 
+  // Test checkpoint recovery (Phase 5.2 - Delta-Based Checkpointing)
+  async function testRecovery() {
+    const sm = sdk?.getSessionManager();
+    const currentSessionId = (window as any).__currentSessionId || sessionId;
+
+    if (!sm) {
+      setError("Session manager not available");
+      return;
+    }
+
+    if (!currentSessionId) {
+      setError("No session ID to recover. Start a session first.");
+      return;
+    }
+
+    setIsRecovering(true);
+    setStatus("Attempting checkpoint recovery...");
+
+    try {
+      addMessage("system", `🔄 Testing recovery for session ${currentSessionId}...`);
+
+      // Call the recovery method
+      const recovered = await sm.recoverFromCheckpoints(currentSessionId);
+
+      if (recovered.messages.length === 0) {
+        addMessage("system", "ℹ️ No checkpoints found for this session.");
+        addMessage("system", "   (Node may not have published checkpoints yet, or session is still active)");
+      } else {
+        addMessage("system", `✅ Recovered ${recovered.messages.length} messages from ${recovered.checkpoints.length} checkpoints`);
+        addMessage("system", `📊 Total tokens recovered: ${recovered.tokenCount}`);
+
+        // Display recovered messages
+        addMessage("system", "📝 Recovered conversation:");
+        recovered.messages.forEach((msg: { role: string; content: string }, i: number) => {
+          const preview = msg.content.length > 100 ? msg.content.substring(0, 100) + "..." : msg.content;
+          addMessage("system", `   [${msg.role}]: ${preview}`);
+        });
+
+        // Optionally restore the conversation
+        addMessage("system", "💡 Tip: In production, these messages would be restored to the chat UI.");
+      }
+
+      setStatus("Recovery test complete");
+    } catch (error: any) {
+      console.error("Recovery failed:", error);
+      const errorCode = error.message.split(":")[0];
+      addMessage("system", `❌ Recovery failed: ${error.message}`);
+
+      if (errorCode === "SESSION_NOT_FOUND") {
+        addMessage("system", "   Session not found in local state. Start a new session first.");
+      } else if (errorCode === "PROOF_HASH_MISMATCH") {
+        addMessage("system", "   ⚠️ Checkpoint data doesn't match on-chain proofs!");
+      } else if (errorCode === "DELTA_FETCH_FAILED") {
+        addMessage("system", "   Could not fetch checkpoint delta from S5 storage.");
+      }
+    } finally {
+      setIsRecovering(false);
+    }
+  }
+
   // Clear conversation
   function clearConversation() {
     setMessages([]);
@@ -2253,6 +2314,14 @@ export default function ChatContextDemo() {
               className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:bg-gray-300"
             >
               End Session
+            </button>
+            <button
+              onClick={testRecovery}
+              disabled={isLoading || isRecovering}
+              className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-gray-300"
+              title="Test checkpoint recovery (Phase 5.2)"
+            >
+              {isRecovering ? "Recovering..." : "Test Recovery"}
             </button>
           </>
         )}
