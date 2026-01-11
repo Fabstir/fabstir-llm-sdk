@@ -153,6 +153,72 @@ export interface CheckpointProof {
   timestamp: number;
 }
 
+// ============= Delta-Based Checkpoint Types =============
+// Used for conversation recovery from node-published checkpoints
+
+/**
+ * A single conversation checkpoint delta stored by the node.
+ * Contains only the messages since the last checkpoint (not cumulative).
+ */
+export interface CheckpointDelta {
+  /** Session identifier */
+  sessionId: string;
+  /** Zero-based index of this checkpoint */
+  checkpointIndex: number;
+  /** On-chain proof hash for verification */
+  proofHash: string;
+  /** Token position at start of this delta */
+  startToken: number;
+  /** Token position at end of this delta */
+  endToken: number;
+  /** Messages in this delta (only new since last checkpoint) */
+  messages: Message[];
+  /** EIP-191 signature by host wallet */
+  hostSignature: string;
+}
+
+/**
+ * Entry in the checkpoint index pointing to a delta.
+ */
+export interface CheckpointIndexEntry {
+  /** Zero-based index of this checkpoint */
+  index: number;
+  /** On-chain proof hash for verification */
+  proofHash: string;
+  /** S5 CID pointing to the CheckpointDelta */
+  deltaCID: string;
+  /** [startToken, endToken] range for this checkpoint */
+  tokenRange: [number, number];
+  /** Unix timestamp when checkpoint was created */
+  timestamp: number;
+}
+
+/**
+ * Index of all checkpoints for a session, published by the host.
+ */
+export interface CheckpointIndex {
+  /** Session identifier */
+  sessionId: string;
+  /** Host's Ethereum address */
+  hostAddress: string;
+  /** Array of checkpoint entries */
+  checkpoints: CheckpointIndexEntry[];
+  /** EIP-191 signature by host wallet over checkpoints array */
+  hostSignature: string;
+}
+
+/**
+ * Result of recovering a conversation from checkpoints.
+ */
+export interface RecoveredConversation {
+  /** Merged messages from all deltas */
+  messages: Message[];
+  /** Total token count from last checkpoint */
+  tokenCount: number;
+  /** Checkpoint entries used for recovery */
+  checkpoints: CheckpointIndexEntry[];
+}
+
 // ============= Host Types =============
 // NOTE: HostInfo and other host types have been moved to types/models.ts
 // to support the new model governance architecture. Import from there instead.
