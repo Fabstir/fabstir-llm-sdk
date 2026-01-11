@@ -4,12 +4,13 @@
 
 Enable SDK recovery of conversation state from node-published checkpoints when sessions timeout or disconnect mid-stream. Uses delta-based storage to minimize S5 storage requirements while providing verifiable conversation recovery.
 
-## Status: Phase 3 Complete ✅
+## Status: Phase 4 Complete ✅
 
 **Priority**: Critical for MVP
 **SDK Version Target**: 1.9.0
 **Node Requirement**: Checkpoint publishing (new feature required)
 **Test Results**: 46/46 tests passing (Phase 1 + Phase 2 + Phase 3)
+**Documentation**: NODE_CHECKPOINT_SPEC.md ready for node developer
 
 ---
 
@@ -448,32 +449,32 @@ Total: ~220KB                        Total: ~40KB (80% reduction!)
 
 **Note**: This phase documents required node changes. Implementation is done by node developer.
 
-### Sub-phase 4.1: Node Implementation Spec
+### Sub-phase 4.1: Node Implementation Spec ✅
 
 **Goal**: Create specification document for node developer.
 
 **Line Budget**: Documentation only
 
 #### Tasks
-- [ ] Create `docs/NODE_CHECKPOINT_SPEC.md` with:
-  - [ ] S5 path convention: `home/checkpoints/{hostAddress}/{sessionId}/index.json`
-  - [ ] Delta format specification (CheckpointDelta JSON schema)
-  - [ ] Index format specification (CheckpointIndex JSON schema)
-  - [ ] Signature requirements (EIP-191, what to sign)
-  - [ ] Timing requirements (store delta BEFORE proof submission)
-  - [ ] Error handling (what to do if S5 upload fails)
-  - [ ] Cleanup policy (when to delete old checkpoints)
-- [ ] Include code examples in Python
-- [ ] Add sequence diagram for checkpoint flow
+- [x] Create `docs/NODE_CHECKPOINT_SPEC.md` with:
+  - [x] S5 path convention: `home/checkpoints/{hostAddress}/{sessionId}/index.json`
+  - [x] Delta format specification (CheckpointDelta JSON schema)
+  - [x] Index format specification (CheckpointIndex JSON schema)
+  - [x] Signature requirements (EIP-191, what to sign)
+  - [x] Timing requirements (store delta BEFORE proof submission)
+  - [x] Error handling (what to do if S5 upload fails)
+  - [x] Cleanup policy (when to delete old checkpoints)
+- [x] Include code examples in Python
+- [x] Add sequence diagram for checkpoint flow
 
 **Implementation Files:**
-- `docs/NODE_CHECKPOINT_SPEC.md` (NEW, ~200 lines)
+- `docs/NODE_CHECKPOINT_SPEC.md` (NEW, ~590 lines) ✅
 
 **Success Criteria:**
-- [ ] Spec document complete and clear
-- [ ] All data formats documented with examples
-- [ ] Signature format explicitly defined
-- [ ] Ready to share with node developer
+- [x] Spec document complete and clear
+- [x] All data formats documented with examples
+- [x] Signature format explicitly defined
+- [x] Ready to share with node developer
 
 ---
 
