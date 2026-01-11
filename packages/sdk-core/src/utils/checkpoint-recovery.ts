@@ -105,8 +105,17 @@ export async function fetchCheckpointIndex(
   // Construct S5 path: home/checkpoints/{hostAddress}/{sessionId}/index.json
   const path = `${CHECKPOINT_BASE_PATH}/${normalizedAddress}/${sessionId}/index.json`;
 
-  // Fetch from S5
-  const data = await s5Client.fs.get(path);
+  // Fetch from S5 - handle "not found" gracefully
+  let data: any;
+  try {
+    data = await s5Client.fs.get(path);
+  } catch (error: any) {
+    // S5 throws error if path doesn't exist - treat as "no checkpoints"
+    if (error.message?.includes('does not exist') || error.message?.includes('not found')) {
+      return null;
+    }
+    throw error;
+  }
 
   // Handle not found case
   if (data === null || data === undefined) {

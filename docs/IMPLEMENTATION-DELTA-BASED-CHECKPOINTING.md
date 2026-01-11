@@ -4,13 +4,14 @@
 
 Enable SDK recovery of conversation state from node-published checkpoints when sessions timeout or disconnect mid-stream. Uses delta-based storage to minimize S5 storage requirements while providing verifiable conversation recovery.
 
-## Status: Phase 5 Complete ✅
+## Status: Phase 7 In Progress 🔄
 
 **Priority**: Critical for MVP
 **SDK Version Target**: 1.9.0
-**Node Requirement**: Checkpoint publishing ✅ (Node v8.11.0 ready)
+**Node Requirement**: Checkpoint publishing ✅ (Node v8.11.0 ready) + HTTP endpoint (Phase 7)
 **Test Results**: 53/53 tests passing (Phase 1-3 unit + Phase 5.1 integration)
 **Documentation**: NODE_CHECKPOINT_SPEC.md ready for node developer
+**Blocker Found**: S5 namespace isolation - SDK cannot access node's `home/` directory (Phase 7 addresses this)
 
 ---
 
@@ -583,6 +584,268 @@ Total: ~220KB                        Total: ~40KB (80% reduction!)
 
 ---
 
+## Phase 7: HTTP API Checkpoint Discovery (S5 Namespace Fix)
+
+### Background: S5 Namespace Isolation Issue
+
+**Problem Discovered During E2E Testing:**
+
+S5's `home/` directory is per-user (private namespace). When the node uploads checkpoints to:
+```
+home/checkpoints/{hostAddress}/{sessionId}/index.json
+```
+
+The SDK cannot access this path because it's in the **node's** S5 namespace, not the **SDK user's** namespace.
+
+**Evidence from E2E Test:**
+- Node logs: `Index uploaded to home/checkpoints/0x048afa.../11/index.json`
+- SDK queries: `GET home/checkpoints/0x048afa.../11/index.json`
+- Result: "No checkpoints found" (SDK's `home/` is empty)
+
+**Solution: HTTP API**
+
+Node exposes an HTTP endpoint that returns the checkpoint index (including delta CIDs). SDK queries this endpoint, then fetches deltas directly from S5 using the CIDs (CIDs are globally addressable).
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                        HTTP API CHECKPOINT DISCOVERY                        │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  BEFORE (Broken):                                                           │
+│  ────────────────                                                           │
+│  SDK → S5 (node's home/checkpoints/...) → ❌ ACCESS DENIED (different user) │
+│                                                                             │
+│  AFTER (Fixed):                                                             │
+│  ───────────────                                                            │
+│  SDK → HTTP GET /v1/checkpoints/{sessionId} → Node returns checkpoint index │
+│      → SDK gets delta CIDs from index                                       │
+│      → SDK fetches deltas from S5 via CID (globally addressable) → ✅       │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Why HTTP API over WebSocket:**
+1. Recovery is on-demand (not real-time streaming)
+2. Works for historical sessions (SDK wasn't connected during streaming)
+3. Works after app crash (WebSocket CIDs would be lost from memory)
+4. Simpler implementation (no WebSocket protocol changes)
+5. Cleaner separation of concerns (streaming vs queries)
+
+---
+
+### Sub-phase 7.1: SDK HTTP Client for Checkpoint Index ✅
+
+**Goal**: Create utility to fetch checkpoint index via HTTP from node.
+
+**Line Budget**: 80 lines (50 implementation + 30 tests)
+
+#### Tasks
+- [x] Write test: `fetchCheckpointIndexFromNode()` returns CheckpointIndex on success
+- [x] Write test: `fetchCheckpointIndexFromNode()` returns null when 404 (no checkpoints)
+- [x] Write test: `fetchCheckpointIndexFromNode()` throws on network error
+- [x] Write test: `fetchCheckpointIndexFromNode()` throws on malformed JSON
+- [x] Write test: `fetchCheckpointIndexFromNode()` validates response structure
+- [x] Write test: `fetchCheckpointIndexFromNode()` handles timeout gracefully
+- [x] Create `fetchCheckpointIndexFromNode(hostUrl: string, sessionId: string): Promise<CheckpointIndex | null>`
+- [x] Construct URL: `${hostUrl}/v1/checkpoints/${sessionId}`
+- [x] Handle HTTP 404 → return null (no checkpoints yet)
+- [x] Handle HTTP 5xx → throw descriptive error
+- [x] Parse and validate JSON structure
+- [x] Add reasonable timeout (10 seconds)
+
+**Test Files:**
+- `packages/sdk-core/tests/unit/checkpoint-http.test.ts` (NEW, ~160 lines) ✅
+
+**Implementation Files:**
+- `packages/sdk-core/src/utils/checkpoint-http.ts` (NEW, ~155 lines) ✅
+- `packages/sdk-core/src/utils/index.ts` (MODIFY, +1 line) ✅
+
+**Success Criteria:**
+- [x] HTTP client fetches checkpoint index correctly
+- [x] 404 returns null (not error)
+- [x] Network errors throw descriptive error
+- [x] Response validated before returning
+- [x] All 10 HTTP client tests pass (exceeded target of 6)
+
+**Test Results:** ✅ **10/10 tests passing**
+
+---
+
+### Sub-phase 7.2: Update Recovery Flow to Use HTTP API
+
+**Goal**: Modify `recoverFromCheckpoints()` to use HTTP API instead of S5 path.
+
+**Line Budget**: 60 lines (40 implementation + 20 tests)
+
+#### Tasks
+- [ ] Write test: `recoverFromCheckpoints()` uses HTTP API when hostUrl provided
+- [ ] Write test: `recoverFromCheckpoints()` fetches deltas from S5 using CIDs
+- [ ] Write test: `recoverFromCheckpoints()` works end-to-end with HTTP + S5
+- [ ] Write test: `recoverFromCheckpoints()` handles node offline gracefully
+- [ ] Update `recoverFromCheckpointsFlow()` to accept hostUrl parameter
+- [ ] Replace S5 path fetch with HTTP API call
+- [ ] Keep S5 CID fetch for delta content (unchanged)
+- [ ] Update SessionManager to pass hostUrl to recovery flow
+- [ ] Add hostUrl to session state (store on session start)
+
+**Test Files:**
+- `packages/sdk-core/tests/unit/checkpoint-recovery.test.ts` (EXTEND, +60 lines)
+
+**Implementation Files:**
+- `packages/sdk-core/src/utils/checkpoint-recovery.ts` (MODIFY, +30 lines)
+- `packages/sdk-core/src/managers/SessionManager.ts` (MODIFY, +15 lines)
+
+**Success Criteria:**
+- [ ] Recovery uses HTTP API for index discovery
+- [ ] Deltas still fetched from S5 via CID
+- [ ] End-to-end flow works correctly
+- [ ] Node offline produces clear error message
+- [ ] All 4 new tests pass
+
+---
+
+### Sub-phase 7.3: Node HTTP Endpoint Specification
+
+**Goal**: Document HTTP endpoint requirements for node developer.
+
+**Line Budget**: Documentation only
+
+#### Tasks
+- [ ] Update `docs/NODE_CHECKPOINT_SPEC.md` with HTTP endpoint section:
+  - [ ] Endpoint: `GET /v1/checkpoints/{sessionId}`
+  - [ ] Response format (CheckpointIndex JSON)
+  - [ ] Status codes (200, 404, 500)
+  - [ ] CORS headers (if needed)
+  - [ ] Rate limiting considerations
+- [ ] Add example request/response
+- [ ] Add error response format
+- [ ] Document authentication (if any - likely none for public read)
+
+**Implementation Files:**
+- `docs/NODE_CHECKPOINT_SPEC.md` (MODIFY, +100 lines)
+
+**Success Criteria:**
+- [ ] HTTP endpoint fully documented
+- [ ] Request/response examples provided
+- [ ] Error cases documented
+- [ ] Ready for node developer implementation
+
+---
+
+### Sub-phase 7.4: Node HTTP Endpoint Implementation (Rust)
+
+**Goal**: Implement checkpoint HTTP endpoint in node.
+
+**Line Budget**: ~60 lines Rust
+
+**Note**: This sub-phase is implemented by node developer, documented here for completeness.
+
+#### Tasks
+- [ ] Add route: `GET /v1/checkpoints/{session_id}`
+- [ ] Query checkpoint store for session
+- [ ] Return JSON checkpoint index
+- [ ] Handle 404 when no checkpoints exist
+- [ ] Add to existing Axum router
+
+**Implementation Files (Node repo):**
+- `src/api/checkpoints.rs` (NEW, ~60 lines)
+- `src/api/server.rs` (MODIFY, add route)
+
+**Pseudocode:**
+```rust
+// GET /v1/checkpoints/{session_id}
+async fn get_checkpoints(
+    Path(session_id): Path<u64>,
+    State(checkpoint_store): State<Arc<CheckpointStore>>,
+) -> impl IntoResponse {
+    match checkpoint_store.get_index(session_id) {
+        Some(index) => Json(index).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+```
+
+**Success Criteria:**
+- [ ] Endpoint returns checkpoint index
+- [ ] 404 when no checkpoints
+- [ ] JSON format matches SDK expectations
+
+---
+
+### Sub-phase 7.5: E2E Testing with HTTP API
+
+**Goal**: Test full recovery flow with real node HTTP endpoint.
+
+**Line Budget**: 40 lines (test harness modifications)
+
+#### Tasks
+- [ ] Update `testRecovery()` in chat-context-rag-demo.tsx to use HTTP API
+- [ ] Test: Start session → Stream → Click "Test Recovery" → Verify checkpoints found
+- [ ] Verify recovered message count matches node's published checkpoints
+- [ ] Verify token count accuracy
+- [ ] Document updated manual test procedure
+
+**Implementation Files:**
+- `apps/harness/pages/chat-context-rag-demo.tsx` (MODIFY, +20 lines)
+
+**Success Criteria:**
+- [ ] Recovery finds checkpoints via HTTP API
+- [ ] Deltas fetched from S5 successfully
+- [ ] Messages recovered correctly
+- [ ] Token count matches expectations
+- [ ] Manual test passes end-to-end
+
+**Updated Manual Test Procedure:**
+1. Navigate to http://localhost:3000/chat-context-rag-demo
+2. Connect wallet and start session
+3. Send 2-3 prompts (generate ~2000+ tokens for checkpoints)
+4. Wait for node to publish checkpoints (observe node logs)
+5. Click "Test Recovery" button
+6. Verify system message shows recovered messages and token count
+7. Verify messages match what was streamed
+
+---
+
+### Sub-phase 7.6: Integration Test Suite
+
+**Goal**: Add automated integration tests for HTTP-based recovery.
+
+**Line Budget**: 100 lines (tests only)
+
+#### Tasks
+- [ ] Write test: HTTP API returns checkpoint index correctly
+- [ ] Write test: Full flow - HTTP index → S5 delta fetch → merge → verify
+- [ ] Write test: Recovery handles node returning empty checkpoints
+- [ ] Write test: Recovery handles network timeout to node
+- [ ] Write test: Delta CID fetch from S5 works correctly
+- [ ] Mock HTTP responses for node endpoint
+- [ ] Verify proof hash matches on-chain (existing tests)
+
+**Test Files:**
+- `packages/sdk-core/tests/integration/checkpoint-http-recovery.test.ts` (NEW, ~150 lines)
+
+**Success Criteria:**
+- [ ] All HTTP integration tests pass
+- [ ] Full recovery flow tested with HTTP API
+- [ ] Error cases handled gracefully
+- [ ] No flaky tests
+
+---
+
+## Phase 7 Summary
+
+| Sub-phase | Description | SDK Changes | Node Changes | Tests |
+|-----------|-------------|-------------|--------------|-------|
+| 7.1 | HTTP client utility | 80 lines | 0 | 6 |
+| 7.2 | Update recovery flow | 45 lines | 0 | 4 |
+| 7.3 | Node endpoint spec | Docs only | 0 | 0 |
+| 7.4 | Node implementation | 0 | ~60 lines | 0 |
+| 7.5 | E2E testing | 20 lines | 0 | Manual |
+| 7.6 | Integration tests | 150 lines | 0 | 7 |
+| **Total** | | **~295 lines** | **~60 lines** | **17+** |
+
+---
+
 ## Files Changed Summary
 
 | File | Phase | Lines Added | Lines Modified |
@@ -591,15 +854,19 @@ Total: ~220KB                        Total: ~40KB (80% reduction!)
 | `src/types/index.ts` | 1.1 | ~4 | 0 |
 | `src/interfaces/ISessionManager.ts` | 1.2 | ~15 | 0 |
 | `src/utils/signature.ts` | 2.1-2.2 | ~55 | 0 (new) |
-| `src/utils/index.ts` | 2.1 | ~1 | 0 |
-| `src/managers/SessionManager.ts` | 3.1-3.5 | ~225 | 0 |
+| `src/utils/index.ts` | 2.1, 7.1 | ~2 | 0 |
+| `src/managers/SessionManager.ts` | 3.1-3.5, 7.2 | ~240 | 0 |
+| `src/utils/checkpoint-http.ts` | 7.1 | ~80 | 0 (new) |
+| `src/utils/checkpoint-recovery.ts` | 3.1-3.5, 7.2 | ~350 | +30 |
 | `tests/unit/checkpoint-types.test.ts` | 1.1-1.2 | ~60 | 0 (new) |
 | `tests/unit/signature-verification.test.ts` | 2.1-2.2 | ~140 | 0 (new) |
-| `tests/unit/checkpoint-recovery.test.ts` | 3.1-3.5 | ~450 | 0 (new) |
+| `tests/unit/checkpoint-recovery.test.ts` | 3.1-3.5, 7.2 | ~510 | 0 (new) |
+| `tests/unit/checkpoint-http.test.ts` | 7.1 | ~120 | 0 (new) |
 | `tests/integration/checkpoint-recovery.test.ts` | 5.1 | ~250 | 0 (new) |
-| `docs/NODE_CHECKPOINT_SPEC.md` | 4.1 | ~200 | 0 (new) |
-| `apps/harness/pages/chat-context-rag-demo.tsx` | 5.2 | ~50 | 0 |
-| **Total** | | **~1490** | **0** |
+| `tests/integration/checkpoint-http-recovery.test.ts` | 7.6 | ~150 | 0 (new) |
+| `docs/NODE_CHECKPOINT_SPEC.md` | 4.1, 7.3 | ~300 | +100 |
+| `apps/harness/pages/chat-context-rag-demo.tsx` | 5.2, 7.5 | ~70 | 0 |
+| **Total** | | **~1785** | **+130** |
 
 ---
 
@@ -607,11 +874,13 @@ Total: ~220KB                        Total: ~40KB (80% reduction!)
 
 | Test File | Tests | Status |
 |-----------|-------|--------|
-| `checkpoint-types.test.ts` | ~8 | [ ] |
-| `signature-verification.test.ts` | ~9 | [ ] |
-| `checkpoint-recovery.test.ts` | ~23 | [ ] |
-| `checkpoint-recovery.test.ts` (integration) | ~6 | [ ] |
-| **Total** | **~46** | [ ] |
+| `checkpoint-types.test.ts` | 8 | ✅ |
+| `signature-verification.test.ts` | 14 | ✅ |
+| `checkpoint-recovery.test.ts` (unit) | 22 | ✅ |
+| `checkpoint-recovery.test.ts` (integration) | 7 | ✅ |
+| `checkpoint-http.test.ts` (unit) | 6 | [ ] Phase 7.1 |
+| `checkpoint-http-recovery.test.ts` (integration) | 7 | [ ] Phase 7.6 |
+| **Total** | **~64** | **51/64** |
 
 ---
 
@@ -674,10 +943,12 @@ Mitigation:
 
 | Dependency | Status | Blocker? |
 |------------|--------|----------|
-| SDK Phase 1-3 | Not started | No |
-| Node checkpoint publishing | Not started | Yes (for E2E tests) |
-| S5 storage access | Available | No |
-| Contract proof query | Available | No |
+| SDK Phase 1-5 | ✅ Complete | No |
+| Node checkpoint publishing | ✅ Complete (v8.11.0) | No |
+| S5 storage access | ✅ Available | No |
+| Contract proof query | ✅ Available | No |
+| **Node HTTP endpoint** | ❌ Not started | **Yes** (for Phase 7.5 E2E) |
+| SDK HTTP client | Not started | No (Phase 7.1) |
 
 ---
 
@@ -699,3 +970,18 @@ Mitigation:
 - Incremental index fetching (pagination)
 - Cross-session checkpoint aggregation
 - Checkpoint caching in SDK
+- Node-offline recovery (would require caching CIDs locally)
+
+---
+
+## Lessons Learned
+
+### S5 Namespace Isolation (Phase 5.2 → Phase 7)
+
+**Attempted Approach**: SDK fetches checkpoint index from S5 path `home/checkpoints/{hostAddress}/{sessionId}/index.json`
+
+**Why It Failed**: S5's `home/` directory is per-user (private namespace). The node uploads to its own `home/`, but the SDK queries its own (different) `home/`. They cannot see each other's files.
+
+**Solution**: HTTP API (Phase 7). Node exposes checkpoint index via HTTP, SDK queries it, then fetches deltas from S5 using globally-addressable CIDs.
+
+**Key Insight**: CIDs are globally addressable on S5 (content-addressed), but paths like `home/...` are user-specific (namespace-addressed).
