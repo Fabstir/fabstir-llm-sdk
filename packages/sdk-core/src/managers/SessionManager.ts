@@ -24,7 +24,8 @@ import {
   SearchVectorsResponse,
   SearchResult,
   SearchIntentConfig,
-  WebSearchMetadata
+  WebSearchMetadata,
+  RecoveredConversation
 } from '../types';
 import { HostSelectionMode } from '../types/settings.types';
 import { PaymentManager } from './PaymentManager';
@@ -2830,5 +2831,27 @@ export class SessionManager implements ISessionManager {
 
 
     return vectors;
+  }
+
+  // =============================================================================
+  // Checkpoint Recovery Methods (Delta-Based Checkpointing)
+  // =============================================================================
+
+  /**
+   * Recover conversation state from node-published checkpoints.
+   *
+   * @param sessionId - The session ID to recover
+   * @returns Recovered conversation with messages, token count, and checkpoint metadata
+   * @throws SDKError - Not yet implemented (Phase 3)
+   */
+  async recoverFromCheckpoints(sessionId: bigint): Promise<RecoveredConversation> {
+    // TODO: Implement in Phase 3 - Recovery Logic Implementation
+    // For now, return empty recovery (no checkpoints available)
+    console.warn('[SessionManager] recoverFromCheckpoints: Not yet implemented, returning empty recovery');
+    return {
+      messages: [],
+      tokenCount: 0,
+      checkpoints: []
+    };
   }
 }

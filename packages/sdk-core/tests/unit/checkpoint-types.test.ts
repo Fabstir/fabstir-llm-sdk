@@ -14,6 +14,7 @@ import type {
   RecoveredConversation,
   Message
 } from '../../src/types';
+import type { ISessionManager } from '../../src/interfaces/ISessionManager';
 
 describe('Checkpoint Types', () => {
   describe('CheckpointDelta', () => {
@@ -168,6 +169,59 @@ describe('Checkpoint Types', () => {
       expect(empty.messages).toEqual([]);
       expect(empty.tokenCount).toBe(0);
       expect(empty.checkpoints).toEqual([]);
+    });
+  });
+});
+
+describe('ISessionManager Interface Extension', () => {
+  describe('recoverFromCheckpoints method', () => {
+    it('should include recoverFromCheckpoints method in interface', () => {
+      // This test verifies the method exists in the interface
+      // by creating a mock that satisfies the interface
+      const mockSessionManager: Pick<ISessionManager, 'recoverFromCheckpoints'> = {
+        recoverFromCheckpoints: async (sessionId: bigint): Promise<RecoveredConversation> => {
+          return {
+            messages: [],
+            tokenCount: 0,
+            checkpoints: []
+          };
+        }
+      };
+
+      expect(mockSessionManager.recoverFromCheckpoints).toBeDefined();
+      expect(typeof mockSessionManager.recoverFromCheckpoints).toBe('function');
+    });
+
+    it('should have correct method signature: (sessionId: bigint) => Promise<RecoveredConversation>', async () => {
+      // Create a mock implementation that matches the expected signature
+      const mockRecoverFromCheckpoints = async (sessionId: bigint): Promise<RecoveredConversation> => {
+        // Verify sessionId is bigint
+        expect(typeof sessionId).toBe('bigint');
+
+        return {
+          messages: [
+            { role: 'user', content: 'Hello', timestamp: 1000 },
+            { role: 'assistant', content: 'Hi!', timestamp: 2000 }
+          ],
+          tokenCount: 1000,
+          checkpoints: [
+            {
+              index: 0,
+              proofHash: '0xproof',
+              deltaCID: 's5://delta',
+              tokenRange: [0, 1000],
+              timestamp: 1000
+            }
+          ]
+        };
+      };
+
+      // Call with bigint and verify return type
+      const result = await mockRecoverFromCheckpoints(123n);
+
+      expect(result.messages).toHaveLength(2);
+      expect(result.tokenCount).toBe(1000);
+      expect(result.checkpoints).toHaveLength(1);
     });
   });
 });

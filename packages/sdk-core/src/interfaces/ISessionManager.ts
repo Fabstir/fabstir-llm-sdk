@@ -6,7 +6,7 @@
  * Browser-compatible session management
  */
 
-import { SessionConfig, SessionJob, CheckpointProof } from '../types';
+import { SessionConfig, SessionJob, CheckpointProof, RecoveredConversation } from '../types';
 import type { SearchApiResponse } from '../types/web-search.types';
 
 export interface ISessionManager {
@@ -138,4 +138,40 @@ export interface ISessionManager {
     query: string,
     options?: { numResults?: number; chainId?: number }
   ): Promise<SearchApiResponse>;
+
+  // =============================================================================
+  // Checkpoint Recovery Methods (Delta-Based Checkpointing)
+  // =============================================================================
+
+  /**
+   * Recover conversation state from node-published checkpoints.
+   *
+   * When a session times out or disconnects mid-stream, this method fetches
+   * checkpoint data published by the host node and reconstructs the conversation
+   * up to the last proven checkpoint.
+   *
+   * The recovery process:
+   * 1. Fetches checkpoint index from host's S5 storage
+   * 2. Verifies host signature on the index
+   * 3. Verifies each checkpoint's proofHash against on-chain proofs
+   * 4. Fetches and verifies each delta
+   * 5. Merges deltas into a complete conversation
+   * 6. Saves recovered conversation to SDK's S5 storage
+   *
+   * @param sessionId - The session ID to recover
+   * @returns Recovered conversation with messages, token count, and checkpoint metadata
+   * @throws SDKError with code 'SESSION_NOT_FOUND' if session doesn't exist
+   * @throws SDKError with code 'INVALID_INDEX_SIGNATURE' if host signature invalid
+   * @throws SDKError with code 'PROOF_HASH_MISMATCH' if checkpoint doesn't match on-chain
+   * @throws SDKError with code 'INVALID_DELTA_SIGNATURE' if delta signature invalid
+   *
+   * @example
+   * ```typescript
+   * // After a session timeout
+   * const recovered = await sessionManager.recoverFromCheckpoints(sessionId);
+   * console.log(`Recovered ${recovered.tokenCount} tokens`);
+   * console.log(`${recovered.messages.length} messages recovered`);
+   * ```
+   */
+  recoverFromCheckpoints(sessionId: bigint): Promise<RecoveredConversation>;
 }
