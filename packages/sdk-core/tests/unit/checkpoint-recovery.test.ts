@@ -887,3 +887,280 @@ describe('Recover From Checkpoints (Full Flow)', () => {
     expect(result.tokenCount).toBe(2000);
   });
 });
+
+/**
+ * Sub-phase 7.2: HTTP-Based Recovery Flow Tests
+ *
+ * Tests for recovering checkpoints using HTTP API instead of S5 path.
+ * This addresses the S5 namespace isolation issue where SDK cannot
+ * access node's home/ directory.
+ */
+describe('HTTP-Based Recovery Flow', () => {
+  // Mock fetch for HTTP requests
+  const mockFetch = vi.fn();
+
+  // Mock S5 client for delta fetching (CID-based, still works)
+  let mockS5Client: {
+    fs: {
+      get: ReturnType<typeof vi.fn>;
+    };
+  };
+
+  // Mock StorageManager
+  let mockStorageManager: {
+    getS5Client: ReturnType<typeof vi.fn>;
+    isInitialized: ReturnType<typeof vi.fn>;
+  };
+
+  // Mock contract
+  let mockContract: {
+    getProofSubmission: ReturnType<typeof vi.fn>;
+  };
+
+  // Mock session info with hostUrl
+  let mockGetSessionInfo: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    global.fetch = mockFetch;
+
+    mockS5Client = {
+      fs: {
+        get: vi.fn(),
+      },
+    };
+
+    mockStorageManager = {
+      getS5Client: vi.fn().mockReturnValue(mockS5Client),
+      isInitialized: vi.fn().mockReturnValue(true),
+    };
+
+    mockContract = {
+      getProofSubmission: vi.fn(),
+    };
+
+    mockGetSessionInfo = vi.fn();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should use HTTP API when hostUrl is provided', async () => {
+    // Arrange
+    const testHostAddress = '0x1234567890123456789012345678901234567890';
+    const testHostUrl = 'http://localhost:8080';
+
+    mockGetSessionInfo.mockResolvedValue({
+      hostAddress: testHostAddress,
+      hostUrl: testHostUrl,
+      status: 'active',
+    });
+
+    // Mock HTTP response with checkpoint index
+    const checkpointIndex: CheckpointIndex = {
+      sessionId: '123',
+      hostAddress: testHostAddress,
+      checkpoints: [
+        {
+          index: 0,
+          proofHash: '0xproof1',
+          deltaCID: 's5://delta1',
+          tokenRange: [0, 1000] as [number, number],
+          timestamp: 1000,
+        },
+      ],
+      hostSignature: '0xsig',
+    };
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => checkpointIndex,
+    });
+
+    // Mock delta from S5 (via CID - still works)
+    const delta: CheckpointDelta = {
+      sessionId: '123',
+      checkpointIndex: 0,
+      proofHash: '0xproof1',
+      startToken: 0,
+      endToken: 1000,
+      messages: [
+        { role: 'user', content: 'Hello', timestamp: 1000 },
+        { role: 'assistant', content: 'Hi!', timestamp: 2000 },
+      ],
+      hostSignature: '0xdeltasig',
+    };
+    mockS5Client.fs.get.mockResolvedValueOnce(delta);
+
+    // Mock on-chain proof
+    mockContract.getProofSubmission.mockResolvedValue({
+      proofHash: '0xproof1',
+      tokensClaimed: 1000n,
+      timestamp: 1000n,
+      verified: true,
+    });
+
+    // Act
+    const { recoverFromCheckpointsFlowWithHttp } = await import('../../src/utils/checkpoint-recovery');
+    const result = await recoverFromCheckpointsFlowWithHttp(
+      mockStorageManager as any,
+      mockContract as any,
+      mockGetSessionInfo,
+      BigInt(123)
+    );
+
+    // Assert
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:8080/v1/checkpoints/123',
+      expect.any(Object)
+    );
+    expect(result.messages).toHaveLength(2);
+    expect(result.tokenCount).toBe(1000);
+  });
+
+  it('should fetch deltas from S5 using CIDs after HTTP index fetch', async () => {
+    // Arrange
+    const testHostAddress = '0x1234567890123456789012345678901234567890';
+    const testHostUrl = 'http://localhost:8080';
+
+    mockGetSessionInfo.mockResolvedValue({
+      hostAddress: testHostAddress,
+      hostUrl: testHostUrl,
+      status: 'active',
+    });
+
+    // Mock checkpoint index with multiple deltas
+    const checkpointIndex: CheckpointIndex = {
+      sessionId: '123',
+      hostAddress: testHostAddress,
+      checkpoints: [
+        {
+          index: 0,
+          proofHash: '0xproof1',
+          deltaCID: 's5://bafybeig1',
+          tokenRange: [0, 1000] as [number, number],
+          timestamp: 1000,
+        },
+        {
+          index: 1,
+          proofHash: '0xproof2',
+          deltaCID: 's5://bafybeig2',
+          tokenRange: [1000, 2000] as [number, number],
+          timestamp: 2000,
+        },
+      ],
+      hostSignature: '0xsig',
+    };
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => checkpointIndex,
+    });
+
+    // Mock deltas from S5
+    const delta1: CheckpointDelta = {
+      sessionId: '123',
+      checkpointIndex: 0,
+      proofHash: '0xproof1',
+      startToken: 0,
+      endToken: 1000,
+      messages: [{ role: 'user', content: 'Hello', timestamp: 1000 }],
+      hostSignature: '0xsig1',
+    };
+
+    const delta2: CheckpointDelta = {
+      sessionId: '123',
+      checkpointIndex: 1,
+      proofHash: '0xproof2',
+      startToken: 1000,
+      endToken: 2000,
+      messages: [{ role: 'assistant', content: 'Hi there!', timestamp: 2000 }],
+      hostSignature: '0xsig2',
+    };
+
+    mockS5Client.fs.get
+      .mockResolvedValueOnce(delta1)
+      .mockResolvedValueOnce(delta2);
+
+    // Mock on-chain proofs
+    mockContract.getProofSubmission
+      .mockResolvedValueOnce({ proofHash: '0xproof1', tokensClaimed: 1000n, timestamp: 1000n, verified: true })
+      .mockResolvedValueOnce({ proofHash: '0xproof2', tokensClaimed: 1000n, timestamp: 2000n, verified: true });
+
+    // Act
+    const { recoverFromCheckpointsFlowWithHttp } = await import('../../src/utils/checkpoint-recovery');
+    const result = await recoverFromCheckpointsFlowWithHttp(
+      mockStorageManager as any,
+      mockContract as any,
+      mockGetSessionInfo,
+      BigInt(123)
+    );
+
+    // Assert: S5 should be called with CIDs for delta fetch
+    expect(mockS5Client.fs.get).toHaveBeenCalledWith('s5://bafybeig1');
+    expect(mockS5Client.fs.get).toHaveBeenCalledWith('s5://bafybeig2');
+    expect(result.messages).toHaveLength(2);
+    expect(result.tokenCount).toBe(2000);
+  });
+
+  it('should return empty recovery when HTTP returns 404', async () => {
+    // Arrange
+    const testHostAddress = '0x1234567890123456789012345678901234567890';
+    const testHostUrl = 'http://localhost:8080';
+
+    mockGetSessionInfo.mockResolvedValue({
+      hostAddress: testHostAddress,
+      hostUrl: testHostUrl,
+      status: 'active',
+    });
+
+    // Mock HTTP 404 response (no checkpoints)
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+    });
+
+    // Act
+    const { recoverFromCheckpointsFlowWithHttp } = await import('../../src/utils/checkpoint-recovery');
+    const result = await recoverFromCheckpointsFlowWithHttp(
+      mockStorageManager as any,
+      mockContract as any,
+      mockGetSessionInfo,
+      BigInt(123)
+    );
+
+    // Assert
+    expect(result.messages).toHaveLength(0);
+    expect(result.tokenCount).toBe(0);
+    expect(result.checkpoints).toHaveLength(0);
+  });
+
+  it('should throw NODE_UNREACHABLE when node is offline', async () => {
+    // Arrange
+    const testHostAddress = '0x1234567890123456789012345678901234567890';
+    const testHostUrl = 'http://localhost:8080';
+
+    mockGetSessionInfo.mockResolvedValue({
+      hostAddress: testHostAddress,
+      hostUrl: testHostUrl,
+      status: 'active',
+    });
+
+    // Mock network error (node offline)
+    mockFetch.mockRejectedValueOnce(new Error('Network request failed'));
+
+    // Act & Assert
+    const { recoverFromCheckpointsFlowWithHttp } = await import('../../src/utils/checkpoint-recovery');
+    await expect(
+      recoverFromCheckpointsFlowWithHttp(
+        mockStorageManager as any,
+        mockContract as any,
+        mockGetSessionInfo,
+        BigInt(123)
+      )
+    ).rejects.toThrow('CHECKPOINT_FETCH_FAILED');
+  });
+});

@@ -10,6 +10,7 @@
 
 import type { CheckpointIndex, CheckpointIndexEntry, CheckpointDelta, Message, RecoveredConversation } from '../types';
 import type { StorageManager } from '../managers/StorageManager';
+import { fetchCheckpointIndexFromNode } from './checkpoint-http';
 
 /**
  * Interface for contract with getProofSubmission method.
@@ -359,10 +360,20 @@ export function mergeDeltas(
 }
 
 /**
- * Session info getter type for recovery flow.
+ * Session info getter type for recovery flow (S5-based).
  */
 export type GetSessionInfoFn = (sessionId: bigint) => Promise<{
   hostAddress: string;
+  status: string;
+} | null>;
+
+/**
+ * Session info getter type for HTTP-based recovery flow.
+ * Includes hostUrl for HTTP API access.
+ */
+export type GetSessionInfoWithHostUrlFn = (sessionId: bigint) => Promise<{
+  hostAddress: string;
+  hostUrl: string;
   status: string;
 } | null>;
 
@@ -433,6 +444,100 @@ export async function recoverFromCheckpointsFlow(
   await verifyCheckpointIndex(index, sessionId, contract, hostAddress);
 
   // Step 4: Fetch and verify all deltas
+  const deltas: CheckpointDelta[] = [];
+  for (const checkpoint of index.checkpoints) {
+    const delta = await fetchAndVerifyDelta(
+      storageManager,
+      checkpoint.deltaCID,
+      hostAddress
+    );
+    deltas.push(delta);
+  }
+
+  // Step 5: Merge deltas into conversation
+  const { messages, tokenCount } = mergeDeltas(deltas);
+
+  // Step 6: Return recovered conversation with checkpoint metadata
+  return {
+    messages,
+    tokenCount,
+    checkpoints: index.checkpoints,
+  };
+}
+
+/**
+ * Execute the full checkpoint recovery flow using HTTP API.
+ *
+ * This function is similar to recoverFromCheckpointsFlow but uses the node's
+ * HTTP API to fetch the checkpoint index instead of S5 path. This is necessary
+ * because S5's home/ directory is per-user (private namespace), so the SDK
+ * cannot access the node's S5 storage directly.
+ *
+ * Flow:
+ * 1. Get session info (includes hostUrl)
+ * 2. Fetch checkpoint index via HTTP API: GET /v1/checkpoints/{sessionId}
+ * 3. Verify index signature and on-chain proofs
+ * 4. Fetch deltas from S5 using CIDs (globally addressable)
+ * 5. Merge deltas into conversation
+ * 6. Return recovered conversation
+ *
+ * @param storageManager - StorageManager instance with S5 client access
+ * @param contract - Contract instance for on-chain proof verification
+ * @param getSessionInfo - Function to get session info (includes hostUrl)
+ * @param sessionId - The session ID to recover
+ * @returns RecoveredConversation with messages, token count, and checkpoint metadata
+ * @throws Error with code 'SESSION_NOT_FOUND' if session doesn't exist
+ * @throws Error with code 'HOST_URL_MISSING' if hostUrl not in session info
+ * @throws Error with code 'CHECKPOINT_FETCH_FAILED' if HTTP fetch fails
+ * @throws Error with code 'INVALID_INDEX_SIGNATURE' if signature verification fails
+ * @throws Error with code 'PROOF_HASH_MISMATCH' if on-chain proof doesn't match
+ * @throws Error with code 'DELTA_FETCH_FAILED' if delta fetch fails
+ *
+ * @example
+ * ```typescript
+ * const result = await recoverFromCheckpointsFlowWithHttp(
+ *   storageManager,
+ *   contract,
+ *   (id) => sessionManager.getSessionInfoWithHostUrl(id),
+ *   BigInt(123)
+ * );
+ * console.log(`Recovered ${result.messages.length} messages`);
+ * ```
+ */
+export async function recoverFromCheckpointsFlowWithHttp(
+  storageManager: StorageManager,
+  contract: ProofQueryContract,
+  getSessionInfo: GetSessionInfoWithHostUrlFn,
+  sessionId: bigint
+): Promise<RecoveredConversation> {
+  // Step 1: Get session info to obtain host address and URL
+  const sessionInfo = await getSessionInfo(sessionId);
+  if (!sessionInfo) {
+    throw new Error(`SESSION_NOT_FOUND: Session ${sessionId} does not exist`);
+  }
+
+  const { hostAddress, hostUrl } = sessionInfo;
+
+  if (!hostUrl) {
+    throw new Error(`HOST_URL_MISSING: Session ${sessionId} has no hostUrl`);
+  }
+
+  // Step 2: Fetch checkpoint index via HTTP API
+  const index = await fetchCheckpointIndexFromNode(hostUrl, sessionId.toString());
+
+  // No checkpoints published - return empty recovery
+  if (!index) {
+    return {
+      messages: [],
+      tokenCount: 0,
+      checkpoints: [],
+    };
+  }
+
+  // Step 3: Verify index signature and on-chain proofs
+  await verifyCheckpointIndex(index, sessionId, contract, hostAddress);
+
+  // Step 4: Fetch and verify all deltas from S5 (via CID - globally addressable)
   const deltas: CheckpointDelta[] = [];
   for (const checkpoint of index.checkpoints) {
     const delta = await fetchAndVerifyDelta(
