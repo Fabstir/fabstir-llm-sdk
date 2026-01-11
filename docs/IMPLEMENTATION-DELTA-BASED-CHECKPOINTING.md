@@ -4,12 +4,12 @@
 
 Enable SDK recovery of conversation state from node-published checkpoints when sessions timeout or disconnect mid-stream. Uses delta-based storage to minimize S5 storage requirements while providing verifiable conversation recovery.
 
-## Status: Phase 1 Complete ✅
+## Status: Sub-phase 2.1 Complete
 
 **Priority**: Critical for MVP
 **SDK Version Target**: 1.9.0
 **Node Requirement**: Checkpoint publishing (new feature required)
-**Test Results**: 10/10 tests passing (Phase 1 complete)
+**Test Results**: 17/17 tests passing (Phase 1 + Sub-phase 2.1)
 
 ---
 
@@ -201,28 +201,32 @@ Total: ~220KB                        Total: ~40KB (80% reduction!)
 **Line Budget**: 60 lines (35 implementation + 25 tests)
 
 #### Tasks
-- [ ] Write test: `verifyHostSignature()` returns true for valid signature
-- [ ] Write test: `verifyHostSignature()` returns false for wrong signer
-- [ ] Write test: `verifyHostSignature()` returns false for tampered message
-- [ ] Write test: `verifyHostSignature()` handles hex string with/without 0x prefix
-- [ ] Write test: `verifyHostSignature()` throws on invalid signature format
-- [ ] Create `packages/sdk-core/src/utils/signature.ts`
-- [ ] Implement `verifyHostSignature(signature: string, message: string, expectedSigner: string): boolean`
-- [ ] Use ethers.js `verifyMessage()` for EIP-191 verification
-- [ ] Export from `utils/index.ts`
+- [x] Write test: `verifyHostSignature()` returns true for valid signature
+- [x] Write test: `verifyHostSignature()` returns false for wrong signer
+- [x] Write test: `verifyHostSignature()` returns false for tampered message
+- [x] Write test: `verifyHostSignature()` handles hex string with/without 0x prefix
+- [x] Write test: `verifyHostSignature()` throws on invalid signature format
+- [x] Write test: `verifyHostSignature()` handles JSON stringified data
+- [x] Write test: `verifyHostSignature()` handles bytes32 hash as message
+- [x] Create `packages/sdk-core/src/utils/signature.ts`
+- [x] Implement `verifyHostSignature(signature: string, message: string | Uint8Array, expectedSigner: string): boolean`
+- [x] Use ethers.js `verifyMessage()` for EIP-191 verification
+- [x] Export from `utils/index.ts`
 
 **Test Files:**
-- `packages/sdk-core/tests/unit/signature-verification.test.ts` (NEW, ~80 lines)
+- `packages/sdk-core/tests/unit/signature-verification.test.ts` (NEW, ~110 lines) ✅
 
 **Implementation Files:**
-- `packages/sdk-core/src/utils/signature.ts` (NEW, ~35 lines)
-- `packages/sdk-core/src/utils/index.ts` (MODIFY, +1 line)
+- `packages/sdk-core/src/utils/signature.ts` (NEW, ~70 lines) ✅
+- `packages/sdk-core/src/utils/index.ts` (MODIFY, +1 line) ✅
 
 **Success Criteria:**
-- [ ] Valid signatures verified correctly
-- [ ] Invalid signatures rejected
-- [ ] Edge cases handled (0x prefix, invalid format)
-- [ ] All 5 signature tests pass
+- [x] Valid signatures verified correctly
+- [x] Invalid signatures rejected
+- [x] Edge cases handled (0x prefix, invalid format)
+- [x] All 7 signature tests pass
+
+**Test Results:** ✅ **7/7 tests passing**
 
 ---
 
