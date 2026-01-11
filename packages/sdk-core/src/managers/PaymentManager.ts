@@ -498,6 +498,29 @@ export class PaymentManager implements IPaymentManager {
   }
 
   /**
+   * Get proof submission details for checkpoint recovery.
+   *
+   * @param sessionId - The session ID
+   * @param proofIndex - The proof index (0-based)
+   * @returns Proof submission details including proofHash, tokensClaimed, timestamp, verified
+   */
+  async getProofSubmission(
+    sessionId: bigint,
+    proofIndex: number
+  ): Promise<{
+    proofHash: string;
+    tokensClaimed: bigint;
+    timestamp: bigint;
+    verified: boolean;
+  }> {
+    if (!this.initialized) {
+      throw new SDKError('PaymentManager not initialized', 'PAYMENT_NOT_INITIALIZED');
+    }
+
+    return this.sessionJobManager.getProofSubmission(sessionId, proofIndex);
+  }
+
+  /**
    * Get job status (supports both regular jobs and session jobs)
    */
   async getJobStatus(jobId: bigint): Promise<any> {

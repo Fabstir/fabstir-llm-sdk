@@ -39,6 +39,7 @@ import { PricingValidationError } from '../errors/pricing-errors';
 import { WebSearchError } from '../errors/web-search-errors';
 import { bytesToHex } from '../crypto/utilities';
 import { analyzePromptForSearchIntent } from '../utils/search-intent-analyzer';
+import { recoverFromCheckpointsFlow } from '../utils/checkpoint-recovery';
 import type { SearchApiResponse, WebSearchStarted, WebSearchResults, WebSearchError as WebSearchErrorMsg } from '../types/web-search.types';
 
 /**
@@ -2840,18 +2841,72 @@ export class SessionManager implements ISessionManager {
   /**
    * Recover conversation state from node-published checkpoints.
    *
+   * This method orchestrates the full recovery flow:
+   * 1. Gets session info to obtain host address
+   * 2. Fetches checkpoint index from S5
+   * 3. Verifies signatures and on-chain proofs
+   * 4. Fetches and verifies all deltas
+   * 5. Merges deltas into a single conversation
+   *
    * @param sessionId - The session ID to recover
    * @returns Recovered conversation with messages, token count, and checkpoint metadata
-   * @throws SDKError - Not yet implemented (Phase 3)
+   * @throws SDKError with code 'SESSION_NOT_FOUND' if session doesn't exist
+   * @throws SDKError with code 'INVALID_INDEX_SIGNATURE' if signature verification fails
+   * @throws SDKError with code 'PROOF_HASH_MISMATCH' if on-chain proof doesn't match
+   * @throws SDKError with code 'DELTA_FETCH_FAILED' if delta fetch fails
    */
   async recoverFromCheckpoints(sessionId: bigint): Promise<RecoveredConversation> {
-    // TODO: Implement in Phase 3 - Recovery Logic Implementation
-    // For now, return empty recovery (no checkpoints available)
-    console.warn('[SessionManager] recoverFromCheckpoints: Not yet implemented, returning empty recovery');
-    return {
-      messages: [],
-      tokenCount: 0,
-      checkpoints: []
+    // Create session info getter that uses internal session state
+    const getSessionInfo = async (id: bigint): Promise<{
+      hostAddress: string;
+      status: string;
+    } | null> => {
+      const session = this.sessions.get(id.toString());
+      if (!session) {
+        return null;
+      }
+      return {
+        hostAddress: session.provider, // provider contains host address
+        status: session.status,
+      };
     };
+
+    // Create proof query contract adapter using PaymentManager
+    const proofContract = {
+      getProofSubmission: async (sid: bigint, proofIndex: number) => {
+        return this.paymentManager.getProofSubmission(sid, proofIndex);
+      },
+    };
+
+    try {
+      return await recoverFromCheckpointsFlow(
+        this.storageManager,
+        proofContract,
+        getSessionInfo,
+        sessionId
+      );
+    } catch (error: any) {
+      // Convert to SDKError if not already
+      if (error.message?.startsWith('SESSION_NOT_FOUND')) {
+        throw new SDKError(error.message, 'SESSION_NOT_FOUND');
+      }
+      if (error.message?.startsWith('INVALID_INDEX_SIGNATURE')) {
+        throw new SDKError(error.message, 'INVALID_INDEX_SIGNATURE');
+      }
+      if (error.message?.startsWith('PROOF_HASH_MISMATCH')) {
+        throw new SDKError(error.message, 'PROOF_HASH_MISMATCH');
+      }
+      if (error.message?.startsWith('DELTA_FETCH_FAILED')) {
+        throw new SDKError(error.message, 'DELTA_FETCH_FAILED');
+      }
+      if (error.message?.startsWith('INVALID_DELTA')) {
+        throw new SDKError(error.message, 'INVALID_DELTA_STRUCTURE');
+      }
+      throw new SDKError(
+        `Checkpoint recovery failed: ${error.message}`,
+        'RECOVERY_FAILED',
+        { originalError: error }
+      );
+    }
   }
 }

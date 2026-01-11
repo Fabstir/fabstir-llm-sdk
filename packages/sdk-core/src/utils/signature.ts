@@ -9,6 +9,7 @@
  */
 
 import { ethers } from 'ethers';
+import type { Message } from '../types';
 
 /**
  * Verify an EIP-191 signature against an expected signer address.
@@ -73,4 +74,63 @@ export function verifyHostSignature(
     // If recovery fails, signature is invalid
     throw new Error(`Signature verification failed: ${(error as Error).message}`);
   }
+}
+
+/**
+ * Recursively sort object keys for deterministic JSON stringification.
+ */
+function sortObjectKeys(obj: any): any {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(sortObjectKeys);
+  }
+  if (typeof obj === 'object') {
+    const sorted: any = {};
+    const keys = Object.keys(obj).sort();
+    for (const key of keys) {
+      sorted[key] = sortObjectKeys(obj[key]);
+    }
+    return sorted;
+  }
+  return obj;
+}
+
+/**
+ * Compute a deterministic keccak256 hash of checkpoint data.
+ *
+ * This function creates a hash that can be used to verify checkpoint integrity.
+ * The hash is deterministic - same input always produces the same output.
+ * Order of messages in the array matters (messages are not sorted).
+ *
+ * @param messages - Array of messages in the checkpoint
+ * @param tokenCount - Total token count at this checkpoint
+ * @returns keccak256 hash as hex string (0x prefix + 64 hex chars)
+ *
+ * @example
+ * ```typescript
+ * const hash = computeCheckpointHash(messages, 1000);
+ * // hash: "0x1234...abcd" (66 characters)
+ * ```
+ */
+export function computeCheckpointHash(messages: Message[], tokenCount: number): string {
+  // Create a deterministic data structure
+  // Messages are kept in order (order matters), but object keys are sorted
+  const data = {
+    messages: messages.map(msg => sortObjectKeys({
+      role: msg.role,
+      content: msg.content,
+      timestamp: msg.timestamp,
+      metadata: msg.metadata
+    })),
+    tokenCount
+  };
+
+  // Sort top-level keys and stringify
+  const sortedData = sortObjectKeys(data);
+  const jsonString = JSON.stringify(sortedData);
+
+  // Compute keccak256 hash
+  return ethers.keccak256(ethers.toUtf8Bytes(jsonString));
 }

@@ -14,6 +14,7 @@ export * from './host-web-search-capabilities';
 export * from './search-retry';
 export * from './ProofSigner';
 export * from './signature';
+export * from './checkpoint-recovery';
 
 // Export other utilities as they are created
 export { TransactionHelper } from '../contracts/TransactionHelper';

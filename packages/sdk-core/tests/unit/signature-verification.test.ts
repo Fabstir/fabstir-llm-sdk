@@ -7,7 +7,8 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { ethers } from 'ethers';
-import { verifyHostSignature } from '../../src/utils/signature';
+import { verifyHostSignature, computeCheckpointHash } from '../../src/utils/signature';
+import type { Message } from '../../src/types';
 
 describe('Signature Verification Utilities', () => {
   // Test wallet for signing
@@ -110,6 +111,91 @@ describe('Signature Verification Utilities', () => {
       // Verify using the hash bytes
       const isValid = verifyHostSignature(signature, ethers.getBytes(hash), testAddress);
       expect(isValid).toBe(true);
+    });
+  });
+
+  describe('computeCheckpointHash', () => {
+    it('should produce consistent hash for same input', () => {
+      const messages: Message[] = [
+        { role: 'user', content: 'Hello', timestamp: 1000 },
+        { role: 'assistant', content: 'Hi there!', timestamp: 2000 }
+      ];
+      const tokenCount = 1000;
+
+      const hash1 = computeCheckpointHash(messages, tokenCount);
+      const hash2 = computeCheckpointHash(messages, tokenCount);
+
+      expect(hash1).toBe(hash2);
+    });
+
+    it('should produce different hash for different input', () => {
+      const messages1: Message[] = [
+        { role: 'user', content: 'Hello', timestamp: 1000 }
+      ];
+      const messages2: Message[] = [
+        { role: 'user', content: 'Goodbye', timestamp: 1000 }
+      ];
+
+      const hash1 = computeCheckpointHash(messages1, 1000);
+      const hash2 = computeCheckpointHash(messages2, 1000);
+
+      expect(hash1).not.toBe(hash2);
+    });
+
+    it('should produce different hash for different token count', () => {
+      const messages: Message[] = [
+        { role: 'user', content: 'Hello', timestamp: 1000 }
+      ];
+
+      const hash1 = computeCheckpointHash(messages, 1000);
+      const hash2 = computeCheckpointHash(messages, 2000);
+
+      expect(hash1).not.toBe(hash2);
+    });
+
+    it('should handle empty messages array', () => {
+      const hash = computeCheckpointHash([], 0);
+
+      // Should not throw and should return valid hash
+      expect(hash).toBeDefined();
+      expect(hash.startsWith('0x')).toBe(true);
+      expect(hash.length).toBe(66); // 0x + 64 hex chars
+    });
+
+    it('should match keccak256 format (bytes32 hex string)', () => {
+      const messages: Message[] = [
+        { role: 'user', content: 'Test message', timestamp: 1000 }
+      ];
+
+      const hash = computeCheckpointHash(messages, 500);
+
+      // keccak256 produces 32 bytes = 64 hex chars + 0x prefix
+      expect(hash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+    });
+
+    it('should be order-sensitive for messages', () => {
+      const msg1: Message = { role: 'user', content: 'First', timestamp: 1000 };
+      const msg2: Message = { role: 'assistant', content: 'Second', timestamp: 2000 };
+
+      const hash1 = computeCheckpointHash([msg1, msg2], 1000);
+      const hash2 = computeCheckpointHash([msg2, msg1], 1000);
+
+      expect(hash1).not.toBe(hash2);
+    });
+
+    it('should handle messages with metadata', () => {
+      const messagesWithMeta: Message[] = [
+        { role: 'user', content: 'Hello', timestamp: 1000, metadata: { key: 'value' } }
+      ];
+      const messagesWithoutMeta: Message[] = [
+        { role: 'user', content: 'Hello', timestamp: 1000 }
+      ];
+
+      const hash1 = computeCheckpointHash(messagesWithMeta, 1000);
+      const hash2 = computeCheckpointHash(messagesWithoutMeta, 1000);
+
+      // Metadata should affect the hash
+      expect(hash1).not.toBe(hash2);
     });
   });
 });
