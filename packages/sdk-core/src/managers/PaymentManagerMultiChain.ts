@@ -246,6 +246,26 @@ export class PaymentManager implements IPaymentManager {
     };
   }
 
+  /**
+   * Get proof submission details for checkpoint recovery.
+   *
+   * @param sessionId - The session/job ID
+   * @param proofIndex - Index of the proof submission (0-based)
+   * @returns Proof submission details including proofHash, tokensClaimed, timestamp, verified
+   */
+  async getProofSubmission(
+    sessionId: bigint,
+    proofIndex: number
+  ): Promise<{
+    proofHash: string;
+    tokensClaimed: bigint;
+    timestamp: bigint;
+    verified: boolean;
+  }> {
+    const wrapper = this.getWrapper(this.currentChainId);
+    return wrapper.getProofSubmission(sessionId, proofIndex);
+  }
+
   // Session Job Methods
 
   /**

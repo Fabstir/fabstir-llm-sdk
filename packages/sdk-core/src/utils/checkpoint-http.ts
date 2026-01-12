@@ -23,16 +23,22 @@ const DEFAULT_TIMEOUT_MS = 10000;
 
 /**
  * Validate that an object has the required CheckpointIndexEntry structure.
+ * Accepts both node formats: deltaCID (uppercase) and deltaCid (camelCase)
  */
 function isValidCheckpointEntry(entry: any): entry is CheckpointIndexEntry {
   if (!entry || typeof entry !== 'object') {
     return false;
   }
 
+  // Accept both deltaCID (node format) and deltaCid (SDK format)
+  const hasDeltaCid = typeof entry.deltaCid === 'string' || typeof entry.deltaCID === 'string';
+
   return (
     typeof entry.index === 'number' &&
     typeof entry.proofHash === 'string' &&
-    typeof entry.deltaCID === 'string' &&
+    hasDeltaCid &&
+    // proofCid is optional
+    (entry.proofCid === undefined || typeof entry.proofCid === 'string') &&
     Array.isArray(entry.tokenRange) &&
     entry.tokenRange.length === 2 &&
     typeof entry.tokenRange[0] === 'number' &&
@@ -43,19 +49,33 @@ function isValidCheckpointEntry(entry: any): entry is CheckpointIndexEntry {
 
 /**
  * Validate that an object has the required CheckpointIndex structure.
+ * Accepts both formats:
+ * - New: messagesSignature + checkpointsSignature
+ * - Legacy: hostSignature (node's current format)
  */
 function isValidCheckpointIndex(data: any): data is CheckpointIndex {
   if (!data || typeof data !== 'object') {
     return false;
   }
 
-  // Check required fields exist with correct types
+  // Check core required fields exist with correct types
   if (
     typeof data.sessionId !== 'string' ||
     typeof data.hostAddress !== 'string' ||
-    !Array.isArray(data.checkpoints) ||
-    typeof data.hostSignature !== 'string'
+    !Array.isArray(data.checkpoints)
   ) {
+    return false;
+  }
+
+  // Accept either signature format:
+  // - New SDK format: messagesSignature + checkpointsSignature
+  // - Legacy node format: hostSignature only
+  const hasNewSignatures =
+    typeof data.messagesSignature === 'string' &&
+    typeof data.checkpointsSignature === 'string';
+  const hasLegacySignature = typeof data.hostSignature === 'string';
+
+  if (!hasNewSignatures && !hasLegacySignature) {
     return false;
   }
 
@@ -67,6 +87,37 @@ function isValidCheckpointIndex(data: any): data is CheckpointIndex {
   }
 
   return true;
+}
+
+/**
+ * Normalize node response to SDK format.
+ * Converts:
+ * - deltaCID -> deltaCid
+ * - hostSignature -> messagesSignature + checkpointsSignature
+ */
+function normalizeCheckpointIndex(data: any): CheckpointIndex {
+  // Normalize checkpoint entries
+  const checkpoints = data.checkpoints.map((cp: any) => ({
+    index: cp.index,
+    proofHash: cp.proofHash,
+    // Normalize deltaCID -> deltaCid
+    deltaCid: cp.deltaCid || cp.deltaCID,
+    proofCid: cp.proofCid || cp.proofCID,
+    tokenRange: cp.tokenRange,
+    timestamp: cp.timestamp,
+  }));
+
+  // Normalize signatures - use hostSignature for both if new format not available
+  const messagesSignature = data.messagesSignature || data.hostSignature;
+  const checkpointsSignature = data.checkpointsSignature || data.hostSignature;
+
+  return {
+    sessionId: data.sessionId,
+    hostAddress: data.hostAddress,
+    checkpoints,
+    messagesSignature,
+    checkpointsSignature,
+  };
 }
 
 /**
@@ -89,7 +140,7 @@ function isValidCheckpointIndex(data: any): data is CheckpointIndex {
  * if (index) {
  *   console.log(`Found ${index.checkpoints.length} checkpoints`);
  *   for (const cp of index.checkpoints) {
- *     console.log(`  Checkpoint ${cp.index}: ${cp.deltaCID}`);
+ *     console.log(`  Checkpoint ${cp.index}: ${cp.deltaCid}`);
  *   }
  * }
  * ```
@@ -149,7 +200,8 @@ export async function fetchCheckpointIndexFromNode(
       );
     }
 
-    return data;
+    // Normalize to SDK format (handles deltaCID -> deltaCid, hostSignature -> messagesSignature)
+    return normalizeCheckpointIndex(data);
   } catch (error: any) {
     clearTimeout(timeoutId);
 

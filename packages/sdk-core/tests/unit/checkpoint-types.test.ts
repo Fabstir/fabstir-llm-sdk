@@ -67,14 +67,14 @@ describe('Checkpoint Types', () => {
       const entry: CheckpointIndexEntry = {
         index: 0,
         proofHash: '0xproof123',
-        deltaCID: 's5://bafybeig1234567890',
+        deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd1234567',
         tokenRange: [0, 1000],
         timestamp: 1704844800000
       };
 
       expect(entry.index).toBe(0);
       expect(entry.proofHash).toBe('0xproof123');
-      expect(entry.deltaCID).toBe('s5://bafybeig1234567890');
+      expect(entry.deltaCid).toBe('baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd1234567');
       expect(entry.tokenRange).toEqual([0, 1000]);
       expect(entry.timestamp).toBe(1704844800000);
     });
@@ -83,13 +83,26 @@ describe('Checkpoint Types', () => {
       const entry: CheckpointIndexEntry = {
         index: 5,
         proofHash: '0xhash',
-        deltaCID: 's5://cid',
+        deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdcid00',
         tokenRange: [5000, 6000],
         timestamp: Date.now()
       };
 
       expect(entry.tokenRange[0]).toBe(5000);
       expect(entry.tokenRange[1]).toBe(6000);
+    });
+
+    it('should accept optional proofCid field', () => {
+      const entry: CheckpointIndexEntry = {
+        index: 0,
+        proofHash: '0xproof123',
+        deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwddelta',
+        proofCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdproof',
+        tokenRange: [0, 1000],
+        timestamp: Date.now()
+      };
+
+      expect(entry.proofCid).toBe('baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdproof');
     });
   });
 
@@ -102,25 +115,27 @@ describe('Checkpoint Types', () => {
           {
             index: 0,
             proofHash: '0xproof1',
-            deltaCID: 's5://delta1',
+            deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000001',
             tokenRange: [0, 1000],
             timestamp: 1000
           },
           {
             index: 1,
             proofHash: '0xproof2',
-            deltaCID: 's5://delta2',
+            deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000002',
             tokenRange: [1000, 2000],
             timestamp: 2000
           }
         ],
-        hostSignature: '0xindexSig'
+        messagesSignature: '0xmsgSig',
+        checkpointsSignature: '0xcpSig'
       };
 
       expect(index.sessionId).toBe('123');
       expect(index.hostAddress).toContain('0x');
       expect(index.checkpoints).toHaveLength(2);
-      expect(index.hostSignature).toBe('0xindexSig');
+      expect(index.messagesSignature).toBe('0xmsgSig');
+      expect(index.checkpointsSignature).toBe('0xcpSig');
     });
 
     it('should accept empty checkpoints array', () => {
@@ -128,7 +143,8 @@ describe('Checkpoint Types', () => {
         sessionId: '789',
         hostAddress: '0xHost',
         checkpoints: [],
-        hostSignature: '0xsig'
+        messagesSignature: '0xmsgsig',
+        checkpointsSignature: '0xcpsig'
       };
 
       expect(index.checkpoints).toEqual([]);
@@ -147,7 +163,7 @@ describe('Checkpoint Types', () => {
           {
             index: 0,
             proofHash: '0xproof',
-            deltaCID: 's5://delta',
+            deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwddelta',
             tokenRange: [0, 1000],
             timestamp: 1000
           }
@@ -208,7 +224,7 @@ describe('ISessionManager Interface Extension', () => {
             {
               index: 0,
               proofHash: '0xproof',
-              deltaCID: 's5://delta',
+              deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwddelta',
               tokenRange: [0, 1000],
               timestamp: 1000
             }

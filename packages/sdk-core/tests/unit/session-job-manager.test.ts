@@ -51,14 +51,14 @@ describe('SessionJobManager - Security Audit Migration', () => {
         tokensClaimed: 100,
         proofHash: '0x' + 'ab'.repeat(32),
         signature: '0x' + 'cd'.repeat(65),
-        proofCID: 'bafybeigtest'
+        proofCID: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdtest0'
       };
 
       expect(params.sessionId).toBe(BigInt(1));
       expect(params.tokensClaimed).toBe(100);
       expect(params.proofHash).toHaveLength(66);
       expect(params.signature).toHaveLength(132);
-      expect(params.proofCID).toBe('bafybeigtest');
+      expect(params.proofCID).toBe('baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdtest0');
     });
 
     it('should NOT have old 4-param signature with bytes proof', async () => {
@@ -94,7 +94,7 @@ describe('SessionJobManager - Security Audit Migration', () => {
         tokensClaimed: 100,
         proofHash: '0x' + 'ab'.repeat(32),
         signature: '0x' + 'cd'.repeat(65),
-        proofCID: 'bafybeigtest'
+        proofCID: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdtest0'
       };
 
       // Old params should have 4 keys, new should have 5

@@ -106,7 +106,7 @@ describe('StorageManager', () => {
       // Mock getMetadata to return a CID
       mockS5Client.fs.getMetadata.mockResolvedValue({
         type: 'file',
-        cid: 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi'
+        cid: 'baagrujzuifhfw2dvqkhzzknwypin32xxaqir4kzyivjf63dzq2jq'
       });
       
       const cid = await storageManager.storeData(key, data, metadata);
@@ -191,20 +191,20 @@ describe('StorageManager', () => {
 
       mockS5Client.fs.list = vi.fn().mockResolvedValue(mockFiles);
       mockS5Client.fs.getMetadata = vi.fn()
-        .mockResolvedValueOnce({ type: 'file', cid: 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi', timestamp: 1000 })
-        .mockResolvedValueOnce({ type: 'file', cid: 'bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku', timestamp: 2000 });
+        .mockResolvedValueOnce({ type: 'file', cid: 'baagrujzuifhfw2dvqkhzzknwypin32xxaqir4kzyivjf63dzq2jq', timestamp: 1000 })
+        .mockResolvedValueOnce({ type: 'file', cid: 'beuzd6tczmzzybdm2u62mdtw35d2qedy4fe3eguc5nj3yjem6vo4a', timestamp: 2000 });
 
       const items = await storageManager.listUserData();
 
       expect(items).toHaveLength(2);
       expect(items[0]).toEqual({
         key: 'session-1',
-        cid: 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
+        cid: 'baagrujzuifhfw2dvqkhzzknwypin32xxaqir4kzyivjf63dzq2jq',
         timestamp: 1000
       });
       expect(items[1]).toEqual({
         key: 'session-2',
-        cid: 'bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku',
+        cid: 'beuzd6tczmzzybdm2u62mdtw35d2qedy4fe3eguc5nj3yjem6vo4a',
         timestamp: 2000
       });
     });
@@ -234,7 +234,7 @@ describe('StorageManager', () => {
       mockS5Client.fs.put.mockResolvedValue(undefined);
       mockS5Client.fs.getMetadata.mockResolvedValue({
         type: 'file',
-        cid: 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi'
+        cid: 'baagrujzuifhfw2dvqkhzzknwypin32xxaqir4kzyivjf63dzq2jq'
       });
       
       await storageManager.storeData('test-key', { data: 'test' });

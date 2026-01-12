@@ -22,14 +22,14 @@ describe('Proof Type Definitions - Security Audit Migration', () => {
         tokensClaimed: BigInt(100),
         proofHash: '0x' + '00'.repeat(32),
         signature: '0x' + '00'.repeat(65),
-        proofCID: 'bafybeigtest'
+        proofCID: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdtest0'
       };
 
       expect(params.sessionId).toBe(BigInt(1));
       expect(params.tokensClaimed).toBe(BigInt(100));
       expect(params.proofHash).toHaveLength(66); // 0x + 64 hex chars
       expect(params.signature).toHaveLength(132); // 0x + 130 hex chars (65 bytes)
-      expect(params.proofCID).toBe('bafybeigtest');
+      expect(params.proofCID).toBe('baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdtest0');
     });
   });
 

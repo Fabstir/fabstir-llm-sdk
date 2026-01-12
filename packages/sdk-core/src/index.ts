@@ -112,6 +112,20 @@ export {
   DepositAccountNotAvailableError
 } from './errors/ChainErrors';
 
+// Export S5 seed derivation utilities
+export {
+  deriveEntropyFromSignature,
+  entropyToS5Phrase,
+  getCachedSeed,
+  cacheSeed,
+  clearCachedSeed,
+  verifyCachedSeed,
+  getOrGenerateS5Seed,
+  generateS5SeedWithoutCache,
+  hasCachedSeed,
+  exportAllCachedSeeds
+} from './utils/s5-seed-derivation';
+
 // Export web search errors
 export { WebSearchError } from './errors/web-search-errors';
 

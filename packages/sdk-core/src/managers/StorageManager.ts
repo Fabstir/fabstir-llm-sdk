@@ -164,6 +164,51 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
+   * Fetch content by CID (content-addressed retrieval) from the S5 network.
+   * Used for checkpoint delta recovery where deltas are stored by CID only.
+   *
+   * This method downloads directly from the S5 P2P network using the raw
+   * downloadBlobAsBytes API, bypassing local filesystem path lookup.
+   * This is necessary for retrieving content uploaded by other users (e.g., nodes).
+   *
+   * @param cid - The S5 CID string (e.g., "baaaqeayea...")
+   * @returns The content stored at the CID (auto-decoded from CBOR/JSON)
+   * @throws Error if CID not found or S5 client not available
+   */
+  async getByCID(cid: string): Promise<any> {
+    if (!this.s5Client) {
+      throw new Error('S5 client not available');
+    }
+
+    // Use downloadByCID API (v0.9.0-beta.7 - includes auth headers fix)
+    // This fetches from configured portals with automatic fallback and BLAKE3 hash verification
+    const rawBytes = await this.s5Client.downloadByCID(cid);
+
+    // Decode the data following S5.js fs.get() pattern:
+    // 1. Try CBOR first
+    // 2. If that fails, try JSON
+    // 3. If that fails, return as-is
+    try {
+      const { decode } = await import('cbor-x');
+      const decoded = decode(rawBytes);
+      // Convert Map to plain object if needed (CBOR can return Map)
+      if (decoded instanceof Map) {
+        return Object.fromEntries(decoded);
+      }
+      return decoded;
+    } catch {
+      // If CBOR fails, try JSON
+      try {
+        const text = new TextDecoder().decode(rawBytes);
+        return JSON.parse(text);
+      } catch {
+        // If JSON fails, return raw bytes
+        return rawBytes;
+      }
+    }
+  }
+
+  /**
    * Initialize storage with S5 seed
    */
   async initialize(seed: string, userAddress?: string): Promise<void> {

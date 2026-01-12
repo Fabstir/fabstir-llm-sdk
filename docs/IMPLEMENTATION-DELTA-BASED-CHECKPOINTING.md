@@ -4,14 +4,14 @@
 
 Enable SDK recovery of conversation state from node-published checkpoints when sessions timeout or disconnect mid-stream. Uses delta-based storage to minimize S5 storage requirements while providing verifiable conversation recovery.
 
-## Status: Phase 7 In Progress 🔄
+## Status: Phase 7 In Progress 🔄 (Sub-phases 7.1-7.3 Complete)
 
 **Priority**: Critical for MVP
 **SDK Version Target**: 1.9.0
-**Node Requirement**: Checkpoint publishing ✅ (Node v8.11.0 ready) + HTTP endpoint (Phase 7)
-**Test Results**: 53/53 tests passing (Phase 1-3 unit + Phase 5.1 integration)
-**Documentation**: NODE_CHECKPOINT_SPEC.md ready for node developer
-**Blocker Found**: S5 namespace isolation - SDK cannot access node's `home/` directory (Phase 7 addresses this)
+**Node Requirement**: Checkpoint publishing ✅ (Node v8.11.0 ready) + HTTP endpoint (Phase 7.4 pending)
+**Test Results**: 46/46 tests passing (10 HTTP + 36 recovery)
+**Documentation**: NODE_CHECKPOINT_SPEC.md v1.1.0 - HTTP endpoint spec added
+**Blocker Found**: S5 namespace isolation - SDK cannot access node's `home/` directory (addressed by HTTP API)
 
 ---
 
@@ -705,31 +705,32 @@ Node exposes an HTTP endpoint that returns the checkpoint index (including delta
 
 ---
 
-### Sub-phase 7.3: Node HTTP Endpoint Specification
+### Sub-phase 7.3: Node HTTP Endpoint Specification ✅
 
 **Goal**: Document HTTP endpoint requirements for node developer.
 
 **Line Budget**: Documentation only
 
 #### Tasks
-- [ ] Update `docs/NODE_CHECKPOINT_SPEC.md` with HTTP endpoint section:
-  - [ ] Endpoint: `GET /v1/checkpoints/{sessionId}`
-  - [ ] Response format (CheckpointIndex JSON)
-  - [ ] Status codes (200, 404, 500)
-  - [ ] CORS headers (if needed)
-  - [ ] Rate limiting considerations
-- [ ] Add example request/response
-- [ ] Add error response format
-- [ ] Document authentication (if any - likely none for public read)
+- [x] Update `docs/NODE_CHECKPOINT_SPEC.md` with HTTP endpoint section:
+  - [x] Endpoint: `GET /v1/checkpoints/{sessionId}`
+  - [x] Response format (CheckpointIndex JSON)
+  - [x] Status codes (200, 404, 500)
+  - [x] CORS headers (if needed)
+  - [x] Rate limiting considerations (none for MVP)
+- [x] Add example request/response
+- [x] Add error response format
+- [x] Document authentication (if any - none, public read)
+- [x] Add implementation notes from node developer (CID format, JSON key ordering, signature verification)
 
 **Implementation Files:**
-- `docs/NODE_CHECKPOINT_SPEC.md` (MODIFY, +100 lines)
+- `docs/NODE_CHECKPOINT_SPEC.md` (MODIFIED, +260 lines)
 
 **Success Criteria:**
-- [ ] HTTP endpoint fully documented
-- [ ] Request/response examples provided
-- [ ] Error cases documented
-- [ ] Ready for node developer implementation
+- [x] HTTP endpoint fully documented
+- [x] Request/response examples provided
+- [x] Error cases documented
+- [x] Ready for node developer implementation
 
 ---
 

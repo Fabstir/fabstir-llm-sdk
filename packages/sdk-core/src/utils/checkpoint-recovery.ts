@@ -48,7 +48,8 @@ function isValidCheckpointIndex(data: any): data is CheckpointIndex {
     typeof data.sessionId !== 'string' ||
     typeof data.hostAddress !== 'string' ||
     !Array.isArray(data.checkpoints) ||
-    typeof data.hostSignature !== 'string'
+    typeof data.messagesSignature !== 'string' ||
+    typeof data.checkpointsSignature !== 'string'
   ) {
     return false;
   }
@@ -58,7 +59,9 @@ function isValidCheckpointIndex(data: any): data is CheckpointIndex {
     if (
       typeof checkpoint.index !== 'number' ||
       typeof checkpoint.proofHash !== 'string' ||
-      typeof checkpoint.deltaCID !== 'string' ||
+      typeof checkpoint.deltaCid !== 'string' ||
+      // proofCid is optional
+      (checkpoint.proofCid !== undefined && typeof checkpoint.proofCid !== 'string') ||
       !Array.isArray(checkpoint.tokenRange) ||
       checkpoint.tokenRange.length !== 2 ||
       typeof checkpoint.timestamp !== 'number'
@@ -171,8 +174,9 @@ export async function verifyCheckpointIndex(
   const normalizedIndexHost = index.hostAddress.toLowerCase();
 
   // Verify host address matches (simplified signature verification)
-  // Note: Full EIP-191 signature verification would verify hostSignature
-  // against the stringified checkpoints, but for now we verify the host address matches
+  // Note: Full EIP-191 signature verification would verify messagesSignature
+  // and checkpointsSignature against their respective content, but for now
+  // we verify the host address matches
   if (normalizedExpected !== normalizedIndexHost) {
     throw new Error(
       `INVALID_INDEX_SIGNATURE: Host address mismatch. Expected ${normalizedExpected}, got ${normalizedIndexHost}`
@@ -234,23 +238,49 @@ function isValidCheckpointDelta(data: any): data is CheckpointDelta {
 }
 
 /**
+ * Check if a string is a valid S5 CID format (multibase encoded).
+ * S5 CIDs come in two forms:
+ * - Raw hash CID (pathToCID): ~53 chars, e.g., "baaa..."
+ * - BlobIdentifier CID (pathToBlobCID): ~59-65 chars, e.g., "blobb..." (includes file size)
+ * Valid formats: b... (base32), z... (base58btc), m... (base64)
+ */
+function isValidS5CID(cid: string): boolean {
+  // Base32 CID starts with 'b' prefix
+  // - Raw hash: ~53 chars (baaa...)
+  // - BlobIdentifier: ~59-65 chars (blobb...) - includes file size encoding
+  if (cid.startsWith('b') && cid.length >= 50 && cid.length <= 70) {
+    return true;
+  }
+  // Base58btc CID starts with 'z' prefix
+  if (cid.startsWith('z') && cid.length >= 40 && cid.length <= 55) {
+    return true;
+  }
+  // Base64 CID starts with 'm' prefix
+  if (cid.startsWith('m') && cid.length >= 40 && cid.length <= 55) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Fetch and verify a checkpoint delta from S5.
  *
  * This function retrieves a delta by its CID and validates its structure.
- * Note: Full signature verification would verify hostSignature against
- * the message content, but for now we verify presence and structure.
+ * The CID must be in proper S5 multibase format:
+ * - BlobIdentifier CID (recommended): blobb... (~59-65 chars, includes file size)
+ * - Raw hash CID: baaa... (~53 chars, raw Blake3 hash)
  *
  * @param storageManager - StorageManager instance with S5 client access
- * @param deltaCID - The S5 CID of the delta to fetch
+ * @param deltaCID - The S5 CID of the delta (BlobIdentifier format preferred, e.g., blobb...)
  * @param hostAddress - The expected host address
  * @returns The verified CheckpointDelta
- * @throws Error with code 'DELTA_FETCH_FAILED' if S5 fetch fails
+ * @throws Error with code 'DELTA_FETCH_FAILED' if CID format is invalid or S5 fetch fails
  * @throws Error with code 'INVALID_DELTA_STRUCTURE' if delta is malformed
  * @throws Error with code 'INVALID_DELTA_SIGNATURE' if signature is invalid
  *
  * @example
  * ```typescript
- * const delta = await fetchAndVerifyDelta(storageManager, 's5://delta1', '0xHost...');
+ * const delta = await fetchAndVerifyDelta(storageManager, 'blobb5otd7a4vy...', '0xHost...');
  * console.log(`Delta contains ${delta.messages.length} messages`);
  * ```
  */
@@ -259,16 +289,24 @@ export async function fetchAndVerifyDelta(
   deltaCID: string,
   hostAddress: string
 ): Promise<CheckpointDelta> {
-  const s5Client = storageManager.getS5Client();
-  if (!s5Client) {
-    throw new Error('DELTA_FETCH_FAILED: S5 client not available');
+  // Validate CID format - must be proper S5 multibase format
+  if (!isValidS5CID(deltaCID)) {
+    throw new Error(
+      `DELTA_FETCH_FAILED: Invalid CID format "${deltaCID}" (length: ${deltaCID.length}). ` +
+      `Expected S5 BlobIdentifier CID (e.g., "blobb..." 59-65 chars) or raw hash CID (e.g., "baaa..." ~53 chars). ` +
+      `Node must use S5's pathToBlobCID() when returning delta CIDs.`
+    );
   }
 
-  // Fetch from S5
+  // Fetch from S5 using content-addressed retrieval via StorageManager
   let data: any;
   try {
-    data = await s5Client.fs.get(deltaCID);
+    // Use StorageManager's getByCID method
+    data = await storageManager.getByCID(deltaCID);
   } catch (error: any) {
+    if (error.message?.startsWith('DELTA_FETCH_FAILED')) {
+      throw error;
+    }
     throw new Error(`DELTA_FETCH_FAILED: ${error.message}`);
   }
 
@@ -448,7 +486,7 @@ export async function recoverFromCheckpointsFlow(
   for (const checkpoint of index.checkpoints) {
     const delta = await fetchAndVerifyDelta(
       storageManager,
-      checkpoint.deltaCID,
+      checkpoint.deltaCid,
       hostAddress
     );
     deltas.push(delta);
@@ -542,7 +580,7 @@ export async function recoverFromCheckpointsFlowWithHttp(
   for (const checkpoint of index.checkpoints) {
     const delta = await fetchAndVerifyDelta(
       storageManager,
-      checkpoint.deltaCID,
+      checkpoint.deltaCid,
       hostAddress
     );
     deltas.push(delta);

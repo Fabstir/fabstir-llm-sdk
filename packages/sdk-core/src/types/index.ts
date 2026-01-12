@@ -185,8 +185,10 @@ export interface CheckpointIndexEntry {
   index: number;
   /** On-chain proof hash for verification */
   proofHash: string;
-  /** S5 CID pointing to the CheckpointDelta */
-  deltaCID: string;
+  /** S5 CID pointing to the CheckpointDelta (camelCase per convention) */
+  deltaCid: string;
+  /** S5 CID pointing to the proof data (optional) */
+  proofCid?: string;
   /** [startToken, endToken] range for this checkpoint */
   tokenRange: [number, number];
   /** Unix timestamp when checkpoint was created */
@@ -203,8 +205,10 @@ export interface CheckpointIndex {
   hostAddress: string;
   /** Array of checkpoint entries */
   checkpoints: CheckpointIndexEntry[];
+  /** EIP-191 signature by host wallet over messages content */
+  messagesSignature: string;
   /** EIP-191 signature by host wallet over checkpoints array */
-  hostSignature: string;
+  checkpointsSignature: string;
 }
 
 /**

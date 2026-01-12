@@ -39,7 +39,7 @@ import { PricingValidationError } from '../errors/pricing-errors';
 import { WebSearchError } from '../errors/web-search-errors';
 import { bytesToHex } from '../crypto/utilities';
 import { analyzePromptForSearchIntent } from '../utils/search-intent-analyzer';
-import { recoverFromCheckpointsFlow } from '../utils/checkpoint-recovery';
+import { recoverFromCheckpointsFlow, recoverFromCheckpointsFlowWithHttp } from '../utils/checkpoint-recovery';
 import type { SearchApiResponse, WebSearchStarted, WebSearchResults, WebSearchError as WebSearchErrorMsg } from '../types/web-search.types';
 
 /**
@@ -2856,17 +2856,23 @@ export class SessionManager implements ISessionManager {
    * @throws SDKError with code 'DELTA_FETCH_FAILED' if delta fetch fails
    */
   async recoverFromCheckpoints(sessionId: bigint): Promise<RecoveredConversation> {
-    // Create session info getter that uses internal session state
+    // Create session info getter that returns hostUrl for HTTP-based recovery
     const getSessionInfo = async (id: bigint): Promise<{
       hostAddress: string;
+      hostUrl: string;
       status: string;
     } | null> => {
       const session = this.sessions.get(id.toString());
       if (!session) {
         return null;
       }
+      // Get HTTP URL from endpoint (convert ws:// to http:// if needed)
+      const endpoint = session.endpoint || 'http://localhost:8080';
+      const hostUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
+
       return {
         hostAddress: session.provider, // provider contains host address
+        hostUrl: hostUrl,
         status: session.status,
       };
     };
@@ -2879,7 +2885,8 @@ export class SessionManager implements ISessionManager {
     };
 
     try {
-      return await recoverFromCheckpointsFlow(
+      // Use HTTP-based recovery flow (fetches checkpoint index from node's HTTP API)
+      return await recoverFromCheckpointsFlowWithHttp(
         this.storageManager,
         proofContract,
         getSessionInfo,
@@ -2889,6 +2896,18 @@ export class SessionManager implements ISessionManager {
       // Convert to SDKError if not already
       if (error.message?.startsWith('SESSION_NOT_FOUND')) {
         throw new SDKError(error.message, 'SESSION_NOT_FOUND');
+      }
+      if (error.message?.startsWith('HOST_URL_MISSING')) {
+        throw new SDKError(error.message, 'HOST_URL_MISSING');
+      }
+      if (error.message?.startsWith('CHECKPOINT_FETCH_FAILED')) {
+        throw new SDKError(error.message, 'CHECKPOINT_FETCH_FAILED');
+      }
+      if (error.message?.startsWith('INVALID_CHECKPOINT_INDEX')) {
+        throw new SDKError(error.message, 'INVALID_CHECKPOINT_INDEX');
+      }
+      if (error.message?.startsWith('NODE_UNREACHABLE')) {
+        throw new SDKError(error.message, 'NODE_UNREACHABLE');
       }
       if (error.message?.startsWith('INVALID_INDEX_SIGNATURE')) {
         throw new SDKError(error.message, 'INVALID_INDEX_SIGNATURE');

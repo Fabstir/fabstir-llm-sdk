@@ -38,6 +38,7 @@ describe('Fetch Checkpoint Index', () => {
     mockStorageManager = {
       getS5Client: vi.fn().mockReturnValue(mockS5Client),
       isInitialized: vi.fn().mockReturnValue(true),
+      getByCID: vi.fn().mockImplementation((cid: string) => mockS5Client.fs.get(cid)),
     };
   });
 
@@ -73,12 +74,13 @@ describe('Fetch Checkpoint Index', () => {
         {
           index: 0,
           proofHash: '0xabc123',
-          deltaCID: 's5://delta1',
+          deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000001',
           tokenRange: [0, 1000] as [number, number],
           timestamp: Date.now(),
         },
       ],
-      hostSignature: '0xsig123',
+      messagesSignature: '0xmsgsig123',
+      checkpointsSignature: '0xcpsig123',
     };
     mockS5Client.fs.get.mockResolvedValue(validIndex);
 
@@ -118,7 +120,7 @@ describe('Fetch Checkpoint Index', () => {
     const malformedData = {
       // Missing required fields
       sessionId: '123',
-      // hostAddress, checkpoints, hostSignature missing
+      // hostAddress, checkpoints, messagesSignature, checkpointsSignature missing
     };
     mockS5Client.fs.get.mockResolvedValue(malformedData);
 
@@ -166,12 +168,13 @@ describe('Verify Checkpoint Index', () => {
         {
           index: 0,
           proofHash: '0xabc1234567890000000000000000000000000000000000000000000000000000',
-          deltaCID: 's5://delta1',
+          deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000001',
           tokenRange: [0, 1000] as [number, number],
           timestamp: Date.now(),
         },
       ],
-      hostSignature: '0x1234', // Will be verified by mock
+      messagesSignature: '0xmsgsig1234',
+      checkpointsSignature: '0xcpsig1234',
     };
 
     // Mock on-chain proof query
@@ -202,7 +205,8 @@ describe('Verify Checkpoint Index', () => {
       sessionId: '123',
       hostAddress: '0x1234567890123456789012345678901234567890',
       checkpoints: [],
-      hostSignature: '0xinvalid', // Invalid signature
+      messagesSignature: '0xmsginvalid',
+      checkpointsSignature: '0xcpinvalid',
     };
 
     // Act & Assert
@@ -227,12 +231,13 @@ describe('Verify Checkpoint Index', () => {
         {
           index: 0,
           proofHash: '0xabc1234567890000000000000000000000000000000000000000000000000000',
-          deltaCID: 's5://delta1',
+          deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000001',
           tokenRange: [0, 1000] as [number, number],
           timestamp: Date.now(),
         },
       ],
-      hostSignature: '0x1234',
+      messagesSignature: '0xmsgsig1234',
+      checkpointsSignature: '0xcpsig1234',
     };
 
     // Mock on-chain returns DIFFERENT proofHash
@@ -265,26 +270,27 @@ describe('Verify Checkpoint Index', () => {
         {
           index: 0,
           proofHash: '0x0000000000000000000000000000000000000000000000000000000000000001',
-          deltaCID: 's5://delta1',
+          deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000001',
           tokenRange: [0, 1000] as [number, number],
           timestamp: 1000,
         },
         {
           index: 1,
           proofHash: '0x0000000000000000000000000000000000000000000000000000000000000002',
-          deltaCID: 's5://delta2',
+          deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000002',
           tokenRange: [1000, 2000] as [number, number],
           timestamp: 2000,
         },
         {
           index: 2,
           proofHash: '0x0000000000000000000000000000000000000000000000000000000000000003',
-          deltaCID: 's5://delta3',
+          deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000003',
           tokenRange: [2000, 3000] as [number, number],
           timestamp: 3000,
         },
       ],
-      hostSignature: '0x1234',
+      messagesSignature: '0xmsgsig1234',
+      checkpointsSignature: '0xcpsig1234',
     };
 
     // Mock on-chain returns matching proofHashes
@@ -311,7 +317,8 @@ describe('Verify Checkpoint Index', () => {
       sessionId: '123',
       hostAddress: testHostAddress,
       checkpoints: [],
-      hostSignature: '0x1234',
+      messagesSignature: '0xmsgsig1234',
+      checkpointsSignature: '0xcpsig1234',
     };
 
     // Act
@@ -358,6 +365,7 @@ describe('Fetch and Verify Deltas', () => {
     mockStorageManager = {
       getS5Client: vi.fn().mockReturnValue(mockS5Client),
       isInitialized: vi.fn().mockReturnValue(true),
+      getByCID: vi.fn().mockImplementation((cid: string) => mockS5Client.fs.get(cid)),
     };
   });
 
@@ -386,7 +394,7 @@ describe('Fetch and Verify Deltas', () => {
     const { fetchAndVerifyDelta } = await import('../../src/utils/checkpoint-recovery');
     const result = await fetchAndVerifyDelta(
       mockStorageManager as any,
-      's5://delta1',
+      'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdelta1',
       testHostAddress
     );
 
@@ -416,7 +424,7 @@ describe('Fetch and Verify Deltas', () => {
     await expect(
       fetchAndVerifyDelta(
         mockStorageManager as any,
-        's5://delta1',
+        'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdelta1',
         '0x1234567890123456789012345678901234567890'
       )
     ).rejects.toThrow('INVALID_DELTA_SIGNATURE');
@@ -431,7 +439,7 @@ describe('Fetch and Verify Deltas', () => {
     await expect(
       fetchAndVerifyDelta(
         mockStorageManager as any,
-        's5://delta1',
+        'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdelta1',
         '0x1234567890123456789012345678901234567890'
       )
     ).rejects.toThrow('DELTA_FETCH_FAILED');
@@ -450,7 +458,7 @@ describe('Fetch and Verify Deltas', () => {
     await expect(
       fetchAndVerifyDelta(
         mockStorageManager as any,
-        's5://delta1',
+        'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdelta1',
         '0x1234567890123456789012345678901234567890'
       )
     ).rejects.toThrow('INVALID_DELTA_STRUCTURE');
@@ -658,6 +666,7 @@ describe('Recover From Checkpoints (Full Flow)', () => {
       getS5Client: vi.fn().mockReturnValue(mockS5Client),
       isInitialized: vi.fn().mockReturnValue(true),
       saveConversation: vi.fn().mockResolvedValue('cid123'),
+      getByCID: vi.fn().mockImplementation((cid: string) => mockS5Client.fs.get(cid)),
     };
 
     mockContract = {
@@ -710,12 +719,13 @@ describe('Recover From Checkpoints (Full Flow)', () => {
         {
           index: 0,
           proofHash: '0xproof1',
-          deltaCID: 's5://delta1',
+          deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000001',
           tokenRange: [0, 1000] as [number, number],
           timestamp: 1000,
         },
       ],
-      hostSignature: '0xsig',
+      messagesSignature: '0xmsgsig',
+      checkpointsSignature: '0xcpsig',
     };
 
     // Mock delta
@@ -791,7 +801,8 @@ describe('Recover From Checkpoints (Full Flow)', () => {
       sessionId: '123',
       hostAddress: '0xDIFFERENT_HOST_ADDRESS_1234567890ABCDEF12', // Mismatch
       checkpoints: [],
-      hostSignature: '0xsig',
+      messagesSignature: '0xmsgsig',
+      checkpointsSignature: '0xcpsig',
     };
 
     mockS5Client.fs.get.mockResolvedValueOnce(checkpointIndex);
@@ -824,19 +835,20 @@ describe('Recover From Checkpoints (Full Flow)', () => {
         {
           index: 0,
           proofHash: '0xproof1',
-          deltaCID: 's5://delta1',
+          deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000001',
           tokenRange: [0, 1000] as [number, number],
           timestamp: 1000,
         },
         {
           index: 1,
           proofHash: '0xproof2',
-          deltaCID: 's5://delta2',
+          deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000002',
           tokenRange: [1000, 2000] as [number, number],
           timestamp: 2000,
         },
       ],
-      hostSignature: '0xsig',
+      messagesSignature: '0xmsgsig',
+      checkpointsSignature: '0xcpsig',
     };
 
     // Mock deltas
@@ -932,6 +944,7 @@ describe('HTTP-Based Recovery Flow', () => {
     mockStorageManager = {
       getS5Client: vi.fn().mockReturnValue(mockS5Client),
       isInitialized: vi.fn().mockReturnValue(true),
+      getByCID: vi.fn().mockImplementation((cid: string) => mockS5Client.fs.get(cid)),
     };
 
     mockContract = {
@@ -964,12 +977,13 @@ describe('HTTP-Based Recovery Flow', () => {
         {
           index: 0,
           proofHash: '0xproof1',
-          deltaCID: 's5://delta1',
+          deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000001',
           tokenRange: [0, 1000] as [number, number],
           timestamp: 1000,
         },
       ],
-      hostSignature: '0xsig',
+      messagesSignature: '0xmsgsig',
+      checkpointsSignature: '0xcpsig',
     };
 
     mockFetch.mockResolvedValueOnce({
@@ -1038,19 +1052,20 @@ describe('HTTP-Based Recovery Flow', () => {
         {
           index: 0,
           proofHash: '0xproof1',
-          deltaCID: 's5://bafybeig1',
+          deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdcid001',
           tokenRange: [0, 1000] as [number, number],
           timestamp: 1000,
         },
         {
           index: 1,
           proofHash: '0xproof2',
-          deltaCID: 's5://bafybeig2',
+          deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdcid002',
           tokenRange: [1000, 2000] as [number, number],
           timestamp: 2000,
         },
       ],
-      hostSignature: '0xsig',
+      messagesSignature: '0xmsgsig',
+      checkpointsSignature: '0xcpsig',
     };
 
     mockFetch.mockResolvedValueOnce({
@@ -1098,9 +1113,9 @@ describe('HTTP-Based Recovery Flow', () => {
       BigInt(123)
     );
 
-    // Assert: S5 should be called with CIDs for delta fetch
-    expect(mockS5Client.fs.get).toHaveBeenCalledWith('s5://bafybeig1');
-    expect(mockS5Client.fs.get).toHaveBeenCalledWith('s5://bafybeig2');
+    // Assert: S5 should be called with CIDs for delta fetch (raw CID format)
+    expect(mockS5Client.fs.get).toHaveBeenCalledWith('baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdcid001');
+    expect(mockS5Client.fs.get).toHaveBeenCalledWith('baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdcid002');
     expect(result.messages).toHaveLength(2);
     expect(result.tokenCount).toBe(2000);
   });

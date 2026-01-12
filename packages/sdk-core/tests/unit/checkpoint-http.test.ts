@@ -26,19 +26,21 @@ describe('fetchCheckpointIndexFromNode', () => {
       {
         index: 0,
         proofHash: '0xabc123',
-        deltaCID: 's5://bafybeig1',
+        deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdcid001',
         tokenRange: [0, 1000] as [number, number],
         timestamp: 1704844800000,
       },
       {
         index: 1,
         proofHash: '0xdef456',
-        deltaCID: 's5://bafybeig2',
+        deltaCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdcid002',
+        proofCid: 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdproof02',  // Optional field
         tokenRange: [1000, 2000] as [number, number],
         timestamp: 1704844860000,
       },
     ],
-    hostSignature: '0xsig123',
+    messagesSignature: '0xmsgsig123',
+    checkpointsSignature: '0xcpsig123',
   };
 
   beforeEach(() => {
@@ -108,7 +110,7 @@ describe('fetchCheckpointIndexFromNode', () => {
       status: 200,
       json: async () => ({
         sessionId: '123',
-        // Missing hostAddress, checkpoints, hostSignature
+        // Missing hostAddress, checkpoints, messagesSignature, checkpointsSignature
       }),
     });
 
@@ -169,10 +171,11 @@ describe('fetchCheckpointIndexFromNode', () => {
         checkpoints: [
           {
             index: 0,
-            // Missing proofHash, deltaCID, tokenRange, timestamp
+            // Missing proofHash, deltaCid, tokenRange, timestamp
           },
         ],
-        hostSignature: '0xsig123',
+        messagesSignature: '0xmsgsig123',
+        checkpointsSignature: '0xcpsig123',
       }),
     });
 
@@ -186,7 +189,8 @@ describe('fetchCheckpointIndexFromNode', () => {
       sessionId: '123',
       hostAddress: '0x048afa7126a3b684832886b78e7cc1dd4019557e',
       checkpoints: [],
-      hostSignature: '0xsig123',
+      messagesSignature: '0xmsgsig123',
+      checkpointsSignature: '0xcpsig123',
     };
 
     mockFetch.mockResolvedValueOnce({

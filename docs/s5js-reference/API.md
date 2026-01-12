@@ -326,6 +326,112 @@ const promise2 = s5.reconnect();
 await Promise.all([promise1, promise2]); // Both resolve when first completes
 ```
 
+## Public Download API
+
+The Public Download API enables downloading content by CID (Content Identifier) from S5 portals. This allows users to share content publicly - one user uploads and shares a CID, another user downloads by that CID.
+
+### downloadByCID(cid)
+
+Download content by its CID from S5 portals.
+
+```typescript
+async downloadByCID(cid: string | Uint8Array): Promise<Uint8Array>
+```
+
+#### Parameters
+
+- **cid** (string | Uint8Array): The CID to download
+  - String formats accepted:
+    - 53-character base32 (raw hash): `"baaaa..."`
+    - 59+ character base32 (BlobIdentifier): `"uJh9d..."`
+  - Uint8Array: 32-byte raw BLAKE3 hash
+
+#### Returns
+
+- `Uint8Array` - The downloaded content
+
+#### Throws
+
+- `Error` if no identity/portals configured
+- `Error` if CID format is invalid
+- `Error` if all portals fail to serve the content
+- `Error` if downloaded content hash doesn't match CID (integrity failure)
+
+#### Features
+
+- **Portal Fallback**: Tries each configured portal until one succeeds
+- **Hash Verification**: Verifies downloaded data matches CID using BLAKE3
+- **Format Detection**: Automatically detects CID format (raw hash vs BlobIdentifier)
+
+#### Example
+
+```typescript
+import { S5, FS5Advanced, formatCID } from '@julesl23/s5js';
+
+// User A: Upload and share content
+const s5a = await S5.create({ initialPeers: [...] });
+await s5a.recoverIdentityFromSeedPhrase(seedPhrase);
+await s5a.registerOnNewPortal('https://s5.ninja');
+
+// Store a file
+await s5a.fs.put('home/public/photo.jpg', imageData);
+
+// Get the CID to share
+const advanced = new FS5Advanced(s5a.fs);
+const cid = await advanced.pathToCID('home/public/photo.jpg');
+const cidString = formatCID(cid);
+console.log('Share this CID:', cidString);
+// "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
+
+// User B: Download by CID
+const s5b = await S5.create({ initialPeers: [...] });
+await s5b.recoverIdentityFromSeedPhrase(seedPhrase);
+await s5b.registerOnNewPortal('https://s5.ninja');
+
+const data = await s5b.downloadByCID(cidString);
+console.log('Downloaded', data.length, 'bytes');
+```
+
+#### Error Handling
+
+```typescript
+try {
+  const data = await s5.downloadByCID(cidString);
+} catch (error) {
+  if (error.message.includes('No identity configured')) {
+    // Need to call recoverIdentityFromSeedPhrase() first
+  } else if (error.message.includes('No portals configured')) {
+    // Need to call registerOnNewPortal() first
+  } else if (error.message.includes('Invalid CID')) {
+    // CID format is wrong
+  } else if (error.message.includes('Hash verification failed')) {
+    // Downloaded data was corrupted or tampered
+  } else if (error.message.includes('Failed to download CID from all portals')) {
+    // Content not available on any portal
+  }
+}
+```
+
+### CID Format Utilities
+
+Additional utilities are available for working with CID formats:
+
+```typescript
+import { detectCIDFormat, cidStringToHash, cidToDownloadFormat } from '@julesl23/s5js';
+
+// Detect CID format
+const format = detectCIDFormat(cidString);
+console.log(format); // 'raw' or 'blob'
+
+// Extract raw 32-byte hash from any CID format
+const hash = cidStringToHash(cidString);
+console.log(hash); // Uint8Array(32)
+
+// Convert CID to download-compatible format
+const downloadCID = cidToDownloadFormat(hash);
+console.log(downloadCID); // "baaaa..."
+```
+
 ### Mobile App Example
 
 Complete example for handling connection in a mobile web app:

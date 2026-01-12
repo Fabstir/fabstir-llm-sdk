@@ -26,7 +26,7 @@ import { FabstirSDKCore, ChainRegistry, ChainId } from "@fabstir/sdk-core";
 import {
   cacheSeed,
   hasCachedSeed,
-} from "../../../packages/sdk-core/src/utils/s5-seed-derivation";
+} from "@fabstir/sdk-core";
 import {
   createSDK,
   connectWallet as connectBaseWallet,

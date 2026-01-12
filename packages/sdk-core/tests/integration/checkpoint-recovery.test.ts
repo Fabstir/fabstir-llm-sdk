@@ -35,6 +35,12 @@ const createMockStorageManager = (mockData: Record<string, any>) => ({
       }),
     },
   }),
+  getByCID: vi.fn().mockImplementation(async (cid: string) => {
+    if (cid in mockData) {
+      return mockData[cid];
+    }
+    return null;
+  }),
 });
 
 // Mock Contract
@@ -82,13 +88,13 @@ const createDelta = (
 const createCheckpointEntry = (
   index: number,
   proofHash: string,
-  deltaCID: string,
+  deltaCid: string,
   startToken: number,
   endToken: number
 ): CheckpointIndexEntry => ({
   index,
   proofHash,
-  deltaCID,
+  deltaCid,
   tokenRange: [startToken, endToken] as [number, number],
   timestamp: Date.now(),
 });
@@ -101,7 +107,7 @@ describe('Checkpoint Recovery Integration Tests', () => {
   describe('Full Recovery Flow - Single Checkpoint', () => {
     it('should recover conversation with 1 checkpoint', async () => {
       const proofHash = '0x' + 'aa'.repeat(32);
-      const deltaCID = 'bafybeigdelta1';
+      const deltaCid = 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000001';
 
       const messages: Message[] = [
         createMessage('user', 'Hello, how are you?'),
@@ -113,13 +119,14 @@ describe('Checkpoint Recovery Integration Tests', () => {
       const index: CheckpointIndex = {
         sessionId,
         hostAddress: hostAddress.toLowerCase(),
-        checkpoints: [createCheckpointEntry(0, proofHash, deltaCID, 0, 1000)],
-        hostSignature: '0x' + 'cd'.repeat(65),
+        checkpoints: [createCheckpointEntry(0, proofHash, deltaCid, 0, 1000)],
+        messagesSignature: '0x' + 'cd'.repeat(65),
+        checkpointsSignature: '0x' + 'ef'.repeat(65),
       };
 
       const mockData: Record<string, any> = {
         [`home/checkpoints/${hostAddress.toLowerCase()}/${sessionId}/index.json`]: index,
-        [deltaCID]: delta,
+        [deltaCid]: delta,
       };
 
       const storageManager = createMockStorageManager(mockData);
@@ -148,17 +155,18 @@ describe('Checkpoint Recovery Integration Tests', () => {
   describe('Full Recovery Flow - Multiple Checkpoints', () => {
     it('should recover conversation with 5 checkpoints', async () => {
       const proofHashes = Array.from({ length: 5 }, (_, i) => '0x' + (i + 1).toString(16).padStart(64, '0'));
-      const deltaCIDs = Array.from({ length: 5 }, (_, i) => `bafybeigdelta${i}`);
+      const deltaCids = Array.from({ length: 5 }, (_, i) => `baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd00000${i}`);
 
       const checkpoints: CheckpointIndexEntry[] = proofHashes.map((hash, i) =>
-        createCheckpointEntry(i, hash, deltaCIDs[i], i * 1000, (i + 1) * 1000)
+        createCheckpointEntry(i, hash, deltaCids[i], i * 1000, (i + 1) * 1000)
       );
 
       const index: CheckpointIndex = {
         sessionId,
         hostAddress: hostAddress.toLowerCase(),
         checkpoints,
-        hostSignature: '0x' + 'cd'.repeat(65),
+        messagesSignature: '0x' + 'cd'.repeat(65),
+        checkpointsSignature: '0x' + 'ef'.repeat(65),
       };
 
       // Create deltas with messages
@@ -186,7 +194,7 @@ describe('Checkpoint Recovery Integration Tests', () => {
         [`home/checkpoints/${hostAddress.toLowerCase()}/${sessionId}/index.json`]: index,
       };
       deltas.forEach((delta, i) => {
-        mockData[deltaCIDs[i]] = delta;
+        mockData[deltaCids[i]] = delta;
       });
 
       const proofs: Record<number, { proofHash: string }> = {};
@@ -227,16 +235,17 @@ describe('Checkpoint Recovery Integration Tests', () => {
   describe('Recovery with Mixed Message Types', () => {
     it('should handle user and assistant messages correctly', async () => {
       const proofHashes = ['0x' + 'aa'.repeat(32), '0x' + 'bb'.repeat(32)];
-      const deltaCIDs = ['bafybeigdelta0', 'bafybeigdelta1'];
+      const deltaCids = ['baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000000', 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000001'];
 
       const index: CheckpointIndex = {
         sessionId,
         hostAddress: hostAddress.toLowerCase(),
         checkpoints: [
-          createCheckpointEntry(0, proofHashes[0], deltaCIDs[0], 0, 1000),
-          createCheckpointEntry(1, proofHashes[1], deltaCIDs[1], 1000, 2000),
+          createCheckpointEntry(0, proofHashes[0], deltaCids[0], 0, 1000),
+          createCheckpointEntry(1, proofHashes[1], deltaCids[1], 1000, 2000),
         ],
-        hostSignature: '0x' + 'cd'.repeat(65),
+        messagesSignature: '0x' + 'cd'.repeat(65),
+        checkpointsSignature: '0x' + 'ef'.repeat(65),
       };
 
       const deltas: CheckpointDelta[] = [
@@ -254,8 +263,8 @@ describe('Checkpoint Recovery Integration Tests', () => {
 
       const mockData: Record<string, any> = {
         [`home/checkpoints/${hostAddress.toLowerCase()}/${sessionId}/index.json`]: index,
-        [deltaCIDs[0]]: deltas[0],
-        [deltaCIDs[1]]: deltas[1],
+        [deltaCids[0]]: deltas[0],
+        [deltaCids[1]]: deltas[1],
       };
 
       const storageManager = createMockStorageManager(mockData);
@@ -326,19 +335,20 @@ describe('Checkpoint Recovery Integration Tests', () => {
 
     it('should throw when delta fetch fails', async () => {
       const proofHash = '0x' + 'aa'.repeat(32);
-      const deltaCID = 'bafybeigdelta1';
+      const deltaCid = 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000001';
 
       const index: CheckpointIndex = {
         sessionId,
         hostAddress: hostAddress.toLowerCase(),
-        checkpoints: [createCheckpointEntry(0, proofHash, deltaCID, 0, 1000)],
-        hostSignature: '0x' + 'cd'.repeat(65),
+        checkpoints: [createCheckpointEntry(0, proofHash, deltaCid, 0, 1000)],
+        messagesSignature: '0x' + 'cd'.repeat(65),
+        checkpointsSignature: '0x' + 'ef'.repeat(65),
       };
 
       // Index exists but delta doesn't
       const mockData: Record<string, any> = {
         [`home/checkpoints/${hostAddress.toLowerCase()}/${sessionId}/index.json`]: index,
-        // deltaCID not in mockData - will return null
+        // deltaCid not in mockData - will return null
       };
 
       const storageManager = createMockStorageManager(mockData);
@@ -362,13 +372,14 @@ describe('Checkpoint Recovery Integration Tests', () => {
     it('should throw when proof hash mismatch', async () => {
       const checkpointProofHash = '0x' + 'aa'.repeat(32);
       const onChainProofHash = '0x' + 'bb'.repeat(32); // Different!
-      const deltaCID = 'bafybeigdelta1';
+      const deltaCid = 'baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwd000001';
 
       const index: CheckpointIndex = {
         sessionId,
         hostAddress: hostAddress.toLowerCase(),
-        checkpoints: [createCheckpointEntry(0, checkpointProofHash, deltaCID, 0, 1000)],
-        hostSignature: '0x' + 'cd'.repeat(65),
+        checkpoints: [createCheckpointEntry(0, checkpointProofHash, deltaCid, 0, 1000)],
+        messagesSignature: '0x' + 'cd'.repeat(65),
+        checkpointsSignature: '0x' + 'ef'.repeat(65),
       };
 
       const mockData: Record<string, any> = {
