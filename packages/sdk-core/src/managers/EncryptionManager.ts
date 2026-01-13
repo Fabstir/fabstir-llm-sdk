@@ -147,6 +147,21 @@ export class EncryptionManager implements IEncryptionManager {
   }
 
   /**
+   * Get client's recovery private key for checkpoint decryption.
+   *
+   * This key is used by the SDK to decrypt checkpoint deltas that were
+   * encrypted by the host using the corresponding recovery public key.
+   *
+   * Returns raw private key in hex format (no 0x prefix) for use with
+   * crypto libraries (secp256k1, noble-curves, etc.)
+   *
+   * @returns Recovery private key (raw hex, no 0x prefix)
+   */
+  getRecoveryPrivateKey(): string {
+    return this.clientPrivateKey;
+  }
+
+  /**
    * Encrypt session initialization payload with full ECDSA signature.
    *
    * Algorithm:

@@ -192,4 +192,14 @@ export interface IEncryptionManager {
    * @returns Stable recovery public key (compressed hex, 0x-prefixed)
    */
   getRecoveryPublicKey(): string;
+
+  /**
+   * Get recovery private key for checkpoint decryption.
+   *
+   * Used by SDK to decrypt checkpoint deltas that were encrypted
+   * by the host using the corresponding recovery public key.
+   *
+   * @returns Recovery private key (raw hex, no 0x prefix)
+   */
+  getRecoveryPrivateKey(): string;
 }

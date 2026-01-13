@@ -64,6 +64,38 @@ describe('EncryptionManager Recovery Key', () => {
     });
   });
 
+  describe('getRecoveryPrivateKey()', () => {
+    it('should return a valid 32-byte hex string (no 0x prefix)', () => {
+      const recoveryPrivKey = encryptionManager.getRecoveryPrivateKey();
+
+      // Should NOT have 0x prefix (raw hex for crypto libraries)
+      expect(recoveryPrivKey).not.toMatch(/^0x/);
+
+      // Should be 64 hex chars = 32 bytes
+      expect(recoveryPrivKey).toMatch(/^[0-9a-fA-F]{64}$/);
+      expect(recoveryPrivKey.length).toBe(64);
+    });
+
+    it('should return consistent key across multiple calls (deterministic)', () => {
+      const key1 = encryptionManager.getRecoveryPrivateKey();
+      const key2 = encryptionManager.getRecoveryPrivateKey();
+
+      expect(key1).toBe(key2);
+    });
+
+    it('should correspond to the recovery public key', async () => {
+      // The private key should generate the same public key
+      const { getPublicKey } = await import('@noble/secp256k1');
+      const { bytesToHex, hexToBytes } = await import('../../src/crypto/utilities');
+
+      const privKey = encryptionManager.getRecoveryPrivateKey();
+      const expectedPubKey = bytesToHex(getPublicKey(privKey, true));
+      const actualPubKey = encryptionManager.getRecoveryPublicKey().replace(/^0x/, '');
+
+      expect(actualPubKey).toBe(expectedPubKey);
+    });
+  });
+
   describe('Recovery key vs session key', () => {
     it('should have getRecoveryPublicKey() return same value as getPublicKey()', () => {
       // For now, recovery key IS the client's stable public key

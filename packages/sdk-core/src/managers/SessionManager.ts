@@ -2845,10 +2845,14 @@ export class SessionManager implements ISessionManager {
    *
    * This method orchestrates the full recovery flow:
    * 1. Gets session info to obtain host address
-   * 2. Fetches checkpoint index from S5
+   * 2. Fetches checkpoint index from node's HTTP API
    * 3. Verifies signatures and on-chain proofs
-   * 4. Fetches and verifies all deltas
+   * 4. Fetches and decrypts all deltas (Phase 8 - encrypted checkpoints)
    * 5. Merges deltas into a single conversation
+   *
+   * Encrypted deltas (node v8.12.0+) are automatically decrypted using the
+   * user's recovery private key from EncryptionManager. Plaintext deltas
+   * from older nodes are handled transparently (backward compatible).
    *
    * @param sessionId - The session ID to recover
    * @returns Recovered conversation with messages, token count, and checkpoint metadata
@@ -2856,6 +2860,8 @@ export class SessionManager implements ISessionManager {
    * @throws SDKError with code 'INVALID_INDEX_SIGNATURE' if signature verification fails
    * @throws SDKError with code 'PROOF_HASH_MISMATCH' if on-chain proof doesn't match
    * @throws SDKError with code 'DELTA_FETCH_FAILED' if delta fetch fails
+   * @throws SDKError with code 'DECRYPTION_KEY_REQUIRED' if encrypted delta and no EncryptionManager
+   * @throws SDKError with code 'DECRYPTION_FAILED' if decryption fails (wrong key or tampered data)
    */
   async recoverFromCheckpoints(sessionId: bigint): Promise<RecoveredConversation> {
     // Create session info getter that returns hostUrl for HTTP-based recovery
@@ -2886,13 +2892,18 @@ export class SessionManager implements ISessionManager {
       },
     };
 
+    // Get user's recovery private key for encrypted checkpoint decryption (Phase 8)
+    // If EncryptionManager is not available, recovery will still work for plaintext deltas
+    const userPrivateKey = this.encryptionManager?.getRecoveryPrivateKey();
+
     try {
       // Use HTTP-based recovery flow (fetches checkpoint index from node's HTTP API)
       return await recoverFromCheckpointsFlowWithHttp(
         this.storageManager,
         proofContract,
         getSessionInfo,
-        sessionId
+        sessionId,
+        userPrivateKey
       );
     } catch (error: any) {
       // Convert to SDKError if not already
@@ -2922,6 +2933,12 @@ export class SessionManager implements ISessionManager {
       }
       if (error.message?.startsWith('INVALID_DELTA')) {
         throw new SDKError(error.message, 'INVALID_DELTA_STRUCTURE');
+      }
+      if (error.message?.startsWith('DECRYPTION_KEY_REQUIRED')) {
+        throw new SDKError(error.message, 'DECRYPTION_KEY_REQUIRED');
+      }
+      if (error.message?.startsWith('DECRYPTION_FAILED')) {
+        throw new SDKError(error.message, 'DECRYPTION_FAILED');
       }
       throw new SDKError(
         `Checkpoint recovery failed: ${error.message}`,
