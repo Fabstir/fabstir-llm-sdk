@@ -1491,13 +1491,15 @@ export class SessionManager implements ISessionManager {
     );
 
     // 3. Prepare session init payload (per docs lines 469-477)
+    const recoveryPubKey = this.encryptionManager.getRecoveryPublicKey();
+
     const initPayload: any = {
       sessionKey: sessionKeyHex,
       jobId: jobId.toString(),  // MUST be string per docs
       modelName: config.modelId,
       pricePerToken: config.pricePerToken || 0,  // MUST be number in wei/smallest units
       // Phase 8.1: Include recovery public key for checkpoint encryption
-      recoveryPublicKey: this.encryptionManager.getRecoveryPublicKey()
+      recoveryPublicKey: recoveryPubKey
     };
 
     // NEW (Sub-phase 5.1.3): Include vector database info if provided
@@ -1522,13 +1524,6 @@ export class SessionManager implements ISessionManager {
       session_id: sessionId.toString(),
       job_id: jobId.toString()
     };
-    console.log('[SessionManager] Message to send:', JSON.stringify({
-      type: messageToSend.type,
-      chain_id: messageToSend.chain_id,
-      session_id: messageToSend.session_id,
-      job_id: messageToSend.job_id,
-      payload_keys: Object.keys(messageToSend.payload || {})
-    }, null, 2));
 
     await ws.sendMessage(messageToSend);
 
