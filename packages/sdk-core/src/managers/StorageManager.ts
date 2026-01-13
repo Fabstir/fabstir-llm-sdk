@@ -134,6 +134,9 @@ export class StorageManager implements IStorageManager {
   private syncListeners: Array<(status: SyncStatus) => void> = [];
   private lastError: Error | null = null;
 
+  // Per-conversation save locks to prevent concurrent write race conditions
+  private saveLocks: Map<string, Promise<any>> = new Map();
+
   // User settings cache
   private settingsCache: {
     data: UserSettings | null;
@@ -615,8 +618,9 @@ export class StorageManager implements IStorageManager {
         timestamp: conversation.updatedAt
       };
     } catch (error: any) {
+      const errorMsg = error.message || error.toString() || JSON.stringify(error) || 'Unknown S5 error';
       throw new SDKError(
-        `Failed to save conversation: ${error.message}`,
+        `Failed to save conversation: ${errorMsg}`,
         'STORAGE_SAVE_ERROR',
         { originalError: error }
       );
@@ -648,39 +652,65 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * Append message to conversation
+   * Append message to conversation (serialized to prevent S5 revision conflicts)
    */
   async appendMessage(conversationId: string, message: Message): Promise<void> {
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
 
-    try {
-      // Load existing conversation or create new one
-      let conversation = await this.loadConversation(conversationId);
-      
-      if (!conversation) {
-        conversation = {
-          id: conversationId,
-          messages: [],
-          metadata: {},
-          createdAt: Date.now(),
-          updatedAt: Date.now()
-        };
+    // Serialize saves to the same conversation to prevent "Revision number too low" errors
+    const existingLock = this.saveLocks.get(conversationId);
+
+    const operation = (async () => {
+      // Wait for any existing save to complete
+      if (existingLock) {
+        try {
+          await existingLock;
+        } catch {
+          // Previous operation failed, but we still proceed
+        }
       }
-      
-      // Append message
-      conversation.messages.push(message);
-      conversation.updatedAt = Date.now();
-      
-      // Save updated conversation
-      await this.saveConversation(conversation);
-    } catch (error: any) {
-      throw new SDKError(
-        `Failed to append message: ${error.message}`,
-        'STORAGE_APPEND_ERROR',
-        { originalError: error }
-      );
+
+      try {
+        // Load existing conversation or create new one
+        let conversation = await this.loadConversation(conversationId);
+
+        if (!conversation) {
+          conversation = {
+            id: conversationId,
+            messages: [],
+            metadata: {},
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          };
+        }
+
+        // Append message
+        conversation.messages.push(message);
+        conversation.updatedAt = Date.now();
+
+        // Save updated conversation
+        await this.saveConversation(conversation);
+      } catch (error: any) {
+        throw new SDKError(
+          `Failed to append message: ${error.message}`,
+          'STORAGE_APPEND_ERROR',
+          { originalError: error }
+        );
+      }
+    })();
+
+    // Store this operation as the current lock
+    this.saveLocks.set(conversationId, operation);
+
+    try {
+      await operation;
+    } finally {
+      // Clean up lock if it's still ours
+      if (this.saveLocks.get(conversationId) === operation) {
+        this.saveLocks.delete(conversationId);
+      }
     }
   }
 
