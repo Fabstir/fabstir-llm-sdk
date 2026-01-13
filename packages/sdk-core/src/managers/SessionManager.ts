@@ -1495,7 +1495,9 @@ export class SessionManager implements ISessionManager {
       sessionKey: sessionKeyHex,
       jobId: jobId.toString(),  // MUST be string per docs
       modelName: config.modelId,
-      pricePerToken: config.pricePerToken || 0  // MUST be number in wei/smallest units
+      pricePerToken: config.pricePerToken || 0,  // MUST be number in wei/smallest units
+      // Phase 8.1: Include recovery public key for checkpoint encryption
+      recoveryPublicKey: this.encryptionManager.getRecoveryPublicKey()
     };
 
     // NEW (Sub-phase 5.1.3): Include vector database info if provided

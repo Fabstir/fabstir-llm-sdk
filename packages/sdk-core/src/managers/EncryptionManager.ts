@@ -132,6 +132,21 @@ export class EncryptionManager implements IEncryptionManager {
   }
 
   /**
+   * Get client's recovery public key for checkpoint encryption.
+   *
+   * This is the stable public key that the host should use to encrypt
+   * checkpoint deltas. Only the user (who has the corresponding private key)
+   * can decrypt these checkpoints during recovery.
+   *
+   * Returns compressed secp256k1 public key in hex format (0x-prefixed)
+   *
+   * @returns Stable recovery public key (same as getPublicKey() - semantic alias)
+   */
+  getRecoveryPublicKey(): string {
+    return '0x' + this.clientPublicKey;
+  }
+
+  /**
    * Encrypt session initialization payload with full ECDSA signature.
    *
    * Algorithm:
