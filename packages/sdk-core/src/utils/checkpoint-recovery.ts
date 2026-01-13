@@ -8,9 +8,10 @@
  * Used to recover conversation state from node-published checkpoints.
  */
 
-import type { CheckpointIndex, CheckpointIndexEntry, CheckpointDelta, Message, RecoveredConversation } from '../types';
+import type { CheckpointIndex, CheckpointIndexEntry, CheckpointDelta, EncryptedCheckpointDelta, Message, RecoveredConversation } from '../types';
 import type { StorageManager } from '../managers/StorageManager';
 import { fetchCheckpointIndexFromNode } from './checkpoint-http';
+import { isEncryptedDelta, decryptCheckpointDelta } from './checkpoint-encryption';
 
 /**
  * Interface for contract with getProofSubmission method.
@@ -270,24 +271,36 @@ function isValidS5CID(cid: string): boolean {
  * - BlobIdentifier CID (recommended): blobb... (~59-65 chars, includes file size)
  * - Raw hash CID: baaa... (~53 chars, raw Blake3 hash)
  *
+ * Supports both encrypted and plaintext deltas:
+ * - Encrypted deltas (encrypted=true) require userPrivateKey for decryption
+ * - Plaintext deltas are returned as-is
+ *
  * @param storageManager - StorageManager instance with S5 client access
  * @param deltaCID - The S5 CID of the delta (BlobIdentifier format preferred, e.g., blobb...)
  * @param hostAddress - The expected host address
+ * @param userPrivateKey - User's recovery private key (required for encrypted deltas, optional for plaintext)
  * @returns The verified CheckpointDelta
  * @throws Error with code 'DELTA_FETCH_FAILED' if CID format is invalid or S5 fetch fails
  * @throws Error with code 'INVALID_DELTA_STRUCTURE' if delta is malformed
  * @throws Error with code 'INVALID_DELTA_SIGNATURE' if signature is invalid
+ * @throws Error with code 'DECRYPTION_KEY_REQUIRED' if encrypted and no private key provided
+ * @throws Error with code 'DECRYPTION_FAILED' if decryption fails
  *
  * @example
  * ```typescript
+ * // Plaintext delta
  * const delta = await fetchAndVerifyDelta(storageManager, 'blobb5otd7a4vy...', '0xHost...');
+ *
+ * // Encrypted delta
+ * const delta = await fetchAndVerifyDelta(storageManager, 'blobb...', '0xHost...', userPrivateKey);
  * console.log(`Delta contains ${delta.messages.length} messages`);
  * ```
  */
 export async function fetchAndVerifyDelta(
   storageManager: StorageManager,
   deltaCID: string,
-  hostAddress: string
+  hostAddress: string,
+  userPrivateKey?: string
 ): Promise<CheckpointDelta> {
   // Validate CID format - must be proper S5 multibase format
   if (!isValidS5CID(deltaCID)) {
@@ -315,7 +328,34 @@ export async function fetchAndVerifyDelta(
     throw new Error(`DELTA_FETCH_FAILED: Delta not found at ${deltaCID}`);
   }
 
-  // Validate structure
+  // Check if delta is encrypted (Phase 8)
+  if (isEncryptedDelta(data)) {
+    // Encrypted delta - require private key for decryption
+    if (!userPrivateKey) {
+      throw new Error(
+        'DECRYPTION_KEY_REQUIRED: User private key required for encrypted checkpoint delta'
+      );
+    }
+
+    try {
+      // Decrypt the delta
+      const decrypted = decryptCheckpointDelta(data, userPrivateKey);
+
+      // Verify signature is present after decryption
+      if (!decrypted.hostSignature || decrypted.hostSignature.length === 0) {
+        throw new Error('INVALID_DELTA_SIGNATURE: Empty or missing host signature in decrypted delta');
+      }
+
+      return decrypted;
+    } catch (error: any) {
+      if (error.message?.includes('DECRYPTION_KEY_REQUIRED') || error.message?.includes('INVALID_DELTA_SIGNATURE')) {
+        throw error;
+      }
+      throw new Error(`DECRYPTION_FAILED: ${error.message}`);
+    }
+  }
+
+  // Plaintext delta - validate structure
   if (!isValidCheckpointDelta(data)) {
     throw new Error(
       'INVALID_DELTA_STRUCTURE: Missing or invalid required fields'
@@ -436,14 +476,26 @@ export type GetSessionInfoWithHostUrlFn = (sessionId: bigint) => Promise<{
  * @throws Error with code 'INVALID_INDEX_SIGNATURE' if signature verification fails
  * @throws Error with code 'PROOF_HASH_MISMATCH' if on-chain proof doesn't match
  * @throws Error with code 'DELTA_FETCH_FAILED' if delta fetch fails
+ * @throws Error with code 'DECRYPTION_KEY_REQUIRED' if encrypted deltas and no private key
+ * @throws Error with code 'DECRYPTION_FAILED' if decryption fails
  *
  * @example
  * ```typescript
+ * // Plaintext deltas
  * const result = await recoverFromCheckpointsFlow(
  *   storageManager,
  *   contract,
  *   (id) => sessionManager.getSessionInfo(id),
  *   BigInt(123)
+ * );
+ *
+ * // Encrypted deltas (Phase 8)
+ * const result = await recoverFromCheckpointsFlow(
+ *   storageManager,
+ *   contract,
+ *   (id) => sessionManager.getSessionInfo(id),
+ *   BigInt(123),
+ *   userPrivateKey
  * );
  * console.log(`Recovered ${result.messages.length} messages`);
  * ```
@@ -452,7 +504,8 @@ export async function recoverFromCheckpointsFlow(
   storageManager: StorageManager,
   contract: ProofQueryContract,
   getSessionInfo: GetSessionInfoFn,
-  sessionId: bigint
+  sessionId: bigint,
+  userPrivateKey?: string
 ): Promise<RecoveredConversation> {
   // Step 1: Get session info to obtain host address
   const sessionInfo = await getSessionInfo(sessionId);
@@ -481,13 +534,14 @@ export async function recoverFromCheckpointsFlow(
   // Step 3: Verify index signature and on-chain proofs
   await verifyCheckpointIndex(index, sessionId, contract, hostAddress);
 
-  // Step 4: Fetch and verify all deltas
+  // Step 4: Fetch and verify all deltas (pass userPrivateKey for encrypted deltas)
   const deltas: CheckpointDelta[] = [];
   for (const checkpoint of index.checkpoints) {
     const delta = await fetchAndVerifyDelta(
       storageManager,
       checkpoint.deltaCid,
-      hostAddress
+      hostAddress,
+      userPrivateKey
     );
     deltas.push(delta);
   }
@@ -530,14 +584,26 @@ export async function recoverFromCheckpointsFlow(
  * @throws Error with code 'INVALID_INDEX_SIGNATURE' if signature verification fails
  * @throws Error with code 'PROOF_HASH_MISMATCH' if on-chain proof doesn't match
  * @throws Error with code 'DELTA_FETCH_FAILED' if delta fetch fails
+ * @throws Error with code 'DECRYPTION_KEY_REQUIRED' if encrypted deltas and no private key
+ * @throws Error with code 'DECRYPTION_FAILED' if decryption fails
  *
  * @example
  * ```typescript
+ * // Plaintext deltas
  * const result = await recoverFromCheckpointsFlowWithHttp(
  *   storageManager,
  *   contract,
  *   (id) => sessionManager.getSessionInfoWithHostUrl(id),
  *   BigInt(123)
+ * );
+ *
+ * // Encrypted deltas (Phase 8)
+ * const result = await recoverFromCheckpointsFlowWithHttp(
+ *   storageManager,
+ *   contract,
+ *   (id) => sessionManager.getSessionInfoWithHostUrl(id),
+ *   BigInt(123),
+ *   userPrivateKey
  * );
  * console.log(`Recovered ${result.messages.length} messages`);
  * ```
@@ -546,7 +612,8 @@ export async function recoverFromCheckpointsFlowWithHttp(
   storageManager: StorageManager,
   contract: ProofQueryContract,
   getSessionInfo: GetSessionInfoWithHostUrlFn,
-  sessionId: bigint
+  sessionId: bigint,
+  userPrivateKey?: string
 ): Promise<RecoveredConversation> {
   // Step 1: Get session info to obtain host address and URL
   const sessionInfo = await getSessionInfo(sessionId);
@@ -575,13 +642,14 @@ export async function recoverFromCheckpointsFlowWithHttp(
   // Step 3: Verify index signature and on-chain proofs
   await verifyCheckpointIndex(index, sessionId, contract, hostAddress);
 
-  // Step 4: Fetch and verify all deltas from S5 (via CID - globally addressable)
+  // Step 4: Fetch and verify all deltas from S5 (pass userPrivateKey for encrypted deltas)
   const deltas: CheckpointDelta[] = [];
   for (const checkpoint of index.checkpoints) {
     const delta = await fetchAndVerifyDelta(
       storageManager,
       checkpoint.deltaCid,
-      hostAddress
+      hostAddress,
+      userPrivateKey
     );
     deltas.push(delta);
   }

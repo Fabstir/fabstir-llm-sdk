@@ -223,6 +223,28 @@ export interface RecoveredConversation {
   checkpoints: CheckpointIndexEntry[];
 }
 
+/**
+ * Encrypted checkpoint delta (Phase 8).
+ * Host encrypts delta with user's recovery public key before S5 upload.
+ * Only user can decrypt during recovery.
+ */
+export interface EncryptedCheckpointDelta {
+  /** Must be true for encrypted deltas */
+  encrypted: true;
+  /** Encryption version (currently 1) */
+  version: number;
+  /** User's recovery public key (echoed back for verification) */
+  userRecoveryPubKey: string;
+  /** Host's ephemeral public key for ECDH (compressed, 0x-prefixed) */
+  ephemeralPublicKey: string;
+  /** 24-byte nonce for XChaCha20 (hex, 48 chars) */
+  nonce: string;
+  /** Encrypted CheckpointDelta JSON (hex) */
+  ciphertext: string;
+  /** EIP-191 signature over keccak256(ciphertext) */
+  hostSignature: string;
+}
+
 // ============= Host Types =============
 // NOTE: HostInfo and other host types have been moved to types/models.ts
 // to support the new model governance architecture. Import from there instead.

@@ -4,14 +4,14 @@
 
 Enable SDK recovery of conversation state from node-published checkpoints when sessions timeout or disconnect mid-stream. Uses delta-based storage to minimize S5 storage requirements while providing verifiable conversation recovery.
 
-## Status: Phase 7 Complete ✅ | Phase 8 Pending 📋
+## Status: Phase 8.3 Complete ✅ | Phase 8.4 Pending (Node) 📋
 
 **Priority**: Critical for MVP
-**SDK Version**: 1.8.6 (checkpoint recovery shipped)
-**Node Requirement**: Checkpoint publishing ✅ (Node v8.11.2) + HTTP endpoint ✅
-**Test Results**: 47/47 tests passing (10 HTTP + 37 recovery)
-**E2E Verified**: 4 messages recovered from 2 checkpoints
-**Next Phase**: Phase 8 - Encrypted Checkpoint Deltas (privacy fix)
+**SDK Version**: 1.8.7 (encrypted checkpoint recovery ready)
+**Node Requirement**: Checkpoint publishing ✅ + HTTP endpoint ✅ + Encryption 📋 (pending)
+**Test Results**: 76/76 tests passing (17 encryption + 10 HTTP + 23 integration + 26 unit)
+**E2E Verified**: 4 messages recovered from 2 checkpoints (plaintext)
+**Next Phase**: Phase 8.4 - Node implements delta encryption (node developer task)
 
 ---
 
@@ -1108,67 +1108,69 @@ Same primitives as Phase 6.2 E2E encryption for consistency.
 
 ---
 
-### Sub-phase 8.2: Node - Encrypted Delta Specification
+### Sub-phase 8.2: Node - Encrypted Delta Specification ✅
 
 **Goal**: Document encryption requirements for node developer.
 
 **Line Budget**: Documentation only
 
 #### Tasks
-- [ ] Update `docs/NODE_CHECKPOINT_SPEC.md` with encryption section:
-  - [ ] Encrypted delta format (EncryptedCheckpointDelta schema)
-  - [ ] ECDH key exchange process
-  - [ ] XChaCha20-Poly1305 encryption steps
-  - [ ] HKDF key derivation parameters
-  - [ ] Signature format (sign over encrypted content)
-- [ ] Add Python implementation example
-- [ ] Add test vectors for verification
-- [ ] Document backward compatibility (plaintext still accepted)
+- [x] Update `docs/NODE_CHECKPOINT_SPEC.md` with encryption section:
+  - [x] Encrypted delta format (EncryptedCheckpointDelta schema)
+  - [x] ECDH key exchange process
+  - [x] XChaCha20-Poly1305 encryption steps
+  - [x] HKDF key derivation parameters
+  - [x] Signature format (sign over encrypted content)
+- [x] Add Python implementation example
+- [x] Add test vectors for verification
+- [x] Document backward compatibility (plaintext still accepted)
 
 **Implementation Files:**
-- `docs/NODE_CHECKPOINT_SPEC.md` (MODIFY, +200 lines)
+- `docs/NODE_CHECKPOINT_SPEC.md` (MODIFY, +720 lines) ✅
 
 **Success Criteria:**
-- [ ] Encryption process fully documented
-- [ ] Code examples provided
-- [ ] Test vectors included
-- [ ] Ready for node developer
+- [x] Encryption process fully documented
+- [x] Code examples provided (complete Python implementation ~330 lines)
+- [x] Test vectors included (3 test vectors)
+- [x] Ready for node developer
 
 ---
 
-### Sub-phase 8.3: SDK - Decrypt Checkpoint Deltas
+### Sub-phase 8.3: SDK - Decrypt Checkpoint Deltas ✅
 
 **Goal**: Add decryption capability to checkpoint recovery flow.
 
 **Line Budget**: 100 lines (60 implementation + 40 tests)
 
 #### Tasks
-- [ ] Write test: `decryptCheckpointDelta()` decrypts valid encrypted delta
-- [ ] Write test: Decryption fails with wrong private key
-- [ ] Write test: Decryption fails with tampered ciphertext
-- [ ] Write test: Decryption fails with wrong nonce
-- [ ] Write test: `fetchAndVerifyDelta()` handles encrypted delta
-- [ ] Write test: `fetchAndVerifyDelta()` handles plaintext delta (backward compat)
-- [ ] Write test: Recovery flow works with encrypted deltas
-- [ ] Create `decryptCheckpointDelta(encryptedDelta, userPrivateKey): CheckpointDelta`
-- [ ] Implement ECDH shared secret derivation
-- [ ] Implement HKDF key derivation
-- [ ] Implement XChaCha20-Poly1305 decryption
-- [ ] Update `fetchAndVerifyDelta()` to detect and handle encryption
-- [ ] Add `userPrivateKey` parameter to recovery flow
+- [x] Write test: `decryptCheckpointDelta()` decrypts valid encrypted delta
+- [x] Write test: Decryption fails with wrong private key
+- [x] Write test: Decryption fails with tampered ciphertext
+- [x] Write test: Decryption fails with wrong nonce
+- [x] Write test: `fetchAndVerifyDelta()` handles encrypted delta
+- [x] Write test: `fetchAndVerifyDelta()` handles plaintext delta (backward compat)
+- [x] Write test: Recovery flow works with encrypted deltas
+- [x] Create `decryptCheckpointDelta(encryptedDelta, userPrivateKey): CheckpointDelta`
+- [x] Implement ECDH shared secret derivation
+- [x] Implement HKDF key derivation
+- [x] Implement XChaCha20-Poly1305 decryption
+- [x] Update `fetchAndVerifyDelta()` to detect and handle encryption
+- [x] Add `userPrivateKey` parameter to recovery flow
 
 **Test Files:**
-- `packages/sdk-core/tests/unit/checkpoint-encryption.test.ts` (NEW, ~180 lines)
+- `packages/sdk-core/tests/unit/checkpoint-encryption.test.ts` (NEW, ~280 lines) ✅
 
 **Implementation Files:**
-- `packages/sdk-core/src/utils/checkpoint-recovery.ts` (MODIFY, +80 lines)
-- `packages/sdk-core/src/utils/checkpoint-encryption.ts` (NEW, ~100 lines)
+- `packages/sdk-core/src/utils/checkpoint-recovery.ts` (MODIFY, +50 lines) ✅
+- `packages/sdk-core/src/utils/checkpoint-encryption.ts` (NEW, ~200 lines) ✅
 
 **Success Criteria:**
-- [ ] Valid encrypted deltas decrypted correctly
-- [ ] Invalid/tampered deltas rejected
-- [ ] Plaintext deltas still work (backward compat)
-- [ ] All 7 tests pass
+- [x] Valid encrypted deltas decrypted correctly
+- [x] Invalid/tampered deltas rejected
+- [x] Plaintext deltas still work (backward compat)
+- [x] All 17 tests pass (exceeds original 7 test target)
+
+**Test Results:** ✅ **17/17 encryption tests + 53/53 total checkpoint tests passing**
 
 ---
 
