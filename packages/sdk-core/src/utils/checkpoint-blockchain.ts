@@ -6,7 +6,28 @@
  */
 
 import { ethers } from 'ethers';
-import type { BlockchainCheckpointEntry, CheckpointQueryOptions } from '../types';
+import type { BlockchainCheckpointEntry, CheckpointQueryOptions, CheckpointDelta, Message } from '../types';
+import { isEncryptedDelta, decryptDeltaIfNeeded } from './checkpoint-encryption';
+import { mergeDeltas } from './checkpoint-recovery';
+
+/**
+ * Interface for storage manager that can fetch by CID.
+ */
+export interface BlockchainRecoveryStorageManager {
+  getByCID(cid: string): Promise<any>;
+}
+
+/**
+ * Result of blockchain-based checkpoint recovery.
+ */
+export interface BlockchainRecoveredConversation {
+  /** Merged messages from all deltas */
+  messages: Message[];
+  /** Total token count from last checkpoint */
+  tokenCount: number;
+  /** Blockchain checkpoint entries used for recovery */
+  checkpoints: BlockchainCheckpointEntry[];
+}
 
 /**
  * Query ProofSubmitted events from blockchain for a session.
@@ -83,4 +104,99 @@ export function filterRecoverableCheckpoints(
   entries: BlockchainCheckpointEntry[]
 ): BlockchainCheckpointEntry[] {
   return entries.filter(hasValidDeltaCID);
+}
+
+/**
+ * Recover conversation from blockchain events (decentralized recovery).
+ *
+ * This function enables fully decentralized checkpoint recovery:
+ * 1. Query ProofSubmitted events from blockchain for the job/session
+ * 2. Extract deltaCIDs from events (skipping pre-upgrade proofs with empty deltaCID)
+ * 3. Fetch checkpoint deltas from S5 using the deltaCIDs
+ * 4. Decrypt deltas if encrypted (using userPrivateKey)
+ * 5. Merge deltas chronologically into conversation
+ *
+ * This approach does NOT require the host to be online - deltaCIDs are
+ * permanently recorded on-chain, providing non-repudiation and censorship resistance.
+ *
+ * @param contract - JobMarketplace contract instance with ProofSubmitted event
+ * @param storageManager - Storage manager with getByCID method for S5 fetch
+ * @param jobId - Session/job ID to recover
+ * @param userPrivateKey - User's recovery private key (required for encrypted deltas)
+ * @param options - Query options (block range)
+ * @returns BlockchainRecoveredConversation with messages, token count, and checkpoint entries
+ * @throws Error with code 'DELTA_FETCH_FAILED' if S5 fetch fails
+ * @throws Error with code 'DECRYPTION_KEY_REQUIRED' if encrypted and no private key
+ * @throws Error with code 'DECRYPTION_FAILED' if decryption fails
+ *
+ * @example
+ * ```typescript
+ * const contract = new ethers.Contract(address, abi, provider);
+ * const result = await recoverFromBlockchain(contract, storageManager, 123n, userPrivateKey);
+ *
+ * console.log(`Recovered ${result.messages.length} messages from ${result.checkpoints.length} checkpoints`);
+ * console.log(`Total tokens: ${result.tokenCount}`);
+ * ```
+ */
+export async function recoverFromBlockchain(
+  contract: ethers.Contract,
+  storageManager: BlockchainRecoveryStorageManager,
+  jobId: bigint,
+  userPrivateKey?: string,
+  options: CheckpointQueryOptions = {}
+): Promise<BlockchainRecoveredConversation> {
+  // Step 1: Query blockchain events
+  const allEntries = await queryProofSubmittedEvents(contract, jobId, options);
+
+  // Step 2: Filter to recoverable checkpoints (non-empty deltaCID)
+  const recoverableEntries = filterRecoverableCheckpoints(allEntries);
+
+  // No recoverable checkpoints - return empty result
+  if (recoverableEntries.length === 0) {
+    return {
+      messages: [],
+      tokenCount: 0,
+      checkpoints: [],
+    };
+  }
+
+  // Step 3: Fetch deltas from S5
+  const deltas: CheckpointDelta[] = [];
+
+  for (const entry of recoverableEntries) {
+    let rawDelta: any;
+
+    try {
+      rawDelta = await storageManager.getByCID(entry.deltaCID);
+    } catch (error: any) {
+      throw new Error(`DELTA_FETCH_FAILED: Failed to fetch delta ${entry.deltaCID}: ${error.message}`);
+    }
+
+    if (!rawDelta) {
+      throw new Error(`DELTA_FETCH_FAILED: Delta not found at ${entry.deltaCID}`);
+    }
+
+    // Step 4: Decrypt if encrypted
+    let delta: CheckpointDelta;
+
+    if (isEncryptedDelta(rawDelta)) {
+      // Encrypted delta - requires private key
+      delta = decryptDeltaIfNeeded(rawDelta, userPrivateKey);
+    } else {
+      // Plaintext delta
+      delta = rawDelta as CheckpointDelta;
+    }
+
+    deltas.push(delta);
+  }
+
+  // Step 5: Merge deltas into conversation
+  const { messages, tokenCount } = mergeDeltas(deltas);
+
+  // Return result with blockchain checkpoint entries
+  return {
+    messages,
+    tokenCount,
+    checkpoints: recoverableEntries,
+  };
 }
