@@ -145,6 +145,44 @@ export class StorageManager implements IStorageManager {
 
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
+  /**
+   * Execute operation with per-conversation lock to prevent S5 revision conflicts.
+   * Serializes concurrent operations on the same conversation to avoid
+   * "Revision number too low" errors from S5's optimistic concurrency control.
+   *
+   * @param conversationId - The conversation ID to lock
+   * @param operation - Async operation to execute under lock
+   * @returns The result of the operation
+   */
+  private async withConversationLock<T>(
+    conversationId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const existingLock = this.saveLocks.get(conversationId);
+
+    const wrappedOperation = (async () => {
+      if (existingLock) {
+        try {
+          await existingLock;
+        } catch {
+          // Previous operation failed, but we still proceed
+        }
+      }
+      return operation();
+    })();
+
+    this.saveLocks.set(conversationId, wrappedOperation);
+
+    try {
+      return await wrappedOperation;
+    } finally {
+      // Clean up lock if it's still ours
+      if (this.saveLocks.get(conversationId) === wrappedOperation) {
+        this.saveLocks.delete(conversationId);
+      }
+    }
+  }
+
   // Folder hierarchy manager (Sub-phase 2.1)
   private folderHierarchy: FolderHierarchy;
 
@@ -597,34 +635,74 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * Save conversation data
+   * Save conversation data to S5 storage.
+   *
+   * **Thread Safety:** All saves to the same conversation are serialized through
+   * per-conversation locking to prevent S5 "Revision number too low" errors.
+   * Saves to different conversations can proceed in parallel.
+   *
+   * **Retry Logic:** Automatically retries up to 3 times with exponential backoff
+   * (200ms, 400ms, 800ms) when revision conflicts occur.
+   *
+   * @param conversation - The conversation data to save
+   * @returns Promise resolving to StorageResult with CID and metadata
+   * @throws SDKError if save fails after retries
    */
   async saveConversation(conversation: ConversationData): Promise<StorageResult> {
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
+    return this.withConversationLock(conversation.id, () =>
+      this._saveConversationInternal(conversation)
+    );
+  }
 
-    try {
-      const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversation.id}/conversation.json`;
+  /**
+   * Internal save - handles actual S5 write with retry logic for revision conflicts.
+   * Called by locked methods only (saveConversation, appendMessage).
+   * @param conversation - The conversation data to save
+   * @param maxRetries - Maximum retry attempts for revision conflicts (default: 3)
+   */
+  private async _saveConversationInternal(
+    conversation: ConversationData,
+    maxRetries = 3
+  ): Promise<StorageResult> {
+    const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversation.id}/conversation.json`;
 
-      await this.s5Client.fs.put(path, conversation);
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await this.s5Client.fs.put(path, conversation);
 
-      // Return immediately using conversation ID (no getMetadata to avoid race condition)
-      // Note: If S5 CID is needed later, fetch it separately with retry logic
-      return {
-        cid: conversation.id,
-        url: `s5://${conversation.id}`,
-        size: JSON.stringify(conversation).length,
-        timestamp: conversation.updatedAt
-      };
-    } catch (error: any) {
-      const errorMsg = error.message || error.toString() || JSON.stringify(error) || 'Unknown S5 error';
-      throw new SDKError(
-        `Failed to save conversation: ${errorMsg}`,
-        'STORAGE_SAVE_ERROR',
-        { originalError: error }
-      );
+        // Return immediately using conversation ID (no getMetadata to avoid race condition)
+        return {
+          cid: conversation.id,
+          url: `s5://${conversation.id}`,
+          size: JSON.stringify(conversation).length,
+          timestamp: conversation.updatedAt
+        };
+      } catch (error: any) {
+        const isRevisionError =
+          error.message?.includes('Revision number too low') ||
+          error.message?.includes('DirectoryTransactionException');
+
+        if (isRevisionError && attempt < maxRetries) {
+          // Exponential backoff: 200ms, 400ms, 800ms
+          console.debug(`[StorageManager] Revision conflict on save (attempt ${attempt}/${maxRetries}), retrying...`);
+          await new Promise(r => setTimeout(r, 100 * Math.pow(2, attempt)));
+          continue;
+        }
+
+        const errorMsg = error.message || error.toString() || JSON.stringify(error) || 'Unknown S5 error';
+        throw new SDKError(
+          `Failed to save conversation: ${errorMsg}`,
+          'STORAGE_SAVE_ERROR',
+          { originalError: error }
+        );
+      }
     }
+
+    // TypeScript: unreachable but needed for return type
+    throw new SDKError('Save failed after retries', 'STORAGE_SAVE_ERROR');
   }
 
   /**
@@ -652,26 +730,25 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * Append message to conversation (serialized to prevent S5 revision conflicts)
+   * Append a message to an existing conversation (or create new if not exists).
+   *
+   * **Atomicity:** The load-modify-save operation is atomic - other operations
+   * on the same conversation are blocked until this completes.
+   *
+   * **Thread Safety:** Uses per-conversation locking to prevent S5 revision conflicts.
+   * Multiple appends to the same conversation are serialized; appends to different
+   * conversations can proceed in parallel.
+   *
+   * @param conversationId - The conversation ID to append to
+   * @param message - The message to append
+   * @throws SDKError if append fails
    */
   async appendMessage(conversationId: string, message: Message): Promise<void> {
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
 
-    // Serialize saves to the same conversation to prevent "Revision number too low" errors
-    const existingLock = this.saveLocks.get(conversationId);
-
-    const operation = (async () => {
-      // Wait for any existing save to complete
-      if (existingLock) {
-        try {
-          await existingLock;
-        } catch {
-          // Previous operation failed, but we still proceed
-        }
-      }
-
+    return this.withConversationLock(conversationId, async () => {
       try {
         // Load existing conversation or create new one
         let conversation = await this.loadConversation(conversationId);
@@ -690,8 +767,8 @@ export class StorageManager implements IStorageManager {
         conversation.messages.push(message);
         conversation.updatedAt = Date.now();
 
-        // Save updated conversation
-        await this.saveConversation(conversation);
+        // Save using internal method (already under lock, no need for double-locking)
+        await this._saveConversationInternal(conversation);
       } catch (error: any) {
         throw new SDKError(
           `Failed to append message: ${error.message}`,
@@ -699,19 +776,7 @@ export class StorageManager implements IStorageManager {
           { originalError: error }
         );
       }
-    })();
-
-    // Store this operation as the current lock
-    this.saveLocks.set(conversationId, operation);
-
-    try {
-      await operation;
-    } finally {
-      // Clean up lock if it's still ours
-      if (this.saveLocks.get(conversationId) === operation) {
-        this.saveLocks.delete(conversationId);
-      }
-    }
+    });
   }
 
   /**
@@ -1145,6 +1210,7 @@ export class StorageManager implements IStorageManager {
 
   /**
    * Save conversation with encryption (Phase 5.1)
+   * Uses withConversationLock() for concurrency protection.
    * @private
    */
   async saveConversationEncrypted(
@@ -1169,39 +1235,40 @@ export class StorageManager implements IStorageManager {
       );
     }
 
-    try {
-      // Encrypt conversation with EncryptionManager
-      const encrypted = await this.encryptionManager.encryptForStorage(
-        options.hostPubKey!,
-        conversation
-      );
+    return this.withConversationLock(conversation.id, async () => {
+      try {
+        // Encrypt conversation with EncryptionManager
+        const encrypted = await this.encryptionManager!.encryptForStorage(
+          options.hostPubKey!,
+          conversation
+        );
 
-      // Prepare encrypted wrapper
-      const encryptedWrapper = {
-        encrypted: true,
-        version: 1,
-        ...encrypted
-      };
+        // Prepare encrypted wrapper
+        const encryptedWrapper = {
+          encrypted: true,
+          version: 1,
+          ...encrypted
+        };
 
-      // Store to S5
-      const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversation.id}/conversation-encrypted.json`;
-      await this.s5Client.fs.put(path, encryptedWrapper);
+        // Store to S5
+        const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversation.id}/conversation-encrypted.json`;
+        await this.s5Client.fs.put(path, encryptedWrapper);
 
-      // Return immediately using conversation ID (no getMetadata to avoid race condition)
-      // Note: If S5 CID is needed later, fetch it separately with retry logic
-      return {
-        cid: conversation.id,
-        url: `s5://${conversation.id}`,
-        size: JSON.stringify(encryptedWrapper).length,
-        timestamp: Date.now()
-      };
-    } catch (error: any) {
-      throw new SDKError(
-        `Failed to save encrypted conversation: ${error.message}`,
-        'STORAGE_ENCRYPT_ERROR',
-        { originalError: error }
-      );
-    }
+        // Return immediately using conversation ID (no getMetadata to avoid race condition)
+        return {
+          cid: conversation.id,
+          url: `s5://${conversation.id}`,
+          size: JSON.stringify(encryptedWrapper).length,
+          timestamp: Date.now()
+        };
+      } catch (error: any) {
+        throw new SDKError(
+          `Failed to save encrypted conversation: ${error.message}`,
+          'STORAGE_ENCRYPT_ERROR',
+          { originalError: error }
+        );
+      }
+    });
   }
 
   /**
@@ -1256,6 +1323,7 @@ export class StorageManager implements IStorageManager {
 
   /**
    * Save conversation without encryption (backward compatible)
+   * Uses withConversationLock() for concurrency protection.
    * @private
    */
   async saveConversationPlaintext(conversation: ConversationData): Promise<StorageResult> {
@@ -1263,33 +1331,34 @@ export class StorageManager implements IStorageManager {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
 
-    try {
-      // Prepare plaintext wrapper
-      const plaintextWrapper = {
-        encrypted: false,
-        version: 1,
-        conversation
-      };
+    return this.withConversationLock(conversation.id, async () => {
+      try {
+        // Prepare plaintext wrapper
+        const plaintextWrapper = {
+          encrypted: false,
+          version: 1,
+          conversation
+        };
 
-      // Store to S5
-      const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversation.id}/conversation-plaintext.json`;
-      await this.s5Client.fs.put(path, plaintextWrapper);
+        // Store to S5
+        const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversation.id}/conversation-plaintext.json`;
+        await this.s5Client.fs.put(path, plaintextWrapper);
 
-      // Return immediately using conversation ID (no getMetadata to avoid race condition)
-      // Note: If S5 CID is needed later, fetch it separately with retry logic
-      return {
-        cid: conversation.id,
-        url: `s5://${conversation.id}`,
-        size: JSON.stringify(plaintextWrapper).length,
-        timestamp: Date.now()
-      };
-    } catch (error: any) {
-      throw new SDKError(
-        `Failed to save plaintext conversation: ${error.message}`,
-        'STORAGE_SAVE_ERROR',
-        { originalError: error }
-      );
-    }
+        // Return immediately using conversation ID (no getMetadata to avoid race condition)
+        return {
+          cid: conversation.id,
+          url: `s5://${conversation.id}`,
+          size: JSON.stringify(plaintextWrapper).length,
+          timestamp: Date.now()
+        };
+      } catch (error: any) {
+        throw new SDKError(
+          `Failed to save plaintext conversation: ${error.message}`,
+          'STORAGE_SAVE_ERROR',
+          { originalError: error }
+        );
+      }
+    });
   }
 
   /**
