@@ -26,7 +26,7 @@ import { FabstirSDKCore, ChainRegistry, ChainId } from "@fabstir/sdk-core";
 import {
   cacheSeed,
   hasCachedSeed,
-} from "../../../packages/sdk-core/src/utils/s5-seed-derivation";
+} from "@fabstir/sdk-core";
 import {
   createSDK,
   connectWallet as connectBaseWallet,
@@ -159,6 +159,7 @@ export default function ChatContextDemo() {
   // UI State
   const [status, setStatus] = useState("Initializing...");
   const [error, setError] = useState<string>("");
+  const [isRecovering, setIsRecovering] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new messages arrive
@@ -1877,6 +1878,128 @@ export default function ChatContextDemo() {
     }
   }
 
+  // Test checkpoint recovery (Phase 5.2 - Delta-Based Checkpointing)
+  async function testRecovery() {
+    const sm = sdk?.getSessionManager();
+    const currentSessionId = (window as any).__currentSessionId || sessionId;
+
+    if (!sm) {
+      setError("Session manager not available");
+      return;
+    }
+
+    if (!currentSessionId) {
+      setError("No session ID to recover. Start a session first.");
+      return;
+    }
+
+    setIsRecovering(true);
+    setStatus("Attempting checkpoint recovery...");
+
+    try {
+      addMessage("system", `🔄 Testing recovery for session ${currentSessionId}...`);
+
+      // Call the recovery method
+      const recovered = await sm.recoverFromCheckpoints(currentSessionId);
+
+      if (recovered.messages.length === 0) {
+        addMessage("system", "ℹ️ No checkpoints found for this session.");
+        addMessage("system", "   (Node may not have published checkpoints yet, or session is still active)");
+      } else {
+        addMessage("system", `✅ Recovered ${recovered.messages.length} messages from ${recovered.checkpoints.length} checkpoints`);
+        addMessage("system", `📊 Total tokens recovered: ${recovered.tokenCount}`);
+
+        // Display recovered messages
+        addMessage("system", "📝 Recovered conversation:");
+        recovered.messages.forEach((msg: { role: string; content: string }, i: number) => {
+          const preview = msg.content.length > 100 ? msg.content.substring(0, 100) + "..." : msg.content;
+          addMessage("system", `   [${msg.role}]: ${preview}`);
+        });
+
+        // Optionally restore the conversation
+        addMessage("system", "💡 Tip: In production, these messages would be restored to the chat UI.");
+      }
+
+      setStatus("Recovery test complete");
+    } catch (error: any) {
+      console.error("Recovery failed:", error);
+      const errorCode = error.message.split(":")[0];
+      addMessage("system", `❌ Recovery failed: ${error.message}`);
+
+      if (errorCode === "SESSION_NOT_FOUND") {
+        addMessage("system", "   Session not found in local state. Start a new session first.");
+      } else if (errorCode === "PROOF_HASH_MISMATCH") {
+        addMessage("system", "   ⚠️ Checkpoint data doesn't match on-chain proofs!");
+      } else if (errorCode === "DELTA_FETCH_FAILED") {
+        addMessage("system", "   Could not fetch checkpoint delta from S5 storage.");
+      }
+    } finally {
+      setIsRecovering(false);
+    }
+  }
+
+  // Test blockchain-based recovery (Phase 9.6 - Decentralized Recovery)
+  async function testBlockchainRecovery() {
+    const sm = sdk?.getSessionManager();
+    const currentJobId = (window as any).__currentJobId || jobId;
+
+    if (!sm) {
+      setError("Session manager not available");
+      return;
+    }
+
+    if (!currentJobId) {
+      setError("No job ID to recover. Start a session first.");
+      return;
+    }
+
+    setIsRecovering(true);
+    setStatus("Attempting blockchain-based recovery...");
+
+    try {
+      addMessage("system", `🔗 Testing blockchain recovery for job ${currentJobId.toString()}...`);
+      addMessage("system", "   (Querying ProofSubmitted events from blockchain...)");
+
+      // Call the blockchain-based recovery method (no HTTP API needed)
+      const recovered = await sm.recoverFromBlockchainEvents(currentJobId);
+
+      if (recovered.messages.length === 0) {
+        addMessage("system", "ℹ️ No recoverable checkpoints found on-chain.");
+        addMessage("system", "   (Node may not have submitted proofs with deltaCID yet)");
+        addMessage("system", `   Checkpoints found: ${recovered.checkpoints.length} (may be pre-upgrade without deltaCID)`);
+      } else {
+        addMessage("system", `✅ Recovered ${recovered.messages.length} messages from ${recovered.checkpoints.length} on-chain checkpoints`);
+        addMessage("system", `📊 Total tokens recovered: ${recovered.tokenCount}`);
+
+        // Display recovered messages
+        addMessage("system", "📝 Recovered conversation:");
+        recovered.messages.forEach((msg: { role: string; content: string }, i: number) => {
+          const preview = msg.content.length > 100 ? msg.content.substring(0, 100) + "..." : msg.content;
+          addMessage("system", `   [${msg.role}]: ${preview}`);
+        });
+
+        // Show blockchain checkpoint info
+        addMessage("system", "🔗 Blockchain checkpoints:");
+        recovered.checkpoints.forEach((cp: any, i: number) => {
+          addMessage("system", `   #${i}: block ${cp.blockNumber}, tokens: ${cp.tokensClaimed.toString()}`);
+        });
+      }
+
+      setStatus("Blockchain recovery test complete");
+    } catch (error: any) {
+      console.error("Blockchain recovery failed:", error);
+      addMessage("system", `❌ Blockchain recovery failed: ${error.message}`);
+
+      if (error.message.includes("DELTA_FETCH_FAILED")) {
+        addMessage("system", "   Could not fetch delta from S5 storage.");
+      } else if (error.message.includes("DECRYPTION_FAILED")) {
+        addMessage("system", "   Failed to decrypt checkpoint delta.");
+      }
+    } finally {
+      setIsRecovering(false);
+    }
+  }
+
   // Clear conversation
   function clearConversation() {
     setMessages([]);
@@ -2253,6 +2376,22 @@ export default function ChatContextDemo() {
               className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:bg-gray-300"
             >
               End Session
+            </button>
+            <button
+              onClick={testRecovery}
+              disabled={isLoading || isRecovering}
+              className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-gray-300"
+              title="Test checkpoint recovery (Phase 5.2)"
+            >
+              {isRecovering ? "Recovering..." : "Test Recovery"}
+            </button>
+            <button
+              onClick={testBlockchainRecovery}
+              disabled={isLoading || isRecovering}
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
+              title="Test blockchain-based recovery (Phase 9.6 - decentralized)"
+            >
+              {isRecovering ? "Recovering..." : "Test Blockchain Recovery"}
             </button>
           </>
         )}

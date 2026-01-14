@@ -35,10 +35,16 @@ export {
 // Export specific ABI fragments for common operations
 export const JobMarketplaceFragments = {
   createSessionJobWithToken: 'function createSessionJobWithToken(address host, address token, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval) returns (uint256)',
-  submitProofOfWork: 'function submitProofOfWork(uint256 jobId, bytes proof, uint256 tokensProven) returns (bool)',
-  claimWithProof: 'function claimWithProof(uint256 jobId) returns (bool)',
+  // Security Audit Migration: submitProofOfWork now requires ECDSA signature from host
+  submitProofOfWork: 'function submitProofOfWork(uint256 jobId, uint256 tokensClaimed, bytes32 proofHash, bytes signature, string proofCID)',
   getSessionJob: 'function getSessionJob(uint256 jobId) returns (tuple(address host, address renter, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 endTime, uint256 proofInterval, uint256 tokensProven, uint256 completedAt, address paymentToken, bool isCompleted))',
-  withdrawTreasuryTokens: 'function withdrawTreasuryTokens(address token) returns (bool)'
+  withdrawTreasuryTokens: 'function withdrawTreasuryTokens(address token) returns (bool)',
+  // New view functions from Security Audit
+  getProofSubmission: 'function getProofSubmission(uint256 sessionId, uint256 proofIndex) view returns (bytes32 proofHash, uint256 tokensClaimed, uint256 timestamp, bool verified)',
+  getLockedBalanceNative: 'function getLockedBalanceNative(address account) view returns (uint256)',
+  getLockedBalanceToken: 'function getLockedBalanceToken(address account, address token) view returns (uint256)',
+  getTotalBalanceNative: 'function getTotalBalanceNative(address account) view returns (uint256)',
+  getTotalBalanceToken: 'function getTotalBalanceToken(address account, address token) view returns (uint256)'
 };
 
 export const HostEarningsFragments = {

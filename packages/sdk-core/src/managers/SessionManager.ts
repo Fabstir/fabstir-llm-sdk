@@ -24,7 +24,8 @@ import {
   SearchVectorsResponse,
   SearchResult,
   SearchIntentConfig,
-  WebSearchMetadata
+  WebSearchMetadata,
+  RecoveredConversation
 } from '../types';
 import { HostSelectionMode } from '../types/settings.types';
 import { PaymentManager } from './PaymentManager';
@@ -38,6 +39,9 @@ import { PricingValidationError } from '../errors/pricing-errors';
 import { WebSearchError } from '../errors/web-search-errors';
 import { bytesToHex } from '../crypto/utilities';
 import { analyzePromptForSearchIntent } from '../utils/search-intent-analyzer';
+import { recoverFromCheckpointsFlow, recoverFromCheckpointsFlowWithHttp } from '../utils/checkpoint-recovery';
+import { recoverFromBlockchain, type BlockchainRecoveredConversation, type CheckpointQueryOptions } from '../utils/checkpoint-blockchain';
+import JobMarketplaceABI from '../contracts/abis/JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json';
 import type { SearchApiResponse, WebSearchStarted, WebSearchResults, WebSearchError as WebSearchErrorMsg } from '../types/web-search.types';
 
 /**
@@ -671,7 +675,6 @@ export class SessionManager implements ISessionManager {
         : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
 
       // Initialize WebSocket client if not already connected
-
       if (!this.wsClient || !this.wsClient.isConnected()) {
         this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
         await this.wsClient.connect();
@@ -681,45 +684,42 @@ export class SessionManager implements ISessionManager {
 
         // Set up global web search message handlers (Phase 5.2-5.3)
         this._setupWebSearchMessageHandlers();
+      }
 
-        // NEW (Phase 6.2): Use encryption by default
-        if (session.encryption && this.encryptionManager) {
-
-          // Send encrypted session init
-          const config: ExtendedSessionConfig = {
-            chainId: session.chainId,
-            host: session.provider,
-            modelId: session.model,
-            endpoint: session.endpoint,
-            paymentMethod: 'deposit',
-            encryption: true
-          };
-          await this.sendEncryptedInit(this.wsClient, config, sessionId, session.jobId);
-
-          if (this.sessionKey) {
-          }
-        } else {
-          // Send plaintext session init (opt-out or no encryption manager)
-          const signer = (this.paymentManager as any).signer;
-          if (!signer) {
-            throw new Error('PaymentManager signer not available. Cannot initialize session without authenticated signer.');
-          }
-          const userAddress = await signer.getAddress();
-          if (!userAddress) {
-            throw new Error('Failed to get user address from signer. Cannot initialize session.');
-          }
-
-          const config: ExtendedSessionConfig = {
-            chainId: session.chainId,
-            host: session.provider,
-            modelId: session.model,
-            endpoint: session.endpoint,
-            paymentMethod: 'deposit',
-            encryption: false
-          };
-          await this.sendPlaintextInit(this.wsClient, config, sessionId, session.jobId, userAddress);
-        }
+      // CRITICAL FIX: Always send session_init before each prompt
+      // The node clears sessions from SessionStore after "Encrypted session complete"
+      // so we must re-initialize the session for each prompt to ensure RAG operations work
+      if (session.encryption && this.encryptionManager) {
+        // Send encrypted session init
+        const config: ExtendedSessionConfig = {
+          chainId: session.chainId,
+          host: session.provider,
+          modelId: session.model,
+          endpoint: session.endpoint,
+          paymentMethod: 'deposit',
+          encryption: true
+        };
+        await this.sendEncryptedInit(this.wsClient, config, sessionId, session.jobId);
       } else {
+        // Send plaintext session init (opt-out or no encryption manager)
+        const signer = (this.paymentManager as any).signer;
+        if (!signer) {
+          throw new Error('PaymentManager signer not available. Cannot initialize session without authenticated signer.');
+        }
+        const userAddress = await signer.getAddress();
+        if (!userAddress) {
+          throw new Error('Failed to get user address from signer. Cannot initialize session.');
+        }
+
+        const config: ExtendedSessionConfig = {
+          chainId: session.chainId,
+          host: session.provider,
+          modelId: session.model,
+          endpoint: session.endpoint,
+          paymentMethod: 'deposit',
+          encryption: false
+        };
+        await this.sendPlaintextInit(this.wsClient, config, sessionId, session.jobId, userAddress);
       }
 
       // Collect full response
@@ -1493,11 +1493,15 @@ export class SessionManager implements ISessionManager {
     );
 
     // 3. Prepare session init payload (per docs lines 469-477)
+    const recoveryPubKey = this.encryptionManager.getRecoveryPublicKey();
+
     const initPayload: any = {
       sessionKey: sessionKeyHex,
       jobId: jobId.toString(),  // MUST be string per docs
       modelName: config.modelId,
-      pricePerToken: config.pricePerToken || 0  // MUST be number in wei/smallest units
+      pricePerToken: config.pricePerToken || 0,  // MUST be number in wei/smallest units
+      // Phase 8.1: Include recovery public key for checkpoint encryption
+      recoveryPublicKey: recoveryPubKey
     };
 
     // NEW (Sub-phase 5.1.3): Include vector database info if provided
@@ -1522,13 +1526,6 @@ export class SessionManager implements ISessionManager {
       session_id: sessionId.toString(),
       job_id: jobId.toString()
     };
-    console.log('[SessionManager] Message to send:', JSON.stringify({
-      type: messageToSend.type,
-      chain_id: messageToSend.chain_id,
-      session_id: messageToSend.session_id,
-      job_id: messageToSend.job_id,
-      payload_keys: Object.keys(messageToSend.payload || {})
-    }, null, 2));
 
     await ws.sendMessage(messageToSend);
 
@@ -2079,9 +2076,8 @@ export class SessionManager implements ISessionManager {
       );
     }
 
-    // 2. Ensure WebSocket is connected (initialize if needed)
+    // 2. Ensure WebSocket is connected
     if (!this.wsClient || !this.wsClient.isConnected()) {
-
       // Get WebSocket URL from endpoint
       const endpoint = session.endpoint || 'http://localhost:8080';
       const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
@@ -2096,39 +2092,40 @@ export class SessionManager implements ISessionManager {
 
       // Set up global web search message handlers (Phase 5.2-5.3)
       this._setupWebSearchMessageHandlers();
+    }
 
-      // Send session init (encryption support)
-      if (session.encryption && this.encryptionManager) {
-        const config: ExtendedSessionConfig = {
-          chainId: session.chainId,
-          host: session.provider,
-          modelId: session.model,
-          endpoint: session.endpoint,
-          paymentMethod: 'deposit',
-          encryption: true
-        };
-        await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
-      } else {
-        const signer = (this.paymentManager as any).signer;
-        if (!signer) {
-          throw new Error('PaymentManager signer not available');
-        }
-        const userAddress = await signer.getAddress();
-        if (!userAddress) {
-          throw new Error('Failed to get user address from signer');
-        }
-
-        const config: ExtendedSessionConfig = {
-          chainId: session.chainId,
-          host: session.provider,
-          modelId: session.model,
-          endpoint: session.endpoint,
-          paymentMethod: 'deposit',
-          encryption: false
-        };
-        await this.sendPlaintextInit(this.wsClient, config, session.sessionId, session.jobId, userAddress);
+    // CRITICAL FIX: Always send session_init before RAG operations
+    // The node clears sessions from SessionStore after "Encrypted session complete"
+    // so we must re-initialize the session to ensure RAG operations work
+    if (session.encryption && this.encryptionManager) {
+      const config: ExtendedSessionConfig = {
+        chainId: session.chainId,
+        host: session.provider,
+        modelId: session.model,
+        endpoint: session.endpoint,
+        paymentMethod: 'deposit',
+        encryption: true
+      };
+      await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
+    } else {
+      const signer = (this.paymentManager as any).signer;
+      if (!signer) {
+        throw new Error('PaymentManager signer not available');
+      }
+      const userAddress = await signer.getAddress();
+      if (!userAddress) {
+        throw new Error('Failed to get user address from signer');
       }
 
+      const config: ExtendedSessionConfig = {
+        chainId: session.chainId,
+        host: session.provider,
+        modelId: session.model,
+        endpoint: session.endpoint,
+        paymentMethod: 'deposit',
+        encryption: false
+      };
+      await this.sendPlaintextInit(this.wsClient, config, session.sessionId, session.jobId, userAddress);
     }
 
     // 3. Handle empty vectors array
@@ -2245,6 +2242,37 @@ export class SessionManager implements ISessionManager {
         'WebSocket not connected - call startSession() first',
         'WEBSOCKET_NOT_CONNECTED'
       );
+    }
+
+    // CRITICAL FIX: Always send session_init before RAG operations
+    // The node clears sessions from SessionStore after "Encrypted session complete"
+    // so we must re-initialize the session to ensure RAG operations work
+    if (session.encryption && this.encryptionManager) {
+      const config: ExtendedSessionConfig = {
+        chainId: session.chainId,
+        host: session.provider,
+        modelId: session.model,
+        endpoint: session.endpoint,
+        paymentMethod: 'deposit',
+        encryption: true
+      };
+      await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
+    } else {
+      const signer = (this.paymentManager as any).signer;
+      if (signer) {
+        const userAddress = await signer.getAddress();
+        if (userAddress) {
+          const config: ExtendedSessionConfig = {
+            chainId: session.chainId,
+            host: session.provider,
+            modelId: session.model,
+            endpoint: session.endpoint,
+            paymentMethod: 'deposit',
+            encryption: false
+          };
+          await this.sendPlaintextInit(this.wsClient, config, session.sessionId, session.jobId, userAddress);
+        }
+      }
     }
 
     // Validate query vector dimensions (384 for all-MiniLM-L6-v2)
@@ -2803,5 +2831,185 @@ export class SessionManager implements ISessionManager {
 
 
     return vectors;
+  }
+
+  // =============================================================================
+  // Checkpoint Recovery Methods (Delta-Based Checkpointing)
+  // =============================================================================
+
+  /**
+   * Recover conversation state from node-published checkpoints (HTTP-based).
+   *
+   * @deprecated Use {@link recoverFromBlockchainEvents} instead for decentralized recovery
+   * that doesn't require the host to be online. This HTTP-based method is kept for
+   * backward compatibility with pre-Phase 9 sessions.
+   *
+   * This method orchestrates the full recovery flow:
+   * 1. Gets session info to obtain host address
+   * 2. Fetches checkpoint index from node's HTTP API
+   * 3. Verifies signatures and on-chain proofs
+   * 4. Fetches and decrypts all deltas (Phase 8 - encrypted checkpoints)
+   * 5. Merges deltas into a single conversation
+   *
+   * Encrypted deltas (node v8.12.0+) are automatically decrypted using the
+   * user's recovery private key from EncryptionManager. Plaintext deltas
+   * from older nodes are handled transparently (backward compatible).
+   *
+   * @param sessionId - The session ID to recover
+   * @returns Recovered conversation with messages, token count, and checkpoint metadata
+   * @throws SDKError with code 'SESSION_NOT_FOUND' if session doesn't exist
+   * @throws SDKError with code 'INVALID_INDEX_SIGNATURE' if signature verification fails
+   * @throws SDKError with code 'PROOF_HASH_MISMATCH' if on-chain proof doesn't match
+   * @throws SDKError with code 'DELTA_FETCH_FAILED' if delta fetch fails
+   * @throws SDKError with code 'DECRYPTION_KEY_REQUIRED' if encrypted delta and no EncryptionManager
+   * @throws SDKError with code 'DECRYPTION_FAILED' if decryption fails (wrong key or tampered data)
+   */
+  async recoverFromCheckpoints(sessionId: bigint): Promise<RecoveredConversation> {
+    // Create session info getter that returns hostUrl for HTTP-based recovery
+    const getSessionInfo = async (id: bigint): Promise<{
+      hostAddress: string;
+      hostUrl: string;
+      status: string;
+    } | null> => {
+      const session = this.sessions.get(id.toString());
+      if (!session) {
+        return null;
+      }
+      // Get HTTP URL from endpoint (convert ws:// to http:// if needed)
+      const endpoint = session.endpoint || 'http://localhost:8080';
+      const hostUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
+
+      return {
+        hostAddress: session.provider, // provider contains host address
+        hostUrl: hostUrl,
+        status: session.status,
+      };
+    };
+
+    // Create proof query contract adapter using PaymentManager
+    const proofContract = {
+      getProofSubmission: async (sid: bigint, proofIndex: number) => {
+        return this.paymentManager.getProofSubmission(sid, proofIndex);
+      },
+    };
+
+    // Get user's recovery private key for encrypted checkpoint decryption (Phase 8)
+    // If EncryptionManager is not available, recovery will still work for plaintext deltas
+    const userPrivateKey = this.encryptionManager?.getRecoveryPrivateKey();
+
+    try {
+      // Use HTTP-based recovery flow (fetches checkpoint index from node's HTTP API)
+      return await recoverFromCheckpointsFlowWithHttp(
+        this.storageManager,
+        proofContract,
+        getSessionInfo,
+        sessionId,
+        userPrivateKey
+      );
+    } catch (error: any) {
+      // Convert to SDKError if not already
+      if (error.message?.startsWith('SESSION_NOT_FOUND')) {
+        throw new SDKError(error.message, 'SESSION_NOT_FOUND');
+      }
+      if (error.message?.startsWith('HOST_URL_MISSING')) {
+        throw new SDKError(error.message, 'HOST_URL_MISSING');
+      }
+      if (error.message?.startsWith('CHECKPOINT_FETCH_FAILED')) {
+        throw new SDKError(error.message, 'CHECKPOINT_FETCH_FAILED');
+      }
+      if (error.message?.startsWith('INVALID_CHECKPOINT_INDEX')) {
+        throw new SDKError(error.message, 'INVALID_CHECKPOINT_INDEX');
+      }
+      if (error.message?.startsWith('NODE_UNREACHABLE')) {
+        throw new SDKError(error.message, 'NODE_UNREACHABLE');
+      }
+      if (error.message?.startsWith('INVALID_INDEX_SIGNATURE')) {
+        throw new SDKError(error.message, 'INVALID_INDEX_SIGNATURE');
+      }
+      if (error.message?.startsWith('PROOF_HASH_MISMATCH')) {
+        throw new SDKError(error.message, 'PROOF_HASH_MISMATCH');
+      }
+      if (error.message?.startsWith('DELTA_FETCH_FAILED')) {
+        throw new SDKError(error.message, 'DELTA_FETCH_FAILED');
+      }
+      if (error.message?.startsWith('INVALID_DELTA')) {
+        throw new SDKError(error.message, 'INVALID_DELTA_STRUCTURE');
+      }
+      if (error.message?.startsWith('DECRYPTION_KEY_REQUIRED')) {
+        throw new SDKError(error.message, 'DECRYPTION_KEY_REQUIRED');
+      }
+      if (error.message?.startsWith('DECRYPTION_FAILED')) {
+        throw new SDKError(error.message, 'DECRYPTION_FAILED');
+      }
+      throw new SDKError(
+        `Checkpoint recovery failed: ${error.message}`,
+        'RECOVERY_FAILED',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Recover conversation from blockchain ProofSubmitted events (decentralized).
+   *
+   * This method does NOT require the host to be online. It queries blockchain
+   * events to discover deltaCIDs, then fetches deltas from S5. This enables
+   * fully decentralized checkpoint recovery.
+   *
+   * @param jobId - The job/session ID to recover
+   * @param options - Query options (block range)
+   * @returns Recovered conversation with messages, token count, and blockchain checkpoint entries
+   * @throws SDKError with code 'DELTA_FETCH_FAILED' if S5 fetch fails
+   * @throws SDKError with code 'DECRYPTION_FAILED' if decryption fails
+   */
+  async recoverFromBlockchainEvents(
+    jobId: bigint,
+    options?: CheckpointQueryOptions
+  ): Promise<BlockchainRecoveredConversation> {
+    // Get signer and chain ID from PaymentManager to create JobMarketplace contract
+    const signer = (this.paymentManager as any).signer as ethers.Signer;
+    const chainId = (this.paymentManager as any).currentChainId as number;
+
+    if (!signer) {
+      throw new SDKError('Signer not available for blockchain recovery', 'SIGNER_NOT_AVAILABLE');
+    }
+
+    // Get contract address from ChainRegistry
+    const chain = ChainRegistry.getChain(chainId);
+    const contractAddress = chain.contracts.jobMarketplace;
+
+    // Create JobMarketplace contract instance for event querying
+    const contract = new ethers.Contract(contractAddress, JobMarketplaceABI, signer);
+
+    // Get user's recovery private key for encrypted delta decryption
+    // If EncryptionManager is not available, recovery will still work for plaintext deltas
+    const userPrivateKey = this.encryptionManager?.getRecoveryPrivateKey();
+
+    try {
+      // Use blockchain-based recovery (no HTTP API needed)
+      return await recoverFromBlockchain(
+        contract,
+        this.storageManager,
+        jobId,
+        userPrivateKey,
+        options
+      );
+    } catch (error: any) {
+      // Convert to SDKError if not already
+      if (error.message?.startsWith('DELTA_FETCH_FAILED')) {
+        throw new SDKError(error.message, 'DELTA_FETCH_FAILED');
+      }
+      if (error.message?.startsWith('DECRYPTION_KEY_REQUIRED')) {
+        throw new SDKError(error.message, 'DECRYPTION_KEY_REQUIRED');
+      }
+      if (error.message?.startsWith('DECRYPTION_FAILED')) {
+        throw new SDKError(error.message, 'DECRYPTION_FAILED');
+      }
+      throw new SDKError(
+        `Blockchain recovery failed: ${error.message}`,
+        'RECOVERY_FAILED',
+        { originalError: error }
+      );
+    }
   }
 }

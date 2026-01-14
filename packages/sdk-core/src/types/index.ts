@@ -153,6 +153,133 @@ export interface CheckpointProof {
   timestamp: number;
 }
 
+// ============= Delta-Based Checkpoint Types =============
+// Used for conversation recovery from node-published checkpoints
+
+/**
+ * A single conversation checkpoint delta stored by the node.
+ * Contains only the messages since the last checkpoint (not cumulative).
+ */
+export interface CheckpointDelta {
+  /** Session identifier */
+  sessionId: string;
+  /** Zero-based index of this checkpoint */
+  checkpointIndex: number;
+  /** On-chain proof hash for verification */
+  proofHash: string;
+  /** Token position at start of this delta */
+  startToken: number;
+  /** Token position at end of this delta */
+  endToken: number;
+  /** Messages in this delta (only new since last checkpoint) */
+  messages: Message[];
+  /** EIP-191 signature by host wallet */
+  hostSignature: string;
+}
+
+/**
+ * Entry in the checkpoint index pointing to a delta.
+ */
+export interface CheckpointIndexEntry {
+  /** Zero-based index of this checkpoint */
+  index: number;
+  /** On-chain proof hash for verification */
+  proofHash: string;
+  /** S5 CID pointing to the CheckpointDelta (camelCase per convention) */
+  deltaCid: string;
+  /** S5 CID pointing to the proof data (optional) */
+  proofCid?: string;
+  /** [startToken, endToken] range for this checkpoint */
+  tokenRange: [number, number];
+  /** Unix timestamp when checkpoint was created */
+  timestamp: number;
+}
+
+/**
+ * Index of all checkpoints for a session, published by the host.
+ */
+export interface CheckpointIndex {
+  /** Session identifier */
+  sessionId: string;
+  /** Host's Ethereum address */
+  hostAddress: string;
+  /** Array of checkpoint entries */
+  checkpoints: CheckpointIndexEntry[];
+  /** EIP-191 signature by host wallet over messages content */
+  messagesSignature: string;
+  /** EIP-191 signature by host wallet over checkpoints array */
+  checkpointsSignature: string;
+}
+
+/**
+ * Result of recovering a conversation from checkpoints.
+ */
+export interface RecoveredConversation {
+  /** Merged messages from all deltas */
+  messages: Message[];
+  /** Total token count from last checkpoint */
+  tokenCount: number;
+  /** Checkpoint entries used for recovery */
+  checkpoints: CheckpointIndexEntry[];
+}
+
+/**
+ * Encrypted checkpoint delta (Phase 8).
+ * Host encrypts delta with user's recovery public key before S5 upload.
+ * Only user can decrypt during recovery.
+ */
+export interface EncryptedCheckpointDelta {
+  /** Must be true for encrypted deltas */
+  encrypted: true;
+  /** Encryption version (currently 1) */
+  version: number;
+  /** User's recovery public key (echoed back for verification) */
+  userRecoveryPubKey: string;
+  /** Host's ephemeral public key for ECDH (compressed, 0x-prefixed) */
+  ephemeralPublicKey: string;
+  /** 24-byte nonce for XChaCha20 (hex, 48 chars) */
+  nonce: string;
+  /** Encrypted CheckpointDelta JSON (hex) */
+  ciphertext: string;
+  /** EIP-191 signature over keccak256(ciphertext) */
+  hostSignature: string;
+}
+
+// ============= Blockchain Checkpoint Types (Phase 9) =============
+
+/**
+ * Checkpoint entry parsed from blockchain ProofSubmitted event.
+ * Used for decentralized checkpoint recovery without requiring host to be online.
+ */
+export interface BlockchainCheckpointEntry {
+  /** Job/session ID from the event */
+  jobId: bigint;
+  /** Host address that submitted the proof */
+  host: string;
+  /** Number of tokens claimed in this proof */
+  tokensClaimed: bigint;
+  /** Keccak256 hash of the proof data */
+  proofHash: string;
+  /** S5 CID of the STARK proof data */
+  proofCID: string;
+  /** S5 CID of the checkpoint delta (NEW in Phase 9) */
+  deltaCID: string;
+  /** Block number where the event was emitted */
+  blockNumber: number;
+  /** Transaction hash that emitted the event */
+  transactionHash: string;
+}
+
+/**
+ * Options for querying ProofSubmitted events from blockchain.
+ */
+export interface CheckpointQueryOptions {
+  /** Start block for event query (default: 0) */
+  fromBlock?: number;
+  /** End block for event query (default: 'latest') */
+  toBlock?: number | 'latest';
+}
+
 // ============= Host Types =============
 // NOTE: HostInfo and other host types have been moved to types/models.ts
 // to support the new model governance architecture. Import from there instead.
@@ -285,3 +412,7 @@ export type { ModelPricing, ModelWithAvailability, PriceRange } from './models';
 // ============= Web Search Types =============
 
 export * from './web-search.types';
+
+// ============= Proof Types (Security Audit Migration) =============
+
+export * from './proof.types';

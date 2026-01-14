@@ -28,6 +28,14 @@ export interface SessionInitPayload {
 
   /** Price per token in wei/smallest unit (NUMBER, not string) */
   pricePerToken: number;
+
+  /**
+   * Optional: User's recovery public key for checkpoint encryption.
+   * Host uses this to encrypt checkpoint deltas so only the user can decrypt.
+   * Compressed secp256k1 public key (0x-prefixed hex, 33 bytes).
+   * @since v1.8.7
+   */
+  recoveryPublicKey?: string;
 }
 
 /**
@@ -173,4 +181,25 @@ export interface IEncryptionManager {
    * @returns Compressed public key hex string (33 bytes, 0x-prefixed)
    */
   getPublicKey(): string;
+
+  /**
+   * Get client's stable recovery public key for checkpoint encryption.
+   *
+   * The host uses this key to encrypt checkpoint deltas so only the user
+   * can decrypt them during recovery. This ensures E2E encryption is
+   * maintained even for recovered conversations.
+   *
+   * @returns Stable recovery public key (compressed hex, 0x-prefixed)
+   */
+  getRecoveryPublicKey(): string;
+
+  /**
+   * Get recovery private key for checkpoint decryption.
+   *
+   * Used by SDK to decrypt checkpoint deltas that were encrypted
+   * by the host using the corresponding recovery public key.
+   *
+   * @returns Recovery private key (raw hex, no 0x prefix)
+   */
+  getRecoveryPrivateKey(): string;
 }

@@ -1,440 +1,553 @@
 # Architecture Documentation
 
-**Last Updated:** December 14, 2025
-
-## Current Contract Addresses (UUPS Proxies)
-
-All contracts have been migrated to UUPS upgradeable pattern:
-
-| Contract | Proxy Address |
-|----------|---------------|
-| JobMarketplace | `0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D` |
-| NodeRegistry | `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22` |
-| ModelRegistry | `0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2` |
-| ProofSystem | `0x5afB91977e69Cc5003288849059bc62d47E7deeb` |
-| HostEarnings | `0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0` |
-
-**Minimum Deposits:** ETH: 0.0001 (~$0.50) | USDC: 500,000 ($0.50)
+**Version:** 2.0
+**Last Updated:** January 9, 2026
+**Network:** Base Sepolia (Testnet)
 
 ---
 
-## Overview
+## 1. Contract Addresses (UUPS Proxies)
 
-The Fabstir P2P LLM marketplace smart contracts implement a **hybrid payment architecture** that evolved during development to optimize gas costs and simplify operations for different job types.
+| Contract | Proxy Address | Implementation |
+|----------|---------------|----------------|
+| JobMarketplace | `0x3CaCbf3f448B420918A93a88706B26Ab27a3523E` ⚠️ NEW | `0x26f27C19F80596d228D853dC39A204f0f6C45C7E` |
+| NodeRegistry | `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22` | `0xb85424dd91D4ae0C6945e512bfDdF8a494299115` |
+| ModelRegistry | `0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2` | `0x1D31d9688a4ffD2aFE738BC6C9a4cb27C272AA5A` |
+| ProofSystem | `0x5afB91977e69Cc5003288849059bc62d47E7deeb` | `0xCF46BBa79eA69A68001A1c2f5Ad9eFA1AD435EF9` |
+| HostEarnings | `0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0` | `0x8584AeAC9687613095D13EF7be4dE0A796F84D7a` |
 
-## Payment Architecture Evolution
+**Tokens:**
+- FAB Token: `0xC78949004B4EB6dEf2D66e49Cd81231472612D62`
+- USDC: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
 
-### Phase 1-2: Original Separated Design
+---
 
-Initially, the system was designed with separated concerns:
-
-```
-User → JobMarketplace → PaymentEscrow → Host
-                     ↓
-                HostEarnings
-```
-
-**Components:**
-- **JobMarketplace**: Managed job lifecycle
-- **PaymentEscrow**: Held funds in escrow separately
-- **HostEarnings**: Tracked host earnings separately
-
-**Characteristics:**
-- Clean separation of concerns
-- Multiple external contract calls per payment
-- Higher gas costs due to cross-contract communication
-- More complex error handling across contracts
-
-### Phase 3-4: Optimized Session Job Design
-
-For session-based jobs (long-running AI inference sessions), the architecture was simplified:
+## 2. Contract Dependency Diagram
 
 ```
-User → JobMarketplaceWithModels → Host
-           (self-contained)
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         FABSTIR COMPUTE ARCHITECTURE                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+                          ┌───────────────────────┐
+                          │    ModelRegistry      │
+                          │  ─────────────────    │
+                          │  • Model whitelist    │
+                          │  • Community voting   │
+                          │  • Trusted models     │
+                          └───────────┬───────────┘
+                                      │ validates models
+                                      ▼
+                          ┌───────────────────────┐
+                          │    NodeRegistry       │
+                          │  ─────────────────    │
+                          │  • Host registration  │
+                          │  • FAB staking        │
+                          │  • Dual pricing       │
+                          │  • Model support      │
+                          └───────────┬───────────┘
+                                      │ validates hosts
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        JobMarketplaceWithModels                              │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│  • Session management          • Deposit handling                           │
+│  • Proof submission            • Payment settlement                         │
+│  • Timeout enforcement         • Treasury collection                        │
+└────────────────┬────────────────────────────────────┬───────────────────────┘
+                 │                                    │
+                 │ verifies signatures                │ credits earnings
+                 ▼                                    ▼
+    ┌───────────────────────┐            ┌───────────────────────┐
+    │     ProofSystem       │            │    HostEarnings       │
+    │  ─────────────────    │            │  ─────────────────    │
+    │  • ECDSA verification │            │  • Earnings ledger    │
+    │  • Proof recording    │            │  • Batch withdrawals  │
+    │  • Replay prevention  │            │  • Multi-token        │
+    └───────────────────────┘            └───────────────────────┘
 ```
 
-**Characteristics:**
-- Direct payment handling within JobMarketplace
-- Single contract holds deposits and processes payments
-- ~30% reduction in gas costs
-- Atomic payment operations (no multi-contract failure modes)
-- Simpler error recovery
+### Dependency Matrix
 
-## Current Hybrid Architecture
+| Contract | Depends On | Depended By |
+|----------|------------|-------------|
+| ModelRegistry | OpenZeppelin | NodeRegistry |
+| NodeRegistry | ModelRegistry, FAB Token | JobMarketplace |
+| JobMarketplace | NodeRegistry, ProofSystem, HostEarnings | - |
+| ProofSystem | OpenZeppelin | JobMarketplace |
+| HostEarnings | OpenZeppelin | JobMarketplace |
 
-The `JobMarketplaceWithModels` contract now implements both models:
+---
 
-### 1. Legacy Single-Prompt Jobs
-- May still use external PaymentEscrow/HostEarnings contracts
-- Maintained for backward compatibility
-- Used for one-off inference requests
+## 3. Session Lifecycle State Machine
 
-### 2. Session Jobs (Recommended)
-- Self-contained payment processing
-- Uses internal `_sendPayments()` helper function
-- Direct transfers to hosts and treasury
-- Optimized for L2 (Base) deployment
+```
+                              ┌─────────────────────────────────────┐
+                              │         SESSION LIFECYCLE           │
+                              └─────────────────────────────────────┘
 
-## Key Components
+    ┌──────────────────┐
+    │  (Not Exists)    │
+    └────────┬─────────┘
+             │
+             │ createSessionJobForModel()
+             │ createSessionJobForModelWithToken()
+             │
+             ▼
+    ┌──────────────────┐
+    │                  │◄──────────────────────────────────────────┐
+    │     ACTIVE       │                                           │
+    │                  │──── submitProofOfWork() ───────────────────┘
+    │  status = 1      │     (updates tokensProven)
+    │                  │
+    └────────┬─────────┘
+             │
+             ├─────────────────────────┬────────────────────────────┐
+             │                         │                            │
+             │ completeSessionJob()    │ triggerSessionTimeout()    │
+             │ (host or depositor)     │ (anyone, after 3× interval)│
+             │                         │                            │
+             ▼                         ▼                            │
+    ┌──────────────────┐    ┌──────────────────┐                   │
+    │    COMPLETED     │    │    TIMED_OUT     │                   │
+    │                  │    │                  │                   │
+    │  status = 2      │    │  status = 3      │                   │
+    │                  │    │                  │                   │
+    │  Payment:        │    │  Payment:        │                   │
+    │  • Host: 90%     │    │  • Host: 90%     │                   │
+    │  • Treasury: 10% │    │    (of proven)   │                   │
+    │  • Refund: rest  │    │  • Treasury: 10% │                   │
+    └──────────────────┘    │  • Refund: rest  │                   │
+                            └──────────────────┘                   │
+                                                                   │
+    ┌─────────────────────────────────────────────────────────────┐│
+    │                    STATE TRANSITIONS                         ││
+    ├─────────────────────────────────────────────────────────────┤│
+    │  ACTIVE → ACTIVE      : submitProofOfWork() [tokensProven++]││
+    │  ACTIVE → COMPLETED   : completeSessionJob()                 │
+    │  ACTIVE → TIMED_OUT   : triggerSessionTimeout()             ││
+    │                                                              ││
+    │  COMPLETED → *        : BLOCKED (immutable)                 ││
+    │  TIMED_OUT → *        : BLOCKED (immutable)                 ││
+    └─────────────────────────────────────────────────────────────┘│
+```
 
-### JobMarketplaceWithModels
+---
 
-The main contract that handles both job types:
+## 4. Data Flow Diagrams
+
+### 4.1 Session Creation Flow
+
+```
+┌─────────┐                  ┌─────────────────┐                  ┌──────────────┐
+│Depositor│                  │  JobMarketplace │                  │ NodeRegistry │
+└────┬────┘                  └────────┬────────┘                  └──────┬───────┘
+     │                                │                                  │
+     │  1. getNodePricing(host)       │                                  │
+     │ ──────────────────────────────────────────────────────────────────>
+     │                                │                                  │
+     │  2. (minNative, minStable)     │                                  │
+     │ <──────────────────────────────────────────────────────────────────
+     │                                │                                  │
+     │  3. createSessionJobForModel() │                                  │
+     │    + ETH deposit               │                                  │
+     │ ──────────────────────────────>│                                  │
+     │                                │                                  │
+     │                                │  4. isActiveNode(host)?          │
+     │                                │ ────────────────────────────────>│
+     │                                │                                  │
+     │                                │  5. true                         │
+     │                                │ <────────────────────────────────│
+     │                                │                                  │
+     │                                │  6. nodeSupportsModel()?         │
+     │                                │ ────────────────────────────────>│
+     │                                │                                  │
+     │                                │  7. true                         │
+     │                                │ <────────────────────────────────│
+     │                                │                                  │
+     │  8. SessionJobCreated event    │                                  │
+     │ <──────────────────────────────│                                  │
+     │                                │                                  │
+```
+
+### 4.2 Proof Submission Flow
+
+```
+┌──────┐                  ┌─────────────────┐                  ┌─────────────┐
+│ Host │                  │  JobMarketplace │                  │ ProofSystem │
+└──┬───┘                  └────────┬────────┘                  └──────┬──────┘
+   │                               │                                  │
+   │  1. Generate inference        │                                  │
+   │     (off-chain)               │                                  │
+   │                               │                                  │
+   │  2. Sign proof:               │                                  │
+   │     hash(proof, tokens)       │                                  │
+   │                               │                                  │
+   │  3. submitProofOfWork(        │                                  │
+   │       jobId, tokens,          │                                  │
+   │       proofHash, signature)   │                                  │
+   │ ─────────────────────────────>│                                  │
+   │                               │                                  │
+   │                               │  4. verifyHostSignature()        │
+   │                               │ ────────────────────────────────>│
+   │                               │                                  │
+   │                               │  5. ECDSA.recover() == host?     │
+   │                               │ <────────────────────────────────│
+   │                               │                                  │
+   │                               │  6. Update tokensProven          │
+   │                               │     Store proofHash              │
+   │                               │                                  │
+   │  7. ProofSubmitted event      │                                  │
+   │ <─────────────────────────────│                                  │
+   │                               │                                  │
+```
+
+### 4.3 Payment Settlement Flow
+
+```
+┌────────────┐        ┌─────────────────┐        ┌──────────────┐        ┌──────────┐
+│Host/Depos. │        │  JobMarketplace │        │ HostEarnings │        │ Treasury │
+└─────┬──────┘        └────────┬────────┘        └──────┬───────┘        └────┬─────┘
+      │                        │                        │                     │
+      │ 1. completeSessionJob()│                        │                     │
+      │ ──────────────────────>│                        │                     │
+      │                        │                        │                     │
+      │                        │ 2. Calculate:          │                     │
+      │                        │    hostPayment = 90%   │                     │
+      │                        │    treasuryFee = 10%   │                     │
+      │                        │    refund = remainder  │                     │
+      │                        │                        │                     │
+      │                        │ 3. creditEarnings()    │                     │
+      │                        │ ──────────────────────>│                     │
+      │                        │                        │                     │
+      │                        │ 4. Transfer fee        │                     │
+      │                        │ ───────────────────────────────────────────>│
+      │                        │                        │                     │
+      │                        │ 5. Transfer refund     │                     │
+      │ <──────────────────────│                        │                     │
+      │                        │                        │                     │
+      │ 6. SessionCompleted    │                        │                     │
+      │ <──────────────────────│                        │                     │
+      │                        │                        │                     │
+
+      [Later: Host withdraws from HostEarnings]
+
+┌──────┐        ┌──────────────┐
+│ Host │        │ HostEarnings │
+└──┬───┘        └──────┬───────┘
+   │                   │
+   │ withdraw()        │
+   │ ─────────────────>│
+   │                   │
+   │ ETH/USDC transfer │
+   │ <─────────────────│
+   │                   │
+```
+
+### 4.4 Model Governance Flow
+
+```
+┌──────────┐        ┌───────────────┐        ┌───────────┐
+│ Proposer │        │ ModelRegistry │        │  Voters   │
+└────┬─────┘        └───────┬───────┘        └─────┬─────┘
+     │                      │                      │
+     │ 1. proposeModel()    │                      │
+     │    + 100 FAB fee     │                      │
+     │ ────────────────────>│                      │
+     │                      │                      │
+     │ 2. ModelProposed     │                      │
+     │ <────────────────────│                      │
+     │                      │                      │
+     │                      │ 3. voteOnProposal()  │
+     │                      │    + FAB tokens      │
+     │                      │ <────────────────────│
+     │                      │                      │
+     │                      │  [3 days pass...]    │
+     │                      │                      │
+     │                      │ 4. executeProposal() │
+     │                      │ <────────────────────│
+     │                      │                      │
+     │                      │ 5. If approved:      │
+     │                      │    - Add model       │
+     │                      │    - Refund fee      │
+     │                      │                      │
+     │                      │ 6. withdrawVotes()   │
+     │                      │ <────────────────────│
+     │                      │                      │
+```
+
+---
+
+## 5. Storage Layout Documentation
+
+### 5.1 JobMarketplaceWithModelsUpgradeable
 
 ```solidity
-contract JobMarketplaceWithModels {
-    // Legacy external contracts (optional)
-    IPaymentEscrow public paymentEscrow;
-    HostEarnings public hostEarnings;
-    
-    // Session job payments (self-contained)
-    function _sendPayments(
-        Job storage job,
-        address host,
-        uint256 payment,
-        uint256 treasuryFee,
-        uint256 refund
-    ) internal {
-        if (job.paymentToken != address(0)) {
-            // Direct ERC20 transfers
-            IERC20(job.paymentToken).transfer(host, payment);
-            IERC20(job.paymentToken).transfer(treasury, treasuryFee);
-            IERC20(job.paymentToken).transfer(renter, refund);
-        } else {
-            // Direct ETH transfers
-            payable(host).transfer(payment);
-            payable(treasury).transfer(treasuryFee);
-            payable(renter).transfer(refund);
-        }
+// Slot 0-4: Inherited from OwnableUpgradeable, PausableUpgradeable, etc.
+
+// Slot 5+: Contract-specific storage
+IERC20 public fabToken;                           // Slot 5
+INodeRegistry public nodeRegistry;                // Slot 6
+IHostEarnings public hostEarnings;                // Slot 7
+IProofSystem public proofSystem;                  // Slot 8
+
+address public treasury;                          // Slot 9
+uint256 public nextJobId;                         // Slot 10
+
+mapping(uint256 => SessionJob) public sessionJobs;      // Slot 11
+mapping(address => uint256[]) public userSessions;      // Slot 12
+mapping(uint256 => bytes32) public sessionModel;        // Slot 13
+mapping(address => uint256) public nativeDeposits;      // Slot 14
+mapping(address => mapping(address => uint256)) public tokenDeposits;  // Slot 15
+mapping(address => bool) public acceptedTokens;         // Slot 16
+mapping(address => uint256) public tokenMinDeposits;    // Slot 17
+
+uint256 public accumulatedTreasuryNative;         // Slot 18
+mapping(address => uint256) public accumulatedTreasuryTokens;  // Slot 19
+
+// Slot 20-69: Storage gap (50 slots reserved)
+uint256[50] private __gap;
+```
+
+### 5.2 SessionJob Struct Layout
+
+```solidity
+struct SessionJob {
+    address host;              // 20 bytes
+    address depositor;         // 20 bytes
+    address paymentToken;      // 20 bytes
+    uint256 depositAmount;     // 32 bytes
+    uint256 pricePerToken;     // 32 bytes
+    uint256 tokensProven;      // 32 bytes
+    uint256 startTime;         // 32 bytes
+    uint256 maxDuration;       // 32 bytes
+    uint256 proofInterval;     // 32 bytes
+    uint256 lastProofTime;     // 32 bytes
+    bytes32 lastProofHash;     // 32 bytes
+    Status status;             // 1 byte (enum)
+}
+// Total: ~10 storage slots per session
+```
+
+### 5.3 NodeRegistryWithModelsUpgradeable
+
+```solidity
+// Slot 0-2: Inherited storage
+
+IERC20 public fabToken;                           // Slot 3
+ModelRegistryUpgradeable public modelRegistry;    // Slot 4
+
+mapping(address => Node) public nodes;            // Slot 5
+mapping(address => uint256) public activeNodesIndex;  // Slot 6
+mapping(bytes32 => address[]) public modelToNodes;    // Slot 7
+mapping(bytes32 => mapping(address => uint256)) private modelNodeIndex;  // Slot 8
+
+mapping(address => mapping(bytes32 => uint256)) public modelPricingNative;   // Slot 9
+mapping(address => mapping(bytes32 => uint256)) public modelPricingStable;   // Slot 10
+mapping(address => mapping(address => uint256)) public customTokenPricing;   // Slot 11
+
+address[] public activeNodesList;                 // Slot 12
+
+// Slot 13-51: Storage gap (39 slots)
+uint256[39] private __gap;
+```
+
+### 5.4 Storage Gap Strategy
+
+All upgradeable contracts reserve storage gaps for future additions:
+
+| Contract | Gap Size | Reserved Slots |
+|----------|----------|----------------|
+| JobMarketplaceWithModelsUpgradeable | 50 | Future payment methods, analytics |
+| NodeRegistryWithModelsUpgradeable | 39 | Reputation, additional pricing |
+| ModelRegistryUpgradeable | 49 | Governance extensions |
+| ProofSystemUpgradeable | 49 | ZK proof support |
+| HostEarningsUpgradeable | 48 | Multi-chain earnings |
+
+---
+
+## 6. External Dependencies
+
+### 6.1 OpenZeppelin Contracts (v5.x)
+
+| Contract | Usage | Import Path |
+|----------|-------|-------------|
+| OwnableUpgradeable | Access control | `@openzeppelin/contracts-upgradeable/access/` |
+| PausableUpgradeable | Emergency stop | `@openzeppelin/contracts-upgradeable/utils/` |
+| Initializable | Proxy initialization | `@openzeppelin/contracts-upgradeable/proxy/utils/` |
+| UUPSUpgradeable | Upgrade pattern | `@openzeppelin/contracts-upgradeable/proxy/utils/` |
+| SafeERC20 | Safe token transfers | `@openzeppelin/contracts/token/ERC20/utils/` |
+| Address | Safe ETH transfers | `@openzeppelin/contracts/utils/` |
+| ECDSA | Signature verification | `@openzeppelin/contracts/utils/cryptography/` |
+| MessageHashUtils | EIP-191 hashing | `@openzeppelin/contracts/utils/cryptography/` |
+
+### 6.2 Token Interfaces
+
+| Interface | Standard | Usage |
+|-----------|----------|-------|
+| IERC20 | ERC-20 | USDC, FAB token interactions |
+
+### 6.3 Upgrade Pattern: UUPS
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    UUPS Proxy Pattern                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   ┌─────────────┐         ┌─────────────────────┐          │
+│   │   Proxy     │────────>│   Implementation    │          │
+│   │  (Storage)  │         │   (Logic Only)      │          │
+│   │             │         │                     │          │
+│   │ • State     │         │ • Functions         │          │
+│   │ • Balance   │         │ • _authorizeUpgrade │          │
+│   └─────────────┘         └─────────────────────┘          │
+│         │                           │                       │
+│         │ delegatecall              │                       │
+│         └───────────────────────────┘                       │
+│                                                             │
+│   Upgrade: owner calls proxy.upgradeToAndCall(newImpl)     │
+│   Authorization: _authorizeUpgrade() checks onlyOwner      │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 7. Security Architecture
+
+### 7.1 Reentrancy Protection
+
+```solidity
+// Custom ReentrancyGuardUpgradeable for proxy compatibility
+contract ReentrancyGuardUpgradeable {
+    uint256 private constant NOT_ENTERED = 1;
+    uint256 private constant ENTERED = 2;
+    uint256 private _status;
+
+    modifier nonReentrant() {
+        require(_status != ENTERED, "ReentrancyGuard: reentrant call");
+        _status = ENTERED;
+        _;
+        _status = NOT_ENTERED;
     }
 }
 ```
 
-### ProofSystem (Updated for S5 Storage - Oct 14, 2025)
+**Protected Functions:**
+- `registerNode()`, `unregisterNode()`, `stake()` (NodeRegistry)
+- `withdraw()`, `withdrawToken()` (HostEarnings)
+- Session creation functions (JobMarketplace)
 
-**Previous Approach**: On-chain EZKL proof verification (221KB proofs)
-- Problem: STARK proofs exceeded RPC transaction limit (128KB)
-- Result: All proof submissions were failing
+### 7.2 Safe Transfer Patterns
 
-**Current Approach**: S5 Off-Chain Proof Storage
-- Full proofs (221KB) stored in S5 decentralized storage
-- Only hash (32 bytes) + CID (string) submitted on-chain
-- Transaction size: 221KB → 300 bytes (737x reduction)
-- Storage cost: ~$50 → ~$0.001 per proof (5000x cheaper)
-- Trust model: Contract trusts host's hash; disputes fetch proof from S5
-- Proof integrity: SHA256 hash prevents tampering
-- Proof availability: S5 ensures decentralized retrieval
-
-### NodeRegistry
-
-Manages host registration and capabilities:
-- Tracks registered GPU hosts
-- Manages staking requirements
-- Stores host capabilities and availability
-
-## Payment Flows
-
-### Session Job Payment Flow (Optimized with S5 Proof Storage)
-
-```
-1. Renter creates session job with deposit
-   └→ Funds held directly in JobMarketplace
-
-2. Host submits proof of work (S5 off-chain)
-   ├→ Host generates STARK proof (221KB) off-chain
-   ├→ Host uploads proof to S5 → receives CID
-   ├→ Host calculates SHA256 hash of proof
-   └→ Host submits hash + CID to contract (~300 bytes)
-
-3. Payment processed via _sendPayments()
-   ├→ Host receives payment (direct transfer)
-   ├→ Treasury receives fee (direct transfer)
-   └→ Renter receives refund if any (direct transfer)
-
-4. Dispute resolution (if needed)
-   ├→ Retrieve full proof from S5 using CID
-   ├→ Verify hash matches on-chain stored hash
-   └→ Verify proof validity off-chain or via dispute contract
-```
-
-**Gas Cost: ~150,000 gas (minimal increase for string storage)**
-
-### Legacy Job Payment Flow
-
-```
-1. Renter posts job
-   └→ JobMarketplace → PaymentEscrow (external call)
-
-2. Host completes job
-   └→ JobMarketplace triggers release
-
-3. PaymentEscrow releases funds
-   ├→ PaymentEscrow → HostEarnings (external call)
-   └→ HostEarnings → Host (external call)
-```
-
-**Gas Cost: ~220,000 gas**
-
-## Token Support
-
-### Native ETH
-- Default payment method
-- No approval needed
-- Direct transfer via `payable().transfer()`
-
-### USDC (ERC20)
-- Base Sepolia: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
-- Base Mainnet: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`
-- Requires approval before job creation
-- Direct transfer via `token.transfer()`
-
-### Adding New Tokens
 ```solidity
-marketplace.setAcceptedToken(tokenAddress, true);
+// ERC20: SafeERC20 library
+token.safeTransfer(recipient, amount);
+token.safeTransferFrom(sender, recipient, amount);
+
+// ETH: Address library
+Address.sendValue(payable(recipient), amount);
 ```
 
-## Gas Optimization Strategies
-
-### 1. Reduced External Calls
-- Session jobs avoid cross-contract calls
-- Payments processed in single transaction
-- No intermediate escrow state
-
-### 2. Efficient Storage Patterns
-- Packed structs for job data
-- Minimal storage updates
-- Reuse of storage slots where possible
-
-### 3. L2 Optimization
-- Designed for Base L2's lower gas costs
-- Batch operations where applicable
-- Event-heavy for off-chain indexing
-
-## Security Considerations
-
-### Reentrancy Protection
-- OpenZeppelin ReentrancyGuard on all payment functions
-- State updates before external calls
-- Checks-Effects-Interactions pattern
-
-### Access Control
-- Only job renter can complete their session
-- Only assigned host can claim abandoned session
-- Treasury address updatable by owner only
-
-### Payment Safety
-- No funds can be trapped in contract
-- All deposits either paid out or refunded
-- Timeout mechanisms prevent indefinite locks
-
-## Migration Path
-
-For projects using the old architecture:
-
-1. **Keep existing jobs running** - Legacy jobs continue to work
-2. **Deploy new contracts** - ProofSystem and updated JobMarketplace
-3. **Update frontend** - Point to new contract addresses
-4. **Create new jobs as sessions** - Use session job functions
-5. **Phase out legacy** - Stop creating legacy jobs
-
-## Benefits of Hybrid Architecture
-
-### For Users
-- Lower transaction fees (~30% reduction)
-- Faster payment processing
-- Simpler error recovery
-
-### For Developers
-- Cleaner codebase for new features
-- Easier testing and debugging
-- Better gas predictability
-
-### For the Protocol
-- Reduced attack surface
-- Simpler audit scope
-- More efficient L2 utilization
-
-## Session Jobs: Continuous AI Inference
-
-### Overview
-Session jobs enable continuous AI conversations with minimal blockchain transactions. Unlike single-prompt jobs that require a transaction per interaction, session jobs use a checkpoint-based proof system.
-
-### Transaction Model
-**Traditional per-prompt**: 50 prompts = 50+ transactions (~$100-250 gas on L2)  
-**Session jobs**: 50 prompts = 5-10 transactions (~$10-25 gas on L2)
-
-Key innovations:
-- **Off-chain inference**: AI processing happens off-chain
-- **On-chain verification**: Only periodic proof checkpoints hit blockchain
-- **Checkpoint intervals**: Host submits proofs every N tokens (not per prompt)
-- **Token-based accounting**: Payment calculated by proven tokens × price per token
-
-### How It Works
-1. **Session creation** (1 tx): User deposits funds, sets parameters
-2. **Active session**: Off-chain prompts/responses, periodic proof submissions
-3. **Completion** (1 tx): Payment based on cryptographically proven work
-
-Example flow:
-```
-User deposits 1 ETH for 10,000 tokens at 0.0001 ETH/token
-Sets checkpointInterval = 500 tokens
-→ Host generates responses off-chain
-→ Submits proof every 500 tokens (not every prompt)
-→ User completes session, payment distributed
-```
-
-### Benefits
-- **85-95% reduction** in transaction costs
-- **Seamless UX** without wallet popups for each prompt
-- **Trustless payment** via EZKL cryptographic proofs
-- **Protection** for both users (refunds) and hosts (abandonment claims)
-
-For detailed documentation, see [SESSION_JOBS.md](./SESSION_JOBS.md).
-
-## S5 Off-Chain Proof Storage Architecture (October 14, 2025)
-
-### The Problem
-STARK proofs generated by RISC0 are approximately 221KB in size, which exceeds the Base Sepolia RPC transaction limit of 128KB. This caused **all proof submissions to fail** with "oversized data" errors, making the entire proof-of-work system non-functional.
-
-### The Solution
-Store full proofs in S5 decentralized storage, submit only cryptographic hash + retrieval CID on-chain.
-
-### Architecture Components
+### 7.3 Access Control Hierarchy
 
 ```
-┌─────────────┐
-│   Host Node │
-└──────┬──────┘
-       │
-       ├─1─→ Generate STARK proof (221KB)
-       │
-       ├─2─→ Upload to S5 Storage
-       │     └→ Receives CID (content identifier)
-       │
-       ├─3─→ Calculate SHA256 hash
-       │
-       ├─4─→ Submit to blockchain:
-       │     - jobId
-       │     - tokensClaimed
-       │     - proofHash (32 bytes)
-       │     - proofCID (string)
-       │
-       ▼
-┌──────────────────────────┐
-│  JobMarketplaceWithModels │
-│  (On-Chain)              │
-│  - Stores hash + CID     │
-│  - Processes payment     │
-│  - Emits ProofSubmitted  │
-└──────────────────────────┘
-       │
-       └─→ Event: ProofSubmitted(jobId, host, tokens, hash, cid)
+┌─────────────────────────────────────────────┐
+│              Access Control                  │
+├─────────────────────────────────────────────┤
+│                                             │
+│  OWNER (Highest)                            │
+│  └── upgradeToAndCall()                     │
+│  └── pause(), unpause()                     │
+│  └── updateTreasury()                       │
+│  └── addTrustedModel()                      │
+│  └── setAuthorizedCaller()                  │
+│                                             │
+│  AUTHORIZED_CALLER (Medium)                 │
+│  └── creditEarnings()                       │
+│  └── recordVerifiedProof()                  │
+│                                             │
+│  HOST (Medium - Economically Bonded)        │
+│  └── submitProofOfWork() [own sessions]     │
+│  └── completeSessionJob() [own sessions]    │
+│  └── update*() [own node]                   │
+│                                             │
+│  DEPOSITOR (Low)                            │
+│  └── completeSessionJob() [own sessions]    │
+│  └── session creation                       │
+│                                             │
+│  ANYONE (Lowest)                            │
+│  └── triggerSessionTimeout()                │
+│  └── View functions                         │
+│  └── proposeModel(), voteOnProposal()       │
+│                                             │
+└─────────────────────────────────────────────┘
 ```
 
-### Trust and Security Model
+---
 
-**On-Chain Storage** (per proof):
-- `bytes32 lastProofHash` - SHA256 hash of proof (32 bytes)
-- `string lastProofCID` - S5 CID for retrieval (variable length, ~50 bytes)
-- Total: ~82 bytes vs 221KB (2,695x reduction)
+## 8. Gas Optimization Patterns
 
-**Trust Assumptions**:
-1. Contract trusts host's submitted hash during normal operation
-2. Payment releases without on-chain proof verification
-3. Disputes can retrieve full proof from S5 using CID
-4. SHA256 hash verification prevents proof tampering
-5. S5 decentralized network ensures proof availability
+### 8.1 O(1) Array Removal
 
-**Security Properties**:
-- **Integrity**: SHA256 hash cryptographically binds to specific proof
-- **Availability**: S5 decentralized storage (multiple nodes)
-- **Verifiability**: Full proof retrievable for disputes
-- **Non-repudiation**: Host cannot change proof after submission (hash mismatch)
-
-### Benefits
-
-| Metric | Before (On-Chain) | After (S5) | Improvement |
-|--------|-------------------|------------|-------------|
-| Transaction size | 221KB | ~300 bytes | 737x smaller |
-| Storage cost | ~$50 | ~$0.001 | 5000x cheaper |
-| Gas cost | N/A (failed) | Minimal | Now works! |
-| Verification | On-chain | On-demand | More efficient |
-
-### Breaking Changes
-
-**Old Contract** (`0xe169A4B57700080725f9553E3Cc69885fea13629`):
 ```solidity
-function submitProofOfWork(
-    uint256 jobId,
-    bytes calldata ekzlProof,
-    uint256 tokensInBatch
-) external
+// Swap-and-pop pattern for efficient removal
+function _removeNodeFromModel(bytes32 modelId, address node) private {
+    uint256 index = modelNodeIndex[modelId][node];
+    uint256 lastIndex = modelToNodes[modelId].length - 1;
+
+    if (index != lastIndex) {
+        address lastNode = modelToNodes[modelId][lastIndex];
+        modelToNodes[modelId][index] = lastNode;
+        modelNodeIndex[modelId][lastNode] = index;
+    }
+
+    modelToNodes[modelId].pop();
+    delete modelNodeIndex[modelId][node];
+}
 ```
 
-**New Contract** (`0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E`):
-```solidity
-function submitProofOfWork(
-    uint256 jobId,
-    uint256 tokensClaimed,
-    bytes32 proofHash,
-    string calldata proofCID
-) external
+### 8.2 Batch Operations
+
+- `batchAddTrustedModels()` - Add multiple models in one transaction
+- HostEarnings accumulation - Batch withdrawals vs per-session payments
+
+### 8.3 Storage Efficiency
+
+- Struct packing for session data
+- Enum for status (1 byte vs 32 bytes)
+- Mapping-based lookups vs array iterations
+
+---
+
+## 9. Event Architecture
+
+### 9.1 Key Events for Indexing
+
+| Contract | Event | Purpose |
+|----------|-------|---------|
+| JobMarketplace | `SessionJobCreated` | Track session starts |
+| JobMarketplace | `SessionJobCompleted` | Track completions, payments |
+| JobMarketplace | `ProofSubmitted` | Track proof history |
+| NodeRegistry | `NodeRegistered` | Track host onboarding |
+| NodeRegistry | `PricingUpdated` | Track price changes |
+| ModelRegistry | `ModelProposed` | Track governance |
+| HostEarnings | `EarningsCredited` | Track host income |
+
+### 9.2 Event Indexing Strategy
+
 ```
-
-### Trade-offs
-
-**Pros**:
-- ✅ Solves RPC size limit completely
-- ✅ Massively reduces transaction costs
-- ✅ Enables proof archiving and retrieval
-- ✅ Decentralized storage via S5
-
-**Cons**:
-- ❌ No immediate on-chain verification
-- ❌ Requires S5 client integration
-- ❌ Trust model shifts from verification to hash commitment
-- ❌ Dispute resolution requires off-chain proof retrieval
-
-### Migration Guide
-
-**For Node Operators**:
-1. Integrate S5 client library
-2. Upload proofs before blockchain submission
-3. Calculate SHA256 hash of proof
-4. Submit hash + CID to new contract
-
-**For SDK Developers**:
-1. Update contract address to `0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E`
-2. Update ABI to include new function signature
-3. Listen for updated `ProofSubmitted` event (includes `proofCID`)
-4. Implement S5 retrieval for proof viewing/verification
-
-**For Auditors/Verifiers**:
-1. Retrieve proof from S5 using CID
-2. Calculate SHA256 hash of retrieved proof
-3. Compare with on-chain stored hash
-4. Verify proof validity using ProofSystem contract
-
-For detailed deployment information, see [S5_PROOF_STORAGE_DEPLOYMENT.md](./S5_PROOF_STORAGE_DEPLOYMENT.md).
-
-## Future Improvements
-
-### Planned Optimizations
-1. **Storage packing** - Further optimize struct layouts
-2. **Batch payments** - Process multiple payments in one transaction
-3. **Payment channels** - For high-frequency micro-payments
-
-### Potential Features
-1. **Streaming payments** - Pay per token as generated
-2. **Multi-party escrow** - Support for collaborative jobs
-3. **Cross-chain payments** - Bridge payments from other chains
-
-## Summary
-
-The hybrid payment architecture represents a pragmatic evolution:
-- **Legacy support** ensures backward compatibility
-- **Optimized session jobs** provide better UX and lower costs
-- **Flexibility** to adapt to different use cases
-
-This architecture balances the ideals of clean separation with the practical realities of gas optimization on L2 networks, resulting in a more efficient and user-friendly system.
+┌─────────────────────────────────────────────────────────────┐
+│                  Off-Chain Indexing                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Events ────────> TheGraph/Custom Indexer ────────> API     │
+│                                                             │
+│  Indexed Fields:                                            │
+│  • jobId (SessionJobCreated, ProofSubmitted)               │
+│  • host (NodeRegistered, EarningsCredited)                 │
+│  • depositor (SessionJobCreated)                           │
+│  • modelId (ModelProposed, SessionJobCreated)              │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```

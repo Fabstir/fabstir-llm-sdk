@@ -42,7 +42,7 @@ describe('SessionManager', () => {
 
     // Mock StorageManager  
     mockStorageManager = {
-      storeData: vi.fn().mockResolvedValue('bafybeiExample123'),
+      storeData: vi.fn().mockResolvedValue('baagrujzuifhfw2dvqkhzzknwypin32xxaqir4kzyivjf63dzq2jq'),
       retrieveData: vi.fn().mockResolvedValue({
         jobId: '42',
         hostAddress: '0xHost789',
@@ -217,7 +217,7 @@ describe('SessionManager', () => {
 
       const cid = await sessionManager.storeSessionData('session-42', data);
 
-      expect(cid).toBe('bafybeiExample123');
+      expect(cid).toBe('baagrujzuifhfw2dvqkhzzknwypin32xxaqir4kzyivjf63dzq2jq');
       expect(mockStorageManager.storeData).toHaveBeenCalledWith(
         'session-42-data',
         data

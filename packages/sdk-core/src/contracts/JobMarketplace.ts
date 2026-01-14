@@ -353,6 +353,28 @@ export class JobMarketplaceWrapper {
     };
   }
 
+  /**
+   * Get proof submission details for a session
+   *
+   * @param sessionId - The session/job ID
+   * @param proofIndex - Index of the proof submission (0-based)
+   * @returns Proof submission result with proofHash, tokensClaimed, timestamp, verified
+   */
+  async getProofSubmission(
+    sessionId: bigint,
+    proofIndex: number
+  ): Promise<{
+    proofHash: string;
+    tokensClaimed: bigint;
+    timestamp: bigint;
+    verified: boolean;
+  }> {
+    await this.verifyChain();
+    const [proofHash, tokensClaimed, timestamp, verified] =
+      await this.contract.getProofSubmission(sessionId, proofIndex);
+    return { proofHash, tokensClaimed, timestamp, verified };
+  }
+
   // Chain Management
   async switchToChain(newChainId: number): Promise<JobMarketplaceWrapper> {
     return new JobMarketplaceWrapper(newChainId, this.signer);

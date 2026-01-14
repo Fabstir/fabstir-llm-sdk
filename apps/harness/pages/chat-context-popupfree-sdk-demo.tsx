@@ -43,7 +43,7 @@ import { FabstirSDKCore, ChainRegistry, ChainId, ensureSubAccount, createSubAcco
 import {
   cacheSeed,
   hasCachedSeed,
-} from "../../../packages/sdk-core/src/utils/s5-seed-derivation";
+} from "@fabstir/sdk-core";
 import {
   createSDK,
   connectWallet as connectBaseWallet,

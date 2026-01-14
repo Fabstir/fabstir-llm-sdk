@@ -1,6 +1,6 @@
 # Fabstir LLM Marketplace - API Reference
 
-**Last Updated:** December 14, 2025
+**Last Updated:** January 9, 2026
 **Network:** Base Sepolia (Chain ID: 84532)
 **PRICE_PRECISION:** 1000 (all prices multiplied by 1000 for sub-$1/million support)
 
@@ -16,7 +16,7 @@
 // UPGRADEABLE CONTRACTS (UUPS Proxies) - Use these addresses
 const contracts = {
   // Proxy addresses (interact with these)
-  jobMarketplace: "0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D",
+  jobMarketplace: "0x3CaCbf3f448B420918A93a88706B26Ab27a3523E",  // ⚠️ NEW - Jan 9, 2026
   nodeRegistry: "0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22",
   modelRegistry: "0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2",
   proofSystem: "0x5afB91977e69Cc5003288849059bc62d47E7deeb",
@@ -27,13 +27,13 @@ const contracts = {
   usdcToken: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 };
 
-// Implementation addresses (for verification only)
+// Implementation addresses (for verification only) - Updated Jan 9, 2026
 const implementations = {
-  jobMarketplace: "0xe0ee96FC4Cc7a05a6e9d5191d070c5d1d13f143F",
-  nodeRegistry: "0x68298e2b74a106763aC99E3D973E98012dB5c75F",
-  modelRegistry: "0xd7Df5c6D4ffe6961d47753D1dd32f844e0F73f50",
-  proofSystem: "0x83eB050Aa3443a76a4De64aBeD90cA8d525E7A3A",
-  hostEarnings: "0x588c42249F85C6ac4B4E27f97416C0289980aabB"
+  jobMarketplace: "0x26f27C19F80596d228D853dC39A204f0f6C45C7E",  // ⚠️ NEW
+  nodeRegistry: "0xb85424dd91D4ae0C6945e512bfDdF8a494299115",    // ⚠️ NEW
+  modelRegistry: "0x1D31d9688a4ffD2aFE738BC6C9a4cb27C272AA5A",   // ⚠️ NEW
+  proofSystem: "0xCF46BBa79eA69A68001A1c2f5Ad9eFA1AD435EF9",     // ⚠️ NEW
+  hostEarnings: "0x8584AeAC9687613095D13EF7be4dE0A796F84D7a"     // ⚠️ NEW
 };
 ```
 
@@ -360,8 +360,8 @@ function isActiveNode(address operator) external view returns (bool)
 
 Session management and payments.
 
-**Proxy Address:** `0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D`
-**Implementation:** `0xe0ee96FC4Cc7a05a6e9d5191d070c5d1d13f143F`
+**Proxy Address:** `0x3CaCbf3f448B420918A93a88706B26Ab27a3523E` ⚠️ NEW (Jan 9, 2026)
+**Implementation:** `0x26f27C19F80596d228D853dC39A204f0f6C45C7E`
 
 ### Constants
 
@@ -538,13 +538,14 @@ function createSessionJobForModelWithToken(
 
 #### `submitProofOfWork`
 
-Submit proof of work for tokens generated.
+Submit signed proof of work for tokens generated.
 
 ```solidity
 function submitProofOfWork(
     uint256 jobId,          // Session ID
     uint256 tokensClaimed,  // Number of tokens in this proof
     bytes32 proofHash,      // SHA256 hash of STARK proof
+    bytes calldata signature,  // Host's ECDSA signature (65 bytes)
     string memory proofCID  // S5 CID where proof is stored
 ) external
 ```
@@ -552,20 +553,59 @@ function submitProofOfWork(
 **Requirements:**
 - Only the session host can submit proofs
 - `tokensClaimed >= MIN_PROVEN_TOKENS` (100)
+- `signature.length == 65` bytes (r, s, v format)
+- Signature must be from the session host
 - Session must be Active
 
 **Example:**
 ```javascript
-// Host submits proof after generating tokens
-const proofHash = ethers.keccak256(proofBytes);
-const proofCID = "bafyreib...";  // S5 storage CID
+import { keccak256, solidityPacked, getBytes } from 'ethers';
 
+// Host submits signed proof after generating tokens
+const proofHash = keccak256(proofBytes);
+const proofCID = "bafyreib...";  // S5 storage CID
+const tokensClaimed = 1000;
+
+// 1. Generate signature
+const dataHash = keccak256(
+  solidityPacked(
+    ['bytes32', 'address', 'uint256'],
+    [proofHash, hostAddress, tokensClaimed]
+  )
+);
+const signature = await hostWallet.signMessage(getBytes(dataHash));
+
+// 2. Submit with signature
 await marketplace.submitProofOfWork(
   sessionId,
-  1000,         // 1000 tokens generated
+  tokensClaimed,
   proofHash,
+  signature,
   proofCID
 );
+```
+
+#### `getProofSubmission`
+
+Get details of a specific proof submission.
+
+```solidity
+function getProofSubmission(
+    uint256 sessionId,
+    uint256 proofIndex
+) external view returns (
+    bytes32 proofHash,
+    uint256 tokensClaimed,
+    uint256 timestamp,
+    bool verified
+)
+```
+
+**Example:**
+```javascript
+const [proofHash, tokensClaimed, timestamp, verified] =
+  await marketplace.getProofSubmission(sessionId, 0);
+console.log(`Proof verified: ${verified}`);
 ```
 
 **Events:**
@@ -592,7 +632,10 @@ function completeSessionJob(
 ) external
 ```
 
-**Can be called by anyone** (enables gasless completion for users).
+**Access Control:**
+- Only `depositor` or `host` can call this function
+- `depositor` can complete immediately (no waiting period)
+- `host` must wait `DISPUTE_WINDOW` (30 seconds) after session start
 
 **Payment Distribution:**
 - 90% of earned amount → Host (via HostEarnings)
@@ -625,8 +668,7 @@ Get session details.
 ```solidity
 function sessionJobs(uint256 jobId) external view returns (
     uint256 id,
-    address depositor,
-    address requester,
+    address depositor,      // Who deposited funds (receives refunds)
     address host,
     address paymentToken,
     uint256 deposit,
@@ -650,10 +692,7 @@ function sessionJobs(uint256 jobId) external view returns (
 enum SessionStatus {
     Active,      // 0 - In progress
     Completed,   // 1 - Successfully completed
-    TimedOut,    // 2 - Timed out
-    Disputed,    // 3 - Under dispute
-    Abandoned,   // 4 - Abandoned by host
-    Cancelled    // 5 - Cancelled
+    TimedOut     // 2 - Timed out
 }
 ```
 
@@ -842,6 +881,8 @@ const { jobId } = (await tx.wait()).logs[0].args;
 ### 3. Host Inference Flow
 
 ```javascript
+import { keccak256, solidityPacked, getBytes } from 'ethers';
+
 // 1. Listen for new sessions
 marketplace.on("SessionJobCreated", async (jobId, requester, host, deposit) => {
   if (host === myAddress) {
@@ -850,12 +891,22 @@ marketplace.on("SessionJobCreated", async (jobId, requester, host, deposit) => {
   }
 });
 
-// 2. Submit proofs periodically
+// 2. Submit signed proofs periodically
+const tokensClaimed = 1000;
+const proofHash = keccak256(proofBytes);
+
+// Generate host signature
+const dataHash = keccak256(
+  solidityPacked(['bytes32', 'address', 'uint256'], [proofHash, hostAddress, tokensClaimed])
+);
+const signature = await hostWallet.signMessage(getBytes(dataHash));
+
 await marketplace.submitProofOfWork(
   sessionId,
-  1000,           // Tokens generated
-  proofHash,      // SHA256 of STARK proof
-  "bafyreib..."   // S5 CID
+  tokensClaimed,
+  proofHash,
+  signature,        // Host's ECDSA signature
+  "bafyreib..."     // S5 CID
 );
 
 // 3. Complete session when done
@@ -892,7 +943,6 @@ await hostEarningsContract.withdrawNative();
 | `ProofSubmitted(uint256 jobId, address host, uint256 tokensClaimed, bytes32 proofHash, string proofCID)` | Proof of work submitted |
 | `SessionCompleted(uint256 jobId, address completedBy, uint256 tokensUsed, uint256 paymentAmount, uint256 refundAmount)` | Session completed |
 | `SessionTimedOut(uint256 jobId, uint256 hostEarnings, uint256 userRefund)` | Session timed out |
-| `SessionAbandoned(uint256 jobId, uint256 userRefund)` | Session abandoned |
 | `DepositReceived(address account, address token, uint256 amount)` | Deposit received |
 | `WithdrawalProcessed(address account, address token, uint256 amount)` | Withdrawal processed |
 | `TokenAccepted(address token, uint256 minDeposit)` | New token accepted |
@@ -931,6 +981,7 @@ await hostEarningsContract.withdrawNative();
 | `"Token not accepted"` | Payment token not in accepted list |
 | `"Token not configured"` | Token has no minimum deposit set |
 | `"Only host can submit proof"` | Non-host trying to submit proof |
+| `"Only depositor or host can complete"` | Third party trying to complete session |
 | `"Session not active"` | Session is not in Active status |
 
 ---
@@ -955,9 +1006,9 @@ const config = {
   rpcUrl: "https://sepolia.base.org",
   explorer: "https://sepolia.basescan.org",
 
-  // UPGRADEABLE CONTRACTS (UUPS Proxies) - December 14, 2025
+  // UPGRADEABLE CONTRACTS (UUPS Proxies) - January 9, 2026
   contracts: {
-    jobMarketplace: "0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D",
+    jobMarketplace: "0x3CaCbf3f448B420918A93a88706B26Ab27a3523E",  // ⚠️ NEW
     nodeRegistry: "0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22",
     modelRegistry: "0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2",
     proofSystem: "0x5afB91977e69Cc5003288849059bc62d47E7deeb",
@@ -966,13 +1017,13 @@ const config = {
     usdcToken: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
   },
 
-  // Implementation addresses (for contract verification)
+  // Implementation addresses (for contract verification) - January 9, 2026
   implementations: {
-    jobMarketplace: "0xe0ee96FC4Cc7a05a6e9d5191d070c5d1d13f143F",
-    nodeRegistry: "0x68298e2b74a106763aC99E3D973E98012dB5c75F",
-    modelRegistry: "0xd7Df5c6D4ffe6961d47753D1dd32f844e0F73f50",
-    proofSystem: "0x83eB050Aa3443a76a4De64aBeD90cA8d525E7A3A",
-    hostEarnings: "0x588c42249F85C6ac4B4E27f97416C0289980aabB"
+    jobMarketplace: "0x26f27C19F80596d228D853dC39A204f0f6C45C7E",  // ⚠️ NEW
+    nodeRegistry: "0xb85424dd91D4ae0C6945e512bfDdF8a494299115",    // ⚠️ NEW
+    modelRegistry: "0x1D31d9688a4ffD2aFE738BC6C9a4cb27C272AA5A",   // ⚠️ NEW
+    proofSystem: "0xCF46BBa79eA69A68001A1c2f5Ad9eFA1AD435EF9",     // ⚠️ NEW
+    hostEarnings: "0x8584AeAC9687613095D13EF7be4dE0A796F84D7a"     // ⚠️ NEW
   }
 };
 ```

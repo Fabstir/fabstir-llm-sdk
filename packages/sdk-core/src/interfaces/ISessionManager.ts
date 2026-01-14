@@ -6,8 +6,9 @@
  * Browser-compatible session management
  */
 
-import { SessionConfig, SessionJob, CheckpointProof } from '../types';
+import { SessionConfig, SessionJob, CheckpointProof, RecoveredConversation, CheckpointQueryOptions } from '../types';
 import type { SearchApiResponse } from '../types/web-search.types';
+import type { BlockchainRecoveredConversation } from '../utils/checkpoint-blockchain';
 
 export interface ISessionManager {
   /**
@@ -138,4 +139,73 @@ export interface ISessionManager {
     query: string,
     options?: { numResults?: number; chainId?: number }
   ): Promise<SearchApiResponse>;
+
+  // =============================================================================
+  // Checkpoint Recovery Methods (Delta-Based Checkpointing)
+  // =============================================================================
+
+  /**
+   * Recover conversation state from node-published checkpoints.
+   *
+   * When a session times out or disconnects mid-stream, this method fetches
+   * checkpoint data published by the host node and reconstructs the conversation
+   * up to the last proven checkpoint.
+   *
+   * The recovery process:
+   * 1. Fetches checkpoint index from host's S5 storage
+   * 2. Verifies host signature on the index
+   * 3. Verifies each checkpoint's proofHash against on-chain proofs
+   * 4. Fetches and verifies each delta
+   * 5. Merges deltas into a complete conversation
+   * 6. Saves recovered conversation to SDK's S5 storage
+   *
+   * @param sessionId - The session ID to recover
+   * @returns Recovered conversation with messages, token count, and checkpoint metadata
+   * @throws SDKError with code 'SESSION_NOT_FOUND' if session doesn't exist
+   * @throws SDKError with code 'INVALID_INDEX_SIGNATURE' if host signature invalid
+   * @throws SDKError with code 'PROOF_HASH_MISMATCH' if checkpoint doesn't match on-chain
+   * @throws SDKError with code 'INVALID_DELTA_SIGNATURE' if delta signature invalid
+   *
+   * @example
+   * ```typescript
+   * // After a session timeout
+   * const recovered = await sessionManager.recoverFromCheckpoints(sessionId);
+   * console.log(`Recovered ${recovered.tokenCount} tokens`);
+   * console.log(`${recovered.messages.length} messages recovered`);
+   * ```
+   */
+  recoverFromCheckpoints(sessionId: bigint): Promise<RecoveredConversation>;
+
+  /**
+   * Recover conversation from blockchain ProofSubmitted events (decentralized).
+   *
+   * This method does NOT require the host to be online. It queries blockchain
+   * events to discover deltaCIDs, then fetches deltas from S5. This enables
+   * fully decentralized checkpoint recovery.
+   *
+   * The recovery process:
+   * 1. Query ProofSubmitted events from blockchain for the jobId
+   * 2. Extract deltaCIDs from events (skip pre-upgrade proofs with empty deltaCID)
+   * 3. Fetch checkpoint deltas from S5 using deltaCIDs
+   * 4. Decrypt deltas if encrypted (using user's recovery private key)
+   * 5. Merge deltas chronologically into conversation
+   *
+   * @param jobId - The job/session ID to recover
+   * @param options - Query options (block range)
+   * @returns Recovered conversation with messages, token count, and blockchain checkpoint entries
+   * @throws SDKError with code 'DELTA_FETCH_FAILED' if S5 fetch fails
+   * @throws SDKError with code 'DECRYPTION_FAILED' if decryption fails
+   *
+   * @example
+   * ```typescript
+   * // Recover without needing host to be online (Phase 9)
+   * const recovered = await sessionManager.recoverFromBlockchainEvents(jobId);
+   * console.log(`Recovered ${recovered.messages.length} messages from blockchain`);
+   * console.log(`${recovered.checkpoints.length} checkpoints on-chain`);
+   * ```
+   */
+  recoverFromBlockchainEvents(
+    jobId: bigint,
+    options?: CheckpointQueryOptions
+  ): Promise<BlockchainRecoveredConversation>;
 }

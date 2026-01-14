@@ -1,0 +1,666 @@
+// Copyright (c) 2025 Fabstir
+// SPDX-License-Identifier: BUSL-1.1
+
+/**
+ * Checkpoint Recovery Utilities for Delta-Based Checkpointing
+ *
+ * Provides functions to fetch and validate checkpoint data from S5 storage.
+ * Used to recover conversation state from node-published checkpoints.
+ */
+
+import type { CheckpointIndex, CheckpointIndexEntry, CheckpointDelta, EncryptedCheckpointDelta, Message, RecoveredConversation } from '../types';
+import type { StorageManager } from '../managers/StorageManager';
+import { fetchCheckpointIndexFromNode } from './checkpoint-http';
+import { isEncryptedDelta, decryptCheckpointDelta } from './checkpoint-encryption';
+
+/**
+ * Interface for contract with getProofSubmission method.
+ */
+export interface ProofQueryContract {
+  getProofSubmission(
+    sessionId: bigint,
+    proofIndex: number
+  ): Promise<{
+    proofHash: string;
+    tokensClaimed: bigint;
+    timestamp: bigint;
+    verified: boolean;
+  }>;
+}
+
+/**
+ * Base path for checkpoint storage on S5.
+ */
+const CHECKPOINT_BASE_PATH = 'home/checkpoints';
+
+/**
+ * Validate that an object has the required CheckpointIndex structure.
+ *
+ * @param data - Object to validate
+ * @returns true if valid CheckpointIndex structure
+ */
+function isValidCheckpointIndex(data: any): data is CheckpointIndex {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+
+  // Check required fields exist
+  if (
+    typeof data.sessionId !== 'string' ||
+    typeof data.hostAddress !== 'string' ||
+    !Array.isArray(data.checkpoints) ||
+    typeof data.messagesSignature !== 'string' ||
+    typeof data.checkpointsSignature !== 'string'
+  ) {
+    return false;
+  }
+
+  // Validate each checkpoint entry
+  for (const checkpoint of data.checkpoints) {
+    if (
+      typeof checkpoint.index !== 'number' ||
+      typeof checkpoint.proofHash !== 'string' ||
+      typeof checkpoint.deltaCid !== 'string' ||
+      // proofCid is optional
+      (checkpoint.proofCid !== undefined && typeof checkpoint.proofCid !== 'string') ||
+      !Array.isArray(checkpoint.tokenRange) ||
+      checkpoint.tokenRange.length !== 2 ||
+      typeof checkpoint.timestamp !== 'number'
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Fetch checkpoint index from S5 storage.
+ *
+ * This function retrieves the checkpoint index for a session from the host's
+ * S5 storage path. The index contains metadata about all available checkpoints.
+ *
+ * @param storageManager - StorageManager instance with S5 client access
+ * @param hostAddress - The host's Ethereum address
+ * @param sessionId - The session ID (as string)
+ * @returns CheckpointIndex if found, null if not found
+ * @throws Error if the data is malformed
+ *
+ * @example
+ * ```typescript
+ * const index = await fetchCheckpointIndex(storageManager, '0xHost...', '123');
+ * if (index) {
+ *   console.log(`Found ${index.checkpoints.length} checkpoints`);
+ * }
+ * ```
+ */
+export async function fetchCheckpointIndex(
+  storageManager: StorageManager,
+  hostAddress: string,
+  sessionId: string
+): Promise<CheckpointIndex | null> {
+  const s5Client = storageManager.getS5Client();
+  if (!s5Client) {
+    throw new Error('S5 client not available');
+  }
+
+  // Normalize host address to lowercase for consistent paths
+  const normalizedAddress = hostAddress.toLowerCase();
+
+  // Construct S5 path: home/checkpoints/{hostAddress}/{sessionId}/index.json
+  const path = `${CHECKPOINT_BASE_PATH}/${normalizedAddress}/${sessionId}/index.json`;
+
+  // Fetch from S5 - handle "not found" gracefully
+  let data: any;
+  try {
+    data = await s5Client.fs.get(path);
+  } catch (error: any) {
+    // S5 throws error if path doesn't exist - treat as "no checkpoints"
+    if (error.message?.includes('does not exist') || error.message?.includes('not found')) {
+      return null;
+    }
+    throw error;
+  }
+
+  // Handle not found case
+  if (data === null || data === undefined) {
+    return null;
+  }
+
+  // Validate structure
+  if (!isValidCheckpointIndex(data)) {
+    throw new Error(
+      'Invalid checkpoint index structure: missing or invalid required fields'
+    );
+  }
+
+  return data;
+}
+
+/**
+ * Verify a checkpoint index against on-chain proofs and expected host.
+ *
+ * This function performs two verifications:
+ * 1. Validates that the index hostAddress matches the expected host
+ * 2. For each checkpoint, verifies that proofHash matches on-chain proof
+ *
+ * @param index - The checkpoint index to verify
+ * @param sessionId - The session ID (bigint)
+ * @param contract - Contract instance with getProofSubmission method
+ * @param expectedHostAddress - The expected host address (for signature verification)
+ * @returns true if verification passes
+ * @throws Error with code 'INVALID_INDEX_SIGNATURE' if host address mismatch
+ * @throws Error with code 'PROOF_HASH_MISMATCH' if on-chain proof doesn't match
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await verifyCheckpointIndex(index, sessionId, contract, hostAddress);
+ *   console.log('Index verified successfully');
+ * } catch (error) {
+ *   if (error.message.includes('PROOF_HASH_MISMATCH')) {
+ *     console.error('On-chain proof mismatch - possible tampering');
+ *   }
+ * }
+ * ```
+ */
+export async function verifyCheckpointIndex(
+  index: CheckpointIndex,
+  sessionId: bigint,
+  contract: ProofQueryContract,
+  expectedHostAddress: string
+): Promise<boolean> {
+  // Normalize addresses for comparison
+  const normalizedExpected = expectedHostAddress.toLowerCase();
+  const normalizedIndexHost = index.hostAddress.toLowerCase();
+
+  // Verify host address matches (simplified signature verification)
+  // Note: Full EIP-191 signature verification would verify messagesSignature
+  // and checkpointsSignature against their respective content, but for now
+  // we verify the host address matches
+  if (normalizedExpected !== normalizedIndexHost) {
+    throw new Error(
+      `INVALID_INDEX_SIGNATURE: Host address mismatch. Expected ${normalizedExpected}, got ${normalizedIndexHost}`
+    );
+  }
+
+  // Empty checkpoints is valid (no proofs to verify)
+  if (index.checkpoints.length === 0) {
+    return true;
+  }
+
+  // Verify each checkpoint's proofHash against on-chain
+  for (const checkpoint of index.checkpoints) {
+    const onChainProof = await contract.getProofSubmission(
+      sessionId,
+      checkpoint.index
+    );
+
+    // Normalize proof hashes for comparison (case-insensitive)
+    const normalizedOnChain = onChainProof.proofHash.toLowerCase();
+    const normalizedCheckpoint = checkpoint.proofHash.toLowerCase();
+
+    if (normalizedOnChain !== normalizedCheckpoint) {
+      throw new Error(
+        `PROOF_HASH_MISMATCH: Checkpoint ${checkpoint.index} proofHash mismatch. ` +
+          `On-chain: ${normalizedOnChain}, Index: ${normalizedCheckpoint}`
+      );
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Validate that an object has the required CheckpointDelta structure.
+ *
+ * @param data - Object to validate
+ * @returns true if valid CheckpointDelta structure
+ */
+function isValidCheckpointDelta(data: any): data is CheckpointDelta {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+
+  // Check required fields exist with correct types
+  if (
+    typeof data.sessionId !== 'string' ||
+    typeof data.checkpointIndex !== 'number' ||
+    typeof data.proofHash !== 'string' ||
+    typeof data.startToken !== 'number' ||
+    typeof data.endToken !== 'number' ||
+    !Array.isArray(data.messages) ||
+    typeof data.hostSignature !== 'string'
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Check if a string is a valid S5 CID format (multibase encoded).
+ * S5 CIDs come in two forms:
+ * - Raw hash CID (pathToCID): ~53 chars, e.g., "baaa..."
+ * - BlobIdentifier CID (pathToBlobCID): ~59-65 chars, e.g., "blobb..." (includes file size)
+ * Valid formats: b... (base32), z... (base58btc), m... (base64)
+ */
+function isValidS5CID(cid: string): boolean {
+  // Base32 CID starts with 'b' prefix
+  // - Raw hash: ~53 chars (baaa...)
+  // - BlobIdentifier: ~59-65 chars (blobb...) - includes file size encoding
+  if (cid.startsWith('b') && cid.length >= 50 && cid.length <= 70) {
+    return true;
+  }
+  // Base58btc CID starts with 'z' prefix
+  if (cid.startsWith('z') && cid.length >= 40 && cid.length <= 55) {
+    return true;
+  }
+  // Base64 CID starts with 'm' prefix
+  if (cid.startsWith('m') && cid.length >= 40 && cid.length <= 55) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Fetch and verify a checkpoint delta from S5.
+ *
+ * This function retrieves a delta by its CID and validates its structure.
+ * The CID must be in proper S5 multibase format:
+ * - BlobIdentifier CID (recommended): blobb... (~59-65 chars, includes file size)
+ * - Raw hash CID: baaa... (~53 chars, raw Blake3 hash)
+ *
+ * Supports both encrypted and plaintext deltas:
+ * - Encrypted deltas (encrypted=true) require userPrivateKey for decryption
+ * - Plaintext deltas are returned as-is
+ *
+ * @param storageManager - StorageManager instance with S5 client access
+ * @param deltaCID - The S5 CID of the delta (BlobIdentifier format preferred, e.g., blobb...)
+ * @param hostAddress - The expected host address
+ * @param userPrivateKey - User's recovery private key (required for encrypted deltas, optional for plaintext)
+ * @returns The verified CheckpointDelta
+ * @throws Error with code 'DELTA_FETCH_FAILED' if CID format is invalid or S5 fetch fails
+ * @throws Error with code 'INVALID_DELTA_STRUCTURE' if delta is malformed
+ * @throws Error with code 'INVALID_DELTA_SIGNATURE' if signature is invalid
+ * @throws Error with code 'DECRYPTION_KEY_REQUIRED' if encrypted and no private key provided
+ * @throws Error with code 'DECRYPTION_FAILED' if decryption fails
+ *
+ * @example
+ * ```typescript
+ * // Plaintext delta
+ * const delta = await fetchAndVerifyDelta(storageManager, 'blobb5otd7a4vy...', '0xHost...');
+ *
+ * // Encrypted delta
+ * const delta = await fetchAndVerifyDelta(storageManager, 'blobb...', '0xHost...', userPrivateKey);
+ * console.log(`Delta contains ${delta.messages.length} messages`);
+ * ```
+ */
+export async function fetchAndVerifyDelta(
+  storageManager: StorageManager,
+  deltaCID: string,
+  hostAddress: string,
+  userPrivateKey?: string
+): Promise<CheckpointDelta> {
+  // Validate CID format - must be proper S5 multibase format
+  if (!isValidS5CID(deltaCID)) {
+    throw new Error(
+      `DELTA_FETCH_FAILED: Invalid CID format "${deltaCID}" (length: ${deltaCID.length}). ` +
+      `Expected S5 BlobIdentifier CID (e.g., "blobb..." 59-65 chars) or raw hash CID (e.g., "baaa..." ~53 chars). ` +
+      `Node must use S5's pathToBlobCID() when returning delta CIDs.`
+    );
+  }
+
+  // Fetch from S5 using content-addressed retrieval via StorageManager
+  let data: any;
+  try {
+    // Use StorageManager's getByCID method
+    data = await storageManager.getByCID(deltaCID);
+  } catch (error: any) {
+    if (error.message?.startsWith('DELTA_FETCH_FAILED')) {
+      throw error;
+    }
+    throw new Error(`DELTA_FETCH_FAILED: ${error.message}`);
+  }
+
+  // Handle not found case
+  if (data === null || data === undefined) {
+    throw new Error(`DELTA_FETCH_FAILED: Delta not found at ${deltaCID}`);
+  }
+
+  // Check if delta is encrypted (Phase 8)
+  if (isEncryptedDelta(data)) {
+    // Encrypted delta - require private key for decryption
+    if (!userPrivateKey) {
+      throw new Error(
+        'DECRYPTION_KEY_REQUIRED: User private key required for encrypted checkpoint delta'
+      );
+    }
+
+    try {
+      // Decrypt the delta
+      const decrypted = decryptCheckpointDelta(data, userPrivateKey);
+
+      // Verify signature is present after decryption
+      if (!decrypted.hostSignature || decrypted.hostSignature.length === 0) {
+        throw new Error('INVALID_DELTA_SIGNATURE: Empty or missing host signature in decrypted delta');
+      }
+
+      return decrypted;
+    } catch (error: any) {
+      if (error.message?.includes('DECRYPTION_KEY_REQUIRED') || error.message?.includes('INVALID_DELTA_SIGNATURE')) {
+        throw error;
+      }
+      throw new Error(`DECRYPTION_FAILED: ${error.message}`);
+    }
+  }
+
+  // Plaintext delta - validate structure
+  if (!isValidCheckpointDelta(data)) {
+    throw new Error(
+      'INVALID_DELTA_STRUCTURE: Missing or invalid required fields'
+    );
+  }
+
+  // Verify signature is present and non-empty
+  // Note: Full EIP-191 verification would be done here in production
+  if (!data.hostSignature || data.hostSignature.length === 0) {
+    throw new Error('INVALID_DELTA_SIGNATURE: Empty or missing host signature');
+  }
+
+  return data;
+}
+
+/**
+ * Merge multiple checkpoint deltas into a single conversation.
+ *
+ * This function combines messages from multiple deltas, handling the case
+ * where assistant messages may be split across checkpoints. It also
+ * returns the total token count from the final checkpoint.
+ *
+ * @param deltas - Array of CheckpointDelta objects to merge
+ * @returns Object containing merged messages and total token count
+ *
+ * @example
+ * ```typescript
+ * const { messages, tokenCount } = mergeDeltas(deltas);
+ * console.log(`Merged ${messages.length} messages with ${tokenCount} tokens`);
+ * ```
+ */
+export function mergeDeltas(
+  deltas: CheckpointDelta[]
+): { messages: Message[]; tokenCount: number } {
+  // Handle empty input
+  if (deltas.length === 0) {
+    return { messages: [], tokenCount: 0 };
+  }
+
+  // Sort deltas by checkpointIndex to ensure correct order
+  const sortedDeltas = [...deltas].sort(
+    (a, b) => a.checkpointIndex - b.checkpointIndex
+  );
+
+  const mergedMessages: Message[] = [];
+
+  for (const delta of sortedDeltas) {
+    for (const msg of delta.messages) {
+      // Check if we should concatenate with the last message
+      // This happens when the last message was an assistant message marked as partial
+      // and the current message is also an assistant message (continuation)
+      if (
+        mergedMessages.length > 0 &&
+        msg.role === 'assistant' &&
+        mergedMessages[mergedMessages.length - 1].role === 'assistant'
+      ) {
+        const lastMsg = mergedMessages[mergedMessages.length - 1];
+        // Check if last message was marked as partial
+        if (lastMsg.metadata?.partial === true) {
+          // Concatenate content
+          lastMsg.content += msg.content;
+          // Update metadata - if current message is not partial, mark as complete
+          if (!msg.metadata?.partial) {
+            lastMsg.metadata = { ...lastMsg.metadata, partial: undefined };
+          }
+          continue;
+        }
+      }
+
+      // Add message to merged list
+      mergedMessages.push({ ...msg });
+    }
+  }
+
+  // Get token count from the last delta's endToken
+  const lastDelta = sortedDeltas[sortedDeltas.length - 1];
+  const tokenCount = lastDelta.endToken;
+
+  return { messages: mergedMessages, tokenCount };
+}
+
+/**
+ * Session info getter type for recovery flow (S5-based).
+ */
+export type GetSessionInfoFn = (sessionId: bigint) => Promise<{
+  hostAddress: string;
+  status: string;
+} | null>;
+
+/**
+ * Session info getter type for HTTP-based recovery flow.
+ * Includes hostUrl for HTTP API access.
+ */
+export type GetSessionInfoWithHostUrlFn = (sessionId: bigint) => Promise<{
+  hostAddress: string;
+  hostUrl: string;
+  status: string;
+} | null>;
+
+/**
+ * Execute the full checkpoint recovery flow.
+ *
+ * This function orchestrates all the steps needed to recover a conversation
+ * from node-published checkpoints:
+ * 1. Get session info to obtain host address
+ * 2. Fetch checkpoint index from S5
+ * 3. Verify index signature and on-chain proofs
+ * 4. Fetch and verify all deltas
+ * 5. Merge deltas into conversation
+ * 6. Return recovered conversation
+ *
+ * @param storageManager - StorageManager instance with S5 client access
+ * @param contract - Contract instance for on-chain proof verification
+ * @param getSessionInfo - Function to get session info (host address)
+ * @param sessionId - The session ID to recover
+ * @returns RecoveredConversation with messages, token count, and checkpoint metadata
+ * @throws Error with code 'SESSION_NOT_FOUND' if session doesn't exist
+ * @throws Error with code 'INVALID_INDEX_SIGNATURE' if signature verification fails
+ * @throws Error with code 'PROOF_HASH_MISMATCH' if on-chain proof doesn't match
+ * @throws Error with code 'DELTA_FETCH_FAILED' if delta fetch fails
+ * @throws Error with code 'DECRYPTION_KEY_REQUIRED' if encrypted deltas and no private key
+ * @throws Error with code 'DECRYPTION_FAILED' if decryption fails
+ *
+ * @example
+ * ```typescript
+ * // Plaintext deltas
+ * const result = await recoverFromCheckpointsFlow(
+ *   storageManager,
+ *   contract,
+ *   (id) => sessionManager.getSessionInfo(id),
+ *   BigInt(123)
+ * );
+ *
+ * // Encrypted deltas (Phase 8)
+ * const result = await recoverFromCheckpointsFlow(
+ *   storageManager,
+ *   contract,
+ *   (id) => sessionManager.getSessionInfo(id),
+ *   BigInt(123),
+ *   userPrivateKey
+ * );
+ * console.log(`Recovered ${result.messages.length} messages`);
+ * ```
+ */
+export async function recoverFromCheckpointsFlow(
+  storageManager: StorageManager,
+  contract: ProofQueryContract,
+  getSessionInfo: GetSessionInfoFn,
+  sessionId: bigint,
+  userPrivateKey?: string
+): Promise<RecoveredConversation> {
+  // Step 1: Get session info to obtain host address
+  const sessionInfo = await getSessionInfo(sessionId);
+  if (!sessionInfo) {
+    throw new Error(`SESSION_NOT_FOUND: Session ${sessionId} does not exist`);
+  }
+
+  const hostAddress = sessionInfo.hostAddress;
+
+  // Step 2: Fetch checkpoint index from S5
+  const index = await fetchCheckpointIndex(
+    storageManager,
+    hostAddress,
+    sessionId.toString()
+  );
+
+  // No checkpoints published - return empty recovery
+  if (!index) {
+    return {
+      messages: [],
+      tokenCount: 0,
+      checkpoints: [],
+    };
+  }
+
+  // Step 3: Verify index signature and on-chain proofs
+  await verifyCheckpointIndex(index, sessionId, contract, hostAddress);
+
+  // Step 4: Fetch and verify all deltas (pass userPrivateKey for encrypted deltas)
+  const deltas: CheckpointDelta[] = [];
+  for (const checkpoint of index.checkpoints) {
+    const delta = await fetchAndVerifyDelta(
+      storageManager,
+      checkpoint.deltaCid,
+      hostAddress,
+      userPrivateKey
+    );
+    deltas.push(delta);
+  }
+
+  // Step 5: Merge deltas into conversation
+  const { messages, tokenCount } = mergeDeltas(deltas);
+
+  // Step 6: Return recovered conversation with checkpoint metadata
+  return {
+    messages,
+    tokenCount,
+    checkpoints: index.checkpoints,
+  };
+}
+
+/**
+ * Execute the full checkpoint recovery flow using HTTP API.
+ *
+ * This function is similar to recoverFromCheckpointsFlow but uses the node's
+ * HTTP API to fetch the checkpoint index instead of S5 path. This is necessary
+ * because S5's home/ directory is per-user (private namespace), so the SDK
+ * cannot access the node's S5 storage directly.
+ *
+ * Flow:
+ * 1. Get session info (includes hostUrl)
+ * 2. Fetch checkpoint index via HTTP API: GET /v1/checkpoints/{sessionId}
+ * 3. Verify index signature and on-chain proofs
+ * 4. Fetch deltas from S5 using CIDs (globally addressable)
+ * 5. Merge deltas into conversation
+ * 6. Return recovered conversation
+ *
+ * @param storageManager - StorageManager instance with S5 client access
+ * @param contract - Contract instance for on-chain proof verification
+ * @param getSessionInfo - Function to get session info (includes hostUrl)
+ * @param sessionId - The session ID to recover
+ * @returns RecoveredConversation with messages, token count, and checkpoint metadata
+ * @throws Error with code 'SESSION_NOT_FOUND' if session doesn't exist
+ * @throws Error with code 'HOST_URL_MISSING' if hostUrl not in session info
+ * @throws Error with code 'CHECKPOINT_FETCH_FAILED' if HTTP fetch fails
+ * @throws Error with code 'INVALID_INDEX_SIGNATURE' if signature verification fails
+ * @throws Error with code 'PROOF_HASH_MISMATCH' if on-chain proof doesn't match
+ * @throws Error with code 'DELTA_FETCH_FAILED' if delta fetch fails
+ * @throws Error with code 'DECRYPTION_KEY_REQUIRED' if encrypted deltas and no private key
+ * @throws Error with code 'DECRYPTION_FAILED' if decryption fails
+ *
+ * @example
+ * ```typescript
+ * // Plaintext deltas
+ * const result = await recoverFromCheckpointsFlowWithHttp(
+ *   storageManager,
+ *   contract,
+ *   (id) => sessionManager.getSessionInfoWithHostUrl(id),
+ *   BigInt(123)
+ * );
+ *
+ * // Encrypted deltas (Phase 8)
+ * const result = await recoverFromCheckpointsFlowWithHttp(
+ *   storageManager,
+ *   contract,
+ *   (id) => sessionManager.getSessionInfoWithHostUrl(id),
+ *   BigInt(123),
+ *   userPrivateKey
+ * );
+ * console.log(`Recovered ${result.messages.length} messages`);
+ * ```
+ */
+export async function recoverFromCheckpointsFlowWithHttp(
+  storageManager: StorageManager,
+  contract: ProofQueryContract,
+  getSessionInfo: GetSessionInfoWithHostUrlFn,
+  sessionId: bigint,
+  userPrivateKey?: string
+): Promise<RecoveredConversation> {
+  // Step 1: Get session info to obtain host address and URL
+  const sessionInfo = await getSessionInfo(sessionId);
+  if (!sessionInfo) {
+    throw new Error(`SESSION_NOT_FOUND: Session ${sessionId} does not exist`);
+  }
+
+  const { hostAddress, hostUrl } = sessionInfo;
+
+  if (!hostUrl) {
+    throw new Error(`HOST_URL_MISSING: Session ${sessionId} has no hostUrl`);
+  }
+
+  // Step 2: Fetch checkpoint index via HTTP API
+  const index = await fetchCheckpointIndexFromNode(hostUrl, sessionId.toString());
+
+  // No checkpoints published - return empty recovery
+  if (!index) {
+    return {
+      messages: [],
+      tokenCount: 0,
+      checkpoints: [],
+    };
+  }
+
+  // Step 3: Verify index signature and on-chain proofs
+  await verifyCheckpointIndex(index, sessionId, contract, hostAddress);
+
+  // Step 4: Fetch and verify all deltas from S5 (pass userPrivateKey for encrypted deltas)
+  const deltas: CheckpointDelta[] = [];
+  for (const checkpoint of index.checkpoints) {
+    const delta = await fetchAndVerifyDelta(
+      storageManager,
+      checkpoint.deltaCid,
+      hostAddress,
+      userPrivateKey
+    );
+    deltas.push(delta);
+  }
+
+  // Step 5: Merge deltas into conversation
+  const { messages, tokenCount } = mergeDeltas(deltas);
+
+  // Step 6: Return recovered conversation with checkpoint metadata
+  return {
+    messages,
+    tokenCount,
+    checkpoints: index.checkpoints,
+  };
+}

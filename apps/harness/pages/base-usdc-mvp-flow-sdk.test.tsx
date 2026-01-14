@@ -27,7 +27,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
 import { FabstirSDKCore, getOrGenerateS5Seed, ChainRegistry, ChainId } from '@fabstir/sdk-core';
-import { cacheSeed, hasCachedSeed } from '../../../packages/sdk-core/src/utils/s5-seed-derivation';
+import { cacheSeed, hasCachedSeed } from '@fabstir/sdk-core';
 import { createSDK, connectWallet as connectBaseWallet, getAccountInfo, getSDK } from '../lib/base-account';
 
 // Get configuration from environment variables

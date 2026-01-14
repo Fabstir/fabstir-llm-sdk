@@ -4,13 +4,15 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
 
 ---
 
-## UPGRADEABLE CONTRACTS (December 14, 2025 - UUPS Proxy Pattern)
+## UPGRADEABLE CONTRACTS (January 9, 2026 - Clean Slate Deployment)
 
-> **RECOMMENDED**: Use these upgradeable contracts for all new integrations. They support future upgrades without data migration.
+> **🔒 SECURITY UPDATE**: All CRITICAL vulnerabilities from January 2025 audit have been fixed.
+> **⚠️ ADDRESS CHANGE**: JobMarketplace proxy address changed on January 9, 2026 (clean slate deployment).
+> **RECOMMENDED**: Use these upgradeable contracts for all integrations.
 
 ### JobMarketplaceWithModelsUpgradeable
-- **Proxy Address**: `0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D`
-- **Implementation**: `0xe0ee96FC4Cc7a05a6e9d5191d070c5d1d13f143F`
+- **Proxy Address**: `0x3CaCbf3f448B420918A93a88706B26Ab27a3523E`
+- **Implementation**: `0x1B6C6A1E373E5E00Bf6210e32A6DA40304f6484c` ✅ deltaCID support (Jan 14, 2026)
 - **Network**: Base Sepolia
 - **Status**: ✅ ACTIVE - UUPS Upgradeable
 - **ABI File**: `JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json`
@@ -24,10 +26,26 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
   - Owner-only upgrade authorization
   - `updateTokenMinDeposit(address, uint256)` - Admin function to update minimum deposits
   - `TokenMinDepositUpdated` event - Emitted when minimum deposit is changed
+- **Security Fixes (Jan 2026)**:
+  - ✅ Host validation - Hosts must be registered in NodeRegistry
+  - ✅ Double-spend prevention - Fixed deposit tracking for inline sessions
+  - ✅ Legacy dead code removed (claimWithProof, Job types)
+  - NEW: `getLockedBalanceNative(address)` - View locked funds in active sessions
+  - NEW: `getLockedBalanceToken(address, address)` - View locked token funds
+  - NEW: `getTotalBalanceNative(address)` - View total balance (withdrawable + locked)
+  - NEW: `getTotalBalanceToken(address, address)` - View total token balance
+  - NEW: `getProofSubmission(uint256 sessionId, uint256 proofIndex)` - View proof details including verified flag
+- **Breaking Change (Jan 14, 2026)**:
+  - `submitProofOfWork` now requires 6 parameters (added `string calldata deltaCID`)
+  - `getProofSubmission` now returns 5 values (added `deltaCID`)
+  - `ProofSubmitted` event now includes `deltaCID` field
+- **Previous Breaking Change (Jan 6, 2026)**:
+  - `submitProofOfWork` added `bytes calldata signature` parameter
+  - Hosts must sign their proofs with ECDSA for verification
 
 ### NodeRegistryWithModelsUpgradeable
 - **Proxy Address**: `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22`
-- **Implementation**: `0x68298e2b74a106763aC99E3D973E98012dB5c75F`
+- **Implementation**: `0x4574d6f1D888cF97eBb8E1bb5E02a5A386b6cFA7` ✅ Corrupt node fix (Jan 10, 2026)
 - **Network**: Base Sepolia
 - **Status**: ✅ ACTIVE - UUPS Upgradeable
 - **ABI File**: `NodeRegistryWithModelsUpgradeable-CLIENT-ABI.json`
@@ -35,37 +53,53 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
   - All features from non-upgradeable version
   - UUPS proxy pattern for future upgrades
   - Owner-only upgrade authorization
+- **New Functions (Jan 10, 2026)**:
+  - `repairCorruptNode(address)` - Owner-only function to fix corrupt node state from upgrades
+  - `unregisterNode()` - Now handles corrupt state gracefully (safety check added)
+- **New Event**:
+  - `CorruptNodeRepaired(address indexed operator, uint256 stakeReturned)`
 
 ### ModelRegistryUpgradeable
 - **Proxy Address**: `0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2`
-- **Implementation**: `0xd7Df5c6D4ffe6961d47753D1dd32f844e0F73f50`
+- **Implementation**: `0x8491af1f0D47f6367b56691dCA0F4996431fB0A5` ✅ Voting improvements (Jan 11, 2026)
 - **Network**: Base Sepolia
 - **Status**: ✅ ACTIVE - UUPS Upgradeable
 - **ABI File**: `ModelRegistryUpgradeable-CLIENT-ABI.json`
 - **Approved Models** (2 models):
   - TinyVicuna-1B-32k (CohereForAI/TinyVicuna-1B-32k-GGUF)
   - TinyLlama-1.1B Chat (TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF)
+- **New Features (Jan 11, 2026) - Security Audit Remediation**:
+  - **Anti-Sniping Vote Extension**: Large votes (≥10k FAB) in last 4 hours extend voting by 1 day (max 3 extensions)
+  - **Re-proposal Cooldown**: Rejected models can be re-proposed after 30 days
+  - New constants: `EXTENSION_THRESHOLD`, `EXTENSION_WINDOW`, `EXTENSION_DURATION`, `MAX_EXTENSIONS`, `REPROPOSAL_COOLDOWN`
+  - New mappings: `lateVotes(bytes32)`, `lastProposalExecutionTime(bytes32)`
+  - New event: `VotingExtended(bytes32 indexed modelId, uint256 newEndTime, uint8 extensionCount)`
+  - `ModelProposal` struct now has `endTime` and `extensionCount` fields
 
 ### HostEarningsUpgradeable
 - **Proxy Address**: `0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0`
-- **Implementation**: `0x588c42249F85C6ac4B4E27f97416C0289980aabB`
+- **Implementation**: `0x8584AeAC9687613095D13EF7be4dE0A796F84D7a`
 - **Network**: Base Sepolia
 - **Status**: ✅ ACTIVE - UUPS Upgradeable
 - **ABI File**: `HostEarningsUpgradeable-CLIENT-ABI.json`
 
 ### ProofSystemUpgradeable
 - **Proxy Address**: `0x5afB91977e69Cc5003288849059bc62d47E7deeb`
-- **Implementation**: `0x83eB050Aa3443a76a4De64aBeD90cA8d525E7A3A`
+- **Implementation**: `0xCF46BBa79eA69A68001A1c2f5Ad9eFA1AD435EF9` ✅ Security fixes (Jan 9, 2026)
 - **Network**: Base Sepolia
 - **Status**: ✅ ACTIVE - UUPS Upgradeable
 - **ABI File**: `ProofSystemUpgradeable-CLIENT-ABI.json`
+- **Security Features** (Jan 2026):
+  - `setAuthorizedCaller(address, bool)` - Owner authorizes callers for recordVerifiedProof
+  - `authorizedCallers(address)` - Check if address is authorized
+  - Access control on `recordVerifiedProof()` prevents front-running attacks
 
 ### Upgradeable Contracts Configuration
 
 ```javascript
-// Use these addresses for all new integrations
+// Use these addresses for all new integrations (Updated January 9, 2026)
 const upgradeableContracts = {
-  jobMarketplace: "0xeebEEbc9BCD35e81B06885b63f980FeC71d56e2D",
+  jobMarketplace: "0x3CaCbf3f448B420918A93a88706B26Ab27a3523E",  // ⚠️ NEW (Jan 9, 2026)
   nodeRegistry: "0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22",
   modelRegistry: "0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2",
   hostEarnings: "0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0",
@@ -73,6 +107,25 @@ const upgradeableContracts = {
   fabToken: "0xC78949004B4EB6dEf2D66e49Cd81231472612D62",
   usdcToken: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 };
+```
+
+### Corrupt Node Recovery (January 10, 2026)
+
+If a host has node data but cannot unregister (corrupt state from contract upgrades):
+
+**Option 1: Host calls `unregisterNode()` directly** (safety check now handles corrupt state):
+```javascript
+// Host can now unregister even with corrupt state
+await nodeRegistry.unregisterNode();
+// Stake is returned, node data is cleared
+```
+
+**Option 2: Owner calls `repairCorruptNode()`**:
+```javascript
+// Owner can repair corrupt nodes
+await nodeRegistry.repairCorruptNode(corruptHostAddress);
+// Stake is returned to the host, node data is cleared
+// Emits CorruptNodeRepaired event
 ```
 
 ---
@@ -691,13 +744,31 @@ const response = await fetch(`${hostApiUrl}/api/v1/inference`, {
 Key functions for session jobs:
 - `createSessionJob()` - Create ETH-based session
 - `createSessionJobWithToken()` - Create token-based session
-- `submitProofOfWork(jobId, tokensClaimed, proofHash, proofCID)` - Submit proof hash + S5 CID (4 params - NEW)
+- `submitProofOfWork(jobId, tokensClaimed, proofHash, signature, proofCID, deltaCID)` - Submit signed proof (6 params)
+- `getProofSubmission(sessionId, proofIndex)` - Get proof details (returns 5 values including deltaCID)
 - `completeSessionJob(jobId, conversationCID)` - Complete and settle payments
 - `triggerSessionTimeout()` - Handle timeout scenarios
 
-**BREAKING CHANGE**: `submitProofOfWork()` now requires S5 proof storage:
-- Old: `submitProofOfWork(jobId, proofBytes, tokensInBatch)` - 3 params ❌ DEPRECATED
-- New: `submitProofOfWork(jobId, tokensClaimed, proofHash, proofCID)` - 4 params ✅ CURRENT
+**BREAKING CHANGE (Jan 14, 2026)**: `submitProofOfWork()` now includes deltaCID:
+- Old: `submitProofOfWork(jobId, tokensClaimed, proofHash, signature, proofCID)` - 5 params ❌ DEPRECATED
+- New: `submitProofOfWork(jobId, tokensClaimed, proofHash, signature, proofCID, deltaCID)` - 6 params ✅ CURRENT
+
+**BREAKING CHANGE (Jan 14, 2026)**: `getProofSubmission()` return value changed:
+- Old: Returns 4 values `(proofHash, tokensClaimed, timestamp, verified)`
+- New: Returns 5 values `(proofHash, tokensClaimed, timestamp, verified, deltaCID)` ✅ CURRENT
+
+```javascript
+// Generate signature for proof submission
+const proofHash = keccak256(workData);
+const dataHash = keccak256(
+  solidityPacked(['bytes32', 'address', 'uint256'], [proofHash, hostAddress, tokensClaimed])
+);
+const signature = await hostWallet.signMessage(getBytes(dataHash));
+
+// deltaCID is optional - use empty string if not tracking deltas
+const deltaCID = "QmDeltaCID123"; // or "" if not using delta tracking
+await marketplace.submitProofOfWork(jobId, tokensClaimed, proofHash, signature, proofCID, deltaCID);
+```
 
 ## Treasury Functions
 
@@ -785,7 +856,13 @@ const HOST_EARNINGS = '0x908962e8c6CE72610021586f85ebDE09aAc97776';
 - **Replacement**: 0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6
 
 ## Last Updated
-December 14, 2025 - UUPS Upgradeable + Minimum deposits reduced to ~$0.50 + updateTokenMinDeposit function
+January 14, 2026 - deltaCID support for proof submissions
+
+### Recent Changes
+- **Jan 14, 2026**: deltaCID support - `submitProofOfWork` now 6 params, `getProofSubmission` returns 5 values
+- **Jan 10, 2026**: NodeRegistry - Added `repairCorruptNode()` admin function and safety check in `unregisterNode()`
+- **Jan 9, 2026**: Clean slate JobMarketplace deployment - new proxy address `0x3CaCbf3f448B420918A93a88706B26Ab27a3523E`
+- **Jan 6, 2026**: Phase 6 ProofSystem Integration - submitProofOfWork signature changed to 5 params
 
 ### PRICE_PRECISION Breaking Change
 
