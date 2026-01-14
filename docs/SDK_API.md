@@ -1188,6 +1188,76 @@ await vectorRAGManager.addVectors(databaseName, vectors);
 - `VectorRAGManager.getPendingDocuments()` - Get documents awaiting embeddings
 - `VectorRAGManager.updateDocumentStatus()` - Update document embedding status
 
+### Checkpoint Recovery
+
+The SDK provides methods to recover conversation state from checkpoint data when sessions are interrupted.
+
+#### recoverFromBlockchainEvents (Recommended)
+
+Recovers conversation from blockchain ProofSubmitted events. This decentralized method does NOT require the host to be online - deltaCIDs are permanently recorded on-chain.
+
+```typescript
+async recoverFromBlockchainEvents(
+  jobId: bigint,
+  options?: CheckpointQueryOptions
+): Promise<BlockchainRecoveredConversation>
+```
+
+**Parameters:**
+- `jobId`: The job/session ID to recover
+- `options`: Optional query options (block range)
+  - `fromBlock`: Starting block (default: auto-calculated for RPC limits)
+  - `toBlock`: Ending block (default: 'latest')
+
+**Returns:**
+```typescript
+interface BlockchainRecoveredConversation {
+  messages: Message[];           // Recovered conversation messages
+  tokenCount: number;            // Total tokens from last checkpoint
+  checkpoints: BlockchainCheckpointEntry[];  // On-chain checkpoint data
+}
+```
+
+**Example:**
+```typescript
+// After a session timeout or disconnect
+const recovered = await sessionManager.recoverFromBlockchainEvents(jobId);
+
+console.log(`Recovered ${recovered.messages.length} messages`);
+console.log(`Total tokens: ${recovered.tokenCount}`);
+console.log(`From ${recovered.checkpoints.length} on-chain checkpoints`);
+
+// Display recovered conversation
+recovered.messages.forEach(msg => {
+  console.log(`[${msg.role}]: ${msg.content}`);
+});
+```
+
+**Features:**
+- **Decentralized**: Works without host being online
+- **Encrypted**: Automatically decrypts deltas using user's recovery key
+- **On-chain**: Data permanently recorded in ProofSubmitted events
+- **Block Range**: Auto-calculates safe block range to avoid RPC limits
+
+**Error Codes:**
+- `DELTA_FETCH_FAILED`: Could not fetch delta from S5 storage
+- `DECRYPTION_FAILED`: Decryption failed (wrong key or tampered data)
+- `SIGNER_NOT_AVAILABLE`: SDK not properly authenticated
+
+#### recoverFromCheckpoints (Deprecated)
+
+> **Deprecated**: Use `recoverFromBlockchainEvents()` instead for decentralized recovery.
+
+Recovers conversation via HTTP API from the host node. Requires host to be online.
+
+```typescript
+async recoverFromCheckpoints(
+  sessionId: bigint
+): Promise<RecoveredConversation>
+```
+
+This method is kept for backward compatibility with pre-Phase 9 sessions.
+
 ## Web Search Integration
 
 The SDK provides automatic web search integration that enhances LLM responses with real-time information from the web. **Web search works seamlessly with both plaintext and encrypted sessions** (requires node v8.7.5+).

@@ -1839,15 +1839,15 @@ async recoverFromCheckpoints(sessionId: bigint): Promise<RecoveredConversation> 
 
 | Task | Status | Description |
 |------|--------|-------------|
-| [ ] | E2E: Create session with recoveryPublicKey | Setup |
-| [ ] | E2E: Generate >1000 tokens to trigger checkpoint | Trigger proof |
-| [ ] | E2E: Verify ProofSubmitted event contains non-empty deltaCID | Blockchain verify |
-| [ ] | E2E: Call `recoverFromBlockchainEvents(jobId)` | Recovery test |
-| [ ] | E2E: Verify messages match original conversation | Content verify |
-| [ ] | E2E: Test recovery with host offline (optional) | Decentralization test |
-| [ ] | Mark HTTP recovery as `@deprecated` in JSDoc | Code annotation |
-| [ ] | Update `docs/SDK_API.md` with new method | API docs |
-| [ ] | Update this plan file | Mark Phase 9 complete |
+| [x] | E2E: Create session with recoveryPublicKey | Setup |
+| [x] | E2E: Generate >1000 tokens to trigger checkpoint | Trigger proof |
+| [x] | E2E: Verify ProofSubmitted event contains non-empty deltaCID | Blockchain verify |
+| [x] | E2E: Call `recoverFromBlockchainEvents(jobId)` | Recovery test |
+| [x] | E2E: Verify messages match original conversation | Content verify |
+| N/A | E2E: Test recovery with host offline (optional) | Decentralization test |
+| [x] | Mark HTTP recovery as `@deprecated` in JSDoc | Code annotation |
+| [x] | Update `docs/SDK_API.md` with new method | API docs |
+| [x] | Update this plan file | Mark Phase 9 complete |
 
 **Success Criteria:**
 - deltaCID in ProofSubmitted event matches S5 blob CID format
@@ -1933,9 +1933,9 @@ pnpm test packages/sdk-core/tests/integration/checkpoint-recovery-blockchain.tes
 **Last Updated**: 2026-01-14
 
 - [x] Sub-phase 9.1: Contract Update - ✅ COMPLETE (deployed 2026-01-14)
-- [ ] Sub-phase 9.2: Node Update - AWAITING NODE DEVELOPER
+- [x] Sub-phase 9.2: Node Update - ✅ COMPLETE (Node v8.12.4 - deltaCID on-chain)
 - [x] Sub-phase 9.3: SDK Types - ✅ COMPLETE (15 tests passing)
 - [x] Sub-phase 9.4: Event Query - ✅ COMPLETE (15 tests passing)
-- [ ] Sub-phase 9.5: Recovery Implementation - CAN START NOW
-- [ ] Sub-phase 9.6: SessionManager Integration - BLOCKED (needs 9.5)
-- [ ] Sub-phase 9.7: Cleanup and Documentation - BLOCKED (needs 9.6)
+- [x] Sub-phase 9.5: Recovery Implementation - ✅ COMPLETE (recoverFromBlockchain utility)
+- [x] Sub-phase 9.6: SessionManager Integration - ✅ COMPLETE (E2E verified Job 51)
+- [x] Sub-phase 9.7: Documentation - ✅ COMPLETE

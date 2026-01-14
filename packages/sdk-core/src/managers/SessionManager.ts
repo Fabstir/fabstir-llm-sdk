@@ -2838,7 +2838,11 @@ export class SessionManager implements ISessionManager {
   // =============================================================================
 
   /**
-   * Recover conversation state from node-published checkpoints.
+   * Recover conversation state from node-published checkpoints (HTTP-based).
+   *
+   * @deprecated Use {@link recoverFromBlockchainEvents} instead for decentralized recovery
+   * that doesn't require the host to be online. This HTTP-based method is kept for
+   * backward compatibility with pre-Phase 9 sessions.
    *
    * This method orchestrates the full recovery flow:
    * 1. Gets session info to obtain host address
