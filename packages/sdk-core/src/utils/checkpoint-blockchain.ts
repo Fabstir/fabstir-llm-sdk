@@ -55,7 +55,20 @@ export async function queryProofSubmittedEvents(
   jobId: bigint,
   options: CheckpointQueryOptions = {}
 ): Promise<BlockchainCheckpointEntry[]> {
-  const { fromBlock = 0, toBlock = 'latest' } = options;
+  let { fromBlock, toBlock = 'latest' } = options;
+
+  // If fromBlock not specified, use a reasonable lookback to avoid RPC limits
+  // Most RPCs limit eth_getLogs to 10,000 blocks, so we use 9,000 to be safe
+  if (fromBlock === undefined || fromBlock === 0) {
+    const provider = contract.runner?.provider;
+    if (provider) {
+      const currentBlock = await provider.getBlockNumber();
+      // Look back ~9000 blocks (about 5 hours on Base at 2s blocks)
+      fromBlock = Math.max(0, currentBlock - 9000);
+    } else {
+      fromBlock = 0; // Fallback, may fail on some RPCs
+    }
+  }
 
   // Create event filter for ProofSubmitted events with specific jobId
   const filter = contract.filters.ProofSubmitted(jobId);

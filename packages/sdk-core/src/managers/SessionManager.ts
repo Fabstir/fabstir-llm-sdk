@@ -41,6 +41,7 @@ import { bytesToHex } from '../crypto/utilities';
 import { analyzePromptForSearchIntent } from '../utils/search-intent-analyzer';
 import { recoverFromCheckpointsFlow, recoverFromCheckpointsFlowWithHttp } from '../utils/checkpoint-recovery';
 import { recoverFromBlockchain, type BlockchainRecoveredConversation, type CheckpointQueryOptions } from '../utils/checkpoint-blockchain';
+import JobMarketplaceABI from '../contracts/abis/JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json';
 import type { SearchApiResponse, WebSearchStarted, WebSearchResults, WebSearchError as WebSearchErrorMsg } from '../types/web-search.types';
 
 /**
@@ -2961,8 +2962,20 @@ export class SessionManager implements ISessionManager {
     jobId: bigint,
     options?: CheckpointQueryOptions
   ): Promise<BlockchainRecoveredConversation> {
-    // Get JobMarketplace contract for event querying
-    const contract = this.paymentManager.getJobMarketplaceContract();
+    // Get signer and chain ID from PaymentManager to create JobMarketplace contract
+    const signer = (this.paymentManager as any).signer as ethers.Signer;
+    const chainId = (this.paymentManager as any).currentChainId as number;
+
+    if (!signer) {
+      throw new SDKError('Signer not available for blockchain recovery', 'SIGNER_NOT_AVAILABLE');
+    }
+
+    // Get contract address from ChainRegistry
+    const chain = ChainRegistry.getChain(chainId);
+    const contractAddress = chain.contracts.jobMarketplace;
+
+    // Create JobMarketplace contract instance for event querying
+    const contract = new ethers.Contract(contractAddress, JobMarketplaceABI, signer);
 
     // Get user's recovery private key for encrypted delta decryption
     // If EncryptionManager is not available, recovery will still work for plaintext deltas

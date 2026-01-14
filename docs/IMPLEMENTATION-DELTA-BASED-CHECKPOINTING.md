@@ -1772,7 +1772,7 @@ export async function recoverFromBlockchain(
 | [x] | Add method signature to `ISessionManager` interface | Type definition |
 | [x] | Export types from `checkpoint-blockchain.ts` in utils/index.ts | Export |
 | [x] | Add "Test Blockchain Recovery" button to test harness | UI test |
-| [ ] | Run E2E test: session → checkpoint → blockchain recovery | E2E verification |
+| [x] | Run E2E test: session → checkpoint → blockchain recovery | E2E verification |
 
 **Test Results**: ✅ 31/31 tests passing (24 blockchain + 7 SessionManager integration)
 
