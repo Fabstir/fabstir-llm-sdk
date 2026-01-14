@@ -40,6 +40,7 @@ import { WebSearchError } from '../errors/web-search-errors';
 import { bytesToHex } from '../crypto/utilities';
 import { analyzePromptForSearchIntent } from '../utils/search-intent-analyzer';
 import { recoverFromCheckpointsFlow, recoverFromCheckpointsFlowWithHttp } from '../utils/checkpoint-recovery';
+import { recoverFromBlockchain, type BlockchainRecoveredConversation, type CheckpointQueryOptions } from '../utils/checkpoint-blockchain';
 import type { SearchApiResponse, WebSearchStarted, WebSearchResults, WebSearchError as WebSearchErrorMsg } from '../types/web-search.types';
 
 /**
@@ -2937,6 +2938,58 @@ export class SessionManager implements ISessionManager {
       }
       throw new SDKError(
         `Checkpoint recovery failed: ${error.message}`,
+        'RECOVERY_FAILED',
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Recover conversation from blockchain ProofSubmitted events (decentralized).
+   *
+   * This method does NOT require the host to be online. It queries blockchain
+   * events to discover deltaCIDs, then fetches deltas from S5. This enables
+   * fully decentralized checkpoint recovery.
+   *
+   * @param jobId - The job/session ID to recover
+   * @param options - Query options (block range)
+   * @returns Recovered conversation with messages, token count, and blockchain checkpoint entries
+   * @throws SDKError with code 'DELTA_FETCH_FAILED' if S5 fetch fails
+   * @throws SDKError with code 'DECRYPTION_FAILED' if decryption fails
+   */
+  async recoverFromBlockchainEvents(
+    jobId: bigint,
+    options?: CheckpointQueryOptions
+  ): Promise<BlockchainRecoveredConversation> {
+    // Get JobMarketplace contract for event querying
+    const contract = this.paymentManager.getJobMarketplaceContract();
+
+    // Get user's recovery private key for encrypted delta decryption
+    // If EncryptionManager is not available, recovery will still work for plaintext deltas
+    const userPrivateKey = this.encryptionManager?.getRecoveryPrivateKey();
+
+    try {
+      // Use blockchain-based recovery (no HTTP API needed)
+      return await recoverFromBlockchain(
+        contract,
+        this.storageManager,
+        jobId,
+        userPrivateKey,
+        options
+      );
+    } catch (error: any) {
+      // Convert to SDKError if not already
+      if (error.message?.startsWith('DELTA_FETCH_FAILED')) {
+        throw new SDKError(error.message, 'DELTA_FETCH_FAILED');
+      }
+      if (error.message?.startsWith('DECRYPTION_KEY_REQUIRED')) {
+        throw new SDKError(error.message, 'DECRYPTION_KEY_REQUIRED');
+      }
+      if (error.message?.startsWith('DECRYPTION_FAILED')) {
+        throw new SDKError(error.message, 'DECRYPTION_FAILED');
+      }
+      throw new SDKError(
+        `Blockchain recovery failed: ${error.message}`,
         'RECOVERY_FAILED',
         { originalError: error }
       );

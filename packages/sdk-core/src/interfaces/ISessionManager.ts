@@ -6,8 +6,9 @@
  * Browser-compatible session management
  */
 
-import { SessionConfig, SessionJob, CheckpointProof, RecoveredConversation } from '../types';
+import { SessionConfig, SessionJob, CheckpointProof, RecoveredConversation, CheckpointQueryOptions } from '../types';
 import type { SearchApiResponse } from '../types/web-search.types';
+import type { BlockchainRecoveredConversation } from '../utils/checkpoint-blockchain';
 
 export interface ISessionManager {
   /**
@@ -174,4 +175,37 @@ export interface ISessionManager {
    * ```
    */
   recoverFromCheckpoints(sessionId: bigint): Promise<RecoveredConversation>;
+
+  /**
+   * Recover conversation from blockchain ProofSubmitted events (decentralized).
+   *
+   * This method does NOT require the host to be online. It queries blockchain
+   * events to discover deltaCIDs, then fetches deltas from S5. This enables
+   * fully decentralized checkpoint recovery.
+   *
+   * The recovery process:
+   * 1. Query ProofSubmitted events from blockchain for the jobId
+   * 2. Extract deltaCIDs from events (skip pre-upgrade proofs with empty deltaCID)
+   * 3. Fetch checkpoint deltas from S5 using deltaCIDs
+   * 4. Decrypt deltas if encrypted (using user's recovery private key)
+   * 5. Merge deltas chronologically into conversation
+   *
+   * @param jobId - The job/session ID to recover
+   * @param options - Query options (block range)
+   * @returns Recovered conversation with messages, token count, and blockchain checkpoint entries
+   * @throws SDKError with code 'DELTA_FETCH_FAILED' if S5 fetch fails
+   * @throws SDKError with code 'DECRYPTION_FAILED' if decryption fails
+   *
+   * @example
+   * ```typescript
+   * // Recover without needing host to be online (Phase 9)
+   * const recovered = await sessionManager.recoverFromBlockchainEvents(jobId);
+   * console.log(`Recovered ${recovered.messages.length} messages from blockchain`);
+   * console.log(`${recovered.checkpoints.length} checkpoints on-chain`);
+   * ```
+   */
+  recoverFromBlockchainEvents(
+    jobId: bigint,
+    options?: CheckpointQueryOptions
+  ): Promise<BlockchainRecoveredConversation>;
 }

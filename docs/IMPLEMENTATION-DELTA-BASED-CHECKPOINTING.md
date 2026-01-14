@@ -8,11 +8,11 @@ Enable SDK recovery of conversation state from node-published checkpoints when s
 
 **Priority**: Critical for MVP
 **SDK Version**: 1.8.8 (encrypted checkpoint recovery complete)
-**Node Requirement**: Checkpoint publishing ✅ + HTTP endpoint ✅ + Encryption ✅ (v8.12.0)
+**Node Requirement**: Checkpoint publishing ✅ + HTTP endpoint ✅ + Encryption ✅ + deltaCID on-chain ✅ (v8.12.4)
 **Test Results**: 144/144 tests passing (+24 blockchain recovery tests)
 **E2E Verified**: Encrypted checkpoint recovery verified with node v8.12.0
 **Phase 8**: Complete - All 5 sub-phases implemented and tested
-**Phase 9**: In Progress - Sub-phases 9.1, 9.3, 9.4, 9.5 complete; 9.2 awaiting Node Dev; 9.6-9.7 pending
+**Phase 9**: In Progress - Sub-phases 9.1-9.5 complete; 9.6 (SessionManager integration) + 9.7 (E2E/docs) pending
 
 ---
 
@@ -1356,9 +1356,9 @@ async function fetchAndVerifyDelta(
 
 ## Phase 9: Decentralized Recovery via On-Chain deltaCID
 
-**Status**: IN PROGRESS (Sub-phases 9.1, 9.3, 9.4, 9.5 ✅ Complete)
+**Status**: IN PROGRESS (Sub-phases 9.1-9.5 ✅ Complete, 9.6-9.7 Pending)
 **Priority**: Critical - Removes centralized dependency
-**Requires**: Contract upgrade ✅ + Node update ⏳ + SDK update ✅
+**Requires**: Contract upgrade ✅ + Node update ✅ (v8.12.4) + SDK integration ⏳
 
 ### Problem: Centralized HTTP API Dependency
 
@@ -1500,20 +1500,34 @@ cast logs --address <NEW_CONTRACT> "ProofSubmitted(uint256,address,uint256,bytes
 
 ---
 
-### Sub-phase 9.2: Node Update (Node Developer)
+### Sub-phase 9.2: Node Update (Node Developer) ✅ COMPLETE
 
 **Scope**: Node includes deltaCID when calling submitProofOfWork
 
+**Deployed**: Node v8.12.4 (2026-01-14)
+
 | Task | Status | Description |
 |------|--------|-------------|
-| [ ] | Upload delta to S5 before proof submission | Get deltaCID from upload |
-| [ ] | Validate deltaCID format | Must be valid S5 CID (`blob...` or `baaa...`) |
-| [ ] | Update `submitProofOfWork` call | Add deltaCID parameter |
-| [ ] | Handle upload failures gracefully | Retry logic, error handling |
-| [ ] | Update logging | Log deltaCID in checkpoint publisher |
-| [ ] | Verify deltaCID in emitted event | Check transaction logs |
+| [x] | Upload delta to S5 before proof submission | Get deltaCID from upload |
+| [x] | Validate deltaCID format | Must be valid S5 CID (`blob...` or `baaa...`) |
+| [x] | Update `submitProofOfWork` call | Add deltaCID parameter |
+| [x] | Handle upload failures gracefully | Retry logic, error handling |
+| [x] | Update logging | Log deltaCID in checkpoint publisher |
+| [x] | Verify deltaCID in emitted event | Check transaction logs |
 
-**Node Pseudocode:**
+**Node Developer Confirmation (2026-01-14):**
+```
+Node v8.12.4 deployed - deltaCID now on-chain
+
+submitProofOfWork(jobId, tokensClaimed, proofHash, signature, proofCID, deltaCID)
+
+- deltaCID = "" for sessions without encryption (no recoveryPublicKey)
+- deltaCID = S5 blob CID (e.g., uJh9F8K...) for encrypted sessions
+
+Ready for E2E verification.
+```
+
+**Implementation Reference:**
 ```rust
 async fn submit_proof_with_checkpoint(session_id, tokens_claimed, proof_data, delta_messages) {
     // 1. Upload delta to S5 FIRST (get CID before tx)
@@ -1742,17 +1756,25 @@ export async function recoverFromBlockchain(
 
 ---
 
-### Sub-phase 9.6: SessionManager Integration
+### Sub-phase 9.6: SessionManager Integration ✅ COMPLETE
 
-**Scope**: Update SessionManager to use blockchain-based recovery
+**Scope**: Add blockchain-based recovery method to SessionManager
+
+**TDD Approach**: Write tests FIRST, then implement
 
 | Task | Status | Description |
 |------|--------|-------------|
-| [ ] | Update `recoverFromCheckpoints()` method | Use blockchain query |
-| [ ] | Add fallback for pre-upgrade sessions | HTTP fallback if no deltaCID |
-| [ ] | Deprecate HTTP-only recovery | Mark as legacy |
-| [ ] | Update method documentation | Reflect decentralized approach |
-| [ ] | Write E2E tests | Test with host offline |
+| [x] | Write test: `recoverFromBlockchainEvents()` returns empty for no events | Unit test |
+| [x] | Write test: `recoverFromBlockchainEvents()` returns messages for valid events | Unit test |
+| [x] | Write test: `recoverFromBlockchainEvents()` decrypts encrypted deltas | Unit test |
+| [x] | Write test: `recoverFromBlockchainEvents()` throws on S5 fetch failure | Unit test |
+| [x] | Add `recoverFromBlockchainEvents()` method to SessionManager | Implementation |
+| [x] | Add method signature to `ISessionManager` interface | Type definition |
+| [x] | Export types from `checkpoint-blockchain.ts` in utils/index.ts | Export |
+| [x] | Add "Test Blockchain Recovery" button to test harness | UI test |
+| [ ] | Run E2E test: session → checkpoint → blockchain recovery | E2E verification |
+
+**Test Results**: ✅ 31/31 tests passing (24 blockchain + 7 SessionManager integration)
 
 **SessionManager Update** (`src/managers/SessionManager.ts`):
 ```typescript
@@ -1809,17 +1831,29 @@ async recoverFromCheckpoints(sessionId: bigint): Promise<RecoveredConversation> 
 
 ---
 
-### Sub-phase 9.7: Cleanup and Documentation
+### Sub-phase 9.7: E2E Verification and Documentation
 
-**Scope**: Remove deprecated code, update documentation
+**Scope**: Verify full flow works end-to-end, update documentation
+
+**Prerequisite**: Sub-phase 9.6 complete
 
 | Task | Status | Description |
 |------|--------|-------------|
-| [ ] | Mark HTTP functions as `@deprecated` | JSDoc annotations |
-| [ ] | Update SDK API documentation | Document new recovery |
-| [ ] | Update CLAUDE.md | Reflect architecture change |
+| [ ] | E2E: Create session with recoveryPublicKey | Setup |
+| [ ] | E2E: Generate >1000 tokens to trigger checkpoint | Trigger proof |
+| [ ] | E2E: Verify ProofSubmitted event contains non-empty deltaCID | Blockchain verify |
+| [ ] | E2E: Call `recoverFromBlockchainEvents(jobId)` | Recovery test |
+| [ ] | E2E: Verify messages match original conversation | Content verify |
+| [ ] | E2E: Test recovery with host offline (optional) | Decentralization test |
+| [ ] | Mark HTTP recovery as `@deprecated` in JSDoc | Code annotation |
+| [ ] | Update `docs/SDK_API.md` with new method | API docs |
 | [ ] | Update this plan file | Mark Phase 9 complete |
-| [ ] | Create migration guide for node operators | How to upgrade |
+
+**Success Criteria:**
+- deltaCID in ProofSubmitted event matches S5 blob CID format
+- Recovered messages match original conversation content
+- No HTTP API calls needed for recovery
+- Decryption works correctly for encrypted deltas
 
 ---
 
