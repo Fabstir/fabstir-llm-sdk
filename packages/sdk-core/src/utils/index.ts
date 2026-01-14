@@ -17,6 +17,7 @@ export * from './signature';
 export * from './checkpoint-recovery';
 export * from './checkpoint-http';
 export * from './checkpoint-encryption';
+export * from './checkpoint-blockchain';
 
 // Export other utilities as they are created
 export { TransactionHelper } from '../contracts/TransactionHelper';

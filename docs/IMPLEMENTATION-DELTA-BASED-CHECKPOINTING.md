@@ -4,7 +4,7 @@
 
 Enable SDK recovery of conversation state from node-published checkpoints when sessions timeout or disconnect mid-stream. Uses delta-based storage to minimize S5 storage requirements while providing verifiable conversation recovery.
 
-## Status: Phase 8 Complete ✅
+## Status: Phase 8 Complete ✅ | Phase 9 Planned
 
 **Priority**: Critical for MVP
 **SDK Version**: 1.8.8 (encrypted checkpoint recovery complete)
@@ -12,6 +12,7 @@ Enable SDK recovery of conversation state from node-published checkpoints when s
 **Test Results**: 120/120 tests passing (17 encryption + 10 HTTP + 33 integration + 60 unit)
 **E2E Verified**: Encrypted checkpoint recovery verified with node v8.12.0
 **Phase 8**: Complete - All 5 sub-phases implemented and tested
+**Phase 9**: Planned - Decentralized recovery via on-chain deltaCID (removes HTTP dependency)
 
 ---
 
@@ -1350,3 +1351,567 @@ async function fetchAndVerifyDelta(
 **Solution**: HTTP API (Phase 7). Node exposes checkpoint index via HTTP, SDK queries it, then fetches deltas from S5 using globally-addressable CIDs.
 
 **Key Insight**: CIDs are globally addressable on S5 (content-addressed), but paths like `home/...` are user-specific (namespace-addressed).
+
+---
+
+## Phase 9: Decentralized Recovery via On-Chain deltaCID
+
+**Status**: NOT STARTED
+**Priority**: Critical - Removes centralized dependency
+**Requires**: Contract upgrade + Node update + SDK update
+
+### Problem: Centralized HTTP API Dependency
+
+Phase 7's HTTP API solution has a **fundamental flaw** for a decentralized P2P network:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  CURRENT FLOW (FLAWED)                                          │
+│                                                                 │
+│  User wants to recover conversation after session ends          │
+│                                                                 │
+│  1. SDK calls HTTP API: GET /v1/checkpoints/{sessionId}         │
+│                         ↑                                       │
+│                    PROBLEM: Host may be offline!                │
+│                                                                 │
+│  In a decentralized P2P network, hosts can:                     │
+│  - Go offline after session ends                                │
+│  - Change IP/NAT configuration                                  │
+│  - Refuse connections                                           │
+│  - User may have lost host URL                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Solution: Store deltaCID in ProofSubmitted Event
+
+Add `deltaCID` to the blockchain event, providing:
+- **Non-repudiation**: Host's transaction signature covers deltaCID
+- **Availability**: CID always discoverable from blockchain
+- **Decentralization**: No HTTP API dependency for recovery
+
+### Security Comparison: HTTP vs On-Chain
+
+| Property | HTTP API (Phase 7) | Blockchain (Phase 9) |
+|----------|-------------------|---------------------|
+| **Non-repudiation** | Weak | Strong (host signed tx) |
+| **CID Availability** | Host must be online | Always available |
+| **Tampering** | deltaCID not signed | deltaCID in signed tx |
+| **Audit trail** | S5 only | Blockchain + S5 |
+| **Dispute evidence** | Indirect | Direct on-chain |
+
+### Architecture Change
+
+**Current ProofSubmitted Event:**
+```solidity
+event ProofSubmitted(
+    uint256 indexed jobId,
+    address indexed host,
+    uint256 tokensClaimed,
+    bytes32 proofHash,
+    string proofCID
+);
+```
+
+**New ProofSubmitted Event:**
+```solidity
+event ProofSubmitted(
+    uint256 indexed jobId,
+    address indexed host,
+    uint256 tokensClaimed,
+    bytes32 proofHash,
+    string proofCID,
+    string deltaCID      // NEW: Checkpoint delta CID for recovery
+);
+```
+
+### Decentralized Recovery Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  NEW DECENTRALIZED RECOVERY FLOW                                │
+│                                                                 │
+│  1. User queries blockchain:                                    │
+│     → ProofSubmitted events for jobId/sessionId                 │
+│     → Gets deltaCID from each event                             │
+│                                                                 │
+│  2. User fetches from S5 (globally accessible):                 │
+│     → deltaCID1 → conversation delta (checkpoint 0)             │
+│     → deltaCID2 → conversation delta (checkpoint 1)             │
+│                                                                 │
+│  3. User merges deltas → recovered conversation                 │
+│                                                                 │
+│  ✓ No HTTP API needed                                           │
+│  ✓ Host can be offline                                          │
+│  ✓ Fully decentralized                                          │
+│  ✓ Non-repudiable (host signed tx with deltaCID)               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Sub-phase 9.1: Contract Update (Contracts Developer) ✅ COMPLETE
+
+**Scope**: Update JobMarketplace contract to emit deltaCID in ProofSubmitted event
+
+**Deployed**: 2026-01-14
+- **Proxy Address**: 0x3CaCbf3f448B420918A93a88706B26Ab27a3523E (unchanged)
+- **New Implementation**: 0x1B6C6A1E373E5E00Bf6210e32A6DA40304f6484c
+
+| Task | Status | Description |
+|------|--------|-------------|
+| [x] | Update `submitProofOfWork` signature | Add `string calldata deltaCID` parameter |
+| [x] | Update `ProofSubmitted` event | Add `deltaCID` field |
+| [x] | Update function to emit deltaCID | Include in event emission |
+| [x] | Write contract unit tests | Test event emission with deltaCID |
+| [x] | Deploy to Base Sepolia testnet | Get new contract address |
+| [x] | Update `.env.test` | Owner updates contract address |
+| [x] | Export client ABI | `JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json` |
+
+**Additional Breaking Changes**:
+- `getProofSubmission()` now returns 5 values: `[proofHash, tokensClaimed, timestamp, verified, deltaCID]`
+
+**Contract Code Change:**
+```solidity
+// Before
+function submitProofOfWork(
+    uint256 jobId,
+    uint256 tokensClaimed,
+    bytes32 proofHash,
+    bytes calldata signature,
+    string calldata proofCID
+) external;
+
+// After
+function submitProofOfWork(
+    uint256 jobId,
+    uint256 tokensClaimed,
+    bytes32 proofHash,
+    bytes calldata signature,
+    string calldata proofCID,
+    string calldata deltaCID  // NEW
+) external;
+```
+
+**Verification**:
+```bash
+# After deployment, verify event includes deltaCID
+cast logs --address <NEW_CONTRACT> "ProofSubmitted(uint256,address,uint256,bytes32,string,string)"
+```
+
+---
+
+### Sub-phase 9.2: Node Update (Node Developer)
+
+**Scope**: Node includes deltaCID when calling submitProofOfWork
+
+| Task | Status | Description |
+|------|--------|-------------|
+| [ ] | Upload delta to S5 before proof submission | Get deltaCID from upload |
+| [ ] | Validate deltaCID format | Must be valid S5 CID (`blob...` or `baaa...`) |
+| [ ] | Update `submitProofOfWork` call | Add deltaCID parameter |
+| [ ] | Handle upload failures gracefully | Retry logic, error handling |
+| [ ] | Update logging | Log deltaCID in checkpoint publisher |
+| [ ] | Verify deltaCID in emitted event | Check transaction logs |
+
+**Node Pseudocode:**
+```rust
+async fn submit_proof_with_checkpoint(session_id, tokens_claimed, proof_data, delta_messages) {
+    // 1. Upload delta to S5 FIRST (get CID before tx)
+    let delta = CheckpointDelta {
+        session_id,
+        checkpoint_index: current_index,
+        messages: delta_messages,
+        encrypted: true,  // Use recovery public key
+    };
+    let delta_cid = s5_client.upload_encrypted(delta, recovery_public_key).await?;
+    info!("[CHECKPOINT] Uploaded delta: deltaCID={}", delta_cid);
+
+    // 2. Generate proof and upload
+    let proof_hash = keccak256(proof_data);
+    let proof_cid = s5_client.upload(proof_data).await?;
+
+    // 3. Submit to contract WITH deltaCID
+    let tx = contract.submit_proof_of_work(
+        session_id,
+        tokens_claimed,
+        proof_hash,
+        signature,
+        proof_cid,
+        delta_cid  // NEW parameter
+    ).await?;
+
+    info!("[CHECKPOINT] Proof submitted: tx={}, deltaCID={}", tx.hash, delta_cid);
+}
+```
+
+---
+
+### Sub-phase 9.3: SDK Types and Interfaces ✅ COMPLETE
+
+**Scope**: Add types for blockchain-based checkpoint query
+
+| Task | Status | Description |
+|------|--------|-------------|
+| [x] | Create `BlockchainCheckpointEntry` type | For parsed event data |
+| [x] | Create `CheckpointQueryOptions` interface | Query parameters |
+| [x] | Update `types/index.ts` | Export new types |
+| [x] | Write type tests | 6 type tests passing |
+
+**Implementation Files:**
+- `packages/sdk-core/src/types/index.ts` (MODIFIED, +32 lines)
+
+**New Types** (`src/types/checkpoint.types.ts`):
+```typescript
+/**
+ * Checkpoint entry parsed from blockchain ProofSubmitted event
+ */
+export interface BlockchainCheckpointEntry {
+  jobId: bigint;
+  host: string;
+  tokensClaimed: bigint;
+  proofHash: string;
+  proofCID: string;
+  deltaCID: string;        // NEW: From event
+  blockNumber: number;
+  transactionHash: string;
+}
+
+/**
+ * Options for querying checkpoint events
+ */
+export interface CheckpointQueryOptions {
+  fromBlock?: number;
+  toBlock?: number | 'latest';
+}
+```
+
+---
+
+### Sub-phase 9.4: Blockchain Event Query ✅ COMPLETE
+
+**Scope**: Query ProofSubmitted events from blockchain
+
+| Task | Status | Description |
+|------|--------|-------------|
+| [x] | Create `queryProofSubmittedEvents()` function | Query by jobId |
+| [x] | Parse events to extract deltaCID | Handle ABI decoding |
+| [x] | Sort events by block number | Chronological order |
+| [x] | Handle empty deltaCID (pre-upgrade) | Backward compatibility |
+| [x] | Write unit tests | 9 event query tests passing |
+
+**Implementation Files:**
+- `packages/sdk-core/src/utils/checkpoint-blockchain.ts` (NEW, ~80 lines)
+- `packages/sdk-core/src/utils/index.ts` (MODIFIED, +1 export)
+- `packages/sdk-core/tests/unit/checkpoint-blockchain.test.ts` (NEW, ~200 lines)
+
+**Test Results:** ✅ **15/15 tests passing** (6 type tests + 9 event query tests)
+
+**Implementation** (`src/utils/checkpoint-blockchain.ts`):
+```typescript
+import { ethers } from 'ethers';
+import type { BlockchainCheckpointEntry, CheckpointQueryOptions } from '../types/checkpoint.types';
+
+/**
+ * Query ProofSubmitted events from blockchain for a session
+ *
+ * @param contract - JobMarketplace contract instance
+ * @param jobId - Session/job ID to query
+ * @param options - Query options (block range)
+ * @returns Array of checkpoint entries with deltaCIDs
+ */
+export async function queryProofSubmittedEvents(
+  contract: ethers.Contract,
+  jobId: bigint,
+  options: CheckpointQueryOptions = {}
+): Promise<BlockchainCheckpointEntry[]> {
+  const { fromBlock = 0, toBlock = 'latest' } = options;
+
+  // Query events filtered by jobId
+  const filter = contract.filters.ProofSubmitted(jobId);
+  const events = await contract.queryFilter(filter, fromBlock, toBlock);
+
+  // Parse and return
+  return events.map(event => ({
+    jobId: event.args.jobId,
+    host: event.args.host,
+    tokensClaimed: event.args.tokensClaimed,
+    proofHash: event.args.proofHash,
+    proofCID: event.args.proofCID,
+    deltaCID: event.args.deltaCID,  // NEW field
+    blockNumber: event.blockNumber,
+    transactionHash: event.transactionHash,
+  })).sort((a, b) => a.blockNumber - b.blockNumber);
+}
+```
+
+**Unit Test** (`tests/unit/checkpoint-blockchain.test.ts`):
+```typescript
+describe('queryProofSubmittedEvents', () => {
+  it('should query events and extract deltaCID', async () => {
+    // Mock contract with events
+    const mockEvents = [
+      { args: { jobId: 1n, deltaCID: 'blobba...', ... }, blockNumber: 100 },
+      { args: { jobId: 1n, deltaCID: 'blobbb...', ... }, blockNumber: 200 },
+    ];
+    mockContract.queryFilter.mockResolvedValue(mockEvents);
+
+    const result = await queryProofSubmittedEvents(mockContract, 1n);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].deltaCID).toBe('blobba...');
+    expect(result[1].deltaCID).toBe('blobbb...');
+  });
+
+  it('should sort events by block number', async () => { ... });
+  it('should handle empty result', async () => { ... });
+});
+```
+
+---
+
+### Sub-phase 9.5: Decentralized Recovery Implementation
+
+**Scope**: Recovery flow using blockchain events instead of HTTP API
+
+| Task | Status | Description |
+|------|--------|-------------|
+| [ ] | Create `recoverFromBlockchain()` function | Main recovery entry |
+| [ ] | Query blockchain for ProofSubmitted events | Get deltaCIDs |
+| [ ] | Fetch deltas from S5 using deltaCIDs | Content-addressed retrieval |
+| [ ] | Verify proofHash matches on-chain | Integrity check |
+| [ ] | Decrypt deltas if encrypted | Using recovery private key |
+| [ ] | Merge deltas into conversation | Chronological merge |
+| [ ] | Write integration tests | Full flow test |
+
+**Implementation** (`src/utils/checkpoint-recovery.ts`):
+```typescript
+/**
+ * Recover conversation from blockchain events (decentralized)
+ *
+ * This method does NOT require the host to be online.
+ * It queries ProofSubmitted events from the blockchain to get deltaCIDs,
+ * then fetches deltas from S5.
+ *
+ * @param contract - JobMarketplace contract instance
+ * @param storageManager - S5 storage manager
+ * @param jobId - Session/job ID
+ * @param userPrivateKey - For delta decryption (optional)
+ * @returns Recovered conversation
+ */
+export async function recoverFromBlockchain(
+  contract: ethers.Contract,
+  storageManager: StorageManager,
+  jobId: bigint,
+  userPrivateKey?: string
+): Promise<RecoveredConversation> {
+  console.log(`[Recovery] Querying blockchain for jobId ${jobId}...`);
+
+  // 1. Query blockchain events
+  const events = await queryProofSubmittedEvents(contract, jobId);
+
+  if (events.length === 0) {
+    console.log('[Recovery] No ProofSubmitted events found');
+    return { messages: [], tokenCount: 0, checkpoints: [] };
+  }
+
+  console.log(`[Recovery] Found ${events.length} checkpoint events`);
+
+  // 2. Fetch and decrypt deltas from S5
+  const deltas: CheckpointDelta[] = [];
+  for (const event of events) {
+    console.log(`[Recovery] Fetching delta: ${event.deltaCID}`);
+
+    const delta = await fetchAndVerifyDelta(
+      storageManager,
+      event.deltaCID,
+      event.host,
+      userPrivateKey
+    );
+
+    deltas.push(delta);
+  }
+
+  // 3. Merge deltas
+  const { messages, tokenCount } = mergeDeltas(deltas);
+
+  console.log(`[Recovery] Recovered ${messages.length} messages, ${tokenCount} tokens`);
+
+  return {
+    messages,
+    tokenCount,
+    checkpoints: events.map(e => ({
+      index: deltas.findIndex(d => d.deltaCID === e.deltaCID),
+      proofHash: e.proofHash,
+      deltaCID: e.deltaCID,
+      tokenRange: [0, Number(e.tokensClaimed)] as [number, number],
+      timestamp: 0,  // Not available from event
+    })),
+  };
+}
+```
+
+---
+
+### Sub-phase 9.6: SessionManager Integration
+
+**Scope**: Update SessionManager to use blockchain-based recovery
+
+| Task | Status | Description |
+|------|--------|-------------|
+| [ ] | Update `recoverFromCheckpoints()` method | Use blockchain query |
+| [ ] | Add fallback for pre-upgrade sessions | HTTP fallback if no deltaCID |
+| [ ] | Deprecate HTTP-only recovery | Mark as legacy |
+| [ ] | Update method documentation | Reflect decentralized approach |
+| [ ] | Write E2E tests | Test with host offline |
+
+**SessionManager Update** (`src/managers/SessionManager.ts`):
+```typescript
+/**
+ * Recover conversation from checkpoint deltas (DECENTRALIZED)
+ *
+ * Queries ProofSubmitted events from blockchain to get deltaCIDs,
+ * then fetches deltas from S5. Does NOT require host to be online.
+ *
+ * @param sessionId - Session ID (jobId) to recover
+ * @returns Recovered conversation with messages and token count
+ */
+async recoverFromCheckpoints(sessionId: bigint): Promise<RecoveredConversation> {
+  const contract = this.contractManager.getJobMarketplace();
+
+  // Try blockchain-based recovery first (decentralized)
+  const events = await queryProofSubmittedEvents(contract, sessionId);
+
+  // Check if events have deltaCID (post-upgrade sessions)
+  if (events.length > 0 && events[0].deltaCID) {
+    console.log('[SessionManager] Using decentralized recovery (blockchain events)');
+    return await recoverFromBlockchain(
+      contract,
+      this.storageManager,
+      sessionId,
+      this.encryptionManager?.getRecoveryPrivateKey()
+    );
+  }
+
+  // Fallback for pre-upgrade sessions (HTTP API)
+  console.warn('[SessionManager] Session predates on-chain deltaCID, trying HTTP fallback');
+  const session = this.sessions.get(sessionId.toString());
+  if (!session?.endpoint) {
+    throw new SDKError(
+      'Cannot recover: session predates on-chain deltaCID and no host endpoint available',
+      'RECOVERY_UNAVAILABLE'
+    );
+  }
+
+  // Try HTTP (may fail if host is offline)
+  return await recoverFromCheckpointsFlowWithHttp(
+    this.storageManager,
+    contract,
+    async () => ({
+      hostAddress: session.provider,
+      hostUrl: session.endpoint.replace('ws://', 'http://').replace('/ws', ''),
+      status: session.status,
+    }),
+    sessionId,
+    this.encryptionManager?.getRecoveryPrivateKey()
+  );
+}
+```
+
+---
+
+### Sub-phase 9.7: Cleanup and Documentation
+
+**Scope**: Remove deprecated code, update documentation
+
+| Task | Status | Description |
+|------|--------|-------------|
+| [ ] | Mark HTTP functions as `@deprecated` | JSDoc annotations |
+| [ ] | Update SDK API documentation | Document new recovery |
+| [ ] | Update CLAUDE.md | Reflect architecture change |
+| [ ] | Update this plan file | Mark Phase 9 complete |
+| [ ] | Create migration guide for node operators | How to upgrade |
+
+---
+
+### Phase 9 Files to Modify
+
+| File | Change |
+|------|--------|
+| **Contract** (Contracts Dev) | |
+| `JobMarketplaceWithModelsUpgradeable.sol` | Add deltaCID to event and function |
+| **Node** (Node Dev) | |
+| `src/checkpoint/publisher.rs` | Include deltaCID in proof submission |
+| **SDK** | |
+| `src/types/checkpoint.types.ts` | Add `BlockchainCheckpointEntry` type |
+| `src/utils/checkpoint-blockchain.ts` | NEW: Blockchain event query |
+| `src/utils/checkpoint-recovery.ts` | Add `recoverFromBlockchain()` |
+| `src/managers/SessionManager.ts` | Update `recoverFromCheckpoints()` |
+| `src/contracts/abis/JobMarketplace*.json` | Updated ABI with deltaCID |
+| `tests/unit/checkpoint-blockchain.test.ts` | NEW: Unit tests |
+| `tests/integration/checkpoint-recovery-blockchain.test.ts` | NEW: E2E tests |
+
+---
+
+### Phase 9 Verification Plan
+
+**Manual Testing**:
+1. [ ] Deploy updated contract to testnet
+2. [ ] Node submits proof with deltaCID
+3. [ ] Verify event includes deltaCID on-chain
+4. [ ] SDK queries events, extracts deltaCID
+5. [ ] SDK fetches delta from S5
+6. [ ] Stop host (simulate offline)
+7. [ ] SDK recovers conversation (no HTTP)
+
+**Automated Tests**:
+```bash
+# Unit tests
+pnpm test packages/sdk-core/tests/unit/checkpoint-blockchain.test.ts
+
+# Integration tests (requires deployed contract)
+pnpm test packages/sdk-core/tests/integration/checkpoint-recovery-blockchain.test.ts
+```
+
+---
+
+### Phase 9 Coordination Requirements
+
+**With Contracts Developer**:
+1. Share event specification change
+2. Review before deployment
+3. Coordinate ABI distribution
+4. Test on testnet first
+
+**With Node Developer**:
+1. Share deltaCID format requirements (valid S5 CID)
+2. Coordinate proof submission changes
+3. Verify transaction includes deltaCID
+4. Test encryption compatibility
+
+---
+
+### Phase 9 Timeline
+
+| Sub-phase | Owner | Dependencies | Status |
+|-----------|-------|--------------|--------|
+| 9.1 Contract Update | Contracts Dev | None | ✅ COMPLETE |
+| 9.2 Node Update | Node Dev | 9.1 complete | AWAITING |
+| 9.3 SDK Types | SDK Dev | 9.1 complete | ✅ COMPLETE |
+| 9.4 Event Query | SDK Dev | 9.1 complete | ✅ COMPLETE |
+| 9.5 Recovery Impl | SDK Dev | 9.3, 9.4 complete | CAN START |
+| 9.6 SessionManager | SDK Dev | 9.5 complete | BLOCKED |
+| 9.7 Cleanup/Docs | SDK Dev | 9.6 complete | BLOCKED |
+
+---
+
+### Phase 9 Progress Tracker
+
+**Last Updated**: 2026-01-14
+
+- [x] Sub-phase 9.1: Contract Update - ✅ COMPLETE (deployed 2026-01-14)
+- [ ] Sub-phase 9.2: Node Update - AWAITING NODE DEVELOPER
+- [x] Sub-phase 9.3: SDK Types - ✅ COMPLETE (15 tests passing)
+- [x] Sub-phase 9.4: Event Query - ✅ COMPLETE (15 tests passing)
+- [ ] Sub-phase 9.5: Recovery Implementation - CAN START NOW
+- [ ] Sub-phase 9.6: SessionManager Integration - BLOCKED (needs 9.5)
+- [ ] Sub-phase 9.7: Cleanup and Documentation - BLOCKED (needs 9.6)

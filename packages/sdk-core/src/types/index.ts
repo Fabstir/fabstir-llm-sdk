@@ -245,6 +245,41 @@ export interface EncryptedCheckpointDelta {
   hostSignature: string;
 }
 
+// ============= Blockchain Checkpoint Types (Phase 9) =============
+
+/**
+ * Checkpoint entry parsed from blockchain ProofSubmitted event.
+ * Used for decentralized checkpoint recovery without requiring host to be online.
+ */
+export interface BlockchainCheckpointEntry {
+  /** Job/session ID from the event */
+  jobId: bigint;
+  /** Host address that submitted the proof */
+  host: string;
+  /** Number of tokens claimed in this proof */
+  tokensClaimed: bigint;
+  /** Keccak256 hash of the proof data */
+  proofHash: string;
+  /** S5 CID of the STARK proof data */
+  proofCID: string;
+  /** S5 CID of the checkpoint delta (NEW in Phase 9) */
+  deltaCID: string;
+  /** Block number where the event was emitted */
+  blockNumber: number;
+  /** Transaction hash that emitted the event */
+  transactionHash: string;
+}
+
+/**
+ * Options for querying ProofSubmitted events from blockchain.
+ */
+export interface CheckpointQueryOptions {
+  /** Start block for event query (default: 0) */
+  fromBlock?: number;
+  /** End block for event query (default: 'latest') */
+  toBlock?: number | 'latest';
+}
+
 // ============= Host Types =============
 // NOTE: HostInfo and other host types have been moved to types/models.ts
 // to support the new model governance architecture. Import from there instead.
