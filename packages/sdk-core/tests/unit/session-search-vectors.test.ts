@@ -61,7 +61,8 @@ describe('SessionManager.searchVectors()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       // Mock _sendRAGRequest to simulate successful search
@@ -94,7 +95,8 @@ describe('SessionManager.searchVectors()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       const mockResults = createMockSearchResults(10);
@@ -124,7 +126,8 @@ describe('SessionManager.searchVectors()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       const mockResults = createMockSearchResults(2); // Only 2 results above 0.8
@@ -157,7 +160,8 @@ describe('SessionManager.searchVectors()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       vi.spyOn(sessionManager as any, '_sendRAGRequest').mockResolvedValue({
@@ -185,7 +189,8 @@ describe('SessionManager.searchVectors()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       // Should throw with descriptive error
@@ -209,7 +214,8 @@ describe('SessionManager.searchVectors()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       // k too low
@@ -237,7 +243,8 @@ describe('SessionManager.searchVectors()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       // threshold too low
@@ -267,7 +274,8 @@ describe('SessionManager.searchVectors()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       const mockResults = createMockSearchResults(5);
@@ -301,7 +309,8 @@ describe('SessionManager.searchVectors()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       vi.spyOn(sessionManager as any, '_sendRAGRequest').mockResolvedValue({
@@ -331,7 +340,8 @@ describe('SessionManager.searchVectors()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       const mockResults = createMockSearchResults(5);
@@ -373,7 +383,8 @@ describe('SessionManager.searchVectors()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       await expect(sessionManager.searchVectors(sessionId, queryVector))
@@ -396,11 +407,36 @@ describe('SessionManager.searchVectors()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       await expect(sessionManager.searchVectors(sessionId, queryVector))
         .rejects.toThrow(/WebSocket not connected/);
+    });
+
+    it('should throw error if RAG context is not configured', async () => {
+      const sessionId = 'test-session-no-rag';
+      const queryVector = createQueryVector();
+
+      (sessionManager as any).wsClient = {};
+      (sessionManager as any).sessions = new Map([[sessionId, {
+        sessionId: BigInt(1),
+        jobId: BigInt(1),
+        chainId: 84532,
+        model: 'llama-3',
+        provider: 'test-host',
+        status: 'active',
+        prompts: [],
+        responses: [],
+        checkpoints: [],
+        totalTokens: 0,
+        startTime: Date.now()
+        // ragContext NOT configured - should fail
+      }]]);
+
+      await expect(sessionManager.searchVectors(sessionId, queryVector))
+        .rejects.toThrow(/No vector database attached to this session/);
     });
 
     it.skip('should timeout after 10 seconds', async () => {
@@ -419,7 +455,8 @@ describe('SessionManager.searchVectors()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       // Mock _sendRAGRequest to simulate timeout
@@ -449,7 +486,8 @@ describe('SessionManager.searchVectors()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       // Mock _sendRAGRequest to simulate host error response

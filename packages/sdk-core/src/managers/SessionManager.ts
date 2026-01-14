@@ -2244,6 +2244,14 @@ export class SessionManager implements ISessionManager {
       );
     }
 
+    // Validate RAG context is configured for this session
+    if (!session.ragContext?.vectorDbId) {
+      throw new SDKError(
+        'No vector database attached to this session. Configure ragContext when starting the session.',
+        'RAG_NOT_CONFIGURED'
+      );
+    }
+
     // CRITICAL FIX: Always send session_init before RAG operations
     // The node clears sessions from SessionStore after "Encrypted session complete"
     // so we must re-initialize the session to ensure RAG operations work
@@ -2345,6 +2353,12 @@ export class SessionManager implements ISessionManager {
       // Get session to retrieve host endpoint and chainId
       const session = this.sessions.get(sessionId);
       if (!session || session.status !== 'active') {
+        return question; // Graceful degradation
+      }
+
+      // Check if RAG context is configured - if not, return original question
+      // (no point generating embeddings without a vector database)
+      if (!session.ragContext?.vectorDbId) {
         return question; // Graceful degradation
       }
 
