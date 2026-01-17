@@ -57,12 +57,14 @@ export interface UserBalanceInfo {
  * Session status enum matching contract values
  *
  * CRITICAL: Order must match contract enum exactly for ABI encoding
+ *
+ * Note: Original enum had Disputed (3), Abandoned (4), Cancelled (5) but
+ * these were removed from the contract as part of the security audit.
+ * Dispute resolution is handled off-chain via DAO with CID evidence.
+ * See: temp/DISPUTE-RESOLUTION-ARCHITECTURE.md
  */
 export enum SessionStatus {
   Active = 0,
   Completed = 1,
-  TimedOut = 2,
-  Disputed = 3,
-  Abandoned = 4,
-  Cancelled = 5
+  TimedOut = 2
 }

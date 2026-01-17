@@ -77,21 +77,26 @@ describe('Proof Type Definitions - Security Audit Migration', () => {
 
   describe('SessionStatus', () => {
     it('should have all status values', () => {
+      // Contract enum reduced to 3 values after security audit
+      // Disputed/Abandoned/Cancelled removed - disputes handled off-chain via DAO
       expect(SessionStatus.Active).toBe(0);
       expect(SessionStatus.Completed).toBe(1);
       expect(SessionStatus.TimedOut).toBe(2);
-      expect(SessionStatus.Disputed).toBe(3);
-      expect(SessionStatus.Abandoned).toBe(4);
-      expect(SessionStatus.Cancelled).toBe(5);
     });
 
     it('should match contract enum values', () => {
       // These values must match the contract's SessionStatus enum
       // Order is critical for ABI encoding/decoding
-      const statusNames = ['Active', 'Completed', 'TimedOut', 'Disputed', 'Abandoned', 'Cancelled'];
+      const statusNames = ['Active', 'Completed', 'TimedOut'];
       statusNames.forEach((name, index) => {
         expect(SessionStatus[name as keyof typeof SessionStatus]).toBe(index);
       });
+    });
+
+    it('should only have 3 values (security audit requirement)', () => {
+      // Verify no extra values exist
+      const enumKeys = Object.keys(SessionStatus).filter(k => isNaN(Number(k)));
+      expect(enumKeys).toEqual(['Active', 'Completed', 'TimedOut']);
     });
   });
 });
