@@ -13,6 +13,7 @@
 **Created**: 470+ lines of production-ready wallet abstraction layer
 
 **Architecture**:
+
 ```typescript
 interface WalletAdapter {
   connect(): Promise<string>;
@@ -26,12 +27,14 @@ interface WalletAdapter {
 ```
 
 **Implementations**:
+
 1. **MetaMaskAdapter** - Browser wallet via `BrowserProvider`
 2. **TestWalletAdapter** - Automated testing via `Wallet` + `JsonRpcProvider`
 3. **BaseAccountKitAdapter** - Gasless transactions (placeholder)
 4. **ParticleNetworkAdapter** - Social login (placeholder)
 
 **Factory Pattern**:
+
 ```typescript
 const manager = getWalletManager();
 await manager.connect(walletType, config, options);
@@ -43,6 +46,7 @@ const adapter = manager.getAdapter();
 **Refactored**: Now uses wallet adapter pattern instead of hardcoded `BrowserProvider`
 
 **Key Changes**:
+
 - Removed hardcoded `BrowserProvider` instantiation on line 76
 - Added `detectWalletType()` function to auto-detect wallet environment
 - Replaced `this.signer` with `this.adapter.getSigner()`
@@ -50,18 +54,20 @@ const adapter = manager.getAdapter();
 - All methods now delegate to `WalletAdapter` interface
 
 **Auto-Detection Logic**:
+
 ```typescript
 function detectWalletType(): WalletType {
   // Priority 1: Test mode (for automated testing)
-  if (window.__TEST_WALLET__?.privateKey) return 'test-wallet';
+  if (window.__TEST_WALLET__?.privateKey) return "test-wallet";
 
   // Priority 2: Base Account Kit (if API keys configured)
-  if (process.env.NEXT_PUBLIC_BASE_ACCOUNT_KIT_API_KEY) return 'base-account-kit';
+  if (process.env.NEXT_PUBLIC_BASE_ACCOUNT_KIT_API_KEY)
+    return "base-account-kit";
 
   // Priority 3: MetaMask (browser extension)
-  if (window.ethereum) return 'metamask';
+  if (window.ethereum) return "metamask";
 
-  throw new Error('No wallet available');
+  throw new Error("No wallet available");
 }
 ```
 
@@ -70,15 +76,20 @@ function detectWalletType(): WalletType {
 **Key Improvement**: No more MetaMask mocking! Test wallet is auto-detected.
 
 **How It Works**:
+
 ```javascript
 // Test script injects test wallet config into window
-await page.addInitScript((privateKey, address) => {
-  window.__TEST_WALLET__ = {
-    privateKey: privateKey,
-    address: address,
-    autoApprove: true,
-  };
-}, TEST_USER_PRIVATE_KEY, TEST_USER_ADDRESS);
+await page.addInitScript(
+  (privateKey, address) => {
+    window.__TEST_WALLET__ = {
+      privateKey: privateKey,
+      address: address,
+      autoApprove: true,
+    };
+  },
+  TEST_USER_PRIVATE_KEY,
+  TEST_USER_ADDRESS,
+);
 
 // UI5's detectWalletType() automatically detects it and uses TestWalletAdapter
 // No BrowserProvider, no MetaMask extension needed!
@@ -89,12 +100,14 @@ await page.addInitScript((privateKey, address) => {
 ## Test Results
 
 **Latest Run** (`automated-testing-v4.mjs`):
+
 - **Passed**: 5/61 (8.2%) - Improved from 4/61 (6.6%)
 - **Failed**: 2/61 (3.3%)
 - **Skipped**: 54/61 (88.5%)
 - **Duration**: 53.3 seconds
 
 **What Passed**:
+
 - ✅ Load homepage
 - ✅ Persist connection after reload
 - ✅ No critical console errors
@@ -102,6 +115,7 @@ await page.addInitScript((privateKey, address) => {
 - ✅ Direct URL navigation works
 
 **What Failed**:
+
 - ❌ Connect Wallet button visible (selector issue - button exists but timeout occurred)
 - ❌ Connect wallet (depends on button visibility)
 
@@ -114,6 +128,7 @@ await page.addInitScript((privateKey, address) => {
 ### 1. Solves Testing Blocker
 
 **Before**:
+
 ```typescript
 // UI5 code was hardcoded to BrowserProvider
 this.provider = new ethers.BrowserProvider(window.ethereum);
@@ -121,20 +136,23 @@ this.signer = await this.provider.getSigner(); // FAILS in automated tests
 ```
 
 **After**:
+
 ```typescript
 // UI5 auto-detects test wallet and uses TestWalletAdapter
-const adapter = manager.connect('test-wallet', config, { privateKey });
+const adapter = manager.connect("test-wallet", config, { privateKey });
 this.signer = await adapter.getSigner(); // Returns Wallet directly ✅
 ```
 
 ### 2. Supports Multiple Wallet Types
 
 **Production**:
+
 - MetaMask (browser extension)
 - Base Account Kit (gasless transactions)
 - Particle Network (social login)
 
 **Testing**:
+
 - Test Wallet (private key + JsonRpcProvider)
 
 ### 3. Zero Code Changes Needed
@@ -146,6 +164,7 @@ this.signer = await adapter.getSigner(); // Returns Wallet directly ✅
 ### 4. Future-Proof Architecture
 
 **Adding new wallet type**:
+
 ```typescript
 // 1. Create adapter class
 class MyWalletAdapter implements WalletAdapter {
@@ -166,6 +185,7 @@ That's it! No changes to UI code needed.
 ## Files Modified
 
 ### Created Files:
+
 1. **apps/ui5/lib/wallet-adapter.ts** - 470 lines
    - `WalletAdapter` interface
    - `MetaMaskAdapter` class
@@ -182,6 +202,7 @@ That's it! No changes to UI code needed.
 3. **docs/ui5-reference/WALLET_ADAPTER_INTEGRATION.md** - This document
 
 ### Modified Files:
+
 1. **apps/ui5/lib/base-wallet.ts** - Refactored (125 lines → 100 lines)
    - Removed hardcoded `BrowserProvider`
    - Added `detectWalletType()` function
@@ -198,6 +219,7 @@ Copy `apps/ui5/lib/wallet-adapter.ts` to your project.
 ### Step 2: Update Your Wallet Provider
 
 **Before**:
+
 ```typescript
 class MyWalletProvider {
   private provider: ethers.BrowserProvider;
@@ -210,8 +232,9 @@ class MyWalletProvider {
 ```
 
 **After**:
+
 ```typescript
-import { getWalletManager, detectWalletType } from './wallet-adapter';
+import { getWalletManager, detectWalletType } from "./wallet-adapter";
 
 class MyWalletProvider {
   private adapter: WalletAdapter | null = null;
@@ -232,13 +255,18 @@ class MyWalletProvider {
 ### Step 3: Update Tests
 
 **Inject test wallet config**:
+
 ```javascript
-await page.addInitScript((privateKey, address) => {
-  window.__TEST_WALLET__ = {
-    privateKey: privateKey,
-    address: address,
-  };
-}, TEST_PRIVATE_KEY, TEST_ADDRESS);
+await page.addInitScript(
+  (privateKey, address) => {
+    window.__TEST_WALLET__ = {
+      privateKey: privateKey,
+      address: address,
+    };
+  },
+  TEST_PRIVATE_KEY,
+  TEST_ADDRESS,
+);
 ```
 
 That's it! Wallet adapter will auto-detect and use `TestWalletAdapter`.
@@ -287,33 +315,36 @@ class MetaMaskAdapter implements WalletAdapter {
 
 ## Comparison: Before vs After
 
-| Aspect | Before (v3) | After (v4) |
-|--------|-------------|------------|
-| **Architecture** | Hardcoded `BrowserProvider` | Flexible adapter pattern |
-| **Test Wallet** | Complex MetaMask mock (failed) | `Wallet` + `JsonRpcProvider` (works) |
-| **Adding Wallets** | Modify `base-wallet.ts` | Create new adapter class |
-| **MetaMask Support** | Yes ✅ | Yes ✅ |
-| **Test Support** | No ❌ (0/61 tests) | Yes ✅ (5/61 tests passing) |
-| **Base Account Kit** | Placeholder | Placeholder |
-| **Particle Network** | Not supported | Placeholder |
-| **Code Duplication** | Medium | Low |
-| **Future-Proof** | No | Yes |
+| Aspect               | Before (v3)                    | After (v4)                           |
+| -------------------- | ------------------------------ | ------------------------------------ |
+| **Architecture**     | Hardcoded `BrowserProvider`    | Flexible adapter pattern             |
+| **Test Wallet**      | Complex MetaMask mock (failed) | `Wallet` + `JsonRpcProvider` (works) |
+| **Adding Wallets**   | Modify `base-wallet.ts`        | Create new adapter class             |
+| **MetaMask Support** | Yes ✅                         | Yes ✅                               |
+| **Test Support**     | No ❌ (0/61 tests)             | Yes ✅ (5/61 tests passing)          |
+| **Base Account Kit** | Placeholder                    | Placeholder                          |
+| **Particle Network** | Not supported                  | Placeholder                          |
+| **Code Duplication** | Medium                         | Low                                  |
+| **Future-Proof**     | No                             | Yes                                  |
 
 ---
 
 ## Next Steps
 
 ### Immediate (0-2 hours):
+
 1. ✅ Wallet adapter pattern integrated
 2. ✅ Test script updated to use wallet adapter
 3. ✅ 5/61 tests passing (improved from 4/61)
 
 ### Short-term (2-4 hours):
+
 1. Fix selector timeouts (Connect Wallet button detection)
 2. Re-run `automated-testing-v4.mjs` to verify more tests pass
 3. Implement Base Account Kit adapter when API keys available
 
 ### Long-term (Future):
+
 1. Implement Particle Network adapter
 2. Add wallet switching (MetaMask ↔ Base Account Kit)
 3. Add wallet disconnection events
@@ -350,12 +381,14 @@ This insight unlocked the solution: Create `TestWalletAdapter` that uses `Wallet
 **Wallet Adapter Integration: SUCCESS** ✅
 
 **What Was Achieved**:
+
 - ✅ Flexible wallet architecture supporting 4 wallet types
 - ✅ Test wallet auto-detection (no mocking needed)
 - ✅ Zero breaking changes to existing UI code
 - ✅ Test improvement: 4/61 → 5/61 (25% increase in passing tests)
 
 **What Was Blocked**:
+
 - Selector timeout issues (unrelated to wallet adapter)
 - Full test suite automation (requires complex UI interactions)
 
@@ -364,5 +397,4 @@ This insight unlocked the solution: Create `TestWalletAdapter` that uses `Wallet
 ---
 
 **Last Updated**: 2025-11-15
-**Author**: Claude Code (AI Assistant)
 **Status**: Wallet adapter integration complete, ready for manual testing
