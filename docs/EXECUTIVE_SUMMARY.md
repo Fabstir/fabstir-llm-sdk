@@ -81,8 +81,8 @@ A decentralized marketplace where smart contracts handle coordination, P2P conne
    - XChaCha20-Poly1305 AEAD encryption
    - Forward secrecy via ephemeral session keys
    - ECDSA signatures for sender authentication
-   - Zero-knowledge architecture (hosts process encrypted payloads)
-   - Only you and the GPU provider hold keys
+   - Private communication (only you and your chosen host can read content)
+   - No platform intermediary sees your prompts or responses
 
 3. **Cryptographic Verification**
 
@@ -199,11 +199,12 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 **Implemented**:
 
 - ✅ End-to-end encryption by default (XChaCha20-Poly1305)
-- ✅ Zero-knowledge architecture (hosts cannot read prompts/responses)
+- ✅ Private inference (no platform intermediary sees content)
 - ✅ Immutable audit trails (all transactions on-chain)
 - ✅ GDPR-compliant data handling (encrypted, user-controlled)
 - ✅ Forward secrecy (ephemeral session keys)
 - ✅ Sender authentication (ECDSA signatures)
+- ✅ Evidence-based slashing for host misbehavior
 
 **In Progress** (Enterprise Compliance):
 
@@ -225,7 +226,8 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 
 2. **Model Curation & Governance**
 
-   - Premium model verification
+   - Owner-curated model approval at MVP (via `addTrustedModel`)
+   - Community voting infrastructure ready (proposeModel, voteOnProposal)
    - Quality assurance services
    - Curated model listings
    - Specialized model hosting
@@ -241,10 +243,11 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 
 - **FAB Token**
 
-  - Host staking requirement (minimum 100 FAB)
+  - Host staking requirement (minimum 1000 FAB)
   - Governance rights (model approvals, protocol upgrades)
+  - Slashing collateral for dispute enforcement
   - Fee discounts (use FAB for payments)
-  - Higher stake = higher job priority
+  - Higher stake = higher job priority in selection algorithm
 
 - **Multi-Token Payments**
   - ETH (native, gas-efficient)
@@ -315,10 +318,11 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 ### 2. **Cryptographic Security**
 
 - End-to-end encryption by default (not optional)
-- Zero-knowledge architecture (hosts process encrypted payloads)
+- Private communication (only user and host see content, no platform intermediary)
 - Forward secrecy (past sessions remain secure if keys compromised)
 - STARK proofs (mathematical certainty of computation)
 - Sender authentication (ECDSA signatures)
+- Evidence-based slashing (CID audit trail enables accountability)
 
 ### 3. **Enterprise Compliance Ready**
 
@@ -353,12 +357,12 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 
 ✅ **Core Infrastructure**
 
-- Smart contracts deployed on Base Sepolia, opBNB Testnet
+- Smart contracts deployed on Base Sepolia (UUPS upgradeable proxies)
 - Multi-chain support operational
 - WebSocket P2P connections working
 - Production nodes running live inference with SSL
 - SDK browser compatibility achieved
-- **fabstir-platformless-ui deployed and operational** (November 2025)
+- Production UI (apps/ui5) in final development
 
 ✅ **End-to-End Encryption**
 
@@ -394,11 +398,11 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 
 ✅ **Developer Tools**
 
-- Browser-compatible SDK (@fabstir/sdk-core v1.6.0)
+- Browser-compatible SDK (@fabstir/sdk-core v1.8.6+)
 - 13 specialized managers (modular architecture)
 - Comprehensive API documentation
-- Working demo applications (apps/harness)
-- Integration test suite (7/7 encryption tests passing)
+- Working demo applications (apps/harness, apps/ui4, apps/ui5)
+- Integration test suite passing
 
 ✅ **Host Operator Tools**
 
@@ -413,8 +417,16 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 
 - Host-controlled minimum pricing (contract-enforced)
 - Price discovery via SDK HostManager
-- Intelligent host selection (weighted algorithm: stake, price, uptime, latency)
+- Intelligent host selection (weighted algorithm: stake 35%, price 30%, uptime 20%, latency 15%)
 - User preference persistence (selection mode, default model)
+
+✅ **Dispute Resolution & Slashing**
+
+- Evidence-based enforcement via CID audit trail (proofCID, deltaCID, conversationCID)
+- Owner-controlled slashing at MVP (transferable to DAO post-MVP)
+- Safety constraints: 50% max slash per action, 24-hour cooldown, evidence required
+- All slashes emit public events for transparency
+- Progressive decentralization path to DAO governance
 
 ✅ **RAG Infrastructure**
 
@@ -424,22 +436,23 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 - PermissionManager for access control
 - Host-side embedding via `/v1/embed` endpoint
 
-### In Deployment
+### In Progress (Q1 2026)
 
-🚀 **Production Deployment** (Q1 2026)
+🚀 **Production Deployment**
 
-- Public beta on Base Sepolia
-- Enterprise beta program
+- Security audit underway (smart contracts)
+- Public beta preparation on Base Sepolia
+- Enterprise beta program preparation
 - Web application (platformlessai.org)
-- UI5 with Base Account Kit integration
+- UI5 production deployment with Base Account Kit
 - Network monitoring dashboard
 
 🚀 **Compliance & Security**
 
+- Security audit (smart contracts) - in progress
 - ISO 27001 preparation
 - ISO 42001 (AI-specific) preparation
 - SOC 2 Type 2 audit readiness
-- Security audit (smart contracts)
 - Penetration testing
 
 ## Roadmap
@@ -593,10 +606,16 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 **Core Contracts**:
 
 - **JobMarketplace**: Job creation, assignment, payment escrow, settlement
-- **NodeRegistry**: Host registration, model listings, public key storage
+- **NodeRegistry**: Host registration, staking (1000 FAB min), slashing, model listings
 - **ProofSystem**: STARK proof hash + CID verification
 - **HostEarnings**: Accumulated earnings tracking, withdrawal management
 - **ModelRegistry**: Model approvals, governance, quality control
+
+**Slashing Parameters** (NodeRegistry):
+- Maximum slash: 50% of stake per action
+- Cooldown: 24 hours between slashes on same host
+- Evidence required: CID pointing to proof of misbehavior
+- Auto-unregister: Host removed if stake falls below 100 FAB
 
 **Contract Addresses**:
 See `.env.test` for current deployed addresses on Base Sepolia and opBNB Testnet. Addresses are updated with each contract deployment and should never be hardcoded.
@@ -737,7 +756,7 @@ Platformless AI represents a fundamental shift in AI infrastructure - from platf
 - **XChaCha20-Poly1305 encryption with forward secrecy** protects all communication
 - **Open source** means full transparency - every line auditable
 
-Our infrastructure is complete and production-ready, with fabstir-platformless-ui deployed and operational. The SDK now includes 13 specialized managers, a comprehensive Host CLI with TUI dashboard, marketplace pricing, and full RAG infrastructure. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise and developer adoption as AI regulation tightens and privacy concerns intensify.
+Our infrastructure is complete and production-ready, currently undergoing security audit. The SDK (v1.8.6+) includes 13 specialized managers, a comprehensive Host CLI with TUI dashboard, marketplace pricing, evidence-based slashing for host accountability, and full RAG infrastructure. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise and developer adoption as AI regulation tightens and privacy concerns intensify.
 
 The convergence of blockchain technology, zero-knowledge cryptography, and decentralized storage creates a unique opportunity to build AI infrastructure that respects user sovereignty, protects intellectual property, and enables permissionless innovation. Users are sovereign - in complete control of their data, able to decide what AI and AI agents can access, and share securely with others on their own terms.
 
@@ -754,7 +773,7 @@ With first-mover advantage in the platformless AI category, we're poised to beco
 | Monthly Sessions     | 100+              | 1,000+         | 10,000+        |
 | Enterprise Customers | 0                 | 3-5 pilots     | 10-20 paying   |
 | Total Value Locked   | $5,000            | $100,000       | $1,000,000     |
-| SDK Version          | v1.6.0            | v2.0+          | v2.5+          |
+| SDK Version          | v1.8.6+           | v2.0+          | v2.5+          |
 | SDK Managers         | 13                | 15+            | 18+            |
 | Avg Response Time    | <2s               | <1.5s          | <1s            |
 | Encryption Default   | 100%              | 100%           | 100%           |
@@ -782,3 +801,7 @@ _"We Don't Trust, We Verify - AI Infrastructure for the Ages"_
 **Built by Fabstir | Powered by Sia Storage | Secured by STARK Proofs**
 
 **© 2025-2026 Platformless AI. Ground-breaking Infrastructure for the Ages.**
+
+---
+
+*Last Updated: January 2026*

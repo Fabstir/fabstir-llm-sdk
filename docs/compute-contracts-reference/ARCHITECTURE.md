@@ -1,7 +1,7 @@
 # Architecture Documentation
 
-**Version:** 2.0
-**Last Updated:** January 9, 2026
+**Version:** 2.1
+**Last Updated:** January 16, 2026
 **Network:** Base Sepolia (Testnet)
 
 ---
@@ -10,9 +10,9 @@
 
 | Contract | Proxy Address | Implementation |
 |----------|---------------|----------------|
-| JobMarketplace | `0x3CaCbf3f448B420918A93a88706B26Ab27a3523E` ⚠️ NEW | `0x26f27C19F80596d228D853dC39A204f0f6C45C7E` |
-| NodeRegistry | `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22` | `0xb85424dd91D4ae0C6945e512bfDdF8a494299115` |
-| ModelRegistry | `0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2` | `0x1D31d9688a4ffD2aFE738BC6C9a4cb27C272AA5A` |
+| JobMarketplace | `0x3CaCbf3f448B420918A93a88706B26Ab27a3523E` | `0x1B6C6A1E373E5E00Bf6210e32A6DA40304f6484c` |
+| NodeRegistry | `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22` | `0xF2D98D38B2dF95f4e8e4A49750823C415E795377` |
+| ModelRegistry | `0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2` | `0x8491af1f0D47f6367b56691dCA0F4996431fB0A5` |
 | ProofSystem | `0x5afB91977e69Cc5003288849059bc62d47E7deeb` | `0xCF46BBa79eA69A68001A1c2f5Ad9eFA1AD435EF9` |
 | HostEarnings | `0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0` | `0x8584AeAC9687613095D13EF7be4dE0A796F84D7a` |
 
@@ -45,6 +45,7 @@
                           │  • FAB staking        │
                           │  • Dual pricing       │
                           │  • Model support      │
+                          │  • Stake slashing     │
                           └───────────┬───────────┘
                                       │ validates hosts
                                       ▼
@@ -98,7 +99,7 @@
     │                  │◄──────────────────────────────────────────┐
     │     ACTIVE       │                                           │
     │                  │──── submitProofOfWork() ───────────────────┘
-    │  status = 1      │     (updates tokensProven)
+    │  status = 0      │     (updates tokensUsed, stores deltaCID)
     │                  │
     └────────┬─────────┘
              │
@@ -106,12 +107,12 @@
              │                         │                            │
              │ completeSessionJob()    │ triggerSessionTimeout()    │
              │ (host or depositor)     │ (anyone, after 3× interval)│
-             │                         │                            │
+             │ + conversationCID       │                            │
              ▼                         ▼                            │
     ┌──────────────────┐    ┌──────────────────┐                   │
     │    COMPLETED     │    │    TIMED_OUT     │                   │
     │                  │    │                  │                   │
-    │  status = 2      │    │  status = 3      │                   │
+    │  status = 1      │    │  status = 2      │                   │
     │                  │    │                  │                   │
     │  Payment:        │    │  Payment:        │                   │
     │  • Host: 90%     │    │  • Host: 90%     │                   │
@@ -123,8 +124,8 @@
     ┌─────────────────────────────────────────────────────────────┐│
     │                    STATE TRANSITIONS                         ││
     ├─────────────────────────────────────────────────────────────┤│
-    │  ACTIVE → ACTIVE      : submitProofOfWork() [tokensProven++]││
-    │  ACTIVE → COMPLETED   : completeSessionJob()                 │
+    │  ACTIVE → ACTIVE      : submitProofOfWork() [tokensUsed++]  ││
+    │  ACTIVE → COMPLETED   : completeSessionJob(conversationCID)  │
     │  ACTIVE → TIMED_OUT   : triggerSessionTimeout()             ││
     │                                                              ││
     │  COMPLETED → *        : BLOCKED (immutable)                 ││
@@ -180,24 +181,29 @@
    │  1. Generate inference        │                                  │
    │     (off-chain)               │                                  │
    │                               │                                  │
-   │  2. Sign proof:               │                                  │
+   │  2. Upload proof to S5   │                                  │
+   │     → get proofCID, deltaCID  │                                  │
+   │                               │                                  │
+   │  3. Sign proof:               │                                  │
    │     hash(proof, tokens)       │                                  │
    │                               │                                  │
-   │  3. submitProofOfWork(        │                                  │
+   │  4. submitProofOfWork(        │                                  │
    │       jobId, tokens,          │                                  │
-   │       proofHash, signature)   │                                  │
+   │       proofHash, signature,   │                                  │
+   │       proofCID, deltaCID)     │                                  │
    │ ─────────────────────────────>│                                  │
    │                               │                                  │
-   │                               │  4. verifyHostSignature()        │
+   │                               │  5. verifyHostSignature()        │
    │                               │ ────────────────────────────────>│
    │                               │                                  │
-   │                               │  5. ECDSA.recover() == host?     │
+   │                               │  6. ECDSA.recover() == host?     │
    │                               │ <────────────────────────────────│
    │                               │                                  │
-   │                               │  6. Update tokensProven          │
-   │                               │     Store proofHash              │
+   │                               │  7. Update tokensUsed            │
+   │                               │     Store proofHash, deltaCID    │
    │                               │                                  │
-   │  7. ProofSubmitted event      │                                  │
+   │  8. ProofSubmitted event      │                                  │
+   │     (includes deltaCID)       │                                  │
    │ <─────────────────────────────│                                  │
    │                               │                                  │
 ```
@@ -318,15 +324,17 @@ struct SessionJob {
     address paymentToken;      // 20 bytes
     uint256 depositAmount;     // 32 bytes
     uint256 pricePerToken;     // 32 bytes
-    uint256 tokensProven;      // 32 bytes
+    uint256 tokensUsed;        // 32 bytes (renamed from tokensProven)
     uint256 startTime;         // 32 bytes
     uint256 maxDuration;       // 32 bytes
     uint256 proofInterval;     // 32 bytes
     uint256 lastProofTime;     // 32 bytes
     bytes32 lastProofHash;     // 32 bytes
-    Status status;             // 1 byte (enum)
+    string lastProofCID;       // Dynamic (S5 CID)
+    string conversationCID;    // Dynamic (S5 CID) - set on completion
+    SessionStatus status;      // 1 byte (enum: Active=0, Completed=1, TimedOut=2)
 }
-// Total: ~10 storage slots per session
+// Total: ~12 storage slots per session (plus dynamic strings)
 ```
 
 ### 5.3 NodeRegistryWithModelsUpgradeable
@@ -348,8 +356,13 @@ mapping(address => mapping(address => uint256)) public customTokenPricing;   // 
 
 address[] public activeNodesList;                 // Slot 12
 
-// Slot 13-51: Storage gap (39 slots)
-uint256[39] private __gap;
+// Slot 13-15: Slashing state (NEW - Jan 16, 2026)
+address public slashingAuthority;                 // Slot 13
+address public treasury;                          // Slot 14
+mapping(address => uint256) public lastSlashTime; // Slot 15
+
+// Slot 16-51: Storage gap (36 slots)
+uint256[36] private __gap;
 ```
 
 ### 5.4 Storage Gap Strategy
@@ -359,7 +372,7 @@ All upgradeable contracts reserve storage gaps for future additions:
 | Contract | Gap Size | Reserved Slots |
 |----------|----------|----------------|
 | JobMarketplaceWithModelsUpgradeable | 50 | Future payment methods, analytics |
-| NodeRegistryWithModelsUpgradeable | 39 | Reputation, additional pricing |
+| NodeRegistryWithModelsUpgradeable | 36 | Reputation (reduced from 39 for slashing) |
 | ModelRegistryUpgradeable | 49 | Governance extensions |
 | ProofSystemUpgradeable | 49 | ZK proof support |
 | HostEarningsUpgradeable | 48 | Multi-chain earnings |
@@ -418,25 +431,26 @@ All upgradeable contracts reserve storage gaps for future additions:
 ### 7.1 Reentrancy Protection
 
 ```solidity
-// Custom ReentrancyGuardUpgradeable for proxy compatibility
-contract ReentrancyGuardUpgradeable {
-    uint256 private constant NOT_ENTERED = 1;
-    uint256 private constant ENTERED = 2;
-    uint256 private _status;
+// OpenZeppelin ReentrancyGuardTransient (EIP-1153 transient storage)
+// Gas-efficient: ~4,900 gas savings per nonReentrant call
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
-    modifier nonReentrant() {
-        require(_status != ENTERED, "ReentrancyGuard: reentrant call");
-        _status = ENTERED;
-        _;
-        _status = NOT_ENTERED;
-    }
+contract JobMarketplaceUpgradeable is ReentrancyGuardTransient {
+    // Uses transient storage (TSTORE/TLOAD) instead of contract storage
+    // Status is automatically cleared at end of transaction
+    // No storage slot consumed - works seamlessly with UUPS proxies
 }
 ```
+
+**Benefits of EIP-1153 Transient Storage:**
+- ~4,900 gas savings per `nonReentrant` call
+- No storage slot collision concerns with proxies
+- Automatic cleanup at transaction end
 
 **Protected Functions:**
 - `registerNode()`, `unregisterNode()`, `stake()` (NodeRegistry)
 - `withdraw()`, `withdrawToken()` (HostEarnings)
-- Session creation functions (JobMarketplace)
+- Session creation and completion functions (JobMarketplace)
 
 ### 7.2 Safe Transfer Patterns
 
@@ -462,6 +476,11 @@ Address.sendValue(payable(recipient), amount);
 │  └── updateTreasury()                       │
 │  └── addTrustedModel()                      │
 │  └── setAuthorizedCaller()                  │
+│  └── setSlashingAuthority()                 │
+│  └── initializeSlashing()                   │
+│                                             │
+│  SLASHING_AUTHORITY (Medium-High)           │
+│  └── slashStake() [any active host]         │
 │                                             │
 │  AUTHORIZED_CALLER (Medium)                 │
 │  └── creditEarnings()                       │
@@ -527,8 +546,8 @@ function _removeNodeFromModel(bytes32 modelId, address node) private {
 | Contract | Event | Purpose |
 |----------|-------|---------|
 | JobMarketplace | `SessionJobCreated` | Track session starts |
-| JobMarketplace | `SessionJobCompleted` | Track completions, payments |
-| JobMarketplace | `ProofSubmitted` | Track proof history |
+| JobMarketplace | `SessionCompleted` | Track completions, payments |
+| JobMarketplace | `ProofSubmitted` | Track proof history (includes deltaCID) |
 | NodeRegistry | `NodeRegistered` | Track host onboarding |
 | NodeRegistry | `PricingUpdated` | Track price changes |
 | ModelRegistry | `ModelProposed` | Track governance |
