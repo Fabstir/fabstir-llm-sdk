@@ -10,7 +10,7 @@ export class S5ConversationStore {
   private seedPhrase: string;
   private portalUrl: string;
   
-  constructor(seedPhrase: string, portalUrl: string = 'https://s5.vup.cx') {
+  constructor(seedPhrase: string, portalUrl: string = 'https://s5.platformlessai.ai') {
     if (!seedPhrase) throw new Error('Seed phrase is required for S5 storage');
     this.seedPhrase = seedPhrase;
     this.portalUrl = portalUrl;
@@ -19,7 +19,7 @@ export class S5ConversationStore {
   async initializeS5(): Promise<void> {
     try {
       this.s5Client = await S5.create({
-        initialPeers: ["wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p"]
+        initialPeers: ["wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p"]
       });
       await this.s5Client.recoverIdentityFromSeedPhrase(this.seedPhrase);
       await this.s5Client.registerOnNewPortal(this.portalUrl);

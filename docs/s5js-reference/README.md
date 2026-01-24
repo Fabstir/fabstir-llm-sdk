@@ -22,16 +22,19 @@ An enhanced JavaScript/TypeScript SDK for the S5 decentralized storage network, 
 ## Key Components
 
 ### Core API
+
 - **S5**: Main client class for connection and identity management
 - **FS5**: File system operations with path-based API
 - **S5UserIdentity**: User identity and authentication
 - **Connection API**: `getConnectionStatus()`, `onConnectionChange()`, `reconnect()` for mobile apps
 
 ### Utility Classes
+
 - **DirectoryWalker**: Recursive directory traversal with cursor support
 - **BatchOperations**: High-level copy/delete operations with progress tracking
 
 ### Media Processing
+
 - **MediaProcessor**: Unified image metadata extraction with WASM/Canvas
 - **BrowserCompat**: Browser capability detection and strategy selection
 - **CanvasMetadataExtractor**: Fallback image processing using Canvas API
@@ -76,7 +79,7 @@ import { S5 } from "@s5-dev/s5js";
 // Create S5 instance and connect to real S5 portal
 const s5 = await S5.create({
   initialPeers: [
-    "wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p",
+    "wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p",
   ],
 });
 
@@ -90,7 +93,7 @@ console.log("Your seed phrase:", seedPhrase);
 await s5.recoverIdentityFromSeedPhrase(seedPhrase);
 
 // Register on S5 portal (s5.vup.cx supports the new API)
-await s5.registerOnNewPortal("https://s5.vup.cx");
+await s5.registerOnNewPortal("https://s5.platformlessai.ai");
 
 // Initialize filesystem (creates home and archive directories)
 await s5.fs.ensureIdentityInitialized();
@@ -114,7 +117,7 @@ for await (const item of s5.fs.list("home/documents")) {
 import { DirectoryWalker, BatchOperations, MediaProcessor } from "@s5-dev/s5js";
 
 // Recursive directory traversal
-const walker = new DirectoryWalker(s5.fs, '/');
+const walker = new DirectoryWalker(s5.fs, "/");
 for await (const entry of walker.walk("home", { maxDepth: 3 })) {
   console.log(`${entry.path} (${entry.type})`);
 }
@@ -124,13 +127,13 @@ const batch = new BatchOperations(s5.fs);
 const result = await batch.copyDirectory("home/source", "home/backup", {
   onProgress: (progress) => {
     console.log(`Copied ${progress.processed} items...`);
-  }
+  },
 });
 console.log(`Completed: ${result.success} success, ${result.failed} failed`);
 
 // Media processing - extract image metadata
 await MediaProcessor.initialize();
-const imageBlob = await fetch('/path/to/image.jpg').then(r => r.blob());
+const imageBlob = await fetch("/path/to/image.jpg").then((r) => r.blob());
 const metadata = await MediaProcessor.extractMetadata(imageBlob);
 console.log(`Image: ${metadata.width}x${metadata.height} ${metadata.format}`);
 console.log(`Dominant colors:`, metadata.dominantColors);
@@ -213,6 +216,7 @@ node test/integration/test-batch-real.js
 ```
 
 This test validates:
+
 - Copy directory with progress tracking
 - Delete directory with progress tracking
 - Error handling modes
@@ -227,6 +231,7 @@ node test/integration/test-media-real.js
 ```
 
 This test validates:
+
 - Image upload with automatic thumbnail generation
 - Metadata extraction (format, dimensions)
 - Thumbnail retrieval (pre-generated and on-demand)
@@ -239,7 +244,7 @@ Expected output: 10/10 tests passing
 ### Important Notes
 
 - **Use Fresh Identities**: The new deterministic key derivation system requires fresh identities. Old accounts created with the previous system won't work.
-- **Portal URL**: Use `https://s5.vup.cx` which has the updated API. Other portals may not have the required updates.
+- **Portal URL**: Use `https://s5.platformlessai.ai` which has the updated API. Other portals may not have the required updates.
 - **Path Requirements**: All paths must start with either `home/` or `archive/`
 
 ## Performance Benchmarks
@@ -278,6 +283,7 @@ node test/integration/test-hamt-real-portal.js
 ### Benchmark Results
 
 See [BENCHMARKS.md](./docs/BENCHMARKS.md) for detailed performance analysis showing:
+
 - HAMT activation at exactly 1000 entries
 - O(log n) scaling verified up to 100K+ entries
 - ~800ms per operation on real S5 network
@@ -307,6 +313,7 @@ const { MediaProcessor } = await import("s5/media");
 ```
 
 Monitor bundle sizes with:
+
 ```bash
 npm run analyze-bundle
 ```
@@ -318,12 +325,14 @@ For power users who need direct access to Content Identifiers (CIDs), the Advanc
 ### When to Use
 
 **Use the Advanced API if you:**
+
 - Need to reference content by its cryptographic hash
 - Are building content-addressed storage applications
 - Require deduplication or content verification
 - Work with distributed systems that use CIDs
 
 **Use the Path-based API if you:**
+
 - Need simple file storage (most use cases)
 - Prefer traditional file system operations
 - Want paths to be more meaningful than hashes
@@ -340,12 +349,12 @@ await s5.recoverIdentityFromSeedPhrase(seedPhrase);
 const advanced = new FS5Advanced(s5.fs);
 
 // Store data and get CID
-await s5.fs.put('home/document.txt', 'Important data');
-const cid = await advanced.pathToCID('home/document.txt');
-console.log(`CID: ${formatCID(cid, 'base32')}`);
+await s5.fs.put("home/document.txt", "Important data");
+const cid = await advanced.pathToCID("home/document.txt");
+console.log(`CID: ${formatCID(cid, "base32")}`);
 
 // Share the CID string
-const cidString = formatCID(cid, 'base58btc');
+const cidString = formatCID(cid, "base58btc");
 
 // Recipient: retrieve by CID alone
 const receivedCID = parseCID(cidString);
@@ -360,16 +369,19 @@ console.log(path); // "home/document.txt"
 ### Available Methods
 
 **FS5Advanced Class (4 essential methods):**
+
 - `pathToCID(path)` - Extract CID from file/directory path
 - `cidToPath(cid)` - Find path for a given CID
 - `getByCID(cid)` - Retrieve data by CID directly
 - `putByCID(data)` - Store content-only and return CID
 
 **Composition Pattern:**
+
 - For path + CID: Use `fs.put(path, data)` then `advanced.pathToCID(path)`
 - For metadata + CID: Use `fs.getMetadata(path)` then `advanced.pathToCID(path)`
 
 **CID Utilities:**
+
 - `formatCID(cid, encoding?)` - Format CID as multibase string
 - `parseCID(cidString)` - Parse CID from string
 - `verifyCID(cid, data, crypto)` - Verify CID matches data
@@ -448,7 +460,7 @@ This is an enhanced version of s5.js being developed under an 8-month grant from
 - **HAMT sharding**: Automatic directory sharding for efficient large directory support
 - **Directory utilities**: Recursive operations with progress tracking and error handling
 - **Deterministic Key Derivation**: Subdirectory keys derived from parent keys
-- **Real Portal Integration**: Successfully tested with s5.vup.cx
+- **Real Portal Integration**: Successfully tested with s5..cx
 
 **Note**: This is a clean implementation that does NOT maintain backward compatibility with old S5 data formats.
 
@@ -510,7 +522,8 @@ node test/integration/test-advanced-cid-real.js
 ```
 
 **Note:** These tests:
-- Connect to real S5 portals (default: https://s5.vup.cx)
+
+- Connect to real S5 portals (default: https://s5.platformlessai.ai)
 - Use actual registry operations with 5+ second propagation delays
 - Run sequentially to avoid registry conflicts
 - Generate temporary test files (auto-cleaned)
@@ -548,6 +561,7 @@ node demos/media/test-media-integration.js  # Integration tests (Node.js)
 **Node.js Test Expectations:**
 
 When running `node demos/media/test-media-integration.js`:
+
 - ✅ **Expected: 17/20 tests pass (85%)**
 - ❌ 3 tests fail due to Node.js platform limitations (NOT bugs):
   1. "WASM Module Loading" - Canvas is 42x faster in Node.js, WASM not loaded (correct)
@@ -555,6 +569,7 @@ When running `node demos/media/test-media-integration.js`:
   3. "Dominant Color Extraction" - Node.js can't access pixel data (works in browser)
 
 **Browser Test Expectations:**
+
 - ✅ **All 20/20 tests pass (100%)**
 
 **Windows Users:**
@@ -584,11 +599,13 @@ http://localhost:8080/demos/media/browser-tests.html
 #### 🧪 Browser Tests - All 20 Tests Passing
 
 **Expected Results:**
+
 - ✅ 20/20 tests pass in browser (100%)
 - ✅ Full WASM functionality
 - ✅ Real dimensions, color extraction, all features working
 
 **Tests Include**:
+
 1. MediaProcessor initialization
 2. Browser capability detection
 3. Strategy selection (wasm-worker, canvas-main, etc.)
@@ -613,12 +630,14 @@ http://localhost:8080/demos/media/browser-tests.html
 **Run**: `node demos/media/benchmark-media.js`
 
 **Output**:
+
 - Processes test images with WASM and Canvas strategies
 - Generates performance comparison table
 - Saves baseline metrics to `baseline-performance.json`
 - Shows processing times, memory usage, success rates
 
 **Expected Results**:
+
 - Canvas faster in Node.js (175x faster due to no Web Workers)
 - WASM initialization: ~83ms first image, <1ms subsequent
 - Canvas: consistent 0.03-0.31ms
@@ -629,6 +648,7 @@ http://localhost:8080/demos/media/browser-tests.html
 **Run**: `node demos/media/demo-pipeline.js`
 
 **Demonstrates**:
+
 - Environment capability detection
 - Smart strategy selection based on capabilities
 - WASM module initialization with progress tracking
@@ -636,6 +656,7 @@ http://localhost:8080/demos/media/browser-tests.html
 - Fallback handling scenarios
 
 **Key Features**:
+
 - Shows decision tree for strategy selection
 - ASCII pipeline flow diagram
 - Real-time progress tracking
@@ -646,6 +667,7 @@ http://localhost:8080/demos/media/browser-tests.html
 **Run**: `node demos/media/demo-metadata.js`
 
 **Processes**:
+
 - All image formats (PNG, JPEG, GIF, BMP, WebP)
 - Magic byte format detection
 - Processing speed classification
@@ -658,18 +680,21 @@ http://localhost:8080/demos/media/browser-tests.html
 **Prerequisites**: Requires HTTP server
 
 **Windows:**
+
 ```cmd
 npx http-server -p 8081
 # Then open: http://localhost:8081/demos/media/demo-splitting-simple.html
 ```
 
 **Linux/Mac:**
+
 ```bash
 ./demos/media/run-browser-tests.sh
 # Then open: http://localhost:8081/demos/media/demo-splitting-simple.html
 ```
 
 **Shows**:
+
 - Core bundle: 195 KB (-27% from full)
 - Media bundle: 79 KB (loaded on-demand)
 - Real image processing with loaded modules
@@ -679,6 +704,7 @@ npx http-server -p 8081
 #### Expected Test Results
 
 **Browser Environment (Full Support)**:
+
 - ✅ 20/20 tests passing
 - ✅ Real image dimensions extracted
 - ✅ Dominant colors working
@@ -687,6 +713,7 @@ npx http-server -p 8081
 - ✅ Strategy: wasm-worker
 
 **Node.js Environment (Limited Canvas)**:
+
 - ✅ 16-19/20 tests passing (expected)
 - ⚠️ Dimensions show 0x0 for some formats (no full Canvas API)
 - ⚠️ No color extraction (needs pixel access)
@@ -704,13 +731,13 @@ npx http-server -p 8081
 ### Media Processing API Usage
 
 ```javascript
-import { MediaProcessor } from 's5/media';
+import { MediaProcessor } from "s5/media";
 
 // Initialize (automatic in browser)
 await MediaProcessor.initialize();
 
 // Extract metadata
-const blob = new Blob([imageData], { type: 'image/png' });
+const blob = new Blob([imageData], { type: "image/png" });
 const metadata = await MediaProcessor.extractMetadata(blob);
 
 console.log(`Image: ${metadata.width}x${metadata.height}`);
@@ -889,14 +916,14 @@ See [BENCHMARKS.md](./docs/BENCHMARKS.md) for detailed results.
 
 ### Portal connection issues
 
-- Use `https://s5.vup.cx` which has the updated API
+- Use `https://s5.platformlessai.ai` which has the updated API
 - Ensure you have Node.js v20+ for proper crypto support
 
 ## Important Notes
 
 - **Format**: Uses new CBOR/DirV1 format - NOT compatible with old S5 data
 - **Paths**: Must start with `home/` or `archive/`
-- **Portal**: Use `https://s5.vup.cx` for testing (has updated API)
+- **Portal**: Use `https://s5.platformlessai.ai` for testing (has updated API)
 - **Identity**: Requires fresh seed phrases (old accounts incompatible)
 
 ## Contributing
@@ -918,4 +945,4 @@ Unless you explicitly state otherwise, any contribution intentionally submitted 
 
 ---
 
-*This is an enhanced version of s5.js being developed under an 8-month grant from the Sia Foundation. The project implements a new format using CBOR serialization with the DirV1 specification.*
+_This is an enhanced version of s5.js being developed under an 8-month grant from the Sia Foundation. The project implements a new format using CBOR serialization with the DirV1 specification._

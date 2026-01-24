@@ -1631,7 +1631,7 @@ curl https://sepolia.base.org
 cast balance $TEST_USER_1_ADDRESS --rpc-url https://sepolia.base.org
 
 # Check S5 portal
-curl -I https://s5.ninja
+curl -I https://s5.platformlessai.ai
 
 # Check UI5 server
 curl http://localhost:3002

@@ -70,7 +70,7 @@ describe('Type Definitions', () => {
   it('should export SDKConfig interface', () => {
     const config: SDKConfig = {
       rpcUrl: 'http://localhost:8545',
-      s5PortalUrl: 'https://s5.ninja',
+      s5PortalUrl: 'https://s5.platformlessai.ai',
       contractAddresses: {
         jobMarketplace: '0x123',
         nodeRegistry: '0x456',
@@ -80,7 +80,7 @@ describe('Type Definitions', () => {
     };
     
     expect(config.rpcUrl).toBe('http://localhost:8545');
-    expect(config.s5PortalUrl).toBe('https://s5.ninja');
+    expect(config.s5PortalUrl).toBe('https://s5.platformlessai.ai');
     expect(config.contractAddresses?.jobMarketplace).toBe('0x123');
   });
 });

@@ -96,7 +96,7 @@ CONTRACT_PROOF_SYSTEM=0x2ACcc60893872A499700908889B38C5420CBcFD1
 CONTRACT_USDC_TOKEN=0x036CbD53842c5426634e7929541eC2318f3dCF7e
 
 # S5 Storage Configuration
-S5_PORTAL_URL=wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p
+S5_PORTAL_URL=wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p
 # S5 seed is auto-generated from wallet signature
 
 # P2P Configuration (optional)
@@ -335,7 +335,7 @@ const s5Seed = deriveS5SeedFromSignature(signature);
 
 ### S5 Portal Configuration
 
-Default portal: `wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p`
+Default portal: `wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p`
 
 For custom portals:
 

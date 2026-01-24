@@ -111,7 +111,7 @@ export async function initializeSDK(useProductionMode = false): Promise<FabstirS
 }
 
 // Export additional config utilities
-export const S5_PORTAL = 'https://s5.cx';
+export const S5_PORTAL = 'https://s5.platformlessai.ai';
 export const BASE_SEPOLIA_CHAIN_ID = 84532;
 export const CONTRACT_ADDRESSES = {
   jobMarketplace: process.env.CONTRACT_JOB_MARKETPLACE!,

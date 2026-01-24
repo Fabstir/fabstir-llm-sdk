@@ -163,7 +163,7 @@ cd /workspace/apps/ui5 && pnpm dev --port 3002
 **Cause**: S5 portal unavailable or file too large
 
 **Solution**:
-1. Verify S5 portal: `curl https://s5.cx`
+1. Verify S5 portal: `curl https://s5.platformlessai.ai`
 2. Check file size (limit: 10MB)
 3. Increase `UPLOAD_TIMEOUT` in test script
 

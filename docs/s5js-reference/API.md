@@ -122,7 +122,7 @@ import { S5 } from "@s5-dev/s5js";
 // Create S5 instance and connect to peers
 const s5 = await S5.create({
   initialPeers: [
-    "wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p"
+    "wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p"
   ]
 });
 
@@ -133,7 +133,7 @@ const seedPhrase = s5.generateSeedPhrase();
 await s5.recoverIdentityFromSeedPhrase(seedPhrase);
 
 // Register on S5 portal (s5.vup.cx supports the new API)
-await s5.registerOnNewPortal("https://s5.vup.cx");
+await s5.registerOnNewPortal("https://s5.platformlessai.ai");
 
 // Initialize filesystem (creates home and archive directories)
 await s5.fs.ensureIdentityInitialized();
@@ -371,7 +371,7 @@ import { S5, FS5Advanced, formatCID } from '@julesl23/s5js';
 // User A: Upload and share content
 const s5a = await S5.create({ initialPeers: [...] });
 await s5a.recoverIdentityFromSeedPhrase(seedPhrase);
-await s5a.registerOnNewPortal('https://s5.ninja');
+await s5a.registerOnNewPortal('https://s5.platformlessai.ai');
 
 // Store a file
 await s5a.fs.put('home/public/photo.jpg', imageData);
@@ -386,7 +386,7 @@ console.log('Share this CID:', cidString);
 // User B: Download by CID
 const s5b = await S5.create({ initialPeers: [...] });
 await s5b.recoverIdentityFromSeedPhrase(seedPhrase);
-await s5b.registerOnNewPortal('https://s5.ninja');
+await s5b.registerOnNewPortal('https://s5.platformlessai.ai');
 
 const data = await s5b.downloadByCID(cidString);
 console.log('Downloaded', data.length, 'bytes');

@@ -300,7 +300,7 @@ console.log('With nprobe=10, results:', results.length);
 const { VectorDbSession } = require('@fabstir/vector-db-native');
 
 const session = await VectorDbSession.create({
-  s5Portal: 'https://s5.cx',
+  s5Portal: 'https://s5.platformlessai.ai',
   userSeedPhrase: 'test seed phrase',
   sessionId: 'direct-test',
   encryptAtRest: false

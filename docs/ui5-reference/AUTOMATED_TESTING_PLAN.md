@@ -294,7 +294,7 @@ async initialize(signer: Signer): Promise<void> {
         // ... existing config
       },
       s5Config: {
-        portalUrl: process.env.NEXT_PUBLIC_S5_PORTAL_URL || 'https://s5.cx',
+        portalUrl: process.env.NEXT_PUBLIC_S5_PORTAL_URL || 'https://s5.platformlessai.ai',
         seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE,
       },
       encryptionConfig: {

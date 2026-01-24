@@ -26,7 +26,7 @@ describe('S5ConversationStore (Real S5)', () => {
   beforeEach(async () => {
     store = new S5ConversationStore({
       seedPhrase: process.env.S5_SEED_PHRASE!,
-      portalUrl: 'https://s5.vup.cx'
+      portalUrl: 'https://s5.platformlessai.ai'
     });
     
     await store.connect();
@@ -121,7 +121,7 @@ describe('S5ConversationStore (Real S5)', () => {
   it('handles S5 connection errors', async () => {
     const badStore = new S5ConversationStore({
       seedPhrase: 'invalid seed phrase that will fail',
-      portalUrl: 'https://s5.vup.cx'
+      portalUrl: 'https://s5.platformlessai.ai'
     });
     
     await expect(badStore.connect()).rejects.toThrow();

@@ -95,7 +95,7 @@ describe('E2E: USDC Session Flow with Payments', () => {
       contractAddress: process.env.CONTRACT_JOB_MARKETPLACE!,
       discoveryUrl: 'http://localhost:3003',
       s5SeedPhrase: process.env.S5_SEED_PHRASE!,
-      s5PortalUrl: 'https://s5.vup.cx',
+      s5PortalUrl: 'https://s5.platformlessai.ai',
       cacheConfig: {
         maxEntries: 10,
         ttl: 60000

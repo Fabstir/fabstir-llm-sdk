@@ -14,7 +14,7 @@ describe('S5 Storage Integration - Minimal Test', () => {
     
     // 1. Create S5 instance
     const s5 = await S5.create({
-      initialPeers: ['wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p']
+      initialPeers: ['wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p']
     });
     console.log('✓ Connected to S5 network');
     
@@ -28,7 +28,7 @@ describe('S5 Storage Integration - Minimal Test', () => {
     // 3. Test with User A
     console.log('\n--- Testing User A ---');
     const s5UserA = await S5.create({
-      initialPeers: ['wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p']
+      initialPeers: ['wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p']
     });
     
     await s5UserA.recoverIdentityFromSeedPhrase(seedA);
@@ -36,7 +36,7 @@ describe('S5 Storage Integration - Minimal Test', () => {
     
     // Register portal and init
     try {
-      await s5UserA.registerOnNewPortal('https://s5.vup.cx');
+      await s5UserA.registerOnNewPortal('https://s5.platformlessai.ai');
       await s5UserA.fs.ensureIdentityInitialized();
       console.log('✓ User A registered and initialized');
       
@@ -70,14 +70,14 @@ describe('S5 Storage Integration - Minimal Test', () => {
     // 4. Test with User B
     console.log('\n--- Testing User B ---');
     const s5UserB = await S5.create({
-      initialPeers: ['wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p']
+      initialPeers: ['wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p']
     });
     
     await s5UserB.recoverIdentityFromSeedPhrase(seedB);
     console.log('✓ User B identity recovered from different seed');
     
     try {
-      await s5UserB.registerOnNewPortal('https://s5.vup.cx');
+      await s5UserB.registerOnNewPortal('https://s5.platformlessai.ai');
       await s5UserB.fs.ensureIdentityInitialized();
       console.log('✓ User B registered and initialized');
       

@@ -20,7 +20,7 @@ describe('Session Persistence (Simplified)', () => {
   beforeAll(async () => {
     sdk = new FabstirSDK({
       rpcUrl: process.env.RPC_URL_BASE_SEPOLIA!,
-      s5PortalUrl: process.env.S5_PORTAL_URL || 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p'
+      s5PortalUrl: process.env.S5_PORTAL_URL || 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p'
     });
     
     await sdk.authenticate(process.env.TEST_USER_1_PRIVATE_KEY!);
@@ -104,7 +104,7 @@ describe('Session Persistence (Simplified)', () => {
     // Create second SDK with same auth
     const sdk2 = new FabstirSDK({
       rpcUrl: process.env.RPC_URL_BASE_SEPOLIA!,
-      s5PortalUrl: process.env.S5_PORTAL_URL || 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p'
+      s5PortalUrl: process.env.S5_PORTAL_URL || 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p'
     });
     
     await sdk2.authenticate(process.env.TEST_USER_1_PRIVATE_KEY!);

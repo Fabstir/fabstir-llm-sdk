@@ -129,7 +129,7 @@ export class UI5SDK {
           fabToken: process.env.NEXT_PUBLIC_CONTRACT_FAB_TOKEN!,
         },
         s5Config: {
-          portalUrl: process.env.NEXT_PUBLIC_S5_PORTAL_URL || 'https://s5.cx',
+          portalUrl: process.env.NEXT_PUBLIC_S5_PORTAL_URL || 'https://s5.platformlessai.ai',
           seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE,
         },
         encryptionConfig: {

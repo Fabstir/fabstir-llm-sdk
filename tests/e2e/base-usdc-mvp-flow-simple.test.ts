@@ -100,7 +100,7 @@ describe('USDC MVP Flow - Complete 17 Steps', () => {
         nodeRegistry: process.env.CONTRACT_NODE_REGISTRY!,
         usdcToken: usdcAddress
       },
-      s5PortalUrl: process.env.S5_PORTAL_URL || 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p'
+      s5PortalUrl: process.env.S5_PORTAL_URL || 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p'
     });
     
     console.log('✅ SDK initialized\n');

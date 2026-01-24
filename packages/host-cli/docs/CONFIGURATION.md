@@ -71,7 +71,7 @@ CHAIN_ID=84532
 
 ```bash
 # S5 Storage Configuration (for conversation persistence)
-S5_PORTAL_URL=https://s5.cx
+S5_PORTAL_URL=https://s5.platformlessai.ai
 S5_SEED_PHRASE=your-seed-phrase-here
 
 # Base Protocol Contracts (NOT Fabstir contracts - Base infrastructure)
@@ -159,7 +159,7 @@ export function createSDKConfig(network: 'base-mainnet' | 'base-sepolia'): SDKCo
       modelRegistry: process.env.CONTRACT_MODEL_REGISTRY || process.env.CONTRACT_JOB_MARKETPLACE!
     },
     s5Config: {
-      portalUrl: process.env.S5_PORTAL_URL || 'https://s5.cx',
+      portalUrl: process.env.S5_PORTAL_URL || 'https://s5.platformlessai.ai',
       seedPhrase: process.env.S5_SEED_PHRASE
     },
     mode: 'production'
@@ -475,7 +475,7 @@ For conversation persistence (optional):
 
 ```bash
 # .env.test
-S5_PORTAL_URL=https://s5.cx
+S5_PORTAL_URL=https://s5.platformlessai.ai
 S5_SEED_PHRASE="your seed phrase here"
 ```
 

@@ -73,7 +73,7 @@ export function createSDKConfig(network: 'base-mainnet' | 'base-sepolia'): SDKCo
     throw new Error(`Missing required environment variable: ${rpcUrlVar}`);
   }
 
-  const s5PortalUrl = process.env.S5_PORTAL_URL || 'https://s5.cx';
+  const s5PortalUrl = process.env.S5_PORTAL_URL || 'https://s5.platformlessai.ai';
 
   return {
     chainId,

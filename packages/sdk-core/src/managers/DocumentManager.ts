@@ -84,7 +84,7 @@ export class DocumentManager {
       const S5 = s5Module.S5;
 
       const s5Instance = await S5.create({
-        initialPeers: ['wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p']
+        initialPeers: ['wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p']
       });
 
       await s5Instance.recoverIdentityFromSeedPhrase(this.userSeed);

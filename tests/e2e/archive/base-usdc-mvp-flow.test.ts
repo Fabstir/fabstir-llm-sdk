@@ -90,7 +90,7 @@ describe('Base Smart Account USDC MVP Flow', () => {
         usdcToken: usdcAddress
       },
       s5Config: {
-        portalUrl: 'https://s5.vup.cx',
+        portalUrl: 'https://s5.platformlessai.ai',
         seedPhrase: process.env.S5_SEED_PHRASE
       },
       mode: 'production'
@@ -269,7 +269,7 @@ describe('Base Smart Account USDC MVP Flow', () => {
         usdcToken: usdcAddress
       },
       s5Config: {
-        portalUrl: 'https://s5.vup.cx',
+        portalUrl: 'https://s5.platformlessai.ai',
         seedPhrase: process.env.S5_SEED_PHRASE
       },
       mode: 'production'

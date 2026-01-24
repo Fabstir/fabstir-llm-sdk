@@ -107,7 +107,7 @@ interface QueuedOperation {
 }
 
 export class StorageManager implements IStorageManager {
-  static readonly DEFAULT_S5_PORTAL = 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p';
+  static readonly DEFAULT_S5_PORTAL = 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p';
   static readonly SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM';
   static readonly REGISTRY_PREFIX = 'fabstir-llm';
   static readonly CONVERSATION_PATH = 'home/conversations';
@@ -304,7 +304,9 @@ export class StorageManager implements IStorageManager {
         return;
       }
 
+      console.log('[StorageManager] Recovering identity from seed phrase...');
       await s5Instance.recoverIdentityFromSeedPhrase(this.userSeed);
+      console.log('[StorageManager] Identity recovered');
 
       // Store the S5 instance - we'll use s5Instance.fs for file operations
       this.s5Client = s5Instance;
@@ -314,20 +316,35 @@ export class StorageManager implements IStorageManager {
 
       // Optional portal registration
       try {
-        await s5Instance.registerOnNewPortal('https://s5.vup.cx');
+        console.log('[StorageManager] Registering on portal...');
+        await s5Instance.registerOnNewPortal('https://s5.platformlessai.ai');
+        console.log('[StorageManager] Portal registration complete');
       } catch (error) {
+        console.warn('[StorageManager] Portal registration skipped:', error);
       }
 
+      console.log('[StorageManager] Ensuring identity initialized...');
       await s5Instance.fs.ensureIdentityInitialized();
+      console.log('[StorageManager] Identity initialized');
       this.initialized = true;
 
       // Setup auto-reconnect handlers for browser environment
       this.setupAutoReconnect();
     } catch (error: any) {
+      // Capture full error details even if message is empty
+      const errorMessage = error?.message || error?.toString?.() || JSON.stringify(error) || 'Unknown error';
+      const errorDetails = {
+        originalError: error,
+        errorType: typeof error,
+        errorName: error?.name,
+        errorStack: error?.stack,
+        errorKeys: error ? Object.keys(error) : []
+      };
+      console.error('[StorageManager] Initialize failed:', errorDetails);
       throw new SDKError(
-        `Failed to initialize StorageManager: ${error.message}`,
+        `Failed to initialize StorageManager: ${errorMessage}`,
         'STORAGE_INIT_ERROR',
-        { originalError: error }
+        errorDetails
       );
     }
   }

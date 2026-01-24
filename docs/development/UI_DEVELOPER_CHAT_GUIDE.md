@@ -122,7 +122,7 @@ NEXT_PUBLIC_CHAIN_ID=84532  # Base Sepolia
 NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_project_id_here
 
 # S5 Storage (Optional - for conversation persistence)
-NEXT_PUBLIC_S5_PORTAL_URL=wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p
+NEXT_PUBLIC_S5_PORTAL_URL=wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p
 
 # DO NOT PUT CONTRACT ADDRESSES HERE
 # The SDK uses ChainRegistry which reads from its internal .env.test

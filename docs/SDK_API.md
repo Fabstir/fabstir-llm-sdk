@@ -5323,7 +5323,7 @@ export const WS_MAX_RECONNECT_ATTEMPTS = 5;
 export const WS_HEARTBEAT_INTERVAL = 30000;    // 30 seconds
 
 // S5 Storage Configuration
-export const DEFAULT_S5_PORTAL = 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p';
+export const DEFAULT_S5_PORTAL = 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p';
 export const S5_UPLOAD_TIMEOUT = 60000;        // 60 seconds
 export const S5_DOWNLOAD_TIMEOUT = 30000;      // 30 seconds
 ```

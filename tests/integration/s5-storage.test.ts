@@ -19,7 +19,7 @@ describe('S5 Storage Integration - Real Enhanced S5', () => {
   beforeAll(async () => {
     // Create temporary S5 instance to generate valid seed phrases
     const s5Temp = await S5.create({
-      initialPeers: [process.env.S5_PORTAL_URL || 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p']
+      initialPeers: [process.env.S5_PORTAL_URL || 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p']
     });
     
     // Generate valid S5 seed phrases
@@ -50,14 +50,14 @@ describe('S5 Storage Integration - Real Enhanced S5', () => {
   it('should connect to real S5 portal and store data', async () => {
     // Initialize S5 client for User A
     s5ClientA = await S5.create({
-      initialPeers: [process.env.S5_PORTAL_URL || 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p']
+      initialPeers: [process.env.S5_PORTAL_URL || 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p']
     });
     
     await s5ClientA.recoverIdentityFromSeedPhrase(userASeed);
     
     // Register on S5 portal
     try {
-      await s5ClientA.registerOnNewPortal('https://s5.vup.cx');
+      await s5ClientA.registerOnNewPortal('https://s5.platformlessai.ai');
       console.log('Registered User A on S5 portal');
     } catch (error) {
       console.log('Portal registration failed, continuing anyway');
@@ -97,14 +97,14 @@ describe('S5 Storage Integration - Real Enhanced S5', () => {
   it('should verify data isolation between users', async () => {
     // Initialize S5 client for User B
     s5ClientB = await S5.create({
-      initialPeers: [process.env.S5_PORTAL_URL || 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p']
+      initialPeers: [process.env.S5_PORTAL_URL || 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p']
     });
     
     await s5ClientB.recoverIdentityFromSeedPhrase(userBSeed);
     
     // Register on S5 portal for User B
     try {
-      await s5ClientB.registerOnNewPortal('https://s5.vup.cx');
+      await s5ClientB.registerOnNewPortal('https://s5.platformlessai.ai');
       console.log('Registered User B on S5 portal');
     } catch (error) {
       console.log('Portal registration for User B failed, continuing anyway');
