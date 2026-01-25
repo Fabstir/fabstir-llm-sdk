@@ -42,7 +42,7 @@ import { DEFAULT_RAG_CONFIG } from './rag/config';
 import { ContractManager, ContractAddresses } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 import { SDKConfig, SDKError } from './types';
-import { getOrGenerateS5Seed, hasCachedSeed, cacheSeed, deriveEntropyFromSignature, entropyToS5Phrase } from './utils/s5-seed-derivation';
+import { getOrGenerateS5Seed, hasCachedSeed, cacheSeed, deriveEntropyFromSignature, entropyToS5Phrase, SEED_DOMAIN_SEPARATOR } from './utils/s5-seed-derivation';
 import { ChainRegistry } from './config/ChainRegistry';
 import { ChainId, ChainConfig } from './types/chain.types';
 import { UnsupportedChainError } from './errors/ChainErrors';
@@ -490,8 +490,7 @@ export class FabstirSDKCore extends EventEmitter {
 
       // Derive seed from primary address with domain separation
       // Format: keccak256(primaryAddress + domainSeparator + chainId)
-      const DOMAIN_SEPARATOR = 'fabstir-s5-seed-v1';
-      const seedInput = primaryAccount.toLowerCase() + DOMAIN_SEPARATOR + chainId.toString();
+      const seedInput = primaryAccount.toLowerCase() + SEED_DOMAIN_SEPARATOR + chainId.toString();
       const entropyHash = ethers.keccak256(ethers.toUtf8Bytes(seedInput));
 
       // Convert hash to entropy bytes (remove 0x prefix, take first 16 bytes for S5 seed)

@@ -8,6 +8,7 @@
 
 import { ethers } from 'ethers';
 import { connectMetaMask, connectCoinbaseWallet, isMetaMaskInstalled } from '../utils/BrowserProvider';
+import { SEED_MESSAGE } from '../utils/s5-seed-derivation';
 
 export interface AuthResult {
   signer: ethers.Signer;
@@ -27,7 +28,6 @@ export interface AuthOptions {
 }
 
 export class AuthManager {
-  static readonly SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM';
   static readonly BASE_SEPOLIA_CHAIN_ID = 84532;
   
   private signer?: ethers.Signer;
@@ -164,7 +164,7 @@ export class AuthManager {
    */
   private async generateS5SeedBrowser(signer: ethers.Signer): Promise<string> {
     // Sign message to generate deterministic seed
-    const signature = await signer.signMessage(AuthManager.SEED_MESSAGE);
+    const signature = await signer.signMessage(SEED_MESSAGE);
     
     // Use Web Crypto API to derive seed
     const encoder = new TextEncoder();

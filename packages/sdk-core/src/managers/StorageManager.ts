@@ -27,6 +27,7 @@ import type { EncryptionManager } from './EncryptionManager';
 import type { EncryptedStorage } from '../interfaces/IEncryptionManager';
 import { FolderHierarchy, type FolderListItem, type FolderMetadata } from '../storage/folder-operations.js';
 import { getParentPath, getAncestorPaths } from '../storage/path-validator.js';
+import { SEED_MESSAGE } from '../utils/s5-seed-derivation';
 
 export interface Exchange {
   prompt: string;
@@ -108,7 +109,6 @@ interface QueuedOperation {
 
 export class StorageManager implements IStorageManager {
   static readonly DEFAULT_S5_PORTAL = 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p';
-  static readonly SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM';
   static readonly REGISTRY_PREFIX = 'fabstir-llm';
   static readonly CONVERSATION_PATH = 'home/conversations';
   static readonly SESSIONS_PATH = 'home/sessions';
@@ -284,9 +284,11 @@ export class StorageManager implements IStorageManager {
       const peersToUse = this.s5PortalUrl ? [this.s5PortalUrl] : [];
 
       // Create S5 instance with timeout protection
+      // skipIdentityLoad: true prevents S5 from loading stale cached identity
+      // before SDK provides the wallet-derived seed via recoverIdentityFromSeedPhrase()
       const s5CreatePromise = S5.create({
         initialPeers: peersToUse,
-        // No Node.js specific options
+        skipIdentityLoad: true,
       });
 
       // Add a 30-second timeout (S5 can take time to connect to peers)

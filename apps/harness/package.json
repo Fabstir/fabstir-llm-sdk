@@ -12,7 +12,7 @@
   "dependencies": {
     "@base-org/account": "^2.3.1",
     "@fabstir/sdk-core": "file:../../packages/sdk-core",
-    "@julesl23/s5js": "file:/workspace/julesl23-s5js-0.9.0-beta.13.tgz",
+    "@julesl23/s5js": "file:/workspace/julesl23-s5js-0.9.0-beta.25.tgz",
     "base-x": "^5.0.1",
     "bs58": "^6.0.0",
     "ethers": "^6.15.0",
