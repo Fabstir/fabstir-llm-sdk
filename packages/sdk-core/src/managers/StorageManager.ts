@@ -28,6 +28,7 @@ import type { EncryptedStorage } from '../interfaces/IEncryptionManager';
 import { FolderHierarchy, type FolderListItem, type FolderMetadata } from '../storage/folder-operations.js';
 import { getParentPath, getAncestorPaths } from '../storage/path-validator.js';
 import { SEED_MESSAGE } from '../utils/s5-seed-derivation';
+import { registerS5WithBackend } from '../utils/s5-secure-registration';
 
 export interface Exchange {
   prompt: string;
@@ -186,8 +187,25 @@ export class StorageManager implements IStorageManager {
   // Folder hierarchy manager (Sub-phase 2.1)
   private folderHierarchy: FolderHierarchy;
 
-  constructor(private s5PortalUrl: string = StorageManager.DEFAULT_S5_PORTAL) {
+  // S5 master token for portal registration (beta.31+)
+  // DEPRECATED: Use authApiUrl for secure browser apps
+  private masterToken?: string;
+
+  // Backend API URL for secure registration (beta.32+)
+  // When set, registration uses backend proxy to keep master token server-side
+  private authApiUrl?: string;
+
+  constructor(
+    private s5PortalUrl: string = StorageManager.DEFAULT_S5_PORTAL,
+    masterTokenOrAuthApiUrl?: string,
+    isAuthApiUrl: boolean = false
+  ) {
     this.folderHierarchy = new FolderHierarchy();
+    if (isAuthApiUrl) {
+      this.authApiUrl = masterTokenOrAuthApiUrl;
+    } else {
+      this.masterToken = masterTokenOrAuthApiUrl;
+    }
   }
 
   /**
@@ -316,13 +334,45 @@ export class StorageManager implements IStorageManager {
       // Setup connection change listener (v0.9.0-beta.5)
       this.setupConnectionHandling(s5Instance);
 
-      // Optional portal registration
-      try {
-        console.log('[StorageManager] Registering on portal...');
-        await s5Instance.registerOnNewPortal('https://s5.platformlessai.ai');
-        console.log('[StorageManager] Portal registration complete');
-      } catch (error) {
-        console.warn('[StorageManager] Portal registration skipped:', error);
+      // Portal registration (S5.js beta.32+)
+      console.log('[StorageManager] Registering on portal...');
+      if (this.authApiUrl) {
+        // Secure backend-mediated registration (master token stays server-side)
+        // This is explicitly configured, so errors should NOT be silently caught
+        console.log('[StorageManager] Using secure backend registration via:', this.authApiUrl);
+        try {
+          await registerS5WithBackend(s5Instance, {
+            backendUrl: this.authApiUrl,
+            portalHost: 's5.platformlessai.ai',
+            portalUrl: 'https://s5.platformlessai.ai',
+          });
+          console.log('[StorageManager] Secure backend registration complete');
+        } catch (error: any) {
+          console.error('[StorageManager] Secure backend registration FAILED:', error.message);
+          throw new SDKError(
+            `Secure S5 registration failed: ${error.message}. Check that backend API routes are configured at ${this.authApiUrl}`,
+            'S5_REGISTRATION_FAILED',
+            { originalError: error }
+          );
+        }
+      } else if (this.masterToken) {
+        // Direct registration with master token (for server-side apps or testing)
+        try {
+          console.log('[StorageManager] Using master token for registration');
+          await s5Instance.registerOnNewPortal('https://s5.platformlessai.ai', this.masterToken);
+          console.log('[StorageManager] Master token registration complete');
+        } catch (error: any) {
+          console.warn('[StorageManager] Master token registration failed:', error.message);
+          // Don't throw - might be returning user who doesn't need registration
+        }
+      } else {
+        // Try without token (works for returning users / login)
+        try {
+          await s5Instance.registerOnNewPortal('https://s5.platformlessai.ai');
+          console.log('[StorageManager] Portal registration complete (no token)');
+        } catch (error: any) {
+          console.warn('[StorageManager] Portal registration skipped:', error.message);
+        }
       }
 
       console.log('[StorageManager] Ensuring identity initialized...');

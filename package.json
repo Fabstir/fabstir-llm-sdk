@@ -39,7 +39,7 @@
     "@base-org/account": "^2.3.1",
     "@chainsafe/libp2p-noise": "^16.0.0",
     "@chainsafe/libp2p-yamux": "^7.0.1",
-    "@fabstir/llm-auth": "file:../fabstir-llm-auth",
+    "@fabstir/llm-auth": "file:./fabstir-llm-auth-0.1.0.tgz",
     "@libp2p/bootstrap": "^11.0.13",
     "@libp2p/identify": "^3.0.0",
     "@libp2p/kad-dht": "^14.1.5",

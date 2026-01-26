@@ -67,6 +67,14 @@ export interface FabstirSDKCoreConfig {
   // S5 Storage configuration
   s5Config?: {
     portalUrl?: string;
+    // Backend API URL for secure registration (beta.32+ RECOMMENDED for browser apps)
+    // Master token stays server-side, client only sends signatures
+    // Example: '/api/s5' or 'https://api.example.com/s5'
+    authApiUrl?: string;
+    // Master token for S5 portal registration (beta.31+)
+    // SECURITY WARNING: Only use for server-side apps or testing
+    // For browser apps, use authApiUrl instead to keep token server-side
+    masterToken?: string;
     // Note: seedPhrase is derived automatically from wallet signature for data sovereignty
     // Each user gets their own deterministic S5 identity based on their wallet
   };
@@ -566,9 +574,25 @@ export class FabstirSDKCore extends EventEmitter {
     const hostOnly = this.config.hostOnly === true;
 
     if (!hostOnly) {
-      // StorageManager constructor takes s5PortalUrl - don't pass undefined
+      // StorageManager constructor takes s5PortalUrl and auth config
       const s5PortalUrl = this.config.s5Config?.portalUrl;
-      this.storageManager = s5PortalUrl ? new StorageManager(s5PortalUrl) : new StorageManager();
+      const s5AuthApiUrl = this.config.s5Config?.authApiUrl;
+      const s5MasterToken = this.config.s5Config?.masterToken;
+
+      // Prefer authApiUrl (secure) over masterToken (exposed)
+      if (s5AuthApiUrl) {
+        this.storageManager = new StorageManager(
+          s5PortalUrl || StorageManager.DEFAULT_S5_PORTAL,
+          s5AuthApiUrl,
+          true  // isAuthApiUrl = true
+        );
+      } else {
+        this.storageManager = new StorageManager(
+          s5PortalUrl || StorageManager.DEFAULT_S5_PORTAL,
+          s5MasterToken,
+          false  // isAuthApiUrl = false (using masterToken)
+        );
+      }
 
       this.sessionManager = new SessionManager(this.paymentManager as any, this.storageManager);
     }
@@ -588,7 +612,7 @@ export class FabstirSDKCore extends EventEmitter {
       if (!hostOnly) {
         // Initialize storage manager with S5 seed (required for client operations)
         if (this.s5Seed && this.userAddress) {
-          await this.storageManager!.initialize(this.s5Seed);
+          await this.storageManager!.initialize(this.s5Seed, this.userAddress);
         } else {
           throw new SDKError(
             'S5 seed and user address required for StorageManager initialization',
