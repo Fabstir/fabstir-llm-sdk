@@ -11,114 +11,61 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 - 🔄 **Session Management** - Stateful conversations with checkpoint proofs
 - 📦 **S5 Storage Integration** - Decentralized conversation persistence
 - 🧠 **RAG (Retrieval-Augmented Generation)** - Upload documents and enhance LLM responses with semantic search
-- 🗂️ **Vector Databases** - Client-side vector management with folder hierarchies and permissions
+- 🗂️ **Vector Databases** - Host-side vector storage and cosine similarity search via WebSocket
+- 🔐 **End-to-End Encryption** - XChaCha20-Poly1305 encryption enabled by default with forward secrecy
 - 🛡️ **Error Recovery** - Automatic retries and failover to ensure reliability
 - 🔌 **Browser Compatible** - Works in both Node.js and browser environments
 
 ## Quick Start
 
-### WebSocket Streaming with Host Discovery
+### Streaming LLM Session
 
-Stream LLM responses in real-time with automatic host discovery:
+Stream LLM responses in real-time with end-to-end encryption (enabled by default):
 
 ```typescript
-import { FabstirSDKCore } from "@fabstir/sdk-core";
+import { FabstirSDKCore } from '@fabstir/sdk-core';
+import { ChainRegistry, ChainId } from '@fabstir/sdk-core/config';
 
 async function streamingExample() {
-  // Initialize SDK
+  // Initialize SDK with chain configuration
+  const chain = ChainRegistry.getChain(ChainId.BASE_SEPOLIA);
   const sdk = new FabstirSDKCore({
-    network: 'base-sepolia',
-    rpcUrl: process.env.RPC_URL
+    mode: 'production' as const,
+    chainId: ChainId.BASE_SEPOLIA,
+    rpcUrl: process.env.RPC_URL_BASE_SEPOLIA!,
+    contractAddresses: {
+      jobMarketplace: chain.contracts.jobMarketplace,
+      nodeRegistry: chain.contracts.nodeRegistry,
+      proofSystem: chain.contracts.proofSystem,
+      hostEarnings: chain.contracts.hostEarnings,
+      modelRegistry: chain.contracts.modelRegistry,
+      usdcToken: chain.contracts.usdcToken,
+      fabToken: chain.contracts.fabToken,
+    }
   });
 
   // Authenticate with wallet
   await sdk.authenticate(privateKey);
 
-  // Discover available hosts automatically
-  const hostManager = sdk.getHostManager();
-  const hosts = await hostManager.discoverAllActiveHosts();
-  console.log(`Found ${hosts.length} active hosts`);
-
-  // Create session with best available host
-  const sessionManager = sdk.getSessionManager();
-  const session = await sessionManager.createSession({
-    model: 'llama-2-13b-chat',
-    temperature: 0.7
+  // Start encrypted session with host
+  const sessionManager = await sdk.getSessionManager();
+  const { sessionId } = await sessionManager.startSession({
+    hostUrl: 'http://host-node:8080',
+    jobId: 123n,
+    modelName: 'llama-3',
+    chainId: ChainId.BASE_SEPOLIA
+    // encryption: true is the default
   });
 
   // Stream tokens as they arrive
-  for await (const token of sessionManager.streamPrompt(
-    session.id,
-    "Explain quantum computing in simple terms"
-  )) {
-    process.stdout.write(token);
-  }
-
-  // End session
-  await sessionManager.endSession(session.id);
+  await sessionManager.sendPromptStreaming(
+    sessionId,
+    "Explain quantum computing in simple terms",
+    (chunk) => process.stdout.write(chunk.content)
+  );
 }
 
 streamingExample().catch(console.error);
-```
-
-### Host Registration and Discovery
-
-Register your node and discover other hosts:
-
-```typescript
-import { FabstirSDKCore } from "@fabstir/sdk-core";
-
-async function hostManagement() {
-  const sdk = new FabstirSDKCore({ network: 'base-sepolia' });
-  await sdk.authenticate(privateKey);
-  
-  const hostManager = sdk.getHostManager();
-  
-  // Register as a host provider
-  await hostManager.registerNodeWithUrl(
-    'llama-2-7b,gpt-4,inference,gpu',  // Capabilities
-    '1000',                              // Stake amount (FAB tokens)
-    'https://my-node.example.com'       // Your API endpoint
-  );
-  
-  // Discover other hosts
-  const hosts = await hostManager.discoverAllActiveHosts();
-  
-  for (const host of hosts) {
-    console.log(`Host: ${host.address}`);
-    console.log(`API: ${host.apiUrl}`);
-    console.log(`Models: ${host.metadata}`);
-    
-    // Check health
-    const health = await hostManager.checkNodeHealth(host.apiUrl);
-    console.log(`Health: ${health.healthy ? '✅' : '❌'} (${health.latency}ms)`);
-  }
-}
-```
-
-### Direct Inference Without Blockchain
-
-Stream inference directly without blockchain transactions:
-
-```typescript
-async function directInference() {
-  const sdk = new FabstirSDKCore({ network: 'base-sepolia' });
-  await sdk.authenticate(privateKey);
-
-  const inferenceManager = sdk.getInferenceManager();
-
-  // Stream tokens with automatic host selection
-  for await (const token of inferenceManager.streamInference(
-    "Write a haiku about coding",
-    {
-      model: 'llama-2-7b',
-      temperature: 0.9,
-      maxTokens: 100
-    }
-  )) {
-    process.stdout.write(token);
-  }
-}
 ```
 
 ### RAG-Enhanced Chat with Document Upload (Host-Side)
@@ -204,85 +151,69 @@ See [docs/IMPLEMENTATION_CHAT_RAG.md](docs/IMPLEMENTATION_CHAT_RAG.md) for compl
 
 ## Installation
 
-### Development Setup (npm link)
-
-For local development when working on both `fabstir-llm-sdk` and `fabstir-llm-ui`:
+### Development Setup
 
 ```bash
-# In fabstir-llm-sdk directory
-cd ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-sdk
-npm link
+# Clone and install (IMPORTANT: Use pnpm, not npm)
+git clone https://github.com/fabstir/fabstir-llm-sdk.git
+cd fabstir-llm-sdk
+pnpm install
 
-# In fabstir-llm-ui directory  
-cd ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-ui
-npm link @fabstir/llm-sdk
+# Build SDK core
+cd packages/sdk-core && pnpm build
 ```
 
-This creates a symbolic link allowing the UI to use your local SDK development version.
-
-### Production Setup
-
-Install from GitHub repository:
+### Package Installation
 
 ```bash
-npm install git+https://github.com/yourusername/fabstir-llm-sdk.git
-# or
-yarn add git+https://github.com/yourusername/fabstir-llm-sdk.git
-# or
-pnpm add git+https://github.com/yourusername/fabstir-llm-sdk.git
-```
-
-Or from npm registry (when published):
-
-```bash
-npm install @fabstir/llm-sdk
-# or
-yarn add @fabstir/llm-sdk
-# or
-pnpm add @fabstir/llm-sdk
+pnpm add @fabstir/sdk-core
 ```
 
 ### Prerequisites
 
-- Node.js 16.0 or higher
-- TypeScript 4.5 or higher (for TypeScript projects)
+- Node.js 18.0 or higher
+- pnpm (not npm — npm causes dependency hoisting issues)
+- TypeScript 5.0 or higher (for TypeScript projects)
 - An Ethereum wallet provider (MetaMask, WalletConnect, etc.)
 
 ## Configuration
 
-Basic configuration options:
-
 ```typescript
-const sdk = new FabstirSDK({
-  mode: "production",        // "mock" | "production"
-  network: "base-sepolia",   // Target blockchain network
-  p2pConfig: {
-    bootstrapNodes: [...],   // P2P bootstrap nodes
-    enableDHT: true,         // Enable distributed hash table
-    enableMDNS: true,        // Enable local discovery
-  },
-  retryOptions: {
-    maxRetries: 3,          // Maximum retry attempts
-    initialDelay: 1000,     // Initial retry delay (ms)
-  },
-  enablePerformanceTracking: true,
+import { FabstirSDKCore } from '@fabstir/sdk-core';
+import { ChainRegistry, ChainId } from '@fabstir/sdk-core/config';
+
+const chain = ChainRegistry.getChain(ChainId.BASE_SEPOLIA);
+const sdk = new FabstirSDKCore({
+  mode: 'production' as const,
+  chainId: ChainId.BASE_SEPOLIA,
+  rpcUrl: process.env.RPC_URL_BASE_SEPOLIA!,
+  contractAddresses: {
+    jobMarketplace: chain.contracts.jobMarketplace,
+    nodeRegistry: chain.contracts.nodeRegistry,
+    // ... other contracts from chain.contracts
+  }
 });
+
+await sdk.authenticate(privateKey);
 ```
+
+**Contract addresses**: Always read from `.env.test` (source of truth). Never hardcode.
 
 ## Documentation
 
 - [**SDK API Reference**](docs/SDK_API.md) - Complete API documentation for all managers
-- [Setup Guide](docs/SETUP_GUIDE.md) - Detailed setup instructions
-- [P2P Configuration](docs/P2P_CONFIGURATION.md) - P2P network configuration
 - [Architecture](docs/ARCHITECTURE.md) - System architecture overview
-- [Configuration](docs/CONFIGURATION.md) - All configuration options
+- [Encryption Guide](docs/ENCRYPTION_GUIDE.md) - End-to-end encryption details
+- [Encryption FAQ](docs/ENCRYPTION_FAQ.md) - Common encryption questions
+- [Multi-Chain Developer Guide](docs/MULTI_CHAIN_DEVELOPER_GUIDE.md) - Multi-chain support
+- [Host Operator Guide](docs/HOST_OPERATOR_GUIDE.md) - Running a host node
+- [Executive Summary](docs/EXECUTIVE_SUMMARY.md) - Project overview
 
-### RAG Documentation
+### Reference Documentation
 
-- [**RAG API Reference**](docs/RAG_API_REFERENCE.md) - Complete RAG API documentation
-- [**RAG Implementation Plan**](docs/IMPLEMENTATION_CHAT_RAG.md) - Implementation progress and architecture
-- [**RAG Manual Testing Guide**](docs/RAG_MANUAL_TESTING_GUIDE.md) - Testing host embedding endpoints
-- [**RAG Node Integration**](docs/node-reference/RAG_SDK_INTEGRATION.md) - Host-side integration guide
+- [Contract Reference](docs/compute-contracts-reference/) - Smart contract documentation
+- [Node Reference](docs/node-reference/API.md) - Host node API
+- [Host CLI Reference](packages/host-cli/docs/API_REFERENCE.md) - Host CLI commands
 
 ## Examples
 
@@ -357,14 +288,11 @@ During the BUSL-1.1 period (until 2029-01-01), we're focusing on core developmen
 
 After 2029-01-01, the project converts to AGPL-3.0-or-later and will follow standard open-source contribution practices.
 
-## Documentation
+## Additional Documentation
 
-- 📚 [Host Discovery API](./docs/HOST_DISCOVERY_API.md) - Automatic host discovery from blockchain
 - 🔌 [WebSocket Protocol Guide](./docs/WEBSOCKET_PROTOCOL_GUIDE.md) - Real-time streaming protocol
-- 💬 [Session Manager API](./docs/SESSION_MANAGER_ENHANCED.md) - Conversation management
-- 🚀 [Inference Manager API](./docs/INFERENCE_MANAGER_API.md) - Direct inference without blockchain
-- 🔧 [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) - Common issues and solutions
 - 📖 [Full SDK Documentation](./docs/SDK_API.md) - Complete API reference
+- 🔐 [Encryption Guide](./docs/ENCRYPTION_GUIDE.md) - End-to-end encryption architecture
 
 ## Support
 

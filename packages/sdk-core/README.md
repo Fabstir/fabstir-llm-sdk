@@ -5,22 +5,21 @@ Browser-compatible SDK for the Fabstir P2P LLM marketplace.
 ## Features
 
 - ✅ **Browser-ready**: Runs in modern browsers without polyfills
+- ✅ **End-to-end encryption**: XChaCha20-Poly1305 with forward secrecy (enabled by default)
 - ✅ **Contract interactions**: Direct blockchain communication via ethers.js
 - ✅ **Wallet management**: Support for MetaMask and Coinbase Wallet
+- ✅ **Multi-chain**: Base Sepolia (primary), opBNB Testnet (secondary)
 - ✅ **S5 Storage**: Decentralized storage via S5.js with mobile-resilient connection handling
-- ✅ **Session management**: Persistent conversation handling
-- ✅ **Payment processing**: ETH and USDC payment support
+- ✅ **Session management**: Persistent conversation handling with streaming
+- ✅ **Payment processing**: Multi-chain ETH, USDC, and FAB token support
+- ✅ **RAG support**: Host-side vector storage and semantic search
 - ✅ **TypeScript**: Full type safety and IntelliSense support
 - ✅ **Mobile support**: Auto-reconnect, operation queuing, and sync status for mobile browsers
 
 ## Installation
 
 ```bash
-npm install @fabstir/sdk-core
-# or
 pnpm add @fabstir/sdk-core
-# or
-yarn add @fabstir/sdk-core
 ```
 
 ## Usage
@@ -29,26 +28,30 @@ yarn add @fabstir/sdk-core
 
 ```typescript
 import { FabstirSDKCore } from '@fabstir/sdk-core';
+import { ChainRegistry, ChainId } from '@fabstir/sdk-core/config';
 
+const chain = ChainRegistry.getChain(ChainId.BASE_SEPOLIA);
 const sdk = new FabstirSDKCore({
+  mode: 'production' as const,
+  chainId: ChainId.BASE_SEPOLIA,
+  rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!,
   contractAddresses: {
-    jobMarketplace: '0x...',
-    nodeRegistry: '0x...',
-    fabToken: '0x...',
-    usdcToken: '0x...'
-  },
-  rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/YOUR_KEY'
+    jobMarketplace: chain.contracts.jobMarketplace,
+    nodeRegistry: chain.contracts.nodeRegistry,
+    // ... other contracts from chain.contracts
+  }
 });
 
-// Authenticate with MetaMask
-await sdk.authenticate();
+// Authenticate
+await sdk.authenticate(privateKey);
 
-// Use SDK features
-const paymentManager = sdk.getPaymentManager();
-await paymentManager.createJob({
-  model: 'llama-2-7b',
-  prompt: 'Hello, world!',
-  paymentMethod: 'USDC'
+// Start an encrypted session
+const sessionManager = await sdk.getSessionManager();
+const { sessionId } = await sessionManager.startSession({
+  hostUrl: 'http://host-node:8080',
+  jobId: 123n,
+  modelName: 'llama-3',
+  chainId: ChainId.BASE_SEPOLIA
 });
 ```
 
@@ -91,26 +94,28 @@ const sdk = new FabstirSDKCore({ /* config */ });
 - **Core only**: ~200KB minified
 - **With tree-shaking**: ~150KB for typical usage
 
-## Available Managers
+## Available Managers (13)
 
 - `AuthManager` - Wallet authentication and key management
-- `PaymentManager` - ETH and USDC payment processing
-- `StorageManager` - S5.js decentralized storage
-- `SessionManager` - Conversation session handling
-- `HostManager` - Node registration and management
-- `SmartWalletManager` - Smart wallet interactions
-- `TreasuryManager` - Treasury operations
+- `PaymentManagerMultiChain` - Multi-chain ETH, USDC, and FAB token payments
+- `SessionManager` - WebSocket sessions, encryption, streaming
+- `HostManager` - Host registration, pricing, earnings
+- `StorageManager` - S5.js decentralized encrypted storage
+- `ClientManager` - Host discovery, job submission
+- `ModelManager` - Model registry and governance
+- `TreasuryManager` - Platform fee management
+- `EncryptionManager` - End-to-end encryption and key exchange
+- `VectorRAGManager` - Host-side vector database operations
+- `DocumentManager` - Document chunking and embedding
+- `SessionGroupManager` - Claude Projects-style session organization
+- `PermissionManager` - Access control for groups and vector databases
 
-## Server Features
+## Host CLI
 
-For P2P networking and proof generation, use the companion package:
+For running a host node, see the companion package:
 
-```bash
-npm install @fabstir/sdk-node
-```
-
-See [@fabstir/sdk-node](../sdk-node) for server-side documentation.
+- [`@fabstir/host-cli`](../host-cli) - CLI for host node operators
 
 ## License
 
-MIT
+Business Source License 1.1 (BUSL-1.1). See [LICENSE](../../LICENSE) for details.

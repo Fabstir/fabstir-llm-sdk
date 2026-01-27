@@ -705,7 +705,7 @@ class MockLLMServer {
 
 ## Related Documentation
 
-- [Host Discovery API](./HOST_DISCOVERY_API.md)
-- [Inference Manager API](./INFERENCE_MANAGER_API.md)
-- [Session Manager API](./SESSION_MANAGER_ENHANCED.md)
+- [SDK API Reference](./SDK_API.md)
+- [Encryption Guide](./ENCRYPTION_GUIDE.md)
 - [WebSocket API & SDK Integration Guide](./node-reference/WEBSOCKET_API_SDK_GUIDE.md)
+- [Node API Reference](./node-reference/API.md)

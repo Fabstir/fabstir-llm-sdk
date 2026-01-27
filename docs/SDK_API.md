@@ -190,47 +190,41 @@ const sdk = new FabstirSDKCore({
 **Multi-Chain Configuration Examples:**
 
 ```typescript
+import { ChainRegistry, ChainId } from '@fabstir/sdk-core/config';
+
 // Base Sepolia Configuration (Default)
+// Contract addresses from ChainRegistry (populated from .env.test)
+const chain = ChainRegistry.getChain(ChainId.BASE_SEPOLIA);
 const baseSepolia = new FabstirSDKCore({
-  rpcUrl: 'https://sepolia.base.org',
-  chainId: 84532, // Optional, this is the default
+  rpcUrl: process.env.RPC_URL_BASE_SEPOLIA!,
+  chainId: ChainId.BASE_SEPOLIA, // 84532
   contractAddresses: {
-    jobMarketplace: '0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f',
-    nodeRegistry: '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
-    proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
-    hostEarnings: '0x908962e8c6CE72610021586f85ebDE09aAc97776',
-    usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-    fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
-    modelRegistry: '0x92b2De840bB2171203011A6dBA928d855cA8183E'
+    jobMarketplace: chain.contracts.jobMarketplace,
+    nodeRegistry: chain.contracts.nodeRegistry,
+    proofSystem: chain.contracts.proofSystem,
+    hostEarnings: chain.contracts.hostEarnings,
+    usdcToken: chain.contracts.usdcToken,
+    fabToken: chain.contracts.fabToken,
+    modelRegistry: chain.contracts.modelRegistry
   }
 });
 
-// opBNB Testnet Configuration
+// opBNB Testnet Configuration (post-MVP)
+const opBNBChain = ChainRegistry.getChain(ChainId.OPBNB_TESTNET);
 const opBNBTestnet = new FabstirSDKCore({
   rpcUrl: 'https://opbnb-testnet-rpc.bnbchain.org',
-  chainId: 5611, // Required for opBNB
+  chainId: ChainId.OPBNB_TESTNET, // 5611
   contractAddresses: {
-    // Note: These are placeholder addresses for opBNB testnet
-    jobMarketplace: '0x0000000000000000000000000000000000000001',
-    nodeRegistry: '0x0000000000000000000000000000000000000002',
-    proofSystem: '0x0000000000000000000000000000000000000003',
-    hostEarnings: '0x0000000000000000000000000000000000000004',
-    usdcToken: '0x0000000000000000000000000000000000000006',
-    modelRegistry: '0x0000000000000000000000000000000000000005',
-    fabToken: '0x0000000000000000000000000000000000000007'
+    // Addresses will be in ChainRegistry when opBNB contracts are deployed
+    ...opBNBChain.contracts
   }
 });
 ```
 
-**Current Contract Addresses (Base Sepolia):**
-```
-JobMarketplace: 0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f
-NodeRegistry: 0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218
-ProofSystem: 0x2ACcc60893872A499700908889B38C5420CBcFD1
-HostEarnings: 0x908962e8c6CE72610021586f85ebDE09aAc97776
-USDCToken: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
-FABToken: 0xC78949004B4EB6dEf2D66e49Cd81231472612D62
-ModelRegistry: 0x92b2De840bB2171203011A6dBA928d855cA8183E
+**Contract Addresses:**
+```bash
+# Source of truth: .env.test - never hardcode addresses
+cat .env.test | grep CONTRACT_
 ```
 
 ## Authentication
@@ -383,7 +377,7 @@ const accounts = await provider.request({
 
 const smartWallet = accounts[0]; // Primary account
 const contracts = {
-  USDC: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+  USDC: process.env.CONTRACT_USDC_TOKEN! // From .env.test
 };
 
 // 2. Ensure sub-account exists with spend permissions
@@ -530,7 +524,7 @@ async function setupPopupFreeTransactions() {
 
   // 3. Ensure sub-account with spend permissions (SDK utility)
   const contracts = {
-    USDC: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+    USDC: process.env.CONTRACT_USDC_TOKEN! // From .env.test
   };
 
   const subAccountResult = await ensureSubAccount(baseProvider, smartWallet, {
@@ -5339,18 +5333,19 @@ import { FabstirSDKCore, EOAProvider, WalletProviderFactory } from '@fabstir/sdk
 import { ChainId } from '@fabstir/sdk-core/types';
 
 // Initialize SDK with specific chain
+// Contract addresses from ChainRegistry (populated from .env.test)
+const chain = ChainRegistry.getChain(ChainId.BASE_SEPOLIA);
 const sdk = new FabstirSDKCore({
-  rpcUrl: 'https://sepolia.base.org',
+  rpcUrl: process.env.RPC_URL_BASE_SEPOLIA!,
   chainId: ChainId.BASE_SEPOLIA, // 84532
   contractAddresses: {
-    // Base Sepolia addresses
-    jobMarketplace: '0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f',
-    nodeRegistry: '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
-    proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
-    hostEarnings: '0x908962e8c6CE72610021586f85ebDE09aAc97776',
-    usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-    fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
-    modelRegistry: '0x92b2De840bB2171203011A6dBA928d855cA8183E'
+    jobMarketplace: chain.contracts.jobMarketplace,
+    nodeRegistry: chain.contracts.nodeRegistry,
+    proofSystem: chain.contracts.proofSystem,
+    hostEarnings: chain.contracts.hostEarnings,
+    usdcToken: chain.contracts.usdcToken,
+    fabToken: chain.contracts.fabToken,
+    modelRegistry: chain.contracts.modelRegistry
   }
 });
 

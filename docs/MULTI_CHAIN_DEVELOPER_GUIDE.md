@@ -16,10 +16,10 @@
 
 ```bash
 # For browser/React applications
-npm install @fabstir/sdk-core
+pnpm install @fabstir/sdk-core
 
 # For Node.js applications
-npm install @fabstir/sdk-core @fabstir/sdk-node
+pnpm install @fabstir/sdk-core @fabstir/sdk-node
 ```
 
 ### 2. Basic Multi-Chain Setup
@@ -28,17 +28,19 @@ npm install @fabstir/sdk-core @fabstir/sdk-node
 import { FabstirSDKCore, EOAProvider, ChainId } from '@fabstir/sdk-core';
 
 // Step 1: Initialize SDK with a specific chain
+// Contract addresses from .env.test (source of truth) or ChainRegistry
+const chain = ChainRegistry.getChain(ChainId.BASE_SEPOLIA);
 const sdk = new FabstirSDKCore({
-  rpcUrl: 'https://sepolia.base.org',
+  rpcUrl: process.env.RPC_URL_BASE_SEPOLIA!,
   chainId: ChainId.BASE_SEPOLIA, // 84532
   contractAddresses: {
-    jobMarketplace: '0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f',
-    nodeRegistry: '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
-    proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
-    hostEarnings: '0x908962e8c6CE72610021586f85ebDE09aAc97776',
-    usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-    fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
-    modelRegistry: '0x92b2De840bB2171203011A6dBA928d855cA8183E'
+    jobMarketplace: chain.contracts.jobMarketplace,
+    nodeRegistry: chain.contracts.nodeRegistry,
+    proofSystem: chain.contracts.proofSystem,
+    hostEarnings: chain.contracts.hostEarnings,
+    usdcToken: chain.contracts.usdcToken,
+    fabToken: chain.contracts.fabToken,
+    modelRegistry: chain.contracts.modelRegistry
   }
 });
 
@@ -82,16 +84,10 @@ console.log('New chain:', sdk.getCurrentChain().name); // "opBNB Testnet"
 - **Status:** Production Ready
 
 **Contract Addresses:**
-```typescript
-const BASE_SEPOLIA_CONTRACTS = {
-  jobMarketplace: '0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f',
-  nodeRegistry: '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218',
-  proofSystem: '0x2ACcc60893872A499700908889B38C5420CBcFD1',
-  hostEarnings: '0x908962e8c6CE72610021586f85ebDE09aAc97776',
-  usdcToken: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-  fabToken: '0xC78949004B4EB6dEf2D66e49Cd81231472612D62',
-  modelRegistry: '0x92b2De840bB2171203011A6dBA928d855cA8183E'
-};
+```bash
+# Always read from .env.test (source of truth) - never hardcode
+# See ChainRegistry.getChain(ChainId.BASE_SEPOLIA).contracts
+cat .env.test | grep CONTRACT_
 ```
 
 ### opBNB Testnet (Chain ID: 5611)
@@ -105,17 +101,9 @@ const BASE_SEPOLIA_CONTRACTS = {
 - **Status:** Development/Testing
 
 **Contract Addresses:**
-```typescript
-const OPBNB_TESTNET_CONTRACTS = {
-  // Note: These are placeholder addresses for development
-  jobMarketplace: '0x0000000000000000000000000000000000000001',
-  nodeRegistry: '0x0000000000000000000000000000000000000002',
-  proofSystem: '0x0000000000000000000000000000000000000003',
-  hostEarnings: '0x0000000000000000000000000000000000000004',
-  modelRegistry: '0x0000000000000000000000000000000000000005',
-  usdcToken: '0x0000000000000000000000000000000000000006',
-  fabToken: '0x0000000000000000000000000000000000000007'
-};
+```bash
+# opBNB contracts not yet deployed - addresses will be in .env.test when available
+# Use ChainRegistry.getChain(ChainId.OPBNB_TESTNET).contracts
 ```
 
 ## Wallet Provider Capabilities
@@ -352,8 +340,8 @@ const baseAccountSDK = await createBaseAccountSDK({
 // Step 2: Create sub-account for auto-spend
 const subAccount = await baseAccountSDK.createSubAccount({
   spender: {
-    address: '0xaa38e7fcf5d7944ef7c836e8451f3bf93b98364f', // JobMarketplace
-    token: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', // USDC
+    address: process.env.CONTRACT_JOB_MARKETPLACE!, // JobMarketplace
+    token: process.env.CONTRACT_USDC_TOKEN!, // USDC
     allowance: parseUnits('10', 6) // $10 USDC allowance
   }
 });
@@ -668,12 +656,13 @@ class ChainAwareRetry {
 
 ### Code Migration Example
 
-**Before (Single-Chain):**
+**Before (Single-Chain - deprecated):**
 ```typescript
-const sdk = new FabstirSDK({
+// Old pattern - do not use
+const sdk = new FabstirSDKCore({
   rpcUrl: process.env.RPC_URL,
   contractAddresses: {
-    jobMarketplace: process.env.CONTRACT_ADDRESS
+    jobMarketplace: process.env.CONTRACT_JOB_MARKETPLACE
   }
 });
 await sdk.authenticate(privateKey);
@@ -710,5 +699,5 @@ await sdk.authenticate('privatekey', { privateKey });
 
 ---
 
-*Last Updated: January 2025*
+*Last Updated: January 2026*
 *SDK Version: @fabstir/sdk-core v2.0.0*

@@ -54,13 +54,13 @@ The SDK uses a manager pattern where each manager handles a specific domain:
   - Secure signature-based authentication
   - Multi-wallet support
 
-#### **PaymentManager** (`/managers/PaymentManager.ts`)
-- USDC and ETH payment processing
+#### **PaymentManagerMultiChain** (`/managers/PaymentManagerMultiChain.ts`)
+- USDC and ETH payment processing across multiple chains
 - Approval and deposit handling
 - Balance checking and validation
 - Session job creation with payments
 - Key Features:
-  - Multi-token support (USDC, ETH)
+  - Multi-chain, multi-token support (USDC, ETH, BNB)
   - Gas-efficient approval patterns
   - Payment validation and error handling
 
@@ -126,22 +126,63 @@ The SDK uses a manager pattern where each manager handles a specific domain:
   - Fee percentage management (10% treasury, 90% host)
   - Withdrawal capabilities
 
+#### **EncryptionManager** (`/managers/EncryptionManager.ts`)
+- End-to-end encryption for all sessions (enabled by default)
+- Key exchange, session key management
+- Forward secrecy via ephemeral keys
+- Key Features:
+  - XChaCha20-Poly1305 AEAD encryption
+  - ECDH key exchange on secp256k1
+  - ECDSA sender authentication
+  - Replay protection via message indexing
+
+#### **VectorRAGManager** (`/managers/VectorRAGManager.ts`)
+- Host-side vector database operations via WebSocket
+- Simplified wrapper delegating to SessionManager
+- Key Features:
+  - Upload vectors to host session memory
+  - Search vectors with cosine similarity
+  - No client-side vector storage needed
+
+#### **DocumentManager** (`/documents/DocumentManager.ts`)
+- Document chunking and embedding generation
+- Text extraction from uploaded files
+- Key Features:
+  - 500-token chunks with 50-token overlap
+  - Embedding via host's `/v1/embed` endpoint
+  - No native bindings required
+
+#### **SessionGroupManager** (`/managers/SessionGroupManager.ts`)
+- Claude Projects-style session organization
+- Group sessions by topic or project
+- Key Features:
+  - Create, list, and manage session groups
+  - Access control via PermissionManager
+
+#### **PermissionManager** (`/managers/PermissionManager.ts`)
+- Access control for groups and vector databases
+- Key Features:
+  - Permission grants and revocations
+  - Group-level access management
+
 ### 3. Contract Integration
 
 The SDK interacts with smart contracts deployed on Base Sepolia (and future chains):
 
-```typescript
-// Contract addresses from .env.test
-{
-  jobMarketplace: "0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944",
-  nodeRegistry: "0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218",
-  proofSystem: "0x2ACcc60893872A499700908889B38C5420CBcFD1",
-  hostEarnings: "0x908962e8c6CE72610021586f85ebDE09aAc97776",
-  modelRegistry: "0x92b2De840bB2171203011A6dBA928d855cA8183E",
-  usdcToken: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-  fabToken: "0xC78949004B4EB6dEf2D66e49Cd81231472612D62"
-}
+```bash
+# Contract addresses - always read from .env.test (source of truth)
+# Never hardcode addresses in source code or documentation
+cat .env.test | grep CONTRACT_
 ```
+
+**Required contracts** (7 total):
+- `CONTRACT_JOB_MARKETPLACE` - Job creation, assignment, payment escrow
+- `CONTRACT_NODE_REGISTRY` - Host registration, staking, model listings
+- `CONTRACT_PROOF_SYSTEM` - STARK proof verification
+- `CONTRACT_HOST_EARNINGS` - Earnings tracking, withdrawals
+- `CONTRACT_MODEL_REGISTRY` - Model approvals, governance
+- `CONTRACT_USDC_TOKEN` - USDC stablecoin
+- `CONTRACT_FAB_TOKEN` - Platform governance token
 
 ### 4. WebSocket Architecture
 
@@ -196,7 +237,7 @@ Features:
 ```
 1. Start Session
    ├─ Discover hosts (ClientManager)
-   ├─ Create session job (PaymentManager)
+   ├─ Create session job (PaymentManagerMultiChain)
    └─ Connect WebSocket (SessionManager)
 
 2. Send Prompts
@@ -402,11 +443,15 @@ S5_SEED_PHRASE="..." # Auto-generated if not provided
 
 ## Security Architecture
 
+- **End-to-end encryption by default** (XChaCha20-Poly1305 AEAD, Phase 6.2)
+- **Forward secrecy** via ephemeral session keys (discarded after use)
+- **Sender authentication** via ECDSA signatures on every message
 - Private keys never leave the client
 - S5 seed phrases derived from wallet signatures
 - Contract interactions validated before submission
 - Model governance ensures only approved models
 - Host verification through on-chain registry
+- Evidence-based slashing for host misbehavior
 
 ## Error Handling
 
@@ -437,6 +482,7 @@ Core dependencies:
 
 ## Version History
 
-- **v1.0.10** - Current version with gasless session ending
+- **v1.8.6+** - Current version: 13 managers, multi-chain, encryption by default, RAG, marketplace pricing
+- **v1.0.10** - Gasless session ending
 - **v1.0.0** - Initial refactored architecture
 - **v0.x** - Legacy monolithic SDK (deprecated)

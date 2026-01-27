@@ -35,7 +35,7 @@ Fabstir Host CLI enables you to run a host node in the Fabstir decentralized LLM
 
 **SDK Integration**: The CLI delegates all blockchain operations to SDK managers:
 - `HostManager` - Registration, unregistration, URL/model updates
-- `PaymentManager` - Token approvals, deposits, withdrawals
+- `PaymentManagerMultiChain` - Token approvals, deposits, withdrawals
 - `SessionManager` - Proof submissions
 - `TreasuryManager` - Fee management
 
@@ -846,8 +846,8 @@ This CLI is part of the Fabstir LLM SDK monorepo:
 
 ## License
 
-MIT License - see [LICENSE](../../LICENSE) file for details.
+Business Source License 1.1 (BUSL-1.1) - see [LICENSE](../../LICENSE) file for details.
 
 ---
 
-Built by the Fabstir team | Last updated: October 2024 (Post-SDK Refactoring)
+Built by the Fabstir team | Last updated: January 2026
