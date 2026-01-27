@@ -153,7 +153,7 @@ NEXT_PUBLIC_BASE_ACCOUNT_KIT_PROJECT_ID=<your project ID>
 # S5 STORAGE
 # ===========================
 
-NEXT_PUBLIC_S5_PORTAL_URL=https://s5.cx
+NEXT_PUBLIC_S5_PORTAL_URL=https://s5.platformlessai.ai
 NEXT_PUBLIC_S5_ENABLE_STORAGE=true
 
 # User-specific (each user provides their own seed)
@@ -186,7 +186,7 @@ NEXT_PUBLIC_DEBUG_MODE=true
 ### 2.2: Verify Environment Variables
 - [x] Check all contract addresses are from `.env.test` (no hardcoded values)
 - [x] Verify RPC URL is accessible: `curl https://sepolia.base.org`
-- [x] Verify S5 portal is accessible: `curl https://s5.cx`
+- [x] Verify S5 portal is accessible: `curl https://s5.platformlessai.ai`
 - [x] Confirm `BASE_CONTRACT_SPEND_PERMISSION_MANAGER` is Base protocol address (not Fabstir)
 
 **Verification Commands**:
@@ -199,7 +199,7 @@ curl -X POST https://sepolia.base.org \
 # Should return: {"jsonrpc":"2.0","id":1,"result":"0x..."}
 
 # Test S5 portal
-curl -I https://s5.cx
+curl -I https://s5.platformlessai.ai
 # Should return: HTTP/2 200
 ```
 
@@ -955,7 +955,7 @@ if (!this.s5Seed) {
 
 // Get default RAG config
 const ragConfig: RAGConfig = {
-  portalUrl: this.config.s5Config?.portalUrl || 'https://s5.cx',
+  portalUrl: this.config.s5Config?.portalUrl || 'https://s5.platformlessai.ai',
   seedPhrase: this.s5Seed,
   dimensions: 384, // all-MiniLM-L6-v2
   metric: 'cosine',
@@ -1747,7 +1747,7 @@ if (this.storage) {
 ### Issue: "S5 upload failed"
 **Cause**: S5 portal unavailable, large file, or network timeout
 **Solution**:
-1. Verify S5 portal is accessible: `curl https://s5.cx`
+1. Verify S5 portal is accessible: `curl https://s5.platformlessai.ai`
 2. Check file size (limit may be 10MB)
 3. Increase upload timeout
 4. Try uploading smaller file

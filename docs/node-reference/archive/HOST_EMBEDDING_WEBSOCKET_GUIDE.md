@@ -256,7 +256,7 @@ import { S5 } from '@s5-dev/s5js';
 // Initialize S5 client (reuse across requests)
 const s5 = new S5({
   userID: process.env.HOST_S5_USER_ID,        // Host's S5 user ID
-  portalURL: process.env.S5_PORTAL_URL || 'https://s5.cx'
+  portalURL: process.env.S5_PORTAL_URL || 'https://s5.platformlessai.ai'
 });
 
 async function downloadFromS5(cid: string): Promise<string> {
@@ -300,7 +300,7 @@ function cidToPath(cid: string): string {
 **Environment Variables** (add to `.env`):
 ```bash
 # S5 Configuration
-S5_PORTAL_URL=https://s5.cx           # S5 portal endpoint
+S5_PORTAL_URL=https://s5.platformlessai.ai           # S5 portal endpoint
 HOST_S5_USER_ID=your-host-user-id    # Host's S5 user ID (if needed)
 S5_DOWNLOAD_TIMEOUT=30000             # Timeout for S5 downloads (milliseconds)
 ```
@@ -581,7 +581,7 @@ import { S5 } from '@s5-dev/s5js';
 
 // Initialize S5 client
 const s5 = new S5({
-  portalURL: process.env.S5_PORTAL_URL || 'https://s5.cx'
+  portalURL: process.env.S5_PORTAL_URL || 'https://s5.platformlessai.ai'
 });
 
 export async function downloadFromS5(cid: string): Promise<string> {
@@ -921,7 +921,7 @@ async function handleGenerateEmbeddings(ws: WebSocket, message: any) {
 
 ```bash
 # S5 Configuration
-S5_PORTAL_URL=https://s5.cx
+S5_PORTAL_URL=https://s5.platformlessai.ai
 S5_DOWNLOAD_TIMEOUT=30000              # 30 seconds
 
 # Embedding Configuration

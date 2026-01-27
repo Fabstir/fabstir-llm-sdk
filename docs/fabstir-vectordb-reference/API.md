@@ -245,7 +245,7 @@ const results = db.search(query_vector, k);
   - Rust toolchain (for building from source)
 - **S5 Network Access:**
   - Enhanced S5.js portal (default: http://localhost:5522)
-  - OR: Direct S5 network access (https://s5.vup.cx)
+  - OR: Direct S5 network access (https://s5.platformlessai.ai)
 
 ### Installation Steps
 
@@ -901,7 +901,7 @@ export S5_SEED_PHRASE_FILE=~/.s5-seed
 
 ```bash
 # Use default S5 portal
-export S5_PORTAL_URL=https://s5.vup.cx
+export S5_PORTAL_URL=https://s5.platformlessai.ai
 
 # Or use custom portal
 export S5_PORTAL_URL=http://localhost:5524
@@ -1380,11 +1380,11 @@ await client.admin.migrate();
 // Error: S5_PORTAL_URL required for real mode
 // Solution: Set the portal URL when using real mode
 export S5_MODE=real
-export S5_PORTAL_URL=https://s5.vup.cx
+export S5_PORTAL_URL=https://s5.platformlessai.ai
 
 // Error: Invalid URL format for S5_PORTAL_URL: must start with http:// or https://
 // Solution: Ensure URLs have proper protocol
-export S5_PORTAL_URL=https://s5.vup.cx  // ✓ Correct
+export S5_PORTAL_URL=https://s5.platformlessai.ai  // ✓ Correct
 export S5_PORTAL_URL=s5.vup.cx          // ✗ Wrong
 
 // Error: Invalid seed phrase: expected 12 or 24 words, got 10

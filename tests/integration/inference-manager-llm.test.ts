@@ -53,7 +53,7 @@ describe('InferenceManager - Real LLM Integration', () => {
       },
       discoveryUrl: 'http://localhost:3003',
       s5Config: {
-        portalUrl: process.env.S5_PORTAL_URL || 'https://s5.ninja',
+        portalUrl: process.env.S5_PORTAL_URL || 'https://s5.platformlessai.ai',
         seedPhrase: process.env.S5_SEED_PHRASE
       }
     });

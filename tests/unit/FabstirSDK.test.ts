@@ -66,7 +66,7 @@ describe('FabstirSDK', () => {
   beforeEach(() => {
     config = {
       rpcUrl: 'http://localhost:8545',
-      s5PortalUrl: 'https://s5.ninja',
+      s5PortalUrl: 'https://s5.platformlessai.ai',
       contractAddresses: {
         jobMarketplace: '0x123',
         nodeRegistry: '0x456'

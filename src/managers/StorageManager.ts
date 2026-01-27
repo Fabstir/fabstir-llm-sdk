@@ -39,7 +39,7 @@ export interface ListOptions {
 }
 
 export default class StorageManager {
-  static readonly DEFAULT_S5_PORTAL = 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p';
+  static readonly DEFAULT_S5_PORTAL = 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p';
   static readonly SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM';
   static readonly REGISTRY_PREFIX = 'fabstir-llm';
   static readonly CONVERSATION_PATH = 'home/conversations';
@@ -69,7 +69,7 @@ export default class StorageManager {
       this.s5Client = await S5.create({ initialPeers: [this.s5PortalUrl] });
       await this.s5Client.recoverIdentityFromSeedPhrase(this.userSeed);
       try {
-        await this.s5Client.registerOnNewPortal('https://s5.vup.cx');
+        await this.s5Client.registerOnNewPortal('https://s5.platformlessai.ai');
       } catch (error) {
         console.debug('Portal registration failed, continuing');
       }

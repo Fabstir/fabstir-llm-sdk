@@ -125,7 +125,7 @@ Your passing test likely differs in one of these ways:
 // In bindings/node/test/search.test.js
 it('should respect topK with 20 vectors', async () => {
   const session = await VectorDbSession.create({
-    s5Portal: 'https://s5.cx',
+    s5Portal: 'https://s5.platformlessai.ai',
     userSeedPhrase: 'test seed phrase',
     sessionId: 'test-topk-20',
     encryptAtRest: false
@@ -257,7 +257,7 @@ search(query, 10)
 // In bindings/node/test/deletion.test.js
 it('should exclude soft-deleted vectors from search', async () => {
   const session = await VectorDbSession.create({
-    s5Portal: 'https://s5.cx',
+    s5Portal: 'https://s5.platformlessai.ai',
     userSeedPhrase: 'test seed phrase',
     sessionId: 'test-soft-delete',
     encryptAtRest: false

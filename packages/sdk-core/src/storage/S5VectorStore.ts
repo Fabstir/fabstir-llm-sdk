@@ -103,18 +103,18 @@ export class S5VectorStore {
       const basePath = this._getDatabaseBasePath();
       console.log(`[S5VectorStore] Step 1: Base path = ${basePath}`);
 
-      // Retry fs.list() up to 3 times (blob propagation delay)
+      // Try fs.list() - handle 404 gracefully for new users
       console.log('[S5VectorStore] Step 2: Calling s5Client.fs.list()...');
       let iterator;
-      for (let i = 0; i < 3; i++) {
-        try {
-          iterator = await this.s5Client.fs.list(basePath);
-          break;
-        } catch (error: any) {
-          if (i === 2) throw error; // Give up after 3 attempts
-          console.log(`[S5VectorStore] ⚠️ Retry fs.list() attempt ${i + 1}/3 - waiting ${500 * (i + 1)}ms`);
-          await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
+      try {
+        iterator = await this.s5Client.fs.list(basePath);
+      } catch (error: any) {
+        // 404 means directory doesn't exist yet - normal for new users
+        if (error?.message?.includes('404') || error?.status === 404) {
+          console.log('[S5VectorStore] ✅ No databases directory yet (new user) - initialized empty');
+          return;
         }
+        throw error;
       }
 
       if (!iterator) {

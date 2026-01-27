@@ -73,7 +73,7 @@ import { FabstirSDK } from '@fabstir/llm-sdk';
 
 const sdk = new FabstirSDK({
   rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY',
-  s5PortalUrl: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p',
+  s5PortalUrl: 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p',
   contractAddresses: {
     jobMarketplace: '0xD937c594682Fe74E6e3d06239719805C04BE804A',
     nodeRegistry: '0x87516C13Ea2f99de598665e14cab64E191A0f8c4',
@@ -89,7 +89,7 @@ const sdk = new FabstirSDK({
 const DEFAULT_RPC_URL = 'https://base-sepolia.g.alchemy.com/v2/demo';
 
 // Default S5 Portal
-const DEFAULT_S5_PORTAL = 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p';
+const DEFAULT_S5_PORTAL = 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p';
 
 // Default contract addresses (Base Sepolia - Jan 2025)
 const DEFAULT_CONTRACTS = {
@@ -153,7 +153,7 @@ StorageManager configuration:
 ```typescript
 // S5 storage constants
 const STORAGE_CONFIG = {
-  DEFAULT_S5_PORTAL: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p',
+  DEFAULT_S5_PORTAL: 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p',
   SEED_MESSAGE: 'Generate S5 seed for Fabstir LLM',
   REGISTRY_PREFIX: 'fabstir-llm',
   CONVERSATION_PATH: 'home/conversations'
@@ -300,7 +300,7 @@ ABIs are located in:
 // S5 portal options
 const S5_PORTALS = {
   // Official S5 portal
-  official: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p',
+  official: 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p',
   
   // Custom portal
   custom: 'wss://YOUR_PORTAL/s5/p2p',
@@ -409,7 +409,7 @@ CONTRACT_USDC_TOKEN=0x036CbD53842c5426634e7929541eC2318f3dCF7e
 CONTRACT_FAB_TOKEN=0xC78949004B4EB6dEf2D66e49Cd81231472612D62
 
 # Storage Configuration
-S5_PORTAL_URL=wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p
+S5_PORTAL_URL=wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p
 S5_REGISTRY_PREFIX=fabstir-llm
 
 # P2P Configuration

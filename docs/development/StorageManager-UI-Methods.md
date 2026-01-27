@@ -161,7 +161,7 @@ if (metadata) {
 ## Important Notes
 
 1. **Initialization Required**: StorageManager must be initialized with `await sdk.getStorageManager()` (note the await!)
-2. **S5 Portal Connection**: Requires connection to S5 portal (default: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p')
+2. **S5 Portal Connection**: Requires connection to S5 portal (default: 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p')
 3. **User-Specific Storage**: All data is stored under the user's address, ensuring privacy
 4. **Cross-Device Sync**: Same user can access conversations from different devices with same private key
 5. **Efficient Storage**: Use `storeExchange()` for streaming responses, `saveConversation()` for bulk updates

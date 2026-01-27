@@ -421,8 +421,8 @@ S5.js was hanging indefinitely when trying to connect, blocking the entire SDK i
 ### Root Causes Found & Fixed
 
 1. **Wrong Portal URL in .env.local**
-   - **Was**: `NEXT_PUBLIC_S5_PORTAL_URL=https://s5.cx` (incorrect HTTP URL)
-   - **Fixed**: `NEXT_PUBLIC_S5_PORTAL_URL=wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p`
+   - **Was**: `NEXT_PUBLIC_S5_PORTAL_URL=https://s5.platformlessai.ai` (incorrect HTTP URL)
+   - **Fixed**: `NEXT_PUBLIC_S5_PORTAL_URL=wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p`
 
 2. **Invalid Seed Phrase Generation**
    - **Was**: Generating fake words like "word01 word02..." 

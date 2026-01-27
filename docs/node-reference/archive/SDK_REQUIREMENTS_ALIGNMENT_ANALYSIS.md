@@ -59,7 +59,7 @@
 - ✅ Sub-phase 2.1: Enhanced S5.js client integration (lines 128-188)
   - HTTP bridge service on port 5522
   - Rust FFI bindings via reqwest
-  - S5 network connectivity (https://s5.vup.cx)
+  - S5 network connectivity (https://s5.platformlessai.ai)
 
 - ✅ Sub-phase 2.2: Manifest and chunk structures (lines 190-275)
   - VectorManifest struct with all required fields

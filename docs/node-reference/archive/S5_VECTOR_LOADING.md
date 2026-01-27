@@ -359,7 +359,7 @@ pub async fn load_vectors_from_s5(
     };
 
     // 2. Initialize S5 client
-    let s5_client = S5Client::new("https://s5.cx")?;  // Use appropriate S5 portal
+    let s5_client = S5Client::new("https://s5.platformlessai.ai")?;  // Use appropriate S5 portal
 
     // 3. Download manifest from S5
     log::info!("Loading manifest from S5: {}", vdb_info.manifest_path);

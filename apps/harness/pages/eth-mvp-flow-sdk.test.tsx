@@ -1921,7 +1921,7 @@ export default function BaseEthMvpFlowSDKTest() {
           },
           s5Config: {
             seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE,
-            portalUrl: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p'
+            portalUrl: 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p'
           }
         });
         
@@ -1972,7 +1972,7 @@ export default function BaseEthMvpFlowSDKTest() {
           },
           s5Config: {
             seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE,
-            portalUrl: 'wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p'
+            portalUrl: 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p'
           }
         });
         

@@ -38,7 +38,7 @@ describe('ETH MVP Flow - Using SDK Methods', () => {
         usdcToken: process.env.CONTRACT_USDC_TOKEN!
       },
       s5Config: {
-        portalUrl: 'https://s5.vup.cx',
+        portalUrl: 'https://s5.platformlessai.ai',
         seedPhrase: process.env.S5_SEED_PHRASE
       },
       mode: 'production' // Use real blockchain
@@ -216,7 +216,7 @@ describe('ETH MVP Flow - Using SDK Methods', () => {
         usdcToken: process.env.CONTRACT_USDC_TOKEN!
       },
       s5Config: {
-        portalUrl: 'https://s5.vup.cx',
+        portalUrl: 'https://s5.platformlessai.ai',
         seedPhrase: process.env.S5_SEED_PHRASE
       },
       mode: 'production'
@@ -303,7 +303,7 @@ describe('ETH MVP Flow - Using SDK Methods', () => {
         usdcToken: process.env.CONTRACT_USDC_TOKEN!
       },
       s5Config: {
-        portalUrl: 'https://s5.vup.cx',
+        portalUrl: 'https://s5.platformlessai.ai',
         seedPhrase: process.env.S5_SEED_PHRASE
       },
       mode: 'production'

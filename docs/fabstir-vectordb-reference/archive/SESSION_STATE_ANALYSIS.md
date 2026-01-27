@@ -254,7 +254,7 @@ When `VectorDbSession.create()` is called with a sessionId:
 ```javascript
 // Create session 1
 const session1 = await VectorDbSession.create({
-  s5Portal: 'https://s5.cx',
+  s5Portal: 'https://s5.platformlessai.ai',
   userSeedPhrase: 'test',
   sessionId: 'test-session-123',
   encryptAtRest: false
@@ -266,7 +266,7 @@ console.log('Session 1 vectors:', results1.length); // Should be 1
 
 // Create session 2 with SAME sessionId
 const session2 = await VectorDbSession.create({
-  s5Portal: 'https://s5.cx',
+  s5Portal: 'https://s5.platformlessai.ai',
   userSeedPhrase: 'test',
   sessionId: 'test-session-123',  // ← SAME ID
   encryptAtRest: false

@@ -840,7 +840,7 @@ NEXT_PUBLIC_CONTRACT_NODE_REGISTRY=<from .env.test>
 NEXT_PUBLIC_CONTRACT_USDC_TOKEN=<from .env.test>
 
 # S5 Configuration
-NEXT_PUBLIC_S5_PORTAL_URL=https://s5.cx
+NEXT_PUBLIC_S5_PORTAL_URL=https://s5.platformlessai.ai
 NEXT_PUBLIC_S5_SEED_PHRASE=<user's seed phrase>
 ```
 
