@@ -37,6 +37,7 @@ export default async function handler(
     console.error('[S5 Register Complete] S5_MASTER_TOKEN not configured');
     return res.status(500).json({ error: 'Server configuration error' });
   }
+  console.log(`[S5 Register Complete] Master token present: ${S5_MASTER_TOKEN?.substring(0, 8)}...${S5_MASTER_TOKEN?.slice(-4)}`);
 
   const { pubKey, response, signature, label } = req.body;
 
@@ -65,6 +66,7 @@ export default async function handler(
       label: label || 'fabstir-sdk',
     };
     console.log(`[S5 Register Complete] Sending to ${S5_PORTAL_URL}/s5/account/register`);
+    console.log(`[S5 Register Complete] Request body: ${JSON.stringify(requestBody)}`);
 
     const registerRes = await fetch(`${S5_PORTAL_URL}/s5/account/register`, {
       method: 'POST',
@@ -79,6 +81,10 @@ export default async function handler(
     const responseText = await registerRes.text();
     console.log(`[S5 Register Complete] Portal response body: ${responseText}`);
 
+    // Get headers for debugging
+    const setCookieHeader = registerRes.headers.get('set-cookie');
+    console.log(`[S5 Register Complete] set-cookie header: ${setCookieHeader}`);
+
     if (!registerRes.ok) {
       console.error(`[S5 Register Complete] Portal error ${registerRes.status}: ${responseText}`);
       return res.status(500).json({
@@ -87,9 +93,38 @@ export default async function handler(
       });
     }
 
-    const data = JSON.parse(responseText);
+    // Auth token may be in set-cookie header OR in JSON body depending on portal version
+    let authToken: string | undefined;
 
-    const { authToken } = data;
+    // Try set-cookie header first (newer portal API)
+    if (setCookieHeader) {
+      const match = setCookieHeader.match(/s5-auth-token=([^;]+)/);
+      if (match) {
+        authToken = match[1];
+        console.log('[S5 Register Complete] Got authToken from set-cookie header');
+      }
+    }
+
+    // Fall back to JSON body (older portal API)
+    if (!authToken && responseText) {
+      try {
+        const data = JSON.parse(responseText);
+        authToken = data.authToken;
+        if (authToken) {
+          console.log('[S5 Register Complete] Got authToken from JSON body');
+        }
+      } catch (e) {
+        // Response wasn't JSON, that's ok
+      }
+    }
+
+    if (!authToken) {
+      console.error('[S5 Register Complete] No authToken found in response');
+      return res.status(500).json({
+        error: 'No authToken in portal response',
+        details: responseText,
+      });
+    }
 
     console.log('[S5 Register Complete] Registration successful, authToken received');
 

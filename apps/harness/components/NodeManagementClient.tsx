@@ -575,7 +575,8 @@ const NodeManagementClient: React.FC = () => {
         mode: 'production',
         chainId: selectedChain,
         rpcUrl: CHAINS[selectedChain as keyof typeof CHAINS].rpcUrl,
-        contractAddresses
+        contractAddresses,
+        hostOnly: true,  // Skip S5/Storage - hosts don't need cloud storage
       });
 
       await sdkInstance.authenticate('signer', { signer: walletSigner });
@@ -786,7 +787,8 @@ const NodeManagementClient: React.FC = () => {
         mode: 'production',
         chainId: chainId,
         rpcUrl: CHAINS[chainId as keyof typeof CHAINS].rpcUrl,
-        contractAddresses
+        contractAddresses,
+        hostOnly: true,  // Skip S5/Storage - hosts don't need cloud storage
       });
 
       await sdkInstance.authenticate('signer', { signer: walletSigner });

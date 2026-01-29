@@ -744,9 +744,11 @@ export class SessionManager implements ISessionManager {
 
           response = await new Promise<string>((resolve, reject) => {
             // Use sliding timeout window - resets on each chunk received
+            // Initial timeout is longer (180s) for cold start scenarios (model loading into GPU)
+            // Once streaming starts, the sliding window uses 60s between chunks
             let timeout = setTimeout(() => {
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
-            }, 60000); // 60 seconds for complex queries (sliding window)
+            }, 180000); // 180 seconds initial timeout for cold start (model loading)
 
             // Guard against double resolution (mobile browser race condition fix)
             let isResolved = false;
@@ -964,9 +966,11 @@ export class SessionManager implements ISessionManager {
           let accumulatedResponse = '';  // Accumulate chunks even in non-streaming mode
           response = await new Promise<string>((resolve, reject) => {
             // Use sliding timeout window - resets on each chunk received
+            // Initial timeout is longer (180s) for cold start scenarios (model loading into GPU)
+            // Once streaming starts, the sliding window uses 60s between chunks
             let timeout = setTimeout(() => {
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
-            }, 60000); // 60 seconds for complex queries (sliding window)
+            }, 180000); // 180 seconds initial timeout for cold start (model loading)
 
             // Guard against double resolution (mobile browser race condition fix)
             let isResolved = false;

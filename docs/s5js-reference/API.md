@@ -122,7 +122,7 @@ import { S5 } from "@s5-dev/s5js";
 // Create S5 instance and connect to peers
 const s5 = await S5.create({
   initialPeers: [
-    "wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p"
+    "wss://z2DWuPbL5pweybXnEB618pMnV58ECj2VPDNfVGm3tFqBvjF@s5.ninja/s5/p2p"
   ]
 });
 
@@ -133,7 +133,7 @@ const seedPhrase = s5.generateSeedPhrase();
 await s5.recoverIdentityFromSeedPhrase(seedPhrase);
 
 // Register on S5 portal (s5.vup.cx supports the new API)
-await s5.registerOnNewPortal("https://s5.platformlessai.ai");
+await s5.registerOnNewPortal("https://s5.vup.cx");
 
 // Initialize filesystem (creates home and archive directories)
 await s5.fs.ensureIdentityInitialized();
@@ -326,6 +326,210 @@ const promise2 = s5.reconnect();
 await Promise.all([promise1, promise2]); // Both resolve when first completes
 ```
 
+## Identity & Signing API
+
+The Identity & Signing API provides methods for cryptographic signing and portal authentication. This enables backend-mediated registration flows where a server with a master token handles portal registration while the browser holds the signing keys.
+
+### getSigningPublicKey(seed?)
+
+Get the Ed25519 public key for signing operations.
+
+```typescript
+async getSigningPublicKey(seed?: string): Promise<string>
+```
+
+#### Parameters
+
+- **seed** (optional string): Base64url-encoded seed for purpose-specific key derivation
+  - If omitted: Returns the identity's main signing public key
+  - If provided: Derives a purpose-specific keypair (e.g., for portal auth)
+
+#### Returns
+
+- Base64url-encoded Ed25519 public key with multikey prefix (0xed)
+
+#### Example
+
+```typescript
+// Main signing key
+const mainPubKey = await s5.getSigningPublicKey();
+
+// Purpose-specific key for portal registration
+const seed = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+const portalPubKey = await s5.getSigningPublicKey(seed);
+```
+
+### sign(data, seed?)
+
+Sign data with the identity's Ed25519 signing key.
+
+```typescript
+async sign(data: Uint8Array, seed?: string): Promise<string>
+```
+
+#### Parameters
+
+- **data** (Uint8Array): The data to sign
+- **seed** (optional string): Base64url-encoded seed for purpose-specific key derivation
+
+#### Returns
+
+- Base64url-encoded Ed25519 signature (already encoded, do NOT encode again)
+
+#### Example
+
+```typescript
+const message = new TextEncoder().encode("Hello, S5!");
+const signature = await s5.sign(message);
+
+// With purpose-specific key
+const signature2 = await s5.sign(message, seed);
+```
+
+### setPortalAuth(portalUrl, authToken)
+
+Set portal auth token for immediate use in the current session. Does NOT persist the token.
+
+```typescript
+setPortalAuth(portalUrl: string, authToken: string): void
+```
+
+#### Parameters
+
+- **portalUrl** (string): The portal URL (e.g., `'https://s5.example.com'`)
+- **authToken** (string): The auth token for uploads
+
+#### Example
+
+```typescript
+// After receiving authToken from backend
+s5.setPortalAuth('https://s5.example.com', authToken);
+
+// Now uploads work immediately
+await s5.fs.put('home/file.txt', 'Hello!');
+```
+
+### storePortalCredentials(portalUrl, seed, authToken)
+
+Store portal credentials for persistence across sessions AND configure for immediate use.
+
+```typescript
+async storePortalCredentials(
+  portalUrl: string,
+  seed: string,
+  authToken: string
+): Promise<void>
+```
+
+#### Parameters
+
+- **portalUrl** (string): The portal URL
+- **seed** (string): Base64url-encoded seed used for key derivation
+- **authToken** (string): The auth token from registration
+
+#### Example
+
+```typescript
+// After backend-mediated registration completes
+await s5.storePortalCredentials(
+  'https://s5.example.com',
+  seed,
+  authToken
+);
+```
+
+### Challenge Type Constants
+
+Exported constants for portal challenge-response authentication:
+
+```typescript
+import { CHALLENGE_TYPE_REGISTER, CHALLENGE_TYPE_LOGIN } from '@julesl23/s5js';
+
+// CHALLENGE_TYPE_REGISTER = 1 (for new account registration)
+// CHALLENGE_TYPE_LOGIN = 2 (for existing account login)
+```
+
+### Backend-Mediated Registration Flow
+
+Complete example of secure portal registration where the master token stays server-side:
+
+```typescript
+// === BROWSER ===
+import { S5, CHALLENGE_TYPE_REGISTER } from '@julesl23/s5js';
+
+// 1. Generate purpose-specific seed
+const seedBytes = crypto.getRandomValues(new Uint8Array(32));
+const seed = base64UrlEncode(seedBytes);
+
+// 2. Get public key for this seed
+const pubKey = await s5.getSigningPublicKey(seed);
+
+// 3. Send pubKey to backend, get challenge
+const { challenge } = await fetch('/api/s5/register-start', {
+  method: 'POST',
+  body: JSON.stringify({ pubKey })
+}).then(r => r.json());
+
+// 4. Build and sign the challenge message
+const challengeBytes = base64UrlDecode(challenge);
+const portalHostHash = await blake3(new TextEncoder().encode('s5.example.com'));
+const message = new Uint8Array([
+  CHALLENGE_TYPE_REGISTER,
+  ...challengeBytes,
+  ...portalHostHash
+]);
+const signature = await s5.sign(message, seed);
+
+// 5. Send signature to backend, get authToken
+const { authToken } = await fetch('/api/s5/register-complete', {
+  method: 'POST',
+  body: JSON.stringify({
+    pubKey,
+    response: base64UrlEncode(message),
+    signature  // Already base64url encoded!
+  })
+}).then(r => r.json());
+
+// 6. Configure S5 for immediate use
+s5.setPortalAuth('https://s5.example.com', authToken);
+
+// 7. Optionally persist for future sessions
+await s5.storePortalCredentials('https://s5.example.com', seed, authToken);
+```
+
+```typescript
+// === BACKEND (has master token) ===
+app.post('/api/s5/register-start', async (req, res) => {
+  const { pubKey } = req.body;
+
+  // Get challenge from portal using master token
+  const response = await fetch(
+    `https://s5.example.com/s5/account/register?pubKey=${pubKey}`,
+    { headers: { Authorization: `Bearer ${MASTER_TOKEN}` } }
+  );
+  const { challenge } = await response.json();
+
+  res.json({ challenge });
+});
+
+app.post('/api/s5/register-complete', async (req, res) => {
+  const { pubKey, response, signature } = req.body;
+
+  // Complete registration with portal using master token
+  const result = await fetch('https://s5.example.com/s5/account/register', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${MASTER_TOKEN}`
+    },
+    body: JSON.stringify({ pubKey, response, signature })
+  });
+
+  const authToken = result.headers.get('set-cookie')?.match(/s5-auth-token=([^;]+)/)?.[1];
+  res.json({ authToken });
+});
+```
+
 ## Public Download API
 
 The Public Download API enables downloading content by CID (Content Identifier) from S5 portals. This allows users to share content publicly - one user uploads and shares a CID, another user downloads by that CID.
@@ -371,7 +575,7 @@ import { S5, FS5Advanced, formatCID } from '@julesl23/s5js';
 // User A: Upload and share content
 const s5a = await S5.create({ initialPeers: [...] });
 await s5a.recoverIdentityFromSeedPhrase(seedPhrase);
-await s5a.registerOnNewPortal('https://s5.platformlessai.ai');
+await s5a.registerOnNewPortal('https://s5.ninja');
 
 // Store a file
 await s5a.fs.put('home/public/photo.jpg', imageData);
@@ -386,7 +590,7 @@ console.log('Share this CID:', cidString);
 // User B: Download by CID
 const s5b = await S5.create({ initialPeers: [...] });
 await s5b.recoverIdentityFromSeedPhrase(seedPhrase);
-await s5b.registerOnNewPortal('https://s5.platformlessai.ai');
+await s5b.registerOnNewPortal('https://s5.ninja');
 
 const data = await s5b.downloadByCID(cidString);
 console.log('Downloaded', data.length, 'bytes');
@@ -414,6 +618,8 @@ try {
 
 ### CID Format Utilities
 
+**Important:** S5 portals require BlobIdentifier CIDs (which include file size) for download endpoints. The `downloadByCID()` method handles both CID formats - it passes BlobIdentifier CIDs through unchanged and converts raw hash CIDs to base32 format.
+
 Additional utilities are available for working with CID formats:
 
 ```typescript
@@ -428,9 +634,20 @@ const hash = cidStringToHash(cidString);
 console.log(hash); // Uint8Array(32)
 
 // Convert CID to download-compatible format
-const downloadCID = cidToDownloadFormat(hash);
-console.log(downloadCID); // "baaaa..."
+// - BlobIdentifier CIDs pass through unchanged (portal requires this format)
+// - Uint8Array inputs are converted to base32 string
+const downloadCID = cidToDownloadFormat(blobIdentifierCID);
+console.log(downloadCID); // Same BlobIdentifier CID (unchanged)
 ```
+
+**CID Formats Explained:**
+
+| Format | Example Prefix | Length | Contains | Use Case |
+|--------|---------------|--------|----------|----------|
+| Raw Hash | `b...` | 53 chars | BLAKE3 hash only | Verification, deduplication |
+| BlobIdentifier | `blob...` or `u...` | 59+ chars | Hash + file size | Portal downloads, sharing |
+
+Both formats are accepted by `downloadByCID()`. For portal downloads, use `pathToBlobCID()` which returns BlobIdentifier format with size metadata.
 
 ### Mobile App Example
 
@@ -2351,6 +2568,52 @@ console.log(cid); // Uint8Array(32) [...]
 const formatted = formatCID(cid, 'base32');
 console.log(formatted); // "bafybeig..."
 ```
+
+#### pathToBlobCID(path)
+
+Get the full BlobIdentifier CID for a file path. Unlike `pathToCID()` which returns the raw 32-byte hash, this method returns the full BlobIdentifier string that includes the file size, which is required by S5 portals for downloading.
+
+```typescript
+async pathToBlobCID(path: string): Promise<string>
+```
+
+**Parameters:**
+- `path: string` - The file path (not directories)
+
+**Returns:**
+- `Promise<string>` - The BlobIdentifier CID as a base32 string (59 chars)
+
+**Throws:**
+- `Error` if path does not exist
+- `Error` if path is a directory (only works for files)
+
+**Example:**
+
+```typescript
+const s5 = await S5.create();
+await s5.recoverIdentityFromSeedPhrase(seedPhrase);
+
+const advanced = new FS5Advanced(s5.fs);
+
+// Store a file
+await s5.fs.put('home/photo.jpg', imageData);
+
+// Get BlobIdentifier CID for sharing/downloading
+const blobCID = await advanced.pathToBlobCID('home/photo.jpg');
+console.log(blobCID); // "uaah6c..." (59 chars with file size encoded)
+
+// Use with downloadByCID
+const data = await s5.downloadByCID(blobCID);
+```
+
+**CID Format Comparison:**
+
+| Method | Returns | Length | Use Case |
+|--------|---------|--------|----------|
+| `pathToCID()` | Raw BLAKE3 hash | 32 bytes | Verification, deduplication |
+| `pathToBlobCID()` | BlobIdentifier string | 59 chars | Portal downloads, sharing |
+
+For most download/sharing use cases, use `pathToBlobCID()` as it contains the file size metadata required by portals.
 
 #### cidToPath(cid)
 
