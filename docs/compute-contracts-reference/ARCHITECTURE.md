@@ -1,12 +1,14 @@
 # Architecture Documentation
 
-**Version:** 2.1
-**Last Updated:** January 16, 2026
+**Version:** 2.2
+**Last Updated:** January 31, 2026
 **Network:** Base Sepolia (Testnet)
 
 ---
 
-## 1. Contract Addresses (UUPS Proxies)
+## 1. Contract Addresses
+
+### Frozen Contracts (Auditors - DO NOT UPGRADE)
 
 | Contract | Proxy Address | Implementation |
 |----------|---------------|----------------|
@@ -15,6 +17,15 @@
 | ModelRegistry | `0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2` | `0x8491af1f0D47f6367b56691dCA0F4996431fB0A5` |
 | ProofSystem | `0x5afB91977e69Cc5003288849059bc62d47E7deeb` | `0xCF46BBa79eA69A68001A1c2f5Ad9eFA1AD435EF9` |
 | HostEarnings | `0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0` | `0x8584AeAC9687613095D13EF7be4dE0A796F84D7a` |
+
+### Test Contracts (Remediation - January 31, 2026)
+
+> **AUDIT Remediation**: These contracts include fixes for AUDIT-F1 through AUDIT-F5. Deployed as new proxies to avoid upgrading frozen audit contracts.
+
+| Contract | Test Proxy | Test Implementation |
+|----------|------------|---------------------|
+| JobMarketplace | `0x95132177F964FF053C1E874b53CF74d819618E06` | `0x06dB705BcBdda50A1712635fdC64A28d75de5603` |
+| ProofSystem | `0xE8DCa89e1588bbbdc4F7D5F78263632B35401B31` | `0x56657bCBAE50AB656A9452f7B52e317650f90267` |
 
 **Tokens:**
 - FAB Token: `0xC78949004B4EB6dEf2D66e49Cd81231472612D62`
@@ -55,9 +66,11 @@
 │  • Session management          • Deposit handling                           │
 │  • Proof submission            • Payment settlement                         │
 │  • Timeout enforcement         • Treasury collection                        │
+│  • proofTimeoutWindow (NEW)    • createSessionFromDepositForModel (NEW)    │
 └────────────────┬────────────────────────────────────┬───────────────────────┘
                  │                                    │
                  │ verifies signatures                │ credits earnings
+                 │ (now includes modelId)            │
                  ▼                                    ▼
     ┌───────────────────────┐            ┌───────────────────────┐
     │     ProofSystem       │            │    HostEarnings       │
@@ -65,6 +78,8 @@
     │  • ECDSA verification │            │  • Earnings ledger    │
     │  • Proof recording    │            │  • Batch withdrawals  │
     │  • Replay prevention  │            │  • Multi-token        │
+    │  • modelId validation │            │                       │
+    │    (NEW - AUDIT-F4)   │            │                       │
     └───────────────────────┘            └───────────────────────┘
 ```
 
@@ -74,7 +89,7 @@
 |----------|------------|-------------|
 | ModelRegistry | OpenZeppelin | NodeRegistry |
 | NodeRegistry | ModelRegistry, FAB Token | JobMarketplace |
-| JobMarketplace | NodeRegistry, ProofSystem, HostEarnings | - |
+| JobMarketplace | NodeRegistry, ProofSystem, HostEarnings, ModelRegistry | - |
 | ProofSystem | OpenZeppelin | JobMarketplace |
 | HostEarnings | OpenZeppelin | JobMarketplace |
 
@@ -91,8 +106,9 @@
     │  (Not Exists)    │
     └────────┬─────────┘
              │
-             │ createSessionJobForModel()
-             │ createSessionJobForModelWithToken()
+             │ createSessionJobForModel(... proofTimeoutWindow)  // NEW param
+             │ createSessionJobForModelWithToken(... proofTimeoutWindow)
+             │ createSessionFromDepositForModel(...)  // NEW function
              │
              ▼
     ┌──────────────────┐
@@ -100,14 +116,15 @@
     │     ACTIVE       │                                           │
     │                  │──── submitProofOfWork() ───────────────────┘
     │  status = 0      │     (updates tokensUsed, stores deltaCID)
-    │                  │
+    │                  │     (signature now includes modelId)
     └────────┬─────────┘
              │
              ├─────────────────────────┬────────────────────────────┐
              │                         │                            │
              │ completeSessionJob()    │ triggerSessionTimeout()    │
-             │ (host or depositor)     │ (anyone, after 3× interval)│
-             │ + conversationCID       │                            │
+             │ (host or depositor)     │ (anyone, after timeout)    │
+             │ + conversationCID       │ Uses proofTimeoutWindow    │
+             │                         │ (NOT proofInterval * 3)    │
              ▼                         ▼                            │
     ┌──────────────────┐    ┌──────────────────┐                   │
     │    COMPLETED     │    │    TIMED_OUT     │                   │
@@ -127,6 +144,8 @@
     │  ACTIVE → ACTIVE      : submitProofOfWork() [tokensUsed++]  ││
     │  ACTIVE → COMPLETED   : completeSessionJob(conversationCID)  │
     │  ACTIVE → TIMED_OUT   : triggerSessionTimeout()             ││
+    │                         (uses proofTimeoutWindow, not       ││
+    │                          proofInterval * 3 - AUDIT-F3 fix)  ││
     │                                                              ││
     │  COMPLETED → *        : BLOCKED (immutable)                 ││
     │  TIMED_OUT → *        : BLOCKED (immutable)                 ││
@@ -152,6 +171,7 @@
      │                                │                                  │
      │  3. createSessionJobForModel() │                                  │
      │    + ETH deposit               │                                  │
+     │    + proofTimeoutWindow (NEW)  │                                  │
      │ ──────────────────────────────>│                                  │
      │                                │                                  │
      │                                │  4. isActiveNode(host)?          │
@@ -166,12 +186,15 @@
      │                                │  7. true                         │
      │                                │ <────────────────────────────────│
      │                                │                                  │
-     │  8. SessionJobCreated event    │                                  │
+     │                                │  8. Validate proofTimeoutWindow  │
+     │                                │     (60-3600 seconds) - NEW      │
+     │                                │                                  │
+     │  9. SessionJobCreated event    │                                  │
      │ <──────────────────────────────│                                  │
      │                                │                                  │
 ```
 
-### 4.2 Proof Submission Flow
+### 4.2 Proof Submission Flow (Updated for AUDIT-F4)
 
 ```
 ┌──────┐                  ┌─────────────────┐                  ┌─────────────┐
@@ -181,28 +204,40 @@
    │  1. Generate inference        │                                  │
    │     (off-chain)               │                                  │
    │                               │                                  │
-   │  2. Upload proof to S5   │                                  │
+   │  2. Upload proof to S5        │                                  │
    │     → get proofCID, deltaCID  │                                  │
    │                               │                                  │
-   │  3. Sign proof:               │                                  │
-   │     hash(proof, tokens)       │                                  │
+   │  3. Get modelId from session  │                                  │
+   │     sessionModel(sessionId)   │                                  │
    │                               │                                  │
-   │  4. submitProofOfWork(        │                                  │
+   │  4. Sign proof WITH modelId:  │                                  │
+   │     hash(proof, host, tokens, │                                  │
+   │          modelId)  // NEW     │                                  │
+   │                               │                                  │
+   │  5. submitProofOfWork(        │                                  │
    │       jobId, tokens,          │                                  │
    │       proofHash, signature,   │                                  │
    │       proofCID, deltaCID)     │                                  │
    │ ─────────────────────────────>│                                  │
    │                               │                                  │
-   │                               │  5. verifyHostSignature()        │
+   │                               │  6. Check proofSystem != 0       │
+   │                               │     (AUDIT-F2 fix)               │
+   │                               │                                  │
+   │                               │  7. Get modelId = sessionModel[] │
+   │                               │                                  │
+   │                               │  8. verifyAndMarkComplete(       │
+   │                               │       proof, host, tokens,       │
+   │                               │       modelId)  // NEW param     │
    │                               │ ────────────────────────────────>│
    │                               │                                  │
-   │                               │  6. ECDSA.recover() == host?     │
+   │                               │  9. ECDSA.recover() with modelId │
+   │                               │     in signed message (AUDIT-F4) │
    │                               │ <────────────────────────────────│
    │                               │                                  │
-   │                               │  7. Update tokensUsed            │
+   │                               │ 10. Update tokensUsed            │
    │                               │     Store proofHash, deltaCID    │
    │                               │                                  │
-   │  8. ProofSubmitted event      │                                  │
+   │ 11. ProofSubmitted event      │                                  │
    │     (includes deltaCID)       │                                  │
    │ <─────────────────────────────│                                  │
    │                               │                                  │
@@ -315,7 +350,7 @@ mapping(address => uint256) public accumulatedTreasuryTokens;  // Slot 19
 uint256[50] private __gap;
 ```
 
-### 5.2 SessionJob Struct Layout
+### 5.2 SessionJob Struct Layout (Updated - AUDIT-F3)
 
 ```solidity
 struct SessionJob {
@@ -327,14 +362,15 @@ struct SessionJob {
     uint256 tokensUsed;        // 32 bytes (renamed from tokensProven)
     uint256 startTime;         // 32 bytes
     uint256 maxDuration;       // 32 bytes
-    uint256 proofInterval;     // 32 bytes
+    uint256 proofInterval;     // 32 bytes (min tokens per proof)
+    uint256 proofTimeoutWindow;// 32 bytes (NEW - AUDIT-F3: timeout in seconds)
     uint256 lastProofTime;     // 32 bytes
     bytes32 lastProofHash;     // 32 bytes
     string lastProofCID;       // Dynamic (S5 CID)
     string conversationCID;    // Dynamic (S5 CID) - set on completion
     SessionStatus status;      // 1 byte (enum: Active=0, Completed=1, TimedOut=2)
 }
-// Total: ~12 storage slots per session (plus dynamic strings)
+// Total: ~13 storage slots per session (plus dynamic strings)
 ```
 
 ### 5.3 NodeRegistryWithModelsUpgradeable
@@ -451,6 +487,7 @@ contract JobMarketplaceUpgradeable is ReentrancyGuardTransient {
 - `registerNode()`, `unregisterNode()`, `stake()` (NodeRegistry)
 - `withdraw()`, `withdrawToken()` (HostEarnings)
 - Session creation and completion functions (JobMarketplace)
+- `depositToken()` (JobMarketplace) - Added for AUDIT remediation
 
 ### 7.2 Safe Transfer Patterns
 
@@ -503,6 +540,36 @@ Address.sendValue(payable(recipient), amount);
 └─────────────────────────────────────────────┘
 ```
 
+### 7.4 Signature Verification (Updated - AUDIT-F4)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              Proof Signature Scheme (AUDIT-F4)               │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  SIGNED MESSAGE FORMAT:                                     │
+│  ──────────────────────                                     │
+│  keccak256(                                                 │
+│    proofHash,      // bytes32 - hash of proof data          │
+│    hostAddress,    // address - session host                │
+│    tokensClaimed,  // uint256 - tokens in this proof        │
+│    modelId         // bytes32 - session model (NEW)         │
+│  )                                                          │
+│                                                             │
+│  WHY modelId IS REQUIRED (AUDIT-F4):                        │
+│  • Prevents cross-model replay attacks                      │
+│  • Non-model sessions use bytes32(0)                        │
+│  • modelId retrieved from sessionModel[sessionId]           │
+│                                                             │
+│  VERIFICATION FLOW:                                         │
+│  1. JobMarketplace gets modelId from sessionModel[]         │
+│  2. Passes modelId to ProofSystem.verifyAndMarkComplete()   │
+│  3. ProofSystem includes modelId in hash reconstruction     │
+│  4. ECDSA.recover() verifies host signed with modelId       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## 8. Gas Optimization Patterns
@@ -548,6 +615,7 @@ function _removeNodeFromModel(bytes32 modelId, address node) private {
 | JobMarketplace | `SessionJobCreated` | Track session starts |
 | JobMarketplace | `SessionCompleted` | Track completions, payments |
 | JobMarketplace | `ProofSubmitted` | Track proof history (includes deltaCID) |
+| JobMarketplace | `ModelSessionCreated` | Track model-specific sessions (NEW) |
 | NodeRegistry | `NodeRegistered` | Track host onboarding |
 | NodeRegistry | `PricingUpdated` | Track price changes |
 | ModelRegistry | `ModelProposed` | Track governance |
@@ -569,4 +637,38 @@ function _removeNodeFromModel(bytes32 modelId, address node) private {
 │  • modelId (ModelProposed, SessionJobCreated)              │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 10. AUDIT Remediation Summary
+
+### Finding Fixes (January 31, 2026)
+
+| Finding | Severity | Description | Fix |
+|---------|----------|-------------|-----|
+| AUDIT-F1 | Low | Dead `onlyRegisteredHost` modifier | Removed unused code |
+| AUDIT-F2 | High | ProofSystem address(0) allows arbitrary proofs | Added require check |
+| AUDIT-F3 | Medium | `proofInterval` dual interpretation | Separate `proofTimeoutWindow` param |
+| AUDIT-F4 | Medium | Missing modelId in signatures | Include modelId in signed message |
+| AUDIT-F5 | Low | Missing `createSessionFromDepositForModel` | Added new function |
+
+### Breaking Changes
+
+| Change | Impact | Migration |
+|--------|--------|-----------|
+| ProofSystem required | Sessions fail if ProofSystem not configured | Ensure ProofSystem is set before deployment |
+| `proofTimeoutWindow` parameter | All session creation calls need new parameter | SDK must pass 60-3600 seconds |
+| `modelId` in signature | Hosts MUST include modelId in signed message | Host software update required |
+| IProofSystem interface | Functions now require modelId parameter | Update all callers |
+
+### Test Contract Verification
+
+```bash
+# Verify test contracts include fixes
+cast call 0x95132177F964FF053C1E874b53CF74d819618E06 "MIN_PROOF_TIMEOUT()" --rpc-url https://sepolia.base.org
+# Expected: 60
+
+cast call 0x95132177F964FF053C1E874b53CF74d819618E06 "MAX_PROOF_TIMEOUT()" --rpc-url https://sepolia.base.org
+# Expected: 3600
 ```
