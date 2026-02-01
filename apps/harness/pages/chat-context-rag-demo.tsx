@@ -1127,6 +1127,7 @@ export default function ChatContextDemo() {
         depositAmount: SESSION_DEPOSIT_AMOUNT,
         pricePerToken: Number(host.pricePerToken || PRICE_PER_TOKEN),
         proofInterval: PROOF_INTERVAL,
+        proofTimeoutWindow: 300, // AUDIT-F3: 5 minute timeout (60-3600 range)
         duration: SESSION_DURATION,
         paymentToken: contracts.USDC,
         useDeposit: false, // Use direct payment with Auto Spend Permissions

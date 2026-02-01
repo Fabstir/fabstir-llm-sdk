@@ -21,10 +21,11 @@ const SEED_WORDS_LENGTH = 13; // 13 words provide the entropy
 const CHECKSUM_WORDS_LENGTH = 2; // 2 words for checksum
 const PHRASE_LENGTH = SEED_WORDS_LENGTH + CHECKSUM_WORDS_LENGTH; // 15 total
 const LAST_WORD_INDEX = 12; // Index of the 13th word (0-based)
-export const SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM SDK v2.0';
-export const SEED_DOMAIN_SEPARATOR = 'fabstir-s5-seed-v2'; // For address-based derivation (Base Account Kit)
+// AUDIT REMEDIATION: Updated seed message and cache version for fresh S5 identity
+export const SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM SDK v2.1 beta';
+export const SEED_DOMAIN_SEPARATOR = 'fabstir-s5-seed-v2.1'; // For address-based derivation (Base Account Kit)
 const CACHE_PREFIX = 'fabstir_s5_seed_';
-const CACHE_VERSION = 'v3'; // Bumped for test→production transition
+const CACHE_VERSION = 'v4'; // Bumped for AUDIT remediation - invalidates old cached seeds
 
 /**
  * Derives deterministic entropy from a wallet signature

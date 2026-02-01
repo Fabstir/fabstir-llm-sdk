@@ -12,6 +12,11 @@ import {
 // Use Upgradeable CLIENT-ABI which has model-specific functions and UUPS support
 import JobMarketplaceABI from './abis/JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json';
 
+// AUDIT-F3: Proof timeout constants (in seconds)
+export const MIN_PROOF_TIMEOUT = 60;       // 1 minute minimum
+export const MAX_PROOF_TIMEOUT = 3600;     // 1 hour maximum
+export const DEFAULT_PROOF_TIMEOUT = 300;  // 5 minutes (recommended)
+
 export interface SessionCreationParams {
   host: string;
   paymentToken: string;
@@ -19,6 +24,8 @@ export interface SessionCreationParams {
   pricePerToken: number;
   duration: number;
   proofInterval: number;
+  /** AUDIT-F3: Timeout window in seconds (60-3600, default 300) */
+  proofTimeoutWindow?: number;
   modelId?: string;  // Optional bytes32 model ID for model-specific pricing
 }
 
@@ -27,6 +34,8 @@ export interface DirectSessionParams {
   pricePerToken: number;
   duration: number;
   proofInterval: number;
+  /** AUDIT-F3: Timeout window in seconds (60-3600, default 300) */
+  proofTimeoutWindow?: number;
   paymentAmount: string;
   modelId?: string;  // Optional bytes32 model ID for model-specific pricing
 }
@@ -44,10 +53,23 @@ export interface SessionJob {
   startTime: number;
   lastProofTime: number;
   proofInterval: number;
+  /** AUDIT-F3: Timeout window for proof submissions */
+  proofTimeoutWindow: number;
   status: number;
   withdrawnByHost: string;
   refundedToUser: string;
   conversationCID: string;
+}
+
+/** Validate proofTimeoutWindow is within allowed range */
+function validateProofTimeoutWindow(timeout?: number): number {
+  const value = timeout ?? DEFAULT_PROOF_TIMEOUT;
+  if (value < MIN_PROOF_TIMEOUT || value > MAX_PROOF_TIMEOUT) {
+    throw new Error(
+      `proofTimeoutWindow must be between ${MIN_PROOF_TIMEOUT} and ${MAX_PROOF_TIMEOUT} seconds, got ${value}`
+    );
+  }
+  return value;
 }
 
 export class JobMarketplaceWrapper {
@@ -209,11 +231,27 @@ export class JobMarketplaceWrapper {
         : ethers.parseUnits(params.deposit, 18);
     }
 
-    // Note: createSessionFromDeposit doesn't support model-specific pricing
-    // For model-specific pricing, use createSessionJob with useDeposit: false
+    // AUDIT-F3: Validate and get proofTimeoutWindow
+    const proofTimeoutWindow = validateProofTimeoutWindow(params.proofTimeoutWindow);
+
+    // AUDIT-F5: Use createSessionFromDepositForModel if modelId is provided
     if (params.modelId) {
-      console.warn(`[JobMarketplace] createSessionFromDeposit doesn't support model-specific pricing. ` +
-        `Using host default minimum. For model pricing, use direct payment (useDeposit: false).`);
+      console.log(`[JobMarketplace] Using createSessionFromDepositForModel with modelId: ${params.modelId}`);
+      const tx = await this.contract.createSessionFromDepositForModel(
+        params.modelId,
+        params.host,
+        params.paymentToken,
+        depositValue,
+        params.pricePerToken,
+        params.duration,
+        params.proofInterval,
+        proofTimeoutWindow
+      );
+      const receipt = await tx.wait();
+      const event = receipt.logs?.find((log: any) =>
+        log.fragment?.name === 'SessionJobCreatedForModel' || log.fragment?.name === 'SessionCreatedByDepositor'
+      );
+      return event ? Number(event.args?.sessionId || event.args[0]) : 0;
     }
 
     const tx = await this.contract.createSessionFromDeposit(
@@ -222,7 +260,8 @@ export class JobMarketplaceWrapper {
       depositValue,
       params.pricePerToken,
       params.duration,
-      params.proofInterval
+      params.proofInterval,
+      proofTimeoutWindow
     );
 
     const receipt = await tx.wait();
@@ -243,6 +282,9 @@ export class JobMarketplaceWrapper {
       throw new Error('Contract is paused for maintenance - cannot create sessions');
     }
 
+    // AUDIT-F3: Validate and get proofTimeoutWindow
+    const proofTimeoutWindow = validateProofTimeoutWindow(params.proofTimeoutWindow);
+
     // Check if we're using USDC or ETH
     const isUSDC = params.paymentToken && params.paymentToken !== ethers.ZeroAddress;
 
@@ -261,7 +303,8 @@ export class JobMarketplaceWrapper {
           amountInUSDC,         // deposit amount
           params.pricePerToken,
           params.duration,
-          params.proofInterval
+          params.proofInterval,
+          proofTimeoutWindow    // AUDIT-F3: 8th parameter
         );
       } else {
         tx = await this.contract.createSessionJobWithToken(
@@ -270,7 +313,8 @@ export class JobMarketplaceWrapper {
           amountInUSDC,         // deposit amount
           params.pricePerToken,
           params.duration,
-          params.proofInterval
+          params.proofInterval,
+          proofTimeoutWindow    // AUDIT-F3: 7th parameter
         );
       }
 
@@ -291,6 +335,7 @@ export class JobMarketplaceWrapper {
       console.log('  Model ID:', params.modelId || 'none');
       console.log('  Duration:', params.duration);
       console.log('  Proof interval:', params.proofInterval);
+      console.log('  Proof timeout window:', proofTimeoutWindow);
 
       let tx;
       if (params.modelId) {
@@ -302,6 +347,7 @@ export class JobMarketplaceWrapper {
           params.pricePerToken,
           params.duration,
           params.proofInterval,
+          proofTimeoutWindow,   // AUDIT-F3: 6th parameter
           { value }
         );
       } else {
@@ -310,6 +356,7 @@ export class JobMarketplaceWrapper {
           params.pricePerToken,
           params.duration,
           params.proofInterval,
+          proofTimeoutWindow,   // AUDIT-F3: 5th parameter
           { value }
         );
       }
@@ -332,7 +379,7 @@ export class JobMarketplaceWrapper {
     await this.verifyChain();
     const session = await this.contract.sessionJobs(jobId);
 
-    // Handle the 16-field struct from sessionJobs
+    // Handle the struct from sessionJobs (now includes proofTimeoutWindow)
     return {
       id: Number(session[0]),
       depositor: session[1],
@@ -346,10 +393,11 @@ export class JobMarketplaceWrapper {
       startTime: Number(session[9]),
       lastProofTime: Number(session[10]),
       proofInterval: Number(session[11]),
-      status: Number(session[12]),
-      withdrawnByHost: ethers.formatEther(session[13]),
-      refundedToUser: ethers.formatEther(session[14]),
-      conversationCID: session[15]
+      proofTimeoutWindow: Number(session[12]),  // AUDIT-F3: new field
+      status: Number(session[13]),
+      withdrawnByHost: ethers.formatEther(session[14]),
+      refundedToUser: ethers.formatEther(session[15]),
+      conversationCID: session[16]
     };
   }
 
@@ -358,7 +406,7 @@ export class JobMarketplaceWrapper {
    *
    * @param sessionId - The session/job ID
    * @param proofIndex - Index of the proof submission (0-based)
-   * @returns Proof submission result with proofHash, tokensClaimed, timestamp, verified
+   * @returns Proof submission result with proofHash, tokensClaimed, timestamp, verified, deltaCID
    */
   async getProofSubmission(
     sessionId: bigint,
@@ -368,11 +416,12 @@ export class JobMarketplaceWrapper {
     tokensClaimed: bigint;
     timestamp: bigint;
     verified: boolean;
+    deltaCID: string;  // Added in AUDIT remediation
   }> {
     await this.verifyChain();
-    const [proofHash, tokensClaimed, timestamp, verified] =
+    const [proofHash, tokensClaimed, timestamp, verified, deltaCID] =
       await this.contract.getProofSubmission(sessionId, proofIndex);
-    return { proofHash, tokensClaimed, timestamp, verified };
+    return { proofHash, tokensClaimed, timestamp, verified, deltaCID };
   }
 
   // Chain Management

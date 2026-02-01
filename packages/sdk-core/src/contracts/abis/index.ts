@@ -33,18 +33,30 @@ export {
 };
 
 // Export specific ABI fragments for common operations
+// AUDIT-F3: All session creation functions now require proofTimeoutWindow parameter
 export const JobMarketplaceFragments = {
-  createSessionJobWithToken: 'function createSessionJobWithToken(address host, address token, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval) returns (uint256)',
-  // Security Audit Migration: submitProofOfWork now requires ECDSA signature from host
-  submitProofOfWork: 'function submitProofOfWork(uint256 jobId, uint256 tokensClaimed, bytes32 proofHash, bytes signature, string proofCID)',
+  // Session creation functions (AUDIT-F3: added proofTimeoutWindow)
+  createSessionJob: 'function createSessionJob(address host, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) payable returns (uint256)',
+  createSessionJobForModel: 'function createSessionJobForModel(address host, bytes32 modelId, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) payable returns (uint256)',
+  createSessionJobWithToken: 'function createSessionJobWithToken(address host, address token, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)',
+  createSessionJobForModelWithToken: 'function createSessionJobForModelWithToken(address host, bytes32 modelId, address token, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)',
+  createSessionFromDeposit: 'function createSessionFromDeposit(address host, address paymentToken, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)',
+  // AUDIT-F5: New function for model-specific deposit sessions
+  createSessionFromDepositForModel: 'function createSessionFromDepositForModel(bytes32 modelId, address host, address paymentToken, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)',
+  // Proof functions (includes deltaCID)
+  submitProofOfWork: 'function submitProofOfWork(uint256 jobId, uint256 tokensClaimed, bytes32 proofHash, bytes signature, string proofCID, string deltaCID)',
   getSessionJob: 'function getSessionJob(uint256 jobId) returns (tuple(address host, address renter, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 endTime, uint256 proofInterval, uint256 tokensProven, uint256 completedAt, address paymentToken, bool isCompleted))',
   withdrawTreasuryTokens: 'function withdrawTreasuryTokens(address token) returns (bool)',
-  // New view functions from Security Audit
-  getProofSubmission: 'function getProofSubmission(uint256 sessionId, uint256 proofIndex) view returns (bytes32 proofHash, uint256 tokensClaimed, uint256 timestamp, bool verified)',
+  // View functions (getProofSubmission now returns deltaCID)
+  getProofSubmission: 'function getProofSubmission(uint256 sessionId, uint256 proofIndex) view returns (bytes32 proofHash, uint256 tokensClaimed, uint256 timestamp, bool verified, string deltaCID)',
   getLockedBalanceNative: 'function getLockedBalanceNative(address account) view returns (uint256)',
   getLockedBalanceToken: 'function getLockedBalanceToken(address account, address token) view returns (uint256)',
   getTotalBalanceNative: 'function getTotalBalanceNative(address account) view returns (uint256)',
-  getTotalBalanceToken: 'function getTotalBalanceToken(address account, address token) view returns (uint256)'
+  getTotalBalanceToken: 'function getTotalBalanceToken(address account, address token) view returns (uint256)',
+  // Timeout constants (AUDIT-F3)
+  MIN_PROOF_TIMEOUT: 'function MIN_PROOF_TIMEOUT() view returns (uint256)',
+  MAX_PROOF_TIMEOUT: 'function MAX_PROOF_TIMEOUT() view returns (uint256)',
+  DEFAULT_PROOF_TIMEOUT: 'function DEFAULT_PROOF_TIMEOUT() view returns (uint256)'
 };
 
 export const HostEarningsFragments = {

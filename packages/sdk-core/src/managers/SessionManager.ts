@@ -133,6 +133,8 @@ export interface ExtendedSessionConfig extends SessionConfig {
   modelId: string;
   paymentMethod: 'deposit' | 'direct';
   depositAmount?: ethers.BigNumberish;
+  /** AUDIT-F3: Timeout window in seconds (60-3600, default 300) */
+  proofTimeoutWindow?: number;
   encryption?: boolean; // NEW: Enable E2EE
   groupId?: string; // NEW: Session Groups integration
   vectorDatabase?: {
@@ -330,6 +332,7 @@ export class SessionManager implements ISessionManager {
         amount: config.depositAmount,  // PaymentManagerMultiChain expects 'amount', not 'depositAmount'
         pricePerToken: validatedPrice, // Use model price from contract
         proofInterval: config.proofInterval,
+        proofTimeoutWindow: config.proofTimeoutWindow,  // AUDIT-F3
         duration: config.duration,
         chainId: config.chainId,
         paymentToken: config.paymentToken,
