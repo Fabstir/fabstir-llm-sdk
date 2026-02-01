@@ -409,6 +409,7 @@ export default function ChatContextDemo() {
         s5Config: {
           portalUrl: process.env.NEXT_PUBLIC_S5_PORTAL_URL,
           seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE,
+          masterToken: process.env.NEXT_PUBLIC_S5_MASTER_TOKEN, // For test harness portal registration
         },
       };
 
@@ -551,13 +552,14 @@ export default function ChatContextDemo() {
     );
     setSubAccount(sub);
 
-    // Pre-cache seed for sub-account to avoid S5 popup
-    const subAccountLower = sub.toLowerCase();
-    if (!hasCachedSeed(subAccountLower)) {
+    // Pre-cache seed for smartWallet (primary) to avoid S5 popup
+    // Note: SDK uses signer.getAddress() which returns smartWallet, not sub-account
+    const smartWalletLower = smartWallet.toLowerCase();
+    if (!hasCachedSeed(smartWalletLower)) {
       const testSeed =
         "yield organic score bishop free juice atop village video element unless sneak care rock update";
-      cacheSeed(subAccountLower, testSeed);
-      console.log("[S5 Seed] Pre-cached test seed for sub-account");
+      cacheSeed(smartWalletLower, testSeed);
+      console.log("[S5 Seed] Pre-cached test seed for smartWallet (primary)");
       addMessage("system", "💾 Pre-cached S5 seed (no popup)");
     }
 
