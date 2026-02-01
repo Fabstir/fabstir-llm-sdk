@@ -581,7 +581,8 @@ async function setupPopupFreeTransactions() {
       depositAmount: "1.0",
       pricePerToken: 200,
       duration: 3600,
-      proofInterval: 100
+      proofInterval: 100,
+      proofTimeoutWindow: 300 // 5 min proof timeout
     }
   );
 
@@ -808,6 +809,7 @@ interface SessionConfig {
   pricePerToken: number;     // Price per token (e.g., 200)
   duration: number;          // Session duration in seconds (e.g., 3600)
   proofInterval: number;     // Checkpoint interval in tokens (e.g., 100)
+  proofTimeoutWindow?: number; // Proof timeout window in seconds (60-3600, default: 300)
   encryption?: boolean;      // Enable end-to-end encryption (default: true)
 ```
 
@@ -821,6 +823,7 @@ const { sessionId, jobId } = await sessionManager.startSession(
     pricePerToken: 200,      // 0.0002 USDC per token (0.02 cents)
     duration: 3600,          // 1 hour session timeout
     proofInterval: 100,      // Checkpoint every 100 tokens
+    proofTimeoutWindow: 300, // 5 min proof timeout (60-3600, default: 300)
     encryption: true         // Enable E2EE (default, can be omitted)
   },
   'http://localhost:8080'   // Optional: Host WebSocket endpoint
@@ -1475,6 +1478,7 @@ async createSessionJobWithUSDC(
     pricePerToken: number;
     duration: number;
     proofInterval: number;
+    proofTimeoutWindow?: number; // 60-3600 seconds, default: 300
   }
 ): Promise<{
     sessionId: bigint;
@@ -1490,7 +1494,8 @@ const result = await paymentManager.createSessionJobWithUSDC(
   {
     pricePerToken: 200,
     duration: 3600,
-    proofInterval: 100
+    proofInterval: 100,
+    proofTimeoutWindow: 300 // 5 min proof timeout (60-3600)
   }
 );
 ```
@@ -1507,6 +1512,7 @@ async createSessionJobWithETH(
     pricePerToken: number;
     duration: number;
     proofInterval: number;
+    proofTimeoutWindow?: number; // 60-3600 seconds, default: 300
   }
 ): Promise<{
     sessionId: bigint;
@@ -4348,6 +4354,7 @@ interface SessionJobParams {
     pricePerToken: bigint;
     duration: bigint;
     proofInterval: bigint;
+    proofTimeoutWindow?: number; // Proof timeout in seconds (60-3600, default: 300)
   };
 }
 
@@ -4712,6 +4719,7 @@ interface SessionConfig {
   pricePerToken: number;  // Price per token in smallest units
   duration: number;       // Session duration in seconds
   proofInterval: number;  // Checkpoint interval in tokens
+  proofTimeoutWindow?: number; // Proof timeout window (60-3600 seconds, default: 300)
 }
 
 interface SessionJob {
