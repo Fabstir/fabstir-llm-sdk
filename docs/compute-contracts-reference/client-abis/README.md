@@ -42,6 +42,13 @@ This directory contains the Application Binary Interfaces (ABIs) for client inte
 - **Previous Breaking Change (Jan 6, 2026)**:
   - `submitProofOfWork` added `bytes calldata signature` parameter
   - Hosts must sign their proofs with ECDSA for verification
+- **New Feature (Feb 2, 2026) - Delegated Session Creation**:
+  - `authorizeDelegate(address delegate, bool authorized)` - Authorize/revoke delegates for sub-account support
+  - `isDelegateAuthorized(address depositor, address delegate)` - Check if delegate is authorized
+  - `createSessionFromDepositAsDelegate(...)` - Delegate creates non-model session from depositor's funds
+  - `createSessionFromDepositForModelAsDelegate(...)` - Delegate creates model-specific session from depositor's funds
+  - `isAuthorizedDelegate(address, address)` - Public mapping for delegate authorization status
+  - New events: `DelegateAuthorized`, `SessionCreatedByDelegate`
 
 ### NodeRegistryWithModelsUpgradeable
 - **Proxy Address**: `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22`
@@ -120,6 +127,60 @@ const upgradeableContracts = {
   usdcToken: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 };
 ```
+
+### Remediation Contracts (For Testing Security Fixes)
+
+> **Note**: These contracts are deployed for testing remediation fixes ONLY. The frozen audit contracts above remain unchanged for auditors.
+
+```javascript
+// Remediation contracts for testing security audit fixes (Feb 2, 2026)
+const remediationContracts = {
+  jobMarketplace: "0x95132177F964FF053C1E874b53CF74d819618E06",  // Remediation proxy
+  proofSystem: "0xE8DCa89e1588bbbdc4F7D5F78263632B35401B31",     // Remediation proxy
+  nodeRegistry: "0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22",    // Shared
+  hostEarnings: "0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0",    // Shared
+  modelRegistry: "0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2",  // Shared
+};
+
+// Implementation addresses for remediation
+const remediationImplementations = {
+  jobMarketplace: "0x305EC43ae2D6D110c2db8DD9F5420FFd2b551F57",  // With delegation (Feb 2, 2026)
+  proofSystem: "0x56657bCBAE50AB656A9452f7B52e317650f90267",     // AUDIT fixes
+};
+```
+
+### Delegated Session Creation (Smart Wallet Support)
+
+Enable sub-accounts to create sessions using the primary account's deposits:
+
+```javascript
+// 1. Primary wallet authorizes sub-account (one-time setup)
+await marketplace.connect(primaryWallet).authorizeDelegate(subAccount.address, true);
+
+// 2. Sub-account creates sessions from primary's deposits (no popup required)
+const sessionId = await marketplace.connect(subAccount).createSessionFromDepositForModelAsDelegate(
+  primaryWallet.address,  // depositor (who has the funds)
+  modelId,                // model to use
+  hostAddress,            // host to connect to
+  ethers.ZeroAddress,     // payment token (address(0) for ETH)
+  ethers.parseEther("0.5"), // deposit amount
+  pricePerToken,
+  3600,                   // maxDuration
+  100,                    // proofInterval
+  300                     // proofTimeoutWindow
+);
+
+// 3. Check authorization status
+const isAuthorized = await marketplace.isDelegateAuthorized(primaryWallet.address, subAccount.address);
+
+// 4. Revoke authorization if needed
+await marketplace.connect(primaryWallet).authorizeDelegate(subAccount.address, false);
+```
+
+**Key Points:**
+- Sessions created by delegates are owned by the depositor (refunds go to depositor)
+- Delegates can only use funds from accounts that have explicitly authorized them
+- Authorization can be revoked at any time by the depositor
 
 ### Corrupt Node Recovery (January 10, 2026)
 
@@ -868,9 +929,10 @@ const HOST_EARNINGS = '0x908962e8c6CE72610021586f85ebDE09aAc97776';
 - **Replacement**: 0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6
 
 ## Last Updated
-January 16, 2026 - Stake slashing feature for NodeRegistry
+February 2, 2026 - Delegated session creation for Smart Wallet sub-accounts
 
 ### Recent Changes
+- **Feb 2, 2026**: Delegated sessions - `authorizeDelegate()`, `isDelegateAuthorized()`, `createSessionFromDepositAsDelegate()`, `createSessionFromDepositForModelAsDelegate()`
 - **Jan 16, 2026**: Stake slashing - `slashStake()`, `initializeSlashing()`, `setSlashingAuthority()`, `setTreasury()`, `lastSlashTime()`
 - **Jan 14, 2026**: deltaCID support - `submitProofOfWork` now 6 params, `getProofSubmission` returns 5 values
 - **Jan 10, 2026**: NodeRegistry - Added `repairCorruptNode()` admin function and safety check in `unregisterNode()`

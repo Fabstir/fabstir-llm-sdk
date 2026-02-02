@@ -2,6 +2,153 @@
 
 ---
 
+## February 2, 2026: Delegated Session Creation (NEW FEATURE - Non-Breaking)
+
+**Contracts Affected**: JobMarketplaceWithModelsUpgradeable
+**Impact Level**: LOW - New feature, fully backward compatible
+
+### Summary
+
+New delegation system enables Coinbase Smart Wallet sub-accounts (and other delegates) to create sessions using the primary account's pre-deposited funds without requiring authorization popups.
+
+| Change | Impact | Action Required |
+|--------|--------|-----------------|
+| New `isAuthorizedDelegate` mapping | NONE | Optional - use for sub-account support |
+| New `authorizeDelegate()` function | NONE | Optional - enable delegation |
+| New `isDelegateAuthorized()` function | NONE | Optional - query authorization |
+| New `createSessionFromDepositAsDelegate()` | NONE | Optional - delegate session creation |
+| New `createSessionFromDepositForModelAsDelegate()` | NONE | Optional - delegate model session |
+| Storage gap reduced from 35 to 34 | NONE | Internal change, no impact |
+
+### Remediation Contract Addresses
+
+| Contract | Remediation Proxy | Frozen Proxy (Auditors) |
+|----------|-------------------|-------------------------|
+| JobMarketplace | `0x95132177F964FF053C1E874b53CF74d819618E06` | `0x3CaCbf3f448B420918A93a88706B26Ab27a3523E` |
+
+### New Functions
+
+#### `authorizeDelegate(address delegate, bool authorized)`
+
+Primary account authorizes a delegate (e.g., Smart Wallet sub-account) to create sessions on their behalf.
+
+```solidity
+function authorizeDelegate(address delegate, bool authorized) external
+```
+
+**Events:**
+```solidity
+event DelegateAuthorized(address indexed depositor, address indexed delegate, bool authorized);
+```
+
+#### `isDelegateAuthorized(address depositor, address delegate)`
+
+Check if a delegate is authorized for a depositor.
+
+```solidity
+function isDelegateAuthorized(address depositor, address delegate) external view returns (bool)
+```
+
+#### `createSessionFromDepositAsDelegate(...)`
+
+Delegate creates a non-model session from depositor's pre-deposited funds.
+
+```solidity
+function createSessionFromDepositAsDelegate(
+    address depositor,
+    address host,
+    address paymentToken,
+    uint256 deposit,
+    uint256 pricePerToken,
+    uint256 maxDuration,
+    uint256 proofInterval,
+    uint256 proofTimeoutWindow
+) external returns (uint256 sessionId)
+```
+
+#### `createSessionFromDepositForModelAsDelegate(...)`
+
+Delegate creates a model-specific session from depositor's pre-deposited funds.
+
+```solidity
+function createSessionFromDepositForModelAsDelegate(
+    address depositor,
+    bytes32 modelId,
+    address host,
+    address paymentToken,
+    uint256 deposit,
+    uint256 pricePerToken,
+    uint256 maxDuration,
+    uint256 proofInterval,
+    uint256 proofTimeoutWindow
+) external returns (uint256 sessionId)
+```
+
+**Events:**
+```solidity
+event SessionCreatedByDelegate(
+    uint256 indexed sessionId,
+    address indexed depositor,
+    address indexed delegate,
+    address host,
+    bytes32 modelId,
+    uint256 deposit
+);
+```
+
+### Usage Example
+
+```javascript
+// 1. Primary wallet deposits funds (one-time)
+await marketplace.connect(primaryWallet).depositNative({ value: ethers.parseEther("5") });
+
+// 2. Primary wallet authorizes sub-account (one-time)
+await marketplace.connect(primaryWallet).authorizeDelegate(subAccount.address, true);
+
+// 3. Sub-account creates sessions without popups (repeatable)
+const sessionId = await marketplace.connect(subAccount).createSessionFromDepositForModelAsDelegate(
+  primaryWallet.address,  // depositor
+  modelId,
+  hostAddress,
+  ethers.ZeroAddress,     // ETH payment
+  ethers.parseEther("0.5"),
+  pricePerToken,
+  3600,                   // 1 hour
+  100,                    // proof interval
+  300                     // timeout window
+);
+
+// Session is owned by primaryWallet - refunds go to primary
+```
+
+### Security Considerations
+
+| Security Aspect | Implementation |
+|-----------------|----------------|
+| Authorization Check | Verified before any deposit operation |
+| Session Ownership | Always set to depositor, never delegate |
+| Refund Direction | All refunds go to depositor |
+| Revocation | Depositor can revoke at any time |
+| Pause Protection | Delegated functions respect contract pause |
+
+### Migration Checklist
+
+#### For SDK Developers (Optional)
+
+- [ ] Add `authorizeDelegate()` support to SDK
+- [ ] Add `isDelegateAuthorized()` query function
+- [ ] Add delegated session creation functions
+- [ ] Subscribe to `DelegateAuthorized` and `SessionCreatedByDelegate` events
+- [ ] Update cached ABIs from `client-abis/`
+
+#### For Smart Wallet Integrations
+
+- [ ] One-time: Call `authorizeDelegate(subAccount, true)` from primary wallet
+- [ ] Use `createSessionFromDepositForModelAsDelegate()` from sub-accounts
+- [ ] Handle `SessionCreatedByDelegate` events for session tracking
+
+---
+
 ## January 31, 2026: AUDIT Security Remediation (AUDIT-F1 to AUDIT-F5)
 
 **Contracts Affected**: JobMarketplaceWithModelsUpgradeable, ProofSystemUpgradeable, IProofSystem

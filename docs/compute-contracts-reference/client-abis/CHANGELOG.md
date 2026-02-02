@@ -1,5 +1,70 @@
 # Client ABIs Changelog
 
+## February 2, 2026 - Delegated Session Creation for Smart Wallet Sub-Accounts
+
+### New Feature: Delegation Support
+
+Enable Coinbase Smart Wallet sub-accounts (and other delegates) to create sessions using the primary account's pre-deposited funds without requiring authorization popups for each transaction.
+
+**New Storage:**
+```solidity
+// Delegation mapping for Smart Wallet sub-account support
+mapping(address => mapping(address => bool)) public isAuthorizedDelegate;
+```
+
+**New Events:**
+```solidity
+event DelegateAuthorized(address indexed depositor, address indexed delegate, bool authorized);
+event SessionCreatedByDelegate(uint256 indexed sessionId, address indexed depositor, address indexed delegate, address host, bytes32 modelId, uint256 deposit);
+```
+
+**New Functions:**
+
+| Function | Purpose |
+|----------|---------|
+| `authorizeDelegate(address, bool)` | Primary account authorizes/revokes delegate |
+| `isDelegateAuthorized(address, address)` | Check if delegate is authorized |
+| `createSessionFromDepositAsDelegate(...)` | Delegate creates non-model session |
+| `createSessionFromDepositForModelAsDelegate(...)` | Delegate creates model-specific session |
+
+**Usage Example:**
+```javascript
+// 1. Primary wallet authorizes sub-account (one-time setup)
+await marketplace.connect(primaryWallet).authorizeDelegate(subAccount.address, true);
+
+// 2. Sub-account creates sessions without popups
+await marketplace.connect(subAccount).createSessionFromDepositForModelAsDelegate(
+  primaryWallet.address,  // depositor
+  modelId,
+  hostAddress,
+  ethers.ZeroAddress,     // ETH
+  ethers.parseEther("0.5"),
+  pricePerToken,
+  3600,                   // maxDuration
+  100,                    // proofInterval
+  300                     // proofTimeoutWindow
+);
+```
+
+**Security:**
+- Only authorized delegates can create sessions on behalf of depositors
+- Sessions are owned by the depositor (refunds go to depositor)
+- Delegation can be revoked at any time
+
+### Remediation Contract Deployment
+
+| Contract | Remediation Proxy | Implementation |
+|----------|-------------------|----------------|
+| JobMarketplace | `0x95132177F964FF053C1E874b53CF74d819618E06` | `0x305EC43ae2D6D110c2db8DD9F5420FFd2b551F57` |
+
+### Tests Added
+- `test/SecurityFixes/DelegatedSessions/test_storage_layout.t.sol`
+- `test/SecurityFixes/DelegatedSessions/test_delegation_authorization.t.sol`
+- `test/SecurityFixes/DelegatedSessions/test_delegated_session_creation.t.sol`
+- `test/SecurityFixes/DelegatedSessions/test_delegation_security.t.sol`
+
+---
+
 ## January 31, 2026 - Security Audit Remediation (AUDIT-F1 to F5)
 
 ### ⚠️ BREAKING CHANGES

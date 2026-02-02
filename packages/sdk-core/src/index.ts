@@ -78,7 +78,7 @@ export * from './contracts';
 export { TransactionHelper } from './contracts/TransactionHelper';
 export { ContractManager } from './contracts/ContractManager';
 export { JobMarketplaceWrapper } from './contracts/JobMarketplace';
-export type { SessionCreationParams, DirectSessionParams, SessionJob } from './contracts/JobMarketplace';
+export type { SessionCreationParams, DirectSessionParams, SessionJob, DelegatedSessionParams } from './contracts/JobMarketplace';
 export type { SessionJobParams, DepositBalances } from './managers/PaymentManagerMultiChain';
 
 // Export types

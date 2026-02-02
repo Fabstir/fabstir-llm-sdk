@@ -61,6 +61,16 @@ export interface SessionJob {
   conversationCID: string;
 }
 
+/**
+ * Parameters for creating a session as an authorized delegate.
+ * The depositor is the primary account whose deposits will be used.
+ * The caller (msg.sender) must be authorized via authorizeDelegate().
+ */
+export interface DelegatedSessionParams extends SessionCreationParams {
+  /** Address of the primary account whose deposits to use */
+  depositor: string;
+}
+
 /** Validate proofTimeoutWindow is within allowed range */
 function validateProofTimeoutWindow(timeout?: number): number {
   const value = timeout ?? DEFAULT_PROOF_TIMEOUT;
@@ -438,5 +448,140 @@ export class JobMarketplaceWrapper {
     ).toString();
 
     return this.depositNative(totalAmount);
+  }
+
+  // Delegation Methods
+
+  /**
+   * Authorize or revoke a delegate to create sessions on behalf of this account.
+   * @param delegate Address to authorize (e.g., Smart Wallet sub-account)
+   * @param authorized true to authorize, false to revoke
+   * @returns Transaction object
+   */
+  async authorizeDelegate(delegate: string, authorized: boolean): Promise<any> {
+    await this.verifyChain();
+
+    if (!ethers.isAddress(delegate) || delegate === ethers.ZeroAddress) {
+      throw new Error('Invalid delegate address');
+    }
+
+    const signerAddress = await this.signer.getAddress();
+    if (delegate.toLowerCase() === signerAddress.toLowerCase()) {
+      throw new Error('Cannot delegate to self');
+    }
+
+    const tx = await this.contract.authorizeDelegate(delegate, authorized);
+    return tx;
+  }
+
+  /**
+   * Check if a delegate is authorized to create sessions for a depositor.
+   * @param depositor Address of the primary account (deposit owner)
+   * @param delegate Address of the potential delegate (e.g., sub-account)
+   * @returns true if delegate is authorized, false otherwise
+   */
+  async isDelegateAuthorized(depositor: string, delegate: string): Promise<boolean> {
+    await this.verifyChain();
+    return await this.contract.isDelegateAuthorized(depositor, delegate);
+  }
+
+  /**
+   * Create a session from depositor's pre-funded balance as an authorized delegate.
+   * Caller must be authorized via authorizeDelegate() first.
+   * @param params Session parameters including depositor address
+   * @returns Session ID
+   */
+  async createSessionFromDepositAsDelegate(params: DelegatedSessionParams): Promise<number> {
+    await this.verifyChain();
+
+    if (!ethers.isAddress(params.depositor) || params.depositor === ethers.ZeroAddress) {
+      throw new Error('Invalid depositor address');
+    }
+
+    // Convert deposit amount based on token
+    let depositValue: bigint;
+    if (params.paymentToken === ethers.ZeroAddress) {
+      depositValue = ethers.parseEther(params.deposit);
+    } else {
+      const chain = ChainRegistry.getChain(this.chainId);
+      const isUSDC = params.paymentToken.toLowerCase() === chain.contracts.usdcToken.toLowerCase();
+      depositValue = isUSDC
+        ? ethers.parseUnits(params.deposit, 6)
+        : ethers.parseUnits(params.deposit, 18);
+    }
+
+    const proofTimeoutWindow = validateProofTimeoutWindow(params.proofTimeoutWindow);
+
+    const tx = await this.contract.createSessionFromDepositAsDelegate(
+      params.depositor,
+      params.host,
+      params.paymentToken,
+      depositValue,
+      params.pricePerToken,
+      params.duration,
+      params.proofInterval,
+      proofTimeoutWindow
+    );
+
+    const receipt = await tx.wait();
+    const event = receipt.logs?.find((log: any) =>
+      log.fragment?.name === 'SessionCreatedByDelegate' || log.fragment?.name === 'SessionCreatedByDepositor'
+    );
+    return event ? Number(event.args?.sessionId || event.args[0]) : 0;
+  }
+
+  /**
+   * Create a model-specific session from depositor's pre-funded balance as an authorized delegate.
+   * Caller must be authorized via authorizeDelegate() first.
+   * @param params Session parameters including depositor address and modelId
+   * @returns Session ID
+   */
+  async createSessionFromDepositForModelAsDelegate(params: DelegatedSessionParams): Promise<number> {
+    await this.verifyChain();
+
+    if (!ethers.isAddress(params.depositor) || params.depositor === ethers.ZeroAddress) {
+      throw new Error('Invalid depositor address');
+    }
+
+    if (!params.modelId || params.modelId === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+      throw new Error('modelId is required for model-specific delegated session');
+    }
+
+    // Convert deposit amount based on token
+    let depositValue: bigint;
+    if (params.paymentToken === ethers.ZeroAddress) {
+      depositValue = ethers.parseEther(params.deposit);
+    } else {
+      const chain = ChainRegistry.getChain(this.chainId);
+      const isUSDC = params.paymentToken.toLowerCase() === chain.contracts.usdcToken.toLowerCase();
+      depositValue = isUSDC
+        ? ethers.parseUnits(params.deposit, 6)
+        : ethers.parseUnits(params.deposit, 18);
+    }
+
+    const proofTimeoutWindow = validateProofTimeoutWindow(params.proofTimeoutWindow);
+
+    console.log(`[JobMarketplace] Using createSessionFromDepositForModelAsDelegate:`);
+    console.log(`  Depositor: ${params.depositor}`);
+    console.log(`  Model ID: ${params.modelId}`);
+    console.log(`  Host: ${params.host}`);
+
+    const tx = await this.contract.createSessionFromDepositForModelAsDelegate(
+      params.depositor,
+      params.modelId,
+      params.host,
+      params.paymentToken,
+      depositValue,
+      params.pricePerToken,
+      params.duration,
+      params.proofInterval,
+      proofTimeoutWindow
+    );
+
+    const receipt = await tx.wait();
+    const event = receipt.logs?.find((log: any) =>
+      log.fragment?.name === 'SessionCreatedByDelegate'
+    );
+    return event ? Number(event.args?.sessionId || event.args[0]) : 0;
   }
 }

@@ -45,6 +45,13 @@ export interface SubAccountResult {
 /**
  * Get or create a sub-account with spend permissions configured
  *
+ * CRITICAL: wallet_addSubAccount MUST be called each browser session to register
+ * the CryptoKey. Per Base docs: "wallet_addSubAccount needs to be called in each
+ * session before the Sub Account can be used. It will not trigger a new Sub Account
+ * creation if one already exists."
+ *
+ * See: https://docs.base.org/base-account/improve-ux/sub-accounts
+ *
  * @param provider - Base Account Kit provider
  * @param primaryAccount - Primary smart wallet address
  * @param options - Sub-account configuration options
@@ -64,8 +71,9 @@ export async function ensureSubAccount(
 
   console.log('[BaseAccountManager] Ensuring sub-account for:', primaryAccount);
 
+  // Check for existing sub-accounts (informational only)
+  let hasExisting = false;
   try {
-    // 1) Check for existing sub-accounts for this origin
     console.log('[BaseAccountManager] Checking for existing sub-accounts...');
     const resp = (await provider.request({
       method: 'wallet_getSubAccounts',
@@ -77,30 +85,26 @@ export async function ensureSubAccount(
       ],
     })) as { subAccounts?: Array<{ address: `0x${string}` }> };
 
-    if (resp?.subAccounts?.length) {
-      const subAccount = resp.subAccounts[0]!.address;
-      console.log('[BaseAccountManager] Found existing sub-account:', subAccount);
-      return {
-        address: subAccount,
-        isExisting: true,
-      };
+    hasExisting = (resp?.subAccounts?.length ?? 0) > 0;
+    if (hasExisting) {
+      console.log('[BaseAccountManager] Found existing sub-account, will re-register for this session');
     }
-
-    console.log('[BaseAccountManager] No existing sub-accounts found');
   } catch (e) {
-    console.error('[BaseAccountManager] Error checking sub-accounts:', e);
+    console.log('[BaseAccountManager] Could not check existing sub-accounts:', e);
   }
 
   try {
-    // 2) Create a new sub-account with spend permission configured
-    console.log('[BaseAccountManager] Creating new sub-account with spend permission...');
+    // ALWAYS call wallet_addSubAccount to register CryptoKey for THIS session
+    // Per Base docs: "wallet_addSubAccount needs to be called in each session"
+    // "It will not trigger a new Sub Account creation if one already exists"
+    console.log('[BaseAccountManager] Calling wallet_addSubAccount (required each session for CryptoKey)...');
 
     const maxAllowanceWei = ethers.parseUnits(maxAllowance, tokenDecimals);
     const period = 86400 * periodDays; // Convert days to seconds
     const start = Math.floor(Date.now() / 1000);
     const end = start + period;
 
-    const created = (await provider.request({
+    const result = (await provider.request({
       method: 'wallet_addSubAccount',
       params: [
         {
@@ -117,20 +121,16 @@ export async function ensureSubAccount(
       ],
     })) as { address: `0x${string}` };
 
-    console.log('[BaseAccountManager] Created sub-account:', created.address);
-    console.log('[BaseAccountManager] Spend permission configured for:', {
-      token: tokenAddress,
-      allowance: maxAllowance,
-      periodDays,
-    });
+    console.log('[BaseAccountManager] wallet_addSubAccount returned:', result.address);
+    console.log('[BaseAccountManager] CryptoKey registered for popup-free transactions');
 
     return {
-      address: created.address,
-      isExisting: false,
+      address: result.address,
+      isExisting: hasExisting,
     };
   } catch (error) {
-    console.error('[BaseAccountManager] Failed to create sub-account:', error);
-    throw new Error(`Failed to create sub-account: ${error}`);
+    console.error('[BaseAccountManager] Failed to register sub-account:', error);
+    throw new Error(`Failed to register sub-account: ${error}`);
   }
 }
 
