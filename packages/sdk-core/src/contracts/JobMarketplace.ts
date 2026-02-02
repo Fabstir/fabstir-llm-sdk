@@ -62,13 +62,30 @@ export interface SessionJob {
 }
 
 /**
- * Parameters for creating a session as an authorized delegate.
- * The depositor is the primary account whose deposits will be used.
- * The caller (msg.sender) must be authorized via authorizeDelegate().
+ * Parameters for V2 direct payment delegated session.
+ * Pulls USDC directly from payer's wallet via transferFrom.
+ * USDC only - ETH not supported for delegation (ERC20Only error).
+ * Caller (msg.sender) must be authorized via authorizeDelegate().
  */
-export interface DelegatedSessionParams extends SessionCreationParams {
-  /** Address of the primary account whose deposits to use */
-  depositor: string;
+export interface DelegatedSessionParams {
+  /** Primary wallet address (whose USDC to use) */
+  payer: string;
+  /** Host address to create session with */
+  host: string;
+  /** Payment token address - Must be ERC-20 (USDC), NOT address(0) */
+  paymentToken: string;
+  /** Amount in token units (e.g., "10" for 10 USDC) */
+  amount: string;
+  /** Price per token in wei */
+  pricePerToken: number;
+  /** Maximum session duration in seconds */
+  duration: number;
+  /** Proof submission interval in seconds */
+  proofInterval: number;
+  /** AUDIT-F3: Timeout window in seconds (60-3600, default 300) */
+  proofTimeoutWindow?: number;
+  /** Model ID (bytes32) - Required for createSessionForModelAsDelegate */
+  modelId?: string;
 }
 
 /** Validate proofTimeoutWindow is within allowed range */
@@ -485,100 +502,117 @@ export class JobMarketplaceWrapper {
     return await this.contract.isDelegateAuthorized(depositor, delegate);
   }
 
+  // V2 Direct Payment Delegation Methods
+
   /**
-   * Create a session from depositor's pre-funded balance as an authorized delegate.
+   * Create session as delegate - pulls USDC directly from payer's wallet.
+   * V2 direct payment pattern - no escrow required.
    * Caller must be authorized via authorizeDelegate() first.
-   * @param params Session parameters including depositor address
+   * @param params Session parameters with payer address
    * @returns Session ID
+   * @throws NotDelegate if caller not authorized
+   * @throws ERC20Only if paymentToken is address(0)
    */
-  async createSessionFromDepositAsDelegate(params: DelegatedSessionParams): Promise<number> {
+  async createSessionAsDelegate(params: DelegatedSessionParams): Promise<number> {
     await this.verifyChain();
 
-    if (!ethers.isAddress(params.depositor) || params.depositor === ethers.ZeroAddress) {
-      throw new Error('Invalid depositor address');
+    // Validate payer address
+    if (!ethers.isAddress(params.payer) || params.payer === ethers.ZeroAddress) {
+      throw new Error('Invalid payer address');
     }
 
-    // Convert deposit amount based on token
-    let depositValue: bigint;
-    if (params.paymentToken === ethers.ZeroAddress) {
-      depositValue = ethers.parseEther(params.deposit);
-    } else {
-      const chain = ChainRegistry.getChain(this.chainId);
-      const isUSDC = params.paymentToken.toLowerCase() === chain.contracts.usdcToken.toLowerCase();
-      depositValue = isUSDC
-        ? ethers.parseUnits(params.deposit, 6)
-        : ethers.parseUnits(params.deposit, 18);
+    // V2: ERC20Only - paymentToken must NOT be address(0)
+    if (!params.paymentToken || params.paymentToken === ethers.ZeroAddress) {
+      throw new Error('ERC20Only: paymentToken must be an ERC-20 token address (not address(0))');
     }
+
+    // Convert amount based on token decimals (USDC = 6 decimals)
+    const chain = ChainRegistry.getChain(this.chainId);
+    const isUSDC = params.paymentToken.toLowerCase() === chain.contracts.usdcToken.toLowerCase();
+    const amountValue = isUSDC
+      ? ethers.parseUnits(params.amount, 6)
+      : ethers.parseUnits(params.amount, 18);
 
     const proofTimeoutWindow = validateProofTimeoutWindow(params.proofTimeoutWindow);
 
-    const tx = await this.contract.createSessionFromDepositAsDelegate(
-      params.depositor,
+    console.log(`[JobMarketplace] V2 createSessionAsDelegate:`);
+    console.log(`  Payer: ${params.payer}`);
+    console.log(`  Host: ${params.host}`);
+    console.log(`  Amount: ${params.amount}`);
+
+    const tx = await this.contract.createSessionAsDelegate(
+      params.payer,
       params.host,
       params.paymentToken,
-      depositValue,
+      amountValue,
       params.pricePerToken,
       params.duration,
       params.proofInterval,
       proofTimeoutWindow
     );
 
-    const receipt = await tx.wait();
+    const receipt = await tx.wait(3);
     const event = receipt.logs?.find((log: any) =>
-      log.fragment?.name === 'SessionCreatedByDelegate' || log.fragment?.name === 'SessionCreatedByDepositor'
+      log.fragment?.name === 'SessionCreatedByDelegate'
     );
     return event ? Number(event.args?.sessionId || event.args[0]) : 0;
   }
 
   /**
-   * Create a model-specific session from depositor's pre-funded balance as an authorized delegate.
+   * Create model session as delegate - pulls USDC directly from payer's wallet.
+   * V2 direct payment pattern - no escrow required.
    * Caller must be authorized via authorizeDelegate() first.
-   * @param params Session parameters including depositor address and modelId
+   * @param params Session parameters with payer address and modelId (required)
    * @returns Session ID
+   * @throws NotDelegate if caller not authorized
+   * @throws ERC20Only if paymentToken is address(0)
    */
-  async createSessionFromDepositForModelAsDelegate(params: DelegatedSessionParams): Promise<number> {
+  async createSessionForModelAsDelegate(params: DelegatedSessionParams): Promise<number> {
     await this.verifyChain();
 
-    if (!ethers.isAddress(params.depositor) || params.depositor === ethers.ZeroAddress) {
-      throw new Error('Invalid depositor address');
+    // Validate payer address
+    if (!ethers.isAddress(params.payer) || params.payer === ethers.ZeroAddress) {
+      throw new Error('Invalid payer address');
     }
 
+    // Validate modelId is provided
     if (!params.modelId || params.modelId === '0x0000000000000000000000000000000000000000000000000000000000000000') {
-      throw new Error('modelId is required for model-specific delegated session');
+      throw new Error('modelId is required for createSessionForModelAsDelegate');
     }
 
-    // Convert deposit amount based on token
-    let depositValue: bigint;
-    if (params.paymentToken === ethers.ZeroAddress) {
-      depositValue = ethers.parseEther(params.deposit);
-    } else {
-      const chain = ChainRegistry.getChain(this.chainId);
-      const isUSDC = params.paymentToken.toLowerCase() === chain.contracts.usdcToken.toLowerCase();
-      depositValue = isUSDC
-        ? ethers.parseUnits(params.deposit, 6)
-        : ethers.parseUnits(params.deposit, 18);
+    // V2: ERC20Only - paymentToken must NOT be address(0)
+    if (!params.paymentToken || params.paymentToken === ethers.ZeroAddress) {
+      throw new Error('ERC20Only: paymentToken must be an ERC-20 token address (not address(0))');
     }
+
+    // Convert amount based on token decimals (USDC = 6 decimals)
+    const chain = ChainRegistry.getChain(this.chainId);
+    const isUSDC = params.paymentToken.toLowerCase() === chain.contracts.usdcToken.toLowerCase();
+    const amountValue = isUSDC
+      ? ethers.parseUnits(params.amount, 6)
+      : ethers.parseUnits(params.amount, 18);
 
     const proofTimeoutWindow = validateProofTimeoutWindow(params.proofTimeoutWindow);
 
-    console.log(`[JobMarketplace] Using createSessionFromDepositForModelAsDelegate:`);
-    console.log(`  Depositor: ${params.depositor}`);
+    console.log(`[JobMarketplace] V2 createSessionForModelAsDelegate:`);
+    console.log(`  Payer: ${params.payer}`);
     console.log(`  Model ID: ${params.modelId}`);
     console.log(`  Host: ${params.host}`);
+    console.log(`  Amount: ${params.amount}`);
 
-    const tx = await this.contract.createSessionFromDepositForModelAsDelegate(
-      params.depositor,
+    const tx = await this.contract.createSessionForModelAsDelegate(
+      params.payer,
       params.modelId,
       params.host,
       params.paymentToken,
-      depositValue,
+      amountValue,
       params.pricePerToken,
       params.duration,
       params.proofInterval,
       proofTimeoutWindow
     );
 
-    const receipt = await tx.wait();
+    const receipt = await tx.wait(3);
     const event = receipt.logs?.find((log: any) =>
       log.fragment?.name === 'SessionCreatedByDelegate'
     );

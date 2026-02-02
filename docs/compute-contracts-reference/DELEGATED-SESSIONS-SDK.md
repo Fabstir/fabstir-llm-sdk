@@ -1,9 +1,18 @@
-# Delegated Session Creation - SDK Integration Guide
+# Delegated Session Creation - SDK Integration Guide (V1 Escrow Pattern)
 
-**Version:** 1.0
+**Version:** 1.1
 **Date:** February 2, 2026
-**Status:** Ready for Integration
+**Status:** Available (See V2 for Smart Wallets)
 **Branch:** `fix/remediation-pre-report`
+
+---
+
+> **Recommendation**: For **Coinbase Smart Wallet** integration, use the **[V2 Direct Payment Pattern](./V2-DIRECT-PAYMENT-DELEGATION-SDK.md)** instead. V2 has better UX (2 popups vs 3) and keeps funds in the user's wallet.
+>
+> Use V1 (this guide) when:
+> - You need **ETH** delegation (V2 is USDC only)
+> - You want funds held in contract escrow
+> - You're integrating with non-Smart-Wallet flows
 
 ---
 
@@ -38,7 +47,7 @@ const REMEDIATION_CONTRACTS = {
   hostEarnings: "0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0",
 };
 
-// JobMarketplace Implementation: 0x305EC43ae2D6D110c2db8DD9F5420FFd2b551F57
+// JobMarketplace Implementation: 0xf5441bda610AbCDe71B96fe6051E738d2702f071 (V2 Delegation)
 ```
 
 ### Frozen Audit Contracts (Do Not Use for Delegation)
@@ -439,4 +448,5 @@ If you encounter issues or have questions about integrating delegated sessions:
 
 | Date | Version | Changes |
 |------|---------|---------|
+| 2026-02-02 | 1.1 | Added V2 recommendation note, updated implementation address |
 | 2026-02-02 | 1.0 | Initial release with delegation support |

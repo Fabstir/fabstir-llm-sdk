@@ -960,6 +960,132 @@ function getDepositBalance(address account, address token) external view returns
 
 Use `address(0)` for native ETH balance.
 
+### V2 Direct Payment Delegation (NEW - February 2, 2026)
+
+Enables Coinbase Smart Wallet sub-accounts to create sessions using primary account's funds via ERC-20 `transferFrom`.
+
+#### `authorizeDelegate`
+
+Authorize or revoke a delegate address.
+
+```solidity
+function authorizeDelegate(address delegate, bool authorized) external
+```
+
+**Requirements:**
+- `delegate != address(0)`
+- `delegate != msg.sender` (cannot self-delegate)
+
+**Example:**
+```javascript
+// Primary account authorizes sub-account
+await marketplace.authorizeDelegate(subAccountAddress, true);
+
+// Revoke authorization
+await marketplace.authorizeDelegate(subAccountAddress, false);
+```
+
+**Events:**
+```solidity
+event DelegateAuthorized(
+    address indexed payer,
+    address indexed delegate,
+    bool authorized
+);
+```
+
+#### `isDelegateAuthorized`
+
+Check if a delegate is authorized for a payer.
+
+```solidity
+function isDelegateAuthorized(address payer, address delegate) external view returns (bool)
+```
+
+#### `createSessionForModelAsDelegate`
+
+Create a model-specific session as an authorized delegate (USDC only).
+
+```solidity
+function createSessionForModelAsDelegate(
+    address payer,              // Account whose USDC is used
+    bytes32 modelId,            // Model to use
+    address host,               // Host address
+    address paymentToken,       // Must be ERC-20 (not address(0))
+    uint256 amount,             // Amount to pull from payer
+    uint256 pricePerToken,      // Agreed price
+    uint256 maxDuration,        // Max session duration
+    uint256 proofInterval,      // Tokens between proofs
+    uint256 proofTimeoutWindow  // Proof timeout (60-3600 seconds)
+) external returns (uint256 sessionId)
+```
+
+**Requirements:**
+- `payer != address(0)`
+- `msg.sender == payer` OR `isAuthorizedDelegate[payer][msg.sender]`
+- `paymentToken != address(0)` (USDC only, no ETH)
+- Payer must have approved contract for `amount`
+- Payer must have sufficient token balance
+
+**Example:**
+```javascript
+// One-time setup (primary account)
+await usdc.approve(marketplace.address, parseUnits("1000", 6)); // $1,000 approval
+await marketplace.authorizeDelegate(subAccount.address, true);
+
+// Per-session (sub-account, NO popup!)
+const sessionId = await marketplace.connect(subAccount).createSessionForModelAsDelegate(
+    primaryWallet.address,  // payer
+    TINY_VICUNA,            // modelId
+    hostAddress,            // host
+    usdcAddress,            // paymentToken (must be ERC-20)
+    parseUnits("10", 6),    // amount
+    5000,                   // pricePerToken
+    3600,                   // maxDuration (1 hour)
+    1000,                   // proofInterval
+    300                     // proofTimeoutWindow
+);
+```
+
+**Events:**
+```solidity
+event SessionCreatedByDelegate(
+    uint256 indexed sessionId,
+    address indexed payer,
+    address indexed delegate,
+    address host,
+    bytes32 modelId,
+    uint256 amount
+);
+```
+
+#### `createSessionAsDelegate`
+
+Create a non-model session as an authorized delegate (USDC only).
+
+```solidity
+function createSessionAsDelegate(
+    address payer,
+    address host,
+    address paymentToken,
+    uint256 amount,
+    uint256 pricePerToken,
+    uint256 maxDuration,
+    uint256 proofInterval,
+    uint256 proofTimeoutWindow
+) external returns (uint256 sessionId)
+```
+
+Same requirements as `createSessionForModelAsDelegate` but without model validation.
+
+#### Custom Errors (V2 Delegation)
+
+```solidity
+error NotDelegate();        // Caller not authorized as delegate
+error ERC20Only();          // Cannot use ETH for delegation (must be ERC-20)
+error BadDelegateParams();  // Invalid parameters (zero address, bad duration, etc.)
+```
+
 #### `createSessionFromDeposit`
 
 Create session from pre-deposited funds.
@@ -974,172 +1100,6 @@ function createSessionFromDeposit(
     uint256 proofInterval
 ) external returns (uint256 jobId)
 ```
-
-### Delegation Functions (NEW - February 2, 2026)
-
-Enable Coinbase Smart Wallet sub-accounts (and other delegates) to create sessions using the primary account's pre-deposited funds.
-
-#### `authorizeDelegate`
-
-Authorize or revoke a delegate to create sessions on behalf of the caller.
-
-```solidity
-function authorizeDelegate(address delegate, bool authorized) external
-```
-
-**Parameters:**
-- `delegate`: The address to authorize (e.g., Smart Wallet sub-account)
-- `authorized`: True to authorize, false to revoke
-
-**Requirements:**
-- `delegate` cannot be zero address
-- `delegate` cannot be caller (self-delegation not allowed)
-
-**Example:**
-```javascript
-// Primary wallet authorizes sub-account (one-time setup)
-await marketplace.connect(primaryWallet).authorizeDelegate(subAccount.address, true);
-
-// Revoke authorization when needed
-await marketplace.connect(primaryWallet).authorizeDelegate(subAccount.address, false);
-```
-
-**Events:**
-```solidity
-event DelegateAuthorized(
-    address indexed depositor,
-    address indexed delegate,
-    bool authorized
-);
-```
-
-#### `isDelegateAuthorized`
-
-Check if a delegate is authorized for a depositor.
-
-```solidity
-function isDelegateAuthorized(address depositor, address delegate) external view returns (bool)
-```
-
-#### `createSessionFromDepositAsDelegate`
-
-Create a session from depositor's pre-deposited funds as an authorized delegate.
-
-```solidity
-function createSessionFromDepositAsDelegate(
-    address depositor,        // Owner of the deposits
-    address host,
-    address paymentToken,     // address(0) for native ETH
-    uint256 deposit,
-    uint256 pricePerToken,
-    uint256 maxDuration,
-    uint256 proofInterval,
-    uint256 proofTimeoutWindow
-) external returns (uint256 sessionId)
-```
-
-**Requirements:**
-- Caller must be `depositor` or authorized delegate of `depositor`
-- `depositor` must have sufficient deposited balance
-- Host must be active and registered
-
-**Example:**
-```javascript
-// Sub-account creates session using primary's deposits
-const sessionId = await marketplace.connect(subAccount).createSessionFromDepositAsDelegate(
-  primaryWallet.address,    // depositor
-  hostAddress,
-  ethers.ZeroAddress,       // ETH
-  ethers.parseEther("0.5"),
-  pricePerToken,
-  3600,                     // 1 hour max
-  100,                      // proof every 100 tokens
-  300                       // 5 minute timeout
-);
-```
-
-#### `createSessionFromDepositForModelAsDelegate`
-
-Create a model-specific session from depositor's pre-deposited funds as an authorized delegate.
-
-```solidity
-function createSessionFromDepositForModelAsDelegate(
-    address depositor,        // Owner of the deposits
-    bytes32 modelId,          // Required model ID
-    address host,
-    address paymentToken,     // address(0) for native ETH
-    uint256 deposit,
-    uint256 pricePerToken,
-    uint256 maxDuration,
-    uint256 proofInterval,
-    uint256 proofTimeoutWindow
-) external returns (uint256 sessionId)
-```
-
-**Requirements:**
-- Caller must be `depositor` or authorized delegate of `depositor`
-- `depositor` must have sufficient deposited balance
-- Host must support the specified model
-- `modelId` cannot be bytes32(0)
-
-**Example:**
-```javascript
-// Sub-account creates model session using primary's deposits
-const sessionId = await marketplace.connect(subAccount).createSessionFromDepositForModelAsDelegate(
-  primaryWallet.address,    // depositor
-  TINY_VICUNA,              // model ID
-  hostAddress,
-  ethers.ZeroAddress,       // ETH
-  ethers.parseEther("0.5"),
-  pricePerToken,
-  3600,
-  100,
-  300
-);
-```
-
-**Events:**
-```solidity
-event SessionCreatedByDelegate(
-    uint256 indexed sessionId,
-    address indexed depositor,
-    address indexed delegate,
-    address host,
-    bytes32 modelId,
-    uint256 deposit
-);
-```
-
-#### Complete Delegation Workflow
-
-```javascript
-// 1. Primary wallet deposits funds (done once)
-await marketplace.connect(primaryWallet).depositNative({ value: ethers.parseEther("5") });
-
-// 2. Primary wallet authorizes sub-account (done once)
-await marketplace.connect(primaryWallet).authorizeDelegate(subAccount.address, true);
-
-// 3. Sub-account creates sessions without popups (multiple times)
-for (const task of tasks) {
-  const sessionId = await marketplace.connect(subAccount).createSessionFromDepositForModelAsDelegate(
-    primaryWallet.address,
-    task.modelId,
-    task.host,
-    ethers.ZeroAddress,
-    task.deposit,
-    task.pricePerToken,
-    task.maxDuration,
-    100,
-    300
-  );
-  // Session is owned by primaryWallet - refunds go there
-}
-
-// 4. Primary wallet can revoke at any time
-await marketplace.connect(primaryWallet).authorizeDelegate(subAccount.address, false);
-```
-
----
 
 ### Admin Functions
 
@@ -1320,18 +1280,16 @@ await hostEarningsContract.withdrawNative();
 
 ### JobMarketplaceWithModels Events
 
-| Event                                                                                                                     | Description                     |
-| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| `SessionJobCreated(uint256 jobId, address requester, address host, uint256 deposit)`                                      | Session created                 |
-| `SessionJobCreatedForModel(uint256 jobId, address requester, address host, bytes32 modelId, uint256 deposit)`             | Model-aware session created     |
-| `ProofSubmitted(uint256 jobId, address host, uint256 tokensClaimed, bytes32 proofHash, string proofCID, string deltaCID)` | Proof of work submitted         |
-| `SessionCompleted(uint256 jobId, address completedBy, uint256 tokensUsed, uint256 paymentAmount, uint256 refundAmount)`   | Session completed               |
-| `SessionTimedOut(uint256 jobId, uint256 hostEarnings, uint256 userRefund)`                                                | Session timed out               |
-| `DepositReceived(address account, address token, uint256 amount)`                                                         | Deposit received                |
-| `WithdrawalProcessed(address account, address token, uint256 amount)`                                                     | Withdrawal processed            |
-| `TokenAccepted(address token, uint256 minDeposit)`                                                                        | New token accepted              |
-| `DelegateAuthorized(address depositor, address delegate, bool authorized)`                                                | Delegate authorization changed  |
-| `SessionCreatedByDelegate(uint256 sessionId, address depositor, address delegate, address host, bytes32 modelId, uint256 deposit)` | Delegated session created |
+| Event                                                                                                                     | Description                 |
+| ------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| `SessionJobCreated(uint256 jobId, address requester, address host, uint256 deposit)`                                      | Session created             |
+| `SessionJobCreatedForModel(uint256 jobId, address requester, address host, bytes32 modelId, uint256 deposit)`             | Model-aware session created |
+| `ProofSubmitted(uint256 jobId, address host, uint256 tokensClaimed, bytes32 proofHash, string proofCID, string deltaCID)` | Proof of work submitted     |
+| `SessionCompleted(uint256 jobId, address completedBy, uint256 tokensUsed, uint256 paymentAmount, uint256 refundAmount)`   | Session completed           |
+| `SessionTimedOut(uint256 jobId, uint256 hostEarnings, uint256 userRefund)`                                                | Session timed out           |
+| `DepositReceived(address account, address token, uint256 amount)`                                                         | Deposit received            |
+| `WithdrawalProcessed(address account, address token, uint256 amount)`                                                     | Withdrawal processed        |
+| `TokenAccepted(address token, uint256 minDeposit)`                                                                        | New token accepted          |
 
 ---
 
@@ -1379,12 +1337,6 @@ await hostEarningsContract.withdrawNative();
 | `"Only host can submit proof"`          | Non-host trying to submit proof        |
 | `"Only depositor or host can complete"` | Third party trying to complete session |
 | `"Session not active"`                  | Session is not in Active status        |
-| `"Invalid delegate address"`            | Delegate is zero address               |
-| `"Cannot delegate to self"`             | Trying to authorize self as delegate   |
-| `"Not authorized delegate"`             | Caller is not authorized delegate      |
-| `"Invalid depositor"`                   | Depositor is zero address              |
-| `"Insufficient native balance"`         | Depositor has insufficient ETH deposit |
-| `"Insufficient token balance"`          | Depositor has insufficient token deposit |
 
 ---
 

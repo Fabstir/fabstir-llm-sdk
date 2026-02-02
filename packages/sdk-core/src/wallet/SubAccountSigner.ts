@@ -106,15 +106,32 @@ export function createSubAccountSigner(options: SubAccountSignerOptions) {
       // Use eth_sendTransaction with sub-account as from address
       // Per Base documentation, this triggers the CryptoKey signing path for popup-free transactions
       // https://docs.base.org/identity/smart-wallet/guides/sub-accounts
-      const txHash = await provider.request({
-        method: 'eth_sendTransaction',
-        params: [{
-          from: subAccount as `0x${string}`,
-          to: tx.to as `0x${string}`,
-          data: tx.data as `0x${string}`,
-          value: valueHex,
-        }],
-      });
+      let txHash: string;
+      try {
+        const result = await provider.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from: subAccount as `0x${string}`,
+            to: tx.to as `0x${string}`,
+            data: tx.data as `0x${string}`,
+            value: valueHex,
+          }],
+        });
+
+        // Validate result is a transaction hash string
+        if (typeof result !== 'string' || !result.startsWith('0x')) {
+          console.error('[SubAccountSigner] Invalid response from eth_sendTransaction:', result);
+          throw new Error(`Sub-account signing failed. Please refresh and reconnect wallet.`);
+        }
+        txHash = result;
+      } catch (sendError: any) {
+        console.error('[SubAccountSigner] eth_sendTransaction failed:', sendError);
+        // Re-throw with more helpful message
+        if (sendError.message?.includes('sub account') || sendError.message?.includes('CryptoKey')) {
+          throw new Error(`Sub-account CryptoKey signing failed. Please refresh the page and reconnect wallet to re-register the CryptoKey. Original error: ${sendError.message}`);
+        }
+        throw sendError;
+      }
 
       console.log('[SubAccountSigner] Transaction hash:', txHash);
 

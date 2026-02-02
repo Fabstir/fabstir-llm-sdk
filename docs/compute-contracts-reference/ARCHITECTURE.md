@@ -171,6 +171,44 @@
      │                                │                                  │
 ```
 
+### 4.1b V2 Direct Payment Delegation Flow (NEW - Feb 2026)
+
+For Coinbase Smart Wallet sub-accounts creating sessions using primary account's USDC:
+
+```
+┌─────────┐   ┌───────────┐                  ┌─────────────────┐
+│ Primary │   │Sub-Account│                  │  JobMarketplace │
+│ Wallet  │   │(Delegate) │                  │                 │
+└────┬────┘   └─────┬─────┘                  └────────┬────────┘
+     │              │                                 │
+     │  1. approve(marketplace, $1000)               │
+     │ ─────────────────────────────────────────────>│  (USDC contract)
+     │              │                                 │
+     │  2. authorizeDelegate(subAccount, true)       │
+     │ ─────────────────────────────────────────────>│
+     │              │                                 │
+     │              │  3. createSessionForModelAsDelegate()
+     │              │     (payer=primary, USDC)       │
+     │              │ ───────────────────────────────>│
+     │              │                                 │
+     │              │     4. Check authorization      │
+     │              │     isAuthorizedDelegate[payer][msg.sender]?
+     │              │                                 │
+     │              │     5. transferFrom(payer, contract, amount)
+     │              │        (pulls USDC from primary's wallet)
+     │              │                                 │
+     │              │  6. Session created             │
+     │              │     (depositor = primary)       │
+     │              │ <───────────────────────────────│
+     │              │                                 │
+```
+
+**Key Points:**
+- Steps 1-2 are one-time setup (2 popups)
+- Step 3 is per-session (NO popup - sub-account signs)
+- Refunds go to primary (depositor), not delegate
+- USDC only (ETH not supported for delegation)
+
 ### 4.2 Proof Submission Flow
 
 ```
@@ -311,11 +349,8 @@ mapping(address => uint256) public tokenMinDeposits;    // Slot 17
 uint256 public accumulatedTreasuryNative;         // Slot 18
 mapping(address => uint256) public accumulatedTreasuryTokens;  // Slot 19
 
-// Slot 20: Delegation mapping for Smart Wallet sub-account support (Feb 2, 2026)
-mapping(address => mapping(address => bool)) public isAuthorizedDelegate;  // Slot 20
-
-// Slot 21-54: Storage gap (34 slots reserved, reduced from 35)
-uint256[34] private __gap;
+// Slot 20-69: Storage gap (50 slots reserved)
+uint256[50] private __gap;
 ```
 
 ### 5.2 SessionJob Struct Layout
@@ -374,7 +409,7 @@ All upgradeable contracts reserve storage gaps for future additions:
 
 | Contract | Gap Size | Reserved Slots |
 |----------|----------|----------------|
-| JobMarketplaceWithModelsUpgradeable | 34 | Reduced from 35 for delegation mapping |
+| JobMarketplaceWithModelsUpgradeable | 50 | Future payment methods, analytics |
 | NodeRegistryWithModelsUpgradeable | 36 | Reputation (reduced from 39 for slashing) |
 | ModelRegistryUpgradeable | 49 | Governance extensions |
 | ProofSystemUpgradeable | 49 | ZK proof support |
@@ -497,12 +532,6 @@ Address.sendValue(payable(recipient), amount);
 │  DEPOSITOR (Low)                            │
 │  └── completeSessionJob() [own sessions]    │
 │  └── session creation                       │
-│  └── authorizeDelegate() [own delegates]    │
-│                                             │
-│  DELEGATE (Low - Authorized by Depositor)   │
-│  └── createSessionFromDepositAsDelegate()   │
-│  └── createSessionFromDepositForModel...()  │
-│     [only for authorizing depositor]        │
 │                                             │
 │  ANYONE (Lowest)                            │
 │  └── triggerSessionTimeout()                │

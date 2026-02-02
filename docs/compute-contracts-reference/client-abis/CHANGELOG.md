@@ -1,67 +1,89 @@
 # Client ABIs Changelog
 
-## February 2, 2026 - Delegated Session Creation for Smart Wallet Sub-Accounts
+## February 2, 2026 - V2 Direct Payment Delegation
 
-### New Feature: Delegation Support
+### New Feature: Smart Wallet Sub-Account Support
 
-Enable Coinbase Smart Wallet sub-accounts (and other delegates) to create sessions using the primary account's pre-deposited funds without requiring authorization popups for each transaction.
+Enables Coinbase Smart Wallet sub-accounts to create sessions using primary account's USDC via `transferFrom` pattern.
 
-**New Storage:**
+**New Functions:**
 ```solidity
-// Delegation mapping for Smart Wallet sub-account support
-mapping(address => mapping(address => bool)) public isAuthorizedDelegate;
+// Authorize a delegate
+function authorizeDelegate(address delegate, bool authorized) external;
+
+// Check authorization
+function isDelegateAuthorized(address payer, address delegate) external view returns (bool);
+
+// Create model session as delegate (USDC only)
+function createSessionForModelAsDelegate(
+    address payer,
+    bytes32 modelId,
+    address host,
+    address paymentToken,
+    uint256 amount,
+    uint256 pricePerToken,
+    uint256 maxDuration,
+    uint256 proofInterval,
+    uint256 proofTimeoutWindow
+) external returns (uint256 sessionId);
+
+// Create non-model session as delegate (USDC only)
+function createSessionAsDelegate(
+    address payer,
+    address host,
+    address paymentToken,
+    uint256 amount,
+    uint256 pricePerToken,
+    uint256 maxDuration,
+    uint256 proofInterval,
+    uint256 proofTimeoutWindow
+) external returns (uint256 sessionId);
+```
+
+**New Custom Errors:**
+```solidity
+error NotDelegate();        // Caller not authorized as delegate
+error ERC20Only();          // Direct delegation requires ERC-20 token
+error BadDelegateParams();  // Invalid parameters
 ```
 
 **New Events:**
 ```solidity
-event DelegateAuthorized(address indexed depositor, address indexed delegate, bool authorized);
-event SessionCreatedByDelegate(uint256 indexed sessionId, address indexed depositor, address indexed delegate, address host, bytes32 modelId, uint256 deposit);
+event DelegateAuthorized(address indexed payer, address indexed delegate, bool authorized);
+event SessionCreatedByDelegate(uint256 indexed sessionId, address indexed payer, address indexed delegate, address host, bytes32 modelId, uint256 amount);
 ```
 
-**New Functions:**
+**New Storage:**
+```solidity
+mapping(address => mapping(address => bool)) public isAuthorizedDelegate;
+```
 
-| Function | Purpose |
-|----------|---------|
-| `authorizeDelegate(address, bool)` | Primary account authorizes/revokes delegate |
-| `isDelegateAuthorized(address, address)` | Check if delegate is authorized |
-| `createSessionFromDepositAsDelegate(...)` | Delegate creates non-model session |
-| `createSessionFromDepositForModelAsDelegate(...)` | Delegate creates model-specific session |
+### Implementation Upgrade (Remediation Proxy)
+| Contract | Proxy | New Implementation |
+|----------|-------|-------------------|
+| JobMarketplace | `0x95132177F964FF053C1E874b53CF74d819618E06` | `0xf5441bda610AbCDe71B96fe6051E738d2702f071` |
 
-**Usage Example:**
-```javascript
-// 1. Primary wallet authorizes sub-account (one-time setup)
-await marketplace.connect(primaryWallet).authorizeDelegate(subAccount.address, true);
+### Bytecode Optimization
+- Custom errors reduced bytecode from 25,453 to 24,516 bytes
+- Contract now fits within EVM 24,576 byte limit
 
-// 2. Sub-account creates sessions without popups
-await marketplace.connect(subAccount).createSessionFromDepositForModelAsDelegate(
-  primaryWallet.address,  // depositor
-  modelId,
-  hostAddress,
-  ethers.ZeroAddress,     // ETH
-  ethers.parseEther("0.5"),
-  pricePerToken,
-  3600,                   // maxDuration
-  100,                    // proofInterval
-  300                     // proofTimeoutWindow
+### SDK Integration
+```typescript
+// One-time setup (primary wallet)
+await usdc.approve(marketplace.address, parseUnits("1000", 6));
+await marketplace.authorizeDelegate(subAccount.address, true);
+
+// Per-session (sub-account - NO popup!)
+await marketplace.connect(subAccount).createSessionForModelAsDelegate(
+    primaryWallet.address, modelId, host, usdcAddress,
+    amount, pricePerToken, maxDuration, proofInterval, proofTimeoutWindow
 );
 ```
 
-**Security:**
-- Only authorized delegates can create sessions on behalf of depositors
-- Sessions are owned by the depositor (refunds go to depositor)
-- Delegation can be revoked at any time
-
-### Remediation Contract Deployment
-
-| Contract | Remediation Proxy | Implementation |
-|----------|-------------------|----------------|
-| JobMarketplace | `0x95132177F964FF053C1E874b53CF74d819618E06` | `0x305EC43ae2D6D110c2db8DD9F5420FFd2b551F57` |
-
-### Tests Added
-- `test/SecurityFixes/DelegatedSessions/test_storage_layout.t.sol`
-- `test/SecurityFixes/DelegatedSessions/test_delegation_authorization.t.sol`
-- `test/SecurityFixes/DelegatedSessions/test_delegated_session_creation.t.sol`
-- `test/SecurityFixes/DelegatedSessions/test_delegation_security.t.sol`
+### No Breaking Changes
+- All existing functions work as before
+- V2 delegation is additive (new functions only)
+- Escrow/deposit functions retained for general wallet support
 
 ---
 

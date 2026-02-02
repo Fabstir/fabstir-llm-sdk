@@ -158,10 +158,11 @@ export default function ChatContextDemo() {
   });
   const [depositAmount, setDepositAmount] = useState("10"); // Default $10 USDC
 
-  // Pre-Funded Deposit State
-  const [contractDeposit, setContractDeposit] = useState("0");
-  const [depositToContract, setDepositToContract] = useState("5");
-  const [isDepositMode, setIsDepositMode] = useState(true);
+  // V2 Direct Payment State (USDC Allowance)
+  const [usdcAllowance, setUsdcAllowance] = useState<bigint>(0n);
+  const [isApproving, setIsApproving] = useState(false);
+  const [approvalError, setApprovalError] = useState("");
+  const DEFAULT_APPROVAL_AMOUNT = parseUnits("1000", 6); // $1,000 USDC
 
   // Delegation State (for popup-free session creation)
   const [isDelegateAuthorized, setIsDelegateAuthorized] = useState(false);
@@ -361,32 +362,15 @@ export default function ChatContextDemo() {
 
       setBalances(newBalances);
 
-      // Read contract deposit balance (for pre-funded deposit mode)
-      if (paymentManager && isDepositMode) {
-        const depositBalance = await readContractDepositBalance();
-        setContractDeposit(depositBalance);
+      // V2: Check USDC allowance for direct payment
+      if (primaryAccount) {
+        await checkUsdcAllowance();
       }
 
       return newBalances;
     } catch (error) {
       console.error("Error reading balances:", error);
       return balances;
-    }
-  };
-
-  // Helper: Read contract deposit balance for pre-funded mode
-  const readContractDepositBalance = async (): Promise<string> => {
-    try {
-      if (!paymentManager) return "0";
-      const contracts = getContractAddresses();
-      const result = await (paymentManager as any).getDepositBalances(
-        [contracts.USDC],
-        selectedChainId
-      );
-      return result.tokens[contracts.USDC] || "0";
-    } catch (error) {
-      console.error("Error reading contract deposit balance:", error);
-      return "0";
     }
   };
 
@@ -468,113 +452,55 @@ export default function ChatContextDemo() {
     }
   };
 
-  // Helper: Deposit USDC to contract escrow (pre-funded mode)
-  const depositToContractEscrow = async () => {
+  // V2: Check USDC allowance for JobMarketplace contract
+  const checkUsdcAllowance = async () => {
     try {
-      console.log("[DepositToEscrow] Starting deposit...");
-      if (!paymentManager || !primaryAccount) {
-        addMessage("system", "❌ Cannot deposit: wallet not connected");
-        return;
-      }
-
+      if (!primaryAccount) return;
       const contracts = getContractAddresses();
-      const depositAmountUsdc = depositToContract;
-      console.log("[DepositToEscrow] Amount:", depositAmountUsdc, "USDC to contract:", contracts.JOB_MARKETPLACE);
-
-      // Check primary account has sufficient balance
-      addMessage("system", `💰 Starting deposit of ${depositAmountUsdc} USDC to contract escrow...`);
       const readProvider = new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS]);
-      const usdcReadContract = new ethers.Contract(
+      const usdcContract = new ethers.Contract(
         contracts.USDC,
-        ["function balanceOf(address) view returns (uint256)", "function allowance(address,address) view returns (uint256)"],
+        ["function allowance(address,address) view returns (uint256)"],
         readProvider
       );
-
-      const balance = await usdcReadContract.balanceOf(primaryAccount);
-      const required = ethers.parseUnits(depositAmountUsdc, 6);
-      console.log("[DepositToEscrow] Balance:", ethers.formatUnits(balance, 6), "Required:", depositAmountUsdc);
-      if (balance < required) {
-        addMessage("system", `❌ Insufficient USDC balance. Have: ${ethers.formatUnits(balance, 6)}, Need: ${depositAmountUsdc}`);
-        return;
-      }
-
-      // Get signer for the PRIMARY account (smart wallet) - must match SDK's authenticated signer
-      // CRITICAL: Use primaryAccount as the signer address, not the default first account
-      const walletProvider = baseAccountSDK ? baseAccountSDK.getProvider() : (window as any).ethereum;
-      const ethersProvider = new ethers.BrowserProvider(walletProvider);
-      const signer = await ethersProvider.getSigner(primaryAccount);
-      const signerAddress = await signer.getAddress();
-      console.log("[DepositToEscrow] Got signer:", signerAddress);
-
-      // Verify signer matches primaryAccount
-      if (signerAddress.toLowerCase() !== primaryAccount!.toLowerCase()) {
-        throw new Error(`Signer address mismatch! Expected ${primaryAccount}, got ${signerAddress}. Make sure the correct account is selected in your wallet.`);
-      }
-
-      // Check/request approval for JobMarketplace contract
-      const currentAllowance = await usdcReadContract.allowance(primaryAccount, contracts.JOB_MARKETPLACE);
-      console.log("[DepositToEscrow] Current allowance:", ethers.formatUnits(currentAllowance, 6));
-      if (currentAllowance < required) {
-        addMessage("system", `🔐 Requesting USDC approval for deposit...`);
-        const usdcWithSigner = new ethers.Contract(
-          contracts.USDC,
-          ["function approve(address,uint256) returns (bool)"],
-          signer
-        );
-        const approveTx = await usdcWithSigner.approve(contracts.JOB_MARKETPLACE, ethers.parseUnits("1000", 6));
-        await approveTx.wait(3);
-        addMessage("system", "✅ USDC approved for deposit");
-      }
-
-      // Call depositToken via PaymentManager
-      addMessage("system", `📤 Depositing ${depositAmountUsdc} USDC to contract escrow...`);
-      console.log("[DepositToEscrow] Calling paymentManager.depositToken...");
-      const result = await (paymentManager as any).depositToken(
-        contracts.USDC,
-        depositAmountUsdc,
-        selectedChainId
-      );
-      console.log("[DepositToEscrow] Result:", result);
-
-      addMessage("system", `✅ Successfully deposited ${depositAmountUsdc} USDC to contract escrow! Tx: ${result.transactionHash}`);
-
-      // Refresh balances
-      await readAllBalances();
+      const allowance = await usdcContract.allowance(primaryAccount, contracts.JOB_MARKETPLACE);
+      console.log("[V2 Allowance] Current:", ethers.formatUnits(allowance, 6), "USDC");
+      setUsdcAllowance(allowance);
     } catch (error: any) {
-      console.error("[DepositToEscrow] Error:", error);
-      addMessage("system", `❌ Deposit failed: ${error.message || error}`);
+      console.error("[V2 Allowance] Error checking:", error);
     }
   };
 
-  // Helper: Withdraw USDC from contract escrow (pre-funded mode)
-  const withdrawFromContractEscrow = async () => {
+  // V2: Approve USDC for JobMarketplace contract (one-time setup)
+  const approveUsdc = async () => {
     try {
-      if (!paymentManager) {
-        addMessage("system", "❌ Cannot withdraw: wallet not connected");
-        return;
-      }
+      setIsApproving(true);
+      setApprovalError("");
+      addMessage("system", "🔐 Approving USDC for contract (one-time setup)...");
 
       const contracts = getContractAddresses();
-      const currentDeposit = await readContractDepositBalance();
-      if (parseFloat(currentDeposit) <= 0) {
-        addMessage("system", "❌ No funds to withdraw from contract escrow");
-        return;
-      }
+      const walletProvider = baseAccountSDK ? baseAccountSDK.getProvider() : (window as any).ethereum;
+      const ethersProvider = new ethers.BrowserProvider(walletProvider);
+      const signer = await ethersProvider.getSigner(primaryAccount);
 
-      addMessage("system", `📥 Withdrawing ${currentDeposit} USDC from contract escrow...`);
-      const result = await (paymentManager as any).withdrawToken(
+      const usdcContract = new ethers.Contract(
         contracts.USDC,
-        currentDeposit,
-        selectedChainId
+        ["function approve(address,uint256) returns (bool)"],
+        signer
       );
 
-      addMessage("system", `✅ Successfully withdrew ${currentDeposit} USDC from contract escrow! Tx: ${result.transactionHash}`);
+      console.log("[V2 Approval] Approving", ethers.formatUnits(DEFAULT_APPROVAL_AMOUNT, 6), "USDC to", contracts.JOB_MARKETPLACE);
+      const tx = await usdcContract.approve(contracts.JOB_MARKETPLACE, DEFAULT_APPROVAL_AMOUNT);
+      await tx.wait(3);
 
-      // Refresh balances
-      await readAllBalances();
+      addMessage("system", "✅ USDC approved! No more approval popups needed.");
+      await checkUsdcAllowance();
     } catch (error: any) {
-      console.error("Error withdrawing from contract:", error);
-      addMessage("system", `❌ Withdrawal failed: ${error.message || error}`);
+      console.error("[V2 Approval] Error:", error);
+      setApprovalError(error.message || "Approval failed");
+      addMessage("system", `❌ Approval failed: ${error.message || error}`);
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -1311,38 +1237,35 @@ export default function ChatContextDemo() {
       addMessage("system", `🤖 Model: ${host.models[0]}`);
       addMessage("system", `🌐 Endpoint: ${host.endpoint}`);
 
-      setStatus("Checking USDC balance...");
+      setStatus("Checking USDC balance and allowance...");
 
-      // Check balance depending on payment mode
-      if (isDepositMode) {
-        // Pre-funded deposit mode: check contract escrow balance
-        const depositBalance = await readContractDepositBalance();
-        const sessionCost = parseFloat(SESSION_DEPOSIT_AMOUNT);
-        addMessage("system", `💰 Contract escrow balance: ${depositBalance} USDC (using pre-funded deposit)`);
-        if (parseFloat(depositBalance) < sessionCost) {
-          throw new Error(
-            `Insufficient contract deposit. Need ${SESSION_DEPOSIT_AMOUNT} USDC but only have ${depositBalance} USDC. Please deposit more USDC to the contract.`
-          );
-        }
-      } else {
-        // Direct payment mode: check primary account has sufficient funds
-        const accountToCheck = primaryAccount;
-        const accountBalance = await readUSDCBalance(accountToCheck);
-        const sessionCost = parseUnits(SESSION_DEPOSIT_AMOUNT, 6);
+      // V2: Check primary account has sufficient USDC balance
+      const accountBalance = await readUSDCBalance(primaryAccount);
+      const sessionCost = parseUnits(SESSION_DEPOSIT_AMOUNT, 6);
 
-        addMessage(
-          "system",
-          `💰 Primary account balance: ${formatUnits(accountBalance, 6)} USDC`
+      addMessage(
+        "system",
+        `💰 Primary account balance: ${formatUnits(accountBalance, 6)} USDC`
+      );
+
+      if (accountBalance < sessionCost) {
+        throw new Error(
+          `Insufficient USDC. Need ${SESSION_DEPOSIT_AMOUNT} USDC but only have ${formatUnits(
+            accountBalance,
+            6
+          )} USDC. Please transfer USDC to your primary account.`
         );
+      }
 
-        if (accountBalance < sessionCost) {
-          throw new Error(
-            `Insufficient USDC. Need ${SESSION_DEPOSIT_AMOUNT} USDC but only have ${formatUnits(
-              accountBalance,
-              6
-            )} USDC. Please transfer USDC to your primary account.`
-          );
-        }
+      // V2: Check USDC allowance is sufficient
+      addMessage("system", `🔐 USDC Allowance: ${formatUnits(usdcAllowance, 6)} USDC`);
+      if (usdcAllowance < sessionCost) {
+        throw new Error(
+          `Insufficient USDC allowance. Need ${SESSION_DEPOSIT_AMOUNT} USDC approved but only have ${formatUnits(
+            usdcAllowance,
+            6
+          )} USDC. Please click "Approve USDC" first.`
+        );
       }
 
       setStatus("Creating session...");
@@ -1379,61 +1302,17 @@ export default function ChatContextDemo() {
         proofTimeoutWindow: 300, // AUDIT-F3: 5 minute timeout (60-3600 range)
         duration: SESSION_DURATION,
         paymentToken: contracts.USDC,
-        useDeposit: isDepositMode, // true = use pre-funded deposit, false = direct payment
         chainId: selectedChainId, // REQUIRED for multi-chain
       };
 
-      // Only need to approve if using direct payment (not deposit mode)
-      if (!isDepositMode) {
-        // Approve USDC for JobMarketplace contract
-        addMessage("system", "💰 Approving USDC for payment...");
-        const provider = baseAccountSDK
-          ? baseAccountSDK.getProvider()
-          : window.ethereum;
-        const ethersProvider = new ethers.BrowserProvider(provider);
-        const signer = await ethersProvider.getSigner();
+      // V2: USDC approval is done upfront via "Approve USDC" button (allowance already checked above)
+      addMessage("system", `✅ USDC pre-approved (${formatUnits(usdcAllowance, 6)} USDC allowance)`);
 
-        const usdcContract = new ethers.Contract(
-          contracts.USDC,
-          [
-            "function approve(address spender, uint256 amount) returns (bool)",
-            "function allowance(address owner, address spender) view returns (uint256)",
-          ],
-          signer
-        );
-
-        // Check current allowance - use high threshold to avoid running out mid-session
-        const currentAllowance = await usdcContract.allowance(
-          primaryAccount,
-          contracts.JOB_MARKETPLACE
-        );
-        const minAllowanceThreshold = parseUnits("100", 6); // 100 USDC threshold
-
-        console.log("[Allowance] Current allowance:", formatUnits(currentAllowance, 6), "USDC");
-        console.log("[Allowance] Threshold:", formatUnits(minAllowanceThreshold, 6), "USDC");
-        console.log("[Allowance] Primary account:", primaryAccount);
-        console.log("[Allowance] JobMarketplace:", contracts.JOB_MARKETPLACE);
-
-        if (currentAllowance < minAllowanceThreshold) {
-          addMessage("system", `🔐 Requesting USDC approval (current: ${formatUnits(currentAllowance, 6)} USDC)...`);
-          const approveTx = await usdcContract.approve(
-            contracts.JOB_MARKETPLACE,
-            parseUnits("1000", 6) // Approve 1000 USDC for multiple sessions
-          );
-          await approveTx.wait(3);
-          addMessage("system", "✅ USDC approved for JobMarketplace (1000 USDC)");
-        } else {
-          addMessage("system", `✅ USDC already approved (${formatUnits(currentAllowance, 6)} USDC)`);
-        }
-      } else {
-        addMessage("system", "💰 Using pre-funded contract deposit (no approval needed)");
-      }
-
-      // Start session - with Auto Spend Permissions, payment happens automatically without popups!
+      // Start session - with V2 delegation, payment happens automatically without popups!
       addMessage(
         "system",
-        isUsingBaseAccount && isDepositMode && subAccountSigner
-          ? "🎉 Starting session via sub-account (popup-free!)"
+        isUsingBaseAccount && isDelegateAuthorized && subAccountSigner
+          ? "🎉 Starting session via V2 direct payment (popup-free!)"
           : isUsingBaseAccount
           ? "📝 Starting session with Base Account..."
           : "📝 Starting session..."
@@ -1452,147 +1331,87 @@ export default function ChatContextDemo() {
 
       let result: any;
 
-      // Check if we can use delegated session creation (popup-free)
-      const canUseDelegation = isDepositMode && isDelegateAuthorized && subAccount && subAccountSigner;
+      // V2: Check if we can use delegated session creation (popup-free)
+      const canUseDelegation = isDelegateAuthorized && subAccount && subAccountSigner;
 
       if (canUseDelegation) {
-        console.log("[Session] Using DELEGATED session creation (popup-free!)");
+        console.log("[Session] Using V2 DELEGATED session creation (popup-free!)");
       } else {
-        console.log("[Session] Using standard session creation (popup required)");
+        console.log("[Session] Delegation not set up - requires approval and authorization");
       }
 
-      if (isDepositMode) {
-        // Get model ID from host's registered model
-        // If already a bytes32 (0x + 64 hex chars), use directly; otherwise hash it
-        const modelName = host.models[0];
-        const modelId = modelName.startsWith('0x') && modelName.length === 66
-          ? modelName  // Already a bytes32 model ID
-          : ethers.keccak256(ethers.toUtf8Bytes(modelName));
-        console.log("[Session] Model:", modelName, "-> ID:", modelId);
+      // V2 Direct Payment: Always use delegation when available (no isDepositMode needed)
+      // Get model ID from host's registered model
+      // If already a bytes32 (0x + 64 hex chars), use directly; otherwise hash it
+      const modelName = host.models[0];
+      const modelId = modelName.startsWith('0x') && modelName.length === 66
+        ? modelName  // Already a bytes32 model ID
+        : ethers.keccak256(ethers.toUtf8Bytes(modelName));
+      console.log("[Session] Model:", modelName, "-> ID:", modelId);
 
-        // Prepare parameters
-        const depositValue = ethers.parseUnits(sessionConfig.depositAmount, 6); // USDC has 6 decimals
+      // Prepare parameters
+      const depositValue = ethers.parseUnits(sessionConfig.depositAmount, 6); // USDC has 6 decimals
 
-        if (canUseDelegation) {
-          // POPUP-FREE PATH: Use sub-account to call delegated function
-          addMessage("system", "🎉 Creating session via delegated call (popup-free!)...");
+      if (canUseDelegation) {
+        // V2 POPUP-FREE PATH: Use sub-account with direct payment from primary's wallet
+        addMessage("system", "🎉 Creating session via V2 direct payment (popup-free!)...");
 
-          const marketplace = new JobMarketplaceWrapper(selectedChainId, subAccountSigner);
+        const marketplace = new JobMarketplaceWrapper(selectedChainId, subAccountSigner);
 
-          const delegatedParams: DelegatedSessionParams = {
-            depositor: primaryAccount,
-            host: host.address,
-            paymentToken: contracts.USDC,
-            deposit: sessionConfig.depositAmount,
-            pricePerToken: sessionConfig.pricePerToken,
-            duration: sessionConfig.duration,
-            proofInterval: sessionConfig.proofInterval,
-            proofTimeoutWindow: sessionConfig.proofTimeoutWindow || 300,
-            modelId: modelId,
-          };
+        // V2: Use payer/amount instead of depositor/deposit
+        const delegatedParams: DelegatedSessionParams = {
+          payer: primaryAccount,
+          host: host.address,
+          paymentToken: contracts.USDC,
+          amount: sessionConfig.depositAmount,
+          pricePerToken: sessionConfig.pricePerToken,
+          duration: sessionConfig.duration,
+          proofInterval: sessionConfig.proofInterval,
+          proofTimeoutWindow: sessionConfig.proofTimeoutWindow || 300,
+          modelId: modelId,
+        };
 
-          console.log("[Session] Calling createSessionFromDepositForModelAsDelegate:", {
-            depositor: primaryAccount,
-            modelId,
-            host: host.address,
-            deposit: depositValue.toString(),
-          });
+        console.log("[Session] V2 createSessionForModelAsDelegate:", {
+          payer: primaryAccount,
+          modelId,
+          host: host.address,
+          amount: depositValue.toString(),
+        });
 
-          const extractedSessionId = await marketplace.createSessionFromDepositForModelAsDelegate(delegatedParams);
+        // V2: Use new direct payment method (pulls USDC via transferFrom)
+        const extractedSessionId = await marketplace.createSessionForModelAsDelegate(delegatedParams);
 
-          result = {
+        result = {
+          sessionId: BigInt(extractedSessionId),
+          jobId: BigInt(extractedSessionId),
+          transactionHash: "delegated"
+        };
+
+        // Register the delegated session with SessionManager so chat works
+        if (sm) {
+          console.log("[Session] Registering delegated session with SessionManager...");
+          await (sm as any).registerDelegatedSession({
             sessionId: BigInt(extractedSessionId),
             jobId: BigInt(extractedSessionId),
-            transactionHash: "delegated"
-          };
-
-          // Register the delegated session with SessionManager so chat works
-          if (sm) {
-            console.log("[Session] Registering delegated session with SessionManager...");
-            await (sm as any).registerDelegatedSession({
-              sessionId: BigInt(extractedSessionId),
-              jobId: BigInt(extractedSessionId),
-              hostUrl: host.endpoint,
-              hostAddress: host.address,
-              model: modelName,
-              chainId: selectedChainId,
-              depositAmount: sessionConfig.depositAmount,
-              pricePerToken: sessionConfig.pricePerToken,
-              proofInterval: sessionConfig.proofInterval,
-              duration: sessionConfig.duration,
-            });
-          }
-
-          addMessage("system", "🎉 Session created WITHOUT popup (delegated)!");
-        } else {
-          // STANDARD PATH: Primary account creates session (requires popup)
-          addMessage("system", "Creating session from pre-funded deposit...");
-          console.log("[Session] Deposit mode: Primary account will call createSessionFromDepositForModel");
-
-          // Use SDK's signer (primary account) - this will show a popup
-          const signer = await sdk!.getSigner();
-
-          // Create JobMarketplace contract with primary account signer
-          const jobMarketplaceABI = [
-            "function createSessionFromDepositForModel(bytes32 modelId, address host, address paymentToken, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)",
-            "event SessionJobCreatedForModel(uint256 indexed sessionId, address indexed client, address indexed host, bytes32 modelId, uint256 deposit)",
-            "event SessionCreatedByDepositor(uint256 indexed sessionId, address indexed depositor, address indexed host, uint256 depositUsed)"
-          ];
-
-          const jobMarketplace = new ethers.Contract(
-            contracts.JOB_MARKETPLACE,
-            jobMarketplaceABI,
-            signer
-          );
-
-          console.log("[Session] Calling createSessionFromDepositForModel via primary account:", {
-            modelId,
-            host: host.address,
-            paymentToken: contracts.USDC,
-            deposit: depositValue.toString(),
+            hostUrl: host.endpoint,
+            hostAddress: host.address,
+            model: modelName,
+            chainId: selectedChainId,
+            depositAmount: sessionConfig.depositAmount,
             pricePerToken: sessionConfig.pricePerToken,
-            duration: sessionConfig.duration,
             proofInterval: sessionConfig.proofInterval,
-            proofTimeoutWindow: sessionConfig.proofTimeoutWindow
+            duration: sessionConfig.duration,
           });
-
-          // Call contract via primary account (requires popup approval)
-          const tx = await jobMarketplace.createSessionFromDepositForModel(
-            modelId,
-            host.address,
-            contracts.USDC,
-            depositValue,
-            sessionConfig.pricePerToken,
-            sessionConfig.duration,
-            sessionConfig.proofInterval,
-            sessionConfig.proofTimeoutWindow || 300
-          );
-
-          console.log("[Session] Transaction sent:", tx.hash);
-          addMessage("system", "Waiting for confirmation...");
-
-          const receipt = await tx.wait(3);
-          console.log("[Session] Transaction confirmed:", receipt);
-
-          // Extract session ID from events
-          const sessionEvent = receipt.logs?.find((log: any) =>
-            log.fragment?.name === 'SessionJobCreatedForModel' ||
-            log.fragment?.name === 'SessionCreatedByDepositor'
-          );
-          const extractedSessionId = sessionEvent ? BigInt(sessionEvent.args[0]) : BigInt(1);
-
-          result = {
-            sessionId: extractedSessionId,
-            jobId: extractedSessionId,
-            transactionHash: tx.hash
-          };
-
-          addMessage("system", "✅ Session created (popup was required)");
         }
+
+        addMessage("system", "🎉 Session created WITHOUT popup (V2 direct payment)!");
       } else {
-        // NORMAL PATH: Use SDK's SessionManager (may show popup for primary account)
-        console.log("[Session] Using SDK SessionManager (standard flow)");
-        result = await sm.startSession(fullSessionConfig);
+        // V2: Delegation not set up - inform user
+        addMessage("system", "❌ Popup-free sessions require delegation setup:");
+        addMessage("system", "  1. Approve USDC (one-time)");
+        addMessage("system", "  2. Authorize Sub-Account (one-time)");
+        addMessage("system", "Please complete setup above, then try again.");
+        throw new Error("Delegation not set up. Please approve USDC and authorize sub-account first.");
       }
 
       // Store session IDs immediately and in window object
@@ -2469,79 +2288,46 @@ export default function ChatContextDemo() {
         </div>
       )}
 
-      {/* Payment Mode Toggle */}
+      {/* V2 Direct Payment Setup Section */}
       {isConnected && primaryAccount && (
-        <div className="bg-gray-100 p-4 rounded-lg mb-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold">⚙️ Payment Mode</h3>
-            <button
-              onClick={() => setIsDepositMode(!isDepositMode)}
-              className={`px-4 py-2 rounded font-medium ${
-                isDepositMode
-                  ? "bg-purple-500 text-white hover:bg-purple-600"
-                  : "bg-gray-400 text-white hover:bg-gray-500"
-              }`}
-            >
-              {isDepositMode ? "Pre-Funded Deposit" : "Direct Payment"}
-            </button>
-          </div>
-          <p className="text-xs text-gray-600 mt-2">
-            {isDepositMode
-              ? "Sessions use USDC pre-deposited to contract escrow (AUDIT-F5: createSessionFromDepositForModel)"
-              : "Sessions transfer USDC directly from primary account (createSessionJobWithToken)"
-            }
-          </p>
-        </div>
-      )}
-
-      {/* Contract Escrow Deposit Section (Pre-Funded Mode) */}
-      {isConnected && primaryAccount && isDepositMode && (
         <div className="bg-purple-50 p-4 rounded-lg mb-4 border-2 border-purple-300">
-          <h3 className="font-semibold mb-2">🏦 Contract Escrow</h3>
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <span className="text-gray-600">Deposit Balance:</span>
-              <span className="font-mono font-bold text-purple-700 ml-2">{contractDeposit} USDC</span>
-            </div>
-            <div className="text-sm text-gray-600">
-              ~{Math.floor(parseFloat(contractDeposit) / parseFloat(SESSION_DEPOSIT_AMOUNT))} sessions available
-            </div>
-          </div>
-          <div className="flex gap-2 items-center">
-            <input
-              type="number"
-              value={depositToContract}
-              onChange={(e) => setDepositToContract(e.target.value)}
-              placeholder="Amount (USDC)"
-              className="px-3 py-2 border rounded w-32"
-              disabled={isLoading}
-              min="0.5"
-              step="0.5"
-            />
-            <button
-              onClick={depositToContractEscrow}
-              disabled={isLoading || !depositToContract}
-              className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-gray-300"
-            >
-              Deposit to Escrow
-            </button>
-            <button
-              onClick={withdrawFromContractEscrow}
-              disabled={isLoading || parseFloat(contractDeposit) <= 0}
-              className="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 disabled:bg-gray-300"
-            >
-              Withdraw All
-            </button>
-          </div>
+          <h3 className="font-semibold mb-2">🔐 V2 Direct Payment Setup</h3>
+          <p className="text-xs text-gray-600 mb-3">
+            Complete these one-time steps for popup-free sessions
+          </p>
 
-          {/* Delegation Authorization for Popup-Free Sessions */}
-          {subAccount && !isDelegateAuthorized && (
-            <div className="mt-3 p-3 bg-yellow-50 rounded-lg border border-yellow-300">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-yellow-800 font-medium">🔓 Enable Popup-Free Sessions</span>
-                  <p className="text-xs text-yellow-700 mt-1">Authorize sub-account once for seamless transactions</p>
-                </div>
+          {/* Step 1: USDC Approval */}
+          <div className="flex items-center justify-between mb-3 p-2 bg-white rounded">
+            <div>
+              <span className="font-medium">Step 1: Approve USDC</span>
+              <p className="text-xs text-gray-600">Allowance: {formatUnits(usdcAllowance, 6)} USDC</p>
+            </div>
+            {usdcAllowance >= parseUnits(SESSION_DEPOSIT_AMOUNT, 6) ? (
+              <span className="text-green-600 font-medium">✅ Approved</span>
+            ) : (
+              <button
+                onClick={approveUsdc}
+                disabled={isApproving}
+                className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-gray-300"
+              >
+                {isApproving ? "Approving..." : "Approve USDC ($1,000)"}
+              </button>
+            )}
+          </div>
+          {approvalError && (
+            <p className="text-xs text-red-600 mb-2">{approvalError}</p>
+          )}
+
+          {/* Step 2: Delegate Authorization */}
+          {subAccount && (
+            <div className="flex items-center justify-between p-2 bg-white rounded">
+              <div>
+                <span className="font-medium">Step 2: Authorize Sub-Account</span>
+                <p className="text-xs text-gray-600">Enables popup-free transactions</p>
+              </div>
+              {isDelegateAuthorized ? (
+                <span className="text-green-600 font-medium">✅ Authorized</span>
+              ) : (
                 <button
                   onClick={authorizeDelegateForSubAccount}
                   disabled={isAuthorizingDelegate}
@@ -2549,51 +2335,19 @@ export default function ChatContextDemo() {
                 >
                   {isAuthorizingDelegate ? "Authorizing..." : "Authorize (One-Time)"}
                 </button>
-              </div>
-              {delegationError && (
-                <p className="text-xs text-red-600 mt-1">{delegationError}</p>
               )}
             </div>
           )}
-          {subAccount && isDelegateAuthorized && (
+          {delegationError && (
+            <p className="text-xs text-red-600 mt-1">{delegationError}</p>
+          )}
+
+          {/* Status */}
+          {usdcAllowance >= parseUnits(SESSION_DEPOSIT_AMOUNT, 6) && isDelegateAuthorized && (
             <div className="mt-3 p-2 bg-green-50 rounded border border-green-300">
-              <span className="text-green-700 text-sm">✅ Popup-free sessions enabled</span>
+              <span className="text-green-700 text-sm">🎉 Setup complete! Sessions will be popup-free.</span>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Deposit Section (Direct Payment Mode) */}
-      {isConnected && primaryAccount && !isDepositMode && (
-        <div className="bg-blue-50 p-4 rounded-lg mb-4">
-          <h3 className="font-semibold mb-2">💰 Deposit USDC</h3>
-          <div className="flex gap-2 items-center">
-            <input
-              type="number"
-              value={depositAmount}
-              onChange={(e) => setDepositAmount(e.target.value)}
-              placeholder="Amount (USDC)"
-              className="px-3 py-2 border rounded w-32"
-              disabled={isLoading}
-            />
-            <button
-              onClick={depositUSDC}
-              disabled={isLoading || !depositAmount}
-              className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-300"
-            >
-              {isLoading ? "Depositing..." : "Deposit to Primary Account"}
-            </button>
-            <button
-              onClick={readAllBalances}
-              disabled={isLoading}
-              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
-            >
-              Refresh Balances
-            </button>
-          </div>
-          <p className="text-xs text-gray-600 mt-2">
-            Request USDC from test faucet to your primary smart account
-          </p>
         </div>
       )}
 

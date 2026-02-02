@@ -261,6 +261,119 @@
   },
   {
     "type": "function",
+    "name": "createSessionAsDelegate",
+    "inputs": [
+      {
+        "name": "payer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "host",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "paymentToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "pricePerToken",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxDuration",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "proofInterval",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "proofTimeoutWindow",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "sessionId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "createSessionForModelAsDelegate",
+    "inputs": [
+      {
+        "name": "payer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "modelId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "host",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "paymentToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "pricePerToken",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxDuration",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "proofInterval",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "proofTimeoutWindow",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "sessionId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "createSessionFromDeposit",
     "inputs": [
       {
@@ -310,121 +423,8 @@
   },
   {
     "type": "function",
-    "name": "createSessionFromDepositAsDelegate",
-    "inputs": [
-      {
-        "name": "depositor",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "host",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "paymentToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "deposit",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "pricePerToken",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maxDuration",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "proofInterval",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "proofTimeoutWindow",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "sessionId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "createSessionFromDepositForModel",
     "inputs": [
-      {
-        "name": "modelId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "host",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "paymentToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "deposit",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "pricePerToken",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maxDuration",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "proofInterval",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "proofTimeoutWindow",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "sessionId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "createSessionFromDepositForModelAsDelegate",
-    "inputs": [
-      {
-        "name": "depositor",
-        "type": "address",
-        "internalType": "address"
-      },
       {
         "name": "modelId",
         "type": "bytes32",
@@ -1874,7 +1874,7 @@
         "internalType": "uint256"
       },
       {
-        "name": "depositor",
+        "name": "payer",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -1898,7 +1898,7 @@
         "internalType": "bytes32"
       },
       {
-        "name": "deposit",
+        "name": "amount",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -2188,6 +2188,11 @@
   },
   {
     "type": "error",
+    "name": "BadDelegateParams",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ERC1967InvalidImplementation",
     "inputs": [
       {
@@ -2200,6 +2205,11 @@
   {
     "type": "error",
     "name": "ERC1967NonPayable",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ERC20Only",
     "inputs": []
   },
   {
@@ -2220,6 +2230,11 @@
   {
     "type": "error",
     "name": "InvalidInitialization",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotDelegate",
     "inputs": []
   },
   {
