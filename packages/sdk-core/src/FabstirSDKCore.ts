@@ -75,8 +75,11 @@ export interface FabstirSDKCoreConfig {
     // SECURITY WARNING: Only use for server-side apps or testing
     // For browser apps, use authApiUrl instead to keep token server-side
     masterToken?: string;
-    // Note: seedPhrase is derived automatically from wallet signature for data sovereignty
-    // Each user gets their own deterministic S5 identity based on their wallet
+    // Optional: Pre-cached S5 seed phrase for cross-tab consistency
+    // When provided, this seed is used for BOTH S5 identity AND encryption keys
+    // This ensures consistent encryption/decryption across all browser tabs
+    // If not provided, seed is derived from wallet signature (requires sign popup)
+    seedPhrase?: string;
   };
   
   // Bridge configuration for server features
@@ -318,14 +321,20 @@ export class FabstirSDKCore extends EventEmitter {
     // Generate or retrieve S5 seed deterministically (skip in hostOnly mode)
     if (this.config.hostOnly !== true) {
       try {
-        // Check if we have a cached seed for this wallet
-        const hasCached = hasCachedSeed(this.userAddress);
-
-        // Get or generate the seed (will use cache if available)
-        this.s5Seed = await getOrGenerateS5Seed(this.signer);
-
-        if (!hasCached) {
+        // PRIORITY 1: Use provided seedPhrase if available (for cross-tab consistency)
+        if (this.config.s5Config?.seedPhrase) {
+          console.log('[SDK] Using provided s5Config.seedPhrase for S5 identity');
+          this.s5Seed = this.config.s5Config.seedPhrase;
         } else {
+          // PRIORITY 2: Check cache or generate from wallet signature
+          const hasCached = hasCachedSeed(this.userAddress);
+          this.s5Seed = await getOrGenerateS5Seed(this.signer);
+
+          if (!hasCached) {
+            console.log('[SDK] Generated new S5 seed from wallet signature');
+          } else {
+            console.log('[SDK] Using cached S5 seed');
+          }
         }
       } catch (error: any) {
         console.warn('[S5 Seed] Failed to generate deterministic seed:', error);
@@ -366,14 +375,20 @@ export class FabstirSDKCore extends EventEmitter {
     // Generate or retrieve S5 seed deterministically (skip in hostOnly mode)
     if (this.config.hostOnly !== true) {
       try {
-        // Check if we have a cached seed for this wallet
-        const hasCached = hasCachedSeed(this.userAddress);
-
-        // Get or generate the seed (will use cache if available)
-        this.s5Seed = await getOrGenerateS5Seed(this.signer);
-
-        if (!hasCached) {
+        // PRIORITY 1: Use provided seedPhrase if available (for cross-tab consistency)
+        if (this.config.s5Config?.seedPhrase) {
+          console.log('[SDK] Using provided s5Config.seedPhrase for S5 identity');
+          this.s5Seed = this.config.s5Config.seedPhrase;
         } else {
+          // PRIORITY 2: Check cache or generate from wallet signature
+          const hasCached = hasCachedSeed(this.userAddress);
+          this.s5Seed = await getOrGenerateS5Seed(this.signer);
+
+          if (!hasCached) {
+            console.log('[SDK] Generated new S5 seed from wallet signature');
+          } else {
+            console.log('[SDK] Using cached S5 seed');
+          }
         }
       } catch (error: any) {
         console.error('[S5 Seed] Failed to generate deterministic seed:', error);
@@ -388,7 +403,7 @@ export class FabstirSDKCore extends EventEmitter {
       console.log('[SDK] Host-only mode: Skipping S5 seed generation');
     }
   }
-  
+
   /**
    * Authenticate with an existing signer (for testing with external wallets)
    */
@@ -410,18 +425,24 @@ export class FabstirSDKCore extends EventEmitter {
     }
     
     this.userAddress = await this.signer.getAddress();
-    
+
     // Generate or retrieve S5 seed deterministically (skip in hostOnly mode)
     if (this.config.hostOnly !== true) {
       try {
-        // Check if we have a cached seed for this wallet
-        const hasCached = hasCachedSeed(this.userAddress);
-
-        // Get or generate the seed (will use cache if available)
-        this.s5Seed = await getOrGenerateS5Seed(this.signer);
-
-        if (!hasCached) {
+        // PRIORITY 1: Use provided seedPhrase if available (for cross-tab consistency)
+        if (this.config.s5Config?.seedPhrase) {
+          console.log('[SDK] Using provided s5Config.seedPhrase for S5 identity');
+          this.s5Seed = this.config.s5Config.seedPhrase;
         } else {
+          // PRIORITY 2: Check cache or generate from wallet signature
+          const hasCached = hasCachedSeed(this.userAddress);
+          this.s5Seed = await getOrGenerateS5Seed(this.signer);
+
+          if (!hasCached) {
+            console.log('[SDK] Generated new S5 seed from wallet signature');
+          } else {
+            console.log('[SDK] Using cached S5 seed');
+          }
         }
       } catch (error: any) {
         console.error('[S5 Seed] Failed to generate deterministic seed:', error);
@@ -493,8 +514,10 @@ export class FabstirSDKCore extends EventEmitter {
     // Using address-based derivation: same passkey → same smart wallet → same address → same seed
     // No signature required - works across sessions, browsers, and devices
     const subAccountLower = subAccountResult.address.toLowerCase();
+    console.log('[BaseAccount Auth] Sub-account address:', subAccountLower);
+    console.log('[BaseAccount Auth] Primary account address:', primaryAccount.toLowerCase());
     if (!hasCachedSeed(subAccountLower)) {
-      console.log('[BaseAccount Auth] Deriving S5 seed from primary account address...');
+      console.log('[BaseAccount Auth] No cached seed found, deriving from primary account address...');
 
       // Derive seed from primary address with domain separation
       // Format: keccak256(primaryAddress + domainSeparator + chainId)
@@ -620,37 +643,19 @@ export class FabstirSDKCore extends EventEmitter {
           );
         }
 
-        // Create EncryptionManager (Phase 6.2 - supports both Wallet and browser signers)
-        if (this.signer) {
-          // For Wallet instances with direct privateKey access
-          if ('privateKey' in this.signer) {
-            this.encryptionManager = new EncryptionManager(this.signer as ethers.Wallet);
-          } else if ('isBaseAccountKit' in this.signer && (this.signer as any).isBaseAccountKit) {
-            // For Base Account Kit / passkey wallets, use address-based derivation
-            // This avoids non-deterministic signatures from passkeys
-            const address = await this.signer.getAddress();
-            const chainId = (this.signer as any).chainId || this.config.chainId!;
-            console.log('[EncryptionManager] Using address-based derivation for Base Account Kit');
-            this.encryptionManager = EncryptionManager.fromAddress(address, chainId);
-          } else {
-            // For browser wallets (MetaMask, etc.), derive encryption key via signature
-            try {
-              const message = 'Fabstir Encryption Key Derivation - Sign this message to enable end-to-end encryption';
-              const signature = await this.signer.signMessage(message);
-              const address = await this.signer.getAddress();
-              this.encryptionManager = EncryptionManager.fromSignature(signature, address);
-            } catch (error: any) {
-              console.warn('[EncryptionManager] Failed to create from signature:', error.message);
-              throw new SDKError(
-                'Failed to create EncryptionManager. User may have rejected signature request. ' +
-                'Encryption is required by default - set encryption: false in session config to opt-out.',
-                'ENCRYPTION_INIT_FAILED',
-                { originalError: error }
-              );
-            }
-          }
+        // Create EncryptionManager
+        // PRIORITY: Use S5 seed for encryption key derivation (ensures cross-tab consistency)
+        if (this.s5Seed) {
+          const address = await this.signer.getAddress();
+          this.encryptionManager = EncryptionManager.fromSeed(this.s5Seed, address);
+        } else if (this.signer && 'privateKey' in this.signer) {
+          // Fallback: For Wallet instances with direct privateKey access (testing)
+          this.encryptionManager = new EncryptionManager(this.signer as ethers.Wallet);
         } else {
-          throw new SDKError('Signer required for encryption', 'SIGNER_NOT_AVAILABLE');
+          throw new SDKError(
+            'S5 seed required for encryption. Ensure wallet can sign messages for seed derivation.',
+            'ENCRYPTION_SEED_REQUIRED'
+          );
         }
 
         await (this.sessionManager as any).initialize();  // SessionManager doesn't take signer

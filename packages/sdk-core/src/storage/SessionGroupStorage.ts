@@ -250,9 +250,10 @@ export class SessionGroupStorage {
             const group = await this.load(groupId);
             groups.push(group);
           } catch (error: any) {
-            // Silently skip groups that fail to load (corrupted, wrong key, deleted, etc.)
-            // This is expected during normal operation as users may have old/corrupted data
-            // Continue loading other groups
+            // Log warning for groups that fail to load (corrupted, wrong key, deleted, etc.)
+            // This helps debug cross-tab encryption issues
+            console.warn(`[SessionGroupStorage] Failed to decrypt group ${groupId}:`, error.message);
+            // Continue loading other groups - may be old data with different encryption key
           }
         }
       }

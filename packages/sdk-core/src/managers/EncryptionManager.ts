@@ -20,6 +20,7 @@ import { xchacha20poly1305 } from '@noble/ciphers/chacha';
 import { bytesToHex, hexToBytes } from '../crypto/utilities';
 import { encryptForEphemeral, decryptFromEphemeral } from '../crypto/encryption';
 import { recoverSenderAddress } from '../crypto/recovery';
+import { deriveEncryptionKeyFromSeed } from '../utils/encryption-key-derivation';
 import type {
   IEncryptionManager,
   SessionInitPayload,
@@ -63,6 +64,9 @@ export class EncryptionManager implements IEncryptionManager {
     // Derive compressed public key from private key
     const pubKeyBytes = secp.getPublicKey(this.clientPrivateKey, true); // true = compressed (33 bytes)
     this.clientPublicKey = bytesToHex(pubKeyBytes);
+
+    // Log public key for debugging cross-tab issues
+    console.log('[EncryptionManager] Initialized with public key:', this.clientPublicKey.substring(0, 20) + '...');
   }
 
   /**
@@ -112,6 +116,32 @@ export class EncryptionManager implements IEncryptionManager {
       address: address
     } as Wallet;
 
+    console.log('[EncryptionManager] Created from address (deterministic)');
+    return new EncryptionManager(wallet);
+  }
+
+  /**
+   * Create EncryptionManager from S5 seed phrase (deterministic).
+   *
+   * This is the PREFERRED method for Base Account Kit and passkey wallets
+   * because it ensures the same encryption keys across all browser tabs.
+   * The key is derived from the same S5 seed used for storage identity,
+   * guaranteeing cross-tab consistency.
+   *
+   * @param seedPhrase - The S5 seed phrase (15 words)
+   * @param address - Wallet address (checksummed)
+   * @returns EncryptionManager instance with deterministic keys
+   */
+  static fromSeed(seedPhrase: string, address: string): EncryptionManager {
+    const privateKey = deriveEncryptionKeyFromSeed(seedPhrase);
+
+    // Create minimal wallet-like object
+    const wallet = {
+      privateKey: '0x' + privateKey,
+      address: address
+    } as Wallet;
+
+    console.log('[EncryptionManager] Created from S5 seed (deterministic across tabs)');
     return new EncryptionManager(wallet);
   }
 

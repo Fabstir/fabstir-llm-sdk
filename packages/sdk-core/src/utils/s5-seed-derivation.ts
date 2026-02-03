@@ -240,9 +240,12 @@ export function cacheSeed(walletAddress: string, seed: string): void {
   if (typeof window === 'undefined' || !window.localStorage) {
     return; // No localStorage in Node.js or SSR
   }
-  
+
   try {
     const cacheKey = getCacheKey(walletAddress);
+    const words = seed.split(' ').slice(0, 3).join(' ');
+    console.log('[cacheSeed] Writing to cache key:', cacheKey);
+    console.log('[cacheSeed] Seed (first 3 words):', words);
     const data = {
       version: CACHE_VERSION,
       seed,
@@ -317,34 +320,45 @@ export async function getOrGenerateS5Seed(
   forceRegenerate = false
 ): Promise<string> {
   const walletAddress = await signer.getAddress();
-  
+  console.log('[getOrGenerateS5Seed] Wallet address:', walletAddress.toLowerCase());
+
   // Check cache first (unless forced to regenerate)
   if (!forceRegenerate) {
     const cached = getCachedSeed(walletAddress);
-    
+
     if (cached) {
+      const words = cached.split(' ').slice(0, 3).join(' ');
+      console.log('[getOrGenerateS5Seed] Found cached seed (first 3 words):', words);
       const isValid = await verifyCachedSeed(walletAddress, cached);
-      
+
       if (isValid) {
+        console.log('[getOrGenerateS5Seed] Returning cached seed');
         return cached;
       }
+      console.log('[getOrGenerateS5Seed] Cached seed failed validation');
+    } else {
+      console.log('[getOrGenerateS5Seed] No cached seed found');
     }
   }
-  
+
   // Generate new seed deterministically
-  
+  console.log('[getOrGenerateS5Seed] Generating new seed via signature...');
+
   // Sign message to get deterministic entropy
   const signature = await signer.signMessage(SEED_MESSAGE);
-  
+
   // Derive entropy from signature
   const entropy = await deriveEntropyFromSignature(signature);
-  
+
   // Convert to S5 phrase
   const seedPhrase = entropyToS5Phrase(entropy);
-  
+  const words = seedPhrase.split(' ').slice(0, 3).join(' ');
+  console.log('[getOrGenerateS5Seed] Generated new seed (first 3 words):', words);
+
   // Cache for future use
+  console.log('[getOrGenerateS5Seed] Caching new seed for:', walletAddress.toLowerCase());
   cacheSeed(walletAddress, seedPhrase);
-  
+
   return seedPhrase;
 }
 
