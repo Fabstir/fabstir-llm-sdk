@@ -162,10 +162,10 @@ GET /v1/version
     "BREAKING: Signature format changed from 84 bytes to 116 bytes (v8.13.0)",
     "FEAT: Node queries sessionModel(sessionId) from JobMarketplace before signing (v8.13.0)",
     "FEAT: Prevents cross-model replay attacks (v8.13.0)",
-    "FEAT: Model validation enforces host authorization at startup (v8.14.0)",
-    "FEAT: Dynamic model discovery from ModelRegistry contract (v8.14.0)",
-    "FEAT: SHA256 hash verification of model files (v8.14.0)",
-    "FEAT: REQUIRE_MODEL_VALIDATION env var for gradual rollout (v8.14.0)",
+    "FEAT: Model validation enforces host authorization at startup (v8.14.2)",
+    "FEAT: Dynamic model discovery from ModelRegistry contract (v8.14.2)",
+    "FEAT: SHA256 hash verification of model files (v8.14.2)",
+    "FEAT: REQUIRE_MODEL_VALIDATION env var for gradual rollout (v8.14.2)",
     "CONTRACT: Updated to remediated contracts - JobMarketplace: 0x9513..., ProofSystem: 0xE8DC... (v8.13.0)",
     "SECURITY: Implements AUDIT-F4 recommendation from pre-report security audit (v8.13.0)",
     "FEAT: Web search now works in streaming mode (HTTP streaming and WebSocket) (v8.7.5)",
@@ -5105,7 +5105,7 @@ P2P_PORT=9000
 # Model path
 MODEL_PATH=./models/tinyllama-1b.Q4_K_M.gguf
 
-# Model validation (v8.14.0+)
+# Model validation (v8.14.2+)
 REQUIRE_MODEL_VALIDATION=false    # Set to true to enforce model authorization
                                   # When enabled:
                                   # - Startup: Verifies MODEL_PATH against registered models

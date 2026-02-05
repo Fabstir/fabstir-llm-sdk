@@ -1,9 +1,9 @@
 # SDK Compatibility Guide: Model Authorization Enforcement
 
-**Version**: v8.14.0-model-validation
+**Version**: v8.14.2-model-validation
 **Date**: February 4, 2026
 **Audience**: SDK Developers (Client-side)
-**Host Node Version**: v8.14.0+
+**Host Node Version**: v8.14.2+
 
 ---
 
@@ -100,7 +100,7 @@ The host node's model authorization enforcement is a **server-side security feat
 - If not authorized → node refuses to start
 - SDK doesn't see failed hosts (they never come online)
 
-**2. SHA256 Hash Verification** (NEW in v8.14.0)
+**2. SHA256 Hash Verification** (NEW in v8.14.2)
 - Host computes SHA256 hash of the model file on disk
 - Queries `getModel(modelId)` to retrieve on-chain hash
 - If hashes don't match → node refuses to start
@@ -724,7 +724,7 @@ class JobMonitor {
 - [ ] ✅ **No changes required** - existing code works as-is
 - [ ] Review error handling for unclaimed jobs (optional improvement)
 - [ ] Consider adding pre-flight validation (optional improvement)
-- [ ] Test with hosts running v8.14.0+ nodes
+- [ ] Test with hosts running v8.14.2+ nodes
 
 ### For New Features
 
@@ -806,7 +806,7 @@ This ensures hosts can't run modified/tampered model files. The integrity of the
 
 ### Q: Are model lists hardcoded in the node?
 
-**A: No.** As of v8.14.0, the node dynamically queries the ModelRegistry contract at startup to discover approved models. This means:
+**A: No.** As of v8.14.2, the node dynamically queries the ModelRegistry contract at startup to discover approved models. This means:
 - New models can be added to the contract without node software updates
 - Hosts just download the new model and configure `MODEL_PATH`
 - The node automatically recognizes any model approved in the contract
@@ -868,7 +868,7 @@ function getAllApprovedModels()
 - GitHub Issues: https://github.com/fabstirp2p/contracts/issues
 
 **Version Compatibility**:
-- Host Node: v8.14.0+ (model validation enabled)
+- Host Node: v8.14.2+ (model validation enabled)
 - Contracts: Remediation proxies (Feb 4, 2026)
 - SDK: All versions compatible (no changes needed)
 

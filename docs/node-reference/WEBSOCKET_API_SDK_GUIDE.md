@@ -200,14 +200,14 @@ interface ErrorMessage {
 - 'RATE_LIMIT': Rate limit exceeded
 - 'SESSION_EXPIRED': Session token expired
 - 'INVALID_JOB': Job verification failed
-- 'MODEL_UNAVAILABLE': Requested model not available or host not authorized for model (v8.14.0+)
+- 'MODEL_UNAVAILABLE': Requested model not available or host not authorized for model (v8.14.2+)
 - 'MODEL_UNAUTHORIZED': Host not authorized to run requested model (see model validation)
 - 'CONTEXT_TOO_LARGE': Conversation context exceeds limits
 ```
 
-### Model Validation (v8.14.0+)
+### Model Validation (v8.14.2+)
 
-As of v8.14.0, hosts enforce model authorization:
+As of v8.14.2, hosts enforce model authorization:
 
 - **Startup**: Host validates MODEL_PATH matches registered model with SHA256 verification
 - **Job Claiming**: Hosts only claim jobs for models they're registered for
@@ -657,7 +657,7 @@ describe('End-to-End Conversation', () => {
 - `SESSION_EXPIRED`: Token expired
 - `INVALID_JOB`: Job verification failed
 - `MODEL_UNAVAILABLE`: Model not loaded
-- `MODEL_UNAUTHORIZED`: Host not authorized for requested model (v8.14.0+)
+- `MODEL_UNAUTHORIZED`: Host not authorized for requested model (v8.14.2+)
 - `CONTEXT_TOO_LARGE`: Exceeds token limit
 - `CIRCUIT_OPEN`: Service temporarily unavailable
 
@@ -760,7 +760,7 @@ const wsUrl = apiUrl.replace('http://', 'ws://') + '/v1/ws';
 2. **Session Management**: Stateless only, no conversation persistence
 3. **Proof Verification**: Using mock EZKL proofs (SHA256-based)
 4. **Rate Limiting**: Not enforced on WebSocket endpoint yet
-5. **Model Validation**: Hosts may reject jobs for unsupported models (v8.14.0+)
+5. **Model Validation**: Hosts may reject jobs for unsupported models (v8.14.2+)
 
 ### Troubleshooting
 

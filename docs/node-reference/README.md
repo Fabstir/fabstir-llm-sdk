@@ -28,7 +28,7 @@ A peer-to-peer node software for the Fabstir LLM marketplace, enabling GPU owner
 - **Encrypted Vector Paths**: Support for encrypted vector_database paths in job parameters (v8.4.0+)
 - **Chat Templates**: Model-specific formatting (Harmony, Llama, etc.) (v8.3.13+)
 - **AUDIT-F4 Compliance**: Model ID in proof signatures prevents cross-model replay attacks (v8.13.0+)
-- **Model Validation**: Dynamic model authorization with SHA256 verification (v8.14.0+)
+- **Model Validation**: Dynamic model authorization with SHA256 verification (v8.14.2+)
 
 ## Prerequisites
 
@@ -120,7 +120,7 @@ VECTOR_DB_URL=http://localhost:8081    # Vector DB endpoint
 HOST_PRIVATE_KEY=0x...           # Required for encryption and settlements
 SESSION_KEY_TTL_SECONDS=3600     # Session key expiration (default: 1 hour)
 
-# Model Validation (v8.14.0+)
+# Model Validation (v8.14.2+)
 REQUIRE_MODEL_VALIDATION=false   # Enable model authorization enforcement
                                  # When true: validates MODEL_PATH, SHA256, host auth
 
@@ -388,4 +388,4 @@ For issues and questions:
 - [WebSocket API Integration](docs/sdk-reference/WEBSOCKET_API_SDK_GUIDE.md) - WebSocket protocol for SDK developers
 - [S5 Vector Loading](docs/sdk-reference/S5_VECTOR_LOADING.md) - Load vector databases from S5 storage (v8.4.0+)
 - [SDK Encryption Integration](docs/sdk-reference/SDK_ENCRYPTION_INTEGRATION.md) - Client-side encryption integration
-- [Model Validation Compatibility](docs/sdk-reference/MODEL-VALIDATION-SDK-COMPATIBILITY.md) - Model authorization guide (v8.14.0+)
+- [Model Validation Compatibility](docs/sdk-reference/MODEL-VALIDATION-SDK-COMPATIBILITY.md) - Model authorization guide (v8.14.2+)

@@ -6,7 +6,7 @@ Update SDK to support the February 2026 contract changes:
 - **Signature Removal**: `submitProofOfWork` no longer requires ECDSA signature (6→5 params)
 - **V2 Direct Payment Delegation**: New functions for Smart Wallet sub-accounts
 - **Early Cancellation Fee**: `minTokensFee()` query
-- **Node v8.14.0 Model Validation**: Transparent server-side changes (no SDK impact)
+- **Node v8.14.2 Model Validation**: Transparent server-side changes (no SDK impact)
 
 ## Status: Complete (awaiting manual harness testing)
 
@@ -712,7 +712,7 @@ Update SDK to support the February 2026 contract changes:
 - **No signature generation needed**: Hosts just call submitProofOfWork directly
 - **Backward compatibility**: ProofSigner kept but deprecated
 - **Pre-MVP**: No migration of existing data needed
-- **Node v8.14.0**: Model validation is server-side, transparent to SDK
+- **Node v8.14.2**: Model validation is server-side, transparent to SDK
 - **Gas savings**: ~3,000 gas per proof submission (no ecrecover)
 
 ---
@@ -720,5 +720,5 @@ Update SDK to support the February 2026 contract changes:
 ## Dependencies
 
 - Requires updated ABIs from contracts developer
-- Requires node v8.14.0+ for model validation features
+- Requires node v8.14.2+ for model validation features
 - Test harness needs SDK rebuild before testing

@@ -115,6 +115,8 @@ export {
 // Export S5 seed derivation utilities
 export {
   deriveEntropyFromSignature,
+  deriveEntropyFromPrivateKey,
+  deriveEntropyFromAddress,
   entropyToS5Phrase,
   getCachedSeed,
   cacheSeed,
@@ -122,8 +124,11 @@ export {
   verifyCachedSeed,
   getOrGenerateS5Seed,
   generateS5SeedWithoutCache,
+  generateS5SeedFromPrivateKey,
+  generateS5SeedFromAddress,
   hasCachedSeed,
-  exportAllCachedSeeds
+  exportAllCachedSeeds,
+  SEED_DOMAIN_SEPARATOR
 } from './utils/s5-seed-derivation';
 
 // Export web search errors

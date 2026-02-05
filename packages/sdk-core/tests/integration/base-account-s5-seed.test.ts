@@ -2,7 +2,8 @@
  * Test: Base Smart Account S5 Seed Derivation
  *
  * Verifies that authenticateWithBaseAccount derives a unique S5 seed
- * from the PRIMARY account signature, not a hardcoded fallback.
+ * from the PRIMARY account ADDRESS (not signature - address-based derivation).
+ * This ensures determinism across browser sessions without requiring signatures.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -11,6 +12,8 @@ import {
   getCachedSeed,
   clearCachedSeed,
   deriveEntropyFromSignature,
+  deriveEntropyFromAddress,
+  generateS5SeedFromAddress,
   entropyToS5Phrase
 } from '../../src/utils/s5-seed-derivation';
 
@@ -93,65 +96,57 @@ describe('Base Smart Account S5 Seed Derivation', () => {
     vi.clearAllMocks();
   });
 
-  it('should call personal_sign with PRIMARY account (not sub-account)', async () => {
-    try {
-      await sdk.authenticateWithBaseAccount({
-        provider: mockProvider,
-        primaryAccount: PRIMARY_ACCOUNT_1,
-        tokenAddress: '0x0000000000000000000000000000000000000006',
-      });
-    } catch (e) {
-      // May fail on other parts, but we just want to verify personal_sign was called
-    }
+  it('should derive S5 seed from PRIMARY account ADDRESS (no signature needed)', async () => {
+    // With address-based derivation, we no longer need signatures for S5 seed
+    // This test verifies the new approach
 
-    // Verify personal_sign was called
-    expect(personalSignCalls.length).toBeGreaterThan(0);
+    const CHAIN_ID = ChainId.BASE_SEPOLIA;
 
-    // Find the S5 seed signing call
-    // Note: Base Account Kit requires hex-encoded messages, so check for both plain and hex
-    const SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM SDK v1.0';
-    const seedSignCall = personalSignCalls.find(call =>
-      call.message.includes('Generate S5 seed') || // Plain text (older format)
-      call.message.includes(SEED_MESSAGE) ||        // Exact match
-      call.message.startsWith('0x')                 // Hex-encoded (new format)
-    );
+    // Derive seed from primary account address
+    const seed = await generateS5SeedFromAddress(PRIMARY_ACCOUNT_1, CHAIN_ID);
 
-    expect(seedSignCall).toBeDefined();
-    expect(seedSignCall!.account.toLowerCase()).toBe(PRIMARY_ACCOUNT_1.toLowerCase());
+    // Should be a valid 15-word phrase
+    expect(seed.split(' ').length).toBe(15);
 
-    console.log('✅ personal_sign called with PRIMARY account:', seedSignCall!.account);
-    console.log('   Message format:', seedSignCall!.message.startsWith('0x') ? 'hex-encoded' : 'plain text');
+    // Should be deterministic
+    const seed2 = await generateS5SeedFromAddress(PRIMARY_ACCOUNT_1, CHAIN_ID);
+    expect(seed).toBe(seed2);
+
+    // No personal_sign calls needed for S5 seed derivation
+    // (The auth flow may still call personal_sign for other purposes like session creation)
+
+    console.log('✅ S5 seed derived from PRIMARY account address (no signature needed)');
+    console.log('   Seed:', seed.split(' ').slice(0, 3).join(' ') + '...');
   });
 
-  it('should derive DIFFERENT seeds for DIFFERENT primary accounts', async () => {
-    // Derive seed for PRIMARY_ACCOUNT_1
-    const entropy1 = await deriveEntropyFromSignature(MOCK_SIGNATURE_1);
-    const seed1 = entropyToS5Phrase(entropy1);
+  it('should derive DIFFERENT seeds for DIFFERENT primary accounts (address-based)', async () => {
+    const CHAIN_ID = ChainId.BASE_SEPOLIA;
 
-    // Derive seed for PRIMARY_ACCOUNT_2
-    const entropy2 = await deriveEntropyFromSignature(MOCK_SIGNATURE_2);
-    const seed2 = entropyToS5Phrase(entropy2);
+    // Derive seed for PRIMARY_ACCOUNT_1 using address
+    const seed1 = await generateS5SeedFromAddress(PRIMARY_ACCOUNT_1, CHAIN_ID);
+
+    // Derive seed for PRIMARY_ACCOUNT_2 using address
+    const seed2 = await generateS5SeedFromAddress(PRIMARY_ACCOUNT_2, CHAIN_ID);
 
     // Seeds must be DIFFERENT (data sovereignty!)
     expect(seed1).not.toBe(seed2);
 
-    console.log('✅ Different primary accounts produce different seeds:');
+    console.log('✅ Different primary accounts produce different seeds (address-based):');
     console.log('   Account 1 seed:', seed1.split(' ').slice(0, 3).join(' ') + '...');
     console.log('   Account 2 seed:', seed2.split(' ').slice(0, 3).join(' ') + '...');
   });
 
-  it('should derive SAME seed for SAME primary account (deterministic)', async () => {
-    // Derive seed twice from same signature
-    const entropy1 = await deriveEntropyFromSignature(MOCK_SIGNATURE_1);
-    const seed1 = entropyToS5Phrase(entropy1);
+  it('should derive SAME seed for SAME primary account (address-based determinism)', async () => {
+    const CHAIN_ID = ChainId.BASE_SEPOLIA;
 
-    const entropy2 = await deriveEntropyFromSignature(MOCK_SIGNATURE_1);
-    const seed2 = entropyToS5Phrase(entropy2);
+    // Derive seed twice from same address
+    const seed1 = await generateS5SeedFromAddress(PRIMARY_ACCOUNT_1, CHAIN_ID);
+    const seed2 = await generateS5SeedFromAddress(PRIMARY_ACCOUNT_1, CHAIN_ID);
 
     // Seeds must be SAME (deterministic!)
     expect(seed1).toBe(seed2);
 
-    console.log('✅ Same primary account produces same seed (deterministic):');
+    console.log('✅ Same primary account produces same seed (address-based determinism):');
     console.log('   Seed:', seed1.split(' ').slice(0, 3).join(' ') + '...');
   });
 

@@ -42,7 +42,7 @@ import { DEFAULT_RAG_CONFIG } from './rag/config';
 import { ContractManager, ContractAddresses } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 import { SDKConfig, SDKError } from './types';
-import { getOrGenerateS5Seed, hasCachedSeed, cacheSeed, deriveEntropyFromSignature, entropyToS5Phrase, SEED_DOMAIN_SEPARATOR } from './utils/s5-seed-derivation';
+import { getOrGenerateS5Seed, hasCachedSeed, cacheSeed, deriveEntropyFromSignature, entropyToS5Phrase, SEED_DOMAIN_SEPARATOR, generateS5SeedFromPrivateKey, generateS5SeedFromAddress } from './utils/s5-seed-derivation';
 import { ChainRegistry } from './config/ChainRegistry';
 import { ChainId, ChainConfig } from './types/chain.types';
 import { UnsupportedChainError } from './errors/ChainErrors';
@@ -326,14 +326,20 @@ export class FabstirSDKCore extends EventEmitter {
           console.log('[SDK] Using provided s5Config.seedPhrase for S5 identity');
           this.s5Seed = this.config.s5Config.seedPhrase;
         } else {
-          // PRIORITY 2: Check cache or generate from wallet signature
+          // PRIORITY 2: Check cache first
           const hasCached = hasCachedSeed(this.userAddress);
-          this.s5Seed = await getOrGenerateS5Seed(this.signer);
-
-          if (!hasCached) {
-            console.log('[SDK] Generated new S5 seed from wallet signature');
-          } else {
+          if (hasCached) {
+            const { getCachedSeed } = await import('./utils/s5-seed-derivation');
+            this.s5Seed = getCachedSeed(this.userAddress)!;
             console.log('[SDK] Using cached S5 seed');
+          } else {
+            // PRIORITY 3: Derive from ADDRESS (not signature) for determinism
+            // This survives browser clear since address is always the same
+            this.s5Seed = await generateS5SeedFromAddress(this.userAddress, this.config.chainId!);
+            console.log('[SDK] Generated S5 seed from wallet address (deterministic, no signature needed)');
+
+            // Cache for faster future lookups
+            cacheSeed(this.userAddress, this.s5Seed);
           }
         }
       } catch (error: any) {
@@ -341,7 +347,7 @@ export class FabstirSDKCore extends EventEmitter {
 
         // No fallbacks in production - seed must be explicitly provided
         throw new SDKError(
-          `Failed to generate S5 seed: ${error.message}. Ensure wallet can sign messages for S5 seed derivation`,
+          `Failed to generate S5 seed: ${error.message}`,
           'SEED_GENERATION_FAILED'
         );
       }
@@ -353,6 +359,12 @@ export class FabstirSDKCore extends EventEmitter {
 
   /**
    * Authenticate with private key (for testing)
+   *
+   * NOTE: When using private key auth, S5 seed is derived DETERMINISTICALLY
+   * from the private key itself, NOT from wallet signatures. This means:
+   * - Same private key = Same S5 seed (always, across sessions/devices)
+   * - Survives browser data clear
+   * - No signature popups required
    */
   private async authenticateWithPrivateKey(privateKey: string): Promise<void> {
     if (!privateKey) {
@@ -372,7 +384,11 @@ export class FabstirSDKCore extends EventEmitter {
 
     this.userAddress = await this.signer.getAddress();
 
-    // Generate or retrieve S5 seed deterministically (skip in hostOnly mode)
+    // Generate S5 seed DETERMINISTICALLY from private key (skip in hostOnly mode)
+    // This is more reliable than signature-based derivation because:
+    // 1. 100% deterministic - same key always produces same seed
+    // 2. Survives browser data clear
+    // 3. Works across devices
     if (this.config.hostOnly !== true) {
       try {
         // PRIORITY 1: Use provided seedPhrase if available (for cross-tab consistency)
@@ -380,22 +396,21 @@ export class FabstirSDKCore extends EventEmitter {
           console.log('[SDK] Using provided s5Config.seedPhrase for S5 identity');
           this.s5Seed = this.config.s5Config.seedPhrase;
         } else {
-          // PRIORITY 2: Check cache or generate from wallet signature
-          const hasCached = hasCachedSeed(this.userAddress);
-          this.s5Seed = await getOrGenerateS5Seed(this.signer);
+          // PRIORITY 2: Derive S5 seed deterministically from private key
+          // This is the KEY FIX for the "data loss after browser clear" bug
+          console.log('[SDK] Deriving S5 seed deterministically from private key...');
+          this.s5Seed = await generateS5SeedFromPrivateKey(privateKey);
 
-          if (!hasCached) {
-            console.log('[SDK] Generated new S5 seed from wallet signature');
-          } else {
-            console.log('[SDK] Using cached S5 seed');
-          }
+          // Cache it for consistency with other auth methods
+          cacheSeed(this.userAddress, this.s5Seed);
+          console.log('[SDK] S5 seed derived and cached (deterministic from private key)');
         }
       } catch (error: any) {
-        console.error('[S5 Seed] Failed to generate deterministic seed:', error);
+        console.error('[S5 Seed] Failed to derive seed from private key:', error);
 
         // No fallbacks in production - seed must be explicitly provided
         throw new SDKError(
-          `Failed to generate S5 seed: ${error.message}. Ensure wallet can sign messages for S5 seed derivation`,
+          `Failed to derive S5 seed from private key: ${error.message}`,
           'SEED_GENERATION_FAILED'
         );
       }
@@ -434,14 +449,20 @@ export class FabstirSDKCore extends EventEmitter {
           console.log('[SDK] Using provided s5Config.seedPhrase for S5 identity');
           this.s5Seed = this.config.s5Config.seedPhrase;
         } else {
-          // PRIORITY 2: Check cache or generate from wallet signature
+          // PRIORITY 2: Check cache first
           const hasCached = hasCachedSeed(this.userAddress);
-          this.s5Seed = await getOrGenerateS5Seed(this.signer);
-
-          if (!hasCached) {
-            console.log('[SDK] Generated new S5 seed from wallet signature');
-          } else {
+          if (hasCached) {
+            const { getCachedSeed } = await import('./utils/s5-seed-derivation');
+            this.s5Seed = getCachedSeed(this.userAddress)!;
             console.log('[SDK] Using cached S5 seed');
+          } else {
+            // PRIORITY 3: Derive from ADDRESS (not signature) for determinism
+            // Works with ANY signer type: MetaMask, Base Account Kit, WalletConnect, etc.
+            this.s5Seed = await generateS5SeedFromAddress(this.userAddress, this.config.chainId!);
+            console.log('[SDK] Generated S5 seed from wallet address (deterministic, no signature needed)');
+
+            // Cache for faster future lookups
+            cacheSeed(this.userAddress, this.s5Seed);
           }
         }
       } catch (error: any) {
@@ -449,7 +470,7 @@ export class FabstirSDKCore extends EventEmitter {
 
         // No fallbacks in production - seed must be explicitly provided
         throw new SDKError(
-          `Failed to generate S5 seed: ${error.message}. Ensure wallet can sign messages for S5 seed derivation`,
+          `Failed to generate S5 seed: ${error.message}`,
           'SEED_GENERATION_FAILED'
         );
       }
@@ -519,21 +540,11 @@ export class FabstirSDKCore extends EventEmitter {
     if (!hasCachedSeed(subAccountLower)) {
       console.log('[BaseAccount Auth] No cached seed found, deriving from primary account address...');
 
-      // Derive seed from primary address with domain separation
-      // Format: keccak256(primaryAddress + domainSeparator + chainId)
-      const seedInput = primaryAccount.toLowerCase() + SEED_DOMAIN_SEPARATOR + chainId.toString();
-      const entropyHash = ethers.keccak256(ethers.toUtf8Bytes(seedInput));
+      // Use shared address-based derivation function for consistency
+      // Derive from PRIMARY account address (not sub-account) for data sovereignty
+      const seedPhrase = await generateS5SeedFromAddress(primaryAccount, chainId);
 
-      // Convert hash to entropy bytes (remove 0x prefix, take first 16 bytes for S5 seed)
-      const entropyHex = entropyHash.slice(2, 34); // 16 bytes = 32 hex chars
-      const entropy = new Uint8Array(16);
-      for (let i = 0; i < 16; i++) {
-        entropy[i] = parseInt(entropyHex.slice(i * 2, i * 2 + 2), 16);
-      }
-
-      const seedPhrase = entropyToS5Phrase(entropy);
-
-      // Cache for sub-account address
+      // Cache for sub-account address (used for future lookups)
       cacheSeed(subAccountLower, seedPhrase);
       console.log('[BaseAccount Auth] S5 seed derived and cached for sub-account');
     }
