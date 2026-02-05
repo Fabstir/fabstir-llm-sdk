@@ -1435,17 +1435,13 @@ export default function ChatContextDemo() {
       const hostSigner = new ethers.Wallet(hostPrivateKey, hostProvider);
       console.log(`Using host signer: ${await hostSigner.getAddress()}`);
 
-      // Generate a unique proof
+      // February 2026: Generate proofHash and proofCID (signature no longer needed)
       const timestamp = Date.now();
-      const uniqueHash = ethers.keccak256(
-        ethers.toUtf8Bytes(`job_${sessionId}_${timestamp}`)
+      const proofHash = ethers.keccak256(
+        ethers.toUtf8Bytes(`proof_${sessionId}_${timestamp}_${tokensToSubmit}`)
       );
-
-      // Create a structured 64-byte proof
-      const proofData = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["bytes32", "bytes32"],
-        [uniqueHash, ethers.id("mock_ezkl_padding")]
-      );
+      // Mock proofCID for test harness - in production this would be an S5 CID
+      const proofCID = `mock-proof-cid-${sessionId}-${timestamp}`;
 
       // Wait for token accumulation (ProofSystem enforces rate limits)
       console.log("Waiting 5 seconds for token accumulation...");
@@ -1455,13 +1451,16 @@ export default function ChatContextDemo() {
       console.log("Submitting checkpoint:", {
         sessionId: sessionId.toString(),
         tokensToSubmit,
-        proofDataLength: proofData.length,
+        proofHash,
+        proofCID,
       });
 
+      // Feb 2026: No signature parameter - auth via msg.sender == session.host
       const checkpointTx = await paymentManager.submitCheckpointAsHost(
         sessionId,
         tokensToSubmit,
-        proofData,
+        proofHash,
+        proofCID,
         hostSigner
       );
 

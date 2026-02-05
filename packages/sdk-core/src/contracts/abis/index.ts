@@ -43,8 +43,8 @@ export const JobMarketplaceFragments = {
   createSessionFromDeposit: 'function createSessionFromDeposit(address host, address paymentToken, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)',
   // AUDIT-F5: New function for model-specific deposit sessions
   createSessionFromDepositForModel: 'function createSessionFromDepositForModel(bytes32 modelId, address host, address paymentToken, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)',
-  // Proof functions (includes deltaCID)
-  submitProofOfWork: 'function submitProofOfWork(uint256 jobId, uint256 tokensClaimed, bytes32 proofHash, bytes signature, string proofCID, string deltaCID)',
+  // Proof functions - Feb 2026: signature removed (auth via msg.sender == session.host)
+  submitProofOfWork: 'function submitProofOfWork(uint256 jobId, uint256 tokensClaimed, bytes32 proofHash, string proofCID, string deltaCID)',
   getSessionJob: 'function getSessionJob(uint256 jobId) returns (tuple(address host, address renter, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 endTime, uint256 proofInterval, uint256 tokensProven, uint256 completedAt, address paymentToken, bool isCompleted))',
   withdrawTreasuryTokens: 'function withdrawTreasuryTokens(address token) returns (bool)',
   // View functions (getProofSubmission now returns deltaCID)
@@ -56,7 +56,14 @@ export const JobMarketplaceFragments = {
   // Timeout constants (AUDIT-F3)
   MIN_PROOF_TIMEOUT: 'function MIN_PROOF_TIMEOUT() view returns (uint256)',
   MAX_PROOF_TIMEOUT: 'function MAX_PROOF_TIMEOUT() view returns (uint256)',
-  DEFAULT_PROOF_TIMEOUT: 'function DEFAULT_PROOF_TIMEOUT() view returns (uint256)'
+  DEFAULT_PROOF_TIMEOUT: 'function DEFAULT_PROOF_TIMEOUT() view returns (uint256)',
+  // V2 Direct Payment Delegation - Feb 2026
+  authorizeDelegate: 'function authorizeDelegate(address delegate, bool authorized)',
+  isDelegateAuthorized: 'function isDelegateAuthorized(address depositor, address delegate) view returns (bool)',
+  createSessionAsDelegate: 'function createSessionAsDelegate(address payer, address host, address paymentToken, uint256 amount, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)',
+  createSessionForModelAsDelegate: 'function createSessionForModelAsDelegate(address payer, bytes32 modelId, address host, address paymentToken, uint256 amount, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)',
+  // Early cancellation fee - Feb 2026
+  minTokensFee: 'function minTokensFee() view returns (uint256)'
 };
 
 export const HostEarningsFragments = {

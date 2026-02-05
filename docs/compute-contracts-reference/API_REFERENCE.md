@@ -1,6 +1,6 @@
 # Fabstir LLM Marketplace - API Reference
 
-**Last Updated:** February 2, 2026
+**Last Updated:** February 4, 2026
 **Network:** Base Sepolia (Chain ID: 84532)
 **PRICE_PRECISION:** 1000 (all prices multiplied by 1000 for sub-$1/million support)
 
@@ -10,16 +10,20 @@
 
 ### Contract Addresses (Upgradeable - UUPS Proxy Pattern)
 
-> **NEW (December 14, 2025):** All contracts have been upgraded to UUPS proxy pattern for future upgradeability. Use the **proxy addresses** for all interactions.
+> **⚠️ TWO DEPLOYMENT SETS:** There are separate proxy addresses for **Frozen (Audit)** and **Remediation (Active Development)** contracts. Use the appropriate set for your use case.
+
+#### Remediation Contracts (Active Development - Feb 2026)
+
+Use these for SDK development and testing new features (V2 Delegation, Early Cancellation Fee, Per-Model Rate Limits):
 
 ```javascript
-// UPGRADEABLE CONTRACTS (UUPS Proxies) - Use these addresses
-const contracts = {
+// REMEDIATION CONTRACTS - Active development
+const remediationContracts = {
   // Proxy addresses (interact with these)
-  jobMarketplace: "0x3CaCbf3f448B420918A93a88706B26Ab27a3523E", // ⚠️ NEW - Jan 9, 2026
+  jobMarketplace: "0x95132177F964FF053C1E874b53CF74d819618E06", // ✅ Early Cancel Fee + Per-Model Rate Limits
   nodeRegistry: "0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22",
-  modelRegistry: "0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2",
-  proofSystem: "0x5afB91977e69Cc5003288849059bc62d47E7deeb",
+  modelRegistry: "0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2", // ✅ Per-Model Rate Limits
+  proofSystem: "0xE8DCa89e1588bbbdc4F7D5F78263632B35401B31",
   hostEarnings: "0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0",
 
   // Tokens (unchanged)
@@ -27,8 +31,37 @@ const contracts = {
   usdcToken: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
 };
 
-// Implementation addresses (for verification only) - Updated Jan 16, 2026
-const implementations = {
+// Remediation implementation addresses - Updated Feb 4, 2026
+const remediationImplementations = {
+  jobMarketplace: "0x1a0436a15d2fD911b2F062D08aA312141A978955", // Signature Removal + Early Cancel Fee (Feb 4)
+  proofSystem: "0x5345a926dcf3B0E1A6895406FB68210ED19AC556", // markProofUsed + Signature Removal (Feb 4)
+  modelRegistry: "0x3F22fd532Ac051aE09b0F2e45F3DBfc835AfCD45", // Per-Model Rate Limits (Feb 3)
+  nodeRegistry: "0xF2D98D38B2dF95f4e8e4A49750823C415E795377",
+  hostEarnings: "0x8584AeAC9687613095D13EF7be4dE0A796F84D7a",
+};
+```
+
+#### Frozen Contracts (Security Audit - DO NOT MODIFY)
+
+These contracts are frozen for security audit. Do not upgrade or modify:
+
+```javascript
+// FROZEN CONTRACTS - Under security audit
+const frozenContracts = {
+  // Proxy addresses (DO NOT MODIFY)
+  jobMarketplace: "0x3CaCbf3f448B420918A93a88706B26Ab27a3523E", // 🔒 FROZEN
+  nodeRegistry: "0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22",   // 🔒 FROZEN
+  modelRegistry: "0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2", // 🔒 FROZEN
+  proofSystem: "0x5afB91977e69Cc5003288849059bc62d47E7deeb",   // 🔒 FROZEN
+  hostEarnings: "0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0",  // 🔒 FROZEN
+
+  // Tokens (unchanged)
+  fabToken: "0xC78949004B4EB6dEf2D66e49Cd81231472612D62",
+  usdcToken: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+};
+
+// Frozen implementation addresses - Jan 16, 2026
+const frozenImplementations = {
   jobMarketplace: "0x1B6C6A1E373E5E00Bf6210e32A6DA40304f6484c", // deltaCID support (Jan 14)
   nodeRegistry: "0xF2D98D38B2dF95f4e8e4A49750823C415E795377", // Stake slashing (Jan 16)
   modelRegistry: "0x8491af1f0D47f6367b56691dCA0F4996431fB0A5", // Voting improvements (Jan 11)
@@ -513,6 +546,100 @@ function lastSlashTime(address host) external view returns (uint256)
 
 ---
 
+## ModelRegistry (Upgradeable)
+
+AI model governance and rate limits.
+
+**Proxy Address:** `0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2`
+**Implementation:** `0x3F22fd532Ac051aE09b0F2e45F3DBfc835AfCD45` (Per-Model Rate Limits - Feb 3, 2026)
+
+### Per-Model Rate Limits (NEW - February 3, 2026)
+
+Allows setting token generation rate limits per model for quality enforcement.
+
+#### `modelRateLimits`
+
+Query the rate limit for a specific model.
+
+```solidity
+function modelRateLimits(bytes32 modelId) external view returns (uint256)
+```
+
+**Returns:** Tokens per second (0 = unlimited)
+
+**Example:**
+```javascript
+const rateLimit = await modelRegistry.modelRateLimits(TINY_VICUNA);
+console.log(`Rate limit: ${rateLimit} tokens/second`);
+// Output: 200 (or 0 if unlimited)
+```
+
+#### `setModelRateLimit`
+
+Set the rate limit for a model (owner only).
+
+```solidity
+function setModelRateLimit(bytes32 modelId, uint256 tokensPerSecond) external
+```
+
+**Requirements:**
+- Caller must be contract owner
+- Model must be approved
+
+**Example:**
+```javascript
+// Set TinyVicuna to 200 tokens/second
+await modelRegistry.setModelRateLimit(TINY_VICUNA, 200);
+
+// Remove rate limit (unlimited)
+await modelRegistry.setModelRateLimit(TINY_VICUNA, 0);
+```
+
+**Events:**
+```solidity
+event ModelRateLimitUpdated(bytes32 indexed modelId, uint256 tokensPerSecond);
+```
+
+### Model Approval Functions
+
+#### `isModelApproved`
+
+Check if a model is approved for use.
+
+```solidity
+function isModelApproved(bytes32 modelId) external view returns (bool)
+```
+
+#### `getModelId`
+
+Calculate model ID from repo and filename.
+
+```solidity
+function getModelId(string memory repo, string memory filename) external pure returns (bytes32)
+```
+
+**Example:**
+```javascript
+const modelId = await modelRegistry.getModelId(
+  "CohereForAI/TinyVicuna-1B-32k-GGUF",
+  "tiny-vicuna-1b.q4_k_m.gguf"
+);
+```
+
+#### `addTrustedModel`
+
+Add a model as trusted (owner only, bypasses voting).
+
+```solidity
+function addTrustedModel(
+    string memory repo,
+    string memory filename,
+    bytes32 sha256Hash
+) external
+```
+
+---
+
 ## JobMarketplaceWithModels (Upgradeable)
 
 Session management and payments.
@@ -718,57 +845,46 @@ function createSessionJobForModelWithToken(
 
 #### `submitProofOfWork`
 
-Submit signed proof of work for tokens generated.
+Submit proof of work for tokens generated. No signature required - authentication via `msg.sender == session.host`.
 
 ```solidity
 function submitProofOfWork(
     uint256 jobId,          // Session ID
     uint256 tokensClaimed,  // Number of tokens in this proof
     bytes32 proofHash,      // SHA256 hash of STARK proof
-    bytes calldata signature,  // Host's ECDSA signature (65 bytes)
     string calldata proofCID,  // S5 CID where full proof is stored
-    string calldata deltaCID   // S5 CID for delta since last proof (NEW - Jan 14, 2026)
+    string calldata deltaCID   // S5 CID for delta since last proof
 ) external
 ```
 
 **Requirements:**
 
-- Only the session host can submit proofs
+- Only the session host can submit proofs (`msg.sender == session.host`)
 - `tokensClaimed >= MIN_PROVEN_TOKENS` (100)
-- `signature.length == 65` bytes (r, s, v format)
-- Signature must be from the session host
 - Session must be Active
 
 **Example:**
 
 ```javascript
-import { keccak256, solidityPacked, getBytes } from "ethers";
+import { keccak256 } from "ethers";
 
-// Host submits signed proof after generating tokens
+// Host submits proof after generating tokens (no signature needed!)
 const proofHash = keccak256(proofBytes);
 const proofCID = "bafyreib..."; // S5 storage CID for full proof
 const deltaCID = "bafyreic..."; // S5 storage CID for delta changes
 const tokensClaimed = 1000;
 
-// 1. Generate signature
-const dataHash = keccak256(
-  solidityPacked(
-    ["bytes32", "address", "uint256"],
-    [proofHash, hostAddress, tokensClaimed]
-  )
-);
-const signature = await hostWallet.signMessage(getBytes(dataHash));
-
-// 2. Submit with signature and CIDs
+// Submit directly as host - no signature generation required
 await marketplace.submitProofOfWork(
   sessionId,
   tokensClaimed,
   proofHash,
-  signature,
   proofCID,
   deltaCID // Can be "" if not tracking incremental changes
 );
 ```
+
+> **Note (Feb 4, 2026):** Signature parameter was removed. Authentication is handled by `msg.sender == session.host` check, providing equivalent security with ~3,000 gas savings.
 
 #### `getProofSubmission`
 
@@ -1101,6 +1217,70 @@ function createSessionFromDeposit(
 ) external returns (uint256 jobId)
 ```
 
+### Early Cancellation Fee (NEW - February 3, 2026)
+
+Protects hosts from users who cancel sessions before submitting any proofs.
+
+#### `minTokensFee`
+
+Query the minimum token fee charged on early cancellation.
+
+```solidity
+function minTokensFee() external view returns (uint256)
+```
+
+**Default Value**: 1000 tokens
+
+**Example:**
+```javascript
+const minTokensFee = await marketplace.minTokensFee();
+console.log(`Min tokens on early cancel: ${minTokensFee}`);
+// Output: 1000
+```
+
+#### `setMinTokensFee`
+
+Set the minimum token fee for early cancellation (owner only).
+
+```solidity
+function setMinTokensFee(uint256 _fee) external
+```
+
+**Requirements:**
+- Caller must be contract owner
+
+**Example:**
+```javascript
+// Set early cancellation fee to 500 tokens
+await marketplace.setMinTokensFee(500);
+```
+
+#### Early Cancellation Fee Calculation
+
+When a depositor completes a session **before any proofs are submitted**:
+
+```javascript
+const PRICE_PRECISION = 1000;
+const fee = (minTokensFee * pricePerToken) / PRICE_PRECISION;
+```
+
+| Price Per Token | Min Tokens Fee | Early Cancel Fee |
+|-----------------|----------------|------------------|
+| 1,000 (0.001 USDC) | 1,000 | 1,000 (0.001 USDC) |
+| 5,000 (0.005 USDC) | 1,000 | 5,000 (0.005 USDC) |
+| 10,000 (0.01 USDC) | 1,000 | 10,000 (0.01 USDC) |
+
+**Fee Distribution:**
+- 100% goes to host (no treasury cut) as compensation
+- Remaining deposit refunded to user
+
+**When Fee is NOT Charged:**
+- Host completes the session
+- At least one proof has been submitted
+- `minTokensFee` is set to 0
+
+---
+
 ### Admin Functions
 
 #### `addAcceptedToken`
@@ -1208,7 +1388,7 @@ const { jobId } = (await tx.wait()).logs[0].args;
 ### 3. Host Inference Flow
 
 ```javascript
-import { keccak256, solidityPacked, getBytes } from "ethers";
+import { keccak256 } from "ethers";
 
 // 1. Listen for new sessions
 marketplace.on("SessionJobCreated", async (jobId, requester, host, deposit) => {
@@ -1218,28 +1398,19 @@ marketplace.on("SessionJobCreated", async (jobId, requester, host, deposit) => {
   }
 });
 
-// 2. Submit signed proofs periodically with CID evidence
+// 2. Submit proofs periodically with CID evidence (no signature needed!)
 const tokensClaimed = 1000;
 const proofHash = keccak256(proofBytes);
-
-// Generate host signature
-const dataHash = keccak256(
-  solidityPacked(
-    ["bytes32", "address", "uint256"],
-    [proofHash, hostAddress, tokensClaimed]
-  )
-);
-const signature = await hostWallet.signMessage(getBytes(dataHash));
 
 // Upload proof data to S5
 const proofCID = await s5Client.upload(proofData);
 const deltaCID = await s5Client.upload(deltaData); // Incremental changes
 
+// Submit directly as host - authentication via msg.sender
 await marketplace.submitProofOfWork(
   sessionId,
   tokensClaimed,
   proofHash,
-  signature, // Host's ECDSA signature
   proofCID, // Full proof CID
   deltaCID // Delta CID (can be "" if not tracking)
 );

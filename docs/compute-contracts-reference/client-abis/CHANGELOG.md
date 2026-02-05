@@ -1,5 +1,78 @@
 # Client ABIs Changelog
 
+## February 4, 2026 - Signature Removal from Proof Submission
+
+### ⚠️ SDK BREAKING CHANGE
+**`submitProofOfWork` signature changed from 6 to 5 parameters** - Signature parameter removed.
+
+The redundant ECDSA signature verification has been removed. Authentication is now handled via `msg.sender == session.host` check, which provides equivalent security with ~3,000 gas savings per proof.
+
+**Old signature (no longer works):**
+```solidity
+function submitProofOfWork(
+    uint256 jobId,
+    uint256 tokensClaimed,
+    bytes32 proofHash,
+    bytes calldata signature,    // ❌ REMOVED
+    string calldata proofCID,
+    string calldata deltaCID
+)
+```
+
+**New signature (required):**
+```solidity
+function submitProofOfWork(
+    uint256 jobId,
+    uint256 tokensClaimed,
+    bytes32 proofHash,
+    string calldata proofCID,
+    string calldata deltaCID     // 5 params total
+)
+```
+
+### SDK Migration Guide
+```javascript
+// OLD (no longer works - 6 params):
+const signature = await hostWallet.signMessage(getBytes(dataHash));
+await marketplace.submitProofOfWork(jobId, tokensClaimed, proofHash, signature, proofCID, deltaCID);
+
+// NEW (required - 5 params):
+// No signature needed! Just call directly as the host
+await marketplace.submitProofOfWork(jobId, tokensClaimed, proofHash, proofCID, deltaCID);
+```
+
+### ProofSystem Changes
+
+**Removed Functions:**
+- `verifyAndMarkComplete(bytes proof, address prover, uint256 claimedTokens, bytes32 modelId)` - REMOVED
+- `verifyHostSignature(bytes proof, address prover, uint256 claimedTokens, bytes32 modelId)` - REMOVED
+
+**New Function:**
+```solidity
+// Simple replay protection only - no signature verification
+function markProofUsed(bytes32 proofHash) external returns (bool)
+```
+
+### Implementation Upgrades (Remediation Proxy)
+| Contract | Proxy | New Implementation |
+|----------|-------|-------------------|
+| JobMarketplace | `0x95132177F964FF053C1E874b53CF74d819618E06` | `0x1a0436a15d2fD911b2F062D08aA312141A978955` |
+| ProofSystem | `0xE8DCa89e1588bbbdc4F7D5F78263632B35401B31` | `0x5345a926dcf3B0E1A6895406FB68210ED19AC556` |
+
+### Benefits
+- ~3,000 gas savings per proof submission (no ecrecover)
+- Simpler host integration (no signature generation)
+- Equivalent security via `msg.sender == session.host` check
+- Reduced code complexity
+
+### No Other Breaking Changes
+- All other functions work as before
+- Session creation unchanged
+- Completion unchanged
+- V2 delegation unchanged
+
+---
+
 ## February 2, 2026 - V2 Direct Payment Delegation
 
 ### New Feature: Smart Wallet Sub-Account Support

@@ -1616,6 +1616,37 @@ export class HostManager {
     return [];
   }
 
+  // ============= Model Validation Helpers (Feb 2026) =============
+
+  /**
+   * Check if host supports a specific model before creating session
+   *
+   * Provides better UX by failing fast instead of waiting for unclaimed job.
+   *
+   * @param hostAddress - Host address to check
+   * @param modelId - bytes32 model identifier
+   * @returns true if host supports the model, false otherwise
+   */
+  async validateHostSupportsModel(hostAddress: string, modelId: string): Promise<boolean> {
+    if (!this.nodeRegistry) {
+      throw new ModelRegistryError('NodeRegistry not initialized', '');
+    }
+    return this.nodeRegistry.nodeSupportsModel(hostAddress, modelId);
+  }
+
+  /**
+   * Get all models supported by a host
+   *
+   * @param hostAddress - Host address to query
+   * @returns Array of model IDs (bytes32) supported by the host
+   */
+  async getHostSupportedModels(hostAddress: string): Promise<string[]> {
+    if (!this.nodeRegistry) {
+      throw new ModelRegistryError('NodeRegistry not initialized', '');
+    }
+    return this.nodeRegistry.getNodeModels(hostAddress);
+  }
+
   /**
    * Parse host models from metadata
    */

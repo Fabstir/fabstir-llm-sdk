@@ -2,6 +2,179 @@
 
 ---
 
+## February 4, 2026: Signature Removal from Proof Submission
+
+**Contracts Affected**: JobMarketplaceWithModelsUpgradeable, ProofSystemUpgradeable (Remediation Proxies)
+**Impact Level**: HIGH - Function signature change requires SDK updates
+
+### Summary
+
+Removed redundant ECDSA signature verification from `submitProofOfWork()`. Authentication is now handled via `msg.sender == session.host` check, providing equivalent security with ~3,000 gas savings per proof.
+
+| Change | Impact | Action Required |
+|--------|--------|-----------------|
+| `submitProofOfWork` signature param removed | HIGH | Update to 5 parameters (remove signature) |
+| `verifyAndMarkComplete` removed from ProofSystem | MEDIUM | Use `markProofUsed` instead |
+| `verifyHostSignature` removed from ProofSystem | MEDIUM | No longer needed |
+
+### 1. submitProofOfWork Signature Change (BREAKING)
+
+**Before (6 parameters):**
+```solidity
+function submitProofOfWork(
+    uint256 jobId,
+    uint256 tokensClaimed,
+    bytes32 proofHash,
+    bytes calldata signature,    // ❌ REMOVED
+    string calldata proofCID,
+    string calldata deltaCID
+) external
+```
+
+**After (5 parameters):**
+```solidity
+function submitProofOfWork(
+    uint256 jobId,
+    uint256 tokensClaimed,
+    bytes32 proofHash,
+    string calldata proofCID,
+    string calldata deltaCID     // 5 params total
+) external
+```
+
+**Migration:**
+```javascript
+// Before (6 params with signature)
+const dataHash = keccak256(solidityPacked(['bytes32', 'address', 'uint256'], [proofHash, hostAddress, tokensClaimed]));
+const signature = await hostWallet.signMessage(getBytes(dataHash));
+await marketplace.submitProofOfWork(jobId, tokensClaimed, proofHash, signature, proofCID, deltaCID);
+
+// After (5 params, no signature)
+await marketplace.submitProofOfWork(jobId, tokensClaimed, proofHash, proofCID, deltaCID);
+```
+
+### 2. ProofSystem Function Changes
+
+**Removed Functions:**
+- `verifyAndMarkComplete(bytes proof, address prover, uint256 claimedTokens, bytes32 modelId)` - No longer exists
+- `verifyHostSignature(bytes proof, address prover, uint256 claimedTokens, bytes32 modelId)` - No longer exists
+
+**New Function:**
+```solidity
+// Simple replay protection - no signature verification
+function markProofUsed(bytes32 proofHash) external returns (bool)
+```
+
+**Note:** `markProofUsed` is called internally by JobMarketplace. SDK developers do not need to call it directly.
+
+### 3. Updated Implementation Addresses
+
+| Contract | Proxy | New Implementation |
+|----------|-------|-------------------|
+| JobMarketplace (Remediation) | `0x95132177F964FF053C1E874b53CF74d819618E06` | `0x1a0436a15d2fD911b2F062D08aA312141A978955` |
+| ProofSystem (Remediation) | `0xE8DCa89e1588bbbdc4F7D5F78263632B35401B31` | `0x5345a926dcf3B0E1A6895406FB68210ED19AC556` |
+
+### Why This Change?
+
+The signature was **redundant** because:
+1. Only the session host can call `submitProofOfWork()` (enforced by `msg.sender == session.host`)
+2. The host is already authenticated by their Ethereum address
+3. Removing ECDSA verification saves ~3,000 gas per proof submission
+4. Simpler integration for hosts (no signature generation code needed)
+
+### Migration Checklist
+
+#### For SDK Developers
+
+- [ ] Update `submitProofOfWork` calls to 5 parameters (remove signature)
+- [ ] Remove signature generation code from host integration
+- [ ] Update cached ABIs from `client-abis/`
+
+#### For Node Operators (Hosts)
+
+- [ ] Remove signature generation from proof submission code
+- [ ] Update SDK/library to latest version
+- [ ] Test proof submission with new 5-parameter function
+
+---
+
+## February 3, 2026: Early Cancellation Fee + Per-Model Rate Limits
+
+**Contracts Affected**: JobMarketplaceWithModelsUpgradeable, ModelRegistryUpgradeable (Remediation Proxies)
+**Impact Level**: LOW - New functions added, no breaking changes
+
+### Summary
+
+Added two security features from audit remediation:
+1. **Early Cancellation Fee**: Protects hosts from users who cancel before first proof
+2. **Per-Model Rate Limits**: Allows setting token rate limits per model
+
+| Change | Impact | Action Required |
+|--------|--------|-----------------|
+| New `minTokensFee` state variable | LOW | Query before session creation for UX |
+| New `setMinTokensFee()` admin function | NONE | Admin only |
+| New `modelRateLimits` mapping | LOW | Optional - use for rate limit enforcement |
+| New `setModelRateLimit()` admin function | NONE | Admin only |
+
+### 1. Early Cancellation Fee (JobMarketplace)
+
+When a depositor completes a session **before any proofs are submitted**, they are charged a minimum fee:
+
+```
+fee = minTokensFee * pricePerToken / PRICE_PRECISION
+```
+
+**New Functions:**
+```solidity
+// Query the minimum token fee (default: 1000 tokens)
+function minTokensFee() external view returns (uint256);
+
+// Set the minimum token fee (owner only)
+function setMinTokensFee(uint256 _fee) external;
+```
+
+**SDK Integration (Optional but Recommended):**
+```typescript
+// Calculate potential early cancellation fee before session creation
+const minTokensFee = await marketplace.minTokensFee();
+const potentialFee = (minTokensFee * pricePerToken) / 1000n;
+console.log(`Early cancel fee: ${potentialFee} (if canceling before first proof)`);
+```
+
+### 2. Per-Model Rate Limits (ModelRegistry)
+
+Allows setting token generation rate limits per model for quality enforcement.
+
+**New Functions:**
+```solidity
+// Query rate limit for a model (tokens per second, 0 = unlimited)
+function modelRateLimits(bytes32 modelId) external view returns (uint256);
+
+// Set rate limit for a model (owner only)
+function setModelRateLimit(bytes32 modelId, uint256 tokensPerSecond) external;
+```
+
+### 3. Updated Implementation Addresses
+
+| Contract | Proxy | New Implementation |
+|----------|-------|-------------------|
+| JobMarketplace (Remediation) | `0x95132177F964FF053C1E874b53CF74d819618E06` | `0x40df542b58A54B9F077289442944fbA562c94E67` |
+| ModelRegistry (Remediation) | `0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2` | `0x3F22fd532Ac051aE09b0F2e45F3DBfc835AfCD45` |
+
+### Migration Checklist
+
+#### For SDK Developers
+
+- [ ] (Optional) Query `minTokensFee()` to display early cancellation cost to users
+- [ ] (Optional) Query `modelRateLimits(modelId)` for rate limit enforcement
+- [ ] Update cached ABIs from `client-abis/`
+
+#### For Node Operators
+
+- [ ] No action required - fee is automatically credited to host earnings
+
+---
+
 ## February 2, 2026: V2 Direct Payment Delegation + Custom Errors
 
 **Contracts Affected**: JobMarketplaceWithModelsUpgradeable (Remediation Proxy)

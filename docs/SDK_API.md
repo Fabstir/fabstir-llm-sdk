@@ -4369,14 +4369,24 @@ interface SessionResult {
 
 Submits checkpoint proof as provider.
 
+**February 2026 Update:** Signature parameter removed. Authentication is now via `msg.sender == session.host` check on-chain.
+
 ```typescript
 async submitCheckpointProof(
   sessionId: bigint,
-  checkpointNumber: number,
-  tokensUsed: number,
-  proofData: string
+  tokensClaimed: number,
+  proofHash: string,
+  proofCID: string,
+  deltaCID: string = ''
 ): Promise<string>
 ```
+
+**Parameters:**
+- `sessionId` - The session/job ID
+- `tokensClaimed` - Number of tokens being claimed
+- `proofHash` - bytes32 keccak256 hash of the proof data
+- `proofCID` - S5 CID pointing to the full proof data
+- `deltaCID` - Optional S5 CID for delta/incremental proof data
 
 #### completeSessionJob
 
@@ -4387,6 +4397,52 @@ async completeSessionJob(
   sessionId: bigint,
   conversationCID: string
 ): Promise<string>
+```
+
+### V2 Direct Payment Delegation (February 2026)
+
+These methods enable Smart Wallet sub-accounts and delegated session creation.
+
+#### authorizeDelegate
+
+Authorizes or revokes a delegate address for session creation on behalf of payer.
+
+```typescript
+async authorizeDelegate(delegate: string, authorized: boolean): Promise<string>
+```
+
+#### isDelegateAuthorized
+
+Checks if a delegate is authorized for a payer.
+
+```typescript
+async isDelegateAuthorized(payer: string, delegate: string): Promise<boolean>
+```
+
+#### createSessionForModelAsDelegate
+
+Creates a session as delegate for a payer (model-specific).
+
+```typescript
+async createSessionForModelAsDelegate(
+  payer: string,
+  modelId: string,
+  host: string,
+  paymentToken: string,
+  amount: bigint,
+  pricePerToken: bigint,
+  maxDuration: number,
+  proofInterval: number,
+  proofTimeoutWindow: number
+): Promise<SessionResult>
+```
+
+#### getMinTokensFee
+
+Gets the minimum token fee for early cancellation.
+
+```typescript
+async getMinTokensFee(): Promise<bigint>
 ```
 
 ## Services

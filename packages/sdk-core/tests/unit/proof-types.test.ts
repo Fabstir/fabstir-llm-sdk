@@ -1,9 +1,12 @@
-// Copyright (c) 2025 Fabstir
+// Copyright (c) 2026 Fabstir
 // SPDX-License-Identifier: BUSL-1.1
 
 /**
- * Tests for Proof Type Definitions - Security Audit Migration
- * Verifies the new proof-related types are exported correctly
+ * Tests for Proof Type Definitions
+ *
+ * February 2026 Contract Update:
+ * - signature is now optional (deprecated)
+ * - deltaCID added to both ProofSubmissionParams and ProofSubmissionResult
  */
 
 import { describe, it, expect } from 'vitest';
@@ -14,9 +17,9 @@ import {
   SessionStatus
 } from '../../src/types/proof.types';
 
-describe('Proof Type Definitions - Security Audit Migration', () => {
+describe('Proof Type Definitions', () => {
   describe('ProofSubmissionParams', () => {
-    it('should have all required fields', () => {
+    it('should have all required fields (legacy with signature)', () => {
       const params: ProofSubmissionParams = {
         sessionId: BigInt(1),
         tokensClaimed: BigInt(100),
@@ -31,21 +34,85 @@ describe('Proof Type Definitions - Security Audit Migration', () => {
       expect(params.signature).toHaveLength(132); // 0x + 130 hex chars (65 bytes)
       expect(params.proofCID).toBe('baaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwdtest0');
     });
+
+    it('should allow signature to be optional (Feb 2026: deprecated)', () => {
+      // Feb 2026: signature is now optional/deprecated
+      const params: ProofSubmissionParams = {
+        sessionId: BigInt(123),
+        tokensClaimed: BigInt(100),
+        proofHash: '0xabcdef',
+        proofCID: 'bafybeicid'
+        // signature omitted - now optional
+      };
+
+      expect(params.sessionId).toBe(BigInt(123));
+      expect(params.signature).toBeUndefined();
+    });
+
+    it('should allow deltaCID to be specified (Feb 2026)', () => {
+      const params: ProofSubmissionParams = {
+        sessionId: BigInt(456),
+        tokensClaimed: BigInt(200),
+        proofHash: '0x123456',
+        proofCID: 'bafybeicid',
+        deltaCID: 'bafybeedelta'
+      };
+
+      expect(params.deltaCID).toBe('bafybeedelta');
+    });
+
+    it('should allow deltaCID to be undefined (optional)', () => {
+      const params: ProofSubmissionParams = {
+        sessionId: BigInt(789),
+        tokensClaimed: BigInt(300),
+        proofHash: '0x789abc',
+        proofCID: 'bafybeicid'
+        // deltaCID is optional - omitted
+      };
+
+      expect(params.deltaCID).toBeUndefined();
+    });
   });
 
   describe('ProofSubmissionResult', () => {
-    it('should have all required fields', () => {
+    it('should have all required fields including deltaCID (Feb 2026)', () => {
       const result: ProofSubmissionResult = {
         proofHash: '0x' + 'ab'.repeat(32),
         tokensClaimed: BigInt(500),
         timestamp: BigInt(Date.now()),
-        verified: true
+        verified: true,
+        deltaCID: 'bafybeedelta'
       };
 
       expect(result.proofHash).toHaveLength(66);
       expect(result.tokensClaimed).toBe(BigInt(500));
       expect(typeof result.timestamp).toBe('bigint');
       expect(result.verified).toBe(true);
+      expect(result.deltaCID).toBe('bafybeedelta');
+    });
+
+    it('should have deltaCID as string type', () => {
+      const result: ProofSubmissionResult = {
+        proofHash: '0xhash',
+        tokensClaimed: BigInt(100),
+        timestamp: BigInt(1000),
+        verified: false,
+        deltaCID: ''
+      };
+
+      expect(typeof result.deltaCID).toBe('string');
+    });
+
+    it('should allow empty string deltaCID', () => {
+      const result: ProofSubmissionResult = {
+        proofHash: '0xhash',
+        tokensClaimed: BigInt(100),
+        timestamp: BigInt(1000),
+        verified: true,
+        deltaCID: ''  // Empty when no delta submitted
+      };
+
+      expect(result.deltaCID).toBe('');
     });
 
     it('verified field can be false (graceful degradation)', () => {
@@ -54,7 +121,8 @@ describe('Proof Type Definitions - Security Audit Migration', () => {
         proofHash: '0x' + 'cd'.repeat(32),
         tokensClaimed: BigInt(200),
         timestamp: BigInt(1700000000),
-        verified: false
+        verified: false,
+        deltaCID: ''
       };
 
       expect(result.verified).toBe(false);

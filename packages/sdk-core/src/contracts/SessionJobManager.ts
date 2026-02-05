@@ -228,20 +228,21 @@ export class SessionJobManager {
   /**
    * Submit checkpoint proof for a session
    *
-   * Security Audit Migration: Now requires ECDSA signature from host
+   * February 2026 Contract Update: Signature removed from proof submission.
+   * Authentication is now via msg.sender == session.host check on-chain.
    *
    * @param sessionId - The session/job ID
    * @param tokensClaimed - Number of tokens being claimed
    * @param proofHash - bytes32 keccak256 hash of the proof data
-   * @param signature - bytes ECDSA signature (65 bytes: r + s + v)
    * @param proofCID - S5 CID pointing to the full proof data
+   * @param deltaCID - Optional S5 CID for delta/incremental proof data
    */
   async submitCheckpointProof(
     sessionId: bigint,
     tokensClaimed: number,
     proofHash: string,
-    signature: string,
-    proofCID: string
+    proofCID: string,
+    deltaCID: string = ''
   ): Promise<string> {
     if (!this.signer) {
       throw new Error('Signer not set');
@@ -250,13 +251,13 @@ export class SessionJobManager {
     const jobMarketplace = this.contractManager.getJobMarketplace();
     const jobMarketplaceWithSigner = jobMarketplace.connect(this.signer);
 
-    // Security Audit: New 5-param signature with ECDSA signature
+    // Feb 2026: 5-param call (signature removed - auth via msg.sender)
     const tx = await jobMarketplaceWithSigner['submitProofOfWork'](
       sessionId,        // jobId
       tokensClaimed,    // tokensClaimed
       proofHash,        // proofHash (bytes32)
-      signature,        // signature (bytes - 65 bytes ECDSA)
-      proofCID          // proofCID (string - S5 CID)
+      proofCID,         // proofCID (string - S5 CID)
+      deltaCID          // deltaCID (string - optional)
     );
 
     const receipt = await tx.wait(3); // Wait for 3 confirmations
@@ -266,22 +267,23 @@ export class SessionJobManager {
   /**
    * Submit checkpoint proof as host (requires host signer)
    *
-   * Security Audit Migration: Now requires ECDSA signature from host
+   * February 2026 Contract Update: Signature removed from proof submission.
+   * Authentication is now via msg.sender == session.host check on-chain.
    *
    * @param sessionId - The session/job ID
    * @param tokensClaimed - Number of tokens being claimed
    * @param proofHash - bytes32 keccak256 hash of the proof data
-   * @param signature - bytes ECDSA signature (65 bytes: r + s + v)
    * @param proofCID - S5 CID pointing to the full proof data
    * @param hostSigner - Host's signer (must match session.host)
+   * @param deltaCID - Optional S5 CID for delta/incremental proof data
    */
   async submitCheckpointProofAsHost(
     sessionId: bigint,
     tokensClaimed: number,
     proofHash: string,
-    signature: string,
     proofCID: string,
-    hostSigner: Signer
+    hostSigner: Signer,
+    deltaCID: string = ''
   ): Promise<string> {
     // Create a new contract instance with host signer
     const jobMarketplace = this.contractManager.getJobMarketplace();
@@ -294,13 +296,13 @@ export class SessionJobManager {
       hostSigner
     );
 
-    // Security Audit: New 5-param signature with ECDSA signature
+    // Feb 2026: 5-param call (signature removed - auth via msg.sender)
     const tx = await jobMarketplaceAsHost['submitProofOfWork'](
       sessionId,        // jobId
       tokensClaimed,    // tokensClaimed
       proofHash,        // proofHash (bytes32)
-      signature,        // signature (bytes - 65 bytes ECDSA)
-      proofCID          // proofCID (string - S5 CID)
+      proofCID,         // proofCID (string - S5 CID)
+      deltaCID          // deltaCID (string - optional)
     );
 
     const receipt = await tx.wait(3); // Wait for 3 confirmations
@@ -448,9 +450,11 @@ export class SessionJobManager {
   /**
    * Get proof submission details
    *
+   * February 2026 Contract Update: Now returns 5 values including deltaCID.
+   *
    * @param sessionId - The session/job ID
    * @param proofIndex - Index of the proof submission (0-based)
-   * @returns ProofSubmissionResult with proofHash, tokensClaimed, timestamp, verified
+   * @returns ProofSubmissionResult with proofHash, tokensClaimed, timestamp, verified, deltaCID
    */
   async getProofSubmission(
     sessionId: bigint,
@@ -460,12 +464,13 @@ export class SessionJobManager {
     tokensClaimed: bigint;
     timestamp: bigint;
     verified: boolean;
+    deltaCID: string;
   }> {
     const jobMarketplace = this.contractManager.getJobMarketplace();
-    const [proofHash, tokensClaimed, timestamp, verified] =
+    const [proofHash, tokensClaimed, timestamp, verified, deltaCID] =
       await jobMarketplace.getProofSubmission(sessionId, proofIndex);
 
-    return { proofHash, tokensClaimed, timestamp, verified };
+    return { proofHash, tokensClaimed, timestamp, verified, deltaCID };
   }
 
   /**
@@ -512,5 +517,167 @@ export class SessionJobManager {
   async getTotalBalanceToken(account: string, token: string): Promise<bigint> {
     const jobMarketplace = this.contractManager.getJobMarketplace();
     return jobMarketplace.getTotalBalanceToken(account, token);
+  }
+
+  // ============= V2 Direct Payment Delegation (Feb 2026) =============
+
+  /**
+   * Authorize a delegate to create sessions on behalf of payer
+   *
+   * @param delegate - Address to authorize as delegate
+   * @param authorized - true to authorize, false to revoke
+   * @returns Transaction hash
+   */
+  async authorizeDelegate(delegate: string, authorized: boolean): Promise<string> {
+    if (!this.signer) {
+      throw new Error('Signer not set');
+    }
+
+    const jobMarketplace = this.contractManager.getJobMarketplace();
+    const tx = await jobMarketplace.connect(this.signer).authorizeDelegate(delegate, authorized);
+    const receipt = await tx.wait(3);
+    return receipt.hash;
+  }
+
+  /**
+   * Check if delegate is authorized for payer
+   *
+   * @param payer - Payer address who may have authorized the delegate
+   * @param delegate - Delegate address to check
+   * @returns true if delegate is authorized, false otherwise
+   */
+  async isDelegateAuthorized(payer: string, delegate: string): Promise<boolean> {
+    const jobMarketplace = this.contractManager.getJobMarketplace();
+    return jobMarketplace.isDelegateAuthorized(payer, delegate);
+  }
+
+  /**
+   * Create session as delegate for payer (model-specific)
+   *
+   * Requires: payer has approved token to contract, payer has authorized delegate
+   *
+   * @param payer - Address who funds the session (must have approved token)
+   * @param modelId - bytes32 model identifier
+   * @param host - Host address to run the session
+   * @param paymentToken - ERC-20 token address for payment (no ETH allowed)
+   * @param amount - Amount of tokens to deposit
+   * @param pricePerToken - Price per token (with PRICE_PRECISION)
+   * @param maxDuration - Maximum session duration in seconds
+   * @param proofInterval - Number of tokens between proof submissions
+   * @param proofTimeoutWindow - Time window for proof submission in seconds
+   * @returns SessionResult with sessionId, jobId, txHash, depositAmount
+   */
+  async createSessionForModelAsDelegate(
+    payer: string,
+    modelId: string,
+    host: string,
+    paymentToken: string,
+    amount: bigint,
+    pricePerToken: bigint,
+    maxDuration: number,
+    proofInterval: number,
+    proofTimeoutWindow: number
+  ): Promise<SessionResult> {
+    if (!this.signer) {
+      throw new Error('Signer not set');
+    }
+
+    const jobMarketplace = this.contractManager.getJobMarketplace();
+    const tx = await jobMarketplace.connect(this.signer).createSessionForModelAsDelegate(
+      payer,
+      modelId,
+      host,
+      paymentToken,
+      amount,
+      pricePerToken,
+      maxDuration,
+      proofInterval,
+      proofTimeoutWindow
+    );
+
+    const receipt = await tx.wait(3);
+
+    // Parse SessionCreatedByDelegate event
+    const event = receipt.logs.find(
+      (log: any) => log.topics[0] === ethers.id('SessionCreatedByDelegate(uint256,address,address,address,bytes32,uint256)')
+    );
+    const sessionId = event ? BigInt(event.topics[1]) : 0n;
+
+    return {
+      sessionId,
+      jobId: sessionId,
+      txHash: receipt.hash,
+      depositAmount: amount
+    };
+  }
+
+  /**
+   * Create session as delegate for payer (non-model version)
+   *
+   * Requires: payer has approved token to contract, payer has authorized delegate
+   *
+   * @param payer - Address who funds the session (must have approved token)
+   * @param host - Host address to run the session
+   * @param paymentToken - ERC-20 token address for payment (no ETH allowed)
+   * @param amount - Amount of tokens to deposit
+   * @param pricePerToken - Price per token (with PRICE_PRECISION)
+   * @param maxDuration - Maximum session duration in seconds
+   * @param proofInterval - Number of tokens between proof submissions
+   * @param proofTimeoutWindow - Time window for proof submission in seconds
+   * @returns SessionResult with sessionId, jobId, txHash, depositAmount
+   */
+  async createSessionAsDelegate(
+    payer: string,
+    host: string,
+    paymentToken: string,
+    amount: bigint,
+    pricePerToken: bigint,
+    maxDuration: number,
+    proofInterval: number,
+    proofTimeoutWindow: number
+  ): Promise<SessionResult> {
+    if (!this.signer) {
+      throw new Error('Signer not set');
+    }
+
+    const jobMarketplace = this.contractManager.getJobMarketplace();
+    const tx = await jobMarketplace.connect(this.signer).createSessionAsDelegate(
+      payer,
+      host,
+      paymentToken,
+      amount,
+      pricePerToken,
+      maxDuration,
+      proofInterval,
+      proofTimeoutWindow
+    );
+
+    const receipt = await tx.wait(3);
+
+    // Parse SessionCreatedByDelegate event
+    const event = receipt.logs.find(
+      (log: any) => log.topics[0] === ethers.id('SessionCreatedByDelegate(uint256,address,address,address,bytes32,uint256)')
+    );
+    const sessionId = event ? BigInt(event.topics[1]) : 0n;
+
+    return {
+      sessionId,
+      jobId: sessionId,
+      txHash: receipt.hash,
+      depositAmount: amount
+    };
+  }
+
+  /**
+   * Get minimum token fee for early cancellation
+   *
+   * Fee calculation: minTokensFee * pricePerToken / PRICE_PRECISION
+   * This fee is charged when session is completed before first proof.
+   *
+   * @returns Minimum tokens fee value
+   */
+  async getMinTokensFee(): Promise<bigint> {
+    const jobMarketplace = this.contractManager.getJobMarketplace();
+    return jobMarketplace.minTokensFee();
   }
 }

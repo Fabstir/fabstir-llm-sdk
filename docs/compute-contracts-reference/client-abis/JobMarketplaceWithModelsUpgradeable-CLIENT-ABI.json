@@ -1040,6 +1040,19 @@
   },
   {
     "type": "function",
+    "name": "minTokensFee",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "nextJobId",
     "inputs": [],
     "outputs": [
@@ -1255,6 +1268,19 @@
   },
   {
     "type": "function",
+    "name": "setMinTokensFee",
+    "inputs": [
+      {
+        "name": "_fee",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "setProofSystem",
     "inputs": [
       {
@@ -1310,11 +1336,6 @@
         "name": "proofHash",
         "type": "bytes32",
         "internalType": "bytes32"
-      },
-      {
-        "name": "signature",
-        "type": "bytes",
-        "internalType": "bytes"
       },
       {
         "name": "proofCID",
