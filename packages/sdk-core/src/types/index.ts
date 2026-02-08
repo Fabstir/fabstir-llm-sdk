@@ -123,6 +123,19 @@ export interface Message {
   metadata?: Record<string, any>;
 }
 
+// ============= Image Types =============
+
+export type ImageFormat = 'png' | 'jpeg' | 'webp' | 'gif';
+
+export interface ImageAttachment {
+  data: string;
+  format: ImageFormat;
+}
+
+export interface PromptOptions {
+  images?: ImageAttachment[];
+}
+
 // ============= Session Types =============
 
 export interface SessionConfig {

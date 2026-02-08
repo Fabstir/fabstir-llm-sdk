@@ -213,7 +213,7 @@ export function detectDocumentType(fileName: string): DocumentType {
       return 'pdf';
     case 'docx':
       return 'docx';
-    // Image formats (processed via host /v1/ocr and /v1/describe-image)
+    // Image formats (detected for rejection — use sendPromptStreaming with options.images)
     case 'png':
       return 'png';
     case 'jpg':

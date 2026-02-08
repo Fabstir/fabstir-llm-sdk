@@ -25,8 +25,11 @@ import {
   SearchResult,
   SearchIntentConfig,
   WebSearchMetadata,
-  RecoveredConversation
+  RecoveredConversation,
+  ImageAttachment,
+  PromptOptions
 } from '../types';
+import { validateImageAttachments } from '../utils/image-validation';
 import { HostSelectionMode } from '../types/settings.types';
 import { PaymentManager } from './PaymentManager';
 import { StorageManager } from './StorageManager';
@@ -684,7 +687,8 @@ export class SessionManager implements ISessionManager {
   async sendPromptStreaming(
     sessionId: bigint,
     prompt: string,
-    onToken?: (token: string) => void
+    onToken?: (token: string) => void,
+    options?: PromptOptions
   ): Promise<string> {
     if (!this.initialized) {
       throw new SDKError('SessionManager not initialized', 'SESSION_NOT_INITIALIZED');
@@ -897,12 +901,12 @@ export class SessionManager implements ISessionManager {
               enableWebSearchEncrypted = analyzePromptForSearchIntent(prompt);
             }
 
-            // Send encrypted message with web search options
+            // Send encrypted message with web search options and images
             this.sendEncryptedMessage(prompt, {
               webSearch: enableWebSearchEncrypted,
               maxSearches: enableWebSearchEncrypted ? (searchConfigEncrypted.maxSearches ?? 5) : 0,
               searchQueries: searchConfigEncrypted.queries ?? null
-            }).catch((err) => {
+            }, options?.images).catch((err) => {
               console.error('[SessionManager] Failed to send encrypted message:', err);
               reject(err);
             });
@@ -936,6 +940,20 @@ export class SessionManager implements ISessionManager {
           }
 
           // Send plaintext message (only if session explicitly opted out of encryption)
+          const plaintextRequest: any = {
+            model: session.model,
+            prompt: augmentedPrompt,  // Use RAG-augmented prompt
+            max_tokens: LLM_MAX_TOKENS,  // Support comprehensive responses from large models
+            temperature: 0.7,
+            stream: true
+          };
+
+          // Include images in plaintext request when present
+          if (options?.images && options.images.length > 0) {
+            validateImageAttachments(options.images);
+            plaintextRequest.images = options.images.map(img => ({ data: img.data, format: img.format }));
+          }
+
           response = await this.wsClient.sendMessage({
             type: 'prompt',
             chain_id: session.chainId,
@@ -945,13 +963,7 @@ export class SessionManager implements ISessionManager {
             web_search: enableWebSearch,
             max_searches: enableWebSearch ? (searchConfig.maxSearches ?? 5) : 0,
             search_queries: searchConfig.queries ?? null,
-            request: {
-              model: session.model,
-              prompt: augmentedPrompt,  // Use RAG-augmented prompt
-              max_tokens: LLM_MAX_TOKENS,  // Support comprehensive responses from large models
-              temperature: 0.7,
-              stream: true
-            }
+            request: plaintextRequest
           });
 
           // Clean up handler for plaintext
@@ -971,13 +983,20 @@ export class SessionManager implements ISessionManager {
         // Add response to session
         session.responses.push(finalResponse);
 
+        // Build user message metadata (store imageCount, not raw image data)
+        const userMsgMeta1: Record<string, any> = {};
+        if (options?.images && options.images.length > 0) {
+          userMsgMeta1.imageCount = options.images.length;
+        }
+
         // Update storage (non-blocking to prevent S5 connection issues from freezing UI)
         this.storageManager.appendMessage(
           sessionId.toString(),
           {
             role: 'user',
             content: prompt,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            ...(Object.keys(userMsgMeta1).length > 0 ? { metadata: userMsgMeta1 } : {})
           }
         ).catch(err => console.warn('[SessionManager] Failed to store user message:', err));
 
@@ -1026,12 +1045,12 @@ export class SessionManager implements ISessionManager {
             enableWebSearchNonStreamEnc = analyzePromptForSearchIntent(prompt);
           }
 
-          // Send encrypted message with web search options
+          // Send encrypted message with web search options and images
           await this.sendEncryptedMessage(prompt, {
             webSearch: enableWebSearchNonStreamEnc,
             maxSearches: enableWebSearchNonStreamEnc ? (searchConfigNonStreamEnc.maxSearches ?? 5) : 0,
             searchQueries: searchConfigNonStreamEnc.queries ?? null
-          });
+          }, options?.images);
 
           // Wait for encrypted response (non-streaming) - MUST accumulate chunks!
           let accumulatedResponse = '';  // Accumulate chunks even in non-streaming mode
@@ -1119,6 +1138,20 @@ export class SessionManager implements ISessionManager {
           }
 
           // Send plaintext message (only if session explicitly opted out of encryption)
+          const plaintextRequestNonStream: any = {
+            model: session.model,
+            prompt: augmentedPrompt,  // Use RAG-augmented prompt
+            max_tokens: LLM_MAX_TOKENS,  // Support comprehensive responses from large models
+            temperature: 0.7,
+            stream: false
+          };
+
+          // Include images in plaintext request when present
+          if (options?.images && options.images.length > 0) {
+            validateImageAttachments(options.images);
+            plaintextRequestNonStream.images = options.images.map(img => ({ data: img.data, format: img.format }));
+          }
+
           response = await this.wsClient.sendMessage({
             type: 'prompt',
             chain_id: session.chainId,
@@ -1128,18 +1161,18 @@ export class SessionManager implements ISessionManager {
             web_search: enableWebSearchNonStream,
             max_searches: enableWebSearchNonStream ? (searchConfigNonStream.maxSearches ?? 5) : 0,
             search_queries: searchConfigNonStream.queries ?? null,
-            request: {
-              model: session.model,
-              prompt: augmentedPrompt,  // Use RAG-augmented prompt
-              max_tokens: LLM_MAX_TOKENS,  // Support comprehensive responses from large models
-              temperature: 0.7,
-              stream: false
-            }
+            request: plaintextRequestNonStream
           });
         }
 
         // Add response to session
         session.responses.push(response);
+
+        // Build user message metadata (store imageCount, not raw image data)
+        const userMsgMeta2: Record<string, any> = {};
+        if (options?.images && options.images.length > 0) {
+          userMsgMeta2.imageCount = options.images.length;
+        }
 
         // Update storage (non-blocking to prevent S5 connection issues from freezing UI)
         this.storageManager.appendMessage(
@@ -1147,7 +1180,8 @@ export class SessionManager implements ISessionManager {
           {
             role: 'user',
             content: prompt,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            ...(Object.keys(userMsgMeta2).length > 0 ? { metadata: userMsgMeta2 } : {})
           }
         ).catch(err => console.warn('[SessionManager] Failed to store user message:', err));
 
@@ -1640,8 +1674,10 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Send encrypted message with session key (Phase 4.2)
-   * @param message - The plaintext message to encrypt and send
+   * Payload is a JSON object: { prompt, model, max_tokens, temperature, stream, images? }
+   * @param message - The plaintext prompt to encrypt and send
    * @param webSearchOptions - Optional web search configuration (v8.7.5+)
+   * @param images - Optional image attachments to include in payload
    * @private
    */
   private async sendEncryptedMessage(
@@ -1650,9 +1686,14 @@ export class SessionManager implements ISessionManager {
       webSearch: boolean;
       maxSearches: number;
       searchQueries: string[] | null;
-    }
+    },
+    images?: ImageAttachment[]
   ): Promise<void> {
 
+    // Validate images before encryption (fail fast)
+    if (images && images.length > 0) {
+      validateImageAttachments(images);
+    }
 
     if (!this.sessionKey) {
       throw new SDKError(
@@ -1686,10 +1727,24 @@ export class SessionManager implements ISessionManager {
     }
 
     try {
-      // Encrypt message with session key (returns payload only)
+      // Build structured JSON payload (node v8.15.3+)
+      const structuredPayload: any = {
+        prompt: message,
+        model: currentSession.model,
+        max_tokens: LLM_MAX_TOKENS,
+        temperature: 0.7,
+        stream: true,
+      };
+
+      // Only include images when present
+      if (images && images.length > 0) {
+        structuredPayload.images = images.map(img => ({ data: img.data, format: img.format }));
+      }
+
+      // Encrypt JSON payload with session key
       const payload = this.encryptionManager.encryptMessage(
         this.sessionKey,
-        message,
+        JSON.stringify(structuredPayload),
         this.messageIndex++
       );
 
@@ -1712,6 +1767,8 @@ export class SessionManager implements ISessionManager {
       await this.wsClient.sendWithoutResponse(messageToSend);
 
     } catch (error: any) {
+      // Re-throw SDKErrors (validation, encryption) without wrapping
+      if (error instanceof SDKError) throw error;
       console.error('[SessionManager] Failed to encrypt/send message:', error.message);
       throw new SDKError(
         `Failed to encrypt message: ${error.message}`,
@@ -1991,8 +2048,16 @@ export class SessionManager implements ISessionManager {
   async streamResponse(
     sessionId: bigint,
     prompt: string,
-    onChunk: (chunk: string) => void
+    onChunk: (chunk: string) => void,
+    options?: PromptOptions
   ): Promise<void> {
+    if (options?.images && options.images.length > 0) {
+      throw new SDKError(
+        'Image attachments are not supported by streamResponse(). Use sendPromptStreaming() with options.images instead.',
+        'IMAGES_NOT_SUPPORTED'
+      );
+    }
+
     if (!this.initialized) {
       throw new SDKError('SessionManager not initialized', 'SESSION_NOT_INITIALIZED');
     }

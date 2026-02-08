@@ -6,7 +6,7 @@
  * Browser-compatible session management
  */
 
-import { SessionConfig, SessionJob, CheckpointProof, RecoveredConversation, CheckpointQueryOptions } from '../types';
+import { SessionConfig, SessionJob, CheckpointProof, RecoveredConversation, CheckpointQueryOptions, PromptOptions } from '../types';
 import type { SearchApiResponse } from '../types/web-search.types';
 import type { BlockchainRecoveredConversation } from '../utils/checkpoint-blockchain';
 
@@ -35,7 +35,8 @@ export interface ISessionManager {
   sendPromptStreaming(
     sessionId: bigint,
     prompt: string,
-    onToken?: (token: string) => void
+    onToken?: (token: string) => void,
+    options?: PromptOptions
   ): Promise<string>;
   
   /**
@@ -92,7 +93,8 @@ export interface ISessionManager {
   streamResponse(
     sessionId: bigint,
     prompt: string,
-    onChunk: (chunk: string) => void
+    onChunk: (chunk: string) => void,
+    options?: PromptOptions
   ): Promise<void>;
   
   /**
