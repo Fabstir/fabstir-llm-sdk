@@ -21,10 +21,11 @@ const SEED_WORDS_LENGTH = 13; // 13 words provide the entropy
 const CHECKSUM_WORDS_LENGTH = 2; // 2 words for checksum
 const PHRASE_LENGTH = SEED_WORDS_LENGTH + CHECKSUM_WORDS_LENGTH; // 15 total
 const LAST_WORD_INDEX = 12; // Index of the 13th word (0-based)
-export const SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM SDK v2.0';
-export const SEED_DOMAIN_SEPARATOR = 'fabstir-s5-seed-v2'; // For address-based derivation (Base Account Kit)
+// AUDIT REMEDIATION: Updated seed message and cache version for fresh S5 identity
+export const SEED_MESSAGE = 'Generate S5 seed for Fabstir LLM SDK v2.1 beta';
+export const SEED_DOMAIN_SEPARATOR = 'fabstir-s5-seed-v2.1'; // For address-based derivation (Base Account Kit)
 const CACHE_PREFIX = 'fabstir_s5_seed_';
-const CACHE_VERSION = 'v3'; // Bumped for test→production transition
+const CACHE_VERSION = 'v4'; // Bumped for AUDIT remediation - invalidates old cached seeds
 
 /**
  * Derives deterministic entropy from a wallet signature
@@ -35,13 +36,142 @@ export async function deriveEntropyFromSignature(signature: string): Promise<Uin
   // Use Web Crypto API for consistent hashing
   const encoder = new TextEncoder();
   const data = encoder.encode(signature);
-  
+
   // Hash the signature to get deterministic entropy
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const fullHash = new Uint8Array(hashBuffer);
-  
+
   // S5 needs exactly 16 bytes of entropy
   return fullHash.slice(0, SEED_LENGTH);
+}
+
+/**
+ * Derives deterministic entropy from a wallet ADDRESS
+ *
+ * This is the PREFERRED method for MetaMask/WalletConnect because:
+ * 1. Wallet addresses are ALWAYS deterministic (same wallet = same address)
+ * 2. No signature popup required
+ * 3. Survives browser data clear
+ * 4. Works across devices (same wallet = same seed)
+ *
+ * Formula: SHA256(address.toLowerCase() + SEED_DOMAIN_SEPARATOR + chainId)
+ *
+ * @param address - The wallet address (checksummed or lowercase)
+ * @param chainId - The chain ID for domain separation
+ * @returns 16 bytes of entropy for S5 seed generation
+ */
+export async function deriveEntropyFromAddress(address: string, chainId: number): Promise<Uint8Array> {
+  // Normalize address to lowercase for case-insensitivity
+  const normalizedAddress = address.toLowerCase();
+
+  // Combine: address + domain separator + chainId
+  const encoder = new TextEncoder();
+  const data = encoder.encode(normalizedAddress + SEED_DOMAIN_SEPARATOR + chainId.toString());
+
+  // Hash to get deterministic entropy
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const fullHash = new Uint8Array(hashBuffer);
+
+  // S5 needs exactly 16 bytes of entropy
+  return fullHash.slice(0, SEED_LENGTH);
+}
+
+/**
+ * Generate S5 seed phrase deterministically from a wallet ADDRESS
+ *
+ * This is the RECOMMENDED method for MetaMask/WalletConnect/Base Account Kit.
+ * The generated seed will be identical across:
+ * - Browser sessions (survives localStorage/IndexedDB clear)
+ * - Different browsers
+ * - Different devices (same wallet address = same seed)
+ *
+ * @param address - The wallet address
+ * @param chainId - The chain ID for domain separation
+ * @returns A valid S5 seed phrase (15 words)
+ */
+export async function generateS5SeedFromAddress(address: string, chainId: number): Promise<string> {
+  console.log('[S5 Seed] Deriving S5 seed deterministically from address...');
+
+  const entropy = await deriveEntropyFromAddress(address, chainId);
+  const seedPhrase = entropyToS5Phrase(entropy);
+
+  const words = seedPhrase.split(' ').slice(0, 3).join(' ');
+  console.log('[S5 Seed] Address-based seed generated (first 3 words):', words + '...');
+
+  return seedPhrase;
+}
+
+/**
+ * Domain separator for deterministic S5 seed derivation from private key
+ * Changing this will generate different seeds - keep stable!
+ */
+const S5_SEED_DERIVATION_DOMAIN = 'fabstir-s5-seed-from-private-key-v1';
+
+/**
+ * Derives S5 seed DETERMINISTICALLY from a private key
+ *
+ * This is the preferred method when the private key is available because:
+ * 1. It's 100% deterministic - same private key ALWAYS produces same S5 seed
+ * 2. No wallet popup required
+ * 3. Works across browser sessions (survives localStorage clear)
+ * 4. Works across devices (same key = same seed)
+ *
+ * Uses HKDF-like derivation: SHA256(domain || privateKey)
+ *
+ * @param privateKey - The wallet's private key (hex string with or without 0x prefix)
+ * @returns 16 bytes of entropy for S5 seed generation
+ */
+export async function deriveEntropyFromPrivateKey(privateKey: string): Promise<Uint8Array> {
+  // Normalize private key (remove 0x prefix if present)
+  const normalizedKey = privateKey.startsWith('0x') ? privateKey.slice(2) : privateKey;
+
+  // Validate it's a valid hex string of correct length (32 bytes = 64 hex chars)
+  if (!/^[0-9a-fA-F]{64}$/.test(normalizedKey)) {
+    throw new Error('Invalid private key format - must be 32 bytes hex');
+  }
+
+  // Combine domain separator with private key for HKDF-like derivation
+  // This ensures the derived seed is specific to Fabstir S5 usage
+  const encoder = new TextEncoder();
+  const domainBytes = encoder.encode(S5_SEED_DERIVATION_DOMAIN);
+  const keyBytes = new Uint8Array(normalizedKey.match(/.{2}/g)!.map(byte => parseInt(byte, 16)));
+
+  // Concatenate domain + key
+  const combined = new Uint8Array(domainBytes.length + keyBytes.length);
+  combined.set(domainBytes);
+  combined.set(keyBytes, domainBytes.length);
+
+  // Hash to get deterministic entropy
+  const hashBuffer = await crypto.subtle.digest('SHA-256', combined);
+  const fullHash = new Uint8Array(hashBuffer);
+
+  // S5 needs exactly 16 bytes of entropy
+  return fullHash.slice(0, SEED_LENGTH);
+}
+
+/**
+ * Generate S5 seed phrase deterministically from a private key
+ *
+ * This is the RECOMMENDED method when the private key is available.
+ * The generated seed will be identical across:
+ * - Browser sessions
+ * - Different browsers
+ * - Different devices
+ * - After clearing browser data
+ *
+ * @param privateKey - The wallet's private key (hex string)
+ * @returns A valid S5 seed phrase (15 words)
+ */
+export async function generateS5SeedFromPrivateKey(privateKey: string): Promise<string> {
+  console.log('[S5 Seed] Deriving S5 seed deterministically from private key...');
+
+  const entropy = await deriveEntropyFromPrivateKey(privateKey);
+  const seedPhrase = entropyToS5Phrase(entropy);
+
+  const words = seedPhrase.split(' ').slice(0, 3).join(' ');
+  console.log('[S5 Seed] Deterministic seed generated (first 3 words):', words + '...');
+
+  return seedPhrase;
 }
 
 /**
@@ -239,9 +369,12 @@ export function cacheSeed(walletAddress: string, seed: string): void {
   if (typeof window === 'undefined' || !window.localStorage) {
     return; // No localStorage in Node.js or SSR
   }
-  
+
   try {
     const cacheKey = getCacheKey(walletAddress);
+    const words = seed.split(' ').slice(0, 3).join(' ');
+    console.log('[cacheSeed] Writing to cache key:', cacheKey);
+    console.log('[cacheSeed] Seed (first 3 words):', words);
     const data = {
       version: CACHE_VERSION,
       seed,
@@ -316,34 +449,45 @@ export async function getOrGenerateS5Seed(
   forceRegenerate = false
 ): Promise<string> {
   const walletAddress = await signer.getAddress();
-  
+  console.log('[getOrGenerateS5Seed] Wallet address:', walletAddress.toLowerCase());
+
   // Check cache first (unless forced to regenerate)
   if (!forceRegenerate) {
     const cached = getCachedSeed(walletAddress);
-    
+
     if (cached) {
+      const words = cached.split(' ').slice(0, 3).join(' ');
+      console.log('[getOrGenerateS5Seed] Found cached seed (first 3 words):', words);
       const isValid = await verifyCachedSeed(walletAddress, cached);
-      
+
       if (isValid) {
+        console.log('[getOrGenerateS5Seed] Returning cached seed');
         return cached;
       }
+      console.log('[getOrGenerateS5Seed] Cached seed failed validation');
+    } else {
+      console.log('[getOrGenerateS5Seed] No cached seed found');
     }
   }
-  
+
   // Generate new seed deterministically
-  
+  console.log('[getOrGenerateS5Seed] Generating new seed via signature...');
+
   // Sign message to get deterministic entropy
   const signature = await signer.signMessage(SEED_MESSAGE);
-  
+
   // Derive entropy from signature
   const entropy = await deriveEntropyFromSignature(signature);
-  
+
   // Convert to S5 phrase
   const seedPhrase = entropyToS5Phrase(entropy);
-  
+  const words = seedPhrase.split(' ').slice(0, 3).join(' ');
+  console.log('[getOrGenerateS5Seed] Generated new seed (first 3 words):', words);
+
   // Cache for future use
+  console.log('[getOrGenerateS5Seed] Caching new seed for:', walletAddress.toLowerCase());
   cacheSeed(walletAddress, seedPhrase);
-  
+
   return seedPhrase;
 }
 

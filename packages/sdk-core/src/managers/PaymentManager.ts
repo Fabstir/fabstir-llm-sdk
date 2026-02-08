@@ -407,24 +407,35 @@ export class PaymentManager implements IPaymentManager {
 
   /**
    * Submit checkpoint proof
+   *
+   * February 2026 Update: Signature parameter removed from contract.
+   * Authentication is now via msg.sender == session.host check.
+   *
+   * @param jobId - Session/job ID
+   * @param tokensClaimed - Number of tokens being claimed
+   * @param proofHash - bytes32 keccak256 hash of proof data
+   * @param proofCID - S5 CID pointing to full proof data
+   * @param deltaCID - Optional S5 CID for delta/incremental proof
    */
   async submitCheckpoint(
     jobId: bigint,
-    tokensGenerated: number,
-    proof: string
+    tokensClaimed: number,
+    proofHash: string,
+    proofCID: string,
+    deltaCID: string = ''
   ): Promise<string> {
     if (!this.initialized || !this.signer) {
       throw new SDKError('PaymentManager not initialized', 'PAYMENT_NOT_INITIALIZED');
     }
 
     try {
-      // submitCheckpointProof needs: sessionId, checkpoint number, tokensGenerated, proof
-      // We'll use checkpoint number 1 for simplicity
+      // Feb 2026: no signature required
       const txHash = await this.sessionJobManager.submitCheckpointProof(
         jobId,
-        1, // checkpoint number
-        tokensGenerated,
-        proof
+        tokensClaimed,
+        proofHash,
+        proofCID,
+        deltaCID
       );
       return txHash;
     } catch (error: any) {
@@ -438,25 +449,38 @@ export class PaymentManager implements IPaymentManager {
 
   /**
    * Submit checkpoint proof as host (requires host signer)
+   *
+   * February 2026 Update: Signature parameter removed from contract.
+   * Authentication is now via msg.sender == session.host check.
+   *
+   * @param jobId - Session/job ID
+   * @param tokensClaimed - Number of tokens being claimed
+   * @param proofHash - bytes32 keccak256 hash of proof data
+   * @param proofCID - S5 CID pointing to full proof data
+   * @param hostSigner - Host's signer (must match session.host)
+   * @param deltaCID - Optional S5 CID for delta/incremental proof
    */
   async submitCheckpointAsHost(
     jobId: bigint,
-    tokensGenerated: number,
-    proof: string,
-    hostSigner: Signer
+    tokensClaimed: number,
+    proofHash: string,
+    proofCID: string,
+    hostSigner: Signer,
+    deltaCID: string = ''
   ): Promise<string> {
     if (!this.initialized) {
       throw new SDKError('PaymentManager not initialized', 'PAYMENT_NOT_INITIALIZED');
     }
 
     try {
-      // Submit proof as host
+      // Submit proof as host (Feb 2026: no signature required)
       const txHash = await this.sessionJobManager.submitCheckpointProofAsHost(
         jobId,
-        1, // checkpoint number
-        tokensGenerated,
-        proof,
-        hostSigner
+        tokensClaimed,
+        proofHash,
+        proofCID,
+        hostSigner,
+        deltaCID
       );
       return txHash;
     } catch (error: any) {

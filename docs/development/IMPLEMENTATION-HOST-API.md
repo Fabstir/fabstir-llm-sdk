@@ -1667,7 +1667,7 @@ pnpm add -D @types/express @types/cors @types/ws
   "dependencies": {
     "express": "^4.18.0",
     "cors": "^2.8.5",
-    "ws": "^8.14.0"
+    "ws": "^8.14.2"
   },
   "devDependencies": {
     "@types/express": "^4.17.0",

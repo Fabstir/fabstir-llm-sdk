@@ -133,6 +133,8 @@ export interface ExtendedSessionConfig extends SessionConfig {
   modelId: string;
   paymentMethod: 'deposit' | 'direct';
   depositAmount?: ethers.BigNumberish;
+  /** AUDIT-F3: Timeout window in seconds (60-3600, default 300) */
+  proofTimeoutWindow?: number;
   encryption?: boolean; // NEW: Enable E2EE
   groupId?: string; // NEW: Session Groups integration
   vectorDatabase?: {
@@ -330,6 +332,7 @@ export class SessionManager implements ISessionManager {
         amount: config.depositAmount,  // PaymentManagerMultiChain expects 'amount', not 'depositAmount'
         pricePerToken: validatedPrice, // Use model price from contract
         proofInterval: config.proofInterval,
+        proofTimeoutWindow: config.proofTimeoutWindow,  // AUDIT-F3
         duration: config.duration,
         chainId: config.chainId,
         paymentToken: config.paymentToken,
@@ -460,6 +463,74 @@ export class SessionManager implements ISessionManager {
    */
   getSession(sessionId: string): SessionState | undefined {
     return this.sessions.get(sessionId);
+  }
+
+  /**
+   * Register a session that was created externally (e.g., via delegated session creation).
+   * This allows the SDK to track and use sessions created outside the normal startSession flow.
+   */
+  async registerDelegatedSession(config: {
+    sessionId: bigint;
+    jobId: bigint;
+    hostUrl: string;
+    hostAddress: string;
+    model: string;
+    chainId: number;
+    depositAmount: string;
+    pricePerToken: number;
+    proofInterval: number;
+    duration: number;
+  }): Promise<void> {
+    const sessionId = config.sessionId;
+    const sessionIdStr = sessionId.toString();
+
+    console.log(`[SessionManager] Registering delegated session ${sessionIdStr}`);
+
+    const sessionState: SessionState = {
+      sessionId,
+      jobId: config.jobId,
+      endpoint: config.hostUrl,  // FIXED: Use 'endpoint' not 'hostUrl' to match SessionState interface
+      provider: config.hostAddress,
+      model: config.model,
+      chainId: config.chainId,
+      status: 'active',
+      prompts: [],
+      responses: [],
+      checkpoints: [],
+      totalTokens: 0,
+      startTime: Date.now(),
+      encryption: true, // Match normal session behavior - use encryption by default (Phase 6.2)
+    };
+
+    // Store in memory
+    this.sessions.set(sessionIdStr, sessionState);
+
+    // Persist to storage
+    await this.storageManager.storeConversation({
+      id: sessionIdStr,
+      messages: [],
+      metadata: {
+        chainId: config.chainId,
+        model: config.model,
+        provider: config.hostAddress,
+        endpoint: config.hostUrl,
+        jobId: config.jobId.toString(),
+        status: 'active',
+        totalTokens: 0,
+        startTime: sessionState.startTime,
+        encryption: sessionState.encryption,
+        config: {
+          depositAmount: config.depositAmount,
+          pricePerToken: config.pricePerToken.toString(),
+          proofInterval: config.proofInterval.toString(),
+          duration: config.duration.toString()
+        }
+      },
+      createdAt: sessionState.startTime,
+      updatedAt: sessionState.startTime
+    });
+
+    console.log(`[SessionManager] Delegated session ${sessionIdStr} registered successfully`);
   }
 
   /**

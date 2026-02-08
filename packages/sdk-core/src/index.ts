@@ -78,7 +78,7 @@ export * from './contracts';
 export { TransactionHelper } from './contracts/TransactionHelper';
 export { ContractManager } from './contracts/ContractManager';
 export { JobMarketplaceWrapper } from './contracts/JobMarketplace';
-export type { SessionCreationParams, DirectSessionParams, SessionJob } from './contracts/JobMarketplace';
+export type { SessionCreationParams, DirectSessionParams, SessionJob, DelegatedSessionParams } from './contracts/JobMarketplace';
 export type { SessionJobParams, DepositBalances } from './managers/PaymentManagerMultiChain';
 
 // Export types
@@ -115,6 +115,8 @@ export {
 // Export S5 seed derivation utilities
 export {
   deriveEntropyFromSignature,
+  deriveEntropyFromPrivateKey,
+  deriveEntropyFromAddress,
   entropyToS5Phrase,
   getCachedSeed,
   cacheSeed,
@@ -122,8 +124,11 @@ export {
   verifyCachedSeed,
   getOrGenerateS5Seed,
   generateS5SeedWithoutCache,
+  generateS5SeedFromPrivateKey,
+  generateS5SeedFromAddress,
   hasCachedSeed,
-  exportAllCachedSeeds
+  exportAllCachedSeeds,
+  SEED_DOMAIN_SEPARATOR
 } from './utils/s5-seed-derivation';
 
 // Export web search errors

@@ -93,75 +93,55 @@ export function createSubAccountSigner(options: SubAccountSignerOptions) {
     async sendTransaction(
       tx: ethers.TransactionRequest
     ): Promise<ethers.TransactionResponse> {
-      // Use wallet_sendCalls with sub-account as from address
-      const calls = [
-        {
-          to: tx.to as `0x${string}`,
-          data: tx.data as `0x${string}`,
-          value: tx.value ? `0x${BigInt(tx.value).toString(16)}` : undefined,
-        },
-      ];
+      // Format value as hex - MUST be "0x0" not undefined (wallet rejects undefined)
+      const valueHex = tx.value ? `0x${BigInt(tx.value).toString(16)}` : '0x0';
 
-      console.log('[SubAccountSigner] Sending transaction via wallet_sendCalls:', {
+      console.log('[SubAccountSigner] Sending transaction via eth_sendTransaction:', {
         from: subAccount,
         to: tx.to,
+        value: valueHex,
         data: (tx.data as string)?.slice(0, 10) + '...',
       });
 
-      const response = await provider.request({
-        method: 'wallet_sendCalls',
-        params: [
-          {
-            version: '2.0.0',
-            chainId: CHAIN_HEX,
+      // Use eth_sendTransaction with sub-account as from address
+      // Per Base documentation, this triggers the CryptoKey signing path for popup-free transactions
+      // https://docs.base.org/identity/smart-wallet/guides/sub-accounts
+      let txHash: string;
+      try {
+        const result = await provider.request({
+          method: 'eth_sendTransaction',
+          params: [{
             from: subAccount as `0x${string}`,
-            calls: calls,
-            capabilities: {
-              atomic: { required: true },
-            },
-          },
-        ],
-      });
+            to: tx.to as `0x${string}`,
+            data: tx.data as `0x${string}`,
+            value: valueHex,
+          }],
+        });
 
-      const bundleId = typeof response === 'string' ? response : (response as any).id;
-      console.log('[SubAccountSigner] Bundle ID:', bundleId);
-
-      // Wait for the bundle to be confirmed and get the real transaction hash
-      let realTxHash: string | undefined;
-      for (let i = 0; i < 30; i++) {
-        try {
-          const res = (await provider.request({
-            method: 'wallet_getCallsStatus',
-            params: [bundleId],
-          })) as { status: number | string; receipts?: any[] };
-
-          const ok =
-            (typeof res.status === 'number' && res.status >= 200 && res.status < 300) ||
-            (typeof res.status === 'string' &&
-              (res.status === 'CONFIRMED' || res.status.startsWith('2')));
-
-          if (ok && res.receipts?.[0]?.transactionHash) {
-            realTxHash = res.receipts[0].transactionHash;
-            console.log('[SubAccountSigner] Transaction confirmed with hash:', realTxHash);
-            break;
-          }
-        } catch (err) {
-          // Continue polling
+        // Validate result is a transaction hash string
+        if (typeof result !== 'string' || !result.startsWith('0x')) {
+          console.error('[SubAccountSigner] Invalid response from eth_sendTransaction:', result);
+          throw new Error(`Sub-account signing failed. Please refresh and reconnect wallet.`);
         }
-        await new Promise((r) => setTimeout(r, 1000));
+        txHash = result;
+      } catch (sendError: any) {
+        console.error('[SubAccountSigner] eth_sendTransaction failed:', sendError);
+        // Re-throw with more helpful message
+        if (sendError.message?.includes('sub account') || sendError.message?.includes('CryptoKey')) {
+          throw new Error(`Sub-account CryptoKey signing failed. Please refresh the page and reconnect wallet to re-register the CryptoKey. Original error: ${sendError.message}`);
+        }
+        throw sendError;
       }
 
-      if (!realTxHash) {
-        throw new Error('Transaction failed to confirm');
-      }
+      console.log('[SubAccountSigner] Transaction hash:', txHash);
 
-      // Return a proper transaction response with the real hash
-      const txResponse = await ethersProvider.getTransaction(realTxHash);
+      // Get the transaction response
+      const txResponse = await ethersProvider.getTransaction(txHash as string);
 
       if (!txResponse) {
-        // If we can't get the transaction, create a minimal response
+        // Return minimal response if transaction not found yet
         return {
-          hash: realTxHash,
+          hash: txHash as string,
           from: subAccount,
           to: tx.to,
           data: tx.data,
@@ -171,8 +151,8 @@ export function createSubAccountSigner(options: SubAccountSignerOptions) {
           gasPrice: 0n,
           chainId: chainId,
           wait: async () => {
-            const receipt = await ethersProvider.getTransactionReceipt(realTxHash);
-            return receipt || ({ status: 1, hash: realTxHash } as any);
+            const receipt = await ethersProvider.waitForTransaction(txHash as string);
+            return receipt || ({ status: 1, hash: txHash } as any);
           },
         } as any;
       }

@@ -22,7 +22,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ethers } from "ethers";
 import { parseUnits, formatUnits } from "viem";
-import { FabstirSDKCore, ChainRegistry, ChainId } from "@fabstir/sdk-core";
+import { FabstirSDKCore, ChainRegistry, ChainId, JobMarketplaceWrapper, DelegatedSessionParams, createSubAccountSigner as sdkCreateSubAccountSigner } from "@fabstir/sdk-core";
 import {
   cacheSeed,
   hasCachedSeed,
@@ -128,6 +128,8 @@ export default function ChatContextDemo() {
   const [isConnected, setIsConnected] = useState(false);
   const [isUsingBaseAccount, setIsUsingBaseAccount] = useState(false);
   const [baseAccountSDK, setBaseAccountSDK] = useState<any>(null);
+  const [subAccountSigner, setSubAccountSigner] = useState<any>(null); // For popup-free session creation
+  const subAccountSignerRef = useRef<any>(null); // Ref for immediate access (avoids React state timing issues)
 
   // Session State
   const [sessionId, setSessionId] = useState<bigint | null>(null);
@@ -155,6 +157,17 @@ export default function ChatContextDemo() {
     treasury: "0",
   });
   const [depositAmount, setDepositAmount] = useState("10"); // Default $10 USDC
+
+  // V2 Direct Payment State (USDC Allowance)
+  const [usdcAllowance, setUsdcAllowance] = useState<bigint>(0n);
+  const [isApproving, setIsApproving] = useState(false);
+  const [approvalError, setApprovalError] = useState("");
+  const DEFAULT_APPROVAL_AMOUNT = parseUnits("1000", 6); // $1,000 USDC
+
+  // Delegation State (for popup-free session creation)
+  const [isDelegateAuthorized, setIsDelegateAuthorized] = useState(false);
+  const [isAuthorizingDelegate, setIsAuthorizingDelegate] = useState(false);
+  const [delegationError, setDelegationError] = useState("");
 
   // UI State
   const [status, setStatus] = useState("Initializing...");
@@ -348,10 +361,146 @@ export default function ChatContextDemo() {
       }
 
       setBalances(newBalances);
+
+      // V2: Check USDC allowance for direct payment
+      if (primaryAccount) {
+        await checkUsdcAllowance();
+      }
+
       return newBalances;
     } catch (error) {
       console.error("Error reading balances:", error);
       return balances;
+    }
+  };
+
+  // Helper: Check if sub-account is authorized as delegate for primary account
+  // Accepts optional params for when called before state is set
+  const checkDelegationStatus = async (primary?: string, sub?: string) => {
+    try {
+      const depositor = primary || primaryAccount;
+      const delegate = sub || subAccount;
+
+      if (!depositor || !delegate || !sdk) {
+        console.log("[Delegation] Skipping check - missing accounts or SDK");
+        return;
+      }
+
+      console.log("[Delegation] Checking authorization status...");
+      console.log(`  Primary: ${depositor}`);
+      console.log(`  Sub-account: ${delegate}`);
+
+      // Get signer to create JobMarketplaceWrapper
+      const signer = await sdk.getSigner();
+      if (!signer) {
+        console.log("[Delegation] No signer available");
+        return;
+      }
+
+      const marketplace = new JobMarketplaceWrapper(selectedChainId, signer);
+      const isAuthorized = await marketplace.isDelegateAuthorized(depositor, delegate);
+
+      console.log(`[Delegation] Authorization status: ${isAuthorized}`);
+      setIsDelegateAuthorized(isAuthorized);
+      setDelegationError("");
+
+      if (isAuthorized) {
+        addMessage("system", "✅ Sub-account is authorized for popup-free session creation.");
+      }
+    } catch (error: any) {
+      console.error("[Delegation] Error checking status:", error);
+      setIsDelegateAuthorized(false);
+      setDelegationError(error.message);
+    }
+  };
+
+  // Helper: Authorize sub-account as delegate for popup-free session creation
+  const authorizeDelegateForSubAccount = async () => {
+    try {
+      if (!primaryAccount || !subAccount || !sdk) {
+        addMessage("system", "❌ Cannot authorize: wallet not connected");
+        return;
+      }
+
+      setIsAuthorizingDelegate(true);
+      setDelegationError("");
+      addMessage("system", `🔐 Authorizing sub-account for popup-free transactions...`);
+
+      // Get primary account signer (this will trigger a popup)
+      const signer = await sdk.getSigner();
+      if (!signer) {
+        throw new Error("No signer available");
+      }
+
+      const marketplace = new JobMarketplaceWrapper(selectedChainId, signer);
+      console.log(`[Delegation] Authorizing delegate: ${subAccount}`);
+
+      const tx = await marketplace.authorizeDelegate(subAccount, true);
+      addMessage("system", `⏳ Waiting for authorization confirmation...`);
+
+      await tx.wait(3);
+      console.log("[Delegation] Authorization confirmed");
+
+      setIsDelegateAuthorized(true);
+      addMessage("system", `✅ Sub-account authorized! Future sessions will be popup-free.`);
+    } catch (error: any) {
+      console.error("[Delegation] Authorization failed:", error);
+      setDelegationError(error.message);
+      addMessage("system", `❌ Authorization failed: ${error.message}`);
+    } finally {
+      setIsAuthorizingDelegate(false);
+    }
+  };
+
+  // V2: Check USDC allowance for JobMarketplace contract
+  const checkUsdcAllowance = async () => {
+    try {
+      if (!primaryAccount) return;
+      const contracts = getContractAddresses();
+      const readProvider = new ethers.JsonRpcProvider(RPC_URLS[selectedChainId as keyof typeof RPC_URLS]);
+      const usdcContract = new ethers.Contract(
+        contracts.USDC,
+        ["function allowance(address,address) view returns (uint256)"],
+        readProvider
+      );
+      const allowance = await usdcContract.allowance(primaryAccount, contracts.JOB_MARKETPLACE);
+      console.log("[V2 Allowance] Current:", ethers.formatUnits(allowance, 6), "USDC");
+      setUsdcAllowance(allowance);
+    } catch (error: any) {
+      console.error("[V2 Allowance] Error checking:", error);
+    }
+  };
+
+  // V2: Approve USDC for JobMarketplace contract (one-time setup)
+  const approveUsdc = async () => {
+    try {
+      setIsApproving(true);
+      setApprovalError("");
+      addMessage("system", "🔐 Approving USDC for contract (one-time setup)...");
+
+      const contracts = getContractAddresses();
+      const walletProvider = baseAccountSDK ? baseAccountSDK.getProvider() : (window as any).ethereum;
+      const ethersProvider = new ethers.BrowserProvider(walletProvider);
+      const signer = await ethersProvider.getSigner(primaryAccount);
+
+      const usdcContract = new ethers.Contract(
+        contracts.USDC,
+        ["function approve(address,uint256) returns (bool)"],
+        signer
+      );
+
+      console.log("[V2 Approval] Approving", ethers.formatUnits(DEFAULT_APPROVAL_AMOUNT, 6), "USDC to", contracts.JOB_MARKETPLACE);
+      const tx = await usdcContract.approve(contracts.JOB_MARKETPLACE, DEFAULT_APPROVAL_AMOUNT);
+      await tx.wait(3);
+
+      addMessage("system", "✅ USDC approved! No more approval popups needed.");
+      await checkUsdcAllowance();
+    } catch (error: any) {
+      console.error("[V2 Approval] Error:", error);
+      setApprovalError(error.message || "Approval failed");
+      addMessage("system", `❌ Approval failed: ${error.message || error}`);
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -409,6 +558,7 @@ export default function ChatContextDemo() {
         s5Config: {
           portalUrl: process.env.NEXT_PUBLIC_S5_PORTAL_URL,
           seedPhrase: process.env.NEXT_PUBLIC_S5_SEED_PHRASE,
+          masterToken: process.env.NEXT_PUBLIC_S5_MASTER_TOKEN, // For test harness portal registration
         },
       };
 
@@ -477,6 +627,9 @@ export default function ChatContextDemo() {
       setIsConnected(true);
       setStatus("Wallet connected. Ready to start chat session.");
       addMessage("system", "✅ Wallet connected successfully.");
+
+      // Check delegation status for popup-free session creation
+      await checkDelegationStatus();
     } catch (error: any) {
       console.error("Wallet connection failed:", error);
       setError(`Failed to connect wallet: ${error.message}`);
@@ -510,6 +663,9 @@ export default function ChatContextDemo() {
         setIsConnected(true);
         setStatus("Wallet connected. Ready to start chat session.");
         addMessage("system", "✅ Wallet connected successfully.");
+
+        // Check delegation status for popup-free session creation
+        await checkDelegationStatus();
       } catch (fallbackError: any) {
         console.error("Fallback connection failed:", fallbackError);
         setError(`Failed to connect wallet: ${fallbackError.message}`);
@@ -551,13 +707,29 @@ export default function ChatContextDemo() {
     );
     setSubAccount(sub);
 
-    // Pre-cache seed for sub-account to avoid S5 popup
-    const subAccountLower = sub.toLowerCase();
-    if (!hasCachedSeed(subAccountLower)) {
+    // Create and store sub-account signer for popup-free session creation from deposit
+    // This signer uses wallet_sendCalls which can be auto-approved via spend permissions
+    // Using SDK's version which has correct EIP-5792 format
+    const subSigner = sdkCreateSubAccountSigner({
+      provider: result.provider,
+      subAccount: sub,
+      primaryAccount: smartWallet,
+      chainId: DEFAULT_CHAIN_ID,
+    });
+    setSubAccountSigner(subSigner);
+    subAccountSignerRef.current = subSigner; // Store in ref for immediate access
+    (window as any).__subAccountSigner = subSigner; // Also store globally for debugging
+    console.log("[SubAccountSigner] Created and stored:", { subAccount: sub, primaryAccount: smartWallet });
+    addMessage("system", `  Sub-account: ${sub.slice(0, 6)}...${sub.slice(-4)} (for popup-free sessions)`);
+
+    // Pre-cache seed for smartWallet (primary) to avoid S5 popup
+    // Note: SDK uses signer.getAddress() which returns smartWallet, not sub-account
+    const smartWalletLower = smartWallet.toLowerCase();
+    if (!hasCachedSeed(smartWalletLower)) {
       const testSeed =
         "yield organic score bishop free juice atop village video element unless sneak care rock update";
-      cacheSeed(subAccountLower, testSeed);
-      console.log("[S5 Seed] Pre-cached test seed for sub-account");
+      cacheSeed(smartWalletLower, testSeed);
+      console.log("[S5 Seed] Pre-cached test seed for smartWallet (primary)");
       addMessage("system", "💾 Pre-cached S5 seed (no popup)");
     }
 
@@ -565,6 +737,9 @@ export default function ChatContextDemo() {
     const baseProvider = result.provider;
 
     // Create a signer from the Base Account Kit provider using the primary smart wallet
+    // Note: Using primary account signer because ERC20 transferFrom uses msg.sender.
+    // Deposits will show popup (correct - moving funds requires confirmation).
+    // For truly popup-free sessions, the contract would need to support spend permissions.
     const baseSigner = await new ethers.BrowserProvider(baseProvider).getSigner(
       smartWallet
     );
@@ -587,6 +762,9 @@ export default function ChatContextDemo() {
     );
     addMessage("system", "🎉 SDK authenticated with Base Account Kit!");
     setIsUsingBaseAccount(true);
+
+    // Check delegation status using local variables (state may not be set yet)
+    await checkDelegationStatus(smartWallet, sub);
   }
 
   // Connect with wallet provider (MetaMask or other wallet)
@@ -705,106 +883,74 @@ export default function ChatContextDemo() {
   }
 
   // Helper: Get or create sub-account with Auto Spend Permissions
+  // CRITICAL: wallet_addSubAccount MUST be called each session to register CryptoKey
+  // See: https://docs.base.org/base-account/improve-ux/sub-accounts
   async function ensureSubAccount(
     provider: any,
     universal: `0x${string}`
   ): Promise<`0x${string}`> {
     console.log("ensureSubAccount: Starting with primary account:", universal);
-    const contracts = getContractAddresses();
 
     try {
-      // 1) Look up existing sub-accounts for THIS origin
-      console.log("ensureSubAccount: Calling wallet_getSubAccounts...");
+      // Check for existing sub-accounts first (informational only)
+      console.log("ensureSubAccount: Checking for existing sub-accounts...");
       const resp = (await provider.request({
         method: "wallet_getSubAccounts",
         params: [
           {
             account: universal,
-            domain: window.location.origin, // e.g. "http://localhost:3000"
+            domain: window.location.origin,
           },
         ],
       })) as { subAccounts?: Array<{ address: `0x${string}` }> };
 
-      console.log(
-        "ensureSubAccount: Response from wallet_getSubAccounts:",
-        resp
-      );
-
-      if (resp?.subAccounts?.length) {
-        const subAccount = resp.subAccounts[0]!.address;
-        addMessage(
-          "system",
-          `✅ Using existing sub-account: ${subAccount.slice(
-            0,
-            6
-          )}...${subAccount.slice(-4)}`
-        );
-        addMessage(
-          "system",
-          "🎉 Auto Spend Permissions already configured - no popups for transactions!"
-        );
-        console.log(
-          "ensureSubAccount: Returning existing sub-account:",
-          subAccount
-        );
-        return subAccount;
+      const hasExisting = resp?.subAccounts?.length > 0;
+      if (hasExisting) {
+        console.log("ensureSubAccount: Found existing sub-account, will re-register for this session");
+      } else {
+        console.log("ensureSubAccount: No existing sub-account found");
       }
-
-      console.log("ensureSubAccount: No existing sub-accounts found");
     } catch (e) {
-      console.error("ensureSubAccount: Error getting sub-accounts:", e);
-      addMessage("system", `⚠️ Error checking for existing sub-accounts: ${e}`);
+      console.log("ensureSubAccount: Could not check existing sub-accounts:", e);
     }
 
     try {
-      // 2) Create a sub-account (SPEC-CORRECT: no spender object here)
-      console.log("ensureSubAccount: Creating new sub-account...");
-      addMessage("system", "🔐 Creating sub-account...");
-      addMessage(
-        "system",
-        "📝 Spend permission will be requested on first transaction"
-      );
+      // ALWAYS call wallet_addSubAccount to register CryptoKey for THIS session
+      // Per Base docs: "wallet_addSubAccount needs to be called in each session"
+      // "It will not trigger a new Sub Account creation if one already exists"
+      console.log("ensureSubAccount: Calling wallet_addSubAccount (required each session for CryptoKey)...");
+      addMessage("system", "🔐 Registering sub-account for this session...");
 
-      const created = (await provider.request({
+      const result = (await provider.request({
         method: "wallet_addSubAccount",
         params: [
           {
-            account: { type: "create" }, // <-- CORRECT: no spender, no allowance here
+            account: { type: "create" },
           },
         ],
       })) as { address: `0x${string}` };
 
-      console.log("ensureSubAccount: Created sub-account:", created);
+      console.log("ensureSubAccount: wallet_addSubAccount returned:", result);
       addMessage(
         "system",
-        `✅ Sub-account created: ${created.address.slice(
-          0,
-          6
-        )}...${created.address.slice(-4)}`
+        `✅ Sub-account ready: ${result.address.slice(0, 6)}...${result.address.slice(-4)}`
       );
-      addMessage(
-        "system",
-        "🎉 Auto Spend Permissions will activate on first transaction!"
-      );
-      return created.address;
+      addMessage("system", "🔑 CryptoKey registered for popup-free transactions");
+      return result.address;
     } catch (error) {
-      console.error("ensureSubAccount: Failed to create sub-account:", error);
-      addMessage("system", `❌ Failed to create sub-account: ${error}`);
-      // Fallback to using primary account if sub-account creation fails
+      console.error("ensureSubAccount: wallet_addSubAccount failed:", error);
+      addMessage("system", `❌ Failed to register sub-account: ${error}`);
       addMessage(
         "system",
         `⚠️ WARNING: Using primary account instead (transaction popups will occur)`
-      );
-      console.log(
-        "ensureSubAccount: Falling back to primary account:",
-        universal
       );
       return universal;
     }
   }
 
-  // Helper: Create sub-account signer (EXACT copy from working test)
-  function createSubAccountSigner(
+  // Helper: Create sub-account signer (DEPRECATED - now using SDK's version)
+  // Keeping for reference but not used - SDK version has correct EIP-5792 format
+  function _deprecatedCreateSubAccountSigner(
     provider: any,
     subAccount: string,
     primaryAccount: string
@@ -876,17 +1022,17 @@ export default function ChatContextDemo() {
           data: tx.data?.slice(0, 10) + "...",
         });
 
+        // Use wallet_sendCalls format from Base documentation
+        // https://docs.base.org/identity/smart-wallet/guides/sub-accounts
         const response = await provider.request({
           method: "wallet_sendCalls",
           params: [
             {
-              version: "2.0.0",
+              version: "2.0",
+              atomicRequired: true,
               chainId: CHAIN_HEX,
               from: subAccount as `0x${string}`,
               calls: calls,
-              capabilities: {
-                atomic: { required: true },
-              },
             },
           ],
         });
@@ -1091,11 +1237,10 @@ export default function ChatContextDemo() {
       addMessage("system", `🤖 Model: ${host.models[0]}`);
       addMessage("system", `🌐 Endpoint: ${host.endpoint}`);
 
-      setStatus("Checking USDC balance...");
+      setStatus("Checking USDC balance and allowance...");
 
-      // Check primary account has sufficient funds
-      const accountToCheck = primaryAccount;
-      const accountBalance = await readUSDCBalance(accountToCheck);
+      // V2: Check primary account has sufficient USDC balance
+      const accountBalance = await readUSDCBalance(primaryAccount);
       const sessionCost = parseUnits(SESSION_DEPOSIT_AMOUNT, 6);
 
       addMessage(
@@ -1112,6 +1257,17 @@ export default function ChatContextDemo() {
         );
       }
 
+      // V2: Check USDC allowance is sufficient
+      addMessage("system", `🔐 USDC Allowance: ${formatUnits(usdcAllowance, 6)} USDC`);
+      if (usdcAllowance < sessionCost) {
+        throw new Error(
+          `Insufficient USDC allowance. Need ${SESSION_DEPOSIT_AMOUNT} USDC approved but only have ${formatUnits(
+            usdcAllowance,
+            6
+          )} USDC. Please click "Approve USDC" first.`
+        );
+      }
+
       setStatus("Creating session...");
 
       // Validate host endpoint
@@ -1122,63 +1278,43 @@ export default function ChatContextDemo() {
         );
       }
 
+      // Get model-specific price from contract (USDC uses 6 decimals for pricePerToken)
+      const modelIdForPrice = host.models[0].startsWith('0x') && host.models[0].length === 66
+        ? host.models[0]
+        : ethers.keccak256(ethers.toUtf8Bytes(host.models[0]));
+      let modelPrice = PRICE_PER_TOKEN;
+      try {
+        const hm = hostManager || sdk?.getHostManager();
+        if (hm) {
+          const rawPrice = await hm.getModelPricing(host.address, modelIdForPrice, contracts.USDC);
+          modelPrice = Number(rawPrice);
+          console.log(`[Session] Model-specific price from contract: ${modelPrice}`);
+        }
+      } catch (e: any) {
+        console.log(`[Session] Could not get model price, using default: ${e.message}`);
+      }
+
       // Create session configuration with direct payment
       const sessionConfig = {
         depositAmount: SESSION_DEPOSIT_AMOUNT,
-        pricePerToken: Number(host.pricePerToken || PRICE_PER_TOKEN),
+        pricePerToken: modelPrice,
         proofInterval: PROOF_INTERVAL,
+        proofTimeoutWindow: 300, // AUDIT-F3: 5 minute timeout (60-3600 range)
         duration: SESSION_DURATION,
         paymentToken: contracts.USDC,
-        useDeposit: false, // Use direct payment with Auto Spend Permissions
         chainId: selectedChainId, // REQUIRED for multi-chain
       };
 
-      // Approve USDC for JobMarketplace contract
-      addMessage("system", "💰 Approving USDC for payment...");
-      const provider = baseAccountSDK
-        ? baseAccountSDK.getProvider()
-        : window.ethereum;
-      const ethersProvider = new ethers.BrowserProvider(provider);
-      const signer = await ethersProvider.getSigner();
+      // V2: USDC approval is done upfront via "Approve USDC" button (allowance already checked above)
+      addMessage("system", `✅ USDC pre-approved (${formatUnits(usdcAllowance, 6)} USDC allowance)`);
 
-      const usdcContract = new ethers.Contract(
-        contracts.USDC,
-        [
-          "function approve(address spender, uint256 amount) returns (bool)",
-          "function allowance(address owner, address spender) view returns (uint256)",
-        ],
-        signer
-      );
-
-      // Check current allowance - use high threshold to avoid running out mid-session
-      const currentAllowance = await usdcContract.allowance(
-        primaryAccount,
-        contracts.JOB_MARKETPLACE
-      );
-      const minAllowanceThreshold = parseUnits("100", 6); // 100 USDC threshold
-
-      console.log("[Allowance] Current allowance:", formatUnits(currentAllowance, 6), "USDC");
-      console.log("[Allowance] Threshold:", formatUnits(minAllowanceThreshold, 6), "USDC");
-      console.log("[Allowance] Primary account:", primaryAccount);
-      console.log("[Allowance] JobMarketplace:", contracts.JOB_MARKETPLACE);
-
-      if (currentAllowance < minAllowanceThreshold) {
-        addMessage("system", `🔐 Requesting USDC approval (current: ${formatUnits(currentAllowance, 6)} USDC)...`);
-        const approveTx = await usdcContract.approve(
-          contracts.JOB_MARKETPLACE,
-          parseUnits("1000", 6) // Approve 1000 USDC for multiple sessions
-        );
-        await approveTx.wait(3);
-        addMessage("system", "✅ USDC approved for JobMarketplace (1000 USDC)");
-      } else {
-        addMessage("system", `✅ USDC already approved (${formatUnits(currentAllowance, 6)} USDC)`);
-      }
-
-      // Start session - with Auto Spend Permissions, payment happens automatically without popups!
+      // Start session - with V2 delegation, payment happens automatically without popups!
       addMessage(
         "system",
-        isUsingBaseAccount
-          ? "🎉 Starting session with Auto Spend Permissions"
+        isUsingBaseAccount && isDelegateAuthorized && subAccountSigner
+          ? "🎉 Starting session via V2 direct payment (popup-free!)"
+          : isUsingBaseAccount
+          ? "📝 Starting session with Base Account..."
           : "📝 Starting session..."
       );
 
@@ -1193,7 +1329,90 @@ export default function ChatContextDemo() {
 
       console.log("Starting session with config:", fullSessionConfig);
 
-      const result = await sm.startSession(fullSessionConfig);
+      let result: any;
+
+      // V2: Check if we can use delegated session creation (popup-free)
+      const canUseDelegation = isDelegateAuthorized && subAccount && subAccountSigner;
+
+      if (canUseDelegation) {
+        console.log("[Session] Using V2 DELEGATED session creation (popup-free!)");
+      } else {
+        console.log("[Session] Delegation not set up - requires approval and authorization");
+      }
+
+      // V2 Direct Payment: Always use delegation when available (no isDepositMode needed)
+      // Get model ID from host's registered model
+      // If already a bytes32 (0x + 64 hex chars), use directly; otherwise hash it
+      const modelName = host.models[0];
+      const modelId = modelName.startsWith('0x') && modelName.length === 66
+        ? modelName  // Already a bytes32 model ID
+        : ethers.keccak256(ethers.toUtf8Bytes(modelName));
+      console.log("[Session] Model:", modelName, "-> ID:", modelId);
+
+      // Prepare parameters
+      const depositValue = ethers.parseUnits(sessionConfig.depositAmount, 6); // USDC has 6 decimals
+
+      if (canUseDelegation) {
+        // V2 POPUP-FREE PATH: Use sub-account with direct payment from primary's wallet
+        addMessage("system", "🎉 Creating session via V2 direct payment (popup-free!)...");
+
+        const marketplace = new JobMarketplaceWrapper(selectedChainId, subAccountSigner);
+
+        // V2: Use payer/amount instead of depositor/deposit
+        const delegatedParams: DelegatedSessionParams = {
+          payer: primaryAccount,
+          host: host.address,
+          paymentToken: contracts.USDC,
+          amount: sessionConfig.depositAmount,
+          pricePerToken: sessionConfig.pricePerToken,
+          duration: sessionConfig.duration,
+          proofInterval: sessionConfig.proofInterval,
+          proofTimeoutWindow: sessionConfig.proofTimeoutWindow || 300,
+          modelId: modelId,
+        };
+
+        console.log("[Session] V2 createSessionForModelAsDelegate:", {
+          payer: primaryAccount,
+          modelId,
+          host: host.address,
+          amount: depositValue.toString(),
+        });
+
+        // V2: Use new direct payment method (pulls USDC via transferFrom)
+        const extractedSessionId = await marketplace.createSessionForModelAsDelegate(delegatedParams);
+
+        result = {
+          sessionId: BigInt(extractedSessionId),
+          jobId: BigInt(extractedSessionId),
+          transactionHash: "delegated"
+        };
+
+        // Register the delegated session with SessionManager so chat works
+        if (sm) {
+          console.log("[Session] Registering delegated session with SessionManager...");
+          await (sm as any).registerDelegatedSession({
+            sessionId: BigInt(extractedSessionId),
+            jobId: BigInt(extractedSessionId),
+            hostUrl: host.endpoint,
+            hostAddress: host.address,
+            model: modelName,
+            chainId: selectedChainId,
+            depositAmount: sessionConfig.depositAmount,
+            pricePerToken: sessionConfig.pricePerToken,
+            proofInterval: sessionConfig.proofInterval,
+            duration: sessionConfig.duration,
+          });
+        }
+
+        addMessage("system", "🎉 Session created WITHOUT popup (V2 direct payment)!");
+      } else {
+        // V2: Delegation not set up - inform user
+        addMessage("system", "❌ Popup-free sessions require delegation setup:");
+        addMessage("system", "  1. Approve USDC (one-time)");
+        addMessage("system", "  2. Authorize Sub-Account (one-time)");
+        addMessage("system", "Please complete setup above, then try again.");
+        throw new Error("Delegation not set up. Please approve USDC and authorize sub-account first.");
+      }
 
       // Store session IDs immediately and in window object
       const newSessionId = result.sessionId;
@@ -1683,17 +1902,13 @@ export default function ChatContextDemo() {
       const hostSigner = new ethers.Wallet(hostPrivateKey, hostProvider);
       console.log(`Using host signer: ${await hostSigner.getAddress()}`);
 
-      // Generate a unique proof
+      // February 2026: Generate proofHash and proofCID (signature no longer needed)
       const timestamp = Date.now();
-      const uniqueHash = ethers.keccak256(
-        ethers.toUtf8Bytes(`job_${sessionId}_${timestamp}`)
+      const proofHash = ethers.keccak256(
+        ethers.toUtf8Bytes(`proof_${sessionId}_${timestamp}_${tokensToSubmit}`)
       );
-
-      // Create a structured 64-byte proof
-      const proofData = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["bytes32", "bytes32"],
-        [uniqueHash, ethers.id("mock_ezkl_padding")]
-      );
+      // Mock proofCID for test harness - in production this would be an S5 CID
+      const proofCID = `mock-proof-cid-${sessionId}-${timestamp}`;
 
       // Wait for token accumulation (ProofSystem enforces rate limits)
       console.log("Waiting 5 seconds for token accumulation...");
@@ -1703,13 +1918,16 @@ export default function ChatContextDemo() {
       console.log("Submitting checkpoint:", {
         sessionId: sessionId.toString(),
         tokensToSubmit,
-        proofDataLength: proofData.length,
+        proofHash,
+        proofCID,
       });
 
+      // Feb 2026: No signature parameter - auth via msg.sender == session.host
       const checkpointTx = await paymentManager.submitCheckpointAsHost(
         sessionId,
         tokensToSubmit,
-        proofData,
+        proofHash,
+        proofCID,
         hostSigner
       );
 
@@ -2069,37 +2287,66 @@ export default function ChatContextDemo() {
         </div>
       )}
 
-      {/* Deposit Section */}
+      {/* V2 Direct Payment Setup Section */}
       {isConnected && primaryAccount && (
-        <div className="bg-blue-50 p-4 rounded-lg mb-4">
-          <h3 className="font-semibold mb-2">💰 Deposit USDC</h3>
-          <div className="flex gap-2 items-center">
-            <input
-              type="number"
-              value={depositAmount}
-              onChange={(e) => setDepositAmount(e.target.value)}
-              placeholder="Amount (USDC)"
-              className="px-3 py-2 border rounded w-32"
-              disabled={isLoading}
-            />
-            <button
-              onClick={depositUSDC}
-              disabled={isLoading || !depositAmount}
-              className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-300"
-            >
-              {isLoading ? "Depositing..." : "Deposit to Primary Account"}
-            </button>
-            <button
-              onClick={readAllBalances}
-              disabled={isLoading}
-              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300"
-            >
-              Refresh Balances
-            </button>
-          </div>
-          <p className="text-xs text-gray-600 mt-2">
-            Request USDC from test faucet to your primary smart account
+        <div className="bg-purple-50 p-4 rounded-lg mb-4 border-2 border-purple-300">
+          <h3 className="font-semibold mb-2">🔐 V2 Direct Payment Setup</h3>
+          <p className="text-xs text-gray-600 mb-3">
+            Complete these one-time steps for popup-free sessions
           </p>
+
+          {/* Step 1: USDC Approval */}
+          <div className="flex items-center justify-between mb-3 p-2 bg-white rounded">
+            <div>
+              <span className="font-medium">Step 1: Approve USDC</span>
+              <p className="text-xs text-gray-600">Allowance: {formatUnits(usdcAllowance, 6)} USDC</p>
+            </div>
+            {usdcAllowance >= parseUnits(SESSION_DEPOSIT_AMOUNT, 6) ? (
+              <span className="text-green-600 font-medium">✅ Approved</span>
+            ) : (
+              <button
+                onClick={approveUsdc}
+                disabled={isApproving}
+                className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-gray-300"
+              >
+                {isApproving ? "Approving..." : "Approve USDC ($1,000)"}
+              </button>
+            )}
+          </div>
+          {approvalError && (
+            <p className="text-xs text-red-600 mb-2">{approvalError}</p>
+          )}
+
+          {/* Step 2: Delegate Authorization */}
+          {subAccount && (
+            <div className="flex items-center justify-between p-2 bg-white rounded">
+              <div>
+                <span className="font-medium">Step 2: Authorize Sub-Account</span>
+                <p className="text-xs text-gray-600">Enables popup-free transactions</p>
+              </div>
+              {isDelegateAuthorized ? (
+                <span className="text-green-600 font-medium">✅ Authorized</span>
+              ) : (
+                <button
+                  onClick={authorizeDelegateForSubAccount}
+                  disabled={isAuthorizingDelegate}
+                  className="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 disabled:bg-gray-300"
+                >
+                  {isAuthorizingDelegate ? "Authorizing..." : "Authorize (One-Time)"}
+                </button>
+              )}
+            </div>
+          )}
+          {delegationError && (
+            <p className="text-xs text-red-600 mt-1">{delegationError}</p>
+          )}
+
+          {/* Status */}
+          {usdcAllowance >= parseUnits(SESSION_DEPOSIT_AMOUNT, 6) && isDelegateAuthorized && (
+            <div className="mt-3 p-2 bg-green-50 rounded border border-green-300">
+              <span className="text-green-700 text-sm">🎉 Setup complete! Sessions will be popup-free.</span>
+            </div>
+          )}
         </div>
       )}
 

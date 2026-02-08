@@ -19,6 +19,11 @@ export function createSDK(): BaseAccountSDK {
     sdkInstance = createBaseAccountSDK({
       appName: 'Fabstir Harness',
       appChainIds: [base.constants.CHAIN_IDS.baseSepolia], // 84532
+      subAccounts: {
+        // Use 'manual' funding to allow direct CryptoKey signing without spend permissions
+        // Sub-account signs with CryptoKey, Base Sepolia paymaster sponsors gas
+        funding: 'manual'
+      }
     });
   }
   return sdkInstance;

@@ -7,6 +7,37 @@ import type { EncryptedStorage } from '../interfaces/IEncryptionManager';
 import type { StorageManager } from '../managers/StorageManager';
 
 /**
+ * Options for saving session groups
+ */
+export interface SessionGroupSaveOptions {
+  /**
+   * Timeout in milliseconds for S5 operations (default: 15000)
+   */
+  timeoutMs?: number;
+
+  /**
+   * Wait for network persistence verification before returning success.
+   * When true (default), the save operation verifies the data is accessible
+   * from the S5 network, not just written to local IndexedDB cache.
+   *
+   * Set to false for non-critical operations where local-first is acceptable.
+   *
+   * @default true
+   */
+  waitForNetwork?: boolean;
+
+  /**
+   * Maximum retries for network verification (default: 3)
+   */
+  verifyRetries?: number;
+
+  /**
+   * Delay between verification retries in ms (default: 1000)
+   */
+  verifyRetryDelayMs?: number;
+}
+
+/**
  * Session Group Storage Layer
  *
  * Handles S5 persistence for Session Groups with encryption.
@@ -18,6 +49,7 @@ import type { StorageManager } from '../managers/StorageManager';
  * - User isolation (each user has separate directory)
  * - Auto-sync on changes
  * - Auto-reconnect on S5 connection issues (v1.4.26+)
+ * - Network persistence verification (v1.11.2+) - ensures data survives browser close
  */
 export class SessionGroupStorage {
   private static readonly STORAGE_PATH = 'home/session-groups';
@@ -62,18 +94,29 @@ export class SessionGroupStorage {
    * Save session group to S5 with encryption
    *
    * @param group - Session group to save
-   * @param timeoutMs - Timeout in milliseconds (default: 15000 = 15s) - only used if StorageManager not available
+   * @param options - Save options (timeoutMs, waitForNetwork, verifyRetries)
    * @throws Error if encryption manager not available
    * @throws Error if S5 write fails
    * @throws Error if S5 operation times out
+   * @throws Error if network verification fails (when waitForNetwork is true)
    */
-  async save(group: SessionGroup, timeoutMs: number = 15000): Promise<void> {
+  async save(group: SessionGroup, options: SessionGroupSaveOptions | number = {}): Promise<void> {
+    // Support legacy signature: save(group, timeoutMs)
+    const opts: SessionGroupSaveOptions = typeof options === 'number'
+      ? { timeoutMs: options }
+      : options;
+
+    const timeoutMs = opts.timeoutMs ?? 15000;
+    const waitForNetwork = opts.waitForNetwork ?? true; // Default: verify network persistence
+    const verifyRetries = opts.verifyRetries ?? 3;
+    const verifyRetryDelayMs = opts.verifyRetryDelayMs ?? 1000;
+
     if (!this.encryptionManager || !this.hostPubKey) {
       throw new Error('EncryptionManager required for storage operations');
     }
 
     const groupSize = JSON.stringify(group).length;
-    console.log(`[SessionGroupStorage] 💾 Saving session group "${group.name}" (${groupSize} bytes plaintext)`);
+    console.log(`[SessionGroupStorage] 💾 Saving session group "${group.name}" (${groupSize} bytes plaintext, waitForNetwork=${waitForNetwork})`);
 
     // Encrypt group data
     const encrypted = await this.encryptionManager.encryptForStorage(
@@ -115,11 +158,124 @@ export class SessionGroupStorage {
       }
     }
 
-    const duration = Math.round(performance.now() - startTime);
-    console.log(`[SessionGroupStorage] ✅ Session group saved to S5 in ${duration}ms (encrypted)`);
+    const writeDuration = Math.round(performance.now() - startTime);
+    console.log(`[SessionGroupStorage] 📝 Local write completed in ${writeDuration}ms`);
 
-    // Update cache
+    // Update cache immediately (local-first)
     this.cache.set(group.id, group);
+
+    // Verify network persistence if requested (default: true for session groups)
+    if (waitForNetwork) {
+      console.log(`[SessionGroupStorage] 🔄 Verifying network persistence for "${group.name}"...`);
+      const verified = await this.verifyNetworkPersistence(group.id, verifyRetries, verifyRetryDelayMs, timeoutMs);
+
+      if (!verified) {
+        // Data is saved locally but network sync not confirmed
+        // This is a warning, not a hard failure - local data will eventually sync
+        console.warn(`[SessionGroupStorage] ⚠️ Network verification failed for "${group.name}" - data saved locally but may not persist across browser sessions`);
+        throw new Error(`Session group "${group.name}" saved locally but network persistence could not be verified. Keep browser open until sync completes.`);
+      }
+
+      const totalDuration = Math.round(performance.now() - startTime);
+      console.log(`[SessionGroupStorage] ✅ Session group "${group.name}" saved and network-verified in ${totalDuration}ms`);
+    } else {
+      console.log(`[SessionGroupStorage] ✅ Session group saved locally in ${writeDuration}ms (network sync pending)`);
+    }
+  }
+
+  /**
+   * Verify that a session group is persisted on the S5 network (not just local cache)
+   *
+   * This is critical for ensuring data survives browser close. S5.js uses local-first
+   * architecture where put() returns after local IndexedDB write, before network sync.
+   *
+   * @param groupId - Session group ID to verify
+   * @param maxRetries - Maximum verification attempts (default: 3)
+   * @param retryDelayMs - Delay between retries in ms (default: 1000)
+   * @param timeoutMs - Timeout per attempt in ms (default: 15000)
+   * @returns true if network persistence verified, false otherwise
+   */
+  private async verifyNetworkPersistence(
+    groupId: string,
+    maxRetries: number = 3,
+    retryDelayMs: number = 1000,
+    timeoutMs: number = 15000
+  ): Promise<boolean> {
+    // Clear local cache to force network read
+    this.cache.delete(groupId);
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[SessionGroupStorage] 🔍 Network verification attempt ${attempt}/${maxRetries} for ${groupId}`);
+
+        // Try to load from network (cache was cleared, so this must hit network)
+        await this.loadFromNetwork(groupId, timeoutMs);
+
+        console.log(`[SessionGroupStorage] ✅ Network verification successful on attempt ${attempt}`);
+        return true;
+      } catch (error: any) {
+        console.log(`[SessionGroupStorage] ⏳ Verification attempt ${attempt} failed: ${error.message}`);
+
+        if (attempt < maxRetries) {
+          // Wait before retry with exponential backoff
+          const delay = retryDelayMs * attempt;
+          console.log(`[SessionGroupStorage] 🔄 Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    console.error(`[SessionGroupStorage] ❌ Network verification failed after ${maxRetries} attempts`);
+    return false;
+  }
+
+  /**
+   * Load session group directly from S5 network, bypassing local cache
+   *
+   * Used for network persistence verification.
+   *
+   * @param groupId - Session group ID
+   * @param timeoutMs - Timeout in milliseconds
+   * @returns Decrypted session group from network
+   * @throws Error if group not found on network or decryption fails
+   */
+  private async loadFromNetwork(groupId: string, timeoutMs: number = 15000): Promise<SessionGroup> {
+    if (!this.encryptionManager) {
+      throw new Error('EncryptionManager required for storage operations');
+    }
+
+    const path = this.buildPath(groupId);
+
+    // Direct S5 call - do NOT check cache
+    const getPromise = this.s5Client.fs.get(path);
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`S5 network read timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+
+    const encrypted = await Promise.race([getPromise, timeoutPromise]);
+
+    if (!encrypted) {
+      throw new Error(`Session group not found on network: ${groupId}`);
+    }
+
+    // Decrypt to verify data integrity
+    const { data: group } = await this.encryptionManager.decryptFromStorage<SessionGroup>(
+      encrypted as EncryptedStorage
+    );
+
+    // Verify the group ID matches (data integrity check)
+    if (group.id !== groupId) {
+      throw new Error(`Data integrity check failed: expected ${groupId}, got ${group.id}`);
+    }
+
+    // Re-populate cache with verified data
+    group.createdAt = new Date(group.createdAt);
+    group.updatedAt = new Date(group.updatedAt);
+    this.cache.set(groupId, group);
+
+    return group;
   }
 
   /**
@@ -250,9 +406,10 @@ export class SessionGroupStorage {
             const group = await this.load(groupId);
             groups.push(group);
           } catch (error: any) {
-            // Silently skip groups that fail to load (corrupted, wrong key, deleted, etc.)
-            // This is expected during normal operation as users may have old/corrupted data
-            // Continue loading other groups
+            // Log warning for groups that fail to load (corrupted, wrong key, deleted, etc.)
+            // This helps debug cross-tab encryption issues
+            console.warn(`[SessionGroupStorage] Failed to decrypt group ${groupId}:`, error.message);
+            // Continue loading other groups - may be old data with different encryption key
           }
         }
       }

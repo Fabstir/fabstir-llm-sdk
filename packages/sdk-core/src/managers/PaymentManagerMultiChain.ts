@@ -37,6 +37,8 @@ export interface SessionJobParams {
   useDeposit?: boolean;
   paymentToken?: string;
   proofInterval?: number;
+  /** AUDIT-F3: Timeout window in seconds (60-3600, default 300) */
+  proofTimeoutWindow?: number;
   modelId?: string;  // Optional bytes32 model ID for model-specific pricing
 }
 
@@ -251,7 +253,7 @@ export class PaymentManager implements IPaymentManager {
    *
    * @param sessionId - The session/job ID
    * @param proofIndex - Index of the proof submission (0-based)
-   * @returns Proof submission details including proofHash, tokensClaimed, timestamp, verified
+   * @returns Proof submission details including proofHash, tokensClaimed, timestamp, verified, deltaCID
    */
   async getProofSubmission(
     sessionId: bigint,
@@ -261,6 +263,7 @@ export class PaymentManager implements IPaymentManager {
     tokensClaimed: bigint;
     timestamp: bigint;
     verified: boolean;
+    deltaCID: string;  // Added in AUDIT remediation
   }> {
     const wrapper = this.getWrapper(this.currentChainId);
     return wrapper.getProofSubmission(sessionId, proofIndex);
@@ -308,6 +311,7 @@ export class PaymentManager implements IPaymentManager {
       pricePerToken: pricePerToken,
       duration: duration,
       proofInterval: proofInterval,
+      proofTimeoutWindow: params.proofTimeoutWindow,
       paymentToken: params.paymentToken,
       useDeposit: params.useDeposit
     });
@@ -315,8 +319,7 @@ export class PaymentManager implements IPaymentManager {
     // Create from deposit or direct payment
     if (params.useDeposit) {
       // Create session from pre-funded deposit
-      // Note: createSessionFromDeposit doesn't support model-specific pricing
-      // For model pricing, use direct payment (useDeposit: false)
+      // AUDIT-F5: Now supports model-specific pricing via createSessionFromDepositForModel
       return await wrapper.createSessionFromDeposit({
         host: params.host,
         paymentToken: params.paymentToken || ethers.ZeroAddress,
@@ -324,7 +327,8 @@ export class PaymentManager implements IPaymentManager {
         pricePerToken,
         duration,
         proofInterval,
-        modelId: params.modelId  // Will warn if model pricing needed
+        proofTimeoutWindow: params.proofTimeoutWindow,  // AUDIT-F3
+        modelId: params.modelId
       });
     } else {
       // Create session with direct payment - supports model-specific pricing
@@ -333,6 +337,7 @@ export class PaymentManager implements IPaymentManager {
         pricePerToken,
         duration,
         proofInterval,
+        proofTimeoutWindow: params.proofTimeoutWindow,  // AUDIT-F3
         paymentAmount: params.amount,
         paymentToken: params.paymentToken || ethers.ZeroAddress,
         modelId: params.modelId  // Uses createSessionJobForModel when set

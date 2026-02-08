@@ -750,20 +750,32 @@ export class StorageManager implements IStorageManager {
           timestamp: conversation.updatedAt
         };
       } catch (error: any) {
-        const isRevisionError =
-          error.message?.includes('Revision number too low') ||
-          error.message?.includes('DirectoryTransactionException');
+        // Get error message from multiple sources (S5.js errors may have message in different places)
+        const errorMsg = error?.message || error?.toString?.() || String(error) || '';
+        console.log(`[StorageManager] Save error on attempt ${attempt}/${maxRetries}:`, errorMsg);
 
-        if (isRevisionError && attempt < maxRetries) {
+        // Retryable errors
+        const isRevisionError = errorMsg.includes('Revision number too low');
+        const isDirectoryError = errorMsg.includes('DirectoryTransactionException') ||
+                                  errorMsg.includes('same name');
+
+        // S5.js bug: retry on _error_stack errors
+        const isS5Bug = errorMsg.includes('_error_stack');
+
+        console.log(`[StorageManager] Error checks: revision=${isRevisionError}, directory=${isDirectoryError}, s5bug=${isS5Bug}`);
+
+        if ((isRevisionError || isDirectoryError || isS5Bug) && attempt < maxRetries) {
           // Exponential backoff: 200ms, 400ms, 800ms
-          console.debug(`[StorageManager] Revision conflict on save (attempt ${attempt}/${maxRetries}), retrying...`);
+          const reason = isRevisionError ? 'Revision conflict' : isDirectoryError ? 'Directory conflict' : 'S5 bug';
+          console.log(`[StorageManager] ${reason} on save (attempt ${attempt}/${maxRetries}), retrying...`);
           await new Promise(r => setTimeout(r, 100 * Math.pow(2, attempt)));
           continue;
         }
 
-        const errorMsg = error.message || error.toString() || JSON.stringify(error) || 'Unknown S5 error';
+        console.log(`[StorageManager] Save failed after ${attempt} attempts, throwing error`);
+        const finalErrorMsg = error.message || error.toString() || JSON.stringify(error) || 'Unknown S5 error';
         throw new SDKError(
-          `Failed to save conversation: ${errorMsg}`,
+          `Failed to save conversation: ${finalErrorMsg}`,
           'STORAGE_SAVE_ERROR',
           { originalError: error }
         );

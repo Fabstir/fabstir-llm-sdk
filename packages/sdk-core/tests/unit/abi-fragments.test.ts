@@ -1,23 +1,26 @@
-// Copyright (c) 2025 Fabstir
+// Copyright (c) 2026 Fabstir
 // SPDX-License-Identifier: BUSL-1.1
 
 /**
- * Tests for ABI fragments - Security Audit Migration
- * Verifies the updated contract function signatures
+ * Tests for ABI fragments
+ *
+ * February 2026 Contract Update: Signature removed from submitProofOfWork
  */
 
 import { describe, it, expect } from 'vitest';
 import { JobMarketplaceFragments } from '../../src/contracts/abis/index';
 
-describe('ABI Fragments - Security Audit Migration', () => {
+describe('ABI Fragments (Feb 2026)', () => {
   describe('JobMarketplaceFragments', () => {
-    it('submitProofOfWork has 5 parameters with signature', () => {
-      // New signature: (jobId, tokensClaimed, proofHash, signature, proofCID)
+    it('submitProofOfWork has 5 parameters (no signature)', () => {
+      // Feb 2026: (jobId, tokensClaimed, proofHash, proofCID, deltaCID)
       expect(JobMarketplaceFragments.submitProofOfWork).toContain('uint256 jobId');
       expect(JobMarketplaceFragments.submitProofOfWork).toContain('uint256 tokensClaimed');
       expect(JobMarketplaceFragments.submitProofOfWork).toContain('bytes32 proofHash');
-      expect(JobMarketplaceFragments.submitProofOfWork).toContain('bytes signature');
       expect(JobMarketplaceFragments.submitProofOfWork).toContain('string proofCID');
+      expect(JobMarketplaceFragments.submitProofOfWork).toContain('string deltaCID');
+      // Feb 2026: signature REMOVED - auth via msg.sender
+      expect(JobMarketplaceFragments.submitProofOfWork).not.toContain('bytes signature');
       // Should NOT contain old parameter names
       expect(JobMarketplaceFragments.submitProofOfWork).not.toContain('tokensProven');
       expect(JobMarketplaceFragments.submitProofOfWork).not.toContain('bytes proof');
