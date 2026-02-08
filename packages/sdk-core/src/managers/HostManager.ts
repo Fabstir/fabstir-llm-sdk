@@ -400,27 +400,61 @@ export class HostManager {
       const hosts: HostInfo[] = [];
 
       for (const address of nodeAddresses) {
-        const info = await this.nodeRegistry['getNodeFullInfo'](address);
+        try {
+          const info = await this.nodeRegistry['getNodeFullInfo'](address);
 
-        // Parse the returned data (8-field struct with dual pricing)
-        const metadata = JSON.parse(info[3]); // metadata is at index 3
+          // Parse metadata with defaults on failure
+          let metadata: HostMetadata;
+          try {
+            if (info[3] && typeof info[3] === 'string' && info[3].startsWith('{')) {
+              const parsed = JSON.parse(info[3]);
+              metadata = {
+                hardware: parsed.hardware || { gpu: 'Unknown', vram: 0, ram: 0 },
+                capabilities: parsed.capabilities || ['inference', 'streaming'],
+                location: parsed.location || 'Unknown',
+                maxConcurrent: parsed.maxConcurrent || 10,
+                costPerToken: Number(info[7] || 0),
+                publicKey: parsed.publicKey
+              };
+            } else {
+              metadata = {
+                hardware: { gpu: 'Unknown', vram: 0, ram: 0 },
+                capabilities: ['inference', 'streaming'],
+                location: 'Unknown',
+                maxConcurrent: 10,
+                costPerToken: Number(info[7] || 0)
+              };
+            }
+          } catch (e) {
+            console.warn(`[HostManager] Failed to parse metadata for ${address}, using defaults`);
+            metadata = {
+              hardware: { gpu: 'Unknown', vram: 0, ram: 0 },
+              capabilities: ['inference', 'streaming'],
+              location: 'Unknown',
+              maxConcurrent: 10,
+              costPerToken: Number(info[7] || 0)
+            };
+          }
 
-        hosts.push({
-          address,
-          apiUrl: info[4],                           // apiUrl at index 4
-          metadata: metadata,
-          supportedModels: info[5],                  // model IDs array at index 5
-          isActive: info[2],                         // isActive at index 2
-          stake: info[1],                            // stake at index 1
-          minPricePerTokenNative: info[6] || 0n,     // Native pricing at index 6
-          minPricePerTokenStable: info[7] || 0n      // Stable pricing at index 7
-        });
+          hosts.push({
+            address,
+            apiUrl: info[4],                           // apiUrl at index 4
+            metadata,
+            supportedModels: info[5],                  // model IDs array at index 5
+            isActive: info[2],                         // isActive at index 2
+            stake: info[1],                            // stake at index 1
+            minPricePerTokenNative: info[6] || 0n,     // Native pricing at index 6
+            minPricePerTokenStable: info[7] || 0n      // Stable pricing at index 7
+          });
+        } catch (error) {
+          console.warn(`[HostManager] Failed to get info for host ${address}, skipping:`, error);
+          continue;
+        }
       }
 
       return hosts;
     } catch (error: any) {
-      console.error('Error finding hosts for model:', error);
-      return [];
+      throw new SDKError(`Failed to find hosts for model: ${error.message}`, 'DISCOVERY_ERROR', error);
     }
   }
 
@@ -674,48 +708,61 @@ export class HostManager {
       const hosts: HostInfo[] = [];
 
       for (const address of activeNodes) {
-        const info = await this.nodeRegistry['getNodeFullInfo'](address);
-
-        // Log raw info for debugging
-        console.log(`[HostManager] getNodeFullInfo for ${address}:`, {
-          operator: info[0],
-          stake: info[1]?.toString(),
-          isActive: info[2],
-          metadataRaw: info[3],
-          apiUrl: info[4],
-          models: info[5],
-          priceNative: info[6]?.toString(),
-          priceStable: info[7]?.toString()
-        });
-
-        // Parse metadata
-        let metadata: HostMetadata;
         try {
-          metadata = JSON.parse(info[3]);
-        } catch (e) {
-          console.error(`[HostManager] Failed to parse metadata for ${address}:`, e);
-          console.error(`[HostManager] Raw metadata value: "${info[3]}"`);
-          console.error(`[HostManager] Metadata type: ${typeof info[3]}`);
-          // Skip this host if metadata is invalid
+          const info = await this.nodeRegistry['getNodeFullInfo'](address);
+
+          // Parse metadata with defaults on failure
+          let metadata: HostMetadata;
+          try {
+            if (info[3] && typeof info[3] === 'string' && info[3].startsWith('{')) {
+              const parsed = JSON.parse(info[3]);
+              metadata = {
+                hardware: parsed.hardware || { gpu: 'Unknown', vram: 0, ram: 0 },
+                capabilities: parsed.capabilities || ['inference', 'streaming'],
+                location: parsed.location || 'Unknown',
+                maxConcurrent: parsed.maxConcurrent || 10,
+                costPerToken: Number(info[7] || 0),
+                publicKey: parsed.publicKey
+              };
+            } else {
+              metadata = {
+                hardware: { gpu: 'Unknown', vram: 0, ram: 0 },
+                capabilities: ['inference', 'streaming'],
+                location: 'Unknown',
+                maxConcurrent: 10,
+                costPerToken: Number(info[7] || 0)
+              };
+            }
+          } catch (e) {
+            console.warn(`[HostManager] Failed to parse metadata for ${address}, using defaults`);
+            metadata = {
+              hardware: { gpu: 'Unknown', vram: 0, ram: 0 },
+              capabilities: ['inference', 'streaming'],
+              location: 'Unknown',
+              maxConcurrent: 10,
+              costPerToken: Number(info[7] || 0)
+            };
+          }
+
+          hosts.push({
+            address,
+            apiUrl: info[4],                           // apiUrl at index 4
+            metadata,
+            supportedModels: info[5],                  // model IDs at index 5
+            isActive: info[2],                         // isActive at index 2
+            stake: info[1],                            // stake at index 1
+            minPricePerTokenNative: info[6] || 0n,     // Native pricing at index 6
+            minPricePerTokenStable: info[7] || 0n      // Stable pricing at index 7
+          });
+        } catch (error) {
+          console.warn(`[HostManager] Failed to get info for host ${address}, skipping:`, error);
           continue;
         }
-
-        hosts.push({
-          address,
-          apiUrl: info[4],                           // apiUrl at index 4
-          metadata,
-          supportedModels: info[5],                  // model IDs at index 5
-          isActive: info[2],                         // isActive at index 2
-          stake: info[1],                            // stake at index 1
-          minPricePerTokenNative: info[6] || 0n,     // Native pricing at index 6
-          minPricePerTokenStable: info[7] || 0n      // Stable pricing at index 7
-        });
       }
 
       return hosts;
     } catch (error: any) {
-      console.error('Error discovering hosts:', error);
-      return [];
+      throw new SDKError(`Failed to discover hosts: ${error.message}`, 'DISCOVERY_ERROR', error);
     }
   }
 
