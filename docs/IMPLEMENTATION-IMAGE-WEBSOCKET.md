@@ -6,10 +6,10 @@ Replace the HTTP-based image processing pipeline (`/v1/describe-image`, `/v1/ocr
 
 ## Status: Complete
 
-**Implementation**: Image Chat via Encrypted WebSocket
-**SDK Version**: 1.12.0
+**Implementation**: Image Chat via Encrypted WebSocket + VLM Token Display
+**SDK Version**: 1.13.0
 **Network**: Base Sepolia (Chain ID: 84532)
-**Node Requirement**: v8.15.3+
+**Node Requirement**: v8.15.4+
 **Source Documents**:
 - Node developer specification (inline, see task description)
 - `docs/platformless-ui/IMAGE_RAG_INTEGRATION.md` (old flow, being replaced)
@@ -19,6 +19,7 @@ Replace the HTTP-based image processing pipeline (`/v1/describe-image`, `/v1/ocr
 - [x] Phase 2: Encrypted Payload Restructure
 - [x] Phase 3: Remove HTTP Image Processing
 - [x] Phase 4: Build, Test & Version Bump
+- [x] Phase 5: VLM Token Display
 
 ---
 
@@ -417,6 +418,241 @@ sendPromptStreaming(sessionId: bigint, prompt: string, onToken?: (token: string)
 
 ---
 
+## Phase 5: VLM Token Display
+
+### Context
+
+Node v8.15.4 now sends `vlm_tokens` in `stream_end` WebSocket messages when images were
+processed by the VLM sidecar (OCR + image description). The UI currently estimates tokens
+via `Math.ceil((prompt.length + response.length) / 4)` — inaccurate. The host was paid
+correctly (~0.05 ETH for ~3,000 tokens) but the UI showed only 397 estimated tokens.
+
+**Node developer spec (stream_end v8.15.4):**
+```json
+{ "type": "stream_end", "id": "msg-123", "session_id": "69", "vlm_tokens": 2873 }
+```
+
+**Token flow:**
+```
+User sends image → VLM OCR (1,445) + VLM Describe (1,428) = 2,873 VLM tokens
+                 → Main LLM generates response = 130 LLM tokens
+                 → Total billed on-chain: 3,003 tokens
+                 → stream_end: { vlm_tokens: 2873 }
+                 → SDK sums: 130 (chunk count) + 2873 (stream_end) = 3,003
+```
+
+**Approach**: Add `onTokenUsage` callback to `PromptOptions` — backward compatible,
+no change to `Promise<string>` return type of `sendPromptStreaming`.
+
+**Token counting strategy:**
+- **LLM tokens**: `data.tokens_used` from `stream_end` if available, else count of
+  `encrypted_chunk`/`stream_chunk` messages (each chunk ≈ 1 token)
+- **VLM tokens**: `data.vlm_tokens` from `stream_end` (0 if absent — no images processed)
+- **Total**: `llmTokens + vlmTokens`
+
+---
+
+### Sub-phase 5.1: Add `TokenUsageInfo` Type & Extend `PromptOptions`
+
+**Goal**: Define the token usage type and add `onTokenUsage` callback to `PromptOptions`.
+
+**Line Budget**: 15 lines new in `types/index.ts`
+
+#### Tasks
+- [x] Write test: `TokenUsageInfo` has `llmTokens`, `vlmTokens`, `totalTokens` (number fields)
+- [x] Write test: `PromptOptions.onTokenUsage` is optional callback accepting `TokenUsageInfo`
+- [x] Add `TokenUsageInfo` interface to `packages/sdk-core/src/types/index.ts`
+- [x] Extend `PromptOptions` with `onTokenUsage?: (usage: TokenUsageInfo) => void`
+- [x] Verify type exported from barrel (`src/index.ts`)
+
+**Test Files:**
+- `packages/sdk-core/tests/managers/SessionManager-vlm-tokens.test.ts` (NEW, sub-phase 5.1, ~20 lines)
+
+**Implementation Files:**
+- `packages/sdk-core/src/types/index.ts` (MODIFY, +12 lines after line 133)
+
+**Success Criteria:**
+- [x] Types compile correctly
+- [x] `PromptOptions.onTokenUsage` is optional
+- [x] Tests pass
+
+---
+
+### Sub-phase 5.2: Capture VLM Tokens in Encrypted Streaming Path
+
+**Goal**: Parse `vlm_tokens` from `stream_end`, count chunks for LLM tokens, call
+`onTokenUsage` callback, update `session.totalTokens`.
+
+**Line Budget**: 15 lines modified in SessionManager (Path 1: lines 847–917)
+
+#### Tasks
+- [x] Write test: encrypted streaming — `onTokenUsage` called with `vlm_tokens` from `stream_end`
+- [x] Write test: encrypted streaming — `llmTokens` equals chunk count when `tokens_used` absent
+- [x] Write test: encrypted streaming — `session.totalTokens` updated after prompt
+- [x] Write test: encrypted streaming — `onTokenUsage` not provided, no error (backward compat)
+- [x] Add `chunkCount` variable, increment per `encrypted_chunk` (line ~851)
+- [x] In `stream_end` handler (line ~883): extract `data.vlm_tokens` and `data.tokens_used`
+- [x] Compute `TokenUsageInfo`, call `options?.onTokenUsage?.(usage)`, update `session.totalTokens`
+
+**Test Files:**
+- `packages/sdk-core/tests/managers/SessionManager-vlm-tokens.test.ts` (sub-phase 5.2, ~50 lines)
+
+**Implementation Files:**
+- `packages/sdk-core/src/managers/SessionManager.ts` (MODIFY, ~15 lines at lines 847–888)
+
+**Success Criteria:**
+- [ ] `stream_end` with `vlm_tokens: 2873` → callback receives `{ llmTokens, vlmTokens: 2873, totalTokens }`
+- [ ] Without `vlm_tokens` → `vlmTokens: 0`
+- [ ] `session.totalTokens` incremented by `totalTokens`
+- [ ] Tests pass
+
+---
+
+### Sub-phase 5.3: Capture VLM Tokens in Plaintext Streaming Path
+
+**Goal**: Add `stream_end` handler to plaintext streaming `onMessage` to capture VLM tokens.
+
+**Line Budget**: 12 lines modified in SessionManager (Path 2: lines 919–978)
+
+#### Tasks
+- [x] Write test: plaintext streaming — `onTokenUsage` called with `vlm_tokens` from `stream_end`
+- [x] Write test: plaintext streaming — chunk count used as `llmTokens`
+- [x] Add `chunkCount` variable, increment per `stream_chunk` (line ~923)
+- [x] Add `stream_end` handler in `onMessage` callback (currently missing at lines 921–931)
+- [x] Extract `data.vlm_tokens`, compute usage, call callback, update session
+
+**Test Files:**
+- `packages/sdk-core/tests/managers/SessionManager-vlm-tokens.test.ts` (sub-phase 5.3, ~40 lines)
+
+**Implementation Files:**
+- `packages/sdk-core/src/managers/SessionManager.ts` (MODIFY, ~12 lines at lines 921–931)
+
+**Success Criteria:**
+- [ ] `stream_end` captured even though `sendMessage()` also handles it
+- [ ] Token usage callback fires before promise resolves
+- [ ] Tests pass
+
+---
+
+### Sub-phase 5.4: Capture VLM Tokens in Non-Streaming Paths
+
+**Goal**: Handle token capture in encrypted non-streaming (Path 3) and plaintext
+non-streaming (Path 4).
+
+**Line Budget**: 25 lines modified in SessionManager
+
+#### Tasks
+- [x] Write test: encrypted non-streaming — `onTokenUsage` called from `stream_end`
+- [x] Write test: plaintext non-streaming — `onTokenUsage` called with `tokens_used` from `response`
+- [x] Path 3 (lines 1070–1137): add `chunkCount`, extract tokens from `stream_end` handler (line ~1130)
+- [x] Path 4 (lines 1138–1182): register temporary `onMessage` handler before `sendMessage()` to capture `tokens_used` and `vlm_tokens` from `response`/`stream_end`
+- [x] Both paths: call `options?.onTokenUsage?.(usage)`, update `session.totalTokens`
+
+**Test Files:**
+- `packages/sdk-core/tests/managers/SessionManager-vlm-tokens.test.ts` (sub-phase 5.4, ~50 lines)
+
+**Implementation Files:**
+- `packages/sdk-core/src/managers/SessionManager.ts` (MODIFY, ~25 lines at lines 1096–1182)
+
+**Success Criteria:**
+- [ ] Both non-streaming paths report token usage
+- [ ] `session.totalTokens` accumulates across multiple prompts
+- [ ] Tests pass
+
+---
+
+### Sub-phase 5.5: Add `getLastTokenUsage()` Getter & Update Interface
+
+**Goal**: Add `lastTokenUsage` to `SessionState` and expose via `getLastTokenUsage()` method.
+
+**Line Budget**: 10 lines total across interface + implementation
+
+#### Tasks
+- [x] Write test: `getLastTokenUsage()` returns `undefined` before any prompt
+- [x] Write test: `getLastTokenUsage()` returns last prompt's `TokenUsageInfo`
+- [x] Add `lastTokenUsage?: TokenUsageInfo` to `SessionState` (line ~130)
+- [x] Add `getLastTokenUsage(sessionId)` method to `SessionManager`
+- [x] Add `getLastTokenUsage(sessionId)` to `ISessionManager` interface
+- [x] Import `TokenUsageInfo` in `ISessionManager.ts`
+
+**Test Files:**
+- `packages/sdk-core/tests/managers/SessionManager-vlm-tokens.test.ts` (sub-phase 5.5, ~25 lines)
+
+**Implementation Files:**
+- `packages/sdk-core/src/managers/SessionManager.ts` (MODIFY, +6 lines)
+- `packages/sdk-core/src/interfaces/ISessionManager.ts` (MODIFY, +4 lines)
+
+**Success Criteria:**
+- [ ] Getter works
+- [ ] Returns `undefined` for sessions without any prompt
+- [ ] Tests pass
+
+---
+
+### Sub-phase 5.6: Update Test Harness UI
+
+**Goal**: Replace token estimation in `chat-context-demo.tsx` with actual token data.
+
+**Line Budget**: 15 lines modified in UI
+
+#### Tasks
+- [x] Replace `Math.ceil((fullPrompt.length + cleanedResponse.length) / 4)` with `onTokenUsage` callback
+- [x] Pass `onTokenUsage` in `sendPromptStreaming` options
+- [x] Use `capturedTokenUsage.totalTokens` for `addMessage` call
+- [x] Show VLM breakdown when `vlmTokens > 0` (e.g. "2,873 VLM + 130 LLM = 3,003 total")
+
+**Implementation Files:**
+- `apps/harness/pages/chat-context-demo.tsx` (MODIFY, ~15 lines at lines 1277–1328)
+
+**Success Criteria:**
+- [ ] UI displays actual token counts from node
+- [ ] VLM token breakdown shown when images were processed
+- [ ] No regression for text-only prompts
+
+---
+
+### Sub-phase 5.7: Build, Test & Version Bump
+
+**Goal**: Version bump, clean build, full test suite green.
+
+**Line Budget**: 1 line (version bump)
+
+#### Tasks
+- [x] Increment version in `packages/sdk-core/package.json` to 1.13.0
+- [x] Run `pnpm test packages/sdk-core/tests/managers/SessionManager-vlm-tokens.test.ts` — all pass (13/13)
+- [x] Run `pnpm test packages/sdk-core/tests/managers/SessionManager-image-chat.test.ts` — no regressions (28/28)
+- [x] Run `cd packages/sdk-core && pnpm build`
+- [x] Clear caches: `rm -rf apps/harness/.next apps/harness/node_modules/.cache`
+- [x] Run `pnpm install --force`
+- [x] Send notification to `fabstir-remediation-pre-report719`
+
+**Implementation Files:**
+- `packages/sdk-core/package.json` (MODIFY, 1 line)
+
+**Success Criteria:**
+- [x] All tests green
+- [x] Build succeeds
+- [x] Version 1.13.0
+
+---
+
+### Phase 5 File Summary
+
+| Sub-phase | File | Change Type | Lines |
+|-----------|------|-------------|-------|
+| 5.1 | `src/types/index.ts` | MODIFY | +12 |
+| 5.2 | `src/managers/SessionManager.ts` | MODIFY | ~15 |
+| 5.3 | `src/managers/SessionManager.ts` | MODIFY | ~12 |
+| 5.4 | `src/managers/SessionManager.ts` | MODIFY | ~25 |
+| 5.5 | `src/managers/SessionManager.ts` + interface | MODIFY | ~10 |
+| 5.6 | `apps/harness/pages/chat-context-demo.tsx` | MODIFY | ~15 |
+| 5.7 | `package.json` | MODIFY | 1 |
+| ALL | `tests/managers/SessionManager-vlm-tokens.test.ts` | NEW | ~185 |
+
+**Total**: ~90 implementation lines + ~185 test lines = ~275 lines
+
+---
+
 ## Verification Checklist
 
 ### Image WebSocket Chat
@@ -431,6 +667,14 @@ sendPromptStreaming(sessionId: bigint, prompt: string, onToken?: (token: string)
 - [ ] `DocumentManager.processDocument()` throws for image files with helpful error
 - [ ] `ImageProcessingResult` type deleted
 - [ ] Zero references to `/v1/describe-image` or `/v1/ocr` in SDK source
+
+### VLM Token Display
+- [x] `stream_end` with `vlm_tokens` → `onTokenUsage` callback receives correct `TokenUsageInfo`
+- [x] Without `vlm_tokens` → `vlmTokens: 0`, `llmTokens` = chunk count
+- [x] `session.totalTokens` accumulates across prompts
+- [x] `getLastTokenUsage()` returns last prompt's usage
+- [x] UI displays actual tokens instead of estimation
+- [x] VLM breakdown shown when `vlmTokens > 0`
 
 ### Edge Cases
 - [ ] `streamResponse()` throws `IMAGES_NOT_SUPPORTED` for images

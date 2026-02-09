@@ -6,7 +6,7 @@
  * Browser-compatible session management
  */
 
-import { SessionConfig, SessionJob, CheckpointProof, RecoveredConversation, CheckpointQueryOptions, PromptOptions } from '../types';
+import { SessionConfig, SessionJob, CheckpointProof, RecoveredConversation, CheckpointQueryOptions, PromptOptions, TokenUsageInfo } from '../types';
 import type { SearchApiResponse } from '../types/web-search.types';
 import type { BlockchainRecoveredConversation } from '../utils/checkpoint-blockchain';
 
@@ -104,6 +104,11 @@ export interface ISessionManager {
     tokensUsed: number,
     pricePerToken: number
   ): bigint;
+
+  /**
+   * Get the token usage info from the last completed prompt for a session.
+   */
+  getLastTokenUsage(sessionId: bigint): TokenUsageInfo | undefined;
 
   /**
    * End a session cleanly (user-initiated)

@@ -390,6 +390,29 @@ describe('Sub-phase 2.1-2.3: Encrypted Payload & Image Wiring', () => {
 
   // --- Sub-phase 2.3 tests ---
 
+  test('web search disabled when images are attached (even if force-enabled)', async () => {
+    // Force-enable web search on the session config
+    const session = (sessionManager as any).sessions.get('42');
+    session.webSearch = { forceEnabled: true, maxSearches: 5 };
+
+    const wsClient = (sessionManager as any).wsClient;
+    wsClient.onMessage = vi.fn().mockImplementation((handler: any) => {
+      setTimeout(() => {
+        handler({ type: 'stream_chunk', content: 'A cat' });
+        handler({ type: 'stream_end' });
+      }, 10);
+      return () => {};
+    });
+
+    const images: ImageAttachment[] = [{ data: 'iVBORw0KGgo=', format: 'png' }];
+    await sessionManager.sendPromptStreaming(BigInt(42), 'What is this?', undefined, { images });
+
+    // web_search should be overridden to false when images present
+    expect(capturedWsMessage).toBeDefined();
+    expect(capturedWsMessage.web_search).toBe(false);
+    expect(capturedWsMessage.max_searches).toBe(0);
+  });
+
   test('streamResponse throws IMAGES_NOT_SUPPORTED when images provided', async () => {
     try {
       await sessionManager.streamResponse(

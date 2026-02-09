@@ -22,7 +22,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ethers } from "ethers";
 import { parseUnits, formatUnits } from "viem";
-import { FabstirSDKCore, ChainRegistry, ChainId } from "@fabstir/sdk-core";
+import { FabstirSDKCore, ChainRegistry, ChainId, type TokenUsageInfo } from "@fabstir/sdk-core";
 import {
   cacheSeed,
   hasCachedSeed,
@@ -1274,9 +1274,12 @@ export default function ChatContextDemo() {
 
       // Send to LLM
       setStatus("Sending message...");
+      let capturedTokenUsage: TokenUsageInfo | undefined;
       const response = await sm.sendPromptStreaming(
         currentSessionId,
-        fullPrompt
+        fullPrompt,
+        undefined,
+        { onTokenUsage: (usage) => { capturedTokenUsage = usage; } }
       );
 
       // Clean up the response to remove any repetitive patterns
@@ -1319,13 +1322,17 @@ export default function ChatContextDemo() {
       // Final cleanup - remove any remaining "A:" prefix
       cleanedResponse = cleanedResponse.replace(/^A:\s*/, "").trim();
 
-      // Estimate tokens (rough estimate: 1 token per 4 characters)
-      const estimatedTokens = Math.ceil(
-        (fullPrompt.length + cleanedResponse.length) / 4
-      );
+      // Use actual token count from node if available, else estimate
+      const actualTokens = capturedTokenUsage?.totalTokens
+        ?? Math.ceil((fullPrompt.length + cleanedResponse.length) / 4);
 
       // Add assistant response
-      addMessage("assistant", cleanedResponse, estimatedTokens);
+      addMessage("assistant", cleanedResponse, actualTokens);
+
+      // Show VLM token breakdown when vision processing occurred
+      if (capturedTokenUsage && capturedTokenUsage.vlmTokens > 0) {
+        addMessage("system", `🔍 Token breakdown: ${capturedTokenUsage.vlmTokens} VLM (vision) + ${capturedTokenUsage.llmTokens} LLM = ${capturedTokenUsage.totalTokens} total`);
+      }
 
       // Store conversation in S5 if storage manager is available
       if (storageManager && storageManager.isInitialized()) {

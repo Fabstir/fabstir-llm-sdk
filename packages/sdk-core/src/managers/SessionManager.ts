@@ -27,7 +27,8 @@ import {
   WebSearchMetadata,
   RecoveredConversation,
   ImageAttachment,
-  PromptOptions
+  PromptOptions,
+  TokenUsageInfo
 } from '../types';
 import { validateImageAttachments } from '../utils/image-validation';
 import { HostSelectionMode } from '../types/settings.types';
@@ -127,6 +128,7 @@ export interface SessionState {
   groupId?: string; // NEW: Session Groups integration
   webSearchMetadata?: WebSearchMetadata; // NEW: Web search metadata from response
   webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 5.1)
+  lastTokenUsage?: TokenUsageInfo; // NEW: Last prompt's token usage (Phase 5)
 }
 
 // Extended SessionConfig with chainId
@@ -201,6 +203,7 @@ export class SessionManager implements ISessionManager {
    * Initialize the session manager
    */
   async initialize(): Promise<void> {
+    console.debug('[SessionManager] SDK v1.13.4 initialized');
     if (!this.paymentManager.isInitialized()) {
       throw new SDKError('PaymentManager not initialized', 'PAYMENT_NOT_INITIALIZED');
     }
@@ -844,11 +847,17 @@ export class SessionManager implements ISessionManager {
               }
             };
 
+            let encChunkCount = 0;
+            let safetyTimeout: ReturnType<typeof setTimeout> | undefined;
+            // v1.13.4: deferred resolution — wait for stream_end after encrypted_response
+
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
               // Skip processing if already resolved
               if (isResolved) return;
 
+
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
+                encChunkCount++;
                 // Reset timeout on each chunk (sliding window)
                 clearTimeout(timeout);
                 timeout = setTimeout(() => {
@@ -863,24 +872,42 @@ export class SessionManager implements ISessionManager {
                   console.error('[SessionManager] Failed to decrypt chunk:', err);
                 }
 
-                // Check for final chunk (primary mobile completion signal)
+                // Check for final chunk — content complete, but defer resolution
+                // until stream_end arrives with token data (3s safety for older nodes)
                 if (data.final === true || data.final) {
-                  safeResolve(fullResponse);
+                  safetyTimeout = setTimeout(() => {
+                    if (!isResolved) safeResolve(fullResponse);
+                  }, 3000);
                   return;
                 }
               } else if (data.type === 'encrypted_chunk' && !this.sessionKey) {
                 console.error('[SessionManager] Received encrypted chunk without session key');
               } else if (data.type === 'encrypted_response') {
+                // encrypted_response carries finish_reason — DO NOT resolve here.
+                // stream_end follows with vlm_tokens. Keep waiting.
                 try {
                   if (this.sessionKey && data.payload && data.payload.ciphertextHex) {
                     await this.decryptIncomingMessage(data);
                   }
-                  safeResolve(fullResponse);
                 } catch (err) {
-                  console.error('[SessionManager] Error in encrypted_response:', err);
-                  safeResolve(fullResponse);
+                  console.error('[SessionManager] Error decrypting encrypted_response:', err);
+                }
+                // Ensure safety timeout is set in case stream_end never arrives
+                if (!safetyTimeout) {
+                  safetyTimeout = setTimeout(() => {
+                    if (!isResolved) safeResolve(fullResponse);
+                  }, 3000);
                 }
               } else if (data.type === 'stream_end') {
+                // Capture token data before resolving
+                if (safetyTimeout) clearTimeout(safetyTimeout);
+                const llmTokens = data.tokens_used || encChunkCount;
+                const vlmTokens = data.vlm_tokens || 0;
+                const totalTokensForPrompt = llmTokens + vlmTokens;
+                const usage: TokenUsageInfo = { llmTokens, vlmTokens, totalTokens: totalTokensForPrompt };
+                session.totalTokens += totalTokensForPrompt;
+                session.lastTokenUsage = usage;
+                options?.onTokenUsage?.(usage);
                 safeResolve(fullResponse);
               } else if (data.type === 'error') {
                 console.error('[SessionManager] Error:', data.message);
@@ -892,7 +919,11 @@ export class SessionManager implements ISessionManager {
             const searchConfigEncrypted = session.webSearch || {};
             let enableWebSearchEncrypted = false;
 
-            if (searchConfigEncrypted.forceDisabled) {
+            // Disable web search when images are attached — VLM handles images locally
+            const hasImagesEncrypted = options?.images && options.images.length > 0;
+            if (hasImagesEncrypted) {
+              enableWebSearchEncrypted = false;
+            } else if (searchConfigEncrypted.forceDisabled) {
               enableWebSearchEncrypted = false;
             } else if (searchConfigEncrypted.forceEnabled) {
               enableWebSearchEncrypted = true;
@@ -914,13 +945,25 @@ export class SessionManager implements ISessionManager {
 
         } else {
           // Plaintext streaming mode
+          let ptChunkCount = 0;
+
           const unsubscribe = this.wsClient.onMessage(async (data: any) => {
 
             if (data.type === 'stream_chunk' && data.content) {
+              ptChunkCount++;
               onToken(data.content);
               fullResponse += data.content;
             } else if (data.type === 'response') {
               fullResponse = data.content || fullResponse;
+            } else if (data.type === 'stream_end') {
+              // VLM token tracking (Phase 5): capture vlm_tokens from plaintext stream_end
+              const llmTokens = data.tokens_used || ptChunkCount;
+              const vlmTokens = data.vlm_tokens || 0;
+              const totalTokensForPrompt = llmTokens + vlmTokens;
+              const usage: TokenUsageInfo = { llmTokens, vlmTokens, totalTokens: totalTokensForPrompt };
+              session.totalTokens += totalTokensForPrompt;
+              session.lastTokenUsage = usage;
+              options?.onTokenUsage?.(usage);
             } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
             } else if (data.type === 'session_completed') {
             }
@@ -930,7 +973,11 @@ export class SessionManager implements ISessionManager {
           const searchConfig = session.webSearch || {};
           let enableWebSearch = false;
 
-          if (searchConfig.forceDisabled) {
+          // Disable web search when images are attached — VLM handles images locally
+          const hasImagesPlaintext = options?.images && options.images.length > 0;
+          if (hasImagesPlaintext) {
+            enableWebSearch = false;
+          } else if (searchConfig.forceDisabled) {
             enableWebSearch = false;
           } else if (searchConfig.forceEnabled) {
             enableWebSearch = true;
@@ -1036,7 +1083,11 @@ export class SessionManager implements ISessionManager {
           const searchConfigNonStreamEnc = session.webSearch || {};
           let enableWebSearchNonStreamEnc = false;
 
-          if (searchConfigNonStreamEnc.forceDisabled) {
+          // Disable web search when images are attached — VLM handles images locally
+          const hasImagesNonStreamEnc = options?.images && options.images.length > 0;
+          if (hasImagesNonStreamEnc) {
+            enableWebSearchNonStreamEnc = false;
+          } else if (searchConfigNonStreamEnc.forceDisabled) {
             enableWebSearchNonStreamEnc = false;
           } else if (searchConfigNonStreamEnc.forceEnabled) {
             enableWebSearchNonStreamEnc = true;
@@ -1081,12 +1132,16 @@ export class SessionManager implements ISessionManager {
               }
             };
 
+            let encNsChunkCount = 0;
+            let safetyTimeoutNs: ReturnType<typeof setTimeout> | undefined;
+
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
               // Skip processing if already resolved
               if (isResolved) return;
 
               // MUST handle encrypted_chunk messages!
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
+                encNsChunkCount++;
                 // Reset timeout on each chunk (sliding window)
                 clearTimeout(timeout);
                 timeout = setTimeout(() => {
@@ -1100,22 +1155,40 @@ export class SessionManager implements ISessionManager {
                   console.error('[SessionManager] Failed to decrypt chunk:', err);
                 }
 
-                // Check for final chunk (primary mobile completion signal)
+                // Check for final chunk — content complete, but defer resolution
+                // until stream_end arrives with token data (3s safety for older nodes)
                 if (data.final === true || data.final) {
-                  safeResolve(accumulatedResponse);
+                  safetyTimeoutNs = setTimeout(() => {
+                    if (!isResolved) safeResolve(accumulatedResponse);
+                  }, 3000);
                   return;
                 }
               } else if (data.type === 'encrypted_response') {
+                // encrypted_response carries finish_reason — DO NOT resolve here.
+                // stream_end follows with vlm_tokens. Keep waiting.
                 try {
                   if (this.sessionKey && data.payload && data.payload.ciphertextHex) {
                     await this.decryptIncomingMessage(data);
                   }
-                  safeResolve(accumulatedResponse);
                 } catch (err) {
-                  console.error('[SessionManager] Error in encrypted_response handler:', err);
-                  safeResolve(accumulatedResponse);
+                  console.error('[SessionManager] Error decrypting encrypted_response:', err);
+                }
+                // Ensure safety timeout is set in case stream_end never arrives
+                if (!safetyTimeoutNs) {
+                  safetyTimeoutNs = setTimeout(() => {
+                    if (!isResolved) safeResolve(accumulatedResponse);
+                  }, 3000);
                 }
               } else if (data.type === 'stream_end') {
+                // Capture token data before resolving
+                if (safetyTimeoutNs) clearTimeout(safetyTimeoutNs);
+                const llmTokens = data.tokens_used || encNsChunkCount;
+                const vlmTokens = data.vlm_tokens || 0;
+                const totalTokensForPrompt = llmTokens + vlmTokens;
+                const usage: TokenUsageInfo = { llmTokens, vlmTokens, totalTokens: totalTokensForPrompt };
+                session.totalTokens += totalTokensForPrompt;
+                session.lastTokenUsage = usage;
+                options?.onTokenUsage?.(usage);
                 safeResolve(accumulatedResponse);
               } else if (data.type === 'error') {
                 console.error('[SessionManager] Error:', data.message);
@@ -1128,7 +1201,11 @@ export class SessionManager implements ISessionManager {
           const searchConfigNonStream = session.webSearch || {};
           let enableWebSearchNonStream = false;
 
-          if (searchConfigNonStream.forceDisabled) {
+          // Disable web search when images are attached — VLM handles images locally
+          const hasImagesPlaintextNonStream = options?.images && options.images.length > 0;
+          if (hasImagesPlaintextNonStream) {
+            enableWebSearchNonStream = false;
+          } else if (searchConfigNonStream.forceDisabled) {
             enableWebSearchNonStream = false;
           } else if (searchConfigNonStream.forceEnabled) {
             enableWebSearchNonStream = true;
@@ -1152,6 +1229,17 @@ export class SessionManager implements ISessionManager {
             plaintextRequestNonStream.images = options.images.map(img => ({ data: img.data, format: img.format }));
           }
 
+          // VLM token tracking (Phase 5): capture tokens from response/stream_end
+          let ptNsUsage: TokenUsageInfo | undefined;
+          const tokenUnsub = this.wsClient.onMessage((data: any) => {
+            if (data.type === 'response' || data.type === 'stream_end') {
+              const llmTokens = data.tokens_used || 0;
+              const vlmTokens = data.vlm_tokens || 0;
+              const totalTokensForPrompt = llmTokens + vlmTokens;
+              ptNsUsage = { llmTokens, vlmTokens, totalTokens: totalTokensForPrompt };
+            }
+          });
+
           response = await this.wsClient.sendMessage({
             type: 'prompt',
             chain_id: session.chainId,
@@ -1163,6 +1251,13 @@ export class SessionManager implements ISessionManager {
             search_queries: searchConfigNonStream.queries ?? null,
             request: plaintextRequestNonStream
           });
+
+          tokenUnsub();
+          if (ptNsUsage) {
+            session.totalTokens += ptNsUsage.totalTokens;
+            session.lastTokenUsage = ptNsUsage;
+            options?.onTokenUsage?.(ptNsUsage);
+          }
         }
 
         // Add response to session
@@ -2162,6 +2257,15 @@ export class SessionManager implements ISessionManager {
   ): bigint {
     // Price includes PRICE_PRECISION multiplier, divide to get actual cost
     return (BigInt(tokensUsed) * BigInt(pricePerToken)) / PRICE_PRECISION;
+  }
+
+  /**
+   * Get the token usage info from the last completed prompt for a session.
+   * Returns undefined if no prompt has been completed yet.
+   */
+  getLastTokenUsage(sessionId: bigint): TokenUsageInfo | undefined {
+    const session = this.sessions.get(sessionId.toString());
+    return session?.lastTokenUsage;
   }
 
   /**
