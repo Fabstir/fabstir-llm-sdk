@@ -6,8 +6,8 @@ FROM fabstir-llm-sdk-dev-cdp:latest
 # Switch to root to install system packages
 USER root
 
-# --- Base system packages ---
-RUN apt-get update && apt-get install -y \
+# --- Base system packages (single layer) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl build-essential python3 \
     # Extra deps for Chrome/Playwright
     xvfb libgtk-3-0 libnss3 libxss1 libasound2 \
@@ -20,29 +20,39 @@ RUN apt-get update && apt-get install -y \
 # --- Global Node tools for SDK dev ---
 RUN npm install -g pnpm typescript ts-node vitest
 
-# --- Install Playwright + Chromium ---
-RUN npm install -g playwright \
-    && npx playwright install --with-deps
+# --- Install Claude Code globally ---
+RUN npm install -g @anthropic-ai/claude-code
 
-WORKDIR /workspace
+# --- Install Playwright MCP + CLI (token-efficient) with Chromium ---
+RUN npm install -g @playwright/mcp@latest \
+    && npx playwright install --with-deps chromium
 
-# Copy entrypoint script
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
-
-# --- Ensure developer has sudo ---
+# --- Ensure developer user exists with sudo ---
 RUN id -u developer >/dev/null 2>&1 || useradd -m -s /bin/bash developer && \
     echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # --- Add developer to docker group ---
 RUN groupadd -f docker && usermod -aG docker developer
 
-# --- Fix node_modules permissions for developer ---
-RUN mkdir -p /workspace/node_modules && chown -R developer:developer /workspace/node_modules
-RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
+# --- Prepare directories with correct ownership (single layer) ---
+RUN mkdir -p /workspace/node_modules \
+             /tmp/.X11-unix \
+             /home/developer/.local/share/claude/versions \
+             /home/developer/.claude \
+    && chmod 1777 /tmp/.X11-unix \
+    && chown -R developer:developer \
+             /workspace/node_modules \
+             /home/developer/.local \
+             /home/developer/.claude
+
+# --- Enable Claude Code agent teams (swarm mode) ---
+ENV CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 
 WORKDIR /workspace
+
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 USER developer
 

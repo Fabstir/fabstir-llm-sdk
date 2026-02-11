@@ -221,6 +221,7 @@ export class HostSelectionService implements IHostSelectionService {
     }
 
     const hosts = await this.hostManager.findHostsForModel(modelId);
+    console.log(`[HostSelectionService] Scoring ${hosts.length} hosts, first host:`, hosts[0] ? { address: hosts[0].address, stake: hosts[0].stake, stakeType: typeof hosts[0].stake } : 'none');
 
     const ranked: RankedHost[] = hosts.map((host) => ({
       host,
@@ -240,7 +241,7 @@ export class HostSelectionService implements IHostSelectionService {
    * @returns Normalized score 0-1
    */
   private normalizeStake(stake: bigint): number {
-    if (stake <= 0n) return 0;
+    if (stake === undefined || stake === null || stake <= 0n) return 0;
 
     // Cap at MAX_STAKE
     const cappedStake = stake > MAX_STAKE ? MAX_STAKE : stake;
@@ -258,7 +259,7 @@ export class HostSelectionService implements IHostSelectionService {
    */
   private normalizePrice(price: bigint): number {
     // Handle edge cases
-    if (price <= 0n) {
+    if (price === undefined || price === null || price <= 0n) {
       // Zero or negative price gets max score (best deal)
       return 1;
     }

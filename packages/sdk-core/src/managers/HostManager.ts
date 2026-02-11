@@ -397,11 +397,13 @@ export class HostManager {
 
       // Get nodes supporting this model
       const nodeAddresses = await this.nodeRegistry['getNodesForModel'](modelId);
+      console.log(`[HostManager] findHostsForModel: modelId=${modelId}, found ${nodeAddresses.length} nodes:`, nodeAddresses);
       const hosts: HostInfo[] = [];
 
       for (const address of nodeAddresses) {
         try {
           const info = await this.nodeRegistry['getNodeFullInfo'](address);
+          console.log(`[HostManager] Raw getNodeFullInfo(${address}):`, JSON.stringify(info, (_, v) => typeof v === 'bigint' ? v.toString() + 'n' : v));
 
           // Parse metadata with defaults on failure
           let metadata: HostMetadata;

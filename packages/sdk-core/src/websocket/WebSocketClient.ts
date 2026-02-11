@@ -275,7 +275,7 @@ export class WebSocketClient {
         this.ws!.send(messageStr);
 
         // Set timeout for response (v1.3.29: capture timeout ID for cleanup)
-        timeoutId = window.setTimeout(() => {
+        timeoutId = setTimeout(() => {
           this.messageHandlers.delete(responseHandler);
           reject(new SDKError('Request timeout', 'WS_TIMEOUT'));
         }, 30000);
@@ -374,7 +374,7 @@ export class WebSocketClient {
   private startHeartbeat(): void {
     this.stopHeartbeat();
     
-    this.heartbeatTimer = window.setInterval(() => {
+    this.heartbeatTimer = setInterval(() => {
       if (this.isConnected()) {
         try {
           this.ws!.send(JSON.stringify({ type: 'ping' }));

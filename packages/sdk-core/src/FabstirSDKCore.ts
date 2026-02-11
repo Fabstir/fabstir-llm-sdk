@@ -41,6 +41,7 @@ import { SessionGroupStorage } from './storage/SessionGroupStorage';
 import { DEFAULT_RAG_CONFIG } from './rag/config';
 import { ContractManager, ContractAddresses } from './contracts/ContractManager';
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
+import { HostSelectionService } from './services/HostSelectionService';
 import { SDKConfig, SDKError } from './types';
 import { getOrGenerateS5Seed, hasCachedSeed, cacheSeed, deriveEntropyFromSignature, entropyToS5Phrase, SEED_DOMAIN_SEPARATOR, generateS5SeedFromPrivateKey, generateS5SeedFromAddress } from './utils/s5-seed-derivation';
 import { ChainRegistry } from './config/ChainRegistry';
@@ -628,7 +629,6 @@ export class FabstirSDKCore extends EventEmitter {
         );
       }
 
-      this.sessionManager = new SessionManager(this.paymentManager as any, this.storageManager);
     }
 
     // VectorRAGManager needs userAddress, seedPhrase, config, and sessionManager
@@ -644,15 +644,34 @@ export class FabstirSDKCore extends EventEmitter {
       await (this.paymentManager as any).initialize(this.signer);
 
       if (!hostOnly) {
-        // Initialize storage manager with S5 seed (required for client operations)
+        // Initialize storage manager with S5 seed (optional — not required for inference)
         if (this.s5Seed && this.userAddress) {
-          await this.storageManager!.initialize(this.s5Seed, this.userAddress);
+          try {
+            await this.storageManager!.initialize(this.s5Seed, this.userAddress);
+          } catch (storageErr: any) {
+            console.warn(`[SDK] StorageManager initialization failed (conversation persistence unavailable): ${storageErr.message}`);
+            // Replace with no-op proxy so SessionManager works without storage
+            const addr = this.userAddress;
+            this.storageManager = new Proxy({} as any, {
+              get(_target, prop) {
+                if (prop === 'isInitialized') return () => true;
+                if (prop === 'getHostSelectionMode') return async () => 'auto';
+                if (prop === 'getUserSettings') return async () => ({});
+                if (prop === 'getUserAddress') return () => addr;
+                if (typeof prop === 'string') return async () => undefined;
+                return undefined;
+              }
+            });
+          }
         } else {
           throw new SDKError(
             'S5 seed and user address required for StorageManager initialization',
             'STORAGE_INIT_FAILED'
           );
         }
+
+        // Create SessionManager after storage init (so it gets the proxy if storage failed)
+        this.sessionManager = new SessionManager(this.paymentManager as any, this.storageManager);
 
         // Create EncryptionManager
         // PRIORITY: Use S5 seed for encryption key derivation (ensures cross-tab consistency)
@@ -706,6 +725,12 @@ export class FabstirSDKCore extends EventEmitter {
       // NEW: Enable encryption in SessionManager (if EncryptionManager available)
       if (this.sessionManager && this.encryptionManager) {
         (this.sessionManager as any).setEncryptionManager(this.encryptionManager);
+      }
+
+      // NEW: Enable automatic host selection in SessionManager (Phase 5.1)
+      if (this.sessionManager && this.hostManager) {
+        const hostSelectionService = new HostSelectionService(this.hostManager as HostManager);
+        (this.sessionManager as any).setHostSelectionService(hostSelectionService);
       }
 
       // Create ClientManager after ModelManager and HostManager are available

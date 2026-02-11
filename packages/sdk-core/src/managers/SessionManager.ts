@@ -157,6 +157,7 @@ export class SessionManager implements ISessionManager {
   private encryptionManager?: EncryptionManager; // NEW: Optional until set after auth
   private sessionGroupManager?: any; // NEW: Session Groups integration (SessionGroupManager)
   private hostSelectionService?: IHostSelectionService; // NEW: Host selection (Phase 5.1)
+  private endpointTransform?: (url: string) => string; // NEW: Transform discovered host URLs (e.g. Docker localhost rewrite)
   private wsClient?: WebSocketClient;
   private sessions: Map<string, SessionState> = new Map();
   private initialized = false;
@@ -200,6 +201,14 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Set a transform function for discovered host endpoint URLs.
+   * Used to rewrite URLs when running in Docker (e.g. localhost → host.docker.internal).
+   */
+  setEndpointTransform(transform: (url: string) => string): void {
+    this.endpointTransform = transform;
+  }
+
+  /**
    * Initialize the session manager
    */
   async initialize(): Promise<void> {
@@ -240,7 +249,7 @@ export class SessionManager implements ISessionManager {
     // Extract parameters for backward compatibility
     const model = config.modelId || config.model;
     let provider = config.host || config.provider;
-    const endpoint = config.endpoint;
+    let endpoint = config.endpoint;
 
     // NEW (Phase 5.1): Automatic host selection when no host is provided
     if (!provider && this.hostSelectionService) {
@@ -251,6 +260,7 @@ export class SessionManager implements ISessionManager {
 
       // Convert model to bytes32 for host lookup
       const modelIdForSelection = convertModelToBytes32(model);
+      console.log(`[SessionManager] Auto-discovery: model="${model}" -> bytes32=${modelIdForSelection}, mode=${mode}`);
 
       // Select host using user's preferences
       const selectedHost = await this.hostSelectionService.selectHostForModel(
@@ -260,17 +270,30 @@ export class SessionManager implements ISessionManager {
       );
 
       if (!selectedHost) {
-        throw new SDKError('No hosts available for the selected model', 'NO_HOSTS_AVAILABLE');
+        throw new SDKError(`No hosts available for model "${model}" (hash: ${modelIdForSelection})`, 'NO_HOSTS_AVAILABLE');
       }
 
       provider = selectedHost.address;
+      // Set endpoint from discovered host's apiUrl
+      if (selectedHost.apiUrl && !endpoint) {
+        endpoint = selectedHost.apiUrl;
+      }
+
+      // Apply endpoint transform (e.g. Docker localhost → host.docker.internal)
+      if (endpoint && this.endpointTransform) {
+        const original = endpoint;
+        endpoint = this.endpointTransform(endpoint);
+        if (endpoint !== original) {
+          console.log(`[SessionManager] Endpoint transformed: ${original} -> ${endpoint}`);
+        }
+      }
 
       // Store selected host for next time
       await this.storageManager.updateUserSettings({
         lastHostAddress: selectedHost.address,
       });
 
-      console.log(`[SessionManager] Auto-selected host: ${selectedHost.address} (mode: ${mode})`);
+      console.log(`[SessionManager] Auto-selected host: ${selectedHost.address}, apiUrl: ${selectedHost.apiUrl} (mode: ${mode})`);
     }
 
     // NEW (Phase 6.2): Enable encryption by default (opt-out with encryption: false)
