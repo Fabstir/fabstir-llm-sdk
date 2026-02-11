@@ -24,7 +24,7 @@ import {
 } from '../documents/extractors.js';
 import { chunkText } from '../documents/chunker.js';
 import type { EmbeddingService } from '../embeddings/EmbeddingService.js';
-import { HostAdapter } from '../embeddings/adapters/HostAdapter.js';
+
 
 /**
  * Chunk result with embedding
@@ -226,7 +226,7 @@ export class DocumentManager {
 
   /**
    * Process a document: extract text, chunk, and embed
-   * For images, uses HostAdapter's processImage() method
+   * Images are rejected — use sendPromptStreaming() with options.images instead
    *
    * @param file - File to process
    * @param options - Chunking and upload options
@@ -248,24 +248,12 @@ export class DocumentManager {
     const documentType = detectDocumentType(file.name);
     let text: string;
 
-    // Check if this is an image
+    // Check if this is an image — reject with clear error directing to WebSocket image chat
     if (isImageType(documentType)) {
-      // Images require HostAdapter for processing
-      if (!(this.embeddingService instanceof HostAdapter)) {
-        throw new Error(
-          'Image processing requires HostAdapter. ' +
-          'Initialize DocumentManager with a HostAdapter embedding service.'
-        );
-      }
-
-      const imageResult = await this.embeddingService.processImage(file);
-      text = imageResult.combinedText;
-
-      options?.onProgress?.({
-        stage: 'extracting',
-        progress: 25,
-        currentStep: `Image processed: OCR confidence ${(imageResult.ocrConfidence * 100).toFixed(0)}%`,
-      });
+      throw new Error(
+        'Image uploads for RAG are no longer supported. ' +
+        'Use sendPromptStreaming() with options.images to send images via encrypted WebSocket chat.'
+      );
     } else {
       // Standard text extraction for documents
       const extractionResult = await extractText(file, documentType);

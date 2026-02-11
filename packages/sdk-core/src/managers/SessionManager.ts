@@ -25,8 +25,12 @@ import {
   SearchResult,
   SearchIntentConfig,
   WebSearchMetadata,
-  RecoveredConversation
+  RecoveredConversation,
+  ImageAttachment,
+  PromptOptions,
+  TokenUsageInfo
 } from '../types';
+import { validateImageAttachments } from '../utils/image-validation';
 import { HostSelectionMode } from '../types/settings.types';
 import { PaymentManager } from './PaymentManager';
 import { StorageManager } from './StorageManager';
@@ -124,6 +128,7 @@ export interface SessionState {
   groupId?: string; // NEW: Session Groups integration
   webSearchMetadata?: WebSearchMetadata; // NEW: Web search metadata from response
   webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 5.1)
+  lastTokenUsage?: TokenUsageInfo; // NEW: Last prompt's token usage (Phase 5)
 }
 
 // Extended SessionConfig with chainId
@@ -198,6 +203,7 @@ export class SessionManager implements ISessionManager {
    * Initialize the session manager
    */
   async initialize(): Promise<void> {
+    console.debug('[SessionManager] SDK v1.13.4 initialized');
     if (!this.paymentManager.isInitialized()) {
       throw new SDKError('PaymentManager not initialized', 'PAYMENT_NOT_INITIALIZED');
     }
@@ -684,7 +690,8 @@ export class SessionManager implements ISessionManager {
   async sendPromptStreaming(
     sessionId: bigint,
     prompt: string,
-    onToken?: (token: string) => void
+    onToken?: (token: string) => void,
+    options?: PromptOptions
   ): Promise<string> {
     if (!this.initialized) {
       throw new SDKError('SessionManager not initialized', 'SESSION_NOT_INITIALIZED');
@@ -840,11 +847,17 @@ export class SessionManager implements ISessionManager {
               }
             };
 
+            let encChunkCount = 0;
+            let safetyTimeout: ReturnType<typeof setTimeout> | undefined;
+            // v1.13.4: deferred resolution — wait for stream_end after encrypted_response
+
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
               // Skip processing if already resolved
               if (isResolved) return;
 
+
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
+                encChunkCount++;
                 // Reset timeout on each chunk (sliding window)
                 clearTimeout(timeout);
                 timeout = setTimeout(() => {
@@ -859,24 +872,42 @@ export class SessionManager implements ISessionManager {
                   console.error('[SessionManager] Failed to decrypt chunk:', err);
                 }
 
-                // Check for final chunk (primary mobile completion signal)
+                // Check for final chunk — content complete, but defer resolution
+                // until stream_end arrives with token data (3s safety for older nodes)
                 if (data.final === true || data.final) {
-                  safeResolve(fullResponse);
+                  safetyTimeout = setTimeout(() => {
+                    if (!isResolved) safeResolve(fullResponse);
+                  }, 3000);
                   return;
                 }
               } else if (data.type === 'encrypted_chunk' && !this.sessionKey) {
                 console.error('[SessionManager] Received encrypted chunk without session key');
               } else if (data.type === 'encrypted_response') {
+                // encrypted_response carries finish_reason — DO NOT resolve here.
+                // stream_end follows with vlm_tokens. Keep waiting.
                 try {
                   if (this.sessionKey && data.payload && data.payload.ciphertextHex) {
                     await this.decryptIncomingMessage(data);
                   }
-                  safeResolve(fullResponse);
                 } catch (err) {
-                  console.error('[SessionManager] Error in encrypted_response:', err);
-                  safeResolve(fullResponse);
+                  console.error('[SessionManager] Error decrypting encrypted_response:', err);
+                }
+                // Ensure safety timeout is set in case stream_end never arrives
+                if (!safetyTimeout) {
+                  safetyTimeout = setTimeout(() => {
+                    if (!isResolved) safeResolve(fullResponse);
+                  }, 3000);
                 }
               } else if (data.type === 'stream_end') {
+                // Capture token data before resolving
+                if (safetyTimeout) clearTimeout(safetyTimeout);
+                const llmTokens = data.tokens_used || encChunkCount;
+                const vlmTokens = data.vlm_tokens || 0;
+                const totalTokensForPrompt = llmTokens + vlmTokens;
+                const usage: TokenUsageInfo = { llmTokens, vlmTokens, totalTokens: totalTokensForPrompt };
+                session.totalTokens += totalTokensForPrompt;
+                session.lastTokenUsage = usage;
+                options?.onTokenUsage?.(usage);
                 safeResolve(fullResponse);
               } else if (data.type === 'error') {
                 console.error('[SessionManager] Error:', data.message);
@@ -888,7 +919,11 @@ export class SessionManager implements ISessionManager {
             const searchConfigEncrypted = session.webSearch || {};
             let enableWebSearchEncrypted = false;
 
-            if (searchConfigEncrypted.forceDisabled) {
+            // Disable web search when images are attached — VLM handles images locally
+            const hasImagesEncrypted = options?.images && options.images.length > 0;
+            if (hasImagesEncrypted) {
+              enableWebSearchEncrypted = false;
+            } else if (searchConfigEncrypted.forceDisabled) {
               enableWebSearchEncrypted = false;
             } else if (searchConfigEncrypted.forceEnabled) {
               enableWebSearchEncrypted = true;
@@ -897,12 +932,12 @@ export class SessionManager implements ISessionManager {
               enableWebSearchEncrypted = analyzePromptForSearchIntent(prompt);
             }
 
-            // Send encrypted message with web search options
+            // Send encrypted message with web search options and images
             this.sendEncryptedMessage(prompt, {
               webSearch: enableWebSearchEncrypted,
               maxSearches: enableWebSearchEncrypted ? (searchConfigEncrypted.maxSearches ?? 5) : 0,
               searchQueries: searchConfigEncrypted.queries ?? null
-            }).catch((err) => {
+            }, options?.images).catch((err) => {
               console.error('[SessionManager] Failed to send encrypted message:', err);
               reject(err);
             });
@@ -910,13 +945,25 @@ export class SessionManager implements ISessionManager {
 
         } else {
           // Plaintext streaming mode
+          let ptChunkCount = 0;
+
           const unsubscribe = this.wsClient.onMessage(async (data: any) => {
 
             if (data.type === 'stream_chunk' && data.content) {
+              ptChunkCount++;
               onToken(data.content);
               fullResponse += data.content;
             } else if (data.type === 'response') {
               fullResponse = data.content || fullResponse;
+            } else if (data.type === 'stream_end') {
+              // VLM token tracking (Phase 5): capture vlm_tokens from plaintext stream_end
+              const llmTokens = data.tokens_used || ptChunkCount;
+              const vlmTokens = data.vlm_tokens || 0;
+              const totalTokensForPrompt = llmTokens + vlmTokens;
+              const usage: TokenUsageInfo = { llmTokens, vlmTokens, totalTokens: totalTokensForPrompt };
+              session.totalTokens += totalTokensForPrompt;
+              session.lastTokenUsage = usage;
+              options?.onTokenUsage?.(usage);
             } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
             } else if (data.type === 'session_completed') {
             }
@@ -926,7 +973,11 @@ export class SessionManager implements ISessionManager {
           const searchConfig = session.webSearch || {};
           let enableWebSearch = false;
 
-          if (searchConfig.forceDisabled) {
+          // Disable web search when images are attached — VLM handles images locally
+          const hasImagesPlaintext = options?.images && options.images.length > 0;
+          if (hasImagesPlaintext) {
+            enableWebSearch = false;
+          } else if (searchConfig.forceDisabled) {
             enableWebSearch = false;
           } else if (searchConfig.forceEnabled) {
             enableWebSearch = true;
@@ -936,6 +987,20 @@ export class SessionManager implements ISessionManager {
           }
 
           // Send plaintext message (only if session explicitly opted out of encryption)
+          const plaintextRequest: any = {
+            model: session.model,
+            prompt: augmentedPrompt,  // Use RAG-augmented prompt
+            max_tokens: LLM_MAX_TOKENS,  // Support comprehensive responses from large models
+            temperature: 0.7,
+            stream: true
+          };
+
+          // Include images in plaintext request when present
+          if (options?.images && options.images.length > 0) {
+            validateImageAttachments(options.images);
+            plaintextRequest.images = options.images.map(img => ({ data: img.data, format: img.format }));
+          }
+
           response = await this.wsClient.sendMessage({
             type: 'prompt',
             chain_id: session.chainId,
@@ -945,13 +1010,7 @@ export class SessionManager implements ISessionManager {
             web_search: enableWebSearch,
             max_searches: enableWebSearch ? (searchConfig.maxSearches ?? 5) : 0,
             search_queries: searchConfig.queries ?? null,
-            request: {
-              model: session.model,
-              prompt: augmentedPrompt,  // Use RAG-augmented prompt
-              max_tokens: LLM_MAX_TOKENS,  // Support comprehensive responses from large models
-              temperature: 0.7,
-              stream: true
-            }
+            request: plaintextRequest
           });
 
           // Clean up handler for plaintext
@@ -971,13 +1030,20 @@ export class SessionManager implements ISessionManager {
         // Add response to session
         session.responses.push(finalResponse);
 
+        // Build user message metadata (store imageCount, not raw image data)
+        const userMsgMeta1: Record<string, any> = {};
+        if (options?.images && options.images.length > 0) {
+          userMsgMeta1.imageCount = options.images.length;
+        }
+
         // Update storage (non-blocking to prevent S5 connection issues from freezing UI)
         this.storageManager.appendMessage(
           sessionId.toString(),
           {
             role: 'user',
             content: prompt,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            ...(Object.keys(userMsgMeta1).length > 0 ? { metadata: userMsgMeta1 } : {})
           }
         ).catch(err => console.warn('[SessionManager] Failed to store user message:', err));
 
@@ -1017,7 +1083,11 @@ export class SessionManager implements ISessionManager {
           const searchConfigNonStreamEnc = session.webSearch || {};
           let enableWebSearchNonStreamEnc = false;
 
-          if (searchConfigNonStreamEnc.forceDisabled) {
+          // Disable web search when images are attached — VLM handles images locally
+          const hasImagesNonStreamEnc = options?.images && options.images.length > 0;
+          if (hasImagesNonStreamEnc) {
+            enableWebSearchNonStreamEnc = false;
+          } else if (searchConfigNonStreamEnc.forceDisabled) {
             enableWebSearchNonStreamEnc = false;
           } else if (searchConfigNonStreamEnc.forceEnabled) {
             enableWebSearchNonStreamEnc = true;
@@ -1026,12 +1096,12 @@ export class SessionManager implements ISessionManager {
             enableWebSearchNonStreamEnc = analyzePromptForSearchIntent(prompt);
           }
 
-          // Send encrypted message with web search options
+          // Send encrypted message with web search options and images
           await this.sendEncryptedMessage(prompt, {
             webSearch: enableWebSearchNonStreamEnc,
             maxSearches: enableWebSearchNonStreamEnc ? (searchConfigNonStreamEnc.maxSearches ?? 5) : 0,
             searchQueries: searchConfigNonStreamEnc.queries ?? null
-          });
+          }, options?.images);
 
           // Wait for encrypted response (non-streaming) - MUST accumulate chunks!
           let accumulatedResponse = '';  // Accumulate chunks even in non-streaming mode
@@ -1062,12 +1132,16 @@ export class SessionManager implements ISessionManager {
               }
             };
 
+            let encNsChunkCount = 0;
+            let safetyTimeoutNs: ReturnType<typeof setTimeout> | undefined;
+
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
               // Skip processing if already resolved
               if (isResolved) return;
 
               // MUST handle encrypted_chunk messages!
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
+                encNsChunkCount++;
                 // Reset timeout on each chunk (sliding window)
                 clearTimeout(timeout);
                 timeout = setTimeout(() => {
@@ -1081,22 +1155,40 @@ export class SessionManager implements ISessionManager {
                   console.error('[SessionManager] Failed to decrypt chunk:', err);
                 }
 
-                // Check for final chunk (primary mobile completion signal)
+                // Check for final chunk — content complete, but defer resolution
+                // until stream_end arrives with token data (3s safety for older nodes)
                 if (data.final === true || data.final) {
-                  safeResolve(accumulatedResponse);
+                  safetyTimeoutNs = setTimeout(() => {
+                    if (!isResolved) safeResolve(accumulatedResponse);
+                  }, 3000);
                   return;
                 }
               } else if (data.type === 'encrypted_response') {
+                // encrypted_response carries finish_reason — DO NOT resolve here.
+                // stream_end follows with vlm_tokens. Keep waiting.
                 try {
                   if (this.sessionKey && data.payload && data.payload.ciphertextHex) {
                     await this.decryptIncomingMessage(data);
                   }
-                  safeResolve(accumulatedResponse);
                 } catch (err) {
-                  console.error('[SessionManager] Error in encrypted_response handler:', err);
-                  safeResolve(accumulatedResponse);
+                  console.error('[SessionManager] Error decrypting encrypted_response:', err);
+                }
+                // Ensure safety timeout is set in case stream_end never arrives
+                if (!safetyTimeoutNs) {
+                  safetyTimeoutNs = setTimeout(() => {
+                    if (!isResolved) safeResolve(accumulatedResponse);
+                  }, 3000);
                 }
               } else if (data.type === 'stream_end') {
+                // Capture token data before resolving
+                if (safetyTimeoutNs) clearTimeout(safetyTimeoutNs);
+                const llmTokens = data.tokens_used || encNsChunkCount;
+                const vlmTokens = data.vlm_tokens || 0;
+                const totalTokensForPrompt = llmTokens + vlmTokens;
+                const usage: TokenUsageInfo = { llmTokens, vlmTokens, totalTokens: totalTokensForPrompt };
+                session.totalTokens += totalTokensForPrompt;
+                session.lastTokenUsage = usage;
+                options?.onTokenUsage?.(usage);
                 safeResolve(accumulatedResponse);
               } else if (data.type === 'error') {
                 console.error('[SessionManager] Error:', data.message);
@@ -1109,7 +1201,11 @@ export class SessionManager implements ISessionManager {
           const searchConfigNonStream = session.webSearch || {};
           let enableWebSearchNonStream = false;
 
-          if (searchConfigNonStream.forceDisabled) {
+          // Disable web search when images are attached — VLM handles images locally
+          const hasImagesPlaintextNonStream = options?.images && options.images.length > 0;
+          if (hasImagesPlaintextNonStream) {
+            enableWebSearchNonStream = false;
+          } else if (searchConfigNonStream.forceDisabled) {
             enableWebSearchNonStream = false;
           } else if (searchConfigNonStream.forceEnabled) {
             enableWebSearchNonStream = true;
@@ -1119,6 +1215,31 @@ export class SessionManager implements ISessionManager {
           }
 
           // Send plaintext message (only if session explicitly opted out of encryption)
+          const plaintextRequestNonStream: any = {
+            model: session.model,
+            prompt: augmentedPrompt,  // Use RAG-augmented prompt
+            max_tokens: LLM_MAX_TOKENS,  // Support comprehensive responses from large models
+            temperature: 0.7,
+            stream: false
+          };
+
+          // Include images in plaintext request when present
+          if (options?.images && options.images.length > 0) {
+            validateImageAttachments(options.images);
+            plaintextRequestNonStream.images = options.images.map(img => ({ data: img.data, format: img.format }));
+          }
+
+          // VLM token tracking (Phase 5): capture tokens from response/stream_end
+          let ptNsUsage: TokenUsageInfo | undefined;
+          const tokenUnsub = this.wsClient.onMessage((data: any) => {
+            if (data.type === 'response' || data.type === 'stream_end') {
+              const llmTokens = data.tokens_used || 0;
+              const vlmTokens = data.vlm_tokens || 0;
+              const totalTokensForPrompt = llmTokens + vlmTokens;
+              ptNsUsage = { llmTokens, vlmTokens, totalTokens: totalTokensForPrompt };
+            }
+          });
+
           response = await this.wsClient.sendMessage({
             type: 'prompt',
             chain_id: session.chainId,
@@ -1128,18 +1249,25 @@ export class SessionManager implements ISessionManager {
             web_search: enableWebSearchNonStream,
             max_searches: enableWebSearchNonStream ? (searchConfigNonStream.maxSearches ?? 5) : 0,
             search_queries: searchConfigNonStream.queries ?? null,
-            request: {
-              model: session.model,
-              prompt: augmentedPrompt,  // Use RAG-augmented prompt
-              max_tokens: LLM_MAX_TOKENS,  // Support comprehensive responses from large models
-              temperature: 0.7,
-              stream: false
-            }
+            request: plaintextRequestNonStream
           });
+
+          tokenUnsub();
+          if (ptNsUsage) {
+            session.totalTokens += ptNsUsage.totalTokens;
+            session.lastTokenUsage = ptNsUsage;
+            options?.onTokenUsage?.(ptNsUsage);
+          }
         }
 
         // Add response to session
         session.responses.push(response);
+
+        // Build user message metadata (store imageCount, not raw image data)
+        const userMsgMeta2: Record<string, any> = {};
+        if (options?.images && options.images.length > 0) {
+          userMsgMeta2.imageCount = options.images.length;
+        }
 
         // Update storage (non-blocking to prevent S5 connection issues from freezing UI)
         this.storageManager.appendMessage(
@@ -1147,7 +1275,8 @@ export class SessionManager implements ISessionManager {
           {
             role: 'user',
             content: prompt,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            ...(Object.keys(userMsgMeta2).length > 0 ? { metadata: userMsgMeta2 } : {})
           }
         ).catch(err => console.warn('[SessionManager] Failed to store user message:', err));
 
@@ -1640,8 +1769,10 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Send encrypted message with session key (Phase 4.2)
-   * @param message - The plaintext message to encrypt and send
+   * Payload is a JSON object: { prompt, model, max_tokens, temperature, stream, images? }
+   * @param message - The plaintext prompt to encrypt and send
    * @param webSearchOptions - Optional web search configuration (v8.7.5+)
+   * @param images - Optional image attachments to include in payload
    * @private
    */
   private async sendEncryptedMessage(
@@ -1650,9 +1781,14 @@ export class SessionManager implements ISessionManager {
       webSearch: boolean;
       maxSearches: number;
       searchQueries: string[] | null;
-    }
+    },
+    images?: ImageAttachment[]
   ): Promise<void> {
 
+    // Validate images before encryption (fail fast)
+    if (images && images.length > 0) {
+      validateImageAttachments(images);
+    }
 
     if (!this.sessionKey) {
       throw new SDKError(
@@ -1686,10 +1822,24 @@ export class SessionManager implements ISessionManager {
     }
 
     try {
-      // Encrypt message with session key (returns payload only)
+      // Build structured JSON payload (node v8.15.3+)
+      const structuredPayload: any = {
+        prompt: message,
+        model: currentSession.model,
+        max_tokens: LLM_MAX_TOKENS,
+        temperature: 0.7,
+        stream: true,
+      };
+
+      // Only include images when present
+      if (images && images.length > 0) {
+        structuredPayload.images = images.map(img => ({ data: img.data, format: img.format }));
+      }
+
+      // Encrypt JSON payload with session key
       const payload = this.encryptionManager.encryptMessage(
         this.sessionKey,
-        message,
+        JSON.stringify(structuredPayload),
         this.messageIndex++
       );
 
@@ -1712,6 +1862,8 @@ export class SessionManager implements ISessionManager {
       await this.wsClient.sendWithoutResponse(messageToSend);
 
     } catch (error: any) {
+      // Re-throw SDKErrors (validation, encryption) without wrapping
+      if (error instanceof SDKError) throw error;
       console.error('[SessionManager] Failed to encrypt/send message:', error.message);
       throw new SDKError(
         `Failed to encrypt message: ${error.message}`,
@@ -1991,8 +2143,16 @@ export class SessionManager implements ISessionManager {
   async streamResponse(
     sessionId: bigint,
     prompt: string,
-    onChunk: (chunk: string) => void
+    onChunk: (chunk: string) => void,
+    options?: PromptOptions
   ): Promise<void> {
+    if (options?.images && options.images.length > 0) {
+      throw new SDKError(
+        'Image attachments are not supported by streamResponse(). Use sendPromptStreaming() with options.images instead.',
+        'IMAGES_NOT_SUPPORTED'
+      );
+    }
+
     if (!this.initialized) {
       throw new SDKError('SessionManager not initialized', 'SESSION_NOT_INITIALIZED');
     }
@@ -2097,6 +2257,15 @@ export class SessionManager implements ISessionManager {
   ): bigint {
     // Price includes PRICE_PRECISION multiplier, divide to get actual cost
     return (BigInt(tokensUsed) * BigInt(pricePerToken)) / PRICE_PRECISION;
+  }
+
+  /**
+   * Get the token usage info from the last completed prompt for a session.
+   * Returns undefined if no prompt has been completed yet.
+   */
+  getLastTokenUsage(sessionId: bigint): TokenUsageInfo | undefined {
+    const session = this.sessions.get(sessionId.toString());
+    return session?.lastTokenUsage;
   }
 
   /**

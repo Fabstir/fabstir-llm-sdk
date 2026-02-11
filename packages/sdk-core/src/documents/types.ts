@@ -9,21 +9,6 @@
  */
 export type DocumentType = 'txt' | 'md' | 'html' | 'pdf' | 'docx' | 'png' | 'jpeg' | 'webp' | 'gif';
 
-/**
- * Image processing result from host OCR and description endpoints
- */
-export interface ImageProcessingResult {
-  /** Description from /v1/describe-image endpoint */
-  description: string;
-  /** Extracted text from /v1/ocr endpoint */
-  extractedText: string;
-  /** OCR confidence score (0.0-1.0) */
-  ocrConfidence: number;
-  /** Combined text for embedding (description + OCR) */
-  combinedText: string;
-  /** Total processing time in milliseconds */
-  processingTimeMs: number;
-}
 
 /**
  * Document upload result

@@ -19,5 +19,7 @@ export * from './checkpoint-http';
 export * from './checkpoint-encryption';
 export * from './checkpoint-blockchain';
 
+export * from './image-validation';
+
 // Export other utilities as they are created
 export { TransactionHelper } from '../contracts/TransactionHelper';
