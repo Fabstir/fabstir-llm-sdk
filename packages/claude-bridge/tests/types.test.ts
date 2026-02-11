@@ -7,6 +7,9 @@ import type {
   AnthropicResponse,
   Usage,
   AnthropicError,
+  AnthropicTool,
+  ToolUseResponseBlock,
+  ContentBlockDeltaData,
 } from '../src/types';
 
 describe('Anthropic API Types', () => {
@@ -100,5 +103,50 @@ describe('Anthropic API Types', () => {
       messages: [{ role: 'user', content: 'Hello' }],
     };
     expect(req.stream ?? false).toBe(false);
+  });
+
+  it('AnthropicRequest accepts optional tools array', () => {
+    const req: AnthropicRequest = {
+      model: 'claude-3-opus-20240229',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: 'Hello' }],
+      tools: [{ name: 'get_weather', description: 'Get weather info', input_schema: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] } }],
+    };
+    expect(req.tools).toHaveLength(1);
+    expect(req.tools![0].name).toBe('get_weather');
+  });
+
+  it('AnthropicTool has name, description, input_schema fields', () => {
+    const tool: AnthropicTool = {
+      name: 'read_file',
+      description: 'Read a file from disk',
+      input_schema: { type: 'object', properties: { path: { type: 'string' } } },
+    };
+    expect(tool.name).toBe('read_file');
+    expect(tool.description).toBe('Read a file from disk');
+    expect(tool.input_schema.type).toBe('object');
+  });
+
+  it('ToolUseResponseBlock has type "tool_use", id, name, input', () => {
+    const block: ToolUseResponseBlock = {
+      type: 'tool_use',
+      id: 'toolu_abc123',
+      name: 'get_weather',
+      input: { city: 'London' },
+    };
+    expect(block.type).toBe('tool_use');
+    expect(block.id).toBe('toolu_abc123');
+    expect(block.name).toBe('get_weather');
+    expect(block.input).toEqual({ city: 'London' });
+  });
+
+  it('ContentBlockDeltaData supports input_json_delta type', () => {
+    const delta: ContentBlockDeltaData = {
+      type: 'content_block_delta',
+      index: 1,
+      delta: { type: 'input_json_delta', partial_json: '{"city":"London"}' },
+    };
+    expect(delta.delta.type).toBe('input_json_delta');
+    expect((delta.delta as any).partial_json).toBe('{"city":"London"}');
   });
 });

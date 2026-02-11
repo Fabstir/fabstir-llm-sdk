@@ -122,13 +122,102 @@ describe('Integration: bridge-flow', () => {
     await recoverServer.start();
     try {
       const res = await request(recoverServer.getPort(), { model: 'glm-4', max_tokens: 100, messages: [{ role: 'user', content: 'Hi' }] });
-      // The handler catches the error from sendPrompt and returns 500.
-      // Auto-recovery happens inside SessionBridge, not the handler.
-      // Since we're mocking at the bridge level, the first call throws and
-      // handler returns 500. This tests the error propagation path.
       expect(res.status).toBe(500);
     } finally {
       await recoverServer.stop();
+    }
+  });
+});
+
+// ===== Sub-phase 10.5: Tool Use E2E Tests =====
+describe('Integration: tool use', () => {
+  let server: BridgeServer;
+  let bridge: SessionBridge;
+  let port: number;
+  let lastPrompt: string;
+
+  beforeAll(async () => {
+    bridge = createMockBridge({
+      sendPrompt: vi.fn().mockImplementation(async (prompt: string, onToken?: (t: string) => void) => {
+        lastPrompt = prompt;
+        // Simulate model returning a tool call (GLM-4.7 native XML format)
+        onToken?.('<tool_call>get_weather<arg_key>city</arg_key><arg_value>London</arg_value></tool_call>');
+        return {
+          response: '<tool_call>get_weather<arg_key>city</arg_key><arg_value>London</arg_value></tool_call>',
+          tokenUsage: { llmTokens: 10, vlmTokens: 0, totalTokens: 10 },
+        } as SendPromptResult;
+      }),
+    });
+    server = new BridgeServer(0, bridge);
+    await server.start();
+    port = server.getPort();
+  });
+
+  afterAll(async () => { await server.stop(); });
+
+  const tools = [{ name: 'get_weather', description: 'Get weather info', input_schema: { type: 'object', properties: { city: { type: 'string' } } } }];
+
+  test('streaming: request with tools produces tool_use SSE events', async () => {
+    const res = await request(port, { model: 'glm-4', max_tokens: 100, messages: [{ role: 'user', content: 'Weather?' }], stream: true, tools });
+    expect(res.status).toBe(200);
+    const events = res.body.split('\n\n').filter(Boolean).map(block => {
+      const dataLine = block.split('\ndata: ')[1];
+      return dataLine ? JSON.parse(dataLine) : null;
+    }).filter(Boolean);
+    const toolStart = events.find(e => e.content_block?.type === 'tool_use');
+    expect(toolStart).toBeDefined();
+    expect(toolStart.content_block.name).toBe('get_weather');
+    const msgDelta = events.find(e => e.type === 'message_delta');
+    expect(msgDelta.delta.stop_reason).toBe('tool_use');
+  });
+
+  test('non-streaming: request with tools produces tool_use in response body', async () => {
+    const res = await request(port, { model: 'glm-4', max_tokens: 100, messages: [{ role: 'user', content: 'Weather?' }], tools });
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    const toolBlock = body.content.find((b: any) => b.type === 'tool_use');
+    expect(toolBlock).toBeDefined();
+    expect(toolBlock.name).toBe('get_weather');
+    expect(toolBlock.input).toEqual({ city: 'London' });
+    expect(body.stop_reason).toBe('tool_use');
+  });
+
+  test('multi-turn: tool_result messages serialized correctly in ChatML prompt', async () => {
+    const messages = [
+      { role: 'user', content: 'What is the weather?' },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'get_weather', input: { city: 'London' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'Sunny, 22C' }] },
+    ];
+    const res = await request(port, { model: 'glm-4', max_tokens: 100, messages, tools });
+    expect(res.status).toBe(200);
+    // tool_use blocks serialized as JSON in ChatML
+    expect(lastPrompt).toContain('get_weather');
+    // tool_result blocks serialized as observation
+    expect(lastPrompt).toContain('<|im_start|>observation');
+    expect(lastPrompt).toContain('Sunny, 22C');
+  });
+
+  test('tools in request inject definitions into system prompt', async () => {
+    const res = await request(port, { model: 'glm-4', max_tokens: 100, messages: [{ role: 'user', content: 'Hi' }], tools });
+    expect(res.status).toBe(200);
+    expect(lastPrompt).toContain('get_weather');
+    expect(lastPrompt).toContain('# Tools');
+    expect(lastPrompt).toContain('Get weather info');
+  });
+
+  test('request without tools (backward compat) still works', async () => {
+    const plainBridge = createMockBridge();
+    const plainServer = new BridgeServer(0, plainBridge);
+    await plainServer.start();
+    try {
+      const res = await request(plainServer.getPort(), { model: 'glm-4', max_tokens: 100, messages: [{ role: 'user', content: 'Hi' }] });
+      expect(res.status).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.content[0].type).toBe('text');
+      expect(body.content[0].text).toBe('Hello from bridge');
+      expect(body.stop_reason).toBe('end_turn');
+    } finally {
+      await plainServer.stop();
     }
   });
 });

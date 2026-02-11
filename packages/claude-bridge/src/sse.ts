@@ -67,3 +67,23 @@ export function buildErrorEvent(errorType: string, message: string): string {
     error: { type: errorType, message },
   });
 }
+
+export function generateToolUseId(): string {
+  return 'toolu_' + randomUUID();
+}
+
+export function buildToolUseBlockStart(index: number, id: string, name: string): string {
+  return sseEvent('content_block_start', {
+    type: 'content_block_start',
+    index,
+    content_block: { type: 'tool_use', id, name, input: {} },
+  });
+}
+
+export function buildInputJsonDelta(index: number, partialJson: string): string {
+  return sseEvent('content_block_delta', {
+    type: 'content_block_delta',
+    index,
+    delta: { type: 'input_json_delta', partial_json: partialJson },
+  });
+}

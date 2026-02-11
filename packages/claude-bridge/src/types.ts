@@ -43,6 +43,12 @@ export interface AnthropicMessage {
   content: string | ContentBlock[];
 }
 
+export interface AnthropicTool {
+  name: string;
+  description: string;
+  input_schema: Record<string, any>;
+}
+
 export interface AnthropicRequest {
   model: string;
   max_tokens: number;
@@ -54,12 +60,22 @@ export interface AnthropicRequest {
   stop_sequences?: string[];
   stream?: boolean;
   metadata?: Record<string, any>;
+  tools?: AnthropicTool[];
 }
 
-export interface ResponseBlock {
+export interface TextResponseBlock {
   type: 'text';
   text: string;
 }
+
+export interface ToolUseResponseBlock {
+  type: 'tool_use';
+  id: string;
+  name: string;
+  input: any;
+}
+
+export type ResponseBlock = TextResponseBlock | ToolUseResponseBlock;
 
 export interface Usage {
   input_tokens: number;
@@ -93,13 +109,17 @@ export interface MessageStartData {
 export interface ContentBlockStartData {
   type: 'content_block_start';
   index: number;
-  content_block: { type: 'text'; text: string };
+  content_block:
+    | { type: 'text'; text: string }
+    | { type: 'tool_use'; id: string; name: string };
 }
 
 export interface ContentBlockDeltaData {
   type: 'content_block_delta';
   index: number;
-  delta: { type: 'text_delta'; text: string };
+  delta:
+    | { type: 'text_delta'; text: string }
+    | { type: 'input_json_delta'; partial_json: string };
 }
 
 export interface ContentBlockStopData {

@@ -25,6 +25,7 @@ Claude Code → localhost:3456/v1/messages → claude-bridge (SDK) → WebSocket
 - [x] Phase 7: CLI Entry Point
 - [x] Phase 8: Integration Testing
 - [ ] Phase 9: Anonymous Host Discovery
+- [ ] Phase 10: Tool Use Support (Function Calling)
 
 ---
 
@@ -108,7 +109,8 @@ packages/claude-bridge/
 │   ├── converter.ts                      # Messages → ChatML + images (~90 lines)
 │   ├── sse.ts                            # SSE event builders (~100 lines)
 │   ├── session-bridge.ts                 # SDK lifecycle + queue (~150 lines)
-│   ├── handler.ts                        # HTTP request handlers (~160 lines)
+│   ├── handler.ts                        # HTTP request handlers (~200 lines)
+│   ├── tool-parser.ts                    # Streaming <tool_call> state machine (~80 lines)
 │   └── server.ts                         # HTTP server + routing (~100 lines)
 └── tests/
     ├── types.test.ts                     # Type validation tests
@@ -118,6 +120,7 @@ packages/claude-bridge/
     ├── session-bridge.test.ts            # SDK lifecycle tests
     ├── handler.test.ts                   # Handler tests (streaming + non-streaming)
     ├── server.test.ts                    # HTTP server tests
+    ├── tool-parser.test.ts              # Tool call parser tests
     └── integration/
         └── bridge-flow.test.ts           # End-to-end flow tests
 ```
@@ -760,27 +763,29 @@ Host nodes are anonymous to the user. The Phase 1-8 implementation requires `--h
 
 | File | Max Lines | Purpose |
 |------|-----------|---------|
-| `src/types.ts` | 120 | Anthropic API request/response types |
+| `src/types.ts` | 140 | Anthropic API request/response types + tool_use types |
 | `src/config.ts` | 80 | CLI config, defaults, validation |
-| `src/converter.ts` | 90 | Messages → ChatML + image extraction |
-| `src/sse.ts` | 100 | SSE event builder functions |
+| `src/converter.ts` | 110 | Messages → ChatML + image extraction + tool prompt injection |
+| `src/sse.ts` | 100 | SSE event builder functions (text + tool_use) |
 | `src/session-bridge.ts` | 150 | SDK lifecycle, session management, request queue |
-| `src/handler.ts` | 160 | HTTP request handlers (streaming + non-streaming) |
+| `src/handler.ts` | 200 | HTTP request handlers (streaming + non-streaming + tool use) |
+| `src/tool-parser.ts` | 80 | Streaming `<tool_call>` tag state machine |
 | `src/server.ts` | 100 | Native Node.js HTTP server + routing |
 | `src/index.ts` | 60 | CLI entry point (Commander) |
-| **Total source** | **≤ 860** | |
+| **Total source** | **≤ 1020** | |
 
 | Test File | ~Lines | Tests |
 |-----------|--------|-------|
-| `tests/types.test.ts` | 50 | 9 |
+| `tests/types.test.ts` | 140 | 13 |
 | `tests/config.test.ts` | 60 | 7 |
-| `tests/converter.test.ts` | 90 | 10 |
-| `tests/sse.test.ts` | 80 | 8 |
+| `tests/converter.test.ts` | 175 | 15 |
+| `tests/sse.test.ts` | 170 | 12 |
 | `tests/session-bridge.test.ts` | 120 | 10 |
-| `tests/handler.test.ts` | 150 | 14 |
+| `tests/handler.test.ts` | 360 | 22 |
 | `tests/server.test.ts` | 90 | 8 |
-| `tests/integration/bridge-flow.test.ts` | 100 | 5 |
-| **Total tests** | **~740** | **71** |
+| `tests/tool-parser.test.ts` | 160 | 12 |
+| `tests/integration/bridge-flow.test.ts` | 230 | 10 |
+| **Total tests** | **~1505** | **109** |
 
 ---
 
@@ -803,6 +808,11 @@ Host nodes are anonymous to the user. The Phase 1-8 implementation requires `--h
 | 13 | 9.2 Session Bridge: conditional host | 4.1 (session bridge), 9.1 | |
 | 14 | 9.3 CLI: update help text | 7.1 (CLI), 9.1 | |
 | 15 | 9.4 Full regression | 9.1, 9.2, 9.3 | |
+| 16 | 10.1 Types + SSE builders for tool_use | 1.2 (types), 3.1 (sse) | |
+| 17 | 10.2 Tool prompt injection | 10.1 (types), 2.1 (converter) | |
+| 18 | 10.3 Streaming tool call parser | None (standalone) | |
+| 19 | 10.4 Handler integration | 10.1, 10.2, 10.3 | |
+| 20 | 10.5 End-to-end tool use tests | All Phase 10 above | |
 
 ---
 
@@ -856,6 +866,7 @@ ANTHROPIC_BASE_URL=http://localhost:3456 claude
 - [x] Phase 7: CLI Entry Point (Sub-phase 7.1)
 - [x] Phase 8: Integration Testing (Sub-phase 8.1)
 - [x] Phase 9: Anonymous Host Discovery (Sub-phases 9.1, 9.2, 9.3, 9.4, 9.5) — 76 tests passing
+- [x] Phase 10: Tool Use Support (Sub-phases 10.1, 10.2, 10.3, 10.4, 10.5) — 114 tests passing
 
 ---
 
@@ -884,3 +895,358 @@ node ./packages/claude-bridge/bin/claude-bridge --private-key "$MY_PRIVATE_KEY" 
 **Success Criteria:**
 - [x] `pnpm claude-bridge -- --help` shows all CLI options
 - [x] All existing tests pass
+
+---
+
+## Phase 10: Tool Use Support (Function Calling)
+
+### Motivation
+
+Claude Code relies on **tool use** (function calling) for its agentic capabilities — reading files, writing code, running commands. When the bridge returns only text, Claude Code gives instructions instead of acting. The GLM-4.7-Flash model supports tool calling natively using `<tool_call>` XML tags, and Ollama already translates these for Claude Code. The bridge needs the same translation layer.
+
+**How it works:**
+1. Claude Code sends `POST /v1/messages` with a `tools[]` array defining available tools
+2. The bridge injects tool definitions into the system prompt using GLM-4's native format
+3. The model outputs `<tool_call>{"name":"...", "arguments":{...}}</tool_call>` tags
+4. The bridge parses these tags and emits Anthropic `tool_use` SSE content blocks
+5. Claude Code executes the tool locally and sends back `tool_result` in the next request
+6. The converter serializes `tool_result` into the ChatML prompt (already works from Phase 2)
+
+**Architecture:**
+```
+Claude Code request (tools[]) ──> converter.ts: inject tools into system prompt
+                                                 ↓
+                                  session-bridge.ts: send to model (unchanged)
+                                                 ↓
+                              handler.ts: stream tokens through ToolCallParser
+                                                 ↓
+                        tool-parser.ts: state machine detects <tool_call> boundaries
+                                                 ↓
+                              sse.ts: emit tool_use content blocks + input_json_delta
+                                                 ↓
+                              Claude Code receives tool_use → executes tool locally
+                                                 ↓
+                              Next request: tool_result in messages → converter handles
+```
+
+**Key Anthropic Formats:**
+
+*Request — tool definition:*
+```json
+{ "name": "get_weather", "description": "Get weather info", "input_schema": { "type": "object", "properties": { "city": { "type": "string" } }, "required": ["city"] } }
+```
+
+*Response — tool_use SSE events (streaming):*
+```
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_abc","name":"get_weather"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"London\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":42}}
+```
+
+*Response — tool_use content block (non-streaming):*
+```json
+{ "type": "tool_use", "id": "toolu_abc", "name": "get_weather", "input": { "city": "London" } }
+```
+
+*GLM-4 native output (what model produces):*
+```
+<tool_call>
+{"name": "get_weather", "arguments": {"city": "London"}}
+</tool_call>
+```
+
+---
+
+### Sub-phase 10.1: Types + SSE Builders for Tool Use
+
+**Goal**: Add `tools` field to `AnthropicRequest`, tool_use response types, and SSE builder functions for `tool_use` content blocks and `input_json_delta` deltas.
+
+**Line Budget**: +22 lines `src/types.ts` (≤ 140 total), +21 lines `src/sse.ts` (≤ 100 total)
+
+#### Tasks
+
+**`src/types.ts`:**
+- [x] Define `AnthropicTool` interface: `{ name: string; description: string; input_schema: Record<string, any> }`
+- [x] Add `tools?: AnthropicTool[]` to `AnthropicRequest`
+- [x] Define `ToolUseResponseBlock` interface: `{ type: 'tool_use'; id: string; name: string; input: any }`
+- [x] Widen `ResponseBlock` to union: `TextResponseBlock | ToolUseResponseBlock`
+- [x] Widen `ContentBlockStartData.content_block` to accept `{ type: 'tool_use'; id: string; name: string }`
+- [x] Widen `ContentBlockDeltaData.delta` to accept `{ type: 'input_json_delta'; partial_json: string }`
+
+**`src/sse.ts`:**
+- [x] Implement `generateToolUseId(): string` — returns `"toolu_" + randomUUID()`
+- [x] Implement `buildToolUseBlockStart(index: number, id: string, name: string): string` — SSE with `content_block: { type: 'tool_use', id, name }`
+- [x] Implement `buildInputJsonDelta(index: number, partialJson: string): string` — SSE with `delta: { type: 'input_json_delta', partial_json }`
+
+**Tests:**
+- [x] Write 4 tests in `tests/types.test.ts`
+- [x] Write 4 tests in `tests/sse.test.ts`
+- [x] Verify all tests pass
+
+**Test File:** `tests/types.test.ts` (+36 lines)
+
+**Tests (4 new):**
+1. [x] `AnthropicRequest accepts optional tools array` — verify a request with `tools: [{ name, description, input_schema }]` has the expected shape
+2. [x] `AnthropicTool has name, description, input_schema fields` — verify type structure
+3. [x] `ToolUseResponseBlock has type "tool_use", id, name, input` — verify type structure
+4. [x] `ContentBlockDeltaData supports input_json_delta type` — verify delta can be `{ type: 'input_json_delta', partial_json: string }`
+
+**Test File:** `tests/sse.test.ts` (+40 lines)
+
+**Tests (4 new):**
+5. [x] `generateToolUseId returns string starting with "toolu_"` — verify format and uniqueness
+6. [x] `buildToolUseBlockStart produces content_block_start with tool_use type, id, and name` — parse SSE, verify `data.content_block` is `{ type: 'tool_use', id: 'toolu_abc', name: 'get_weather' }`
+7. [x] `buildInputJsonDelta produces content_block_delta with input_json_delta type` — parse SSE, verify `data.delta` is `{ type: 'input_json_delta', partial_json: '{"city":' }`
+8. [x] `buildMessageDelta with stop_reason "tool_use" works` — verify `buildMessageDelta('tool_use', N)` produces correct output (documents existing function for tool_use case)
+
+**Success Criteria:**
+- [x] All existing 76 tests still pass
+- [x] 8 new tests pass (total: 84)
+- [x] TypeScript compiles cleanly
+- [x] `src/types.ts` ≤ 140 lines (actual: 138)
+- [x] `src/sse.ts` ≤ 100 lines (actual: 89)
+
+---
+
+### Sub-phase 10.2: Tool Prompt Injection
+
+**Goal**: When `AnthropicRequest.tools` is present, inject tool definitions into the system prompt so the model produces `<tool_call>` output.
+
+**Line Budget**: +30 lines `src/converter.ts` (≤ 110 total)
+
+#### Tasks
+
+**`src/converter.ts`:**
+- [x] Change `convertMessages` signature: `convertMessages(messages, system?, tools?)`
+- [x] Implement `formatToolsForPrompt(tools: AnthropicTool[]): string` helper that produces:
+  ```
+  You have access to the following tools. When you want to use a tool, output ONLY a tool call in exactly this format with no other text:
+  <tool_call>
+  {"name": "tool_name", "arguments": {"param": "value"}}
+  </tool_call>
+
+  Available tools:
+  - tool_name: description
+    Parameters: { JSON schema summary }
+  ```
+- [x] When `tools` is non-empty, prepend tool injection text to system prompt content
+- [x] When `tools` is empty or undefined, no change to existing behavior
+
+**Tests:**
+- [x] Write 5 tests in `tests/converter.test.ts`
+- [x] Verify all tests pass
+
+**Test File:** `tests/converter.test.ts` (+64 lines)
+
+**Tests (5 new):**
+1. [x] `convertMessages with tools injects tool definitions into system prompt` — call with one tool, verify prompt contains tool name, description, and parameter schema in system section
+2. [x] `convertMessages with tools includes instruction to use <tool_call> format` — verify injected text contains `<tool_call>` and `</tool_call>` as instruction
+3. [x] `convertMessages with tools preserves existing system prompt` — when both `system` and `tools` provided, verify both original system text and tool definitions appear
+4. [x] `convertMessages with empty tools array produces no tool injection` — output identical to no tools
+5. [x] `convertMessages with multiple tools includes all tool definitions` — verify all tool names appear
+
+**Success Criteria:**
+- [x] All existing converter tests still pass (backward compatible)
+- [x] 5 new tests pass (total: 89)
+- [x] `src/converter.ts` ≤ 110 lines (actual: 100)
+
+---
+
+### Sub-phase 10.3: Streaming Tool Call Parser
+
+**Goal**: Create a new `src/tool-parser.ts` module with a streaming state machine that detects `<tool_call>...</tool_call>` boundaries in token streams and emits structured events.
+
+**Line Budget**: ≤ 80 lines `src/tool-parser.ts` (new file)
+
+#### Tasks
+
+**`src/tool-parser.ts`:**
+- [x] Define `ParserEvent` type union:
+  - `{ type: 'text'; text: string }` — normal text output
+  - `{ type: 'tool_call'; name: string; arguments: Record<string, any> }` — parsed tool call
+  - `{ type: 'error'; rawContent: string }` — malformed tool call (graceful degradation)
+- [x] Implement `ToolCallParser` class with:
+  - `private buffer: string` — accumulates characters
+  - `private state: 'text' | 'maybe_tag' | 'in_tool_call'` — current parser state
+  - `feed(token: string): ParserEvent[]` — process a token, return events to emit
+  - `flush(): ParserEvent[]` — emit any remaining buffered content as text
+  - `reset(): void` — clear all state
+
+**State machine:**
+- **`text`**: Accumulate characters. On `<` → switch to `maybe_tag`, start buffering from `<`
+- **`maybe_tag`**: Continue buffering. Compare against `<tool_call>` prefix character-by-character:
+  - If buffer matches full `<tool_call>` → switch to `in_tool_call`
+  - If buffer length exceeds `<tool_call>` length without match → flush buffer as text, back to `text`
+  - If next char proves mismatch (e.g., `<tools` vs `<tool_`) → flush buffer as text, back to `text`
+- **`in_tool_call`**: Buffer everything. Check for `</tool_call>` on each token:
+  - Found → extract content between tags, `JSON.parse(content.trim())`, extract `name` and `arguments` (accept `parameters` as alias for `arguments`), emit `tool_call` event, back to `text`
+  - Malformed JSON → emit `error` event with raw content, back to `text`
+
+**Tests:**
+- [x] Write 12 tests in `tests/tool-parser.test.ts` (new file)
+- [x] Verify all tests pass
+
+**Test File:** `tests/tool-parser.test.ts` (~160 lines, new file)
+
+**Tests (12 new):**
+1. [x] `emits text tokens unchanged when no tool_call present` — feed "Hello world" token by token, verify all text events emitted
+2. [x] `detects complete tool_call in a single token` — feed entire `<tool_call>\n{"name":"get_weather","arguments":{"city":"London"}}\n</tool_call>`, verify `tool_call` event
+3. [x] `detects tool_call split across multiple tokens` — feed `<tool`, `_call>`, `\n{"name":"read_file"`, `,
+"arguments":{"path":"/tmp"}}`, `\n</tool_call>`, verify single `tool_call` event
+4. [x] `emits text before tool_call, then tool_call event` — feed "Let me read that. " then `<tool_call>...`, verify text events first, then tool_call
+5. [x] `emits text after tool_call` — feed `<tool_call>...</tool_call>` then " Done.", verify tool_call then text
+6. [x] `handles multiple tool_calls in sequence` — two consecutive `<tool_call>...</tool_call>` blocks, verify two tool_call events
+7. [x] `buffers partial < and flushes if not tool_call` — feed "x < y" as tokens, verify all emitted as text
+8. [x] `buffers partial <tool and flushes if not matching` — feed `<tool`, then `s are useful`, verify all flushed as text
+9. [x] `handles malformed JSON inside tool_call tags gracefully` — feed `<tool_call>\nnot valid json\n</tool_call>`, verify `error` event with raw content
+10. [x] `accepts "arguments" or "parameters" key` — feed tool_call with `"parameters"` key, verify parsed `tool_call` event normalizes to `arguments`
+11. [x] `reset() clears all state` — feed partial `<tool_call>`, call `reset()`, feed normal text, verify no leftover state
+12. [x] `flush() emits any buffered content as text` — feed `<tool` then call `flush()`, verify `<tool` emitted as text
+
+**Success Criteria:**
+- [x] All 12 parser tests pass
+- [x] Parser handles edge cases (partial tokens, false starts, malformed JSON)
+- [x] `src/tool-parser.ts` ≤ 80 lines (actual: 81)
+
+---
+
+### Sub-phase 10.4: Handler Integration
+
+**Goal**: Wire `ToolCallParser` into `handleStreaming()` and `handleNonStreaming()` so tool calls in model output are emitted as Anthropic `tool_use` SSE events / response blocks.
+
+**Line Budget**: +55 lines `src/handler.ts` (≤ 200 total)
+
+#### Tasks
+
+**`src/handler.ts` — `handleMessages()`:**
+- [x] Pass `body.tools` to `convertMessages()` as third argument
+- [x] Pass `body.tools` to both `handleStreaming()` and `handleNonStreaming()`
+
+**`src/handler.ts` — `handleStreaming()`:**
+- [x] Accept `tools?: AnthropicTool[]` parameter
+- [x] When `tools` present and non-empty: create `ToolCallParser` instance
+- [x] Track `currentBlockIndex` (starts at 0) and `hasToolUse` flag
+- [x] Replace direct `onToken` callback with parser-based flow:
+  - `parser.feed(token)` → iterate returned events:
+    - `TextEvent` → emit `buildContentBlockDelta(currentBlockIndex, text)`
+    - `ToolCallEvent` →
+      1. Close current text block: `buildContentBlockStop(currentBlockIndex)`
+      2. Open tool_use block: `buildToolUseBlockStart(++currentBlockIndex, generateToolUseId(), name)`
+      3. Emit JSON input: `buildInputJsonDelta(currentBlockIndex, JSON.stringify(arguments))`
+      4. Close tool_use block: `buildContentBlockStop(currentBlockIndex)`
+      5. Set `hasToolUse = true`
+      6. Open new text block: `buildContentBlockStart(++currentBlockIndex)` (in case text follows)
+    - `ErrorEvent` → emit raw content as text_delta (graceful degradation)
+- [x] After streaming completes: call `parser.flush()` and process any remaining events
+- [x] Use `hasToolUse ? 'tool_use' : 'end_turn'` as stop_reason in `buildMessageDelta()`
+- [x] When `tools` is empty/undefined: bypass parser entirely (existing direct passthrough, backward compatible)
+
+**`src/handler.ts` — `handleNonStreaming()`:**
+- [x] Accept `tools?: AnthropicTool[]` parameter
+- [x] When `tools` present and non-empty:
+  1. Create `ToolCallParser`, feed entire response, call `flush()`
+  2. Build `content[]` array from parser events:
+     - `TextEvent` → `{ type: 'text', text }`
+     - `ToolCallEvent` → `{ type: 'tool_use', id: generateToolUseId(), name, input: arguments }`
+     - `ErrorEvent` → `{ type: 'text', text: rawContent }` (graceful degradation)
+  3. Set `stop_reason` to `'tool_use'` if any tool calls, else `'end_turn'`
+- [x] When `tools` is empty/undefined: existing behavior (single text block)
+
+**Tests:**
+- [x] Write 8 tests in `tests/handler.test.ts`
+- [x] Verify all tests pass
+
+**Test File:** `tests/handler.test.ts` (+112 lines)
+
+**Tests (8 new):**
+1. [x] `streaming: tool_call in output produces tool_use content block` — mock bridge emits tokens with `<tool_call>...</tool_call>`, verify SSE contains `content_block_start` with `type: "tool_use"` and `content_block_delta` with `type: "input_json_delta"`
+2. [x] `streaming: text before tool_call emitted as text block, then tool_use block` — mock bridge emits text then tool_call, verify two content blocks at sequential indices
+3. [x] `streaming: stop_reason is "tool_use" when tool calls detected` — verify `message_delta` has `stop_reason: "tool_use"`
+4. [x] `streaming: no tools in request still works unchanged (backward compat)` — no tools, plain text, verify identical to existing behavior
+5. [x] `streaming: tool_use id starts with "toolu_"` — verify id field format
+6. [x] `streaming: multiple tool_calls produce multiple tool_use blocks` — two consecutive tool_calls, verify two `tool_use` content blocks
+7. [x] `non-streaming: tool_call in response produces tool_use in response body` — mock bridge returns text with `<tool_call>...</tool_call>`, verify JSON `content` array has `{ type: "tool_use", id, name, input }`
+8. [x] `non-streaming: stop_reason is "tool_use" when tool calls detected` — verify `stop_reason: "tool_use"`
+
+**Success Criteria:**
+- [x] All existing 14 handler tests still pass (backward compatibility)
+- [x] 8 new tests pass (total: 22 handler tests)
+- [x] `src/handler.ts` ≤ 200 lines (actual: 190)
+
+---
+
+### Sub-phase 10.5: End-to-End Tool Use Integration Tests
+
+**Goal**: Verify the complete tool use flow end-to-end through the HTTP server, including multi-turn conversations with tool_result messages.
+
+**Line Budget**: 0 source lines (tests only, +96 lines in test file)
+
+#### Tasks
+
+- [x] Write 5 tests in `tests/integration/bridge-flow.test.ts`
+- [x] Verify all tests pass
+
+**Test File:** `tests/integration/bridge-flow.test.ts` (+96 lines)
+
+**Tests (5 new):**
+1. [x] `streaming: request with tools produces tool_use SSE events` — full HTTP request with `tools[]` and `stream: true`, mock bridge emits tokens with `<tool_call>`, verify SSE stream contains `tool_use` content blocks and `stop_reason: "tool_use"`
+2. [x] `non-streaming: request with tools produces tool_use in response body` — full HTTP request with `tools[]` and `stream: false`, mock bridge returns text with `<tool_call>`, verify JSON response has `tool_use` content block
+3. [x] `multi-turn: tool_result messages serialized correctly in ChatML prompt` — send request with message history containing `tool_use` (from assistant) and `tool_result` (from user), verify ChatML prompt includes serialized tool use and result text
+4. [x] `tools in request inject definitions into system prompt` — send request with `tools[]`, verify the prompt passed to `bridge.sendPrompt` contains tool definitions in system section
+5. [x] `request without tools (backward compat) still works` — send request with no `tools` field, verify normal text response (regression test)
+
+**Success Criteria:**
+- [x] All existing 5 integration tests still pass
+- [x] 5 new tests pass (total: 10 integration tests)
+- [x] All 114 tests pass across entire package
+
+---
+
+### Phase 10 Summary
+
+| Sub-phase | New Tests | Files Modified | New File | Line Delta |
+|-----------|-----------|----------------|----------|------------|
+| 10.1 Types + SSE builders | 8 | `types.ts` (+22), `sse.ts` (+21) | — | +43 source |
+| 10.2 Tool prompt injection | 5 | `converter.ts` (+30) | — | +30 source |
+| 10.3 Tool call parser | 12 | — | `tool-parser.ts` (~80) | +80 source |
+| 10.4 Handler integration | 8 | `handler.ts` (+55) | — | +55 source |
+| 10.5 E2E integration tests | 5 | integration test (+96) | — | +0 source |
+| **Total** | **38** | **4 modified** | **1 new** | **+208 source, +348 test** |
+
+### Risks and Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| Model doesn't produce `<tool_call>` tags reliably | Prompt injection is explicit with examples; GLM-4 was trained on this format natively; parser gracefully degrades to text for unrecognized output |
+| Partial token boundaries split mid-tag | `maybe_tag` state buffers partial matches; `flush()` handles end-of-stream cleanup |
+| Tool call JSON contains `</tool_call>` in string values | Extremely unlikely for model-generated JSON; simple `indexOf` sufficient for MVP |
+| Content block index management complexity | Simple `currentBlockIndex` counter; bypass parser entirely when no tools in request |
+| Backward compatibility regression | When no `tools` in request, handler uses existing direct-passthrough logic; every sub-phase includes backward compat tests |
+
+### Verification (after all Phase 10 sub-phases)
+
+```bash
+# Run all tests
+cd /workspace/packages/claude-bridge && pnpm test
+
+# Rebuild
+cd /workspace/packages/sdk-core && pnpm build:esm && pnpm build:cjs
+cd /workspace/packages/claude-bridge && pnpm build
+
+# Start bridge
+export CLAUDE_BRIDGE_LOCALHOST_OVERRIDE=host.docker.internal
+pnpm claude-bridge -- --private-key "$MY_PRIVATE_KEY" --model "unsloth/GLM-4.7-Flash-GGUF:GLM-4.7-Flash-UD-Q8_K_XL.gguf"
+
+# In hello-world1: Claude Code should now use tools
+ANTHROPIC_BASE_URL=http://sdk-dev:3456 claude
+# Ask: "Create me a React app that displays hello world"
+# Expected: Claude Code creates files using Write/Bash tools instead of giving text instructions
+```

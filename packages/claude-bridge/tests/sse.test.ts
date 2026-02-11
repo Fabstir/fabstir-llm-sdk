@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   generateMessageId,
+  generateToolUseId,
   buildMessageStart,
   buildContentBlockStart,
   buildContentBlockDelta,
@@ -8,6 +9,8 @@ import {
   buildMessageDelta,
   buildMessageStop,
   buildErrorEvent,
+  buildToolUseBlockStart,
+  buildInputJsonDelta,
 } from '../src/sse';
 
 /** Parse an SSE string into { event, data } where data is parsed JSON */
@@ -126,5 +129,48 @@ describe('SSE Event Builder', () => {
       // Should not end with more than two newlines
       expect(evt.endsWith('\n\n\n')).toBe(false);
     }
+  });
+
+  it('generateToolUseId returns string starting with "toolu_"', () => {
+    const id = generateToolUseId();
+    expect(typeof id).toBe('string');
+    expect(id.startsWith('toolu_')).toBe(true);
+    expect(id.length).toBeGreaterThan(6);
+
+    const id2 = generateToolUseId();
+    expect(id2).not.toBe(id);
+  });
+
+  it('buildToolUseBlockStart produces content_block_start with tool_use type, id, and name', () => {
+    const sse = buildToolUseBlockStart(1, 'toolu_abc', 'get_weather');
+    const { event, data } = parseSSE(sse);
+
+    expect(event).toBe('content_block_start');
+    expect(data.type).toBe('content_block_start');
+    expect(data.index).toBe(1);
+    expect(data.content_block.type).toBe('tool_use');
+    expect(data.content_block.id).toBe('toolu_abc');
+    expect(data.content_block.name).toBe('get_weather');
+    expect(data.content_block.input).toEqual({});
+  });
+
+  it('buildInputJsonDelta produces content_block_delta with input_json_delta type', () => {
+    const sse = buildInputJsonDelta(1, '{"city":');
+    const { event, data } = parseSSE(sse);
+
+    expect(event).toBe('content_block_delta');
+    expect(data.type).toBe('content_block_delta');
+    expect(data.index).toBe(1);
+    expect(data.delta.type).toBe('input_json_delta');
+    expect(data.delta.partial_json).toBe('{"city":');
+  });
+
+  it('buildMessageDelta with stop_reason "tool_use" works', () => {
+    const sse = buildMessageDelta('tool_use', 42);
+    const { event, data } = parseSSE(sse);
+
+    expect(event).toBe('message_delta');
+    expect(data.delta.stop_reason).toBe('tool_use');
+    expect(data.usage.output_tokens).toBe(42);
   });
 });
