@@ -47,6 +47,7 @@ import { recoverFromCheckpointsFlow, recoverFromCheckpointsFlowWithHttp } from '
 import { recoverFromBlockchain, type BlockchainRecoveredConversation, type CheckpointQueryOptions } from '../utils/checkpoint-blockchain';
 import JobMarketplaceABI from '../contracts/abis/JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json';
 import type { SearchApiResponse, WebSearchStarted, WebSearchResults, WebSearchError as WebSearchErrorMsg } from '../types/web-search.types';
+import { RAGSessionConfig, RAGMetrics, validateRAGConfig, mergeRAGConfig } from '../session/rag-config';
 
 /**
  * Check if a string is a bytes32 hash (0x + 64 hex chars)
@@ -129,6 +130,9 @@ export interface SessionState {
   webSearchMetadata?: WebSearchMetadata; // NEW: Web search metadata from response
   webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 5.1)
   lastTokenUsage?: TokenUsageInfo; // NEW: Last prompt's token usage (Phase 5)
+  ragContext?: { vectorDbId: string }; // Set by uploadVectors() or startSession(ragConfig)
+  ragConfig?: RAGSessionConfig; // RAG configuration from startSession
+  ragMetrics?: RAGMetrics; // RAG metrics tracking
 }
 
 // Extended SessionConfig with chainId
@@ -419,6 +423,9 @@ export class SessionManager implements ISessionManager {
         encryption: enableEncryption,  // NEW (Phase 6.2): Store encryption preference
         groupId: config.groupId,  // NEW: Session Groups integration
         webSearch: config.webSearch,  // NEW (Phase 5.1): Web search configuration
+        ragContext: ragConfig?.enabled
+          ? { vectorDbId: ragConfig.vectorDbSessionId || `rag-${sessionId}` }
+          : undefined,
         ragConfig: ragConfig,  // NEW (Phase 5.1): Store RAG config
         ragMetrics: ragConfig?.enabled ? {
           totalRetrievals: 0,
@@ -509,6 +516,7 @@ export class SessionManager implements ISessionManager {
     pricePerToken: number;
     proofInterval: number;
     duration: number;
+    ragConfig?: RAGSessionConfig;
   }): Promise<void> {
     const sessionId = config.sessionId;
     const sessionIdStr = sessionId.toString();
@@ -529,6 +537,9 @@ export class SessionManager implements ISessionManager {
       totalTokens: 0,
       startTime: Date.now(),
       encryption: true, // Match normal session behavior - use encryption by default (Phase 6.2)
+      ragContext: config.ragConfig?.enabled
+        ? { vectorDbId: config.ragConfig.vectorDbSessionId || `rag-${sessionIdStr}` }
+        : undefined,
     };
 
     // Store in memory
@@ -2461,6 +2472,11 @@ export class SessionManager implements ISessionManager {
         allErrors.push(`Batch ${batchIndex + 1} failed: ${error.message}`);
         totalRejected += batch.length;
       }
+    }
+
+    // After successful upload, mark session as RAG-enabled
+    if (totalUploaded > 0) {
+      session.ragContext = session.ragContext || { vectorDbId: `vectors-${sessionId}` };
     }
 
     return {

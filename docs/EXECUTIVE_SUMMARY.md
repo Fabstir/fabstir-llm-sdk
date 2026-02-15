@@ -2,11 +2,11 @@
 
 ## Vision
 
-**AI infrastructure where no company sits between you and AI models - trustless, private, and sovereign by design**
+**Decentralized infrastructure for AI agents and applications - trustless, private, and sovereign by design**
 
 *"We don't trust, we verify."*
 
-Platformless AI represents the right architecture for how the world should interact with LLMs and AI models. A truly ground-breaking infrastructure for the ages - where users are sovereign and in complete control of their data, able to decide what AI and AI agents can access, and share securely with other users on their own terms.
+Platformless AI represents the right architecture for how the world should interact with LLMs, AI models, and autonomous AI agents. A truly ground-breaking infrastructure for the ages - where users are sovereign and in complete control of their data, able to decide what AI and AI agents can access, and share securely with other users on their own terms. From agentic coding assistants to SaaS AI backends, Platformless AI provides the decentralized compute layer that eliminates vendor lock-in, censorship, and privacy risk.
 
 ## Core Principles: Trustless by Design
 
@@ -24,6 +24,8 @@ Platformless AI represents the right architecture for how the world should inter
 Platformless AI is building decentralized AI infrastructure that eliminates the platform middleman. Unlike traditional AI services, there's no centralized company that can censor prompts, access your data, or revoke your access. Smart contracts coordinate, P2P connections deliver inference, and cryptographic proofs verify computation - all without requiring trust in a central authority.
 
 Our marketplace connects GPU providers directly with users through blockchain-based settlement, end-to-end encryption, and mathematical proof of computation. This creates a trustless, censorship-resistant, and privacy-preserving platform for AI services.
+
+**Critically, this infrastructure extends beyond chat to support autonomous AI agents.** Our Claude Bridge has demonstrated Claude Code — an agentic coding assistant with 23 tools — running entirely on decentralized GPU hosts. This makes Platformless AI the first decentralized infrastructure capable of powering agentic AI workflows, from coding assistants to SaaS AI backends.
 
 ## The Problem
 
@@ -108,21 +110,29 @@ A decentralized marketplace where smart contracts handle coordination, P2P conne
    - Automated escrow and distribution
    - Immutable on-chain audit trails
 
-6. **Developer-Friendly SDK**
+6. **Agentic AI Bridge**
+   - Anthropic Messages API compatibility layer (@fabstir/claude-bridge)
+   - Enables autonomous AI agents (Claude Code, Cursor, etc.) to run on decentralized hosts
+   - Streaming SSE translation: tool_use, input_json_delta, multi-turn tool results
+   - Supports 23+ tool definitions with structured tool calling
+   - Think-block stripping, output limits, and session auto-recovery
+   - Any Anthropic-compatible client works without modification
+
+8. **Developer-Friendly SDK**
    - Browser-compatible (@fabstir/sdk-core)
    - 13 specialized managers (Auth, Payment, Session, Host, Storage, Model, Treasury, Client, Encryption, VectorRAG, Document, SessionGroup, Permission)
    - Real-time streaming responses
    - Simple integration (5 lines to start)
    - Open source and auditable
 
-7. **Host Operator Tools**
+9. **Host Operator Tools**
    - Host CLI (`@fabstir/host-cli`) for server management
    - TUI dashboard for headless servers (status, logs, earnings, pricing)
    - Setup wizard for guided host onboarding
    - Model discovery and download with verification
    - Earnings tracking and withdrawal
 
-8. **Video Transcoding Marketplace** (Post-MVP)
+10. **Video Transcoding Marketplace** (Post-MVP)
    - Decentralized video/audio format conversion
    - GPU-accelerated transcoding (h264, AV1, AAC, Opus)
    - GOP-based STARK proofs verify quality (PSNR, SSIM metrics)
@@ -232,12 +242,14 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
    - Curated model listings
    - Specialized model hosting
 
-3. **Enterprise Services**
+3. **Enterprise & SaaS Services**
    - Private node deployments
    - Dedicated compute capacity
    - SLA guarantees
    - Custom compliance packages
    - White-label solutions
+   - SaaS AI backend (drop-in Anthropic API replacement for product teams)
+   - Agentic AI infrastructure (managed Claude Bridge for enterprise dev teams)
 
 ### Token Economics
 
@@ -261,6 +273,8 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 
 - **Global AI Market**: $400B+ by 2025, growing 35% annually
 - **LLM API Market**: $7B+ in 2024, 37% CAGR
+- **Agentic AI / AI Coding Market**: $15B+ by 2027 (GitHub Copilot alone: $100M+ ARR; Cursor, Windsurf, Claude Code growing rapidly)
+- **AI-Powered SaaS**: $30B+ by 2027 — every SaaS company embedding AI needs reliable, private infrastructure
 - **Video Transcoding Market**: $1.8B+ by 2027, 17% CAGR (Post-MVP expansion)
 - **Enterprise AI Security**: $22B+ market (compliance, privacy)
 - **Decentralized Compute**: $8B+ emerging market
@@ -275,14 +289,22 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
    - Healthcare (HIPAA compliance, patient diagnostics)
    - Web3 companies (avoid centralized AI irony)
 
-2. **Developers & Startups**
+2. **SaaS Companies**
+
+   - AI-powered product features without vendor lock-in (no single API key dependency)
+   - Private customer data processing (data never leaves encrypted P2P channel)
+   - Multi-model flexibility (switch models without re-architecting)
+   - Cost control (direct GPU pricing vs. 300-750x platform markup)
+   - Compliance-ready AI backend (GDPR, HIPAA, SOC 2)
+
+3. **Developers & Startups**
 
    - Privacy-first applications
    - Censorship-resistant apps
    - Custom model deployment
    - Budget-conscious builders
 
-3. **GPU Providers**
+4. **GPU Providers**
 
    - Gamers with idle RTX 3060+ GPUs
    - AI-focused data centers with spare capacity
@@ -291,13 +313,13 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
    - Render farms that already have GPUs for VFX/animation
    - Geographic diversity (global participation)
 
-4. **Researchers & Academics**
+5. **Researchers & Academics**
    - Experimental models
    - Controversial research (no censorship)
    - Budget constraints
    - Open access requirements
 
-5. **Content Creators & Media Companies** (Post-MVP)
+6. **Content Creators & Media Companies** (Post-MVP)
    - YouTubers, streamers, indie filmmakers (affordable transcoding)
    - Media companies (privacy-preserving video processing)
    - NFT marketplaces (video NFT optimization)
@@ -340,7 +362,15 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 - Fair distribution (90% to hosts, 10% protocol fee)
 - Competitive marketplace (providers compete on price/quality)
 
-### 5. **Technical Innovation**
+### 5. **Agentic AI Ready**
+
+- Only decentralized infrastructure supporting autonomous AI agent tool use
+- Claude Bridge: Anthropic Messages API compatibility for agentic coding (Claude Code, Cursor)
+- Streaming SSE with structured tool calling (23+ tools), multi-turn tool results
+- SaaS-ready: any Anthropic-compatible client works without modification
+- Proven in production: Claude Code creating React apps, running tests, editing files — all on decentralized hosts
+
+### 6. **Technical Innovation**
 
 - Off-chain proof storage (221KB proofs on S5, 32-byte hash on-chain)
 - Multi-chain support (Base, opBNB, future chains)
@@ -435,6 +465,15 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 - SessionGroupManager for Claude Projects-style organization
 - PermissionManager for access control
 - Host-side embedding via `/v1/embed` endpoint
+
+✅ **Agentic AI Bridge** (Claude Bridge)
+
+- Anthropic Messages API compatibility layer (@fabstir/claude-bridge)
+- Full tool use support: streaming SSE with tool_use blocks, input_json_delta, multi-turn tool results
+- Claude Code (23 tools) running end-to-end on decentralized hosts — verified in production
+- Think-block stripping, output safeguards, session auto-recovery
+- Enables any Anthropic-compatible AI agent or SaaS application to use decentralized infrastructure
+- 129 tests passing, production-validated
 
 ### In Progress (Q1 2026)
 
@@ -531,6 +570,31 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
    - Translation services (confidential)
    - Voiceover generation (privacy)
 
+### Agentic AI Use Cases
+
+1. **Agentic Coding**
+
+   - Claude Code, Cursor, Windsurf running on private decentralized infrastructure
+   - Source code never leaves encrypted P2P channel (IP protection)
+   - No API key dependency on Anthropic/OpenAI (sovereign access)
+   - Enterprise dev teams coding with AI without data leakage risk
+   - Full tool use: file editing, terminal commands, web search — all through decentralized hosts
+
+2. **SaaS AI Backend**
+
+   - Companies embedding AI into products without vendor lock-in
+   - Drop-in Anthropic API replacement (same Messages API, different infrastructure)
+   - Multi-model flexibility: swap underlying models without client changes
+   - Predictable costs at scale (direct GPU pricing, no platform markup)
+   - Compliance-ready: encrypted inference meets GDPR/HIPAA/SOC 2 requirements
+
+3. **AI Agent Orchestration**
+
+   - Multi-agent workflows (research, planning, implementation teams)
+   - Autonomous agents operating on private infrastructure
+   - Long-running agent sessions with encrypted state persistence
+   - Tool-heavy workloads: agents calling 20+ tools per session
+
 ### Developer Use Cases
 
 1. **Privacy-First Applications**
@@ -560,9 +624,10 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 1. **First-Mover Advantage in Trustless AI**
 
    - First production-ready platformless AI infrastructure
+   - First decentralized infrastructure supporting agentic AI tool use (Claude Code verified)
    - MVP complete with real nodes, real proofs, real encryption
    - Working implementation, not vaporware
-   - Technical moat (cryptographic verification, multi-chain, encryption)
+   - Technical moat (cryptographic verification, multi-chain, encryption, agentic bridge)
 
 2. **Network Effects**
 
@@ -716,12 +781,14 @@ See `.env.test` for current deployed addresses on Base Sepolia and opBNB Testnet
 - **Contact**: investors@fabstir.com
 - **Ask**: Seed round to scale team, audits, enterprise sales
 
-### For Enterprise Customers
+### For Enterprise & SaaS Customers
 
 - **Beta Program**: Limited spots for Q1 2026 enterprise beta
+- **SaaS Integration**: Drop-in Anthropic API replacement for AI-powered products
+- **Agentic AI**: Run Claude Code, Cursor, and custom AI agents on private infrastructure
 - **Benefits**: Early access, custom compliance support, dedicated integration help
 - **Contact**: enterprise@fabstir.com or DM on LinkedIn
-- **Industries**: Financial services, healthcare, legal, media & entertainment
+- **Industries**: Financial services, healthcare, legal, media & entertainment, SaaS
 
 ### For Developers
 
@@ -756,7 +823,7 @@ Platformless AI represents a fundamental shift in AI infrastructure - from platf
 - **XChaCha20-Poly1305 encryption with forward secrecy** protects all communication
 - **Open source** means full transparency - every line auditable
 
-Our infrastructure is complete and production-ready, currently undergoing security audit. The SDK (v1.8.6+) includes 13 specialized managers, a comprehensive Host CLI with TUI dashboard, marketplace pricing, evidence-based slashing for host accountability, and full RAG infrastructure. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise and developer adoption as AI regulation tightens and privacy concerns intensify.
+Our infrastructure is complete and production-ready, currently undergoing security audit. The SDK (v1.8.6+) includes 13 specialized managers, a comprehensive Host CLI with TUI dashboard, marketplace pricing, evidence-based slashing for host accountability, and full RAG infrastructure. The Claude Bridge extends this to agentic AI — Claude Code running autonomously on decentralized hosts, creating applications, executing tools, and managing files with full end-to-end encryption. Companies are already approaching us to use this as SaaS AI backend infrastructure. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise, SaaS, and developer adoption as AI regulation tightens and privacy concerns intensify.
 
 The convergence of blockchain technology, zero-knowledge cryptography, and decentralized storage creates a unique opportunity to build AI infrastructure that respects user sovereignty, protects intellectual property, and enables permissionless innovation. Users are sovereign - in complete control of their data, able to decide what AI and AI agents can access, and share securely with others on their own terms.
 
@@ -804,4 +871,4 @@ _"We Don't Trust, We Verify - AI Infrastructure for the Ages"_
 
 ---
 
-*Last Updated: January 2026*
+*Last Updated: February 2026*

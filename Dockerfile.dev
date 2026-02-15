@@ -47,6 +47,7 @@ RUN mkdir -p /workspace/node_modules \
 
 # --- Enable Claude Code agent teams (swarm mode) ---
 ENV CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+ENV PATH="/home/developer/.local/bin:$PATH"
 
 WORKDIR /workspace
 

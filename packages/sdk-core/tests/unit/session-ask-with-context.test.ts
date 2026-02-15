@@ -68,7 +68,8 @@ describe('SessionManager.askWithContext()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       // Mock HostAdapter.embedText() to return query vector
@@ -118,7 +119,8 @@ describe('SessionManager.askWithContext()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       vi.spyOn(HostAdapter.prototype, 'embedText').mockResolvedValue({
@@ -157,7 +159,8 @@ describe('SessionManager.askWithContext()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       vi.spyOn(HostAdapter.prototype, 'embedText').mockResolvedValue({
@@ -196,7 +199,8 @@ describe('SessionManager.askWithContext()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       // Mock HostAdapter to throw error
@@ -230,7 +234,8 @@ describe('SessionManager.askWithContext()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       vi.spyOn(HostAdapter.prototype, 'embedText').mockResolvedValue({
@@ -271,7 +276,8 @@ describe('SessionManager.askWithContext()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       vi.spyOn(HostAdapter.prototype, 'embedText').mockResolvedValue({
@@ -318,7 +324,8 @@ describe('SessionManager.askWithContext()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       vi.spyOn(HostAdapter.prototype, 'embedText').mockResolvedValue({
@@ -410,7 +417,8 @@ describe('SessionManager.askWithContext()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       vi.spyOn(HostAdapter.prototype, 'embedText').mockResolvedValue({
@@ -448,7 +456,8 @@ describe('SessionManager.askWithContext()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       vi.spyOn(HostAdapter.prototype, 'embedText').mockResolvedValue({
@@ -495,7 +504,8 @@ describe('SessionManager.askWithContext()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       vi.spyOn(HostAdapter.prototype, 'embedText').mockResolvedValue({
@@ -534,7 +544,8 @@ describe('SessionManager.askWithContext()', () => {
         responses: [],
         checkpoints: [],
         totalTokens: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        ragContext: { vectorDbId: 'test-db' }
       }]]);
 
       vi.spyOn(HostAdapter.prototype, 'embedText').mockResolvedValue({
