@@ -1492,15 +1492,13 @@ export default function ChatContextDemo() {
       setImageError(null);
       setImageCapabilities(null);
       try {
-        console.log(`[ImageGen] Checking capabilities for host ${host.address} at ${host.endpoint}`);
         const imgCaps = await (hm as any).getImageGenerationCapabilities(host.address, host.endpoint);
-        console.log("[ImageGen] Capabilities result:", imgCaps);
         setImageCapabilities(imgCaps);
         addMessage("system", imgCaps.supportsImageGeneration
           ? "Image generation supported (FLUX.2 Klein 4B)"
           : "Image generation not available on this host");
       } catch (e: any) {
-        console.warn("[ImageGen] Could not check capabilities:", e);
+        console.warn("Could not check image gen capabilities:", e);
       }
     } catch (error: any) {
       console.error("Failed to start session:", error);
@@ -1688,16 +1686,11 @@ export default function ChatContextDemo() {
     }
   }
 
-  // Handle image generation request (uses HTTP path — node WebSocket doesn't route to diffusion yet)
+  // Handle image generation request (encrypted WebSocket — E2E encrypted via session)
   async function handleGenerateImage() {
-    console.log("[ImageGen] handleGenerateImage called");
     const sm = sdk?.getSessionManager() as any;
-    const hostEndpoint = activeHostRef.current?.endpoint;
-    console.log("[ImageGen] sm:", !!sm, "hostEndpoint:", hostEndpoint, "prompt:", imagePrompt.trim().substring(0, 30));
-    if (!sm || !hostEndpoint || !imagePrompt.trim()) {
-      console.log("[ImageGen] Guard clause hit — returning early");
-      return;
-    }
+    const currentSessionId = (window as any).__currentSessionId || sessionId;
+    if (!sm || !currentSessionId || !imagePrompt.trim()) return;
 
     setIsGeneratingImage(true);
     setImageError(null);
@@ -1705,9 +1698,8 @@ export default function ChatContextDemo() {
     try {
       addMessage("user", `[Image Gen] ${imagePrompt}`);
 
-      console.log(`[ImageGen] Calling HTTP image generation at ${hostEndpoint}`);
-      const result: ImageGenerationResult = await sm.generateImageHttpRequest(
-        hostEndpoint,
+      const result: ImageGenerationResult = await sm.generateImage(
+        currentSessionId.toString(),
         imagePrompt.trim(),
         { size: imageSize as any, steps: imageSteps }
       );
