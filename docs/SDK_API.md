@@ -7,6 +7,7 @@
 - [Authentication](#authentication)
 - [Session Management](#session-management)
 - [Web Search Integration](#web-search-integration)
+- [Image Generation](#image-generation)
 - [Payment Management](#payment-management)
 - [Model Governance](#model-governance)
 - [Host Management](#host-management)
@@ -35,6 +36,7 @@ The Fabstir SDK provides a comprehensive interface for interacting with the Fabs
 - USDC and ETH payment support
 - Session-based LLM interactions with context preservation
 - **RAG (Retrieval-Augmented Generation)** with vector databases, document upload, and semantic search
+- **Image Generation** via FLUX.2 diffusion models (encrypted WebSocket + HTTP paths)
 - Model governance and validation
 - WebSocket real-time streaming
 - S5 decentralized storage integration
@@ -1455,6 +1457,167 @@ await sessionManager.sendPromptStreaming(
 ```
 
 **Important**: The `web_search`, `max_searches`, and `search_queries` fields are sent at the message level (not inside the encrypted payload), allowing the node to perform web search before processing the encrypted content.
+
+## Image Generation
+
+The SDK supports text-to-image generation using host-side diffusion models (FLUX.2 Klein 4B). Image generation uses the same E2E encrypted WebSocket channel as inference, with an HTTP path available for testing.
+
+### generateImage (Encrypted WebSocket)
+
+Generate an image via the encrypted WebSocket session (production path):
+
+```typescript
+const sessionManager = await sdk.getSessionManager();
+
+const result = await sessionManager.generateImage(
+  sessionId,
+  'A cat astronaut floating in space',
+  {
+    size: '512x512',    // Default: '1024x1024'
+    steps: 4,           // Default: 4 (range: 1-100)
+    model: 'flux-1-schnell',  // Optional model override
+    seed: 42,           // Optional seed for reproducibility
+    negativePrompt: 'blurry, low quality',  // Optional
+    safetyLevel: 'strict'  // 'strict' | 'moderate' | 'permissive'
+  }
+);
+
+// Display image
+const imgSrc = `data:image/png;base64,${result.image}`;
+
+console.log(`Size: ${result.size}`);
+console.log(`Steps: ${result.steps}`);
+console.log(`Seed: ${result.seed}`);
+console.log(`Processing: ${result.processingTimeMs}ms`);
+console.log(`Billing: ${result.billing.generationUnits} units`);
+```
+
+**Parameters:**
+- `sessionId` (string) - Active encrypted session ID
+- `prompt` (string) - Text description (1-2000 characters)
+- `options` (ImageGenerationOptions, optional) - Generation options
+
+**Returns:** `Promise<ImageGenerationResult>`
+
+```typescript
+interface ImageGenerationResult {
+  image: string;           // Base64-encoded PNG
+  model: string;           // Model used
+  size: string;            // e.g. '512x512'
+  steps: number;           // Diffusion steps
+  seed: number;            // Seed used
+  processingTimeMs: number;
+  safety: SafetyInfo;      // { promptSafe, outputSafe, safetyLevel }
+  billing: BillingInfo;    // { generationUnits, modelMultiplier, megapixels, steps }
+  provider: string;        // Host address
+  chainId: number;
+  chainName: string;
+  nativeToken: string;
+}
+```
+
+**Throws:** `ImageGenerationError` with codes:
+- `VALIDATION_FAILED` - Invalid prompt, size, or steps
+- `PROMPT_BLOCKED` - Safety classifier rejected the prompt
+- `DIFFUSION_SERVICE_UNAVAILABLE` - Host diffusion sidecar is down
+- `IMAGE_GENERATION_FAILED` - Generation failed (retryable)
+- `RATE_LIMIT_EXCEEDED` - Client-side rate limit (5 req/min, retryable)
+- `ENCRYPTION_FAILED` - Encryption/decryption error
+
+### generateImageHttpRequest (HTTP Path)
+
+Generate an image via HTTP POST (testing/CI path, no E2E encryption):
+
+```typescript
+const result = await sessionManager.generateImageHttpRequest(
+  'http://host:8080',
+  'A serene mountain lake at golden hour',
+  { size: '512x512', steps: 4 }
+);
+```
+
+**Parameters:**
+- `hostUrl` (string) - Base URL of the host node
+- `prompt` (string) - Text description (1-2000 characters)
+- `options` (ImageGenerationOptions, optional) - Generation options
+
+**Returns:** `Promise<ImageGenerationResult>` (same as `generateImage`)
+
+### getImageGenerationCapabilities
+
+Check if a host supports image generation:
+
+```typescript
+const hostManager = sdk.getHostManager();
+const capabilities = await hostManager.getImageGenerationCapabilities(hostAddress, apiUrl);
+
+interface ImageGenerationCapabilities {
+  supportsImageGeneration: boolean;      // Host has diffusion sidecar
+  supportsEncryptedWebSocket: boolean;   // Encrypted WebSocket path available
+  supportsHttp: boolean;                 // HTTP path available
+  hasSafetyClassifier: boolean;          // Prompt safety checking
+  hasOutputClassifier: boolean;          // Output safety checking
+  hasBilling: boolean;                   // Billing computation
+  hasContentHashes: boolean;             // Content hash generation
+}
+
+if (capabilities.supportsImageGeneration) {
+  console.log(`WebSocket: ${capabilities.supportsEncryptedWebSocket}`);
+  console.log(`HTTP: ${capabilities.supportsHttp}`);
+}
+```
+
+### ImageGenerationError
+
+Handle image generation errors:
+
+```typescript
+import { ImageGenerationError } from '@fabstir/sdk-core';
+
+try {
+  await sessionManager.generateImage(sessionId, prompt);
+} catch (error) {
+  if (error instanceof ImageGenerationError) {
+    switch (error.code) {
+      case 'RATE_LIMIT_EXCEEDED':
+        console.log(`Retry in ${Math.ceil(error.retryAfter! / 1000)}s`);
+        break;
+      case 'PROMPT_BLOCKED':
+        console.log('Prompt rejected by safety classifier');
+        break;
+      case 'DIFFUSION_SERVICE_UNAVAILABLE':
+        console.log('Diffusion sidecar not running on host');
+        break;
+      case 'IMAGE_GENERATION_FAILED':
+        console.log('Generation failed, retryable:', error.isRetryable);
+        break;
+    }
+  }
+}
+```
+
+### Allowed Image Sizes
+
+```typescript
+import { ALLOWED_IMAGE_SIZES, isValidImageSize } from '@fabstir/sdk-core';
+
+// ALLOWED_IMAGE_SIZES = ['256x256', '512x512', '768x768', '1024x1024', '1024x768', '768x1024']
+
+if (isValidImageSize('512x512')) {
+  // Valid size
+}
+```
+
+### Billing Estimation
+
+```typescript
+import { estimateGenerationUnits, parseSize } from '@fabstir/sdk-core';
+
+const { width, height } = parseSize('1024x1024');
+const units = estimateGenerationUnits(width, height, 4);
+// Formula: (width * height / 1_048_576) * (steps / 20) * modelMultiplier
+// 1024x1024, 4 steps = 0.2 units
+```
 
 ## Payment Management
 

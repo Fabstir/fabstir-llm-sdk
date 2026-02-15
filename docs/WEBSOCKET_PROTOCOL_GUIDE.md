@@ -119,6 +119,47 @@ interface WebSocketMessage {
 }
 ```
 
+### 7. Image Generation Request (Encrypted)
+
+Send an image generation request via the encrypted WebSocket channel (node v8.16.0+). The request is sent as an `encrypted_message` with `action: "image_generation"` in the encrypted payload.
+
+```json
+{
+  "type": "encrypted_message",
+  "session_id": "session_123",
+  "id": "img-1739612345678-abc",
+  "payload": {
+    "ciphertextHex": "...",
+    "nonceHex": "...",
+    "aadHex": ""
+  }
+}
+```
+
+**Encrypted payload (plaintext before encryption):**
+
+```json
+{
+  "action": "image_generation",
+  "prompt": "A cat astronaut floating in space",
+  "size": "512x512",
+  "steps": 4,
+  "model": "flux-1-schnell",
+  "safetyLevel": "strict",
+  "chainId": 84532
+}
+```
+
+**Fields:**
+- `action` (string, required): Must be `"image_generation"` — routes to diffusion sidecar instead of LLM
+- `prompt` (string, required): Text description (1-2000 characters)
+- `size` (string): Image dimensions. Allowed: `256x256`, `512x512`, `768x768`, `1024x1024`, `1024x768`, `768x1024`. Default: `1024x1024`
+- `steps` (number): Diffusion steps (1-100). Default: `4`
+- `model` (string, optional): Model override
+- `seed` (number, optional): Seed for reproducibility
+- `negativePrompt` (string, optional): Negative prompt
+- `safetyLevel` (string): `"strict"` | `"moderate"` | `"permissive"`. Default: `"strict"`
+
 ## Host -> Client Messages
 
 ### 1. Connection Confirmation
@@ -210,6 +251,82 @@ interface WebSocketMessage {
   "latency": 1
 }
 ```
+
+### 8. Image Generation Result (Encrypted)
+
+Returned when the host successfully generates an image (node v8.16.0+). The response arrives as an `encrypted_response` containing the result in the encrypted payload.
+
+```json
+{
+  "type": "encrypted_response",
+  "session_id": "session_123",
+  "payload": {
+    "ciphertextHex": "...",
+    "nonceHex": "...",
+    "aadHex": "encrypted_image_response"
+  }
+}
+```
+
+**Decrypted payload:**
+
+```json
+{
+  "type": "image_generation_result",
+  "image": "<base64-encoded PNG>",
+  "model": "stable-diffusion-xl",
+  "size": "512x512",
+  "steps": 4,
+  "seed": 99999,
+  "processingTimeMs": 3200,
+  "safety": {
+    "promptSafe": true,
+    "outputSafe": true,
+    "safetyLevel": "strict"
+  },
+  "billing": {
+    "generationUnits": 0.05,
+    "modelMultiplier": 1.0,
+    "megapixels": 0.26,
+    "steps": 4
+  },
+  "provider": "0x1234...",
+  "chainId": 84532,
+  "chainName": "Base Sepolia",
+  "nativeToken": "ETH"
+}
+```
+
+### 9. Image Generation Error (Encrypted)
+
+Returned when image generation fails:
+
+```json
+{
+  "type": "encrypted_response",
+  "session_id": "session_123",
+  "payload": {
+    "ciphertextHex": "...",
+    "nonceHex": "...",
+    "aadHex": ""
+  }
+}
+```
+
+**Decrypted payload:**
+
+```json
+{
+  "type": "image_generation_error",
+  "error_code": "PROMPT_BLOCKED",
+  "error": "Prompt blocked by safety classifier"
+}
+```
+
+**Error codes:**
+- `PROMPT_BLOCKED` — Safety classifier rejected the prompt
+- `DIFFUSION_SERVICE_UNAVAILABLE` — Diffusion sidecar not running
+- `IMAGE_GENERATION_FAILED` — Generation failed (retryable)
 
 ## Advanced Features
 
