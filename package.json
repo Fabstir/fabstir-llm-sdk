@@ -22,7 +22,8 @@
     "dev": "tsc --watch",
     "build:all": "yarn workspaces foreach run build && yarn build",
     "test:all": "yarn workspaces foreach run test && yarn test",
-    "clean:all": "yarn workspaces foreach run clean && yarn clean"
+    "clean:all": "yarn workspaces foreach run clean && yarn clean",
+    "claude-bridge": "node ./packages/claude-bridge/bin/claude-bridge"
   },
   "keywords": [
     "fabstir",

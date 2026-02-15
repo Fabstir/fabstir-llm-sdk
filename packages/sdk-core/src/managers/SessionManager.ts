@@ -47,6 +47,7 @@ import { recoverFromCheckpointsFlow, recoverFromCheckpointsFlowWithHttp } from '
 import { recoverFromBlockchain, type BlockchainRecoveredConversation, type CheckpointQueryOptions } from '../utils/checkpoint-blockchain';
 import JobMarketplaceABI from '../contracts/abis/JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json';
 import type { SearchApiResponse, WebSearchStarted, WebSearchResults, WebSearchError as WebSearchErrorMsg } from '../types/web-search.types';
+import { RAGSessionConfig, RAGMetrics, validateRAGConfig, mergeRAGConfig } from '../session/rag-config';
 
 /**
  * Check if a string is a bytes32 hash (0x + 64 hex chars)
@@ -129,6 +130,9 @@ export interface SessionState {
   webSearchMetadata?: WebSearchMetadata; // NEW: Web search metadata from response
   webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 5.1)
   lastTokenUsage?: TokenUsageInfo; // NEW: Last prompt's token usage (Phase 5)
+  ragContext?: { vectorDbId: string }; // Set by uploadVectors() or startSession(ragConfig)
+  ragConfig?: RAGSessionConfig; // RAG configuration from startSession
+  ragMetrics?: RAGMetrics; // RAG metrics tracking
 }
 
 // Extended SessionConfig with chainId
@@ -157,6 +161,7 @@ export class SessionManager implements ISessionManager {
   private encryptionManager?: EncryptionManager; // NEW: Optional until set after auth
   private sessionGroupManager?: any; // NEW: Session Groups integration (SessionGroupManager)
   private hostSelectionService?: IHostSelectionService; // NEW: Host selection (Phase 5.1)
+  private endpointTransform?: (url: string) => string; // NEW: Transform discovered host URLs (e.g. Docker localhost rewrite)
   private wsClient?: WebSocketClient;
   private sessions: Map<string, SessionState> = new Map();
   private initialized = false;
@@ -200,6 +205,14 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Set a transform function for discovered host endpoint URLs.
+   * Used to rewrite URLs when running in Docker (e.g. localhost → host.docker.internal).
+   */
+  setEndpointTransform(transform: (url: string) => string): void {
+    this.endpointTransform = transform;
+  }
+
+  /**
    * Initialize the session manager
    */
   async initialize(): Promise<void> {
@@ -240,7 +253,7 @@ export class SessionManager implements ISessionManager {
     // Extract parameters for backward compatibility
     const model = config.modelId || config.model;
     let provider = config.host || config.provider;
-    const endpoint = config.endpoint;
+    let endpoint = config.endpoint;
 
     // NEW (Phase 5.1): Automatic host selection when no host is provided
     if (!provider && this.hostSelectionService) {
@@ -251,6 +264,7 @@ export class SessionManager implements ISessionManager {
 
       // Convert model to bytes32 for host lookup
       const modelIdForSelection = convertModelToBytes32(model);
+      console.log(`[SessionManager] Auto-discovery: model="${model}" -> bytes32=${modelIdForSelection}, mode=${mode}`);
 
       // Select host using user's preferences
       const selectedHost = await this.hostSelectionService.selectHostForModel(
@@ -260,17 +274,30 @@ export class SessionManager implements ISessionManager {
       );
 
       if (!selectedHost) {
-        throw new SDKError('No hosts available for the selected model', 'NO_HOSTS_AVAILABLE');
+        throw new SDKError(`No hosts available for model "${model}" (hash: ${modelIdForSelection})`, 'NO_HOSTS_AVAILABLE');
       }
 
       provider = selectedHost.address;
+      // Set endpoint from discovered host's apiUrl
+      if (selectedHost.apiUrl && !endpoint) {
+        endpoint = selectedHost.apiUrl;
+      }
+
+      // Apply endpoint transform (e.g. Docker localhost → host.docker.internal)
+      if (endpoint && this.endpointTransform) {
+        const original = endpoint;
+        endpoint = this.endpointTransform(endpoint);
+        if (endpoint !== original) {
+          console.log(`[SessionManager] Endpoint transformed: ${original} -> ${endpoint}`);
+        }
+      }
 
       // Store selected host for next time
       await this.storageManager.updateUserSettings({
         lastHostAddress: selectedHost.address,
       });
 
-      console.log(`[SessionManager] Auto-selected host: ${selectedHost.address} (mode: ${mode})`);
+      console.log(`[SessionManager] Auto-selected host: ${selectedHost.address}, apiUrl: ${selectedHost.apiUrl} (mode: ${mode})`);
     }
 
     // NEW (Phase 6.2): Enable encryption by default (opt-out with encryption: false)
@@ -396,6 +423,9 @@ export class SessionManager implements ISessionManager {
         encryption: enableEncryption,  // NEW (Phase 6.2): Store encryption preference
         groupId: config.groupId,  // NEW: Session Groups integration
         webSearch: config.webSearch,  // NEW (Phase 5.1): Web search configuration
+        ragContext: ragConfig?.enabled
+          ? { vectorDbId: ragConfig.vectorDbSessionId || `rag-${sessionId}` }
+          : undefined,
         ragConfig: ragConfig,  // NEW (Phase 5.1): Store RAG config
         ragMetrics: ragConfig?.enabled ? {
           totalRetrievals: 0,
@@ -486,6 +516,7 @@ export class SessionManager implements ISessionManager {
     pricePerToken: number;
     proofInterval: number;
     duration: number;
+    ragConfig?: RAGSessionConfig;
   }): Promise<void> {
     const sessionId = config.sessionId;
     const sessionIdStr = sessionId.toString();
@@ -506,6 +537,9 @@ export class SessionManager implements ISessionManager {
       totalTokens: 0,
       startTime: Date.now(),
       encryption: true, // Match normal session behavior - use encryption by default (Phase 6.2)
+      ragContext: config.ragConfig?.enabled
+        ? { vectorDbId: config.ragConfig.vectorDbSessionId || `rag-${sessionIdStr}` }
+        : undefined,
     };
 
     // Store in memory
@@ -2438,6 +2472,11 @@ export class SessionManager implements ISessionManager {
         allErrors.push(`Batch ${batchIndex + 1} failed: ${error.message}`);
         totalRejected += batch.length;
       }
+    }
+
+    // After successful upload, mark session as RAG-enabled
+    if (totalUploaded > 0) {
+      session.ragContext = session.ragContext || { vectorDbId: `vectors-${sessionId}` };
     }
 
     return {
