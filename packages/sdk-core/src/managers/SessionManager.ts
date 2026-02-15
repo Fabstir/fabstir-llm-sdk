@@ -48,6 +48,11 @@ import { recoverFromBlockchain, type BlockchainRecoveredConversation, type Check
 import JobMarketplaceABI from '../contracts/abis/JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json';
 import type { SearchApiResponse, WebSearchStarted, WebSearchResults, WebSearchError as WebSearchErrorMsg } from '../types/web-search.types';
 import { RAGSessionConfig, RAGMetrics, validateRAGConfig, mergeRAGConfig } from '../session/rag-config';
+import type { ImageGenerationOptions, ImageGenerationResult } from '../types/image-generation.types';
+import { ImageGenerationError } from '../errors/image-generation-errors';
+import { ImageGenerationRateLimiter } from '../utils/image-generation-rate-limiter';
+import { generateImageWs } from '../utils/image-generation-ws';
+import { generateImageHttp } from '../utils/image-generation-http';
 
 /**
  * Check if a string is a bytes32 hash (0x + 64 hex chars)
@@ -167,6 +172,7 @@ export class SessionManager implements ISessionManager {
   private initialized = false;
   private sessionKey?: Uint8Array; // NEW: Store session key for Phase 4.2
   private messageIndex: number = 0; // NEW: For Phase 4.2 replay protection
+  private imageGenRateLimiter = new ImageGenerationRateLimiter();
   private pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: any) => void; timeoutId: NodeJS.Timeout }> = new Map(); // Host-side RAG request tracking
   private ragHandlerUnsubscribe?: () => void; // NEW: Store RAG handler unsubscribe function to prevent duplicate handlers
   // Web Search (Phase 5.2-5.3): Pending search tracking and handler cleanup
@@ -3308,5 +3314,103 @@ export class SessionManager implements ISessionManager {
         { originalError: error }
       );
     }
+  }
+
+  // ============= Image Generation =============
+
+  /**
+   * Generate an image via encrypted WebSocket (production path).
+   *
+   * @param sessionId - Active session ID
+   * @param prompt - Text prompt for image generation
+   * @param options - Image generation options (size, steps, etc.)
+   * @returns Promise resolving to ImageGenerationResult
+   */
+  async generateImage(
+    sessionId: string,
+    prompt: string,
+    options?: ImageGenerationOptions
+  ): Promise<ImageGenerationResult> {
+    // Validate session exists and is active
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
+    }
+    if (session.status !== 'active') {
+      throw new SDKError('Session is not active', 'SESSION_NOT_ACTIVE');
+    }
+
+    // Require encryption manager
+    if (!this.encryptionManager) {
+      throw new SDKError('EncryptionManager not available', 'ENCRYPTION_NOT_AVAILABLE');
+    }
+
+    // Lazily initialize WebSocket if not connected (same pattern as sendEncryptedMessage)
+    const endpoint = session.endpoint || 'http://localhost:8080';
+    const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
+      ? endpoint
+      : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
+
+    if (!this.wsClient || !this.wsClient.isConnected()) {
+      console.log(`[SessionManager] generateImage: initializing WebSocket to ${wsUrl}`);
+      this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+      await this.wsClient.connect();
+    }
+
+    // Send session_init if session key not yet established
+    if (!this.sessionKey) {
+      console.log(`[SessionManager] generateImage: sending encrypted session init`);
+      const initConfig: ExtendedSessionConfig = {
+        chainId: session.chainId,
+        host: session.provider,
+        modelId: session.model,
+        endpoint: session.endpoint,
+        paymentMethod: 'deposit',
+        encryption: true
+      };
+      await this.sendEncryptedInit(this.wsClient, initConfig, session.sessionId, session.jobId);
+    }
+
+    if (!this.sessionKey) {
+      throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
+    }
+
+    // Delegate to standalone utility
+    const messageIndexRef = { value: this.messageIndex };
+    const result = await generateImageWs({
+      wsClient: this.wsClient,
+      encryptionManager: {
+        encryptMessage: (key: Uint8Array, plaintext: string, index: number) =>
+          this.encryptionManager!.encryptMessage(key, plaintext, index),
+        decryptMessage: (key: Uint8Array, payload: any) => {
+          const p = payload.payload || payload;
+          return this.encryptionManager!.decryptMessage(key, p);
+        },
+      },
+      rateLimiter: this.imageGenRateLimiter,
+      sessionId,
+      sessionKey: this.sessionKey,
+      messageIndex: messageIndexRef,
+      prompt,
+      options,
+    });
+    this.messageIndex = messageIndexRef.value;
+    return result;
+  }
+
+  /**
+   * Generate an image via HTTP POST (testing/CI path, no encryption).
+   *
+   * @param hostUrl - Base URL of the host
+   * @param prompt - Text prompt for image generation
+   * @param options - Image generation options (size, steps, etc.)
+   * @returns Promise resolving to ImageGenerationResult
+   */
+  async generateImageHttpRequest(
+    hostUrl: string,
+    prompt: string,
+    options?: ImageGenerationOptions
+  ): Promise<ImageGenerationResult> {
+    return generateImageHttp(hostUrl, prompt, options);
   }
 }

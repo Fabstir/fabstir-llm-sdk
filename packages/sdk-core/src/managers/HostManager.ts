@@ -32,6 +32,8 @@ import { bytesToHex, hexToBytes, toCompressedPub } from '../crypto/utilities';
 import { requestHostPublicKey } from './HostKeyRecovery';
 import { getWebSearchCapabilitiesFromHost } from '../utils/host-web-search-capabilities';
 import type { WebSearchCapabilities } from '../types/web-search.types';
+import { getImageGenerationCapabilitiesFromHost } from '../utils/host-image-generation-capabilities';
+import type { ImageGenerationCapabilities } from '../types/image-generation.types';
 
 /**
  * Pricing constants for host registration - DUAL PRICING
@@ -962,6 +964,50 @@ export class HostManager {
     }
 
     return getWebSearchCapabilitiesFromHost(hostApiUrl);
+  }
+
+  /**
+   * Get image generation capabilities from a host.
+   *
+   * @param hostAddress - Host's EVM address
+   * @param apiUrl - Optional API URL (skips contract lookup if provided)
+   * @returns Image generation capabilities
+   */
+  async getImageGenerationCapabilities(
+    hostAddress: string,
+    apiUrl?: string
+  ): Promise<ImageGenerationCapabilities> {
+    let hostApiUrl = apiUrl;
+    if (!hostApiUrl) {
+      try {
+        const hostInfo = await this.getHostInfo(hostAddress);
+        hostApiUrl = hostInfo.apiUrl;
+      } catch {
+        return {
+          supportsImageGeneration: false,
+          supportsEncryptedWebSocket: false,
+          supportsHttp: false,
+          hasSafetyClassifier: false,
+          hasOutputClassifier: false,
+          hasBilling: false,
+          hasContentHashes: false,
+        };
+      }
+    }
+
+    if (!hostApiUrl) {
+      return {
+        supportsImageGeneration: false,
+        supportsEncryptedWebSocket: false,
+        supportsHttp: false,
+        hasSafetyClassifier: false,
+        hasOutputClassifier: false,
+        hasBilling: false,
+        hasContentHashes: false,
+      };
+    }
+
+    return getImageGenerationCapabilitiesFromHost(hostApiUrl);
   }
 
   /**

@@ -442,3 +442,7 @@ export * from './web-search.types';
 // ============= Proof Types (Security Audit Migration) =============
 
 export * from './proof.types';
+
+// ============= Image Generation Types =============
+
+export * from './image-generation.types';

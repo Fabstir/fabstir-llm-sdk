@@ -134,6 +134,9 @@ export {
 // Export web search errors
 export { WebSearchError } from './errors/web-search-errors';
 
+// Export image generation errors
+export { ImageGenerationError } from './errors/image-generation-errors';
+
 // Export wallet providers
 export { EOAProvider } from './providers/EOAProvider';
 export { SmartAccountProvider } from './providers/SmartAccountProvider';
