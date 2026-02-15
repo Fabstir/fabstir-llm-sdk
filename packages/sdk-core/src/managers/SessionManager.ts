@@ -168,6 +168,7 @@ export class SessionManager implements ISessionManager {
   private hostSelectionService?: IHostSelectionService; // NEW: Host selection (Phase 5.1)
   private endpointTransform?: (url: string) => string; // NEW: Transform discovered host URLs (e.g. Docker localhost rewrite)
   private wsClient?: WebSocketClient;
+  private wsSessionId?: string; // Track which session owns the WebSocket
   private sessions: Map<string, SessionState> = new Map();
   private initialized = false;
   private sessionKey?: Uint8Array; // NEW: Store session key for Phase 4.2
@@ -792,10 +793,20 @@ export class SessionManager implements ISessionManager {
         ? endpoint 
         : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
 
+      // Force new WebSocket if session changed (old connection belongs to previous session)
+      if (this.wsClient && this.wsSessionId && this.wsSessionId !== sessionIdStr) {
+        try { await this.wsClient.disconnect(); } catch (_) { /* ignore */ }
+        this.wsClient = undefined;
+        this.wsSessionId = undefined;
+        this.sessionKey = undefined;
+        this.messageIndex = 0;
+      }
+
       // Initialize WebSocket client if not already connected
       if (!this.wsClient || !this.wsClient.isConnected()) {
         this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
         await this.wsClient.connect();
+        this.wsSessionId = sessionIdStr;
 
         // Set up global RAG message handlers
         this._setupRAGMessageHandlers();
@@ -944,7 +955,7 @@ export class SessionManager implements ISessionManager {
                 const llmTokens = data.tokens_used || encChunkCount;
                 const vlmTokens = data.vlm_tokens || 0;
                 const totalTokensForPrompt = llmTokens + vlmTokens;
-                const usage: TokenUsageInfo = { llmTokens, vlmTokens, totalTokens: totalTokensForPrompt };
+                const usage: TokenUsageInfo = { llmTokens, vlmTokens, imageGenTokens: 0, totalTokens: totalTokensForPrompt };
                 session.totalTokens += totalTokensForPrompt;
                 session.lastTokenUsage = usage;
                 options?.onTokenUsage?.(usage);
@@ -1000,7 +1011,7 @@ export class SessionManager implements ISessionManager {
               const llmTokens = data.tokens_used || ptChunkCount;
               const vlmTokens = data.vlm_tokens || 0;
               const totalTokensForPrompt = llmTokens + vlmTokens;
-              const usage: TokenUsageInfo = { llmTokens, vlmTokens, totalTokens: totalTokensForPrompt };
+              const usage: TokenUsageInfo = { llmTokens, vlmTokens, imageGenTokens: 0, totalTokens: totalTokensForPrompt };
               session.totalTokens += totalTokensForPrompt;
               session.lastTokenUsage = usage;
               options?.onTokenUsage?.(usage);
@@ -1225,7 +1236,7 @@ export class SessionManager implements ISessionManager {
                 const llmTokens = data.tokens_used || encNsChunkCount;
                 const vlmTokens = data.vlm_tokens || 0;
                 const totalTokensForPrompt = llmTokens + vlmTokens;
-                const usage: TokenUsageInfo = { llmTokens, vlmTokens, totalTokens: totalTokensForPrompt };
+                const usage: TokenUsageInfo = { llmTokens, vlmTokens, imageGenTokens: 0, totalTokens: totalTokensForPrompt };
                 session.totalTokens += totalTokensForPrompt;
                 session.lastTokenUsage = usage;
                 options?.onTokenUsage?.(usage);
@@ -1276,7 +1287,7 @@ export class SessionManager implements ISessionManager {
               const llmTokens = data.tokens_used || 0;
               const vlmTokens = data.vlm_tokens || 0;
               const totalTokensForPrompt = llmTokens + vlmTokens;
-              ptNsUsage = { llmTokens, vlmTokens, totalTokens: totalTokensForPrompt };
+              ptNsUsage = { llmTokens, vlmTokens, imageGenTokens: 0, totalTokens: totalTokensForPrompt };
             }
           });
 
@@ -1667,11 +1678,37 @@ export class SessionManager implements ISessionManager {
         this.ragHandlerUnsubscribe = undefined;
       }
 
-      // Close WebSocket connection if active
-      if (this.wsClient && this.wsClient.isConnected()) {
-        await this.wsClient.disconnect();
+      // Clean up web search handler
+      if (this.searchHandlerUnsubscribe) {
+        this.searchHandlerUnsubscribe();
+        this.searchHandlerUnsubscribe = undefined;
+      }
+
+      // Reject any pending RAG/search requests (WebSocket is closing)
+      for (const [id, pending] of this.pendingRequests) {
+        clearTimeout(pending.timeoutId);
+        pending.reject(new SDKError('Session ended', 'SESSION_ENDED'));
+      }
+      this.pendingRequests.clear();
+
+      for (const [id, pending] of this.pendingSearches) {
+        clearTimeout(pending.timeoutId);
+        pending.reject(new SDKError('Session ended', 'SESSION_ENDED'));
+      }
+      this.pendingSearches.clear();
+
+      // Fully tear down WebSocket connection (must be fresh for next session)
+      if (this.wsClient) {
+        try {
+          await this.wsClient.disconnect();
+        } catch (_) { /* ignore disconnect errors */ }
         this.wsClient = undefined;
       }
+      this.wsSessionId = undefined;
+
+      // Clear encryption state so next session sends fresh session_init + ECDH
+      this.sessionKey = undefined;
+      this.messageIndex = 0;
 
       // Update session state in memory
       const session = this.sessions.get(sessionIdStr);
@@ -1708,8 +1745,10 @@ export class SessionManager implements ISessionManager {
     sessionId: bigint,
     jobId: bigint
   ): Promise<void> {
+    console.warn(`[SDK:encryptedInit:1] ENTER sessionId=${sessionId} jobId=${jobId} host=${config.host} endpoint=${config.endpoint}`);
 
     if (!this.encryptionManager) {
+      console.error(`[SDK:encryptedInit:2] ENCRYPTION_NOT_AVAILABLE`);
       throw new SDKError(
         'EncryptionManager not available for encrypted session',
         'ENCRYPTION_NOT_AVAILABLE'
@@ -1717,6 +1756,7 @@ export class SessionManager implements ISessionManager {
     }
 
     if (!this.hostManager) {
+      console.error(`[SDK:encryptedInit:3] HOST_MANAGER_NOT_AVAILABLE`);
       throw new SDKError(
         'HostManager required for host public key retrieval',
         'HOST_MANAGER_NOT_AVAILABLE'
@@ -1725,16 +1765,17 @@ export class SessionManager implements ISessionManager {
 
     // 1. Generate random session key (32 bytes)
     this.sessionKey = crypto.getRandomValues(new Uint8Array(32));
-
     const sessionKeyHex = bytesToHex(this.sessionKey);
-
     this.messageIndex = 0;
+    console.warn(`[SDK:encryptedInit:4] Generated session key, messageIndex reset to 0`);
 
     // 2. Get host public key (uses cache, metadata, or signature recovery)
+    console.warn(`[SDK:encryptedInit:5] Getting host public key for ${config.host}...`);
     const hostPubKey = await this.hostManager.getHostPublicKey(
       config.host,
       config.endpoint  // API URL for fallback
     );
+    console.warn(`[SDK:encryptedInit:6] Got host public key (${hostPubKey.length} chars)`);
 
     // 3. Prepare session init payload (per docs lines 469-477)
     const recoveryPubKey = this.encryptionManager.getRecoveryPublicKey();
@@ -1756,22 +1797,55 @@ export class SessionManager implements ISessionManager {
       };
     }
 
-
     // 4. Encrypt with EncryptionManager
+    console.warn(`[SDK:encryptedInit:7] Encrypting session init payload...`);
     const encrypted = await this.encryptionManager.encryptSessionInit(
       hostPubKey,
       initPayload
     );
+    console.warn(`[SDK:encryptedInit:8] Encrypted OK, type=${encrypted.type}`);
 
-    // 5. Send encrypted init message
+    // 5. Send encrypted init message via sendWithoutResponse + targeted ack handler.
     const messageToSend = {
       ...encrypted,  // { type: 'encrypted_session_init', payload: {...} }
       chain_id: config.chainId,
       session_id: sessionId.toString(),
       job_id: jobId.toString()
     };
+    console.warn(`[SDK:encryptedInit:9] Sending encrypted_session_init via sendWithoutResponse (session_id=${sessionId}, job_id=${jobId}, chain_id=${config.chainId})`);
 
-    await ws.sendMessage(messageToSend);
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        console.error(`[SDK:encryptedInit:12] TIMEOUT waiting for session_init_ack (30s)`);
+        unsubscribe();
+        reject(new SDKError('Session init timeout waiting for ack', 'WS_TIMEOUT'));
+      }, 30000);
+
+      const unsubscribe = ws.onMessage((data: any) => {
+        console.warn(`[SDK:encryptedInit:10] Received message type=${data.type} while waiting for ack`);
+        if (data.type === 'session_init_ack') {
+          console.warn(`[SDK:encryptedInit:11] Got session_init_ack - init complete`);
+          clearTimeout(timeout);
+          unsubscribe();
+          resolve();
+        } else if (data.type === 'error') {
+          console.error(`[SDK:encryptedInit:11b] Got error: ${data.message}`);
+          clearTimeout(timeout);
+          unsubscribe();
+          reject(new SDKError(data.message || 'Session init failed', 'SESSION_INIT_ERROR'));
+        }
+        // Ignore ALL other message types (encrypted_response, encrypted_chunk, etc.)
+      });
+
+      ws.sendWithoutResponse(messageToSend).then(() => {
+        console.warn(`[SDK:encryptedInit:9b] sendWithoutResponse completed (message sent to WebSocket)`);
+      }).catch((err: any) => {
+        console.error(`[SDK:encryptedInit:9c] sendWithoutResponse FAILED: ${err.message}`);
+        clearTimeout(timeout);
+        unsubscribe();
+        reject(err);
+      });
+    });
 
   }
 
@@ -2360,16 +2434,24 @@ export class SessionManager implements ISessionManager {
       );
     }
 
-    // 2. Ensure WebSocket is connected
-    if (!this.wsClient || !this.wsClient.isConnected()) {
-      // Get WebSocket URL from endpoint
-      const endpoint = session.endpoint || 'http://localhost:8080';
-      const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
-        ? endpoint
-        : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
+    // 2. Force new WebSocket if session changed (old connection belongs to previous session)
+    const endpoint = session.endpoint || 'http://localhost:8080';
+    const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
+      ? endpoint
+      : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
 
+    if (this.wsClient && this.wsSessionId && this.wsSessionId !== sessionId) {
+      try { await this.wsClient.disconnect(); } catch (_) { /* ignore */ }
+      this.wsClient = undefined;
+      this.wsSessionId = undefined;
+      this.sessionKey = undefined;
+      this.messageIndex = 0;
+    }
+
+    if (!this.wsClient || !this.wsClient.isConnected()) {
       this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
       await this.wsClient.connect();
+      this.wsSessionId = sessionId;
 
       // Set up global RAG message handlers
       this._setupRAGMessageHandlers();
@@ -3331,71 +3413,129 @@ export class SessionManager implements ISessionManager {
     prompt: string,
     options?: ImageGenerationOptions
   ): Promise<ImageGenerationResult> {
+    console.warn(`[SDK:generateImage:1] ENTER v1.14.6 sessionId=${sessionId} wsSessionId=${this.wsSessionId} hasWs=${!!this.wsClient} wsConnected=${this.wsClient?.isConnected()} hasKey=${!!this.sessionKey} msgIdx=${this.messageIndex}`);
+
     // Validate session exists and is active
     const session = this.sessions.get(sessionId);
     if (!session) {
+      console.error(`[SDK:generateImage:2] SESSION_NOT_FOUND sessionId=${sessionId} available=[${Array.from(this.sessions.keys()).join(',')}]`);
       throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
     }
+    console.warn(`[SDK:generateImage:3] Session found: status=${session.status} endpoint=${session.endpoint} provider=${session.provider} model=${session.model} chainId=${session.chainId} jobId=${session.jobId} sessionId=${session.sessionId}`);
+
     if (session.status !== 'active') {
+      console.error(`[SDK:generateImage:4] SESSION_NOT_ACTIVE status=${session.status}`);
       throw new SDKError('Session is not active', 'SESSION_NOT_ACTIVE');
     }
 
     // Require encryption manager
     if (!this.encryptionManager) {
+      console.error(`[SDK:generateImage:5] ENCRYPTION_NOT_AVAILABLE`);
       throw new SDKError('EncryptionManager not available', 'ENCRYPTION_NOT_AVAILABLE');
     }
+    console.warn(`[SDK:generateImage:6] EncryptionManager OK`);
 
-    // Lazily initialize WebSocket if not connected (same pattern as sendEncryptedMessage)
+    // Lazily initialize WebSocket if not connected
     const endpoint = session.endpoint || 'http://localhost:8080';
     const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
       ? endpoint
       : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
+    console.warn(`[SDK:generateImage:7] endpoint=${endpoint} wsUrl=${wsUrl}`);
+
+    // Force new WebSocket if session changed (old connection belongs to previous session)
+    if (this.wsClient && this.wsSessionId && this.wsSessionId !== sessionId) {
+      console.warn(`[SDK:generateImage:8] Session changed ${this.wsSessionId} -> ${sessionId}, tearing down old WebSocket`);
+      try { await this.wsClient.disconnect(); } catch (_) { /* ignore */ }
+      this.wsClient = undefined;
+      this.wsSessionId = undefined;
+      this.sessionKey = undefined;
+      this.messageIndex = 0;
+    }
 
     if (!this.wsClient || !this.wsClient.isConnected()) {
-      console.log(`[SessionManager] generateImage: initializing WebSocket to ${wsUrl}`);
-      this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
-      await this.wsClient.connect();
+      console.warn(`[SDK:generateImage:9] Creating fresh WebSocket to ${wsUrl}`);
+      try {
+        this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+        console.warn(`[SDK:generateImage:10] WebSocket created, calling connect()...`);
+        await this.wsClient.connect();
+        console.warn(`[SDK:generateImage:11] WebSocket connected OK`);
+        this.wsSessionId = sessionId;
+      } catch (err: any) {
+        console.error(`[SDK:generateImage:12] WebSocket connect FAILED: ${err.message}`, err);
+        throw err;
+      }
+    } else {
+      console.warn(`[SDK:generateImage:9b] Reusing existing WebSocket (connected=${this.wsClient.isConnected()})`);
     }
 
-    // Send session_init if session key not yet established
-    if (!this.sessionKey) {
-      console.log(`[SessionManager] generateImage: sending encrypted session init`);
-      const initConfig: ExtendedSessionConfig = {
-        chainId: session.chainId,
-        host: session.provider,
-        modelId: session.model,
-        endpoint: session.endpoint,
-        paymentMethod: 'deposit',
-        encryption: true
-      };
+    // Always send session_init with fresh ECDH key exchange
+    console.warn(`[SDK:generateImage:13] Sending sendEncryptedInit for session ${sessionId} job ${session.jobId}`);
+    const initConfig: ExtendedSessionConfig = {
+      chainId: session.chainId,
+      host: session.provider,
+      modelId: session.model,
+      endpoint: session.endpoint,
+      paymentMethod: 'deposit',
+      encryption: true
+    };
+    try {
       await this.sendEncryptedInit(this.wsClient, initConfig, session.sessionId, session.jobId);
+      console.warn(`[SDK:generateImage:14] sendEncryptedInit completed OK, hasKey=${!!this.sessionKey}`);
+    } catch (err: any) {
+      console.error(`[SDK:generateImage:15] sendEncryptedInit FAILED: ${err.message}`, err);
+      throw err;
     }
 
     if (!this.sessionKey) {
+      console.error(`[SDK:generateImage:16] SESSION_KEY_NOT_AVAILABLE after init`);
       throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
     }
 
     // Delegate to standalone utility
+    console.warn(`[SDK:generateImage:17] Calling generateImageWs prompt="${prompt.substring(0, 50)}..." msgIdx=${this.messageIndex}`);
     const messageIndexRef = { value: this.messageIndex };
-    const result = await generateImageWs({
-      wsClient: this.wsClient,
-      encryptionManager: {
-        encryptMessage: (key: Uint8Array, plaintext: string, index: number) =>
-          this.encryptionManager!.encryptMessage(key, plaintext, index),
-        decryptMessage: (key: Uint8Array, payload: any) => {
-          const p = payload.payload || payload;
-          return this.encryptionManager!.decryptMessage(key, p);
+    try {
+      const result = await generateImageWs({
+        wsClient: this.wsClient,
+        encryptionManager: {
+          encryptMessage: (key: Uint8Array, plaintext: string, index: number) =>
+            this.encryptionManager!.encryptMessage(key, plaintext, index),
+          decryptMessage: (key: Uint8Array, payload: any) => {
+            const p = payload.payload || payload;
+            return this.encryptionManager!.decryptMessage(key, p);
+          },
         },
-      },
-      rateLimiter: this.imageGenRateLimiter,
-      sessionId,
-      sessionKey: this.sessionKey,
-      messageIndex: messageIndexRef,
-      prompt,
-      options,
-    });
-    this.messageIndex = messageIndexRef.value;
-    return result;
+        rateLimiter: this.imageGenRateLimiter,
+        sessionId,
+        sessionKey: this.sessionKey,
+        messageIndex: messageIndexRef,
+        prompt,
+        options,
+      });
+      this.messageIndex = messageIndexRef.value;
+      console.warn(`[SDK:generateImage:18] generateImageWs completed OK, size=${result.size} processingTime=${result.processingTimeMs}ms`);
+
+      // Track image generation billing as token usage
+      // Convert generationUnits to token equivalent (1 unit = 1000 tokens)
+      const genUnits = result.billing?.generationUnits || 0;
+      const imageGenTokens = Math.ceil(genUnits * 1000);
+      if (imageGenTokens > 0) {
+        const usage: TokenUsageInfo = {
+          llmTokens: 0,
+          vlmTokens: 0,
+          imageGenTokens,
+          totalTokens: imageGenTokens,
+        };
+        session.totalTokens += imageGenTokens;
+        session.lastTokenUsage = usage;
+        console.warn(`[SDK:generateImage:18b] Billing: ${genUnits} genUnits = ${imageGenTokens} imageGenTokens, session totalTokens=${session.totalTokens}`);
+      }
+
+      return result;
+    } catch (err: any) {
+      console.error(`[SDK:generateImage:19] generateImageWs FAILED: ${err.message}`, err);
+      throw err;
+    }
   }
 
   /**

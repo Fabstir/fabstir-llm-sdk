@@ -145,7 +145,9 @@ export interface TokenUsageInfo {
   llmTokens: number;
   /** VLM sidecar tokens for image OCR + description (0 if no images) */
   vlmTokens: number;
-  /** Total billed tokens: llmTokens + vlmTokens */
+  /** Image generation token equivalent (generationUnits * 1000, 0 if no image gen) */
+  imageGenTokens: number;
+  /** Total billed tokens: llmTokens + vlmTokens + imageGenTokens */
   totalTokens: number;
 }
 
