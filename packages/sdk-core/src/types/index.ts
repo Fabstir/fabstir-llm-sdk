@@ -136,6 +136,8 @@ export interface PromptOptions {
   images?: ImageAttachment[];
   /** Called once when token usage info is available (on stream_end or response completion) */
   onTokenUsage?: (usage: TokenUsageInfo) => void;
+  /** Called when image generation intent is auto-detected and image is generated */
+  onImageGenerated?: (result: import('./image-generation.types').ImageGenerationResult) => void;
 }
 
 // ============= Token Usage Types =============

@@ -1608,6 +1608,50 @@ if (isValidImageSize('512x512')) {
 }
 ```
 
+### Automatic Image Intent Detection (v1.14.10+)
+
+The SDK auto-detects image generation intent from natural language prompts in `sendPromptStreaming()`. When detected, it routes to `generateImage()` automatically — no UI toggle required.
+
+```typescript
+// Auto-detected: routes to generateImage(), fires callback
+await sessionManager.sendPromptStreaming(
+  sessionId,
+  'Generate an image of a cat astronaut in 1024x1024',
+  (token) => process.stdout.write(token),
+  {
+    onImageGenerated: (result) => {
+      // result.image = base64 PNG
+      const imgSrc = `data:image/png;base64,${result.image}`;
+      console.log(`Generated ${result.size} in ${result.processingTimeMs}ms`);
+    }
+  }
+);
+// Returns "Image generated successfully" as text response
+
+// NOT detected: goes to normal LLM inference
+await sessionManager.sendPromptStreaming(sessionId, 'What is in this image?', onToken);
+// → Normal LLM response (no false positive)
+```
+
+**Trigger patterns:** `generate an image of`, `draw a`, `create a picture of`, `paint a`, `sketch a`, `make an image of`, `render a` — including polite forms (`please generate`, `can you draw`).
+
+**Not triggered by:** `describe the image`, `what is in this image`, `how to draw in CSS`, `image processing algorithm`, etc.
+
+**Parameters auto-extracted from prompt:**
+- Size: `"...in 1024x1024"` → `{ size: '1024x1024' }`
+- Steps: `"...with 20 steps"` → `{ steps: 20 }`
+
+**Fallback:** If image generation fails, the prompt silently falls back to normal LLM inference.
+
+**Direct usage:**
+
+```typescript
+import { analyzePromptForImageIntent } from '@fabstir/sdk-core';
+
+const result = analyzePromptForImageIntent('Generate an image of a cat in 512x512');
+// { isImageIntent: true, cleanPrompt: 'a cat', extractedOptions: { size: '512x512' } }
+```
+
 ### Billing Estimation
 
 ```typescript

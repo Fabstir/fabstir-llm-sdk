@@ -12,7 +12,7 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 - 📦 **S5 Storage Integration** - Decentralized conversation persistence
 - 🧠 **RAG (Retrieval-Augmented Generation)** - Upload documents and enhance LLM responses with semantic search
 - 🗂️ **Vector Databases** - Host-side vector storage and cosine similarity search via WebSocket
-- 🎨 **Image Generation** - Text-to-image via FLUX.2 diffusion models over E2E encrypted WebSocket
+- 🎨 **Image Generation** - Text-to-image via FLUX.2 diffusion models over E2E encrypted WebSocket, with automatic intent detection from natural language prompts
 - 🔐 **End-to-End Encryption** - XChaCha20-Poly1305 encryption enabled by default with forward secrecy
 - 🛡️ **Error Recovery** - Automatic retries and failover to ensure reliability
 - 🔌 **Browser Compatible** - Works in both Node.js and browser environments
@@ -149,6 +149,36 @@ async function ragExample() {
 - **WebSocket Protocol**: `uploadVectors` and `searchVectors` messages over persistent connection
 
 See [docs/IMPLEMENTATION_CHAT_RAG.md](docs/IMPLEMENTATION_CHAT_RAG.md) for complete architecture and production configuration.
+
+### Image Generation
+
+Generate images via FLUX.2 diffusion models over E2E encrypted WebSocket. The SDK auto-detects image intent from natural language prompts:
+
+```typescript
+// Automatic: type naturally, SDK detects intent and routes to image generation
+await sessionManager.sendPromptStreaming(
+  sessionId,
+  'Generate an image of a cat astronaut in 1024x1024',
+  (token) => console.log(token),
+  {
+    onImageGenerated: (result) => {
+      const imgSrc = `data:image/png;base64,${result.image}`;
+      console.log(`Generated ${result.size} in ${result.processingTimeMs}ms`);
+    }
+  }
+);
+
+// Explicit: call generateImage() directly for full control
+const result = await sessionManager.generateImage(
+  sessionId,
+  'A serene mountain lake at golden hour',
+  { size: '512x512', steps: 4 }
+);
+```
+
+**Auto-detected triggers:** `generate an image of`, `draw a`, `create a picture of`, `paint a`, `sketch a`, `make an image of`, `render a` — including polite forms.
+
+See [docs/SDK_API.md#image-generation](docs/SDK_API.md#image-generation) for full API reference.
 
 ## Installation
 

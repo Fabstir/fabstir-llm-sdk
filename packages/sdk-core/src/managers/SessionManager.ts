@@ -43,6 +43,7 @@ import { PricingValidationError } from '../errors/pricing-errors';
 import { WebSearchError } from '../errors/web-search-errors';
 import { bytesToHex } from '../crypto/utilities';
 import { analyzePromptForSearchIntent } from '../utils/search-intent-analyzer';
+import { analyzePromptForImageIntent } from '../utils/image-intent-analyzer';
 import { recoverFromCheckpointsFlow, recoverFromCheckpointsFlowWithHttp } from '../utils/checkpoint-recovery';
 import { recoverFromBlockchain, type BlockchainRecoveredConversation, type CheckpointQueryOptions } from '../utils/checkpoint-blockchain';
 import JobMarketplaceABI from '../contracts/abis/JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json';
@@ -778,6 +779,25 @@ export class SessionManager implements ISessionManager {
 
     if (session.status !== 'active') {
       throw new SDKError(`Session is ${session.status}`, 'SESSION_NOT_ACTIVE');
+    }
+
+    // Auto-detect image generation intent (like search intent auto-detection)
+    const imageIntent = analyzePromptForImageIntent(prompt);
+    if (imageIntent.isImageIntent) {
+      console.warn(`[SDK:sendPromptStreaming] Image intent detected, routing to generateImage()`);
+      try {
+        const imgResult = await this.generateImage(
+          sessionIdStr,
+          imageIntent.cleanPrompt || prompt,
+          imageIntent.extractedOptions
+        );
+        if (options?.onImageGenerated) {
+          options.onImageGenerated(imgResult);
+        }
+        return `Image generated successfully`;
+      } catch (imgErr) {
+        console.warn(`[SDK:sendPromptStreaming] Image generation failed, falling back to LLM:`, imgErr);
+      }
     }
 
     try {

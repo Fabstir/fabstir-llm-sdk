@@ -136,6 +136,7 @@ export { WebSearchError } from './errors/web-search-errors';
 
 // Export image generation errors
 export { ImageGenerationError } from './errors/image-generation-errors';
+export { analyzePromptForImageIntent, type ImageIntentResult } from './utils/image-intent-analyzer';
 
 // Export wallet providers
 export { EOAProvider } from './providers/EOAProvider';
