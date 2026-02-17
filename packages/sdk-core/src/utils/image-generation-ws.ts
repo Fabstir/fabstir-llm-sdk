@@ -52,7 +52,7 @@ export async function generateImageWs(params: GenerateImageWsParams): Promise<Im
     messageIndex,
     prompt,
     options,
-    timeoutMs = 30000,
+    timeoutMs = 120000,
   } = params;
 
   console.warn(`[SDK:imageWs:1] ENTER sessionId=${sessionId} prompt="${prompt.substring(0, 50)}..." msgIdx=${messageIndex.value} timeout=${timeoutMs}ms`);

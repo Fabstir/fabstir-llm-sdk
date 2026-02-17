@@ -432,6 +432,40 @@ importers:
         specifier: ^1.6.1
         version: 1.6.1(@types/node@20.19.30)(@vitest/ui@1.6.1)(jsdom@23.2.0(bufferutil@4.1.0)(canvas@2.11.2)(utf-8-validate@5.0.10))(lightningcss@1.30.2)
 
+  packages/openai-bridge:
+    dependencies:
+      '@fabstir/sdk-core':
+        specifier: workspace:*
+        version: link:../sdk-core
+      '@julesl23/s5js':
+        specifier: '>=0.9.0-beta.41'
+        version: 0.9.0-beta.41(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+      commander:
+        specifier: ^11.1.0
+        version: 11.1.0
+      dotenv:
+        specifier: ^16.3.0
+        version: 16.6.1
+      fake-indexeddb:
+        specifier: ^6.0.0
+        version: 6.2.5
+      ws:
+        specifier: ^8.18.3
+        version: 8.19.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.30
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@20.19.30)(@vitest/ui@1.6.1)(jsdom@23.2.0(bufferutil@4.1.0)(canvas@2.11.2)(utf-8-validate@5.0.10))(lightningcss@1.30.2)
+
   packages/sdk-core:
     dependencies:
       '@noble/ciphers':

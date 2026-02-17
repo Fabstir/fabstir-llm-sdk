@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # --- Global Node tools for SDK dev ---
 RUN npm install -g pnpm typescript ts-node vitest
 
-# --- Install Claude Code globally ---
+# --- Install Claude Code via npm (base install) ---
 RUN npm install -g @anthropic-ai/claude-code
 
 # --- Install Playwright MCP + CLI (token-efficient) with Chromium ---
@@ -34,9 +34,15 @@ RUN id -u developer >/dev/null 2>&1 || useradd -m -s /bin/bash developer && \
 # --- Add developer to docker group ---
 RUN groupadd -f docker && usermod -aG docker developer
 
+# --- Give developer ownership of global npm prefix so updates work without sudo ---
+RUN NPM_PREFIX=$(npm config get prefix) && \
+    chown -R developer:developer "$NPM_PREFIX/lib/node_modules" && \
+    chown -R developer:developer "$NPM_PREFIX/bin"
+
 # --- Prepare directories with correct ownership (single layer) ---
 RUN mkdir -p /workspace/node_modules \
              /tmp/.X11-unix \
+             /home/developer/.local/bin \
              /home/developer/.local/share/claude/versions \
              /home/developer/.claude \
     && chmod 1777 /tmp/.X11-unix \
@@ -45,8 +51,27 @@ RUN mkdir -p /workspace/node_modules \
              /home/developer/.local \
              /home/developer/.claude
 
+# --- Install Claude Code natively as developer user ---
+# The native install goes to ~/.local/bin/claude which supports auto-updates
+USER developer
+RUN claude install --yes 2>/dev/null || true
+
+# --- Ensure native install PATH takes priority over npm global ---
+# ~/.local/bin MUST come before /usr/local/bin so the native binary wins
+USER root
+RUN echo 'export PATH="$HOME/.local/bin:$PATH"' >> /home/developer/.bashrc && \
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> /home/developer/.profile
+
+# --- Add convenience alias for updating Claude Code ---
+# Use claude-update-npm if native update (claude update) fails due to blocked domains
+RUN echo 'alias claude-update-npm="npm install -g @anthropic-ai/claude-code@latest"' \
+    >> /home/developer/.bashrc && \
+    echo 'alias claude-update-npm="npm install -g @anthropic-ai/claude-code@latest"' \
+    >> /home/developer/.profile
+
 # --- Enable Claude Code agent teams (swarm mode) ---
 ENV CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+# Native install path must come first so it takes priority over npm global
 ENV PATH="/home/developer/.local/bin:$PATH"
 
 WORKDIR /workspace

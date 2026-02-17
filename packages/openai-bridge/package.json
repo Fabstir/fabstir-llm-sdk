@@ -1,0 +1,50 @@
+{
+  "name": "@fabstir/openai-bridge",
+  "version": "0.1.0",
+  "description": "OpenAI-compatible API bridge routing through Fabstir SDK encrypted WebSocket",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "fabstir-openai-bridge": "./bin/openai-bridge"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "clean": "rm -rf dist",
+    "start": "node dist/index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "fabstir",
+    "openai",
+    "bridge",
+    "proxy"
+  ],
+  "author": "Fabstir",
+  "license": "MIT",
+  "dependencies": {
+    "@fabstir/sdk-core": "workspace:*",
+    "commander": "^11.1.0",
+    "dotenv": "^16.3.0",
+    "fake-indexeddb": "^6.0.0",
+    "@julesl23/s5js": ">=0.9.0-beta.41",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.3.0",
+    "vitest": "^1.6.1"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
