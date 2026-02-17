@@ -118,6 +118,14 @@ A decentralized marketplace where smart contracts handle coordination, P2P conne
    - Think-block stripping, output limits, and session auto-recovery
    - Any Anthropic-compatible client works without modification
 
+7. **Image Generation**
+   - FLUX.2 diffusion model integration via host-side sidecar
+   - SDK auto-detects image intent from natural language ("generate an image of...", "draw a...", "paint a...")
+   - Extracts resolution (e.g. 1024x1024) and inference steps from prompt text
+   - Multi-turn aware: correctly detects intent in conversation history
+   - Encrypted end-to-end: image prompts and results flow through same encrypted WebSocket
+   - Explicit API (`generateImage()`) and automatic intent routing both supported
+
 8. **Developer-Friendly SDK**
    - Browser-compatible (@fabstir/sdk-core)
    - 13 specialized managers (Auth, Payment, Session, Host, Storage, Model, Treasury, Client, Encryption, VectorRAG, Document, SessionGroup, Permission)
@@ -428,7 +436,7 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 
 ✅ **Developer Tools**
 
-- Browser-compatible SDK (@fabstir/sdk-core v1.8.6+)
+- Browser-compatible SDK (@fabstir/sdk-core v1.14.11+)
 - 13 specialized managers (modular architecture)
 - Comprehensive API documentation
 - Working demo applications (apps/harness, apps/ui4, apps/ui5)
@@ -474,6 +482,15 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 - Think-block stripping, output safeguards, session auto-recovery
 - Enables any Anthropic-compatible AI agent or SaaS application to use decentralized infrastructure
 - 129 tests passing, production-validated
+
+✅ **Image Generation**
+
+- FLUX.2 diffusion model via host-side sidecar (encrypted WebSocket path)
+- SDK auto-detects image intent from natural language prompts (7 trigger patterns)
+- Extracts resolution and inference steps from prompt text
+- Multi-turn aware: works correctly in conversation history (User:/Assistant: and Harmony formats)
+- Both explicit API (`generateImage()`) and automatic intent routing supported
+- Production-validated with multiple resolutions (512x512, 768x768, 1024x1024)
 
 ### In Progress (Q1 2026)
 
@@ -823,7 +840,7 @@ Platformless AI represents a fundamental shift in AI infrastructure - from platf
 - **XChaCha20-Poly1305 encryption with forward secrecy** protects all communication
 - **Open source** means full transparency - every line auditable
 
-Our infrastructure is complete and production-ready, currently undergoing security audit. The SDK (v1.8.6+) includes 13 specialized managers, a comprehensive Host CLI with TUI dashboard, marketplace pricing, evidence-based slashing for host accountability, and full RAG infrastructure. The Claude Bridge extends this to agentic AI — Claude Code running autonomously on decentralized hosts, creating applications, executing tools, and managing files with full end-to-end encryption. Companies are already approaching us to use this as SaaS AI backend infrastructure. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise, SaaS, and developer adoption as AI regulation tightens and privacy concerns intensify.
+Our infrastructure is complete and production-ready, currently undergoing security audit. The SDK (v1.14.11+) includes 13 specialized managers, a comprehensive Host CLI with TUI dashboard, marketplace pricing, evidence-based slashing for host accountability, full RAG infrastructure, and image generation with automatic intent detection. The Claude Bridge extends this to agentic AI — Claude Code running autonomously on decentralized hosts, creating applications, executing tools, and managing files with full end-to-end encryption. Companies are already approaching us to use this as SaaS AI backend infrastructure. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise, SaaS, and developer adoption as AI regulation tightens and privacy concerns intensify.
 
 The convergence of blockchain technology, zero-knowledge cryptography, and decentralized storage creates a unique opportunity to build AI infrastructure that respects user sovereignty, protects intellectual property, and enables permissionless innovation. Users are sovereign - in complete control of their data, able to decide what AI and AI agents can access, and share securely with others on their own terms.
 
@@ -840,7 +857,7 @@ With first-mover advantage in the platformless AI category, we're poised to beco
 | Monthly Sessions     | 100+              | 1,000+         | 10,000+        |
 | Enterprise Customers | 0                 | 3-5 pilots     | 10-20 paying   |
 | Total Value Locked   | $5,000            | $100,000       | $1,000,000     |
-| SDK Version          | v1.8.6+           | v2.0+          | v2.5+          |
+| SDK Version          | v1.14.11+         | v2.0+          | v2.5+          |
 | SDK Managers         | 13                | 15+            | 18+            |
 | Avg Response Time    | <2s               | <1.5s          | <1s            |
 | Encryption Default   | 100%              | 100%           | 100%           |
