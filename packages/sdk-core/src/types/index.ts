@@ -132,10 +132,17 @@ export interface ImageAttachment {
   format: ImageFormat;
 }
 
+/** Controls model reasoning mode per-request (host v8.17.0+). Omit for default behavior. */
+export type ThinkingMode = 'enabled' | 'disabled' | 'low' | 'medium' | 'high';
+
 export interface PromptOptions {
   images?: ImageAttachment[];
+  /** Controls model thinking/reasoning mode per-request. Omit for default. */
+  thinking?: ThinkingMode;
   /** Called once when token usage info is available (on stream_end or response completion) */
   onTokenUsage?: (usage: TokenUsageInfo) => void;
+  /** Called when image generation intent is auto-detected and image is generated */
+  onImageGenerated?: (result: import('./image-generation.types').ImageGenerationResult) => void;
 }
 
 // ============= Token Usage Types =============
@@ -145,7 +152,9 @@ export interface TokenUsageInfo {
   llmTokens: number;
   /** VLM sidecar tokens for image OCR + description (0 if no images) */
   vlmTokens: number;
-  /** Total billed tokens: llmTokens + vlmTokens */
+  /** Image generation token equivalent (generationUnits * 1000, 0 if no image gen) */
+  imageGenTokens: number;
+  /** Total billed tokens: llmTokens + vlmTokens + imageGenTokens */
   totalTokens: number;
 }
 
@@ -442,3 +451,7 @@ export * from './web-search.types';
 // ============= Proof Types (Security Audit Migration) =============
 
 export * from './proof.types';
+
+// ============= Image Generation Types =============
+
+export * from './image-generation.types';

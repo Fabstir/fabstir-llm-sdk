@@ -109,10 +109,12 @@ describe('Sub-phase 5.1: TokenUsageInfo Type & PromptOptions Extension', () => {
     const usage: TokenUsageInfo = {
       llmTokens: 130,
       vlmTokens: 2873,
+      imageGenTokens: 0,
       totalTokens: 3003,
     };
     expect(usage.llmTokens).toBe(130);
     expect(usage.vlmTokens).toBe(2873);
+    expect(usage.imageGenTokens).toBe(0);
     expect(usage.totalTokens).toBe(3003);
   });
 

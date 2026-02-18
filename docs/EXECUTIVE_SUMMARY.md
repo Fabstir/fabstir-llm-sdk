@@ -25,7 +25,7 @@ Platformless AI is building decentralized AI infrastructure that eliminates the 
 
 Our marketplace connects GPU providers directly with users through blockchain-based settlement, end-to-end encryption, and mathematical proof of computation. This creates a trustless, censorship-resistant, and privacy-preserving platform for AI services.
 
-**Critically, this infrastructure extends beyond chat to support autonomous AI agents.** Our Claude Bridge has demonstrated Claude Code — an agentic coding assistant with 23 tools — running entirely on decentralized GPU hosts. This makes Platformless AI the first decentralized infrastructure capable of powering agentic AI workflows, from coding assistants to SaaS AI backends.
+**Critically, this infrastructure extends beyond chat to support autonomous AI agents.** Our Claude Bridge has demonstrated Claude Code — an agentic coding assistant with 23 tools — running entirely on decentralized GPU hosts. Our OpenAI Bridge extends this to any OpenAI-compatible client (OpenCode, Continue, Cursor, LangChain), including image generation via FLUX.2 diffusion. This makes Platformless AI the first decentralized infrastructure capable of powering agentic AI workflows, from coding assistants to SaaS AI backends, with both Anthropic and OpenAI API compatibility.
 
 ## The Problem
 
@@ -110,13 +110,22 @@ A decentralized marketplace where smart contracts handle coordination, P2P conne
    - Automated escrow and distribution
    - Immutable on-chain audit trails
 
-6. **Agentic AI Bridge**
-   - Anthropic Messages API compatibility layer (@fabstir/claude-bridge)
-   - Enables autonomous AI agents (Claude Code, Cursor, etc.) to run on decentralized hosts
+6. **Agentic AI Bridges**
+   - **Claude Bridge** (`@fabstir/claude-bridge`): Anthropic Messages API compatibility layer
+   - **OpenAI Bridge** (`@fabstir/openai-bridge`): OpenAI Chat Completions, Images, and Responses API compatibility layer
+   - Enables autonomous AI agents (Claude Code, Cursor, OpenCode, Continue, LangChain) to run on decentralized hosts
    - Streaming SSE translation: tool_use, input_json_delta, multi-turn tool results
    - Supports 23+ tool definitions with structured tool calling
    - Think-block stripping, output limits, and session auto-recovery
-   - Any Anthropic-compatible client works without modification
+   - Any Anthropic-compatible or OpenAI-compatible client works without modification
+
+7. **Image Generation**
+   - FLUX.2 diffusion model integration via host-side sidecar
+   - SDK auto-detects image intent from natural language ("generate an image of...", "draw a...", "paint a...")
+   - Extracts resolution (e.g. 1024x1024) and inference steps from prompt text
+   - Multi-turn aware: correctly detects intent in conversation history
+   - Encrypted end-to-end: image prompts and results flow through same encrypted WebSocket
+   - Explicit API (`generateImage()`) and automatic intent routing both supported
 
 8. **Developer-Friendly SDK**
    - Browser-compatible (@fabstir/sdk-core)
@@ -248,8 +257,8 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
    - SLA guarantees
    - Custom compliance packages
    - White-label solutions
-   - SaaS AI backend (drop-in Anthropic API replacement for product teams)
-   - Agentic AI infrastructure (managed Claude Bridge for enterprise dev teams)
+   - SaaS AI backend (drop-in Anthropic or OpenAI API replacement for product teams)
+   - Agentic AI infrastructure (managed Claude Bridge + OpenAI Bridge for enterprise dev teams)
 
 ### Token Economics
 
@@ -366,9 +375,11 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 
 - Only decentralized infrastructure supporting autonomous AI agent tool use
 - Claude Bridge: Anthropic Messages API compatibility for agentic coding (Claude Code, Cursor)
+- OpenAI Bridge: OpenAI Chat Completions API compatibility (OpenCode, Continue, LangChain, any OpenAI SDK client)
 - Streaming SSE with structured tool calling (23+ tools), multi-turn tool results
-- SaaS-ready: any Anthropic-compatible client works without modification
-- Proven in production: Claude Code creating React apps, running tests, editing files — all on decentralized hosts
+- Image generation via `/v1/images/generations` endpoint (FLUX.2 diffusion, quality/size mapping)
+- SaaS-ready: any Anthropic-compatible or OpenAI-compatible client works without modification
+- Proven in production: Claude Code and OpenCode running on decentralized hosts
 
 ### 6. **Technical Innovation**
 
@@ -428,7 +439,7 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 
 ✅ **Developer Tools**
 
-- Browser-compatible SDK (@fabstir/sdk-core v1.8.6+)
+- Browser-compatible SDK (@fabstir/sdk-core v1.14.11+)
 - 13 specialized managers (modular architecture)
 - Comprehensive API documentation
 - Working demo applications (apps/harness, apps/ui4, apps/ui5)
@@ -466,14 +477,25 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 - PermissionManager for access control
 - Host-side embedding via `/v1/embed` endpoint
 
-✅ **Agentic AI Bridge** (Claude Bridge)
+✅ **Agentic AI Bridges** (Claude Bridge + OpenAI Bridge)
 
-- Anthropic Messages API compatibility layer (@fabstir/claude-bridge)
+- **Claude Bridge** (`@fabstir/claude-bridge`): Anthropic Messages API compatibility layer
+- **OpenAI Bridge** (`@fabstir/openai-bridge`): OpenAI Chat Completions, Images, and Responses API compatibility layer
 - Full tool use support: streaming SSE with tool_use blocks, input_json_delta, multi-turn tool results
-- Claude Code (23 tools) running end-to-end on decentralized hosts — verified in production
+- Claude Code (23 tools) and OpenCode running end-to-end on decentralized hosts — verified in production
+- OpenAI Bridge supports: `/v1/chat/completions` (streaming + non-streaming), `/v1/images/generations` (FLUX.2), `/v1/responses`, `/v1/models`, vision (base64 images), tool calling
 - Think-block stripping, output safeguards, session auto-recovery
-- Enables any Anthropic-compatible AI agent or SaaS application to use decentralized infrastructure
-- 129 tests passing, production-validated
+- Enables any Anthropic-compatible or OpenAI-compatible AI agent or SaaS application to use decentralized infrastructure
+- 129 + 162 tests passing, production-validated
+
+✅ **Image Generation**
+
+- FLUX.2 diffusion model via host-side sidecar (encrypted WebSocket path)
+- SDK auto-detects image intent from natural language prompts (7 trigger patterns)
+- Extracts resolution and inference steps from prompt text
+- Multi-turn aware: works correctly in conversation history (User:/Assistant: and Harmony formats)
+- Both explicit API (`generateImage()`) and automatic intent routing supported
+- Production-validated with multiple resolutions (512x512, 768x768, 1024x1024)
 
 ### In Progress (Q1 2026)
 
@@ -574,7 +596,8 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 
 1. **Agentic Coding**
 
-   - Claude Code, Cursor, Windsurf running on private decentralized infrastructure
+   - Claude Code, Cursor, Windsurf, OpenCode, Continue running on private decentralized infrastructure
+   - Both Anthropic and OpenAI API compatibility (Claude Bridge + OpenAI Bridge)
    - Source code never leaves encrypted P2P channel (IP protection)
    - No API key dependency on Anthropic/OpenAI (sovereign access)
    - Enterprise dev teams coding with AI without data leakage risk
@@ -583,7 +606,7 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 2. **SaaS AI Backend**
 
    - Companies embedding AI into products without vendor lock-in
-   - Drop-in Anthropic API replacement (same Messages API, different infrastructure)
+   - Drop-in Anthropic API replacement (Claude Bridge) or OpenAI API replacement (OpenAI Bridge)
    - Multi-model flexibility: swap underlying models without client changes
    - Predictable costs at scale (direct GPU pricing, no platform markup)
    - Compliance-ready: encrypted inference meets GDPR/HIPAA/SOC 2 requirements
@@ -784,8 +807,8 @@ See `.env.test` for current deployed addresses on Base Sepolia and opBNB Testnet
 ### For Enterprise & SaaS Customers
 
 - **Beta Program**: Limited spots for Q1 2026 enterprise beta
-- **SaaS Integration**: Drop-in Anthropic API replacement for AI-powered products
-- **Agentic AI**: Run Claude Code, Cursor, and custom AI agents on private infrastructure
+- **SaaS Integration**: Drop-in Anthropic or OpenAI API replacement for AI-powered products
+- **Agentic AI**: Run Claude Code, OpenCode, Cursor, Continue, and custom AI agents on private infrastructure
 - **Benefits**: Early access, custom compliance support, dedicated integration help
 - **Contact**: enterprise@fabstir.com or DM on LinkedIn
 - **Industries**: Financial services, healthcare, legal, media & entertainment, SaaS
@@ -823,7 +846,7 @@ Platformless AI represents a fundamental shift in AI infrastructure - from platf
 - **XChaCha20-Poly1305 encryption with forward secrecy** protects all communication
 - **Open source** means full transparency - every line auditable
 
-Our infrastructure is complete and production-ready, currently undergoing security audit. The SDK (v1.8.6+) includes 13 specialized managers, a comprehensive Host CLI with TUI dashboard, marketplace pricing, evidence-based slashing for host accountability, and full RAG infrastructure. The Claude Bridge extends this to agentic AI — Claude Code running autonomously on decentralized hosts, creating applications, executing tools, and managing files with full end-to-end encryption. Companies are already approaching us to use this as SaaS AI backend infrastructure. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise, SaaS, and developer adoption as AI regulation tightens and privacy concerns intensify.
+Our infrastructure is complete and production-ready, currently undergoing security audit. The SDK (v1.14.11+) includes 13 specialized managers, a comprehensive Host CLI with TUI dashboard, marketplace pricing, evidence-based slashing for host accountability, full RAG infrastructure, and image generation with automatic intent detection. The Claude Bridge and OpenAI Bridge extend this to agentic AI — Claude Code and OpenCode running autonomously on decentralized hosts, creating applications, executing tools, generating images, and managing files with full end-to-end encryption. The OpenAI Bridge adds compatibility for any OpenAI SDK client, including image generation via FLUX.2 diffusion. Companies are already approaching us to use this as SaaS AI backend infrastructure. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise, SaaS, and developer adoption as AI regulation tightens and privacy concerns intensify.
 
 The convergence of blockchain technology, zero-knowledge cryptography, and decentralized storage creates a unique opportunity to build AI infrastructure that respects user sovereignty, protects intellectual property, and enables permissionless innovation. Users are sovereign - in complete control of their data, able to decide what AI and AI agents can access, and share securely with others on their own terms.
 
@@ -840,7 +863,7 @@ With first-mover advantage in the platformless AI category, we're poised to beco
 | Monthly Sessions     | 100+              | 1,000+         | 10,000+        |
 | Enterprise Customers | 0                 | 3-5 pilots     | 10-20 paying   |
 | Total Value Locked   | $5,000            | $100,000       | $1,000,000     |
-| SDK Version          | v1.8.6+           | v2.0+          | v2.5+          |
+| SDK Version          | v1.14.11+         | v2.0+          | v2.5+          |
 | SDK Managers         | 13                | 15+            | 18+            |
 | Avg Response Time    | <2s               | <1.5s          | <1s            |
 | Encryption Default   | 100%              | 100%           | 100%           |

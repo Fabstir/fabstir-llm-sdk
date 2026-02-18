@@ -20,6 +20,12 @@ export * from './checkpoint-encryption';
 export * from './checkpoint-blockchain';
 
 export * from './image-validation';
+export * from './image-generation-rate-limiter';
+export * from './image-generation-billing';
+export * from './host-image-generation-capabilities';
+export * from './image-generation-http';
+export * from './image-generation-ws';
+export * from './image-intent-analyzer';
 
 // Export other utilities as they are created
 export { TransactionHelper } from '../contracts/TransactionHelper';

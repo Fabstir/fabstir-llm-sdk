@@ -39,6 +39,19 @@ import type { IPaymentManager,
   ITreasuryManager,
  } from '@fabstir/sdk-core';
 import { DocumentManager, HostAdapter } from '@fabstir/sdk-core';
+import { ALLOWED_IMAGE_SIZES, ImageGenerationError } from '@fabstir/sdk-core';
+import type { ImageGenerationResult } from '@fabstir/sdk-core';
+
+// Image generation entry type for gallery display
+interface GeneratedImageEntry {
+  image: string;
+  prompt: string;
+  size: string;
+  steps: number;
+  seed: number;
+  processingTimeMs: number;
+  billing?: { generationUnits: number };
+}
 
 // Web search metadata type (Phase 8.1 - inline to avoid import resolution issues)
 interface WebSearchMetadata {
@@ -69,6 +82,12 @@ const TEST_HOST_2_PRIVATE_KEY =
 const TEST_TREASURY_ADDRESS = process.env.NEXT_PUBLIC_TEST_TREASURY_ADDRESS!;
 const TEST_TREASURY_PRIVATE_KEY =
   process.env.NEXT_PUBLIC_TEST_TREASURY_PRIVATE_KEY!;
+
+// Model filter options for host discovery
+const MODEL_FILTERS: { label: string; value: string }[] = [
+  { label: "All Models", value: "all" },
+  { label: "gpt-oss-120b (Image Gen Host)", value: "ggml-org/gpt-oss-120b-GGUF:gpt-oss-120b-mxfp4-00001-of-00003.gguf" },
+];
 
 // Session configuration
 const SESSION_DEPOSIT_AMOUNT = "0.5"; // $0.5 USDC
@@ -119,6 +138,15 @@ export default function ChatContextDemo() {
   } | null>(null);
   const [uploadError, setUploadError] = useState<string>("");
 
+  // Image Generation State
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [imageSize, setImageSize] = useState<string>("512x512");
+  const [imageSteps, setImageSteps] = useState(4);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [generatedImages, setGeneratedImages] = useState<GeneratedImageEntry[]>([]);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [imageCapabilities, setImageCapabilities] = useState<any>(null);
+
   // Wallet State
   const [selectedChainId, setSelectedChainId] =
     useState<number>(DEFAULT_CHAIN_ID);
@@ -130,6 +158,9 @@ export default function ChatContextDemo() {
   const [baseAccountSDK, setBaseAccountSDK] = useState<any>(null);
   const [subAccountSigner, setSubAccountSigner] = useState<any>(null); // For popup-free session creation
   const subAccountSignerRef = useRef<any>(null); // Ref for immediate access (avoids React state timing issues)
+
+  // Model Filter State
+  const [selectedModelFilter, setSelectedModelFilter] = useState<string>("all");
 
   // Session State
   const [sessionId, setSessionId] = useState<bigint | null>(null);
@@ -1163,11 +1194,25 @@ export default function ChatContextDemo() {
       const contracts = getContractAddresses();
 
       // Discover hosts using HostManager
-      addMessage("system", "🔍 Discovering active hosts...");
+      // Discover hosts — filter by model if selected
+      const isModelFiltered = selectedModelFilter !== "all";
+      addMessage("system", isModelFiltered
+        ? `🔍 Discovering hosts for model: ${selectedModelFilter}...`
+        : "🔍 Discovering all active hosts...");
       let hosts: any[] = [];
 
       try {
-        hosts = await (hm as any).discoverAllActiveHostsWithModels();
+        if (isModelFiltered) {
+          // Hash "repo:file" → keccak256("repo/file") to get bytes32 model ID
+          const colonIdx = selectedModelFilter.indexOf(':');
+          const repo = selectedModelFilter.substring(0, colonIdx);
+          const file = selectedModelFilter.substring(colonIdx + 1);
+          const modelId = ethers.keccak256(ethers.toUtf8Bytes(`${repo}/${file}`));
+          console.log(`Model filter: "${selectedModelFilter}" -> modelId: ${modelId}`);
+          hosts = await (hm as any).findHostsForModel(modelId);
+        } else {
+          hosts = await (hm as any).discoverAllActiveHostsWithModels();
+        }
         console.log("Found hosts:", hosts);
       } catch (sdkError: any) {
         console.log("SDK host discovery failed, error:", sdkError.message);
@@ -1175,7 +1220,9 @@ export default function ChatContextDemo() {
       }
 
       if (hosts.length === 0) {
-        throw new Error("No active hosts available");
+        throw new Error(isModelFiltered
+          ? `No hosts available for model: ${selectedModelFilter}`
+          : "No active hosts available");
       }
 
       // Parse host metadata
@@ -1186,10 +1233,10 @@ export default function ChatContextDemo() {
         pricePerToken: PRICE_PER_TOKEN,
       }));
 
-      // Filter hosts that support models
-      const modelSupported = parsedHosts.filter(
-        (h: any) => h.models && h.models.length > 0
-      );
+      // Filter hosts that support models (skip for model-filtered discovery, already filtered)
+      const modelSupported = isModelFiltered
+        ? parsedHosts
+        : parsedHosts.filter((h: any) => h.models && h.models.length > 0);
       if (modelSupported.length === 0) {
         throw new Error("No active hosts found supporting required models");
       }
@@ -1439,6 +1486,20 @@ export default function ChatContextDemo() {
 
       setStatus("Session active. You can start chatting!");
       addMessage("system", "✅ Ready to chat! Send a message to begin.");
+
+      // Check image generation capabilities
+      setGeneratedImages([]);
+      setImageError(null);
+      setImageCapabilities(null);
+      try {
+        const imgCaps = await (hm as any).getImageGenerationCapabilities(host.address, host.endpoint);
+        setImageCapabilities(imgCaps);
+        addMessage("system", imgCaps.supportsImageGeneration
+          ? "Image generation supported (FLUX.2 Klein 4B)"
+          : "Image generation not available on this host");
+      } catch (e: any) {
+        console.warn("Could not check image gen capabilities:", e);
+      }
     } catch (error: any) {
       console.error("Failed to start session:", error);
       setError(`Failed to start session: ${error.message}`);
@@ -1622,6 +1683,49 @@ export default function ChatContextDemo() {
       addMessage("system", `❌ Error: ${error.message}`);
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  // Handle image generation request (encrypted WebSocket — E2E encrypted via session)
+  async function handleGenerateImage() {
+    const sm = sdk?.getSessionManager() as any;
+    const currentSessionId = (window as any).__currentSessionId || sessionId;
+    if (!sm || !currentSessionId || !imagePrompt.trim()) return;
+
+    setIsGeneratingImage(true);
+    setImageError(null);
+
+    try {
+      addMessage("user", `[Image Gen] ${imagePrompt}`);
+
+      const result: ImageGenerationResult = await sm.generateImage(
+        currentSessionId.toString(),
+        imagePrompt.trim(),
+        { size: imageSize as any, steps: imageSteps }
+      );
+
+      setGeneratedImages(prev => [{
+        image: result.image,
+        prompt: imagePrompt,
+        size: result.size,
+        steps: result.steps,
+        seed: result.seed,
+        processingTimeMs: result.processingTimeMs,
+        billing: result.billing ? { generationUnits: result.billing.generationUnits } : undefined,
+      }, ...prev]);
+
+      addMessage("system",
+        `Generated ${result.size} image in ${result.processingTimeMs}ms ` +
+        `(seed: ${result.seed}, billing: ${result.billing?.generationUnits?.toFixed(3)} units)`
+      );
+    } catch (error: any) {
+      const msg = error instanceof ImageGenerationError
+        ? `[${error.code}] ${error.message}${error.retryAfter ? ` (retry in ${Math.ceil(error.retryAfter / 1000)}s)` : ''}`
+        : error.message;
+      setImageError(msg);
+      addMessage("system", `Image generation failed: ${msg}`);
+    } finally {
+      setIsGeneratingImage(false);
     }
   }
 
@@ -2590,6 +2694,119 @@ export default function ChatContextDemo() {
         </div>
       )}
 
+      {/* Image Generation Section */}
+      {sessionId && imageCapabilities?.supportsImageGeneration && (
+        <div className="bg-green-50 p-4 rounded-lg mb-4 border border-green-200">
+          <h3 className="font-semibold mb-3 text-green-900">Image Generation (FLUX.2 Klein 4B)</h3>
+
+          {/* Prompt input */}
+          <div className="flex gap-2 mb-3">
+            <input
+              type="text"
+              value={imagePrompt}
+              onChange={(e) => setImagePrompt(e.target.value)}
+              placeholder="Describe the image..."
+              className="flex-1 p-2 border rounded text-sm"
+              disabled={isGeneratingImage}
+              onKeyDown={(e) => e.key === 'Enter' && !isGeneratingImage && imagePrompt.trim() && handleGenerateImage()}
+            />
+            <button
+              onClick={handleGenerateImage}
+              disabled={isGeneratingImage || !imagePrompt.trim()}
+              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-300 text-sm"
+            >
+              {isGeneratingImage ? "Generating..." : "Generate"}
+            </button>
+          </div>
+
+          {/* Size and Steps controls */}
+          <div className="flex gap-4 mb-3 items-center text-sm">
+            <label className="flex items-center gap-1">
+              Size:
+              <select
+                value={imageSize}
+                onChange={(e) => setImageSize(e.target.value)}
+                className="p-1 border rounded text-sm"
+                disabled={isGeneratingImage}
+              >
+                {ALLOWED_IMAGE_SIZES.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1">
+              Steps:
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={imageSteps}
+                onChange={(e) => setImageSteps(Number(e.target.value))}
+                className="w-16 p-1 border rounded text-sm"
+                disabled={isGeneratingImage}
+              />
+            </label>
+          </div>
+
+          {/* Quick prompt buttons */}
+          <div className="flex gap-2 mb-3 flex-wrap">
+            <span className="text-xs text-gray-500">Try:</span>
+            {["A cat astronaut floating in space", "A serene mountain lake at golden hour"].map((p) => (
+              <button
+                key={p}
+                onClick={() => setImagePrompt(p)}
+                className="text-xs px-2 py-1 bg-green-100 hover:bg-green-200 rounded border border-green-300"
+                disabled={isGeneratingImage}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+
+          {/* Error display */}
+          {imageError && (
+            <div className="text-red-600 text-sm mb-3 p-2 bg-red-50 rounded">{imageError}</div>
+          )}
+
+          {/* Generated images gallery */}
+          {generatedImages.length > 0 && (
+            <div className="space-y-3">
+              <h4 className="text-sm font-medium text-green-800">Generated Images ({generatedImages.length})</h4>
+              {generatedImages.map((img, idx) => (
+                <div key={idx} className="bg-white p-3 rounded border">
+                  <img
+                    src={`data:image/png;base64,${img.image}`}
+                    alt={img.prompt}
+                    className="max-w-full rounded mb-2"
+                    style={{ maxHeight: '400px' }}
+                  />
+                  <p className="text-sm text-gray-700 mb-1">{img.prompt}</p>
+                  <div className="flex gap-3 text-xs text-gray-500">
+                    <span>{img.size}</span>
+                    <span>{img.steps} steps</span>
+                    <span>seed: {img.seed}</span>
+                    <span>{img.processingTimeMs}ms</span>
+                    {img.billing && <span>{img.billing.generationUnits.toFixed(3)} units</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Capability info */}
+          <p className="text-xs text-gray-600 mt-2">
+            WebSocket: {imageCapabilities.supportsEncryptedWebSocket ? "Y" : "N"} | HTTP: {imageCapabilities.supportsHttp ? "Y" : "N"} | Safety: {imageCapabilities.hasSafetyClassifier ? "Y" : "N"}
+          </p>
+        </div>
+      )}
+
+      {/* Fallback when host lacks image gen */}
+      {sessionId && imageCapabilities && !imageCapabilities.supportsImageGeneration && (
+        <div className="bg-gray-50 p-3 rounded-lg mb-4 border border-gray-200 text-sm text-gray-500">
+          Image generation not available — host does not have FLUX.2 diffusion sidecar
+        </div>
+      )}
+
       {/* Control Buttons */}
       <div className="flex gap-2">
         {!isConnected ? (
@@ -2601,13 +2818,25 @@ export default function ChatContextDemo() {
             Connect Wallet
           </button>
         ) : !sessionId ? (
-          <button
-            onClick={startSession}
-            disabled={isLoading}
-            className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-300"
-          >
-            Start Session
-          </button>
+          <div className="flex gap-2 items-center">
+            <select
+              value={selectedModelFilter}
+              onChange={(e) => setSelectedModelFilter(e.target.value)}
+              className="p-2 border rounded text-sm"
+              disabled={isLoading}
+            >
+              {MODEL_FILTERS.map((mf) => (
+                <option key={mf.value} value={mf.value}>{mf.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={startSession}
+              disabled={isLoading}
+              className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-300"
+            >
+              Start Session
+            </button>
+          </div>
         ) : (
           <>
             <button

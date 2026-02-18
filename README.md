@@ -12,9 +12,11 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 - 📦 **S5 Storage Integration** - Decentralized conversation persistence
 - 🧠 **RAG (Retrieval-Augmented Generation)** - Upload documents and enhance LLM responses with semantic search
 - 🗂️ **Vector Databases** - Host-side vector storage and cosine similarity search via WebSocket
+- 🎨 **Image Generation** - Text-to-image via FLUX.2 diffusion models over E2E encrypted WebSocket, with automatic intent detection from natural language prompts
 - 🔐 **End-to-End Encryption** - XChaCha20-Poly1305 encryption enabled by default with forward secrecy
 - 🛡️ **Error Recovery** - Automatic retries and failover to ensure reliability
 - 🔌 **Browser Compatible** - Works in both Node.js and browser environments
+- 🤖 **OpenAI-Compatible Bridge** - Drop-in replacement API for any OpenAI SDK client (Cursor, Continue, OpenCode, LangChain)
 
 ## Quick Start
 
@@ -149,6 +151,59 @@ async function ragExample() {
 
 See [docs/IMPLEMENTATION_CHAT_RAG.md](docs/IMPLEMENTATION_CHAT_RAG.md) for complete architecture and production configuration.
 
+### Image Generation
+
+Generate images via FLUX.2 diffusion models over E2E encrypted WebSocket. The SDK auto-detects image intent from natural language prompts:
+
+```typescript
+// Automatic: type naturally, SDK detects intent and routes to image generation
+await sessionManager.sendPromptStreaming(
+  sessionId,
+  'Generate an image of a cat astronaut in 1024x1024',
+  (token) => console.log(token),
+  {
+    onImageGenerated: (result) => {
+      const imgSrc = `data:image/png;base64,${result.image}`;
+      console.log(`Generated ${result.size} in ${result.processingTimeMs}ms`);
+    }
+  }
+);
+
+// Explicit: call generateImage() directly for full control
+const result = await sessionManager.generateImage(
+  sessionId,
+  'A serene mountain lake at golden hour',
+  { size: '512x512', steps: 4 }
+);
+```
+
+**Auto-detected triggers:** `generate an image of`, `draw a`, `create a picture of`, `paint a`, `sketch a`, `make an image of`, `render a` — including polite forms.
+
+See [docs/SDK_API.md#image-generation](docs/SDK_API.md#image-generation) for full API reference.
+
+### OpenAI-Compatible Bridge
+
+Use any OpenAI SDK client (Cursor, Continue, OpenCode, LangChain) with Fabstir's decentralised AI network — no code changes required:
+
+```bash
+# Start the bridge (handles blockchain session + encryption automatically)
+npx fabstir-openai-bridge \
+  --private-key $PRIVATE_KEY \
+  --model "CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf"
+
+# OpenAI Bridge running on http://localhost:3457
+# Set OPENAI_BASE_URL=http://localhost:3457/v1 in your client
+```
+
+Supports:
+- `POST /v1/chat/completions` — text chat (streaming and non-streaming)
+- `POST /v1/images/generations` — image generation via FLUX.2
+- `POST /v1/responses` — OpenAI Responses API
+- `GET /v1/models` — model listing
+- Tool use, vision (base64 images), multi-turn conversations
+
+See [packages/openai-bridge/](packages/openai-bridge/) for full documentation and CLI options.
+
 ## Installation
 
 ### Development Setup
@@ -214,6 +269,7 @@ await sdk.authenticate(privateKey);
 - [Contract Reference](docs/compute-contracts-reference/) - Smart contract documentation
 - [Node Reference](docs/node-reference/API.md) - Host node API
 - [Host CLI Reference](packages/host-cli/docs/API_REFERENCE.md) - Host CLI commands
+- [OpenAI Bridge](packages/openai-bridge/) - OpenAI-compatible API bridge
 
 ## Examples
 

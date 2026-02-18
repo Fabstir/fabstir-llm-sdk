@@ -111,20 +111,30 @@ export class WebSocketClient {
   }
 
   /**
-   * Disconnect from WebSocket server
+   * Disconnect from WebSocket server.
+   * Waits for the close handshake to complete so a new connection to the
+   * same origin is not blocked by the browser.
    */
   async disconnect(): Promise<void> {
     this.options.reconnect = false;
     this.stopHeartbeat();
-    
+
     if (this.ws) {
-      if (this.ws.readyState === WebSocket.OPEN) {
-        this.ws.close(1000, 'Client disconnect');
-      }
+      const ws = this.ws;
       this.ws = undefined;
+      this.connectionPromise = undefined;
+
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(resolve, 3000); // Don't hang forever
+          ws.addEventListener('close', () => { clearTimeout(timeout); resolve(); }, { once: true });
+          ws.close(1000, 'Client disconnect');
+        });
+      }
+    } else {
+      this.connectionPromise = undefined;
     }
-    
-    this.connectionPromise = undefined;
+
     this.messageHandlers.clear();
     this.messageQueue = [];
   }
