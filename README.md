@@ -16,6 +16,7 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 - 🔐 **End-to-End Encryption** - XChaCha20-Poly1305 encryption enabled by default with forward secrecy
 - 🛡️ **Error Recovery** - Automatic retries and failover to ensure reliability
 - 🔌 **Browser Compatible** - Works in both Node.js and browser environments
+- 🤖 **OpenAI-Compatible Bridge** - Drop-in replacement API for any OpenAI SDK client (Cursor, Continue, OpenCode, LangChain)
 
 ## Quick Start
 
@@ -180,6 +181,29 @@ const result = await sessionManager.generateImage(
 
 See [docs/SDK_API.md#image-generation](docs/SDK_API.md#image-generation) for full API reference.
 
+### OpenAI-Compatible Bridge
+
+Use any OpenAI SDK client (Cursor, Continue, OpenCode, LangChain) with Fabstir's decentralised AI network — no code changes required:
+
+```bash
+# Start the bridge (handles blockchain session + encryption automatically)
+npx fabstir-openai-bridge \
+  --private-key $PRIVATE_KEY \
+  --model "CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf"
+
+# OpenAI Bridge running on http://localhost:3457
+# Set OPENAI_BASE_URL=http://localhost:3457/v1 in your client
+```
+
+Supports:
+- `POST /v1/chat/completions` — text chat (streaming and non-streaming)
+- `POST /v1/images/generations` — image generation via FLUX.2
+- `POST /v1/responses` — OpenAI Responses API
+- `GET /v1/models` — model listing
+- Tool use, vision (base64 images), multi-turn conversations
+
+See [packages/openai-bridge/](packages/openai-bridge/) for full documentation and CLI options.
+
 ## Installation
 
 ### Development Setup
@@ -245,6 +269,7 @@ await sdk.authenticate(privateKey);
 - [Contract Reference](docs/compute-contracts-reference/) - Smart contract documentation
 - [Node Reference](docs/node-reference/API.md) - Host node API
 - [Host CLI Reference](packages/host-cli/docs/API_REFERENCE.md) - Host CLI commands
+- [OpenAI Bridge](packages/openai-bridge/) - OpenAI-compatible API bridge
 
 ## Examples
 

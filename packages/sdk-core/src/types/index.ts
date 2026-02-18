@@ -132,8 +132,13 @@ export interface ImageAttachment {
   format: ImageFormat;
 }
 
+/** Controls model reasoning mode per-request (host v8.17.0+). Omit for default behavior. */
+export type ThinkingMode = 'enabled' | 'disabled' | 'low' | 'medium' | 'high';
+
 export interface PromptOptions {
   images?: ImageAttachment[];
+  /** Controls model thinking/reasoning mode per-request. Omit for default. */
+  thinking?: ThinkingMode;
   /** Called once when token usage info is available (on stream_end or response completion) */
   onTokenUsage?: (usage: TokenUsageInfo) => void;
   /** Called when image generation intent is auto-detected and image is generated */

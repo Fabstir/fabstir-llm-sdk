@@ -1003,12 +1003,12 @@ export class SessionManager implements ISessionManager {
               enableWebSearchEncrypted = analyzePromptForSearchIntent(prompt);
             }
 
-            // Send encrypted message with web search options and images
+            // Send encrypted message with web search options, images, and thinking
             this.sendEncryptedMessage(prompt, {
               webSearch: enableWebSearchEncrypted,
               maxSearches: enableWebSearchEncrypted ? (searchConfigEncrypted.maxSearches ?? 5) : 0,
               searchQueries: searchConfigEncrypted.queries ?? null
-            }, options?.images).catch((err) => {
+            }, options?.images, options?.thinking).catch((err) => {
               console.error('[SessionManager] Failed to send encrypted message:', err);
               reject(err);
             });
@@ -1070,6 +1070,11 @@ export class SessionManager implements ISessionManager {
           if (options?.images && options.images.length > 0) {
             validateImageAttachments(options.images);
             plaintextRequest.images = options.images.map(img => ({ data: img.data, format: img.format }));
+          }
+
+          // Include thinking mode when set
+          if (options?.thinking) {
+            plaintextRequest.thinking = options.thinking;
           }
 
           response = await this.wsClient.sendMessage({
@@ -1167,12 +1172,12 @@ export class SessionManager implements ISessionManager {
             enableWebSearchNonStreamEnc = analyzePromptForSearchIntent(prompt);
           }
 
-          // Send encrypted message with web search options and images
+          // Send encrypted message with web search options, images, and thinking
           await this.sendEncryptedMessage(prompt, {
             webSearch: enableWebSearchNonStreamEnc,
             maxSearches: enableWebSearchNonStreamEnc ? (searchConfigNonStreamEnc.maxSearches ?? 5) : 0,
             searchQueries: searchConfigNonStreamEnc.queries ?? null
-          }, options?.images);
+          }, options?.images, options?.thinking);
 
           // Wait for encrypted response (non-streaming) - MUST accumulate chunks!
           let accumulatedResponse = '';  // Accumulate chunks even in non-streaming mode
@@ -1298,6 +1303,11 @@ export class SessionManager implements ISessionManager {
           if (options?.images && options.images.length > 0) {
             validateImageAttachments(options.images);
             plaintextRequestNonStream.images = options.images.map(img => ({ data: img.data, format: img.format }));
+          }
+
+          // Include thinking mode when set
+          if (options?.thinking) {
+            plaintextRequestNonStream.thinking = options.thinking;
           }
 
           // VLM token tracking (Phase 5): capture tokens from response/stream_end
@@ -1916,7 +1926,8 @@ export class SessionManager implements ISessionManager {
       maxSearches: number;
       searchQueries: string[] | null;
     },
-    images?: ImageAttachment[]
+    images?: ImageAttachment[],
+    thinking?: import('../types').ThinkingMode
   ): Promise<void> {
 
     // Validate images before encryption (fail fast)
@@ -1964,6 +1975,11 @@ export class SessionManager implements ISessionManager {
         temperature: 0.7,
         stream: true,
       };
+
+      // Only include thinking when set
+      if (thinking) {
+        structuredPayload.thinking = thinking;
+      }
 
       // Only include images when present
       if (images && images.length > 0) {
@@ -2316,7 +2332,8 @@ export class SessionManager implements ISessionManager {
         max_tokens: LLM_MAX_TOKENS,  // Allow longer responses for poems, stories, etc.
         temperature: 0.7,  // Add temperature for better responses
         sessionId: sessionId.toString(),
-        jobId: session.jobId.toString()
+        jobId: session.jobId.toString(),
+        ...(options?.thinking ? { thinking: options.thinking } : {})
       };
       
       const fetchResponse = await fetch(inferenceUrl, {

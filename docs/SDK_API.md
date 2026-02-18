@@ -8,6 +8,7 @@
 - [Session Management](#session-management)
 - [Web Search Integration](#web-search-integration)
 - [Image Generation](#image-generation)
+  - [OpenAI-Compatible Bridge](#openai-compatible-bridge)
 - [Payment Management](#payment-management)
 - [Model Governance](#model-governance)
 - [Host Management](#host-management)
@@ -1662,6 +1663,24 @@ const units = estimateGenerationUnits(width, height, 4);
 // Formula: (width * height / 1_048_576) * (steps / 20) * modelMultiplier
 // 1024x1024, 4 steps = 0.2 units
 ```
+
+### OpenAI-Compatible Bridge
+
+The `@fabstir/openai-bridge` package exposes Fabstir's AI infrastructure via standard OpenAI API endpoints. Any OpenAI SDK client (Cursor, Continue, OpenCode, LangChain) can use Fabstir hosts without code changes.
+
+```bash
+npx fabstir-openai-bridge --private-key $KEY --model "repo:file"
+# Listens on http://localhost:3457
+# Client sets OPENAI_BASE_URL=http://localhost:3457/v1
+```
+
+Supported endpoints:
+- `POST /v1/chat/completions` — streaming and non-streaming text, tool use, vision
+- `POST /v1/images/generations` — image generation (maps to `SessionManager.generateImage()`)
+- `POST /v1/responses` — OpenAI Responses API format
+- `GET /v1/models` — model listing
+
+The bridge handles blockchain session management, host discovery, E2E encryption, and session re-keying automatically. See [`packages/openai-bridge/`](../packages/openai-bridge/) for CLI options and configuration.
 
 ## Payment Management
 
