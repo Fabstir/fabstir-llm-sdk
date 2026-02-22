@@ -6,7 +6,7 @@
  * Browser-compatible host/node management
  */
 
-import { HostInfo, HostMetadata, ModelSpec } from '../types/models';
+import { HostInfo, HostMetadata, ModelSpec, ModelPricing } from '../types/models';
 import { HostRegistrationWithModels } from '../managers/HostManager';
 import type { WebSearchCapabilities } from '../types/web-search.types';
 
@@ -187,4 +187,27 @@ export interface IHostManager {
    * Get host reputation score
    */
   getReputation(address: string): Promise<number>;
+
+  /**
+   * Set custom pricing for a specific model
+   * @param modelId - Model ID (bytes32 hash from contract)
+   * @param nativePrice - Native token price as string (use "0" to keep default)
+   * @param stablePrice - Stablecoin price as string (use "0" to keep default)
+   * @returns Transaction hash
+   */
+  setModelPricing(modelId: string, nativePrice: string, stablePrice: string): Promise<string>;
+
+  /**
+   * Clear custom pricing for a model (revert to host default pricing)
+   * @param modelId - Model ID (bytes32 hash from contract)
+   * @returns Transaction hash
+   */
+  clearModelPricing(modelId: string): Promise<string>;
+
+  /**
+   * Get all model prices for a host
+   * @param hostAddress - Host's EVM address
+   * @returns Array of ModelPricing objects
+   */
+  getHostModelPrices(hostAddress: string): Promise<ModelPricing[]>;
 }

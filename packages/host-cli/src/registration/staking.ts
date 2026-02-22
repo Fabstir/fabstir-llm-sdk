@@ -153,9 +153,9 @@ export async function approveTokens(
     // Use SDK method instead of direct contract calls
     // approveToken(spender, amount, tokenAddress)
     const receipt = await paymentManager.approveToken(
+      fabTokenAddress,
       spenderAddress,
-      amount,
-      fabTokenAddress
+      amount
     );
 
     return {

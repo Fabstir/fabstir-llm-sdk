@@ -68,6 +68,8 @@ import { registerServeCommand } from './commands/serve';
 import { registerDashboardCommand } from './commands/dashboard';
 import { registerModelsCommand } from './commands/models';
 import { registerSetupCommand } from './commands/setup';
+import { registerSetModelPricingCommand } from './commands/set-model-pricing';
+import { registerClearModelPricingCommand } from './commands/clear-model-pricing';
 
 const program = new Command();
 
@@ -97,6 +99,8 @@ registerServeCommand(program);
 registerDashboardCommand(program);
 registerModelsCommand(program);
 registerSetupCommand(program);
+registerSetModelPricingCommand(program);
+registerClearModelPricingCommand(program);
 
 // Show help if no command provided
 if (!process.argv.slice(2).length) {

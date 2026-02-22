@@ -17,6 +17,8 @@ import { fetchStatus } from './services/MgmtClient.js';
 import { fetchEarnings, deriveAddressFromPrivateKey } from './services/EarningsClient.js';
 import { withdrawAllEarnings } from './services/WithdrawalService.js';
 import { fetchCurrentPricing, updateStablePricing, updateNativePricing, formatPrice, formatNativePrice } from './services/PricingService.js';
+import { fetchHostModelPrices, updateModelStablePricing, updateModelNativePricing, clearModelPricingOnChain } from './services/ModelPricingService.js';
+import { fetchAllModels } from '../services/ModelRegistryClient.js';
 import { DockerLogStream } from './services/DockerLogs.js';
 import { showMessage, showError } from './actions.js';
 
@@ -90,7 +92,7 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
 
   // Actions bar (row 11)
   const actionsBar = grid.set(11, 0, 1, 12, blessed.box, {
-    content: ' [R]efresh  [P]ricing  [W]ithdraw  [Q]uit ',
+    content: ' [R]efresh  [P]ricing  [M]odel Pricing  [W]ithdraw  [Q]uit ',
     style: { fg: 'white', bg: 'gray' },
   });
 
@@ -288,6 +290,230 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
         logsBox.log('[PRICING] Cancelled');
         screen.render();
       }
+    });
+  });
+
+  screen.key(['m'], async () => {
+    if (!hostPrivateKey || !hostAddress) {
+      logsBox.log(showError('Cannot manage model pricing: HOST_PRIVATE_KEY not set'));
+      screen.render();
+      return;
+    }
+
+    logsBox.log('[MODEL PRICING] Fetching models and pricing...');
+    screen.render();
+
+    // Fetch host's model prices and all approved models for display names
+    const [modelPrices, allModels] = await Promise.all([
+      fetchHostModelPrices(hostAddress, rpcUrl),
+      fetchAllModels(rpcUrl),
+    ]);
+
+    if (allModels.length === 0) {
+      logsBox.log(showError('No approved models found'));
+      screen.render();
+      return;
+    }
+
+    // Build display items: model name + current price
+    const modelItems = allModels.map((model) => {
+      const pricing = modelPrices.find((p) => p.modelId === model.modelId);
+      const priceStr = pricing
+        ? `USDC: ${formatPrice(pricing.stablePrice)} | ETH: ${formatNativePrice(pricing.nativePrice)}`
+        : '(default pricing)';
+      return `${model.displayName} - ${priceStr}`;
+    });
+    modelItems.push('[ESC] Cancel');
+
+    // Show model selection menu
+    const modelMenu = blessed.list({
+      parent: screen,
+      top: 'center',
+      left: 'center',
+      width: 60,
+      height: Math.min(modelItems.length + 2, 15),
+      border: { type: 'line' },
+      label: ' Select model to price ',
+      style: {
+        fg: 'white',
+        bg: 'blue',
+        border: { fg: 'white' },
+        selected: { bg: 'green', fg: 'white' },
+      },
+      keys: true,
+      vi: true,
+      items: modelItems,
+    });
+
+    modelMenu.focus();
+    screen.render();
+
+    modelMenu.key(['escape'], () => {
+      modelMenu.destroy();
+      logsBox.log('[MODEL PRICING] Cancelled');
+      screen.render();
+    });
+
+    modelMenu.on('select', (_item: blessed.Widgets.BoxElement, index: number) => {
+      if (index >= allModels.length) {
+        modelMenu.destroy();
+        logsBox.log('[MODEL PRICING] Cancelled');
+        screen.render();
+        return;
+      }
+
+      const selectedModel = allModels[index];
+      modelMenu.destroy();
+      screen.render();
+
+      // Show price type menu
+      const priceMenu = blessed.list({
+        parent: screen,
+        top: 'center',
+        left: 'center',
+        width: 40,
+        height: 7,
+        border: { type: 'line' },
+        label: ` ${selectedModel.displayName} `,
+        style: {
+          fg: 'white',
+          bg: 'blue',
+          border: { fg: 'white' },
+          selected: { bg: 'green', fg: 'white' },
+        },
+        keys: true,
+        vi: true,
+        items: ['[U] USDC (stablecoin)', '[E] ETH (native token)', '[C] Clear (use default)', '[ESC] Cancel'],
+      });
+
+      priceMenu.focus();
+      screen.render();
+
+      const handleModelPriceUpdate = async (priceType: 'usdc' | 'eth') => {
+        priceMenu.destroy();
+        screen.render();
+
+        const label = priceType === 'usdc'
+          ? ' New USDC price ($/million) or ESC to cancel '
+          : ' New ETH price (Gwei/million) or ESC to cancel ';
+
+        const inputBox = blessed.textbox({
+          parent: screen,
+          top: 'center',
+          left: 'center',
+          width: 50,
+          height: 3,
+          border: { type: 'line' },
+          label,
+          style: { fg: 'white', bg: 'blue', border: { fg: 'white' } },
+          inputOnFocus: true,
+        });
+
+        inputBox.focus();
+        screen.render();
+
+        inputBox.on('submit', async (value: string) => {
+          inputBox.destroy();
+          screen.render();
+
+          const newPrice = parseFloat(value);
+          if (isNaN(newPrice) || newPrice <= 0) {
+            logsBox.log(showError('Invalid price entered'));
+            screen.render();
+            return;
+          }
+
+          if (priceType === 'usdc') {
+            logsBox.log(`[MODEL PRICING] Setting ${selectedModel.displayName} USDC to $${newPrice.toFixed(2)}/million...`);
+            screen.render();
+            const result = await updateModelStablePricing(hostPrivateKey, rpcUrl, selectedModel.modelId, newPrice, (status) => {
+              logsBox.log(`[MODEL PRICING] ${status}`);
+              screen.render();
+            });
+            if (result.success) {
+              logsBox.log(showMessage(`${selectedModel.displayName} USDC price set to $${result.newPrice}/million`));
+              logsBox.log(`[MODEL PRICING] TX: ${result.txHash}`);
+            } else {
+              logsBox.log(showError(`Model price update failed: ${result.error}`));
+            }
+          } else {
+            logsBox.log(`[MODEL PRICING] Setting ${selectedModel.displayName} ETH to ${newPrice} Gwei/million...`);
+            screen.render();
+            const result = await updateModelNativePricing(hostPrivateKey, rpcUrl, selectedModel.modelId, newPrice, (status) => {
+              logsBox.log(`[MODEL PRICING] ${status}`);
+              screen.render();
+            });
+            if (result.success) {
+              logsBox.log(showMessage(`${selectedModel.displayName} ETH price set to ${result.newPrice} Gwei/million`));
+              logsBox.log(`[MODEL PRICING] TX: ${result.txHash}`);
+            } else {
+              logsBox.log(showError(`Model price update failed: ${result.error}`));
+            }
+          }
+          screen.render();
+        });
+
+        inputBox.on('cancel', () => {
+          inputBox.destroy();
+          logsBox.log('[MODEL PRICING] Cancelled');
+          screen.render();
+        });
+
+        inputBox.readInput();
+      };
+
+      priceMenu.key(['u'], () => handleModelPriceUpdate('usdc'));
+      priceMenu.key(['e'], () => handleModelPriceUpdate('eth'));
+      priceMenu.key(['c'], async () => {
+        priceMenu.destroy();
+        screen.render();
+        logsBox.log(`[MODEL PRICING] Clearing ${selectedModel.displayName} custom pricing...`);
+        screen.render();
+        const result = await clearModelPricingOnChain(hostPrivateKey, rpcUrl, selectedModel.modelId, (status) => {
+          logsBox.log(`[MODEL PRICING] ${status}`);
+          screen.render();
+        });
+        if (result.success) {
+          logsBox.log(showMessage(`${selectedModel.displayName} reverted to default pricing`));
+          logsBox.log(`[MODEL PRICING] TX: ${result.txHash}`);
+        } else {
+          logsBox.log(showError(`Clear model pricing failed: ${result.error}`));
+        }
+        screen.render();
+      });
+      priceMenu.key(['escape'], () => {
+        priceMenu.destroy();
+        logsBox.log('[MODEL PRICING] Cancelled');
+        screen.render();
+      });
+      priceMenu.on('select', (_item2: blessed.Widgets.BoxElement, idx: number) => {
+        if (idx === 0) handleModelPriceUpdate('usdc');
+        else if (idx === 1) handleModelPriceUpdate('eth');
+        else if (idx === 2) {
+          priceMenu.destroy();
+          screen.render();
+          // Clear pricing inline
+          (async () => {
+            logsBox.log(`[MODEL PRICING] Clearing ${selectedModel.displayName} custom pricing...`);
+            screen.render();
+            const result = await clearModelPricingOnChain(hostPrivateKey, rpcUrl, selectedModel.modelId, (status) => {
+              logsBox.log(`[MODEL PRICING] ${status}`);
+              screen.render();
+            });
+            if (result.success) {
+              logsBox.log(showMessage(`${selectedModel.displayName} reverted to default pricing`));
+              logsBox.log(`[MODEL PRICING] TX: ${result.txHash}`);
+            } else {
+              logsBox.log(showError(`Clear model pricing failed: ${result.error}`));
+            }
+            screen.render();
+          })();
+        } else {
+          priceMenu.destroy();
+          logsBox.log('[MODEL PRICING] Cancelled');
+          screen.render();
+        }
+      });
     });
   });
 
