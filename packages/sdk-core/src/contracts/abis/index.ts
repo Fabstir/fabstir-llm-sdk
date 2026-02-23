@@ -60,7 +60,6 @@ export const JobMarketplaceFragments = {
   // V2 Direct Payment Delegation - Feb 2026
   authorizeDelegate: 'function authorizeDelegate(address delegate, bool authorized)',
   isDelegateAuthorized: 'function isDelegateAuthorized(address depositor, address delegate) view returns (bool)',
-  createSessionAsDelegate: 'function createSessionAsDelegate(address payer, address host, address paymentToken, uint256 amount, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)',
   createSessionForModelAsDelegate: 'function createSessionForModelAsDelegate(address payer, bytes32 modelId, address host, address paymentToken, uint256 amount, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)',
   // Early cancellation fee - Feb 2026
   minTokensFee: 'function minTokensFee() view returns (uint256)'

@@ -612,63 +612,6 @@ export class SessionJobManager {
   }
 
   /**
-   * Create session as delegate for payer (non-model version)
-   *
-   * Requires: payer has approved token to contract, payer has authorized delegate
-   *
-   * @param payer - Address who funds the session (must have approved token)
-   * @param host - Host address to run the session
-   * @param paymentToken - ERC-20 token address for payment (no ETH allowed)
-   * @param amount - Amount of tokens to deposit
-   * @param pricePerToken - Price per token (with PRICE_PRECISION)
-   * @param maxDuration - Maximum session duration in seconds
-   * @param proofInterval - Number of tokens between proof submissions
-   * @param proofTimeoutWindow - Time window for proof submission in seconds
-   * @returns SessionResult with sessionId, jobId, txHash, depositAmount
-   */
-  async createSessionAsDelegate(
-    payer: string,
-    host: string,
-    paymentToken: string,
-    amount: bigint,
-    pricePerToken: bigint,
-    maxDuration: number,
-    proofInterval: number,
-    proofTimeoutWindow: number
-  ): Promise<SessionResult> {
-    if (!this.signer) {
-      throw new Error('Signer not set');
-    }
-
-    const jobMarketplace = this.contractManager.getJobMarketplace();
-    const tx = await jobMarketplace.connect(this.signer).createSessionAsDelegate(
-      payer,
-      host,
-      paymentToken,
-      amount,
-      pricePerToken,
-      maxDuration,
-      proofInterval,
-      proofTimeoutWindow
-    );
-
-    const receipt = await tx.wait(3);
-
-    // Parse SessionCreatedByDelegate event
-    const event = receipt.logs.find(
-      (log: any) => log.topics[0] === ethers.id('SessionCreatedByDelegate(uint256,address,address,address,bytes32,uint256)')
-    );
-    const sessionId = event ? BigInt(event.topics[1]) : 0n;
-
-    return {
-      sessionId,
-      jobId: sessionId,
-      txHash: receipt.hash,
-      depositAmount: amount
-    };
-  }
-
-  /**
    * Get minimum token fee for early cancellation
    *
    * Fee calculation: minTokensFee * pricePerToken / PRICE_PRECISION

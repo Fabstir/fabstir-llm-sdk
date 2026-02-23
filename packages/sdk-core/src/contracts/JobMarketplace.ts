@@ -502,62 +502,6 @@ export class JobMarketplaceWrapper {
     return await this.contract.isDelegateAuthorized(depositor, delegate);
   }
 
-  // V2 Direct Payment Delegation Methods
-
-  /**
-   * Create session as delegate - pulls USDC directly from payer's wallet.
-   * V2 direct payment pattern - no escrow required.
-   * Caller must be authorized via authorizeDelegate() first.
-   * @param params Session parameters with payer address
-   * @returns Session ID
-   * @throws NotDelegate if caller not authorized
-   * @throws ERC20Only if paymentToken is address(0)
-   */
-  async createSessionAsDelegate(params: DelegatedSessionParams): Promise<number> {
-    await this.verifyChain();
-
-    // Validate payer address
-    if (!ethers.isAddress(params.payer) || params.payer === ethers.ZeroAddress) {
-      throw new Error('Invalid payer address');
-    }
-
-    // V2: ERC20Only - paymentToken must NOT be address(0)
-    if (!params.paymentToken || params.paymentToken === ethers.ZeroAddress) {
-      throw new Error('ERC20Only: paymentToken must be an ERC-20 token address (not address(0))');
-    }
-
-    // Convert amount based on token decimals (USDC = 6 decimals)
-    const chain = ChainRegistry.getChain(this.chainId);
-    const isUSDC = params.paymentToken.toLowerCase() === chain.contracts.usdcToken.toLowerCase();
-    const amountValue = isUSDC
-      ? ethers.parseUnits(params.amount, 6)
-      : ethers.parseUnits(params.amount, 18);
-
-    const proofTimeoutWindow = validateProofTimeoutWindow(params.proofTimeoutWindow);
-
-    console.log(`[JobMarketplace] V2 createSessionAsDelegate:`);
-    console.log(`  Payer: ${params.payer}`);
-    console.log(`  Host: ${params.host}`);
-    console.log(`  Amount: ${params.amount}`);
-
-    const tx = await this.contract.createSessionAsDelegate(
-      params.payer,
-      params.host,
-      params.paymentToken,
-      amountValue,
-      params.pricePerToken,
-      params.duration,
-      params.proofInterval,
-      proofTimeoutWindow
-    );
-
-    const receipt = await tx.wait(3);
-    const event = receipt.logs?.find((log: any) =>
-      log.fragment?.name === 'SessionCreatedByDelegate'
-    );
-    return event ? Number(event.args?.sessionId || event.args[0]) : 0;
-  }
-
   /**
    * Create model session as delegate - pulls USDC directly from payer's wallet.
    * V2 direct payment pattern - no escrow required.

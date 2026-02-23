@@ -64,13 +64,36 @@ describe('February 2026 Contract Upgrade - Integration', () => {
     it('V2 delegation fragments exist', () => {
       expect(JobMarketplaceFragments.authorizeDelegate).toBeDefined();
       expect(JobMarketplaceFragments.isDelegateAuthorized).toBeDefined();
-      expect(JobMarketplaceFragments.createSessionAsDelegate).toBeDefined();
+      expect((JobMarketplaceFragments as any).createSessionAsDelegate).toBeUndefined();
       expect(JobMarketplaceFragments.createSessionForModelAsDelegate).toBeDefined();
     });
 
     it('minTokensFee fragment exists', () => {
       expect(JobMarketplaceFragments.minTokensFee).toBeDefined();
       expect(JobMarketplaceFragments.minTokensFee).toContain('minTokensFee');
+    });
+  });
+
+  describe('Post-Audit Remediation ABI', () => {
+    // Load the ABI JSON directly
+    const abiJson = require('../../src/contracts/abis/JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json');
+    const functionNames = abiJson
+      .filter((entry: any) => entry.type === 'function')
+      .map((entry: any) => entry.name);
+    const eventNames = abiJson
+      .filter((entry: any) => entry.type === 'event')
+      .map((entry: any) => entry.name);
+
+    it('ABI should NOT contain createSessionAsDelegate function', () => {
+      expect(functionNames).not.toContain('createSessionAsDelegate');
+    });
+
+    it('ABI should contain RefundCreditedToDeposit event', () => {
+      expect(eventNames).toContain('RefundCreditedToDeposit');
+    });
+
+    it('ABI should still contain createSessionForModelAsDelegate function', () => {
+      expect(functionNames).toContain('createSessionForModelAsDelegate');
     });
   });
 
@@ -97,7 +120,7 @@ describe('February 2026 Contract Upgrade - Integration', () => {
     });
 
     it('V2 delegation flow', async () => {
-      // Test: authorize → createSessionAsDelegate
+      // Test: authorize → createSessionForModelAsDelegate
       // Requires live contract and test accounts
     });
 
