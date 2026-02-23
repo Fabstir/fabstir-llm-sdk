@@ -143,6 +143,8 @@ export interface PromptOptions {
   onTokenUsage?: (usage: TokenUsageInfo) => void;
   /** Called when image generation intent is auto-detected and image is generated */
   onImageGenerated?: (result: import('./image-generation.types').ImageGenerationResult) => void;
+  /** Raw user query for web search (before any RAG context injection). */
+  rawQuery?: string;
 }
 
 // ============= Token Usage Types =============

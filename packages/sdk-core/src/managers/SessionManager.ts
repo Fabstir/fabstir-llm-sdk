@@ -43,6 +43,7 @@ import { PricingValidationError } from '../errors/pricing-errors';
 import { WebSearchError } from '../errors/web-search-errors';
 import { bytesToHex } from '../crypto/utilities';
 import { analyzePromptForSearchIntent } from '../utils/search-intent-analyzer';
+import { resolveSearchQueries } from '../utils/search-query-resolver';
 import { analyzePromptForImageIntent } from '../utils/image-intent-analyzer';
 import { recoverFromCheckpointsFlow, recoverFromCheckpointsFlowWithHttp } from '../utils/checkpoint-recovery';
 import { recoverFromBlockchain, type BlockchainRecoveredConversation, type CheckpointQueryOptions } from '../utils/checkpoint-blockchain';
@@ -1007,7 +1008,7 @@ export class SessionManager implements ISessionManager {
             this.sendEncryptedMessage(prompt, {
               webSearch: enableWebSearchEncrypted,
               maxSearches: enableWebSearchEncrypted ? (searchConfigEncrypted.maxSearches ?? 5) : 0,
-              searchQueries: searchConfigEncrypted.queries ?? null
+              searchQueries: resolveSearchQueries(enableWebSearchEncrypted, prompt, searchConfigEncrypted.queries, options?.rawQuery)
             }, options?.images, options?.thinking).catch((err) => {
               console.error('[SessionManager] Failed to send encrypted message:', err);
               reject(err);
@@ -1085,7 +1086,7 @@ export class SessionManager implements ISessionManager {
             // Web search fields (v8.7.0+) - AUTOMATICALLY ENABLED based on intent
             web_search: enableWebSearch,
             max_searches: enableWebSearch ? (searchConfig.maxSearches ?? 5) : 0,
-            search_queries: searchConfig.queries ?? null,
+            search_queries: resolveSearchQueries(enableWebSearch, prompt, searchConfig.queries, options?.rawQuery),
             request: plaintextRequest
           });
 
@@ -1176,7 +1177,7 @@ export class SessionManager implements ISessionManager {
           await this.sendEncryptedMessage(prompt, {
             webSearch: enableWebSearchNonStreamEnc,
             maxSearches: enableWebSearchNonStreamEnc ? (searchConfigNonStreamEnc.maxSearches ?? 5) : 0,
-            searchQueries: searchConfigNonStreamEnc.queries ?? null
+            searchQueries: resolveSearchQueries(enableWebSearchNonStreamEnc, prompt, searchConfigNonStreamEnc.queries, options?.rawQuery)
           }, options?.images, options?.thinking);
 
           // Wait for encrypted response (non-streaming) - MUST accumulate chunks!
@@ -1329,7 +1330,7 @@ export class SessionManager implements ISessionManager {
             // Web search fields (v8.7.0+) - AUTOMATICALLY ENABLED based on intent
             web_search: enableWebSearchNonStream,
             max_searches: enableWebSearchNonStream ? (searchConfigNonStream.maxSearches ?? 5) : 0,
-            search_queries: searchConfigNonStream.queries ?? null,
+            search_queries: resolveSearchQueries(enableWebSearchNonStream, prompt, searchConfigNonStream.queries, options?.rawQuery),
             request: plaintextRequestNonStream
           });
 
@@ -1984,6 +1985,11 @@ export class SessionManager implements ISessionManager {
       // Only include images when present
       if (images && images.length > 0) {
         structuredPayload.images = images.map(img => ({ data: img.data, format: img.format }));
+      }
+
+      // Include search_queries in encrypted payload (node reads from both outer and inner)
+      if (webSearchOptions?.searchQueries) {
+        structuredPayload.search_queries = webSearchOptions.searchQueries;
       }
 
       // Encrypt JSON payload with session key

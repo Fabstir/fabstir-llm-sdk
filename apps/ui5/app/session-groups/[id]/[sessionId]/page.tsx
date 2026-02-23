@@ -1077,7 +1077,8 @@ export default function ChatSessionPage() {
                     : msg
                 )
               );
-            }
+            },
+            { rawQuery: message }
           ),
           new Promise((_, reject) =>
             setTimeout(() => reject(new Error(`AI response timeout after ${aiResponseTimeout / 1000} seconds (WebSocket connection issue)`)), aiResponseTimeout)
