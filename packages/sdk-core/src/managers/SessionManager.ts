@@ -902,10 +902,12 @@ export class SessionManager implements ISessionManager {
 
             // Guard against double resolution (mobile browser race condition fix)
             let isResolved = false;
+            let safetyTimeout: ReturnType<typeof setTimeout> | undefined;
             const safeResolve = (value: string) => {
               if (!isResolved) {
                 isResolved = true;
                 clearTimeout(timeout);
+                if (safetyTimeout) clearTimeout(safetyTimeout);
                 unsubscribe();
                 resolve(value);
               }
@@ -914,13 +916,13 @@ export class SessionManager implements ISessionManager {
               if (!isResolved) {
                 isResolved = true;
                 clearTimeout(timeout);
+                if (safetyTimeout) clearTimeout(safetyTimeout);
                 unsubscribe();
                 reject(err);
               }
             };
 
             let encChunkCount = 0;
-            let safetyTimeout: ReturnType<typeof setTimeout> | undefined;
             // v1.13.4: deferred resolution — wait for stream_end after encrypted_response
 
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
@@ -986,6 +988,19 @@ export class SessionManager implements ISessionManager {
                 safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
               }
             });
+
+            // Abort signal handling: resolve with partial response on abort
+            if (options?.signal) {
+              if (options.signal.aborted) { safeResolve(fullResponse); return; }
+              options.signal.addEventListener('abort', () => {
+                if (this.wsClient) {
+                  this.wsClient.sendWithoutResponse({
+                    type: 'stream_cancel', session_id: sessionIdStr, reason: 'user_cancelled'
+                  }).catch(() => {});
+                }
+                safeResolve(fullResponse);
+              }, { once: true });
+            }
 
             // AUTOMATIC WEB SEARCH INTENT DETECTION for encrypted path (Phase 5.1)
             const searchConfigEncrypted = session.webSearch || {};
@@ -1078,7 +1093,7 @@ export class SessionManager implements ISessionManager {
             plaintextRequest.thinking = options.thinking;
           }
 
-          response = await this.wsClient.sendMessage({
+          const sendMessagePromise = this.wsClient.sendMessage({
             type: 'prompt',
             chain_id: session.chainId,
             jobId: session.jobId.toString(),  // Include jobId for settlement tracking
@@ -1090,8 +1105,39 @@ export class SessionManager implements ISessionManager {
             request: plaintextRequest
           });
 
-          // Clean up handler for plaintext
-          unsubscribe();
+          // Abort signal handling for plaintext path
+          if (options?.signal) {
+            if (options.signal.aborted) {
+              unsubscribe();
+              response = fullResponse;
+            } else {
+              response = await new Promise<string>((res, rej) => {
+                const onAbort = () => {
+                  if (this.wsClient) {
+                    this.wsClient.sendWithoutResponse({
+                      type: 'stream_cancel', session_id: sessionIdStr, reason: 'user_cancelled'
+                    }).catch(() => {});
+                  }
+                  unsubscribe();
+                  res(fullResponse);
+                };
+                options.signal!.addEventListener('abort', onAbort, { once: true });
+                sendMessagePromise.then(result => {
+                  options.signal!.removeEventListener('abort', onAbort);
+                  unsubscribe();
+                  res(result);
+                }).catch(err => {
+                  options.signal!.removeEventListener('abort', onAbort);
+                  unsubscribe();
+                  rej(err);
+                });
+              });
+            }
+          } else {
+            response = await sendMessagePromise;
+            // Clean up handler for plaintext
+            unsubscribe();
+          }
         }
         
         // Use collected response or fallback to returned response

@@ -145,6 +145,8 @@ export interface PromptOptions {
   onImageGenerated?: (result: import('./image-generation.types').ImageGenerationResult) => void;
   /** Raw user query for web search (before any RAG context injection). */
   rawQuery?: string;
+  /** AbortSignal to stop in-progress streaming inference. Resolves with partial response. */
+  signal?: AbortSignal;
 }
 
 // ============= Token Usage Types =============

@@ -93,9 +93,9 @@ GET /v1/version
 
 ```json
 {
-  "version": "8.16.1",
-  "build": "v8.16.1-auto-image-routing-2026-02-16",
-  "date": "2026-02-16",
+  "version": "8.18.0",
+  "build": "v8.18.0-set-token-pricing-2026-02-24",
+  "date": "2026-02-24",
   "features": [
     "multi-chain",
     "base-sepolia",
@@ -163,7 +163,19 @@ GET /v1/version
     "output-safety-classifier",
     "image-generation-billing",
     "image-content-hashes",
-    "auto-image-routing"
+    "auto-image-routing",
+    "thinking-mode",
+    "per-request-thinking",
+    "default-thinking-mode-env",
+    "glm4-default-thinking",
+    "new-jobmarketplace-proxy",
+    "dispute-window-fix",
+    "contract-dispute-window-query",
+    "dispute-window-buffer",
+    "glm4-context-aware-system-prompt",
+    "set-token-pricing",
+    "per-token-erc20-pricing",
+    "token-pricing-usdc-env"
   ],
   "chains": [84532, 5611],
   "breaking_changes": [
@@ -197,7 +209,16 @@ GET /v1/version
     "FEAT: Three-layer content safety pipeline for image generation (v8.16.0)",
     "FEAT: Per-session rate limiting for image generation (v8.16.0)",
     "FEAT: Node-side image intent detection with AUTO_IMAGE_ROUTING env var (v8.16.1)",
-    "FEAT: Auto-routes image prompts to diffusion sidecar when intent detected (v8.16.1)"
+    "FEAT: Auto-routes image prompts to diffusion sidecar when intent detected (v8.16.1)",
+    "FEAT: Per-request thinking/reasoning mode via 'thinking' field (v8.17.0)",
+    "FEAT: Harmony maps thinking to Reasoning: none/low/medium/high in system prompt (v8.17.0)",
+    "FEAT: GLM-4 maps thinking to /think or /no_think prefix (v8.17.0)",
+    "FIX: Dispute window now queried from contract disputeWindow() at startup (v8.17.5)",
+    "FIX: GLM-4 default system prompt now context-aware for RAG (v8.17.6)",
+    "CONTRACT: JobMarketplace fresh proxy 0xD067...adA4 (v8.17.4)",
+    "FEAT: Node calls setTokenPricing(USDC, price) after registerNode() (v8.18.0, F202614977)",
+    "FEAT: TOKEN_PRICING_USDC env var for custom USDC pricing (v8.18.0)",
+    "CONTRACT: NodeRegistry getNodePricing() reverts for ERC20 without setTokenPricing (v8.18.0)"
   ]
 }
 ```
@@ -301,7 +322,7 @@ GET /chains
       "rpc_url": "https://sepolia.base.org",
       "contracts": {
         "node_registry": "0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22",
-        "job_marketplace": "0x95132177F964FF053C1E874b53CF74d819618E06",
+        "job_marketplace": "0xD067719Ee4c514B5735d1aC0FfB46FECf2A9adA4",
         "payment_escrow": "0x...",
         "host_earnings": "0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0"
       },
@@ -370,7 +391,7 @@ GET /chain/{chain_id}
   "rpc_url": "https://sepolia.base.org",
   "contracts": {
     "node_registry": "0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22",
-    "job_marketplace": "0x95132177F964FF053C1E874b53CF74d819618E06",
+    "job_marketplace": "0xD067719Ee4c514B5735d1aC0FfB46FECf2A9adA4",
     "payment_escrow": "0x...",
     "host_earnings": "0x..."
   },
@@ -720,7 +741,7 @@ GET /v1/chains
       "native_token": "ETH",
       "rpc_url": "https://sepolia.base.org",
       "contracts": {
-        "job_marketplace": "0x95132177F964FF053C1E874b53CF74d819618E06",
+        "job_marketplace": "0xD067719Ee4c514B5735d1aC0FfB46FECf2A9adA4",
         "node_registry": "0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22",
         "proof_system": "0x2ACcc60893872A499700908889B38C5420CBcFD1",
         "host_earnings": "0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0",
@@ -2476,7 +2497,7 @@ The node generates cryptographic proofs for all inference results to ensure paym
 - **Storage**: Off-chain in S5 network (737x size reduction on-chain)
 - **On-Chain Submission**: Only hash + CID (hash: 32 bytes, CID: ~50 bytes)
 - **Contract Function**: `submitProofOfWork(jobId, tokensClaimed, proofHash, proofCID)`
-- **Contract Address**: `0x95132177F964FF053C1E874b53CF74d819618E06` (Base Sepolia, UUPS Proxy)
+- **Contract Address**: `0xD067719Ee4c514B5735d1aC0FfB46FECf2A9adA4` (Base Sepolia, UUPS Proxy)
 
 **🚨 CRITICAL**: Nodes built without `--features real-ezkl` generate **mock proofs** (126 bytes) which are NOT valid for production use!
 
@@ -2643,7 +2664,7 @@ jobMarketplace.on(filter, (jobId, host, tokensUsed, event) => {
 **Requirements**:
 - Node must have `HOST_PRIVATE_KEY` configured
 - Node version v5-payment-settlement or later
-- JobMarketplace: 0x95132177F964FF053C1E874b53CF74d819618E06 (v8.13.0+ AUDIT-F4 remediated)
+- JobMarketplace: 0xD067719Ee4c514B5735d1aC0FfB46FECf2A9adA4 (v8.13.0+ AUDIT-F4 remediated)
 
 ### Proof Configuration
 
@@ -3145,8 +3166,8 @@ All contract addresses are defined in the `.env.contracts` file at the repositor
 
 | Contract | Address | Version | Features |
 |----------|---------|---------|----------|
-| **NodeRegistry** | `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22` | v8.5.0+ | UUPS Proxy, dual pricing + PRICE_PRECISION=1000 |
-| **JobMarketplace** | `0x95132177F964FF053C1E874b53CF74d819618E06` | v8.13.0+ | AUDIT-F4 remediated, S5 proof storage, modelId signatures |
+| **NodeRegistry** | `0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22` | v8.5.0+ | UUPS Proxy, dual pricing + PRICE_PRECISION=1000, setTokenPricing (v8.18.0+) |
+| **JobMarketplace** | `0xD067719Ee4c514B5735d1aC0FfB46FECf2A9adA4` | v8.13.0+ | AUDIT-F4 remediated, S5 proof storage, modelId signatures |
 | **HostEarnings** | `0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0` | v8.5.0+ | UUPS Proxy, host earnings accumulator (90% share) |
 | **ProofSystem** | `0xE8DCa89e1588bbbdc4F7D5F78263632B35401B31` | v8.13.0+ | AUDIT-F4 remediated, 4-parameter signature verification |
 | **ModelRegistry** | `0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2` | v8.5.0+ | UUPS Proxy, model governance |
@@ -3176,6 +3197,24 @@ Contract addresses for opBNB Testnet are defined in `.env.contracts` but the cha
 - Stable: MIN=1, MAX=100,000,000 (×1000 precision)
 - Payment formula: `(tokens * pricePerToken) / 1000`
 
+**NodeRegistry — setTokenPricing (v8.18.0+, F202614977)**:
+- **Breaking**: `getNodePricing()` / `getModelPricing()` now **revert** with `"No token pricing"` for ERC20 tokens if `setTokenPricing(token, price)` has not been called
+- Registration is now two steps: `registerNode()` then `setTokenPricing(usdcAddress, price)`
+- Node automatically calls `setTokenPricing(USDC, price)` after `registerNode()` succeeds
+- If `setTokenPricing` tx fails, registration is NOT rolled back — host can retry via `cast` or node restart
+- Native ETH sessions are unaffected (only ERC20 tokens require explicit pricing)
+- `TOKEN_PRICING_USDC` env var: override USDC price (default: 10,000 = $10/M tokens)
+- On-chain range: MIN=1, MAX=100,000,000 (validated by `stable::validate_price()`)
+- New implementation address: `0xeeB3ABad9d27Bb3a5D7ACA3c282CDD8C80aAD24b`
+- Manual call for already-registered hosts:
+  ```bash
+  cast send 0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22 \
+    "setTokenPricing(address,uint256)" \
+    0x036CbD53842c5426634e7929541eC2318f3dCF7e 10000 \
+    --private-key $HOST_PRIVATE_KEY \
+    --rpc-url "https://sepolia.base.org" --legacy
+  ```
+
 **JobMarketplace (v8.1.2+)**:
 - Off-chain proof storage in S5 network
 - `submitProofOfWork(jobId, tokensClaimed, proofHash, proofCID)` function
@@ -3187,7 +3226,7 @@ Contract addresses for opBNB Testnet are defined in `.env.contracts` but the cha
 ```bash
 # From .env.local.test (v8.13.0+ AUDIT-F4 Remediated)
 CONTRACT_NODE_REGISTRY=0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22
-CONTRACT_JOB_MARKETPLACE=0x95132177F964FF053C1E874b53CF74d819618E06
+CONTRACT_JOB_MARKETPLACE=0xD067719Ee4c514B5735d1aC0FfB46FECf2A9adA4
 CONTRACT_HOST_EARNINGS=0xE4F33e9e132E60fc3477509f99b9E1340b91Aee0
 CONTRACT_PROOF_SYSTEM=0xE8DCa89e1588bbbdc4F7D5F78263632B35401B31
 CONTRACT_MODEL_REGISTRY=0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2
@@ -3202,10 +3241,10 @@ TEST_HOST_1_PRIVATE_KEY=<from .env.test.local>
 #### Contract ABIs
 
 Contract ABIs are located in:
-- `contracts/` - Full contract ABIs
+- `contracts/` - Full contract ABIs (used by `abigen!` for Rust bindings)
 - `docs/compute-contracts-reference/client-abis/` - Client-optimized ABIs
   - `JobMarketplaceWithModels-CLIENT-ABI.json`
-  - `NodeRegistryWithModels-CLIENT-ABI.json`
+  - `NodeRegistryWithModelsUpgradeable-CLIENT-ABI.json` — includes `setTokenPricing`, `customTokenPricing`, `TokenPricingUpdated` (v8.18.0+)
 
 #### Documentation References
 
@@ -5211,7 +5250,7 @@ cast client --rpc-url https://sepolia.base.org
 cast client --rpc-url https://opbnb-testnet.binance.org
 
 # Check contract deployment (v8.1.2+ hash+CID contract)
-cast code 0x95132177F964FF053C1E874b53CF74d819618E06 --rpc-url https://sepolia.base.org
+cast code 0xD067719Ee4c514B5735d1aC0FfB46FECf2A9adA4 --rpc-url https://sepolia.base.org
 ```
 
 #### Monitor Logs
@@ -5236,7 +5275,7 @@ CHAIN_ID=84532                    # Default chain (Base Sepolia)
 RPC_URL=https://sepolia.base.org  # Default RPC endpoint
 
 # Contract addresses (from .env.contracts)
-JOB_MARKETPLACE_ADDRESS=0x95132177F964FF053C1E874b53CF74d819618E06
+JOB_MARKETPLACE_ADDRESS=0xD067719Ee4c514B5735d1aC0FfB46FECf2A9adA4
 NODE_REGISTRY_ADDRESS=0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22
 
 # Node wallet (must have gas on both chains)
@@ -5256,6 +5295,11 @@ REQUIRE_MODEL_VALIDATION=false    # Set to true to enforce model authorization
                                   # - SHA256 hash verification against on-chain hash
                                   # - Host authorization check via NodeRegistry
                                   # - Node refuses to start if unauthorized
+
+# Token pricing (v8.18.0+)
+TOKEN_PRICING_USDC=10000          # USDC price per token (default: 10000 = $10/M tokens)
+                                  # Must be in range [1, 100000000]
+                                  # Invalid values fall back to default with warning
 ```
 
 ### Getting Help
