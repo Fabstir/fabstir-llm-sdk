@@ -373,7 +373,8 @@ export async function stakeTokens(config: StakingConfig): Promise<StakingResult>
       apiUrl: config.apiUrl,
       supportedModels,
       minPricePerTokenNative: config.minPricePerTokenNative,  // Native pricing (ETH/BNB) in wei
-      minPricePerTokenStable: config.minPricePerTokenStable   // Stable pricing (USDC) in raw units
+      minPricePerTokenStable: config.minPricePerTokenStable,  // Stable pricing (USDC) in raw units
+      stableTokenAddress: sdk.getContractAddresses?.()?.usdcToken
     });
 
     // SDK already waits for transaction confirmation and returns hash

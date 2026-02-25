@@ -47,10 +47,10 @@ describe('Contract Pricing Validation', () => {
 
       // Note: This test assumes host is not already registered
       // In practice, unregister first or use a different test account
-      const tx = await nodeRegistry.registerNode(metadata, apiUrl, modelIds, minPrice);
+      const tx = await nodeRegistry.registerNode(metadata, apiUrl, modelIds, minPrice, minPrice);
       await tx.wait(3);
 
-      const pricing = await nodeRegistry.getNodePricing(await signer.getAddress());
+      const pricing = await nodeRegistry.getNodePricing(await signer.getAddress(), USDC_ADDRESS);
       expect(pricing).toBe(BigInt(minPrice));
     });
 
@@ -60,7 +60,7 @@ describe('Contract Pricing Validation', () => {
       const modelIds = ['0x329d002bc20d4e7baae25df802c9678b5a4340b3ce91f23e6a0644975e95935f'];
 
       await expect(
-        nodeRegistry.registerNode(metadata, apiUrl, modelIds, 50) // Below min
+        nodeRegistry.registerNode(metadata, apiUrl, modelIds, 50, 50) // Below min
       ).rejects.toThrow();
     });
 
@@ -70,7 +70,7 @@ describe('Contract Pricing Validation', () => {
       const modelIds = ['0x329d002bc20d4e7baae25df802c9678b5a4340b3ce91f23e6a0644975e95935f'];
 
       await expect(
-        nodeRegistry.registerNode(metadata, apiUrl, modelIds, 150000) // Above max
+        nodeRegistry.registerNode(metadata, apiUrl, modelIds, 150000, 150000) // Above max
       ).rejects.toThrow();
     });
   });
@@ -79,10 +79,10 @@ describe('Contract Pricing Validation', () => {
     it('should update host minimum price', async () => {
       const newPrice = 3000;
 
-      const tx = await nodeRegistry.updatePricing(newPrice);
+      const tx = await nodeRegistry.updatePricingStable(newPrice);
       await tx.wait(3);
 
-      const updatedPrice = await nodeRegistry.getNodePricing(await signer.getAddress());
+      const updatedPrice = await nodeRegistry.getNodePricing(await signer.getAddress(), USDC_ADDRESS);
       expect(updatedPrice).toBe(BigInt(newPrice));
     });
 
@@ -90,7 +90,7 @@ describe('Contract Pricing Validation', () => {
       const newPrice = 4000;
       const signerAddress = await signer.getAddress();
 
-      const tx = await nodeRegistry.updatePricing(newPrice);
+      const tx = await nodeRegistry.updatePricingStable(newPrice);
       const receipt = await tx.wait(3);
 
       const event = receipt.logs
@@ -112,7 +112,7 @@ describe('Contract Pricing Validation', () => {
   describe('getNodePricing', () => {
     it('should return correct pricing value', async () => {
       const signerAddress = await signer.getAddress();
-      const pricing = await nodeRegistry.getNodePricing(signerAddress);
+      const pricing = await nodeRegistry.getNodePricing(signerAddress, USDC_ADDRESS);
 
       expect(pricing).toBeGreaterThanOrEqual(BigInt(100));
       expect(pricing).toBeLessThanOrEqual(BigInt(100000));
@@ -122,7 +122,7 @@ describe('Contract Pricing Validation', () => {
   describe('createSession price validation', () => {
     it('should reject session with price below host minimum', async () => {
       const hostAddress = await signer.getAddress();
-      const hostMinPrice = await nodeRegistry.getNodePricing(hostAddress);
+      const hostMinPrice = await nodeRegistry.getNodePricing(hostAddress, USDC_ADDRESS);
       const belowMinPrice = Number(hostMinPrice) - 100;
 
       await expect(
@@ -134,12 +134,12 @@ describe('Contract Pricing Validation', () => {
           3600, // 1 hour
           1000 // proof interval
         )
-      ).rejects.toThrow(/Price below host minimum/);
+      ).rejects.toThrow(/Price below host min/);
     });
 
     it('should accept session with price >= host minimum', async () => {
       const hostAddress = await signer.getAddress();
-      const hostMinPrice = await nodeRegistry.getNodePricing(hostAddress);
+      const hostMinPrice = await nodeRegistry.getNodePricing(hostAddress, USDC_ADDRESS);
 
       // This test would require actual deposit - skipping execution
       // In real test: First deposit, then create session

@@ -72,10 +72,10 @@ export const HostEarningsFragments = {
 };
 
 export const NodeRegistryFragments = {
-  registerNode: 'function registerNode(string metadata, string apiUrl, bytes32[] modelIds)',
+  registerNode: 'function registerNode(string metadata, string apiUrl, bytes32[] modelIds, uint256 minPricePerTokenNative, uint256 minPricePerTokenStable)',
   unregisterNode: 'function unregisterNode()',
   stake: 'function stake(uint256 amount)',
-  nodes: 'function nodes(address) view returns (address operator, uint256 stakedAmount, bool active, string metadata, string apiUrl)',
+  nodes: 'function nodes(address) view returns (address operator, uint256 stakedAmount, bool active, string metadata, string apiUrl, uint256 minPricePerTokenNative, uint256 minPricePerTokenStable)',
   getNodeModels: 'function getNodeModels(address nodeAddress) view returns (bytes32[])',
   isActiveNode: 'function isActiveNode(address operator) view returns (bool)'
 };

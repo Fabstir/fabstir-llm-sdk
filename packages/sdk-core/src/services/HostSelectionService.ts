@@ -260,8 +260,8 @@ export class HostSelectionService implements IHostSelectionService {
   private normalizePrice(price: bigint): number {
     // Handle edge cases
     if (price === undefined || price === null || price <= 0n) {
-      // Zero or negative price gets max score (best deal)
-      return 1;
+      // Zero/missing price = host has no pricing configured
+      return 0;
     }
 
     if (price <= MIN_PRICE) {

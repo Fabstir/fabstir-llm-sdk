@@ -75,6 +75,7 @@ export interface HostRegistrationWithModels {
   supportedModels: ModelSpec[];
   minPricePerTokenNative: string;    // Minimum price for ETH/BNB (wei)
   minPricePerTokenStable: string;    // Minimum price for USDC (raw)
+  stableTokenAddress?: string;       // Optional USDC address for setTokenPricing (auto-resolved from ContractManager if omitted)
 }
 
 export class HostManager {
@@ -368,6 +369,17 @@ export class HostManager {
         );
       }
 
+      // Step 4: Set per-token pricing for stablecoin (REQUIRED since Feb 24, 2026)
+      // Without this, getNodePricing(host, usdcToken) reverts with "No token pricing"
+      const stableTokenAddr = request.stableTokenAddress ||
+        (this.contractManager?.getContractAddress ? await this.contractManager.getContractAddress('usdcToken').catch(() => null as any) : null);
+      if (stableTokenAddr && this.nodeRegistry) {
+        const setTokenTx = await this.nodeRegistry['setTokenPricing'](
+          stableTokenAddr, minPriceStable, { gasLimit: 100000n }
+        );
+        await setTokenTx.wait(3);
+      }
+
       return receipt.hash;
     } catch (error: any) {
       if (error instanceof ModelNotApprovedError ||
@@ -381,6 +393,27 @@ export class HostManager {
         this.nodeRegistry?.address
       );
     }
+  }
+
+  /**
+   * Set per-token pricing for a specific ERC-20 token (e.g. USDC)
+   * Required since Feb 24, 2026 — without this, getNodePricing(host, token) reverts
+   * @param tokenAddress - ERC-20 token contract address
+   * @param price - Price per token in contract precision units
+   * @returns Transaction hash
+   */
+  async setTokenPricing(tokenAddress: string, price: bigint): Promise<string> {
+    if (!this.initialized || !this.signer || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+    if (!isAddress(tokenAddress)) {
+      throw new SDKError(`Invalid token address: ${tokenAddress}`, 'INVALID_ADDRESS');
+    }
+    const tx = await this.nodeRegistry['setTokenPricing'](
+      tokenAddress, price, { gasLimit: 100000n }
+    );
+    const receipt = await tx.wait(3);
+    return receipt.hash;
   }
 
   /**
@@ -454,6 +487,24 @@ export class HostManager {
           console.warn(`[HostManager] Failed to get info for host ${address}, skipping:`, error);
           continue;
         }
+      }
+
+      // Filter out hosts without valid USDC token pricing (Feb 24, 2026 requirement)
+      // getNodePricing(host, token) reverts with "No token pricing" if customTokenPricing not set
+      const usdcAddr = this.contractManager?.getContractAddress
+        ? await this.contractManager.getContractAddress('usdcToken').catch(() => null as any)
+        : null;
+      if (usdcAddr) {
+        const validHosts: HostInfo[] = [];
+        for (const host of hosts) {
+          try {
+            await this.nodeRegistry['getNodePricing'](host.address, usdcAddr);
+            validHosts.push(host);
+          } catch {
+            console.warn(`[HostManager] Host ${host.address} has no USDC token pricing, excluding from results`);
+          }
+        }
+        return validHosts;
       }
 
       return hosts;

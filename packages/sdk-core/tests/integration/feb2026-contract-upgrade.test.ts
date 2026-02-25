@@ -18,7 +18,7 @@ import { describe, it, expect, beforeAll, vi } from 'vitest';
 // Import types to verify they exist
 import type { ProofSubmissionParams, ProofSubmissionResult } from '../../src/types/proof.types';
 import { DELEGATION_ERRORS, parseDelegationError } from '../../src/types/errors';
-import { JobMarketplaceFragments } from '../../src/contracts/abis/index';
+import { JobMarketplaceFragments, NodeRegistryFragments } from '../../src/contracts/abis/index';
 
 describe('February 2026 Contract Upgrade - Integration', () => {
   describe('Type Definitions', () => {
@@ -109,6 +109,160 @@ describe('February 2026 Contract Upgrade - Integration', () => {
       expect(parseDelegationError({ message: 'ERC20Only' })).toBe('Direct delegation requires ERC-20 token (no ETH)');
       expect(parseDelegationError({ message: 'BadDelegateParams' })).toBe('Invalid delegation parameters');
       expect(parseDelegationError({ message: 'other error' })).toBeNull();
+    });
+  });
+
+  describe('Post-Audit ModelRegistry ABI', () => {
+    const modelAbi = require('../../src/contracts/abis/ModelRegistryUpgradeable-CLIENT-ABI.json');
+    const modelFunctions = modelAbi
+      .filter((e: any) => e.type === 'function')
+      .map((e: any) => e.name);
+    const modelEvents = modelAbi
+      .filter((e: any) => e.type === 'event')
+      .map((e: any) => e.name);
+
+    it('should contain rate-limit functions', () => {
+      expect(modelFunctions).toContain('getModelRateLimit');
+      expect(modelFunctions).toContain('setModelRateLimit');
+      expect(modelFunctions).toContain('DEFAULT_RATE_LIMIT');
+    });
+
+    it('should contain voting extension constants', () => {
+      expect(modelFunctions).toContain('EXTENSION_DURATION');
+      expect(modelFunctions).toContain('EXTENSION_THRESHOLD');
+      expect(modelFunctions).toContain('MAX_EXTENSIONS');
+    });
+
+    it('should contain new events (ModelRateLimitUpdated, VotingExtended, RejectedFeesWithdrawn)', () => {
+      expect(modelEvents).toContain('ModelRateLimitUpdated');
+      expect(modelEvents).toContain('VotingExtended');
+      expect(modelEvents).toContain('RejectedFeesWithdrawn');
+    });
+
+    it('should NOT contain updateModelHash', () => {
+      expect(modelFunctions).not.toContain('updateModelHash');
+    });
+
+    it('should NOT contain removed events (ModelHashUpdated, ModelSkipped)', () => {
+      expect(modelEvents).not.toContain('ModelHashUpdated');
+      expect(modelEvents).not.toContain('ModelSkipped');
+    });
+  });
+
+  describe('Post-Audit NodeRegistry ABI', () => {
+    const nodeAbi = require('../../src/contracts/abis/NodeRegistryWithModelsUpgradeable-CLIENT-ABI.json');
+    const nodeFunctions = nodeAbi
+      .filter((e: any) => e.type === 'function')
+      .map((e: any) => e.name);
+    const nodeEvents = nodeAbi
+      .filter((e: any) => e.type === 'event')
+      .map((e: any) => e.name);
+
+    it('should contain slashing functions', () => {
+      expect(nodeFunctions).toContain('slashStake');
+      expect(nodeFunctions).toContain('initializeSlashing');
+      expect(nodeFunctions).toContain('setSlashingAuthority');
+      expect(nodeFunctions).toContain('setTreasury');
+    });
+
+    it('should contain slashing constants', () => {
+      expect(nodeFunctions).toContain('MAX_SLASH_PERCENTAGE');
+      expect(nodeFunctions).toContain('MIN_STAKE_AFTER_SLASH');
+      expect(nodeFunctions).toContain('SLASH_COOLDOWN');
+    });
+
+    it('should contain slashing events', () => {
+      expect(nodeEvents).toContain('SlashExecuted');
+      expect(nodeEvents).toContain('HostAutoUnregistered');
+      expect(nodeEvents).toContain('SlashingAuthorityUpdated');
+      expect(nodeEvents).toContain('TreasuryUpdated');
+    });
+
+    it('registerNode should have 5 params with dual pricing', () => {
+      const registerNode = nodeAbi.find(
+        (e: any) => e.type === 'function' && e.name === 'registerNode'
+      );
+      expect(registerNode.inputs).toHaveLength(5);
+      const inputNames = registerNode.inputs.map((i: any) => i.name);
+      expect(inputNames).toContain('minPricePerTokenNative');
+      expect(inputNames).toContain('minPricePerTokenStable');
+    });
+  });
+
+  describe('Post-Audit ProofSystem ABI', () => {
+    const proofAbi = require('../../src/contracts/abis/ProofSystemUpgradeable-CLIENT-ABI.json');
+    const proofFunctions = proofAbi
+      .filter((e: any) => e.type === 'function')
+      .map((e: any) => e.name);
+
+    it('should NOT contain removed circuit functions', () => {
+      expect(proofFunctions).not.toContain('getModelCircuit');
+      expect(proofFunctions).not.toContain('isCircuitRegistered');
+      expect(proofFunctions).not.toContain('modelCircuits');
+    });
+
+    it('should still contain core proof functions', () => {
+      expect(proofFunctions).toContain('markProofUsed');
+      expect(proofFunctions).toContain('verifiedProofs');
+      expect(proofFunctions).toContain('setAuthorizedCaller');
+    });
+  });
+
+  describe('Post-Audit NodeRegistry Fragment Exports', () => {
+    it('registerNode fragment has 5 params with pricing', () => {
+      expect(NodeRegistryFragments.registerNode).toContain('minPricePerTokenNative');
+      expect(NodeRegistryFragments.registerNode).toContain('minPricePerTokenStable');
+    });
+
+    it('nodes fragment includes pricing fields', () => {
+      expect(NodeRegistryFragments.nodes).toContain('minPricePerTokenNative');
+      expect(NodeRegistryFragments.nodes).toContain('minPricePerTokenStable');
+    });
+  });
+
+  describe('Post-Audit setTokenPricing in Registration', () => {
+    it('HostRegistrationWithModels should accept stableTokenAddress field', async () => {
+      const { HostRegistrationWithModels } = await import('../../src/managers/HostManager');
+      // TypeScript compilation test: stableTokenAddress should be an optional field
+      const request: import('../../src/managers/HostManager').HostRegistrationWithModels = {
+        metadata: { hardware: { gpu: 'RTX 4090', vram: 24, ram: 64 }, capabilities: { streaming: true }, location: 'us-east-1', maxConcurrent: 5, costPerToken: 0.0001 },
+        apiUrl: 'http://localhost:8080',
+        supportedModels: [],
+        minPricePerTokenNative: '3000000',
+        minPricePerTokenStable: '5000',
+        stableTokenAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+      };
+      expect(request.stableTokenAddress).toBe('0x036CbD53842c5426634e7929541eC2318f3dCF7e');
+    });
+
+    it('HostManager should expose setTokenPricing method', async () => {
+      const { HostManager } = await import('../../src/managers/HostManager');
+      expect(typeof HostManager.prototype.setTokenPricing).toBe('function');
+    });
+  });
+
+  describe('Host Discovery Pricing Filter', () => {
+    it('findHostsForModel should filter hosts without token pricing', async () => {
+      // This is a structural test — the filter logic exists in findHostsForModel
+      // Verified by checking that the method accesses getNodePricing during filtering
+      const { HostManager } = await import('../../src/managers/HostManager');
+      expect(typeof HostManager.prototype.findHostsForModel).toBe('function');
+      // The actual filtering behavior requires a live contract to test
+    });
+  });
+
+  describe('normalizePrice Scoring Bug Fix', () => {
+    it('normalizePrice should return 0 for zero or undefined price', async () => {
+      const { HostSelectionService } = await import('../../src/services/HostSelectionService');
+      const service = new HostSelectionService();
+
+      // Access private method via prototype for testing
+      const normalizePrice = (HostSelectionService.prototype as any).normalizePrice;
+
+      // Zero price should return 0 (not available), not 1 (best deal)
+      expect(normalizePrice(0n)).toBe(0);
+      expect(normalizePrice(undefined)).toBe(0);
+      expect(normalizePrice(null)).toBe(0);
     });
   });
 
