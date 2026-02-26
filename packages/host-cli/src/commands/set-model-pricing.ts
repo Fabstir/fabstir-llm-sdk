@@ -67,21 +67,25 @@ export function registerSetModelPricingCommand(program: Command): void {
           throw new Error('This address is not registered as a host node');
         }
 
-        // Calculate price values
-        let nativePrice = '0';
-        let stablePrice = '0';
+        // Phase 18: Per-model per-token pricing
+        let tokenAddress: string;
+        let priceValue: string;
 
         if (priceType === 'usdc') {
-          stablePrice = Math.round(price * PRICE_PRECISION).toString();
-          console.log(chalk.cyan(`💵 USDC Price: $${price}/million tokens (contract value: ${stablePrice})`));
+          const usdcAddr = process.env.CONTRACT_USDC_TOKEN;
+          if (!usdcAddr) throw new Error('CONTRACT_USDC_TOKEN not set');
+          tokenAddress = usdcAddr;
+          priceValue = Math.round(price * PRICE_PRECISION).toString();
+          console.log(chalk.cyan(`USDC Price: $${price}/million tokens (contract value: ${priceValue})`));
         } else {
-          nativePrice = BigInt(Math.round(price * 1e9)).toString();
-          console.log(chalk.cyan(`⛽ ETH Price: ${price} Gwei/million tokens (contract value: ${nativePrice} wei)`));
+          tokenAddress = '0x0000000000000000000000000000000000000000'; // ethers.ZeroAddress
+          priceValue = BigInt(Math.round(price * 1e9)).toString();
+          console.log(chalk.cyan(`ETH Price: ${price} Gwei/million tokens (contract value: ${priceValue} wei)`));
         }
 
         // Submit transaction
-        console.log(chalk.blue('\n📝 Submitting transaction...'));
-        const txHash = await hostManager.setModelPricing(modelId, nativePrice, stablePrice);
+        console.log(chalk.blue('\nSubmitting transaction...'));
+        const txHash = await hostManager.setModelTokenPricing(modelId, tokenAddress, priceValue);
 
         console.log(chalk.green('\n✅ Successfully set model pricing!'));
         console.log(chalk.cyan(`🔗 Transaction: ${txHash}`));

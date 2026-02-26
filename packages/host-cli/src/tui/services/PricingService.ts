@@ -3,24 +3,33 @@
 
 /**
  * Pricing Service
- * Handles querying and updating pricing via NodeRegistry contract
+ * Phase 18: Handles querying and updating per-model per-token pricing via NodeRegistry contract
  */
 
 import { ethers } from 'ethers';
 
-// Contract addresses (Base Sepolia)
-const NODE_REGISTRY_ADDRESS = '0x8BC0Af4aAa2dfb99699B1A24bA85E507de10Fd22';
-const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+// Use environment variables for contract addresses (CLAUDE.md: never hardcode)
+function getNodeRegistryAddress(): string {
+  const addr = process.env.CONTRACT_NODE_REGISTRY;
+  if (!addr) throw new Error('CONTRACT_NODE_REGISTRY not set in environment');
+  return addr;
+}
+
+function getUsdcAddress(): string {
+  const addr = process.env.CONTRACT_USDC_TOKEN;
+  if (!addr) throw new Error('CONTRACT_USDC_TOKEN not set in environment');
+  return addr;
+}
 
 // Price precision: 1000 = $1 per million tokens
 const PRICE_PRECISION = 1000;
 
-// Minimal ABI for pricing operations
+// Phase 18: ABI for per-model per-token pricing operations
 const NODE_REGISTRY_ABI = [
-  'function getNodePricing(address operator, address token) view returns (uint256)',
+  'function getModelPricing(address operator, bytes32 modelId, address token) view returns (uint256)',
+  'function setModelTokenPricing(bytes32 modelId, address token, uint256 price) external',
+  'function getHostModelPrices(address operator, address token) view returns (bytes32[], uint256[])',
   'function nodes(address) view returns (address operator, uint256 stakedAmount, bool active, string metadata, string apiUrl, uint256 minPricePerTokenNative, uint256 minPricePerTokenStable)',
-  'function updatePricingStable(uint256 newMinPrice) external',
-  'function updatePricingNative(uint256 newMinPrice) external',
   'function PRICE_PRECISION() view returns (uint256)',
 ];
 
@@ -39,7 +48,7 @@ export interface UpdatePricingResult {
 }
 
 /**
- * Fetches current pricing for a host
+ * Fetches current pricing for a host (from node struct — registration prices)
  * @param hostAddress The host's address
  * @param rpcUrl RPC URL for the blockchain
  * @returns PricingData or null if fetch fails
@@ -50,16 +59,13 @@ export async function fetchCurrentPricing(
 ): Promise<PricingData | null> {
   try {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
-    const contract = new ethers.Contract(NODE_REGISTRY_ADDRESS, NODE_REGISTRY_ABI, provider);
+    const contract = new ethers.Contract(getNodeRegistryAddress(), NODE_REGISTRY_ABI, provider);
 
-    // Get pricing from node info
+    // Get pricing from node info (registration prices, not model-specific)
     const nodeInfo = await contract.nodes(hostAddress);
     const nativePriceRaw = nodeInfo.minPricePerTokenNative;
     const stablePriceRaw = nodeInfo.minPricePerTokenStable;
 
-    // Convert stable price to human-readable format
-    // Price is stored as: $X per million tokens * PRICE_PRECISION
-    // So $5/million = 5000 (5 * 1000)
     const stablePriceNum = Number(stablePriceRaw) / PRICE_PRECISION;
 
     return {
@@ -75,9 +81,10 @@ export async function fetchCurrentPricing(
 }
 
 /**
- * Updates the stable (USDC) pricing for the host
+ * Phase 18: Updates the stable (USDC) pricing for a specific model
  * @param privateKey The host's private key for signing
  * @param rpcUrl RPC URL for the blockchain
+ * @param modelId The model ID (bytes32 hash)
  * @param newPriceUsd New price in USD per million tokens (e.g., 5.00)
  * @param onStatus Callback for status updates
  * @returns UpdatePricingResult
@@ -85,11 +92,11 @@ export async function fetchCurrentPricing(
 export async function updateStablePricing(
   privateKey: string,
   rpcUrl: string,
+  modelId: string,
   newPriceUsd: number,
   onStatus?: (status: string) => void
 ): Promise<UpdatePricingResult> {
   try {
-    // Validate price range (0.001 to 100,000 per million tokens)
     if (newPriceUsd < 0.001 || newPriceUsd > 100000) {
       return {
         success: false,
@@ -97,23 +104,21 @@ export async function updateStablePricing(
       };
     }
 
-    // Normalize private key
     const normalizedKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
-
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const wallet = new ethers.Wallet(normalizedKey, provider);
-    const contract = new ethers.Contract(NODE_REGISTRY_ADDRESS, NODE_REGISTRY_ABI, wallet);
+    const contract = new ethers.Contract(getNodeRegistryAddress(), NODE_REGISTRY_ABI, wallet);
 
-    // Convert USD price to contract format: price * PRICE_PRECISION
     const priceInContract = Math.round(newPriceUsd * PRICE_PRECISION);
+    const usdcAddress = getUsdcAddress();
 
-    onStatus?.(`Updating price to $${newPriceUsd.toFixed(2)}/million tokens...`);
+    onStatus?.(`Setting model ${modelId.slice(0, 10)}... USDC price to $${newPriceUsd.toFixed(2)}/million tokens...`);
 
-    const tx = await contract.updatePricingStable(priceInContract);
+    const tx = await contract.setModelTokenPricing(modelId, usdcAddress, priceInContract);
     onStatus?.(`Transaction sent: ${tx.hash.slice(0, 10)}...`);
     onStatus?.('Waiting for confirmation...');
 
-    const receipt = await tx.wait(1);
+    const receipt = await tx.wait(3);
 
     if (receipt.status === 1) {
       return {
@@ -130,7 +135,6 @@ export async function updateStablePricing(
     }
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-    // Simplify common errors
     if (errorMsg.includes('insufficient funds')) {
       return { success: false, error: 'Insufficient ETH for gas' };
     }
@@ -142,27 +146,24 @@ export async function updateStablePricing(
 }
 
 /**
- * Updates the native (ETH) pricing for the host
- * Native price is stored as wei per million tokens in contract
- * User inputs in Gwei for convenience (1 Gwei = 10^9 wei)
- *
+ * Phase 18: Updates the native (ETH) pricing for a specific model
  * @param privateKey The host's private key for signing
  * @param rpcUrl RPC URL for the blockchain
- * @param newPriceGwei New price in Gwei per million tokens (e.g., 500000 = 0.0005 ETH)
+ * @param modelId The model ID (bytes32 hash)
+ * @param newPriceGwei New price in Gwei per million tokens
  * @param onStatus Callback for status updates
  * @returns UpdatePricingResult
  */
 export async function updateNativePricing(
   privateKey: string,
   rpcUrl: string,
+  modelId: string,
   newPriceGwei: number,
   onStatus?: (status: string) => void
 ): Promise<UpdatePricingResult> {
   try {
-    // Contract minimum is 227273 wei per million tokens
-    // That's about 0.000227 Gwei, so any reasonable Gwei value should work
     const MIN_NATIVE_RAW = 227273n;
-    const priceInWei = BigInt(Math.round(newPriceGwei * 1e9)); // Gwei to wei
+    const priceInWei = BigInt(Math.round(newPriceGwei * 1e9));
 
     if (priceInWei < MIN_NATIVE_RAW) {
       return {
@@ -171,20 +172,18 @@ export async function updateNativePricing(
       };
     }
 
-    // Normalize private key
     const normalizedKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
-
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const wallet = new ethers.Wallet(normalizedKey, provider);
-    const contract = new ethers.Contract(NODE_REGISTRY_ADDRESS, NODE_REGISTRY_ABI, wallet);
+    const contract = new ethers.Contract(getNodeRegistryAddress(), NODE_REGISTRY_ABI, wallet);
 
-    onStatus?.(`Updating ETH price to ${newPriceGwei} Gwei/million tokens...`);
+    onStatus?.(`Setting model ${modelId.slice(0, 10)}... ETH price to ${newPriceGwei} Gwei/million tokens...`);
 
-    const tx = await contract.updatePricingNative(priceInWei);
+    const tx = await contract.setModelTokenPricing(modelId, ethers.ZeroAddress, priceInWei);
     onStatus?.(`Transaction sent: ${tx.hash.slice(0, 10)}...`);
     onStatus?.('Waiting for confirmation...');
 
-    const receipt = await tx.wait(1);
+    const receipt = await tx.wait(3);
 
     if (receipt.status === 1) {
       return {
@@ -216,8 +215,6 @@ export async function updateNativePricing(
 
 /**
  * Formats stable price for display
- * @param priceRaw Raw price from contract
- * @returns Formatted string like "$5.00/million"
  */
 export function formatPrice(priceRaw: bigint): string {
   const priceNum = Number(priceRaw) / PRICE_PRECISION;
@@ -226,14 +223,10 @@ export function formatPrice(priceRaw: bigint): string {
 
 /**
  * Formats native price for display
- * Native price is stored as wei per million tokens
- * @param priceRaw Raw price from contract (in wei)
- * @returns Formatted string like "8990.22 Gwei/M" or "0.009 ETH/M"
  */
 export function formatNativePrice(priceRaw: bigint): string {
   const priceInGwei = Number(priceRaw) / 1e9;
   if (priceInGwei >= 1000000) {
-    // Show as ETH if very large
     const priceInEth = Number(priceRaw) / 1e18;
     return `${priceInEth.toFixed(4)} ETH/M`;
   }

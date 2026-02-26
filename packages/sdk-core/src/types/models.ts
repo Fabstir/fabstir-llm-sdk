@@ -124,18 +124,14 @@ export interface ModelRequirements {
 }
 
 /**
- * Per-model pricing information
- * Hosts can set custom prices for individual models that override their default host-level pricing
+ * Per-model per-token pricing information
+ * Phase 18: Each price is for a specific (model, token) pair. No fallbacks.
  */
 export interface ModelPricing {
   /** Model ID (bytes32 hash from contract) */
   modelId: string;
-  /** Native token price (ETH/BNB) with PRICE_PRECISION=1000 multiplier */
-  nativePrice: bigint;
-  /** Stablecoin price (USDC) with PRICE_PRECISION=1000 multiplier */
-  stablePrice: bigint;
-  /** True if this is a custom override, false if using host default pricing */
-  isCustom: boolean;
+  /** Price for the specific token queried, with PRICE_PRECISION=1000 multiplier */
+  price: bigint;
 }
 
 /**

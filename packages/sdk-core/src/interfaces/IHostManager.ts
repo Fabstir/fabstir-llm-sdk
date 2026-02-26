@@ -136,34 +136,23 @@ export interface IHostManager {
   updateSupportedModels(modelIds: string[]): Promise<string>;
 
   /**
-   * Update host minimum pricing for native tokens (ETH/BNB)
-   * @param newMinPrice - New minimum price in wei (2,272,727,273 to 22,727,272,727,273)
+   * Set pricing for a specific model + token pair
+   * Phase 18: Replaces updatePricingNative, updatePricingStable, setModelPricing
+   * @param modelId - Model ID (bytes32 hash)
+   * @param tokenAddress - Token address (ethers.ZeroAddress for native ETH/BNB)
+   * @param price - Price as string (validated per token type)
    * @returns Transaction hash
    */
-  updatePricingNative(newMinPrice: string): Promise<string>;
+  setModelTokenPricing(modelId: string, tokenAddress: string, price: string): Promise<string>;
 
   /**
-   * Update host minimum pricing for stablecoins (USDC)
-   * @param newMinPrice - New minimum price (10 to 100,000)
+   * Clear pricing for a specific model + token pair
+   * Phase 18: Replaces clearModelPricing (now per-token)
+   * @param modelId - Model ID (bytes32 hash)
+   * @param tokenAddress - Token address (ethers.ZeroAddress for native ETH/BNB)
    * @returns Transaction hash
    */
-  updatePricingStable(newMinPrice: string): Promise<string>;
-
-  /**
-   * Update host minimum pricing (legacy method)
-   * @param newMinPrice - New minimum price per token (100-100,000 range)
-   * @returns Transaction hash
-   * @deprecated Use updatePricingNative() or updatePricingStable() instead
-   */
-  updatePricing(newMinPrice: string): Promise<string>;
-
-  /**
-   * Get host minimum pricing (legacy method)
-   * @param hostAddress - Host address to query pricing for
-   * @returns Minimum price per token as bigint (0 if host not registered)
-   * @deprecated Use getHostStatus() or getHostInfo() to get dual pricing fields
-   */
-  getPricing(hostAddress: string): Promise<bigint>;
+  clearModelTokenPricing(modelId: string, tokenAddress: string): Promise<string>;
 
   /**
    * Get host accumulated earnings for a specific token
@@ -189,25 +178,20 @@ export interface IHostManager {
   getReputation(address: string): Promise<number>;
 
   /**
-   * Set custom pricing for a specific model
-   * @param modelId - Model ID (bytes32 hash from contract)
-   * @param nativePrice - Native token price as string (use "0" to keep default)
-   * @param stablePrice - Stablecoin price as string (use "0" to keep default)
-   * @returns Transaction hash
-   */
-  setModelPricing(modelId: string, nativePrice: string, stablePrice: string): Promise<string>;
-
-  /**
-   * Clear custom pricing for a model (revert to host default pricing)
-   * @param modelId - Model ID (bytes32 hash from contract)
-   * @returns Transaction hash
-   */
-  clearModelPricing(modelId: string): Promise<string>;
-
-  /**
-   * Get all model prices for a host
+   * Get all model prices for a host for a specific token
+   * Phase 18: Now requires token parameter. Returns (modelId, price) pairs.
    * @param hostAddress - Host's EVM address
-   * @returns Array of ModelPricing objects
+   * @param tokenAddress - Token address (ethers.ZeroAddress for native, USDC address for stable)
+   * @returns Array of ModelPricing objects (price=0 entries filtered out)
    */
-  getHostModelPrices(hostAddress: string): Promise<ModelPricing[]>;
+  getHostModelPrices(hostAddress: string, tokenAddress: string): Promise<ModelPricing[]>;
+
+  /**
+   * Get effective pricing for a specific model + token pair
+   * @param hostAddress - Host's EVM address
+   * @param modelId - Model ID (bytes32 hash)
+   * @param tokenAddress - Token address
+   * @returns Effective price as bigint
+   */
+  getModelPricing(hostAddress: string, modelId: string, tokenAddress: string): Promise<bigint>;
 }

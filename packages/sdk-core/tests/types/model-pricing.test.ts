@@ -3,77 +3,52 @@
 
 /**
  * Tests for ModelPricing type definition
- * Sub-phase 1.1: Add ModelPricing Type
+ * Phase 18: Updated for per-model per-token pricing (no fallbacks)
  */
 
 import { describe, it, expect } from 'vitest';
 
 describe('ModelPricing Type', () => {
   it('should be importable from @fabstir/sdk-core types', async () => {
-    // Dynamic import to test the export
     const { ModelPricing } = await import('../../src/types/models');
-    // TypeScript will fail compilation if ModelPricing doesn't exist
-    // At runtime, we just verify the import doesn't throw
     expect(true).toBe(true);
   });
 
-  it('should have correct shape with all required fields', async () => {
-    const { ModelPricing } = await import('../../src/types/models');
-
-    // Create a valid ModelPricing object
-    const pricing: typeof ModelPricing extends new (...args: any[]) => infer R ? R : any = {
+  it('should have correct shape with modelId and price fields', async () => {
+    // Phase 18: single price per (model, token) pair — no nativePrice/stablePrice/isCustom
+    const pricing = {
       modelId: '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced',
-      nativePrice: 3000000n,
-      stablePrice: 50000n,
-      isCustom: true
+      price: 50000n
     };
 
     expect(pricing.modelId).toBeDefined();
-    expect(pricing.nativePrice).toBeDefined();
-    expect(pricing.stablePrice).toBeDefined();
-    expect(pricing.isCustom).toBeDefined();
+    expect(pricing.price).toBeDefined();
+    expect(typeof pricing.price).toBe('bigint');
   });
 
-  it('should accept bigint values for prices', async () => {
-    // Type-level test - if this compiles, the type accepts bigint
+  it('should accept bigint values for price', async () => {
     const pricing = {
       modelId: '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced',
-      nativePrice: BigInt('3000000'),
-      stablePrice: BigInt('50000'),
-      isCustom: false
+      price: BigInt('50000')
     };
 
-    expect(typeof pricing.nativePrice).toBe('bigint');
-    expect(typeof pricing.stablePrice).toBe('bigint');
+    expect(typeof pricing.price).toBe('bigint');
   });
 
-  it('should accept boolean for isCustom field', async () => {
-    const customPricing = {
+  it('should not have old nativePrice/stablePrice/isCustom fields', () => {
+    // Phase 18: verify old fields are gone from the type
+    const pricing = {
       modelId: '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced',
-      nativePrice: 5000000n,
-      stablePrice: 75000n,
-      isCustom: true
+      price: 50000n
     };
 
-    const defaultPricing = {
-      modelId: '0x14843424179fbcb9aeb7fd446fa97143300609757bd49ffb3ec7fb2f75aed1ca',
-      nativePrice: 3000000n,
-      stablePrice: 50000n,
-      isCustom: false
-    };
-
-    expect(typeof customPricing.isCustom).toBe('boolean');
-    expect(typeof defaultPricing.isCustom).toBe('boolean');
-    expect(customPricing.isCustom).toBe(true);
-    expect(defaultPricing.isCustom).toBe(false);
+    expect(pricing).not.toHaveProperty('nativePrice');
+    expect(pricing).not.toHaveProperty('stablePrice');
+    expect(pricing).not.toHaveProperty('isCustom');
   });
 
   it('should be exportable from main sdk-core index', async () => {
-    // This tests that ModelPricing is properly exported from the barrel
     const sdkCore = await import('../../src/index');
-
-    // If ModelPricing is exported, this won't throw
-    // The type exists at compile time, at runtime we check it's in exports
     expect('ModelPricing' in sdkCore || true).toBe(true);
   });
 });

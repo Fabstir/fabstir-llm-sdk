@@ -35,13 +35,9 @@ export {
 // Export specific ABI fragments for common operations
 // AUDIT-F3: All session creation functions now require proofTimeoutWindow parameter
 export const JobMarketplaceFragments = {
-  // Session creation functions (AUDIT-F3: added proofTimeoutWindow)
-  createSessionJob: 'function createSessionJob(address host, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) payable returns (uint256)',
+  // Session creation functions — Phase 18: modelless variants removed, all sessions require modelId
   createSessionJobForModel: 'function createSessionJobForModel(address host, bytes32 modelId, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) payable returns (uint256)',
-  createSessionJobWithToken: 'function createSessionJobWithToken(address host, address token, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)',
   createSessionJobForModelWithToken: 'function createSessionJobForModelWithToken(address host, bytes32 modelId, address token, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)',
-  createSessionFromDeposit: 'function createSessionFromDeposit(address host, address paymentToken, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)',
-  // AUDIT-F5: New function for model-specific deposit sessions
   createSessionFromDepositForModel: 'function createSessionFromDepositForModel(bytes32 modelId, address host, address paymentToken, uint256 deposit, uint256 pricePerToken, uint256 maxDuration, uint256 proofInterval, uint256 proofTimeoutWindow) returns (uint256)',
   // Proof functions - Feb 2026: signature removed (auth via msg.sender == session.host)
   submitProofOfWork: 'function submitProofOfWork(uint256 jobId, uint256 tokensClaimed, bytes32 proofHash, string proofCID, string deltaCID)',

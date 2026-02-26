@@ -161,7 +161,8 @@ describe('JobMarketplace Multi-Chain Wrapper', () => {
         deposit: '0.001',
         pricePerToken: 1000000, // 0.000001 ETH per token
         duration: 3600,
-        proofInterval: 300
+        proofInterval: 300,
+        modelId: '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced'
       };
 
       // Mock sufficient balance for the deposit
@@ -182,7 +183,8 @@ describe('JobMarketplace Multi-Chain Wrapper', () => {
         deposit: '100', // 100 USDC
         pricePerToken: 100000, // 0.1 USDC per token
         duration: 3600,
-        proofInterval: 300
+        proofInterval: 300,
+        modelId: '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced'
       };
 
       // Mock sufficient USDC balance
@@ -213,7 +215,8 @@ describe('JobMarketplace Multi-Chain Wrapper', () => {
         deposit: '0.001',
         pricePerToken: 1000000,
         duration: 3600,
-        proofInterval: 300
+        proofInterval: 300,
+        modelId: '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced'
       };
 
       await expect(wrapper.createSessionFromDeposit(params))
@@ -252,7 +255,8 @@ describe('JobMarketplace Multi-Chain Wrapper', () => {
         pricePerToken: 1000000,
         duration: 3600,
         proofInterval: 300,
-        paymentAmount: '0.001'
+        paymentAmount: '0.001',
+        modelId: '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced'
       });
 
       expect(mockSigner.sendTransaction).toHaveBeenCalledWith(
@@ -330,7 +334,8 @@ describe('JobMarketplace Multi-Chain Wrapper', () => {
         deposit: '0.001',
         pricePerToken: 1000000,
         duration: 3600,
-        proofInterval: 300
+        proofInterval: 300,
+        modelId: '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced'
       })).rejects.toThrow('Invalid address');
     });
   });

@@ -226,27 +226,29 @@ export class HostManagerMock implements IHostManager {
     return '0x' + Math.random().toString(16).substring(2);
   }
 
-  async updatePricingNative(newMinPrice: string): Promise<string> {
+  // Phase 18: Per-model per-token pricing
+  async setModelTokenPricing(modelId: string, tokenAddress: string, price: string): Promise<string> {
     await this.delay(500);
-    console.log('[Mock] Updated native pricing:', newMinPrice);
+    console.log(`[Mock] setModelTokenPricing: model=${modelId.slice(0, 10)}, token=${tokenAddress.slice(0, 10)}, price=${price}`);
     return '0x' + Math.random().toString(16).substring(2);
   }
 
-  async updatePricingStable(newMinPrice: string): Promise<string> {
+  async clearModelTokenPricing(modelId: string, tokenAddress: string): Promise<string> {
     await this.delay(500);
-    console.log('[Mock] Updated stable pricing:', newMinPrice);
+    console.log(`[Mock] clearModelTokenPricing: model=${modelId.slice(0, 10)}, token=${tokenAddress.slice(0, 10)}`);
     return '0x' + Math.random().toString(16).substring(2);
   }
 
-  async updatePricing(newMinPrice: string): Promise<string> {
-    return this.updatePricingStable(newMinPrice);
+  async getHostModelPrices(hostAddress: string, tokenAddress: string): Promise<Array<{ modelId: string; price: bigint }>> {
+    await this.delay(200);
+    console.log(`[Mock] getHostModelPrices: host=${hostAddress.slice(0, 10)}, token=${tokenAddress.slice(0, 10)}`);
+    return [];
   }
 
-  async getPricing(hostAddress: string): Promise<bigint> {
+  async getModelPricing(hostAddress: string, modelId: string, tokenAddress: string): Promise<bigint> {
     await this.delay(150);
-
-    const host = this.mockHosts.get(hostAddress);
-    return host?.minPricePerTokenStable || BigInt(0);
+    console.log(`[Mock] getModelPricing: host=${hostAddress.slice(0, 10)}, model=${modelId.slice(0, 10)}, token=${tokenAddress.slice(0, 10)}`);
+    return BigInt(5000); // Default mock price
   }
 
   async getHostEarnings(hostAddress: string, tokenAddress: string): Promise<bigint> {

@@ -8,6 +8,7 @@
 
 import blessed from 'blessed';
 import contrib from 'blessed-contrib';
+import { ethers } from 'ethers';
 import { DashboardState } from './types.js';
 import { formatHeader } from './components/Header.js';
 import { formatStatusPanel } from './components/StatusPanel.js';
@@ -16,7 +17,7 @@ import { formatLogEntry } from './components/LogsPanel.js';
 import { fetchStatus } from './services/MgmtClient.js';
 import { fetchEarnings, deriveAddressFromPrivateKey } from './services/EarningsClient.js';
 import { withdrawAllEarnings } from './services/WithdrawalService.js';
-import { fetchCurrentPricing, updateStablePricing, updateNativePricing, formatPrice, formatNativePrice } from './services/PricingService.js';
+import { formatPrice, formatNativePrice } from './services/PricingService.js';
 import { fetchHostModelPrices, updateModelStablePricing, updateModelNativePricing, clearModelPricingOnChain } from './services/ModelPricingService.js';
 import { fetchAllModels } from '../services/ModelRegistryClient.js';
 import { DockerLogStream } from './services/DockerLogs.js';
@@ -159,138 +160,11 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
     await Promise.all([refreshStatus(), refreshEarnings()]);
   });
 
+  // Phase 18: Per-host base pricing removed — redirect to model pricing (m key)
   screen.key(['p'], async () => {
-    if (!hostPrivateKey || !hostAddress) {
-      logsBox.log(showError('Cannot manage pricing: HOST_PRIVATE_KEY not set'));
-      screen.render();
-      return;
-    }
-
-    logsBox.log('[PRICING] Fetching current pricing...');
+    logsBox.log('[PRICING] Per-host base pricing has been replaced by per-model pricing (Phase 18).');
+    logsBox.log('[PRICING] Press [m] to manage per-model pricing instead.');
     screen.render();
-
-    const pricing = await fetchCurrentPricing(hostAddress, rpcUrl);
-    if (!pricing) {
-      logsBox.log(showError('Failed to fetch current pricing'));
-      screen.render();
-      return;
-    }
-
-    logsBox.log(`[PRICING] USDC: ${formatPrice(pricing.stablePriceRaw)} | ETH: ${formatNativePrice(pricing.nativePriceRaw)}`);
-    screen.render();
-
-    // Create menu to choose price type
-    const menuBox = blessed.list({
-      parent: screen,
-      top: 'center',
-      left: 'center',
-      width: 40,
-      height: 6,
-      border: { type: 'line' },
-      label: ' Select price to update ',
-      style: {
-        fg: 'white',
-        bg: 'blue',
-        border: { fg: 'white' },
-        selected: { bg: 'green', fg: 'white' },
-      },
-      keys: true,
-      vi: true,
-      items: ['[U] USDC (stablecoin)', '[E] ETH (native token)', '[ESC] Cancel'],
-    });
-
-    menuBox.focus();
-    screen.render();
-
-    const handlePriceUpdate = async (priceType: 'usdc' | 'eth') => {
-      menuBox.destroy();
-      screen.render();
-
-      const label = priceType === 'usdc'
-        ? ' New USDC price ($/million) or ESC to cancel '
-        : ' New ETH price (Gwei/million) or ESC to cancel ';
-
-      const inputBox = blessed.textbox({
-        parent: screen,
-        top: 'center',
-        left: 'center',
-        width: 50,
-        height: 3,
-        border: { type: 'line' },
-        label,
-        style: { fg: 'white', bg: 'blue', border: { fg: 'white' } },
-        inputOnFocus: true,
-      });
-
-      inputBox.focus();
-      screen.render();
-
-      inputBox.on('submit', async (value: string) => {
-        inputBox.destroy();
-        screen.render();
-
-        const newPrice = parseFloat(value);
-        if (isNaN(newPrice) || newPrice <= 0) {
-          logsBox.log(showError('Invalid price entered'));
-          screen.render();
-          return;
-        }
-
-        if (priceType === 'usdc') {
-          logsBox.log(`[PRICING] Updating USDC to $${newPrice.toFixed(2)}/million...`);
-          screen.render();
-          const result = await updateStablePricing(hostPrivateKey, rpcUrl, newPrice, (status) => {
-            logsBox.log(`[PRICING] ${status}`);
-            screen.render();
-          });
-          if (result.success) {
-            logsBox.log(showMessage(`USDC price updated to $${result.newPrice}/million`));
-            logsBox.log(`[PRICING] TX: ${result.txHash}`);
-          } else {
-            logsBox.log(showError(`Price update failed: ${result.error}`));
-          }
-        } else {
-          logsBox.log(`[PRICING] Updating ETH to ${newPrice} Gwei/million...`);
-          screen.render();
-          const result = await updateNativePricing(hostPrivateKey, rpcUrl, newPrice, (status) => {
-            logsBox.log(`[PRICING] ${status}`);
-            screen.render();
-          });
-          if (result.success) {
-            logsBox.log(showMessage(`ETH price updated to ${result.newPrice} Gwei/million`));
-            logsBox.log(`[PRICING] TX: ${result.txHash}`);
-          } else {
-            logsBox.log(showError(`Price update failed: ${result.error}`));
-          }
-        }
-        screen.render();
-      });
-
-      inputBox.on('cancel', () => {
-        inputBox.destroy();
-        logsBox.log('[PRICING] Cancelled');
-        screen.render();
-      });
-
-      inputBox.readInput();
-    };
-
-    menuBox.key(['u'], () => handlePriceUpdate('usdc'));
-    menuBox.key(['e'], () => handlePriceUpdate('eth'));
-    menuBox.key(['escape'], () => {
-      menuBox.destroy();
-      logsBox.log('[PRICING] Cancelled');
-      screen.render();
-    });
-    menuBox.on('select', (_item: blessed.Widgets.BoxElement, index: number) => {
-      if (index === 0) handlePriceUpdate('usdc');
-      else if (index === 1) handlePriceUpdate('eth');
-      else {
-        menuBox.destroy();
-        logsBox.log('[PRICING] Cancelled');
-        screen.render();
-      }
-    });
   });
 
   screen.key(['m'], async () => {
@@ -303,9 +177,11 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
     logsBox.log('[MODEL PRICING] Fetching models and pricing...');
     screen.render();
 
-    // Fetch host's model prices and all approved models for display names
-    const [modelPrices, allModels] = await Promise.all([
-      fetchHostModelPrices(hostAddress, rpcUrl),
+    // Phase 18: Fetch per-token model prices (USDC + native separately)
+    const usdcAddr = process.env.CONTRACT_USDC_TOKEN || '';
+    const [usdcPrices, nativePrices, allModels] = await Promise.all([
+      usdcAddr ? fetchHostModelPrices(hostAddress, rpcUrl, usdcAddr) : Promise.resolve([]),
+      fetchHostModelPrices(hostAddress, rpcUrl, ethers.ZeroAddress),
       fetchAllModels(rpcUrl),
     ]);
 
@@ -315,12 +191,14 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
       return;
     }
 
-    // Build display items: model name + current price
+    // Build display items: model name + current price per token
     const modelItems = allModels.map((model) => {
-      const pricing = modelPrices.find((p) => p.modelId === model.modelId);
-      const priceStr = pricing
-        ? `USDC: ${formatPrice(pricing.stablePrice)} | ETH: ${formatNativePrice(pricing.nativePrice)}`
-        : '(default pricing)';
+      const usdcPricing = usdcPrices.find((p) => p.modelId === model.modelId);
+      const nativePricing = nativePrices.find((p) => p.modelId === model.modelId);
+      const parts: string[] = [];
+      if (usdcPricing) parts.push(`USDC: ${formatPrice(usdcPricing.price)}`);
+      if (nativePricing) parts.push(`ETH: ${formatNativePrice(nativePricing.price)}`);
+      const priceStr = parts.length > 0 ? parts.join(' | ') : '(no pricing set)';
       return `${model.displayName} - ${priceStr}`;
     });
     modelItems.push('[ESC] Cancel');
@@ -467,17 +345,29 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
       priceMenu.key(['c'], async () => {
         priceMenu.destroy();
         screen.render();
-        logsBox.log(`[MODEL PRICING] Clearing ${selectedModel.displayName} custom pricing...`);
+        logsBox.log(`[MODEL PRICING] Clearing ${selectedModel.displayName} pricing (USDC + ETH)...`);
         screen.render();
-        const result = await clearModelPricingOnChain(hostPrivateKey, rpcUrl, selectedModel.modelId, (status) => {
-          logsBox.log(`[MODEL PRICING] ${status}`);
+        // Phase 18: Clear both USDC and native pricing separately
+        const clearUsdcAddr = process.env.CONTRACT_USDC_TOKEN || '';
+        if (clearUsdcAddr) {
+          const usdcResult = await clearModelPricingOnChain(hostPrivateKey, rpcUrl, selectedModel.modelId, clearUsdcAddr, (status) => {
+            logsBox.log(`[MODEL PRICING] USDC: ${status}`);
+            screen.render();
+          });
+          if (usdcResult.success) {
+            logsBox.log(showMessage(`${selectedModel.displayName} USDC pricing cleared. TX: ${usdcResult.txHash}`));
+          } else {
+            logsBox.log(showError(`Clear USDC pricing failed: ${usdcResult.error}`));
+          }
+        }
+        const nativeResult = await clearModelPricingOnChain(hostPrivateKey, rpcUrl, selectedModel.modelId, ethers.ZeroAddress, (status) => {
+          logsBox.log(`[MODEL PRICING] ETH: ${status}`);
           screen.render();
         });
-        if (result.success) {
-          logsBox.log(showMessage(`${selectedModel.displayName} reverted to default pricing`));
-          logsBox.log(`[MODEL PRICING] TX: ${result.txHash}`);
+        if (nativeResult.success) {
+          logsBox.log(showMessage(`${selectedModel.displayName} ETH pricing cleared. TX: ${nativeResult.txHash}`));
         } else {
-          logsBox.log(showError(`Clear model pricing failed: ${result.error}`));
+          logsBox.log(showError(`Clear ETH pricing failed: ${nativeResult.error}`));
         }
         screen.render();
       });
@@ -492,19 +382,30 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
         else if (idx === 2) {
           priceMenu.destroy();
           screen.render();
-          // Clear pricing inline
+          // Phase 18: Clear pricing inline — both USDC and native
           (async () => {
-            logsBox.log(`[MODEL PRICING] Clearing ${selectedModel.displayName} custom pricing...`);
+            logsBox.log(`[MODEL PRICING] Clearing ${selectedModel.displayName} pricing (USDC + ETH)...`);
             screen.render();
-            const result = await clearModelPricingOnChain(hostPrivateKey, rpcUrl, selectedModel.modelId, (status) => {
-              logsBox.log(`[MODEL PRICING] ${status}`);
+            const inlineUsdcAddr = process.env.CONTRACT_USDC_TOKEN || '';
+            if (inlineUsdcAddr) {
+              const usdcRes = await clearModelPricingOnChain(hostPrivateKey, rpcUrl, selectedModel.modelId, inlineUsdcAddr, (status) => {
+                logsBox.log(`[MODEL PRICING] USDC: ${status}`);
+                screen.render();
+              });
+              if (usdcRes.success) {
+                logsBox.log(showMessage(`${selectedModel.displayName} USDC pricing cleared. TX: ${usdcRes.txHash}`));
+              } else {
+                logsBox.log(showError(`Clear USDC pricing failed: ${usdcRes.error}`));
+              }
+            }
+            const nativeRes = await clearModelPricingOnChain(hostPrivateKey, rpcUrl, selectedModel.modelId, ethers.ZeroAddress, (status) => {
+              logsBox.log(`[MODEL PRICING] ETH: ${status}`);
               screen.render();
             });
-            if (result.success) {
-              logsBox.log(showMessage(`${selectedModel.displayName} reverted to default pricing`));
-              logsBox.log(`[MODEL PRICING] TX: ${result.txHash}`);
+            if (nativeRes.success) {
+              logsBox.log(showMessage(`${selectedModel.displayName} ETH pricing cleared. TX: ${nativeRes.txHash}`));
             } else {
-              logsBox.log(showError(`Clear model pricing failed: ${result.error}`));
+              logsBox.log(showError(`Clear ETH pricing failed: ${nativeRes.error}`));
             }
             screen.render();
           })();

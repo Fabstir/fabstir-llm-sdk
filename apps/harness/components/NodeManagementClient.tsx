@@ -840,62 +840,14 @@ const NodeManagementClient: React.FC = () => {
     }
   };
 
-  // Update Native Pricing (ETH/BNB)
+  // Phase 18: Per-host base pricing removed — use per-model pricing instead
   const updatePricingNative = async () => {
-    if (!sdk) {
-      addLog('❌ SDK not initialized');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const currentPriceNative = nodeInfo?.minPricePerTokenNative?.toString() || '0';
-      addLog(`💰 Updating native pricing from ${currentPriceNative} to ${newPriceNativeValue} wei...`);
-
-      const hostManager = sdk.getHostManager();
-      const txHash = await hostManager.updatePricingNative(newPriceNativeValue);
-
-      addLog(`✅ Native pricing updated! TX: ${txHash}`);
-      const formatted = formatNativePrice(newPriceNativeValue);
-      addLog(`💵 New native price: ${formatted.eth} ETH/token (~$${formatted.usd})`);
-
-      // Refresh node info
-      await checkRegistrationStatus();
-      setNewPriceNativeValue(''); // Clear input
-    } catch (error: any) {
-      addLog(`❌ Native pricing update failed: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
+    addLog('⚠️ Per-host base pricing deprecated (Phase 18). Use per-model pricing below.');
   };
 
-  // Update Stable Pricing (USDC)
+  // Phase 18: Per-host base pricing removed — use per-model pricing instead
   const updatePricingStable = async () => {
-    if (!sdk) {
-      addLog('❌ SDK not initialized');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const currentPriceStable = nodeInfo?.minPricePerTokenStable?.toString() || '0';
-      addLog(`💰 Updating stable pricing from ${currentPriceStable} to ${newPriceStableValue}...`);
-
-      const hostManager = sdk.getHostManager();
-      const txHash = await hostManager.updatePricingStable(newPriceStableValue);
-
-      addLog(`✅ Stable pricing updated! TX: ${txHash}`);
-      const formatted = formatStablePrice(newPriceStableValue);
-      addLog(`💵 New stable price: ${formatted.usdc} USDC/token`);
-
-      // Refresh node info
-      await checkRegistrationStatus();
-      setNewPriceStableValue(''); // Clear input
-    } catch (error: any) {
-      addLog(`❌ Stable pricing update failed: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
+    addLog('⚠️ Per-host base pricing deprecated (Phase 18). Use per-model pricing below.');
   };
 
   // Helper to get model name from ID
@@ -908,16 +860,18 @@ const NodeManagementClient: React.FC = () => {
     return knownModels[modelId] || `${modelId.slice(0, 10)}...`;
   };
 
-  // Fetch all model prices for the connected host
+  // Phase 18: Fetch per-token model prices for the connected host
   const fetchHostModelPrices = async () => {
     if (!sdk || !walletAddress) return;
 
     setLoadingModelPrices(true);
     try {
       const hostManager = sdk.getHostManager();
-      const prices = await hostManager.getHostModelPrices(walletAddress);
+      // Phase 18: getHostModelPrices requires tokenAddress — fetch USDC prices
+      const usdcAddr = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN || process.env.CONTRACT_USDC_TOKEN || '';
+      const prices = await hostManager.getHostModelPrices(walletAddress, usdcAddr);
       setHostModelPrices(prices);
-      addLog(`📊 Fetched ${prices.length} model prices`);
+      addLog(`📊 Fetched ${prices.length} model USDC prices`);
     } catch (error: any) {
       addLog(`❌ Failed to fetch model prices: ${error.message}`);
     } finally {
@@ -925,7 +879,7 @@ const NodeManagementClient: React.FC = () => {
     }
   };
 
-  // Set custom pricing for selected model
+  // Phase 18: Set per-model per-token pricing
   const handleSetModelPricing = async () => {
     if (!sdk || !selectedModelForPricing) {
       addLog('❌ Select a model first');
@@ -937,13 +891,20 @@ const NodeManagementClient: React.FC = () => {
       addLog(`💰 Setting pricing for model ${getModelNameFromId(selectedModelForPricing)}...`);
 
       const hostManager = sdk.getHostManager();
-      const txHash = await hostManager.setModelPricing(
-        selectedModelForPricing,
-        modelPriceNative || '0',
-        modelPriceStable || '0'
-      );
+      const usdcAddr = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN || process.env.CONTRACT_USDC_TOKEN || '';
 
-      addLog(`✅ Model pricing set! TX: ${txHash}`);
+      // Phase 18: Set USDC price if provided
+      if (modelPriceStable && modelPriceStable !== '0') {
+        const txHash = await hostManager.setModelTokenPricing(selectedModelForPricing, usdcAddr, modelPriceStable);
+        addLog(`✅ Model USDC pricing set! TX: ${txHash}`);
+      }
+
+      // Phase 18: Set native price if provided
+      if (modelPriceNative && modelPriceNative !== '0') {
+        const zeroAddr = '0x0000000000000000000000000000000000000000';
+        const txHash = await hostManager.setModelTokenPricing(selectedModelForPricing, zeroAddr, modelPriceNative);
+        addLog(`✅ Model ETH pricing set! TX: ${txHash}`);
+      }
 
       // Refresh model prices
       await fetchHostModelPrices();
@@ -954,7 +915,7 @@ const NodeManagementClient: React.FC = () => {
     }
   };
 
-  // Clear custom pricing for selected model
+  // Phase 18: Clear per-model per-token pricing (both USDC and native)
   const handleClearModelPricing = async () => {
     if (!sdk || !selectedModelForPricing) {
       addLog('❌ Select a model first');
@@ -963,12 +924,19 @@ const NodeManagementClient: React.FC = () => {
 
     setLoading(true);
     try {
-      addLog(`🔄 Clearing custom pricing for model ${getModelNameFromId(selectedModelForPricing)}...`);
+      addLog(`🔄 Clearing pricing for model ${getModelNameFromId(selectedModelForPricing)}...`);
 
       const hostManager = sdk.getHostManager();
-      const txHash = await hostManager.clearModelPricing(selectedModelForPricing);
+      const usdcAddr = process.env.NEXT_PUBLIC_CONTRACT_USDC_TOKEN || process.env.CONTRACT_USDC_TOKEN || '';
+      const zeroAddr = '0x0000000000000000000000000000000000000000';
 
-      addLog(`✅ Model pricing cleared! TX: ${txHash}`);
+      // Phase 18: Clear both USDC and native pricing
+      if (usdcAddr) {
+        const txHash = await hostManager.clearModelTokenPricing(selectedModelForPricing, usdcAddr);
+        addLog(`✅ USDC pricing cleared! TX: ${txHash}`);
+      }
+      const txHashNative = await hostManager.clearModelTokenPricing(selectedModelForPricing, zeroAddr);
+      addLog(`✅ ETH pricing cleared! TX: ${txHashNative}`);
 
       // Refresh model prices
       await fetchHostModelPrices();

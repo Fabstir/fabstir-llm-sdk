@@ -3,7 +3,7 @@
 
 /**
  * Model Pricing Export Tests
- * Sub-phase 4.1: Verify exports for per-model pricing feature
+ * Phase 18: Updated for per-model per-token pricing (no fallbacks)
  *
  * Verifies that ModelPricing type and HostManager methods are properly
  * exported from the SDK package root.
@@ -15,29 +15,25 @@ import type { ModelPricing } from '../../src/index';
 
 describe('Model Pricing Exports', () => {
   describe('ModelPricing Type', () => {
-    it('should be importable from package root', () => {
-      // Type-level verification - if this compiles, the type is exported
+    it('should be importable from package root with per-token shape', () => {
+      // Phase 18: single price per (model, token) pair
       const pricing: ModelPricing = {
         modelId: '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced',
-        nativePrice: 3000000n,
-        stablePrice: 50000n,
-        isCustom: false
+        price: 50000n
       };
 
       expect(pricing.modelId).toBeDefined();
-      expect(typeof pricing.nativePrice).toBe('bigint');
-      expect(typeof pricing.stablePrice).toBe('bigint');
-      expect(typeof pricing.isCustom).toBe('boolean');
+      expect(typeof pricing.price).toBe('bigint');
     });
   });
 
   describe('HostManager Methods', () => {
-    it('should have setModelPricing method', () => {
-      expect(typeof HostManager.prototype.setModelPricing).toBe('function');
+    it('should have setModelTokenPricing method', () => {
+      expect(typeof HostManager.prototype.setModelTokenPricing).toBe('function');
     });
 
-    it('should have clearModelPricing method', () => {
-      expect(typeof HostManager.prototype.clearModelPricing).toBe('function');
+    it('should have clearModelTokenPricing method', () => {
+      expect(typeof HostManager.prototype.clearModelTokenPricing).toBe('function');
     });
 
     it('should have getHostModelPrices method', () => {

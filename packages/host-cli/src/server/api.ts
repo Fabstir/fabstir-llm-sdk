@@ -387,31 +387,12 @@ export class ManagementServer {
     });
   }
 
-  private async handleUpdatePricing(req: Request, res: Response): Promise<void> {
-    try {
-      const { price } = req.body;
-
-      // Validate price
-      const priceNum = parseInt(price);
-      if (isNaN(priceNum) || priceNum < DEFAULT_PRICE_PER_TOKEN_NUMBER || priceNum > Number(MAX_PRICE_PER_TOKEN)) {
-        res.status(400).json({ error: `Price must be between ${DEFAULT_PRICE_PER_TOKEN_NUMBER} and ${Number(MAX_PRICE_PER_TOKEN)}` });
-        return;
-      }
-
-      // Get HostManager from SDK
-      const hostManager = getHostManager();
-
-      // Update pricing
-      const txHash = await hostManager.updatePricing(price);
-
-      res.json({
-        success: true,
-        transactionHash: txHash,
-        newPrice: price
-      });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message || 'Failed to update pricing' });
-    }
+  private async handleUpdatePricing(_req: Request, res: Response): Promise<void> {
+    // Phase 18: Per-host base pricing removed. Use set-model-pricing command instead.
+    res.status(501).json({
+      error: 'Deprecated',
+      message: 'Per-host base pricing removed in Phase 18. Use set-model-pricing (per-model per-token) instead.'
+    });
   }
 
   private async handleDiscoverNodes(req: Request, res: Response): Promise<void> {

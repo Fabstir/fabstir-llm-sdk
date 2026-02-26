@@ -1,6 +1,6 @@
 {
   "name": "@fabstir/sdk-core",
-  "version": "1.14.19",
+  "version": "1.15.0",
   "description": "Browser-compatible core SDK for Fabstir P2P LLM marketplace",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

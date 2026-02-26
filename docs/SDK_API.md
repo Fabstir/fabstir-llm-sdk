@@ -2445,46 +2445,71 @@ Withdraws accumulated earnings for a host.
 async withdrawEarnings(tokenAddress: string): Promise<string>
 ```
 
-### updatePricingNative
+### setModelTokenPricing
 
-Updates the native token pricing for the current host.
+Sets per-model per-token pricing for a specific model. Phase 18 replacement for `updatePricingNative`, `updatePricingStable`, and `setModelPricing`.
 
 ```typescript
-async updatePricingNative(newPrice: string): Promise<string>
+async setModelTokenPricing(modelId: string, tokenAddress: string, price: string): Promise<string>
 ```
 
 **Parameters:**
-- `newPrice`: New minimum price in wei (string)
-- Must be within range: `2272727273` to `22727272727273`
+- `modelId`: bytes32 model ID hash
+- `tokenAddress`: Token address — USDC address for stablecoin, `0x0000...0000` for native ETH
+- `price`: Price value — USDC uses PRICE_PRECISION (1000 = $1/million tokens), native uses wei
 
 **Example:**
 ```typescript
 const hostManager = sdk.getHostManager();
 
-// Update native pricing to ~$0.00007 @ $4400 ETH
-const txHash = await hostManager.updatePricingNative('15909090909091');
-console.log('Native pricing updated:', txHash);
+// Set USDC price to $5/million tokens (5 * 1000 = 5000)
+const usdcAddr = process.env.CONTRACT_USDC_TOKEN;
+const tx1 = await hostManager.setModelTokenPricing(modelId, usdcAddr, '5000');
+
+// Set ETH price (in wei per million tokens)
+const zeroAddr = '0x0000000000000000000000000000000000000000';
+const tx2 = await hostManager.setModelTokenPricing(modelId, zeroAddr, '15909090909091');
 ```
 
-### updatePricingStable
+### clearModelTokenPricing
 
-Updates the stablecoin pricing for the current host.
+Clears per-model pricing for a specific token. Must be called per-token (native and USDC separately).
 
 ```typescript
-async updatePricingStable(newPrice: string): Promise<string>
+async clearModelTokenPricing(modelId: string, tokenAddress: string): Promise<string>
 ```
 
 **Parameters:**
-- `newPrice`: New minimum price in raw USDC units (string)
-- Must be within range: `10` to `100000`
+- `modelId`: bytes32 model ID hash
+- `tokenAddress`: Token address to clear pricing for
 
 **Example:**
 ```typescript
 const hostManager = sdk.getHostManager();
 
-// Update stable pricing to 0.0005 USDC
-const txHash = await hostManager.updatePricingStable('500');
-console.log('Stable pricing updated:', txHash);
+// Clear USDC pricing for a model
+const tx = await hostManager.clearModelTokenPricing(modelId, usdcAddr);
+```
+
+### getHostModelPrices
+
+Fetches all per-model prices for a host for a specific token.
+
+```typescript
+async getHostModelPrices(hostAddress: string, tokenAddress: string): Promise<ModelPricing[]>
+```
+
+**Returns:** Array of `{ modelId: string, price: bigint }` — entries with `price === 0n` are filtered out.
+
+**Example:**
+```typescript
+const hostManager = sdk.getHostManager();
+
+// Get all USDC model prices
+const usdcPrices = await hostManager.getHostModelPrices(hostAddress, usdcAddr);
+
+// Get all native model prices
+const nativePrices = await hostManager.getHostModelPrices(hostAddress, zeroAddr);
 ```
 
 ## Storage Management
@@ -4576,6 +4601,7 @@ interface SessionJobParams {
   signer: ethers.Signer;
   tokenAddress: string;     // USDC address
   depositAmount: string;     // Amount in smallest units
+  modelId: string;           // Required bytes32 model ID (Phase 18: modelless sessions removed)
   sessionConfig: {
     pricePerToken: bigint;
     duration: bigint;

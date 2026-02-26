@@ -3,98 +3,26 @@
 
 /**
  * Update-pricing command
- * Updates the minimum price per token for the host
+ * Phase 18: Deprecated — per-host base pricing replaced by per-model per-token pricing.
+ * Redirects users to set-model-pricing command.
  */
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { initializeSDK, authenticateSDK, getHostManager, getAuthenticatedAddress } from '../sdk/client';
 
 export function registerUpdatePricingCommand(program: Command): void {
   program
     .command('update-pricing')
-    .description('Update minimum price per token for your host')
-    .requiredOption('--price <amount>', 'New minimum price per token (1-100,000,000)')
-    .option('-k, --private-key <key>', 'Private key to use (otherwise uses wallet file)')
-    .option('-r, --rpc-url <url>', 'RPC URL', process.env.RPC_URL_BASE_SEPOLIA)
-    .action(async (options) => {
-      try {
-        // Validate price format
-        const newPrice = parseInt(options.price);
-        if (isNaN(newPrice)) {
-          throw new Error(`Invalid price format: ${options.price}. Must be a number.`);
-        }
-
-        // Validate price range (will also be validated by SDK)
-        if (newPrice < 1 || newPrice > 100000000) {
-          throw new Error(`Price must be between 1 and 100,000,000. Got: ${newPrice}`);
-        }
-
-        console.log(chalk.blue('\n💰 Updating Host Pricing...\n'));
-
-        // Initialize and authenticate SDK
-        await initializeSDK('base-sepolia');
-        await authenticateSDK(options.privateKey);
-
-        const address = getAuthenticatedAddress();
-        if (!address) {
-          throw new Error('Failed to authenticate SDK');
-        }
-
-        console.log(chalk.cyan(`📍 Address: ${address}`));
-        console.log(chalk.cyan(`🌐 Network: Base Sepolia`));
-
-        // Get HostManager from SDK
-        const hostManager = getHostManager();
-
-        // Check if the host is registered
-        const hostStatus = await hostManager.getHostStatus(address);
-        if (!hostStatus.isRegistered || !hostStatus.isActive) {
-          throw new Error('This address is not registered as a host node');
-        }
-
-        // Get current pricing
-        const hostInfo = await hostManager.getHostInfo(address);
-        const currentPrice = Number(hostInfo.minPricePerTokenStable || 0n);
-
-        // Display current and new pricing (with PRICE_PRECISION=1000)
-        const PRICE_PRECISION = 1000;
-        const currentPriceUSDC = (currentPrice / PRICE_PRECISION / 1000000).toFixed(9);
-        const currentPricePerMillion = (currentPrice / PRICE_PRECISION).toFixed(3);
-        const newPriceUSDC = (newPrice / PRICE_PRECISION / 1000000).toFixed(9);
-        const newPricePerMillion = (newPrice / PRICE_PRECISION).toFixed(3);
-
-        console.log(chalk.gray(`\nCurrent price: ${currentPrice} ($${currentPricePerMillion}/million, ${currentPriceUSDC} USDC/token)`));
-        console.log(chalk.cyan(`New price:     ${newPrice} ($${newPricePerMillion}/million, ${newPriceUSDC} USDC/token)`));
-
-        // Update pricing using SDK
-        console.log(chalk.blue('\n📝 Submitting transaction...'));
-        const txHash = await hostManager.updatePricing(options.price);
-
-        console.log(chalk.cyan(`📋 Transaction hash: ${txHash}`));
-        console.log(chalk.green('\n✅ Successfully updated pricing!'));
-        console.log(chalk.cyan(`🔗 Transaction: ${txHash}`));
-
-        // Verify the update (with PRICE_PRECISION=1000)
-        const updatedInfo = await hostManager.getHostInfo(address);
-        const updatedPrice = Number(updatedInfo.minPricePerTokenStable);
-        const updatedPriceUSDC = (updatedPrice / PRICE_PRECISION / 1000000).toFixed(9);
-        const updatedPricePerMillion = (updatedPrice / PRICE_PRECISION).toFixed(3);
-        console.log(chalk.green(`✓ New price: ${updatedPrice} ($${updatedPricePerMillion}/million, ${updatedPriceUSDC} USDC/token)`));
-
-      } catch (error: any) {
-        console.error(chalk.red('\n❌ Update failed:'), error.message);
-
-        // Check for specific error types
-        if (error.message.includes('not registered')) {
-          console.log(chalk.yellow('\nℹ️  You must be registered as a host to update pricing'));
-        } else if (error.message.includes('between 1 and 100')) {
-          console.log(chalk.yellow('\nℹ️  Price must be between 1 and 100,000,000'));
-        } else if (error.message.includes('insufficient')) {
-          console.log(chalk.yellow('\nℹ️  Transaction failed due to insufficient gas'));
-        }
-
-        process.exit(1);
-      }
+    .description('[Deprecated] Use set-model-pricing instead (Phase 18: all pricing is per-model per-token)')
+    .requiredOption('--price <amount>', 'New minimum price per token')
+    .option('-k, --private-key <key>', 'Private key to use')
+    .option('-r, --rpc-url <url>', 'RPC URL')
+    .action(async () => {
+      console.error(chalk.red('\n❌ update-pricing is deprecated (Phase 18).\n'));
+      console.log(chalk.yellow('Per-host base pricing has been replaced by per-model per-token pricing.'));
+      console.log(chalk.cyan('\nUse instead:'));
+      console.log(chalk.cyan('  fabstir-host set-model-pricing --model "repo:file" --price 5.00 --price-type usdc'));
+      console.log(chalk.cyan('  fabstir-host set-model-pricing --model "repo:file" --price 0.5 --price-type eth'));
+      process.exit(1);
     });
 }

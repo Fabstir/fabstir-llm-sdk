@@ -75,7 +75,7 @@ export interface HostRegistrationWithModels {
   supportedModels: ModelSpec[];
   minPricePerTokenNative: string;    // Minimum price for ETH/BNB (wei)
   minPricePerTokenStable: string;    // Minimum price for USDC (raw)
-  stableTokenAddress?: string;       // Optional USDC address for setTokenPricing (auto-resolved from ContractManager if omitted)
+  stableTokenAddress?: string;       // Optional USDC address for setModelTokenPricing (auto-resolved from ContractManager if omitted)
 }
 
 export class HostManager {
@@ -369,15 +369,26 @@ export class HostManager {
         );
       }
 
-      // Step 4: Set per-token pricing for stablecoin (REQUIRED since Feb 24, 2026)
-      // Without this, getNodePricing(host, usdcToken) reverts with "No token pricing"
+      // Step 4: Set per-model per-token pricing (Phase 18 — REQUIRED for session creation)
+      // Sessions revert if no modelTokenPricing is set for the (model, token) pair
       const stableTokenAddr = request.stableTokenAddress ||
         (this.contractManager?.getContractAddress ? await this.contractManager.getContractAddress('usdcToken').catch(() => null as any) : null);
-      if (stableTokenAddr && this.nodeRegistry) {
-        const setTokenTx = await this.nodeRegistry['setTokenPricing'](
-          stableTokenAddr, minPriceStable, { gasLimit: 100000n }
-        );
-        await setTokenTx.wait(3);
+      if (this.nodeRegistry) {
+        for (const modelId of modelIds) {
+          // Set native pricing for each model
+          const setNativeTx = await this.nodeRegistry['setModelTokenPricing'](
+            modelId, ethers.ZeroAddress, minPriceNative, { gasLimit: 100000n }
+          );
+          await setNativeTx.wait(3);
+
+          // Set stable pricing for each model (if stable token available)
+          if (stableTokenAddr) {
+            const setStableTx = await this.nodeRegistry['setModelTokenPricing'](
+              modelId, stableTokenAddr, minPriceStable, { gasLimit: 100000n }
+            );
+            await setStableTx.wait(3);
+          }
+        }
       }
 
       return receipt.hash;
@@ -396,24 +407,124 @@ export class HostManager {
   }
 
   /**
-   * Set per-token pricing for a specific ERC-20 token (e.g. USDC)
-   * Required since Feb 24, 2026 — without this, getNodePricing(host, token) reverts
-   * @param tokenAddress - ERC-20 token contract address
-   * @param price - Price per token in contract precision units
+   * Set pricing for a specific model + token pair
+   * Phase 18: Replaces setTokenPricing, updatePricingNative, updatePricingStable, setModelPricing
+   * @param modelId - Model ID (bytes32 hash)
+   * @param tokenAddress - Token address (ethers.ZeroAddress for native ETH/BNB)
+   * @param price - Price as string (validated per token type)
    * @returns Transaction hash
    */
-  async setTokenPricing(tokenAddress: string, price: bigint): Promise<string> {
-    if (!this.initialized || !this.signer || !this.nodeRegistry) {
+  async setModelTokenPricing(modelId: string, tokenAddress: string, price: string): Promise<string> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
       throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
     }
-    if (!isAddress(tokenAddress)) {
-      throw new SDKError(`Invalid token address: ${tokenAddress}`, 'INVALID_ADDRESS');
+
+    // Validate modelId is a bytes32 hash
+    if (!modelId.match(/^0x[a-fA-F0-9]{64}$/)) {
+      throw new SDKError(
+        `Invalid modelId format: ${modelId}. Expected bytes32 hash (0x + 64 hex chars).`,
+        'INVALID_MODEL_ID'
+      );
     }
-    const tx = await this.nodeRegistry['setTokenPricing'](
-      tokenAddress, price, { gasLimit: 100000n }
-    );
-    const receipt = await tx.wait(3);
-    return receipt.hash;
+
+    const priceValue = BigInt(price);
+
+    // Validate price range based on token type
+    const isNative = tokenAddress === ethers.ZeroAddress;
+    if (isNative) {
+      if (priceValue < MIN_PRICE_NATIVE || priceValue > MAX_PRICE_NATIVE) {
+        throw new PricingValidationError(
+          `Native price must be between ${MIN_PRICE_NATIVE} and ${MAX_PRICE_NATIVE} wei, got ${priceValue}`,
+          priceValue
+        );
+      }
+    } else {
+      if (priceValue < MIN_PRICE_STABLE || priceValue > MAX_PRICE_STABLE) {
+        throw new PricingValidationError(
+          `Stable price must be between ${MIN_PRICE_STABLE} and ${MAX_PRICE_STABLE}, got ${priceValue}`,
+          priceValue
+        );
+      }
+    }
+
+    try {
+      const tx = await this.nodeRegistry['setModelTokenPricing'](
+        modelId, tokenAddress, priceValue, { gasLimit: 200000n }
+      );
+
+      const receipt = await tx.wait(3);
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Set model token pricing transaction failed',
+          this.nodeRegistry.address
+        );
+      }
+
+      return receipt.hash;
+    } catch (error: any) {
+      if (error instanceof PricingValidationError || error instanceof SDKError) {
+        throw error;
+      }
+      throw new ModelRegistryError(
+        `Failed to set model token pricing: ${error.message}`,
+        this.nodeRegistry?.address
+      );
+    }
+  }
+
+  /**
+   * Clear pricing for a specific model + token pair
+   * Phase 18: Replaces clearModelPricing (now per-token)
+   * @param modelId - Model ID (bytes32 hash)
+   * @param tokenAddress - Token address (ethers.ZeroAddress for native ETH/BNB)
+   * @returns Transaction hash
+   */
+  async clearModelTokenPricing(modelId: string, tokenAddress: string): Promise<string> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.signer || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    // Validate modelId
+    if (!modelId.match(/^0x[a-fA-F0-9]{64}$/)) {
+      throw new SDKError(
+        `Invalid modelId format: ${modelId}. Expected bytes32 hash (0x + 64 hex chars).`,
+        'INVALID_MODEL_ID'
+      );
+    }
+
+    try {
+      const tx = await this.nodeRegistry['clearModelTokenPricing'](
+        modelId, tokenAddress, { gasLimit: 150000n }
+      );
+
+      const receipt = await tx.wait(3);
+
+      if (!receipt || receipt.status !== 1) {
+        throw new ModelRegistryError(
+          'Clear model token pricing transaction failed',
+          this.nodeRegistry.address
+        );
+      }
+
+      return receipt.hash;
+    } catch (error: any) {
+      if (error instanceof SDKError) {
+        throw error;
+      }
+      throw new ModelRegistryError(
+        `Failed to clear model token pricing: ${error.message}`,
+        this.nodeRegistry?.address
+      );
+    }
   }
 
   /**
@@ -489,8 +600,8 @@ export class HostManager {
         }
       }
 
-      // Filter out hosts without valid USDC token pricing (Feb 24, 2026 requirement)
-      // getNodePricing(host, token) reverts with "No token pricing" if customTokenPricing not set
+      // Phase 18: Filter out hosts without valid model-token pricing
+      // getModelPricing(host, modelId, token) reverts if no pricing set for that (model, token) pair
       const usdcAddr = this.contractManager?.getContractAddress
         ? await this.contractManager.getContractAddress('usdcToken').catch(() => null as any)
         : null;
@@ -498,10 +609,10 @@ export class HostManager {
         const validHosts: HostInfo[] = [];
         for (const host of hosts) {
           try {
-            await this.nodeRegistry['getNodePricing'](host.address, usdcAddr);
+            await this.nodeRegistry['getModelPricing'](host.address, modelId, usdcAddr);
             validHosts.push(host);
           } catch {
-            console.warn(`[HostManager] Host ${host.address} has no USDC token pricing, excluding from results`);
+            console.warn(`[HostManager] Host ${host.address} has no model pricing for ${modelId}, excluding from results`);
           }
         }
         return validHosts;
@@ -1102,278 +1213,13 @@ export class HostManager {
   }
 
   /**
-   * Update host minimum pricing
-   * @param newMinPrice - New minimum price per token (100-100,000)
-   * @returns Transaction hash
-   */
-  async updatePricing(newMinPrice: string): Promise<string> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-
-    if (!this.signer || !this.nodeRegistry) {
-      throw new ModelRegistryError('Not initialized', this.nodeRegistryAddress);
-    }
-
-    try {
-      const price = BigInt(newMinPrice);
-
-      // Validate price range
-      if (price < MIN_PRICE_PER_TOKEN || price > MAX_PRICE_PER_TOKEN) {
-        throw new PricingValidationError(
-          `minPricePerToken must be between ${MIN_PRICE_PER_TOKEN} and ${MAX_PRICE_PER_TOKEN}, got ${price}`,
-          price
-        );
-      }
-
-
-      const tx = await this.nodeRegistry.updatePricing(
-        price,
-        { gasLimit: 200000n }
-      );
-
-      const receipt = await tx.wait(3); // Wait for 3 confirmations
-
-      if (!receipt || receipt.status !== 1) {
-        throw new ModelRegistryError(
-          'Failed to update pricing',
-          this.nodeRegistry.address
-        );
-      }
-
-      return receipt.hash;
-    } catch (error: any) {
-      if (error instanceof PricingValidationError) {
-        throw error;
-      }
-      console.error('Error updating pricing:', error);
-      throw new ModelRegistryError(
-        `Failed to update pricing: ${error.message}`,
-        this.nodeRegistry?.address
-      );
-    }
-  }
-
-  /**
-   * Update host minimum pricing for native tokens (ETH/BNB)
-   * @param newMinPrice - New minimum price in wei (227,273 to 22,727,272,727,273,000 with PRICE_PRECISION)
-   * @returns Transaction hash
-   */
-  async updatePricingNative(newMinPrice: string): Promise<string> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-
-    if (!this.signer || !this.nodeRegistry) {
-      throw new ModelRegistryError('Not initialized', this.nodeRegistryAddress);
-    }
-
-    try {
-      const price = BigInt(newMinPrice);
-
-      // Validate native token price range
-      if (price < MIN_PRICE_NATIVE || price > MAX_PRICE_NATIVE) {
-        throw new PricingValidationError(
-          `minPricePerTokenNative must be between ${MIN_PRICE_NATIVE} and ${MAX_PRICE_NATIVE} wei, got ${price}`,
-          price
-        );
-      }
-
-
-      const tx = await this.nodeRegistry.updatePricingNative(
-        price,
-        { gasLimit: 200000n }
-      );
-
-      const receipt = await tx.wait(3); // Wait for 3 confirmations
-
-      if (!receipt || receipt.status !== 1) {
-        throw new ModelRegistryError(
-          'Failed to update native pricing',
-          this.nodeRegistry.address
-        );
-      }
-
-      return receipt.hash;
-    } catch (error: any) {
-      if (error instanceof PricingValidationError) {
-        throw error;
-      }
-      console.error('Error updating native pricing:', error);
-      throw new ModelRegistryError(
-        `Failed to update native pricing: ${error.message}`,
-        this.nodeRegistry?.address
-      );
-    }
-  }
-
-  /**
-   * Update host minimum pricing for stablecoins (USDC)
-   * @param newMinPrice - New minimum price (1 to 100,000,000 with PRICE_PRECISION)
-   * @returns Transaction hash
-   */
-  async updatePricingStable(newMinPrice: string): Promise<string> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-
-    if (!this.signer || !this.nodeRegistry) {
-      throw new ModelRegistryError('Not initialized', this.nodeRegistryAddress);
-    }
-
-    try {
-      const price = BigInt(newMinPrice);
-
-      // Validate stablecoin price range
-      if (price < MIN_PRICE_STABLE || price > MAX_PRICE_STABLE) {
-        throw new PricingValidationError(
-          `minPricePerTokenStable must be between ${MIN_PRICE_STABLE} and ${MAX_PRICE_STABLE}, got ${price}`,
-          price
-        );
-      }
-
-
-      const tx = await this.nodeRegistry.updatePricingStable(
-        price,
-        { gasLimit: 200000n }
-      );
-
-      const receipt = await tx.wait(3); // Wait for 3 confirmations
-
-      if (!receipt || receipt.status !== 1) {
-        throw new ModelRegistryError(
-          'Failed to update stablecoin pricing',
-          this.nodeRegistry.address
-        );
-      }
-
-      return receipt.hash;
-    } catch (error: any) {
-      if (error instanceof PricingValidationError) {
-        throw error;
-      }
-      console.error('Error updating stablecoin pricing:', error);
-      throw new ModelRegistryError(
-        `Failed to update stablecoin pricing: ${error.message}`,
-        this.nodeRegistry?.address
-      );
-    }
-  }
-
-  /**
-   * Set custom pricing for a specific model (overrides host default pricing)
-   * @param modelId - Model ID (bytes32 hash from contract)
-   * @param nativePrice - Native token price (0 = use default, or MIN_PRICE_NATIVE to MAX_PRICE_NATIVE)
-   * @param stablePrice - Stablecoin price (0 = use default, or MIN_PRICE_STABLE to MAX_PRICE_STABLE)
-   * @returns Transaction hash
-   */
-  async setModelPricing(
-    modelId: string,
-    nativePrice: string,
-    stablePrice: string
-  ): Promise<string> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-
-    if (!this.signer || !this.nodeRegistry) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
-    }
-
-    try {
-      const priceNative = BigInt(nativePrice);
-      const priceStable = BigInt(stablePrice);
-
-      // Validate price ranges (0 is allowed = use default)
-      if (priceNative !== 0n && (priceNative < MIN_PRICE_NATIVE || priceNative > MAX_PRICE_NATIVE)) {
-        throw new PricingValidationError(
-          `nativePrice must be 0 (default) or between ${MIN_PRICE_NATIVE} and ${MAX_PRICE_NATIVE}, got ${priceNative}`,
-          priceNative
-        );
-      }
-
-      if (priceStable !== 0n && (priceStable < MIN_PRICE_STABLE || priceStable > MAX_PRICE_STABLE)) {
-        throw new PricingValidationError(
-          `stablePrice must be 0 (default) or between ${MIN_PRICE_STABLE} and ${MAX_PRICE_STABLE}, got ${priceStable}`,
-          priceStable
-        );
-      }
-
-      const tx = await this.nodeRegistry.setModelPricing(
-        modelId,
-        priceNative,
-        priceStable,
-        { gasLimit: 200000n }
-      );
-
-      const receipt = await tx.wait(3); // Wait for 3 confirmations
-
-      if (!receipt || receipt.status !== 1) {
-        throw new ModelRegistryError(
-          'Set model pricing transaction failed',
-          this.nodeRegistry.address
-        );
-      }
-
-      return receipt.hash;
-    } catch (error: any) {
-      if (error instanceof PricingValidationError || error instanceof SDKError) {
-        throw error;
-      }
-      throw new ModelRegistryError(
-        `Failed to set model pricing: ${error.message}`,
-        this.nodeRegistry?.address
-      );
-    }
-  }
-
-  /**
-   * Clear custom pricing for a model (revert to host default pricing)
-   * @param modelId - Model ID (bytes32 hash from contract)
-   * @returns Transaction hash
-   */
-  async clearModelPricing(modelId: string): Promise<string> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-
-    if (!this.signer || !this.nodeRegistry) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
-    }
-
-    try {
-      const tx = await this.nodeRegistry.clearModelPricing(
-        modelId,
-        { gasLimit: 150000n }
-      );
-
-      const receipt = await tx.wait(3); // Wait for 3 confirmations
-
-      if (!receipt || receipt.status !== 1) {
-        throw new ModelRegistryError(
-          'Clear model pricing transaction failed',
-          this.nodeRegistry.address
-        );
-      }
-
-      return receipt.hash;
-    } catch (error: any) {
-      if (error instanceof SDKError) {
-        throw error;
-      }
-      throw new ModelRegistryError(
-        `Failed to clear model pricing: ${error.message}`,
-        this.nodeRegistry?.address
-      );
-    }
-  }
-
-  /**
-   * Get all model prices for a host
+   * Get all model prices for a host for a specific token
+   * Phase 18: Now requires token parameter. Returns (modelId, price) pairs.
    * @param hostAddress - Host's EVM address
-   * @returns Array of ModelPricing objects with effective prices and isCustom flag
+   * @param tokenAddress - Token address (ethers.ZeroAddress for native, USDC for stable)
+   * @returns Array of ModelPricing objects (price=0 entries filtered out)
    */
-  async getHostModelPrices(hostAddress: string): Promise<ModelPricing[]> {
+  async getHostModelPrices(hostAddress: string, tokenAddress: string): Promise<ModelPricing[]> {
     if (!this.initialized) {
       await this.initialize();
     }
@@ -1383,27 +1229,19 @@ export class HostManager {
     }
 
     try {
-      // Get host defaults for comparison
-      const hostStatus = await this.getHostStatus(hostAddress);
-      const defaultNative = hostStatus.minPricePerTokenNative || 0n;
-      const defaultStable = hostStatus.minPricePerTokenStable || 0n;
-
-      // Get all model prices from contract
-      const [modelIds, nativePrices, stablePrices] = await this.nodeRegistry.getHostModelPrices(hostAddress);
+      // Phase 18: contract returns (bytes32[], uint256[]) for a specific token
+      const [modelIds, prices] = await this.nodeRegistry['getHostModelPrices'](hostAddress, tokenAddress);
 
       const result: ModelPricing[] = [];
       for (let i = 0; i < modelIds.length; i++) {
-        const nativePrice = BigInt(nativePrices[i] || 0n);
-        const stablePrice = BigInt(stablePrices[i] || 0n);
+        const price = BigInt(prices[i] || 0n);
 
-        // Check if custom (different from host default)
-        const isCustom = nativePrice !== defaultNative || stablePrice !== defaultStable;
+        // Filter out price=0 entries (means "not configured" per Phase 18 migration doc)
+        if (price === 0n) continue;
 
         result.push({
           modelId: modelIds[i],
-          nativePrice,
-          stablePrice,
-          isCustom
+          price
         });
       }
 
@@ -1455,27 +1293,6 @@ export class HostManager {
     }
 
     return priceValue;
-  }
-
-  /**
-   * Get host minimum pricing
-   * @param hostAddress - Host address to query pricing for
-   * @returns Minimum price per token as bigint (0 if not registered)
-   * @deprecated Use getHostStatus() or getHostInfo() to get dual pricing fields
-   */
-  async getPricing(hostAddress: string): Promise<bigint> {
-    if (!this.initialized || !this.nodeRegistry) {
-      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
-    }
-
-    try {
-      const pricing = await this.nodeRegistry.getNodePricing(hostAddress);
-      return pricing;
-    } catch (error: any) {
-      console.error('Error fetching pricing:', error);
-      // Return 0 for unregistered hosts or errors
-      return 0n;
-    }
   }
 
   /**

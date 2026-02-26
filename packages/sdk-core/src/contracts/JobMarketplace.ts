@@ -26,7 +26,7 @@ export interface SessionCreationParams {
   proofInterval: number;
   /** AUDIT-F3: Timeout window in seconds (60-3600, default 300) */
   proofTimeoutWindow?: number;
-  modelId?: string;  // Optional bytes32 model ID for model-specific pricing
+  modelId: string;  // Required bytes32 model ID — Phase 18: modelless sessions removed
 }
 
 export interface DirectSessionParams {
@@ -37,7 +37,7 @@ export interface DirectSessionParams {
   /** AUDIT-F3: Timeout window in seconds (60-3600, default 300) */
   proofTimeoutWindow?: number;
   paymentAmount: string;
-  modelId?: string;  // Optional bytes32 model ID for model-specific pricing
+  modelId: string;  // Required bytes32 model ID — Phase 18: modelless sessions removed
 }
 
 export interface SessionJob {
@@ -84,8 +84,8 @@ export interface DelegatedSessionParams {
   proofInterval: number;
   /** AUDIT-F3: Timeout window in seconds (60-3600, default 300) */
   proofTimeoutWindow?: number;
-  /** Model ID (bytes32) - Required for createSessionForModelAsDelegate */
-  modelId?: string;
+  /** Model ID (bytes32) - Required — Phase 18: modelless sessions removed */
+  modelId: string;
 }
 
 /** Validate proofTimeoutWindow is within allowed range */
@@ -261,27 +261,14 @@ export class JobMarketplaceWrapper {
     // AUDIT-F3: Validate and get proofTimeoutWindow
     const proofTimeoutWindow = validateProofTimeoutWindow(params.proofTimeoutWindow);
 
-    // AUDIT-F5: Use createSessionFromDepositForModel if modelId is provided
-    if (params.modelId) {
-      console.log(`[JobMarketplace] Using createSessionFromDepositForModel with modelId: ${params.modelId}`);
-      const tx = await this.contract.createSessionFromDepositForModel(
-        params.modelId,
-        params.host,
-        params.paymentToken,
-        depositValue,
-        params.pricePerToken,
-        params.duration,
-        params.proofInterval,
-        proofTimeoutWindow
-      );
-      const receipt = await tx.wait();
-      const event = receipt.logs?.find((log: any) =>
-        log.fragment?.name === 'SessionJobCreatedForModel' || log.fragment?.name === 'SessionCreatedByDepositor'
-      );
-      return event ? Number(event.args?.sessionId || event.args[0]) : 0;
+    // Phase 18: modelId is required — modelless session creation removed from contract
+    if (!params.modelId) {
+      throw new Error('modelId is required for session creation (Phase 18: modelless sessions removed)');
     }
 
-    const tx = await this.contract.createSessionFromDeposit(
+    console.log(`[JobMarketplace] Using createSessionFromDepositForModel with modelId: ${params.modelId}`);
+    const tx = await this.contract.createSessionFromDepositForModel(
+      params.modelId,
       params.host,
       params.paymentToken,
       depositValue,
@@ -290,14 +277,11 @@ export class JobMarketplaceWrapper {
       params.proofInterval,
       proofTimeoutWindow
     );
-
     const receipt = await tx.wait();
-    // Extract job ID from events or return default
     const event = receipt.logs?.find((log: any) =>
-      log.fragment?.name === 'SessionJobCreated'
+      log.fragment?.name === 'SessionJobCreatedForModel' || log.fragment?.name === 'SessionCreatedByDepositor'
     );
-    // For tests, return incrementing job ID if no event
-    return event ? Number(event.args[0]) : (params.paymentToken === ethers.ZeroAddress ? 1 : 2);
+    return event ? Number(event.args?.sessionId || event.args[0]) : 0;
   }
 
   async createSessionJob(params: DirectSessionParams & { paymentToken?: string }): Promise<number> {
@@ -312,38 +296,29 @@ export class JobMarketplaceWrapper {
     // AUDIT-F3: Validate and get proofTimeoutWindow
     const proofTimeoutWindow = validateProofTimeoutWindow(params.proofTimeoutWindow);
 
+    // Phase 18: modelId is required — modelless session creation removed from contract
+    if (!params.modelId) {
+      throw new Error('modelId is required for session creation (Phase 18: modelless sessions removed)');
+    }
+
     // Check if we're using USDC or ETH
     const isUSDC = params.paymentToken && params.paymentToken !== ethers.ZeroAddress;
 
     if (isUSDC) {
-      // For USDC, use createSessionJobWithToken or createSessionJobForModelWithToken
+      // For USDC, use createSessionJobForModelWithToken
       const amountInUSDC = ethers.parseUnits(params.paymentAmount, 6); // USDC has 6 decimals
 
-      let tx;
-      if (params.modelId) {
-        // Use model-specific function - validates against model price, not host default
-        console.log(`[JobMarketplace] Using createSessionJobForModelWithToken with modelId: ${params.modelId}`);
-        tx = await this.contract.createSessionJobForModelWithToken(
-          params.host,
-          params.modelId,       // bytes32 model ID
-          params.paymentToken,  // token address
-          amountInUSDC,         // deposit amount
-          params.pricePerToken,
-          params.duration,
-          params.proofInterval,
-          proofTimeoutWindow    // AUDIT-F3: 8th parameter
-        );
-      } else {
-        tx = await this.contract.createSessionJobWithToken(
-          params.host,
-          params.paymentToken,  // token address
-          amountInUSDC,         // deposit amount
-          params.pricePerToken,
-          params.duration,
-          params.proofInterval,
-          proofTimeoutWindow    // AUDIT-F3: 7th parameter
-        );
-      }
+      console.log(`[JobMarketplace] Using createSessionJobForModelWithToken with modelId: ${params.modelId}`);
+      const tx = await this.contract.createSessionJobForModelWithToken(
+        params.host,
+        params.modelId,       // bytes32 model ID
+        params.paymentToken,  // token address
+        amountInUSDC,         // deposit amount
+        params.pricePerToken,
+        params.duration,
+        params.proofInterval,
+        proofTimeoutWindow    // AUDIT-F3: 8th parameter
+      );
 
       const receipt = await tx.wait();
       const event = receipt.logs.find((log: any) =>
@@ -351,42 +326,19 @@ export class JobMarketplaceWrapper {
       );
       return event ? Number(event.args[0]) : 0;
     } else {
-      // For ETH, use createSessionJob or createSessionJobForModel
+      // For ETH, use createSessionJobForModel
       const value = ethers.parseEther(params.paymentAmount);
 
-      console.log('[JobMarketplace] Creating ETH session job:');
-      console.log('  Host:', params.host);
-      console.log('  Payment amount:', params.paymentAmount, 'ETH');
-      console.log('  Payment amount in wei:', value.toString());
-      console.log('  Price per token:', params.pricePerToken);
-      console.log('  Model ID:', params.modelId || 'none');
-      console.log('  Duration:', params.duration);
-      console.log('  Proof interval:', params.proofInterval);
-      console.log('  Proof timeout window:', proofTimeoutWindow);
-
-      let tx;
-      if (params.modelId) {
-        // Use model-specific function - validates against model price, not host default
-        console.log(`[JobMarketplace] Using createSessionJobForModel with modelId: ${params.modelId}`);
-        tx = await this.contract.createSessionJobForModel(
-          params.host,
-          params.modelId,       // bytes32 model ID
-          params.pricePerToken,
-          params.duration,
-          params.proofInterval,
-          proofTimeoutWindow,   // AUDIT-F3: 6th parameter
-          { value }
-        );
-      } else {
-        tx = await this.contract.createSessionJob(
-          params.host,
-          params.pricePerToken,
-          params.duration,
-          params.proofInterval,
-          proofTimeoutWindow,   // AUDIT-F3: 5th parameter
-          { value }
-        );
-      }
+      console.log(`[JobMarketplace] Using createSessionJobForModel with modelId: ${params.modelId}`);
+      const tx = await this.contract.createSessionJobForModel(
+        params.host,
+        params.modelId,       // bytes32 model ID
+        params.pricePerToken,
+        params.duration,
+        params.proofInterval,
+        proofTimeoutWindow,   // AUDIT-F3: 6th parameter
+        { value }
+      );
 
       const receipt = await tx.wait();
       const event = receipt.logs.find((log: any) =>

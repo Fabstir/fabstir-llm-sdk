@@ -174,12 +174,17 @@
   },
   {
     "type": "function",
-    "name": "clearModelPricing",
+    "name": "clearModelTokenPricing",
     "inputs": [
       {
         "name": "modelId",
         "type": "bytes32",
         "internalType": "bytes32"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -243,6 +248,11 @@
         "name": "operator",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [
@@ -252,12 +262,7 @@
         "internalType": "bytes32[]"
       },
       {
-        "name": "nativePrices",
-        "type": "uint256[]",
-        "internalType": "uint256[]"
-      },
-      {
-        "name": "stablePrices",
+        "name": "prices",
         "type": "uint256[]",
         "internalType": "uint256[]"
       }
@@ -381,30 +386,6 @@
         "name": "",
         "type": "bytes32[]",
         "internalType": "bytes32[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getNodePricing",
-    "inputs": [
-      {
-        "name": "operator",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "token",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -584,6 +565,35 @@
   },
   {
     "type": "function",
+    "name": "modelTokenPricing",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "nodeSupportsModel",
     "inputs": [
       {
@@ -736,7 +746,7 @@
   },
   {
     "type": "function",
-    "name": "setModelPricing",
+    "name": "setModelTokenPricing",
     "inputs": [
       {
         "name": "modelId",
@@ -744,12 +754,12 @@
         "internalType": "bytes32"
       },
       {
-        "name": "nativePrice",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
       },
       {
-        "name": "stablePrice",
+        "name": "price",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -765,24 +775,6 @@
         "name": "newAuthority",
         "type": "address",
         "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "setTokenPricing",
-    "inputs": [
-      {
-        "name": "token",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "price",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
     "outputs": [],
@@ -929,32 +921,6 @@
   },
   {
     "type": "function",
-    "name": "updatePricingNative",
-    "inputs": [
-      {
-        "name": "newMinPrice",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "updatePricingStable",
-    "inputs": [
-      {
-        "name": "newMinPrice",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "updateSupportedModels",
     "inputs": [
       {
@@ -1087,7 +1053,20 @@
   },
   {
     "type": "event",
-    "name": "ModelPricingUpdated",
+    "name": "ModelRegistryUpdated",
+    "inputs": [
+      {
+        "name": "newRegistry",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ModelTokenPricingUpdated",
     "inputs": [
       {
         "name": "operator",
@@ -1102,29 +1081,16 @@
         "internalType": "bytes32"
       },
       {
-        "name": "nativePrice",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "stablePrice",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ModelRegistryUpdated",
-    "inputs": [
-      {
-        "name": "newRegistry",
+        "name": "token",
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      },
+      {
+        "name": "price",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -1219,25 +1185,6 @@
   },
   {
     "type": "event",
-    "name": "PricingUpdated",
-    "inputs": [
-      {
-        "name": "operator",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "newMinPrice",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
     "name": "SlashExecuted",
     "inputs": [
       {
@@ -1300,31 +1247,6 @@
         "type": "address",
         "indexed": true,
         "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "TokenPricingUpdated",
-    "inputs": [
-      {
-        "name": "operator",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "token",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "price",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
       }
     ],
     "anonymous": false

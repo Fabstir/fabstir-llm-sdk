@@ -23,6 +23,7 @@ export interface SessionJobParams {
   model: string;
   provider: string;
   sessionConfig: SessionConfig;
+  modelId?: string; // Phase 18: bytes32 model ID (required for contract call)
 }
 
 export interface SessionResult {
@@ -191,10 +192,16 @@ export class SessionJobManager {
       console.error('Actual:', actualContractAddress);
     }
 
-    const tx = await (jobMarketplaceWithSigner as any)['createSessionJobWithToken'](
+    // Phase 18: modelless session creation removed — always use model-specific variant
+    if (!params.modelId) {
+      throw new Error('modelId is required for session creation (Phase 18: modelless sessions removed). Set params.modelId to the bytes32 model hash.');
+    }
+
+    const tx = await (jobMarketplaceWithSigner as any)['createSessionJobForModelWithToken'](
       params.provider, // host address
-      usdcAddress, // token address (USDC) - use the already obtained address
-      amountToUse, // deposit amount (may be less than full $2 if using existing balance)
+      params.modelId, // bytes32 model ID
+      usdcAddress, // token address (USDC)
+      amountToUse, // deposit amount
       params.sessionConfig.pricePerToken, // price per token
       params.sessionConfig.duration, // max duration
       params.sessionConfig.proofInterval // proof interval
@@ -399,17 +406,20 @@ export class SessionJobManager {
   async estimateSessionCreationGas(params: SessionJobParams): Promise<bigint> {
     const jobMarketplace = this.contractManager.getJobMarketplace();
     
-    // Estimate gas for the transaction
+    // Phase 18: All sessions require modelId — use model-specific variant
+    if (!params.modelId) {
+      throw new Error('modelId is required for session creation gas estimation');
+    }
     const gasEstimate = await this.contractManager.estimateGas(
       jobMarketplace,
-      'createSessionJob',
+      'createSessionJobForModel',
       [
-        params.model,
         params.provider,
-        ethers.parseUnits(params.sessionConfig.depositAmount, 6),
+        params.modelId,
         params.sessionConfig.pricePerToken,
+        params.sessionConfig.duration,
         params.sessionConfig.proofInterval,
-        params.sessionConfig.duration
+        300 // proofTimeoutWindow
       ]
     );
 

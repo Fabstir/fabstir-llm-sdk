@@ -3,7 +3,7 @@
 
 /**
  * Clear-model-pricing command
- * Reverts a model to default host pricing
+ * Phase 18: Clears per-model per-token pricing for a specific model
  */
 
 import { Command } from 'commander';
@@ -14,12 +14,18 @@ import { validateModelString } from '../services/ModelRegistryClient';
 export function registerClearModelPricingCommand(program: Command): void {
   program
     .command('clear-model-pricing')
-    .description('Clear per-model pricing (revert to default host pricing)')
+    .description('Clear per-model pricing for a specific token type')
     .requiredOption('--model <modelString>', 'Model string in "repo:fileName" format')
+    .option('--price-type <type>', 'Price type to clear: usdc, eth, or all', 'all')
     .option('-k, --private-key <key>', 'Private key to use (otherwise uses wallet file)')
     .option('-r, --rpc-url <url>', 'RPC URL', process.env.RPC_URL_BASE_SEPOLIA)
     .action(async (options) => {
       try {
+        const priceType = options.priceType || 'all';
+        if (!['usdc', 'eth', 'all'].includes(priceType)) {
+          throw new Error('Price type must be "usdc", "eth", or "all"');
+        }
+
         console.log(chalk.blue('\n🔄 Clearing Model Pricing...\n'));
 
         // Initialize SDK
@@ -42,6 +48,7 @@ export function registerClearModelPricingCommand(program: Command): void {
 
         console.log(chalk.cyan(`📍 Address: ${address}`));
         console.log(chalk.cyan(`🎯 Model: ${options.model}`));
+        console.log(chalk.cyan(`🏷️  Clearing: ${priceType} pricing`));
 
         // Get HostManager and verify registration
         const hostManager = getHostManager();
@@ -50,13 +57,24 @@ export function registerClearModelPricingCommand(program: Command): void {
           throw new Error('This address is not registered as a host node');
         }
 
-        // Submit transaction
-        console.log(chalk.blue('\n📝 Clearing model pricing...'));
-        const txHash = await hostManager.clearModelPricing(modelId);
+        // Phase 18: Clear per-token — must be called separately for each token
+        const nativeToken = '0x0000000000000000000000000000000000000000';
+
+        if (priceType === 'usdc' || priceType === 'all') {
+          const usdcAddr = process.env.CONTRACT_USDC_TOKEN;
+          if (!usdcAddr) throw new Error('CONTRACT_USDC_TOKEN not set');
+          console.log(chalk.blue('\n📝 Clearing USDC pricing...'));
+          const txHash = await hostManager.clearModelTokenPricing(modelId, usdcAddr);
+          console.log(chalk.green(`✅ USDC pricing cleared! Tx: ${txHash}`));
+        }
+
+        if (priceType === 'eth' || priceType === 'all') {
+          console.log(chalk.blue('\n📝 Clearing ETH pricing...'));
+          const txHash = await hostManager.clearModelTokenPricing(modelId, nativeToken);
+          console.log(chalk.green(`✅ ETH pricing cleared! Tx: ${txHash}`));
+        }
 
         console.log(chalk.green('\n✅ Successfully cleared model pricing!'));
-        console.log(chalk.cyan(`🔗 Transaction: ${txHash}`));
-        console.log(chalk.gray('Model will now use your default host pricing.'));
 
       } catch (error: any) {
         console.error(chalk.red('\n❌ Clear model pricing failed:'), error.message);

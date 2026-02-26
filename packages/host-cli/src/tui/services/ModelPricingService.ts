@@ -3,7 +3,7 @@
 
 /**
  * Model Pricing Service
- * Handles querying and updating per-model pricing via NodeRegistry contract
+ * Phase 18: Per-model per-token pricing via NodeRegistry contract
  */
 
 import { ethers } from 'ethers';
@@ -11,17 +11,16 @@ import { ethers } from 'ethers';
 // Price precision: 1000 = $1 per million tokens
 const PRICE_PRECISION = 1000;
 
-// Minimal ABI for per-model pricing operations
+// Phase 18: ABI for per-model per-token pricing operations
 const NODE_REGISTRY_ABI = [
-  'function setModelPricing(bytes32 modelId, uint256 nativePrice, uint256 stablePrice) external',
-  'function clearModelPricing(bytes32 modelId) external',
-  'function getHostModelPrices(address host) external view returns (bytes32[], uint256[], uint256[])',
+  'function setModelTokenPricing(bytes32 modelId, address token, uint256 price) external',
+  'function clearModelTokenPricing(bytes32 modelId, address token) external',
+  'function getHostModelPrices(address operator, address token) external view returns (bytes32[], uint256[])',
 ];
 
 export interface ModelPricingInfo {
   modelId: string;
-  nativePrice: bigint;
-  stablePrice: bigint;
+  price: bigint;
 }
 
 export interface UpdateModelPricingResult {
@@ -39,31 +38,43 @@ function getNodeRegistryAddress(): string {
   return address;
 }
 
+function getUsdcAddress(): string {
+  const address = process.env.CONTRACT_USDC_TOKEN;
+  if (!address) {
+    throw new Error('CONTRACT_USDC_TOKEN environment variable is not set');
+  }
+  return address;
+}
+
 /**
- * Fetches per-model pricing for a host
+ * Phase 18: Fetches per-model pricing for a host for a specific token
  */
 export async function fetchHostModelPrices(
   hostAddress: string,
-  rpcUrl: string
+  rpcUrl: string,
+  tokenAddress: string
 ): Promise<ModelPricingInfo[]> {
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   const contract = new ethers.Contract(getNodeRegistryAddress(), NODE_REGISTRY_ABI, provider);
 
-  const [modelIds, nativePrices, stablePrices] = await contract.getHostModelPrices(hostAddress);
+  // Phase 18: 2 arrays (modelIds, prices) instead of 3
+  const [modelIds, prices] = await contract.getHostModelPrices(hostAddress, tokenAddress);
 
   const results: ModelPricingInfo[] = [];
   for (let i = 0; i < modelIds.length; i++) {
+    const price = BigInt(prices[i] || 0n);
+    // Filter out price=0 (not configured)
+    if (price === 0n) continue;
     results.push({
       modelId: modelIds[i],
-      nativePrice: nativePrices[i],
-      stablePrice: stablePrices[i],
+      price,
     });
   }
   return results;
 }
 
 /**
- * Updates USDC pricing for a specific model
+ * Phase 18: Updates USDC pricing for a specific model
  */
 export async function updateModelStablePricing(
   privateKey: string,
@@ -83,10 +94,11 @@ export async function updateModelStablePricing(
     const contract = new ethers.Contract(getNodeRegistryAddress(), NODE_REGISTRY_ABI, wallet);
 
     const stablePrice = BigInt(Math.round(priceUsd * PRICE_PRECISION));
+    const usdcAddress = getUsdcAddress();
 
     onStatus?.(`Setting model USDC price to $${priceUsd.toFixed(2)}/million tokens...`);
 
-    const tx = await contract.setModelPricing(modelId, 0n, stablePrice);
+    const tx = await contract.setModelTokenPricing(modelId, usdcAddress, stablePrice);
     onStatus?.(`Transaction sent: ${tx.hash.slice(0, 10)}...`);
     onStatus?.('Waiting for confirmation...');
 
@@ -105,7 +117,7 @@ export async function updateModelStablePricing(
 }
 
 /**
- * Updates ETH pricing for a specific model
+ * Phase 18: Updates ETH pricing for a specific model
  */
 export async function updateModelNativePricing(
   privateKey: string,
@@ -129,7 +141,7 @@ export async function updateModelNativePricing(
 
     onStatus?.(`Setting model ETH price to ${priceGwei} Gwei/million tokens...`);
 
-    const tx = await contract.setModelPricing(modelId, priceInWei, 0n);
+    const tx = await contract.setModelTokenPricing(modelId, ethers.ZeroAddress, priceInWei);
     onStatus?.(`Transaction sent: ${tx.hash.slice(0, 10)}...`);
     onStatus?.('Waiting for confirmation...');
 
@@ -148,12 +160,14 @@ export async function updateModelNativePricing(
 }
 
 /**
- * Clears custom pricing for a model (reverts to host default)
+ * Phase 18: Clears pricing for a model + token pair
+ * Must be called per-token (native and USDC separately)
  */
 export async function clearModelPricingOnChain(
   privateKey: string,
   rpcUrl: string,
   modelId: string,
+  tokenAddress: string,
   onStatus?: (status: string) => void
 ): Promise<UpdateModelPricingResult> {
   try {
@@ -162,9 +176,9 @@ export async function clearModelPricingOnChain(
     const wallet = new ethers.Wallet(normalizedKey, provider);
     const contract = new ethers.Contract(getNodeRegistryAddress(), NODE_REGISTRY_ABI, wallet);
 
-    onStatus?.('Clearing model pricing override...');
+    onStatus?.('Clearing model pricing...');
 
-    const tx = await contract.clearModelPricing(modelId);
+    const tx = await contract.clearModelTokenPricing(modelId, tokenAddress);
     onStatus?.(`Transaction sent: ${tx.hash.slice(0, 10)}...`);
     onStatus?.('Waiting for confirmation...');
 

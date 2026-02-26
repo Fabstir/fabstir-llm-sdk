@@ -220,10 +220,8 @@ describe('February 2026 Contract Upgrade - Integration', () => {
     });
   });
 
-  describe('Post-Audit setTokenPricing in Registration', () => {
+  describe('Phase 18: Per-Model Per-Token Pricing in Registration', () => {
     it('HostRegistrationWithModels should accept stableTokenAddress field', async () => {
-      const { HostRegistrationWithModels } = await import('../../src/managers/HostManager');
-      // TypeScript compilation test: stableTokenAddress should be an optional field
       const request: import('../../src/managers/HostManager').HostRegistrationWithModels = {
         metadata: { hardware: { gpu: 'RTX 4090', vram: 24, ram: 64 }, capabilities: { streaming: true }, location: 'us-east-1', maxConcurrent: 5, costPerToken: 0.0001 },
         apiUrl: 'http://localhost:8080',
@@ -235,19 +233,22 @@ describe('February 2026 Contract Upgrade - Integration', () => {
       expect(request.stableTokenAddress).toBe('0x036CbD53842c5426634e7929541eC2318f3dCF7e');
     });
 
-    it('HostManager should expose setTokenPricing method', async () => {
+    it('HostManager should expose setModelTokenPricing method', async () => {
       const { HostManager } = await import('../../src/managers/HostManager');
-      expect(typeof HostManager.prototype.setTokenPricing).toBe('function');
+      expect(typeof HostManager.prototype.setModelTokenPricing).toBe('function');
+    });
+
+    it('HostManager should expose clearModelTokenPricing method', async () => {
+      const { HostManager } = await import('../../src/managers/HostManager');
+      expect(typeof HostManager.prototype.clearModelTokenPricing).toBe('function');
     });
   });
 
   describe('Host Discovery Pricing Filter', () => {
-    it('findHostsForModel should filter hosts without token pricing', async () => {
-      // This is a structural test — the filter logic exists in findHostsForModel
-      // Verified by checking that the method accesses getNodePricing during filtering
+    it('findHostsForModel should filter hosts without model pricing', async () => {
+      // Phase 18: filter uses getModelPricing instead of getNodePricing
       const { HostManager } = await import('../../src/managers/HostManager');
       expect(typeof HostManager.prototype.findHostsForModel).toBe('function');
-      // The actual filtering behavior requires a live contract to test
     });
   });
 

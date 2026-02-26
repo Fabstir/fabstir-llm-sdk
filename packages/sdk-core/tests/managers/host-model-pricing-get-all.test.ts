@@ -3,7 +3,7 @@
 
 /**
  * Tests for HostManager.getHostModelPrices() method
- * Sub-phase 3.1: Add getHostModelPrices() Method
+ * Phase 18: Now requires token param, returns (bytes32[], uint256[])
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -12,31 +12,18 @@ import { ethers } from 'ethers';
 // Known model IDs for testing
 const TINY_VICUNA_MODEL_ID = '0x0b75a2061e70e736924a30c0a327db7ab719402129f76f631adbd7b7a5a5bced';
 const TINY_LLAMA_MODEL_ID = '0x14843424179fbcb9aeb7fd446fa97143300609757bd49ffb3ec7fb2f75aed1ca';
+const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
 
-// Mock contract response - 3 parallel arrays
+// Phase 18: Mock contract response — 2 parallel arrays (modelIds, prices)
 const mockGetHostModelPrices = vi.fn().mockResolvedValue([
   // modelIds array
   [TINY_VICUNA_MODEL_ID, TINY_LLAMA_MODEL_ID],
-  // nativePrices array
-  [3000000n, 3000000n],
-  // stablePrices array
-  [50000n, 50000n]
-]);
-
-const mockGetNodeFullInfo = vi.fn().mockResolvedValue([
-  '0x' + '1'.repeat(40), // operator
-  1000000000000000000n, // stakedAmount
-  true,                  // active
-  '{}',                  // metadata
-  'http://localhost:8080', // apiUrl
-  [TINY_VICUNA_MODEL_ID, TINY_LLAMA_MODEL_ID], // supportedModels
-  3000000n,             // minPricePerTokenNative (default)
-  50000n                // minPricePerTokenStable (default)
+  // prices array (for the specific token queried)
+  [50000n, 75000n]
 ]);
 
 const mockNodeRegistry = {
   getHostModelPrices: mockGetHostModelPrices,
-  getNodeFullInfo: mockGetNodeFullInfo,
   address: '0x' + '1'.repeat(40)
 };
 
@@ -48,101 +35,87 @@ describe('HostManager.getHostModelPrices()', () => {
   });
 
   describe('Contract Interaction', () => {
-    it('should call contract getHostModelPrices with host address', async () => {
-      await mockNodeRegistry.getHostModelPrices(hostAddress);
+    it('should call contract getHostModelPrices with host address AND token', async () => {
+      await mockNodeRegistry.getHostModelPrices(hostAddress, USDC_ADDRESS);
 
-      expect(mockGetHostModelPrices).toHaveBeenCalledWith(hostAddress);
+      expect(mockGetHostModelPrices).toHaveBeenCalledWith(hostAddress, USDC_ADDRESS);
     });
 
-    it('should return array of ModelPricing objects', async () => {
-      const [modelIds, nativePrices, stablePrices] = await mockNodeRegistry.getHostModelPrices(hostAddress);
+    it('should accept ZeroAddress for native pricing query', async () => {
+      await mockNodeRegistry.getHostModelPrices(hostAddress, ethers.ZeroAddress);
+
+      expect(mockGetHostModelPrices).toHaveBeenCalledWith(hostAddress, ethers.ZeroAddress);
+    });
+
+    it('should return 2 parallel arrays (modelIds, prices)', async () => {
+      const [modelIds, prices] = await mockNodeRegistry.getHostModelPrices(hostAddress, USDC_ADDRESS);
 
       expect(Array.isArray(modelIds)).toBe(true);
-      expect(Array.isArray(nativePrices)).toBe(true);
-      expect(Array.isArray(stablePrices)).toBe(true);
-      expect(modelIds.length).toBe(nativePrices.length);
-      expect(modelIds.length).toBe(stablePrices.length);
+      expect(Array.isArray(prices)).toBe(true);
+      expect(modelIds.length).toBe(prices.length);
     });
 
     it('should transform contract response to ModelPricing format', async () => {
-      const [modelIds, nativePrices, stablePrices] = await mockNodeRegistry.getHostModelPrices(hostAddress);
+      const [modelIds, prices] = await mockNodeRegistry.getHostModelPrices(hostAddress, USDC_ADDRESS);
 
       // Transform to ModelPricing objects (as the SDK method would)
-      const prices = modelIds.map((modelId: string, i: number) => ({
+      const modelPrices = modelIds.map((modelId: string, i: number) => ({
         modelId,
-        nativePrice: nativePrices[i],
-        stablePrice: stablePrices[i],
-        isCustom: false // Would be determined by comparing to defaults
+        price: prices[i]
       }));
 
-      expect(prices).toHaveLength(2);
-      expect(prices[0].modelId).toBe(TINY_VICUNA_MODEL_ID);
-      expect(prices[0].nativePrice).toBe(3000000n);
-      expect(prices[0].stablePrice).toBe(50000n);
+      expect(modelPrices).toHaveLength(2);
+      expect(modelPrices[0].modelId).toBe(TINY_VICUNA_MODEL_ID);
+      expect(modelPrices[0].price).toBe(50000n);
+      expect(modelPrices[1].price).toBe(75000n);
     });
   });
 
-  describe('isCustom Detection', () => {
-    it('should mark prices as custom when different from defaults', async () => {
-      // Mock custom pricing for TinyVicuna
-      const customMockGetHostModelPrices = vi.fn().mockResolvedValue([
+  describe('Filtering', () => {
+    it('should filter out price=0 entries (not configured)', async () => {
+      const mockWithZeros = vi.fn().mockResolvedValue([
         [TINY_VICUNA_MODEL_ID, TINY_LLAMA_MODEL_ID],
-        [5000000n, 3000000n],  // TinyVicuna has custom native price
-        [75000n, 50000n]       // TinyVicuna has custom stable price
+        [50000n, 0n] // TinyLlama has no pricing for this token
       ]);
 
-      const [modelIds, nativePrices, stablePrices] = await customMockGetHostModelPrices(hostAddress);
+      const [modelIds, prices] = await mockWithZeros(hostAddress, USDC_ADDRESS);
 
-      // Get defaults
-      const hostInfo = await mockNodeRegistry.getNodeFullInfo(hostAddress);
-      const defaultNative = hostInfo[6];
-      const defaultStable = hostInfo[7];
+      // Filter out zero prices
+      const filtered = modelIds
+        .map((modelId: string, i: number) => ({ modelId, price: prices[i] }))
+        .filter((p: any) => p.price !== 0n);
 
-      // Transform with isCustom detection
-      const prices = modelIds.map((modelId: string, i: number) => ({
-        modelId,
-        nativePrice: nativePrices[i],
-        stablePrice: stablePrices[i],
-        isCustom: nativePrices[i] !== defaultNative || stablePrices[i] !== defaultStable
-      }));
-
-      // TinyVicuna should be custom (different from defaults)
-      expect(prices[0].isCustom).toBe(true);
-      // TinyLlama should not be custom (same as defaults)
-      expect(prices[1].isCustom).toBe(false);
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0].modelId).toBe(TINY_VICUNA_MODEL_ID);
     });
   });
 
   describe('Edge Cases', () => {
-    it('should return empty array for host with no models', async () => {
-      const emptyMock = vi.fn().mockResolvedValue([[], [], []]);
+    it('should return empty arrays for host with no models', async () => {
+      const emptyMock = vi.fn().mockResolvedValue([[], []]);
 
-      const [modelIds, nativePrices, stablePrices] = await emptyMock(hostAddress);
+      const [modelIds, prices] = await emptyMock(hostAddress, USDC_ADDRESS);
 
       expect(modelIds).toHaveLength(0);
-      expect(nativePrices).toHaveLength(0);
-      expect(stablePrices).toHaveLength(0);
+      expect(prices).toHaveLength(0);
     });
 
     it('should handle unregistered host gracefully', async () => {
       const unregisteredMock = vi.fn().mockRejectedValue(new Error('Host not registered'));
 
-      await expect(unregisteredMock(ethers.ZeroAddress)).rejects.toThrow('Host not registered');
+      await expect(unregisteredMock(ethers.ZeroAddress, USDC_ADDRESS)).rejects.toThrow('Host not registered');
     });
 
     it('should handle bigint prices correctly', async () => {
       const largePriceMock = vi.fn().mockResolvedValue([
         [TINY_VICUNA_MODEL_ID],
-        [22_727_272_727_273_000n], // Max native price
-        [100_000_000n]             // Max stable price
+        [100_000_000n] // Max stable price
       ]);
 
-      const [modelIds, nativePrices, stablePrices] = await largePriceMock(hostAddress);
+      const [modelIds, prices] = await largePriceMock(hostAddress, USDC_ADDRESS);
 
-      expect(typeof nativePrices[0]).toBe('bigint');
-      expect(typeof stablePrices[0]).toBe('bigint');
-      expect(nativePrices[0]).toBe(22_727_272_727_273_000n);
-      expect(stablePrices[0]).toBe(100_000_000n);
+      expect(typeof prices[0]).toBe('bigint');
+      expect(prices[0]).toBe(100_000_000n);
     });
   });
 });
