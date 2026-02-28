@@ -601,7 +601,7 @@ export class HostManager {
       }
 
       // Phase 18: Filter out hosts without valid model-token pricing
-      // getModelPricing(host, modelId, token) reverts if no pricing set for that (model, token) pair
+      // and populate minPricePerTokenStable with the actual per-model USDC price
       const usdcAddr = this.contractManager?.getContractAddress
         ? await this.contractManager.getContractAddress('usdcToken').catch(() => null as any)
         : null;
@@ -609,7 +609,9 @@ export class HostManager {
         const validHosts: HostInfo[] = [];
         for (const host of hosts) {
           try {
-            await this.nodeRegistry['getModelPricing'](host.address, modelId, usdcAddr);
+            const modelPrice: bigint = await this.nodeRegistry['getModelPricing'](host.address, modelId, usdcAddr);
+            // Override node-level registration price with actual per-model USDC price
+            host.minPricePerTokenStable = modelPrice;
             validHosts.push(host);
           } catch {
             console.warn(`[HostManager] Host ${host.address} has no model pricing for ${modelId}, excluding from results`);
