@@ -2,37 +2,33 @@
 # SPDX-License-Identifier: BUSL-1.1
 
 #!/bin/bash
-# Start Fabstir Host 1 Docker Container with mounted binary and GPU support
-# This runs TEST_HOST_1_ADDRESS on port 8083
+# Start Fabstir Host CLI for TEST_HOST_1
+# This is for development/testing — uses .env.test for config
 
 # Load environment variables from .env.test
 set -a
 source ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-sdk/.env.test
 set +a
 
-docker run -d \
-  --name fabstir-host-test \
-  --gpus all \
-  -p 8083:8083 \
-  -p 9000:9000 \
-  -p 3001:3001 \
-  -v ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-node/models:/models \
-  -v ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-node/target/release/fabstir-llm-node:/usr/local/bin/fabstir-llm-node:ro \
-  -v ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-sdk/.env.test:/app/.env.test:ro \
+# Map CONTRACT_*_TOKEN vars to host-cli's expected names
+export FAB_TOKEN="${CONTRACT_FAB_TOKEN}"
+export USDC_TOKEN="${CONTRACT_USDC_TOKEN}"
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📦 Host CLI for: ${TEST_HOST_1_ADDRESS}"
+echo "🌐 RPC: ${RPC_URL_BASE_SEPOLIA}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Usage examples:"
+echo "  docker run -it --env-file .env fabstir/host-cli dashboard"
+echo "  docker run --env-file .env fabstir/host-cli info"
+echo "  docker run --env-file .env fabstir/host-cli set-model-pricing --model 'repo:file' --price 5 --price-type usdc"
+echo ""
+
+# Run the command passed as arguments, default to --help
+docker run -it \
   --env-file ~/dev/Fabstir/fabstir-llm-marketplace/fabstir-llm-sdk/.env.test \
   -e HOST_PRIVATE_KEY="${TEST_HOST_1_PRIVATE_KEY}" \
-  --entrypoint /bin/sh \
-  fabstir-host-cli:local \
-  -c "while true; do sleep 3600; done"
-
-echo ""
-echo "Container started. Verifying binary mount..."
-docker exec fabstir-host-test ls -lh /usr/local/bin/fabstir-llm-node
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📦 Host 1 Container: fabstir-host-test"
-echo "🔑 Host Address: ${TEST_HOST_1_ADDRESS}"
-echo "🌐 Node API: http://localhost:8083"
-echo "🔧 P2P Port: 9000"
-echo "📡 Management API: http://localhost:3001 (start with start-management-server-host1.sh)"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  -e FAB_TOKEN="${CONTRACT_FAB_TOKEN}" \
+  -e USDC_TOKEN="${CONTRACT_USDC_TOKEN}" \
+  fabstir/host-cli "${@:---help}"

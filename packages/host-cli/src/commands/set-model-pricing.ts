@@ -72,8 +72,8 @@ export function registerSetModelPricingCommand(program: Command): void {
         let priceValue: string;
 
         if (priceType === 'usdc') {
-          const usdcAddr = process.env.CONTRACT_USDC_TOKEN;
-          if (!usdcAddr) throw new Error('CONTRACT_USDC_TOKEN not set');
+          const usdcAddr = process.env.USDC_TOKEN;
+          if (!usdcAddr) throw new Error('USDC_TOKEN not set');
           tokenAddress = usdcAddr;
           priceValue = Math.round(price * PRICE_PRECISION).toString();
           console.log(chalk.cyan(`USDC Price: $${price}/million tokens (contract value: ${priceValue})`));

@@ -19,7 +19,7 @@ import { fetchEarnings, deriveAddressFromPrivateKey } from './services/EarningsC
 import { withdrawAllEarnings } from './services/WithdrawalService.js';
 import { formatPrice, formatNativePrice } from './services/PricingService.js';
 import { fetchHostModelPrices, updateModelStablePricing, updateModelNativePricing, clearModelPricingOnChain } from './services/ModelPricingService.js';
-import { fetchAllModels } from '../services/ModelRegistryClient.js';
+import { fetchHostRegisteredModels } from '../services/ModelRegistryClient.js';
 import { DockerLogStream } from './services/DockerLogs.js';
 import { showMessage, showError } from './actions.js';
 
@@ -178,15 +178,15 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
     screen.render();
 
     // Phase 18: Fetch per-token model prices (USDC + native separately)
-    const usdcAddr = process.env.CONTRACT_USDC_TOKEN || '';
+    const usdcAddr = process.env.USDC_TOKEN || '';
     const [usdcPrices, nativePrices, allModels] = await Promise.all([
       usdcAddr ? fetchHostModelPrices(hostAddress, rpcUrl, usdcAddr) : Promise.resolve([]),
       fetchHostModelPrices(hostAddress, rpcUrl, ethers.ZeroAddress),
-      fetchAllModels(rpcUrl),
+      fetchHostRegisteredModels(hostAddress, rpcUrl),
     ]);
 
     if (allModels.length === 0) {
-      logsBox.log(showError('No approved models found'));
+      logsBox.log(showError('No registered models found for this host'));
       screen.render();
       return;
     }
@@ -348,7 +348,7 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
         logsBox.log(`[MODEL PRICING] Clearing ${selectedModel.displayName} pricing (USDC + ETH)...`);
         screen.render();
         // Phase 18: Clear both USDC and native pricing separately
-        const clearUsdcAddr = process.env.CONTRACT_USDC_TOKEN || '';
+        const clearUsdcAddr = process.env.USDC_TOKEN || '';
         if (clearUsdcAddr) {
           const usdcResult = await clearModelPricingOnChain(hostPrivateKey, rpcUrl, selectedModel.modelId, clearUsdcAddr, (status) => {
             logsBox.log(`[MODEL PRICING] USDC: ${status}`);
@@ -386,7 +386,7 @@ export async function createDashboard(options: CreateDashboardOptions): Promise<
           (async () => {
             logsBox.log(`[MODEL PRICING] Clearing ${selectedModel.displayName} pricing (USDC + ETH)...`);
             screen.render();
-            const inlineUsdcAddr = process.env.CONTRACT_USDC_TOKEN || '';
+            const inlineUsdcAddr = process.env.USDC_TOKEN || '';
             if (inlineUsdcAddr) {
               const usdcRes = await clearModelPricingOnChain(hostPrivateKey, rpcUrl, selectedModel.modelId, inlineUsdcAddr, (status) => {
                 logsBox.log(`[MODEL PRICING] USDC: ${status}`);

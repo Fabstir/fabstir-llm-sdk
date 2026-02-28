@@ -55,8 +55,8 @@ export function createTestConfig(overrides?: Partial<TestConfig>): TestConfig {
       nodeRegistry: process.env.CONTRACT_NODE_REGISTRY || '',
       proofSystem: process.env.CONTRACT_PROOF_SYSTEM || '',
       hostEarnings: process.env.CONTRACT_HOST_EARNINGS || '',
-      fabToken: process.env.CONTRACT_FAB_TOKEN || '',
-      usdcToken: process.env.CONTRACT_USDC_TOKEN || ''
+      fabToken: process.env.FAB_TOKEN || '',
+      usdcToken: process.env.USDC_TOKEN || ''
     }
   };
 

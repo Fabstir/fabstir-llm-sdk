@@ -8,8 +8,21 @@
 
 import { ethers } from 'ethers';
 
-// Contract address (Base Sepolia)
-const MODEL_REGISTRY_ADDRESS = '0x1a9d91521c85bD252Ac848806Ff5096bBb9ACDb2';
+function getModelRegistryAddress(): string {
+  const address = process.env.CONTRACT_MODEL_REGISTRY;
+  if (!address) {
+    throw new Error('CONTRACT_MODEL_REGISTRY environment variable is not set');
+  }
+  return address;
+}
+
+function getNodeRegistryAddress(): string {
+  const address = process.env.CONTRACT_NODE_REGISTRY;
+  if (!address) {
+    throw new Error('CONTRACT_NODE_REGISTRY environment variable is not set');
+  }
+  return address;
+}
 
 // Minimal ABI for model queries
 const MODEL_REGISTRY_ABI = [
@@ -69,7 +82,7 @@ function constructRepoUrl(repo: string): string {
  */
 export async function fetchAllModels(rpcUrl: string): Promise<ModelInfo[]> {
   const provider = new ethers.JsonRpcProvider(rpcUrl);
-  const contract = new ethers.Contract(MODEL_REGISTRY_ADDRESS, MODEL_REGISTRY_ABI, provider);
+  const contract = new ethers.Contract(getModelRegistryAddress(), MODEL_REGISTRY_ABI, provider);
 
   // Get all model IDs
   const modelIds: string[] = await contract.getAllModels();
@@ -111,7 +124,7 @@ export async function fetchAllModels(rpcUrl: string): Promise<ModelInfo[]> {
  */
 export async function fetchModelById(rpcUrl: string, modelId: string): Promise<ModelInfo | null> {
   const provider = new ethers.JsonRpcProvider(rpcUrl);
-  const contract = new ethers.Contract(MODEL_REGISTRY_ADDRESS, MODEL_REGISTRY_ABI, provider);
+  const contract = new ethers.Contract(getModelRegistryAddress(), MODEL_REGISTRY_ABI, provider);
 
   try {
     const model = await contract.getModel(modelId);
@@ -142,7 +155,7 @@ export async function fetchModelById(rpcUrl: string, modelId: string): Promise<M
  */
 export async function fetchModelHash(rpcUrl: string, modelId: string): Promise<string | null> {
   const provider = new ethers.JsonRpcProvider(rpcUrl);
-  const contract = new ethers.Contract(MODEL_REGISTRY_ADDRESS, MODEL_REGISTRY_ABI, provider);
+  const contract = new ethers.Contract(getModelRegistryAddress(), MODEL_REGISTRY_ABI, provider);
 
   try {
     return await contract.getModelHash(modelId);
@@ -156,7 +169,7 @@ export async function fetchModelHash(rpcUrl: string, modelId: string): Promise<s
  */
 export async function isModelApproved(rpcUrl: string, modelId: string): Promise<boolean> {
   const provider = new ethers.JsonRpcProvider(rpcUrl);
-  const contract = new ethers.Contract(MODEL_REGISTRY_ADDRESS, MODEL_REGISTRY_ABI, provider);
+  const contract = new ethers.Contract(getModelRegistryAddress(), MODEL_REGISTRY_ABI, provider);
 
   try {
     return await contract.isModelApproved(modelId);
@@ -170,7 +183,7 @@ export async function isModelApproved(rpcUrl: string, modelId: string): Promise<
  */
 export async function computeModelId(rpcUrl: string, repo: string, fileName: string): Promise<string> {
   const provider = new ethers.JsonRpcProvider(rpcUrl);
-  const contract = new ethers.Contract(MODEL_REGISTRY_ADDRESS, MODEL_REGISTRY_ABI, provider);
+  const contract = new ethers.Contract(getModelRegistryAddress(), MODEL_REGISTRY_ABI, provider);
 
   return await contract.getModelId(repo, fileName);
 }
@@ -213,4 +226,37 @@ export async function validateModelString(
     const errMsg = err instanceof Error ? err.message : 'Unknown error';
     return { valid: false, error: `Validation failed: ${errMsg}` };
   }
+}
+
+// Minimal ABI for NodeRegistry model queries
+const NODE_REGISTRY_MODELS_ABI = [
+  'function getNodeModels(address nodeAddress) view returns (bytes32[])',
+];
+
+/**
+ * Fetches only the models registered to a specific host from NodeRegistry,
+ * then resolves each model ID to full ModelInfo via ModelRegistry.
+ */
+export async function fetchHostRegisteredModels(
+  hostAddress: string,
+  rpcUrl: string
+): Promise<ModelInfo[]> {
+  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const nodeRegistry = new ethers.Contract(
+    getNodeRegistryAddress(),
+    NODE_REGISTRY_MODELS_ABI,
+    provider
+  );
+
+  const modelIds: string[] = await nodeRegistry.getNodeModels(hostAddress);
+
+  const models: ModelInfo[] = [];
+  for (const modelId of modelIds) {
+    const model = await fetchModelById(rpcUrl, modelId);
+    if (model) {
+      models.push(model);
+    }
+  }
+
+  return models;
 }

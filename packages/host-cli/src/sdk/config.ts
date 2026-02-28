@@ -36,8 +36,8 @@ const REQUIRED_ENV_VARS = [
   'CONTRACT_NODE_REGISTRY',
   'CONTRACT_PROOF_SYSTEM',
   'CONTRACT_HOST_EARNINGS',
-  'CONTRACT_FAB_TOKEN',
-  'CONTRACT_USDC_TOKEN',
+  'FAB_TOKEN',
+  'USDC_TOKEN',
   'CONTRACT_MODEL_REGISTRY',
 ];
 
@@ -83,8 +83,8 @@ export function createSDKConfig(network: 'base-mainnet' | 'base-sepolia'): SDKCo
       nodeRegistry: process.env.CONTRACT_NODE_REGISTRY!,
       proofSystem: process.env.CONTRACT_PROOF_SYSTEM!,
       hostEarnings: process.env.CONTRACT_HOST_EARNINGS!,
-      fabToken: process.env.CONTRACT_FAB_TOKEN!,
-      usdcToken: process.env.CONTRACT_USDC_TOKEN!,
+      fabToken: process.env.FAB_TOKEN!,
+      usdcToken: process.env.USDC_TOKEN!,
       modelRegistry: process.env.CONTRACT_MODEL_REGISTRY!,
     },
     s5Config: {

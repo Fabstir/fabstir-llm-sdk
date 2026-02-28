@@ -122,7 +122,7 @@ export function registerInfoCommand(program: Command): void {
 
         // Get FAB balance
         let fabBalance = BigInt(0);
-        const fabTokenAddress = process.env.CONTRACT_FAB_TOKEN;
+        const fabTokenAddress = process.env.FAB_TOKEN;
         if (fabTokenAddress) {
           const fabToken = new ethers.Contract(fabTokenAddress, ERC20_ABI, provider);
           try {

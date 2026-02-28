@@ -61,8 +61,8 @@ export function registerClearModelPricingCommand(program: Command): void {
         const nativeToken = '0x0000000000000000000000000000000000000000';
 
         if (priceType === 'usdc' || priceType === 'all') {
-          const usdcAddr = process.env.CONTRACT_USDC_TOKEN;
-          if (!usdcAddr) throw new Error('CONTRACT_USDC_TOKEN not set');
+          const usdcAddr = process.env.USDC_TOKEN;
+          if (!usdcAddr) throw new Error('USDC_TOKEN not set');
           console.log(chalk.blue('\n📝 Clearing USDC pricing...'));
           const txHash = await hostManager.clearModelTokenPricing(modelId, usdcAddr);
           console.log(chalk.green(`✅ USDC pricing cleared! Tx: ${txHash}`));

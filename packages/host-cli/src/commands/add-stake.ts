@@ -55,7 +55,7 @@ export function registerAddStakeCommand(program: Command): void {
 
         // Get contract addresses
         const nodeRegistryAddress = process.env.CONTRACT_NODE_REGISTRY;
-        const fabTokenAddress = process.env.CONTRACT_FAB_TOKEN;
+        const fabTokenAddress = process.env.FAB_TOKEN;
 
         if (!nodeRegistryAddress || !fabTokenAddress) {
           throw new Error('Contract addresses not found in environment');

@@ -58,10 +58,11 @@ tmp
 temp
 *.tmp
 
-# Models (too large, mount at runtime)
+# Models and node binary (not needed for CLI-only image)
 models
 *.gguf
 model_registry.json
+fabstir-llm-node*
 
 # CI/CD
 .github

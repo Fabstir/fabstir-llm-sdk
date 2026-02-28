@@ -37,8 +37,8 @@ describe('SDK Setup and Discovery', () => {
     it('should have required contract addresses in environment', () => {
       expect(process.env.CONTRACT_JOB_MARKETPLACE).toBeDefined();
       expect(process.env.CONTRACT_NODE_REGISTRY).toBeDefined();
-      expect(process.env.CONTRACT_FAB_TOKEN).toBeDefined();
-      expect(process.env.CONTRACT_USDC_TOKEN).toBeDefined();
+      expect(process.env.FAB_TOKEN).toBeDefined();
+      expect(process.env.USDC_TOKEN).toBeDefined();
     });
 
     it('should have RPC URL for Base Sepolia', () => {

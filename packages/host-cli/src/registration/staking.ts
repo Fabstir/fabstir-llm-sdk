@@ -77,7 +77,7 @@ export async function checkAllowance(): Promise<bigint> {
 
   try {
     const paymentManager = sdk.getPaymentManager();
-    const fabTokenAddress = process.env.CONTRACT_FAB_TOKEN || '';
+    const fabTokenAddress = process.env.FAB_TOKEN || '';
     const spenderAddress = getStakingRequirements().contractAddress;
 
     // Use SDK PaymentManager instead of direct contract calls
@@ -147,7 +147,7 @@ export async function approveTokens(
 
     // Execute approval using SDK PaymentManager
     const paymentManager = sdk.getPaymentManager();
-    const fabTokenAddress = process.env.CONTRACT_FAB_TOKEN || '';
+    const fabTokenAddress = process.env.FAB_TOKEN || '';
     const spenderAddress = getStakingRequirements().contractAddress;
 
     // Use SDK method instead of direct contract calls

@@ -100,7 +100,7 @@ describe('Info Command', () => {
 
     // Set environment variables
     process.env.CONTRACT_NODE_REGISTRY = '0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218';
-    process.env.CONTRACT_FAB_TOKEN = '0xC78949004B4EB6dEf2D66e49Cd81231472612D62';
+    process.env.FAB_TOKEN = '0xC78949004B4EB6dEf2D66e49Cd81231472612D62';
 
     // Setup mock wallet
     mockWallet = {

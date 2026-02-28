@@ -16,8 +16,8 @@ function getNodeRegistryAddress(): string {
 }
 
 function getUsdcAddress(): string {
-  const addr = process.env.CONTRACT_USDC_TOKEN;
-  if (!addr) throw new Error('CONTRACT_USDC_TOKEN not set in environment');
+  const addr = process.env.USDC_TOKEN;
+  if (!addr) throw new Error('USDC_TOKEN not set in environment');
   return addr;
 }
 

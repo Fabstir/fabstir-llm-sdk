@@ -192,18 +192,18 @@ describe('SDK Initialization', () => {
     });
 
     it('should provide meaningful error messages', async () => {
-      const originalEnv = process.env.CONTRACT_FAB_TOKEN;
-      delete process.env.CONTRACT_FAB_TOKEN;
+      const originalEnv = process.env.FAB_TOKEN;
+      delete process.env.FAB_TOKEN;
 
       try {
         await initializeSDK();
         expect.fail('Should have thrown');
       } catch (error: any) {
-        expect(error.message).toContain('CONTRACT_FAB_TOKEN');
+        expect(error.message).toContain('FAB_TOKEN');
       }
 
       // Restore
-      process.env.CONTRACT_FAB_TOKEN = originalEnv;
+      process.env.FAB_TOKEN = originalEnv;
     });
   });
 

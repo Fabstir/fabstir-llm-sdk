@@ -61,7 +61,7 @@ describe('FAB Token Balance Checking', () => {
       const privateKey = process.env.TEST_HOST_1_PRIVATE_KEY!;
       await authenticateSDK(privateKey);
 
-      const fabAddress = process.env.CONTRACT_FAB_TOKEN;
+      const fabAddress = process.env.FAB_TOKEN;
       expect(fabAddress).toBeDefined();
 
       const balance = await getFABBalance();
@@ -223,7 +223,7 @@ describe('FAB Token Balance Checking', () => {
 
   describe('Token Contract Integration', () => {
     it('should use correct FAB token address from environment', async () => {
-      const fabAddress = process.env.CONTRACT_FAB_TOKEN;
+      const fabAddress = process.env.FAB_TOKEN;
       expect(fabAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
     });
 
