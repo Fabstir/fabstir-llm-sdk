@@ -28,7 +28,8 @@ import {
   RecoveredConversation,
   ImageAttachment,
   PromptOptions,
-  TokenUsageInfo
+  TokenUsageInfo,
+  ContextInfo
 } from '../types';
 import { validateImageAttachments } from '../utils/image-validation';
 import { HostSelectionMode } from '../types/settings.types';
@@ -41,6 +42,7 @@ import { ChainRegistry } from '../config/ChainRegistry';
 import { UnsupportedChainError } from '../errors/ChainErrors';
 import { PricingValidationError } from '../errors/pricing-errors';
 import { WebSearchError } from '../errors/web-search-errors';
+import { ContextLimitError } from '../errors/context-errors';
 import { bytesToHex } from '../crypto/utilities';
 import { analyzePromptForSearchIntent } from '../utils/search-intent-analyzer';
 import { resolveSearchQueries } from '../utils/search-query-resolver';
@@ -137,6 +139,9 @@ export interface SessionState {
   webSearchMetadata?: WebSearchMetadata; // NEW: Web search metadata from response
   webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 5.1)
   lastTokenUsage?: TokenUsageInfo; // NEW: Last prompt's token usage (Phase 5)
+  lastPromptTokens?: number;
+  contextWindowSize?: number;
+  lastFinishReason?: 'stop' | 'length' | 'cancelled' | null;
   ragContext?: { vectorDbId: string }; // Set by uploadVectors() or startSession(ragConfig)
   ragConfig?: RAGSessionConfig; // RAG configuration from startSession
   ragMetrics?: RAGMetrics; // RAG metrics tracking
@@ -973,19 +978,20 @@ export class SessionManager implements ISessionManager {
                   }, 3000);
                 }
               } else if (data.type === 'stream_end') {
-                // Capture token data before resolving
                 if (safetyTimeout) clearTimeout(safetyTimeout);
-                const llmTokens = data.tokens_used || encChunkCount;
-                const vlmTokens = data.vlm_tokens || 0;
-                const totalTokensForPrompt = llmTokens + vlmTokens;
-                const usage: TokenUsageInfo = { llmTokens, vlmTokens, imageGenTokens: 0, totalTokens: totalTokensForPrompt };
-                session.totalTokens += totalTokensForPrompt;
-                session.lastTokenUsage = usage;
-                options?.onTokenUsage?.(usage);
+                this._processStreamEnd(data, encChunkCount, session, options);
                 safeResolve(fullResponse);
               } else if (data.type === 'error') {
                 console.error('[SessionManager] Error:', data.message);
-                safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
+                if (data.code === 'TOKEN_LIMIT_EXCEEDED') {
+                  safeReject(new ContextLimitError(
+                    data.message || 'Prompt exceeds context window',
+                    data.prompt_tokens ?? 0,
+                    data.context_window_size ?? 0
+                  ));
+                } else {
+                  safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
+                }
               }
             });
 
@@ -1043,14 +1049,7 @@ export class SessionManager implements ISessionManager {
             } else if (data.type === 'response') {
               fullResponse = data.content || fullResponse;
             } else if (data.type === 'stream_end') {
-              // VLM token tracking (Phase 5): capture vlm_tokens from plaintext stream_end
-              const llmTokens = data.tokens_used || ptChunkCount;
-              const vlmTokens = data.vlm_tokens || 0;
-              const totalTokensForPrompt = llmTokens + vlmTokens;
-              const usage: TokenUsageInfo = { llmTokens, vlmTokens, imageGenTokens: 0, totalTokens: totalTokensForPrompt };
-              session.totalTokens += totalTokensForPrompt;
-              session.lastTokenUsage = usage;
-              options?.onTokenUsage?.(usage);
+              this._processStreamEnd(data, ptChunkCount, session, options);
             } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
             } else if (data.type === 'session_completed') {
             }
@@ -1303,19 +1302,20 @@ export class SessionManager implements ISessionManager {
                   }, 3000);
                 }
               } else if (data.type === 'stream_end') {
-                // Capture token data before resolving
                 if (safetyTimeoutNs) clearTimeout(safetyTimeoutNs);
-                const llmTokens = data.tokens_used || encNsChunkCount;
-                const vlmTokens = data.vlm_tokens || 0;
-                const totalTokensForPrompt = llmTokens + vlmTokens;
-                const usage: TokenUsageInfo = { llmTokens, vlmTokens, imageGenTokens: 0, totalTokens: totalTokensForPrompt };
-                session.totalTokens += totalTokensForPrompt;
-                session.lastTokenUsage = usage;
-                options?.onTokenUsage?.(usage);
+                this._processStreamEnd(data, encNsChunkCount, session, options);
                 safeResolve(accumulatedResponse);
               } else if (data.type === 'error') {
                 console.error('[SessionManager] Error:', data.message);
-                safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
+                if (data.code === 'TOKEN_LIMIT_EXCEEDED') {
+                  safeReject(new ContextLimitError(
+                    data.message || 'Prompt exceeds context window',
+                    data.prompt_tokens ?? 0,
+                    data.context_window_size ?? 0
+                  ));
+                } else {
+                  safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
+                }
               }
             });
           });
@@ -1361,10 +1361,7 @@ export class SessionManager implements ISessionManager {
           let ptNsUsage: TokenUsageInfo | undefined;
           const tokenUnsub = this.wsClient.onMessage((data: any) => {
             if (data.type === 'response' || data.type === 'stream_end') {
-              const llmTokens = data.tokens_used || 0;
-              const vlmTokens = data.vlm_tokens || 0;
-              const totalTokensForPrompt = llmTokens + vlmTokens;
-              ptNsUsage = { llmTokens, vlmTokens, imageGenTokens: 0, totalTokens: totalTokensForPrompt };
+              ptNsUsage = this._processStreamEnd(data, 0, session, options);
             }
           });
 
@@ -1381,11 +1378,6 @@ export class SessionManager implements ISessionManager {
           });
 
           tokenUnsub();
-          if (ptNsUsage) {
-            session.totalTokens += ptNsUsage.totalTokens;
-            session.lastTokenUsage = ptNsUsage;
-            options?.onTokenUsage?.(ptNsUsage);
-          }
         }
 
         // Add response to session
@@ -1429,6 +1421,7 @@ export class SessionManager implements ISessionManager {
         return response;
       }
     } catch (error: any) {
+      if (error instanceof ContextLimitError) throw error;
       throw new SDKError(
         `Failed to send prompt via WebSocket: ${error.message}`,
         'WS_PROMPT_ERROR',
@@ -2463,12 +2456,84 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Process stream_end data: extract token usage, compute context utilization, fire callbacks.
+   * Shared by all 4 stream_end handler sites (encrypted/plaintext, streaming/non-streaming).
+   */
+  private _processStreamEnd(
+    data: any,
+    fallbackChunkCount: number,
+    session: SessionState,
+    options: PromptOptions | undefined
+  ): TokenUsageInfo {
+    const llmTokens = data.tokens_used || fallbackChunkCount;
+    const vlmTokens = data.vlm_tokens || 0;
+    const totalTokens = llmTokens + vlmTokens;
+
+    const usageObj = data.usage;
+    const promptTokens = usageObj?.prompt_tokens;
+    const completionTokens = usageObj?.completion_tokens;
+    const contextWindowSize = usageObj?.context_window_size;
+    const finishReason = data.finish_reason ?? undefined;
+
+    let contextUtilization: number | undefined;
+    if (promptTokens != null && contextWindowSize && contextWindowSize > 0) {
+      contextUtilization = (promptTokens + (completionTokens ?? 0)) / contextWindowSize;
+    }
+
+    const usage: TokenUsageInfo = {
+      llmTokens, vlmTokens, imageGenTokens: 0, totalTokens,
+      promptTokens, contextWindowSize, contextUtilization, finishReason
+    };
+
+    session.totalTokens += totalTokens;
+    session.lastTokenUsage = usage;
+    if (promptTokens != null) session.lastPromptTokens = promptTokens;
+    if (contextWindowSize != null) session.contextWindowSize = contextWindowSize;
+    session.lastFinishReason = finishReason ?? null;
+
+    options?.onTokenUsage?.(usage);
+
+    if (contextUtilization != null && options?.onContextWarning) {
+      const threshold = options.contextWarningThreshold ?? 0.8;
+      if (contextUtilization >= threshold) {
+        options.onContextWarning(usage);
+      }
+    }
+
+    return usage;
+  }
+
+  /**
    * Get the token usage info from the last completed prompt for a session.
    * Returns undefined if no prompt has been completed yet.
    */
   getLastTokenUsage(sessionId: bigint): TokenUsageInfo | undefined {
     const session = this.sessions.get(sessionId.toString());
     return session?.lastTokenUsage;
+  }
+
+  /**
+   * Get context window utilization info for a session.
+   * Returns null if no prompt has been sent yet.
+   */
+  getContextInfo(sessionId: bigint): ContextInfo | null {
+    const session = this.sessions.get(sessionId.toString());
+    if (!session || session.lastPromptTokens === undefined) return null;
+
+    const promptTokens = session.lastPromptTokens ?? 0;
+    const contextWindowSize = session.contextWindowSize ?? 0;
+    const completionTokens = session.lastTokenUsage?.llmTokens ?? 0;
+    const utilization = contextWindowSize > 0
+      ? (promptTokens + completionTokens) / contextWindowSize
+      : 0;
+
+    return {
+      promptTokens,
+      completionTokens,
+      contextWindowSize,
+      utilization,
+      finishReason: session.lastFinishReason ?? null
+    };
   }
 
   /**

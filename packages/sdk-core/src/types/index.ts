@@ -147,6 +147,10 @@ export interface PromptOptions {
   rawQuery?: string;
   /** AbortSignal to stop in-progress streaming inference. Resolves with partial response. */
   signal?: AbortSignal;
+  /** Called when context utilization >= threshold. UI should trim history before next prompt. */
+  onContextWarning?: (usage: TokenUsageInfo) => void;
+  /** Fraction at which onContextWarning fires (default 0.8). Set to 1.0 to disable. */
+  contextWarningThreshold?: number;
 }
 
 // ============= Token Usage Types =============
@@ -160,6 +164,22 @@ export interface TokenUsageInfo {
   imageGenTokens: number;
   /** Total billed tokens: llmTokens + vlmTokens + imageGenTokens */
   totalTokens: number;
+  /** Tokens in the prompt sent to the model (from node usage.prompt_tokens) */
+  promptTokens?: number;
+  /** Model's maximum context window size (from node usage.context_window_size) */
+  contextWindowSize?: number;
+  /** 0.0-1.0 ratio: (promptTokens + completionTokens) / contextWindowSize */
+  contextUtilization?: number;
+  /** Why generation stopped: "stop" (natural), "length" (max_tokens hit), "cancelled" */
+  finishReason?: 'stop' | 'length' | 'cancelled';
+}
+
+export interface ContextInfo {
+  promptTokens: number;
+  completionTokens: number;
+  contextWindowSize: number;
+  utilization: number;
+  finishReason: 'stop' | 'length' | 'cancelled' | null;
 }
 
 // ============= Session Types =============

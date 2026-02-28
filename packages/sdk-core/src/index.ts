@@ -134,6 +134,9 @@ export {
 // Export web search errors
 export { WebSearchError } from './errors/web-search-errors';
 
+// Export context limit errors
+export { ContextLimitError } from './errors/context-errors';
+
 // Export image generation errors
 export { ImageGenerationError } from './errors/image-generation-errors';
 export { analyzePromptForImageIntent, type ImageIntentResult } from './utils/image-intent-analyzer';
