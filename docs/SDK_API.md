@@ -874,8 +874,37 @@ Sends a prompt and receives streaming response via WebSocket.
 async sendPromptStreaming(
   sessionId: bigint,
   prompt: string,
-  onToken?: (token: string) => void
+  onToken?: (token: string) => void,
+  options?: PromptOptions
 ): Promise<string>
+```
+
+**PromptOptions:**
+```typescript
+interface PromptOptions {
+  images?: ImageAttachment[];
+  thinking?: ThinkingMode;
+  onTokenUsage?: (usage: TokenUsageInfo) => void;
+  onImageGenerated?: (result: ImageGenerationResult) => void;
+  rawQuery?: string;
+  signal?: AbortSignal;
+  onContextWarning?: (usage: TokenUsageInfo) => void;
+  contextWarningThreshold?: number;  // default 0.8
+}
+```
+
+**TokenUsageInfo:**
+```typescript
+interface TokenUsageInfo {
+  llmTokens: number;
+  vlmTokens: number;
+  imageGenTokens: number;
+  totalTokens: number;
+  promptTokens?: number;          // from node usage.prompt_tokens
+  contextWindowSize?: number;     // from node usage.context_window_size
+  contextUtilization?: number;    // 0.0-1.0 ratio
+  finishReason?: 'stop' | 'length' | 'cancelled';
+}
 ```
 
 **Example:**
@@ -883,12 +912,20 @@ async sendPromptStreaming(
 const response = await sessionManager.sendPromptStreaming(
   sessionId,
   "Tell me a story",
-  (token) => {
-    // Handle each token as it arrives
-    process.stdout.write(token);
+  (token) => process.stdout.write(token),
+  {
+    onTokenUsage: (usage) => {
+      console.log(`Context: ${Math.round((usage.contextUtilization ?? 0) * 100)}%`);
+      if (usage.finishReason === 'length') {
+        console.log('Response was truncated (max_tokens reached).');
+      }
+    },
+    contextWarningThreshold: 0.75,
+    onContextWarning: (usage) => {
+      console.warn(`Context ${Math.round(usage.contextUtilization! * 100)}% full — trim history soon`);
+    }
   }
 );
-console.log('\nFull response:', response);
 ```
 
 ### submitCheckpoint
@@ -1187,6 +1224,50 @@ await vectorRAGManager.addVectors(databaseName, vectors);
 **See Also:**
 - `VectorRAGManager.getPendingDocuments()` - Get documents awaiting embeddings
 - `VectorRAGManager.updateDocumentStatus()` - Update document embedding status
+
+### getLastTokenUsage
+
+Returns the token usage info from the last completed prompt for a session.
+
+```typescript
+getLastTokenUsage(sessionId: bigint): TokenUsageInfo | undefined
+```
+
+**Example:**
+```typescript
+const usage = sessionManager.getLastTokenUsage(sessionId);
+if (usage) {
+  console.log(`Last prompt used ${usage.totalTokens} tokens`);
+  console.log(`Context: ${Math.round((usage.contextUtilization ?? 0) * 100)}%`);
+}
+```
+
+### getContextInfo
+
+Returns context window utilization info for a session. Returns `null` if no prompt has been sent yet or the node didn't report context usage.
+
+```typescript
+getContextInfo(sessionId: bigint): ContextInfo | null
+```
+
+**ContextInfo:**
+```typescript
+interface ContextInfo {
+  promptTokens: number;
+  completionTokens: number;
+  contextWindowSize: number;
+  utilization: number;              // 0.0-1.0
+  finishReason: 'stop' | 'length' | 'cancelled' | null;
+}
+```
+
+**Example:**
+```typescript
+const ctx = sessionManager.getContextInfo(sessionId);
+if (ctx && ctx.utilization > 0.9) {
+  // Trim conversation history before next message
+}
+```
 
 ### Checkpoint Recovery
 
@@ -4976,6 +5057,32 @@ class InsufficientDepositError extends Error {
 
 class NodeChainMismatchError extends Error {
   constructor(nodeChainId: number, sdkChainId: number);
+}
+
+class ContextLimitError extends Error {
+  readonly code: 'TOKEN_LIMIT_EXCEEDED';
+  readonly promptTokens: number;
+  readonly contextWindowSize: number;
+  readonly excess: number;  // promptTokens - contextWindowSize
+  constructor(message: string, promptTokens: number, contextWindowSize: number);
+}
+```
+
+### Context Limit Error Handling
+
+When the prompt exceeds the model's context window, the node returns `TOKEN_LIMIT_EXCEEDED` and the SDK throws `ContextLimitError`. The `excess` field tells the UI how many tokens to trim.
+
+```typescript
+import { ContextLimitError } from '@fabstir/sdk-core';
+
+try {
+  await sessionManager.sendPromptStreaming(sessionId, prompt, onToken, opts);
+} catch (err) {
+  if (err instanceof ContextLimitError) {
+    console.log(`Over limit by ${err.excess} tokens`);
+    const trimmed = trimOldestMessages(messages, err.excess);
+    await sessionManager.sendPromptStreaming(sessionId, buildPrompt(trimmed), onToken, opts);
+  } else throw err;
 }
 ```
 

@@ -204,11 +204,22 @@ Send an image generation request via the encrypted WebSocket channel (node v8.16
   "usage": {
     "prompt_tokens": 25,
     "completion_tokens": 150,
-    "total_tokens": 175
+    "total_tokens": 175,
+    "context_window_size": 32768
   },
   "duration_ms": 2340
 }
 ```
+
+**Fields (v8.21.0+):**
+- `finish_reason` — `"stop"` (natural end), `"length"` (max_tokens hit), `"cancelled"` (user aborted)
+- `usage.prompt_tokens` — Number of tokens in the prompt
+- `usage.completion_tokens` — Number of tokens generated
+- `usage.total_tokens` — Sum of prompt + completion tokens
+- `usage.context_window_size` — Model's maximum context window size
+- `duration_ms` — Inference duration in milliseconds
+
+The SDK computes `contextUtilization = (prompt_tokens + completion_tokens) / context_window_size` and fires the `onContextWarning` callback when this exceeds the configured threshold (default 0.8).
 
 ### 5. Error Message
 
@@ -224,6 +235,17 @@ Send an image generation request via the encrypted WebSocket channel (node v8.16
     }
   },
   "requestId": "failed_request_id"
+}
+```
+
+**Context limit error (v8.21.0+):**
+```json
+{
+  "type": "error",
+  "code": "TOKEN_LIMIT_EXCEEDED",
+  "message": "Prompt exceeds context window",
+  "prompt_tokens": 33500,
+  "context_window_size": 32768
 }
 ```
 
@@ -648,6 +670,7 @@ function ChatComponent() {
 | `INVALID_REQUEST` | Malformed request | Check request format |
 | `SERVER_ERROR` | Internal server error | Retry with backoff |
 | `QUOTA_EXCEEDED` | Token quota exceeded | Wait or upgrade plan |
+| `TOKEN_LIMIT_EXCEEDED` | Prompt exceeds context window | Trim history and retry (see `ContextLimitError`) |
 
 ### Error Recovery Example
 
