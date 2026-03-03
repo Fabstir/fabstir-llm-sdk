@@ -1,0 +1,148 @@
+import { FabstirSDKCore } from '@fabstir/sdk-core';
+import { SessionAdapter } from './SessionAdapter';
+import type { OrchestratorConfig, OrchestratorSession, SessionAdapterConfig } from '../types';
+
+interface PoolEntry {
+  adapter: SessionAdapter;
+  session: OrchestratorSession;
+}
+
+export class SessionPool {
+  private readonly config: OrchestratorConfig;
+  private available: number;
+  private readonly waitQueue: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
+  private readonly active: Set<PoolEntry> = new Set();
+  private txQueue: Promise<void> = Promise.resolve();
+  private totalDeposit = 0;
+
+  constructor(config: OrchestratorConfig) {
+    this.config = config;
+    this.available = config.maxConcurrentSessions;
+  }
+
+  private async withTxLock<T>(fn: () => Promise<T>): Promise<T> {
+    let resolve: () => void;
+    const next = new Promise<void>(r => (resolve = r));
+    const prev = this.txQueue;
+    this.txQueue = next;
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      resolve!();
+    }
+  }
+
+  private async waitForSlot(signal?: AbortSignal): Promise<void> {
+    if (this.available > 0) {
+      this.available--;
+      return;
+    }
+    return new Promise<void>((resolve, reject) => {
+      const waiter = { resolve, reject };
+      this.waitQueue.push(waiter);
+
+      if (signal) {
+        const onAbort = () => {
+          const idx = this.waitQueue.indexOf(waiter);
+          if (idx >= 0) this.waitQueue.splice(idx, 1);
+          reject(new DOMException('Aborted', 'AbortError'));
+        };
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+    });
+  }
+
+  private releaseSlot(): void {
+    const waiter = this.waitQueue.shift();
+    if (waiter) {
+      waiter.resolve();
+    } else {
+      this.available++;
+    }
+  }
+
+  async acquire(
+    model: string,
+    adapterConfig: SessionAdapterConfig,
+    signal?: AbortSignal,
+  ): Promise<{ adapter: SessionAdapter; session: OrchestratorSession }> {
+    const depositNum = parseFloat(adapterConfig.depositAmount);
+    if (this.totalDeposit + depositNum > parseFloat(this.config.budget.maxTotalDeposit)) {
+      throw new Error(`Budget exceeded: total deposit would be ${this.totalDeposit + depositNum}, max is ${this.config.budget.maxTotalDeposit}`);
+    }
+
+    await this.waitForSlot(signal);
+
+    try {
+      const sdk = new FabstirSDKCore({
+        chainId: this.config.chainId,
+        rpcUrl: (this.config.sdk as any).config?.rpcUrl ?? '',
+        contractAddresses: (this.config.sdk as any).config?.contractAddresses ?? {},
+      } as any);
+      await sdk.authenticate('privatekey', { privateKey: this.config.privateKey } as any);
+
+      const adapter = new SessionAdapter(sdk);
+      const session = await this.withTxLock(() =>
+        adapter.createSession(model, adapterConfig),
+      );
+
+      this.totalDeposit += depositNum;
+      const entry: PoolEntry = { adapter, session };
+      this.active.add(entry);
+
+      return { adapter, session };
+    } catch (err) {
+      this.releaseSlot();
+      throw err;
+    }
+  }
+
+  async release(adapter: SessionAdapter, session: OrchestratorSession): Promise<void> {
+    try {
+      await this.withTxLock(async () => {
+        const pm = adapter.getSDK().getPaymentManager() as any;
+        await pm.completeSessionJob(Number(session.jobId), '', session.chainId);
+      });
+    } finally {
+      try {
+        await adapter.endSession(session.sessionId);
+      } finally {
+        for (const entry of this.active) {
+          if (entry.adapter === adapter) {
+            this.active.delete(entry);
+            break;
+          }
+        }
+        this.releaseSlot();
+      }
+    }
+  }
+
+  async destroy(): Promise<void> {
+    const entries = [...this.active];
+    for (const entry of entries) {
+      try {
+        const pm = entry.adapter.getSDK().getPaymentManager() as any;
+        await pm.completeSessionJob(Number(entry.session.jobId), '', entry.session.chainId).catch(() => {});
+      } catch {
+        // Ignore settlement errors during destroy
+      }
+      try {
+        await entry.adapter.endSession(entry.session.sessionId);
+      } catch {
+        // Ignore teardown errors during destroy
+      }
+      this.active.delete(entry);
+    }
+    this.available = this.config.maxConcurrentSessions;
+  }
+
+  getTotalDeposit(): number {
+    return this.totalDeposit;
+  }
+}

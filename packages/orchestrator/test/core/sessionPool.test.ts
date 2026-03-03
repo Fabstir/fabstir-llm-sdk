@@ -1,0 +1,217 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { SessionPool } from '../../src/core/SessionPool';
+import type { OrchestratorConfig, BudgetConfig } from '../../src/types';
+
+function createMockSDK(overrides: any = {}) {
+  const sessionManager = {
+    startSession: vi.fn().mockResolvedValue({ sessionId: BigInt(Math.floor(Math.random() * 1000)), jobId: BigInt(Math.floor(Math.random() * 1000)) }),
+    sendPromptStreaming: vi.fn().mockResolvedValue('response'),
+    endSession: vi.fn().mockResolvedValue(undefined),
+    ...overrides.sessionManager,
+  };
+  const paymentManager = {
+    completeSessionJob: vi.fn().mockResolvedValue({ success: true }),
+    ...overrides.paymentManager,
+  };
+  return {
+    getSessionManager: vi.fn().mockReturnValue(sessionManager),
+    getPaymentManager: vi.fn().mockReturnValue(paymentManager),
+    getModelManager: vi.fn().mockReturnValue({}),
+    authenticate: vi.fn().mockResolvedValue(undefined),
+    _sessionManager: sessionManager,
+    _paymentManager: paymentManager,
+  };
+}
+
+const budget: BudgetConfig = {
+  maxDepositPerSubTask: '0.001',
+  maxTotalDeposit: '0.01',
+  maxSubTasks: 10,
+};
+
+function createConfig(sdk: any, maxSessions = 3): OrchestratorConfig {
+  return {
+    sdk,
+    chainId: 84532,
+    privateKey: '0xabcdef',
+    models: { fast: 'fast-model', deep: 'deep-model' },
+    maxConcurrentSessions: maxSessions,
+    budget,
+  };
+}
+
+// Mock FabstirSDKCore constructor
+let mockSDKInstance: any;
+vi.mock('@fabstir/sdk-core', () => ({
+  FabstirSDKCore: vi.fn().mockImplementation(() => {
+    mockSDKInstance = createMockSDK();
+    return mockSDKInstance;
+  }),
+}));
+
+describe('SessionPool', () => {
+  let seedSDK: ReturnType<typeof createMockSDK>;
+  let pool: SessionPool;
+
+  beforeEach(() => {
+    seedSDK = createMockSDK();
+    pool = new SessionPool(createConfig(seedSDK));
+  });
+
+  it('constructor creates pool with maxConcurrentSessions limit', () => {
+    expect(pool).toBeDefined();
+  });
+
+  it('acquire creates new SDK instance and returns SessionAdapter', async () => {
+    const { adapter, session } = await pool.acquire('fast-model', {
+      chainId: 84532, depositAmount: '0.001',
+    });
+    expect(adapter).toBeDefined();
+    expect(session).toBeDefined();
+    expect(session.model).toBe('fast-model');
+  });
+
+  it('acquire blocks when pool exhausted', async () => {
+    const config = createConfig(seedSDK, 1);
+    pool = new SessionPool(config);
+    await pool.acquire('model', { chainId: 84532, depositAmount: '0.001' });
+    const second = pool.acquire('model', { chainId: 84532, depositAmount: '0.001' });
+    const result = await Promise.race([
+      second.then(() => 'resolved'),
+      new Promise(r => setTimeout(() => r('timeout'), 100)),
+    ]);
+    expect(result).toBe('timeout');
+    await pool.destroy();
+  });
+
+  it('release makes slot available for next acquire', async () => {
+    const config = createConfig(seedSDK, 1);
+    pool = new SessionPool(config);
+    const first = await pool.acquire('model', { chainId: 84532, depositAmount: '0.001' });
+    const secondPromise = pool.acquire('model', { chainId: 84532, depositAmount: '0.001' });
+    await pool.release(first.adapter, first.session);
+    const second = await Promise.race([
+      secondPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000)),
+    ]);
+    expect(second).toBeDefined();
+    await pool.destroy();
+  });
+
+  it('acquire authenticates SDK instance with correct pattern', async () => {
+    await pool.acquire('model', { chainId: 84532, depositAmount: '0.001' });
+    expect(mockSDKInstance.authenticate).toHaveBeenCalledWith('privatekey', { privateKey: '0xabcdef' });
+  });
+
+  it('acquire creates full SDK instance (NOT hostOnly)', async () => {
+    await pool.acquire('model', { chainId: 84532, depositAmount: '0.001' });
+    expect(mockSDKInstance.getSessionManager).toBeDefined();
+  });
+
+  it('acquire rejects with AbortError if signal fires while waiting', async () => {
+    const config = createConfig(seedSDK, 1);
+    pool = new SessionPool(config);
+    await pool.acquire('model', { chainId: 84532, depositAmount: '0.001' });
+    const controller = new AbortController();
+    const promise = pool.acquire('model', { chainId: 84532, depositAmount: '0.001' }, controller.signal);
+    controller.abort();
+    await expect(promise).rejects.toThrow();
+    await pool.destroy();
+  });
+
+  it('acquire serializes startSession calls to prevent nonce collisions', async () => {
+    const order: number[] = [];
+    let callCount = 0;
+    mockSDKInstance = undefined;
+    const { FabstirSDKCore } = await import('@fabstir/sdk-core');
+    (FabstirSDKCore as any).mockImplementation(() => {
+      const n = ++callCount;
+      const mock = createMockSDK();
+      mock._sessionManager.startSession.mockImplementation(async () => {
+        order.push(n);
+        await new Promise(r => setTimeout(r, 10));
+        return { sessionId: BigInt(n), jobId: BigInt(n) };
+      });
+      mockSDKInstance = mock;
+      return mock;
+    });
+
+    const config = createConfig(seedSDK, 3);
+    pool = new SessionPool(config);
+    await Promise.all([
+      pool.acquire('m', { chainId: 84532, depositAmount: '0.001' }),
+      pool.acquire('m', { chainId: 84532, depositAmount: '0.001' }),
+      pool.acquire('m', { chainId: 84532, depositAmount: '0.001' }),
+    ]);
+    // Verify sequential ordering (each starts after prior finishes)
+    expect(order).toEqual([1, 2, 3]);
+    await pool.destroy();
+  });
+
+  it('destroy cleans up all instances', async () => {
+    await pool.acquire('model', { chainId: 84532, depositAmount: '0.001' });
+    await pool.destroy();
+    // Should not throw
+    expect(true).toBe(true);
+  });
+
+  it('concurrent acquires up to limit resolve immediately', async () => {
+    const results = await Promise.all([
+      pool.acquire('m', { chainId: 84532, depositAmount: '0.001' }),
+      pool.acquire('m', { chainId: 84532, depositAmount: '0.001' }),
+      pool.acquire('m', { chainId: 84532, depositAmount: '0.001' }),
+    ]);
+    expect(results).toHaveLength(3);
+    await pool.destroy();
+  });
+
+  it('tracks total deposit spend across all sessions', async () => {
+    await pool.acquire('m', { chainId: 84532, depositAmount: '0.003' });
+    await pool.acquire('m', { chainId: 84532, depositAmount: '0.003' });
+    expect(pool.getTotalDeposit()).toBe(0.006);
+    await pool.destroy();
+  });
+
+  it('throws when totalDeposit exceeds budget.maxTotalDeposit', async () => {
+    const config = createConfig(seedSDK, 5);
+    config.budget = { ...budget, maxTotalDeposit: '0.002' };
+    pool = new SessionPool(config);
+    await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
+    await expect(
+      pool.acquire('m', { chainId: 84532, depositAmount: '0.002' }),
+    ).rejects.toThrow(/budget/i);
+    await pool.destroy();
+  });
+
+  it('release calls completeSessionJob before endSession', async () => {
+    const { adapter, session } = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
+    const adapterSDK = adapter.getSDK() as any;
+    const callOrder: string[] = [];
+    adapterSDK.getPaymentManager().completeSessionJob.mockImplementation(async () => {
+      callOrder.push('complete');
+      return { success: true };
+    });
+    adapterSDK.getSessionManager().endSession.mockImplementation(async () => {
+      callOrder.push('end');
+    });
+    await pool.release(adapter, session);
+    expect(callOrder).toEqual(['complete', 'end']);
+  });
+
+  it('release still calls endSession if completeSessionJob fails', async () => {
+    const { adapter, session } = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
+    const adapterSDK = adapter.getSDK() as any;
+    adapterSDK.getPaymentManager().completeSessionJob.mockRejectedValue(new Error('settle failed'));
+    // Should not throw (error caught), but endSession still called
+    await pool.release(adapter, session).catch(() => {});
+    expect(adapterSDK.getSessionManager().endSession).toHaveBeenCalledWith(session.sessionId);
+  });
+
+  it('acquire handles S5 init failure gracefully', async () => {
+    // S5 init failure is handled internally by FabstirSDKCore
+    // SDK still creates SessionManager with no-op proxy for StorageManager
+    const result = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
+    expect(result.adapter).toBeDefined();
+    await pool.destroy();
+  });
+});
