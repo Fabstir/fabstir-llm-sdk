@@ -97,6 +97,17 @@ The orchestrator manages the full payment lifecycle:
 
 Every sub-task can return a cryptographic proof CID (Content Identifier). The `ProofCollector` accumulates these throughout orchestration, providing a verifiable audit trail of all inference work performed — stored on Sia for permanent, decentralised availability.
 
+### SSE Streaming and Task Lifecycle
+
+The orchestrator supports real-time progress streaming via Server-Sent Events (SSE), giving clients granular visibility into every stage of orchestration:
+
+- **Content negotiation**: `POST /v1/orchestrate` with `Accept: text/event-stream` returns an SSE stream; without it, the existing sync JSON response is returned (fully backward compatible)
+- **Phased progress events**: Clients receive `status-update` events for each orchestration phase — `decomposing` (goal breakdown), `executing` (per sub-task start and batch completion with `taskId`/`taskName`), and `synthesising` (final answer generation)
+- **Artifact streaming**: Synthesis results are delivered as `artifact-update` events before the final `completed` status
+- **Client disconnect handling**: If the client closes the SSE connection, the orchestration is aborted via `AbortSignal` — no wasted compute
+- **Task cancellation**: `DELETE /v1/orchestrate/:taskId` cancels an active streaming task, returning 404 for unknown tasks
+- **SSEEventBus**: A concrete `EventBus` implementation that writes SSE format (`data: JSON\n\n`) to Express responses, with guards against writes after close or client disconnect
+
 ### Concurrency and Session Pooling
 
 The `SessionPool` manages multiple simultaneous `FabstirSDKCore` instances with semaphore-based concurrency control:
@@ -113,21 +124,29 @@ The `SessionPool` manages multiple simultaneous `FabstirSDKCore` instances with 
 ### Server Side: Exposing the Orchestrator as an A2A Agent
 
 ```
-┌─────────────────────────────────────────┐
-│         OrchestratorA2AServer           │
-│                                         │
-│  GET /.well-known/agent.json            │
-│    → Returns Agent Card with skills     │
-│                                         │
-│  POST /v1/orchestrate                   │
-│    → JWT-authenticated task submission  │
-│    → OrchestratorExecutor bridges to    │
-│      OrchestratorManager                │
-│    → Returns result with artifacts      │
-│                                         │
-│  JWT verification via setJwtVerifier()  │
-│    → Wallet-signed auth tokens          │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│           OrchestratorA2AServer              │
+│                                              │
+│  GET /.well-known/agent.json                 │
+│    → Returns Agent Card with skills          │
+│                                              │
+│  POST /v1/orchestrate                        │
+│    → JWT-authenticated task submission       │
+│    → Content negotiation:                    │
+│      Accept: text/event-stream → SSE stream  │
+│      Otherwise → sync JSON response          │
+│    → OrchestratorExecutor bridges to         │
+│      OrchestratorManager                     │
+│    → SSE: streams progress, artifacts,       │
+│      status updates in real time             │
+│                                              │
+│  DELETE /v1/orchestrate/:taskId              │
+│    → Cancels an active streaming task        │
+│    → Returns 404 if task not found           │
+│                                              │
+│  JWT verification via setJwtVerifier()       │
+│    → Wallet-signed auth tokens               │
+└──────────────────────────────────────────────┘
 ```
 
 The server publishes an **Agent Card** at the well-known endpoint:
@@ -204,6 +223,8 @@ By implementing A2A, Platformless AI transforms Sia-backed compute from simple i
 |---------|----------------|----------------|
 | A2A Protocol | Yes | No |
 | Multi-agent orchestration | Yes (DAG-based) | No (single inference) |
+| SSE streaming | Real-time phased progress | None |
+| Task cancellation | Mid-flight abort via SSE or REST | None |
 | Encrypted inference | Default | Rare |
 | On-chain settlement | Per sub-task | Per session at best |
 | Task decomposition | Automatic | Manual |
@@ -225,13 +246,14 @@ By implementing A2A, Platformless AI transforms Sia-backed compute from simple i
 | `ProofCollector` | Cryptographic proof CID accumulation |
 | `OrchestratorManager` | Top-level coordinator: plan → route → execute → synthesise → settle |
 | `FanOut` / `Pipeline` / `MapReduce` | Reusable orchestration patterns |
-| `OrchestratorA2AServer` | Express server exposing A2A endpoints with JWT auth |
-| `OrchestratorExecutor` | Bridges OrchestratorManager to A2A event bus |
+| `OrchestratorA2AServer` | Express server with SSE streaming, content negotiation, and cancel endpoint |
+| `OrchestratorExecutor` | Bridges OrchestratorManager to A2A event bus with abort support |
+| `SSEEventBus` | Concrete EventBus writing SSE format to HTTP responses |
 | `A2AClientPool` | HTTP client for delegating to external A2A agents |
 | `AgentDiscovery` | Skill-based agent lookup via Agent Cards |
 
 **Package**: `@fabstir/orchestrator` v0.1.0
-**Tests**: 130 unit tests, all passing
+**Tests**: 150 unit tests, all passing
 **Runtime**: Node.js >= 18
 **Dependencies**: `@fabstir/sdk-core`, `express`
 
@@ -239,7 +261,6 @@ By implementing A2A, Platformless AI transforms Sia-backed compute from simple i
 
 ## What's Next
 
-- **SSE streaming**: Real-time progress events during orchestration via Server-Sent Events
 - **Multi-orchestrator coordination**: A2A-based delegation between Platformless AI orchestrators
 - **Agent marketplace**: On-chain registry of A2A-compatible agents with reputation scoring
 - **Sia-native agent cards**: Host Agent Card metadata directly on Sia for fully decentralised discovery

@@ -1,7 +1,10 @@
+import crypto from 'crypto';
 import express from 'express';
 import type { Request, Response, Express } from 'express';
 import type { Server } from 'http';
 import type { OrchestratorManager } from '../../core/OrchestratorManager';
+import { OrchestratorExecutor } from './OrchestratorExecutor';
+import { SSEEventBus } from './SSEEventBus';
 import { buildAgentCard } from './agentCard';
 import type { A2AAgentCard } from '../types';
 
@@ -24,6 +27,8 @@ export class OrchestratorA2AServer {
   private readonly app: Express;
   private readonly card: A2AAgentCard;
   private readonly routes: RouteEntry[] = [];
+  private readonly executor: OrchestratorExecutor;
+  private readonly activeTasks = new Map<string, AbortController>();
   private server: Server | null = null;
   private jwtVerifier: (token: string) => boolean = () => false;
 
@@ -32,6 +37,7 @@ export class OrchestratorA2AServer {
     this.options = options;
     this.app = express();
     this.app.use(express.json());
+    this.executor = new OrchestratorExecutor(manager);
 
     this.card = buildAgentCard({
       publicUrl: options.publicUrl,
@@ -67,6 +73,23 @@ export class OrchestratorA2AServer {
         return;
       }
 
+      if (req.headers.accept?.includes('text/event-stream')) {
+        const taskId = crypto.randomUUID();
+        const bus = new SSEEventBus(res);
+        const ctx = { task: { id: taskId }, message: { parts: [{ type: 'text', text: goal }] } };
+        this.activeTasks.set(taskId, new AbortController());
+
+        req.on('close', () => this.executor.cancelTask(taskId, bus));
+
+        try {
+          await this.executor.execute(ctx, bus);
+        } finally {
+          bus.close();
+          this.activeTasks.delete(taskId);
+        }
+        return;
+      }
+
       try {
         const result = await this.manager.orchestrate(goal);
         res.json({
@@ -81,6 +104,18 @@ export class OrchestratorA2AServer {
     };
     this.routes.push({ path: '/v1/orchestrate', method: 'POST', handler: orchestrateHandler });
     this.app.post('/v1/orchestrate', orchestrateHandler);
+
+    const cancelHandler = async (req: Request, res: Response) => {
+      const taskId = req.params.taskId as string;
+      if (!this.activeTasks.has(taskId)) {
+        res.status(404).json({ error: 'Task not found' });
+        return;
+      }
+      this.executor.cancelTask(taskId, { publish() {} });
+      res.json({ status: 'cancelled', taskId });
+    };
+    this.routes.push({ path: '/v1/orchestrate/:taskId', method: 'DELETE', handler: cancelHandler });
+    this.app.delete('/v1/orchestrate/:taskId', cancelHandler);
   }
 
   async start(): Promise<void> {

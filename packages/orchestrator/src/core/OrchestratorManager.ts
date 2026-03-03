@@ -59,7 +59,9 @@ export class OrchestratorManager {
 
     try {
       const planner = new TaskPlanner(planAdapter, planSession, this.config.models);
+      options?.onProgress?.({ phase: 'decomposing', message: 'Decomposing goal into sub-tasks', completedTasks: 0, totalTasks: 0 });
       const graph = await planner.decompose(goal, options);
+      options?.onProgress?.({ phase: 'decomposing', message: `Decomposed into ${graph.tasks.length} sub-tasks`, completedTasks: 0, totalTasks: graph.tasks.length });
 
       if (graph.tasks.length > this.config.budget.maxSubTasks) {
         throw new Error(
@@ -74,6 +76,7 @@ export class OrchestratorManager {
         totalTokensUsed += r.tokensUsed ?? 0;
       }
 
+      options?.onProgress?.({ phase: 'synthesising', message: 'Synthesising final answer', completedTasks: graph.tasks.length, totalTasks: graph.tasks.length });
       const synthesis = await planner.synthesise(goal, results);
       const proofCIDs = this.proofCollector.getProofCIDs();
 
@@ -114,6 +117,7 @@ export class OrchestratorManager {
       const batch = ready.map(async (record) => {
         const task = graph.tasks.find(t => t.id === record.id)!;
         const assignment = this.router.assign(task);
+        options?.onProgress?.({ phase: 'executing', message: `Starting task "${task.name}"`, taskId: task.id, taskName: task.name, completedTasks: completedCount, totalTasks });
         this.queue.markClaimed(task.id, assignment.model);
 
         try {
@@ -131,6 +135,7 @@ export class OrchestratorManager {
       completedCount = [...results.keys()].length;
 
       options?.onProgress?.({
+        phase: 'executing',
         message: `Completed ${completedCount}/${totalTasks} tasks`,
         completedTasks: completedCount,
         totalTasks,

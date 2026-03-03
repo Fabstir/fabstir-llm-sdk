@@ -128,4 +128,18 @@ describe('Core Types', () => {
     };
     expect(withEncryption.encryption).toBe(true);
   });
+
+  it('ProgressUpdate accepts phase, taskId, and taskName fields', () => {
+    const update: ProgressUpdate = {
+      phase: 'decomposing',
+      message: 'Decomposing goal',
+      completedTasks: 0,
+      totalTasks: 0,
+      taskId: 'task-1',
+      taskName: 'Research',
+    };
+    expect(update.phase).toBe('decomposing');
+    expect(update.taskId).toBe('task-1');
+    expect(update.taskName).toBe('Research');
+  });
 });

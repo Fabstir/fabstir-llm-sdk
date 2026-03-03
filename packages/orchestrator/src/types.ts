@@ -106,9 +106,12 @@ export interface OrchestrationOptions {
 }
 
 export interface ProgressUpdate {
+  phase: 'decomposing' | 'executing' | 'synthesising';
   message: string;
   completedTasks: number;
   totalTasks: number;
+  taskId?: string;
+  taskName?: string;
 }
 
 // --- Session Types ---

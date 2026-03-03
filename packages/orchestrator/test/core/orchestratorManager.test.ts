@@ -199,4 +199,37 @@ describe('OrchestratorManager', () => {
     await expect(manager.orchestrate('Goal')).rejects.toThrow('inference failed');
     expect(sharedEndSession).toHaveBeenCalled();
   });
+
+  it('orchestrate calls onProgress with phase decomposing before decompose', async () => {
+    const updates: any[] = [];
+    await manager.orchestrate('Goal', { onProgress: (u) => updates.push(u) });
+    const first = updates[0];
+    expect(first.phase).toBe('decomposing');
+    expect(first.message).toContain('Decomposing');
+  });
+
+  it('orchestrate calls onProgress with phase decomposing after decompose with task count', async () => {
+    const updates: any[] = [];
+    await manager.orchestrate('Goal', { onProgress: (u) => updates.push(u) });
+    const decomposed = updates.find((u: any) => u.phase === 'decomposing' && u.totalTasks > 0);
+    expect(decomposed).toBeDefined();
+    expect(decomposed.totalTasks).toBe(2);
+  });
+
+  it('orchestrate calls onProgress with phase executing and taskId per sub-task', async () => {
+    const updates: any[] = [];
+    await manager.orchestrate('Goal', { onProgress: (u) => updates.push(u) });
+    const executing = updates.filter((u: any) => u.phase === 'executing' && u.taskId);
+    expect(executing.length).toBeGreaterThanOrEqual(1);
+    expect(executing[0].taskId).toBeDefined();
+    expect(executing[0].taskName).toBeDefined();
+  });
+
+  it('orchestrate calls onProgress with phase synthesising before synthesis', async () => {
+    const updates: any[] = [];
+    await manager.orchestrate('Goal', { onProgress: (u) => updates.push(u) });
+    const synth = updates.find((u: any) => u.phase === 'synthesising');
+    expect(synth).toBeDefined();
+    expect(synth.message).toContain('Synthe');
+  });
 });

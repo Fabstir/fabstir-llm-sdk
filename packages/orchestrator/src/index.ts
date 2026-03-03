@@ -32,6 +32,7 @@ export { pipeline } from './patterns/Pipeline';
 export { mapReduce } from './patterns/MapReduce';
 export { OrchestratorExecutor } from './a2a/server/OrchestratorExecutor';
 export type { RequestContext, EventBus, StatusEvent, ArtifactEvent } from './a2a/server/OrchestratorExecutor';
+export { SSEEventBus } from './a2a/server/SSEEventBus';
 export { buildAgentCard } from './a2a/server/agentCard';
 export { OrchestratorA2AServer } from './a2a/server/OrchestratorA2AServer';
 export type { A2AAgentCard, A2ASkill, A2ASecurityScheme, A2AServerConfig } from './a2a/types';
