@@ -14,6 +14,7 @@ import type {
   OrchestratorSession,
   TaskGraph,
 } from '../types';
+import { X402BudgetTracker } from '../x402/client/X402BudgetTracker';
 
 export class OrchestratorManager {
   private readonly config: OrchestratorConfig;
@@ -21,6 +22,7 @@ export class OrchestratorManager {
   private readonly router: ModelRouter;
   private readonly queue: TaskQueue;
   private readonly proofCollector: ProofCollector;
+  private readonly x402Budget?: X402BudgetTracker;
 
   constructor(config: OrchestratorConfig) {
     this.config = config;
@@ -28,6 +30,9 @@ export class OrchestratorManager {
     this.router = new ModelRouter(config.sdk, config.models);
     this.queue = new TaskQueue();
     this.proofCollector = new ProofCollector();
+    if (config.x402?.budget) {
+      this.x402Budget = new X402BudgetTracker(config.x402.budget.maxX402Spend);
+    }
   }
 
   async initialize(): Promise<void> {
@@ -86,6 +91,7 @@ export class OrchestratorManager {
         subTaskResults: results,
         proofCIDs,
         totalTokensUsed,
+        ...(this.x402Budget ? { x402Spend: String(this.x402Budget.getSpent()) } : {}),
       };
     } finally {
       try {

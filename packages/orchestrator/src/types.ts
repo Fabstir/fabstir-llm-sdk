@@ -1,4 +1,5 @@
 import type { FabstirSDKCore } from '@fabstir/sdk-core';
+import type { X402PricingConfig, X402BudgetConfig } from './x402/types';
 
 // --- Budget ---
 export interface BudgetConfig {
@@ -20,6 +21,7 @@ export interface OrchestratorConfig {
   maxConcurrentSessions: number;
   budget: BudgetConfig;
   taskStoragePrefix?: string;
+  x402?: { pricing?: X402PricingConfig; budget?: X402BudgetConfig; signerProvider?: any; usdcAddress?: string };
 }
 
 // --- Task Types ---
@@ -96,6 +98,7 @@ export interface OrchestrationResult {
   subTaskResults: Map<string, SubTaskResult>;
   proofCIDs: string[];
   totalTokensUsed: number;
+  x402Spend?: string;
 }
 
 // --- Orchestration Options ---

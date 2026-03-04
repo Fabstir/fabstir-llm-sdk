@@ -108,6 +108,22 @@ The orchestrator supports real-time progress streaming via Server-Sent Events (S
 - **Task cancellation**: `DELETE /v1/orchestrate/:taskId` cancels an active streaming task, returning 404 for unknown tasks
 - **SSEEventBus**: A concrete `EventBus` implementation that writes SSE format (`data: JSON\n\n`) to Express responses, with guards against writes after close or client disconnect
 
+### x402 HTTP Payment for A2A Delegation
+
+The orchestrator implements the x402 HTTP payment protocol for inter-agent USDC micropayments, running alongside the existing escrow model:
+
+- **Internal inference** (own hosts): Unchanged escrow via `JobMarketplace`
+- **External A2A delegation** (foreign agents): x402 per-request USDC payment via EIP-3009 `transferWithAuthorization`
+
+**Inbound payments** (server): External agents can pay USDC to use the orchestrator as an alternative to JWT authentication. The server returns HTTP 402 with structured payment requirements; clients respond with a signed `X-PAYMENT` header.
+
+**Outbound payments** (client): When delegating to external agents that return HTTP 402, the orchestrator automatically parses requirements, checks budget, signs an EIP-712 `TransferWithAuthorization`, and retries with the payment header.
+
+- **Budget enforcement**: `X402BudgetTracker` tracks cumulative outbound x402 spend with configurable limits
+- **Agent Card advertising**: x402 pricing is advertised in the Agent Card's `x402.accepts` field for automatic discovery
+- **EIP-3009**: Gasless USDC transfers where the server submits the signed authorization on-chain — no pre-funding required
+- **Account Kit V2 integration**: Sub-account signer provides scoped USDC spending authority for outbound payments
+
 ### Concurrency and Session Pooling
 
 The `SessionPool` manages multiple simultaneous `FabstirSDKCore` instances with semaphore-based concurrency control:
@@ -131,7 +147,8 @@ The `SessionPool` manages multiple simultaneous `FabstirSDKCore` instances with 
 │    → Returns Agent Card with skills          │
 │                                              │
 │  POST /v1/orchestrate                        │
-│    → JWT-authenticated task submission       │
+│    → Auth: JWT or x402 X-PAYMENT header     │
+│    → x402: 402 → X-PAYMENT → orchestrate    │
 │    → Content negotiation:                    │
 │      Accept: text/event-stream → SSE stream  │
 │      Otherwise → sync JSON response          │
@@ -144,8 +161,8 @@ The `SessionPool` manages multiple simultaneous `FabstirSDKCore` instances with 
 │    → Cancels an active streaming task        │
 │    → Returns 404 if task not found           │
 │                                              │
-│  JWT verification via setJwtVerifier()       │
-│    → Wallet-signed auth tokens               │
+│  Auth: JWT via setJwtVerifier() OR           │
+│    x402 USDC micropayment (EIP-3009)         │
 └──────────────────────────────────────────────┘
 ```
 
@@ -231,6 +248,7 @@ By implementing A2A, Platformless AI transforms Sia-backed compute from simple i
 | Agent discovery | A2A standard | Proprietary or none |
 | Proof collection | CID-based on Sia | Limited |
 | Orchestration patterns | FanOut, Pipeline, MapReduce | None |
+| HTTP-native payments | x402 USDC micropayments (EIP-3009) | None |
 
 ---
 
@@ -249,11 +267,15 @@ By implementing A2A, Platformless AI transforms Sia-backed compute from simple i
 | `OrchestratorA2AServer` | Express server with SSE streaming, content negotiation, and cancel endpoint |
 | `OrchestratorExecutor` | Bridges OrchestratorManager to A2A event bus with abort support |
 | `SSEEventBus` | Concrete EventBus writing SSE format to HTTP responses |
-| `A2AClientPool` | HTTP client for delegating to external A2A agents |
+| `A2AClientPool` | HTTP client for delegating to external A2A agents with x402 payment support |
 | `AgentDiscovery` | Skill-based agent lookup via Agent Cards |
+| `X402PaymentGate` | Express middleware: returns 402 or validates X-PAYMENT header |
+| `X402PaymentValidator` | On-chain settlement via USDC `transferWithAuthorization` |
+| `X402PaymentHandler` | Client-side EIP-712 signing for x402 payments |
+| `X402BudgetTracker` | Outbound x402 spend enforcement with configurable limits |
 
 **Package**: `@fabstir/orchestrator` v0.1.0
-**Tests**: 150 unit tests, all passing
+**Tests**: 206 unit tests, all passing
 **Runtime**: Node.js >= 18
 **Dependencies**: `@fabstir/sdk-core`, `express`
 
@@ -264,7 +286,7 @@ By implementing A2A, Platformless AI transforms Sia-backed compute from simple i
 - **Multi-orchestrator coordination**: A2A-based delegation between Platformless AI orchestrators
 - **Agent marketplace**: On-chain registry of A2A-compatible agents with reputation scoring
 - **Sia-native agent cards**: Host Agent Card metadata directly on Sia for fully decentralised discovery
-- **x402 payment integration**: HTTP-native micropayments for cross-agent task delegation
+- **Dynamic x402 pricing**: Model-aware pricing for x402 payments based on task complexity
 
 ---
 

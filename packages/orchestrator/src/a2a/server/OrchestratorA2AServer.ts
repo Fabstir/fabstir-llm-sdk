@@ -7,12 +7,15 @@ import { OrchestratorExecutor } from './OrchestratorExecutor';
 import { SSEEventBus } from './SSEEventBus';
 import { buildAgentCard } from './agentCard';
 import type { A2AAgentCard } from '../types';
+import type { X402PricingConfig, X402PaymentResponse } from '../../x402/types';
+import { decodeX402Payment, validatePayloadFields } from '../../x402/server/X402PaymentGate';
 
 export interface A2AServerOptions {
   publicUrl: string;
   port?: number;
   agentName?: string;
   walletAddress?: string;
+  x402Pricing?: X402PricingConfig;
 }
 
 interface RouteEntry {
@@ -42,6 +45,7 @@ export class OrchestratorA2AServer {
     this.card = buildAgentCard({
       publicUrl: options.publicUrl,
       agentName: options.agentName,
+      x402Pricing: options.x402Pricing,
     });
 
     this.setupRoutes();
@@ -55,16 +59,37 @@ export class OrchestratorA2AServer {
     this.app.get('/.well-known/agent.json', agentCardHandler);
 
     const orchestrateHandler = async (req: Request, res: Response) => {
-      const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        res.status(401).json({ error: 'Missing or invalid authorization header' });
-        return;
-      }
+      const x402Cfg = this.options.x402Pricing;
+      let paidViaX402 = false;
 
-      const token = authHeader.slice(7);
-      if (!this.jwtVerifier(token)) {
-        res.status(401).json({ error: 'Invalid JWT token' });
-        return;
+      if (x402Cfg) {
+        const paymentHeader = req.headers['x-payment'] as string | undefined;
+        if (paymentHeader) {
+          try {
+            const payload = decodeX402Payment(paymentHeader);
+            validatePayloadFields(payload, x402Cfg);
+            paidViaX402 = true;
+          } catch {
+            res.status(402).json({ x402Version: 1, accepts: this.card.x402!.accepts, error: 'Invalid payment' });
+            return;
+          }
+        } else {
+          const authHeader = req.headers.authorization;
+          if (!authHeader || !authHeader.startsWith('Bearer ') || !this.jwtVerifier(authHeader.slice(7))) {
+            res.status(402).json({ x402Version: 1, accepts: this.card.x402!.accepts, error: 'Payment required' });
+            return;
+          }
+        }
+      } else {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+          res.status(401).json({ error: 'Missing or invalid authorization header' });
+          return;
+        }
+        if (!this.jwtVerifier(authHeader.slice(7))) {
+          res.status(401).json({ error: 'Invalid JWT token' });
+          return;
+        }
       }
 
       const { goal } = req.body;
@@ -92,6 +117,10 @@ export class OrchestratorA2AServer {
 
       try {
         const result = await this.manager.orchestrate(goal);
+        if (paidViaX402) {
+          const payResp: X402PaymentResponse = { success: true, network: x402Cfg!.network };
+          res.setHeader('X-PAYMENT-RESPONSE', Buffer.from(JSON.stringify(payResp)).toString('base64'));
+        }
         res.json({
           taskGraphId: result.taskGraphId,
           synthesis: result.synthesis,

@@ -1,3 +1,5 @@
+import type { X402PaymentRequirement } from '../x402/types';
+
 export interface A2AAgentCard {
   name: string;
   description: string;
@@ -5,6 +7,7 @@ export interface A2AAgentCard {
   version: string;
   skills: A2ASkill[];
   securitySchemes: A2ASecurityScheme[];
+  x402?: { accepts: X402PaymentRequirement[] };
 }
 
 export interface A2ASkill {
