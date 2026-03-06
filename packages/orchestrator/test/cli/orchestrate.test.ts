@@ -25,12 +25,13 @@ vi.mock('../../src/a2a/server/OrchestratorA2AServer', () => ({
 }));
 
 const mockAuthenticate = vi.fn().mockResolvedValue(undefined);
+const mockApproveToken = vi.fn().mockResolvedValue({ hash: '0x1', from: '0x2', to: '0x3' });
 
 vi.mock('@fabstir/sdk-core', () => ({
   FabstirSDKCore: vi.fn().mockImplementation(() => ({
     authenticate: mockAuthenticate,
     getSessionManager: vi.fn(),
-    getPaymentManager: vi.fn(),
+    getPaymentManager: vi.fn().mockReturnValue({ approveToken: mockApproveToken }),
     getModelManager: vi.fn().mockReturnValue({
       getAvailableModelsWithHosts: vi.fn().mockResolvedValue([]),
       setHostManager: vi.fn(),
@@ -145,6 +146,30 @@ describe('CLI', () => {
     onProgress({ phase: 'decomposing', message: 'test msg' });
     expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('decomposing'));
     stderrSpy.mockRestore();
+    consoleSpy.mockRestore();
+  });
+
+  it('CLI passes paymentToken from FABSTIR_PAYMENT_TOKEN env to config', async () => {
+    process.env.FABSTIR_PAYMENT_TOKEN = '0xTokenAddr';
+    const { OrchestratorManager } = await import('../../src/core/OrchestratorManager');
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runCLI(['node', 'orchestrate', 'test goal']);
+    const config = (OrchestratorManager as any).mock.calls.at(-1)[0];
+    expect(config.paymentToken).toBe('0xTokenAddr');
+    consoleSpy.mockRestore();
+  });
+  it('CLI calls approveToken when FABSTIR_PAYMENT_TOKEN is set', async () => {
+    process.env.FABSTIR_PAYMENT_TOKEN = '0xTokenAddr';
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runCLI(['node', 'orchestrate', 'test goal']);
+    expect(mockApproveToken).toHaveBeenCalledWith(expect.any(String), BigInt(1000_000_000), '0xTokenAddr');
+    consoleSpy.mockRestore();
+  });
+  it('CLI does not call approveToken when FABSTIR_PAYMENT_TOKEN is not set', async () => {
+    delete process.env.FABSTIR_PAYMENT_TOKEN;
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runCLI(['node', 'orchestrate', 'test goal']);
+    expect(mockApproveToken).not.toHaveBeenCalled();
     consoleSpy.mockRestore();
   });
 });

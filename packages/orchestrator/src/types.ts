@@ -21,6 +21,7 @@ export interface OrchestratorConfig {
   maxConcurrentSessions: number;
   budget: BudgetConfig;
   taskStoragePrefix?: string;
+  paymentToken?: string;
   proofGracePeriodMs?: number;
   x402?: { pricing?: X402PricingConfig; budget?: X402BudgetConfig; signerProvider?: any; usdcAddress?: string };
 }

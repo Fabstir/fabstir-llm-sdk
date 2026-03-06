@@ -232,4 +232,23 @@ describe('OrchestratorManager', () => {
     expect(synth).toBeDefined();
     expect(synth.message).toContain('Synthe');
   });
+
+  it('orchestrate passes paymentToken to startSession when configured', async () => {
+    resetSharedMocks();
+    const config = makeConfig();
+    config.paymentToken = '0xUSDC';
+    manager = new OrchestratorManager(config);
+    await manager.initialize();
+    await manager.orchestrate('Goal');
+    const calls = sharedStartSession.mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0][0]).toHaveProperty('paymentToken', '0xUSDC');
+  });
+
+  it('orchestrate does not pass paymentToken when not configured', async () => {
+    await manager.orchestrate('Goal');
+    const calls = sharedStartSession.mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0][0].paymentToken).toBeUndefined();
+  });
 });

@@ -54,6 +54,7 @@ export class OrchestratorManager {
     const adapterConfig = {
       chainId: this.config.chainId,
       depositAmount: this.config.budget.maxDepositPerSubTask,
+      paymentToken: this.config.paymentToken,
     };
 
     const { adapter: planAdapter, session: planSession } = await this.pool.acquire(
@@ -160,6 +161,7 @@ export class OrchestratorManager {
     const adapterConfig = {
       chainId: this.config.chainId,
       depositAmount: this.config.budget.maxDepositPerSubTask,
+      paymentToken: this.config.paymentToken,
     };
     const { adapter, session } = await this.pool.acquire(model, adapterConfig, options?.signal);
 

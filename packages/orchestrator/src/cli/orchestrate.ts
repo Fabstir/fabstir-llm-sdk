@@ -33,6 +33,13 @@ export async function runCLI(argv: string[]): Promise<void> {
 
   await sdk.authenticate('privatekey', { privateKey });
 
+  const paymentToken = process.env.FABSTIR_PAYMENT_TOKEN;
+  if (paymentToken) {
+    await (sdk.getPaymentManager() as any).approveToken(
+      chain.contracts.jobMarketplace, BigInt(1000_000_000), paymentToken,
+    );
+  }
+
   // Wire HostManager into ModelManager (sdk-core doesn't do this automatically)
   const modelMgr = sdk.getModelManager();
   const hostMgr = sdk.getClientManager().getHostManager();
@@ -47,6 +54,7 @@ export async function runCLI(argv: string[]): Promise<void> {
     models: { fast: fastModel, deep: deepModel, planning: planningModel },
     maxConcurrentSessions: maxSessions,
     proofGracePeriodMs,
+    paymentToken,
     budget: {
       maxDepositPerSubTask: process.env.FABSTIR_MAX_DEPOSIT_PER_TASK ?? '0.001',
       maxTotalDeposit: process.env.FABSTIR_MAX_TOTAL_DEPOSIT ?? '0.01',
