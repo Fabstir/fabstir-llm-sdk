@@ -471,9 +471,15 @@ importers:
       '@fabstir/sdk-core':
         specifier: workspace:*
         version: link:../sdk-core
+      dotenv:
+        specifier: ^17.3.1
+        version: 17.3.1
       express:
         specifier: ^4.21.0
         version: 4.22.1
+      ws:
+        specifier: ^8.19.0
+        version: 8.19.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
     devDependencies:
       '@types/express':
         specifier: ^5.0.0
@@ -481,6 +487,9 @@ importers:
       '@types/node':
         specifier: ^20.10.5
         version: 20.19.30
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       fake-indexeddb:
         specifier: ^6.0.0
         version: 6.2.5
@@ -3894,6 +3903,10 @@ packages:
 
   dotenv@17.2.3:
     resolution: {integrity: sha512-JVUnt+DUIzu87TABbhPmNfVdBDt18BLOWjMUFJMSi/Qqg7NTYtabbvSNJGOJ7afbRuv9D/lngizHtP7QyLQ+9w==}
+    engines: {node: '>=12'}
+
+  dotenv@17.3.1:
+    resolution: {integrity: sha512-IO8C/dzEb6O3F9/twg6ZLXz164a2fhTnEWb95H23Dm4OuN+92NmEAlTrupP9VW6Jm3sO26tQlqyvyi4CsnY9GA==}
     engines: {node: '>=12'}
 
   drawille-blessed-contrib@1.0.0:
@@ -11241,6 +11254,8 @@ snapshots:
   dotenv@16.6.1: {}
 
   dotenv@17.2.3: {}
+
+  dotenv@17.3.1: {}
 
   drawille-blessed-contrib@1.0.0: {}
 

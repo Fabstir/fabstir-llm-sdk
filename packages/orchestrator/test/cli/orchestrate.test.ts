@@ -2,8 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock modules before importing
 const mockOrchestrate = vi.fn().mockResolvedValue({
-  taskGraphId: 'g-1', synthesis: 'Final answer',
-  subTaskResults: new Map(), proofCIDs: [], totalTokensUsed: 100,
+  taskGraphId: 'g-1', synthesis: 'Final answer', subTaskResults: new Map(), proofCIDs: [], totalTokensUsed: 100,
 });
 const mockInitialize = vi.fn().mockResolvedValue(undefined);
 const mockDestroy = vi.fn().mockResolvedValue(undefined);
@@ -25,15 +24,26 @@ vi.mock('../../src/a2a/server/OrchestratorA2AServer', () => ({
   })),
 }));
 
+const mockAuthenticate = vi.fn().mockResolvedValue(undefined);
+
 vi.mock('@fabstir/sdk-core', () => ({
   FabstirSDKCore: vi.fn().mockImplementation(() => ({
-    authenticate: vi.fn().mockResolvedValue(undefined),
+    authenticate: mockAuthenticate,
     getSessionManager: vi.fn(),
     getPaymentManager: vi.fn(),
     getModelManager: vi.fn().mockReturnValue({
       getAvailableModelsWithHosts: vi.fn().mockResolvedValue([]),
+      setHostManager: vi.fn(),
+    }),
+    getClientManager: vi.fn().mockReturnValue({
+      getHostManager: vi.fn().mockReturnValue({}),
     }),
   })),
+  ChainRegistry: { getChain: vi.fn().mockReturnValue({
+    rpcUrl: 'https://rpc.example.com',
+    contracts: { jobMarketplace: '0x1', nodeRegistry: '0x2', paymentEscrow: '0x3', proofSystem: '0x4', hostEarnings: '0x5', usdcToken: '0x6', fabToken: '0x7' },
+  }) },
+  ChainId: { BASE_SEPOLIA: 84532 },
 }));
 
 import { runCLI } from '../../src/cli/orchestrate';
@@ -60,7 +70,7 @@ describe('CLI', () => {
   it('CLI with goal argument calls orchestrate and prints result', async () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     await runCLI(['node', 'orchestrate', 'Analyze this data']);
-    expect(mockOrchestrate).toHaveBeenCalledWith('Analyze this data');
+    expect(mockOrchestrate).toHaveBeenCalledWith('Analyze this data', expect.objectContaining({ onProgress: expect.any(Function) }));
     expect(consoleSpy).toHaveBeenCalled();
     consoleSpy.mockRestore();
   });
@@ -86,5 +96,55 @@ describe('CLI', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
+  });
+
+  it('CLI authenticates SDK with privatekey before initialize', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runCLI(['node', 'orchestrate', 'test goal']);
+    expect(mockAuthenticate).toHaveBeenCalledWith('privatekey', { privateKey: '0xabc123' });
+    expect(mockAuthenticate.mock.invocationCallOrder[0]).toBeLessThan(mockInitialize.mock.invocationCallOrder[0]);
+    consoleSpy.mockRestore();
+  });
+
+  it('CLI uses ChainRegistry for contract addresses when no explicit RPC URL', async () => {
+    delete process.env.FABSTIR_RPC_URL;
+    const { ChainRegistry } = await import('@fabstir/sdk-core');
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runCLI(['node', 'orchestrate', 'test goal']);
+    expect(ChainRegistry.getChain).toHaveBeenCalled();
+    consoleSpy.mockRestore();
+  });
+
+  it('CLI passes planning model from FABSTIR_PLANNING_MODEL env', async () => {
+    process.env.FABSTIR_PLANNING_MODEL = 'Repo:planner.gguf';
+    const { OrchestratorManager } = await import('../../src/core/OrchestratorManager');
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runCLI(['node', 'orchestrate', 'test goal']);
+    const config = (OrchestratorManager as any).mock.calls.at(-1)[0];
+    expect(config.models.planning).toBe('Repo:planner.gguf');
+    consoleSpy.mockRestore();
+  });
+
+  it('CLI passes deep model as planning model when FABSTIR_PLANNING_MODEL not set', async () => {
+    delete process.env.FABSTIR_PLANNING_MODEL;
+    const { OrchestratorManager } = await import('../../src/core/OrchestratorManager');
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runCLI(['node', 'orchestrate', 'test goal']);
+    const config = (OrchestratorManager as any).mock.calls.at(-1)[0];
+    expect(config.models.planning).toBe('Repo:deep.gguf');
+    consoleSpy.mockRestore();
+  });
+
+  it('CLI passes onProgress callback that logs to stderr', async () => {
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runCLI(['node', 'orchestrate', 'test goal']);
+    const call = mockOrchestrate.mock.calls.at(-1);
+    const onProgress = call[1]?.onProgress;
+    expect(onProgress).toBeDefined();
+    onProgress({ phase: 'decomposing', message: 'test msg' });
+    expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('decomposing'));
+    stderrSpy.mockRestore();
+    consoleSpy.mockRestore();
   });
 });

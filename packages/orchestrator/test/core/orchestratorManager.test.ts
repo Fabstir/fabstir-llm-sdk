@@ -63,7 +63,7 @@ function makeConfig(): OrchestratorConfig {
     sdk: makeMockInstance() as any,
     chainId: 84532, privateKey: '0xabc',
     models: { fast: 'Repo:fast.gguf', deep: 'Repo:deep.gguf' },
-    maxConcurrentSessions: 4, budget,
+    maxConcurrentSessions: 4, budget, proofGracePeriodMs: 0,
   };
 }
 

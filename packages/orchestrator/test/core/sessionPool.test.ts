@@ -37,6 +37,7 @@ function createConfig(sdk: any, maxSessions = 3): OrchestratorConfig {
     models: { fast: 'fast-model', deep: 'deep-model' },
     maxConcurrentSessions: maxSessions,
     budget,
+    proofGracePeriodMs: 0,
   };
 }
 
@@ -183,28 +184,76 @@ describe('SessionPool', () => {
     await pool.destroy();
   });
 
-  it('release calls completeSessionJob before endSession', async () => {
+  it('release ends session immediately and defers completeSessionJob', async () => {
+    const config = createConfig(seedSDK, 3);
+    config.proofGracePeriodMs = 100;
+    pool = new SessionPool(config);
     const { adapter, session } = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
     const adapterSDK = adapter.getSDK() as any;
-    const callOrder: string[] = [];
-    adapterSDK.getPaymentManager().completeSessionJob.mockImplementation(async () => {
-      callOrder.push('complete');
-      return { success: true };
-    });
-    adapterSDK.getSessionManager().endSession.mockImplementation(async () => {
-      callOrder.push('end');
-    });
     await pool.release(adapter, session);
-    expect(callOrder).toEqual(['complete', 'end']);
+    // endSession called immediately, completeSessionJob deferred
+    expect(adapterSDK.getSessionManager().endSession).toHaveBeenCalledWith(session.sessionId);
+    expect(adapterSDK.getPaymentManager().completeSessionJob).not.toHaveBeenCalled();
+    await pool.destroy(); // waits for deferred settlement
+    expect(adapterSDK.getPaymentManager().completeSessionJob).toHaveBeenCalled();
   });
 
-  it('release still calls endSession if completeSessionJob fails', async () => {
+  it('release still calls endSession if completeSessionJob would fail', async () => {
+    const config = createConfig(seedSDK, 3);
+    config.proofGracePeriodMs = 50;
+    pool = new SessionPool(config);
     const { adapter, session } = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
     const adapterSDK = adapter.getSDK() as any;
     adapterSDK.getPaymentManager().completeSessionJob.mockRejectedValue(new Error('settle failed'));
-    // Should not throw (error caught), but endSession still called
-    await pool.release(adapter, session).catch(() => {});
+    await pool.release(adapter, session);
     expect(adapterSDK.getSessionManager().endSession).toHaveBeenCalledWith(session.sessionId);
+    await pool.destroy(); // should not throw despite settlement failure
+  });
+
+  it('release defers completeSessionJob by proofGracePeriodMs', async () => {
+    const config = createConfig(seedSDK, 3);
+    config.proofGracePeriodMs = 200;
+    pool = new SessionPool(config);
+    const { adapter, session } = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
+    const adapterSDK = adapter.getSDK() as any;
+    const completeMock = adapterSDK.getPaymentManager().completeSessionJob;
+    await pool.release(adapter, session);
+    // completeSessionJob should NOT have been called yet (grace period pending)
+    expect(completeMock).not.toHaveBeenCalled();
+    // After grace period, it should be called
+    await new Promise(r => setTimeout(r, 300));
+    expect(completeMock).toHaveBeenCalled();
+    await pool.destroy();
+  });
+
+  it('release immediately frees slot even with grace period', async () => {
+    const config = createConfig(seedSDK, 1);
+    config.proofGracePeriodMs = 5000;
+    pool = new SessionPool(config);
+    const first = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
+    const secondPromise = pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
+    await pool.release(first.adapter, first.session);
+    // Slot should be free immediately, not after 5s grace period
+    const second = await Promise.race([
+      secondPromise,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 500)),
+    ]);
+    expect(second).toBeDefined();
+    await pool.destroy();
+  });
+
+  it('destroy waits for pending deferred completions', async () => {
+    const config = createConfig(seedSDK, 3);
+    config.proofGracePeriodMs = 200;
+    pool = new SessionPool(config);
+    const { adapter, session } = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
+    const adapterSDK = adapter.getSDK() as any;
+    const completeMock = adapterSDK.getPaymentManager().completeSessionJob;
+    await pool.release(adapter, session);
+    expect(completeMock).not.toHaveBeenCalled();
+    await pool.destroy();
+    // destroy should have waited and completed the deferred settlement
+    expect(completeMock).toHaveBeenCalled();
   });
 
   it('acquire handles S5 init failure gracefully', async () => {

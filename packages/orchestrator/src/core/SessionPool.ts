@@ -2,6 +2,8 @@ import { FabstirSDKCore } from '@fabstir/sdk-core';
 import { SessionAdapter } from './SessionAdapter';
 import type { OrchestratorConfig, OrchestratorSession, SessionAdapterConfig } from '../types';
 
+const DEFAULT_PROOF_GRACE_MS = 30_000; // 30 seconds for hosts to submit proofs
+
 interface PoolEntry {
   adapter: SessionAdapter;
   session: OrchestratorSession;
@@ -14,6 +16,7 @@ export class SessionPool {
   private readonly active: Set<PoolEntry> = new Set();
   private txQueue: Promise<void> = Promise.resolve();
   private totalDeposit = 0;
+  private readonly pendingSettlements: Promise<void>[] = [];
 
   constructor(config: OrchestratorConfig) {
     this.config = config;
@@ -103,27 +106,44 @@ export class SessionPool {
   }
 
   async release(adapter: SessionAdapter, session: OrchestratorSession): Promise<void> {
+    // End WebSocket and free slot immediately so orchestrator can proceed
     try {
-      await this.withTxLock(async () => {
-        const pm = adapter.getSDK().getPaymentManager() as any;
-        await pm.completeSessionJob(Number(session.jobId), '', session.chainId);
-      });
+      await adapter.endSession(session.sessionId);
     } finally {
-      try {
-        await adapter.endSession(session.sessionId);
-      } finally {
-        for (const entry of this.active) {
-          if (entry.adapter === adapter) {
-            this.active.delete(entry);
-            break;
-          }
+      for (const entry of this.active) {
+        if (entry.adapter === adapter) {
+          this.active.delete(entry);
+          break;
         }
-        this.releaseSlot();
       }
+      this.releaseSlot();
+    }
+
+    // Settle blockchain job after grace period for host proof submission
+    const graceMs = this.config.proofGracePeriodMs ?? DEFAULT_PROOF_GRACE_MS;
+    const settle = async () => {
+      if (graceMs > 0) await new Promise(r => setTimeout(r, graceMs));
+      try {
+        await this.withTxLock(async () => {
+          const pm = adapter.getSDK().getPaymentManager() as any;
+          await pm.completeSessionJob(Number(session.jobId), '', session.chainId);
+        });
+      } catch {
+        // Settlement errors after grace period are non-fatal
+      }
+    };
+    if (graceMs > 0) {
+      this.pendingSettlements.push(settle());
+    } else {
+      await settle();
     }
   }
 
   async destroy(): Promise<void> {
+    // Wait for any deferred settlements to complete
+    await Promise.all(this.pendingSettlements);
+    this.pendingSettlements.length = 0;
+
     const entries = [...this.active];
     for (const entry of entries) {
       try {
