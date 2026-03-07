@@ -8,11 +8,18 @@ export interface BudgetConfig {
   maxSubTasks: number;
 }
 
+/** Minimal signer interface compatible with ethers.Signer */
+export interface SignerLike {
+  getAddress(): Promise<string>;
+  provider?: unknown;
+}
+
 // --- Orchestrator Configuration ---
 export interface OrchestratorConfig {
   sdk: FabstirSDKCore;
   chainId: number;
-  privateKey: string;
+  privateKey?: string;
+  signer?: SignerLike;
   models: {
     fast?: string;
     deep?: string;

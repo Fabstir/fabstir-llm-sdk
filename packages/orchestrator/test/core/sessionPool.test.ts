@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SessionPool } from '../../src/core/SessionPool';
-import type { OrchestratorConfig, BudgetConfig } from '../../src/types';
+import type { OrchestratorConfig, BudgetConfig, SignerLike } from '../../src/types';
 
 function createMockSDK(overrides: any = {}) {
   const sessionManager = {
@@ -57,6 +57,29 @@ describe('SessionPool', () => {
   beforeEach(() => {
     seedSDK = createMockSDK();
     pool = new SessionPool(createConfig(seedSDK));
+  });
+
+  function createSignerConfig(sdk: any, maxSessions = 3): OrchestratorConfig {
+    const signer: SignerLike = { getAddress: vi.fn().mockResolvedValue('0x1234abcd') };
+    return { sdk, chainId: 84532, signer, models: { fast: 'fast-model' }, maxConcurrentSessions: maxSessions, budget, proofGracePeriodMs: 0 };
+  }
+
+  it('acquire authenticates SDK with signer when signer is provided', async () => {
+    const signerPool = new SessionPool(createSignerConfig(seedSDK));
+    await signerPool.acquire('fast-model', { chainId: 84532, depositAmount: '0.001' });
+    expect(mockSDKInstance.authenticate).toHaveBeenCalledWith('signer', { signer: expect.objectContaining({ getAddress: expect.any(Function) }) });
+    await signerPool.destroy();
+  });
+
+  it('constructor throws if neither privateKey nor signer is provided', () => {
+    const config: OrchestratorConfig = { sdk: seedSDK as any, chainId: 84532, models: { fast: 'f' }, maxConcurrentSessions: 1, budget };
+    expect(() => new SessionPool(config)).toThrow('OrchestratorConfig requires either privateKey or signer');
+  });
+
+  it('constructor throws if both privateKey and signer are provided', () => {
+    const signer: SignerLike = { getAddress: vi.fn().mockResolvedValue('0x1234') };
+    const config: OrchestratorConfig = { sdk: seedSDK as any, chainId: 84532, privateKey: '0xabc', signer, models: { fast: 'f' }, maxConcurrentSessions: 1, budget };
+    expect(() => new SessionPool(config)).toThrow('OrchestratorConfig requires either privateKey or signer, not both');
   });
 
   it('constructor creates pool with maxConcurrentSessions limit', () => {

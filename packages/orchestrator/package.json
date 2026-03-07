@@ -1,6 +1,6 @@
 {
   "name": "@fabstir/orchestrator",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Multi-agent orchestration for Fabstir P2P LLM marketplace",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

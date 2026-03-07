@@ -1,6 +1,7 @@
 // @fabstir/orchestrator — public API
 export type {
   OrchestratorConfig,
+  SignerLike,
   BudgetConfig,
   TaskGraph,
   OrchestratorTask,

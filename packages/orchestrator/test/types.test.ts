@@ -14,6 +14,7 @@ import type {
   TaskRecord,
   OrchestrationOptions,
   ProgressUpdate,
+  SignerLike,
 } from '../src/types';
 
 describe('Core Types', () => {
@@ -127,6 +128,25 @@ describe('Core Types', () => {
       encryption: true,
     };
     expect(withEncryption.encryption).toBe(true);
+  });
+
+  it('OrchestratorConfig accepts signer instead of privateKey', () => {
+    const signer: SignerLike = { getAddress: async () => '0x1234' };
+    const config: OrchestratorConfig = {
+      sdk: {} as any, chainId: 84532, signer, models: { fast: 'f' },
+      maxConcurrentSessions: 3, budget: { maxDepositPerSubTask: '0.001', maxTotalDeposit: '0.01', maxSubTasks: 10 },
+    };
+    expect(config.signer).toBe(signer);
+    expect(config.privateKey).toBeUndefined();
+  });
+
+  it('OrchestratorConfig still accepts privateKey for backward compatibility', () => {
+    const config: OrchestratorConfig = {
+      sdk: {} as any, chainId: 84532, privateKey: '0xabc', models: { fast: 'f' },
+      maxConcurrentSessions: 3, budget: { maxDepositPerSubTask: '0.001', maxTotalDeposit: '0.01', maxSubTasks: 10 },
+    };
+    expect(config.privateKey).toBe('0xabc');
+    expect(config.signer).toBeUndefined();
   });
 
   it('ProgressUpdate accepts phase, taskId, and taskName fields', () => {

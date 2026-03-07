@@ -19,6 +19,12 @@ export class SessionPool {
   private readonly pendingSettlements: Promise<void>[] = [];
 
   constructor(config: OrchestratorConfig) {
+    if (!config.privateKey && !config.signer) {
+      throw new Error('OrchestratorConfig requires either privateKey or signer');
+    }
+    if (config.privateKey && config.signer) {
+      throw new Error('OrchestratorConfig requires either privateKey or signer, not both');
+    }
     this.config = config;
     this.available = config.maxConcurrentSessions;
   }
@@ -87,7 +93,11 @@ export class SessionPool {
         rpcUrl: (this.config.sdk as any).config?.rpcUrl ?? '',
         contractAddresses: (this.config.sdk as any).config?.contractAddresses ?? {},
       } as any);
-      await sdk.authenticate('privatekey', { privateKey: this.config.privateKey } as any);
+      if (this.config.signer) {
+        await sdk.authenticate('signer', { signer: this.config.signer } as any);
+      } else {
+        await sdk.authenticate('privatekey', { privateKey: this.config.privateKey } as any);
+      }
 
       const adapter = new SessionAdapter(sdk);
       const session = await this.withTxLock(() =>
