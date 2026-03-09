@@ -151,6 +151,10 @@ export interface PromptOptions {
   onContextWarning?: (usage: TokenUsageInfo) => void;
   /** Fraction at which onContextWarning fires (default 0.8). Set to 1.0 to disable. */
   contextWarningThreshold?: number;
+  /** Called when pre-prompt host health check detects degraded/unhealthy host */
+  onHostHealthWarning?: (health: HostHealthInfo) => void;
+  /** Called when host reports proof/checkpoint status after inference */
+  onSessionStatus?: (status: SessionStatusInfo) => void;
 }
 
 // ============= Token Usage Types =============
@@ -180,6 +184,37 @@ export interface ContextInfo {
   contextWindowSize: number;
   utilization: number;
   finishReason: 'stop' | 'length' | 'cancelled' | null;
+}
+
+// ============= Host Health Types =============
+
+export type HostHealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'unreachable';
+
+export interface HostHealthInfo {
+  status: HostHealthStatus;
+  issues: string[];
+  checkedAt: number;
+}
+
+export interface BackgroundOpStatus {
+  status: 'success' | 'failed';
+  error?: string;
+}
+
+export interface ProofStatus extends BackgroundOpStatus {
+  proofId?: string;
+  sizeBytes?: number;
+}
+
+export interface CheckpointStatus extends BackgroundOpStatus {
+  checkpointIndex?: number;
+}
+
+export interface SessionStatusInfo {
+  sessionId: string;
+  proof?: ProofStatus;
+  checkpoint?: CheckpointStatus;
+  timestamp: number;
 }
 
 // ============= Session Types =============

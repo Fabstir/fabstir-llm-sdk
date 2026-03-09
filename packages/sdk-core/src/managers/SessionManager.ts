@@ -29,7 +29,9 @@ import {
   ImageAttachment,
   PromptOptions,
   TokenUsageInfo,
-  ContextInfo
+  ContextInfo,
+  HostHealthInfo,
+  SessionStatusInfo
 } from '../types';
 import { validateImageAttachments } from '../utils/image-validation';
 import { HostSelectionMode } from '../types/settings.types';
@@ -145,6 +147,7 @@ export interface SessionState {
   ragContext?: { vectorDbId: string }; // Set by uploadVectors() or startSession(ragConfig)
   ragConfig?: RAGSessionConfig; // RAG configuration from startSession
   ragMetrics?: RAGMetrics; // RAG metrics tracking
+  lastHostHealth?: HostHealthInfo; // Last host health check result (Phase 14.2)
 }
 
 // Extended SessionConfig with chainId
@@ -186,6 +189,8 @@ export class SessionManager implements ISessionManager {
   // Web Search (Phase 5.2-5.3): Pending search tracking and handler cleanup
   private pendingSearches: Map<string, { resolve: (result: SearchApiResponse) => void; reject: (error: Error) => void; timeoutId: NodeJS.Timeout }> = new Map();
   private searchHandlerUnsubscribe?: () => void;
+  private sessionStatusCallback?: (status: SessionStatusInfo) => void;
+  private sessionStatusUnsubscribe?: () => void;
 
   constructor(
     paymentManager: PaymentManager,
@@ -224,6 +229,15 @@ export class SessionManager implements ISessionManager {
    */
   setEndpointTransform(transform: (url: string) => string): void {
     this.endpointTransform = transform;
+  }
+
+  /**
+   * Set callback for session status updates (proof/checkpoint outcomes).
+   * The callback persists across prompts and fires whenever the host
+   * sends a session_status, proof_submitted, or checkpoint_submitted message.
+   */
+  setSessionStatusCallback(callback: (status: SessionStatusInfo) => void): void {
+    this.sessionStatusCallback = callback;
   }
 
   /**
@@ -839,6 +853,19 @@ export class SessionManager implements ISessionManager {
 
         // Set up global web search message handlers (Phase 5.2-5.3)
         this._setupWebSearchMessageHandlers();
+
+        // Set up global session status handler (Phase 14.3)
+        this._setupSessionStatusHandler();
+      }
+
+      // Non-blocking host health check (fires callback asynchronously)
+      if (options?.onHostHealthWarning && session.endpoint) {
+        this._checkHostHealth(session.endpoint).then(health => {
+          session.lastHostHealth = health;
+          if (health.status !== 'healthy') {
+            options.onHostHealthWarning!(health);
+          }
+        }).catch(() => {});
       }
 
       // CRITICAL FIX: Always send session_init before each prompt
@@ -1050,7 +1077,6 @@ export class SessionManager implements ISessionManager {
               fullResponse = data.content || fullResponse;
             } else if (data.type === 'stream_end') {
               this._processStreamEnd(data, ptChunkCount, session, options);
-            } else if (data.type === 'proof_submitted' || data.type === 'checkpoint_submitted') {
             } else if (data.type === 'session_completed') {
             }
           });
@@ -1752,6 +1778,12 @@ export class SessionManager implements ISessionManager {
       if (this.searchHandlerUnsubscribe) {
         this.searchHandlerUnsubscribe();
         this.searchHandlerUnsubscribe = undefined;
+      }
+
+      // Clean up session status handler
+      if (this.sessionStatusUnsubscribe) {
+        this.sessionStatusUnsubscribe();
+        this.sessionStatusUnsubscribe = undefined;
       }
 
       // Reject any pending RAG/search requests (WebSocket is closing)
@@ -2612,6 +2644,9 @@ export class SessionManager implements ISessionManager {
 
       // Set up global web search message handlers (Phase 5.2-5.3)
       this._setupWebSearchMessageHandlers();
+
+      // Set up global session status handler (Phase 14.3)
+      this._setupSessionStatusHandler();
     }
 
     // CRITICAL FIX: Always send session_init before RAG operations
@@ -3706,5 +3741,82 @@ export class SessionManager implements ISessionManager {
     options?: ImageGenerationOptions
   ): Promise<ImageGenerationResult> {
     return generateImageHttp(hostUrl, prompt, options);
+  }
+
+  getHostHealth(sessionId: bigint): HostHealthInfo | undefined {
+    const session = this.sessions.get(sessionId.toString());
+    return session?.lastHostHealth;
+  }
+
+  private async _checkHostHealth(endpoint: string): Promise<HostHealthInfo> {
+    try {
+      const httpUrl = endpoint.replace(/^ws(s?):\/\//, 'http$1://').replace(/\/v1\/ws$/, '');
+      const response = await fetch(`${httpUrl}/v1/health`, { signal: AbortSignal.timeout(3000) });
+      const data = await response.json();
+      return {
+        status: data.status,
+        issues: data.issues || [],
+        checkedAt: Date.now(),
+      };
+    } catch {
+      return { status: 'unreachable', issues: ['Health endpoint unreachable'], checkedAt: Date.now() };
+    }
+  }
+
+  // =============================================================================
+  // Session Status Handler (Phase 14.3)
+  // =============================================================================
+
+  /**
+   * Set up persistent WebSocket listener for session_status, proof_submitted,
+   * and checkpoint_submitted messages. Converts all formats to SessionStatusInfo.
+   */
+  private _setupSessionStatusHandler(): void {
+    if (this.sessionStatusUnsubscribe) this.sessionStatusUnsubscribe();
+    if (!this.wsClient) return;
+
+    const unsubscribe = this.wsClient.onMessage((data: any) => {
+      const callback = this.sessionStatusCallback;
+      if (data.type === 'session_status') {
+        this._processSessionStatus(data, callback);
+      } else if (data.type === 'proof_submitted') {
+        this._processSessionStatus({
+          session_id: data.session_id,
+          proof: { status: 'success', proof_id: data.proof_id, size_bytes: data.size_bytes },
+          timestamp: data.timestamp,
+        }, callback);
+      } else if (data.type === 'checkpoint_submitted') {
+        this._processSessionStatus({
+          session_id: data.session_id,
+          checkpoint: { status: 'success', checkpoint_index: data.checkpoint_index },
+          timestamp: data.timestamp,
+        }, callback);
+      }
+    });
+    this.sessionStatusUnsubscribe = unsubscribe;
+  }
+
+  /**
+   * Convert raw WebSocket data into a typed SessionStatusInfo and invoke callback.
+   * No-op if callback is undefined.
+   */
+  private _processSessionStatus(data: any, callback?: (status: SessionStatusInfo) => void): void {
+    if (!callback) return;
+    const status: SessionStatusInfo = {
+      sessionId: data.session_id || data.sessionId || '',
+      proof: data.proof ? {
+        status: data.proof.status || 'success',
+        error: data.proof.error,
+        proofId: data.proof.proof_id || data.proof.proofId,
+        sizeBytes: data.proof.size_bytes || data.proof.sizeBytes,
+      } : undefined,
+      checkpoint: data.checkpoint ? {
+        status: data.checkpoint.status || 'success',
+        error: data.checkpoint.error,
+        checkpointIndex: data.checkpoint.checkpoint_index ?? data.checkpoint.checkpointIndex,
+      } : undefined,
+      timestamp: data.timestamp || Date.now(),
+    };
+    callback(status);
   }
 }
