@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 import { ChainConfig, ChainId, NativeToken } from '../types/chain.types';
-import { getBaseSepolia, getOpBNBTestnet } from './environment';
+import { getBaseSepolia, getBaseMainnet, getOpBNBTestnet } from './environment';
 
 /**
  * Central registry for all supported blockchain configurations
@@ -35,6 +35,22 @@ export class ChainRegistry {
         },
       ],
     ]);
+
+    // Only add Base mainnet if environment variables are configured
+    try {
+      const baseMainnet = getBaseMainnet();
+      this.chains.set(ChainId.BASE_MAINNET, {
+        chainId: baseMainnet.chainId,
+        name: 'Base',
+        nativeToken: 'ETH' as NativeToken,
+        rpcUrl: baseMainnet.rpcUrl,
+        contracts: baseMainnet.contracts,
+        minDeposit: '0.0001',
+        blockExplorer: 'https://basescan.org',
+      });
+    } catch (error) {
+      console.debug('Base mainnet not configured - will be available when env vars are set');
+    }
 
     // Only add opBNB if environment variables are configured (post-MVP)
     try {

@@ -144,4 +144,110 @@ describe('x402PaymentGate middleware', () => {
     p.payload.authorization.validBefore = '0'; // already expired
     expect(() => validatePayloadFields(p, DEFAULT_CONFIG)).toThrow(/expired|validBefore/i);
   });
+
+  it('decodeX402Payment works without Buffer global', () => {
+    const p = validPayload();
+    const encoded = btoa(JSON.stringify(p));
+    const origBuffer = globalThis.Buffer;
+    try {
+      // Shadow Buffer to prove source code does not depend on it
+      (globalThis as any).Buffer = undefined;
+      const decoded = decodeX402Payment(encoded);
+      expect(decoded.x402Version).toBe(1);
+      expect(decoded.scheme).toBe('exact');
+      expect(decoded.payload.authorization.from).toBe('0xPayer');
+    } finally {
+      globalThis.Buffer = origBuffer;
+    }
+  });
+
+  it('x402PaymentGate rejects replayed nonce when NonceRegistry provided', async () => {
+    const { NonceRegistry } = await import('../../src/x402/server/NonceRegistry');
+    const registry = new NonceRegistry();
+    const mw = x402PaymentGate(DEFAULT_CONFIG, registry);
+    const header = encodeHeader(validPayload());
+    // First request succeeds
+    const req1 = mockReq({ 'x-payment': header });
+    const res1 = mockRes();
+    const next1 = vi.fn();
+    await mw(req1, res1, next1);
+    expect(next1).toHaveBeenCalled();
+    // Second request with same nonce is rejected
+    const req2 = mockReq({ 'x-payment': header });
+    const res2 = mockRes();
+    const next2 = vi.fn();
+    await mw(req2, res2, next2);
+    expect(res2.status).toHaveBeenCalledWith(402);
+    expect(res2.json.mock.calls[0][0].error).toContain('replay');
+    expect(next2).not.toHaveBeenCalled();
+  });
+
+  it('x402PaymentGate allows request when NonceRegistry not provided (backward compat)', async () => {
+    const mw = x402PaymentGate(DEFAULT_CONFIG);
+    const header = encodeHeader(validPayload());
+    // First request
+    const req1 = mockReq({ 'x-payment': header });
+    const res1 = mockRes();
+    const next1 = vi.fn();
+    await mw(req1, res1, next1);
+    expect(next1).toHaveBeenCalled();
+    // Second request with same nonce also succeeds (no registry)
+    const req2 = mockReq({ 'x-payment': header });
+    const res2 = mockRes();
+    const next2 = vi.fn();
+    await mw(req2, res2, next2);
+    expect(next2).toHaveBeenCalled();
+  });
+
+  it('rejects payment below minimum amount (dust protection)', async () => {
+    const config = { ...DEFAULT_CONFIG, orchestratePrice: '1000', minAmount: '10000' };
+    const mw = x402PaymentGate(config);
+    const p = validPayload();
+    p.payload.authorization.value = '5000'; // above orchestratePrice but below minAmount
+    const req = mockReq({ 'x-payment': encodeHeader(p) });
+    const res = mockRes();
+    const next = vi.fn();
+    await mw(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(402);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('rejects payment above maximum amount (overpayment protection)', async () => {
+    const config = { ...DEFAULT_CONFIG, maxAmount: '1000000' };
+    const mw = x402PaymentGate(config);
+    const p = validPayload();
+    p.payload.authorization.value = '10000000'; // above maxAmount
+    const req = mockReq({ 'x-payment': encodeHeader(p) });
+    const res = mockRes();
+    const next = vi.fn();
+    await mw(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(402);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('rejects payment with wrong payTo address', async () => {
+    const mw = x402PaymentGate(DEFAULT_CONFIG);
+    const p = validPayload();
+    p.payload.authorization.to = '0xWrongRecipient';
+    const req = mockReq({ 'x-payment': encodeHeader(p) });
+    const res = mockRes();
+    const next = vi.fn();
+    await mw(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(402);
+    const body = res.json.mock.calls[0][0];
+    expect(body.error).toContain('payTo');
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('accepts payment within valid bounds', async () => {
+    const config = { ...DEFAULT_CONFIG, minAmount: '500000', maxAmount: '5000000' };
+    const mw = x402PaymentGate(config);
+    const p = validPayload(); // value is '1000000', within [500000, 5000000]
+    const req = mockReq({ 'x-payment': encodeHeader(p) });
+    const res = mockRes();
+    const next = vi.fn();
+    await mw(req, res, next);
+    expect(next).toHaveBeenCalled();
+    expect(req.x402Payment).toBeDefined();
+  });
 });

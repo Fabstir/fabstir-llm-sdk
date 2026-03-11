@@ -76,4 +76,49 @@ describe('x402 A2AClientPool integration', () => {
     const retryCall = mockFetch.mock.calls[2];
     expect(retryCall[1].headers['X-PAYMENT']).toBe('base64pay');
   });
+
+  it('caches session token from x402 payment response', async () => {
+    const sessionPayResp = btoa(JSON.stringify({ success: true, network: 'base-sepolia', sessionToken: 'sess-token-1' }));
+    const okResWithSession = () => ({
+      ok: true, status: 200,
+      json: async () => okResult,
+      headers: { get: (name: string) => name === 'X-PAYMENT-RESPONSE' ? sessionPayResp : null },
+    });
+    // First call: discover + 402 + retry with payment (retry returns session token)
+    mockFetch.mockResolvedValueOnce(cardRes()).mockResolvedValueOnce(payRes()).mockResolvedValueOnce(okResWithSession());
+    const p = poolX402();
+    await p.delegate(URL, 'Do');
+
+    // Second call: should use cached session token (card is cached, so only 1 fetch for /a2a/jsonrpc)
+    mockFetch.mockResolvedValueOnce(okRes());
+    await p.delegate(URL, 'Do again');
+
+    // The second request should have Authorization header with session token
+    const secondReqCall = mockFetch.mock.calls[3]; // 4th call overall (0=card, 1=402, 2=retry, 3=second request)
+    expect(secondReqCall[1].headers['Authorization']).toBe('Bearer session:sess-token-1');
+  });
+
+  it('clears stale session token on 402 and retries with payment', async () => {
+    const sessionPayResp = btoa(JSON.stringify({ success: true, network: 'base-sepolia', sessionToken: 'sess-token-2' }));
+    const okResWithSession = () => ({
+      ok: true, status: 200,
+      json: async () => okResult,
+      headers: { get: (name: string) => name === 'X-PAYMENT-RESPONSE' ? sessionPayResp : null },
+    });
+    // First call: discover + 402 + retry with session token returned
+    mockFetch.mockResolvedValueOnce(cardRes()).mockResolvedValueOnce(payRes()).mockResolvedValueOnce(okResWithSession());
+    const p = poolX402();
+    await p.delegate(URL, 'Do');
+
+    // Second call: cached token is stale, gets 402, clears token, retries with payment
+    mockFetch.mockResolvedValueOnce(payRes()).mockResolvedValueOnce(okRes());
+    await p.delegate(URL, 'Do again');
+
+    // The 4th call (index 3) should have had the stale session token
+    const staleCall = mockFetch.mock.calls[3];
+    expect(staleCall[1].headers['Authorization']).toBe('Bearer session:sess-token-2');
+    // The 5th call (index 4) should be the retry with X-PAYMENT
+    const retryCall = mockFetch.mock.calls[4];
+    expect(retryCall[1].headers['X-PAYMENT']).toBe('base64pay');
+  });
 });

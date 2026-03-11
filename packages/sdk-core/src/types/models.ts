@@ -44,6 +44,13 @@ export interface HostMetadata {
   costPerToken: number;        // Cost per token in wei
   stakeAmount?: string;        // Stake amount in wei
   publicKey?: string;          // Compressed secp256k1 public key (33 bytes hex, 66 chars)
+  x402?: {
+    payTo: string;             // Address to receive x402 payments
+    asset: string;             // Token address (e.g. USDC)
+    network: string;           // Network identifier (e.g. 'base')
+    pricePerRequest: string;   // Price per request in token smallest unit
+    maxTimeoutSeconds?: number; // Max timeout for payment settlement
+  };
 }
 
 /**

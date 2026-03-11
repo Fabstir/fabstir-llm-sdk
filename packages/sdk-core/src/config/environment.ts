@@ -73,6 +73,46 @@ export function getBaseSepolia(): EnvironmentConfig {
 }
 
 /**
+ * Get environment configuration for Base Mainnet
+ */
+export function getBaseMainnet(): EnvironmentConfig {
+  const hasProcessEnv = typeof process !== 'undefined' && process.env;
+
+  return {
+    contracts: {
+      jobMarketplace: (hasProcessEnv && process.env.BASE_CONTRACT_JOB_MARKETPLACE) ||
+        (hasProcessEnv && process.env.NEXT_PUBLIC_BASE_CONTRACT_JOB_MARKETPLACE) ||
+        (() => { throw new Error('BASE_CONTRACT_JOB_MARKETPLACE environment variable not set'); })(),
+      nodeRegistry: (hasProcessEnv && process.env.BASE_CONTRACT_NODE_REGISTRY) ||
+        (hasProcessEnv && process.env.NEXT_PUBLIC_BASE_CONTRACT_NODE_REGISTRY) ||
+        (() => { throw new Error('BASE_CONTRACT_NODE_REGISTRY environment variable not set'); })(),
+      proofSystem: (hasProcessEnv && process.env.BASE_CONTRACT_PROOF_SYSTEM) ||
+        (hasProcessEnv && process.env.NEXT_PUBLIC_BASE_CONTRACT_PROOF_SYSTEM) ||
+        (() => { throw new Error('BASE_CONTRACT_PROOF_SYSTEM environment variable not set'); })(),
+      hostEarnings: (hasProcessEnv && process.env.BASE_CONTRACT_HOST_EARNINGS) ||
+        (hasProcessEnv && process.env.NEXT_PUBLIC_BASE_CONTRACT_HOST_EARNINGS) ||
+        (() => { throw new Error('BASE_CONTRACT_HOST_EARNINGS environment variable not set'); })(),
+      modelRegistry: (hasProcessEnv && process.env.BASE_CONTRACT_MODEL_REGISTRY) ||
+        (hasProcessEnv && process.env.NEXT_PUBLIC_BASE_CONTRACT_MODEL_REGISTRY) ||
+        (() => { throw new Error('BASE_CONTRACT_MODEL_REGISTRY environment variable not set'); })(),
+      usdcToken: (hasProcessEnv && process.env.BASE_CONTRACT_USDC_TOKEN) ||
+        (hasProcessEnv && process.env.NEXT_PUBLIC_BASE_CONTRACT_USDC_TOKEN) ||
+        (() => { throw new Error('BASE_CONTRACT_USDC_TOKEN environment variable not set'); })(),
+      fabToken: (hasProcessEnv && process.env.BASE_CONTRACT_FAB_TOKEN) ||
+        (hasProcessEnv && process.env.NEXT_PUBLIC_BASE_CONTRACT_FAB_TOKEN) ||
+        (() => { throw new Error('BASE_CONTRACT_FAB_TOKEN environment variable not set'); })(),
+    },
+    entryPoint: (hasProcessEnv && process.env.BASE_ENTRY_POINT_ADDRESS) ||
+      (hasProcessEnv && process.env.NEXT_PUBLIC_BASE_ENTRY_POINT_ADDRESS) ||
+      (() => { throw new Error('BASE_ENTRY_POINT_ADDRESS environment variable not set'); })(),
+    chainId: 8453,
+    rpcUrl: (hasProcessEnv && process.env.RPC_URL_BASE_MAINNET) ||
+      (hasProcessEnv && process.env.NEXT_PUBLIC_RPC_URL_BASE_MAINNET) ||
+      (() => { throw new Error('RPC_URL_BASE_MAINNET environment variable not set'); })(),
+  };
+}
+
+/**
  * Get environment configuration for opBNB Testnet
  * All contracts must be configured via environment variables
  */

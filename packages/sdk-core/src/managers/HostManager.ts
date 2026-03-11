@@ -562,7 +562,8 @@ export class HostManager {
                 location: parsed.location || 'Unknown',
                 maxConcurrent: parsed.maxConcurrent || 10,
                 costPerToken: Number(info[7] || 0),
-                publicKey: parsed.publicKey
+                publicKey: parsed.publicKey,
+                x402: parsed.x402,
               };
             } else {
               metadata = {
@@ -793,7 +794,8 @@ export class HostManager {
               location: parsed.location || 'Unknown',
               maxConcurrent: parsed.maxConcurrent || 10,
               costPerToken: Number(node.minPricePerTokenStable || 0),
-              publicKey: parsed.publicKey
+              publicKey: parsed.publicKey,
+              x402: parsed.x402,
             };
           } catch {
             metadata = {
@@ -890,7 +892,8 @@ export class HostManager {
                 location: parsed.location || 'Unknown',
                 maxConcurrent: parsed.maxConcurrent || 10,
                 costPerToken: Number(info[7] || 0),
-                publicKey: parsed.publicKey
+                publicKey: parsed.publicKey,
+                x402: parsed.x402,
               };
             } else {
               metadata = {
@@ -932,6 +935,25 @@ export class HostManager {
     } catch (error: any) {
       throw new SDKError(`Failed to discover hosts: ${error.message}`, 'DISCOVERY_ERROR', error);
     }
+  }
+
+  /**
+   * Discover hosts that support x402 payments from their on-chain metadata.
+   * Optionally filter by modelId.
+   */
+  async getX402CapableHosts(modelId?: string): Promise<HostInfo[]> {
+    if (!this.initialized || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+
+    let hosts: HostInfo[];
+    if (modelId) {
+      hosts = await this.findHostsForModel(modelId);
+    } else {
+      hosts = await this.discoverAllActiveHostsWithModels();
+    }
+
+    return hosts.filter(h => h.metadata.x402 !== undefined);
   }
 
   /**

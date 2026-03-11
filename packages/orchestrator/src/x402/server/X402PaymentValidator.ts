@@ -16,7 +16,7 @@ export class X402PaymentValidator {
 
   async validate(payload: X402PaymentPayload): Promise<X402PaymentResponse> {
     const { authorization, signature } = payload.payload;
-    const { v, r, s } = ethers.utils.splitSignature(signature);
+    const { v, r, s } = ethers.Signature.from(signature);
     try {
       const tx = await this.contract.transferWithAuthorization(
         authorization.from,

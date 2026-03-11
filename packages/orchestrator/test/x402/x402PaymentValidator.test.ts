@@ -3,12 +3,12 @@ import type { X402PaymentPayload } from '../../src/x402/types';
 
 const mockWait = vi.fn().mockResolvedValue({ hash: '0xTxHash123' });
 const mockTransferWithAuth = vi.fn().mockResolvedValue({ wait: mockWait });
-const MockContract = vi.fn().mockImplementation(() => ({ transferWithAuthorization: mockTransferWithAuth }));
+const mockSignatureFrom = vi.fn().mockReturnValue({ v: 27, r: '0xR', s: '0xS' });
 
-const mockSplitSignature = vi.fn().mockReturnValue({ v: 27, r: '0xR', s: '0xS' });
-vi.mock('ethers', () => ({
-  ethers: { Contract: MockContract, utils: { splitSignature: mockSplitSignature } },
-}));
+vi.mock('ethers', () => {
+  function MockContract() { return { transferWithAuthorization: mockTransferWithAuth }; }
+  return { ethers: { Contract: MockContract, Signature: { from: mockSignatureFrom } } };
+});
 
 function validPayload(): X402PaymentPayload {
   return {
@@ -87,10 +87,11 @@ describe('X402PaymentValidator', () => {
   it('validate extracts v, r, s from signature', async () => {
     const validator = new X402PaymentValidator({} as any, '0xUSDC');
     await validator.validate(validPayload());
-    expect(mockSplitSignature).toHaveBeenCalledWith('0xFullSignature');
+    expect(mockSignatureFrom).toHaveBeenCalledWith('0xFullSignature');
     const args = mockTransferWithAuth.mock.calls[0];
     expect(args[6]).toBe(27); // v
     expect(args[7]).toBe('0xR'); // r
     expect(args[8]).toBe('0xS'); // s
   });
+
 });

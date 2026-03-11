@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import { X402PaymentHandler } from '../../src/x402/client/X402PaymentHandler';
 import type { X402PaymentRequirement, X402PaymentPayload } from '../../src/x402/types';
 
@@ -96,5 +98,33 @@ describe('X402PaymentHandler', () => {
     const validBefore = Number(decoded.payload.authorization.validBefore);
     expect(validBefore).toBeGreaterThanOrEqual(before + req.maxTimeoutSeconds);
     expect(validBefore).toBeLessThanOrEqual(after + req.maxTimeoutSeconds + 1);
+  });
+
+  it('does not import Node.js crypto module', () => {
+    const sourcePath = path.resolve(__dirname, '../../src/x402/client/X402PaymentHandler.ts');
+    const source = fs.readFileSync(sourcePath, 'utf-8');
+    expect(source).not.toMatch(/from\s+['"]crypto['"]/);
+    expect(source).not.toMatch(/require\s*\(\s*['"]crypto['"]\s*\)/);
+  });
+
+  it('createPaymentHeader generates valid bytes32 nonce (32 bytes = 64 hex chars)', async () => {
+    const signer = mockSigner();
+    const handler = new X402PaymentHandler(signer, '0xUSDC', 84532);
+    const header = await handler.createPaymentHeader(mockRequirement());
+    const decoded: X402PaymentPayload = JSON.parse(atob(header));
+    const nonce = decoded.payload.authorization.nonce;
+    expect(nonce).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it('createPaymentHeader uses globalThis.crypto.getRandomValues for nonce', async () => {
+    const spy = vi.spyOn(globalThis.crypto, 'getRandomValues');
+    const signer = mockSigner();
+    const handler = new X402PaymentHandler(signer, '0xUSDC', 84532);
+    await handler.createPaymentHeader(mockRequirement());
+    expect(spy).toHaveBeenCalledWith(expect.any(Uint8Array));
+    const callArg = spy.mock.calls[0][0] as Uint8Array;
+    expect(callArg).toBeInstanceOf(Uint8Array);
+    expect(callArg.length).toBe(32);
+    spy.mockRestore();
   });
 });

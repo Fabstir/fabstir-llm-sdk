@@ -266,16 +266,28 @@ export class JobMarketplaceWrapper {
       throw new Error('modelId is required for session creation (Phase 18: modelless sessions removed)');
     }
 
-    console.log(`[JobMarketplace] Using createSessionFromDepositForModel with modelId: ${params.modelId}`);
+    // Ensure all uint256 params are BigInt for unambiguous ABI encoding
+    const priceBigInt = BigInt(params.pricePerToken);
+    const durationBigInt = BigInt(params.duration);
+    const proofIntervalBigInt = BigInt(params.proofInterval);
+    const proofTimeoutBigInt = BigInt(proofTimeoutWindow);
+
+    console.log(`[JobMarketplace] createSessionFromDepositForModel:`, {
+      modelId: params.modelId, host: params.host, paymentToken: params.paymentToken,
+      deposit: depositValue.toString(), pricePerToken: priceBigInt.toString(),
+      duration: durationBigInt.toString(), proofInterval: proofIntervalBigInt.toString(),
+      proofTimeoutWindow: proofTimeoutBigInt.toString(),
+    });
+
     const tx = await this.contract.createSessionFromDepositForModel(
       params.modelId,
       params.host,
       params.paymentToken,
-      depositValue,
-      params.pricePerToken,
-      params.duration,
-      params.proofInterval,
-      proofTimeoutWindow
+      depositValue,          // already bigint
+      priceBigInt,           // uint256 — explicit bigint
+      durationBigInt,        // uint256 — explicit bigint
+      proofIntervalBigInt,   // uint256 — explicit bigint
+      proofTimeoutBigInt     // uint256 — explicit bigint
     );
     const receipt = await tx.wait();
     const event = receipt.logs?.find((log: any) =>
@@ -308,16 +320,29 @@ export class JobMarketplaceWrapper {
       // For USDC, use createSessionJobForModelWithToken
       const amountInUSDC = ethers.parseUnits(params.paymentAmount, 6); // USDC has 6 decimals
 
-      console.log(`[JobMarketplace] Using createSessionJobForModelWithToken with modelId: ${params.modelId}`);
+      // Ensure all uint256 params are BigInt for unambiguous ABI encoding
+      // (prevents Coinbase SubAccountSigner Go chain-proxy misinterpretation)
+      const priceBigInt = BigInt(params.pricePerToken);
+      const durationBigInt = BigInt(params.duration);
+      const proofIntervalBigInt = BigInt(params.proofInterval);
+      const proofTimeoutBigInt = BigInt(proofTimeoutWindow);
+
+      console.log(`[JobMarketplace] createSessionJobForModelWithToken:`, {
+        host: params.host, modelId: params.modelId, paymentToken: params.paymentToken,
+        amount: amountInUSDC.toString(), pricePerToken: priceBigInt.toString(),
+        duration: durationBigInt.toString(), proofInterval: proofIntervalBigInt.toString(),
+        proofTimeoutWindow: proofTimeoutBigInt.toString(),
+      });
+
       const tx = await this.contract.createSessionJobForModelWithToken(
         params.host,
         params.modelId,       // bytes32 model ID
         params.paymentToken,  // token address
-        amountInUSDC,         // deposit amount
-        params.pricePerToken,
-        params.duration,
-        params.proofInterval,
-        proofTimeoutWindow    // AUDIT-F3: 8th parameter
+        amountInUSDC,         // deposit amount (bigint)
+        priceBigInt,          // uint256 — explicit bigint
+        durationBigInt,       // uint256 — explicit bigint
+        proofIntervalBigInt,  // uint256 — explicit bigint
+        proofTimeoutBigInt    // uint256 — explicit bigint
       );
 
       const receipt = await tx.wait();
@@ -329,14 +354,25 @@ export class JobMarketplaceWrapper {
       // For ETH, use createSessionJobForModel
       const value = ethers.parseEther(params.paymentAmount);
 
-      console.log(`[JobMarketplace] Using createSessionJobForModel with modelId: ${params.modelId}`);
+      const priceBigInt = BigInt(params.pricePerToken);
+      const durationBigInt = BigInt(params.duration);
+      const proofIntervalBigInt = BigInt(params.proofInterval);
+      const proofTimeoutBigInt = BigInt(proofTimeoutWindow);
+
+      console.log(`[JobMarketplace] createSessionJobForModel:`, {
+        host: params.host, modelId: params.modelId,
+        value: value.toString(), pricePerToken: priceBigInt.toString(),
+        duration: durationBigInt.toString(), proofInterval: proofIntervalBigInt.toString(),
+        proofTimeoutWindow: proofTimeoutBigInt.toString(),
+      });
+
       const tx = await this.contract.createSessionJobForModel(
         params.host,
         params.modelId,       // bytes32 model ID
-        params.pricePerToken,
-        params.duration,
-        params.proofInterval,
-        proofTimeoutWindow,   // AUDIT-F3: 6th parameter
+        priceBigInt,          // uint256 — explicit bigint
+        durationBigInt,       // uint256 — explicit bigint
+        proofIntervalBigInt,  // uint256 — explicit bigint
+        proofTimeoutBigInt,   // uint256 — explicit bigint
         { value }
       );
 
@@ -490,22 +526,29 @@ export class JobMarketplaceWrapper {
 
     const proofTimeoutWindow = validateProofTimeoutWindow(params.proofTimeoutWindow);
 
-    console.log(`[JobMarketplace] V2 createSessionForModelAsDelegate:`);
-    console.log(`  Payer: ${params.payer}`);
-    console.log(`  Model ID: ${params.modelId}`);
-    console.log(`  Host: ${params.host}`);
-    console.log(`  Amount: ${params.amount}`);
+    // Ensure all uint256 params are BigInt for unambiguous ABI encoding
+    const priceBigInt = BigInt(params.pricePerToken);
+    const durationBigInt = BigInt(params.duration);
+    const proofIntervalBigInt = BigInt(params.proofInterval);
+    const proofTimeoutBigInt = BigInt(proofTimeoutWindow);
+
+    console.log(`[JobMarketplace] createSessionForModelAsDelegate:`, {
+      payer: params.payer, modelId: params.modelId, host: params.host,
+      paymentToken: params.paymentToken, amount: amountValue.toString(),
+      pricePerToken: priceBigInt.toString(), duration: durationBigInt.toString(),
+      proofInterval: proofIntervalBigInt.toString(), proofTimeoutWindow: proofTimeoutBigInt.toString(),
+    });
 
     const tx = await this.contract.createSessionForModelAsDelegate(
       params.payer,
       params.modelId,
       params.host,
       params.paymentToken,
-      amountValue,
-      params.pricePerToken,
-      params.duration,
-      params.proofInterval,
-      proofTimeoutWindow
+      amountValue,           // already bigint
+      priceBigInt,           // uint256 — explicit bigint
+      durationBigInt,        // uint256 — explicit bigint
+      proofIntervalBigInt,   // uint256 — explicit bigint
+      proofTimeoutBigInt     // uint256 — explicit bigint
     );
 
     const receipt = await tx.wait(3);

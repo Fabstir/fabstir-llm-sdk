@@ -1,5 +1,4 @@
 // x402 client-side payment handler: creates EIP-3009 signed payments for 402 responses
-import crypto from 'crypto';
 import type {
   X402PaymentRequired,
   X402PaymentRequirement,
@@ -44,7 +43,10 @@ export class X402PaymentHandler {
       validBefore: String(
         Math.floor(Date.now() / 1000) + requirement.maxTimeoutSeconds,
       ),
-      nonce: '0x' + crypto.randomUUID().replace(/-/g, ''),
+      nonce: '0x' + Array.from(
+        globalThis.crypto.getRandomValues(new Uint8Array(32)),
+        b => b.toString(16).padStart(2, '0'),
+      ).join(''),
     };
 
     const domain = {
