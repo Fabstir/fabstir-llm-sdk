@@ -198,4 +198,56 @@ describe('x402PaymentGate middleware', () => {
     await mw(req2, res2, next2);
     expect(next2).toHaveBeenCalled();
   });
+
+  it('rejects payment below minimum amount (dust protection)', async () => {
+    const config = { ...DEFAULT_CONFIG, orchestratePrice: '1000', minAmount: '10000' };
+    const mw = x402PaymentGate(config);
+    const p = validPayload();
+    p.payload.authorization.value = '5000'; // above orchestratePrice but below minAmount
+    const req = mockReq({ 'x-payment': encodeHeader(p) });
+    const res = mockRes();
+    const next = vi.fn();
+    await mw(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(402);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('rejects payment above maximum amount (overpayment protection)', async () => {
+    const config = { ...DEFAULT_CONFIG, maxAmount: '1000000' };
+    const mw = x402PaymentGate(config);
+    const p = validPayload();
+    p.payload.authorization.value = '10000000'; // above maxAmount
+    const req = mockReq({ 'x-payment': encodeHeader(p) });
+    const res = mockRes();
+    const next = vi.fn();
+    await mw(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(402);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('rejects payment with wrong payTo address', async () => {
+    const mw = x402PaymentGate(DEFAULT_CONFIG);
+    const p = validPayload();
+    p.payload.authorization.to = '0xWrongRecipient';
+    const req = mockReq({ 'x-payment': encodeHeader(p) });
+    const res = mockRes();
+    const next = vi.fn();
+    await mw(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(402);
+    const body = res.json.mock.calls[0][0];
+    expect(body.error).toContain('payTo');
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('accepts payment within valid bounds', async () => {
+    const config = { ...DEFAULT_CONFIG, minAmount: '500000', maxAmount: '5000000' };
+    const mw = x402PaymentGate(config);
+    const p = validPayload(); // value is '1000000', within [500000, 5000000]
+    const req = mockReq({ 'x-payment': encodeHeader(p) });
+    const res = mockRes();
+    const next = vi.fn();
+    await mw(req, res, next);
+    expect(next).toHaveBeenCalled();
+    expect(req.x402Payment).toBeDefined();
+  });
 });

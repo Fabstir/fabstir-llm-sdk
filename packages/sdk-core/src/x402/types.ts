@@ -57,6 +57,8 @@ export interface X402PricingConfig {
   asset: string;
   network: string;
   maxTimeoutSeconds: number;
+  minAmount?: string;
+  maxAmount?: string;
 }
 
 /** Client-side budget configuration */

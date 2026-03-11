@@ -7,6 +7,7 @@ import type {
   X402PaymentRequirement,
 } from '../types';
 import type { NonceRegistry } from './NonceRegistry';
+import type { X402RateLimiter } from './X402RateLimiter';
 
 /** Base64-decode and JSON-parse an X-PAYMENT header into X402PaymentPayload */
 export function decodeX402Payment(header: string): X402PaymentPayload {
@@ -33,6 +34,15 @@ export function validatePayloadFields(
     throw new Error(
       `Insufficient payment: need ${required}, got ${value}`,
     );
+  }
+  if (config.minAmount && value < BigInt(config.minAmount)) {
+    throw new Error(`Payment below minimum: need at least ${config.minAmount}, got ${value}`);
+  }
+  if (config.maxAmount && value > BigInt(config.maxAmount)) {
+    throw new Error(`Payment above maximum: limit is ${config.maxAmount}, got ${value}`);
+  }
+  if (payload.payload.authorization.to.toLowerCase() !== config.payTo.toLowerCase()) {
+    throw new Error(`Wrong payTo: expected ${config.payTo}, got ${payload.payload.authorization.to}`);
   }
   const now = Math.floor(Date.now() / 1000);
   const validBefore = Number(payload.payload.authorization.validBefore);
@@ -63,7 +73,7 @@ function reply402(res: Response, config: X402PricingConfig, error: string): void
 }
 
 /** Express middleware that enforces x402 payment via X-PAYMENT header */
-export function x402PaymentGate(config: X402PricingConfig, nonceRegistry?: NonceRegistry): RequestHandler {
+export function x402PaymentGate(config: X402PricingConfig, nonceRegistry?: NonceRegistry, rateLimiter?: X402RateLimiter): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     const header = req.headers['x-payment'] as string | undefined;
     if (!header) {
@@ -81,6 +91,10 @@ export function x402PaymentGate(config: X402PricingConfig, nonceRegistry?: Nonce
       validatePayloadFields(payload, config);
     } catch (err: any) {
       reply402(res, config, err.message);
+      return;
+    }
+    if (rateLimiter && !rateLimiter.checkLimit(payload.payload.authorization.from)) {
+      reply402(res, config, 'Rate limit exceeded');
       return;
     }
     if (nonceRegistry && !nonceRegistry.checkAndRecord(payload.payload.authorization.nonce)) {

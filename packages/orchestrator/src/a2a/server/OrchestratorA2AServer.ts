@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import express from 'express';
 import type { Request, Response, Express } from 'express';
 import type { Server } from 'http';
@@ -21,6 +22,7 @@ export interface A2AServerOptions {
   x402UsdcAddress?: string;
   x402SessionDurationSec?: number;
   x402MaxRequestsPerSession?: number;
+  eventEmitter?: EventEmitter;
 }
 
 interface RouteEntry {
@@ -37,6 +39,7 @@ export class OrchestratorA2AServer {
   private readonly routes: RouteEntry[] = [];
   private readonly executor: OrchestratorExecutor;
   private readonly activeTasks = new Map<string, AbortController>();
+  private readonly emitter: EventEmitter | null = null;
   private readonly validator: X402PaymentValidator | null = null;
   private readonly sessionManager: X402SessionManager | null = null;
   private server: Server | null = null;
@@ -48,6 +51,10 @@ export class OrchestratorA2AServer {
     this.app = express();
     this.app.use(express.json());
     this.executor = new OrchestratorExecutor(manager);
+
+    if (options.eventEmitter) {
+      this.emitter = options.eventEmitter;
+    }
 
     this.card = buildAgentCard({
       publicUrl: options.publicUrl,
@@ -96,6 +103,11 @@ export class OrchestratorA2AServer {
             try {
               payload = decodeX402Payment(paymentHeader);
               validatePayloadFields(payload, x402Cfg);
+              this.emitter?.emit('x402:payment-received', {
+                payer: payload.payload.authorization.from,
+                amount: payload.payload.authorization.value,
+                network: payload.network,
+              });
             } catch {
               res.status(402).json({ x402Version: 1, accepts: this.card.x402!.accepts, error: 'Invalid payment' });
               return;
@@ -103,9 +115,18 @@ export class OrchestratorA2AServer {
             if (this.validator) {
               const result = await this.validator.validate(payload);
               if (!result.success) {
+                this.emitter?.emit('x402:payment-failed', {
+                  payer: payload.payload.authorization.from,
+                  error: result.errorReason,
+                });
                 res.status(402).json({ x402Version: 1, accepts: this.card.x402!.accepts, error: result.errorReason });
                 return;
               }
+              this.emitter?.emit('x402:payment-settled', {
+                payer: payload.payload.authorization.from,
+                amount: payload.payload.authorization.value,
+                transaction: result.transaction,
+              });
               settlementResult = result;
             }
             paidViaX402 = true;
@@ -119,6 +140,10 @@ export class OrchestratorA2AServer {
               );
               if (!settlementResult) settlementResult = { success: true, network: x402Cfg!.network };
               (settlementResult as any).sessionToken = sessionResult.token;
+              this.emitter?.emit('x402:session-created', {
+                payer: payload.payload.authorization.from,
+                token: sessionResult.token,
+              });
             }
           } else {
             const jwtAuthHeader = req.headers.authorization;
@@ -239,5 +264,9 @@ export class OrchestratorA2AServer {
 
   getSessionManager(): X402SessionManager | null {
     return this.sessionManager;
+  }
+
+  getEventEmitter(): EventEmitter | null {
+    return this.emitter;
   }
 }
