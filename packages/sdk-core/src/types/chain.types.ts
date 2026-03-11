@@ -6,6 +6,7 @@
  */
 export enum ChainId {
   BASE_SEPOLIA = 84532,
+  BASE_MAINNET = 8453,
   OPBNB_TESTNET = 5611,
 }
 

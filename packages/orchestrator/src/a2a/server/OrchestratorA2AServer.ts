@@ -8,6 +8,7 @@ import { buildAgentCard } from './agentCard';
 import type { A2AAgentCard } from '../types';
 import type { X402PricingConfig, X402PaymentResponse } from '../../x402/types';
 import { decodeX402Payment, validatePayloadFields } from '../../x402/server/X402PaymentGate';
+import { X402PaymentValidator } from '../../x402/server/X402PaymentValidator';
 
 export interface A2AServerOptions {
   publicUrl: string;
@@ -15,6 +16,8 @@ export interface A2AServerOptions {
   agentName?: string;
   walletAddress?: string;
   x402Pricing?: X402PricingConfig;
+  x402Signer?: any;
+  x402UsdcAddress?: string;
 }
 
 interface RouteEntry {
@@ -31,6 +34,7 @@ export class OrchestratorA2AServer {
   private readonly routes: RouteEntry[] = [];
   private readonly executor: OrchestratorExecutor;
   private readonly activeTasks = new Map<string, AbortController>();
+  private readonly validator: X402PaymentValidator | null = null;
   private server: Server | null = null;
   private jwtVerifier: (token: string) => boolean = () => false;
 
@@ -47,6 +51,10 @@ export class OrchestratorA2AServer {
       x402Pricing: options.x402Pricing,
     });
 
+    if (options.x402Signer && options.x402UsdcAddress) {
+      this.validator = new X402PaymentValidator(options.x402Signer, options.x402UsdcAddress);
+    }
+
     this.setupRoutes();
   }
 
@@ -60,18 +68,28 @@ export class OrchestratorA2AServer {
     const orchestrateHandler = async (req: Request, res: Response) => {
       const x402Cfg = this.options.x402Pricing;
       let paidViaX402 = false;
+      let settlementResult: X402PaymentResponse | null = null;
 
       if (x402Cfg) {
         const paymentHeader = req.headers['x-payment'] as string | undefined;
         if (paymentHeader) {
+          let payload;
           try {
-            const payload = decodeX402Payment(paymentHeader);
+            payload = decodeX402Payment(paymentHeader);
             validatePayloadFields(payload, x402Cfg);
-            paidViaX402 = true;
           } catch {
             res.status(402).json({ x402Version: 1, accepts: this.card.x402!.accepts, error: 'Invalid payment' });
             return;
           }
+          if (this.validator) {
+            const result = await this.validator.validate(payload);
+            if (!result.success) {
+              res.status(402).json({ x402Version: 1, accepts: this.card.x402!.accepts, error: result.errorReason });
+              return;
+            }
+            settlementResult = result;
+          }
+          paidViaX402 = true;
         } else {
           const authHeader = req.headers.authorization;
           if (!authHeader || !authHeader.startsWith('Bearer ') || !this.jwtVerifier(authHeader.slice(7))) {
@@ -117,7 +135,7 @@ export class OrchestratorA2AServer {
       try {
         const result = await this.manager.orchestrate(goal);
         if (paidViaX402) {
-          const payResp: X402PaymentResponse = { success: true, network: x402Cfg!.network };
+          const payResp: X402PaymentResponse = settlementResult ?? { success: true, network: x402Cfg!.network };
           res.setHeader('X-PAYMENT-RESPONSE', btoa(JSON.stringify(payResp)));
         }
         res.json({

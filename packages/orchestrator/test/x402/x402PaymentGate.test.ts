@@ -160,4 +160,42 @@ describe('x402PaymentGate middleware', () => {
       globalThis.Buffer = origBuffer;
     }
   });
+
+  it('x402PaymentGate rejects replayed nonce when NonceRegistry provided', async () => {
+    const { NonceRegistry } = await import('../../src/x402/server/NonceRegistry');
+    const registry = new NonceRegistry();
+    const mw = x402PaymentGate(DEFAULT_CONFIG, registry);
+    const header = encodeHeader(validPayload());
+    // First request succeeds
+    const req1 = mockReq({ 'x-payment': header });
+    const res1 = mockRes();
+    const next1 = vi.fn();
+    await mw(req1, res1, next1);
+    expect(next1).toHaveBeenCalled();
+    // Second request with same nonce is rejected
+    const req2 = mockReq({ 'x-payment': header });
+    const res2 = mockRes();
+    const next2 = vi.fn();
+    await mw(req2, res2, next2);
+    expect(res2.status).toHaveBeenCalledWith(402);
+    expect(res2.json.mock.calls[0][0].error).toContain('replay');
+    expect(next2).not.toHaveBeenCalled();
+  });
+
+  it('x402PaymentGate allows request when NonceRegistry not provided (backward compat)', async () => {
+    const mw = x402PaymentGate(DEFAULT_CONFIG);
+    const header = encodeHeader(validPayload());
+    // First request
+    const req1 = mockReq({ 'x-payment': header });
+    const res1 = mockRes();
+    const next1 = vi.fn();
+    await mw(req1, res1, next1);
+    expect(next1).toHaveBeenCalled();
+    // Second request with same nonce also succeeds (no registry)
+    const req2 = mockReq({ 'x-payment': header });
+    const res2 = mockRes();
+    const next2 = vi.fn();
+    await mw(req2, res2, next2);
+    expect(next2).toHaveBeenCalled();
+  });
 });

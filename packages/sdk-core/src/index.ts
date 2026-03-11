@@ -91,6 +91,9 @@ export * from './types/session-groups.types';
 export { ChainRegistry } from './config/ChainRegistry';
 export { ChainId, type ChainConfig, type ChainContracts, type NativeToken } from './types/chain.types';
 
+// x402 network mapping
+export { chainIdToX402Network, x402NetworkToChainId } from './config/x402Networks';
+
 // Export interfaces
 export * from './interfaces';
 export {

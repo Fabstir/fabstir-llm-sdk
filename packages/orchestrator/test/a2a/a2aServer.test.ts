@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
+
+const mockValidate = vi.fn();
+vi.mock('../../src/x402/server/X402PaymentValidator', () => ({
+  X402PaymentValidator: vi.fn().mockImplementation(() => ({ validate: mockValidate })),
+}));
+
 import { OrchestratorA2AServer } from '../../src/a2a/server/OrchestratorA2AServer';
+import { X402PaymentValidator } from '../../src/x402/server/X402PaymentValidator';
 
 function createMockManager() {
   return {
@@ -199,5 +206,79 @@ describe('OrchestratorA2AServer', () => {
     expect(parsed.success).toBe(true);
     expect(parsed.network).toBe('base-sepolia');
     await x402Server.stop();
+  });
+
+  // --- Sub-phase 2.1: X402PaymentValidator integration tests ---
+
+  function makeX402ServerOpts(withSigner: boolean) {
+    const x402Cfg = {
+      orchestratePrice: '1000000', payTo: '0xRecipient',
+      asset: 'USDC', network: 'base-sepolia', maxTimeoutSeconds: 30,
+    };
+    return {
+      publicUrl: 'http://localhost:3000', port: 0, x402Pricing: x402Cfg,
+      ...(withSigner ? { x402Signer: { address: '0xSigner' }, x402UsdcAddress: '0xUSDC' } : {}),
+    };
+  }
+
+  function makePaymentHeader() {
+    return btoa(JSON.stringify({
+      x402Version: 1, scheme: 'exact', network: 'base-sepolia',
+      payload: { signature: '0xsig', authorization: {
+        from: '0xPayer', to: '0xRecipient', value: '1000000',
+        validAfter: '0', validBefore: String(Math.floor(Date.now() / 1000) + 3600), nonce: '0xNonce1',
+      } },
+    }));
+  }
+
+  it('server with x402Signer creates X402PaymentValidator', () => {
+    const s = new OrchestratorA2AServer(manager as any, makeX402ServerOpts(true));
+    expect(X402PaymentValidator).toHaveBeenCalledWith({ address: '0xSigner' }, '0xUSDC');
+    s.stop();
+  });
+
+  it('server with x402Signer calls validator.validate() after field validation', async () => {
+    mockValidate.mockResolvedValue({ success: true, transaction: '0xTxHash', network: 'base-sepolia', payer: '0xPayer' });
+    const s = new OrchestratorA2AServer(manager as any, makeX402ServerOpts(true));
+    const handler = s.getRouteHandler('/v1/orchestrate');
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn(), setHeader: vi.fn() };
+    await handler({ headers: { 'x-payment': makePaymentHeader() }, body: { goal: 'test' } } as any, res as any);
+    expect(mockValidate).toHaveBeenCalledWith(expect.objectContaining({ scheme: 'exact', network: 'base-sepolia' }));
+    await s.stop();
+  });
+
+  it('server returns tx hash in X-PAYMENT-RESPONSE on successful settlement', async () => {
+    mockValidate.mockResolvedValue({ success: true, transaction: '0xTxHash', network: 'base-sepolia', payer: '0xPayer' });
+    const s = new OrchestratorA2AServer(manager as any, makeX402ServerOpts(true));
+    const handler = s.getRouteHandler('/v1/orchestrate');
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn(), setHeader: vi.fn() };
+    await handler({ headers: { 'x-payment': makePaymentHeader() }, body: { goal: 'test' } } as any, res as any);
+    const b64 = res.setHeader.mock.calls.find((c: any[]) => c[0] === 'X-PAYMENT-RESPONSE')![1] as string;
+    const parsed = JSON.parse(atob(b64));
+    expect(parsed.transaction).toBe('0xTxHash');
+    expect(parsed.payer).toBe('0xPayer');
+    await s.stop();
+  });
+
+  it('server returns 402 when on-chain settlement fails', async () => {
+    mockValidate.mockResolvedValue({ success: false, errorReason: 'insufficient balance', network: 'base-sepolia' });
+    const s = new OrchestratorA2AServer(manager as any, makeX402ServerOpts(true));
+    const handler = s.getRouteHandler('/v1/orchestrate');
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn(), setHeader: vi.fn() };
+    await handler({ headers: { 'x-payment': makePaymentHeader() }, body: { goal: 'test' } } as any, res as any);
+    expect(res.status).toHaveBeenCalledWith(402);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: 'insufficient balance' }));
+    await s.stop();
+  });
+
+  it('server without x402Signer does field validation only (backward compat)', async () => {
+    mockValidate.mockClear();
+    const s = new OrchestratorA2AServer(manager as any, makeX402ServerOpts(false));
+    const handler = s.getRouteHandler('/v1/orchestrate');
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn(), setHeader: vi.fn() };
+    await handler({ headers: { 'x-payment': makePaymentHeader() }, body: { goal: 'test' } } as any, res as any);
+    expect(mockValidate).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ synthesis: 'Final answer' }));
+    await s.stop();
   });
 });

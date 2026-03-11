@@ -6,6 +6,7 @@ import type {
   X402PaymentRequired,
   X402PaymentRequirement,
 } from '../types';
+import type { NonceRegistry } from './NonceRegistry';
 
 /** Base64-decode and JSON-parse an X-PAYMENT header into X402PaymentPayload */
 export function decodeX402Payment(header: string): X402PaymentPayload {
@@ -62,7 +63,7 @@ function reply402(res: Response, config: X402PricingConfig, error: string): void
 }
 
 /** Express middleware that enforces x402 payment via X-PAYMENT header */
-export function x402PaymentGate(config: X402PricingConfig): RequestHandler {
+export function x402PaymentGate(config: X402PricingConfig, nonceRegistry?: NonceRegistry): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     const header = req.headers['x-payment'] as string | undefined;
     if (!header) {
@@ -80,6 +81,10 @@ export function x402PaymentGate(config: X402PricingConfig): RequestHandler {
       validatePayloadFields(payload, config);
     } catch (err: any) {
       reply402(res, config, err.message);
+      return;
+    }
+    if (nonceRegistry && !nonceRegistry.checkAndRecord(payload.payload.authorization.nonce)) {
+      reply402(res, config, 'Nonce already used (replay detected)');
       return;
     }
     (req as any).x402Payment = payload;
