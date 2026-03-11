@@ -207,43 +207,35 @@ describe('SessionPool', () => {
     await pool.destroy();
   });
 
-  it('release ends session immediately and defers completeSessionJob', async () => {
-    const config = createConfig(seedSDK, 3);
-    config.proofGracePeriodMs = 100;
-    pool = new SessionPool(config);
+  it('release caches first session without ending it', async () => {
     const { adapter, session } = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
     const adapterSDK = adapter.getSDK() as any;
     await pool.release(adapter, session);
-    // endSession called immediately, completeSessionJob deferred
-    expect(adapterSDK.getSessionManager().endSession).toHaveBeenCalledWith(session.sessionId);
+    expect(adapterSDK.getSessionManager().endSession).not.toHaveBeenCalled();
     expect(adapterSDK.getPaymentManager().completeSessionJob).not.toHaveBeenCalled();
-    await pool.destroy(); // waits for deferred settlement
-    expect(adapterSDK.getPaymentManager().completeSessionJob).toHaveBeenCalled();
+    await pool.destroy();
   });
 
-  it('release still calls endSession if completeSessionJob would fail', async () => {
-    const config = createConfig(seedSDK, 3);
-    config.proofGracePeriodMs = 50;
-    pool = new SessionPool(config);
-    const { adapter, session } = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
-    const adapterSDK = adapter.getSDK() as any;
-    adapterSDK.getPaymentManager().completeSessionJob.mockRejectedValue(new Error('settle failed'));
-    await pool.release(adapter, session);
-    expect(adapterSDK.getSessionManager().endSession).toHaveBeenCalledWith(session.sessionId);
-    await pool.destroy(); // should not throw despite settlement failure
+  it('duplicate release calls endSession even if completeSessionJob fails', async () => {
+    const first = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
+    const second = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
+    const secondSDK = second.adapter.getSDK() as any;
+    secondSDK.getPaymentManager().completeSessionJob.mockRejectedValue(new Error('settle failed'));
+    await pool.release(first.adapter, first.session);
+    await pool.release(second.adapter, second.session);
+    expect(secondSDK.getSessionManager().endSession).toHaveBeenCalledWith(second.session.sessionId);
+    await pool.destroy();
   });
 
-  it('release defers completeSessionJob by proofGracePeriodMs', async () => {
-    const config = createConfig(seedSDK, 3);
-    config.proofGracePeriodMs = 200;
-    pool = new SessionPool(config);
-    const { adapter, session } = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
-    const adapterSDK = adapter.getSDK() as any;
-    const completeMock = adapterSDK.getPaymentManager().completeSessionJob;
-    await pool.release(adapter, session);
-    // completeSessionJob should NOT have been called yet (grace period pending)
+  it('duplicate release defers completeSessionJob by proofGracePeriodMs', async () => {
+    pool = new SessionPool({ ...createConfig(seedSDK, 3), proofGracePeriodMs: 200 });
+    const first = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
+    const second = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
+    const secondSDK = second.adapter.getSDK() as any;
+    const completeMock = secondSDK.getPaymentManager().completeSessionJob;
+    await pool.release(first.adapter, first.session); // cached
+    await pool.release(second.adapter, second.session); // duplicate — deferred settlement
     expect(completeMock).not.toHaveBeenCalled();
-    // After grace period, it should be called
     await new Promise(r => setTimeout(r, 300));
     expect(completeMock).toHaveBeenCalled();
     await pool.destroy();
@@ -266,24 +258,81 @@ describe('SessionPool', () => {
   });
 
   it('destroy waits for pending deferred completions', async () => {
-    const config = createConfig(seedSDK, 3);
-    config.proofGracePeriodMs = 200;
-    pool = new SessionPool(config);
-    const { adapter, session } = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
-    const adapterSDK = adapter.getSDK() as any;
-    const completeMock = adapterSDK.getPaymentManager().completeSessionJob;
-    await pool.release(adapter, session);
+    pool = new SessionPool({ ...createConfig(seedSDK, 3), proofGracePeriodMs: 200 });
+    const first = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
+    const second = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
+    const secondSDK = second.adapter.getSDK() as any;
+    const completeMock = secondSDK.getPaymentManager().completeSessionJob;
+    await pool.release(first.adapter, first.session); // cached
+    await pool.release(second.adapter, second.session); // duplicate — deferred settlement
     expect(completeMock).not.toHaveBeenCalled();
     await pool.destroy();
-    // destroy should have waited and completed the deferred settlement
     expect(completeMock).toHaveBeenCalled();
   });
 
   it('acquire handles S5 init failure gracefully', async () => {
-    // S5 init failure is handled internally by FabstirSDKCore
-    // SDK still creates SessionManager with no-op proxy for StorageManager
     const result = await pool.acquire('m', { chainId: 84532, depositAmount: '0.001' });
     expect(result.adapter).toBeDefined();
     await pool.destroy();
+  });
+  describe('session multiplexing', () => {
+    it('acquire returns cached session for same model after release', async () => {
+      const first = await pool.acquire('fast-model', { chainId: 84532, depositAmount: '0.001' });
+      const firstSDK = mockSDKInstance;
+      await pool.release(first.adapter, first.session);
+      const second = await pool.acquire('fast-model', { chainId: 84532, depositAmount: '0.001' });
+      expect(second.adapter).toBe(first.adapter);
+      expect(second.session).toBe(first.session);
+      expect(firstSDK._sessionManager.startSession).toHaveBeenCalledTimes(1);
+      await pool.destroy();
+    });
+
+    it('reused session does not double-count deposit', async () => {
+      const first = await pool.acquire('fast-model', { chainId: 84532, depositAmount: '0.003' });
+      await pool.release(first.adapter, first.session);
+      await pool.acquire('fast-model', { chainId: 84532, depositAmount: '0.003' });
+      expect(pool.getTotalDeposit()).toBe(0.003);
+      await pool.destroy();
+    });
+
+    it('different models cached independently', async () => {
+      const fast = await pool.acquire('fast-model', { chainId: 84532, depositAmount: '0.001' });
+      const deep = await pool.acquire('deep-model', { chainId: 84532, depositAmount: '0.001' });
+      await pool.release(fast.adapter, fast.session);
+      await pool.release(deep.adapter, deep.session);
+      const reacquired = await pool.acquire('fast-model', { chainId: 84532, depositAmount: '0.001' });
+      expect(reacquired.adapter).toBe(fast.adapter);
+      expect(reacquired.adapter).not.toBe(deep.adapter);
+      await pool.destroy();
+    });
+
+    it('release caches session without calling endSession', async () => {
+      const { adapter, session } = await pool.acquire('fast-model', { chainId: 84532, depositAmount: '0.001' });
+      const adapterSDK = adapter.getSDK() as any;
+      await pool.release(adapter, session);
+      expect(adapterSDK.getSessionManager().endSession).not.toHaveBeenCalled();
+      await pool.destroy();
+    });
+
+    it('duplicate session for same model destroyed on release when cache occupied', async () => {
+      const first = await pool.acquire('fast-model', { chainId: 84532, depositAmount: '0.001' });
+      const second = await pool.acquire('fast-model', { chainId: 84532, depositAmount: '0.001' });
+      await pool.release(first.adapter, first.session);
+      expect((first.adapter.getSDK() as any).getSessionManager().endSession).not.toHaveBeenCalled();
+      await pool.release(second.adapter, second.session);
+      expect((second.adapter.getSDK() as any).getSessionManager().endSession).toHaveBeenCalledWith(second.session.sessionId);
+      await pool.destroy();
+    });
+
+    it('destroy cleans up cached sessions', async () => {
+      const { adapter, session } = await pool.acquire('fast-model', { chainId: 84532, depositAmount: '0.001' });
+      const adapterSDK = adapter.getSDK() as any;
+      await pool.release(adapter, session);
+      expect(adapterSDK.getSessionManager().endSession).not.toHaveBeenCalled();
+      expect(adapterSDK.getPaymentManager().completeSessionJob).not.toHaveBeenCalled();
+      await pool.destroy();
+      expect(adapterSDK.getSessionManager().endSession).toHaveBeenCalledWith(session.sessionId);
+      expect(adapterSDK.getPaymentManager().completeSessionJob).toHaveBeenCalled();
+    });
   });
 });
