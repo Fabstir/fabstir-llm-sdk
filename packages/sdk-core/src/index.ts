@@ -94,6 +94,17 @@ export { ChainId, type ChainConfig, type ChainContracts, type NativeToken } from
 // x402 network mapping
 export { chainIdToX402Network, x402NetworkToChainId } from './config/x402Networks';
 
+// x402 types
+export type {
+  X402PaymentRequirement, X402PaymentRequired, X402Authorization,
+  X402PaymentPayload, X402PaymentResponse, X402PricingConfig, X402BudgetConfig,
+} from './x402/types';
+
+// x402 client and fetch wrapper
+export { X402Client } from './x402/X402Client';
+export { x402Fetch } from './x402/x402Fetch';
+export type { X402FetchClient, X402FetchBudgetTracker } from './x402/x402Fetch';
+
 // Export interfaces
 export * from './interfaces';
 export {
