@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import express from 'express';
 import type { Request, Response, Express } from 'express';
 import type { Server } from 'http';
@@ -99,7 +98,7 @@ export class OrchestratorA2AServer {
       }
 
       if (req.headers.accept?.includes('text/event-stream')) {
-        const taskId = crypto.randomUUID();
+        const taskId = globalThis.crypto.randomUUID();
         const bus = new SSEEventBus(res);
         const ctx = { task: { id: taskId }, message: { parts: [{ type: 'text', text: goal }] } };
         this.activeTasks.set(taskId, new AbortController());
@@ -119,7 +118,7 @@ export class OrchestratorA2AServer {
         const result = await this.manager.orchestrate(goal);
         if (paidViaX402) {
           const payResp: X402PaymentResponse = { success: true, network: x402Cfg!.network };
-          res.setHeader('X-PAYMENT-RESPONSE', Buffer.from(JSON.stringify(payResp)).toString('base64'));
+          res.setHeader('X-PAYMENT-RESPONSE', btoa(JSON.stringify(payResp)));
         }
         res.json({
           taskGraphId: result.taskGraphId,

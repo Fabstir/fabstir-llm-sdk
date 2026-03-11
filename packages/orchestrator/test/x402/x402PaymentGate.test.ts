@@ -144,4 +144,20 @@ describe('x402PaymentGate middleware', () => {
     p.payload.authorization.validBefore = '0'; // already expired
     expect(() => validatePayloadFields(p, DEFAULT_CONFIG)).toThrow(/expired|validBefore/i);
   });
+
+  it('decodeX402Payment works without Buffer global', () => {
+    const p = validPayload();
+    const encoded = btoa(JSON.stringify(p));
+    const origBuffer = globalThis.Buffer;
+    try {
+      // Shadow Buffer to prove source code does not depend on it
+      (globalThis as any).Buffer = undefined;
+      const decoded = decodeX402Payment(encoded);
+      expect(decoded.x402Version).toBe(1);
+      expect(decoded.scheme).toBe('exact');
+      expect(decoded.payload.authorization.from).toBe('0xPayer');
+    } finally {
+      globalThis.Buffer = origBuffer;
+    }
+  });
 });

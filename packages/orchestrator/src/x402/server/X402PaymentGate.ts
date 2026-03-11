@@ -9,7 +9,7 @@ import type {
 
 /** Base64-decode and JSON-parse an X-PAYMENT header into X402PaymentPayload */
 export function decodeX402Payment(header: string): X402PaymentPayload {
-  const json = Buffer.from(header, 'base64').toString('utf-8');
+  const json = atob(header);
   return JSON.parse(json) as X402PaymentPayload;
 }
 

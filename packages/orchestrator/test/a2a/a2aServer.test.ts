@@ -172,4 +172,32 @@ describe('OrchestratorA2AServer', () => {
     await cancelHandler({ params: { taskId: 'nonexistent' } } as any, cancelRes as any);
     expect(cancelRes.status).toHaveBeenCalledWith(404);
   });
+
+  it('orchestrate response X-PAYMENT-RESPONSE header is valid base64 without Buffer', async () => {
+    const x402Cfg = {
+      orchestratePrice: '1000000', payTo: '0xRecipient',
+      asset: 'USDC', network: 'base-sepolia', maxTimeoutSeconds: 30,
+    };
+    const x402Server = new OrchestratorA2AServer(manager as any, {
+      publicUrl: 'http://localhost:3000', port: 0, x402Pricing: x402Cfg,
+    });
+    const handler = x402Server.getRouteHandler('/v1/orchestrate');
+    const paymentPayload = {
+      x402Version: 1, scheme: 'exact', network: 'base-sepolia',
+      payload: { signature: '0xsig', authorization: {
+        from: '0xPayer', to: '0xRecipient', value: '1000000',
+        validAfter: '0', validBefore: String(Math.floor(Date.now() / 1000) + 3600), nonce: '0x01',
+      } },
+    };
+    const xPaymentHeader = btoa(JSON.stringify(paymentPayload));
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn(), setHeader: vi.fn() };
+    await handler({ headers: { 'x-payment': xPaymentHeader }, body: { goal: 'test' } } as any, res as any);
+    expect(res.setHeader).toHaveBeenCalledWith('X-PAYMENT-RESPONSE', expect.any(String));
+    const b64 = res.setHeader.mock.calls.find((c: any[]) => c[0] === 'X-PAYMENT-RESPONSE')![1] as string;
+    // Decode using atob (browser-compatible), NOT Buffer
+    const parsed = JSON.parse(atob(b64));
+    expect(parsed.success).toBe(true);
+    expect(parsed.network).toBe('base-sepolia');
+    await x402Server.stop();
+  });
 });
