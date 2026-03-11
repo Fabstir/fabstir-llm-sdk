@@ -105,6 +105,10 @@ export { X402Client } from './x402/X402Client';
 export { x402Fetch } from './x402/x402Fetch';
 export type { X402FetchClient, X402FetchBudgetTracker } from './x402/x402Fetch';
 
+// x402 host client
+export { X402HostClient } from './x402/X402HostClient';
+export type { X402HostClientOptions, InferenceRequest, InferenceResponse } from './x402/X402HostClient';
+
 // Export interfaces
 export * from './interfaces';
 export {

@@ -15,6 +15,7 @@ interface A2AClientPoolOptions {
 
 export class A2AClientPool {
   private readonly cardCache = new Map<string, A2AAgentCard>();
+  private readonly sessionTokens = new Map<string, string>();
   private readonly paymentHandler?: X402PaymentHandler;
   private readonly budgetTracker?: X402BudgetTracker;
 
@@ -62,9 +63,16 @@ export class A2AClientPool {
       signal: options?.signal,
     };
 
+    const cachedToken = this.sessionTokens.get(agentUrl);
+    if (cachedToken) {
+      fetchOptions.headers['Authorization'] = `Bearer session:${cachedToken}`;
+    }
+
     const response = await fetch(`${agentUrl}/a2a/jsonrpc`, fetchOptions);
 
     if (response.status === 402) {
+      // Clear stale session token
+      this.sessionTokens.delete(agentUrl);
       if (!this.paymentHandler) {
         throw new Error('x402 payment required but no handler configured');
       }
@@ -84,6 +92,17 @@ export class A2AClientPool {
         throw new Error(`x402 payment retry failed: ${retryResponse.status}`);
       }
       this.budgetTracker?.recordSpend(req.maxAmountRequired);
+
+      const paymentResponseHeader = retryResponse.headers?.get?.('X-PAYMENT-RESPONSE');
+      if (paymentResponseHeader) {
+        try {
+          const paymentResponse = JSON.parse(atob(paymentResponseHeader));
+          if (paymentResponse.sessionToken) {
+            this.sessionTokens.set(agentUrl, paymentResponse.sessionToken);
+          }
+        } catch { /* ignore parse errors */ }
+      }
+
       return this.parseResult(retryResponse, body.params.id, agentUrl);
     }
 

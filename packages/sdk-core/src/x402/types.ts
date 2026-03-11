@@ -47,6 +47,7 @@ export interface X402PaymentResponse {
   network: string;
   payer?: string;
   errorReason?: string;
+  sessionToken?: string;  // V2 session token for reuse
 }
 
 /** Server-side pricing configuration */

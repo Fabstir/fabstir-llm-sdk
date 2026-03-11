@@ -9,6 +9,7 @@ import type { A2AAgentCard } from '../types';
 import type { X402PricingConfig, X402PaymentResponse } from '../../x402/types';
 import { decodeX402Payment, validatePayloadFields } from '../../x402/server/X402PaymentGate';
 import { X402PaymentValidator } from '../../x402/server/X402PaymentValidator';
+import { X402SessionManager } from '../../x402/server/X402SessionManager';
 
 export interface A2AServerOptions {
   publicUrl: string;
@@ -18,6 +19,8 @@ export interface A2AServerOptions {
   x402Pricing?: X402PricingConfig;
   x402Signer?: any;
   x402UsdcAddress?: string;
+  x402SessionDurationSec?: number;
+  x402MaxRequestsPerSession?: number;
 }
 
 interface RouteEntry {
@@ -35,6 +38,7 @@ export class OrchestratorA2AServer {
   private readonly executor: OrchestratorExecutor;
   private readonly activeTasks = new Map<string, AbortController>();
   private readonly validator: X402PaymentValidator | null = null;
+  private readonly sessionManager: X402SessionManager | null = null;
   private server: Server | null = null;
   private jwtVerifier: (token: string) => boolean = () => false;
 
@@ -55,6 +59,10 @@ export class OrchestratorA2AServer {
       this.validator = new X402PaymentValidator(options.x402Signer, options.x402UsdcAddress);
     }
 
+    if (options.x402Pricing && (options.x402SessionDurationSec || options.x402MaxRequestsPerSession)) {
+      this.sessionManager = new X402SessionManager();
+    }
+
     this.setupRoutes();
   }
 
@@ -71,30 +79,53 @@ export class OrchestratorA2AServer {
       let settlementResult: X402PaymentResponse | null = null;
 
       if (x402Cfg) {
-        const paymentHeader = req.headers['x-payment'] as string | undefined;
-        if (paymentHeader) {
-          let payload;
-          try {
-            payload = decodeX402Payment(paymentHeader);
-            validatePayloadFields(payload, x402Cfg);
-          } catch {
-            res.status(402).json({ x402Version: 1, accepts: this.card.x402!.accepts, error: 'Invalid payment' });
-            return;
+        // Check for session token first
+        const authHeader = req.headers.authorization;
+        if (authHeader?.startsWith('Bearer session:') && this.sessionManager) {
+          const sessionToken = authHeader.slice('Bearer session:'.length);
+          if (this.sessionManager.consumeRequest(sessionToken)) {
+            paidViaX402 = true;
           }
-          if (this.validator) {
-            const result = await this.validator.validate(payload);
-            if (!result.success) {
-              res.status(402).json({ x402Version: 1, accepts: this.card.x402!.accepts, error: result.errorReason });
+          // Session invalid/expired, fall through to payment
+        }
+
+        if (!paidViaX402) {
+          const paymentHeader = req.headers['x-payment'] as string | undefined;
+          if (paymentHeader) {
+            let payload;
+            try {
+              payload = decodeX402Payment(paymentHeader);
+              validatePayloadFields(payload, x402Cfg);
+            } catch {
+              res.status(402).json({ x402Version: 1, accepts: this.card.x402!.accepts, error: 'Invalid payment' });
               return;
             }
-            settlementResult = result;
-          }
-          paidViaX402 = true;
-        } else {
-          const authHeader = req.headers.authorization;
-          if (!authHeader || !authHeader.startsWith('Bearer ') || !this.jwtVerifier(authHeader.slice(7))) {
-            res.status(402).json({ x402Version: 1, accepts: this.card.x402!.accepts, error: 'Payment required' });
-            return;
+            if (this.validator) {
+              const result = await this.validator.validate(payload);
+              if (!result.success) {
+                res.status(402).json({ x402Version: 1, accepts: this.card.x402!.accepts, error: result.errorReason });
+                return;
+              }
+              settlementResult = result;
+            }
+            paidViaX402 = true;
+
+            if (this.sessionManager) {
+              const sessionResult = this.sessionManager.createSession(
+                payload.payload.authorization.from,
+                payload.payload.authorization.value,
+                this.options.x402SessionDurationSec ?? 3600,
+                this.options.x402MaxRequestsPerSession,
+              );
+              if (!settlementResult) settlementResult = { success: true, network: x402Cfg!.network };
+              (settlementResult as any).sessionToken = sessionResult.token;
+            }
+          } else {
+            const jwtAuthHeader = req.headers.authorization;
+            if (!jwtAuthHeader || !jwtAuthHeader.startsWith('Bearer ') || !this.jwtVerifier(jwtAuthHeader.slice(7))) {
+              res.status(402).json({ x402Version: 1, accepts: this.card.x402!.accepts, error: 'Payment required' });
+              return;
+            }
           }
         }
       } else {
@@ -204,5 +235,9 @@ export class OrchestratorA2AServer {
 
   setJwtVerifier(verifier: (token: string) => boolean): void {
     this.jwtVerifier = verifier;
+  }
+
+  getSessionManager(): X402SessionManager | null {
+    return this.sessionManager;
   }
 }

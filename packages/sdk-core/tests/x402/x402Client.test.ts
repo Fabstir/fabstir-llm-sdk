@@ -96,4 +96,23 @@ describe('X402Client', () => {
       /Buffer\.from/, /import\s+.*\s+from\s+['"]crypto['"]/, /import\s+.*\s+from\s+['"]buffer['"]/])
       expect(src).not.toMatch(pat);
   });
+
+  describe('parseSessionToken', () => {
+    it('returns null when no X-PAYMENT-RESPONSE header', () => {
+      const resp = { headers: { get: vi.fn().mockReturnValue(null) } };
+      expect(new X402Client(makeSigner(), USDC, CHAIN).parseSessionToken(resp)).toBeNull();
+    });
+
+    it('returns sessionToken when present in base64-encoded header', () => {
+      const data = { success: true, network: 'base-sepolia', sessionToken: 'abc-123-token' };
+      const resp = { headers: { get: vi.fn().mockReturnValue(btoa(JSON.stringify(data))) } };
+      expect(new X402Client(makeSigner(), USDC, CHAIN).parseSessionToken(resp)).toBe('abc-123-token');
+    });
+
+    it('returns null when no sessionToken in response', () => {
+      const data = { success: true, network: 'base-sepolia' };
+      const resp = { headers: { get: vi.fn().mockReturnValue(btoa(JSON.stringify(data))) } };
+      expect(new X402Client(makeSigner(), USDC, CHAIN).parseSessionToken(resp)).toBeNull();
+    });
+  });
 });

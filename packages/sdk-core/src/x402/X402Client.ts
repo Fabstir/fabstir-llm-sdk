@@ -60,4 +60,17 @@ export class X402Client {
     if (!header) return null;
     return JSON.parse(header) as X402PaymentResponse;
   }
+
+  parseSessionToken(response: {
+    headers: { get(name: string): string | null };
+  }): string | null {
+    const header = response.headers.get('X-PAYMENT-RESPONSE');
+    if (!header) return null;
+    try {
+      const parsed = JSON.parse(atob(header)) as X402PaymentResponse;
+      return parsed.sessionToken ?? null;
+    } catch {
+      return null;
+    }
+  }
 }
