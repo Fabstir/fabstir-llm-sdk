@@ -88,9 +88,9 @@ describe('SessionJobManager.createSessionForModelAsDelegate() (Feb 2026)', () =>
       params.paymentToken,
       params.amount,
       params.pricePerToken,
-      params.maxDuration,
-      params.proofInterval,
-      params.proofTimeoutWindow
+      BigInt(params.maxDuration),
+      BigInt(params.proofInterval),
+      BigInt(params.proofTimeoutWindow)
     );
   });
 
