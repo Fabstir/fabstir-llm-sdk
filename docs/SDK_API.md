@@ -27,6 +27,7 @@
 - [Error Handling](#error-handling)
 - [Types and Interfaces](#types-and-interfaces)
 - [Usage Examples](#usage-examples)
+- [Multi-Agent Orchestration](#multi-agent-orchestration-fabstirorchestrator)
 
 ## Overview
 
@@ -44,6 +45,9 @@ The Fabstir SDK provides a comprehensive interface for interacting with the Fabs
 - Base Account Kit for gasless transactions
 - Multi-chain support (Base Sepolia, opBNB testnet)
 - Chain-aware wallet providers (EOA and Smart Accounts)
+- Multi-agent orchestration with LLM-driven task decomposition
+- x402 HTTP payment protocol for agent-to-agent USDC micropayments
+- A2A protocol for agent discovery and delegation
 
 ## Multi-Chain Support
 
@@ -6015,6 +6019,152 @@ Based on treasury configuration (.env.test):
 - **Host**: 90% of payment (HOST_EARNINGS_PERCENTAGE)
 - **Treasury**: 10% of payment (TREASURY_FEE_PERCENTAGE)
 - **User**: Refund of unused deposit
+
+## Multi-Agent Orchestration (`@fabstir/orchestrator`)
+
+The orchestrator package coordinates multiple SDK sessions for complex, multi-step tasks using LLM-driven planning.
+
+### Installation
+
+```bash
+pnpm add @fabstir/orchestrator
+```
+
+### OrchestratorManager
+
+The main entry point for multi-agent orchestration.
+
+```typescript
+import { OrchestratorManager } from '@fabstir/orchestrator';
+
+const orchestrator = new OrchestratorManager({
+  sdk,                          // FabstirSDKCore instance
+  chainId: 84532,               // Base Sepolia
+  privateKey: '0x...',          // Or use signer for Account Kit
+  models: {
+    fast: 'fast-model',         // For simple analysis tasks
+    deep: 'deep-model',        // For reasoning/synthesis
+    planning: 'deep-model',    // For task decomposition
+  },
+  maxConcurrentSessions: 3,
+  budget: {
+    maxDepositPerSubTask: '0.003',
+    maxTotalDeposit: '0.01',
+    maxSubTasks: 5,
+  },
+});
+
+const result = await orchestrator.run('Analyze renewable energy pros and cons');
+// result.synthesis — Final combined answer
+// result.subTaskResults — Individual task outputs
+// result.totalTokensUsed — Token usage across all tasks
+await orchestrator.destroy();
+```
+
+### OrchestratorConfig
+
+```typescript
+interface OrchestratorConfig {
+  sdk: FabstirSDKCore;
+  chainId: number;
+  privateKey?: string;           // EOA authentication
+  signer?: SignerLike;           // Account Kit authentication
+  models: {
+    fast?: string;               // Quick tasks
+    deep?: string;               // Complex reasoning
+    planning?: string;           // Task decomposition
+  };
+  maxConcurrentSessions: number; // Pool size (>= 2)
+  budget: BudgetConfig;
+  proofGracePeriodMs?: number;   // Grace period for proof submission
+  x402?: X402Config;             // Optional x402 payment config
+}
+
+interface BudgetConfig {
+  maxDepositPerSubTask: string;  // USDC per task
+  maxTotalDeposit: string;       // Total USDC budget
+  maxSubTasks: number;           // Max parallel tasks
+}
+```
+
+### Orchestration Patterns
+
+Three reusable execution patterns:
+
+```typescript
+import { fanOut, pipeline, mapReduce } from '@fabstir/orchestrator';
+
+// Fan-out: N independent tasks in parallel
+const results = await fanOut(pool, tasks, options, signal);
+
+// Pipeline: Sequential, each receives prior result
+const result = await pipeline(pool, tasks, options, signal);
+
+// Map-reduce: Parallel mappers + single reducer
+const result = await mapReduce(pool, mapTasks, reduceTask, options, signal);
+```
+
+### Session Multiplexing
+
+SessionPool automatically caches sessions per model. When a subtask finishes, its session is cached instead of destroyed. The next subtask using the same model reuses it — no new deposit required.
+
+| Scenario | Sessions Before | After | Savings |
+|----------|----------------|-------|---------|
+| 1 plan + 3 tasks (2 fast, 1 deep) | 4 | 3 | 25% |
+| 1 plan + 4 tasks (2 fast, 2 deep) | 5 | 3 | 40% |
+| 1 plan + 5 tasks (all fast) | 6 | 2 | 67% |
+
+### A2A Protocol (Agent-to-Agent)
+
+#### Running as A2A Server
+
+```typescript
+import { OrchestratorA2AServer } from '@fabstir/orchestrator';
+
+const server = new OrchestratorA2AServer(orchestrator, { port: 3100 });
+await server.start();
+// GET  /.well-known/agent.json  — Agent discovery
+// POST /v1/orchestrate           — Execute orchestration
+// DELETE /v1/orchestrate/:taskId — Cancel task
+```
+
+#### Discovering External Agents
+
+```typescript
+import { AgentDiscovery, A2AClientPool } from '@fabstir/orchestrator';
+
+const discovery = new AgentDiscovery();
+await discovery.register('https://other-agent.example.com');
+const agents = discovery.findBySkill('code-review');
+```
+
+### x402 Payment Protocol
+
+HTTP-native USDC micropayments between agents using EIP-3009 `transferWithAuthorization`.
+
+#### Server (receiving payments)
+
+```typescript
+import { x402PaymentGate, X402PaymentValidator } from '@fabstir/orchestrator';
+
+// Express middleware — returns 402 if payment missing
+app.use('/v1/orchestrate', x402PaymentGate({
+  pricing: { amount: '0.01', currency: 'USDC', network: 'base-sepolia' },
+  payTo: '0xYourAddress',
+}));
+```
+
+#### Client (sending payments)
+
+```typescript
+import { X402PaymentHandler, X402BudgetTracker } from '@fabstir/orchestrator';
+
+const handler = new X402PaymentHandler(signerProvider, usdcAddress);
+const budget = new X402BudgetTracker(1.0); // $1 max spend
+
+// Automatically handles 402 responses
+const header = await handler.createPaymentHeader(paymentRequirements);
+```
 
 ## Support
 

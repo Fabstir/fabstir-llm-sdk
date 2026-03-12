@@ -14,6 +14,7 @@ export class SessionPool {
   private available: number;
   private readonly waitQueue: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
   private readonly active: Set<PoolEntry> = new Set();
+  private readonly cached = new Map<string, PoolEntry>();
   private txQueue: Promise<void> = Promise.resolve();
   private totalDeposit = 0;
   private readonly pendingSettlements: Promise<void>[] = [];
@@ -80,12 +81,20 @@ export class SessionPool {
     adapterConfig: SessionAdapterConfig,
     signal?: AbortSignal,
   ): Promise<{ adapter: SessionAdapter; session: OrchestratorSession }> {
-    const depositNum = parseFloat(adapterConfig.depositAmount);
-    if (this.totalDeposit + depositNum > parseFloat(this.config.budget.maxTotalDeposit)) {
-      throw new Error(`Budget exceeded: total deposit would be ${this.totalDeposit + depositNum}, max is ${this.config.budget.maxTotalDeposit}`);
+    await this.waitForSlot(signal);
+
+    const cachedEntry = this.cached.get(model);
+    if (cachedEntry) {
+      this.cached.delete(model);
+      this.active.add(cachedEntry);
+      return { adapter: cachedEntry.adapter, session: cachedEntry.session };
     }
 
-    await this.waitForSlot(signal);
+    const depositNum = parseFloat(adapterConfig.depositAmount);
+    if (this.totalDeposit + depositNum > parseFloat(this.config.budget.maxTotalDeposit)) {
+      this.releaseSlot();
+      throw new Error(`Budget exceeded: total deposit would be ${this.totalDeposit + depositNum}, max is ${this.config.budget.maxTotalDeposit}`);
+    }
 
     try {
       const sdk = new FabstirSDKCore({
@@ -116,16 +125,24 @@ export class SessionPool {
   }
 
   async release(adapter: SessionAdapter, session: OrchestratorSession): Promise<void> {
-    // End WebSocket and free slot immediately so orchestrator can proceed
+    // Find and remove entry from active set
+    let matched: PoolEntry | undefined;
+    for (const entry of this.active) {
+      if (entry.adapter === adapter) { matched = entry; break; }
+    }
+    if (matched) this.active.delete(matched);
+
+    // Cache for reuse if no entry cached for this model — keep session alive
+    if (matched && !this.cached.has(session.model)) {
+      this.cached.set(session.model, matched);
+      this.releaseSlot();
+      return;
+    }
+
+    // Duplicate or no match — destroy session fully
     try {
       await adapter.endSession(session.sessionId);
     } finally {
-      for (const entry of this.active) {
-        if (entry.adapter === adapter) {
-          this.active.delete(entry);
-          break;
-        }
-      }
       this.releaseSlot();
     }
 
@@ -153,6 +170,16 @@ export class SessionPool {
     // Wait for any deferred settlements to complete
     await Promise.all(this.pendingSettlements);
     this.pendingSettlements.length = 0;
+
+    // Clean up cached sessions — end and settle each one
+    for (const [, entry] of this.cached) {
+      try {
+        const pm = entry.adapter.getSDK().getPaymentManager() as any;
+        await pm.completeSessionJob(Number(entry.session.jobId), '', entry.session.chainId).catch(() => {});
+      } catch {}
+      try { await entry.adapter.endSession(entry.session.sessionId); } catch {}
+    }
+    this.cached.clear();
 
     const entries = [...this.active];
     for (const entry of entries) {

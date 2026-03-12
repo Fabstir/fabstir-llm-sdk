@@ -13,6 +13,7 @@ The Fabstir LLM SDK is a modular TypeScript/JavaScript SDK that enables applicat
 │   ├── sdk-node/        # Node.js specific features (P2P, libp2p)
 │   ├── sdk-client/      # Client utilities
 │   ├── host-cli/        # CLI for host providers
+│   ├── orchestrator/    # Multi-agent orchestration with A2A and x402
 │   └── s5js/            # Enhanced S5 storage (symlinked)
 ├── apps/
 │   └── harness/         # Test harness Next.js application
@@ -165,6 +166,54 @@ The SDK uses a manager pattern where each manager handles a specific domain:
   - Permission grants and revocations
   - Group-level access management
 
+### 2b. Orchestrator Package (`@fabstir/orchestrator`)
+
+Multi-agent orchestration layer that coordinates multiple SDK sessions for complex tasks.
+
+#### **OrchestratorManager** (`/core/OrchestratorManager.ts`)
+- Top-level coordinator for multi-agent workflows
+- Manages: SessionPool, ModelRouter, TaskQueue, ProofCollector
+- LLM-driven task decomposition via planning session
+- Result synthesis from parallel subtask execution
+
+#### **SessionPool** (`/core/SessionPool.ts`)
+- Semaphore-based concurrency control for parallel sessions
+- Per-model session caching (session multiplexing) to reduce deposits
+- Transaction mutex for safe blockchain nonce ordering
+- Budget enforcement: per-task and total deposit limits
+
+#### **SessionAdapter** (`/core/SessionAdapter.ts`)
+- Clean abstraction wrapping FabstirSDKCore for session lifecycle
+- Methods: createSession(), sendPrompt(), endSession()
+- End-to-end encryption by default
+
+#### **ModelRouter** (`/core/ModelRouter.ts`)
+- Intelligent task-to-model assignment based on complexity
+- Routes: tool-calling/synthesis → deep model, small analysis → fast model
+
+#### **TaskPlanner** (`/core/TaskPlanner.ts`)
+- LLM-driven goal decomposition into dependency DAG
+- JSON-based task graph with blockedBy dependencies
+
+#### **Orchestration Patterns**
+- **FanOut** — Execute N independent tasks in parallel
+- **Pipeline** — Sequential execution, each task receives prior result
+- **MapReduce** — Parallel map phase + single reduce synthesis
+
+#### **A2A Protocol** (Agent-to-Agent)
+- **OrchestratorA2AServer** — Express HTTP server exposing orchestrator as discoverable agent
+- **A2AClientPool** — Discover and delegate to external agents
+- **AgentDiscovery** — Skill-based agent registry and lookup
+- **SSEEventBus** — Server-Sent Events for progress streaming
+
+#### **x402 Payment Protocol**
+- HTTP-native USDC micropayments between agents (EIP-3009)
+- **X402PaymentGate** — Express middleware validating X-PAYMENT headers
+- **X402PaymentValidator** — On-chain settlement via transferWithAuthorization
+- **X402PaymentHandler** — Client-side EIP-712 signed payment headers
+- **X402BudgetTracker** — Outbound spending limits enforcement
+- **X402SessionManager** — One-time payment → reusable session tokens
+
 ### 3. Contract Integration
 
 The SDK interacts with smart contracts deployed on Base Sepolia (and future chains):
@@ -249,6 +298,26 @@ Features:
    ├─ Close WebSocket only
    ├─ Host submits completion
    └─ Automatic settlement
+```
+
+### 8. Orchestration Flow
+
+```
+1. Plan
+   ├─ OrchestratorManager acquires planning session
+   ├─ TaskPlanner.decompose() breaks goal into TaskGraph
+   └─ ModelRouter assigns model per task
+
+2. Execute
+   ├─ TaskQueue tracks dependency DAG
+   ├─ SessionPool provides concurrent sessions (with multiplexing)
+   ├─ Patterns (FanOut/Pipeline/MapReduce) coordinate execution
+   └─ A2AClientPool delegates to external agents if needed
+
+3. Synthesize
+   ├─ TaskPlanner.synthesise() combines all results
+   ├─ ProofCollector accumulates proof CIDs
+   └─ SessionPool.destroy() cleans up all sessions
 ```
 
 ## Data Flow
@@ -389,6 +458,9 @@ For detailed implementation status, see [docs/IMPLEMENTATION_CHAT_RAG.md](IMPLEM
 5. **Streaming-First**: Real-time token streaming over WebSocket
 6. **Decentralized Storage**: S5 for persistence without central servers
 7. **Host-Side RAG**: Vector storage and search on host nodes for performance and privacy
+8. **Session Multiplexing**: Reuse blockchain sessions per model to minimize deposit burden
+9. **A2A Interoperability**: Agents discover and delegate to each other via standard protocol
+10. **x402 Payments**: HTTP-native micropayments eliminate pre-funding requirements
 
 ## Testing Architecture
 
@@ -482,6 +554,7 @@ Core dependencies:
 
 ## Version History
 
+- **v0.5.0** - Orchestrator package: multi-agent, A2A, x402 payments, session multiplexing
 - **v1.8.6+** - Current version: 13 managers, multi-chain, encryption by default, RAG, marketplace pricing
 - **v1.0.10** - Gasless session ending
 - **v1.0.0** - Initial refactored architecture

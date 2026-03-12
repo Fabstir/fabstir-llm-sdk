@@ -410,6 +410,32 @@ Multiple sessions can be multiplexed over a single WebSocket connection:
 }
 ```
 
+### Orchestrator Session Pooling
+
+The `@fabstir/orchestrator` package manages multiple concurrent WebSocket sessions for multi-agent workflows. Each subtask gets its own session from a `SessionPool`, with automatic session multiplexing per model.
+
+```
+Orchestrator                    Host Nodes
+    │
+    ├─ Planning Session ──────→ Host A (deep model)
+    │     decompose() + synthesise()
+    │
+    ├─ Subtask 1 Session ─────→ Host B (fast model)  ← cached for reuse
+    │     sendPrompt()
+    │
+    ├─ Subtask 2 Session ─────→ Host C (deep model)
+    │     sendPrompt()
+    │
+    └─ Subtask 3 ─────────────→ Reuses Subtask 1 session (same model)
+          sendPrompt()           No new deposit required
+```
+
+Key behaviors:
+- Sessions are acquired from the pool with concurrency limits (semaphore)
+- Released sessions are cached per model for reuse by subsequent subtasks
+- All sessions use end-to-end encryption by default
+- `SessionPool.destroy()` cleans up all cached and active sessions
+
 ## Connection Management
 
 ### Reconnection Strategy
@@ -849,3 +875,5 @@ class MockLLMServer {
 - [Encryption Guide](./ENCRYPTION_GUIDE.md)
 - [WebSocket API & SDK Integration Guide](./node-reference/WEBSOCKET_API_SDK_GUIDE.md)
 - [Node API Reference](./node-reference/API.md)
+- [Session Multiplexing](./IMPLEMENTATION-SESSION-MULTIPLEXING.md) - Session reuse optimization
+- [Orchestrator Architecture](../packages/orchestrator/README.md) - Multi-agent orchestration

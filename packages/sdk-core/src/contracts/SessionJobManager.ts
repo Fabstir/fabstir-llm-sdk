@@ -600,9 +600,9 @@ export class SessionJobManager {
       paymentToken,
       amount,
       pricePerToken,
-      maxDuration,
-      proofInterval,
-      proofTimeoutWindow
+      BigInt(maxDuration),
+      BigInt(proofInterval),
+      BigInt(proofTimeoutWindow)
     );
 
     const receipt = await tx.wait(3);
