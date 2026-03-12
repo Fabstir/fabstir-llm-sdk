@@ -17,6 +17,10 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 - 🛡️ **Error Recovery** - Automatic retries and failover to ensure reliability
 - 🔌 **Browser Compatible** - Works in both Node.js and browser environments
 - 🤖 **OpenAI-Compatible Bridge** - Drop-in replacement API for any OpenAI SDK client (Cursor, Continue, OpenCode, LangChain)
+- 🎯 **Multi-Agent Orchestration** - Task decomposition, parallel execution, and result synthesis
+- 💸 **x402 Payment Protocol** - HTTP-native USDC micropayments between agents (EIP-3009)
+- 🤝 **A2A Protocol Support** - Agent discovery, delegation, and SSE streaming
+- 🔀 **Session Multiplexing** - Reuse blockchain sessions per model to reduce deposit costs
 
 ## Quick Start
 
@@ -204,6 +208,31 @@ Supports:
 
 See [packages/openai-bridge/](packages/openai-bridge/) for full documentation and CLI options.
 
+### Multi-Agent Orchestration
+
+Decompose complex tasks across multiple LLM sessions with automatic parallel execution, budget control, and result synthesis:
+
+```typescript
+import { OrchestratorManager } from '@fabstir/orchestrator';
+import { FabstirSDKCore } from '@fabstir/sdk-core';
+
+const sdk = new FabstirSDKCore({ /* chain config */ });
+await sdk.authenticate(privateKey);
+
+const orchestrator = new OrchestratorManager({
+  sdk,
+  chainId: 84532,
+  privateKey,
+  models: { fast: 'fast-model', deep: 'deep-model', planning: 'deep-model' },
+  maxConcurrentSessions: 3,
+  budget: { maxDepositPerSubTask: '0.003', maxTotalDeposit: '0.01', maxSubTasks: 5 },
+});
+
+const result = await orchestrator.run('Analyze the pros and cons of renewable energy');
+console.log(result.synthesis);
+await orchestrator.destroy();
+```
+
 ## Installation
 
 ### Development Setup
@@ -222,6 +251,7 @@ cd packages/sdk-core && pnpm build
 
 ```bash
 pnpm add @fabstir/sdk-core
+pnpm add @fabstir/orchestrator
 ```
 
 ### Prerequisites
@@ -270,6 +300,9 @@ await sdk.authenticate(privateKey);
 - [Node Reference](docs/node-reference/API.md) - Host node API
 - [Host CLI Reference](packages/host-cli/docs/API_REFERENCE.md) - Host CLI commands
 - [OpenAI Bridge](packages/openai-bridge/) - OpenAI-compatible API bridge
+- [Orchestrator Guide](packages/orchestrator/README.md) - Multi-agent orchestration
+- [x402 Payment Protocol](docs/EXECUTION-X402-PAYMENTS.md) - HTTP micropayments
+- [Session Multiplexing](docs/IMPLEMENTATION-SESSION-MULTIPLEXING.md) - Session reuse optimization
 
 ## Examples
 

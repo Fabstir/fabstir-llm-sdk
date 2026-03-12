@@ -135,17 +135,17 @@ screenshots/
 docs/devops/
 fabstir-llm-node-releases/
 
-docs/fabstir-vectordb-reference/
-docs/s5js-reference/
-docs/node-reference/
+docs/archive/
+docs/auth-reference/
 docs/compute-contracts-reference/
-docs/ui4-reference/
-docs/ui5-reference/
 docs/development/
-docs/platformless-ui/
 docs/fabstir-vectordb-reference/
 docs/implementation-history/
-docs/auth-reference/
-docs/archive/
+docs/node-reference/
+docs/platformless-ui/
+docs/s5js-reference/
+docs/ui4-reference/
+docs/ui5-reference/
 docs/audit/
 docs/transcode-reference/
+
