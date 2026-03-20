@@ -342,4 +342,14 @@ export interface ITranscodeManager {
       timestamp: number;
     }>
   >;
+
+  /**
+   * Check if a host supports video/audio transcoding
+   */
+  isTranscodingAvailable(hostUrl: string): Promise<boolean>;
+
+  /**
+   * Check if a host supports trustless transcoding verification (PSNR/SSIM quality metrics)
+   */
+  isTrustlessAvailable(hostUrl: string): Promise<boolean>;
 }

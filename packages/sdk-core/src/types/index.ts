@@ -514,3 +514,7 @@ export * from './proof.types';
 // ============= Image Generation Types =============
 
 export * from './image-generation.types';
+
+// ============= Transcoding Types =============
+
+export * from './transcode.types';

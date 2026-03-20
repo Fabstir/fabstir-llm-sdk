@@ -29,10 +29,10 @@ export async function submitTranscodeWs(opts: TranscodeWsOptions): Promise<Trans
   const { wsClient, encryptionManager, sessionId, sessionKey, messageIndex,
     sourceCid, formats, isEncrypted = true, isGpu, jobId, chainId, onProgress, timeoutMs = 300000 } = opts;
 
-  const inner: Record<string, unknown> = { action: 'transcode', source_cid: sourceCid, formats, is_encrypted: isEncrypted };
-  if (isGpu !== undefined) inner.is_gpu = isGpu;
-  if (jobId !== undefined) inner.job_id = jobId;
-  if (chainId !== undefined) inner.chain_id = chainId;
+  const inner: Record<string, unknown> = { action: 'transcode', sourceCid, mediaFormats: formats, isEncrypted };
+  if (isGpu !== undefined) inner.isGpu = isGpu;
+  if (jobId !== undefined) inner.jobId = jobId;
+  if (chainId !== undefined) inner.chainId = chainId;
 
   const encrypted = encryptionManager.encryptMessage(sessionKey, JSON.stringify(inner), messageIndex.value++);
   const envelope = {
@@ -64,7 +64,7 @@ export async function submitTranscodeWs(opts: TranscodeWsOptions): Promise<Trans
           handle.taskId = resolvedTaskId;
         } else if (msg.type === 'transcode_progress' && onProgress) {
           const g = msg.gopInfo;
-          onProgress(msg.progress, g ? { currentGop: g.current_gop, totalGops: g.total_gops, elapsedSeconds: g.elapsed_seconds } : undefined);
+          onProgress(msg.progress, g ? { currentGop: g.currentGop, totalGops: g.totalGops, elapsedSeconds: g.elapsedSeconds } : undefined);
         } else if (msg.type === 'transcode_complete') {
           const qm = msg.qualityMetrics;
           safeResolve({
@@ -73,7 +73,8 @@ export async function submitTranscodeWs(opts: TranscodeWsOptions): Promise<Trans
             proofTreeCID: msg.proofTreeCID ?? null, proofTreeRootHash: msg.proofTreeRootHash ?? null,
           });
         } else if (msg.type === 'transcode_error') {
-          safeReject(new Error(msg.error || 'Transcode failed'));
+          const errMsg = typeof msg.error === 'string' ? msg.error : msg.error?.message || 'Transcode failed';
+          safeReject(new Error(errMsg));
         }
       } catch (err: any) { if (!isSettled) safeReject(err); }
     });

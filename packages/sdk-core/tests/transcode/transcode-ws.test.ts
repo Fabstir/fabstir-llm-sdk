@@ -36,8 +36,8 @@ describe('submitTranscodeWs', () => {
     await vi.waitFor(() => expect(m.enc.encryptMessage).toHaveBeenCalled());
     const parsed = JSON.parse(m.enc.encryptMessage.mock.calls[0][1]);
     expect(parsed.action).toBe('transcode');
-    expect(parsed.source_cid).toBe('uEiBmSrc');
-    expect(parsed.formats).toEqual([{ id: 1, ext: 'mp4', vcodec: 'libx264' }]);
+    expect(parsed.sourceCid).toBe('uEiBmSrc');
+    expect(parsed.mediaFormats).toEqual([{ id: 1, ext: 'mp4', vcodec: 'libx264' }]);
   });
 
   it('sends encrypted_message envelope with session_id', async () => {
@@ -58,7 +58,7 @@ describe('submitTranscodeWs', () => {
   it('calls onProgress with progress and gopInfo', async () => {
     const onProgress = vi.fn();
     await submitTranscodeWs(baseOpts(m.ws, m.enc, { onProgress }));
-    m.messageHandler(encResp({ type: 'transcode_progress', taskId: 'task-1', progress: 45, gopInfo: { current_gop: 27, total_gops: 60, elapsed_seconds: 18.5 } }));
+    m.messageHandler(encResp({ type: 'transcode_progress', taskId: 'task-1', progress: 45, gopInfo: { currentGop: 27, totalGops: 60, elapsedSeconds: 18.5 } }));
     expect(onProgress).toHaveBeenCalledWith(45, { currentGop: 27, totalGops: 60, elapsedSeconds: 18.5 });
   });
 
@@ -83,7 +83,7 @@ describe('submitTranscodeWs', () => {
 
   it('rejects on transcode_error', async () => {
     const h = await submitTranscodeWs(baseOpts(m.ws, m.enc));
-    m.messageHandler(encResp({ type: 'transcode_error', taskId: 'task-1', error: 'Codec not supported', code: 'CODEC_ERROR' }));
+    m.messageHandler(encResp({ type: 'transcode_error', taskId: 'task-1', error: { code: 'CODEC_ERROR', message: 'Codec not supported' } }));
     await expect(h.result).rejects.toThrow('Codec not supported');
   });
 
@@ -100,7 +100,7 @@ describe('submitTranscodeWs', () => {
     submitTranscodeWs(baseOpts(m.ws, m.enc, { timeoutMs: 500 }));
     await vi.waitFor(() => expect(m.enc.encryptMessage).toHaveBeenCalled());
     const parsed = JSON.parse(m.enc.encryptMessage.mock.calls[0][1]);
-    expect(parsed.is_encrypted).toBe(true);
+    expect(parsed.isEncrypted).toBe(true);
   });
 });
 

@@ -16,7 +16,8 @@ import {
   IStorageManager,
   ISessionManager,
   IHostManager,
-  ITreasuryManager
+  ITreasuryManager,
+  ITranscodeManager
 } from './interfaces';
 import { IVectorRAGManager } from './managers/interfaces/IVectorRAGManager';
 import { IWalletProvider } from './interfaces/IWalletProvider';
@@ -35,6 +36,7 @@ import { ModelManager } from './managers/ModelManager';
 import { TreasuryManager } from './managers/TreasuryManager';
 import { ClientManager } from './managers/ClientManager';
 import { EncryptionManager } from './managers/EncryptionManager';
+import { TranscodeManager } from './managers/TranscodeManager';
 import { VectorRAGManager } from './managers/VectorRAGManager';
 import { SessionGroupManager } from './managers/SessionGroupManager';
 import { SessionGroupStorage } from './storage/SessionGroupStorage';
@@ -124,7 +126,8 @@ export class FabstirSDKCore extends EventEmitter {
   private encryptionManager?: EncryptionManager;
   private vectorRAGManager?: IVectorRAGManager;
   private sessionGroupManager?: SessionGroupManager;
-  
+  private transcodeManager?: TranscodeManager;
+
   private authenticated = false;
   private s5Seed?: string;
   private userAddress?: string;
@@ -772,6 +775,14 @@ export class FabstirSDKCore extends EventEmitter {
       } else if (!hostOnly) {
         console.warn('VectorRAGManager initialization skipped: missing userAddress or s5Seed');
       }
+
+      // Initialize TranscodeManager (needs sessionManager, storageManager, contractManager, encryptionManager)
+      if (!hostOnly && this.sessionManager && this.storageManager && this.contractManager && this.encryptionManager) {
+        this.transcodeManager = new TranscodeManager(
+          this.sessionManager, this.storageManager, this.contractManager,
+          this.encryptionManager, this.signer!, this.currentChainId,
+        );
+      }
     }
 
     // Initialize bridge client if configured
@@ -868,6 +879,14 @@ export class FabstirSDKCore extends EventEmitter {
   getSessionGroupManager(): SessionGroupManager {
     this.ensureAuthenticated();
     return this.sessionGroupManager!;
+  }
+
+  getTranscodeManager(): ITranscodeManager {
+    this.ensureAuthenticated();
+    if (!this.transcodeManager) {
+      throw new SDKError('TranscodeManager not initialized', 'TRANSCODE_NOT_AVAILABLE');
+    }
+    return this.transcodeManager;
   }
 
   /**
@@ -1159,7 +1178,8 @@ export class FabstirSDKCore extends EventEmitter {
     this.clientManager = undefined;
     this.treasuryManager = undefined;
     this.vectorRAGManager = undefined;
-    
+    this.transcodeManager = undefined;
+
     // Clear auth state
     this.provider = undefined;
     this.signer = undefined;

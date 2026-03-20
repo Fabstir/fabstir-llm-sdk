@@ -16,3 +16,4 @@ export { IP2PService, P2PNode, P2PMessage, P2PDiscoveryResult } from './IP2PServ
 export * from './IEncryptionManager';
 export { IPermissionManager } from './IPermissionManager';
 export * from './IHostSelectionService';
+export { ITranscodeManager } from './ITranscodeManager';
