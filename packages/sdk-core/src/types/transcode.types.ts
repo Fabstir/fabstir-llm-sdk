@@ -45,6 +45,7 @@ export enum Resolution {
 export enum Codec {
   H264 = 0,
   AV1 = 1,
+  HEVC = 2,
 }
 
 /**
@@ -88,7 +89,7 @@ export interface TranscodeFormatSpec {
 
   output: {
     video: {
-      codec: 'h264' | 'av1';
+      codec: 'h264' | 'av1' | 'hevc';
       profile?: string; // e.g., 'main', 'high'
       level?: string; // e.g., '4.0', '5.1'
       resolution: {
@@ -176,8 +177,8 @@ export interface HostTranscodeCapabilities {
  */
 export interface GOPProof {
   gopIndex: number;
-  inputGOPHash: string; // Blake3 hash
-  outputGOPHash: string; // Blake3 hash
+  inputGOPHash: string; // keccak256 hash
+  outputGOPHash: string; // keccak256 hash
   psnrDB: number; // PSNR in dB
   ssim?: number; // SSIM (0.0-1.0)
   actualBitrate: number; // kbps
@@ -201,7 +202,75 @@ export interface QualityMetrics {
   psnrDB: number; // Peak Signal-to-Noise Ratio
   ssim?: number; // Structural Similarity Index
   actualBitrate: number; // Achieved bitrate
-  averageGOPSize: number; // Average GOP size in frames
+  averageGOPSize?: number; // Average GOP size in frames
+}
+
+/**
+ * Node's ffmpeg-oriented format specification (sent to node as mediaFormats)
+ */
+export interface VideoFormat {
+  id: number;
+  ext: string;
+  label?: string;
+  type?: string;
+  vcodec?: string;
+  acodec?: string;
+  preset?: string;
+  profile?: string;
+  ch?: number;
+  vf?: string;
+  b_v?: string;
+  ar?: string;
+  b_a?: string;
+  c_a?: string;
+  minrate?: string;
+  maxrate?: string;
+  bufsize?: string;
+  gpu?: boolean;
+  compression_level?: number;
+  dest?: string;
+  encrypt?: boolean;
+}
+
+/**
+ * Single transcoded output with S5 CID
+ */
+export interface TranscodedOutput {
+  id: number;
+  ext: string;
+  cid: string;
+  [key: string]: unknown;
+}
+
+/**
+ * GOP progress info from WebSocket
+ */
+export interface GOPInfo {
+  currentGop: number;
+  totalGops: number;
+  elapsedSeconds: number;
+}
+
+/**
+ * WebSocket transcode result (distinct from on-chain TranscodeJobResult)
+ */
+export interface TranscodeResult {
+  taskId: string;
+  outputs: TranscodedOutput[];
+  billing: { units: number; tokens: number };
+  duration: number;
+  qualityMetrics: QualityMetrics | null;
+  proofTreeCID: string | null;
+  proofTreeRootHash: string | null;
+}
+
+/**
+ * Handle returned by submitTranscodeWs for controlling a transcode job
+ */
+export interface TranscodeHandle {
+  taskId: string;
+  cancel(): void;
+  result: Promise<TranscodeResult>;
 }
 
 /**
@@ -210,7 +279,8 @@ export interface QualityMetrics {
 export interface CreateTranscodeJobParams {
   hostAddress: string;
   inputCID: string; // S5 CID of source video
-  formatSpec: TranscodeFormatSpec;
+  mediaFormats: VideoFormat[]; // Required — sent to node
+  formatSpec?: TranscodeFormatSpec; // Optional — for future contract format spec registration
   maxDuration: number; // Max job duration in seconds
   proofInterval: number; // GOPs between proof submissions
   chainId: number;
