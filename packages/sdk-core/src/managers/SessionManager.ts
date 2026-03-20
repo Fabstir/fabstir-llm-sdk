@@ -59,6 +59,8 @@ import { ImageGenerationError } from '../errors/image-generation-errors';
 import { ImageGenerationRateLimiter } from '../utils/image-generation-rate-limiter';
 import { generateImageWs } from '../utils/image-generation-ws';
 import { generateImageHttp } from '../utils/image-generation-http';
+import { submitTranscodeWs } from '../utils/transcode-ws';
+import type { VideoFormat, TranscodeHandle, TranscodeSubmitOptions } from '../types/transcode.types';
 
 /**
  * Check if a string is a bytes32 hash (0x + 64 hex chars)
@@ -3725,6 +3727,59 @@ export class SessionManager implements ISessionManager {
       console.error(`[SDK:generateImage:19] generateImageWs FAILED: ${err.message}`, err);
       throw err;
     }
+  }
+
+  /** Submit a transcode job via encrypted WebSocket (mirrors generateImage pattern). */
+  async submitTranscode(
+    sessionId: string, sourceCid: string, formats: VideoFormat[], options?: TranscodeSubmitOptions
+  ): Promise<TranscodeHandle> {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
+    if (session.status !== 'active') throw new SDKError('Session is not active', 'SESSION_NOT_ACTIVE');
+    if (!this.encryptionManager) throw new SDKError('EncryptionManager not available', 'ENCRYPTION_NOT_AVAILABLE');
+
+    // Lazy WS init (same pattern as generateImage)
+    const endpoint = session.endpoint || 'http://localhost:8080';
+    const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
+      ? endpoint : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
+
+    if (this.wsClient && this.wsSessionId && this.wsSessionId !== sessionId) {
+      try { await this.wsClient.disconnect(); } catch (_) { /* ignore */ }
+      this.wsClient = undefined; this.wsSessionId = undefined;
+      this.sessionKey = undefined; this.messageIndex = 0;
+    }
+    if (!this.wsClient || !this.wsClient.isConnected()) {
+      this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+      await this.wsClient.connect();
+      this.wsSessionId = sessionId;
+    }
+
+    if (!this.sessionKey) {
+      await this.sendEncryptedInit(this.wsClient, {
+        chainId: session.chainId, host: session.provider, modelId: session.model,
+        endpoint: session.endpoint, paymentMethod: 'deposit', encryption: true,
+      } as ExtendedSessionConfig, session.sessionId, session.jobId);
+    }
+    if (!this.sessionKey) throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
+
+    const messageIndexRef = { value: this.messageIndex };
+    const handle = await submitTranscodeWs({
+      wsClient: this.wsClient,
+      encryptionManager: {
+        encryptMessage: (key: Uint8Array, plaintext: string, index: number) =>
+          this.encryptionManager!.encryptMessage(key, plaintext, index),
+        decryptMessage: (key: Uint8Array, payload: any) => {
+          const p = payload.payload || payload;
+          return this.encryptionManager!.decryptMessage(key, p);
+        },
+      },
+      sessionId, sessionKey: this.sessionKey, messageIndex: messageIndexRef,
+      sourceCid, formats, jobId: Number(session.jobId),
+      chainId: options?.chainId ?? session.chainId, isEncrypted: options?.isEncrypted,
+      isGpu: options?.isGpu, onProgress: options?.onProgress, timeoutMs: options?.timeoutMs,
+    });
+    this.messageIndex = messageIndexRef.value;
+    return handle;
   }
 
   /**

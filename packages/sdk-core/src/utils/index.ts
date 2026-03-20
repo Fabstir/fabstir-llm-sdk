@@ -27,5 +27,7 @@ export * from './image-generation-http';
 export * from './image-generation-ws';
 export * from './image-intent-analyzer';
 
+export { computeTranscodeModelId } from './transcode-utils';
+
 // Export other utilities as they are created
 export { TransactionHelper } from '../contracts/TransactionHelper';

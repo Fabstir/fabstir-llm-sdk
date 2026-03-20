@@ -273,6 +273,15 @@ export interface TranscodeHandle {
   result: Promise<TranscodeResult>;
 }
 
+/** Options for SessionManager.submitTranscode */
+export interface TranscodeSubmitOptions {
+  isEncrypted?: boolean;
+  isGpu?: boolean;
+  chainId?: number;
+  onProgress?: (progress: number, gopInfo?: GOPInfo) => void;
+  timeoutMs?: number;
+}
+
 /**
  * Transcode job creation parameters
  */
