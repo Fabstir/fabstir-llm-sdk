@@ -9,6 +9,7 @@
 - [Web Search Integration](#web-search-integration)
 - [Image Generation](#image-generation)
   - [OpenAI-Compatible Bridge](#openai-compatible-bridge)
+- [Video Transcoding](#video-transcoding)
 - [Payment Management](#payment-management)
 - [Model Governance](#model-governance)
 - [Host Management](#host-management)
@@ -39,6 +40,7 @@ The Fabstir SDK provides a comprehensive interface for interacting with the Fabs
 - Session-based LLM interactions with context preservation
 - **RAG (Retrieval-Augmented Generation)** with vector databases, document upload, and semantic search
 - **Image Generation** via FLUX.2 diffusion models (encrypted WebSocket + HTTP paths)
+- **Video Transcoding** with GPU acceleration, encrypted source/output support, and real-time progress
 - Model governance and validation
 - WebSocket real-time streaming
 - S5 decentralized storage integration
@@ -1766,6 +1768,101 @@ Supported endpoints:
 - `GET /v1/models` — model listing
 
 The bridge handles blockchain session management, host discovery, E2E encryption, and session re-keying automatically. See [`packages/openai-bridge/`](../packages/openai-bridge/) for CLI options and configuration.
+
+## Video Transcoding
+
+GPU-accelerated video transcoding via encrypted WebSocket. Source videos are uploaded to S5 (optionally encrypted), transcoded by the host's sidecar, and output CIDs returned for download.
+
+### Get TranscodeManager
+
+```typescript
+const transcodeManager = sdk.getTranscodeManager();
+```
+
+### Feature Detection
+
+```typescript
+const hasTranscoding = await transcodeManager.isTranscodingAvailable(hostUrl);
+const hasTrustless = await transcodeManager.isTrustlessAvailable(hostUrl);
+```
+
+### Price Estimation
+
+```typescript
+const estimate = await transcodeManager.estimateTranscodePrice(hostAddress, formatSpec, durationSeconds);
+// { totalCost, breakdown: { duration, pricePerSecond, resolution, codec, quality } }
+```
+
+### Submit Transcode via SessionManager
+
+`submitTranscode` is on the concrete `SessionManager` class (not `ISessionManager`), following the same pattern as `generateImage`:
+
+```typescript
+const sessionManager = sdk.getSessionManager() as any; // Cast to access submitTranscode
+
+const handle = await sessionManager.submitTranscode(sessionId, sourceCid, formats, {
+  isGpu: true,
+  isEncrypted: true, // true if source is encrypted on S5
+  onProgress: (progress, gopInfo) => {
+    console.log(`${progress}% — GOP ${gopInfo?.currentGop}/${gopInfo?.totalGops}`);
+  },
+});
+
+console.log(`Task: ${handle.taskId}`);
+handle.cancel(); // Cancel mid-transcode
+
+const result = await handle.result;
+// { taskId, outputs: [{ id, ext, cid }], billing: { units, tokens }, duration, qualityMetrics, proofTreeCID, proofTreeRootHash }
+```
+
+### TranscodeSubmitOptions
+
+```typescript
+interface TranscodeSubmitOptions {
+  isEncrypted?: boolean;   // Source video encrypted on S5 (default: true)
+  isGpu?: boolean;         // Use GPU acceleration (default: true)
+  chainId?: number;        // Blockchain context
+  onProgress?: (progress: number, gopInfo?: GOPInfo) => void;
+  timeoutMs?: number;      // Default: 300000 (5 min)
+}
+```
+
+### Format Presets
+
+Formats use `VideoFormat[]` matching the node's ffmpeg parameters:
+
+```typescript
+const formats: VideoFormat[] = [{
+  id: 1, ext: 'mp4', vcodec: 'h264_nvenc', acodec: 'aac',
+  preset: 'fast', vf: 'scale=1920x1080', b_v: '5M',
+  ar: '48k', ch: 2, dest: 's5'
+}];
+```
+
+### Model IDs for Transcoding
+
+Transcode model IDs use `keccak256(abi.encodePacked("fabstir/transcoding/", fileName))`:
+
+```typescript
+import { keccak256, solidityPacked } from 'ethers';
+const modelId = keccak256(solidityPacked(['string', 'string'], ['fabstir/transcoding/', '1080p-h264-nvenc']));
+```
+
+### Encrypted Source Upload
+
+Upload source video encrypted to S5 using `uploadBlobEncrypted`, then construct the S5 encrypted CID (0xae format) which embeds the decryption key:
+
+```typescript
+const s5 = storageManager.getS5Client();
+const result = await s5.fs.uploadBlobEncrypted(blob);
+// result: { hash, size, encryptionKey, encryptedBlobHash, padding }
+
+// Construct encrypted CID (0xae format — sidecar extracts key automatically)
+const encCID = new Uint8Array([0xae, 0x01, 18, 0x1f, ...result.encryptedBlobHash, ...result.encryptionKey, ...paddingLE, ...plaintextCIDTail]);
+const sourceCid = `s5://${base64url.encode(encCID)}`; // u-prefix
+```
+
+---
 
 ## Payment Management
 

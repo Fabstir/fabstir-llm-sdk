@@ -160,6 +160,48 @@ Send an image generation request via the encrypted WebSocket channel (node v8.16
 - `negativePrompt` (string, optional): Negative prompt
 - `safetyLevel` (string): `"strict"` | `"moderate"` | `"permissive"`. Default: `"strict"`
 
+### 8. Transcode Request (Encrypted)
+
+Send a transcode request via the encrypted WebSocket channel. The request is sent as an `encrypted_message` with `action: "transcode"` in the encrypted payload.
+
+```json
+{
+  "type": "encrypted_message",
+  "session_id": "session_123",
+  "id": "tc-1739612345678-abc",
+  "payload": {
+    "ciphertextHex": "...",
+    "nonceHex": "...",
+    "aadHex": ""
+  }
+}
+```
+
+**Encrypted payload (plaintext before encryption):**
+
+```json
+{
+  "action": "transcode",
+  "sourceCid": "s5://zEY8K2Yzj74oaLPdytdyfbcqW6UuGv3bE96HEhEV7s74W9p2gU5Bt",
+  "mediaFormats": [
+    { "id": 1, "ext": "mp4", "vcodec": "h264_nvenc", "acodec": "aac", "preset": "fast", "vf": "scale=1920x1080", "b_v": "5M", "ar": "48k", "ch": 2, "dest": "s5" }
+  ],
+  "isEncrypted": false,
+  "isGpu": true,
+  "jobId": 289,
+  "chainId": 84532
+}
+```
+
+**Fields:**
+- `action` (string, required): Must be `"transcode"` — routes to transcoder sidecar
+- `sourceCid` (string, required): S5 CID of the source video (with `s5://` prefix). Use `z`-prefix (base58) for unencrypted, `u`-prefix (base64url) for encrypted CIDs
+- `mediaFormats` (array, required): Output format specs matching ffmpeg parameters
+- `isEncrypted` (boolean): Whether source video is encrypted on S5 (default: `true`)
+- `isGpu` (boolean): Use GPU acceleration (default: `true`)
+- `jobId` (number, optional): For billing integration
+- `chainId` (number, optional): Blockchain context (default: `84532`)
+
 ## Host -> Client Messages
 
 ### 1. Connection Confirmation
@@ -349,6 +391,81 @@ Returned when image generation fails:
 - `PROMPT_BLOCKED` — Safety classifier rejected the prompt
 - `DIFFUSION_SERVICE_UNAVAILABLE` — Diffusion sidecar not running
 - `IMAGE_GENERATION_FAILED` — Generation failed (retryable)
+
+### 10. Transcode Accepted (Encrypted)
+
+Acknowledgment after a transcode request is received:
+
+```json
+{
+  "type": "encrypted_response",
+  "payload": { "ciphertextHex": "...", "nonceHex": "...", "aadHex": "" }
+}
+```
+
+**Decrypted payload:**
+
+```json
+{
+  "type": "transcode_accepted",
+  "taskId": "5ffb76fd-6d9c-44f8-aaf9-757f28445a79"
+}
+```
+
+### 11. Transcode Progress (Encrypted)
+
+Streamed during transcoding with 0-100% progress and GOP info:
+
+**Decrypted payload:**
+
+```json
+{
+  "type": "transcode_progress",
+  "progress": 60,
+  "gopInfo": {
+    "currentGop": 3,
+    "totalGops": 5,
+    "elapsedSeconds": 2.5
+  }
+}
+```
+
+### 12. Transcode Complete (Encrypted)
+
+Returned when transcoding finishes successfully:
+
+**Decrypted payload:**
+
+```json
+{
+  "type": "transcode_complete",
+  "taskId": "5ffb76fd-6d9c-44f8-aaf9-757f28445a79",
+  "outputs": [
+    { "id": 1, "ext": "mp4", "cid": "s5://urqYSH...", "vcodec": "h264_nvenc", "vf": "scale=1920x1080" }
+  ],
+  "billing": { "units": 11, "tokens": 11000 },
+  "duration": 10,
+  "qualityMetrics": null,
+  "proofTreeCID": "blobb5pi5sfjl...",
+  "proofTreeRootHash": "0x3328225..."
+}
+```
+
+### 13. Transcode Error (Encrypted)
+
+Returned when transcoding fails:
+
+**Decrypted payload:**
+
+```json
+{
+  "type": "transcode_error",
+  "error": {
+    "code": "TRANSCODE_FAILED",
+    "message": "Source CID not found on S5 network"
+  }
+}
+```
 
 ## Advanced Features
 

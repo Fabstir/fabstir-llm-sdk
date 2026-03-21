@@ -13,6 +13,7 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 - 🧠 **RAG (Retrieval-Augmented Generation)** - Upload documents and enhance LLM responses with semantic search
 - 🗂️ **Vector Databases** - Host-side vector storage and cosine similarity search via WebSocket
 - 🎨 **Image Generation** - Text-to-image via FLUX.2 diffusion models over E2E encrypted WebSocket, with automatic intent detection from natural language prompts
+- 🎬 **Video Transcoding** - GPU-accelerated video transcoding (H.264/AV1) with encrypted source/output support, real-time progress, GOP-level proofs, and S5 storage
 - 🔐 **End-to-End Encryption** - XChaCha20-Poly1305 encryption enabled by default with forward secrecy
 - 🛡️ **Error Recovery** - Automatic retries and failover to ensure reliability
 - 🔌 **Browser Compatible** - Works in both Node.js and browser environments
