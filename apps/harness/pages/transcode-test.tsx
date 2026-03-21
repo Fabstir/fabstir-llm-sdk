@@ -18,7 +18,10 @@ function getTranscodeModelId(preset: string): string {
   const fileNames: Record<string, string> = {
     '1080p_h264': '1080p-h264-nvenc',
     '2160p_h264': '2160p-h264-nvenc',
-    'both': '1080p-2160p-h264-nvenc',
+    'both_h264': '1080p-2160p-h264-nvenc',
+    '1080p_av1': '1080p-av1-nvenc',
+    '2160p_av1': '2160p-av1-nvenc',
+    'both_av1': '1080p-2160p-av1-nvenc',
   };
   const fileName = fileNames[preset];
   if (!fileName) throw new Error(`Unknown transcode preset: ${preset}`);
@@ -35,11 +38,26 @@ const FORMAT_PRESETS: Record<string, { label: string; formats: VideoFormat[] }> 
     label: '2160p (4K) H.264',
     formats: [{ id: 1, ext: 'mp4', vcodec: 'h264_nvenc', acodec: 'aac', preset: 'fast', vf: 'scale=3840x2160', b_v: '15M', ar: '48k', ch: 2, dest: 's5' }],
   },
-  'both': {
+  'both_h264': {
     label: '1080p + 2160p H.264',
     formats: [
       { id: 1, ext: 'mp4', vcodec: 'h264_nvenc', acodec: 'aac', preset: 'fast', vf: 'scale=1920x1080', b_v: '5M', ar: '48k', ch: 2, dest: 's5' },
       { id: 2, ext: 'mp4', vcodec: 'h264_nvenc', acodec: 'aac', preset: 'fast', vf: 'scale=3840x2160', b_v: '15M', ar: '48k', ch: 2, dest: 's5' },
+    ],
+  },
+  '1080p_av1': {
+    label: '1080p AV1',
+    formats: [{ id: 1, ext: 'mp4', vcodec: 'av1_nvenc', acodec: 'aac', preset: 'p4', vf: 'scale=1920x1080', b_v: '5M', ar: '48k', ch: 2, dest: 's5' }],
+  },
+  '2160p_av1': {
+    label: '2160p (4K) AV1',
+    formats: [{ id: 1, ext: 'mp4', vcodec: 'av1_nvenc', acodec: 'aac', preset: 'p4', vf: 'scale=3840x2160', b_v: '15M', ar: '48k', ch: 2, dest: 's5' }],
+  },
+  'both_av1': {
+    label: '1080p + 2160p AV1',
+    formats: [
+      { id: 1, ext: 'mp4', vcodec: 'av1_nvenc', acodec: 'aac', preset: 'p4', vf: 'scale=1920x1080', b_v: '5M', ar: '48k', ch: 2, dest: 's5' },
+      { id: 2, ext: 'mp4', vcodec: 'av1_nvenc', acodec: 'aac', preset: 'p4', vf: 'scale=3840x2160', b_v: '15M', ar: '48k', ch: 2, dest: 's5' },
     ],
   },
 };
