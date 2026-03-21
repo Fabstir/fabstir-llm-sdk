@@ -1827,7 +1827,7 @@ interface TranscodeSubmitOptions {
 }
 ```
 
-### Format Presets
+### VideoFormat
 
 Formats use `VideoFormat[]` matching the node's ffmpeg parameters:
 
@@ -1835,8 +1835,77 @@ Formats use `VideoFormat[]` matching the node's ffmpeg parameters:
 const formats: VideoFormat[] = [{
   id: 1, ext: 'mp4', vcodec: 'h264_nvenc', acodec: 'aac',
   preset: 'fast', vf: 'scale=1920x1080', b_v: '5M',
-  ar: '48k', ch: 2, dest: 's5'
+  ar: '48k', ch: 2, dest: 's5',
+  encrypt: true,        // Per-format encryption (encrypts output on S5)
+  trim_percent: 15,     // Transcode only first N% of source duration
 }];
+```
+
+**Streaming fields:**
+- `encrypt` (boolean, optional): When `true`, the output is encrypted on S5. Used to produce encrypted full-length outputs alongside unencrypted previews.
+- `trim_percent` (number, optional): Transcode only the first N% of the source video. The node sidecar computes `-t <duration * trim_percent / 100>` for ffmpeg. Used to produce free preview clips.
+
+### Streaming Content Pipeline
+
+For streaming content with free previews, use `buildStreamingFormats()` to produce two outputs per resolution — an encrypted full-length version and an unencrypted trimmed preview:
+
+```typescript
+import { buildStreamingFormats, selectResolution, assembleContentMetadata } from '@fabstir/sdk-core/utils';
+
+// Build format array: 2 outputs per resolution (full + preview)
+const formats = buildStreamingFormats(['720p', '1080p'], 'h264', 15);
+// Returns 4 formats:
+//   id 1: 1080p full (encrypt: true)
+//   id 2: 1080p preview (encrypt: false, trim_percent: 15)
+//   id 3: 720p full (encrypt: true)
+//   id 4: 720p preview (encrypt: false, trim_percent: 15)
+
+// When previewPercent is 0, produces 1 output per resolution (no encrypt/trim flags)
+const simpleFormats = buildStreamingFormats(['1080p'], 'h264', 0);
+// Returns 1 format: id 1, 1080p (same as legacy single-output behavior)
+```
+
+**After transcode completes**, assemble metadata pairing preview and full CIDs:
+
+```typescript
+const result = await handle.result;
+const metadata = assembleContentMetadata(result, formats, sourceCid, 15, jobId);
+// metadata: {
+//   sourceCid, transcodedAt, freePreviewPercent: 15, jobId,
+//   sources: [
+//     { resolution: '1080p', previewCid: '...', fullCid: '...', codec: 'h264', container: 'mp4', bitrateKbps: 5000 },
+//     { resolution: '720p',  previewCid: '...', fullCid: '...', codec: 'h264', container: 'mp4', bitrateKbps: 2000 },
+//   ]
+// }
+```
+
+**Select best resolution** for playback based on device/bandwidth:
+
+```typescript
+const best = selectResolution(metadata.sources, { maxHeight: 720, bandwidthKbps: 3000 });
+// Returns the TranscodedSource for the best matching resolution
+```
+
+**Types:**
+
+```typescript
+interface TranscodedSource {
+  resolution: string;      // '480p' | '720p' | '1080p' | '2160p'
+  previewCid: string;      // Unencrypted, first N% — freely accessible
+  fullCid: string;         // Encrypted, complete — requires purchase/key
+  codec: string;           // 'h264' | 'hevc' | 'av1'
+  container: string;       // 'mp4' | 'webm'
+  bitrateKbps: number;
+  proofTreeCid?: string;
+}
+
+interface TranscodedContentMetadata {
+  sourceCid: string;
+  transcodedAt: number;        // Unix timestamp
+  freePreviewPercent: number;  // e.g. 15
+  sources: TranscodedSource[];
+  jobId: number;               // On-chain job ID
+}
 ```
 
 ### Model IDs for Transcoding

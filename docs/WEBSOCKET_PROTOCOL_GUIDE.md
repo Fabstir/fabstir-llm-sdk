@@ -184,7 +184,8 @@ Send a transcode request via the encrypted WebSocket channel. The request is sen
   "action": "transcode",
   "sourceCid": "s5://zEY8K2Yzj74oaLPdytdyfbcqW6UuGv3bE96HEhEV7s74W9p2gU5Bt",
   "mediaFormats": [
-    { "id": 1, "ext": "mp4", "vcodec": "h264_nvenc", "acodec": "aac", "preset": "fast", "vf": "scale=1920x1080", "b_v": "5M", "ar": "48k", "ch": 2, "dest": "s5" }
+    { "id": 1, "ext": "mp4", "vcodec": "h264_nvenc", "acodec": "aac", "preset": "fast", "vf": "scale=1920x1080", "b_v": "5M", "ar": "48k", "ch": 2, "dest": "s5", "encrypt": true },
+    { "id": 2, "ext": "mp4", "vcodec": "h264_nvenc", "acodec": "aac", "preset": "fast", "vf": "scale=1920x1080", "b_v": "5M", "ar": "48k", "ch": 2, "dest": "s5", "encrypt": false, "trim_percent": 15 }
   ],
   "isEncrypted": false,
   "isGpu": true,
@@ -196,7 +197,9 @@ Send a transcode request via the encrypted WebSocket channel. The request is sen
 **Fields:**
 - `action` (string, required): Must be `"transcode"` — routes to transcoder sidecar
 - `sourceCid` (string, required): S5 CID of the source video (with `s5://` prefix). Use `z`-prefix (base58) for unencrypted, `u`-prefix (base64url) for encrypted CIDs
-- `mediaFormats` (array, required): Output format specs matching ffmpeg parameters
+- `mediaFormats` (array, required): Output format specs matching ffmpeg parameters. Each format supports:
+  - `encrypt` (boolean, optional): Per-format output encryption. When `true`, the transcoded output is encrypted on S5. Enables producing encrypted full-length outputs alongside unencrypted previews in a single job.
+  - `trim_percent` (number, optional): Transcode only the first N% of the source duration. The sidecar computes `-t <duration * trim_percent / 100>` for ffmpeg. Used to produce free preview clips.
 - `isEncrypted` (boolean): Whether source video is encrypted on S5 (default: `true`)
 - `isGpu` (boolean): Use GPU acceleration (default: `true`)
 - `jobId` (number, optional): For billing integration
@@ -441,7 +444,8 @@ Returned when transcoding finishes successfully:
   "type": "transcode_complete",
   "taskId": "5ffb76fd-6d9c-44f8-aaf9-757f28445a79",
   "outputs": [
-    { "id": 1, "ext": "mp4", "cid": "s5://urqYSH...", "vcodec": "h264_nvenc", "vf": "scale=1920x1080" }
+    { "id": 1, "ext": "mp4", "cid": "s5://uFullEncrypted...", "vcodec": "h264_nvenc", "vf": "scale=1920x1080" },
+    { "id": 2, "ext": "mp4", "cid": "s5://zPreviewUnencrypted...", "vcodec": "h264_nvenc", "vf": "scale=1920x1080" }
   ],
   "billing": { "units": 11, "tokens": 11000 },
   "duration": 10,
