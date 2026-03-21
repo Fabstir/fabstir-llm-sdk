@@ -230,6 +230,7 @@ export interface VideoFormat {
   compression_level?: number;
   dest?: string;
   encrypt?: boolean;
+  trim_percent?: number;
 }
 
 /**
@@ -558,4 +559,30 @@ export function createFormatSpecFromPreset(
     },
     ...overrides,
   } as TranscodeFormatSpec;
+}
+
+/**
+ * A single resolution's transcoded outputs for streaming content.
+ * Pairs an unencrypted preview CID with an encrypted full CID.
+ */
+export interface TranscodedSource {
+  resolution: string;
+  previewCid: string;
+  fullCid: string;
+  codec: string;
+  container: string;
+  bitrateKbps: number;
+  proofTreeCid?: string;
+}
+
+/**
+ * Content metadata assembled from a streaming transcode job.
+ * Stores preview + full CIDs per resolution for FabSDK consumption.
+ */
+export interface TranscodedContentMetadata {
+  sourceCid: string;
+  transcodedAt: number;
+  freePreviewPercent: number;
+  sources: TranscodedSource[];
+  jobId: number;
 }

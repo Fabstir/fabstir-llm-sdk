@@ -4,7 +4,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
 import { FabstirSDKCore, ChainRegistry, ChainId } from '@fabstir/sdk-core';
-import type { VideoFormat, TranscodeHandle, TranscodeResult } from '@fabstir/sdk-core';
+import type { VideoFormat, TranscodeHandle, TranscodeResult, TranscodedContentMetadata } from '@fabstir/sdk-core';
+import { buildStreamingFormats, assembleContentMetadata } from '@fabstir/sdk-core';
 
 // ── Env vars ──
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!;
@@ -12,6 +13,7 @@ const USER_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_USER_1_PRIVATE_KEY!;
 const HOST_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_2_ADDRESS!;
 const HOST_URL = process.env.NEXT_PUBLIC_TEST_HOST_2_URL!;
 const MAX_LOG_ENTRIES = 500;
+const PREVIEW_PERCENT = 15;
 
 // ── Transcode model IDs (contract uses keccak256(abi.encodePacked("fabstir/transcoding/", fileName))) ──
 function getTranscodeModelId(preset: string): string {
@@ -27,40 +29,6 @@ function getTranscodeModelId(preset: string): string {
   if (!fileName) throw new Error(`Unknown transcode preset: ${preset}`);
   return ethers.keccak256(ethers.solidityPacked(['string', 'string'], ['fabstir/transcoding/', fileName]));
 }
-
-// ── Format presets (node-facing VideoFormat[]) ──
-const FORMAT_PRESETS: Record<string, { label: string; formats: VideoFormat[] }> = {
-  '1080p_h264': {
-    label: '1080p H.264',
-    formats: [{ id: 1, ext: 'mp4', vcodec: 'h264_nvenc', acodec: 'aac', preset: 'fast', vf: 'scale=1920x1080', b_v: '5M', ar: '48k', ch: 2, dest: 's5' }],
-  },
-  '2160p_h264': {
-    label: '2160p (4K) H.264',
-    formats: [{ id: 1, ext: 'mp4', vcodec: 'h264_nvenc', acodec: 'aac', preset: 'fast', vf: 'scale=3840x2160', b_v: '15M', ar: '48k', ch: 2, dest: 's5' }],
-  },
-  'both_h264': {
-    label: '1080p + 2160p H.264',
-    formats: [
-      { id: 1, ext: 'mp4', vcodec: 'h264_nvenc', acodec: 'aac', preset: 'fast', vf: 'scale=1920x1080', b_v: '5M', ar: '48k', ch: 2, dest: 's5' },
-      { id: 2, ext: 'mp4', vcodec: 'h264_nvenc', acodec: 'aac', preset: 'fast', vf: 'scale=3840x2160', b_v: '15M', ar: '48k', ch: 2, dest: 's5' },
-    ],
-  },
-  '1080p_av1': {
-    label: '1080p AV1',
-    formats: [{ id: 1, ext: 'mp4', vcodec: 'av1_nvenc', acodec: 'aac', preset: 'p4', vf: 'scale=1920x1080', b_v: '5M', ar: '48k', ch: 2, dest: 's5' }],
-  },
-  '2160p_av1': {
-    label: '2160p (4K) AV1',
-    formats: [{ id: 1, ext: 'mp4', vcodec: 'av1_nvenc', acodec: 'aac', preset: 'p4', vf: 'scale=3840x2160', b_v: '15M', ar: '48k', ch: 2, dest: 's5' }],
-  },
-  'both_av1': {
-    label: '1080p + 2160p AV1',
-    formats: [
-      { id: 1, ext: 'mp4', vcodec: 'av1_nvenc', acodec: 'aac', preset: 'p4', vf: 'scale=1920x1080', b_v: '5M', ar: '48k', ch: 2, dest: 's5' },
-      { id: 2, ext: 'mp4', vcodec: 'av1_nvenc', acodec: 'aac', preset: 'p4', vf: 'scale=3840x2160', b_v: '15M', ar: '48k', ch: 2, dest: 's5' },
-    ],
-  },
-};
 
 // ── Styles ──
 const sectionStyle: React.CSSProperties = { border: '1px solid #333', borderRadius: 6, padding: 12, marginBottom: 12, background: '#1a1a2e' };
@@ -97,11 +65,16 @@ export default function TranscodeTestPage() {
 
   // Transcode
   const [sourceCid, setSourceCid] = useState('');
-  const [selectedPreset, setSelectedPreset] = useState('1080p_h264');
   const [progress, setProgress] = useState(0);
   const [gopInfo, setGopInfo] = useState('');
   const [isTranscoding, setIsTranscoding] = useState(false);
   const [result, setResult] = useState<TranscodeResult | null>(null);
+
+  // Format config
+  const [selectedResolutions, setSelectedResolutions] = useState<string[]>(['1080p']);
+  const [selectedCodec, setSelectedCodec] = useState('h264');
+  const [previewPercent, setPreviewPercent] = useState(0);
+  const [contentMetadata, setContentMetadata] = useState<TranscodedContentMetadata | null>(null);
 
   // Price
   const [priceEstimate, setPriceEstimate] = useState<any>(null);
@@ -198,8 +171,11 @@ export default function TranscodeTestPage() {
   // ── 3. Session Management ──
   async function handleStartSession() {
     if (!sessionManager) return;
-    const modelId = getTranscodeModelId(selectedPreset);
-    addLog(`Starting session with modelId=${modelId.substring(0, 18)}... (${selectedPreset})`);
+    // Use highest selected resolution for model ID (Constraint 6)
+    const sortedRes = [...selectedResolutions].sort((a, b) => parseInt(b) - parseInt(a));
+    const modelKey = `${sortedRes[0]}_${selectedCodec}`;
+    const modelId = getTranscodeModelId(modelKey);
+    addLog(`Starting session with modelId=${modelId.substring(0, 18)}... (${modelKey})`);
     try {
       const result = await sessionManager.startSession({
         host: HOST_ADDRESS,
@@ -228,14 +204,15 @@ export default function TranscodeTestPage() {
     if (!transcodeManager) return;
     addLog('Estimating price...');
     try {
-      const preset = FORMAT_PRESETS[selectedPreset];
+      const formats = buildStreamingFormats(selectedResolutions, selectedCodec, previewPercent);
+      const fmt = formats[0];
       const formatSpec = {
         version: '1.0.0' as const,
         input: { cid: sourceCid || 'placeholder' },
         output: {
-          video: { codec: preset.formats[0].vcodec as any, resolution: parseResolution(preset.formats[0].vf), frameRate: 30, bitrate: { target: parseBitrate(preset.formats[0].b_v) } },
-          audio: { codec: (preset.formats[0].acodec || 'aac') as any, sampleRate: 48000, channels: preset.formats[0].ch || 2 },
-          container: preset.formats[0].ext as any,
+          video: { codec: fmt.vcodec as any, resolution: parseResolution(fmt.vf), frameRate: 30, bitrate: { target: parseBitrate(fmt.b_v) } },
+          audio: { codec: (fmt.acodec || 'aac') as any, sampleRate: 48000, channels: fmt.ch || 2 },
+          container: fmt.ext as any,
         },
         quality: { tier: 'standard' as const },
         gop: { size: 60, structure: 'IBBPBBP' },
@@ -316,9 +293,11 @@ export default function TranscodeTestPage() {
     setProgress(0);
     setGopInfo('');
     setResult(null);
-    addLog(`Starting transcode: preset=${selectedPreset}, cid=${sourceCid.substring(0, 20)}...`);
+    addLog(`Starting transcode: [${selectedResolutions.join(',')}] ${selectedCodec}, preview=${previewPercent}%, cid=${sourceCid.substring(0, 20)}...`);
     try {
-      const formats = FORMAT_PRESETS[selectedPreset].formats;
+      const formats = buildStreamingFormats(selectedResolutions, selectedCodec, previewPercent);
+      addLog(`Built ${formats.length} format(s) for ${selectedResolutions.length} resolution(s)${previewPercent > 0 ? ' (full+preview)' : ''}`);
+
       const handle = await sessionManager.submitTranscode(sessionId, sourceCid, formats, {
         isGpu: true,
         isEncrypted: encryptSource,
@@ -337,6 +316,11 @@ export default function TranscodeTestPage() {
       setResult(res);
       setIsTranscoding(false);
       addLog(`Transcode complete: ${res.outputs?.length || 0} output(s), ${res.duration}ms`);
+      if (previewPercent > 0 && formats.length > 0) {
+        const meta = assembleContentMetadata(res, formats, sourceCid, previewPercent, parseInt(jobId) || 0);
+        setContentMetadata(meta);
+        addLog(`Content metadata assembled: ${meta.sources.length} resolution(s), preview=${meta.freePreviewPercent}%`);
+      }
     } catch (err: any) {
       if (!mountedRef.current) return;
       setIsTranscoding(false);
@@ -414,15 +398,39 @@ export default function TranscodeTestPage() {
         />
       </div>
 
-      {/* 5. Format Selection */}
+      {/* 5. Format Configuration */}
       <div style={sectionStyle}>
-        <h3 style={{ margin: '0 0 8px' }}>5. Format Preset</h3>
-        {Object.entries(FORMAT_PRESETS).map(([key, { label }]) => (
-          <label key={key} style={{ marginRight: 16, cursor: 'pointer' }}>
-            <input type="radio" name="preset" value={key} checked={selectedPreset === key} onChange={() => setSelectedPreset(key)} />
-            {' '}{label}
-          </label>
-        ))}
+        <h3 style={{ margin: '0 0 8px' }}>5. Format Configuration</h3>
+        <div style={{ marginBottom: 6 }}>
+          <span style={{ fontSize: 13, marginRight: 8 }}>Resolutions:</span>
+          {['480p', '720p', '1080p', '2160p'].map(res => (
+            <label key={res} style={{ marginRight: 12, cursor: 'pointer' }}>
+              <input type="checkbox" checked={selectedResolutions.includes(res)} onChange={e => {
+                setSelectedResolutions(prev => e.target.checked ? [...prev, res] : prev.filter(r => r !== res));
+              }} />
+              {' '}{res}
+            </label>
+          ))}
+        </div>
+        <div style={{ marginBottom: 6 }}>
+          <span style={{ fontSize: 13, marginRight: 8 }}>Codec:</span>
+          {['h264', 'av1'].map(c => (
+            <label key={c} style={{ marginRight: 12, cursor: 'pointer' }}>
+              <input type="radio" name="codec" value={c} checked={selectedCodec === c} onChange={() => setSelectedCodec(c)} />
+              {' '}{c.toUpperCase()}
+            </label>
+          ))}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13 }}>Free preview %:</span>
+          <input type="number" min={0} max={50} style={{ ...inputStyle, width: 60 }} value={previewPercent} onChange={e => setPreviewPercent(parseInt(e.target.value) || 0)} />
+          <span style={{ fontSize: 12, color: '#888' }}>(0 = no preview, just full outputs)</span>
+        </div>
+        <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+          {previewPercent > 0
+            ? `${selectedResolutions.length} resolution(s) × 2 = ${selectedResolutions.length * 2} format(s) (full encrypted + ${previewPercent}% preview unencrypted)`
+            : `${selectedResolutions.length} format(s) (full output per resolution)`}
+        </div>
       </div>
 
       {/* 6. Price Estimation */}
@@ -532,6 +540,33 @@ export default function TranscodeTestPage() {
             <details style={{ marginTop: 8 }}>
               <summary style={{ cursor: 'pointer', color: '#888' }}>Raw result JSON</summary>
               <pre style={{ fontSize: 11, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(result, null, 2)}</pre>
+            </details>
+          </div>
+        </div>
+      )}
+
+      {/* 8b. Streaming Content Metadata */}
+      {contentMetadata && (
+        <div style={sectionStyle}>
+          <h3 style={{ margin: '0 0 8px' }}>8b. Streaming Content Metadata</h3>
+          <div style={{ fontSize: 13, background: '#0a0a1a', padding: 8, borderRadius: 4 }}>
+            <div><strong>Source:</strong> {contentMetadata.sourceCid.substring(0, 30)}...</div>
+            <div><strong>Preview:</strong> {contentMetadata.freePreviewPercent}% free | <strong>Job:</strong> {contentMetadata.jobId}</div>
+            {contentMetadata.sources.map((src, i) => (
+              <div key={i} style={{ marginTop: 8, padding: 6, background: '#111', borderRadius: 4 }}>
+                <div><strong>{src.resolution}</strong> {src.codec} {src.container} @ {src.bitrateKbps} kbps</div>
+                <div style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                  Preview: <span style={{ color: '#22c55e' }}>{src.previewCid.substring(0, 30)}...</span>
+                  {' '}<a href={`https://s5.platformlessai.ai/s5/blob/${src.previewCid.replace(/^s5:\/\//, '')}`} target="_blank" rel="noreferrer" style={{ color: '#3b82f6' }}>Download</a>
+                </div>
+                <div style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                  Full: <span style={{ color: '#f59e0b' }}>{src.fullCid.substring(0, 30)}...</span>
+                </div>
+              </div>
+            ))}
+            <details style={{ marginTop: 8 }}>
+              <summary style={{ cursor: 'pointer', color: '#888' }}>Raw metadata JSON</summary>
+              <pre style={{ fontSize: 11, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(contentMetadata, null, 2)}</pre>
             </details>
           </div>
         </div>
