@@ -75,6 +75,7 @@ export default function TranscodeTestPage() {
 
   // Upload
   const [isUploading, setIsUploading] = useState(false);
+  const [encryptSource, setEncryptSource] = useState(true);
 
   // Transcode
   const [sourceCid, setSourceCid] = useState('');
@@ -240,21 +241,44 @@ export default function TranscodeTestPage() {
       const storageManager = sdk.getStorageManager() as any;
       const s5 = storageManager.getS5Client();
 
-      // Upload blob directly to S5 portal and get BlobIdentifier CID
       const blob = new Blob([await file.arrayBuffer()], { type: file.type || 'video/mp4' });
-      const blobId = await s5.api.uploadBlob(blob);
-      const zCid = blobId.toBase58();
-      addLog(`Upload complete. Blob CID: ${zCid}`);
+      let cid: string;
 
-      // Verify the blob is downloadable from S5
-      try {
-        const downloaded = await s5.downloadByCID(zCid);
-        addLog(`Verified: downloaded ${downloaded.length} bytes from S5 portal`);
-      } catch (e: any) {
-        addLog(`WARNING: verification download failed: ${e.message}`);
+      if (encryptSource) {
+        // Encrypted upload → construct S5 encrypted CID (0xae format with embedded key)
+        const result = await s5.fs.uploadBlobEncrypted(blob);
+        addLog(`Encrypted upload complete: hash=${Array.from(result.hash.slice(0, 4)).map((b: number) => b.toString(16).padStart(2, '0')).join('')}..., padding=${result.padding}`);
+
+        // Build plaintext BlobIdentifier bytes: [0x5b, 0x82, 0x1f, ...hash(32), ...sizeLE]
+        const sizeLE: number[] = [];
+        let s = result.size;
+        do { sizeLE.push(s & 0xff); s = Math.floor(s / 256); } while (s > 0);
+        while (sizeLE.length > 1 && sizeLE[sizeLE.length - 1] === 0) sizeLE.pop();
+        // Plaintext CID tail: [0x26, 0x1f, ...hash(32), ...sizeLE]
+        const plaintextCID = new Uint8Array([0x26, 0x1f, ...result.hash, ...sizeLE]);
+        // Padding as 4-byte little-endian
+        const paddingLE = new Uint8Array(4);
+        paddingLE[0] = result.padding & 0xff; paddingLE[1] = (result.padding >> 8) & 0xff;
+        paddingLE[2] = (result.padding >> 16) & 0xff; paddingLE[3] = (result.padding >> 24) & 0xff;
+        // Full encrypted CID: [0xae, 0x01, 18, 0x1f, ...encryptedHash(32), ...key(32), ...padding(4), ...plaintextCID]
+        const encCID = new Uint8Array([0xae, 0x01, 18, 0x1f, ...result.encryptedBlobHash, ...result.encryptionKey, ...paddingLE, ...plaintextCID]);
+        const { base64url } = await import('multiformats/bases/base64');
+        cid = `s5://${base64url.encode(encCID)}`;
+        addLog(`Encrypted CID: ${cid.substring(0, 40)}...`);
+      } else {
+        // Unencrypted upload
+        const blobId = await s5.api.uploadBlob(blob);
+        const zCid = blobId.toBase58();
+        addLog(`Upload complete. Blob CID: ${zCid}`);
+        try {
+          const downloaded = await s5.downloadByCID(zCid);
+          addLog(`Verified: downloaded ${downloaded.length} bytes from S5 portal`);
+        } catch (e: any) {
+          addLog(`WARNING: verification download failed: ${e.message}`);
+        }
+        cid = `s5://${zCid}`;
       }
 
-      const cid = `s5://${zCid}`;
       setSourceCid(cid);
       addLog(`Save this CID for future use: ${cid}`);
     } catch (err: any) {
@@ -279,7 +303,7 @@ export default function TranscodeTestPage() {
       const formats = FORMAT_PRESETS[selectedPreset].formats;
       const handle = await sessionManager.submitTranscode(sessionId, sourceCid, formats, {
         isGpu: true,
-        isEncrypted: false,
+        isEncrypted: encryptSource,
         onProgress: (p: number, g?: { currentGop: number; totalGops: number; elapsedSeconds: number }) => {
           if (!mountedRef.current) return;
           setProgress(p);
@@ -355,9 +379,13 @@ export default function TranscodeTestPage() {
       <div style={sectionStyle}>
         <h3 style={{ margin: '0 0 8px' }}>4. Video Source</h3>
         <div style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 13, marginRight: 12, cursor: 'pointer' }}>
+            <input type="checkbox" checked={encryptSource} onChange={e => setEncryptSource(e.target.checked)} />
+            {' '}Encrypt source
+          </label>
           <label style={{ fontSize: 13, marginRight: 8 }}>Upload video to S5:</label>
           <input type="file" accept="video/*" onChange={handleFileUpload} disabled={!authReady || isUploading} style={{ fontSize: 13 }} />
-          {isUploading && <span style={{ marginLeft: 8, color: '#3b82f6' }}>Uploading...</span>}
+          {isUploading && <span style={{ marginLeft: 8, color: '#3b82f6' }}>Uploading{encryptSource ? ' (encrypted)' : ''}...</span>}
         </div>
         <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>Or paste a previously obtained CID:</div>
         <input
@@ -431,11 +459,45 @@ export default function TranscodeTestPage() {
             <div><strong>Outputs:</strong> {result.outputs?.length ? result.outputs.map((o: any, i: number) => {
               const rawCid = o.cid || o.outputCid || '';
               const bareCid = rawCid.replace(/^s5:\/\//, '');
+              const isEncCid = bareCid.startsWith('u');
               return (
                 <div key={i} style={{ marginLeft: 12 }}>
-                  {rawCid || JSON.stringify(o)}
-                  {bareCid && (
+                  <span style={{ wordBreak: 'break-all' }}>{rawCid.substring(0, 40)}...{rawCid.substring(rawCid.length - 10)}</span>
+                  {bareCid && !isEncCid && (
                     <a href={`https://s5.platformlessai.ai/s5/blob/${bareCid}`} target="_blank" rel="noreferrer" style={{ marginLeft: 8, color: '#3b82f6' }}>Download</a>
+                  )}
+                  {bareCid && (
+                    <button style={{ ...blueBtn, marginLeft: 8, fontSize: 12, padding: '3px 8px' }} onClick={async () => {
+                      try {
+                        addLog(`Downloading output ${i + 1} via S5...`);
+                        const sm = (sdk as any).getStorageManager().getS5Client();
+                        let data: Uint8Array;
+                        // Check if CID is encrypted (0xae prefix) — parse and decrypt manually
+                        const { base64url: b64u } = await import('multiformats/bases/base64');
+                        const { base58btc: b58 } = await import('multiformats/bases/base58');
+                        const cidBytes = bareCid.startsWith('u') ? b64u.decode(bareCid) : bareCid.startsWith('z') ? b58.decode(bareCid) : null;
+                        if (cidBytes && cidBytes[0] === 0xae) {
+                          // Encrypted CID: [0xae, algo, chunkPow, 0x1f, encHash(32), key(32), padding(4), plaintextCID...]
+                          const encHash = cidBytes.slice(4, 36);
+                          const encKey = cidBytes.slice(36, 68);
+                          const pCid = cidBytes.slice(72); // plaintext CID tail
+                          // Extract plaintext size from tail: [0x26, 0x1f, hash(32), ...sizeLE]
+                          const sizeBytes = pCid.slice(34);
+                          let pSize = 0;
+                          for (let j = sizeBytes.length - 1; j >= 0; j--) pSize = pSize * 256 + sizeBytes[j];
+                          addLog(`Encrypted output: decrypting ${pSize} bytes...`);
+                          data = await sm.fs.downloadAndDecryptBlob(encHash, encKey, pSize);
+                        } else {
+                          data = await sm.downloadByCID(bareCid);
+                        }
+                        const fileBlob = new Blob([data], { type: 'video/mp4' });
+                        const url = URL.createObjectURL(fileBlob);
+                        const a = document.createElement('a'); a.href = url; a.download = `output-${o.id || i}.${o.ext || 'mp4'}`;
+                        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        addLog(`Downloaded output ${i + 1}: ${data.length} bytes`);
+                      } catch (e: any) { addLog(`Download failed: ${e.message}`); }
+                    }}>Save via S5</button>
                   )}
                 </div>
               );

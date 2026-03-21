@@ -553,8 +553,8 @@ importers:
         version: 1.6.1(@types/node@20.19.30)(@vitest/ui@1.6.1)(jsdom@23.2.0(bufferutil@4.1.0)(canvas@2.11.2)(utf-8-validate@5.0.10))(lightningcss@1.30.2)
     optionalDependencies:
       '@julesl23/s5js':
-        specifier: '>=0.9.0-beta.41'
-        version: 0.9.0-beta.41(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+        specifier: '>=0.9.0-beta.43'
+        version: 0.9.0-beta.43(bufferutil@4.1.0)(utf-8-validate@5.0.10)
 
   packages/sdk-core-mock:
     dependencies:
@@ -1564,6 +1564,9 @@ packages:
 
   '@julesl23/s5js@0.9.0-beta.41':
     resolution: {integrity: sha512-660L+t00T+fpTqaCAqUufRwwZU3hn4VNZuuxb22SuT/J823+wdiuMHUm0XrGErqnBYjk+4cQLAoI53xdVngewQ==}
+
+  '@julesl23/s5js@0.9.0-beta.43':
+    resolution: {integrity: sha512-VyYHAvEOAj6xIhvqqJx3Nlgc+iz923cQLG5VH1F+ILaWAliUYvGxCQMhLa6v4Q1xT/ACOlQN3YTe7etRd4TvIQ==}
 
   '@julesl23/s5js@file:packages/sdk-core/julesl23-s5js-0.9.0-beta.33.tgz':
     resolution: {integrity: sha512-Z82vOKS7Fc275oMwiWnYif3zAFQknyXUMxVjy0+b245zWTuYTQhwCKRZDFD4ygflFqmaC9vv0lkv060AiDATmw==, tarball: file:packages/sdk-core/julesl23-s5js-0.9.0-beta.33.tgz}
@@ -8176,7 +8179,7 @@ snapshots:
       openai: 4.104.0(ws@8.19.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))(zod@3.25.76)
       pdfjs-dist: 3.11.174
     optionalDependencies:
-      '@julesl23/s5js': 0.9.0-beta.41(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+      '@julesl23/s5js': 0.9.0-beta.43(bufferutil@4.1.0)(utf-8-validate@5.0.10)
     transitivePeerDependencies:
       - aws-crt
       - bufferutil
@@ -8199,7 +8202,7 @@ snapshots:
       openai: 4.104.0(ws@8.19.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))(zod@3.25.76)
       pdfjs-dist: 3.11.174
     optionalDependencies:
-      '@julesl23/s5js': 0.9.0-beta.41(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+      '@julesl23/s5js': 0.9.0-beta.43(bufferutil@4.1.0)(utf-8-validate@5.0.10)
     transitivePeerDependencies:
       - aws-crt
       - bufferutil
@@ -8222,7 +8225,7 @@ snapshots:
       openai: 4.104.0(ws@8.19.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))(zod@3.25.76)
       pdfjs-dist: 3.11.174
     optionalDependencies:
-      '@julesl23/s5js': 0.9.0-beta.41(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+      '@julesl23/s5js': 0.9.0-beta.43(bufferutil@4.1.0)(utf-8-validate@5.0.10)
     transitivePeerDependencies:
       - aws-crt
       - bufferutil
@@ -8412,6 +8415,31 @@ snapshots:
       - bufferutil
       - supports-color
       - utf-8-validate
+
+  '@julesl23/s5js@0.9.0-beta.43(bufferutil@4.1.0)(utf-8-validate@5.0.10)':
+    dependencies:
+      '@noble/ciphers': 1.3.0
+      '@noble/ed25519': 2.3.0
+      '@noble/hashes': 1.8.0
+      axios: 1.13.3(debug@4.4.3)
+      cbor-x: 1.6.0
+      cors: 2.8.6
+      debug: 4.4.3
+      express: 5.2.1
+      idb: 8.0.3
+      memory-level: 3.1.0
+      msgpackr: 1.11.8
+      multiformats: 13.4.2
+      node-fetch: 3.3.2
+      rxjs: 7.8.2
+      undici: 7.19.1
+      ws: 8.19.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+      xxhash-wasm: 1.1.0
+    transitivePeerDependencies:
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+    optional: true
 
   '@julesl23/s5js@file:packages/sdk-core/julesl23-s5js-0.9.0-beta.33.tgz(bufferutil@4.1.0)(utf-8-validate@5.0.10)':
     dependencies:
