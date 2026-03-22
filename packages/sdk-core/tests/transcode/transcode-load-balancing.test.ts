@@ -138,4 +138,14 @@ describe('submitTranscodeWithLoadBalancing', () => {
     await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId, opts);
     expect(sessionManager.submitTranscode).toHaveBeenCalledWith('100', 'cid-1', formats, opts);
   });
+
+  it('calls onHostSelected with chosen host address and URL', async () => {
+    const { tm, hostSel } = createManager();
+    (hostSel.getRankedHostsForModel as any).mockResolvedValue([mkRanked('0xABC', 'http://chosen:8080')]);
+    mockFetch.mockResolvedValue({ ok: true, json: async () => cap(2) });
+    const onHostSelected = vi.fn();
+    await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId, { onHostSelected });
+    expect(onHostSelected).toHaveBeenCalledOnce();
+    expect(onHostSelected).toHaveBeenCalledWith('0xABC', 'http://chosen:8080');
+  });
 });

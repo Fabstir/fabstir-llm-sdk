@@ -295,6 +295,7 @@ export interface TranscodeCapacity {
 export interface TranscodeLoadBalancedOptions extends TranscodeSubmitOptions {
   maxHostRetries?: number;
   hostSelectionMode?: import('./settings.types').HostSelectionMode;
+  onHostSelected?: (hostAddress: string, hostUrl: string) => void;
 }
 
 /**

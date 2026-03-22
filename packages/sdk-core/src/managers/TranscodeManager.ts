@@ -70,6 +70,8 @@ export class TranscodeManager implements ITranscodeManager {
         continue;
       }
 
+      options?.onHostSelected?.(host.address, host.apiUrl);
+
       try {
         const { sessionId } = await this.sessionManager.startSession({
           host: host.address,
