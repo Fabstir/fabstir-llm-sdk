@@ -782,6 +782,11 @@ export class FabstirSDKCore extends EventEmitter {
           this.sessionManager, this.storageManager, this.contractManager,
           this.encryptionManager, this.signer!, this.currentChainId,
         );
+        if (this.hostManager) {
+          this.transcodeManager.setHostSelectionService(
+            new HostSelectionService(this.hostManager as HostManager)
+          );
+        }
       }
     }
 

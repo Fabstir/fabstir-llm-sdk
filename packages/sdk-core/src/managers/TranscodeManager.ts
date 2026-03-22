@@ -15,7 +15,13 @@ import type {
   TranscodeProofTree,
   Resolution,
   VideoFormat,
+  TranscodeHandle,
+  TranscodeLoadBalancedOptions,
 } from '../types/transcode.types';
+import type { IHostSelectionService } from '../interfaces/IHostSelectionService';
+import { TranscodeError } from '../errors/transcode-errors';
+import { fetchTranscodeCapacity } from '../utils/transcode-capacity';
+import { HostSelectionMode } from '../types/settings.types';
 import { computeTranscodeModelId, estimateTranscodeUnits, billingUnitsToTokens } from '../utils/transcode-utils';
 
 /** Contract status codes → human-readable strings */
@@ -23,6 +29,8 @@ const CONTRACT_STATUS: Record<number, string> = { 0: 'created', 1: 'active', 2: 
 
 /** TranscodeManager — manages video/audio transcoding jobs */
 export class TranscodeManager implements ITranscodeManager {
+  private hostSelectionService?: IHostSelectionService;
+
   constructor(
     private sessionManager: any,
     private storageManager: any,
@@ -31,6 +39,57 @@ export class TranscodeManager implements ITranscodeManager {
     private signer: Signer,
     private chainId: number,
   ) {}
+
+  setHostSelectionService(service: IHostSelectionService): void {
+    this.hostSelectionService = service;
+  }
+
+  async submitTranscodeWithLoadBalancing(
+    sourceCid: string,
+    formats: VideoFormat[],
+    modelId: string,
+    options?: TranscodeLoadBalancedOptions,
+  ): Promise<TranscodeHandle> {
+    if (!this.hostSelectionService) {
+      throw new Error('HostSelectionService not set — call setHostSelectionService() first');
+    }
+
+    const mode = options?.hostSelectionMode ?? HostSelectionMode.AUTO;
+    const maxRetries = options?.maxHostRetries ?? 3;
+    const ranked = await this.hostSelectionService.getRankedHostsForModel(modelId, mode);
+
+    for (const { host } of ranked.slice(0, maxRetries)) {
+      try {
+        const capacity = await fetchTranscodeCapacity(host.apiUrl);
+        if (!capacity.sidecarConnected || capacity.available <= 0) {
+          console.log(`[TranscodeManager] Skipping ${host.address}: no capacity (available=${capacity.available}, sidecar=${capacity.sidecarConnected})`);
+          continue;
+        }
+      } catch {
+        console.log(`[TranscodeManager] Skipping ${host.address}: capacity fetch failed`);
+        continue;
+      }
+
+      try {
+        const { sessionId } = await this.sessionManager.startSession({
+          host: host.address,
+          modelId,
+          chainId: this.chainId,
+        });
+        return await this.sessionManager.submitTranscode(
+          sessionId.toString(), sourceCid, formats, options,
+        );
+      } catch (err) {
+        if (err instanceof TranscodeError && err.code === 'CAPACITY_FULL') {
+          console.log(`[TranscodeManager] CAPACITY_FULL on ${host.address}, trying next host`);
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    throw new TranscodeError('No hosts available with transcode capacity', 'NO_AVAILABLE_HOSTS');
+  }
 
   async createTranscodeJob(params: CreateTranscodeJobParams): Promise<{
     jobId: bigint;

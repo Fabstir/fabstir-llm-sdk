@@ -283,6 +283,20 @@ export interface TranscodeSubmitOptions {
   timeoutMs?: number;
 }
 
+/** Runtime capacity snapshot from a host's transcode sidecar */
+export interface TranscodeCapacity {
+  active: number;
+  max: number;
+  available: number;
+  sidecarConnected: boolean;
+}
+
+/** Options for load-balanced transcode submission */
+export interface TranscodeLoadBalancedOptions extends TranscodeSubmitOptions {
+  maxHostRetries?: number;
+  hostSelectionMode?: import('./settings.types').HostSelectionMode;
+}
+
 /**
  * Transcode job creation parameters
  */

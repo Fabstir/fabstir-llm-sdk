@@ -28,6 +28,8 @@ export * from './image-generation-ws';
 export * from './image-intent-analyzer';
 
 export { computeTranscodeModelId, buildStreamingFormats, selectResolution, assembleContentMetadata } from './transcode-utils';
+export { fetchTranscodeCapacity } from './transcode-capacity';
+export { TranscodeError } from '../errors/transcode-errors';
 
 // Export other utilities as they are created
 export { TransactionHelper } from '../contracts/TransactionHelper';
