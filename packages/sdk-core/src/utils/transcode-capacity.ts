@@ -19,9 +19,10 @@ export async function fetchTranscodeCapacity(
   }
 
   if (!res.ok) {
+    const code = res.status === 429 ? 'CAPACITY_FULL' : 'TRANSCODE_FAILED';
     throw new TranscodeError(
       `Capacity request to ${base} returned ${res.status} ${res.statusText}`,
-      'TRANSCODE_FAILED',
+      code,
     );
   }
 

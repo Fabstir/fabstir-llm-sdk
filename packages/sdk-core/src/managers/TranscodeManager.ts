@@ -30,6 +30,8 @@ const CONTRACT_STATUS: Record<number, string> = { 0: 'created', 1: 'active', 2: 
 /** TranscodeManager — manages video/audio transcoding jobs */
 export class TranscodeManager implements ITranscodeManager {
   private hostSelectionService?: IHostSelectionService;
+  /** Tracks in-flight jobs per host so the load balancer doesn't over-assign to a single host */
+  private pendingJobs = new Map<string, number>();
 
   constructor(
     private sessionManager: any,
@@ -61,8 +63,10 @@ export class TranscodeManager implements ITranscodeManager {
     for (const { host } of ranked.slice(0, maxRetries)) {
       try {
         const capacity = await fetchTranscodeCapacity(host.apiUrl);
-        if (!capacity.sidecarConnected || capacity.available <= 0) {
-          console.log(`[TranscodeManager] Skipping ${host.address}: no capacity (available=${capacity.available}, sidecar=${capacity.sidecarConnected})`);
+        const pending = this.pendingJobs.get(host.address) || 0;
+        const effectiveAvailable = capacity.available - pending;
+        if (!capacity.sidecarConnected || effectiveAvailable <= 0) {
+          console.log(`[TranscodeManager] Skipping ${host.address}: no capacity (available=${capacity.available}, pending=${pending}, effective=${effectiveAvailable}, sidecar=${capacity.sidecarConnected})`);
           continue;
         }
       } catch {
@@ -70,6 +74,8 @@ export class TranscodeManager implements ITranscodeManager {
         continue;
       }
 
+      // Track this host as having a pending job
+      this.pendingJobs.set(host.address, (this.pendingJobs.get(host.address) || 0) + 1);
       options?.onHostSelected?.(host.address, host.apiUrl);
 
       try {
@@ -77,11 +83,25 @@ export class TranscodeManager implements ITranscodeManager {
           host: host.address,
           modelId,
           chainId: this.chainId,
+          endpoint: host.apiUrl,
+          depositAmount: options?.depositAmount ?? '0.0002',
+          duration: options?.duration ?? 3600,
+          proofInterval: options?.proofInterval ?? 100,
+          encryption: options?.encryption !== false,
         });
-        return await this.sessionManager.submitTranscode(
+        const handle = await this.sessionManager.submitTranscode(
           sessionId.toString(), sourceCid, formats, options,
         );
+        // Decrement pending count when job completes or fails
+        handle.result.finally(() => {
+          const count = this.pendingJobs.get(host.address) || 0;
+          if (count > 0) this.pendingJobs.set(host.address, count - 1);
+        });
+        return handle;
       } catch (err) {
+        // Decrement on submission failure
+        const count = this.pendingJobs.get(host.address) || 0;
+        if (count > 0) this.pendingJobs.set(host.address, count - 1);
         if (err instanceof TranscodeError && err.code === 'CAPACITY_FULL') {
           console.log(`[TranscodeManager] CAPACITY_FULL on ${host.address}, trying next host`);
           continue;

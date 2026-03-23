@@ -15,7 +15,7 @@ describe('fetchTranscodeCapacity', () => {
     vi.restoreAllMocks();
   });
 
-  const validCapacity = { active: 2, max: 5, available: 3, sidecarConnected: true };
+  const validCapacity = { active: 2, max: 5, queued: 0, available: 3, sidecarConnected: true };
 
   it('returns TranscodeCapacity on successful fetch', async () => {
     mockFetch.mockResolvedValue({ ok: true, json: async () => validCapacity });
@@ -32,18 +32,16 @@ describe('fetchTranscodeCapacity', () => {
 
   it('throws TranscodeError with TRANSCODE_FAILED on non-200 response', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 500, statusText: 'Internal Server Error' });
-    await expect(fetchTranscodeCapacity('http://host1:8080'))
-      .rejects.toThrow(TranscodeError);
-    await expect(fetchTranscodeCapacity('http://host1:8080'))
-      .rejects.toMatchObject({ code: 'TRANSCODE_FAILED' });
+    const err = await fetchTranscodeCapacity('http://host1:8080').catch(e => e);
+    expect(err).toBeInstanceOf(TranscodeError);
+    expect(err.code).toBe('TRANSCODE_FAILED');
   });
 
   it('throws TranscodeError with TRANSCODE_FAILED on network error', async () => {
     mockFetch.mockRejectedValue(new TypeError('fetch failed'));
-    await expect(fetchTranscodeCapacity('http://host1:8080'))
-      .rejects.toThrow(TranscodeError);
-    await expect(fetchTranscodeCapacity('http://host1:8080'))
-      .rejects.toMatchObject({ code: 'TRANSCODE_FAILED' });
+    const err = await fetchTranscodeCapacity('http://host1:8080').catch(e => e);
+    expect(err).toBeInstanceOf(TranscodeError);
+    expect(err.code).toBe('TRANSCODE_FAILED');
   });
 
   it('constructs correct URL from host URL (strips trailing slash)', async () => {
@@ -53,6 +51,13 @@ describe('fetchTranscodeCapacity', () => {
       'http://host1:8080/v1/transcode/capacity',
       expect.objectContaining({ signal: expect.anything() }),
     );
+  });
+
+  it('throws TranscodeError with CAPACITY_FULL on HTTP 429', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many Requests' });
+    const err = await fetchTranscodeCapacity('http://host1:8080').catch(e => e);
+    expect(err).toBeInstanceOf(TranscodeError);
+    expect(err.code).toBe('CAPACITY_FULL');
   });
 
   it('accepts custom timeoutMs', async () => {

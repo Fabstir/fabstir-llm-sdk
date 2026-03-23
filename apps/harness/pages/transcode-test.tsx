@@ -394,6 +394,7 @@ export default function TranscodeTestPage() {
         maxHostRetries: 3,
         isGpu: true,
         isEncrypted: encryptSource,
+        depositAmount: '0.0002',
         onProgress: handleTranscodeProgress,
         onHostSelected: (hostAddress: string, hostUrl: string) => {
           setSelectedHost({ address: hostAddress, url: hostUrl });

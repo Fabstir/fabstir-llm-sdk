@@ -27,6 +27,11 @@ const Home: NextPage = () => {
               → USDC Demo (Session Jobs with Gasless Transactions)
             </Link>
           </li>
+          <li style={{ marginBottom: '12px' }}>
+            <Link href="/transcode-lb-test" style={{ color: '#0052cc', textDecoration: 'none', fontSize: '18px' }}>
+              → Load-Balanced Transcode Stress Test
+            </Link>
+          </li>
         </ul>
       </div>
     </main>

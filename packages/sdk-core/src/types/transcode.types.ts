@@ -287,6 +287,7 @@ export interface TranscodeSubmitOptions {
 export interface TranscodeCapacity {
   active: number;
   max: number;
+  queued: number;
   available: number;
   sidecarConnected: boolean;
 }
@@ -296,6 +297,11 @@ export interface TranscodeLoadBalancedOptions extends TranscodeSubmitOptions {
   maxHostRetries?: number;
   hostSelectionMode?: import('./settings.types').HostSelectionMode;
   onHostSelected?: (hostAddress: string, hostUrl: string) => void;
+  /** Session config passed through to startSession */
+  depositAmount?: string;
+  duration?: number;
+  proofInterval?: number;
+  encryption?: boolean;
 }
 
 /**

@@ -40,7 +40,7 @@ beforeEach(() => { origFetch = globalThis.fetch; globalThis.fetch = mockFetch; }
 import { afterEach } from 'vitest';
 afterEach(() => { globalThis.fetch = origFetch; vi.restoreAllMocks(); });
 
-const cap = (avail: number, connected = true) => ({ active: 3 - avail, max: 3, available: avail, sidecarConnected: connected });
+const cap = (avail: number, connected = true) => ({ active: 3 - avail, max: 3, queued: 0, available: avail, sidecarConnected: connected });
 const formats: VideoFormat[] = [{ id: 1, ext: 'mp4' }];
 const modelId = '0xabc';
 

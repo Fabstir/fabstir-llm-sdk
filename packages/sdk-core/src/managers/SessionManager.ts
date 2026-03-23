@@ -3738,33 +3738,48 @@ export class SessionManager implements ISessionManager {
     if (session.status !== 'active') throw new SDKError('Session is not active', 'SESSION_NOT_ACTIVE');
     if (!this.encryptionManager) throw new SDKError('EncryptionManager not available', 'ENCRYPTION_NOT_AVAILABLE');
 
-    // Lazy WS init (same pattern as generateImage)
+    // Each transcode gets its own WebSocket + session key so concurrent jobs don't clobber each other
     const endpoint = session.endpoint || 'http://localhost:8080';
     const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
       ? endpoint : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
 
-    if (this.wsClient && this.wsSessionId && this.wsSessionId !== sessionId) {
-      try { await this.wsClient.disconnect(); } catch (_) { /* ignore */ }
-      this.wsClient = undefined; this.wsSessionId = undefined;
-      this.sessionKey = undefined; this.messageIndex = 0;
-    }
-    if (!this.wsClient || !this.wsClient.isConnected()) {
-      this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
-      await this.wsClient.connect();
-      this.wsSessionId = sessionId;
-    }
+    // Reuse existing WS if it matches this session (backward compat / single-session),
+    // otherwise create a dedicated connection for this transcode job
+    let wsClient: WebSocketClient;
+    let localSessionKey: Uint8Array | undefined;
+    let localMessageIndex: number;
 
-    if (!this.sessionKey) {
-      await this.sendEncryptedInit(this.wsClient, {
+    if (this.wsClient?.isConnected() && this.wsSessionId === sessionId && this.sessionKey) {
+      wsClient = this.wsClient;
+      localSessionKey = this.sessionKey;
+      localMessageIndex = this.messageIndex;
+    } else {
+      wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+      await wsClient.connect();
+
+      // Save/restore shared state so sendEncryptedInit writes to per-call locals
+      const prevSessionKey = this.sessionKey;
+      const prevMessageIndex = this.messageIndex;
+      this.sessionKey = undefined;
+      this.messageIndex = 0;
+
+      await this.sendEncryptedInit(wsClient, {
         chainId: session.chainId, host: session.provider, modelId: session.model,
         endpoint: session.endpoint, paymentMethod: 'deposit', encryption: true,
       } as ExtendedSessionConfig, session.sessionId, session.jobId);
-    }
-    if (!this.sessionKey) throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
 
-    const messageIndexRef = { value: this.messageIndex };
+      localSessionKey = this.sessionKey;
+      localMessageIndex = this.messageIndex;
+      // Restore previous shared state (for non-transcode WS usage)
+      this.sessionKey = prevSessionKey;
+      this.messageIndex = prevMessageIndex;
+    }
+
+    if (!localSessionKey) throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
+
+    const messageIndexRef = { value: localMessageIndex };
     const handle = await submitTranscodeWs({
-      wsClient: this.wsClient,
+      wsClient,
       encryptionManager: {
         encryptMessage: (key: Uint8Array, plaintext: string, index: number) =>
           this.encryptionManager!.encryptMessage(key, plaintext, index),
@@ -3773,12 +3788,11 @@ export class SessionManager implements ISessionManager {
           return this.encryptionManager!.decryptMessage(key, p);
         },
       },
-      sessionId, sessionKey: this.sessionKey, messageIndex: messageIndexRef,
+      sessionId, sessionKey: localSessionKey, messageIndex: messageIndexRef,
       sourceCid, formats, jobId: Number(session.jobId),
       chainId: options?.chainId ?? session.chainId, isEncrypted: options?.isEncrypted,
       isGpu: options?.isGpu, onProgress: options?.onProgress, timeoutMs: options?.timeoutMs,
     });
-    this.messageIndex = messageIndexRef.value;
     return handle;
   }
 
