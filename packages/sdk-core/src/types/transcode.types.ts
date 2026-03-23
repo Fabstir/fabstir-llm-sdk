@@ -302,6 +302,7 @@ export interface TranscodeLoadBalancedOptions extends TranscodeSubmitOptions {
   duration?: number;
   proofInterval?: number;
   encryption?: boolean;
+  retryDelayMs?: number;           // Delay between retry rounds (default: 5000)
 }
 
 /**

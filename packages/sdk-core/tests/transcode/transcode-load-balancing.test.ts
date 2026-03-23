@@ -114,10 +114,10 @@ describe('submitTranscodeWithLoadBalancing', () => {
     const hosts = Array.from({ length: 5 }, (_, i) => mkRanked(`0x${i}`, `http://h${i}:8080`));
     (hostSel.getRankedHostsForModel as any).mockResolvedValue(hosts);
     mockFetch.mockResolvedValue({ ok: true, json: async () => cap(0) });
-    await expect(tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId))
+    await expect(tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId, { retryDelayMs: 0 }))
       .rejects.toMatchObject({ code: 'NO_AVAILABLE_HOSTS' });
-    // Default maxHostRetries=3, so only 3 capacity fetches
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    // Default maxHostRetries=3, 2 rounds = 6 capacity fetches
+    expect(mockFetch).toHaveBeenCalledTimes(6);
   });
 
   it('returns TranscodeHandle from successful submission', async () => {
@@ -147,5 +147,17 @@ describe('submitTranscodeWithLoadBalancing', () => {
     await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId, { onHostSelected });
     expect(onHostSelected).toHaveBeenCalledOnce();
     expect(onHostSelected).toHaveBeenCalledWith('0xABC', 'http://chosen:8080');
+  });
+
+  it('retries after backoff when all hosts fail on first round', async () => {
+    const { tm, hostSel } = createManager();
+    (hostSel.getRankedHostsForModel as any).mockResolvedValue([mkRanked('0x1', 'http://h1:8080')]);
+    // Round 1: capacity fetch fails. Round 2: succeeds.
+    mockFetch
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValueOnce({ ok: true, json: async () => cap(2) });
+    const handle = await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId, { retryDelayMs: 10 });
+    expect(handle.taskId).toBe('task-1');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 });
