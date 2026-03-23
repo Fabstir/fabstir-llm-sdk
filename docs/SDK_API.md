@@ -1827,6 +1827,58 @@ interface TranscodeSubmitOptions {
 }
 ```
 
+### Load-Balanced Transcode Submission
+
+`submitTranscodeWithLoadBalancing` on `TranscodeManager` ranks available hosts, checks capacity, and submits to the best host with available slots. If the preferred host is full, it overflows to the next ranked host automatically.
+
+```typescript
+const transcodeManager = sdk.getTranscodeManager();
+const handle = await transcodeManager.submitTranscodeWithLoadBalancing(sourceCid, formats, modelId, {
+  hostSelectionMode: HostSelectionMode.AUTO,
+  maxHostRetries: 5,
+  isGpu: true,
+  isEncrypted: true,
+  depositAmount: '0.0002',
+  onHostSelected: (address, url) => console.log(`Selected: ${address} @ ${url}`),
+  onProgress: (progress, gopInfo) => console.log(`${progress}%`),
+});
+const result = await handle.result;
+```
+
+**Pending job tracking**: The load balancer tracks in-flight jobs per host so that rapid sequential submissions don't all land on the same host. `effectiveAvailable = capacity.available - pendingJobs` ensures overflow to secondary hosts even when the capacity endpoint hasn't yet updated.
+
+**Per-transcode WebSocket connections**: Each `submitTranscode` call creates its own WebSocket connection and session key, enabling multiple concurrent transcode jobs without WebSocket message clobbering.
+
+### TranscodeLoadBalancedOptions
+
+```typescript
+interface TranscodeLoadBalancedOptions extends TranscodeSubmitOptions {
+  maxHostRetries?: number;       // Max hosts to try (default: 3)
+  hostSelectionMode?: HostSelectionMode; // AUTO, CHEAPEST, RELIABLE, FASTEST
+  onHostSelected?: (hostAddress: string, hostUrl: string) => void;
+  depositAmount?: string;        // Session deposit (default: '0.0002')
+  duration?: number;             // Session duration in seconds (default: 3600)
+  proofInterval?: number;        // Proof interval (default: 100)
+  encryption?: boolean;          // E2E encryption (default: true)
+}
+```
+
+### TranscodeCapacity
+
+Runtime capacity snapshot from a host's transcode sidecar, returned by `fetchTranscodeCapacity(hostUrl)`:
+
+```typescript
+interface TranscodeCapacity {
+  active: number;           // Currently running transcode jobs
+  max: number;              // Maximum concurrent slots
+  queued: number;           // Jobs waiting in sidecar queue (node v8.27.0+)
+  available: number;        // Slots available for new jobs
+  sidecarConnected: boolean; // Whether transcoder sidecar is connected
+}
+```
+
+**HTTP 429 handling**: When a host's sidecar is full, the capacity endpoint returns HTTP 429. The SDK maps this to `TranscodeError` with code `CAPACITY_FULL` (retryable), causing the load balancer to try the next host.
+
 ### VideoFormat
 
 Formats use `VideoFormat[]` matching the node's ffmpeg parameters:
@@ -5206,7 +5258,14 @@ enum SDKErrorCode {
   CHAIN_MISMATCH = 'CHAIN_MISMATCH',
   INSUFFICIENT_DEPOSIT = 'INSUFFICIENT_DEPOSIT',
   NODE_CHAIN_MISMATCH = 'NODE_CHAIN_MISMATCH',
-  DEPOSIT_ACCOUNT_UNAVAILABLE = 'DEPOSIT_ACCOUNT_UNAVAILABLE'
+  DEPOSIT_ACCOUNT_UNAVAILABLE = 'DEPOSIT_ACCOUNT_UNAVAILABLE',
+
+  // Transcoding
+  CAPACITY_FULL = 'CAPACITY_FULL',             // Host transcode queue full (HTTP 429, retryable)
+  TRANSCODE_FAILED = 'TRANSCODE_FAILED',       // Transcode operation failed
+  TRANSCODE_TIMEOUT = 'TRANSCODE_TIMEOUT',     // Transcode timed out (retryable)
+  SIDECAR_DISCONNECTED = 'SIDECAR_DISCONNECTED', // Transcoder sidecar not connected
+  NO_AVAILABLE_HOSTS = 'NO_AVAILABLE_HOSTS'    // All hosts exhausted during load balancing
 }
 ```
 

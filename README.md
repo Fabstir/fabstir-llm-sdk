@@ -13,7 +13,7 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 - 🧠 **RAG (Retrieval-Augmented Generation)** - Upload documents and enhance LLM responses with semantic search
 - 🗂️ **Vector Databases** - Host-side vector storage and cosine similarity search via WebSocket
 - 🎨 **Image Generation** - Text-to-image via FLUX.2 diffusion models over E2E encrypted WebSocket, with automatic intent detection from natural language prompts
-- 🎬 **Video Transcoding** - GPU-accelerated video transcoding (H.264/AV1) with encrypted source/output support, real-time progress, GOP-level proofs, and S5 storage
+- 🎬 **Video Transcoding** - GPU-accelerated video transcoding (H.264/AV1) with encrypted source/output support, real-time progress, GOP-level proofs, S5 storage, and load balancing across multiple hosts
 - 🔐 **End-to-End Encryption** - XChaCha20-Poly1305 encryption enabled by default with forward secrecy
 - 🛡️ **Error Recovery** - Automatic retries and failover to ensure reliability
 - 🔌 **Browser Compatible** - Works in both Node.js and browser environments
@@ -304,6 +304,16 @@ await sdk.authenticate(privateKey);
 - [Orchestrator Guide](packages/orchestrator/README.md) - Multi-agent orchestration
 - [x402 Payment Protocol](docs/EXECUTION-X402-PAYMENTS.md) - HTTP micropayments
 - [Session Multiplexing](docs/IMPLEMENTATION-SESSION-MULTIPLEXING.md) - Session reuse optimization
+- [Transcode Load Balancing](docs/IMPLEMENTATION-TRANSCODE-LOAD-BALANCING.md) - Multi-host transcode distribution
+- [WebSocket Protocol Guide](docs/WEBSOCKET_PROTOCOL_GUIDE.md) - WebSocket message format and encryption
+
+### Test Harness Pages
+
+The `apps/harness` Next.js app provides interactive test pages:
+
+- [`/transcode-test`](apps/harness/pages/transcode-test.tsx) - Single-job transcode with optional load balancing toggle
+- [`/transcode-lb-test`](apps/harness/pages/transcode-lb-test.tsx) - Stress test: N concurrent transcode jobs with host discovery, capacity display (including queue depth), staggered session creation, per-job progress bars, and host distribution summary
+- [`/chat-context-demo`](apps/harness/pages/chat-context-demo.tsx) - Definitive UI reference for SDK integration
 
 ## Examples
 
