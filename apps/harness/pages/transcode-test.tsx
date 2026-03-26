@@ -4,8 +4,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
 import { FabstirSDKCore, ChainRegistry, ChainId } from '@fabstir/sdk-core';
-import type { VideoFormat, TranscodeHandle, TranscodeResult, TranscodedContentMetadata } from '@fabstir/sdk-core';
-import { buildStreamingFormats, assembleContentMetadata } from '@fabstir/sdk-core';
+import type { VideoFormat, TranscodeHandle, TranscodeResult, TranscodedContentMetadata, TranscodeCapacity } from '@fabstir/sdk-core';
+import { buildStreamingFormats, assembleContentMetadata, fetchTranscodeCapacity, HostSelectionMode } from '@fabstir/sdk-core';
 
 // ── Env vars ──
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!;
@@ -79,6 +79,14 @@ export default function TranscodeTestPage() {
   // Price
   const [priceEstimate, setPriceEstimate] = useState<any>(null);
   const [durationSec, setDurationSec] = useState(60);
+
+  // Load balancing
+  const [useLoadBalancing, setUseLoadBalancing] = useState(false);
+  const [selectionMode, setSelectionMode] = useState<HostSelectionMode>(HostSelectionMode.AUTO);
+  const [discoveredHosts, setDiscoveredHosts] = useState<any[]>([]);
+  const [hostCapacities, setHostCapacities] = useState<Record<string, TranscodeCapacity>>({});
+  const [isDiscovering, setIsDiscovering] = useState(false);
+  const [selectedHost, setSelectedHost] = useState<{ address: string; url: string } | null>(null);
 
   const handleRef = useRef<TranscodeHandle | null>(null);
   const logPanelRef = useRef<HTMLDivElement>(null);
@@ -168,13 +176,47 @@ export default function TranscodeTestPage() {
     }
   }
 
+  // ── 2b. Host Discovery (Load Balancing) ──
+  async function handleDiscoverHosts() {
+    if (!sdk) return;
+    setIsDiscovering(true);
+    setDiscoveredHosts([]);
+    setHostCapacities({});
+    try {
+      const hostManager = sdk.getHostManager();
+      const { modelKey, modelId } = getSelectedModelKeyAndId();
+      addLog(`Discovering hosts for model ${modelKey} (${modelId.substring(0, 18)}...)...`);
+      const hosts = await hostManager.findHostsForModel(modelId);
+      setDiscoveredHosts(hosts);
+      addLog(`Found ${hosts.length} host(s)`);
+      const capResults = await Promise.all(
+        hosts.map(host =>
+          fetchTranscodeCapacity(host.apiUrl)
+            .then(cap => ({ host, cap, ok: true as const }))
+            .catch((err: any) => ({ host, cap: null, ok: false as const, err })),
+        ),
+      );
+      const caps: Record<string, TranscodeCapacity> = {};
+      for (const r of capResults) {
+        if (r.ok) {
+          caps[r.host.address] = r.cap;
+          addLog(`  ${r.host.address.substring(0, 10)}... @ ${r.host.apiUrl} — ${r.cap.available}/${r.cap.max} slots, sidecar=${r.cap.sidecarConnected}`);
+        } else {
+          addLog(`  ${r.host.address.substring(0, 10)}... @ ${r.host.apiUrl} — unreachable: ${r.err.message}`);
+        }
+      }
+      setHostCapacities(caps);
+    } catch (err: any) {
+      addLog(`Host discovery failed: ${err.message}`);
+    } finally {
+      setIsDiscovering(false);
+    }
+  }
+
   // ── 3. Session Management ──
   async function handleStartSession() {
     if (!sessionManager) return;
-    // Use highest selected resolution for model ID (Constraint 6)
-    const sortedRes = [...selectedResolutions].sort((a, b) => parseInt(b) - parseInt(a));
-    const modelKey = `${sortedRes[0]}_${selectedCodec}`;
-    const modelId = getTranscodeModelId(modelKey);
+    const { modelKey, modelId } = getSelectedModelKeyAndId();
     addLog(`Starting session with modelId=${modelId.substring(0, 18)}... (${modelKey})`);
     try {
       const result = await sessionManager.startSession({
@@ -301,12 +343,7 @@ export default function TranscodeTestPage() {
       const handle = await sessionManager.submitTranscode(sessionId, sourceCid, formats, {
         isGpu: true,
         isEncrypted: encryptSource,
-        onProgress: (p: number, g?: { currentGop: number; totalGops: number; elapsedSeconds: number }) => {
-          if (!mountedRef.current) return;
-          setProgress(p);
-          if (g) setGopInfo(`GOP ${g.currentGop}/${g.totalGops} (${g.elapsedSeconds}s)`);
-          if (p % 25 === 0 || p === 100) addLog(`Progress: ${p}%${g ? ` — GOP ${g.currentGop}/${g.totalGops}` : ''}`);
-        },
+        onProgress: handleTranscodeProgress,
       });
       handleRef.current = handle;
       addLog(`Transcode submitted: taskId=${handle.taskId}`);
@@ -336,7 +373,67 @@ export default function TranscodeTestPage() {
     }
   }
 
+  // ── 6b. Load-Balanced Transcode Execution ──
+  async function handleStartTranscodeLoadBalanced() {
+    if (!transcodeManager || !sourceCid) {
+      addLog('Missing transcode manager or source CID');
+      return;
+    }
+    setIsTranscoding(true);
+    setProgress(0);
+    setGopInfo('');
+    setResult(null);
+    setSelectedHost(null);
+    const { modelKey, modelId } = getSelectedModelKeyAndId();
+    addLog(`Starting load-balanced transcode: [${selectedResolutions.join(',')}] ${selectedCodec}, mode=${selectionMode}, cid=${sourceCid.substring(0, 20)}...`);
+    try {
+      const formats = buildStreamingFormats(selectedResolutions, selectedCodec, previewPercent);
+      addLog(`Built ${formats.length} format(s) for ${selectedResolutions.length} resolution(s)${previewPercent > 0 ? ' (full+preview)' : ''}`);
+      const handle = await transcodeManager.submitTranscodeWithLoadBalancing(sourceCid, formats, modelId, {
+        hostSelectionMode: selectionMode,
+        maxHostRetries: 3,
+        isGpu: true,
+        isEncrypted: encryptSource,
+        depositAmount: '0.0002',
+        onProgress: handleTranscodeProgress,
+        onHostSelected: (hostAddress: string, hostUrl: string) => {
+          setSelectedHost({ address: hostAddress, url: hostUrl });
+          addLog(`Load balancer selected host: ${hostAddress.substring(0, 10)}... @ ${hostUrl}`);
+        },
+      });
+      handleRef.current = handle;
+      addLog(`Transcode submitted: taskId=${handle.taskId}`);
+      const res = await handle.result;
+      if (!mountedRef.current) return;
+      setResult(res);
+      setIsTranscoding(false);
+      addLog(`Transcode complete: ${res.outputs?.length || 0} output(s), ${res.duration}ms`);
+      if (previewPercent > 0 && formats.length > 0) {
+        const meta = assembleContentMetadata(res, formats, sourceCid, previewPercent, 0);
+        setContentMetadata(meta);
+        addLog(`Content metadata assembled: ${meta.sources.length} resolution(s), preview=${meta.freePreviewPercent}%`);
+      }
+    } catch (err: any) {
+      if (!mountedRef.current) return;
+      setIsTranscoding(false);
+      addLog(`Load-balanced transcode failed: ${err.message}${err.code ? ` [${err.code}]` : ''}`);
+    }
+  }
+
   // ── Helpers ──
+  function handleTranscodeProgress(p: number, g?: { currentGop: number; totalGops: number; elapsedSeconds: number }) {
+    if (!mountedRef.current) return;
+    setProgress(p);
+    if (g) setGopInfo(`GOP ${g.currentGop}/${g.totalGops} (${g.elapsedSeconds}s)`);
+    if (p % 25 === 0 || p === 100) addLog(`Progress: ${p}%${g ? ` — GOP ${g.currentGop}/${g.totalGops}` : ''}`);
+  }
+
+  function getSelectedModelKeyAndId(): { modelKey: string; modelId: string } {
+    const sortedRes = [...selectedResolutions].sort((a, b) => parseInt(b) - parseInt(a));
+    const modelKey = `${sortedRes[0]}_${selectedCodec}`;
+    return { modelKey, modelId: getTranscodeModelId(modelKey) };
+  }
+
   function parseResolution(vf?: string): { width: number; height: number } {
     const m = vf?.match(/scale=(\d+)x(\d+)/);
     return m ? { width: parseInt(m[1]), height: parseInt(m[2]) } : { width: 1920, height: 1080 };
@@ -366,15 +463,57 @@ export default function TranscodeTestPage() {
         <span style={{ marginLeft: 12 }}>
           {indicator(transcodingAvail)} Transcoding &nbsp; {indicator(trustlessAvail)} Trustless Verification
         </span>
+        <div style={{ marginTop: 10, borderTop: '1px solid #333', paddingTop: 8 }}>
+          <label style={{ fontSize: 13, cursor: 'pointer' }}>
+            <input type="checkbox" checked={useLoadBalancing} onChange={e => setUseLoadBalancing(e.target.checked)} />
+            {' '}Use Load Balancing
+          </label>
+          {useLoadBalancing && (
+            <div style={{ marginTop: 8 }}>
+              <span style={{ fontSize: 13, marginRight: 8 }}>Selection Mode:</span>
+              <select value={selectionMode} onChange={e => setSelectionMode(e.target.value as HostSelectionMode)}
+                style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid #555', background: '#0f0f23', color: '#e0e0e0', fontSize: 13 }}>
+                {Object.values(HostSelectionMode).filter(v => v !== HostSelectionMode.SPECIFIC).map(m => (
+                  <option key={m} value={m}>{m.toUpperCase()}</option>
+                ))}
+              </select>
+              <button style={authReady && !isDiscovering ? blueBtn : disabledBtn} onClick={handleDiscoverHosts}
+                disabled={!authReady || isDiscovering} >
+                {isDiscovering ? 'Discovering...' : 'Discover Hosts'}
+              </button>
+              {discoveredHosts.length > 0 && (
+                <table style={{ width: '100%', marginTop: 8, fontSize: 12, borderCollapse: 'collapse' }}>
+                  <thead><tr style={{ borderBottom: '1px solid #444', textAlign: 'left' }}>
+                    <th style={{ padding: 4 }}>Address</th><th style={{ padding: 4 }}>URL</th>
+                    <th style={{ padding: 4 }}>Sidecar</th><th style={{ padding: 4 }}>Slots</th>
+                  </tr></thead>
+                  <tbody>{discoveredHosts.map((h: any) => {
+                    const cap = hostCapacities[h.address];
+                    return (<tr key={h.address} style={{ borderBottom: '1px solid #222' }}>
+                      <td style={{ padding: 4, fontFamily: 'monospace' }}>{h.address.substring(0, 10)}...</td>
+                      <td style={{ padding: 4 }}>{h.apiUrl}</td>
+                      <td style={{ padding: 4 }}>{cap ? (cap.sidecarConnected ? '✅' : '❌') : '—'}</td>
+                      <td style={{ padding: 4 }}>{cap ? `${cap.available}/${cap.max}` : '—'}</td>
+                    </tr>);
+                  })}</tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 3. Session */}
       <div style={sectionStyle}>
         <h3 style={{ margin: '0 0 8px' }}>3. Session Management</h3>
-        <button style={authReady && !sessionId ? greenBtn : disabledBtn} onClick={handleStartSession} disabled={!authReady || !!sessionId}>
-          Start Session
-        </button>
-        {sessionId && <span style={{ marginLeft: 12, fontSize: 13 }}>Session: {sessionId} | Job: {jobId}</span>}
+        {useLoadBalancing ? (
+          <span style={{ fontSize: 13, color: '#888' }}>Session managed by load balancer</span>
+        ) : (<>
+          <button style={authReady && !sessionId ? greenBtn : disabledBtn} onClick={handleStartSession} disabled={!authReady || !!sessionId}>
+            Start Session
+          </button>
+          {sessionId && <span style={{ marginLeft: 12, fontSize: 13 }}>Session: {sessionId} | Job: {jobId}</span>}
+        </>)}
       </div>
 
       {/* 4. Video Source */}
@@ -453,13 +592,23 @@ export default function TranscodeTestPage() {
       <div style={sectionStyle}>
         <h3 style={{ margin: '0 0 8px' }}>7. Transcode</h3>
         <div style={{ marginBottom: 8 }}>
-          <button
-            style={sessionId && sourceCid && !isTranscoding ? greenBtn : disabledBtn}
-            onClick={handleStartTranscode}
-            disabled={!sessionId || !sourceCid || isTranscoding}
-          >
-            Start Transcode
-          </button>
+          {useLoadBalancing ? (
+            <button
+              style={sourceCid && !isTranscoding ? greenBtn : disabledBtn}
+              onClick={handleStartTranscodeLoadBalanced}
+              disabled={!sourceCid || isTranscoding}
+            >
+              Start Transcode (Load Balanced)
+            </button>
+          ) : (
+            <button
+              style={sessionId && sourceCid && !isTranscoding ? greenBtn : disabledBtn}
+              onClick={handleStartTranscode}
+              disabled={!sessionId || !sourceCid || isTranscoding}
+            >
+              Start Transcode
+            </button>
+          )}
           <button
             style={isTranscoding ? redBtn : disabledBtn}
             onClick={handleCancelTranscode}
@@ -475,6 +624,11 @@ export default function TranscodeTestPage() {
         <div style={{ fontSize: 13, color: '#aaa' }}>
           {progress}% {gopInfo && `| ${gopInfo}`}
         </div>
+        {selectedHost && (
+          <div style={{ fontSize: 12, color: '#22c55e', marginTop: 4 }}>
+            Selected host: {selectedHost.address.substring(0, 10)}... @ {selectedHost.url}
+          </div>
+        )}
       </div>
 
       {/* 8. Results */}

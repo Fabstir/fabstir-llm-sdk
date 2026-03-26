@@ -3,6 +3,7 @@
  * Standalone functions for submitting/cancelling transcode jobs via encrypted WebSocket.
  */
 import type { VideoFormat, GOPInfo, TranscodeResult, TranscodeHandle } from '../types/transcode.types';
+import { TranscodeError } from '../errors/transcode-errors';
 
 /** Parameters for submitTranscodeWs */
 export interface TranscodeWsOptions {
@@ -48,12 +49,12 @@ export async function submitTranscodeWs(opts: TranscodeWsOptions): Promise<Trans
     const safeResolve = (r: TranscodeResult) => { if (!isSettled) { settle(); resolve(r); } };
     const safeReject = (e: Error) => { if (!isSettled) { settle(); reject(e); } };
 
-    const timer = setTimeout(() => safeReject(new Error('Transcode timed out')), timeoutMs);
+    const timer = setTimeout(() => safeReject(new TranscodeError('Transcode timed out', 'TRANSCODE_TIMEOUT')), timeoutMs);
 
     const unsub = wsClient.onMessage((data: any) => {
       if (isSettled) return;
       if (data.type === 'error') {
-        safeReject(new Error(data.message || 'Transcode failed'));
+        safeReject(new TranscodeError(data.message || 'Transcode failed', 'TRANSCODE_FAILED'));
         return;
       }
       if (data.type !== 'encrypted_response' || !data.payload) return;
@@ -73,14 +74,18 @@ export async function submitTranscodeWs(opts: TranscodeWsOptions): Promise<Trans
             proofTreeCID: msg.proofTreeCID ?? null, proofTreeRootHash: msg.proofTreeRootHash ?? null,
           });
         } else if (msg.type === 'transcode_error') {
-          const errMsg = typeof msg.error === 'string' ? msg.error : msg.error?.message || 'Transcode failed';
-          safeReject(new Error(errMsg));
+          const nodeCode = typeof msg.error === 'object' ? msg.error?.code
+                         : typeof msg.error === 'string' ? msg.error : undefined;
+          const sdkCode = nodeCode === 'TRANSCODE_CAPACITY_FULL' ? 'CAPACITY_FULL' as const : 'TRANSCODE_FAILED' as const;
+          const errMsg = typeof msg.error === 'object' ? msg.error?.message || 'Transcode failed'
+                       : typeof msg.error === 'string' ? msg.error : 'Transcode failed';
+          safeReject(new TranscodeError(errMsg, sdkCode));
         }
       } catch (err: any) { if (!isSettled) safeReject(err); }
     });
 
     wsClient.sendWithoutResponse(envelope).catch((err: any) => {
-      safeReject(new Error(`Failed to send transcode request: ${err.message}`));
+      safeReject(new TranscodeError(`Failed to send transcode request: ${err.message}`, 'TRANSCODE_FAILED'));
     });
   });
 

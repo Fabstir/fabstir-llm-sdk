@@ -15,7 +15,13 @@ import type {
   TranscodeProofTree,
   Resolution,
   VideoFormat,
+  TranscodeHandle,
+  TranscodeLoadBalancedOptions,
 } from '../types/transcode.types';
+import type { IHostSelectionService } from '../interfaces/IHostSelectionService';
+import { TranscodeError } from '../errors/transcode-errors';
+import { fetchTranscodeCapacity } from '../utils/transcode-capacity';
+import { HostSelectionMode } from '../types/settings.types';
 import { computeTranscodeModelId, estimateTranscodeUnits, billingUnitsToTokens } from '../utils/transcode-utils';
 
 /** Contract status codes → human-readable strings */
@@ -23,6 +29,10 @@ const CONTRACT_STATUS: Record<number, string> = { 0: 'created', 1: 'active', 2: 
 
 /** TranscodeManager — manages video/audio transcoding jobs */
 export class TranscodeManager implements ITranscodeManager {
+  private hostSelectionService?: IHostSelectionService;
+  /** Tracks in-flight jobs per host so the load balancer doesn't over-assign to a single host */
+  private pendingJobs = new Map<string, number>();
+
   constructor(
     private sessionManager: any,
     private storageManager: any,
@@ -31,6 +41,86 @@ export class TranscodeManager implements ITranscodeManager {
     private signer: Signer,
     private chainId: number,
   ) {}
+
+  setHostSelectionService(service: IHostSelectionService): void {
+    this.hostSelectionService = service;
+  }
+
+  async submitTranscodeWithLoadBalancing(
+    sourceCid: string,
+    formats: VideoFormat[],
+    modelId: string,
+    options?: TranscodeLoadBalancedOptions,
+  ): Promise<TranscodeHandle> {
+    if (!this.hostSelectionService) {
+      throw new Error('HostSelectionService not set — call setHostSelectionService() first');
+    }
+
+    const mode = options?.hostSelectionMode ?? HostSelectionMode.AUTO;
+    const maxRetries = options?.maxHostRetries ?? 3;
+    const ranked = await this.hostSelectionService.getRankedHostsForModel(modelId, mode);
+    const maxRounds = 2;
+    const retryDelay = options?.retryDelayMs ?? 5000;
+
+    for (let round = 0; round < maxRounds; round++) {
+      if (round > 0) {
+        console.log(`[TranscodeManager] All hosts exhausted, retrying in ${retryDelay}ms (round ${round + 1}/${maxRounds})`);
+        await new Promise(r => setTimeout(r, retryDelay));
+      }
+
+      for (const { host } of ranked.slice(0, maxRetries)) {
+        try {
+          const capacity = await fetchTranscodeCapacity(host.apiUrl);
+          const pending = this.pendingJobs.get(host.address) || 0;
+          const effectiveAvailable = capacity.available - pending;
+          if (!capacity.sidecarConnected || effectiveAvailable <= 0) {
+            console.log(`[TranscodeManager] Skipping ${host.address}: no capacity (available=${capacity.available}, pending=${pending}, effective=${effectiveAvailable}, sidecar=${capacity.sidecarConnected})`);
+            continue;
+          }
+        } catch {
+          console.log(`[TranscodeManager] Skipping ${host.address}: capacity fetch failed`);
+          continue;
+        }
+
+        // Track this host as having a pending job
+        this.pendingJobs.set(host.address, (this.pendingJobs.get(host.address) || 0) + 1);
+        options?.onHostSelected?.(host.address, host.apiUrl);
+
+        try {
+          const { sessionId } = await this.sessionManager.startSession({
+            host: host.address,
+            modelId,
+            chainId: this.chainId,
+            endpoint: host.apiUrl,
+            depositAmount: options?.depositAmount ?? '0.0002',
+            duration: options?.duration ?? 3600,
+            proofInterval: options?.proofInterval ?? 100,
+            encryption: options?.encryption !== false,
+          });
+          const handle = await this.sessionManager.submitTranscode(
+            sessionId.toString(), sourceCid, formats, options,
+          );
+          // Decrement pending count when job completes or fails
+          handle.result.finally(() => {
+            const count = this.pendingJobs.get(host.address) || 0;
+            if (count > 0) this.pendingJobs.set(host.address, count - 1);
+          });
+          return handle;
+        } catch (err) {
+          // Decrement on submission failure
+          const count = this.pendingJobs.get(host.address) || 0;
+          if (count > 0) this.pendingJobs.set(host.address, count - 1);
+          if (err instanceof TranscodeError && err.code === 'CAPACITY_FULL') {
+            console.log(`[TranscodeManager] CAPACITY_FULL on ${host.address}, trying next host`);
+            continue;
+          }
+          throw err;
+        }
+      }
+    }
+
+    throw new TranscodeError('No hosts available with transcode capacity', 'NO_AVAILABLE_HOSTS');
+  }
 
   async createTranscodeJob(params: CreateTranscodeJobParams): Promise<{
     jobId: bigint;

@@ -283,6 +283,28 @@ export interface TranscodeSubmitOptions {
   timeoutMs?: number;
 }
 
+/** Runtime capacity snapshot from a host's transcode sidecar */
+export interface TranscodeCapacity {
+  active: number;
+  max: number;
+  queued: number;
+  available: number;
+  sidecarConnected: boolean;
+}
+
+/** Options for load-balanced transcode submission */
+export interface TranscodeLoadBalancedOptions extends TranscodeSubmitOptions {
+  maxHostRetries?: number;
+  hostSelectionMode?: import('./settings.types').HostSelectionMode;
+  onHostSelected?: (hostAddress: string, hostUrl: string) => void;
+  /** Session config passed through to startSession */
+  depositAmount?: string;
+  duration?: number;
+  proofInterval?: number;
+  encryption?: boolean;
+  retryDelayMs?: number;           // Delay between retry rounds (default: 5000)
+}
+
 /**
  * Transcode job creation parameters
  */

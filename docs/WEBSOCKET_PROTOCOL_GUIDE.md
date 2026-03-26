@@ -471,6 +471,29 @@ Returned when transcoding fails:
 }
 ```
 
+**Error codes**: `TRANSCODE_FAILED` (generic), `TRANSCODE_CAPACITY_FULL` (sidecar queue full — SDK maps to `CAPACITY_FULL`, retryable).
+
+### 14. Transcode Capacity (HTTP, not WebSocket)
+
+The host exposes `GET /v1/transcode/capacity` as an HTTP endpoint (not over WebSocket). The SDK calls this before submitting a transcode job to check slot availability.
+
+```json
+{
+  "active": 2,
+  "max": 3,
+  "queued": 1,
+  "available": 1,
+  "sidecarConnected": true
+}
+```
+
+- `queued` (number): Jobs waiting in the sidecar queue (node v8.27.0+)
+- HTTP 429 response: Returned when the sidecar is completely full. The SDK maps this to `CAPACITY_FULL` error, triggering load balancer overflow to the next host.
+
+### Concurrent Transcode Sessions
+
+Each `submitTranscode` call creates its own WebSocket connection and performs an independent encrypted session init (ECDH key exchange). This allows multiple concurrent transcode jobs to run simultaneously without message clobbering. The SDK tracks per-job WebSocket lifecycle — connections are cleaned up when the transcode completes or fails.
+
 ## Advanced Features
 
 ### Compression
@@ -818,6 +841,9 @@ function ChatComponent() {
 | `SERVER_ERROR` | Internal server error | Retry with backoff |
 | `QUOTA_EXCEEDED` | Token quota exceeded | Wait or upgrade plan |
 | `TOKEN_LIMIT_EXCEEDED` | Prompt exceeds context window | Trim history and retry (see `ContextLimitError`) |
+| `CAPACITY_FULL` | Host transcode slots full (HTTP 429) | Load balancer retries on next host automatically |
+| `TRANSCODE_FAILED` | Transcode operation failed | Check source CID and format parameters |
+| `NO_AVAILABLE_HOSTS` | All hosts exhausted during load balancing | Retry later or add more hosts |
 
 ### Error Recovery Example
 
