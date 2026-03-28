@@ -230,7 +230,7 @@ export class SmartAccountProvider implements IWalletProvider {
         break;
       } catch (error: any) {
         retries--;
-        if (retries === 0 || !error.message?.includes('timeout')) {
+        if (retries === 0 || (!error.message?.includes('timeout') && !error.message?.includes('deadline exceeded'))) {
           throw error;
         }
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -256,7 +256,7 @@ export class SmartAccountProvider implements IWalletProvider {
         break;
       } catch (error: any) {
         retries--;
-        if (retries === 0 || !error.message?.includes('Network timeout')) {
+        if (retries === 0 || (!error.message?.includes('Network timeout') && !error.message?.includes('deadline exceeded'))) {
           throw error;
         }
         await new Promise(resolve => setTimeout(resolve, 1000));

@@ -311,6 +311,47 @@ describe('SmartAccountProvider', () => {
 
       await expect(provider.sendTransaction(tx)).rejects.toThrow('Paymaster rejected');
     });
+
+    it('retries gas estimation on "context deadline exceeded"', async () => {
+      await provider.connect();
+
+      mockBundlerClient.estimateUserOperationGas
+        .mockRejectedValueOnce(new Error('context deadline exceeded'))
+        .mockResolvedValueOnce({
+          preVerificationGas: '100000',
+          verificationGasLimit: '200000',
+          callGasLimit: '300000',
+        });
+
+      const tx = {
+        to: '0x742d35cc6634c0532925a3b844bc9e7595f0beeb',
+        value: 0n,
+        data: '0x',
+      };
+
+      const response = await provider.sendTransaction(tx);
+      expect(response.hash).toBeDefined();
+      expect(mockBundlerClient.estimateUserOperationGas).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries sendUserOperation on "context deadline exceeded"', async () => {
+      await provider.connect();
+
+      const userOpHash = '0x' + 'abcd'.repeat(16);
+      mockBundlerClient.sendUserOperation
+        .mockRejectedValueOnce(new Error('context deadline exceeded'))
+        .mockResolvedValueOnce(userOpHash);
+
+      const tx = {
+        to: '0x742d35cc6634c0532925a3b844bc9e7595f0beeb',
+        value: 0n,
+        data: '0x',
+      };
+
+      const response = await provider.sendTransaction(tx);
+      expect(response.hash).toBe(userOpHash);
+      expect(mockBundlerClient.sendUserOperation).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('Provider Information', () => {
