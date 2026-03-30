@@ -280,6 +280,59 @@ describe('SessionManager - Session Groups Integration', () => {
     });
   });
 
+  describe('endSession() non-blocking storage', () => {
+    // Helper: inject a mock session directly into sessions Map (bypasses startSession pricing issues)
+    function injectSession(sm: any, id: bigint) {
+      sm.sessions.set(id.toString(), {
+        sessionId: id,
+        status: 'active',
+        startTime: Date.now(),
+        totalTokens: 0,
+      });
+    }
+
+    it('should not block on slow storage operations', async () => {
+      mockStorageManager.loadConversation = vi.fn().mockImplementation(
+        () => new Promise(resolve => setTimeout(() => resolve(null), 200))
+      );
+      injectSession(sessionManager, 900n);
+
+      const start = Date.now();
+      await sessionManager.endSession(900n);
+      const elapsed = Date.now() - start;
+
+      expect(elapsed).toBeLessThan(100);
+      expect(mockStorageManager.loadConversation).toHaveBeenCalledWith('900');
+    });
+
+    it('should not throw when storage save fails', async () => {
+      mockStorageManager.loadConversation = vi.fn().mockResolvedValue({
+        id: '900', metadata: {}, updatedAt: 0,
+      });
+      mockStorageManager.saveConversation = vi.fn().mockRejectedValue(
+        new Error('S5 write failed')
+      );
+      injectSession(sessionManager, 900n);
+
+      await expect(sessionManager.endSession(900n)).resolves.toBeUndefined();
+    });
+
+    it('should persist session end status eventually', async () => {
+      mockStorageManager.loadConversation = vi.fn().mockResolvedValue({
+        id: '900', metadata: {}, updatedAt: 0,
+      });
+      mockStorageManager.saveConversation = vi.fn().mockResolvedValue({ success: true });
+      injectSession(sessionManager, 900n);
+
+      await sessionManager.endSession(900n);
+      await new Promise(r => setTimeout(r, 0)); // flush microtasks
+
+      expect(mockStorageManager.saveConversation).toHaveBeenCalledWith(
+        expect.objectContaining({ metadata: expect.objectContaining({ status: 'ended' }) })
+      );
+    });
+  });
+
   describe('Session metadata', () => {
     it('should store model, host, total tokens, start/end time', async () => {
       const group = await sessionGroupManager.createSessionGroup({

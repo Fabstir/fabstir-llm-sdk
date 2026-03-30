@@ -1821,14 +1821,15 @@ export class SessionManager implements ISessionManager {
         session.endTime = Date.now();
       }
 
-      // Update storage to mark session as ended
-      const conversation = await this.storageManager.loadConversation(sessionIdStr);
-      if (conversation) {
-        conversation.metadata['status'] = 'ended';
-        conversation.metadata['endTime'] = Date.now();
-        conversation.updatedAt = Date.now();
-        await this.storageManager.saveConversation(conversation);
-      }
+      // Update storage to mark session as ended (non-blocking for fast session teardown)
+      this.storageManager.loadConversation(sessionIdStr).then(conversation => {
+        if (conversation) {
+          conversation.metadata['status'] = 'ended';
+          conversation.metadata['endTime'] = Date.now();
+          conversation.updatedAt = Date.now();
+          return this.storageManager.saveConversation(conversation);
+        }
+      }).catch(err => console.warn('[SessionManager] Failed to persist session end status:', err));
 
     } catch (error: any) {
       throw new SDKError(
