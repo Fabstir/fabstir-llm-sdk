@@ -91,6 +91,7 @@ export interface UpdateSessionGroupInput {
   name?: string;
   description?: string;
   metadata?: Record<string, any>;
+  chatSessionsData?: Record<string, ChatSession>;
 }
 
 /**

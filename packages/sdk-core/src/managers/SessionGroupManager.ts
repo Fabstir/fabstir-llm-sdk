@@ -262,9 +262,19 @@ export class SessionGroupManager implements ISessionGroupManager {
       group.metadata = { ...group.metadata, ...updates.metadata };
     }
 
+    if (updates.chatSessionsData !== undefined) {
+      group.chatSessionsData = { ...(group.chatSessionsData || {}), ...updates.chatSessionsData };
+      for (const [sid, session] of Object.entries(updates.chatSessionsData)) {
+        this.chatStorage.set(sid, session);
+      }
+    }
+
     group.updatedAt = new Date();
 
     this.groups.set(groupId, group);
+    if (this.storage) {
+      await this.storage.save(group);
+    }
     return group;
   }
 
@@ -376,6 +386,9 @@ export class SessionGroupManager implements ISessionGroupManager {
     group.defaultDatabase = databaseId;
     group.updatedAt = new Date();
     this.groups.set(groupId, group);
+    if (this.storage) {
+      await this.storage.save(group);
+    }
 
     return group;
   }

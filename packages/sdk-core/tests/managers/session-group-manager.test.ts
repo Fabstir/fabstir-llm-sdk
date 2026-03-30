@@ -251,6 +251,63 @@ describe('SessionGroupManager', () => {
         manager.updateSessionGroup(group.id, otherUser, { name: 'Hacked' })
       ).rejects.toThrow('Permission denied');
     });
+
+    it('should call storage.save when storage is available', async () => {
+      const mockStorage = { save: vi.fn(), load: vi.fn(), loadAll: vi.fn() } as any;
+      const storageManager = new SessionGroupManager(mockStorage);
+      const group = await storageManager.createSessionGroup({
+        name: 'Persist Test',
+        description: 'Test persistence',
+        owner: testOwner,
+      });
+      mockStorage.save.mockClear();
+
+      await storageManager.updateSessionGroup(group.id, testOwner, {
+        metadata: { updated: true },
+      });
+
+      expect(mockStorage.save).toHaveBeenCalledTimes(1);
+      expect(mockStorage.save).toHaveBeenCalledWith(expect.objectContaining({ id: group.id }));
+    });
+
+    it('should not fail when storage is not available', async () => {
+      const group = await manager.createSessionGroup({
+        name: 'No Storage',
+        description: 'Test',
+        owner: testOwner,
+      });
+
+      await expect(
+        manager.updateSessionGroup(group.id, testOwner, { name: 'Updated' })
+      ).resolves.toBeDefined();
+    });
+
+    it('should update chatSessionsData when provided', async () => {
+      const group = await manager.createSessionGroup({
+        name: 'Chat Test',
+        description: 'Test',
+        owner: testOwner,
+      });
+
+      const now = Date.now();
+      const updated = await manager.updateSessionGroup(group.id, testOwner, {
+        chatSessionsData: {
+          'session-1': {
+            sessionId: 'session-1',
+            groupId: group.id,
+            title: 'Test Chat',
+            messages: [],
+            metadata: { model: 'test-model' },
+            created: now,
+            updated: now,
+          },
+        },
+      });
+
+      expect(updated.chatSessionsData).toBeDefined();
+      expect(updated.chatSessionsData!['session-1']).toBeDefined();
+      expect(updated.chatSessionsData!['session-1'].title).toBe('Test Chat');
+    });
   });
 
   describe('deleteSessionGroup()', () => {
@@ -403,6 +460,23 @@ describe('SessionGroupManager', () => {
       const updated = await manager.setDefaultDatabase(group.id, testOwner, undefined);
 
       expect(updated.defaultDatabase).toBeUndefined();
+    });
+
+    it('should call storage.save when setting default database', async () => {
+      const mockStorage = { save: vi.fn(), load: vi.fn(), loadAll: vi.fn() } as any;
+      const storageManager = new SessionGroupManager(mockStorage);
+      const group = await storageManager.createSessionGroup({
+        name: 'Default DB Test',
+        description: 'Test',
+        owner: testOwner,
+      });
+      await storageManager.linkVectorDatabase(group.id, testOwner, 'db-persist');
+      mockStorage.save.mockClear();
+
+      await storageManager.setDefaultDatabase(group.id, testOwner, 'db-persist');
+
+      expect(mockStorage.save).toHaveBeenCalledTimes(1);
+      expect(mockStorage.save).toHaveBeenCalledWith(expect.objectContaining({ id: group.id }));
     });
   });
 
