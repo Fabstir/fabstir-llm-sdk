@@ -1,6 +1,6 @@
 {
   "name": "@fabstir/sdk-core",
-  "version": "1.17.5",
+  "version": "1.17.6",
   "description": "Browser-compatible core SDK for Fabstir P2P LLM marketplace",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -77,7 +77,7 @@
     "vitest": "^1.1.0"
   },
   "optionalDependencies": {
-    "@julesl23/s5js": "file:/workspace/julesl23-s5js-0.9.0-beta.45.tgz"
+    "@julesl23/s5js": "0.9.0-beta.45"
   },
   "peerDependencies": {
     "@fabstir/llm-auth": ">=0.1.0",
