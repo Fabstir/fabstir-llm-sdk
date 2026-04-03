@@ -27,6 +27,7 @@ export * from './image-generation-http';
 export * from './image-generation-ws';
 export * from './image-intent-analyzer';
 
+export { AsyncMutex } from './AsyncMutex';
 export { computeTranscodeModelId, buildStreamingFormats, selectResolution, assembleContentMetadata } from './transcode-utils';
 export { fetchTranscodeCapacity } from './transcode-capacity';
 export { TranscodeError } from '../errors/transcode-errors';

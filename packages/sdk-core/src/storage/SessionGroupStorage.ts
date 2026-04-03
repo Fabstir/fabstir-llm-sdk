@@ -131,32 +131,7 @@ export class SessionGroupStorage {
 
     const startTime = performance.now();
 
-    // Use StorageManager's retry/reconnect logic if available (v1.4.26+)
-    if (this.storageManager) {
-      try {
-        await this.storageManager.putWithRetry(path, encrypted);
-      } catch (error: any) {
-        console.error(`[SessionGroupStorage] ❌ save(${group.id}) failed after retries:`, error.message);
-        throw error;
-      }
-    } else {
-      // Fallback: direct S5 call with timeout protection
-      const putPromise = this.s5Client.fs.put(path, encrypted);
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
-          reject(new Error(`S5 put operation timed out after ${timeoutMs}ms - S5 connection may be stale`));
-        }, timeoutMs);
-      });
-
-      try {
-        await Promise.race([putPromise, timeoutPromise]);
-      } catch (error: any) {
-        if (error.message?.includes('timed out')) {
-          console.error(`[SessionGroupStorage] ⏰ save(${group.id}) timed out - S5 connection may need reconnection`);
-        }
-        throw error;
-      }
-    }
+    await this.putWithRevisionRetry(path, encrypted, timeoutMs);
 
     const writeDuration = Math.round(performance.now() - startTime);
     console.log(`[SessionGroupStorage] 📝 Local write completed in ${writeDuration}ms`);
@@ -180,6 +155,51 @@ export class SessionGroupStorage {
       console.log(`[SessionGroupStorage] ✅ Session group "${group.name}" saved and network-verified in ${totalDuration}ms`);
     } else {
       console.log(`[SessionGroupStorage] ✅ Session group saved locally in ${writeDuration}ms (network sync pending)`);
+    }
+  }
+
+  /**
+   * Put data to S5 with automatic retry on revision/directory conflicts.
+   *
+   * S5.js can throw "Revision number too low" or "DirectoryTransactionException"
+   * when concurrent writes race on the same path. This method retries with
+   * exponential backoff (100ms, 200ms, 400ms) to let the previous write settle.
+   *
+   * @param path - S5 filesystem path
+   * @param data - Data to write
+   * @param timeoutMs - Timeout per attempt in milliseconds
+   * @param maxRetries - Maximum number of attempts (default: 3)
+   */
+  private async putWithRevisionRetry(
+    path: string,
+    data: any,
+    timeoutMs: number,
+    maxRetries = 3,
+  ): Promise<void> {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        if (this.storageManager) {
+          await this.storageManager.putWithRetry(path, data);
+        } else {
+          const putPromise = this.s5Client.fs.put(path, data);
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error(`S5 put operation timed out after ${timeoutMs}ms`)), timeoutMs);
+          });
+          await Promise.race([putPromise, timeoutPromise]);
+        }
+        return; // Success
+      } catch (error: any) {
+        const msg = error?.message || '';
+        const isRevisionError =
+          msg.includes('Revision number too low') ||
+          msg.includes('DirectoryTransactionException') ||
+          msg.includes('same name');
+        if (!isRevisionError || attempt === maxRetries - 1) {
+          throw error;
+        }
+        // Exponential backoff: 100ms, 200ms, 400ms
+        await new Promise((r) => setTimeout(r, 100 * Math.pow(2, attempt)));
+      }
     }
   }
 

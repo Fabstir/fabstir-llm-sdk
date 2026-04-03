@@ -29,6 +29,7 @@ import { FolderHierarchy, type FolderListItem, type FolderMetadata } from '../st
 import { getParentPath, getAncestorPaths } from '../storage/path-validator.js';
 import { SEED_MESSAGE } from '../utils/s5-seed-derivation';
 import { registerS5WithBackend } from '../utils/s5-secure-registration';
+import { AsyncMutex } from '../utils/AsyncMutex';
 
 export interface Exchange {
   prompt: string;
@@ -136,7 +137,7 @@ export class StorageManager implements IStorageManager {
   private lastError: Error | null = null;
 
   // Per-conversation save locks to prevent concurrent write race conditions
-  private saveLocks: Map<string, Promise<any>> = new Map();
+  private conversationMutex = new AsyncMutex();
 
   // User settings cache
   private settingsCache: {
@@ -159,29 +160,7 @@ export class StorageManager implements IStorageManager {
     conversationId: string,
     operation: () => Promise<T>
   ): Promise<T> {
-    const existingLock = this.saveLocks.get(conversationId);
-
-    const wrappedOperation = (async () => {
-      if (existingLock) {
-        try {
-          await existingLock;
-        } catch {
-          // Previous operation failed, but we still proceed
-        }
-      }
-      return operation();
-    })();
-
-    this.saveLocks.set(conversationId, wrappedOperation);
-
-    try {
-      return await wrappedOperation;
-    } finally {
-      // Clean up lock if it's still ours
-      if (this.saveLocks.get(conversationId) === wrappedOperation) {
-        this.saveLocks.delete(conversationId);
-      }
-    }
+    return this.conversationMutex.withLock(conversationId, operation);
   }
 
   // Folder hierarchy manager (Sub-phase 2.1)
