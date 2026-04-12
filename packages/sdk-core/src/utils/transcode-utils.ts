@@ -1,12 +1,13 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 import { keccak256, toUtf8Bytes } from 'ethers';
-import type { VideoFormat, QualityMetrics, TranscodedSource, TranscodedContentMetadata, TranscodeResult } from '../types/transcode.types';
+import type { VideoFormat, QualityMetrics, TranscodedSource, TranscodedContentMetadata, TranscodeResult, HlsTranscodedSource, HlsContentMetadata } from '../types/transcode.types';
+import { isHlsOutput } from '../types/transcode.types';
 
 /** VideoFormat field order matching the struct definition */
 const FIELD_ORDER: (keyof VideoFormat)[] = [
   'id', 'ext', 'label', 'type', 'vcodec', 'acodec', 'preset', 'profile',
   'ch', 'vf', 'b_v', 'ar', 'b_a', 'c_a', 'minrate', 'maxrate', 'bufsize',
-  'gpu', 'compression_level', 'dest', 'encrypt',
+  'gpu', 'compression_level', 'dest', 'encrypt', 'hls', 'hls_time',
 ];
 const PSNR_STANDARD = 38.0;
 const PSNR_HIGH = 42.0;
@@ -146,6 +147,85 @@ export function buildStreamingFormats(
     }
   }
   return formats;
+}
+
+/** Build one HLS format per resolution with hls: true */
+export function buildHlsFormats(
+  resolutions: string[], codec: string, hlsTime?: number,
+): VideoFormat[] {
+  const cd = CODEC_DEFAULTS[codec] ?? CODEC_DEFAULTS.h264;
+  const formats: VideoFormat[] = [];
+  let nextId = 1;
+  for (const res of resolutions) {
+    const rm = RESOLUTION_MAP[res];
+    if (!rm) continue;
+    const fmt: VideoFormat = {
+      id: nextId++, ext: 'mp4', vcodec: cd.vcodec, acodec: 'aac',
+      preset: cd.preset, ar: '48k', ch: 2, vf: rm.vf, b_v: cd.bitrates[res],
+      dest: 's5', hls: true,
+    };
+    if (hlsTime !== undefined) fmt.hls_time = hlsTime;
+    formats.push(fmt);
+  }
+  return formats;
+}
+
+/** Generate HLS master playlist with #EXT-X-STREAM-INF per source */
+export function buildMasterPlaylist(
+  sources: HlsTranscodedSource[], variantUrlFn: (resolution: string) => string,
+): string {
+  const lines: string[] = ['#EXTM3U'];
+  for (const src of sources) {
+    const rm = RESOLUTION_MAP[src.resolution];
+    if (!rm) continue;
+    const [w, h] = rm.vf.replace('scale=', '').split('x');
+    lines.push(
+      `#EXT-X-STREAM-INF:BANDWIDTH=${src.bitrateKbps * 1000},RESOLUTION=${w}x${h}`,
+      variantUrlFn(src.resolution),
+    );
+  }
+  return lines.join('\n') + '\n';
+}
+
+/** Generate HLS variant playlist for one resolution (fMP4/version 7) */
+export function buildVariantPlaylist(
+  source: HlsTranscodedSource, segmentUrlFn: (cid: string) => string,
+): string {
+  const maxDur = Math.ceil(Math.max(...source.segments.map(s => s.duration)));
+  const lines: string[] = [
+    '#EXTM3U', '#EXT-X-VERSION:7',
+    `#EXT-X-TARGETDURATION:${maxDur}`,
+    '#EXT-X-MEDIA-SEQUENCE:0',
+    `#EXT-X-MAP:URI="${segmentUrlFn(source.initSegmentCid)}"`,
+  ];
+  for (const seg of source.segments) {
+    lines.push(`#EXTINF:${seg.duration.toFixed(6)},`, segmentUrlFn(seg.cid));
+  }
+  lines.push('#EXT-X-ENDLIST');
+  return lines.join('\n') + '\n';
+}
+
+/** Map HLS transcode results into HlsContentMetadata */
+export function assembleHlsContentMetadata(
+  result: TranscodeResult, formats: VideoFormat[], sourceCid: string,
+  previewPercent: number, jobId: number,
+): HlsContentMetadata {
+  const sources: HlsTranscodedSource[] = [];
+  for (const fmt of formats) {
+    const output = result.outputs.find(o => o.id === fmt.id);
+    if (!output || !isHlsOutput(output)) continue;
+    sources.push({
+      resolution: vfToResolution(fmt.vf!),
+      codec: normalizeCodec(fmt.vcodec!),
+      container: fmt.ext,
+      bitrateKbps: parseBitrateKbps(fmt.b_v!),
+      initSegmentCid: output.initSegmentCid,
+      segments: output.segments,
+      previewSegments: output.previewSegments,
+      totalDuration: output.totalDuration,
+    });
+  }
+  return { sourceCid, transcodedAt: Date.now(), freePreviewPercent: previewPercent, sources, jobId };
 }
 
 /** Select best resolution for device/bandwidth from transcoded sources */

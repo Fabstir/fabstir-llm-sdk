@@ -23,17 +23,19 @@ export interface TranscodeWsOptions {
   chainId?: number;
   onProgress?: (progress: number, gopInfo?: GOPInfo) => void;
   timeoutMs?: number;
+  previewPercent?: number;
 }
 
 /** Submit a transcode job via encrypted WebSocket. Returns a TranscodeHandle immediately. */
 export async function submitTranscodeWs(opts: TranscodeWsOptions): Promise<TranscodeHandle> {
   const { wsClient, encryptionManager, sessionId, sessionKey, messageIndex,
-    sourceCid, formats, isEncrypted = true, isGpu, jobId, chainId, onProgress, timeoutMs = 300000 } = opts;
+    sourceCid, formats, isEncrypted = true, isGpu, jobId, chainId, onProgress, timeoutMs = 300000, previewPercent } = opts;
 
   const inner: Record<string, unknown> = { action: 'transcode', sourceCid, mediaFormats: formats, isEncrypted };
   if (isGpu !== undefined) inner.isGpu = isGpu;
   if (jobId !== undefined) inner.jobId = jobId;
   if (chainId !== undefined) inner.chainId = chainId;
+  if (previewPercent !== undefined) inner.previewPercent = previewPercent;
 
   const encrypted = encryptionManager.encryptMessage(sessionKey, JSON.stringify(inner), messageIndex.value++);
   const envelope = {

@@ -1812,7 +1812,8 @@ console.log(`Task: ${handle.taskId}`);
 handle.cancel(); // Cancel mid-transcode
 
 const result = await handle.result;
-// { taskId, outputs: [{ id, ext, cid }], billing: { units, tokens }, duration, qualityMetrics, proofTreeCID, proofTreeRootHash }
+// { taskId, outputs: TranscodeOutputUnion[], billing: { units, tokens }, duration, qualityMetrics, proofTreeCID, proofTreeRootHash }
+// Each output is either { id, ext, cid } (standard) or { id, hls: true, initSegmentCid, segments, ... } (HLS)
 ```
 
 ### TranscodeSubmitOptions
@@ -1824,6 +1825,7 @@ interface TranscodeSubmitOptions {
   chainId?: number;        // Blockchain context
   onProgress?: (progress: number, gopInfo?: GOPInfo) => void;
   timeoutMs?: number;      // Default: 300000 (5 min)
+  previewPercent?: number; // HLS: first N% of segments uploaded unencrypted (default: 0)
 }
 ```
 
@@ -1832,7 +1834,7 @@ interface TranscodeSubmitOptions {
 `submitTranscodeWithLoadBalancing` on `TranscodeManager` ranks available hosts, checks capacity, and submits to the best host with available slots. If the preferred host is full, it overflows to the next ranked host automatically.
 
 ```typescript
-const transcodeManager = sdk.getTranscodeManager();
+const transcodeManager = sdk.getTranscodeManager() as any; // Cast — not on ITranscodeManager interface
 const handle = await transcodeManager.submitTranscodeWithLoadBalancing(sourceCid, formats, modelId, {
   hostSelectionMode: HostSelectionMode.AUTO,
   maxHostRetries: 5,
@@ -1893,24 +1895,28 @@ const formats: VideoFormat[] = [{
 }];
 ```
 
-**Streaming fields:**
+**Streaming fields (Phase 1 — whole-file):**
 - `encrypt` (boolean, optional): When `true`, the output is encrypted on S5. Used to produce encrypted full-length outputs alongside unencrypted previews.
 - `trim_percent` (number, optional): Transcode only the first N% of the source video. The node sidecar computes `-t <duration * trim_percent / 100>` for ffmpeg. Used to produce free preview clips.
+
+**HLS fields (Phase 2 — segmented):**
+- `hls` (boolean, optional): When `true`, output fMP4 segments instead of a single file. `encrypt` and `trim_percent` are ignored for HLS formats.
+- `hls_time` (number, optional): Target segment duration in seconds (default: 6).
 
 ### Streaming Content Pipeline
 
 For streaming content with free previews, use `buildStreamingFormats()` to produce two outputs per resolution — an encrypted full-length version and an unencrypted trimmed preview:
 
 ```typescript
-import { buildStreamingFormats, selectResolution, assembleContentMetadata } from '@fabstir/sdk-core/utils';
+import { buildStreamingFormats, selectResolution, assembleContentMetadata } from '@fabstir/sdk-core';
 
 // Build format array: 2 outputs per resolution (full + preview)
 const formats = buildStreamingFormats(['720p', '1080p'], 'h264', 15);
-// Returns 4 formats:
-//   id 1: 1080p full (encrypt: true)
-//   id 2: 1080p preview (encrypt: false, trim_percent: 15)
-//   id 3: 720p full (encrypt: true)
-//   id 4: 720p preview (encrypt: false, trim_percent: 15)
+// Returns 4 formats (ordered by the resolutions array):
+//   id 1: 720p full (encrypt: true)
+//   id 2: 720p preview (encrypt: false, trim_percent: 15)
+//   id 3: 1080p full (encrypt: true)
+//   id 4: 1080p preview (encrypt: false, trim_percent: 15)
 
 // When previewPercent is 0, produces 1 output per resolution (no encrypt/trim flags)
 const simpleFormats = buildStreamingFormats(['1080p'], 'h264', 0);
@@ -1960,13 +1966,138 @@ interface TranscodedContentMetadata {
 }
 ```
 
-### Model IDs for Transcoding
+### HLS Adaptive Bitrate Streaming
 
-Transcode model IDs use `keccak256(abi.encodePacked("fabstir/transcoding/", fileName))`:
+For adaptive bitrate streaming with per-segment encryption, use `buildHlsFormats()`. Unlike `buildStreamingFormats()` (which produces two outputs per resolution), HLS produces one format per resolution — the preview/paid split is handled per-segment via `previewPercent` at the request level.
 
 ```typescript
-import { keccak256, solidityPacked } from 'ethers';
-const modelId = keccak256(solidityPacked(['string', 'string'], ['fabstir/transcoding/', '1080p-h264-nvenc']));
+import { buildHlsFormats, buildMasterPlaylist, buildVariantPlaylist,
+  assembleHlsContentMetadata, isHlsOutput } from '@fabstir/sdk-core';
+
+// Build format array: 1 format per resolution with hls: true
+const formats = buildHlsFormats(['720p', '1080p', '2160p'], 'av1', 6);
+// Returns 3 formats:
+//   id 1: 720p  (hls: true, hls_time: 6)
+//   id 2: 1080p (hls: true, hls_time: 6)
+//   id 3: 2160p (hls: true, hls_time: 6)
+
+// Submit with previewPercent (first 15% of segments unencrypted)
+const handle = await (sessionManager as any).submitTranscode(
+  sessionId.toString(), sourceCid, formats, {
+    isGpu: true, isEncrypted: true, previewPercent: 15,
+    onProgress: (p, gop) => console.log(`${p}%`),
+  },
+);
+const result = await handle.result;
+```
+
+**After transcode completes**, assemble HLS metadata:
+
+```typescript
+const metadata = assembleHlsContentMetadata(result, formats, sourceCid, 15, jobId);
+// metadata: {
+//   sourceCid, transcodedAt, freePreviewPercent: 15, jobId,
+//   sources: [
+//     { resolution: '720p', codec: 'av1', container: 'mp4', bitrateKbps: 1500,
+//       initSegmentCid: 'z...', segments: [...], previewSegments: 15, totalDuration: 598 },
+//     { resolution: '1080p', ... },
+//     { resolution: '2160p', ... },
+//   ]
+// }
+```
+
+**Generate M3U8 playlists** client-side:
+
+```typescript
+// Master playlist (adaptive bitrate switching)
+const master = buildMasterPlaylist(metadata.sources, res => `${res}/index.m3u8`);
+// #EXTM3U
+// #EXT-X-STREAM-INF:BANDWIDTH=1500000,RESOLUTION=1280x720
+// 720p/index.m3u8
+// #EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1920x1080
+// 1080p/index.m3u8
+// ...
+
+// Variant playlist (single resolution, all segments)
+const variant = buildVariantPlaylist(metadata.sources[0], cid => `https://s5.example/${cid}`);
+// #EXTM3U
+// #EXT-X-VERSION:7
+// #EXT-X-TARGETDURATION:7
+// #EXT-X-MAP:URI="https://s5.example/zInitSeg..."
+// #EXTINF:6.006000,
+// https://s5.example/zSeg0...
+// ...
+// #EXT-X-ENDLIST
+```
+
+**Discriminate HLS from standard outputs** using the type guard:
+
+```typescript
+for (const output of result.outputs) {
+  if (isHlsOutput(output)) {
+    // output: HlsOutput — has initSegmentCid, segments[], previewSegments, etc.
+    console.log(`HLS: ${output.segments.length} segments`);
+  } else {
+    // output: TranscodedOutput — has cid (single file)
+    console.log(`Standard: ${output.cid}`);
+  }
+}
+```
+
+**HLS Types:**
+
+```typescript
+interface HlsSegment {
+  index: number;           // 0-based segment position
+  cid: string;             // z-prefix (unencrypted) or u-prefix (encrypted)
+  duration: number;        // Actual segment duration in seconds
+  encrypted: boolean;      // true if segment is encrypted on S5
+}
+
+interface HlsOutput {
+  id: number;
+  hls: true;               // Literal true — discriminant for type guard
+  initSegmentCid: string;  // fMP4 init segment (always unencrypted, z-prefix)
+  segments: HlsSegment[];
+  previewSegments: number; // Count of unencrypted preview segments
+  totalSegments: number;
+  totalDuration: number;   // Sum of all segment durations
+}
+
+type TranscodeOutputUnion = TranscodedOutput | HlsOutput;
+
+function isHlsOutput(o: TranscodeOutputUnion): o is HlsOutput;
+
+interface HlsTranscodedSource {
+  resolution: string;      // '480p' | '720p' | '1080p' | '2160p'
+  codec: string;           // 'h264' | 'av1'
+  container: string;       // 'mp4'
+  bitrateKbps: number;
+  initSegmentCid: string;
+  segments: HlsSegment[];
+  previewSegments: number;
+  totalDuration: number;
+}
+
+interface HlsContentMetadata {
+  sourceCid: string;
+  transcodedAt: number;
+  freePreviewPercent: number;
+  sources: HlsTranscodedSource[];
+  jobId: number;
+}
+```
+
+### Model IDs for Transcoding
+
+Transcode model IDs are computed from the canonical JSON of the `VideoFormat[]` array — not from a model name string. Use the SDK utility:
+
+```typescript
+import { computeTranscodeModelId } from '@fabstir/sdk-core';
+
+const modelId = computeTranscodeModelId(formats);
+// Internally: sorts by id, maps to canonical field order, JSON.stringify, keccak256
+// Deterministic — same formats always produce the same model ID
 ```
 
 ### Encrypted Source Upload

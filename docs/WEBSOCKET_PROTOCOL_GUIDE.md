@@ -204,6 +204,11 @@ Send a transcode request via the encrypted WebSocket channel. The request is sen
 - `isGpu` (boolean): Use GPU acceleration (default: `true`)
 - `jobId` (number, optional): For billing integration
 - `chainId` (number, optional): Blockchain context (default: `84532`)
+- `previewPercent` (number, optional): HLS only — first N% of segments uploaded unencrypted. When `0` or absent, all segments use the encryption mode from `isEncrypted`. See [HLS Integration Guide](node-reference/SDK_HLS_INTEGRATION.md)
+
+**HLS format fields** (added to any format in `mediaFormats`):
+- `hls` (boolean, optional): When `true`, output fMP4 segments instead of a single file. `encrypt` and `trim_percent` are ignored for HLS formats.
+- `hls_time` (number, optional): Target segment duration in seconds (default: `6`)
 
 ## Host -> Client Messages
 
@@ -435,9 +440,9 @@ Streamed during transcoding with 0-100% progress and GOP info:
 
 ### 12. Transcode Complete (Encrypted)
 
-Returned when transcoding finishes successfully:
+Returned when transcoding finishes successfully.
 
-**Decrypted payload:**
+**Decrypted payload (standard / Phase 1):**
 
 ```json
 {
@@ -452,6 +457,36 @@ Returned when transcoding finishes successfully:
   "qualityMetrics": null,
   "proofTreeCID": "blobb5pi5sfjl...",
   "proofTreeRootHash": "0x3328225..."
+}
+```
+
+**Decrypted payload (HLS / Phase 2):**
+
+When any format has `hls: true`, the `outputs` array contains HLS output objects with `segments` arrays instead of a single `cid`:
+
+```json
+{
+  "type": "transcode_complete",
+  "taskId": "5ffb76fd-6d9c-44f8-aaf9-757f28445a79",
+  "outputs": [
+    {
+      "id": 1,
+      "hls": true,
+      "initSegmentCid": "zInitSeg1080p...",
+      "segments": [
+        { "index": 0, "cid": "zSeg0Plain...", "duration": 6.006, "encrypted": false },
+        { "index": 1, "cid": "uSeg1Enc...", "duration": 6.006, "encrypted": true }
+      ],
+      "previewSegments": 1,
+      "totalSegments": 100,
+      "totalDuration": 598.764
+    }
+  ],
+  "billing": { "units": 2376, "tokens": 2376000 },
+  "duration": 598.764,
+  "qualityMetrics": null,
+  "proofTreeCID": null,
+  "proofTreeRootHash": null
 }
 ```
 

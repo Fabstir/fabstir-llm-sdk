@@ -13,7 +13,7 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 - 🧠 **RAG (Retrieval-Augmented Generation)** - Upload documents and enhance LLM responses with semantic search
 - 🗂️ **Vector Databases** - Host-side vector storage and cosine similarity search via WebSocket
 - 🎨 **Image Generation** - Text-to-image via FLUX.2 diffusion models over E2E encrypted WebSocket, with automatic intent detection from natural language prompts
-- 🎬 **Video Transcoding** - GPU-accelerated video transcoding (H.264/AV1) with encrypted source/output support, real-time progress, GOP-level proofs, S5 storage, and load balancing across multiple hosts
+- 🎬 **Video Transcoding** - GPU-accelerated video transcoding (H.264/AV1) with encrypted source/output support, real-time progress, GOP-level proofs, S5 storage, load balancing across multiple hosts, and HLS adaptive bitrate streaming with per-segment encryption
 - 🔐 **End-to-End Encryption** - XChaCha20-Poly1305 encryption enabled by default with forward secrecy
 - 🛡️ **Error Recovery** - Automatic retries and failover to ensure reliability
 - 🔌 **Browser Compatible** - Works in both Node.js and browser environments
@@ -52,15 +52,20 @@ async function streamingExample() {
   });
 
   // Authenticate with wallet
-  await sdk.authenticate(privateKey);
+  await sdk.authenticate('privatekey', { privateKey });
 
   // Start encrypted session with host
-  const sessionManager = await sdk.getSessionManager();
+  const sessionManager = sdk.getSessionManager();
   const { sessionId } = await sessionManager.startSession({
-    hostUrl: 'http://host-node:8080',
-    jobId: 123n,
-    modelName: 'llama-3',
-    chainId: ChainId.BASE_SEPOLIA
+    host: hostAddress,                    // Host Ethereum address
+    modelId: modelHash,                   // Model ID (bytes32 hash)
+    endpoint: 'http://host-node:8080',    // Host WebSocket URL
+    chainId: ChainId.BASE_SEPOLIA,
+    depositAmount: '0.001',
+    pricePerToken: 200,
+    paymentMethod: 'deposit',
+    duration: 3600,
+    proofInterval: 100,
     // encryption: true is the default
   });
 
@@ -87,7 +92,7 @@ import { DocumentManager } from "@fabstir/sdk-core/documents";
 async function ragExample() {
   // Initialize SDK
   const sdk = new FabstirSDKCore({ network: 'base-sepolia' });
-  await sdk.authenticate(privateKey);
+  await sdk.authenticate('privatekey', { privateKey });
 
   // Setup RAG with zero-cost host embeddings
   const hostUrl = process.env.NEXT_PUBLIC_TEST_HOST_1_URL || 'http://localhost:8083';
@@ -95,12 +100,17 @@ async function ragExample() {
   const documentManager = new DocumentManager({ embeddingService });
 
   // Start session with host node
-  const sessionManager = await sdk.getSessionManager();
+  const sessionManager = sdk.getSessionManager();
   const { sessionId } = await sessionManager.startSession({
-    hostUrl,
-    jobId: 123n,
-    modelName: 'llama-3',
-    chainId: 84532
+    host: hostAddress,
+    modelId: modelHash,
+    endpoint: hostUrl,
+    chainId: 84532,
+    depositAmount: '0.001',
+    pricePerToken: 200,
+    paymentMethod: 'deposit',
+    duration: 3600,
+    proofInterval: 100,
   });
 
   // Process document: extract → chunk → embed
@@ -305,6 +315,7 @@ await sdk.authenticate(privateKey);
 - [x402 Payment Protocol](docs/EXECUTION-X402-PAYMENTS.md) - HTTP micropayments
 - [Session Multiplexing](docs/IMPLEMENTATION-SESSION-MULTIPLEXING.md) - Session reuse optimization
 - [Transcode Load Balancing](docs/IMPLEMENTATION-TRANSCODE-LOAD-BALANCING.md) - Multi-host transcode distribution
+- [HLS Streaming](docs/node-reference/SDK_HLS_INTEGRATION.md) - HLS adaptive bitrate streaming integration guide
 - [WebSocket Protocol Guide](docs/WEBSOCKET_PROTOCOL_GUIDE.md) - WebSocket message format and encryption
 
 ### Test Harness Pages

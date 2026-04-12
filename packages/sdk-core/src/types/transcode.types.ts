@@ -231,6 +231,8 @@ export interface VideoFormat {
   dest?: string;
   encrypt?: boolean;
   trim_percent?: number;
+  hls?: boolean;
+  hls_time?: number;
 }
 
 /**
@@ -241,6 +243,33 @@ export interface TranscodedOutput {
   ext: string;
   cid: string;
   [key: string]: unknown;
+}
+
+/** Single HLS segment with S5 CID */
+export interface HlsSegment {
+  index: number;
+  cid: string;
+  duration: number;
+  encrypted: boolean;
+}
+
+/** HLS output with init segment and segment list */
+export interface HlsOutput {
+  id: number;
+  hls: true;
+  initSegmentCid: string;
+  segments: HlsSegment[];
+  previewSegments: number;
+  totalSegments: number;
+  totalDuration: number;
+}
+
+/** Union of standard and HLS outputs */
+export type TranscodeOutputUnion = TranscodedOutput | HlsOutput;
+
+/** Type guard for HLS outputs */
+export function isHlsOutput(o: TranscodeOutputUnion): o is HlsOutput {
+  return 'hls' in o && (o as HlsOutput).hls === true;
 }
 
 /**
@@ -257,7 +286,7 @@ export interface GOPInfo {
  */
 export interface TranscodeResult {
   taskId: string;
-  outputs: TranscodedOutput[];
+  outputs: TranscodeOutputUnion[];
   billing: { units: number; tokens: number };
   duration: number;
   qualityMetrics: QualityMetrics | null;
@@ -281,6 +310,7 @@ export interface TranscodeSubmitOptions {
   chainId?: number;
   onProgress?: (progress: number, gopInfo?: GOPInfo) => void;
   timeoutMs?: number;
+  previewPercent?: number;
 }
 
 /** Runtime capacity snapshot from a host's transcode sidecar */
@@ -606,5 +636,26 @@ export interface TranscodedContentMetadata {
   transcodedAt: number;
   freePreviewPercent: number;
   sources: TranscodedSource[];
+  jobId: number;
+}
+
+/** HLS transcoded source for one resolution */
+export interface HlsTranscodedSource {
+  resolution: string;
+  codec: string;
+  container: string;
+  bitrateKbps: number;
+  initSegmentCid: string;
+  segments: HlsSegment[];
+  previewSegments: number;
+  totalDuration: number;
+}
+
+/** Content metadata assembled from an HLS transcode job */
+export interface HlsContentMetadata {
+  sourceCid: string;
+  transcodedAt: number;
+  freePreviewPercent: number;
+  sources: HlsTranscodedSource[];
   jobId: number;
 }

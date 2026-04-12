@@ -3792,7 +3792,7 @@ export class SessionManager implements ISessionManager {
       sessionId, sessionKey: localSessionKey, messageIndex: messageIndexRef,
       sourceCid, formats, jobId: Number(session.jobId),
       chainId: options?.chainId ?? session.chainId, isEncrypted: options?.isEncrypted,
-      isGpu: options?.isGpu, onProgress: options?.onProgress, timeoutMs: options?.timeoutMs,
+      isGpu: options?.isGpu, onProgress: options?.onProgress, timeoutMs: options?.timeoutMs, previewPercent: options?.previewPercent,
     });
     return handle;
   }

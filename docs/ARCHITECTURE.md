@@ -137,6 +137,23 @@ The SDK uses a manager pattern where each manager handles a specific domain:
   - ECDSA sender authentication
   - Replay protection via message indexing
 
+#### **TranscodeManager** (`/managers/TranscodeManager.ts`)
+- GPU-accelerated video transcoding with load balancing across hosts
+- Capacity-aware host selection and automatic failover
+- Key Features:
+  - Load-balanced transcode submission (`submitTranscodeWithLoadBalancing`)
+  - Host capacity checking via sidecar endpoint
+  - Pending job tracking for accurate capacity estimation
+  - Supports Phase 1 (whole-file) and Phase 2 (HLS segmented) output
+
+#### Transcode Utilities (`/utils/transcode-utils.ts`, `/utils/transcode-ws.ts`)
+- Format builders: `buildStreamingFormats()` (Phase 1), `buildHlsFormats()` (Phase 2 HLS)
+- HLS playlist generation: `buildMasterPlaylist()`, `buildVariantPlaylist()` (M3U8 v7, fMP4)
+- Metadata assembly: `assembleContentMetadata()`, `assembleHlsContentMetadata()`
+- Model ID computation: `computeTranscodeModelId()` (canonical JSON → keccak256)
+- WebSocket transcode submission with encrypted message envelope
+- Type guard: `isHlsOutput()` discriminates HLS from standard outputs
+
 #### **VectorRAGManager** (`/managers/VectorRAGManager.ts`)
 - Host-side vector database operations via WebSocket
 - Simplified wrapper delegating to SessionManager
@@ -235,13 +252,15 @@ cat .env.test | grep CONTRACT_
 
 ### 4. WebSocket Architecture
 
-Direct WebSocket connections to host nodes for real-time inference:
+Direct WebSocket connections to host nodes for real-time inference and transcoding:
 
 ```
 User → SDK → WebSocket → Host Node (fabstir-llm-node)
-                ↓
-        Streaming Responses
+                ↓                        ↓
+        Streaming Responses     Transcoder Sidecar (ffmpeg + NVENC)
 ```
+
+All WebSocket messages use E2E encryption (ECDH + XChaCha20-Poly1305). The same connection carries LLM inference, vector operations, image generation, and video transcoding. For transcoding, the host node proxies requests to a GPU transcoder sidecar via localhost HTTP.
 
 **Key Innovation**: Gasless session ending
 - User closes WebSocket connection
@@ -554,8 +573,10 @@ Core dependencies:
 
 ## Version History
 
+- **v1.18.0** - HLS adaptive bitrate streaming: `buildHlsFormats`, M3U8 playlist generation, per-segment encryption, `isHlsOutput` type guard
+- **v1.17.x** - S5 concurrent write serialization, non-blocking endSession, session group persistence
 - **v0.5.0** - Orchestrator package: multi-agent, A2A, x402 payments, session multiplexing
-- **v1.8.6+** - Current version: 13 managers, multi-chain, encryption by default, RAG, marketplace pricing
+- **v1.8.6+** - 13 managers, multi-chain, encryption by default, RAG, marketplace pricing
 - **v1.0.10** - Gasless session ending
 - **v1.0.0** - Initial refactored architecture
 - **v0.x** - Legacy monolithic SDK (deprecated)
