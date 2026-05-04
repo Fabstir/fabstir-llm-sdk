@@ -2296,14 +2296,18 @@ const NodeManagementClient: React.FC = () => {
                                 {getModelNameFromId(price.modelId)}
                               </td>
                               <td style={{ padding: '8px', textAlign: 'right', border: '1px solid #ddd', fontFamily: 'monospace' }}>
-                                {price.nativePrice.toString()}
+                                {price.nativePrice?.toString() ?? '—'}
                               </td>
                               <td style={{ padding: '8px', textAlign: 'right', border: '1px solid #ddd', fontFamily: 'monospace' }}>
-                                {price.stablePrice.toString()}
-                                {' '}
-                                <span style={{ color: '#666', fontSize: '11px' }}>
-                                  (${(Number(price.stablePrice) / 1000).toFixed(3)}/M)
-                                </span>
+                                {price.stablePrice?.toString() ?? '—'}
+                                {price.stablePrice !== undefined && (
+                                  <>
+                                    {' '}
+                                    <span style={{ color: '#666', fontSize: '11px' }}>
+                                      (${(Number(price.stablePrice) / 1000).toFixed(3)}/M)
+                                    </span>
+                                  </>
+                                )}
                               </td>
                               <td style={{ padding: '8px', textAlign: 'center', border: '1px solid #ddd' }}>
                                 {price.isCustom ? '✅' : '➖'}
