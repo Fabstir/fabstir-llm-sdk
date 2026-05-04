@@ -243,21 +243,22 @@ cat .env.test | grep CONTRACT_
 Authenticates the SDK with various providers.
 
 ```typescript
-// Method 1: Authenticate with private key
-async authenticate(privateKey: string): Promise<void>
-
-// Method 2: Authenticate with method name and options
-async authenticate(method: string, options: AuthOptions): Promise<void>
+async authenticate(
+  method?: 'metamask' | 'privatekey' | 'signer' | 'aa-signer',
+  options?: any,
+): Promise<void>
 ```
 
 **Parameters:**
-- `privateKey`: Private key string (Method 1)
-- `method`: Authentication method - "signer" or "privateKey" (Method 2)
-- `options`: Authentication options including signer (Method 2)
+- `method`: Authentication method — `'metamask'` (default), `'privatekey'`, `'signer'`, or `'aa-signer'` (added in 1.19.0).
+- `options`: Mode-specific options.
+  - For `'privatekey'`: `{ privateKey: string }`
+  - For `'signer'`: `{ signer: ethers.Signer }`
+  - For `'aa-signer'`: `{ smartAccountAddress, eoaPrivateKey, sendUserOp, rpcUrl, chainId }` — see Method 3 below.
 
 **Example 1: Private Key Authentication:**
 ```typescript
-await sdk.authenticate('0x...');
+await sdk.authenticate('privatekey', { privateKey: '0x...' });
 ```
 
 **Example 2: Custom Signer Authentication (Base Account Kit):**
@@ -306,6 +307,51 @@ await sdk.authenticate("signer", {
   signer: baseSigner,
 });
 ```
+
+**Example 3: ERC-4337 Smart Account Authentication (`'aa-signer'` mode, since 1.19.0):**
+
+For users whose Smart Account holds funds but whose EOA holds no ETH (email-only sign-in via Biconomy MEE, ZeroDev, Pimlico, etc.). All on-chain transactions route through a caller-supplied `sendUserOp` callback (bundler-agnostic); the EOA private key is used internally for off-chain signing only (`signMessage`, `signTypedData`, encrypted session init).
+
+```typescript
+import { FabstirSDKCore, type SendUserOpFn } from '@fabstir/sdk-core';
+
+const sendUserOp: SendUserOpFn = async ({ to, data, value }) => {
+  // Build + submit UserOp via your AA stack (Biconomy / ZeroDev / Pimlico / etc.)
+  const { transactionHash } = await myBundler.sendUserOp({ to, data, value: value ?? 0n });
+  return { transactionHash };  // sdk-core fetches the receipt itself
+};
+
+const sdk = new FabstirSDKCore({ /* ...config */ });
+await sdk.authenticate('aa-signer', {
+  smartAccountAddress: '0xSA...',  // 0x… — used as msg.sender for all chain tx
+  eoaPrivateKey:        '0xEOA...', // 0x… — used ONLY for off-chain signing
+  sendUserOp,
+  rpcUrl:               'https://...',
+  chainId:              84532,
+});
+```
+
+**`SendUserOpFn` types** (importable from `@fabstir/sdk-core`):
+
+```typescript
+type SendUserOpCall   = { to: string; data: string; value?: bigint };  // value defaults to 0n
+type SendUserOpResult = { transactionHash: string; [k: string]: unknown };  // extra fields permitted
+type SendUserOpFn     = (call: SendUserOpCall) => Promise<SendUserOpResult>;
+```
+
+**Behavioral notes specific to `'aa-signer'` mode:**
+
+- **Asymmetric address surface**: `sdk.getAddress()` returns the Smart Account address (the chain-side identity, used as `msg.sender` for every contract call). `sdk.getSigner()` returns the internal EOA `ethers.Wallet` for off-chain signing — `sdk.getSigner().getAddress()` returns the EOA address. **Do NOT** call `sendTransaction` on `sdk.getSigner()` — the EOA holds no ETH and the call will revert.
+- **`tx.from` semantics**: when methods like `pm.depositNative` / `pm.sendEth` resolve, the returned `TransactionResponse.from` is the Smart Account address (matching `msg.sender` of the inner contract call), NOT the bundler relayer EOA that broadcast the on-chain tx. Use `tx.hash` for tx identity, not `tx.from`.
+- **`switchChain()` not supported in 1.19.0**: throws `SDKError` with code `AA_SWITCH_CHAIN_UNSUPPORTED`. Workaround: `disconnect()` then re-`authenticate('aa-signer', { ...newChainOptions })`. Native AA-mode chain-switching is planned for v1.20.0.
+- **Cross-RPC race tolerance**: when the caller's bundler RPC differs from sdk-core's `rpcUrl`, the SDK retries `getTransactionReceipt` up to 5× with 500ms backoff before throwing `AA_RECEIPT_NOT_VISIBLE`.
+
+**SDKError codes from `authenticate('aa-signer', ...)`** (wrapped at the public-API layer as `AUTH_FAILED` with the inner code in the error message):
+- `AA_SMART_ACCOUNT_MISSING`, `AA_EOA_KEY_MISSING`, `AA_SEND_USEROP_MISSING`, `AA_RPC_URL_MISSING`
+- `AA_RECEIPT_NOT_VISIBLE` (cross-RPC race — bundler mined the tx but sdk-core's RPC hadn't seen it after 5 attempts)
+- `AA_SIGN_TRANSACTION_UNSUPPORTED` (raised if anything tries to call `signTransaction` on the AA signer — use `sendTransaction` which routes through `sendUserOp`)
+
+See `docs/fabstir-v2-reference/IMPLEMENTATION-AA-TRANSCODE-PAYMENT.md` Section A for the full design rationale.
 
 ### Base Account Kit Integration
 

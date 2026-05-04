@@ -179,9 +179,12 @@ export {
   type SubAccountSignerOptions,
 } from './wallet';
 
+// Export ERC-4337 / 'aa-signer' mode callback types (consumer DX)
+export type { SendUserOpFn, SendUserOpCall, SendUserOpResult } from './wallet';
+
 // Export WebSocket client
 export { WebSocketClient } from './websocket/WebSocketClient';
 
 // Version
-export const VERSION = '1.0.0';
+export const VERSION = '1.19.0';
 export const SDK_TYPE = 'browser';

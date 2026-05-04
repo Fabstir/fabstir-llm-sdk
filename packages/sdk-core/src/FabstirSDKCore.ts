@@ -50,6 +50,7 @@ import { ChainRegistry } from './config/ChainRegistry';
 import { ChainId, ChainConfig } from './types/chain.types';
 import { UnsupportedChainError } from './errors/ChainErrors';
 import { ensureSubAccount, createSubAccountSigner, SubAccountOptions } from './wallet';
+import { AASigner, type AASignerOptions } from './wallet';
 
 export interface FabstirSDKCoreConfig {
   // Network configuration
@@ -132,6 +133,8 @@ export class FabstirSDKCore extends EventEmitter {
   private s5Seed?: string;
   private userAddress?: string;
   private initialized = false;
+  private authMode?: 'metamask' | 'privatekey' | 'signer' | 'aa-signer';
+  private eoaWallet?: ethers.Wallet;
 
   constructor(config: FabstirSDKCoreConfig = {}) {
     super();
@@ -203,7 +206,7 @@ export class FabstirSDKCore extends EventEmitter {
   /**
    * Authenticate with wallet
    */
-  async authenticate(method: 'metamask' | 'privatekey' | 'signer' = 'metamask', options?: any): Promise<void> {
+  async authenticate(method: 'metamask' | 'privatekey' | 'signer' | 'aa-signer' = 'metamask', options?: any): Promise<void> {
     try {
       if (method === 'metamask') {
         await this.authenticateWithMetaMask();
@@ -217,10 +220,13 @@ export class FabstirSDKCore extends EventEmitter {
           throw new SDKError('Signer required in options', 'SIGNER_MISSING');
         }
         await this.authenticateWithSigner(options.signer);
+      } else if (method === 'aa-signer') {
+        await this.authenticateWithAASigner(options);
       } else {
         throw new SDKError('Unsupported authentication method', 'AUTH_METHOD_UNSUPPORTED');
       }
-      
+
+      this.authMode = method;
       this.authenticated = true;
 
       // Initialize contract manager
@@ -420,6 +426,59 @@ export class FabstirSDKCore extends EventEmitter {
       }
     } else {
       console.log('[SDK] Host-only mode: Skipping S5 seed generation');
+    }
+  }
+
+  /**
+   * Authenticate via ERC-4337 Smart Account. The Smart Account holds funds;
+   * the caller-supplied `sendUserOp` callback executes UserOps on the bundler
+   * of their choice. The EOA private key is used internally for off-chain
+   * signing only (signMessage, signTypedData, encrypted session init) — it
+   * never broadcasts and is not expected to hold ETH.
+   */
+  private async authenticateWithAASigner(
+    options: AASignerOptions & { rpcUrl: string },
+  ): Promise<void> {
+    if (!options?.smartAccountAddress) {
+      throw new SDKError('Smart account address required', 'AA_SMART_ACCOUNT_MISSING');
+    }
+    if (!options.eoaPrivateKey) {
+      throw new SDKError('EOA private key required', 'AA_EOA_KEY_MISSING');
+    }
+    if (!options.sendUserOp) {
+      throw new SDKError('sendUserOp callback required', 'AA_SEND_USEROP_MISSING');
+    }
+    if (!options.rpcUrl) {
+      throw new SDKError('RPC URL required for aa-signer auth', 'AA_RPC_URL_MISSING');
+    }
+
+    this.provider = new ethers.JsonRpcProvider(options.rpcUrl);
+    this.eoaWallet = new ethers.Wallet(options.eoaPrivateKey, this.provider);
+    this.signer = new AASigner(
+      {
+        smartAccountAddress: options.smartAccountAddress,
+        eoaPrivateKey: options.eoaPrivateKey,
+        sendUserOp: options.sendUserOp,
+        chainId: options.chainId,
+      },
+      this.provider,
+    );
+    this.userAddress = options.smartAccountAddress;
+
+    if (this.config.hostOnly !== true) {
+      try {
+        if (this.config.s5Config?.seedPhrase) {
+          this.s5Seed = this.config.s5Config.seedPhrase;
+        } else {
+          this.s5Seed = await generateS5SeedFromPrivateKey(options.eoaPrivateKey);
+          cacheSeed(this.userAddress, this.s5Seed);
+        }
+      } catch (error: any) {
+        throw new SDKError(
+          `Failed to derive S5 seed from EOA private key: ${error.message}`,
+          'SEED_GENERATION_FAILED',
+        );
+      }
     }
   }
 
@@ -1050,6 +1109,7 @@ export class FabstirSDKCore extends EventEmitter {
    * Get current signer
    */
   getSigner(): ethers.Signer | undefined {
+    if (this.authMode === 'aa-signer') return this.eoaWallet;
     return this.signer;
   }
   
@@ -1190,6 +1250,8 @@ export class FabstirSDKCore extends EventEmitter {
     this.signer = undefined;
     this.contractManager = undefined;
     this.authenticated = false;
+    this.authMode = undefined;
+    this.eoaWallet = undefined;
   }
   
   /**
@@ -1236,6 +1298,12 @@ export class FabstirSDKCore extends EventEmitter {
    * Switch to a different chain
    */
   async switchChain(chainId: number): Promise<void> {
+    if (this.authMode === 'aa-signer') {
+      throw new SDKError(
+        "switchChain is not supported in aa-signer mode. Call disconnect() then authenticate('aa-signer', { ...newChainOptions }) instead.",
+        'AA_SWITCH_CHAIN_UNSUPPORTED',
+      );
+    }
     // Don't switch if already on target chain
     if (this.currentChainId === chainId) {
       return;
@@ -1322,7 +1390,7 @@ export class FabstirSDKCore extends EventEmitter {
    * Get SDK version
    */
   getVersion(): string {
-    return '1.0.0-browser';
+    return '1.19.0-browser';
   }
 
   /**

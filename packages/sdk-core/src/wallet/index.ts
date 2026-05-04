@@ -21,3 +21,11 @@ export {
   createSubAccountSigner,
   type SubAccountSignerOptions,
 } from './SubAccountSigner';
+
+export {
+  AASigner,
+  type AASignerOptions,
+  type SendUserOpCall,
+  type SendUserOpResult,
+  type SendUserOpFn,
+} from './AASigner';

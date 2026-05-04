@@ -116,6 +116,47 @@ For running a host node, see the companion package:
 
 - [`@fabstir/host-cli`](../host-cli) - CLI for host node operators
 
+## Authentication: `'aa-signer'` Mode (ERC-4337 Smart Accounts)
+
+For users whose Smart Account holds funds but whose EOA holds no ETH (e.g. email-only sign-in via Biconomy MEE, ZeroDev, Pimlico), `'aa-signer'` mode routes all on-chain transactions through a caller-supplied `sendUserOp` callback. This keeps the SDK bundler-agnostic — the EOA private key is used internally for off-chain signing only (`signMessage`, `signTypedData`, encrypted session init), never to broadcast transactions.
+
+```ts
+import { FabstirSDKCore, type SendUserOpFn } from '@fabstir/sdk-core';
+
+const sendUserOp: SendUserOpFn = async ({ to, data, value }) => {
+  // Build + submit UserOp via your AA stack (Biconomy / ZeroDev / Pimlico / etc.)
+  const { transactionHash } = await myBundler.sendUserOp({ to, data, value: value ?? 0n });
+  return { transactionHash };  // sdk-core fetches the receipt itself
+};
+
+const sdk = new FabstirSDKCore({ /* ...config */ });
+await sdk.authenticate('aa-signer', {
+  smartAccountAddress: '0xSA...',
+  eoaPrivateKey:        '0xEOA_KEY...',
+  sendUserOp,
+  rpcUrl:               'https://...',
+  chainId:              84532,
+});
+```
+
+### Asymmetric Address Surface
+
+`sdk.getAddress()` returns the **Smart Account address** — the chain-side identity used as `msg.sender` for every contract call. `sdk.getSigner()` returns the internal EOA `ethers.Wallet` for off-chain signing; `sdk.getSigner().getAddress()` returns the EOA address. Do **NOT** call `sendTransaction` on `sdk.getSigner()` — the EOA holds no ETH and the call will revert at the RPC layer.
+
+### TransactionResponse `tx.from` Semantics
+
+When SDK methods that return a `TransactionResponse` (e.g. `pm.depositNative`, `pm.sendEth`) resolve, the returned object's `from` field is the **Smart Account address**, matching the `msg.sender` of the inner contract call — **not** the bundler relayer EOA that broadcast the on-chain tx. Callers comparing `tx.from` against on-chain data (e.g. `eth_getTransactionByHash(tx.hash).from`) will see a mismatch, because that field reflects the relayer. Use `tx.hash` for transaction identity, and prefer the SDK's parsed return values (e.g. `{ sessionId, jobId }` from `sm.startSession`) for state lookups.
+
+### Chain Switching
+
+`sdk.switchChain()` is **not supported** in `'aa-signer'` mode in 1.19.0 — invoking it would re-bind managers with stale chain config. As a workaround, call `disconnect()` then re-`authenticate('aa-signer', { ...newChainOptions })`. Native chain-switching support is planned for v1.20.0.
+
+### ethers v6 Dependency
+
+This mode relies on `ethers.AbstractSigner` and `ethers.ContractTransactionResponse` semantics specific to ethers v6.x. `sdk-core` declares `"ethers": "^6.9.0"` as a peer dependency. If a future ethers minor version (e.g. 6.20+) changes `ContractTransactionResponse` polling internals, the synthetic-response path may need a corresponding update — track via integration tests.
+
+AA-signer integration spec provided by the fabstir-v2 team.
+
 ## License
 
 Business Source License 1.1 (BUSL-1.1). See [LICENSE](../../LICENSE) for details.
