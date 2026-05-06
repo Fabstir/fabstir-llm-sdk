@@ -186,5 +186,5 @@ export type { SendUserOpFn, SendUserOpCall, SendUserOpResult } from './wallet';
 export { WebSocketClient } from './websocket/WebSocketClient';
 
 // Version
-export const VERSION = '1.19.0';
+export const VERSION = '1.19.1';
 export const SDK_TYPE = 'browser';

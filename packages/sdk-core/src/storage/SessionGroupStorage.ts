@@ -5,6 +5,7 @@ import type { SessionGroup } from '../types/session-groups.types';
 import type { EncryptionManager } from '../managers/EncryptionManager';
 import type { EncryptedStorage } from '../interfaces/IEncryptionManager';
 import type { StorageManager } from '../managers/StorageManager';
+import { mapWithConcurrency } from '../utils/concurrency';
 
 /**
  * Options for saving session groups
@@ -53,6 +54,13 @@ export interface SessionGroupSaveOptions {
  */
 export class SessionGroupStorage {
   private static readonly STORAGE_PATH = 'home/session-groups';
+  /**
+   * Concurrency cap for parallel S5 fetches in `loadAll`. 10 is the empirical
+   * sweet spot for S5 portal traffic — high enough to dominate the cold-path
+   * latency, low enough to avoid hammering the portal for users with many
+   * session groups.
+   */
+  private static readonly LOAD_ALL_CONCURRENCY = 10;
 
   private s5Client: any;
   private storageManager?: StorageManager;
@@ -418,20 +426,38 @@ export class SessionGroupStorage {
         throw error;
       }
 
-      // Now process the collected entries
-      for (const entry of entries) {
-        if (entry.type === 'file' && entry.name.endsWith('.json')) {
+      // Process the collected entries in parallel with bounded concurrency.
+      // Each load is an independent S5 fetch + decrypt; the previous sequential
+      // for-of would multiply per-group latency by the group count (e.g. 20
+      // groups x 3.5s = 70s on cold path). With concurrency=10 the cold-path
+      // total is ~ceil(N/10) * single-load-time.
+      const fileEntries = entries.filter(
+        (e) => e.type === 'file' && e.name.endsWith('.json'),
+      );
+
+      const loaded = await mapWithConcurrency(
+        fileEntries,
+        SessionGroupStorage.LOAD_ALL_CONCURRENCY,
+        async (entry) => {
           const groupId = entry.name.replace('.json', '');
           try {
-            const group = await this.load(groupId);
-            groups.push(group);
+            return await this.load(groupId);
           } catch (error: any) {
-            // Log warning for groups that fail to load (corrupted, wrong key, deleted, etc.)
-            // This helps debug cross-tab encryption issues
-            console.warn(`[SessionGroupStorage] Failed to decrypt group ${groupId}:`, error.message);
-            // Continue loading other groups - may be old data with different encryption key
+            // Log warning for groups that fail to load (corrupted, wrong key,
+            // deleted, etc.) — this helps debug cross-tab encryption issues.
+            // Returning null isolates the failure so one bad group does not
+            // reject the whole batch.
+            console.warn(
+              `[SessionGroupStorage] Failed to decrypt group ${groupId}:`,
+              error.message,
+            );
+            return null;
           }
-        }
+        },
+      );
+
+      for (const group of loaded) {
+        if (group !== null) groups.push(group);
       }
 
       return groups;

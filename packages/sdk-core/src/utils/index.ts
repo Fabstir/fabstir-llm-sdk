@@ -35,3 +35,4 @@ export { TranscodeError } from '../errors/transcode-errors';
 
 // Export other utilities as they are created
 export { TransactionHelper } from '../contracts/TransactionHelper';
+export { mapWithConcurrency } from './concurrency';
