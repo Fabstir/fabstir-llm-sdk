@@ -1390,7 +1390,7 @@ export class FabstirSDKCore extends EventEmitter {
    * Get SDK version
    */
   getVersion(): string {
-    return '1.19.1-browser';
+    return '1.19.2-browser';
   }
 
   /**

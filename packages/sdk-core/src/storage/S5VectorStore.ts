@@ -5,6 +5,7 @@ import type { S5 } from '@julesl23/s5js';
 import type { EncryptionManager } from '../managers/EncryptionManager';
 import type { Vector, SearchResult } from '../types';
 import type { DatabaseMetadata } from '../database/types';
+import { mapWithConcurrency } from '../utils/concurrency';
 
 interface DatabaseManifest {
   name: string;
@@ -56,6 +57,15 @@ export interface S5VectorStoreOptions {
 }
 
 export class S5VectorStore {
+  /**
+   * Concurrency cap for parallel manifest fetches in `initialize()`. 10 is
+   * the empirical sweet spot for S5 portal traffic — high enough to dominate
+   * cold-path latency, low enough to avoid the thundering-herd retry storm
+   * the previous unbounded Promise.all could trigger for users with many
+   * databases.
+   */
+  private static readonly INIT_CONCURRENCY = 10;
+
   private readonly s5Client: S5;
   private readonly userAddress: string;
   private readonly encryptionManager: EncryptionManager;
@@ -135,11 +145,18 @@ export class S5VectorStore {
         return;
       }
 
-      // Load manifests in parallel with retry logic
+      // Load manifests in parallel with bounded concurrency. The previous
+      // unbounded Promise.all would fan out N parallel S5 fetches (where N
+      // could be 50+ for power users), each of which has its own 5-retry
+      // exponential-backoff loop. On portal slowness this compounds into a
+      // thundering herd: N fetches all retry simultaneously, each waiting
+      // up to 200+400+800+1600 = 3000ms across attempts. Capping at 10 in
+      // flight stays under typical portal rate limits and keeps cold-path
+      // initialization predictable for users with many databases.
       const directories = entries.filter((entry: any) => entry.type === 'directory');
       console.log(`[S5VectorStore] Step 3: Found ${directories.length} database directories`);
 
-      const manifestPromises = directories.map(async (entry: any) => {
+      await mapWithConcurrency(directories, S5VectorStore.INIT_CONCURRENCY, async (entry: any) => {
         const databaseName = entry.name;
 
         // Retry loading manifest with exponential backoff (blob propagation delay)
@@ -171,8 +188,6 @@ export class S5VectorStore {
           }
         }
       });
-
-      await Promise.all(manifestPromises);
 
       console.log(`[S5VectorStore] ✅✅✅ Initialized with ${this.manifestCache.size} database(s)`);
     } catch (error) {
