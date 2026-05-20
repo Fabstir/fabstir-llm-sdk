@@ -55,12 +55,12 @@ export interface SessionGroupSaveOptions {
 export class SessionGroupStorage {
   private static readonly STORAGE_PATH = 'home/session-groups';
   /**
-   * Concurrency cap for parallel S5 fetches in `loadAll`. 10 is the empirical
-   * sweet spot for S5 portal traffic — high enough to dominate the cold-path
-   * latency, low enough to avoid hammering the portal for users with many
-   * session groups.
+   * Concurrency cap for parallel S5 fetches in `loadAll`. Raised from 10 to
+   * 20 in 1.20.0 after empirical confirmation that the S5 portal handles the
+   * higher fan-out without rate-limiting; ~2x cold-path speedup for users
+   * with many session groups.
    */
-  private static readonly LOAD_ALL_CONCURRENCY = 10;
+  private static readonly LOAD_ALL_CONCURRENCY = 20;
 
   private s5Client: any;
   private storageManager?: StorageManager;

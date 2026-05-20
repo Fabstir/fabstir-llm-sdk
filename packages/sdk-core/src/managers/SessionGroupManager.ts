@@ -607,6 +607,50 @@ export class SessionGroupManager implements ISessionGroupManager {
    * Loads from S5 if requestor is provided and session not in cache.
    * If requestor is not provided, only checks memory cache.
    */
+  /**
+   * Get multiple chat sessions in one shot.
+   *
+   * Optimal pattern for bulk loads: a single S5 manifest fetch (via
+   * getSessionGroup) populates chatStorage with EVERY session in the group,
+   * so we never need N parallel per-session fetches. Strictly better than
+   * looping `getChatSession` from the consumer side, which would re-trigger
+   * the cache-miss path repeatedly. Order of returned sessions matches the
+   * order of `sessionIds`; missing IDs return null at the same index.
+   *
+   * @throws Error if any returned session's groupId disagrees with the
+   *         requested groupId (defensive — would indicate cache corruption).
+   */
+  async getChatSessionsBulk(
+    groupId: string,
+    sessionIds: string[],
+    requestor: string,
+  ): Promise<Array<ChatSession | null>> {
+    if (sessionIds.length === 0) return [];
+
+    // Fast path: every requested session is already in cache.
+    const cachedAll = sessionIds.every((id) => this.chatStorage.has(id));
+    if (!cachedAll) {
+      try {
+        await this.getSessionGroup(groupId, requestor);
+      } catch (err) {
+        console.error(
+          '[SessionGroupManager.getChatSessionsBulk] Failed to load group from S5:',
+          err,
+        );
+        return sessionIds.map(() => null);
+      }
+    }
+
+    return sessionIds.map((id) => {
+      const session = this.chatStorage.get(id);
+      if (!session) return null;
+      if (session.groupId !== groupId) {
+        throw new Error(`Session ${id} does not belong to group ${groupId}`);
+      }
+      return session;
+    });
+  }
+
   async getChatSession(groupId: string, sessionId: string, requestor?: string): Promise<ChatSession | null> {
     // First check memory cache
     let session = this.chatStorage.get(sessionId);

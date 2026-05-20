@@ -1,6 +1,6 @@
 {
   "name": "@fabstir/openai-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "OpenAI-compatible API bridge routing through Fabstir SDK encrypted WebSocket",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

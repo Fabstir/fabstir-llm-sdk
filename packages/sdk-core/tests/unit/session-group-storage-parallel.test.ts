@@ -46,7 +46,7 @@ function makeFakeS5Client(entryNames: string[]) {
 }
 
 describe('SessionGroupStorage.loadAll — parallel cold-path fetches', () => {
-  it('runs per-group loads in parallel with at most LOAD_ALL_CONCURRENCY=10 in flight', async () => {
+  it('runs per-group loads in parallel with at most LOAD_ALL_CONCURRENCY=20 in flight', async () => {
     const groupIds = Array.from({ length: 25 }, (_, i) => `g${i}`);
     const entryNames = groupIds.map((id) => `${id}.json`);
     const s5Client = makeFakeS5Client(entryNames);
@@ -77,10 +77,10 @@ describe('SessionGroupStorage.loadAll — parallel cold-path fetches', () => {
 
     // Peak in-flight respects the cap
     expect(peak).toBeGreaterThanOrEqual(2); // proves we ran SOMETHING in parallel
-    expect(peak).toBeLessThanOrEqual(10);
+    expect(peak).toBeLessThanOrEqual(20);
 
     // Sequential would be 25 * 30 = 750ms.
-    // Parallel @ 10 = ceil(25/10) * 30 = 90ms minimum (plus jitter).
+    // Parallel @ 20 = ceil(25/20) * 30 = 60ms minimum (plus jitter).
     // Anything under ~400ms proves we're not sequential.
     expect(elapsed).toBeLessThan(400);
   });

@@ -68,7 +68,7 @@ export async function convertOpenAIMessages(
   for (const msg of messages) {
     if (msg.role === 'system') {
       const content = typeof msg.content === 'string' ? msg.content : '';
-      systemParts.push(content.length > 1000 ? content.slice(0, 1000) : content);
+      systemParts.push(content);
     } else {
       nonSystemMessages.push(msg);
     }

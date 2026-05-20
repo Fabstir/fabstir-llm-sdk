@@ -9,6 +9,9 @@ import { ToolCallParser } from './tool-parser';
 import { createThinkStripper, stripThinkFromText } from './think-stripper';
 import type { SessionBridge } from './session-bridge';
 
+const DEBUG = !!process.env.BRIDGE_DEBUG;
+function debug(...args: any[]) { if (DEBUG) console.log('[openai-bridge:DEBUG]', ...args); }
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -53,6 +56,8 @@ export async function handleChatCompletions(
 
   const tools = body.tools && body.tools.length > 0 ? body.tools : undefined;
   const { prompt, images } = await convertOpenAIMessages(body.messages, tools);
+  debug('Prompt sent to model:\n' + prompt.slice(0, 2000) + (prompt.length > 2000 ? '\n...[truncated]' : ''));
+  if (tools?.length) debug('Tools count:', tools.length, 'names:', tools.map(t => t.function.name).join(', '));
   const inputTokens = estimateInputTokens(prompt);
   const model = body.model;
   const opts = images.length > 0 ? { images } : undefined;

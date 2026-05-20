@@ -4,6 +4,20 @@
 
 This guide documents the WebSocket protocol used for real-time communication between the Fabstir SDK and LLM host nodes. The protocol enables streaming token generation, session management, and bidirectional communication at the `/v1/ws` endpoint.
 
+> ### Encryption is the default (Phase 6.2+)
+>
+> Since Phase 6.2, the SDK opens every session with end-to-end XChaCha20-Poly1305 encryption by default. The production wire format is:
+>
+> 1. `encrypted_init` (client → host) — ECDH session-key handshake, plus an encrypted `session_init` payload.
+> 2. `encrypted_message` (client → host) — every prompt / image-gen / transcode request is wrapped in this envelope; the action (`inference`, `image_generation`, `transcode`) lives inside the encrypted JSON payload.
+> 3. `encrypted_chunk` (host → client) — per-token streamed output, encrypted.
+> 4. `encrypted_response` (host → client) — terminal response carrying `finish_reason`, encrypted.
+> 5. `stream_end` (host → client) — **plaintext** trailer carrying usage / billing metadata; sent after `encrypted_response`.
+>
+> The plaintext-shaped `inference` / `session_init` / `auth` / etc. examples in §"Client -> Host Messages" describe either (a) the JSON contents *inside* an `encrypted_message` payload, or (b) the legacy plaintext fallback that older nodes still accept (`sendPlaintextInit` in `SessionManager.ts`). New integrations should treat encryption as mandatory and only consult the plaintext shapes to understand what goes into the encrypted payload.
+>
+> See `docs/ENCRYPTION_GUIDE.md` and `docs/development/NODE_ENCRYPTION_GUIDE.md` for the cryptographic details.
+
 ## Connection Establishment
 
 ### Endpoint
@@ -110,16 +124,70 @@ interface WebSocketMessage {
 }
 ```
 
-### 6. Cancel Request
+### 6. Cancel Request (v8.19.0+)
 
 ```json
 {
-  "type": "cancel",
-  "requestId": "request_to_cancel"
+  "type": "stream_cancel",
+  "session_id": "session_123",
+  "reason": "user_cancelled"
 }
 ```
 
-### 7. Image Generation Request (Encrypted)
+Sent **plaintext** (not wrapped in `encrypted_message`) so the host can cancel the in-flight inference even if the session key is mid-rotation. The host responds with a `stream_end` carrying `reason: "cancelled"` and the accurate `tokens_used` so the SDK can settle billing correctly. (Legacy: older SDK builds used `{"type": "cancel", "requestId": "..."}` — node still accepts this for backward compatibility but the v8.19.0+ shape above is what `SessionManager.sendPromptStreaming` emits today, see `SessionManager.ts:1033`.)
+
+### 7. Encrypted Session Init (Default flow, Phase 6.2+)
+
+The encrypted handshake replaces the plaintext `session_init` above. The client generates an ephemeral X25519 keypair, sends its public key plus an encrypted inner `session_init` payload, and the host replies with its own public key — both sides derive the shared session key via ECDH. After this point all inference / image-gen / transcode requests go through `encrypted_message`.
+
+```json
+{
+  "type": "encrypted_init",
+  "session_id": "session_123",
+  "client_public_key": "<base64 X25519 public key>",
+  "payload": {
+    "ciphertextHex": "...",
+    "nonceHex": "...",
+    "aadHex": "encrypted_session_init"
+  }
+}
+```
+
+The decrypted payload inside is the same `session_init` shape shown in §3 (chain_id, session_id, jobId, user_address, optional vector_database). Implemented in `SessionManager.sendEncryptedInit` (`SessionManager.ts:1847`).
+
+### 8. Encrypted Inference / Action Request
+
+Every prompt, image-generation, or transcode request is wrapped in this envelope. The `payload` is XChaCha20-Poly1305-encrypted JSON whose `action` field tells the host which sidecar to route to (default action when omitted: text inference).
+
+```json
+{
+  "type": "encrypted_message",
+  "session_id": "session_123",
+  "id": "msg-1739612345678-abc",
+  "payload": {
+    "ciphertextHex": "...",
+    "nonceHex": "...",
+    "aadHex": ""
+  }
+}
+```
+
+**Encrypted payload (plaintext before encryption) — text inference:**
+
+```json
+{
+  "prompt": "Explain quantum computing",
+  "max_tokens": 500,
+  "temperature": 0.7,
+  "stream": true,
+  "thinking": "medium",
+  "chain_id": 84532
+}
+```
+
+Implemented in `SessionManager.sendEncryptedMessage` (`SessionManager.ts:1997`). The structured payload may also include `web_search`, `max_searches`, `search_queries`, and sampler controls (`repeat_penalty`, `frequency_penalty`, `presence_penalty`, `min_p`) per the `/v1/inference` field set in `docs/node-reference/API.md`.
+
+### 9. Image Generation Request (Encrypted)
 
 Send an image generation request via the encrypted WebSocket channel (node v8.16.0+). The request is sent as an `encrypted_message` with `action: "image_generation"` in the encrypted payload.
 
@@ -160,7 +228,7 @@ Send an image generation request via the encrypted WebSocket channel (node v8.16
 - `negativePrompt` (string, optional): Negative prompt
 - `safetyLevel` (string): `"strict"` | `"moderate"` | `"permissive"`. Default: `"strict"`
 
-### 8. Transcode Request (Encrypted)
+### 10. Transcode Request (Encrypted)
 
 Send a transcode request via the encrypted WebSocket channel. The request is sent as an `encrypted_message` with `action: "transcode"` in the encrypted payload.
 
@@ -236,6 +304,26 @@ Send a transcode request via the encrypted WebSocket channel. The request is sen
 
 ### 3. Stream Chunk
 
+Two shapes — encrypted is the default (Phase 6.2+), plaintext is the legacy fallback.
+
+**Encrypted (default):**
+
+```json
+{
+  "type": "encrypted_chunk",
+  "session_id": "session_123",
+  "payload": {
+    "ciphertextHex": "...",
+    "nonceHex": "...",
+    "aadHex": ""
+  }
+}
+```
+
+Decrypted payload is the same shape as the plaintext `stream_chunk` below — `{ content, index, finish_reason }`. The SDK decrypts each chunk and dispatches `content` to the caller's `onToken` callback. Handled in `SessionManager.ts:967, 1293`.
+
+**Plaintext (legacy fallback, older nodes / unencrypted sessions):**
+
 ```json
 {
   "type": "stream_chunk",
@@ -247,26 +335,34 @@ Send a transcode request via the encrypted WebSocket channel. The request is sen
 
 ### 4. Stream End
 
+`stream_end` is sent **plaintext** (not encrypted), so the SDK can read billing metadata even if the encrypted channel has been torn down. It arrives *after* the terminal `encrypted_response` in the encrypted flow.
+
 ```json
 {
   "type": "stream_end",
+  "reason": "complete",
   "finish_reason": "stop",
+  "tokens_used": 150,
   "usage": {
     "prompt_tokens": 25,
     "completion_tokens": 150,
     "total_tokens": 175,
-    "context_window_size": 32768
+    "context_window_size": 32768,
+    "vlm_tokens": 0
   },
   "duration_ms": 2340
 }
 ```
 
-**Fields (v8.21.0+):**
-- `finish_reason` — `"stop"` (natural end), `"length"` (max_tokens hit), `"cancelled"` (user aborted)
+**Fields (v8.19.1+, v8.21.0+):**
+- `reason` (v8.19.1+) — `"complete"`, `"cancelled"`, `"error"`. Source of truth for cancellation accounting; `finish_reason` mirrors this for OpenAI-shaped consumers.
+- `finish_reason` — `"stop"` (natural end), `"length"` (max_tokens hit), `"cancelled"` (user aborted via `stream_cancel`).
+- `tokens_used` (v8.19.1+) — Total tokens generated this turn. Same value as `usage.completion_tokens` in the steady state, but emitted even when `usage` is unavailable (e.g. early-cancel paths).
 - `usage.prompt_tokens` — Number of tokens in the prompt
 - `usage.completion_tokens` — Number of tokens generated
 - `usage.total_tokens` — Sum of prompt + completion tokens
-- `usage.context_window_size` — Model's maximum context window size
+- `usage.context_window_size` (v8.21.0+) — Model's maximum context window size
+- `usage.vlm_tokens` — Vision-language tokens charged (image inputs in chat). Tracked separately from text tokens for billing.
 - `duration_ms` — Inference duration in milliseconds
 
 The SDK computes `contextUtilization = (prompt_tokens + completion_tokens) / context_window_size` and fires the `onContextWarning` callback when this exceeds the configured threshold (default 0.8).
@@ -1057,5 +1153,7 @@ class MockLLMServer {
 - [Encryption Guide](./ENCRYPTION_GUIDE.md)
 - [WebSocket API & SDK Integration Guide](./node-reference/WEBSOCKET_API_SDK_GUIDE.md)
 - [Node API Reference](./node-reference/API.md)
-- [Session Multiplexing](./IMPLEMENTATION-SESSION-MULTIPLEXING.md) - Session reuse optimization
-- [Orchestrator Architecture](../packages/orchestrator/README.md) - Multi-agent orchestration
+- [Session Multiplexing](./development/IMPLEMENTATION-SESSION-MULTIPLEXING.md) - Session reuse optimization
+- [Orchestrator Implementation](./development/IMPLEMENTATION-ORCHESTRATOR.md) - Multi-agent orchestration design
+- [Platformless AI Orchestrator Summary](./PLATFORMLESS_AI_ORCHESTRATOR_SUMMARY.md) - High-level orchestrator overview
+- [Agent Bridges Guide](./AGENT_BRIDGES_GUIDE.md) - OpenAI/Anthropic-compatible HTTP bridges that sit in front of this WebSocket protocol

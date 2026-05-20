@@ -135,6 +135,11 @@ export class FabstirSDKCore extends EventEmitter {
   private initialized = false;
   private authMode?: 'metamask' | 'privatekey' | 'signer' | 'aa-signer';
   private eoaWallet?: ethers.Wallet;
+  /**
+   * Promise tracking the deferred VectorRAG initialization. Started during
+   * initializeManagers; consumers await it via `getVectorRAGReady()`.
+   */
+  private vectorRAGReady?: Promise<void>;
 
   constructor(config: FabstirSDKCoreConfig = {}) {
     super();
@@ -821,6 +826,15 @@ export class FabstirSDKCore extends EventEmitter {
           encryptionManager: this.encryptionManager!
         });
 
+        // Kick off vectorRAG initialization in the background so the SDK-init
+        // critical path stays fast. Consumers that need vector features ready
+        // before use can `await sdk.getVectorRAGReady()`. Errors surface to
+        // awaiters and are logged here for observability of the silent path.
+        this.vectorRAGReady = this.vectorRAGManager.initialize().catch((err: any) => {
+          console.warn('[FabstirSDKCore] Background VectorRAG init failed:', err?.message ?? err);
+          throw err;
+        });
+
         // Initialize SessionGroupManager with S5 storage and retry/reconnect support (v1.4.26+)
         const sessionGroupStorage = new SessionGroupStorage(
           this.storageManager!.getS5Client(),
@@ -930,11 +944,41 @@ export class FabstirSDKCore extends EventEmitter {
   }
 
   /**
-   * Get vector RAG manager for document embeddings and semantic search
+   * Get vector RAG manager for document embeddings and semantic search.
+   *
+   * Note: returns the manager instance immediately, but the underlying
+   * S5 manifest cache may still be loading. If you need readiness before
+   * issuing queries, await `getVectorRAGReady()`.
    */
   getVectorRAGManager(): IVectorRAGManager {
     this.ensureAuthenticated();
     return this.vectorRAGManager!;
+  }
+
+  /**
+   * Promise that resolves when the deferred VectorRAG initialization (started
+   * during SDK auth/init) completes successfully, or rejects if it fails.
+   *
+   * Consumers that genuinely need the manifest cache populated before issuing
+   * `listDatabases()` / vector queries should `await sdk.getVectorRAGReady()`
+   * after `authenticate()`. Consumers that only need the manager handle (e.g.
+   * for later use) can skip this — `getVectorRAGManager()` returns immediately.
+   *
+   * Throws if the SDK is not authenticated, or if VectorRAG was not
+   * initialized in the current configuration (e.g. host-only mode, or
+   * missing userAddress / s5Seed at auth time).
+   */
+  getVectorRAGReady(): Promise<void> {
+    this.ensureAuthenticated();
+    if (!this.vectorRAGReady) {
+      return Promise.reject(
+        new SDKError(
+          'VectorRAG was not initialized for this SDK instance (host-only mode or missing s5Seed/userAddress at authenticate time)',
+          'VECTOR_RAG_NOT_INITIALIZED',
+        ),
+      );
+    }
+    return this.vectorRAGReady;
   }
 
   /**
@@ -1252,6 +1296,7 @@ export class FabstirSDKCore extends EventEmitter {
     this.authenticated = false;
     this.authMode = undefined;
     this.eoaWallet = undefined;
+    this.vectorRAGReady = undefined;
   }
   
   /**
@@ -1390,7 +1435,7 @@ export class FabstirSDKCore extends EventEmitter {
    * Get SDK version
    */
   getVersion(): string {
-    return '1.19.2-browser';
+    return '1.20.0-browser';
   }
 
   /**

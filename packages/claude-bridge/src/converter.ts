@@ -76,8 +76,7 @@ export function convertMessages(
   // Build system prompt: user system prompt first, then tool injection last (recency bias)
   const systemParts: string[] = [];
   if (system) {
-    // Cap system prompt — Claude Code's instructions are for Claude, not the local model
-    systemParts.push(system.length > 1000 ? system.slice(0, 1000) : system);
+    systemParts.push(system);
   }
   if (tools && tools.length > 0) {
     systemParts.push(formatToolsForPrompt(tools));

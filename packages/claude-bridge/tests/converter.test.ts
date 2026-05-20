@@ -159,13 +159,11 @@ describe('convertMessages', () => {
     expect(prompt).toContain('- get_weather: Get weather info [city]');
   });
 
-  it('system prompt capped at 1000 chars', () => {
+  it('system prompt is preserved in full', () => {
     const messages: AnthropicMessage[] = [{ role: 'user', content: 'Hello' }];
     const longSystem = 'A'.repeat(5000);
     const { prompt } = convertMessages(messages, longSystem);
-    // System block should contain at most 1000 chars of the original system text
-    expect(prompt).toContain('A'.repeat(1000));
-    expect(prompt).not.toContain('A'.repeat(1001));
+    expect(prompt).toContain(longSystem);
   });
 
   it('convertMessages with empty tools array produces no tool injection', () => {

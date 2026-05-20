@@ -37,7 +37,7 @@ function makeStore(directoryNames: string[]) {
 }
 
 describe('S5VectorStore.initialize — bounded concurrency on cold-path manifest fetches', () => {
-  it('caps in-flight manifest fetches at INIT_CONCURRENCY (= 10) and finishes all of them', async () => {
+  it('caps in-flight manifest fetches at INIT_CONCURRENCY (= 20) and finishes all of them', async () => {
     const dbCount = 30;
     const dirs = Array.from({ length: dbCount }, (_, i) => `db${i}`);
     const store = makeStore(dirs);
@@ -70,10 +70,10 @@ describe('S5VectorStore.initialize — bounded concurrency on cold-path manifest
     await store.initialize();
 
     expect(loadSpy).toHaveBeenCalledTimes(dbCount);
-    // Cap is 10. Allow some scheduling slop on the lower bound (must have
+    // Cap is 20. Allow some scheduling slop on the lower bound (must have
     // overlapped at least 2-way to prove it parallelized at all).
     expect(peak).toBeGreaterThanOrEqual(2);
-    expect(peak).toBeLessThanOrEqual(10);
+    expect(peak).toBeLessThanOrEqual(20);
 
     // Sanity: all manifests landed in cache
     expect((await store.listDatabases()).length).toBe(dbCount);
@@ -113,5 +113,40 @@ describe('S5VectorStore.initialize — bounded concurrency on cold-path manifest
     const loadSpy = vi.spyOn(store as any, '_loadManifest');
     await store.initialize();
     expect(loadSpy).not.toHaveBeenCalled();
+  });
+
+  it('is idempotent under concurrent calls — second initialize() joins the in-flight first', async () => {
+    // Critical for the 1.20.0 deferred-init pattern: SDK kicks off init in
+    // the background while consumer code may also call initialize() directly.
+    // Both should join one batch, not fan out two parallel sets of S5 fetches.
+    const dirs = Array.from({ length: 5 }, (_, i) => `db${i}`);
+    const store = makeStore(dirs);
+
+    const loadSpy = vi
+      .spyOn(store as any, '_loadManifest')
+      .mockImplementation(async (databaseName: any) => {
+        await wait(40);
+        return {
+          name: databaseName,
+          owner: '0xowner',
+          vectorCount: 0,
+          storageSizeBytes: 0,
+          created: 0,
+          lastAccessed: 0,
+          updated: 0,
+          chunks: [],
+          chunkCount: 0,
+          folderPaths: [],
+          deleted: false,
+        };
+      });
+
+    // Fire two initialize() calls concurrently. Without in-flight tracking,
+    // each call would invoke _loadManifest 5 times for 10 total. With it,
+    // both join the same batch for 5 total.
+    await Promise.all([store.initialize(), store.initialize()]);
+
+    expect(loadSpy).toHaveBeenCalledTimes(5);
+    expect((await store.listDatabases()).length).toBe(5);
   });
 });

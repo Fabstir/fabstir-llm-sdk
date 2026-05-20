@@ -123,7 +123,7 @@ describe('OpenAI Converter', () => {
     expect(prompt).toContain('<tool_call>');
   });
 
-  it('caps system prompt at 1000 chars', async () => {
+  it('system prompt is preserved in full', async () => {
     const longSystem = 'x'.repeat(2000);
     const messages: OpenAIChatMessage[] = [
       { role: 'system', content: longSystem },
@@ -131,7 +131,7 @@ describe('OpenAI Converter', () => {
     ];
     const { prompt } = await convertOpenAIMessages(messages);
     const systemBlock = prompt.split('<|im_end|>')[0];
-    expect(systemBlock).not.toContain('x'.repeat(1001));
+    expect(systemBlock).toContain(longSystem);
   });
 
   it('includes <tool_call> format instructions when tools provided', async () => {

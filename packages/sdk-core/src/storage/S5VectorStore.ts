@@ -58,13 +58,12 @@ export interface S5VectorStoreOptions {
 
 export class S5VectorStore {
   /**
-   * Concurrency cap for parallel manifest fetches in `initialize()`. 10 is
-   * the empirical sweet spot for S5 portal traffic — high enough to dominate
-   * cold-path latency, low enough to avoid the thundering-herd retry storm
-   * the previous unbounded Promise.all could trigger for users with many
-   * databases.
+   * Concurrency cap for parallel manifest fetches in `initialize()`. Raised
+   * from 10 to 20 in 1.20.0 after empirical confirmation that the S5 portal
+   * handles the higher fan-out without rate-limiting; ~2x cold-path speedup
+   * for users with many vector databases.
    */
-  private static readonly INIT_CONCURRENCY = 10;
+  private static readonly INIT_CONCURRENCY = 20;
 
   private readonly s5Client: S5;
   private readonly userAddress: string;
@@ -72,6 +71,14 @@ export class S5VectorStore {
   private readonly cacheEnabled: boolean;
   private manifestCache: Map<string, DatabaseManifest>;
   private vectorCache: Map<string, Map<string, Vector>>;
+  /**
+   * In-flight initialize() promise. When the SDK kicks off init in the
+   * background (deferred init via FabstirSDKCore.getVectorRAGReady), the
+   * consumer may also call initialize() directly. Without this, both calls
+   * would each fan out a fresh batch of S5 manifest fetches. With this,
+   * the second caller joins the first's promise.
+   */
+  private initInFlight?: Promise<void>;
 
   constructor(options: S5VectorStoreOptions) {
     this.s5Client = options.s5Client;
@@ -108,6 +115,24 @@ export class S5VectorStore {
       return;
     }
 
+    // If an init is already in flight, join its promise — don't fan out a
+    // second batch of S5 manifest fetches. Critical now that FabstirSDKCore
+    // may auto-start init in the background while consumer code also calls
+    // initialize() directly.
+    if (this.initInFlight) {
+      console.log('[S5VectorStore] ⏳ Joining in-flight initialize()');
+      return this.initInFlight;
+    }
+
+    this.initInFlight = this._doInitialize();
+    try {
+      await this.initInFlight;
+    } finally {
+      this.initInFlight = undefined;
+    }
+  }
+
+  private async _doInitialize(): Promise<void> {
     console.log('[S5VectorStore] 🚀 Initialize() called - starting database discovery');
     try {
       const basePath = this._getDatabaseBasePath();

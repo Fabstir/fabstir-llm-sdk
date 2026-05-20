@@ -1,6 +1,6 @@
 {
   "name": "@fabstir/claude-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local Anthropic API proxy that routes Claude Code requests through Fabstir SDK encrypted WebSocket",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
