@@ -711,6 +711,14 @@ Key behaviors:
 - All sessions use end-to-end encryption by default
 - `SessionPool.destroy()` cleans up all cached and active sessions
 
+#### Delegate-pays mode (settlement on disconnect)
+
+When the orchestrator runs in **delegate-pays** mode (its OpenAI daemon, funded by a payer's capped USDC allowance — see `docs/AGENT_BRIDGES_GUIDE.md` §4a), session teardown over the WebSocket differs in one important way:
+
+- The pool ends the WS session normally (`endSession`), but the **delegate never settles the on-chain job** — only the payer or host may complete a delegated session. The **host settles on WebSocket disconnect**.
+- So a host serving a delegated session MUST finalize/settle the job when the client WS closes, rather than waiting for a client-initiated `completeSessionJob`.
+- This only affects settlement; the on-the-wire message protocol (inference, streaming, image, transcode) is unchanged.
+
 ## Connection Management
 
 ### Reconnection Strategy

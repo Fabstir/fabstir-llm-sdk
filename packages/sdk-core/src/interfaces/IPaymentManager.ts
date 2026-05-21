@@ -7,7 +7,18 @@
  */
 
 import { Signer } from 'ethers';
-import { JobCreationRequest, JobResult, PaymentOptions, TransactionResult } from '../types';
+import {
+  JobCreationRequest,
+  JobResult,
+  PaymentOptions,
+  TransactionResult,
+  CreateDelegateAuthParams,
+  DelegateAuthorizationResult,
+  GetDelegateAuthParams,
+  DelegateAuthorizationStatus,
+  RevokeDelegateParams,
+  RevokeDelegateResult,
+} from '../types';
 
 export interface IPaymentManager {
   /**
@@ -115,4 +126,21 @@ export interface IPaymentManager {
     totalTokens: number,
     finalProof: string
   ): Promise<string>;
+
+  // ===== Delegate authorization (delegate-pays) =====
+
+  /** Authorize a delegate to spend the payer's USDC up to a cap (USDC-only). */
+  createDelegateAuthorization(params: CreateDelegateAuthParams): Promise<DelegateAuthorizationResult>;
+
+  /** Read delegate authorization status + live remaining allowance. */
+  getDelegateAuthorization(params: GetDelegateAuthParams): Promise<DelegateAuthorizationStatus>;
+
+  /** Revoke a delegate: deauthorize AND zero the allowance in one bundled call. */
+  revokeDelegate(params: RevokeDelegateParams): Promise<RevokeDelegateResult>;
+
+  /** Enter delegate-pays mode by recording the payer (owner) funding sessions. */
+  setDelegatePayer(payer: string): void;
+
+  /** The payer set in delegate-pays mode, or undefined when self-funded. */
+  getDelegatePayer(): string | undefined;
 }

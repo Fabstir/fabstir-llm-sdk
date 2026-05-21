@@ -7,6 +7,15 @@ const DEFAULT_PROOF_GRACE_MS = 30_000; // 30 seconds for hosts to submit proofs
 interface PoolEntry {
   adapter: SessionAdapter;
   session: OrchestratorSession;
+  /** Committed (unsettled) deposit in USDC; refunded to the budget on free. */
+  deposit: number;
+}
+
+/** Error with a typed SDK cap code (defense-in-depth, Sub-phase 3.3). */
+function capError(message: string, code: 'CAP_EXCEEDED_ALLOWANCE' | 'CAP_EXCEEDED_SDK_BUDGET'): Error {
+  const e: any = new Error(message);
+  e.code = code;
+  return e;
 }
 
 export class SessionPool {
@@ -91,9 +100,31 @@ export class SessionPool {
     }
 
     const depositNum = parseFloat(adapterConfig.depositAmount);
-    if (this.totalDeposit + depositNum > parseFloat(this.config.budget.maxTotalDeposit)) {
+    const committed = this.totalDeposit + depositNum;
+
+    // (b) Configured SDK budget cap — pre-flight, typed.
+    if (committed > parseFloat(this.config.budget.maxTotalDeposit)) {
       this.releaseSlot();
-      throw new Error(`Budget exceeded: total deposit would be ${this.totalDeposit + depositNum}, max is ${this.config.budget.maxTotalDeposit}`);
+      throw capError(
+        `Budget exceeded: total deposit would be ${committed}, max is ${this.config.budget.maxTotalDeposit}`,
+        'CAP_EXCEEDED_SDK_BUDGET',
+      );
+    }
+
+    // (a) Live on-chain remaining allowance (delegate mode). The on-chain approval
+    // is the authoritative ceiling; this refuses cleanly BEFORE any session call.
+    if (this.config.delegatePayer) {
+      const pm = this.config.sdk.getPaymentManager() as any;
+      const delegate = await (this.config.signer as any)?.getAddress();
+      const { remaining } = await pm.getDelegateAuthorization({ payer: this.config.delegatePayer, delegate });
+      const committedBase = BigInt(Math.round(committed * 1e6)); // USDC base units
+      if (committedBase > BigInt(remaining)) {
+        this.releaseSlot();
+        throw capError(
+          `Allowance exceeded: committed ${committedBase} would exceed remaining allowance ${remaining}`,
+          'CAP_EXCEEDED_ALLOWANCE',
+        );
+      }
     }
 
     try {
@@ -102,7 +133,14 @@ export class SessionPool {
         rpcUrl: (this.config.sdk as any).config?.rpcUrl ?? '',
         contractAddresses: (this.config.sdk as any).config?.contractAddresses ?? {},
       } as any);
-      if (this.config.signer) {
+      if (this.config.delegatePayer) {
+        // Delegate-pays: the per-acquire SDK spends the payer's capped USDC
+        // allowance. Requires a delegate signer (the daemon's hot EOA).
+        await sdk.authenticateAsDelegate({
+          signer: this.config.signer as any,
+          payer: this.config.delegatePayer,
+        });
+      } else if (this.config.signer) {
         await sdk.authenticate('signer', { signer: this.config.signer } as any);
       } else {
         await sdk.authenticate('privatekey', { privateKey: this.config.privateKey } as any);
@@ -114,7 +152,7 @@ export class SessionPool {
       );
 
       this.totalDeposit += depositNum;
-      const entry: PoolEntry = { adapter, session };
+      const entry: PoolEntry = { adapter, session, deposit: depositNum };
       this.active.add(entry);
 
       return { adapter, session };
@@ -139,7 +177,8 @@ export class SessionPool {
       return;
     }
 
-    // Duplicate or no match — destroy session fully
+    // Duplicate or no match — destroy session fully and refund its committed deposit
+    if (matched) this.totalDeposit = Math.max(0, this.totalDeposit - matched.deposit);
     try {
       await adapter.endSession(session.sessionId);
     } finally {
@@ -149,6 +188,9 @@ export class SessionPool {
     // Settle blockchain job after grace period for host proof submission
     const graceMs = this.config.proofGracePeriodMs ?? DEFAULT_PROOF_GRACE_MS;
     const settle = async () => {
+      // Delegate mode: only payer/host may complete — never the delegate.
+      // End the WS session (done above) and let the host settle on disconnect.
+      if (this.config.delegatePayer) return;
       if (graceMs > 0) await new Promise(r => setTimeout(r, graceMs));
       try {
         await this.withTxLock(async () => {
@@ -171,23 +213,27 @@ export class SessionPool {
     await Promise.all(this.pendingSettlements);
     this.pendingSettlements.length = 0;
 
-    // Clean up cached sessions — end and settle each one
+    // Clean up cached sessions — end and (self-funded only) settle each one
     for (const [, entry] of this.cached) {
-      try {
-        const pm = entry.adapter.getSDK().getPaymentManager() as any;
-        await pm.completeSessionJob(Number(entry.session.jobId), '', entry.session.chainId).catch(() => {});
-      } catch {}
+      if (!this.config.delegatePayer) {
+        try {
+          const pm = entry.adapter.getSDK().getPaymentManager() as any;
+          await pm.completeSessionJob(Number(entry.session.jobId), '', entry.session.chainId).catch(() => {});
+        } catch {}
+      }
       try { await entry.adapter.endSession(entry.session.sessionId); } catch {}
     }
     this.cached.clear();
 
     const entries = [...this.active];
     for (const entry of entries) {
-      try {
-        const pm = entry.adapter.getSDK().getPaymentManager() as any;
-        await pm.completeSessionJob(Number(entry.session.jobId), '', entry.session.chainId).catch(() => {});
-      } catch {
-        // Ignore settlement errors during destroy
+      if (!this.config.delegatePayer) {
+        try {
+          const pm = entry.adapter.getSDK().getPaymentManager() as any;
+          await pm.completeSessionJob(Number(entry.session.jobId), '', entry.session.chainId).catch(() => {});
+        } catch {
+          // Ignore settlement errors during destroy
+        }
       }
       try {
         await entry.adapter.endSession(entry.session.sessionId);
@@ -197,6 +243,7 @@ export class SessionPool {
       this.active.delete(entry);
     }
     this.available = this.config.maxConcurrentSessions;
+    this.totalDeposit = 0; // all sessions destroyed — committed budget refunded
   }
 
   getTotalDeposit(): number {

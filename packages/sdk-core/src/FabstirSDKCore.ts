@@ -133,8 +133,10 @@ export class FabstirSDKCore extends EventEmitter {
   private s5Seed?: string;
   private userAddress?: string;
   private initialized = false;
-  private authMode?: 'metamask' | 'privatekey' | 'signer' | 'aa-signer';
+  private authMode?: 'metamask' | 'privatekey' | 'signer' | 'aa-signer' | 'delegate';
   private eoaWallet?: ethers.Wallet;
+  /** Set in delegate-pays mode: the payer (owner) whose USDC funds sessions. */
+  private delegatePayer?: string;
   /**
    * Promise tracking the deferred VectorRAG initialization. Started during
    * initializeManagers; consumers await it via `getVectorRAGReady()`.
@@ -253,7 +255,30 @@ export class FabstirSDKCore extends EventEmitter {
       );
     }
   }
-  
+
+  /**
+   * Authenticate as a delegate (delegate-pays): a plain EOA `signer` spends the
+   * `payer`'s on-chain-capped USDC allowance. Reuses authenticate('signer') for
+   * full manager init, then records the payer and propagates it to PaymentManager.
+   */
+  async authenticateAsDelegate(options: { signer: ethers.Signer; payer: string }): Promise<void> {
+    if (!options || !options.signer) {
+      throw new SDKError('Delegate signer required', 'DELEGATE_SIGNER_MISSING');
+    }
+    if (!options.payer || options.payer === ethers.ZeroAddress) {
+      throw new SDKError('Delegate payer (owner) required', 'DELEGATE_PAYER_MISSING');
+    }
+    await this.authenticate('signer', { signer: options.signer });
+    this.authMode = 'delegate';
+    this.delegatePayer = options.payer;
+    this.paymentManager!.setDelegatePayer(options.payer);
+  }
+
+  /** The payer (owner) recorded in delegate-pays mode, or undefined otherwise. */
+  getDelegatePayer(): string | undefined {
+    return this.delegatePayer;
+  }
+
   /**
    * Authenticate with the initialized wallet provider
    */
@@ -1295,6 +1320,7 @@ export class FabstirSDKCore extends EventEmitter {
     this.contractManager = undefined;
     this.authenticated = false;
     this.authMode = undefined;
+    this.delegatePayer = undefined;
     this.eoaWallet = undefined;
     this.vectorRAGReady = undefined;
   }

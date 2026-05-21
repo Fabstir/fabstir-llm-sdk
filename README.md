@@ -18,7 +18,8 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 - 🔑 **ERC-4337 Smart Account Auth** - Optional `'aa-signer'` mode for email-only sign-in via Biconomy MEE / ZeroDev / Pimlico — all on-chain calls route through a caller-supplied `sendUserOp` callback (bundler-agnostic). See [packages/sdk-core/README.md](packages/sdk-core/README.md) and [docs/SDK_API.md](docs/SDK_API.md) for usage.
 - 🛡️ **Error Recovery** - Automatic retries and failover to ensure reliability
 - 🔌 **Browser Compatible** - Works in both Node.js and browser environments
-- 🤖 **OpenAI-Compatible Bridge** - Drop-in replacement API for any OpenAI SDK client (Cursor, Continue, OpenCode, LangChain)
+- 🤖 **OpenAI-Compatible Daemon** - Drop-in API for any OpenAI client (Cursor, Continue, OpenCode, LangChain) via `@fabstir/orchestrator` — chat/streaming/tools, `/v1/models`, images, responses, with decentralized host selection
+- 🔑 **Delegate-Pays (USDC)** - A hot EOA spends a user's **on-chain-capped** USDC allowance — no host pinning, no raw-key custody; the user controls the cap and revokes anytime
 - 🎯 **Multi-Agent Orchestration** - Task decomposition, parallel execution, and result synthesis
 - 💸 **x402 Payment Protocol** - HTTP-native USDC micropayments between agents (EIP-3009)
 - 🤝 **A2A Protocol Support** - Agent discovery, delegation, and SSE streaming
@@ -197,28 +198,31 @@ const result = await sessionManager.generateImage(
 
 See [docs/SDK_API.md#image-generation](docs/SDK_API.md#image-generation) for full API reference.
 
-### OpenAI-Compatible Bridge
+### OpenAI-Compatible Daemon (delegate-pays)
 
-Use any OpenAI SDK client (Cursor, Continue, OpenCode, LangChain) with Fabstir's decentralised AI network — no code changes required:
+Use any OpenAI SDK client (Cursor, Continue, OpenCode, LangChain) with Fabstir's decentralised AI network — no code changes required. The **`@fabstir/orchestrator` daemon** uses decentralized host selection and **USDC delegate-pays**: a generated hot EOA spends a user's on-chain-capped USDC allowance (no host pinning, no raw-key custody).
 
 ```bash
-# Start the bridge (handles blockchain session + encryption automatically)
-npx fabstir-openai-bridge \
-  --private-key $PRIVATE_KEY \
-  --model "CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf"
+# Start the daemon — delegate hot EOA is generated/persisted at ~/.fabstir/delegate.key (0600).
+# FABSTIR_PAYER is the bridge sub-account whose bounded USDC allowance funds sessions
+# (MUST be distinct from the chat primary).
+FABSTIR_PAYER=0x<bridge-sub-account> \
+FABSTIR_DELEGATE_KEY=0x<optional-hot-eoa-key> \
+FABSTIR_OPENAI_PORT=3457 \
+  fabstir-orchestrator
 
-# OpenAI Bridge running on http://localhost:3457
-# Set OPENAI_BASE_URL=http://localhost:3457/v1 in your client
+# Set OPENAI_BASE_URL=http://127.0.0.1:3457/v1 in your client.
+# /v1/* returns 402 (+ authorize URL) until the user authorizes the delegate & sets a USDC allowance.
 ```
 
 Supports:
-- `POST /v1/chat/completions` — text chat (streaming and non-streaming)
-- `POST /v1/images/generations` — image generation via FLUX.2
+- `POST /v1/chat/completions` — text chat (streaming and non-streaming), tool use, vision (base64 images)
+- `POST /v1/images/generations` — image generation
 - `POST /v1/responses` — OpenAI Responses API
 - `GET /v1/models` — model listing
-- Tool use, vision (base64 images), multi-turn conversations
+- Delegate control plane: `GET /v1/delegate/status`, `POST /v1/delegate/payer`
 
-See [packages/openai-bridge/](packages/openai-bridge/) for full documentation and CLI options.
+See [docs/AGENT_BRIDGES_GUIDE.md](docs/AGENT_BRIDGES_GUIDE.md) (§4a) and [packages/orchestrator/README.md](packages/orchestrator/README.md). The older CLI `@fabstir/openai-bridge` is **deprecated** in favor of this daemon.
 
 ### Multi-Agent Orchestration
 
@@ -262,8 +266,8 @@ cd packages/sdk-core && pnpm build
 ### Package Installation
 
 ```bash
-pnpm add @fabstir/sdk-core
-pnpm add @fabstir/orchestrator
+pnpm add @fabstir/sdk-core@1.21.1       # delegate-pays API + authenticateAsDelegate
+pnpm add @fabstir/orchestrator@0.6.1     # OpenAI-compatible daemon + delegate plumbing
 ```
 
 ### Prerequisites
@@ -311,8 +315,10 @@ await sdk.authenticate(privateKey);
 - [Contract Reference](docs/compute-contracts-reference/) - Smart contract documentation
 - [Node Reference](docs/node-reference/API.md) - Host node API
 - [Host CLI Reference](packages/host-cli/docs/API_REFERENCE.md) - Host CLI commands
-- [OpenAI Bridge](packages/openai-bridge/) - OpenAI-compatible API bridge
-- [Orchestrator Guide](packages/orchestrator/README.md) - Multi-agent orchestration
+- [Agent Coding Bridges Guide](docs/AGENT_BRIDGES_GUIDE.md) - OpenAI/Anthropic coding agents → Fabstir (incl. §4a orchestrator delegate-pays daemon)
+- [Delegate-Pays API](docs/SDK_API.md#delegate-pays-authorization-sdk-level-sdk-core-1210) - `authenticateAsDelegate`, authorize/revoke delegate, capped USDC
+- [Orchestrator Guide](packages/orchestrator/README.md) - OpenAI daemon + multi-agent orchestration
+- [OpenAI Bridge](packages/openai-bridge/) - *(deprecated — use the orchestrator daemon)*
 - [x402 Payment Protocol](docs/EXECUTION-X402-PAYMENTS.md) - HTTP micropayments
 - [Session Multiplexing](docs/IMPLEMENTATION-SESSION-MULTIPLEXING.md) - Session reuse optimization
 - [Transcode Load Balancing](docs/IMPLEMENTATION-TRANSCODE-LOAD-BALANCING.md) - Multi-host transcode distribution

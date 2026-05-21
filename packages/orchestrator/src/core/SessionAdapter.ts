@@ -76,6 +76,16 @@ export class SessionAdapter {
     await sessionManager.endSession(sessionId);
   }
 
+  /** Generate an image in this session. SessionManager keys sessions by string id. */
+  async generateImage(
+    sessionId: bigint,
+    prompt: string,
+    options?: { size?: string; steps?: number },
+  ): Promise<{ image: string;[k: string]: any }> {
+    const sessionManager = this.sdk.getSessionManager();
+    return await sessionManager.generateImage(sessionId.toString(), prompt, options as any);
+  }
+
   getSDK(): FabstirSDKCore {
     return this.sdk;
   }

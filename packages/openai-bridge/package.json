@@ -1,7 +1,8 @@
 {
   "name": "@fabstir/openai-bridge",
   "version": "0.2.0",
-  "description": "OpenAI-compatible API bridge routing through Fabstir SDK encrypted WebSocket",
+  "deprecated": "DEPRECATED: folded into @fabstir/orchestrator's local OpenAI daemon (decentralized host selection + USDC delegate-pays). See README.md.",
+  "description": "[DEPRECATED — use @fabstir/orchestrator] OpenAI-compatible API bridge routing through Fabstir SDK encrypted WebSocket",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
