@@ -9,6 +9,7 @@
 import { SessionConfig, SessionJob, CheckpointProof, RecoveredConversation, CheckpointQueryOptions, PromptOptions, TokenUsageInfo, ContextInfo } from '../types';
 import type { SearchApiResponse } from '../types/web-search.types';
 import type { BlockchainRecoveredConversation } from '../utils/checkpoint-blockchain';
+import type { ImageGenerationOptions, ImageGenerationResult } from '../types/image-generation.types';
 
 export interface ISessionManager {
   /**
@@ -120,6 +121,15 @@ export interface ISessionManager {
    * End a session cleanly (user-initiated)
    */
   endSession(sessionId: bigint): Promise<void>;
+
+  /**
+   * Generate an image within a session (diffusion). sessionId is the string key.
+   */
+  generateImage(
+    sessionId: string,
+    prompt: string,
+    options?: ImageGenerationOptions
+  ): Promise<ImageGenerationResult>;
 
   // =============================================================================
   // Web Search Methods (Phase 4.2, 4.4)

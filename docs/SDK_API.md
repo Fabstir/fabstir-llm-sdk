@@ -24,6 +24,7 @@
 - [Client Manager](#client-manager)
 - [WebSocket Communication](#websocket-communication)
 - [Contract Integration](#contract-integration)
+  - [Delegate-Pays Authorization](#delegate-pays-authorization-sdk-level-sdk-core-1210)
 - [Services](#services)
 - [Error Handling](#error-handling)
 - [Types and Interfaces](#types-and-interfaces)
@@ -5131,9 +5132,106 @@ async completeSessionJob(
 ): Promise<string>
 ```
 
+### Delegate-Pays Authorization (SDK-level, sdk-core 1.21.0+)
+
+High-level API for the **delegate-pays** model: a generated hot EOA (the "delegate") spends a payer's **on-chain-capped USDC allowance** — no host pinning, no raw private-key custody. The user keeps control via a hard on-chain cap (`usdc.approve(jobMarketplace, cap)`); a looping agent physically cannot overspend it. These methods wrap the contract-level calls in [V2 Direct Payment Delegation](#v2-direct-payment-delegation-february-2026) below.
+
+> **Delegated sessions are USDC-only** (V2 delegation rejects native token) and the **delegate never settles** — the host settles the job on WebSocket disconnect. Only the payer or host may complete a delegated session.
+>
+> **The `payer` MUST be an account distinct from the chat primary** (use the existing Coinbase sub-account). ERC-20 allowance is keyed `(owner=payer, spender=marketplace)` and shared across all of that payer's delegates, so reusing the chat primary would let a coding agent drain chat's allowance, and `revokeDelegate`'s `approve(0)` would break chat.
+
+#### authenticateAsDelegate
+
+Authenticates with a plain EOA delegate `signer` while recording the `payer` whose USDC funds sessions. Reuses the `'signer'` auth path (managers initialise as normal), then sets `authMode = 'delegate'` and propagates the payer to the PaymentManager. After this, `startSession` routes through the delegate path transparently — `SessionManager` is unchanged.
+
+```typescript
+await sdk.authenticateAsDelegate({ signer: ethers.Signer, payer: string }): Promise<void>
+sdk.getDelegatePayer(): string | undefined   // the payer recorded in delegate mode
+```
+
+Throws `SDKError` `DELEGATE_SIGNER_MISSING` (no signer) or `DELEGATE_PAYER_MISSING` (missing/zero payer) before authenticating. `disconnect()` clears the delegate state.
+
+#### createDelegateAuthorization
+
+Authorizes a delegate to spend the payer's USDC up to `allowanceCap` (in **base units** — bigint, USDC has 6 decimals). Performs `approveToken(marketplace, cap)` **then** `authorizeDelegate(delegate, true)`. Signed by the bridge-payer (sub-account).
+
+```typescript
+await sdk.getPaymentManager().createDelegateAuthorization({
+  delegate: string,
+  allowanceCap: bigint,        // e.g. 50_000_000n = 50 USDC
+  token?: string,              // defaults to the chain's USDC
+  chainId?: number,
+}): Promise<{ approveTxHash: string; authorizeTxHash: string }>
+```
+
+Throws `DELEGATE_USDC_REQUIRED` for a zero/native token (no `ZeroAddress` fallback).
+
+#### getDelegateAuthorization
+
+Reads whether `delegate` is authorized for `payer` and the live remaining allowance (the authoritative on-chain cap).
+
+```typescript
+await sdk.getPaymentManager().getDelegateAuthorization({
+  payer: string,
+  delegate: string,
+  token?: string,
+  chainId?: number,
+}): Promise<{ authorized: boolean; remaining: bigint }>   // remaining = USDC base units
+```
+
+#### revokeDelegate
+
+Revokes a delegate by bundling **both** on-chain actions so the UI cannot half-revoke: `authorizeDelegate(delegate, false)` **then** `approveToken(marketplace, 0n)`. Because it operates on the bridge-payer sub-account, zeroing its allowance never touches chat's `allowance[primary][marketplace]`.
+
+```typescript
+await sdk.getPaymentManager().revokeDelegate({
+  delegate: string,
+  token?: string,
+  chainId?: number,
+}): Promise<{ revokeTxHash: string; approveTxHash: string }>
+```
+
+If the `approve(0)` leg fails after deauthorization, throws `SDKError` `DELEGATE_REVOKE_INCOMPLETE` carrying the `revokeTxHash` in `details`.
+
+#### setDelegatePayer / getDelegatePayer (PaymentManager)
+
+```typescript
+sdk.getPaymentManager().setDelegatePayer(payer: string): void   // enter delegate mode
+sdk.getPaymentManager().getDelegatePayer(): string | undefined
+```
+
+#### Delegate session pre-flight & error codes
+
+When `delegatePayer` is set, `createSessionJob` (used by `startSession`) takes a delegate branch that pre-checks **before** any chain write and maps contract reverts to typed `SDKError` codes:
+
+| Code | Cause |
+|------|-------|
+| `DELEGATE_USDC_REQUIRED` | zero/native `paymentToken`, or contract `ERC20Only` revert |
+| `DELEGATE_NOT_AUTHORIZED` | delegate not authorized for payer, or contract `NotDelegate` revert |
+| `DELEGATE_ALLOWANCE_INSUFFICIENT` | remaining allowance < session amount (`details` has `remaining`/`needed`) |
+| `DELEGATE_BALANCE_INSUFFICIENT` | payer USDC balance < session amount |
+| `DELEGATE_BAD_PARAMS` | contract `BadDelegateParams` revert |
+| `DELEGATE_SIGNER_MISSING` / `DELEGATE_PAYER_MISSING` | `authenticateAsDelegate` validation |
+| `DELEGATE_REVOKE_INCOMPLETE` | `revokeDelegate`'s `approve(0)` leg failed |
+
+#### Minimal flow
+
+```typescript
+// UI (signed by the bridge sub-account = payer):
+await sdk.getPaymentManager().createDelegateAuthorization({ delegate: delegateAddress, allowanceCap: 50_000_000n });
+
+// Daemon (delegate hot EOA):
+await sdk.authenticateAsDelegate({ signer: delegateWallet, payer: subAccountAddress });
+const { sessionId } = await (await sdk.getSessionManager()).startSession({ /* USDC paymentToken */ });
+// … run prompts … then end the session; the HOST settles on disconnect.
+
+// Revoke when done:
+await sdk.getPaymentManager().revokeDelegate({ delegate: delegateAddress });
+```
+
 ### V2 Direct Payment Delegation (February 2026)
 
-These methods enable Smart Wallet sub-accounts and delegated session creation.
+These contract-level methods (on the JobMarketplace wrapper) back the [Delegate-Pays Authorization](#delegate-pays-authorization-sdk-level-sdk-core-1210) API above. Use the SDK-level API for app code; reach for these only for low-level/CLI use.
 
 #### authorizeDelegate
 

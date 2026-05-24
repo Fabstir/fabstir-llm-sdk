@@ -30,6 +30,12 @@ export interface OrchestratorConfig {
   taskStoragePrefix?: string;
   paymentToken?: string;
   proofGracePeriodMs?: number;
+  /**
+   * Delegate-pays mode: the payer (owner) whose on-chain-capped USDC allowance
+   * funds sessions. When set, pool SDKs authenticate via authenticateAsDelegate
+   * and `signer` (the delegate hot EOA) is REQUIRED. Self-funded when unset.
+   */
+  delegatePayer?: string;
   x402?: { pricing?: X402PricingConfig; budget?: X402BudgetConfig; signerProvider?: any; usdcAddress?: string };
 }
 

@@ -16,11 +16,18 @@ import {
   JobResult,
   PaymentOptions,
   TransactionResult,
-  PaymentMethod
+  PaymentMethod,
+  CreateDelegateAuthParams,
+  DelegateAuthorizationResult,
+  GetDelegateAuthParams,
+  DelegateAuthorizationStatus,
+  RevokeDelegateParams,
+  RevokeDelegateResult
 } from '../types';
 import { ChainId, ChainConfig } from '../types/chain.types';
 import { ChainRegistry } from '../config/ChainRegistry';
 import { JobMarketplaceWrapper } from '../contracts/JobMarketplace';
+import { DELEGATION_ERRORS } from '../types/errors';
 import {
   UnsupportedChainError,
   ChainMismatchError,
@@ -58,6 +65,8 @@ export class PaymentManager implements IPaymentManager {
   private currentChainId: number;
   private marketplaceWrappers: Map<number, JobMarketplaceWrapper>;
   private initialized = false;
+  /** Set in delegate-pays mode: the payer (owner) whose USDC funds sessions. */
+  private delegatePayer?: string;
 
   constructor(signer?: Signer, chainId?: number) {
     if (!chainId) {
@@ -316,6 +325,61 @@ export class PaymentManager implements IPaymentManager {
       useDeposit: params.useDeposit
     });
 
+    // Delegate-pays branch (2.1): payer-funded USDC session via the V2 delegation
+    // contract. USDC-only; all pre-flight checks run BEFORE any chain write.
+    if (this.delegatePayer) {
+      const paymentToken = params.paymentToken;
+      if (!paymentToken || paymentToken === ethers.ZeroAddress) {
+        throw new SDKError(
+          'Delegated sessions are USDC-only: a non-zero ERC-20 paymentToken is required',
+          'DELEGATE_USDC_REQUIRED'
+        );
+      }
+      if (!this.signer) {
+        throw new SDKError('PaymentManager not initialized', 'NOT_INITIALIZED');
+      }
+      const delegateAddr = await this.signer.getAddress();
+      const chain = this.getChainConfig(params.chainId);
+      const isUSDC = paymentToken.toLowerCase() === chain.contracts.usdcToken.toLowerCase();
+      const amountBase = ethers.parseUnits(params.amount, isUSDC ? 6 : 18);
+
+      if (!(await wrapper.isDelegateAuthorized(this.delegatePayer, delegateAddr))) {
+        throw new SDKError(
+          `Delegate ${delegateAddr} is not authorized by payer ${this.delegatePayer}`,
+          'DELEGATE_NOT_AUTHORIZED'
+        );
+      }
+      const remaining = await this.checkAllowance(this.delegatePayer, chain.contracts.jobMarketplace, paymentToken);
+      if (remaining < amountBase) {
+        throw new SDKError(
+          `Delegate allowance insufficient: remaining ${remaining}, needed ${amountBase}`,
+          'DELEGATE_ALLOWANCE_INSUFFICIENT',
+          { remaining: remaining.toString(), needed: amountBase.toString() }
+        );
+      }
+      const balance = await this.getTokenBalance(this.delegatePayer, paymentToken);
+      if (balance < amountBase) {
+        throw new SDKError(
+          `Payer USDC balance insufficient: balance ${balance}, needed ${amountBase}`,
+          'DELEGATE_BALANCE_INSUFFICIENT',
+          { balance: balance.toString(), needed: amountBase.toString() }
+        );
+      }
+      try {
+        return await wrapper.createSessionForModelAsDelegate({
+          payer: this.delegatePayer, modelId: params.modelId!, host: params.host,
+          paymentToken, amount: params.amount, pricePerToken, duration,
+          proofInterval, proofTimeoutWindow: params.proofTimeoutWindow,
+        });
+      } catch (e: any) {
+        const m = e?.message || '';
+        if (m.includes(DELEGATION_ERRORS.NOT_DELEGATE)) throw new SDKError(m, 'DELEGATE_NOT_AUTHORIZED');
+        if (m.includes(DELEGATION_ERRORS.ERC20_ONLY)) throw new SDKError(m, 'DELEGATE_USDC_REQUIRED');
+        if (m.includes(DELEGATION_ERRORS.BAD_PARAMS)) throw new SDKError(m, 'DELEGATE_BAD_PARAMS');
+        throw e;
+      }
+    }
+
     // Create from deposit or direct payment
     if (params.useDeposit) {
       // Create session from pre-funded deposit
@@ -549,6 +613,83 @@ export class PaymentManager implements IPaymentManager {
     }
 
     return receipt;
+  }
+
+  // ============= Delegate Authorization API (Sub-phase 1.1) =============
+  // Conveniences over approveToken + JobMarketplaceWrapper.authorizeDelegate.
+  // Operate on the bridge-payer (Constraint 10); revoke's approve(0) is isolated.
+
+  /**
+   * Authorize a delegate to spend the payer's USDC up to `allowanceCap`:
+   * approve(marketplace, cap) THEN authorizeDelegate(delegate, true). USDC-only.
+   */
+  async createDelegateAuthorization(
+    params: CreateDelegateAuthParams
+  ): Promise<DelegateAuthorizationResult> {
+    const chain = this.getChainConfig(params.chainId);
+    const token = params.token ?? chain.contracts.usdcToken;
+    if (!token || token === ethers.ZeroAddress) {
+      throw new SDKError(
+        'Delegated authorization requires a non-zero ERC-20 (USDC) token',
+        'DELEGATE_USDC_REQUIRED'
+      );
+    }
+    const approveReceipt = await this.approveToken(
+      chain.contracts.jobMarketplace,
+      params.allowanceCap,
+      token
+    );
+    const authTx = await this.getWrapper(params.chainId).authorizeDelegate(params.delegate, true);
+    await authTx.wait(3);
+    return { approveTxHash: approveReceipt.hash, authorizeTxHash: authTx.hash };
+  }
+
+  /**
+   * Read whether `delegate` is authorized for `payer` and the live remaining
+   * USDC allowance (token base units).
+   */
+  async getDelegateAuthorization(
+    params: GetDelegateAuthParams
+  ): Promise<DelegateAuthorizationStatus> {
+    const chain = this.getChainConfig(params.chainId);
+    const token = params.token ?? chain.contracts.usdcToken;
+    // Two independent reads — run them concurrently.
+    const [authorized, remaining] = await Promise.all([
+      this.getWrapper(params.chainId).isDelegateAuthorized(params.payer, params.delegate),
+      this.checkAllowance(params.payer, chain.contracts.jobMarketplace, token),
+    ]);
+    return { authorized, remaining };
+  }
+
+  /**
+   * Revoke a delegate by bundling BOTH on-chain actions so the UI cannot
+   * half-revoke: authorizeDelegate(delegate, false) THEN approve(marketplace, 0).
+   */
+  async revokeDelegate(params: RevokeDelegateParams): Promise<RevokeDelegateResult> {
+    const chain = this.getChainConfig(params.chainId);
+    const token = params.token ?? chain.contracts.usdcToken;
+    const revokeTx = await this.getWrapper(params.chainId).authorizeDelegate(params.delegate, false);
+    await revokeTx.wait(3);
+    try {
+      const approveReceipt = await this.approveToken(chain.contracts.jobMarketplace, 0n, token);
+      return { revokeTxHash: revokeTx.hash, approveTxHash: approveReceipt.hash };
+    } catch (e) {
+      throw new SDKError(
+        'Delegate revoke incomplete: allowance not zeroed after deauthorization',
+        'DELEGATE_REVOKE_INCOMPLETE',
+        { revokeTxHash: revokeTx.hash, cause: (e as Error)?.message }
+      );
+    }
+  }
+
+  /** Enter delegate-pays mode: record the payer (owner) funding sessions (1.2). */
+  setDelegatePayer(payer: string): void {
+    this.delegatePayer = payer;
+  }
+
+  /** The payer set in delegate-pays mode, or undefined when self-funded. */
+  getDelegatePayer(): string | undefined {
+    return this.delegatePayer;
   }
 
   /**

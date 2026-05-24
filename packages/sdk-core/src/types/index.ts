@@ -36,13 +36,59 @@ export interface NetworkConfig {
 export class SDKError extends Error {
   code: string;
   details?: any;
-  
+
   constructor(message: string, code: string = 'SDK_ERROR', details?: any) {
     super(message);
     this.name = 'SDKError';
     this.code = code;
     this.details = details;
   }
+}
+
+// ============= Delegate Authorization Types (delegate-pays) =============
+
+/** Params for PaymentManager.createDelegateAuthorization (Sub-phase 1.1). */
+export interface CreateDelegateAuthParams {
+  /** Delegate (hot EOA) address to authorize. */
+  delegate: string;
+  /** On-chain USDC allowance cap, in token base units (the hard ceiling). */
+  allowanceCap: bigint;
+  /** ERC-20 token; defaults to the chain's USDC. Native/zero is rejected. */
+  token?: string;
+  chainId?: number;
+}
+
+/** Result of createDelegateAuthorization — tx hash for each on-chain action. */
+export interface DelegateAuthorizationResult {
+  approveTxHash: string;
+  authorizeTxHash: string;
+}
+
+/** Params for PaymentManager.getDelegateAuthorization. */
+export interface GetDelegateAuthParams {
+  payer: string;
+  delegate: string;
+  token?: string;
+  chainId?: number;
+}
+
+/** Authorization status + live remaining allowance (token base units). */
+export interface DelegateAuthorizationStatus {
+  authorized: boolean;
+  remaining: bigint;
+}
+
+/** Params for PaymentManager.revokeDelegate (bundles deauthorize + approve(0)). */
+export interface RevokeDelegateParams {
+  delegate: string;
+  token?: string;
+  chainId?: number;
+}
+
+/** Result of revokeDelegate — tx hash for each bundled on-chain action. */
+export interface RevokeDelegateResult {
+  revokeTxHash: string;
+  approveTxHash: string;
 }
 
 // ============= Authentication Types =============
