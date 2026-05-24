@@ -39,6 +39,9 @@ export async function runCLI(argv: string[]): Promise<void> {
     chainId,
     rpcUrl,
     contractAddresses: chain.contracts,
+    // Delegate/coding-agent daemon proxies chat — no S5 persistence/RAG needed.
+    // (orchestrate/A2A paths keep S5 for conversation/RAG features.)
+    skipS5: !!payer,
   } as any);
 
   // Build the delegate hot EOA and authenticate as delegate; otherwise self-funded.

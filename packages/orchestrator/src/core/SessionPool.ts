@@ -132,6 +132,8 @@ export class SessionPool {
         chainId: this.config.chainId,
         rpcUrl: (this.config.sdk as any).config?.rpcUrl ?? '',
         contractAddresses: (this.config.sdk as any).config?.contractAddresses ?? {},
+        // Per-acquire SDKs only run sessions (sendPrompt) — no S5 persistence/RAG.
+        skipS5: true,
       } as any);
       if (this.config.delegatePayer) {
         // Delegate-pays: the per-acquire SDK spends the payer's capped USDC

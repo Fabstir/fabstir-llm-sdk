@@ -104,6 +104,13 @@ export interface FabstirSDKCoreConfig {
   // Host-only mode: Skip S5/Storage/Session initialization (for host CLI operations)
   // When true, only HostManager, ModelManager, and PaymentManager are initialized
   hostOnly?: boolean;
+
+  // Skip S5 storage + VectorRAG/SessionGroup/Transcode (but KEEP SessionManager).
+  // For inference-only consumers (e.g. the orchestrator delegate/coding-agent
+  // daemon) that proxy chat/completions and don't need conversation persistence
+  // or RAG. Conversation storage degrades to a no-op proxy. Also honored via the
+  // SKIP_S5_STORAGE env var. Unlike hostOnly, SessionManager IS initialized.
+  skipS5?: boolean;
 }
 
 export class FabstirSDKCore extends EventEmitter {
@@ -193,7 +200,10 @@ export class FabstirSDKCore extends EventEmitter {
       smartWallet: config.smartWallet,
 
       // Host-only mode: Skip S5/Storage/Session initialization
-      hostOnly: config.hostOnly
+      hostOnly: config.hostOnly,
+
+      // Inference-only: skip S5 storage + RAG, keep SessionManager. Env-overridable.
+      skipS5: config.skipS5 ?? (typeof process !== 'undefined' && process.env?.SKIP_S5_STORAGE === 'true')
     };
 
     // Validate all required contract addresses
@@ -699,8 +709,10 @@ export class FabstirSDKCore extends EventEmitter {
 
     // Host-only mode: Skip S5/Storage/Session/Encryption (for host CLI operations)
     const hostOnly = this.config.hostOnly === true;
+    // Inference-only mode: skip S5 storage + RAG, but KEEP SessionManager.
+    const skipS5 = this.config.skipS5 === true;
 
-    if (!hostOnly) {
+    if (!hostOnly && !skipS5) {
       // StorageManager constructor takes s5PortalUrl and auth config
       const s5PortalUrl = this.config.s5Config?.portalUrl;
       const s5AuthApiUrl = this.config.s5Config?.authApiUrl;
@@ -736,24 +748,28 @@ export class FabstirSDKCore extends EventEmitter {
       await (this.paymentManager as any).initialize(this.signer);
 
       if (!hostOnly) {
+        // No-op storage proxy so SessionManager works without S5 persistence.
+        const makeNoopStorage = (addr: string) => new Proxy({} as any, {
+          get(_target, prop) {
+            if (prop === 'isInitialized') return () => true;
+            if (prop === 'getHostSelectionMode') return async () => 'auto';
+            if (prop === 'getUserSettings') return async () => ({});
+            if (prop === 'getUserAddress') return () => addr;
+            if (typeof prop === 'string') return async () => undefined;
+            return undefined;
+          }
+        });
+
         // Initialize storage manager with S5 seed (optional — not required for inference)
-        if (this.s5Seed && this.userAddress) {
+        if (skipS5) {
+          // Inference-only: no S5 storage; SessionManager runs on the no-op proxy.
+          this.storageManager = makeNoopStorage(this.userAddress || '');
+        } else if (this.s5Seed && this.userAddress) {
           try {
             await this.storageManager!.initialize(this.s5Seed, this.userAddress);
           } catch (storageErr: any) {
             console.warn(`[SDK] StorageManager initialization failed (conversation persistence unavailable): ${storageErr.message}`);
-            // Replace with no-op proxy so SessionManager works without storage
-            const addr = this.userAddress;
-            this.storageManager = new Proxy({} as any, {
-              get(_target, prop) {
-                if (prop === 'isInitialized') return () => true;
-                if (prop === 'getHostSelectionMode') return async () => 'auto';
-                if (prop === 'getUserSettings') return async () => ({});
-                if (prop === 'getUserAddress') return () => addr;
-                if (typeof prop === 'string') return async () => undefined;
-                return undefined;
-              }
-            });
+            this.storageManager = makeNoopStorage(this.userAddress);
           }
         } else {
           throw new SDKError(
@@ -836,8 +852,8 @@ export class FabstirSDKCore extends EventEmitter {
       await (this.treasuryManager as any).initialize(this.signer);
 
       // Initialize VectorRAGManager after authentication (needs userAddress and s5Seed)
-      // Skip in hostOnly mode (no S5 storage available)
-      if (!hostOnly && this.userAddress && this.s5Seed && this.sessionManager) {
+      // Skip in hostOnly / skipS5 mode (no S5 storage available)
+      if (!hostOnly && !skipS5 && this.userAddress && this.s5Seed && this.sessionManager) {
         const ragConfig = {
           ...DEFAULT_RAG_CONFIG,
           s5Portal: this.config.s5Config?.portalUrl || DEFAULT_RAG_CONFIG.s5Portal
@@ -875,7 +891,7 @@ export class FabstirSDKCore extends EventEmitter {
       }
 
       // Initialize TranscodeManager (needs sessionManager, storageManager, contractManager, encryptionManager)
-      if (!hostOnly && this.sessionManager && this.storageManager && this.contractManager && this.encryptionManager) {
+      if (!hostOnly && !skipS5 && this.sessionManager && this.storageManager && this.contractManager && this.encryptionManager) {
         this.transcodeManager = new TranscodeManager(
           this.sessionManager, this.storageManager, this.contractManager,
           this.encryptionManager, this.signer!, this.currentChainId,

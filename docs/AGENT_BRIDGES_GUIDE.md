@@ -1,6 +1,6 @@
 # Agent Coding Bridges: OpenCode & Claude Code → Fabstir Hosts
 
-> **⚠️ `@fabstir/openai-bridge` is DEPRECATED (2026-05).** Its OpenAI surface has been folded into the **`@fabstir/orchestrator` local daemon** (v0.6.1), which is now the recommended path for OpenAI-compatible coding agents. The daemon is at full parity (chat + streaming + tools, `/v1/models`, `/v1/images/generations`, `/v1/responses`) and fixes the two things the bridge got wrong for a DePIN marketplace: **no host pinning** (decentralized host selection) and **no raw-key custody** (USDC **delegate-pays** — a hot EOA spending a user's on-chain-capped allowance). See **§4a Running the orchestrator OpenAI daemon (recommended)** below. The legacy `--private-key --host` bridge CLIs (§3, §4) still work but are frozen; `claude-bridge`'s `/v1/messages` port into the daemon is a follow-up.
+> **⚠️ `@fabstir/openai-bridge` is DEPRECATED (2026-05).** Its OpenAI surface has been folded into the **`@fabstir/orchestrator` local daemon** (v0.6.2), which is now the recommended path for OpenAI-compatible coding agents. The daemon is at full parity (chat + streaming + tools, `/v1/models`, `/v1/images/generations`, `/v1/responses`) and fixes the two things the bridge got wrong for a DePIN marketplace: **no host pinning** (decentralized host selection) and **no raw-key custody** (USDC **delegate-pays** — a hot EOA spending a user's on-chain-capped allowance). See **§4a Running the orchestrator OpenAI daemon (recommended)** below. The legacy `--private-key --host` bridge CLIs (§3, §4) still work but are frozen; `claude-bridge`'s `/v1/messages` port into the daemon is a follow-up.
 
 This guide explains how to use **`@fabstir/openai-bridge`** and **`@fabstir/claude-bridge`** to point local coding agents (OpenCode, Claude Code, Cursor, Continue, Aider, etc.) at Fabstir host nodes so they consume Fabstir-hosted models for agentic coding work.
 
@@ -185,7 +185,7 @@ Auth header: **`Authorization: Bearer <key>`** when `--api-key` is set; otherwis
 
 ## 4a. Running the orchestrator OpenAI daemon (recommended)
 
-`@fabstir/orchestrator` (v0.6.1+) serves the same OpenAI surface as `openai-bridge`, but with **decentralized host selection** (no `--host` pinning) and **USDC delegate-pays** instead of an embedded raw private key. This is the recommended replacement for `openai-bridge`.
+`@fabstir/orchestrator` (v0.6.2+) serves the same OpenAI surface as `openai-bridge`, but with **decentralized host selection** (no `--host` pinning) and **USDC delegate-pays** instead of an embedded raw private key. This is the recommended replacement for `openai-bridge`.
 
 ### How delegate-pays differs from the legacy bridge
 
@@ -214,6 +214,26 @@ FABSTIR_PRIVATE_KEY=... FABSTIR_RPC_URL=... FABSTIR_FAST_MODEL=... FABSTIR_DEEP_
 | `FABSTIR_BIND` | `127.0.0.1` | Loopback by default. `0.0.0.0` requires `FABSTIR_BIND_CONFIRM=1`. |
 | `FABSTIR_AUTHORIZE_URL` | — | URL returned in the `402` gate so the UI can authorize the delegate. |
 | `FABSTIR_SESSION_DEPOSIT` | `0.001` | Per-session USDC deposit. |
+| `FABSTIR_RPC_URL` | chain default | Base-Sepolia RPC. |
+| `FABSTIR_FAST_MODEL` / `FABSTIR_DEEP_MODEL` | — | Model strings (`{repo}:{file}`) the daemon can serve. |
+
+#### Chain env (required)
+
+Contract addresses come from `ChainRegistry`, which reads the standard env vars — the daemon needs these set (the SDK reads `CONTRACT_*` and falls back to `NEXT_PUBLIC_*`):
+
+```
+RPC_URL_BASE_SEPOLIA           # (or FABSTIR_RPC_URL / NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA)
+CONTRACT_JOB_MARKETPLACE
+CONTRACT_NODE_REGISTRY
+CONTRACT_PROOF_SYSTEM
+CONTRACT_HOST_EARNINGS
+CONTRACT_USDC_TOKEN
+CONTRACT_MODEL_REGISTRY
+```
+
+#### S5 / VectorRAG are NOT required for the daemon
+
+The delegate/coding-agent daemon proxies `/v1/chat/completions` (+ images/responses) and does **not** need S5 conversation persistence or VectorRAG. It runs with **`skipS5`** enabled automatically (sdk-core 1.21.2+): no S5 portal registration, no VectorRAG/SessionGroup/Transcode init, conversation storage degrades to a no-op proxy. End-to-end session encryption still works (the key derives from the wallet seed, no S5 network). So you do **not** need S5 portal creds for the daemon. (`SKIP_S5_STORAGE=true` is also honored as an env override on the SDK.)
 
 ### Endpoints
 

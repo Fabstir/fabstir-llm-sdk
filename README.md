@@ -266,8 +266,8 @@ cd packages/sdk-core && pnpm build
 ### Package Installation
 
 ```bash
-pnpm add @fabstir/sdk-core@1.21.1       # delegate-pays API + authenticateAsDelegate
-pnpm add @fabstir/orchestrator@0.6.1     # OpenAI-compatible daemon + delegate plumbing
+pnpm add @fabstir/sdk-core@1.21.2       # delegate-pays API + authenticateAsDelegate
+pnpm add @fabstir/orchestrator@0.6.2     # OpenAI-compatible daemon + delegate plumbing
 ```
 
 ### Prerequisites
