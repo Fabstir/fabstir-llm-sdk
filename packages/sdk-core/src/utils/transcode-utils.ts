@@ -13,6 +13,16 @@ const PSNR_STANDARD = 38.0;
 const PSNR_HIGH = 42.0;
 const SSIM_HIGH = 0.95;
 const ENCRYPTION_FACTOR = 1.1;
+/** Token→USDC scale; must match HostManager/SessionManager (PRICE_PRECISION = 1000n). */
+const PRICE_PRECISION = 1000n;
+
+/**
+ * Canonical token→USDC conversion: (tokens × pricePerToken) / PRICE_PRECISION.
+ * Returns USDC base units (6 decimals). Integer-floors.
+ */
+export function tokensToUsdc(tokens: number, pricePerToken: bigint | number): bigint {
+  return (BigInt(tokens) * BigInt(pricePerToken)) / PRICE_PRECISION;
+}
 
 /** Build canonical object with struct field order, omitting undefined/null */
 function canonicalFormat(f: VideoFormat): Record<string, unknown> {

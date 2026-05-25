@@ -1,11 +1,22 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { formatUnits } from 'ethers';
 import { TranscodeManager } from '../../src/managers/TranscodeManager';
 import type { ITranscodeManager } from '../../src/interfaces/ITranscodeManager';
 import type { VideoFormat, CreateTranscodeJobParams } from '../../src/types/transcode.types';
+import { tokensToUsdc, estimateTranscodeUnits, billingUnitsToTokens, computeTranscodeModelId } from '../../src/utils/transcode-utils';
+import { TranscodeError } from '../../src/errors/transcode-errors';
 
 const TEST_ADDRESS = '0x1234567890abcdef1234567890abcdef12345678';
+// Mock USDC token address returned by the stubbed contractManager.getContractAddress('usdcToken')
+const USDC_ADDRESS = '0xaaaa567890abcdef1234567890abcdef1234aaaa';
+const TEST_PRICE = 5000n; // on-chain pricePerToken (base units; canonical /1000 scale)
+// Two renditions (720p + 1080p) to exercise multi-rendition summing
+const PRICE_FORMATS: VideoFormat[] = [
+  { id: 1, ext: 'mp4', vcodec: 'libx264', vf: 'scale=1280x720' },
+  { id: 2, ext: 'mp4', vcodec: 'libx264', vf: 'scale=1920x1080' },
+];
 
 const TEST_FORMATS: VideoFormat[] = [
   { id: 1, ext: 'mp4', vcodec: 'libx264', vf: 'scale=1920x1080' },
@@ -22,13 +33,13 @@ const TEST_JOB_PARAMS: CreateTranscodeJobParams = {
 
 /** Minimal mock factories */
 function mockSessionManager() {
-  return { startSession: vi.fn().mockResolvedValue({ sessionId: 'sess-123', jobId: 1n }), endSession: vi.fn().mockResolvedValue(undefined) };
+  return { startSession: vi.fn().mockResolvedValue({ sessionId: 'sess-123', jobId: 1n }), endSession: vi.fn().mockResolvedValue(undefined), resolveModelPricePerToken: vi.fn().mockResolvedValue(TEST_PRICE) };
 }
 function mockStorageManager() {
   return { uploadFile: vi.fn().mockResolvedValue({ cid: 'bafyabc' }), downloadFile: vi.fn().mockResolvedValue(new Blob(['video'])), uploadJSON: vi.fn().mockResolvedValue('bafyjson') };
 }
 function mockContractManager() {
-  return { getContract: vi.fn().mockReturnValue({ getSessionJob: vi.fn().mockResolvedValue({ status: 1, tokensClaimed: 0n }), completeSessionJob: vi.fn().mockResolvedValue({ wait: vi.fn().mockResolvedValue({ hash: '0xdef' }) }) }) };
+  return { getContract: vi.fn().mockReturnValue({ getSessionJob: vi.fn().mockResolvedValue({ status: 1, tokensClaimed: 0n }), completeSessionJob: vi.fn().mockResolvedValue({ wait: vi.fn().mockResolvedValue({ hash: '0xdef' }) }) }), getContractAddress: vi.fn().mockResolvedValue(USDC_ADDRESS) };
 }
 function mockEncryptionManager() {
   return { encryptMessage: vi.fn().mockReturnValue({ ciphertextHex: '0xenc', nonceHex: '0xnonce', aadHex: '0xaad' }), decryptMessage: vi.fn().mockReturnValue('{}') };
@@ -87,23 +98,87 @@ describe('TranscodeManager', () => {
   });
 
   describe('estimateTranscodePrice', () => {
-    it('returns price estimate with breakdown', async () => {
-      const formatSpec = {
-        version: '1.0.0' as const,
-        input: { cid: 'bafyinput' },
-        output: {
-          video: { codec: 'h264' as const, resolution: { width: 1920, height: 1080 }, frameRate: 30, bitrate: { target: 5000 } },
-          audio: { codec: 'aac' as const, sampleRate: 48000, channels: 2 },
-          container: 'mp4' as const,
-        },
-        quality: { tier: 'standard' as const },
-        gop: { size: 60, structure: 'IBBPBBP' },
-        proof: { strategy: 'per_gop' as any, requireQualityMetrics: true },
-      };
-      const estimate = await manager.estimateTranscodePrice(TEST_ADDRESS, formatSpec, 600);
-      expect(estimate).toHaveProperty('totalCost');
-      expect(estimate).toHaveProperty('breakdown');
-      expect(estimate.breakdown).toHaveProperty('duration', 600);
+    const DURATION = 600;
+
+    it('sums all renditions and applies encryption by default', async () => {
+      const est = await manager.estimateTranscodePrice(TEST_ADDRESS, PRICE_FORMATS, DURATION);
+      const expectedTokens = billingUnitsToTokens(estimateTranscodeUnits(DURATION, PRICE_FORMATS, true));
+      expect(est.tokens).toBe(expectedTokens);
+      expect(est.breakdown.renditions).toBe(PRICE_FORMATS.length);
+    });
+
+    it('returns USDC cost (base units + human-readable), not a token count', async () => {
+      const est = await manager.estimateTranscodePrice(TEST_ADDRESS, PRICE_FORMATS, DURATION);
+      const expectedBase = tokensToUsdc(est.tokens, TEST_PRICE);
+      expect(est.totalCostBaseUnits).toBe(expectedBase.toString());
+      expect(est.totalCost).toBe(formatUnits(expectedBase, 6));
+      expect(est.pricePerToken).toBe(TEST_PRICE.toString());
+      // totalCost must be a real USDC figure, NOT the raw token count
+      expect(est.totalCost).not.toBe(String(est.tokens));
+    });
+
+    it('defaults isEncrypted true (1.1x applied); {isEncrypted:false} drops it', async () => {
+      const enc = await manager.estimateTranscodePrice(TEST_ADDRESS, PRICE_FORMATS, DURATION);
+      const plain = await manager.estimateTranscodePrice(TEST_ADDRESS, PRICE_FORMATS, DURATION, { isEncrypted: false });
+      expect(enc.breakdown.isEncrypted).toBe(true);
+      expect(plain.breakdown.isEncrypted).toBe(false);
+      expect(enc.tokens).toBe(billingUnitsToTokens(estimateTranscodeUnits(DURATION, PRICE_FORMATS, true)));
+      expect(plain.tokens).toBe(billingUnitsToTokens(estimateTranscodeUnits(DURATION, PRICE_FORMATS, false)));
+      expect(enc.tokens).toBeGreaterThan(plain.tokens);
+    });
+
+    it('defaults paymentToken to USDC via getContractAddress; resolves price for the transcode modelId', async () => {
+      const sm = mockSessionManager();
+      const cm = mockContractManager();
+      const mgr = createManager({ sm, cm });
+      const est = await mgr.estimateTranscodePrice(TEST_ADDRESS, PRICE_FORMATS, DURATION);
+      expect(cm.getContractAddress).toHaveBeenCalledWith('usdcToken');
+      expect(est.paymentToken).toBe(USDC_ADDRESS);
+      expect(sm.resolveModelPricePerToken).toHaveBeenCalledWith(
+        TEST_ADDRESS, computeTranscodeModelId(PRICE_FORMATS), USDC_ADDRESS,
+      );
+    });
+
+    it('an explicit paymentToken overrides the default (no getContractAddress call)', async () => {
+      const sm = mockSessionManager();
+      const cm = mockContractManager();
+      const mgr = createManager({ sm, cm });
+      const est = await mgr.estimateTranscodePrice(TEST_ADDRESS, PRICE_FORMATS, DURATION, { paymentToken: TEST_ADDRESS });
+      expect(cm.getContractAddress).not.toHaveBeenCalled();
+      expect(est.paymentToken).toBe(TEST_ADDRESS);
+      expect(sm.resolveModelPricePerToken).toHaveBeenCalledWith(
+        TEST_ADDRESS, computeTranscodeModelId(PRICE_FORMATS), TEST_ADDRESS,
+      );
+    });
+
+    it('uses an explicit options.modelId override instead of computeTranscodeModelId(formats)', async () => {
+      const sm = mockSessionManager();
+      const mgr = createManager({ sm });
+      // A registered, NAMED modelId (e.g. getModelId('fabstir/transcoding-hls','480p-720p-1080p-av1'))
+      const namedModelId = '0x' + 'ab'.repeat(32);
+      // sanity: the override must differ from the formats-derived hash, else the test proves nothing
+      expect(namedModelId).not.toBe(computeTranscodeModelId(PRICE_FORMATS));
+      await mgr.estimateTranscodePrice(TEST_ADDRESS, PRICE_FORMATS, DURATION, { modelId: namedModelId });
+      expect(sm.resolveModelPricePerToken).toHaveBeenCalledWith(TEST_ADDRESS, namedModelId, USDC_ADDRESS);
+    });
+
+    it('breakdown carries { duration, units, renditions, isEncrypted }', async () => {
+      const est = await manager.estimateTranscodePrice(TEST_ADDRESS, PRICE_FORMATS, DURATION);
+      expect(est.breakdown).toEqual({
+        duration: DURATION,
+        units: estimateTranscodeUnits(DURATION, PRICE_FORMATS, true),
+        renditions: PRICE_FORMATS.length,
+        isEncrypted: true,
+      });
+    });
+
+    it('throws TranscodeError on a zero on-chain price (never a zero/NaN deposit)', async () => {
+      const sm = mockSessionManager();
+      sm.resolveModelPricePerToken.mockResolvedValue(0n);
+      const mgr = createManager({ sm });
+      await expect(
+        mgr.estimateTranscodePrice(TEST_ADDRESS, PRICE_FORMATS, DURATION),
+      ).rejects.toThrow(TranscodeError);
     });
   });
 

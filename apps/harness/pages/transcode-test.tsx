@@ -247,22 +247,9 @@ export default function TranscodeTestPage() {
     addLog('Estimating price...');
     try {
       const formats = buildStreamingFormats(selectedResolutions, selectedCodec, previewPercent);
-      const fmt = formats[0];
-      const formatSpec = {
-        version: '1.0.0' as const,
-        input: { cid: sourceCid || 'placeholder' },
-        output: {
-          video: { codec: fmt.vcodec as any, resolution: parseResolution(fmt.vf), frameRate: 30, bitrate: { target: parseBitrate(fmt.b_v) } },
-          audio: { codec: (fmt.acodec || 'aac') as any, sampleRate: 48000, channels: fmt.ch || 2 },
-          container: fmt.ext as any,
-        },
-        quality: { tier: 'standard' as const },
-        gop: { size: 60, structure: 'IBBPBBP' },
-        proof: { strategy: 'per_gop' as any, requireQualityMetrics: true },
-      };
-      const est = await transcodeManager.estimateTranscodePrice(HOST_ADDRESS, formatSpec, durationSec);
+      const est = await transcodeManager.estimateTranscodePrice(HOST_ADDRESS, formats, durationSec, { isEncrypted: true });
       setPriceEstimate(est);
-      addLog(`Price estimate: ${est.totalCost} tokens (${est.breakdown.pricePerSecond}/sec, ${durationSec}s, ${est.breakdown.codec}@${est.breakdown.resolution})`);
+      addLog(`Price estimate: ${est.totalCost} USDC | ${est.tokens} tokens (${est.breakdown.duration}s, ${est.breakdown.units} units, ${est.breakdown.renditions} renditions, encrypted=${est.breakdown.isEncrypted})`);
     } catch (err: any) {
       addLog(`Price estimation failed: ${err.message}`);
     }
@@ -434,16 +421,6 @@ export default function TranscodeTestPage() {
     return { modelKey, modelId: getTranscodeModelId(modelKey) };
   }
 
-  function parseResolution(vf?: string): { width: number; height: number } {
-    const m = vf?.match(/scale=(\d+)x(\d+)/);
-    return m ? { width: parseInt(m[1]), height: parseInt(m[2]) } : { width: 1920, height: 1080 };
-  }
-  function parseBitrate(bv?: string): number {
-    if (!bv) return 5000;
-    const n = parseFloat(bv);
-    return bv.endsWith('M') ? n * 1000 : n;
-  }
-
   // ── Render ──
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: 20, color: '#e0e0e0', background: '#0f0f23', minHeight: '100vh', fontFamily: 'system-ui, monospace' }}>
@@ -582,8 +559,8 @@ export default function TranscodeTestPage() {
         </div>
         {priceEstimate && (
           <div style={{ fontSize: 13, background: '#0a0a1a', padding: 8, borderRadius: 4 }}>
-            Total: {priceEstimate.totalCost} tokens | Per second: {priceEstimate.breakdown.pricePerSecond} |
-            {' '}{priceEstimate.breakdown.resolution} {priceEstimate.breakdown.codec} ({priceEstimate.breakdown.quality})
+            Total: {priceEstimate.totalCost} USDC ({priceEstimate.totalCostBaseUnits} base units) | Tokens: {priceEstimate.tokens} | Price/token: {priceEstimate.pricePerToken} |
+            {' '}{priceEstimate.breakdown.duration}s, {priceEstimate.breakdown.units} units, {priceEstimate.breakdown.renditions} renditions{priceEstimate.breakdown.isEncrypted ? ' (encrypted)' : ''}
           </div>
         )}
       </div>

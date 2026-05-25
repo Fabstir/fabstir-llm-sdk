@@ -3,8 +3,33 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 import type { VideoFormat, QualityMetrics } from '../../src/types/transcode.types';
 import {
   computeTranscodeModelId, billingUnitsToTokens, resolutionFactor,
-  codecFactor, estimateTranscodeUnits, validateQuality,
+  codecFactor, estimateTranscodeUnits, validateQuality, tokensToUsdc,
 } from '../../src/utils/transcode-utils';
+
+describe('tokensToUsdc', () => {
+  it('applies the exact (tokens × pricePerToken) / 1000 math', () => {
+    // 60000 tokens × 5000 / 1000 = 300000 base units = 0.30 USDC
+    expect(tokensToUsdc(60000, 5000n)).toBe(300000n);
+  });
+
+  it('handles a sub-$1/M rate', () => {
+    // 60000 tokens × 60 / 1000 = 3600 base units = 0.0036 USDC
+    expect(tokensToUsdc(60000, 60n)).toBe(3600n);
+  });
+
+  it('accepts a number pricePerToken and integer-floors', () => {
+    // 1 × 1 / 1000 = 0 (floor)
+    expect(tokensToUsdc(1, 1)).toBe(0n);
+  });
+
+  it('accepts a bigint pricePerToken', () => {
+    expect(tokensToUsdc(60000, 5000n)).toBe(300000n);
+  });
+
+  it('returns 0n for zero tokens', () => {
+    expect(tokensToUsdc(0, 5000n)).toBe(0n);
+  });
+});
 
 describe('computeTranscodeModelId', () => {
   it('returns keccak256 of sorted canonical JSON', () => {

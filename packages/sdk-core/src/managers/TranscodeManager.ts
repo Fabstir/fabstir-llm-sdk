@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 
-import type { Signer } from 'ethers';
+import { formatUnits, type Signer } from 'ethers';
 import type { ITranscodeManager } from '../interfaces/ITranscodeManager';
 import type {
   CreateTranscodeJobParams,
@@ -22,7 +22,7 @@ import type { IHostSelectionService } from '../interfaces/IHostSelectionService'
 import { TranscodeError } from '../errors/transcode-errors';
 import { fetchTranscodeCapacity } from '../utils/transcode-capacity';
 import { HostSelectionMode } from '../types/settings.types';
-import { computeTranscodeModelId, estimateTranscodeUnits, billingUnitsToTokens } from '../utils/transcode-utils';
+import { computeTranscodeModelId, estimateTranscodeUnits, billingUnitsToTokens, tokensToUsdc } from '../utils/transcode-utils';
 
 /** Contract status codes → human-readable strings */
 const CONTRACT_STATUS: Record<number, string> = { 0: 'created', 1: 'active', 2: 'completed', 3: 'cancelled' };
@@ -178,39 +178,42 @@ export class TranscodeManager implements ITranscodeManager {
     throw new Error('Not implemented');
   }
 
+  /**
+   * Estimate the predicted USDC cost for transcoding `formats` (deposit sizing; no margin).
+   * Reads the on-chain pricePerToken for the transcode modelId (same price the session charges).
+   */
   async estimateTranscodePrice(
     hostAddress: string,
-    formatSpec: TranscodeFormatSpec,
+    formats: VideoFormat[],
     videoDurationSeconds: number,
+    options?: { isEncrypted?: boolean; paymentToken?: string; modelId?: string },
   ): Promise<TranscodePriceEstimate> {
-    const resolution = `${formatSpec.output.video.resolution.width}x${formatSpec.output.video.resolution.height}`;
-    const codec = formatSpec.output.video.codec;
-    const quality = formatSpec.quality?.tier || 'standard';
-
-    // Base estimate using billing formula
-    const formats: VideoFormat[] = [{
-      id: 1,
-      ext: formatSpec.output.container,
-      vcodec: codec,
-      vf: `scale=${resolution}`,
-    }];
-    const units = estimateTranscodeUnits(videoDurationSeconds, formats);
+    // Default: derive the modelId from formats. Override when the session is priced/matched on a
+    // named modelId (e.g. getModelId('fabstir/transcoding-hls','480p-720p-1080p-av1')) so the
+    // estimate resolves the SAME price the session charges.
+    const modelId = options?.modelId ?? computeTranscodeModelId(formats);
+    const paymentToken = options?.paymentToken
+      ?? await this.contractManager.getContractAddress('usdcToken');
+    const pricePerToken: bigint = await this.sessionManager.resolveModelPricePerToken(
+      hostAddress, modelId, paymentToken,
+    );
+    if (!pricePerToken || pricePerToken <= 0n) {
+      throw new TranscodeError(
+        `No on-chain price for transcode modelId ${modelId} (token ${paymentToken})`,
+        'TRANSCODE_FAILED', hostAddress,
+      );
+    }
+    const isEncrypted = options?.isEncrypted ?? true;
+    const units = estimateTranscodeUnits(videoDurationSeconds, formats, isEncrypted);
     const tokens = billingUnitsToTokens(units);
-
-    const costStr = String(tokens);
+    const base = tokensToUsdc(tokens, pricePerToken);
     return {
-      baseCost: costStr,
-      resolutionMultiplier: 1.0,
-      codecMultiplier: 1.0,
-      qualityMultiplier: 1.0,
-      totalCost: costStr,
-      breakdown: {
-        duration: videoDurationSeconds,
-        pricePerSecond: String(Math.ceil(tokens / videoDurationSeconds)),
-        resolution,
-        codec,
-        quality,
-      },
+      totalCost: formatUnits(base, 6), // USDC human-readable (predicted, no margin)
+      totalCostBaseUnits: base.toString(), // authoritative integer base units
+      tokens,
+      pricePerToken: pricePerToken.toString(),
+      paymentToken,
+      breakdown: { duration: videoDurationSeconds, units, renditions: formats.length, isEncrypted },
     };
   }
 

@@ -17,6 +17,7 @@ import type {
   TranscodePriceEstimate,
   TranscodeVerification,
   TranscodeFormatSpec,
+  VideoFormat,
   GOPProof,
   TranscodeProofTree,
   Resolution,
@@ -123,28 +124,18 @@ export interface ITranscodeManager {
   getProofTree(jobId: bigint): Promise<TranscodeProofTree>;
 
   /**
-   * Calculate price estimate for a transcode job
-   *
-   * @param hostAddress - The host address
-   * @param formatSpec - The format specification
-   * @param videoDurationSeconds - Estimated video duration
-   * @returns Detailed price estimate
-   *
-   * @example
-   * ```typescript
-   * const estimate = await transcodeManager.estimateTranscodePrice(
-   *   hostAddress,
-   *   formatSpec,
-   *   600 // 10 minutes
-   * );
-   * console.log(`Total cost: ${estimate.totalCost} USDC`);
-   * console.log('Breakdown:', estimate.breakdown);
-   * ```
+   * Predicted USDC cost of a transcode job (deposit sizing; NO margin). Prices ALL
+   * `formats` renditions via the on-chain pricePerToken for the transcode modelId —
+   * the same price the session charges; the caller applies its own margin. `options`:
+   * isEncrypted (1.1x factor, default true), paymentToken (default USDC via getContractAddress),
+   * modelId (override the formats-derived id when the session is priced on a named modelId).
+   * @returns USDC cost (`totalCostBaseUnits` authoritative, `totalCost` human) + `tokens`.
    */
   estimateTranscodePrice(
     hostAddress: string,
-    formatSpec: TranscodeFormatSpec,
-    videoDurationSeconds: number
+    formats: VideoFormat[],
+    videoDurationSeconds: number,
+    options?: { isEncrypted?: boolean; paymentToken?: string; modelId?: string }
   ): Promise<TranscodePriceEstimate>;
 
   /**

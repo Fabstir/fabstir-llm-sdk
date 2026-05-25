@@ -212,6 +212,18 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Resolve the on-chain pricePerToken for a model, mirroring startSession's lookup
+   * (convertModelToBytes32 + hostManager.getModelPricing). Returns the RAW price;
+   * the caller owns any zero/validity guard and the payment-token choice (no native default).
+   */
+  async resolveModelPricePerToken(hostAddress: string, modelId: string, paymentToken: string): Promise<bigint> {
+    if (!this.hostManager) {
+      throw new Error('HostManager not set; cannot resolve model price');
+    }
+    return this.hostManager.getModelPricing(hostAddress, convertModelToBytes32(modelId), paymentToken);
+  }
+
+  /**
    * Set EncryptionManager for end-to-end encryption (called after authentication)
    */
   setEncryptionManager(encryptionManager: EncryptionManager): void {

@@ -876,7 +876,7 @@ const { sessionId, jobId } = await sessionManager.startSession(
   '0x4594F755F593B517Bb3194F4DeC20C48a3f04504', // Provider address
   {
     depositAmount: "1.0",    // $1 USDC minimum per session
-    pricePerToken: 200,      // 0.0002 USDC per token (0.02 cents)
+    pricePerToken: 200,      // $0.20 per MILLION tokens (USD_per_million × PRICE_PRECISION=1000); cost = tokens × pricePerToken / 1000 in USDC base units (6dp)
     duration: 3600,          // 1 hour session timeout
     proofInterval: 100,      // Checkpoint every 100 tokens
     proofTimeoutWindow: 300, // 5 min proof timeout (60-3600, default: 300)
@@ -1836,8 +1836,21 @@ const hasTrustless = await transcodeManager.isTrustlessAvailable(hostUrl);
 ### Price Estimation
 
 ```typescript
-const estimate = await transcodeManager.estimateTranscodePrice(hostAddress, formatSpec, durationSeconds);
-// { totalCost, breakdown: { duration, pricePerSecond, resolution, codec, quality } }
+const estimate = await transcodeManager.estimateTranscodePrice(
+  hostAddress,
+  formats,            // VideoFormat[] — the renditions to produce
+  videoDurationSeconds,
+  { isEncrypted: true } // optional: { isEncrypted?, paymentToken?, modelId? }
+                        // modelId: override when the session is priced on a named modelId
+);
+// {
+//   totalCost,          // USDC human-readable — PREDICTED cost (no margin; caller applies its own safety margin)
+//   totalCostBaseUnits, // USDC base units (6dp) — authoritative integer = tokens × pricePerToken / 1000
+//   tokens,
+//   pricePerToken,      // e.g. 200 = $0.20 per million tokens (× PRICE_PRECISION=1000)
+//   paymentToken,
+//   breakdown: { duration, units, renditions, isEncrypted }
+// }
 ```
 
 ### Submit Transcode via SessionManager
@@ -5873,7 +5886,7 @@ async function chatWithContext() {
     '0x4594F755F593B517Bb3194F4DeC20C48a3f04504',
     {
       depositAmount: "1.0",        // $1 USDC minimum deposit
-      pricePerToken: 200,          // 0.0002 USDC per token
+      pricePerToken: 200,          // $0.20 per MILLION tokens (× PRICE_PRECISION=1000); cost = tokens × pricePerToken / 1000 (USDC base units, 6dp)
       duration: 3600,              // 1 hour timeout
       proofInterval: 100           // Checkpoint every 100 tokens
     }

@@ -416,17 +416,16 @@ export interface TranscodeHostInfo {
  * Price estimate for transcode job
  */
 export interface TranscodePriceEstimate {
-  baseCost: string; // Base cost in USDC
-  resolutionMultiplier: number;
-  codecMultiplier: number;
-  qualityMultiplier: number;
-  totalCost: string; // Final cost in USDC
+  totalCost: string; // USDC human-readable (predicted, no margin), e.g. '0.42'
+  totalCostBaseUnits: string; // USDC base units (6 decimals)
+  tokens: number; // Billable token count
+  pricePerToken: string; // On-chain price per token (base units)
+  paymentToken: string; // Payment token address
   breakdown: {
     duration: number; // seconds
-    pricePerSecond: string;
-    resolution: string; // '720p', '1080p', '4k'
-    codec: string; // 'h264', 'av1'
-    quality: string; // 'standard', 'high', 'lossless'
+    units: number; // billable units
+    renditions: number; // number of output formats
+    isEncrypted: boolean; // whether encryption factor applied
   };
 }
 
