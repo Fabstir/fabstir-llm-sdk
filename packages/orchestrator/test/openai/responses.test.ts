@@ -88,6 +88,27 @@ describe('responses API (4.6)', () => {
     expect(fc).toMatchObject({ name: 'Bash', arguments: '{"command":"ls"}', status: 'completed' });
   });
 
+  it('tools non-streaming → normalizes a mis-cased tool name back to the request casing', async () => {
+    nonStream = '<tool_call>Bash<arg_key>command</arg_key><arg_value>ls</arg_value></tool_call>';
+    const lowerTools = [{ type: 'function', name: 'bash', parameters: { required: ['command'] } }];
+    const r = jsonRes();
+    await makeHandler().handle({ body: { model: 'm', input: 'go', tools: lowerTools } } as any, r);
+    const fc = r.body.output.find((o: any) => o.type === 'function_call');
+    expect(fc.name).toBe('bash');
+  });
+
+  it('tools streaming → normalizes a mis-cased tool name in the function_call item', async () => {
+    streamTokens = ['<tool_call>Bash<arg_key>command</arg_key>', '<arg_value>ls</arg_value></tool_call>'];
+    const lowerTools = [{ type: 'function', name: 'bash', parameters: { required: ['command'] } }];
+    const r = streamRes();
+    await makeHandler().handle({ body: { model: 'm', input: 'go', tools: lowerTools, stream: true } } as any, r);
+    const items = r._chunks
+      .filter((c: string) => c.includes('response.output_item.added'))
+      .map((c: string) => JSON.parse(c.slice(c.indexOf('data: ') + 6).trim()));
+    const fc = items.find((e: any) => e.item?.type === 'function_call');
+    expect(fc.item.name).toBe('bash');
+  });
+
   it('streaming emits Responses SSE events (created → output_text.delta → completed)', async () => {
     streamTokens = ['He', 'llo'];
     const r = streamRes();

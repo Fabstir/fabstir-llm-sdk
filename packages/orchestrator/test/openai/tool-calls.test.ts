@@ -88,6 +88,33 @@ describe('tool-call translation (4.4)', () => {
     expect(prompt).toContain('<|im_start|>observation\na\nb\n<|im_end|>');
   });
 
+  it('non-streaming: normalizes a mis-cased tool name back to the request casing (OpenCode "Bash" vs "bash")', async () => {
+    nonStreamResponse = '<tool_call>Bash<arg_key>command</arg_key><arg_value>ls</arg_value></tool_call>';
+    const lowerTools = [{ type: 'function', function: { name: 'bash', parameters: { required: ['command'] } } }];
+    const res = jsonRes();
+    await makeHandler().handle(req({ tools: lowerTools }) as any, res);
+    expect(res.body.choices[0].message.tool_calls[0].function.name).toBe('bash');
+  });
+
+  it('non-streaming: strips a stray <tool_call> tag glued onto the emitted name (OpenCode "<tool_call>write")', async () => {
+    // Model doubles the open tag; the parser keeps the inner one inside the name.
+    nonStreamResponse = '<tool_call><tool_call>write<arg_key>path</arg_key><arg_value>todo.html</arg_value></tool_call>';
+    const writeTools = [{ type: 'function', function: { name: 'write', parameters: { required: ['path'] } } }];
+    const res = jsonRes();
+    await makeHandler().handle(req({ tools: writeTools }) as any, res);
+    expect(res.body.choices[0].message.tool_calls[0].function.name).toBe('write');
+  });
+
+  it('streaming: normalizes a mis-cased tool name in the emitted delta', async () => {
+    streamTokens = ['<tool_call>Bash<arg_key>command</arg_key>', '<arg_value>ls</arg_value></tool_call>'];
+    const lowerTools = [{ type: 'function', function: { name: 'bash', parameters: { required: ['command'] } } }];
+    const res = streamRes();
+    await makeHandler().handle(req({ stream: true, tools: lowerTools }) as any, res);
+    const parsed = res._chunks.filter((c: string) => !c.includes('[DONE]')).map((c: string) => JSON.parse(c.replace(/^data: /, '').trim()));
+    const toolHead = parsed.find(d => d.choices[0]?.delta?.tool_calls?.[0]?.function?.name);
+    expect(toolHead.choices[0].delta.tool_calls[0].function.name).toBe('bash');
+  });
+
   it('malformed <tool_call> is surfaced as text (no crash)', async () => {
     nonStreamResponse = 'before <tool_call></tool_call> after';
     const res = jsonRes();

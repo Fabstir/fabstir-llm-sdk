@@ -8,7 +8,7 @@ import { convertOpenAIMessages, estimateInputTokens } from './converter';
 import { generateMessageId, generateToolCallId, buildContentDelta, buildToolCallDelta } from './sse';
 import { stripThinkFromText } from './think-stripper';
 import { streamChatCompletion } from './streaming';
-import { ToolCallParser, ParserEvent } from './tool-parser';
+import { ToolCallParser, ParserEvent, normalizeToolName } from './tool-parser';
 
 export interface ChatHandlerConfig {
   chainId: number;
@@ -83,7 +83,7 @@ export class ChatCompletionsHandler {
           for (const evt of events) {
             if (evt.type === 'text' && evt.text) write(buildContentDelta(msgId, m, evt.text));
             else if (evt.type === 'tool_call') {
-              write(buildToolCallDelta(msgId, m, state.toolCallIndex, generateToolCallId(), evt.name));
+              write(buildToolCallDelta(msgId, m, state.toolCallIndex, generateToolCallId(), normalizeToolName(evt.name, tools)));
               write(buildToolCallDelta(msgId, m, state.toolCallIndex, undefined, undefined, JSON.stringify(evt.arguments)));
               state.hasToolUse = true; state.toolCallIndex++;
             }
@@ -114,7 +114,7 @@ export class ChatCompletionsHandler {
         for (const evt of events) {
           if (evt.type === 'text' && evt.text.trim()) textParts.push(evt.text);
           else if (evt.type === 'tool_call') {
-            toolCalls.push({ id: generateToolCallId(), type: 'function', function: { name: evt.name, arguments: JSON.stringify(evt.arguments) } });
+            toolCalls.push({ id: generateToolCallId(), type: 'function', function: { name: normalizeToolName(evt.name, tools), arguments: JSON.stringify(evt.arguments) } });
             finishReason = 'tool_calls';
           }
         }
