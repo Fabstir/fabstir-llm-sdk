@@ -51,9 +51,9 @@ function formatToolsForPrompt(tools: OpenAITool[]): string {
     lines.push(`- ${tool.function.name}: ${desc}${params ? ` [${params}]` : ''}`);
   }
   lines.push('');
-  lines.push('IMPORTANT: To perform actions, you MUST output <tool_call> tags.');
-  lines.push('Format: <tool_call>ToolName<arg_key>param</arg_key><arg_value>value</arg_value></tool_call>');
-  lines.push('Example: <tool_call>Bash<arg_key>command</arg_key><arg_value>npm install</arg_value></tool_call>');
+  lines.push('IMPORTANT: To perform actions, you MUST output a <tool_call> tag containing a single JSON object.');
+  lines.push('Format: <tool_call>{"name": "ToolName", "arguments": {"param": "value"}}</tool_call>');
+  lines.push('Example: <tool_call>{"name": "Bash", "arguments": {"command": "npm install"}}</tool_call>');
   return lines.join('\n');
 }
 
@@ -91,8 +91,9 @@ export async function convertOpenAIMessages(
     allImages.push(...images);
 
     if (msg.role === 'assistant' && msg.tool_calls?.length) {
+      // Replay prior tool calls in the same native-JSON shape we now instruct.
       const toolText = msg.tool_calls.map(tc =>
-        `<tool_call>${tc.function.name}<arg_key>arguments</arg_key><arg_value>${tc.function.arguments}</arg_value></tool_call>`
+        `<tool_call>{"name":${JSON.stringify(tc.function.name)},"arguments":${tc.function.arguments || '{}'}}</tool_call>`
       ).join('');
       prompt += `<|im_start|>assistant\n${text}${toolText}\n<|im_end|>\n`;
     } else if (text) {

@@ -185,6 +185,10 @@ export interface PromptOptions {
   images?: ImageAttachment[];
   /** Controls model thinking/reasoning mode per-request. Omit for default. */
   thinking?: ThinkingMode;
+  /** Sampling temperature (0.0–2.0). Higher = more random. Omit for SDK default (0.7). Node validates the range. */
+  temperature?: number;
+  /** Maximum tokens to generate for this prompt. Omit for SDK default (LLM_MAX_TOKENS). */
+  maxTokens?: number;
   /** Called once when token usage info is available (on stream_end or response completion) */
   onTokenUsage?: (usage: TokenUsageInfo) => void;
   /** Called when image generation intent is auto-detected and image is generated */

@@ -108,14 +108,16 @@ export class ResponsesHandler {
     return next;
   }
 
-  private async run(model: string, prompt: string, onToken?: (t: string) => void, signal?: AbortSignal): Promise<{ response: string; tokensUsed: number }> {
+  private async run(model: string, prompt: string, onToken?: (t: string) => void, signal?: AbortSignal, sampling?: { temperature?: number; maxTokens?: number }): Promise<{ response: string; tokensUsed: number }> {
     const { adapter, session } = await this.deps.pool.acquire(model, {
       chainId: this.deps.config.chainId,
       depositAmount: this.deps.config.depositAmount,
       paymentToken: this.deps.config.paymentToken,
     }, signal);
     try {
-      return await adapter.sendPrompt(session.sessionId, prompt, undefined, onToken, signal ? { signal } : undefined);
+      const promptOpts: any = { ...sampling };
+      if (signal) promptOpts.signal = signal;
+      return await adapter.sendPrompt(session.sessionId, prompt, undefined, onToken, Object.keys(promptOpts).length > 0 ? promptOpts : undefined);
     } finally {
       await this.deps.pool.release(adapter, session);
     }
@@ -133,14 +135,17 @@ export class ResponsesHandler {
     const tools = body.tools && body.tools.length > 0 ? body.tools : undefined;
     const prompt = inputToPrompt(body.input, body.instructions, tools);
     const inputTokens = estimateTokens(prompt);
+    const sampling: { temperature?: number; maxTokens?: number } = {};
+    if (body.temperature != null) sampling.temperature = body.temperature;
+    if (body.max_output_tokens != null) sampling.maxTokens = body.max_output_tokens;
 
-    if (body.stream === true) await this.handleStreaming(res, model, prompt, inputTokens, tools);
-    else await this.handleNonStreaming(res, model, prompt, inputTokens, tools);
+    if (body.stream === true) await this.handleStreaming(res, model, prompt, inputTokens, tools, sampling);
+    else await this.handleNonStreaming(res, model, prompt, inputTokens, tools, sampling);
   }
 
-  private async handleNonStreaming(res: any, model: string, prompt: string, inputTokens: number, tools?: any[]): Promise<void> {
+  private async handleNonStreaming(res: any, model: string, prompt: string, inputTokens: number, tools?: any[], sampling?: { temperature?: number; maxTokens?: number }): Promise<void> {
     try {
-      const { response, tokensUsed } = await this.enqueue(model, () => this.run(model, prompt));
+      const { response, tokensUsed } = await this.enqueue(model, () => this.run(model, prompt, undefined, undefined, sampling));
       const text = stripThinkFromText(response);
       const output: any[] = [];
 
@@ -174,7 +179,7 @@ export class ResponsesHandler {
     }
   }
 
-  private async handleStreaming(res: any, model: string, prompt: string, inputTokens: number, tools?: any[]): Promise<void> {
+  private async handleStreaming(res: any, model: string, prompt: string, inputTokens: number, tools?: any[], sampling?: { temperature?: number; maxTokens?: number }): Promise<void> {
     const sse = makeSse();
     const respId = genId('resp');
     const msgId = genId('msg');
@@ -227,7 +232,7 @@ export class ResponsesHandler {
         if (parser) processEvents(parser.feed(cleaned));
         else processEvents([{ type: 'text', text: cleaned }]);
       };
-      const { tokensUsed } = await this.enqueue(model, () => this.run(model, prompt, onToken, ac.signal));
+      const { tokensUsed } = await this.enqueue(model, () => this.run(model, prompt, onToken, ac.signal, sampling));
       if (parser) processEvents(parser.flush());
 
       write(sse('response.output_text.done', { item_id: msgId, output_index: 0, content_index: 0, text: fullText }));

@@ -56,11 +56,34 @@ export class ToolCallParser {
   }
 
   private parseContent(content: string): { name: string; args: Record<string, any> } | null {
-    const firstArg = content.indexOf('<arg_key>');
+    const trimmed = content.trim();
+    // Native JSON tool call (Hermes/ChatML): {"name":"...","arguments":{...}}.
+    // This is what the converter now instructs; trust the model's JSON types (no coercion).
+    if (trimmed.startsWith('{')) {
+      // The model intermittently truncates the JSON by its trailing brace(s); on parse
+      // failure, repair (string-aware brace/bracket balancing) and retry before giving up.
+      let obj: any;
+      try { obj = JSON.parse(trimmed); }
+      catch { try { obj = JSON.parse(completeJson(trimmed)); } catch { /* fall through to XML */ } }
+      if (obj && typeof obj.name === 'string' && obj.name.trim()) {
+        let args = obj.arguments ?? obj.parameters ?? {};
+        if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
+        return { name: obj.name.trim(), args: (args && typeof args === 'object') ? args : {} };
+      }
+    }
+    // Legacy fallback: hand-rolled <arg_key>/<arg_value> XML (other models still emit it).
+    // Name ends at the first arg tag. Tolerate a malformed first key opened with
+    // <arg_value> (some models do this), so the name isn't swallowed.
+    const ki = content.indexOf('<arg_key>');
+    const vi = content.indexOf('<arg_value>');
+    const firstArg = ki < 0 ? vi : (vi < 0 ? ki : Math.min(ki, vi));
     const name = (firstArg >= 0 ? content.slice(0, firstArg) : content).trim();
     if (!name) return null;
     const args: Record<string, any> = {};
-    const re = /<arg_key>([\s\S]*?)<\/arg_key>\s*<arg_value>([\s\S]*?)<\/arg_value>/g;
+    // A key may open with <arg_key> OR (malformed) <arg_value>; the </arg_key> close
+    // disambiguates a key from a value, so a real <arg_value>v</arg_value> (which closes
+    // with </arg_value>) is never mis-read as a key.
+    const re = /<arg_(?:key|value)>([\s\S]*?)<\/arg_key>\s*<arg_value>([\s\S]*?)<\/arg_value>/g;
     let m;
     while ((m = re.exec(content)) !== null) {
       args[m[1].trim()] = this.coerce(m[2].trim());
@@ -94,6 +117,30 @@ export class ToolCallParser {
   reset(): void {
     this.buffer = ''; this.state = 'text';
   }
+}
+
+/**
+ * Repair truncated JSON by closing any unterminated string and unbalanced braces/brackets.
+ * String-aware: `{`/`}`/`[`/`]` inside a JSON string value (e.g. CSS/JS in `content`) are
+ * ignored — only structural brackets are balanced. Used to recover tool-call JSON that the
+ * model cut one or more closing braces short.
+ */
+export function completeJson(str: string): string {
+  const stack: string[] = [];
+  let inStr = false, esc = false;
+  for (const ch of str) {
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+    } else if (ch === '"') inStr = true;
+    else if (ch === '{' || ch === '[') stack.push(ch);
+    else if (ch === '}' || ch === ']') stack.pop();
+  }
+  let out = str;
+  if (inStr) out += '"';
+  for (let i = stack.length - 1; i >= 0; i--) out += stack[i] === '{' ? '}' : ']';
+  return out;
 }
 
 export function generateToolCallId(): string {
