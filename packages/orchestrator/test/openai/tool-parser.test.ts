@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ToolCallParser, generateToolCallId } from '../../src/openai/tool-parser';
+import { ToolCallParser, generateToolCallId, normalizeToolName } from '../../src/openai/tool-parser';
 
 describe('ToolCallParser (4.1)', () => {
   it('emits text then a single tool_call after </tool_call>, then trailing text', () => {
@@ -41,5 +41,31 @@ describe('ToolCallParser (4.1)', () => {
 
   it('generateToolCallId has call_ prefix', () => {
     expect(generateToolCallId()).toMatch(/^call_/);
+  });
+});
+
+describe('normalizeToolName', () => {
+  it('maps a mis-cased name onto the request casing (nested chat-completions shape)', () => {
+    expect(normalizeToolName('Bash', [{ function: { name: 'bash' } }])).toBe('bash');
+  });
+
+  it('maps a mis-cased name onto the request casing (flat Responses shape)', () => {
+    expect(normalizeToolName('Bash', [{ name: 'bash' }])).toBe('bash');
+  });
+
+  it('strips a stray <tool_call> tag glued onto the name', () => {
+    expect(normalizeToolName('<tool_call>write', [{ function: { name: 'write' } }])).toBe('write');
+  });
+
+  it('strips tags case-insensitively even without a tools list', () => {
+    expect(normalizeToolName('</TOOL_CALL>write')).toBe('write');
+  });
+
+  it('passes an unknown name through cleaned (no silent drop)', () => {
+    expect(normalizeToolName('<tool_call>mystery', [{ function: { name: 'bash' } }])).toBe('mystery');
+  });
+
+  it('preserves an already-correct name', () => {
+    expect(normalizeToolName('write', [{ function: { name: 'write' } }])).toBe('write');
   });
 });

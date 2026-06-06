@@ -4,7 +4,7 @@
 import { randomUUID } from 'crypto';
 import type { SessionPool } from '../core/SessionPool';
 import { createThinkStripper, stripThinkFromText } from './think-stripper';
-import { ToolCallParser } from './tool-parser';
+import { ToolCallParser, normalizeToolName } from './tool-parser';
 import { sendOpenAIError } from './chat-completions';
 
 export interface ResponsesConfig {
@@ -153,7 +153,7 @@ export class ResponsesHandler {
           else if (evt.type === 'tool_call') {
             output.push({
               type: 'function_call', id: genId('fc'), call_id: genId('call'),
-              name: evt.name, arguments: JSON.stringify(normalizeToolArgs(evt.arguments)), status: 'completed',
+              name: normalizeToolName(evt.name, tools), arguments: JSON.stringify(normalizeToolArgs(evt.arguments)), status: 'completed',
             });
           }
         }
@@ -209,7 +209,7 @@ export class ResponsesHandler {
           } else if (evt.type === 'tool_call') {
             const fcId = genId('fc');
             const args = JSON.stringify(normalizeToolArgs(evt.arguments));
-            const fcItem = { type: 'function_call', id: fcId, call_id: genId('call'), name: evt.name, arguments: '', status: 'in_progress' };
+            const fcItem = { type: 'function_call', id: fcId, call_id: genId('call'), name: normalizeToolName(evt.name, tools), arguments: '', status: 'in_progress' };
             write(sse('response.output_item.added', { output_index: outputIndex, item: { ...fcItem } }));
             write(sse('response.function_call_arguments.delta', { item_id: fcId, output_index: outputIndex, delta: args }));
             write(sse('response.function_call_arguments.done', { item_id: fcId, output_index: outputIndex, arguments: args }));

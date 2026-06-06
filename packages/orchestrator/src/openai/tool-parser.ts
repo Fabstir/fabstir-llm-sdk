@@ -99,3 +99,26 @@ export class ToolCallParser {
 export function generateToolCallId(): string {
   return 'call_' + randomUUID().replace(/-/g, '').slice(0, 24);
 }
+
+/**
+ * Reconcile a model-emitted tool-call name with the request's own tool list before
+ * surfacing it as `tool_calls`. Strips stray <tool_call> tags the model may glue on,
+ * then case-insensitively maps the name onto the caller's declared tool so strict
+ * clients (e.g. OpenCode) accept it (`Bash` -> `bash`, `<tool_call>write` -> `write`).
+ * Handles both the chat-completions (`function.name`) and Responses (`name`) tool
+ * shapes. An unknown name passes through cleaned — never silently dropped.
+ */
+export function normalizeToolName(
+  raw: string,
+  tools?: Array<{ name?: string; function?: { name?: string } }>,
+): string {
+  const cleaned = String(raw ?? '').replace(/<\/?tool_call>/gi, '').trim();
+  if (tools?.length) {
+    const lower = cleaned.toLowerCase();
+    for (const t of tools) {
+      const n = t?.function?.name ?? t?.name;
+      if (n && n.toLowerCase() === lower) return n;
+    }
+  }
+  return cleaned;
+}
