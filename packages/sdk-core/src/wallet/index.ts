@@ -29,3 +29,8 @@ export {
   type SendUserOpResult,
   type SendUserOpFn,
 } from './AASigner';
+
+// ERC-4337 v0.7 gasless building blocks (headless self-funded delegate path)
+export { createBundlerSendUserOp, ESTIMATION_DUMMY_SIG, type BundlerSendUserOpConfig } from './userop/createBundlerSendUserOp';
+export { encodeExecute, encodeFactoryData, getInitCodeFor, getCounterfactualAddress } from './userop/SimpleAccountV07';
+export { userOpHashV07, pack2x128, getInitCode, getPaymasterAndData, type UnpackedUserOpV07 } from './userop/userOpHashV07';
