@@ -15,6 +15,8 @@ export interface InferenceRequest {
   messages: Array<{ role: string; content: string }>;
   stream?: boolean;
   maxTokens?: number;
+  /** Sampling temperature (0.0–2.0). Omit to let the host apply its default. Node validates the range. */
+  temperature?: number;
 }
 
 export interface InferenceResponse {
@@ -47,6 +49,7 @@ export class X402HostClient {
           messages: request.messages,
           stream: request.stream ?? false,
           max_tokens: request.maxTokens,
+          temperature: request.temperature,
         }),
       },
       this.x402Client,

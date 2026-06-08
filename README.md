@@ -266,8 +266,8 @@ cd packages/sdk-core && pnpm build
 ### Package Installation
 
 ```bash
-pnpm add @fabstir/sdk-core@1.23.1       # deposit-ready transcode pricing (estimateTranscodePrice→USDC, named-modelId override); delegate-pays API
-pnpm add @fabstir/orchestrator@0.6.3     # OpenAI-compatible daemon + delegate plumbing (tool-call name normalization for strict clients)
+pnpm add @fabstir/sdk-core@1.24.0       # per-request sampling (temperature + maxTokens) on PromptOptions, threaded to all inference paths
+pnpm add @fabstir/orchestrator@0.6.7     # per-request temperature/max_tokens + native-JSON tool calls (repairs truncated JSON; legacy-XML fallback)
 ```
 
 ### Prerequisites

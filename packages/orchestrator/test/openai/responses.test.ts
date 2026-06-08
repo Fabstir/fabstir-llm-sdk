@@ -11,6 +11,7 @@ let nonStream = 'Hello';
 let streamTokens: string[] = [];
 let lastPrompt = '';
 let lastSignal: AbortSignal | undefined;
+let lastOpts: any;
 let hangStream = false;
 function createSDK() {
   const sessionManager = {
@@ -18,6 +19,7 @@ function createSDK() {
     sendPromptStreaming: vi.fn(async (sid: bigint, prompt: string, onToken: any, opts: any) => {
       lastPrompt = prompt;
       lastSignal = opts?.signal;
+      lastOpts = opts;
       if (hangStream) return new Promise<string>(() => {}); // never resolves
       if (onToken) { for (const t of streamTokens) onToken(t); return streamTokens.join(''); }
       return nonStream;
@@ -57,7 +59,7 @@ function streamRes() {
 const TOOLS = [{ type: 'function', name: 'Bash', parameters: { required: ['command'] } }];
 
 describe('responses API (4.6)', () => {
-  beforeEach(() => { vi.clearAllMocks(); createdSDKs.length = 0; nonStream = 'Hello'; streamTokens = []; lastPrompt = ''; lastSignal = undefined; hangStream = false; });
+  beforeEach(() => { vi.clearAllMocks(); createdSDKs.length = 0; nonStream = 'Hello'; streamTokens = []; lastPrompt = ''; lastSignal = undefined; lastOpts = undefined; hangStream = false; });
 
   it('non-streaming string input → response shape with a message output item; instructions become system block', async () => {
     nonStream = '<think>r</think>Hi there';
@@ -123,6 +125,29 @@ describe('responses API (4.6)', () => {
     const r = jsonRes();
     await makeHandler().handle({ body: { model: 'm' } } as any, r);
     expect(r.status).toHaveBeenCalledWith(400);
+  });
+
+  it('folds temperature into prompt opts (non-streaming)', async () => {
+    await makeHandler().handle({ body: { model: 'm', input: 'hi', temperature: 0.2 } } as any, jsonRes());
+    expect(lastOpts.temperature).toBe(0.2);
+  });
+
+  it('maps max_output_tokens → maxTokens', async () => {
+    await makeHandler().handle({ body: { model: 'm', input: 'hi', max_output_tokens: 128 } } as any, jsonRes());
+    expect(lastOpts.maxTokens).toBe(128);
+  });
+
+  it('folds temperature into prompt opts (streaming)', async () => {
+    streamTokens = ['hi'];
+    await makeHandler().handle({ body: { model: 'm', input: 'hi', temperature: 0.15, stream: true } } as any, streamRes());
+    expect(lastOpts.temperature).toBe(0.15);
+  });
+
+  it('injects no sampling fields when the request omits them (non-streaming)', async () => {
+    await makeHandler().handle({ body: { model: 'm', input: 'hi' } } as any, jsonRes());
+    // Key ABSENCE: with no sampling and no signal, run() passes undefined → only onTokenUsage remains.
+    expect(lastOpts).not.toHaveProperty('temperature');
+    expect(lastOpts).not.toHaveProperty('maxTokens');
   });
 
   it('streaming aborts the underlying prompt when the client disconnects', async () => {

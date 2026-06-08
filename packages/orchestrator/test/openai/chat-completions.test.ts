@@ -93,3 +93,37 @@ describe('chat completions non-streaming (4.2)', () => {
     expect(server.app).toBeDefined();
   });
 });
+
+// ============= Sub-phase 3.1: per-request sampling (temperature + max_tokens) =============
+// SessionAdapter wraps daemon opts as { ...opts, onTokenUsage } (+signal when streaming),
+// so sendPromptStreaming arg [3] is a SUPERSET — assert with toMatchObject, never toEqual.
+
+describe('chat completions sampling (3.1)', () => {
+  let pool: SessionPool;
+  let handler: ChatCompletionsHandler;
+  beforeEach(() => {
+    vi.clearAllMocks(); createdSDKs.length = 0;
+    pool = new SessionPool(poolConfig());
+    handler = new ChatCompletionsHandler({ pool, config: { chainId: 84532, depositAmount: '1' } });
+  });
+
+  const optsOf = () => createdSDKs[0]._sessionManager.sendPromptStreaming.mock.calls[0][3];
+
+  it('folds body.temperature/max_tokens into sendPromptStreaming opts (as temperature/maxTokens)', async () => {
+    await handler.handle(chatReq({ temperature: 0.1, max_tokens: 256 }) as any, mockRes());
+    expect(optsOf()).toMatchObject({ temperature: 0.1, maxTokens: 256 });
+  });
+
+  it('honors temperature: 0 (not dropped as falsy)', async () => {
+    await handler.handle(chatReq({ temperature: 0 }) as any, mockRes());
+    expect(optsOf().temperature).toBe(0);
+  });
+
+  it('injects no sampling fields when the request omits them', async () => {
+    await handler.handle(chatReq() as any, mockRes());
+    const opts = optsOf();
+    // Key ABSENCE (not just value undefined): the daemon must not inject sampling keys at all.
+    expect(opts).not.toHaveProperty('temperature');
+    expect(opts).not.toHaveProperty('maxTokens');
+  });
+});

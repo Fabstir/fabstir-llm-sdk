@@ -86,4 +86,30 @@ describe('X402HostClient', () => {
     const client = new X402HostClient({ hostUrl: 'http://host:8080/', x402Client: mockX402Client });
     expect(client.getHostUrl()).toBe('http://host:8080');
   });
+
+  // Per-request sampling parity (temperature + maxTokens). Wire stays snake_case.
+  it('infer forwards temperature and maxTokens into the request body (max_tokens snake_case)', async () => {
+    (globalThis.fetch as any).mockResolvedValue(mockResponse(200, COMPLETION_BODY));
+    const client = new X402HostClient({ hostUrl: 'http://host:8080', x402Client: mockX402Client });
+    await client.infer({ model: 'llama3', messages: [{ role: 'user', content: 'Hi' }], temperature: 0.15, maxTokens: 256 });
+    const body = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
+    expect(body.temperature).toBe(0.15);
+    expect(body.max_tokens).toBe(256);
+  });
+
+  it('infer honors temperature: 0 (not dropped as falsy)', async () => {
+    (globalThis.fetch as any).mockResolvedValue(mockResponse(200, COMPLETION_BODY));
+    const client = new X402HostClient({ hostUrl: 'http://host:8080', x402Client: mockX402Client });
+    await client.infer({ model: 'llama3', messages: [{ role: 'user', content: 'Hi' }], temperature: 0 });
+    const body = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
+    expect(body.temperature).toBe(0);
+  });
+
+  it('infer omits temperature when unset (host applies its own default)', async () => {
+    (globalThis.fetch as any).mockResolvedValue(mockResponse(200, COMPLETION_BODY));
+    const client = new X402HostClient({ hostUrl: 'http://host:8080', x402Client: mockX402Client });
+    await client.infer({ model: 'llama3', messages: [{ role: 'user', content: 'Hi' }] });
+    const body = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
+    expect(body).not.toHaveProperty('temperature');
+  });
 });

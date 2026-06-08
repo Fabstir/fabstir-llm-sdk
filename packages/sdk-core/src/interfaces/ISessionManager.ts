@@ -27,7 +27,8 @@ export interface ISessionManager {
    */
   sendPrompt(
     sessionId: bigint,
-    prompt: string
+    prompt: string,
+    options?: PromptOptions
   ): Promise<string>;
 
   /**

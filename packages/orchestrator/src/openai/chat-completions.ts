@@ -69,10 +69,14 @@ export class ChatCompletionsHandler {
     const { prompt, images } = await convertOpenAIMessages(body.messages, tools);
     const inputTokens = estimateInputTokens(prompt);
     const model = body.model;
-    const opts = images.length > 0 ? { images } : undefined;
+    const opts: any = {};
+    if (body.temperature != null) opts.temperature = body.temperature;
+    if (body.max_tokens != null) opts.maxTokens = body.max_tokens;
+    if (images.length > 0) opts.images = images;
+    const promptOpts = Object.keys(opts).length > 0 ? opts : undefined;
 
     const run = (onToken: any, signal: any) =>
-      this.enqueue(model, () => this.run(model, prompt, opts, onToken, signal))
+      this.enqueue(model, () => this.run(model, prompt, promptOpts, onToken, signal))
         .then(({ tokensUsed }) => ({ tokensUsed, inputTokens }));
 
     if (body.stream === true) {
@@ -101,7 +105,7 @@ export class ChatCompletionsHandler {
     }
 
     try {
-      const { response, tokensUsed } = await this.enqueue(model, () => this.run(model, prompt, opts));
+      const { response, tokensUsed } = await this.enqueue(model, () => this.run(model, prompt, promptOpts));
       const clean = stripThinkFromText(response);
       const message: any = { role: 'assistant', content: clean };
       let finishReason = 'stop';

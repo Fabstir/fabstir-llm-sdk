@@ -647,7 +647,8 @@ export class SessionManager implements ISessionManager {
    */
   async sendPrompt(
     sessionId: bigint,
-    prompt: string
+    prompt: string,
+    options?: PromptOptions
   ): Promise<string> {
     if (!this.initialized) {
       throw new SDKError('SessionManager not initialized', 'SESSION_NOT_INITIALIZED');
@@ -678,8 +679,8 @@ export class SessionManager implements ISessionManager {
       const requestBody = {
         model: session.model,
         prompt: augmentedPrompt,  // Use RAG-augmented prompt
-        max_tokens: LLM_MAX_TOKENS,  // Allow longer responses for poems, stories, etc.
-        temperature: 0.7,  // Add temperature for better responses
+        max_tokens: options?.maxTokens ?? LLM_MAX_TOKENS,  // Allow longer responses for poems, stories, etc.
+        temperature: options?.temperature ?? 0.7,  // Add temperature for better responses
         sessionId: sessionId.toString(),
         jobId: session.jobId.toString()
       };
@@ -1071,7 +1072,7 @@ export class SessionManager implements ISessionManager {
               webSearch: enableWebSearchEncrypted,
               maxSearches: enableWebSearchEncrypted ? (searchConfigEncrypted.maxSearches ?? 5) : 0,
               searchQueries: resolveSearchQueries(enableWebSearchEncrypted, prompt, searchConfigEncrypted.queries, options?.rawQuery)
-            }, options?.images, options?.thinking).catch((err) => {
+            }, options?.images, options?.thinking, { temperature: options?.temperature, maxTokens: options?.maxTokens }).catch((err) => {
               console.error('[SessionManager] Failed to send encrypted message:', err);
               reject(err);
             });
@@ -1116,8 +1117,8 @@ export class SessionManager implements ISessionManager {
           const plaintextRequest: any = {
             model: session.model,
             prompt: augmentedPrompt,  // Use RAG-augmented prompt
-            max_tokens: LLM_MAX_TOKENS,  // Support comprehensive responses from large models
-            temperature: 0.7,
+            max_tokens: options?.maxTokens ?? LLM_MAX_TOKENS,  // Support comprehensive responses from large models
+            temperature: options?.temperature ?? 0.7,
             stream: true
           };
 
@@ -1263,7 +1264,7 @@ export class SessionManager implements ISessionManager {
             webSearch: enableWebSearchNonStreamEnc,
             maxSearches: enableWebSearchNonStreamEnc ? (searchConfigNonStreamEnc.maxSearches ?? 5) : 0,
             searchQueries: resolveSearchQueries(enableWebSearchNonStreamEnc, prompt, searchConfigNonStreamEnc.queries, options?.rawQuery)
-          }, options?.images, options?.thinking);
+          }, options?.images, options?.thinking, { temperature: options?.temperature, maxTokens: options?.maxTokens });
 
           // Wait for encrypted response (non-streaming) - MUST accumulate chunks!
           let accumulatedResponse = '';  // Accumulate chunks even in non-streaming mode
@@ -1381,8 +1382,8 @@ export class SessionManager implements ISessionManager {
           const plaintextRequestNonStream: any = {
             model: session.model,
             prompt: augmentedPrompt,  // Use RAG-augmented prompt
-            max_tokens: LLM_MAX_TOKENS,  // Support comprehensive responses from large models
-            temperature: 0.7,
+            max_tokens: options?.maxTokens ?? LLM_MAX_TOKENS,  // Support comprehensive responses from large models
+            temperature: options?.temperature ?? 0.7,
             stream: false
           };
 
@@ -2004,6 +2005,8 @@ export class SessionManager implements ISessionManager {
    * @param message - The plaintext prompt to encrypt and send
    * @param webSearchOptions - Optional web search configuration (v8.7.5+)
    * @param images - Optional image attachments to include in payload
+   * @param thinking - Optional per-request thinking/reasoning mode
+   * @param sampling - Optional per-request sampling overrides ({ temperature, maxTokens })
    * @private
    */
   private async sendEncryptedMessage(
@@ -2014,7 +2017,8 @@ export class SessionManager implements ISessionManager {
       searchQueries: string[] | null;
     },
     images?: ImageAttachment[],
-    thinking?: import('../types').ThinkingMode
+    thinking?: import('../types').ThinkingMode,
+    sampling?: { temperature?: number; maxTokens?: number }
   ): Promise<void> {
 
     // Validate images before encryption (fail fast)
@@ -2058,8 +2062,8 @@ export class SessionManager implements ISessionManager {
       const structuredPayload: any = {
         prompt: message,
         model: currentSession.model,
-        max_tokens: LLM_MAX_TOKENS,
-        temperature: 0.7,
+        max_tokens: sampling?.maxTokens ?? LLM_MAX_TOKENS,
+        temperature: sampling?.temperature ?? 0.7,
         stream: true,
       };
 
@@ -2421,8 +2425,8 @@ export class SessionManager implements ISessionManager {
       const requestBody = {
         model: session.model,
         prompt: prompt,
-        max_tokens: LLM_MAX_TOKENS,  // Allow longer responses for poems, stories, etc.
-        temperature: 0.7,  // Add temperature for better responses
+        max_tokens: options?.maxTokens ?? LLM_MAX_TOKENS,  // Allow longer responses for poems, stories, etc.
+        temperature: options?.temperature ?? 0.7,  // Add temperature for better responses
         sessionId: sessionId.toString(),
         jobId: session.jobId.toString(),
         ...(options?.thinking ? { thinking: options.thinking } : {})
