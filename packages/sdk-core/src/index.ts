@@ -182,6 +182,10 @@ export {
 // Export ERC-4337 / 'aa-signer' mode callback types (consumer DX)
 export type { SendUserOpFn, SendUserOpCall, SendUserOpResult } from './wallet';
 
+// Export ERC-4337 v0.7 gasless building blocks (AASigner-as-signer, Constraint 7)
+export { AASigner, createBundlerSendUserOp, encodeExecute, encodeFactoryData, getCounterfactualAddress, userOpHashV07 } from './wallet';
+export type { BundlerSendUserOpConfig, UnpackedUserOpV07 } from './wallet';
+
 // Export WebSocket client
 export { WebSocketClient } from './websocket/WebSocketClient';
 
