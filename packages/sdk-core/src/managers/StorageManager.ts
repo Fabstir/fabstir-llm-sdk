@@ -201,6 +201,42 @@ export class StorageManager implements IStorageManager {
     return this.s5Client;
   }
 
+  /** Raw blob bytes by CID (no CBOR/JSON decode) — for proofHash over exact stored bytes (Constraint 3). */
+  async getRawBytes(cid: string): Promise<Uint8Array> {
+    if (!this.s5Client) throw new Error('S5 client not available');
+    return this.s5Client.downloadByCID(cid);
+  }
+
+  /**
+   * Fetch + decrypt a `u`-prefix `0xae` capability CID → plaintext bytes (Constraint 5, LTX frames).
+   * Net-new: parse the 0xae envelope (blake3 blobHash, key, size), then reuse s5js downloadAndDecryptBlob.
+   */
+  async downloadDecryptedByCID(cid: string): Promise<Uint8Array> {
+    if (!this.s5Client) throw new Error('S5 client not available');
+    if (cid[0] !== 'u') throw new Error(`Not a u-prefix capability CID: ${cid.slice(0, 12)}`);
+    const body = this.base64UrlToBytes(cid.slice(1));
+    if (body[0] !== 0xae) throw new Error(`Not a 0xae encrypted CID (got 0x${(body[0] ?? 0).toString(16)})`);
+    if (body.length < 107) throw new Error(`Malformed 0xae capability CID: body too short (${body.length} bytes)`);
+    if (body[2] !== 0x12) throw new Error(`Unexpected 0xae chunk-size byte 0x${body[2].toString(16)} (expected 0x12)`);
+    const encBlobHash = body.slice(4, 36); // blake3(ciphertext) — the fetch hash
+    const key = body.slice(36, 68);
+    let size = 0;
+    for (let i = body.length - 1; i >= 106; i--) size = size * 256 + body[i]; // sizeLE-trimmed at offset 106
+    if (size === 0) throw new Error('Malformed 0xae capability CID: decoded size is 0');
+    // downloadAndDecryptBlob lives on the FS5 sub-object (s5.fs — fs5.js:684), not the S5 root.
+    return this.s5Client.fs.downloadAndDecryptBlob(encBlobHash, key, size);
+  }
+
+  /** Decode multibase `u` (base64url, unpadded) to bytes. Browser-safe (atob). */
+  private base64UrlToBytes(s: string): Uint8Array {
+    const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64.length % 4 === 0 ? '' : '='.repeat(4 - (b64.length % 4));
+    const bin = atob(b64 + pad);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
   /**
    * Fetch content by CID (content-addressed retrieval) from the S5 network.
    * Used for checkpoint delta recovery where deltas are stored by CID only.

@@ -17,3 +17,4 @@ export * from './IEncryptionManager';
 export { IPermissionManager } from './IPermissionManager';
 export * from './IHostSelectionService';
 export { ITranscodeManager } from './ITranscodeManager';
+export type { ILtxManager } from './ILtxManager';

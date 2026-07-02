@@ -568,3 +568,7 @@ export * from './image-generation.types';
 // ============= Transcoding Types =============
 
 export * from './transcode.types';
+
+// ============= LTX Video Sidecar Types (M0) =============
+
+export * from './ltx.types';
