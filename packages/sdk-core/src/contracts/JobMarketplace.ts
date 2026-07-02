@@ -390,6 +390,19 @@ export class JobMarketplaceWrapper {
     return tx;
   }
 
+  /** Reclaim a reserved deposit after proof timeout: triggerSessionTimeout(uint256 jobId). */
+  async triggerSessionTimeout(jobId: number): Promise<any> {
+    await this.verifyChain();
+    const tx = await this.contract.triggerSessionTimeout(jobId);
+    return tx;
+  }
+
+  /** Per-token minimum session deposit (tokenMinDeposits mapping; admin-mutable — read, never hardcode). */
+  async getTokenMinDeposit(token: string): Promise<bigint> {
+    await this.verifyChain();
+    return this.contract.tokenMinDeposits(token);
+  }
+
   async getSessionJob(jobId: number): Promise<SessionJob> {
     await this.verifyChain();
     const session = await this.contract.sessionJobs(jobId);

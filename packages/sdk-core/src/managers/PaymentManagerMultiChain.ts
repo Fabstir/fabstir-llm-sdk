@@ -424,6 +424,27 @@ export class PaymentManager implements IPaymentManager {
     };
   }
 
+  /** Contract's per-token minimum session deposit (admin-mutable, e.g. USDC floor) — base units. */
+  async getTokenMinDeposit(tokenAddress: string, chainId?: number): Promise<bigint> {
+    return this.getWrapper(chainId).getTokenMinDeposit(tokenAddress);
+  }
+
+  /**
+   * Reclaim a reserved deposit after proof timeout (Constraint 8; LTX GENERATION_FAILED/TIMEOUT).
+   * ABI: triggerSessionTimeout(uint256 jobId). Deposit refunds to balance (RefundCreditedToDeposit).
+   */
+  async triggerSessionTimeout(jobId: number, chainId?: number): Promise<TransactionResult> {
+    const wrapper = this.getWrapper(chainId);
+    const tx = await wrapper.triggerSessionTimeout(jobId);
+    await tx.wait(3);
+
+    return {
+      success: true,
+      transactionHash: tx.hash,
+      chainId: wrapper.getChainId()
+    };
+  }
+
   /**
    * Complete session (alias for completeSessionJob for compatibility)
    */

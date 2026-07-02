@@ -17,7 +17,8 @@ import {
   ISessionManager,
   IHostManager,
   ITreasuryManager,
-  ITranscodeManager
+  ITranscodeManager,
+  ILtxManager
 } from './interfaces';
 import { IVectorRAGManager } from './managers/interfaces/IVectorRAGManager';
 import { IWalletProvider } from './interfaces/IWalletProvider';
@@ -37,6 +38,7 @@ import { TreasuryManager } from './managers/TreasuryManager';
 import { ClientManager } from './managers/ClientManager';
 import { EncryptionManager } from './managers/EncryptionManager';
 import { TranscodeManager } from './managers/TranscodeManager';
+import { LtxManager } from './managers/LtxManager';
 import { VectorRAGManager } from './managers/VectorRAGManager';
 import { SessionGroupManager } from './managers/SessionGroupManager';
 import { SessionGroupStorage } from './storage/SessionGroupStorage';
@@ -56,7 +58,9 @@ export interface FabstirSDKCoreConfig {
   // Network configuration
   rpcUrl?: string;
   chainId?: number;
-  
+  /** Registered LTX video-sidecar model id (bytes32). Enables the LTX manager when set. */
+  ltxModelId?: string;
+
   // Contract addresses (optional - can use env vars)
   contractAddresses?: {
     jobMarketplace?: string;
@@ -135,6 +139,7 @@ export class FabstirSDKCore extends EventEmitter {
   private vectorRAGManager?: IVectorRAGManager;
   private sessionGroupManager?: SessionGroupManager;
   private transcodeManager?: TranscodeManager;
+  private ltxManager?: LtxManager;
 
   private authenticated = false;
   private s5Seed?: string;
@@ -174,6 +179,7 @@ export class FabstirSDKCore extends EventEmitter {
       mode: config.mode || 'production',
       rpcUrl: config.rpcUrl, // Required, no fallback
       chainId: config.chainId || 84532, // Base Sepolia default
+      ltxModelId: config.ltxModelId, // LTX video-sidecar model id (enables getLtxManager)
 
       contractAddresses: {
         // Required addresses - no fallbacks
@@ -902,6 +908,20 @@ export class FabstirSDKCore extends EventEmitter {
           );
         }
       }
+
+      // Initialize LtxManager when an LTX model id is configured (pending Jules' registration in M0).
+      // M1: also inject `jobMarketplace: <JobMarketplaceWrapper>` to activate the on-chain integrity poll
+      // in verifyAttestation (inert in M0 — the node defers submitProofOfWork; Constraint 3).
+      if (!hostOnly && !skipS5 && this.sessionManager && this.storageManager && this.contractManager && this.config.ltxModelId) {
+        this.ltxManager = new LtxManager({
+          sessionManager: this.sessionManager,
+          storageManager: this.storageManager,
+          paymentManager: this.paymentManager,
+          ltxModelId: this.config.ltxModelId,
+          usdcAddress: await this.contractManager.getContractAddress('usdcToken'),
+          chainId: this.currentChainId,
+        });
+      }
     }
 
     // Initialize bridge client if configured
@@ -1036,6 +1056,15 @@ export class FabstirSDKCore extends EventEmitter {
       throw new SDKError('TranscodeManager not initialized', 'TRANSCODE_NOT_AVAILABLE');
     }
     return this.transcodeManager;
+  }
+
+  /** Get the LTX video-sidecar manager (requires config.ltxModelId to have been set). */
+  getLtxManager(): ILtxManager {
+    this.ensureAuthenticated();
+    if (!this.ltxManager) {
+      throw new SDKError('LtxManager not initialized (set config.ltxModelId)', 'LTX_NOT_AVAILABLE');
+    }
+    return this.ltxManager;
   }
 
   /**

@@ -31,6 +31,7 @@ export { PaymentManager as PaymentManagerMultiChain } from './managers/PaymentMa
 export { StorageManager } from './managers/StorageManager';
 export type { S5ConnectionStatus, SyncStatus } from './managers/StorageManager';
 export { SessionManager } from './managers/SessionManager';
+export { LtxManager } from './managers/LtxManager';
 export {
   HostManager,
   // PRICE_PRECISION constant (1000x multiplier for sub-$1/million pricing)

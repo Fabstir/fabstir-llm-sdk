@@ -17,6 +17,7 @@ export enum JobType {
   AUDIO_TRANSCODE = 2,
   IMAGE_GENERATION = 3, // Future
   THREE_D_RENDER = 4, // Future
+  VIDEO_GENERATION = 5, // LTX text-to-video (M0)
 }
 
 /**

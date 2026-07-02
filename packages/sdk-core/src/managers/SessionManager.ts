@@ -61,6 +61,8 @@ import { generateImageWs } from '../utils/image-generation-ws';
 import { generateImageHttp } from '../utils/image-generation-http';
 import { submitTranscodeWs } from '../utils/transcode-ws';
 import type { VideoFormat, TranscodeHandle, TranscodeSubmitOptions } from '../types/transcode.types';
+import { submitLtxWs } from '../utils/ltx-ws';
+import type { LtxJob, LtxHandle, LtxSubmitOptions } from '../types/ltx.types';
 
 /**
  * Check if a string is a bytes32 hash (0x + 64 hex chars)
@@ -3744,6 +3746,60 @@ export class SessionManager implements ISessionManager {
       console.error(`[SDK:generateImage:19] generateImageWs FAILED: ${err.message}`, err);
       throw err;
     }
+  }
+
+  /** Submit an LTX video job via encrypted WebSocket (mirrors submitTranscode; Constraint 7). */
+  async submitLtx(sessionId: string, job: LtxJob, options?: LtxSubmitOptions): Promise<LtxHandle> {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
+    if (session.status !== 'active') throw new SDKError('Session is not active', 'SESSION_NOT_ACTIVE');
+    if (!this.encryptionManager) throw new SDKError('EncryptionManager not available', 'ENCRYPTION_NOT_AVAILABLE');
+
+    const endpoint = session.endpoint || 'http://localhost:8080';
+    const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
+      ? endpoint : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
+
+    let wsClient: WebSocketClient;
+    let localSessionKey: Uint8Array | undefined;
+    let localMessageIndex: number;
+
+    if (this.wsClient?.isConnected() && this.wsSessionId === sessionId && this.sessionKey) {
+      wsClient = this.wsClient;
+      localSessionKey = this.sessionKey;
+      localMessageIndex = this.messageIndex;
+    } else {
+      wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+      await wsClient.connect();
+      const prevSessionKey = this.sessionKey;
+      const prevMessageIndex = this.messageIndex;
+      this.sessionKey = undefined;
+      this.messageIndex = 0;
+      await this.sendEncryptedInit(wsClient, {
+        chainId: session.chainId, host: session.provider, modelId: session.model,
+        endpoint: session.endpoint, paymentMethod: 'deposit', encryption: true,
+      } as ExtendedSessionConfig, session.sessionId, session.jobId);
+      localSessionKey = this.sessionKey;
+      localMessageIndex = this.messageIndex;
+      this.sessionKey = prevSessionKey;
+      this.messageIndex = prevMessageIndex;
+    }
+
+    if (!localSessionKey) throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
+
+    const messageIndexRef = { value: localMessageIndex };
+    return submitLtxWs({
+      wsClient,
+      encryptionManager: {
+        encryptMessage: (key: Uint8Array, plaintext: string, index: number) =>
+          this.encryptionManager!.encryptMessage(key, plaintext, index),
+        decryptMessage: (key: Uint8Array, payload: any) => {
+          const p = payload.payload || payload;
+          return this.encryptionManager!.decryptMessage(key, p);
+        },
+      },
+      sessionId, sessionKey: localSessionKey, messageIndex: messageIndexRef,
+      job, requestId: options?.requestId, onProgress: options?.onProgress, timeoutMs: options?.timeoutMs,
+    });
   }
 
   /** Submit a transcode job via encrypted WebSocket (mirrors generateImage pattern). */
