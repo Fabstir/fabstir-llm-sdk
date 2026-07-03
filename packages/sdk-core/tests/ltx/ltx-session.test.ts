@@ -38,14 +38,16 @@ describe('LtxManager.createLtxSession (SP3.3, Constraint 8)', () => {
     expect(order.indexOf('getByCID')).toBeLessThan(order.indexOf('startSession'));
   });
 
-  it('escrows exactly estimateCost on the LTX model id', async () => {
+  it('escrows the 5%-padded estimate on the LTX model id', async () => {
     const { manager, startSession } = makeManager();
     const res = await manager.createLtxSession(validJob, HOST, meta);
     expect(res).toEqual({ sessionId: 5n, jobId: 5n });
     const cfg = startSession.mock.calls[0][0];
     expect(cfg.modelId).toBe(LTX_MODEL_ID);
     // depositAmount is a DECIMAL USDC string; startSession/createSessionJob parseUnits() it back to base units.
-    expect(parseUnits(cfg.depositAmount, 6)).toBe(tokensToUsdc(111514, PRICE));
+    // est = 111514 × 5 / 1000 = 557; pad = ceil(557 × 1.05) = 585.
+    const est = tokensToUsdc(111514, PRICE);
+    expect(parseUnits(cfg.depositAmount, 6)).toBe((est * 105n + 99n) / 100n);
     expect(cfg.host).toBe(HOST);
     expect(cfg.paymentToken).toBe(USDC);
   });
@@ -72,11 +74,21 @@ describe('LtxManager.createLtxSession (SP3.3, Constraint 8)', () => {
     expect(parseUnits(cfg.depositAmount, 6)).toBe(500000n);
   });
 
-  it('keeps the exact estimate when it already exceeds the floor', async () => {
+  it('pads the estimate by 5% (ceil) when it exceeds the floor', async () => {
     const { manager, startSession } = makeManager(undefined, 100n);
     await manager.createLtxSession(validJob, HOST, meta);
     const cfg = startSession.mock.calls[0][0];
-    expect(parseUnits(cfg.depositAmount, 6)).toBe(tokensToUsdc(111514, PRICE));
+    const est = tokensToUsdc(111514, PRICE);
+    expect(parseUnits(cfg.depositAmount, 6)).toBe((est * 105n + 99n) / 100n);
+  });
+
+  it('deposit STRICTLY exceeds the estimate — settlement claim must never test claim == deposit equality', async () => {
+    // The deposit is the settlement ceiling. Billing has matched ltxTokens(job) to the unit on every
+    // paid session, so an unpadded deposit would make every above-floor claim hit exact equality.
+    const { manager, startSession } = makeManager(undefined, 0n);
+    await manager.createLtxSession(validJob, HOST, meta);
+    const cfg = startSession.mock.calls[0][0];
+    expect(parseUnits(cfg.depositAmount, 6)).toBeGreaterThan(tokensToUsdc(111514, PRICE));
   });
 
   it('threads options.endpoint into startSession (submitLtx derives the node WS from session.endpoint)', async () => {

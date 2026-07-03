@@ -111,7 +111,7 @@ export class LtxManager {
   }
 
   /**
-   * Create the session for the LTX model id with an EXACT USDC deposit = estimateCost.
+   * Create the session for the LTX model id with deposit = max(floor, ceil(estimateCost × 1.05)).
    * Validates pre-escrow (Constraint 8) so a bad job never locks funds. Works across direct + delegate paths.
    */
   async createLtxSession(
@@ -126,7 +126,12 @@ export class LtxManager {
     // Overage is a refundable balance: settlement charges actual tokens×price and refunds the rest.
     const floor: bigint = await this.paymentManager.getTokenMinDeposit(est.paymentToken, options?.chainId ?? this.chainId);
     const estBase = BigInt(est.totalCostBaseUnits);
-    const depositBase = estBase > floor ? estBase : floor;
+    // Deposit is also the SETTLEMENT CEILING: the proof claim must fit inside it. Billing matches the
+    // estimate to the unit, so an unpadded above-floor deposit would test claim == deposit equality on
+    // every clip. 5% ceil keeps the claim strictly inside and absorbs a host price move between
+    // estimate and session open; the overage refunds at settlement.
+    const padded = (estBase * 105n + 99n) / 100n;
+    const depositBase = padded > floor ? padded : floor;
     return this.sessionManager.startSession({
       chainId: options?.chainId ?? this.chainId,
       host: hostAddress,

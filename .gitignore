@@ -150,6 +150,7 @@ docs/audit/
 docs/transcode-reference/
 docs/fabstir-reference/
 docs/fabstir-v2-reference/
+docs//platformless-ui/
 
 # LTX E2E generated clips (local test output)
 ltx-output/

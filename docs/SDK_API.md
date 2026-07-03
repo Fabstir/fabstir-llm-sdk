@@ -2243,8 +2243,10 @@ const result = await ltx.generate(job, hostAddress, hostMetadata, {
 //   seed: decimal string in [0, 2^64-1] (pre-validated before escrow — the sampler is u64)
 //   resolution: from bundle.bounds.resolutions; billing binds the REQUESTED dims
 // Flow: validateJob (pre-escrow, no funds locked on failure) → estimateCost →
-//       session + exact USDC escrow (max($0.50 floor, cost); delegate path automatic under
-//       authenticateAsDelegate) → encrypted ltx_generate → staged progress → ltx_complete.
+//       session + USDC escrow (max($0.50 floor, cost × 1.05 ceil) — deposit is the settlement
+//       ceiling, the pad keeps the claim strictly inside it; overage refunds at settlement;
+//       delegate path automatic under authenticateAsDelegate) → encrypted ltx_generate →
+//       staged progress → ltx_complete.
 // result: { outputCID, proofCID, manifest, frames /* private capability CIDs */, billing,
 //           sessionId, jobId /* bigints — String() them before JSON persistence */ }
 // The per-clip socket closes on completion; the session self-settles (~35s) — host is paid

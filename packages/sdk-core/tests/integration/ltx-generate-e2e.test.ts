@@ -120,8 +120,11 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
       expect(ev, 'SessionCompleted not observed').toBeTruthy();
       expect(ev.args.totalTokensUsed).toBe(BigInt(result.billing.tokens));
       expect(ev.args.hostEarnings).toBe(host);                                 // hosts finally earn
-      expect(ev.args.userRefund).toBe(500000n - gross);                        // floor deposit − gross
-      console.log(`[ECONOMICS] tokens=${result.billing.tokens} gross=${gross} host=${host} fee=${fee} refund=${500000n - gross} ✓`);
+      // Deposit rule (1.28.3): max(floor, ceil(est × 1.05)); est == gross to the unit (triple equality above)
+      const padded = (gross * 105n + 99n) / 100n;
+      const deposit = padded > 500000n ? padded : 500000n;
+      expect(ev.args.userRefund).toBe(deposit - gross);
+      console.log(`[ECONOMICS] tokens=${result.billing.tokens} gross=${gross} host=${host} fee=${fee} deposit=${deposit} refund=${deposit - gross} ✓`);
     }
 
     // Opt-in: persist the decrypted clip + provenance for human viewing (LTX_SAVE_DIR=/path)
