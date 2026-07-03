@@ -39,6 +39,7 @@ import { ClientManager } from './managers/ClientManager';
 import { EncryptionManager } from './managers/EncryptionManager';
 import { TranscodeManager } from './managers/TranscodeManager';
 import { LtxManager } from './managers/LtxManager';
+import { JobMarketplaceWrapper } from './contracts/JobMarketplace';
 import { VectorRAGManager } from './managers/VectorRAGManager';
 import { SessionGroupManager } from './managers/SessionGroupManager';
 import { SessionGroupStorage } from './storage/SessionGroupStorage';
@@ -909,14 +910,15 @@ export class FabstirSDKCore extends EventEmitter {
         }
       }
 
-      // Initialize LtxManager when an LTX model id is configured (pending Jules' registration in M0).
-      // M1: also inject `jobMarketplace: <JobMarketplaceWrapper>` to activate the on-chain integrity poll
-      // in verifyAttestation (inert in M0 — the node defers submitProofOfWork; Constraint 3).
+      // Initialize LtxManager when an LTX model id is configured.
+      // jobMarketplace activates the on-chain integrity poll in verifyAttestation (M1 economics —
+      // live once the node submits proofs; skips cleanly while none exist).
       if (!hostOnly && !skipS5 && this.sessionManager && this.storageManager && this.contractManager && this.config.ltxModelId) {
         this.ltxManager = new LtxManager({
           sessionManager: this.sessionManager,
           storageManager: this.storageManager,
           paymentManager: this.paymentManager,
+          jobMarketplace: new JobMarketplaceWrapper(this.currentChainId, this.signer!),
           ltxModelId: this.config.ltxModelId,
           usdcAddress: await this.contractManager.getContractAddress('usdcToken'),
           chainId: this.currentChainId,

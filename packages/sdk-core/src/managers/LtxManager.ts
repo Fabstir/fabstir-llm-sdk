@@ -165,6 +165,8 @@ export class LtxManager {
       if (result.billing && result.billing.tokens > expectedTokens) {
         throw new LtxError(`billing over-claim: ${result.billing.tokens} > estimated ${expectedTokens}`, 'GENERATION_FAILED');
       }
+      result.sessionId = sessionId; // receipts / reclaim / getProofSubmission reads
+      result.jobId = jobId;
       return result;
     } catch (err: any) {
       throw new LtxError(err?.message ?? 'LTX generation failed', err instanceof LtxError ? err.code : 'GENERATION_FAILED', { sessionId, jobId });
@@ -228,7 +230,7 @@ export class LtxManager {
    * integrity is inert until on-chain proof lands (Constraint 3); signature optional (Constraint 4);
    * merkle advisory. Pass options.sessionId to exercise the (inert) on-chain integrity compare.
    */
-  async verifyAttestation(job: LtxJob, result: LtxResult, options?: { sessionId?: bigint }): Promise<LtxVerification> {
+  async verifyAttestation(job: LtxJob, result: LtxResult, options?: { sessionId?: bigint; proofIndex?: number }): Promise<LtxVerification> {
     if (!this.storageManager) {
       throw new LtxError('StorageManager not available for verifyAttestation', 'LTX_INPUT_BINDING_MISMATCH');
     }
@@ -244,10 +246,15 @@ export class LtxManager {
       throw new LtxError('inputCommitment/templateHash does not match the submitted job (params or images)', 'LTX_INPUT_BINDING_MISMATCH');
     }
 
-    // (2) integrity — wired but inert until the node submits proof on chain (Constraint 3)
+    // (2) integrity — live when a proof exists on-chain; skips cleanly otherwise (Constraint 3)
     let integrity: 'ok' | 'skipped' = 'skipped';
     if (options?.sessionId != null && this.jobMarketplace) {
-      const proof = await this.jobMarketplace.getProofSubmission(options.sessionId, 0);
+      // one proof per clip: index 0 for the single-clip generate() flow; callers reusing a session pass the ordinal.
+      // NB the contract REVERTS ("Bad index") for an empty proof slot — treat any read failure as no-proof-yet.
+      let proof: any = null;
+      try {
+        proof = await this.jobMarketplace.getProofSubmission(options.sessionId, options.proofIndex ?? 0);
+      } catch { /* no proof at this index (or read failure) → integrity stays 'skipped' */ }
       const onChain: string | undefined = proof?.proofHash;
       if (onChain && !/^0x0*$/.test(onChain)) {
         const raw = await this.storageManager.getRawBytes(result.proofCID);

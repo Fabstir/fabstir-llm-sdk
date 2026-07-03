@@ -52,6 +52,9 @@ export interface LtxResult {
   billing: LtxBilling;
   requestId?: string;
   allowListVersion?: number;
+  /** Attached by generate(): the paid session behind this clip — receipts, reclaim, on-chain proof reads. */
+  sessionId?: bigint;
+  jobId?: bigint;
 }
 
 export type LtxStage = 'generating' | 'encrypting' | 'uploading' | 'finalising';

@@ -68,6 +68,13 @@ describe('LtxManager.generate (SP4.2)', () => {
     expect(submitLtx).toHaveBeenCalledWith('7', validJob, undefined);
   });
 
+  it('attaches sessionId/jobId to the result (receipts, reclaim, proof reads)', async () => {
+    const { manager } = makeManager();
+    const res = await manager.generate(validJob, HOST, meta);
+    expect(res.sessionId).toBe(7n);
+    expect(res.jobId).toBe(7n);
+  });
+
   it('post-escrow tripwire failures carry sessionId/jobId in LtxError.details for reclaim', async () => {
     const { manager } = makeManager(undefined, { allowListVersion: 2 });
     const err: any = await manager.generate(validJob, HOST, meta).catch((e) => e);

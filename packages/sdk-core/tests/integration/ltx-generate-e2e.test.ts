@@ -82,8 +82,43 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
     const frames = await ltx.downloadFrames(result);
     expect(frames[0].length).toBeGreaterThan(0);
 
-    const verification = await ltx.verifyAttestation(job, result);
+    const verification = await ltx.verifyAttestation(job, result, { sessionId: result.sessionId });
     expect(verification.inputBinding).toBe(true);
+
+    // M1 economics gate (LTX_EXPECT_PROOF=1): proof on-chain, integrity live, exact settle math (90/10 fee-from-gross, fee floors).
+    if (process.env.LTX_EXPECT_PROOF === '1') {
+      const { JobMarketplaceWrapper } = await import('../../src/contracts/JobMarketplace');
+      const wrapper = new JobMarketplaceWrapper(ChainId.BASE_SEPOLIA, wallet);
+      let proof: any;
+      for (let i = 0; i < 24; i++) {  // node submits with confirmations pre-ltx_complete; poll defensively (≤2min)
+        try {
+          proof = await wrapper.getProofSubmission(result.sessionId!, 0);
+          if (proof?.proofHash && !/^0x0+$/.test(proof.proofHash)) break;
+        } catch { /* contract reverts "Bad index" while the slot is empty — keep polling */ }
+        await new Promise((r) => setTimeout(r, 5000));
+      }
+      expect(proof?.proofHash, 'no on-chain proof appeared within the poll window').toBeTruthy();
+      expect(verification.integrity === 'ok' || (await ltx.verifyAttestation(job, result, { sessionId: result.sessionId })).integrity).toBe('ok');
+      expect(Number(proof.tokensClaimed)).toBe(result.billing.tokens);        // §B triple equality (est == billing asserted above)
+      // SessionCompleted numbers per the contracts dev's exact formulas
+      const price = 904n;
+      const gross = (BigInt(result.billing.tokens) * price) / 1000n;
+      const fee = (gross * 1000n) / 10000n;                                    // floors → treasury
+      const host = gross - fee;                                               // host gets the leftover unit
+      const abi = ['event SessionCompleted(uint256 indexed jobId, uint256 totalTokensUsed, uint256 hostEarnings, uint256 userRefund)'];
+      const c = new ethers.Contract(chain.contracts.jobMarketplace, abi, wallet.provider);
+      let ev: any;
+      for (let i = 0; i < 30 && !ev; i++) {                                    // 30s eligibility wait + completion tx (≤3min)
+        const latest = await wallet.provider!.getBlockNumber();
+        [ev] = await c.queryFilter(c.filters.SessionCompleted(result.jobId!), latest - 900, latest);
+        if (!ev) await new Promise((r) => setTimeout(r, 6000));
+      }
+      expect(ev, 'SessionCompleted not observed').toBeTruthy();
+      expect(ev.args.totalTokensUsed).toBe(BigInt(result.billing.tokens));
+      expect(ev.args.hostEarnings).toBe(host);                                 // hosts finally earn
+      expect(ev.args.userRefund).toBe(500000n - gross);                        // floor deposit − gross
+      console.log(`[ECONOMICS] tokens=${result.billing.tokens} gross=${gross} host=${host} fee=${fee} refund=${500000n - gross} ✓`);
+    }
 
     // Opt-in: persist the decrypted clip + provenance for human viewing (LTX_SAVE_DIR=/path)
     if (process.env.LTX_SAVE_DIR) {
@@ -94,7 +129,7 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
         { outputCID: result.outputCID, proofCID: result.proofCID, manifest: result.manifest, billing: result.billing, verification }, null, 2));
       console.log(`[LTX_SAVE_DIR] wrote ${frames.length} EXR frames + result.json -> ${dir}`);
     }
-  }, 600000);
+  }, 900000); // render + (LTX_EXPECT_PROOF) proof poll + 30s settle window + SessionCompleted poll
 
   // M1a image-to-video — additionally gated on the i2v pending inputs (own model id + template + an input image).
   const I2V_READY = !!(process.env.LTX_I2V_MODEL_ID && process.env.LTX_I2V_TEMPLATE_HASH && process.env.LTX_I2V_IMAGE_PATH);
