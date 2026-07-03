@@ -32,8 +32,8 @@ export interface ILtxManager {
   /** Fetch + decrypt the private capability CIDs, index-aligned to manifest.frameHashes. */
   downloadFrames(result: LtxResult): Promise<Uint8Array[]>;
 
-  /** Verify M0 provenance (input-binding live; integrity inert; signature/merkle advisory). */
-  verifyAttestation(job: LtxJob, result: LtxResult, options?: { sessionId?: bigint }): Promise<LtxVerification>;
+  /** Verify provenance (input-binding live; integrity live when a proof exists on-chain; signature/merkle advisory). */
+  verifyAttestation(job: LtxJob, result: LtxResult, options?: { sessionId?: bigint; proofIndex?: number }): Promise<LtxVerification>;
 
   /** Reclaim a reserved deposit after proof timeout (GENERATION_FAILED/TIMEOUT). */
   triggerSessionTimeout(jobId: number): Promise<any>;

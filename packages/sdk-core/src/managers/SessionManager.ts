@@ -3787,7 +3787,8 @@ export class SessionManager implements ISessionManager {
     if (!localSessionKey) throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
 
     const messageIndexRef = { value: localMessageIndex };
-    return submitLtxWs({
+    const ownsWs = wsClient !== this.wsClient; // dedicated per-clip socket (created above), not the shared session WS
+    const handle = await submitLtxWs({
       wsClient,
       encryptionManager: {
         encryptMessage: (key: Uint8Array, plaintext: string, index: number) =>
@@ -3800,6 +3801,13 @@ export class SessionManager implements ISessionManager {
       sessionId, sessionKey: localSessionKey, messageIndex: messageIndexRef,
       job, requestId: options?.requestId, onProgress: options?.onProgress, timeoutMs: options?.timeoutMs,
     });
+    if (ownsWs) {
+      // Close the dedicated socket once the clip settles either way (frames/verify use S5, not this WS).
+      // The node settles the SESSION on socket death (M1 economics) — a lingering WS defers the host's
+      // payout to tab-close or the 1h timeout. Closing here settles it within ~seconds (+30s window).
+      handle.result = handle.result.finally(() => { void wsClient.disconnect().catch(() => {}); });
+    }
+    return handle;
   }
 
   /** Submit a transcode job via encrypted WebSocket (mirrors generateImage pattern). */

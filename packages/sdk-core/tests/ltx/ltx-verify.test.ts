@@ -42,10 +42,27 @@ describe('LtxManager.verifyAttestation (SP5.1)', () => {
     expect(v.integrity).toBe('skipped');
   });
 
+  it("skips integrity when the contract REVERTS 'Bad index' (real behavior for an empty proof slot)", async () => {
+    const revert = Object.assign(new Error('execution reverted: "Bad index"'), { code: 'CALL_EXCEPTION', reason: 'Bad index' });
+    const m = makeManager({ jobMarketplace: { getProofSubmission: vi.fn(async () => { throw revert; }) } });
+    const v = await m.verifyAttestation(vectors.job as any, result, { sessionId: 5n });
+    expect(v.integrity).toBe('skipped');
+    expect(v.inputBinding).toBe(true); // the live check still ran
+  });
+
   it('verifies integrity against the on-chain proofHash when present', async () => {
     const m = makeManager({ jobMarketplace: { getProofSubmission: vi.fn(async () => ({ proofHash: vectors.proofHash })) } });
     const v = await m.verifyAttestation(vectors.job as any, result, { sessionId: 5n });
     expect(v.integrity).toBe('ok');
+  });
+
+  it('reads the requested proofIndex (multi-clip sessions), defaulting to 0', async () => {
+    const getProofSubmission = vi.fn(async () => ({ proofHash: vectors.proofHash }));
+    const m = makeManager({ jobMarketplace: { getProofSubmission } });
+    await m.verifyAttestation(vectors.job as any, result, { sessionId: 5n, proofIndex: 2 });
+    expect(getProofSubmission).toHaveBeenLastCalledWith(5n, 2);
+    await m.verifyAttestation(vectors.job as any, result, { sessionId: 5n });
+    expect(getProofSubmission).toHaveBeenLastCalledWith(5n, 0);
   });
 
   it('recovers the signer when signed; skips when absent (Constraint 4)', async () => {
