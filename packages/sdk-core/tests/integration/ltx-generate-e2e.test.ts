@@ -95,4 +95,97 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
       console.log(`[LTX_SAVE_DIR] wrote ${frames.length} EXR frames + result.json -> ${dir}`);
     }
   }, 600000);
+
+  // M1a image-to-video — additionally gated on the i2v pending inputs (own model id + template + an input image).
+  const I2V_READY = !!(process.env.LTX_I2V_MODEL_ID && process.env.LTX_I2V_TEMPLATE_HASH && process.env.LTX_I2V_IMAGE_PATH);
+  it.skipIf(!I2V_READY)('i2v: uploads an encrypted image, generates, verifies the v2 image binding', async () => {
+    for (const [k, v] of Object.entries({ NODE_WS, LTX_HOST, BUNDLE_CID, BUNDLE_HASH })) {
+      if (!v) throw new Error(`LTX i2v E2E requires env ${k}`);
+    }
+    const { readFileSync } = await import('fs');
+    const chain = ChainRegistry.getChain(ChainId.BASE_SEPOLIA);
+    const rpcUrl = process.env.RPC_URL_BASE_SEPOLIA!;
+    const wallet = new ethers.Wallet(process.env.TEST_USER_1_PRIVATE_KEY!, new ethers.JsonRpcProvider(rpcUrl));
+    const sdk = new FabstirSDKCore({
+      mode: 'production', chainId: ChainId.BASE_SEPOLIA, rpcUrl,
+      ltxModelId: process.env.LTX_I2V_MODEL_ID!,          // i2v has its OWN registered model id
+      contractAddresses: chain.contracts,
+      s5Config: { seedPhrase: process.env.S5_SEED_PHRASE },
+    });
+    await sdk.authenticate('signer', { signer: wallet });
+    const ltx = sdk.getLtxManager();
+    const hostMetadata: LtxBundleMetadata = { allowListVersion: BUNDLE_VERSION, bundleHash: BUNDLE_HASH!, bundleCID: BUNDLE_CID };
+
+    const imageBytes = new Uint8Array(readFileSync(process.env.LTX_I2V_IMAGE_PATH!));
+    const { cids } = await ltx.uploadImages([imageBytes], hostMetadata);
+
+    const job: LtxJob = {
+      templateId: 'ltx-i2v-hdr', templateHash: process.env.LTX_I2V_TEMPLATE_HASH!,
+      prompt: process.env.LTX_PROMPT || 'camera slowly pushes in, cinematic',
+      seed: process.env.LTX_SEED || String(Date.now()),
+      frames: 121, fps: 24, resolution: { w: 1280, h: 720 },   // i2v default 720p; delivered = 5*fps+1
+      lora: 'ltx-iclora-hdr@v1', output: 'exr-sequence', images: cids,
+    };
+    await (sdk.getPaymentManager() as any).approveToken(chain.contracts.jobMarketplace, ethers.parseUnits('1', 6), chain.contracts.usdcToken);
+
+    const stages: string[] = [];
+    const result = await ltx.generate(job, LTX_HOST!, hostMetadata, { endpoint: NODE_WS, onProgress: (p) => stages.push(p.stage) });
+    expect(result.frames.length).toBe(result.manifest.frameCount);
+    const frames = await ltx.downloadFrames(result);
+    expect(frames[0].length).toBeGreaterThan(0);
+    const verification = await ltx.verifyAttestation(job, result);  // v2 commitment binds the image content
+    expect(verification.inputBinding).toBe(true);
+    if (process.env.LTX_SAVE_DIR) {
+      mkdirSync(process.env.LTX_SAVE_DIR, { recursive: true });
+      writeFileSync(join(process.env.LTX_SAVE_DIR, 'i2v_frame_0000.exr'), frames[0]);
+      console.log(`[LTX_SAVE_DIR] wrote i2v result -> ${process.env.LTX_SAVE_DIR}`);
+    }
+  }, 600000);
+
+  // M1b first-last-frame — gated on the flf2v inputs (own model id + template + TWO comma-separated image paths).
+  const FLF2V_READY = !!(process.env.LTX_FLF2V_MODEL_ID && process.env.LTX_FLF2V_TEMPLATE_HASH && process.env.LTX_FLF2V_IMAGE_PATHS?.includes(','));
+  it.skipIf(!FLF2V_READY)('flf2v: two images (first,last), generates the in-between, verifies the v2 binding', async () => {
+    for (const [k, v] of Object.entries({ NODE_WS, LTX_HOST, BUNDLE_CID, BUNDLE_HASH })) {
+      if (!v) throw new Error(`LTX flf2v E2E requires env ${k}`);
+    }
+    const { readFileSync } = await import('fs');
+    const chain = ChainRegistry.getChain(ChainId.BASE_SEPOLIA);
+    const rpcUrl = process.env.RPC_URL_BASE_SEPOLIA!;
+    const wallet = new ethers.Wallet(process.env.TEST_USER_1_PRIVATE_KEY!, new ethers.JsonRpcProvider(rpcUrl));
+    const sdk = new FabstirSDKCore({
+      mode: 'production', chainId: ChainId.BASE_SEPOLIA, rpcUrl,
+      ltxModelId: process.env.LTX_FLF2V_MODEL_ID!,        // flf2v has its OWN registered model id
+      contractAddresses: chain.contracts,
+      s5Config: { seedPhrase: process.env.S5_SEED_PHRASE },
+    });
+    await sdk.authenticate('signer', { signer: wallet });
+    const ltx = sdk.getLtxManager();
+    const hostMetadata: LtxBundleMetadata = { allowListVersion: BUNDLE_VERSION, bundleHash: BUNDLE_HASH!, bundleCID: BUNDLE_CID };
+
+    const [firstPath, lastPath] = process.env.LTX_FLF2V_IMAGE_PATHS!.split(',');
+    const images = [firstPath, lastPath].map((p) => new Uint8Array(readFileSync(p.trim())));
+    const { cids } = await ltx.uploadImages(images, hostMetadata); // ORDER: [firstFrame, lastFrame]
+
+    const job: LtxJob = {
+      templateId: 'ltx-flf2v-hdr', templateHash: process.env.LTX_FLF2V_TEMPLATE_HASH!,
+      prompt: process.env.LTX_PROMPT || 'smooth cinematic motion from the first still to the last',
+      seed: process.env.LTX_SEED || String(Date.now()),
+      frames: 121, fps: 24, resolution: { w: 1280, h: 720 },
+      lora: 'ltx-iclora-hdr@v1', output: 'exr-sequence', images: cids,
+    };
+    await (sdk.getPaymentManager() as any).approveToken(chain.contracts.jobMarketplace, ethers.parseUnits('1', 6), chain.contracts.usdcToken);
+
+    const stages: string[] = [];
+    const result = await ltx.generate(job, LTX_HOST!, hostMetadata, { endpoint: NODE_WS, onProgress: (p) => stages.push(p.stage) });
+    expect(result.frames.length).toBe(result.manifest.frameCount);
+    const frames = await ltx.downloadFrames(result);
+    expect(frames[0].length).toBeGreaterThan(0);
+    const verification = await ltx.verifyAttestation(job, result);  // binds BOTH image hashes, in order
+    expect(verification.inputBinding).toBe(true);
+    if (process.env.LTX_SAVE_DIR) {
+      mkdirSync(process.env.LTX_SAVE_DIR, { recursive: true });
+      writeFileSync(join(process.env.LTX_SAVE_DIR, 'flf2v_frame_0000.exr'), frames[0]);
+      console.log(`[LTX_SAVE_DIR] wrote flf2v result -> ${process.env.LTX_SAVE_DIR}`);
+    }
+  }, 600000);
 });

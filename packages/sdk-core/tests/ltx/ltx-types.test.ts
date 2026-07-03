@@ -43,4 +43,17 @@ describe('ltx.types + errors + exports (SP2.1)', () => {
     expect(result.manifest.frameCount).toBe(3);
     expect(bundle.bounds.frames.max).toBe(257);
   });
+
+  it('M1a: LtxJob.images + bundle v2 fields type-check against the v2 fixture', async () => {
+    const v2 = (await import('./bundle-fixture-v2.json')).default;
+    const bundle: LtxBundle = v2 as LtxBundle;                       // imageInputs/imageSemantics/imageMaxBytes/imageFormats
+    const i2v = bundle.templates.find((t) => t.templateId === 'ltx-i2v-hdr')!;
+    expect(i2v.imageInputs).toBe(1);
+    expect(i2v.imageSemantics).toEqual(['firstFrame']);
+    expect(bundle.templates.find((t) => t.templateId === 'ltx-t2v-hdr')!.imageInputs).toBe(0);
+    expect(bundle.bounds.imageMaxBytes).toBe(8388608);
+    expect(bundle.bounds.imageFormats).toContain('png');
+    const job: LtxJob = { templateId: 'ltx-i2v-hdr', templateHash: '0x', prompt: 'p', seed: '1', frames: 126, fps: 25, resolution: { w: 1280, h: 720 }, lora: 'l', output: 'exr-sequence', images: ['uCid0'] };
+    expect(job.images!.length).toBe(1);
+  });
 });

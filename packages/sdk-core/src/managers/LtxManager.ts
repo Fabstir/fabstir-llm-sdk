@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // LtxManager — LTX 2.3 video sidecar (M0). Mirrors TranscodeManager over the same encrypted rail.
 import { formatUnits } from 'ethers';
-import { ltxTokens, canonicalBundleHash, ltxInputCommitment, ltxMerkleRoot, ltxProofHash, recoverLtxSigner } from '../utils/ltx-utils';
+import { ltxTokens, canonicalBundleHash, ltxInputCommitmentFor, ltxImageHash, ltxMerkleRoot, ltxProofHash, recoverLtxSigner } from '../utils/ltx-utils';
 import { tokensToUsdc } from '../utils/transcode-utils';
 import { LtxError } from '../errors/ltx-errors';
 import type { LtxJob, LtxPriceEstimate, LtxBundle, LtxBundleMetadata, LtxSubmitOptions, LtxResult, LtxVerification } from '../types/ltx.types';
@@ -28,6 +28,7 @@ export class LtxManager {
   private readonly usdcAddress: string;
   private readonly chainId?: number;
   private bundleCache?: LtxBundle;
+  private readonly imageHashCache = new Map<string, string>(); // capability CID → keccak(plaintext), filled by uploadImages
 
   constructor(deps: LtxManagerDeps) {
     this.sessionManager = deps.sessionManager;
@@ -77,6 +78,11 @@ export class LtxManager {
     if (!this.storageManager) {
       throw new LtxError('StorageManager not available for validateJob', 'LTX_PREVALIDATION_FAILED');
     }
+    // Sampler-range invariant (node's RandomNoise seed is u64): decimal digits only, ≤ 2^64-1.
+    // The COMMITMENT could encode uint256, but an oversize seed fails node-side AFTER escrow — gate it here.
+    if (!/^\d+$/.test(job.seed) || BigInt(job.seed) > 0xffffffffffffffffn) {
+      throw new LtxError(`seed must be a decimal integer in [0, 2^64-1], got "${job.seed}"`, 'LTX_PREVALIDATION_FAILED');
+    }
     const bundle = await this.resolveBundle(hostMetadata);
 
     const tpl = bundle.templates.find((t) => t.templateId === job.templateId);
@@ -84,6 +90,11 @@ export class LtxManager {
       throw new LtxError(
         `Template ${job.templateId} not allow-listed or templateHash mismatch`, 'LTX_PREVALIDATION_FAILED',
       );
+    }
+    const requiredImages = tpl.imageInputs ?? 0;
+    const suppliedImages = job.images?.length ?? 0;
+    if (suppliedImages !== requiredImages) {
+      throw new LtxError(`template ${job.templateId} requires ${requiredImages} image(s), got ${suppliedImages}`, 'LTX_PREVALIDATION_FAILED');
     }
     const { frames, fps, resolutions } = bundle.bounds;
     if (job.frames < frames.min || job.frames > frames.max) {
@@ -160,6 +171,44 @@ export class LtxManager {
     }
   }
 
+  /**
+   * Encrypt + upload input images to S5 (M1a). Returns capability CIDs (for job.images, order
+   * preserved) and their keccak plaintext hashes (cached for verifyAttestation). Enforces the
+   * bundle's imageMaxBytes fail-closed BEFORE any upload when host metadata is supplied.
+   */
+  async uploadImages(images: Uint8Array[], hostMetadata?: LtxBundleMetadata): Promise<{ cids: string[]; hashes: string[] }> {
+    if (!this.storageManager) {
+      throw new LtxError('StorageManager not available for uploadImages', 'LTX_PREVALIDATION_FAILED');
+    }
+    // Transport invariant (node-confirmed): the 256 KiB chunk scheme cannot represent an EXACT
+    // chunk-multiple plaintext (and an empty image is meaningless) — fail closed before any upload.
+    for (const [i, img] of images.entries()) {
+      if (img.length === 0 || img.length % 262144 === 0) {
+        throw new LtxError(`image[${i}] is ${img.length} bytes — an exact 256 KiB multiple (or empty) cannot be encrypted; re-encode the image (±1 byte)`, 'LTX_PREVALIDATION_FAILED');
+      }
+    }
+    if (hostMetadata) {
+      const maxBytes = (await this.resolveBundle(hostMetadata)).bounds.imageMaxBytes;
+      if (maxBytes !== undefined) {
+        for (const [i, img] of images.entries()) {
+          if (img.length > maxBytes) {
+            throw new LtxError(`image[${i}] is ${img.length} bytes > imageMaxBytes ${maxBytes}`, 'LTX_PREVALIDATION_FAILED');
+          }
+        }
+      }
+    }
+    const cids: string[] = [];
+    const hashes: string[] = [];
+    for (const img of images) {
+      const cid = await this.storageManager.uploadEncryptedBlob(img);
+      const hash = ltxImageHash(img);
+      this.imageHashCache.set(cid, hash);
+      cids.push(cid);
+      hashes.push(hash);
+    }
+    return { cids, hashes };
+  }
+
   /** Fetch + decrypt the PRIVATE capability CIDs (result.frames), index-aligned to manifest.frameHashes. */
   async downloadFrames(result: LtxResult): Promise<Uint8Array[]> {
     if (!this.storageManager) {
@@ -185,10 +234,14 @@ export class LtxManager {
     }
     const att = await this.storageManager.getByCID(result.proofCID);
 
-    // (1) input-binding — the live M0 check
-    if (ltxInputCommitment(job).toLowerCase() !== String(att.inputCommitment).toLowerCase()
+    // (1) input-binding — the live check. Image templates (M1a): re-derive imageHashes from the
+    // job's own capability CIDs (decrypt → keccak of plaintext) so verification is self-contained.
+    const imgs = job.images ?? [];
+    const imageHashes = await Promise.all(imgs.map(async (cid) =>
+      this.imageHashCache.get(cid) ?? ltxImageHash(await this.storageManager.downloadDecryptedByCID(cid))));
+    if (ltxInputCommitmentFor(job, imgs.length, imageHashes).toLowerCase() !== String(att.inputCommitment).toLowerCase()
       || String(att.templateHash).toLowerCase() !== job.templateHash.toLowerCase()) {
-      throw new LtxError('inputCommitment/templateHash does not match the submitted job', 'LTX_INPUT_BINDING_MISMATCH');
+      throw new LtxError('inputCommitment/templateHash does not match the submitted job (params or images)', 'LTX_INPUT_BINDING_MISMATCH');
     }
 
     // (2) integrity — wired but inert until the node submits proof on chain (Constraint 3)

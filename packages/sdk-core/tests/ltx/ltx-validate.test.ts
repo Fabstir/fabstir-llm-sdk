@@ -66,6 +66,22 @@ describe('LtxManager.validateJob (SP3.2, Constraint 8)', () => {
     }
   });
 
+  it('rejects seeds outside the sampler u64 range BEFORE escrow (LTX_PREVALIDATION_FAILED)', async () => {
+    const U64_MAX = (1n << 64n) - 1n;
+    // the exact UI-doc bug: two u32 decimal strings concatenated → ~half exceed u64
+    const concatBug = '42949672954294967295';
+    const bad = [concatBug, (U64_MAX + 1n).toString(), '-1', '1.5', 'abc', '', '0x10'];
+    for (const seed of bad) {
+      const m = makeManager(vi.fn().mockResolvedValue(bundleFixture));
+      await expect(m.validateJob({ ...validJob, seed }, meta())).rejects.toMatchObject({ code: 'LTX_PREVALIDATION_FAILED' });
+    }
+    // boundary: u64 max and 0 are valid
+    for (const seed of [U64_MAX.toString(), '0']) {
+      const m = makeManager(vi.fn().mockResolvedValue(bundleFixture));
+      await expect(m.validateJob({ ...validJob, seed }, meta())).resolves.toBeTruthy();
+    }
+  });
+
   it('does NOT gate on loras — an unlisted lora still passes (advisory)', async () => {
     const m = makeManager(vi.fn().mockResolvedValue(bundleFixture));
     await expect(m.validateJob({ ...validJob, lora: 'some-other-lora@v9' }, meta())).resolves.toBeTruthy();
@@ -101,5 +117,38 @@ describe('LtxManager.validateJob (SP3.2, Constraint 8)', () => {
     const h = canonicalBundleHash(malformed);
     const m = makeManager(vi.fn().mockResolvedValue(malformed));
     await expect(m.validateJob(validJob, meta({ bundleHash: h, allowListVersion: 1 }))).rejects.toMatchObject({ code: 'LTX_PREVALIDATION_FAILED' });
+  });
+});
+
+describe('validateJob v2 — imageInputs count gate (M1a, fail-closed)', async () => {
+  const bundleV2 = (await import('./bundle-fixture-v2.json')).default as any;
+  const metaV2 = { allowListVersion: 2, bundleHash: bundleV2.bundleHash, bundleCID: 'bBundleV2' };
+  const i2vJob = {
+    templateId: 'ltx-i2v-hdr', templateHash: bundleV2.templates.find((t: any) => t.templateId === 'ltx-i2v-hdr').templateHash,
+    prompt: 'p', seed: '1', frames: 126, fps: 25, resolution: { w: 1280, h: 720 }, lora: 'ltx-iclora-hdr@v1', output: 'exr-sequence',
+  };
+  const t2vJob = {
+    templateId: 'ltx-t2v-hdr', templateHash: bundleV2.templates.find((t: any) => t.templateId === 'ltx-t2v-hdr').templateHash,
+    prompt: 'p', seed: '1', frames: 121, fps: 24, resolution: { w: 768, h: 512 }, lora: 'ltx-iclora-hdr@v1', output: 'exr-sequence',
+  };
+
+  it('i2v with exactly 1 image passes; 0 or 2 images fail pre-escrow', async () => {
+    await expect(makeManager(vi.fn().mockResolvedValue(bundleV2)).validateJob({ ...i2vJob, images: ['u0'] } as any, metaV2)).resolves.toBeTruthy();
+    await expect(makeManager(vi.fn().mockResolvedValue(bundleV2)).validateJob(i2vJob as any, metaV2)).rejects.toMatchObject({ code: 'LTX_PREVALIDATION_FAILED' });
+    await expect(makeManager(vi.fn().mockResolvedValue(bundleV2)).validateJob({ ...i2vJob, images: ['u0', 'u1'] } as any, metaV2)).rejects.toMatchObject({ code: 'LTX_PREVALIDATION_FAILED' });
+  });
+
+  it('t2v (imageInputs 0/absent) rejects a job that carries images', async () => {
+    await expect(makeManager(vi.fn().mockResolvedValue(bundleV2)).validateJob(t2vJob as any, metaV2)).resolves.toBeTruthy();
+    await expect(makeManager(vi.fn().mockResolvedValue(bundleV2)).validateJob({ ...t2vJob, images: ['u0'] } as any, metaV2)).rejects.toMatchObject({ code: 'LTX_PREVALIDATION_FAILED' });
+  });
+
+  it('flf2v requires exactly 2 images', async () => {
+    const flfJob = {
+      templateId: 'ltx-flf2v-hdr', templateHash: bundleV2.templates.find((t: any) => t.templateId === 'ltx-flf2v-hdr').templateHash,
+      prompt: 'p', seed: '1', frames: 121, fps: 24, resolution: { w: 768, h: 512 }, lora: 'ltx-iclora-hdr@v1', output: 'exr-sequence',
+    };
+    await expect(makeManager(vi.fn().mockResolvedValue(bundleV2)).validateJob({ ...flfJob, images: ['u0', 'u1'] } as any, metaV2)).resolves.toBeTruthy();
+    await expect(makeManager(vi.fn().mockResolvedValue(bundleV2)).validateJob({ ...flfJob, images: ['u0'] } as any, metaV2)).rejects.toMatchObject({ code: 'LTX_PREVALIDATION_FAILED' });
   });
 });

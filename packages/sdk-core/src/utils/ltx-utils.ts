@@ -17,25 +17,53 @@ export interface LtxCommitmentInput {
 /** abi.encode field order for inputCommitment — MUST match the node (vectors.json). */
 const INPUT_TYPES = ['string', 'uint256', 'uint32', 'uint32', 'uint32', 'uint32', 'string'];
 
+/** The seven M0 values, shared by both encoders (the TYPE LISTS stay separate — see dispatcher). */
+const inputValues = (job: LtxCommitmentInput) =>
+  [job.prompt, BigInt(job.seed), job.frames, job.fps, job.resolution.w, job.resolution.h, job.lora];
+
 /**
  * ABI-encode the LTX job fields for the input-commitment preimage.
  * Order: prompt, seed(uint256), frames, fps, w, h, lora. Canonical by construction.
  */
 export function ltxInputEncoded(job: LtxCommitmentInput): string {
-  return AbiCoder.defaultAbiCoder().encode(INPUT_TYPES, [
-    job.prompt,
-    BigInt(job.seed),
-    job.frames,
-    job.fps,
-    job.resolution.w,
-    job.resolution.h,
-    job.lora,
-  ]);
+  return AbiCoder.defaultAbiCoder().encode(INPUT_TYPES, inputValues(job));
 }
 
 /** inputCommitment = keccak256(abi.encode(...)) — the live M0 input-binding value. */
 export function ltxInputCommitment(job: LtxCommitmentInput): string {
   return keccak256(ltxInputEncoded(job));
+}
+
+/** keccak256 over the PLAINTEXT image bytes — the content identity bound by commitment v2 (M1a). */
+export function ltxImageHash(plaintext: Uint8Array): string {
+  return keccak256(plaintext);
+}
+
+/** v2 field order = the M0 seven + bytes32[] imageHashes. ONLY for image templates (imageInputs>0). */
+const INPUT_TYPES_V2 = [...INPUT_TYPES, 'bytes32[]'];
+
+/** ABI-encode the v2 (image-template) input-commitment preimage. */
+export function ltxInputEncodedV2(job: LtxCommitmentInput, imageHashes: string[]): string {
+  return AbiCoder.defaultAbiCoder().encode(INPUT_TYPES_V2, [...inputValues(job), imageHashes]);
+}
+
+/** inputCommitment v2 = keccak256(8-field abi.encode) — binds the plaintext image hashes, in job order. */
+export function ltxInputCommitmentV2(job: LtxCommitmentInput, imageHashes: string[]): string {
+  return keccak256(ltxInputEncodedV2(job, imageHashes));
+}
+
+/**
+ * Format dispatcher (frozen M1a seam): imageInputs=0 → the M0 SEVEN-field encoding, byte-identical to
+ * deployed t2v — NEVER "v2 with an empty array" (a trailing dynamic field shifts the prompt/lora offset
+ * words, so enc7 !== enc8-empty). imageInputs>0 → v2, with a fail-closed image-count check.
+ */
+export function ltxInputCommitmentFor(job: LtxCommitmentInput, imageInputs: number, imageHashes: string[]): string {
+  if (imageInputs === 0) {
+    if (imageHashes.length > 0) throw new Error(`template takes no images but got ${imageHashes.length} image hash(es)`);
+    return ltxInputCommitment(job);
+  }
+  if (imageHashes.length !== imageInputs) throw new Error(`template requires ${imageInputs} image(s), got ${imageHashes.length}`);
+  return ltxInputCommitmentV2(job, imageHashes);
 }
 
 /**

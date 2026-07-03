@@ -37,6 +37,7 @@ export async function submitLtxWs(opts: LtxWsOptions): Promise<LtxHandle> {
     prompt: job.prompt, seed: job.seed, frames: job.frames, fps: job.fps,
     resolution: job.resolution, lora: job.lora, output: job.output,
   };
+  if (job.images?.length) inner.images = job.images; // M1a: capability CIDs, order = template imageSemantics
   if (requestId !== undefined) inner.requestId = requestId;
 
   const encrypted = encryptionManager.encryptMessage(sessionKey, JSON.stringify(inner), messageIndex.value++);

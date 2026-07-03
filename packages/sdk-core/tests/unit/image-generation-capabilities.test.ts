@@ -108,4 +108,12 @@ describe('getImageGenerationCapabilitiesFromHost', () => {
     const caps = await getImageGenerationCapabilitiesFromHost('http://localhost:8080');
     expect(caps.supportsImageGeneration).toBe(false);
   });
+
+  it('skips non-http(s) apiUrls (e.g. ws:// LTX hosts) without attempting a fetch', async () => {
+    for (const url of ['ws://192.168.1.19:8082/v1/ws', 'wss://node.example/v1/ws']) {
+      const caps = await getImageGenerationCapabilitiesFromHost(url);
+      expect(caps.supportsImageGeneration).toBe(false);
+    }
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 });
