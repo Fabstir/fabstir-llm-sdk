@@ -227,6 +227,40 @@ export class StorageManager implements IStorageManager {
     return this.s5Client.fs.downloadAndDecryptBlob(encBlobHash, key, size);
   }
 
+  /**
+   * Encrypt + upload a blob to S5 and return its `u`-prefix `0xae` capability CID (M1a input images).
+   * s5js's public uploadBlobEncrypted does all the crypto (chunked XChaCha20-Poly1305, padding) but
+   * drops the CID it computes — rebuild the same envelope from its returned fields (layout verified
+   * byte-exact against capability-fixture.json).
+   */
+  async uploadEncryptedBlob(bytes: Uint8Array): Promise<string> {
+    if (!this.s5Client) throw new Error('S5 client not available');
+    const r = await this.s5Client.fs.uploadBlobEncrypted(new Blob([bytes as unknown as BlobPart])); // TS lib quirk: Uint8Array<ArrayBufferLike> vs BlobPart; valid at runtime
+    const norm = (h: any, what: string) => {
+      const b = h instanceof Uint8Array ? h : new Uint8Array(h);
+      if (b.length === 32) return b;
+      if (b.length === 33) return b.subarray(1); // strip multihash prefix
+      throw new Error(`unexpected ${what} length ${b.length} from uploadBlobEncrypted`);
+    };
+    const encBlobHash = norm(r.encryptedBlobHash, 'encryptedBlobHash');
+    const ptHash = norm(r.hash, 'plaintext hash');
+    const key = new Uint8Array(r.encryptionKey);
+    if (key.length !== 32) throw new Error(`unexpected key length ${key.length}`);
+    const padLE = new Uint8Array(4);
+    new DataView(padLE.buffer).setUint32(0, r.padding, true);
+    const sizeLE: number[] = []; // little-endian, trailing zeros trimmed (mirrors the parse at :224)
+    for (let s = r.size; s > 0; s = Math.floor(s / 256)) sizeLE.push(s & 0xff);
+    const body = new Uint8Array([0xae, 0xa6, 0x12, 0x1f, ...encBlobHash, ...key, ...padLE, 0x26, 0x1f, ...ptHash, ...sizeLE]);
+    return 'u' + this.bytesToBase64Url(body);
+  }
+
+  /** Encode bytes as unpadded base64url (multibase `u` body). Inverse of base64UrlToBytes. */
+  private bytesToBase64Url(bytes: Uint8Array): string {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
   /** Decode multibase `u` (base64url, unpadded) to bytes. Browser-safe (atob). */
   private base64UrlToBytes(s: string): Uint8Array {
     const b64 = s.replace(/-/g, '+').replace(/_/g, '/');

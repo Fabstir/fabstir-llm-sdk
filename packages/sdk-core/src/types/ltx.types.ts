@@ -18,7 +18,11 @@ export interface LtxJob {
   lora: string;
   /** Output format, e.g. "exr-sequence". */
   output: string;
-  // M1 (parked): controlImageCID?: string — rides a NEW templateId+templateHash.
+  /**
+   * M1a image templates: input images as S5 capability CIDs (u-prefix 0xae), ORDER-significant —
+   * images[i] maps to the template's pinned imageSemantics[i]. Absent/empty for t2v (imageInputs 0).
+   */
+  images?: string[];
 }
 
 /** Public, KEY-LESS manifest at outputCID: content hashes + Merkle root, no decryption keys. */
@@ -85,17 +89,28 @@ export interface LtxPriceEstimate {
   paymentToken: string;
 }
 
-/** Frozen allow-list + param bounds (AllowListBundle) — see LTX-SIDECAR-M0-BUNDLE-SCHEMA.md. */
+/** Frozen allow-list + param bounds (AllowListBundle; v2 adds the image fields) — see bundle schema doc. */
 export interface LtxBundle {
   allowListVersion: number;
   bundleHash: string;
-  templates: { templateId: string; templateHash: string }[];
+  templates: {
+    templateId: string;
+    templateHash: string;
+    /** v2 format selector: 0/absent = t2v (M0 7-field commitment); >0 = image template (v2 commitment). */
+    imageInputs?: number;
+    /** Pinned semantic order of images[i] (e.g. ["firstFrame","lastFrame"]) — node-authoritative. */
+    imageSemantics?: string[];
+  }[];
   /** ADVISORY only — never hard-gate job.lora (Constraint 8). */
   loras: string[];
   bounds: {
     frames: { min: number; max: number };
     fps: number[];
     resolutions: { w: number; h: number }[];
+    /** v2: per-image byte ceiling — fail-closed client-side, host authoritative. */
+    imageMaxBytes?: number;
+    /** v2: advisory accepted formats; host authoritative on decode. */
+    imageFormats?: string[];
   };
 }
 

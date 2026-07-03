@@ -16,6 +16,10 @@ export async function getImageGenerationCapabilitiesFromHost(
     hasContentHashes: false,
   };
 
+  // Non-http(s) apiUrls (e.g. an LTX host advertising ws://…) can't serve this HTTP probe — skip
+  // cleanly instead of letting fetch throw "URL scheme ws is not supported" into the console.
+  if (!/^https?:\/\//i.test(hostApiUrl)) return noCapabilities;
+
   try {
     const response = await fetch(`${hostApiUrl}/v1/version`);
     if (!response.ok) return noCapabilities;

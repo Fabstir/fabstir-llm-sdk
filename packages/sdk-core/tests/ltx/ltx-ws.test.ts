@@ -99,4 +99,20 @@ describe('submitLtxWs (SP4.1, Constraint 2)', () => {
     const err = await h.result.catch((e) => e);
     expect(err).toBeInstanceOf(LtxError);
   });
+
+  it('M1a: carries images[] on the wire when present, omits it otherwise', async () => {
+    const withImages = makeWs();
+    await submitLtxWs({
+      wsClient: withImages.wsClient, encryptionManager, sessionId: 's1', sessionKey: new Uint8Array(32),
+      messageIndex: { value: 0 }, job: { ...job, images: ['uCap0', 'uCap1'] }, timeoutMs: 5000,
+    } as any);
+    expect(JSON.parse(withImages.sent[0].payload.ciphertextHex).images).toEqual(['uCap0', 'uCap1']);
+
+    const without = makeWs();
+    await submitLtxWs({
+      wsClient: without.wsClient, encryptionManager, sessionId: 's1', sessionKey: new Uint8Array(32),
+      messageIndex: { value: 0 }, job, timeoutMs: 5000,
+    } as any);
+    expect('images' in JSON.parse(without.sent[0].payload.ciphertextHex)).toBe(false);
+  });
 });

@@ -67,3 +67,33 @@ describe('LtxManager.verifyAttestation (SP5.1)', () => {
     expect(v.signatureValid).toBe(false);
   });
 });
+
+describe('verifyAttestation v2 — image templates (M1a)', async () => {
+  const v2 = (await import('./vectors-i2v.json')).default as any;
+  const { getBytes: gb } = await import('ethers');
+  const i2vJob = { ...v2.singleImage.job, images: ['uCap0'] };
+  const att = {
+    ...vectors.attestation,
+    inputCommitment: v2.singleImage.inputCommitment.hash,   // the node-attested v2 commitment
+    templateHash: v2.singleImage.job.templateHash,
+    signature: undefined,
+  };
+  const mkStorage = (attestation: any) => ({
+    getByCID: vi.fn(async () => attestation),
+    getRawBytes: vi.fn(async () => getBytes(vectors.proofHashInput)),
+    downloadDecryptedByCID: vi.fn(async () => gb(v2.singleImage.imagePlaintext[0].hex)), // decrypts to the fixture plaintext
+  });
+
+  it('derives imageHashes from job.images (decrypt→keccak) and binds the v2 commitment', async () => {
+    const m = new LtxManager({ storageManager: mkStorage(att), ltxModelId: '0x01', usdcAddress: '0xabc' } as any);
+    const v = await m.verifyAttestation(i2vJob, result);
+    expect(v.inputBinding).toBe(true);
+  });
+
+  it('a DIFFERENT decrypted image ⟹ LTX_INPUT_BINDING_MISMATCH', async () => {
+    const storage = mkStorage(att);
+    storage.downloadDecryptedByCID = vi.fn(async () => new Uint8Array([1, 2, 3]));
+    const m = new LtxManager({ storageManager: storage, ltxModelId: '0x01', usdcAddress: '0xabc' } as any);
+    await expect(m.verifyAttestation(i2vJob, result)).rejects.toMatchObject({ code: 'LTX_INPUT_BINDING_MISMATCH' });
+  });
+});
