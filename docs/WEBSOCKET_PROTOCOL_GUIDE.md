@@ -278,6 +278,56 @@ Send a transcode request via the encrypted WebSocket channel. The request is sen
 - `hls` (boolean, optional): When `true`, output fMP4 segments instead of a single file. `encrypt` and `trim_percent` are ignored for HLS formats.
 - `hls_time` (number, optional): Target segment duration in seconds (default: `6`)
 
+### 11. LTX Video Generation Request (Encrypted)
+
+Send an LTX video-generation job (text-to-video / image-to-video / first-last-frame) via the
+encrypted channel. Sent as an `encrypted_message` with `action: "ltx_generate"` in the encrypted
+payload (AAD `message_<index>`, mirroring transcode/image).
+
+**Encrypted payload (plaintext before encryption):**
+
+```json
+{
+  "action": "ltx_generate",
+  "requestId": "optional-uuid",
+  "templateId": "ltx-i2v-hdr",
+  "templateHash": "0x…",
+  "prompt": "the scene comes alive with gentle motion, cinematic",
+  "seed": "10149559525267700669",
+  "frames": 121,
+  "fps": 24,
+  "resolution": { "w": 1920, "h": 1080 },
+  "lora": "ltx-iclora-hdr@v1",
+  "output": "exr-sequence",
+  "images": ["u<capabilityCID0>", "u<capabilityCID1>"]
+}
+```
+
+**Fields:**
+- `templateId` / `templateHash` (required): must match an entry in the host's published allow-list
+  bundle (versioned; advertised in NodeRegistry metadata). The node hard-rejects unknown templates.
+- `seed` (string, required): decimal integer in **[0, 2^64−1]** (the sampler is u64); encoded as
+  `uint256` inside the provenance commitment.
+- `frames`/`fps`/`resolution`: validated against the bundle's bounds. Delivered length is pinned by
+  the template (`5×fps+1` frames); billing binds the **requested** values.
+- `images` (array, optional): S5 **capability CIDs** (u-prefix, key-bearing) of encrypted input
+  stills — count must equal the template's `imageInputs`, order matches its `imageSemantics`
+  (e.g. `["firstFrame","lastFrame"]`). Omitted for text-to-video.
+
+**Responses** (all on the `encrypted_response` envelope with fixed AAD `encrypted_ltx_response`):
+- `ltx_accepted` — `{ type, status: "processing", sessionId, requestId?, allowListVersion }`
+- `ltx_progress` — `{ type, stage: "generating"|"encrypting"|"uploading"|"finalising", pct }`
+- `ltx_complete` — `{ type, outputCID, proofCID, frames: ["u…"], manifest, billing, requestId? }`
+  — `frames` are PRIVATE key-bearing capability CIDs; the public manifest/attestation are key-less.
+  `proofCID` is always present, whether or not the host's on-chain proof submission landed.
+- `ltx_error` — `{ type, error: { code, message } }` with codes `VALIDATION_FAILED`,
+  `SIDECAR_UNAVAILABLE`, `CAPACITY` (also returned, retryably, while a session settles),
+  `GENERATION_FAILED`, `TIMEOUT`. No proof on error — no settlement.
+
+**Session lifecycle:** one clip per session (exact USDC escrow up front). After `ltx_complete` the
+client closes the socket; the node submits its proof of work, waits the dispute window (~30 s), and
+completes the session on-chain (host paid per token, remainder refunded).
+
 ## Host -> Client Messages
 
 ### 1. Connection Confirmation

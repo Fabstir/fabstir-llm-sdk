@@ -10,6 +10,7 @@
 - [Image Generation](#image-generation)
   - [OpenAI-Compatible Bridge](#openai-compatible-bridge)
 - [Video Transcoding](#video-transcoding)
+- [Video Generation (LTX)](#video-generation-ltx)
 - [Payment Management](#payment-management)
 - [Model Governance](#model-governance)
 - [Host Management](#host-management)
@@ -2175,6 +2176,113 @@ const sourceCid = `s5://${base64url.encode(encCID)}`; // u-prefix
 ```
 
 ---
+
+## Video Generation (LTX)
+
+AI text-to-video, image-to-video, and first-last-frame video generation (LTX 2.3) via the same
+encrypted WebSocket + paid-session rail as transcoding. Each clip runs in its own session with an
+exact USDC escrow; results are encrypted EXR/MP4 media on S5, delivered as private capability CIDs,
+with a cryptographic provenance attestation (input commitment + on-chain proof anchor).
+
+Templates and parameter bounds come from the host's **versioned allow-list bundle** (published to S5,
+advertised in NodeRegistry metadata); the SDK authenticates the bundle by canonical hash and
+pre-validates every job **before escrow**. Full integration walkthrough:
+`docs/platformless-ui/LTX_VIDEO_UI_INTEGRATION.md`. Canonical live example:
+`packages/sdk-core/tests/integration/ltx-generate-e2e.test.ts`.
+
+### Enable + Get LtxManager
+
+```typescript
+const sdk = new FabstirSDKCore({
+  // ...usual config...
+  ltxModelId: '0x…', // bytes32 — the registered LTX model id (each template family has its own)
+});
+await sdk.authenticate(...);
+const ltx = sdk.getLtxManager(); // throws LTX_NOT_AVAILABLE if ltxModelId missing
+```
+
+### Host Inputs (bundle metadata)
+
+```typescript
+const hostMetadata = {
+  allowListVersion: 4,     // advertised version — must match the authenticated bundle
+  bundleHash: '0x…',       // keccak256 of the canonical bundle; SDK authenticates the fetch
+  bundleCID: 'b…',         // S5 CID of the published bundle
+};
+```
+
+### Price Estimation
+
+```typescript
+const est = await ltx.estimateCost(job, hostAddress);
+// { totalCost,           // decimal USDC string, exact at every resolution
+//   totalCostBaseUnits,  // integer base units = tokens × pricePerToken / 1000
+//   tokens,              // ceil(frames × w × h / 1000) — megapixel-frame billing
+//   pricePerToken, paymentToken }
+```
+
+### Input Images (i2v / flf2v)
+
+```typescript
+const { cids, hashes } = await ltx.uploadImages([firstFrameBytes /*, lastFrameBytes*/], hostMetadata);
+// Encrypts each image (XChaCha20-Poly1305, 256 KiB chunks) → S5 → u-prefix capability CIDs.
+// ORDER-significant (bundle imageSemantics, e.g. ["firstFrame","lastFrame"]) — order is bound into
+// the provenance commitment. Fail-closed: > bounds.imageMaxBytes, empty, or exact 256 KiB-multiple
+// plaintexts are rejected before upload.
+```
+
+### Generate
+
+```typescript
+const result = await ltx.generate(job, hostAddress, hostMetadata, {
+  endpoint: 'wss://host/v1/ws', // REQUIRED — the node's WebSocket URL
+  onProgress: ({ stage, pct }) => {}, // 'generating' | 'encrypting' | 'uploading' | 'finalising'
+  timeoutMs: 1500000,           // raise above the 600s default for 1080p+ renders
+});
+// LtxJob: { templateId, templateHash, prompt, seed, frames, fps, resolution:{w,h}, lora, output, images? }
+//   seed: decimal string in [0, 2^64-1] (pre-validated before escrow — the sampler is u64)
+//   resolution: from bundle.bounds.resolutions; billing binds the REQUESTED dims
+// Flow: validateJob (pre-escrow, no funds locked on failure) → estimateCost →
+//       session + exact USDC escrow (max($0.50 floor, cost); delegate path automatic under
+//       authenticateAsDelegate) → encrypted ltx_generate → staged progress → ltx_complete.
+// result: { outputCID, proofCID, manifest, frames /* private capability CIDs */, billing,
+//           sessionId, jobId /* bigints — String() them before JSON persistence */ }
+// The per-clip socket closes on completion; the session self-settles (~35s) — host is paid
+// tokens × price × 90%, the remainder of the deposit refunds.
+```
+
+### Fetch + Decrypt the Clip
+
+```typescript
+const frames = await ltx.downloadFrames(result); // Uint8Array[], index-aligned to manifest.frameHashes
+// M0/M1 nodes deliver a single H.264+AAC MP4 as frames[0]:
+const url = URL.createObjectURL(new Blob([frames[0]], { type: 'video/mp4' }));
+```
+
+### Verify Provenance
+
+```typescript
+const v = await ltx.verifyAttestation(job, result, { sessionId: result.sessionId });
+// { inputBinding,   // LIVE check — recomputes the commitment (prompt, seed, params, image hashes)
+//   integrity,      // 'ok' when sha256(proofCID bytes) matches the on-chain proof; 'skipped' before
+//                   // the host's proof tx confirms — re-call ~35–60s later to upgrade the badge
+//   merkleValid, signer, signatureValid }
+// Throws LTX_INPUT_BINDING_MISMATCH if the attestation doesn't match the submitted job.
+```
+
+### Reclaim a Failed Session's Deposit
+
+```typescript
+await ltx.triggerSessionTimeout(Number(err.details.jobId));
+// Post-escrow LtxError failures carry details.{sessionId,jobId}; eligible after the proof-timeout window.
+```
+
+### Errors
+
+All failures are typed `LtxError { code, message, details }` — wire codes `VALIDATION_FAILED`,
+`SIDECAR_UNAVAILABLE`, `CAPACITY` (retryable during settlement), `GENERATION_FAILED`, `TIMEOUT`;
+client codes `LTX_PREVALIDATION_FAILED` (pre-escrow, no funds moved), `LTX_BUNDLE_STALE`,
+`LTX_INPUT_BINDING_MISMATCH`, `LTX_PROOF_MISMATCH`.
 
 ## Payment Management
 

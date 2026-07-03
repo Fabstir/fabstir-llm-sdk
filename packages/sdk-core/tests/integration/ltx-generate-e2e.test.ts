@@ -59,7 +59,10 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
       seed: process.env.LTX_SEED || '4815162342',
       // frames=121 matches what the node actually renders (~5s pinned) — the honest charge, and immune to the
       // node switching billing from requested→delivered frames (which would trip the over-claim guard at 25).
-      frames: 121, fps: 24, resolution: { w: 768, h: 512 }, lora: 'ltx-iclora-hdr@v1', output: 'exr-sequence',
+      // LTX_RESOLUTION="WxH" (v4 ladder shakedown, default 768x512); LTX_TIMEOUT_MS for long HD renders.
+      frames: 121, fps: 24,
+      resolution: (([w, h]) => ({ w, h }))((process.env.LTX_RESOLUTION || '768x512').split('x').map(Number)),
+      lora: 'ltx-iclora-hdr@v1', output: 'exr-sequence',
     };
     const hostMetadata: LtxBundleMetadata = { allowListVersion: BUNDLE_VERSION, bundleHash: BUNDLE_HASH!, bundleCID: BUNDLE_CID };
 
@@ -73,6 +76,7 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
     const result = await ltx.generate(job, LTX_HOST!, hostMetadata, {
       endpoint: NODE_WS, // the node's WS URL — without this, submitLtx falls back to localhost
       onProgress: (p) => stages.push(p.stage),
+      timeoutMs: Number(process.env.LTX_TIMEOUT_MS || 600000), // HD renders can exceed the 600s default
     });
 
     expect(result.outputCID).toBeTruthy();
@@ -129,7 +133,7 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
         { outputCID: result.outputCID, proofCID: result.proofCID, manifest: result.manifest, billing: result.billing, verification }, null, 2));
       console.log(`[LTX_SAVE_DIR] wrote ${frames.length} EXR frames + result.json -> ${dir}`);
     }
-  }, 900000); // render + (LTX_EXPECT_PROOF) proof poll + 30s settle window + SessionCompleted poll
+  }, 1800000); // HD render (LTX_TIMEOUT_MS) + (LTX_EXPECT_PROOF) proof poll + 30s settle window + SessionCompleted poll
 
   // M1a image-to-video — additionally gated on the i2v pending inputs (own model id + template + an input image).
   const I2V_READY = !!(process.env.LTX_I2V_MODEL_ID && process.env.LTX_I2V_TEMPLATE_HASH && process.env.LTX_I2V_IMAGE_PATH);

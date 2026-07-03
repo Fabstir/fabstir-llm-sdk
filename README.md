@@ -14,6 +14,7 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 - 🗂️ **Vector Databases** - Host-side vector storage and cosine similarity search via WebSocket
 - 🎨 **Image Generation** - Text-to-image via FLUX.2 diffusion models over E2E encrypted WebSocket, with automatic intent detection from natural language prompts
 - 🎬 **Video Transcoding** - GPU-accelerated video transcoding (H.264/AV1) with encrypted source/output support, real-time progress, GOP-level proofs, S5 storage, load balancing across multiple hosts, and HLS adaptive bitrate streaming with per-segment encryption
+- 🎥 **AI Video Generation (LTX 2.3)** - Text-to-video, image-to-video, and first-last-frame generation up to 4K over the encrypted rail, with per-clip USDC escrow that settles on-chain (host paid per megapixel-frame), encrypted input stills, staged progress, and cryptographic provenance (input commitment + on-chain proof anchor) verified client-side
 - 🔐 **End-to-End Encryption** - XChaCha20-Poly1305 encryption enabled by default with forward secrecy
 - 🔑 **ERC-4337 Smart Account Auth** - Optional `'aa-signer'` mode for email-only sign-in via Biconomy MEE / ZeroDev / Pimlico — all on-chain calls route through a caller-supplied `sendUserOp` callback (bundler-agnostic). See [packages/sdk-core/README.md](packages/sdk-core/README.md) and [docs/SDK_API.md](docs/SDK_API.md) for usage.
 - 🛡️ **Error Recovery** - Automatic retries and failover to ensure reliability

@@ -154,6 +154,30 @@ The SDK uses a manager pattern where each manager handles a specific domain:
 - WebSocket transcode submission with encrypted message envelope
 - Type guard: `isHlsOutput()` discriminates HLS from standard outputs
 
+#### **LtxManager** (`/managers/LtxManager.ts`)
+- AI video generation (LTX 2.3): text-to-video, image-to-video, first-last-frame — the third
+  non-LLM sidecar on the same encrypted WS + paid-session rail as transcoding
+- One session per clip with an exact USDC escrow (`max(floor, cost)`); the per-clip socket closes on
+  completion and the session self-settles on-chain (host paid per megapixel-frame token, 90/10 split)
+- Pre-escrow validation against the host's **versioned allow-list bundle** (S5-published, hash-
+  authenticated): templates, frame/fps/resolution bounds, image counts, u64 seed range — a bad job
+  never locks funds
+- Encrypted input images: `uploadImages()` → S5 capability CIDs (order-significant, bound into the
+  provenance commitment)
+- **Provenance verification** (`verifyAttestation`): recomputes the input commitment (prompt, seed,
+  params, image hashes) against the host's attestation; checks `sha256(attestation bytes)` against
+  the on-chain proof anchor (`getProofSubmission`); Merkle root over frame hashes
+- Key Features: `estimateCost` (exact at every resolution), `generate` (validate → escrow → stream
+  progress → surface), `downloadFrames` (capability-CID decrypt), `triggerSessionTimeout` (reclaim)
+
+#### LTX Utilities (`/utils/ltx-utils.ts`, `/utils/ltx-ws.ts`)
+- Conformance primitives, fixture-verified byte-exact against node-generated vectors: input
+  commitment (7-field abi.encode; v2 adds `bytes32[]` image hashes for image templates), output
+  commitment, Merkle root, EIP-191 attestation digest + signer recovery, `sha256` proof hash,
+  canonical bundle hash (recursive key-sort → compact JSON → keccak256)
+- WebSocket submission (`submitLtxWs`): `ltx_generate` dispatch, staged progress, typed `LtxError`
+  mapping, client-side cancel
+
 #### **VectorRAGManager** (`/managers/VectorRAGManager.ts`)
 - Host-side vector database operations via WebSocket
 - Simplified wrapper delegating to SessionManager
@@ -260,7 +284,7 @@ User → SDK → WebSocket → Host Node (fabstir-llm-node)
         Streaming Responses     Transcoder Sidecar (ffmpeg + NVENC)
 ```
 
-All WebSocket messages use E2E encryption (ECDH + XChaCha20-Poly1305). The same connection carries LLM inference, vector operations, image generation, and video transcoding. For transcoding, the host node proxies requests to a GPU transcoder sidecar via localhost HTTP.
+All WebSocket messages use E2E encryption (ECDH + XChaCha20-Poly1305). The same connection carries LLM inference, vector operations, image generation, video transcoding, and LTX video generation. For transcoding and video generation, the host node proxies requests to GPU sidecars via localhost (ffmpeg/NVENC for transcode; a headless ComfyUI running pinned LTX 2.3 templates for generation — clients send typed parameters only, never graphs).
 
 **Key Innovation**: Gasless session ending
 - User closes WebSocket connection
