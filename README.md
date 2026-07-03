@@ -309,7 +309,7 @@ await sdk.authenticate(privateKey);
 - [Encryption FAQ](docs/ENCRYPTION_FAQ.md) - Common encryption questions
 - [Multi-Chain Developer Guide](docs/MULTI_CHAIN_DEVELOPER_GUIDE.md) - Multi-chain support
 - [Host Operator Guide](docs/HOST_OPERATOR_GUIDE.md) - Running a host node
-- [Executive Summary](docs/EXECUTIVE_SUMMARY.md) - Project overview
+- [Executive Summary](docs/PLATFORMLESS_AI_EXECUTIVE_SUMMARY.md) - Platformless AI project overview
 
 ### Reference Documentation
 
