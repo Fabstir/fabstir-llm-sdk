@@ -2,7 +2,7 @@
 // Sub-phase 5.2: public exports + SDK wiring surface.
 import 'fake-indexeddb/auto';
 import { describe, it, expect } from 'vitest';
-import { LtxManager, FabstirSDKCore } from '../../src';
+import { LtxManager, FabstirSDKCore, ltxTokens } from '../../src';
 import type { LtxJob, LtxResult, LtxPriceEstimate, ILtxManager } from '../../src';
 
 describe('LTX SDK exports + wiring (SP5.2)', () => {
@@ -19,6 +19,12 @@ describe('LTX SDK exports + wiring (SP5.2)', () => {
 
   it('FabstirSDKCore exposes getLtxManager()', () => {
     expect(typeof (FabstirSDKCore.prototype as any).getLtxManager).toBe('function');
+  });
+
+  it('ltxTokens is exported from the root — canonical over-claim maths for granular-path clients', () => {
+    expect(typeof ltxTokens).toBe('function');
+    // ceil(frames·w·h / 1000): 121 × 768 × 512 / 1000 = 47,579.14 → 47,580
+    expect(ltxTokens({ frames: 121, resolution: { w: 768, h: 512 } })).toBe(47580);
   });
 
   it('LtxJob / LtxResult / LtxPriceEstimate / ILtxManager types resolve from ../../src', () => {

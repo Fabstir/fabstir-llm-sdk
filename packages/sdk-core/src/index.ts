@@ -160,6 +160,10 @@ export { ContextLimitError } from './errors/context-errors';
 export { ImageGenerationError } from './errors/image-generation-errors';
 export { analyzePromptForImageIntent, type ImageIntentResult } from './utils/image-intent-analyzer';
 
+// Canonical LTX megapixel-frame token count — the exact maths generate() uses for the over-claim
+// guard, so granular-path clients (submitLtx) can replicate it byte-for-byte instead of re-deriving.
+export { ltxTokens } from './utils/ltx-utils';
+
 // Export wallet providers
 export { EOAProvider } from './providers/EOAProvider';
 export { SmartAccountProvider } from './providers/SmartAccountProvider';
