@@ -103,6 +103,13 @@ export class LtxManager {
     if (!fps.includes(job.fps)) {
       throw new LtxError(`fps ${job.fps} not in allow-list`, 'LTX_PREVALIDATION_FAILED');
     }
+    // Node duration rule (v8.34.0): clips are a whole number of seconds — frames = fps × seconds + 1.
+    // The node rejects off-grid counts AFTER escrow; gate here so a bad job never locks funds.
+    if ((job.frames - 1) % job.fps !== 0) {
+      throw new LtxError(
+        `frames ${job.frames} is not a whole number of seconds at ${job.fps} fps (frames must be fps × seconds + 1)`, 'LTX_PREVALIDATION_FAILED',
+      );
+    }
     if (!resolutions.some((r) => r.w === job.resolution.w && r.h === job.resolution.h)) {
       throw new LtxError(`resolution ${job.resolution.w}x${job.resolution.h} not in allow-list`, 'LTX_PREVALIDATION_FAILED');
     }

@@ -57,20 +57,34 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
       // Overridable: a REPEATED seed makes ComfyUI serve its cache (0s, no GPU) — vary LTX_SEED for a real generation.
       prompt: process.env.LTX_PROMPT || 'interior of a derelict spaceship corridor',
       seed: process.env.LTX_SEED || '4815162342',
-      // frames=121 matches what the node actually renders (~5s pinned) — the honest charge, and immune to the
-      // node switching billing from requested→delivered frames (which would trip the over-claim guard at 25).
-      // LTX_RESOLUTION="WxH" (v4 ladder shakedown, default 768x512); LTX_TIMEOUT_MS for long HD renders.
-      frames: 121, fps: 24,
+      // frames = fps × duration + 1 — the node's whole-second grid (v8.34.0); billing binds the REQUESTED count.
+      // LTX_RESOLUTION="WxH" (default 768x512); LTX_FPS (default 24) + LTX_DURATION seconds (default 5, node
+      // accepts 5–15 on bundle v5); LTX_TIMEOUT_MS for long renders.
+      fps: Number(process.env.LTX_FPS || 24),
+      frames: Number(process.env.LTX_FPS || 24) * Number(process.env.LTX_DURATION || 5) + 1,
       resolution: (([w, h]) => ({ w, h }))((process.env.LTX_RESOLUTION || '768x512').split('x').map(Number)),
       lora: 'ltx-iclora-hdr@v1', output: 'exr-sequence',
     };
     const hostMetadata: LtxBundleMetadata = { allowListVersion: BUNDLE_VERSION, bundleHash: BUNDLE_HASH!, bundleCID: BUNDLE_CID };
 
     // Direct deposit path pulls USDC via transferFrom → approve the JobMarketplace as spender first
-    // (approveUSDC is a no-op; the standard path uses approveToken to the marketplace). 1 USDC ≫ the ~0.009 clip.
+    // (approveUSDC is a no-op; the standard path uses approveToken to the marketplace). Approval must cover
+    // the PADDED deposit (max(floor, est × 1.05)) — a flat 1 USDC under-approves long/high-fps/4K clips.
     // NB: the RUNTIME (impl) arg order is (spender, amount, tokenAddress) — the IPaymentManager interface
     // mistypes it as (tokenAddress, spenderAddress, amount), so cast to call the concrete signature.
-    await (sdk.getPaymentManager() as any).approveToken(chain.contracts.jobMarketplace, ethers.parseUnits('1', 6), chain.contracts.usdcToken);
+    const est = await ltx.estimateCost(job, LTX_HOST!);
+    const estPadded = (BigInt(est.totalCostBaseUnits) * 105n + 99n) / 100n;
+    const approval = estPadded > 500000n ? estPadded : 500000n;
+    await (sdk.getPaymentManager() as any).approveToken(chain.contracts.jobMarketplace, approval, chain.contracts.usdcToken);
+    // Load-balanced RPCs can serve createSessionJob's gas estimate from a node that hasn't synced the approve
+    // block yet ("transfer amount exceeds allowance" on a correct allowance). Confirm the allowance is visible
+    // on the same provider before creating the session. (Production has no such race — approve and generate are
+    // separate user actions seconds/minutes apart.)
+    const usdc = new ethers.Contract(chain.contracts.usdcToken, ['function allowance(address,address) view returns (uint256)'], wallet.provider);
+    for (let i = 0; i < 20; i++) {
+      if ((await usdc.allowance(wallet.address, chain.contracts.jobMarketplace)) >= approval) break;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
 
     const stages: string[] = [];
     const result = await ltx.generate(job, LTX_HOST!, hostMetadata, {
@@ -102,7 +116,12 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
         await new Promise((r) => setTimeout(r, 5000));
       }
       expect(proof?.proofHash, 'no on-chain proof appeared within the poll window').toBeTruthy();
-      expect(verification.integrity === 'ok' || (await ltx.verifyAttestation(job, result, { sessionId: result.sessionId })).integrity).toBe('ok');
+      // Integrity is 'skipped' when delivery beats settlement (proof still confirming); a read-only re-check
+      // upgrades it to 'ok' once the proof anchors. Re-verify only if the delivery check hadn't already seen it.
+      const finalIntegrity = verification.integrity === 'ok'
+        ? 'ok'
+        : (await ltx.verifyAttestation(job, result, { sessionId: result.sessionId })).integrity;
+      expect(finalIntegrity).toBe('ok');
       expect(Number(proof.tokensClaimed)).toBe(result.billing.tokens);        // §B triple equality (est == billing asserted above)
       // SessionCompleted numbers per the contracts dev's exact formulas
       const price = 904n;

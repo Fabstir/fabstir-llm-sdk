@@ -82,6 +82,17 @@ describe('LtxManager.validateJob (SP3.2, Constraint 8)', () => {
     }
   });
 
+  it('rejects off-grid frame counts pre-escrow — frames must be fps × whole-seconds + 1 (node v8.34.0 duration rule)', async () => {
+    // The node rejects (frames−1) % fps !== 0 AFTER escrow; Constraint 8 says the SDK gates it BEFORE.
+    for (const frames of [122, 200, 120]) {
+      const m = makeManager(vi.fn().mockResolvedValue(bundleFixture));
+      await expect(m.validateJob({ ...validJob, frames }, meta())).rejects.toMatchObject({ code: 'LTX_PREVALIDATION_FAILED' });
+    }
+    // on-grid multi-second counts within bounds pass: 241 @ 24 fps = 10 s
+    const m = makeManager(vi.fn().mockResolvedValue(bundleFixture));
+    await expect(m.validateJob({ ...validJob, frames: 241 }, meta())).resolves.toBeTruthy();
+  });
+
   it('does NOT gate on loras — an unlisted lora still passes (advisory)', async () => {
     const m = makeManager(vi.fn().mockResolvedValue(bundleFixture));
     await expect(m.validateJob({ ...validJob, lora: 'some-other-lora@v9' }, meta())).resolves.toBeTruthy();
