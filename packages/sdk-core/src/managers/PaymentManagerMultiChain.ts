@@ -98,6 +98,19 @@ export class PaymentManager implements IPaymentManager {
   }
 
   /**
+   * Swap the signing key in place WITHOUT re-authenticating the SDK identity. Clears the cached
+   * marketplace wrappers (each holds the previous signer) and rebuilds the current chain's wrapper,
+   * so every subsequent tx is signed by `signer`. Used by enableDelegatePayments to route escrow
+   * through the sub-account while the authenticated identity stays the primary/payer.
+   */
+  setSigner(signer: Signer): void {
+    this.signer = signer;
+    this.initialized = true;
+    this.marketplaceWrappers.clear();
+    this.initializeWrapper(this.currentChainId);
+  }
+
+  /**
    * Check if manager is initialized
    */
   isInitialized(): boolean {
@@ -704,7 +717,7 @@ export class PaymentManager implements IPaymentManager {
   }
 
   /** Enter delegate-pays mode: record the payer (owner) funding sessions (1.2). */
-  setDelegatePayer(payer: string): void {
+  setDelegatePayer(payer: string | undefined): void {
     this.delegatePayer = payer;
   }
 

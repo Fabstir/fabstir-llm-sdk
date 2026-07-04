@@ -297,6 +297,49 @@ export class FabstirSDKCore extends EventEmitter {
   }
 
   /**
+   * Enable delegate-pays on the ALREADY-authenticated (primary) session so shared-PaymentManager
+   * escrow — LTX video, LLM session-open — is signed by the sub-account (popup-free CryptoKey) while
+   * `payer` funds it via its on-chain-capped USDC allowance.
+   *
+   * Unlike {@link authenticateAsDelegate} (which re-authenticates AS the delegate and thereby moves
+   * userAddress + S5 identity to the sub-account), this leaves the authenticated identity — and thus
+   * storage ownership, session groups, and the S5 seed — on the primary. Invariant: sign as the
+   * delegate, identify as the payer. Call AFTER authenticate(); reversible via
+   * {@link disableDelegatePayments}. `getDelegatePayer()` reports the active payer.
+   */
+  async enableDelegatePayments(options: { signer: ethers.Signer; payer: string }): Promise<void> {
+    if (!this.authenticated || !this.paymentManager) {
+      throw new SDKError('enableDelegatePayments requires an authenticated session', 'NOT_AUTHENTICATED');
+    }
+    if (!options || !options.signer) {
+      throw new SDKError('Delegate signer required', 'DELEGATE_SIGNER_MISSING');
+    }
+    if (!options.payer || options.payer === ethers.ZeroAddress) {
+      throw new SDKError('Delegate payer (owner) required', 'DELEGATE_PAYER_MISSING');
+    }
+    // Swap ONLY the PaymentManager's signing key (+ rebuild its wrappers) and record the payer.
+    // this.signer / this.userAddress / this.s5Seed / this.authMode are deliberately untouched.
+    this.paymentManager.setSigner(options.signer);
+    this.paymentManager.setDelegatePayer(options.payer);
+    this.delegatePayer = options.payer;
+  }
+
+  /**
+   * Revert {@link enableDelegatePayments}: route escrow back through the primary signer and clear the
+   * payer. Escrow signs (and pops up) as the primary again. No-op on identity — it never moved.
+   */
+  async disableDelegatePayments(): Promise<void> {
+    if (!this.paymentManager) {
+      throw new SDKError('disableDelegatePayments requires an authenticated session', 'NOT_AUTHENTICATED');
+    }
+    if (this.signer) {
+      this.paymentManager.setSigner(this.signer);
+    }
+    this.paymentManager.setDelegatePayer(undefined);
+    this.delegatePayer = undefined;
+  }
+
+  /**
    * Authenticate with the initialized wallet provider
    */
   async authenticateWithWallet(): Promise<void> {
