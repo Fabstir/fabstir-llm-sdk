@@ -44,6 +44,11 @@ export interface HostMetadata {
   costPerToken: number;        // Cost per token in wei
   stakeAmount?: string;        // Stake amount in wei
   publicKey?: string;          // Compressed secp256k1 public key (33 bytes hex, 66 chars)
+  ltx?: {                      // Published LTX allow-list bundle (read by getLtxBundleMetadata)
+    allowListVersion: number;
+    bundleHash: string;        // "0x" + keccak of the canonical bundle
+    bundleCID: string;         // S5 CID of the published bundle
+  };
   x402?: {
     payTo: string;             // Address to receive x402 payments
     asset: string;             // Token address (e.g. USDC)

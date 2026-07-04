@@ -962,6 +962,7 @@ export class FabstirSDKCore extends EventEmitter {
           storageManager: this.storageManager,
           paymentManager: this.paymentManager,
           jobMarketplace: new JobMarketplaceWrapper(this.currentChainId, this.signer!),
+          hostManager: this.hostManager,
           ltxModelId: this.config.ltxModelId,
           usdcAddress: await this.contractManager.getContractAddress('usdcToken'),
           chainId: this.currentChainId,

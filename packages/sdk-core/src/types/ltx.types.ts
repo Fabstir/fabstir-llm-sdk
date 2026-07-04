@@ -40,7 +40,10 @@ export interface LtxManifest {
 export interface LtxBilling {
   unit: string;
   tokens: number;
+  /** Restated by generate() to the authoritative on-chain price (the wire value can read "0"). */
   pricePerToken?: string;
+  /** SDK-derived by generate(): floor(tokens × pricePerToken / 1000) in USDC base units (6 dp). */
+  gross?: string;
 }
 
 /** Resolved ltx_complete result. `frames` are PRIVATE capability CIDs, index-aligned to frameHashes. */
@@ -52,6 +55,8 @@ export interface LtxResult {
   billing: LtxBilling;
   requestId?: string;
   allowListVersion?: number;
+  /** Echoed by generate(): the seed that conditioned the render (== job.seed; verifyAttestation's inputBinding proves the node used it). */
+  seed?: string;
   /** Attached by generate(): the paid session behind this clip — receipts, reclaim, on-chain proof reads. */
   sessionId?: bigint;
   jobId?: bigint;

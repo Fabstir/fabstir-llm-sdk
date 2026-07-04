@@ -36,11 +36,20 @@ function makeManager(order?: string[], resultOverride: Record<string, unknown> =
 }
 
 describe('LtxManager.generate (SP4.2)', () => {
-  it('orchestrates validate → estimate → session → submit in order', async () => {
+  it('orchestrates validate → estimate → session → submit, then estimates once more to enrich billing', async () => {
     const order: string[] = [];
     const { manager } = makeManager(order);
     await manager.generate(validJob, HOST, meta);
-    expect(order).toEqual(['validate', 'estimate', 'session', 'submit']);
+    // trailing 'estimate' = the post-delivery price read that populates billing.gross / pricePerToken
+    expect(order).toEqual(['validate', 'estimate', 'session', 'submit', 'estimate']);
+  });
+
+  it('surfaces the conditioning seed and enriches billing with gross + authoritative pricePerToken (BL1 helper surface)', async () => {
+    const { manager } = makeManager();
+    const res = await manager.generate(validJob, HOST, meta);
+    expect(res.seed).toBe(validJob.seed);                          // the seed that conditioned the render, echoed
+    expect(res.billing.pricePerToken).toBe(PRICE.toString());      // on-chain price, not the "0" the wire may carry
+    expect(res.billing.gross).toBe(((111514n * PRICE) / 1000n).toString()); // floor(tokens × price / 1000), base units
   });
 
   it('does NOT create a session or submit when pre-validation fails', async () => {

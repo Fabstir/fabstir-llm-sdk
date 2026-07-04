@@ -12,6 +12,8 @@ export interface LtxManagerDeps {
   storageManager?: any;
   paymentManager?: any;
   jobMarketplace?: any;
+  /** HostManager — reads the host's on-chain NodeRegistry metadata for bundle discovery. */
+  hostManager?: any;
   /** Registered LTX model id (bytes32) — the price key. Never the templateHash (Constraint 6). */
   ltxModelId: string;
   /** USDC token address (payment token) for this chain. */
@@ -24,6 +26,7 @@ export class LtxManager {
   private readonly storageManager: any;
   private readonly paymentManager: any;
   private readonly jobMarketplace: any;
+  private readonly hostManager: any;
   private readonly ltxModelId: string;
   private readonly usdcAddress: string;
   private readonly chainId?: number;
@@ -35,6 +38,7 @@ export class LtxManager {
     this.storageManager = deps.storageManager;
     this.paymentManager = deps.paymentManager;
     this.jobMarketplace = deps.jobMarketplace;
+    this.hostManager = deps.hostManager;
     this.ltxModelId = deps.ltxModelId;
     this.usdcAddress = deps.usdcAddress;
     this.chainId = deps.chainId;
@@ -179,6 +183,14 @@ export class LtxManager {
       }
       result.sessionId = sessionId; // receipts / reclaim / getProofSubmission reads
       result.jobId = jobId;
+      result.seed = job.seed; // conditioning seed echoed for provenance (inputBinding proves the node used it)
+      // Enrich the billing block for downstream clients: the wire pricePerToken can read "0", so restate the
+      // authoritative on-chain price and derive gross. Best-effort — a price read must NEVER fail a delivered clip.
+      try {
+        const { pricePerToken } = await this.estimateCost(job, hostAddress);
+        result.billing.pricePerToken = pricePerToken.toString();
+        result.billing.gross = tokensToUsdc(result.billing.tokens, pricePerToken).toString();
+      } catch { /* billing enrichment is advisory; tokens, proofCID and seed are already surfaced */ }
       return result;
     } catch (err: any) {
       throw new LtxError(err?.message ?? 'LTX generation failed', err instanceof LtxError ? err.code : 'GENERATION_FAILED', { sessionId, jobId });
@@ -235,6 +247,47 @@ export class LtxManager {
       );
     }
     return Promise.all(result.frames.map((cid) => this.storageManager.downloadDecryptedByCID(cid)));
+  }
+
+  /**
+   * Decrypt the single playable output container (H.264/MP4) to bytes — the helper's <jobId>.mp4.
+   * Valid ONLY when the node emitted a single-file output (manifest.frameCount === 1, frames[0] is the
+   * container). For an N-frame sequence (e.g. output "exr-sequence") there is NO single artefact — throws
+   * with guidance to use downloadFrames() and encode client-side. outputCID is the key-less manifest, not
+   * the video, so it is never decrypted here.
+   */
+  async downloadOutputVideo(result: LtxResult): Promise<Uint8Array> {
+    if (!this.storageManager) {
+      throw new LtxError('StorageManager not available for downloadOutputVideo', 'LTX_PREVALIDATION_FAILED');
+    }
+    if (result.manifest.frameCount !== 1 || result.frames.length !== 1) {
+      throw new LtxError(
+        `output is a ${result.manifest.frameCount}-frame sequence, not a single container — use downloadFrames() and encode client-side`,
+        'LTX_PREVALIDATION_FAILED',
+      );
+    }
+    return this.storageManager.downloadDecryptedByCID(result.frames[0]);
+  }
+
+  /**
+   * Discover a host's CURRENT LTX allow-list bundle from its on-chain NodeRegistry metadata — the
+   * authoritative source, so a long-running client can self-heal on LTX_BUNDLE_STALE without a config
+   * edit + restart. Requires the node to publish `metadata.ltx = { allowListVersion, bundleHash, bundleCID }`
+   * via updateMetadata. Feed the result straight into validateJob / generate / createLtxSession.
+   */
+  async getLtxBundleMetadata(hostAddress: string): Promise<LtxBundleMetadata> {
+    if (!this.hostManager) {
+      throw new LtxError('HostManager not available for getLtxBundleMetadata', 'LTX_PREVALIDATION_FAILED');
+    }
+    const info = await this.hostManager.getHostInfo(hostAddress);
+    const ltx = info?.metadata?.ltx;
+    if (!ltx || ltx.allowListVersion === undefined || !ltx.bundleHash || !ltx.bundleCID) {
+      throw new LtxError(
+        `host ${hostAddress} advertises no LTX bundle (metadata.ltx absent/incomplete) — the node must publish { allowListVersion, bundleHash, bundleCID } via updateMetadata`,
+        'LTX_PREVALIDATION_FAILED',
+      );
+    }
+    return { allowListVersion: Number(ltx.allowListVersion), bundleHash: ltx.bundleHash, bundleCID: ltx.bundleCID };
   }
 
   /**

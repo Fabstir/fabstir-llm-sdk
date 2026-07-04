@@ -62,7 +62,7 @@ import { generateImageHttp } from '../utils/image-generation-http';
 import { submitTranscodeWs } from '../utils/transcode-ws';
 import type { VideoFormat, TranscodeHandle, TranscodeSubmitOptions } from '../types/transcode.types';
 import { submitLtxWs } from '../utils/ltx-ws';
-import type { LtxJob, LtxHandle, LtxSubmitOptions } from '../types/ltx.types';
+import type { LtxJob, LtxHandle, LtxSubmitOptions, LtxResult } from '../types/ltx.types';
 
 /**
  * Check if a string is a bytes32 hash (0x + 64 hex chars)
@@ -3801,6 +3801,8 @@ export class SessionManager implements ISessionManager {
       sessionId, sessionKey: localSessionKey, messageIndex: messageIndexRef,
       job, requestId: options?.requestId, onProgress: options?.onProgress, timeoutMs: options?.timeoutMs,
     });
+    // Echo the conditioning seed so the granular submitLtx result is self-contained (matches generate()).
+    handle.result = handle.result.then((r: LtxResult) => { r.seed = job.seed; return r; });
     if (ownsWs) {
       // Close the dedicated socket once the clip settles either way (frames/verify use S5, not this WS).
       // The node settles the SESSION on socket death (M1 economics) — a lingering WS defers the host's

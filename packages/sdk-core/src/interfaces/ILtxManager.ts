@@ -32,6 +32,12 @@ export interface ILtxManager {
   /** Fetch + decrypt the private capability CIDs, index-aligned to manifest.frameHashes. */
   downloadFrames(result: LtxResult): Promise<Uint8Array[]>;
 
+  /** Decrypt the single playable container (frameCount === 1) to bytes; throws for an N-frame sequence. */
+  downloadOutputVideo(result: LtxResult): Promise<Uint8Array>;
+
+  /** Discover the host's CURRENT LTX bundle metadata from on-chain NodeRegistry (drift self-heal). */
+  getLtxBundleMetadata(hostAddress: string): Promise<LtxBundleMetadata>;
+
   /** Verify provenance (input-binding live; integrity live when a proof exists on-chain; signature/merkle advisory). */
   verifyAttestation(job: LtxJob, result: LtxResult, options?: { sessionId?: bigint; proofIndex?: number }): Promise<LtxVerification>;
 
