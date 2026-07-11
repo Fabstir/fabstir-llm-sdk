@@ -43,10 +43,13 @@ Three properties, each verifiable rather than promised:
 - **Video transcoding** (GPU H.264/AV1, HLS streaming, per-segment encryption, multi-host load
   balancing).
 - **AI video generation (LTX 2.3)** — the newest capability, live end-to-end in the product UI:
-  - **Three modes:** text-to-video, image-to-video (animate a still), and first-last-frame
-    (supply two stills; the model generates the motion between them).
+  - **Four modes:** text-to-video, image-to-video (animate a still), first-last-frame
+    (supply two stills; the model generates the motion between them), and video restyle
+    (IC-LoRA union control — a reference still plus a control clip whose motion and camera
+    the output follows, re-skinned to the reference look).
   - **Resolutions** from SD to 1440p live today (4K staged behind one final contract check),
-    ~5-second clips with generated audio, at **$0.04–$0.40 per clip** on the current test pricing.
+    user-selectable clips of **5–15 seconds** at **24–50 fps** with generated audio, at
+    **$0.04–$0.40 per clip** (through 1440p) on the current test pricing.
   - **Real settled economics:** paid sessions have generated clips, submitted proofs, and settled
     on-chain with host earnings and user refunds correct **to the unit** — verified independently
     by the client SDK, the node operator, and the contracts, which were built by different people
@@ -54,6 +57,19 @@ Three properties, each verifiable rather than promised:
   - **Provenance verified in the product:** every clip in the chat UI carries a "✓ verified" badge
     the user's own browser computed, upgrading to "verified + anchored" once the host's proof
     confirms on-chain.
+  - **Inside Blender:** all four modes now run in a native Blender 5.x extension — the artist
+    works with the strips already on the Video Sequence Editor timeline (a prompt for
+    text-to-video, a keyframe still for image-to-video, two stills to bridge for first-last-frame,
+    or a movie strip plus a reference still to restyle), and the finished clip replaces the
+    placeholder **in place**, billed to the estimate shown beforehand and settled on-chain to the
+    unit (SD/720p/1080p proven live, including a restyle whose output follows the control clip's
+    motion and camera). For restyle, the extension conforms the selected control strip to the job's
+    frame rate and duration before upload, and the delivered clip's audio is added as a
+    frame-aligned sound strip; each strip records its session id, proof CID, seed, and billing. The
+    extension is a pure protocol client — the host node is unchanged — so every timeline clip
+    carries the same input-bound attestation. Because the LTX 2.3 pipeline is HDR- and EXR-native,
+    this places verifiable AI generation inside a professional film and VFX tool, not a consumer
+    web app.
 
 The full stack is exercised daily by a Next.js product UI (Platformless AI chat), a test harness,
 and scripted end-to-end gates that assert on-chain numbers exactly.
@@ -80,10 +96,9 @@ on-chain-capped allowance.
 
 - **Near term:** 4K generation (final contract check in progress), production TLS endpoints,
   host-signed attestations, and the prompt-fidelity template re-pin.
-- **Next:** longer/higher-fidelity clips (LTX 1080p/15s class), additional pinned templates
-  (style transfer, audio-conditioned video), C2PA/Content Credentials export backed by the
-  on-chain proof, and a Blender add-on placing paid, provenance-bound generation directly in a
-  filmmaker's timeline.
+- **Next:** additional pinned templates (e.g. audio-conditioned video) and C2PA/Content
+  Credentials export backed by the on-chain proof. (All four generation modes — including the
+  LTX IC-LoRA Union Control restyle — are already live in the product UI and the Blender timeline.)
 - **Foundational:** mainnet deployment and permissionless host onboarding at scale.
 
 ## Where to go deeper

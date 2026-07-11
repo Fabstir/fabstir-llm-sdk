@@ -26,7 +26,7 @@ Platformless AI is building decentralised AI infrastructure that eliminates the 
 
 Our marketplace connects GPU providers directly with users through blockchain-based settlement, end-to-end encryption, and mathematical proof of computation. This creates a trustless, censorship-resistant, and privacy-preserving platform for AI services.
 
-**Critically, this infrastructure extends beyond chat to support autonomous AI agents and multi-agent orchestration.** Our Claude Bridge has demonstrated Claude Code — an agentic coding assistant with 23 tools — running entirely on decentralised GPU hosts. Our OpenAI Bridge extends this to any OpenAI-compatible client (OpenCode, Continue, Cursor, LangChain), including image generation via FLUX.2 diffusion. The same encrypted rail now **generates video**: LTX 2.3 text-to-video, image-to-video, and first-last-frame clips — paid per clip in USDC, settled on-chain with the host earning 90%, and carrying cryptographic provenance the buyer's own client verifies. Our orchestrator package (`@fabstir/orchestrator`) adds experimental DAG-based task decomposition, intelligent model routing, and inter-agent collaboration via Google's Agent-to-Agent (A2A) protocol (v1.0.0-rc, ~12 months old) — with x402 USDC micropayments for cross-agent delegation. Platformless AI is, to our knowledge, the first DePIN project to implement A2A. The core orchestration is functional and fully tested (351 unit tests), but A2A is still maturing as a standard, and we're early implementers — full interoperability testing with third-party A2A agents is ongoing.
+**Critically, this infrastructure extends beyond chat to support autonomous AI agents and multi-agent orchestration.** Our Claude Bridge has demonstrated Claude Code — an agentic coding assistant with 23 tools — running entirely on decentralised GPU hosts. Our OpenAI Bridge extends this to any OpenAI-compatible client (OpenCode, Continue, Cursor, LangChain), including image generation via FLUX.2 diffusion. The same encrypted rail now **generates video**: LTX 2.3 text-to-video, image-to-video, first-last-frame, and video-restyle (IC-LoRA union control) clips — paid per clip in USDC, settled on-chain with the host earning 90%, and carrying cryptographic provenance the buyer's own client verifies. Our orchestrator package (`@fabstir/orchestrator`) adds experimental DAG-based task decomposition, intelligent model routing, and inter-agent collaboration via Google's Agent-to-Agent (A2A) protocol (v1.0.0-rc, ~12 months old) — with x402 USDC micropayments for cross-agent delegation. Platformless AI is, to our knowledge, the first DePIN project to implement A2A. The core orchestration is functional and fully tested (351 unit tests), but A2A is still maturing as a standard, and we're early implementers — full interoperability testing with third-party A2A agents is ongoing.
 
 ## The Problem
 
@@ -160,11 +160,12 @@ A decentralised marketplace where smart contracts handle coordination, P2P conne
 
 12. **AI Video Generation (LTX 2.3)** — live end-to-end with settled on-chain economics
 
-- Three modes, selected by pinned template: **text-to-video**, **image-to-video** (animate the user's own still), **first-last-frame** (two ordered stills; the model generates the motion between them)
-- Resolutions SD through 4K (portrait/landscape/square), ~5 s clips with generated audio; **$0.04–$0.91 per clip** on current test pricing, billed by megapixel-frame at on-chain prices
+- Four modes, selected by pinned template: **text-to-video**, **image-to-video** (animate the user's own still), **first-last-frame** (two ordered stills; the model generates the motion between them), **video restyle** (IC-LoRA union control — a reference still plus a control clip whose motion and camera the output follows, re-skinned to the reference look)
+- Resolutions SD through 4K (portrait/landscape/square; **1440p live, 4K staged**), **user-selectable 5–15 s clips at 24–50 fps** with generated audio; **$0.04–$0.91 per clip** across the ladder on current test pricing, billed by megapixel-frame at on-chain prices
 - Per-clip USDC escrow sized to the exact cost; the host anchors its proof of work on-chain and settlement pays 90% to the host, refunding the remainder — **proven to the unit on real sessions** from both the SDK and the product UI
-- **Verifiable provenance**: an attestation binds prompt, seed, parameters, and the byte-exact input images to the output; the client recomputes the commitment, and the attestation hash is anchored on-chain at settlement — the product UI shows a "✓ verified" badge the user's own browser computed
-- Input stills encrypted client-side (up to 32 MB); pinned, hash-committed templates mean clients send typed parameters, never executable graphs
+- **Verifiable provenance**: an attestation binds prompt, seed, parameters, and the byte-exact input images and control video to the output; the client recomputes the commitment, and the attestation hash is anchored on-chain at settlement — the product UI shows a "✓ verified" badge the user's own browser computed
+- **Now inside Blender**: all four modes run in a native Blender 5.x extension in the Video Sequence Editor — the artist works with the strips already on the timeline (a prompt, a keyframe still, two stills to bridge, or a movie strip plus a reference still to restyle) and the finished clip replaces the placeholder in place, billed to the estimate and settled on-chain to the unit (SD/720p/1080p proven live, including a restyle that follows the control clip's motion and camera); the extension conforms the control strip to the job's fps/duration, adds the delivered audio as a frame-aligned sound strip, and records each clip's session id, proof CID, seed, and billing on the strip — a pure protocol client, so the host node is unchanged, and the LTX 2.3 pipeline is HDR- and EXR-native
+- Input stills and control clips encrypted client-side (stills up to 32 MB); pinned, hash-committed templates mean clients send typed parameters, never executable graphs
 
 ## How It Works
 
@@ -205,7 +206,7 @@ Upload to S5 → Create Job → Host Downloads → GPU Transcode → GOP Proofs
 
 ### For AI Video Generation
 
-1. **Describe the Clip** - Prompt, plus optional stills (encrypted client-side) for image-to-video / first-last-frame
+1. **Describe the Clip** - Prompt, plus optional stills (encrypted client-side) for image-to-video / first-last-frame, or a reference still and control clip for restyle
 2. **See the Exact Price** - Cost computed from on-chain pricing before committing ($0.04–$0.91 per clip by resolution)
 3. **Escrow & Generate** - Per-clip USDC session; encrypted WebSocket streams staged progress (generating → encrypting → uploading)
 4. **Verify Provenance** - Client recomputes the input commitment (prompt, seed, params, byte-exact image hashes) against the attestation
@@ -559,11 +560,12 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 
 ✅ **AI Video Generation (LTX 2.3)** — live with settled economics
 
-- Three modes live from the product UI: text-to-video, image-to-video, first-last-frame (encrypted input stills, order-bound into the provenance commitment)
+- Four modes live from the product UI: text-to-video, image-to-video, first-last-frame, and video restyle (IC-LoRA union control) — encrypted input stills and control clips, order-bound into the provenance commitment
 - Pinned, hash-committed ComfyUI templates behind a versioned, client-authenticated allow-list bundle — clients send typed parameters, never graphs
 - Full payment rail proven on Base Sepolia: per-clip USDC escrow → on-chain proof submission → dispute-window settlement → 90/10 split — **host earnings, treasury fee, and user refund verified to the exact unit** on real sessions, from two independent clients
-- Resolution ladder live through 1440p (4K staged behind a final contract check); ~5 s clips with generated audio at $0.04–$0.40 per clip on test pricing
+- Resolution ladder live through 1440p (4K staged behind a final contract check); **user-selectable 5–15 s clips at 24–50 fps** with generated audio, $0.04–$0.40 per clip through 1440p on test pricing
 - Client-side provenance verification shipping in the chat UI: "✓ verified" badge (input binding) upgrading to "verified + anchored" once the proof confirms on-chain
+- **Blender extension (live)**: all four modes inside the Video Sequence Editor of a native Blender 5.x extension — clips generated and settled on-chain to the unit from within the timeline (SD/720p/1080p proven, including a restyle following the control clip's motion and camera), with the control strip conformed to the job's fps/duration, the delivered audio added as a frame-aligned sound strip, and each strip recording its session id, proof CID, seed, and billing; the host node is unchanged, and the LTX 2.3 pipeline is HDR- and EXR-native
 
 ### In Progress (Q2 2026)
 
@@ -625,10 +627,12 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 
 ### Q2 2026 - AI Video Generation ✅
 
-- [x] LTX 2.3 generation live: text-to-video, image-to-video, first-last-frame
+- [x] LTX 2.3 generation live: text-to-video, image-to-video, first-last-frame, and video restyle (IC-LoRA union control)
 - [x] Pinned-template provenance with client-side verification and on-chain proof anchoring
 - [x] Full per-clip economics settled on Base Sepolia (90/10 split, verified to the unit)
 - [x] Resolution ladder through 1440p in the product UI; encrypted input stills to 32 MB
+- [x] User-selectable clip length (5–15 s) and frame rate (24, 25, 48, 50 fps)
+- [x] Blender 5.x extension — all four modes live in the Video Sequence Editor (text-to-video, image-to-video, first-last-frame, restyle), settled on-chain to the unit (SD/720p/1080p proven), with control-strip conforming and frame-aligned delivered audio
 - [ ] 4K activation (final contract-level check)
 - [ ] Host-signed attestations
 
@@ -640,7 +644,6 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 - [ ] API gateway service (REST abstraction)
 - [ ] Model governance DAO launch
 - [ ] C2PA/Content Credentials export backed by the on-chain proof anchor
-- [ ] Blender add-on — paid, provenance-bound generation inside a filmmaker's timeline
 
 ### Q4 2026 - Ecosystem Growth
 
@@ -678,8 +681,8 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 4. **Media & Entertainment**
    - Script generation (no IP theft)
    - Creative content generation (proprietary)
-   - AI video generation with verifiable provenance (which model, which inputs — anchored on-chain; ready for AI-disclosure requirements)
-   - Storyboard-to-motion workflows (animate stills, generate the motion between two frames)
+   - AI video generation with verifiable provenance (which model, which inputs — anchored on-chain; ready for AI-disclosure requirements) — all four modes now generatable **directly inside Blender's timeline** via a native extension, keeping VFX artists in their production tool
+   - Storyboard-to-motion and restyle workflows (animate stills, generate the motion between two frames, or re-skin a control clip to a reference still)
    - Translation services (confidential)
    - Voiceover generation (privacy)
 
@@ -936,7 +939,7 @@ Platformless AI represents a fundamental shift in AI infrastructure - from platf
 - **XChaCha20-Poly1305 encryption with forward secrecy** protects all communication
 - **Open source** means full transparency - every line auditable
 
-Our infrastructure is complete and production-ready, currently undergoing security audit. The SDK (v1.28.2+) covers the whole flow — wallet sign-in, payments, encrypted sessions, storage, encryption, document search, video transcoding, and AI video generation — alongside a comprehensive Host CLI with TUI dashboard, marketplace pricing, evidence-based slashing for host accountability, and image generation with automatic intent detection. The newest capability, LTX 2.3 video generation, is live end-to-end in the product UI: text-, image-, and first-last-frame-conditioned clips through 1440p (4K staged), paid per clip in USDC, settled on-chain with the host earning 90% — verified to the exact unit on real sessions — and carrying provenance the user's own browser checks and the chain anchors. The Claude Bridge and OpenAI Bridge extend this to agentic AI — Claude Code and OpenCode running autonomously on decentralised hosts, creating applications, executing tools, generating images, and managing files with full end-to-end encryption. The `@fabstir/orchestrator` package adds experimental multi-agent coordination via Google's A2A protocol (v1.0.0-rc) — the first DePIN project to implement this emerging standard — with DAG-based task decomposition, intelligent model routing, SSE streaming, and x402 USDC micropayments for inter-agent delegation. A2A is still maturing as a standard, and we're early implementers; the core orchestration works (351 tests passing), but full interoperability testing with third-party agents is ongoing. Companies are already approaching us to use this as SaaS AI backend infrastructure. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise, SaaS, and developer adoption as AI regulation tightens and privacy concerns intensify.
+Our infrastructure is complete and production-ready, currently undergoing security audit. The SDK (v1.28.2+) covers the whole flow — wallet sign-in, payments, encrypted sessions, storage, encryption, document search, video transcoding, and AI video generation — alongside a comprehensive Host CLI with TUI dashboard, marketplace pricing, evidence-based slashing for host accountability, and image generation with automatic intent detection. The newest capability, LTX 2.3 video generation, is live end-to-end in the product UI across all four modes — text-to-video, image-to-video, first-last-frame, and video restyle (IC-LoRA union control) — through 1440p (4K staged), 5–15 seconds at 24–50 fps, paid per clip in USDC, settled on-chain with the host earning 90% — verified to the exact unit on real sessions — and carrying provenance the user's own browser checks and the chain anchors. The same paid, provenance-bound generation now runs inside a native Blender 5.x extension, placing all four generation modes directly in a filmmaker's HDR- and EXR-native Video Sequence Editor timeline. The Claude Bridge and OpenAI Bridge extend this to agentic AI — Claude Code and OpenCode running autonomously on decentralised hosts, creating applications, executing tools, generating images, and managing files with full end-to-end encryption. The `@fabstir/orchestrator` package adds experimental multi-agent coordination via Google's A2A protocol (v1.0.0-rc) — the first DePIN project to implement this emerging standard — with DAG-based task decomposition, intelligent model routing, SSE streaming, and x402 USDC micropayments for inter-agent delegation. A2A is still maturing as a standard, and we're early implementers; the core orchestration works (351 tests passing), but full interoperability testing with third-party agents is ongoing. Companies are already approaching us to use this as SaaS AI backend infrastructure. With cryptographic security, compliance-by-design architecture, and sustainable economics, Platformless AI is positioned to capture significant enterprise, SaaS, and developer adoption as AI regulation tightens and privacy concerns intensify.
 
 The convergence of blockchain technology, zero-knowledge cryptography, and decentralised storage creates a unique opportunity to build AI infrastructure that respects user sovereignty, protects intellectual property, and enables permissionless innovation. Users are sovereign - in complete control of their data, able to decide what AI and AI agents can access, and share securely with others on their own terms.
 
