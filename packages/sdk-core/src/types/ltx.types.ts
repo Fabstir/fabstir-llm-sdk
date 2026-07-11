@@ -23,6 +23,11 @@ export interface LtxJob {
    * images[i] maps to the template's pinned imageSemantics[i]. Absent/empty for t2v (imageInputs 0).
    */
   images?: string[];
+  /**
+   * BL3 video templates (IC-LoRA): input videos as S5 capability CIDs, ORDER-significant —
+   * videos[i] maps to the template's pinned videoSemantics[i]. Absent/empty unless videoInputs>0.
+   */
+  videos?: string[];
 }
 
 /** Public, KEY-LESS manifest at outputCID: content hashes + Merkle root, no decryption keys. */
@@ -108,6 +113,10 @@ export interface LtxBundle {
     imageInputs?: number;
     /** Pinned semantic order of images[i] (e.g. ["firstFrame","lastFrame"]) — node-authoritative. */
     imageSemantics?: string[];
+    /** v3 format selector: >0 = video template (IC-LoRA, 9-field commitment). 0/absent otherwise. */
+    videoInputs?: number;
+    /** Pinned semantic order of videos[i] (e.g. ["controlVideo"]) — node-authoritative. */
+    videoSemantics?: string[];
   }[];
   /** ADVISORY only — never hard-gate job.lora (Constraint 8). */
   loras: string[];
@@ -119,6 +128,10 @@ export interface LtxBundle {
     imageMaxBytes?: number;
     /** v2: advisory accepted formats; host authoritative on decode. */
     imageFormats?: string[];
+    /** v3: per-video byte ceiling — fail-closed client-side, host authoritative. */
+    videoMaxBytes?: number;
+    /** v3: accepted video container formats (e.g. ["mp4"]); host authoritative on decode. */
+    videoFormats?: string[];
   };
 }
 

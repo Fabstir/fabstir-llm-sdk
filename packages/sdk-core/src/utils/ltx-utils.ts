@@ -39,6 +39,11 @@ export function ltxImageHash(plaintext: Uint8Array): string {
   return keccak256(plaintext);
 }
 
+/** keccak256 over the PLAINTEXT video bytes — the content identity bound by commitment v3 (BL3, IC-LoRA). */
+export function ltxVideoHash(plaintext: Uint8Array): string {
+  return keccak256(plaintext);
+}
+
 /** v2 field order = the M0 seven + bytes32[] imageHashes. ONLY for image templates (imageInputs>0). */
 const INPUT_TYPES_V2 = [...INPUT_TYPES, 'bytes32[]'];
 
@@ -52,12 +57,35 @@ export function ltxInputCommitmentV2(job: LtxCommitmentInput, imageHashes: strin
   return keccak256(ltxInputEncodedV2(job, imageHashes));
 }
 
+/** v3 field order = the M0 seven + bytes32[] imageHashes + bytes32[] videoHashes. ONLY for video templates (videoInputs>0). */
+const INPUT_TYPES_V3 = [...INPUT_TYPES_V2, 'bytes32[]'];
+
+/** ABI-encode the v3 (video-template) input-commitment preimage. imageHashes may be empty; videoHashes must not. */
+export function ltxInputEncodedV3(job: LtxCommitmentInput, imageHashes: string[], videoHashes: string[]): string {
+  return AbiCoder.defaultAbiCoder().encode(INPUT_TYPES_V3, [...inputValues(job), imageHashes, videoHashes]);
+}
+
+/** inputCommitment v3 = keccak256(9-field abi.encode) — binds plaintext image AND video hashes, in job order. */
+export function ltxInputCommitmentV3(job: LtxCommitmentInput, imageHashes: string[], videoHashes: string[]): string {
+  return keccak256(ltxInputEncodedV3(job, imageHashes, videoHashes));
+}
+
 /**
- * Format dispatcher (frozen M1a seam): imageInputs=0 → the M0 SEVEN-field encoding, byte-identical to
- * deployed t2v — NEVER "v2 with an empty array" (a trailing dynamic field shifts the prompt/lora offset
- * words, so enc7 !== enc8-empty). imageInputs>0 → v2, with a fail-closed image-count check.
+ * Format dispatcher (frozen seam). Selector by the TEMPLATE's bundle entry, most-specific first:
+ *   videoInputs>0 → v3 (nine-field, images may be empty); else imageInputs>0 → v2 (eight-field);
+ *   else the M0 SEVEN-field. NEVER "vN with an empty trailing array" — a trailing dynamic field shifts
+ *   the earlier offset words, so enc7 !== enc8-empty !== enc9-empty. Each level count-checks fail-closed.
  */
-export function ltxInputCommitmentFor(job: LtxCommitmentInput, imageInputs: number, imageHashes: string[]): string {
+export function ltxInputCommitmentFor(
+  job: LtxCommitmentInput, imageInputs: number, imageHashes: string[],
+  videoInputs = 0, videoHashes: string[] = [],
+): string {
+  if (videoInputs > 0) {
+    if (videoHashes.length !== videoInputs) throw new Error(`template requires ${videoInputs} video(s), got ${videoHashes.length}`);
+    if (imageHashes.length !== imageInputs) throw new Error(`template requires ${imageInputs} image(s), got ${imageHashes.length}`);
+    return ltxInputCommitmentV3(job, imageHashes, videoHashes);
+  }
+  if (videoHashes.length > 0) throw new Error(`template takes no videos but got ${videoHashes.length} video hash(es)`);
   if (imageInputs === 0) {
     if (imageHashes.length > 0) throw new Error(`template takes no images but got ${imageHashes.length} image hash(es)`);
     return ltxInputCommitment(job);

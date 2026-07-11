@@ -163,3 +163,28 @@ describe('validateJob v2 — imageInputs count gate (M1a, fail-closed)', async (
     await expect(makeManager(vi.fn().mockResolvedValue(bundleV2)).validateJob({ ...flfJob, images: ['u0'] } as any, metaV2)).rejects.toMatchObject({ code: 'LTX_PREVALIDATION_FAILED' });
   });
 });
+
+describe('validateJob v6 — videoInputs count gate (BL3, IC-LoRA)', async () => {
+  const bundleV6 = (await import('./bundle-fixture-v6.json')).default as any;
+  const metaV6 = { allowListVersion: 6, bundleHash: bundleV6.bundleHash, bundleCID: 'bBundleV6' };
+  const th = (id: string) => bundleV6.templates.find((t: any) => t.templateId === id).templateHash;
+  const icloraJob = {
+    templateId: 'ltx-iclora-hdr', templateHash: th('ltx-iclora-hdr'),
+    prompt: 'p', seed: '1', frames: 126, fps: 25, resolution: { w: 768, h: 512 }, lora: 'ltx-iclora-hdr@v1', output: 'exr-sequence',
+  };
+  const t2vJob = {
+    templateId: 'ltx-t2v-hdr', templateHash: th('ltx-t2v-hdr'),
+    prompt: 'p', seed: '1', frames: 121, fps: 24, resolution: { w: 768, h: 512 }, lora: 'ltx-iclora-hdr@v1', output: 'exr-sequence',
+  };
+
+  it('iclora with exactly 1 image + 1 video passes; missing/extra video fails pre-escrow', async () => {
+    await expect(makeManager(vi.fn().mockResolvedValue(bundleV6)).validateJob({ ...icloraJob, images: ['ui'], videos: ['uv'] } as any, metaV6)).resolves.toBeTruthy();
+    await expect(makeManager(vi.fn().mockResolvedValue(bundleV6)).validateJob({ ...icloraJob, images: ['ui'] } as any, metaV6)).rejects.toMatchObject({ code: 'LTX_PREVALIDATION_FAILED' });
+    await expect(makeManager(vi.fn().mockResolvedValue(bundleV6)).validateJob({ ...icloraJob, images: ['ui'], videos: ['uv', 'uv2'] } as any, metaV6)).rejects.toMatchObject({ code: 'LTX_PREVALIDATION_FAILED' });
+  });
+
+  it('the three existing templates carry videoInputs 0 — a job with a video is rejected', async () => {
+    await expect(makeManager(vi.fn().mockResolvedValue(bundleV6)).validateJob(t2vJob as any, metaV6)).resolves.toBeTruthy();
+    await expect(makeManager(vi.fn().mockResolvedValue(bundleV6)).validateJob({ ...t2vJob, videos: ['uv'] } as any, metaV6)).rejects.toMatchObject({ code: 'LTX_PREVALIDATION_FAILED' });
+  });
+});

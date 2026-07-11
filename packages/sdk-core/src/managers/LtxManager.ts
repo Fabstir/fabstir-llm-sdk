@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // LtxManager — LTX 2.3 video sidecar (M0). Mirrors TranscodeManager over the same encrypted rail.
 import { formatUnits } from 'ethers';
-import { ltxTokens, canonicalBundleHash, ltxInputCommitmentFor, ltxImageHash, ltxMerkleRoot, ltxProofHash, recoverLtxSigner } from '../utils/ltx-utils';
+import { ltxTokens, canonicalBundleHash, ltxInputCommitmentFor, ltxImageHash, ltxVideoHash, ltxMerkleRoot, ltxProofHash, recoverLtxSigner } from '../utils/ltx-utils';
 import { tokensToUsdc } from '../utils/transcode-utils';
 import { LtxError } from '../errors/ltx-errors';
 import type { LtxJob, LtxPriceEstimate, LtxBundle, LtxBundleMetadata, LtxSubmitOptions, LtxResult, LtxVerification } from '../types/ltx.types';
@@ -32,6 +32,7 @@ export class LtxManager {
   private readonly chainId?: number;
   private bundleCache?: LtxBundle;
   private readonly imageHashCache = new Map<string, string>(); // capability CID → keccak(plaintext), filled by uploadImages
+  private readonly videoHashCache = new Map<string, string>(); // capability CID → keccak(plaintext), filled by uploadVideos
 
   constructor(deps: LtxManagerDeps) {
     this.sessionManager = deps.sessionManager;
@@ -99,6 +100,11 @@ export class LtxManager {
     const suppliedImages = job.images?.length ?? 0;
     if (suppliedImages !== requiredImages) {
       throw new LtxError(`template ${job.templateId} requires ${requiredImages} image(s), got ${suppliedImages}`, 'LTX_PREVALIDATION_FAILED');
+    }
+    const requiredVideos = tpl.videoInputs ?? 0;
+    const suppliedVideos = job.videos?.length ?? 0;
+    if (suppliedVideos !== requiredVideos) {
+      throw new LtxError(`template ${job.templateId} requires ${requiredVideos} video(s), got ${suppliedVideos}`, 'LTX_PREVALIDATION_FAILED');
     }
     const { frames, fps, resolutions } = bundle.bounds;
     if (job.frames < frames.min || job.frames > frames.max) {
@@ -235,6 +241,52 @@ export class LtxManager {
     return { cids, hashes };
   }
 
+  /**
+   * Encrypt + upload input videos to S5 (BL3, IC-LoRA). Mirror of uploadImages: returns capability CIDs
+   * (for job.videos, order preserved) and their keccak plaintext hashes (cached for verifyAttestation).
+   * Fail-closed BEFORE any upload: the 256 KiB transport guard, the bundle's videoMaxBytes, and — when
+   * the bundle constrains formats to mp4 only — an ISO-BMFF `ftyp` sniff.
+   */
+  async uploadVideos(videos: Uint8Array[], hostMetadata?: LtxBundleMetadata): Promise<{ cids: string[]; hashes: string[] }> {
+    if (!this.storageManager) {
+      throw new LtxError('StorageManager not available for uploadVideos', 'LTX_PREVALIDATION_FAILED');
+    }
+    for (const [i, vid] of videos.entries()) {
+      if (vid.length === 0 || vid.length % 262144 === 0) {
+        throw new LtxError(`video[${i}] is ${vid.length} bytes — an exact 256 KiB multiple (or empty) cannot be encrypted; re-encode the video (±1 byte)`, 'LTX_PREVALIDATION_FAILED');
+      }
+    }
+    if (hostMetadata) {
+      const bounds = (await this.resolveBundle(hostMetadata)).bounds;
+      if (bounds.videoMaxBytes !== undefined) {
+        for (const [i, vid] of videos.entries()) {
+          if (vid.length > bounds.videoMaxBytes) {
+            throw new LtxError(`video[${i}] is ${vid.length} bytes > videoMaxBytes ${bounds.videoMaxBytes}`, 'LTX_PREVALIDATION_FAILED');
+          }
+        }
+      }
+      // Format is host-authoritative on decode; when the bundle lists only mp4, fail closed on a missing ftyp box.
+      const formats = bounds.videoFormats;
+      if (formats && formats.length === 1 && formats[0] === 'mp4') {
+        for (const [i, vid] of videos.entries()) {
+          if (!(vid.length >= 8 && vid[4] === 0x66 && vid[5] === 0x74 && vid[6] === 0x79 && vid[7] === 0x70)) {
+            throw new LtxError(`video[${i}] is not an mp4 (no ISO-BMFF 'ftyp' box at offset 4); bundle videoFormats=[${formats.join(',')}]`, 'LTX_PREVALIDATION_FAILED');
+          }
+        }
+      }
+    }
+    const cids: string[] = [];
+    const hashes: string[] = [];
+    for (const vid of videos) {
+      const cid = await this.storageManager.uploadEncryptedBlob(vid);
+      const hash = ltxVideoHash(vid);
+      this.videoHashCache.set(cid, hash);
+      cids.push(cid);
+      hashes.push(hash);
+    }
+    return { cids, hashes };
+  }
+
   /** Fetch + decrypt the PRIVATE capability CIDs (result.frames), index-aligned to manifest.frameHashes. */
   async downloadFrames(result: LtxResult): Promise<Uint8Array[]> {
     if (!this.storageManager) {
@@ -301,14 +353,18 @@ export class LtxManager {
     }
     const att = await this.storageManager.getByCID(result.proofCID);
 
-    // (1) input-binding — the live check. Image templates (M1a): re-derive imageHashes from the
-    // job's own capability CIDs (decrypt → keccak of plaintext) so verification is self-contained.
+    // (1) input-binding — the live check. Image/video templates: re-derive the plaintext hashes from the
+    // job's own capability CIDs (decrypt → keccak) so verification is self-contained. The dispatcher picks
+    // v1/v2/v3 from the supplied counts (validateJob already gated them to the template's declared counts).
     const imgs = job.images ?? [];
     const imageHashes = await Promise.all(imgs.map(async (cid) =>
       this.imageHashCache.get(cid) ?? ltxImageHash(await this.storageManager.downloadDecryptedByCID(cid))));
-    if (ltxInputCommitmentFor(job, imgs.length, imageHashes).toLowerCase() !== String(att.inputCommitment).toLowerCase()
+    const vids = job.videos ?? [];
+    const videoHashes = await Promise.all(vids.map(async (cid) =>
+      this.videoHashCache.get(cid) ?? ltxVideoHash(await this.storageManager.downloadDecryptedByCID(cid))));
+    if (ltxInputCommitmentFor(job, imgs.length, imageHashes, vids.length, videoHashes).toLowerCase() !== String(att.inputCommitment).toLowerCase()
       || String(att.templateHash).toLowerCase() !== job.templateHash.toLowerCase()) {
-      throw new LtxError('inputCommitment/templateHash does not match the submitted job (params or images)', 'LTX_INPUT_BINDING_MISMATCH');
+      throw new LtxError('inputCommitment/templateHash does not match the submitted job (params, images, or videos)', 'LTX_INPUT_BINDING_MISMATCH');
     }
 
     // (2) integrity — live when a proof exists on-chain; skips cleanly otherwise (Constraint 3)
