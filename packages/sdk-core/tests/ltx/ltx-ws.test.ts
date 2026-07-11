@@ -2,6 +2,7 @@
 // Sub-phase 4.1: submitLtxWs — send ltx_generate, dispatch ltx_accepted/progress/complete/error.
 import { describe, it, expect, vi } from 'vitest';
 import vectors from './vectors.json';
+import icloraVectors from './vectors-iclora.json';
 import { submitLtxWs } from '../../src/utils/ltx-ws';
 import { LtxError } from '../../src/errors/ltx-errors';
 
@@ -114,5 +115,64 @@ describe('submitLtxWs (SP4.1, Constraint 2)', () => {
       messageIndex: { value: 0 }, job, timeoutMs: 5000,
     } as any);
     expect('images' in JSON.parse(without.sent[0].payload.ciphertextHex)).toBe(false);
+  });
+
+  it('BL3: carries videos[] on the wire when present, omits it otherwise', async () => {
+    const withVideos = makeWs();
+    await submitLtxWs({
+      wsClient: withVideos.wsClient, encryptionManager, sessionId: 's1', sessionKey: new Uint8Array(32),
+      messageIndex: { value: 0 }, job: { ...job, videos: ['uCapV0'] }, timeoutMs: 5000,
+    } as any);
+    expect(JSON.parse(withVideos.sent[0].payload.ciphertextHex).videos).toEqual(['uCapV0']);
+
+    const without = makeWs();
+    await submitLtxWs({
+      wsClient: without.wsClient, encryptionManager, sessionId: 's1', sessionKey: new Uint8Array(32),
+      messageIndex: { value: 0 }, job, timeoutMs: 5000,
+    } as any);
+    expect('videos' in JSON.parse(without.sent[0].payload.ciphertextHex)).toBe(false);
+  });
+});
+
+// The ltx_generate builder is a field whitelist, so a field added to LtxJob but not to the
+// whitelist is dropped silently — the node then rejects on a count gate it cannot satisfy.
+// These assert the wire message field for field against a job carrying EVERY optional input.
+describe('submitLtxWs wire message (field-for-field, all optional inputs present)', () => {
+  const iclora = icloraVectors.referencePlusControl;
+  const fullJob = { ...iclora.job, images: [...iclora.images], videos: [...iclora.videos] };
+
+  async function wireOf(j: any, requestId?: string) {
+    const ws = makeWs();
+    await submitLtxWs({
+      wsClient: ws.wsClient, encryptionManager, sessionId: 's1', sessionKey: new Uint8Array(32),
+      messageIndex: { value: 0 }, job: j, requestId, timeoutMs: 5000,
+    } as any);
+    return JSON.parse(ws.sent[0].payload.ciphertextHex);
+  }
+
+  it('emits exactly the frozen ltx_generate shape — no field dropped, none extra', async () => {
+    expect(await wireOf(fullJob, 'req-full')).toEqual({
+      action: 'ltx_generate',
+      templateId: iclora.job.templateId,
+      templateHash: iclora.job.templateHash,
+      prompt: iclora.job.prompt,
+      seed: iclora.job.seed,
+      frames: iclora.job.frames,
+      fps: iclora.job.fps,
+      resolution: iclora.job.resolution,
+      lora: iclora.job.lora,
+      output: iclora.job.output,
+      images: iclora.images,
+      videos: iclora.videos,
+      requestId: 'req-full',
+    });
+  });
+
+  // Generic guard: catches the NEXT field added to LtxJob and forgotten in the whitelist.
+  it('carries every LtxJob field onto the wire (whitelist has no silent drops)', async () => {
+    const inner = await wireOf(fullJob);
+    for (const [field, value] of Object.entries(fullJob)) {
+      expect(inner, `LtxJob field "${field}" was dropped by the ltx_generate whitelist`).toHaveProperty(field, value);
+    }
   });
 });

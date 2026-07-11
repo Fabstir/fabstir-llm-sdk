@@ -38,6 +38,7 @@ export async function submitLtxWs(opts: LtxWsOptions): Promise<LtxHandle> {
     resolution: job.resolution, lora: job.lora, output: job.output,
   };
   if (job.images?.length) inner.images = job.images; // M1a: capability CIDs, order = template imageSemantics
+  if (job.videos?.length) inner.videos = job.videos; // BL3: capability CIDs, order = template videoSemantics
   if (requestId !== undefined) inner.requestId = requestId;
 
   const encrypted = encryptionManager.encryptMessage(sessionKey, JSON.stringify(inner), messageIndex.value++);
