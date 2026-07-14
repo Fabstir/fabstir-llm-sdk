@@ -5,6 +5,7 @@ import { IWalletProvider, WalletCapabilities, TransactionRequest, TransactionRes
 import { ethers } from 'ethers';
 import { ChainId } from '../types/chain.types';
 import { getBaseSepolia } from '../config/environment';
+import { loadBaseAccountSDK } from '../utils/BaseAccountIntegration';
 
 // Types for bundler operations
 interface UserOperation {
@@ -123,35 +124,28 @@ export class SmartAccountProvider implements IWalletProvider {
       throw new Error(`Smart Account Provider only supports Base Sepolia (${ChainId.BASE_SEPOLIA})`);
     }
 
+    // Optional peer dep — loadBaseAccountSDK throws the one canonical, actionable error if the
+    // consumer never installed it. Kept OUTSIDE the try below so that message reaches the caller
+    // intact rather than being re-wrapped as an opaque "Failed to connect wallet".
+    const { createBaseAccountSDK, base } = await loadBaseAccountSDK();
+
     try {
-      // Dynamic import to avoid build issues
-      const BaseAccountModule = await import('@base-org/account').catch(() => null);
+      // Initialize Base Account SDK
+      this.baseAccountSDK = createBaseAccountSDK({
+        appName: 'Fabstir SDK',
+        appChainIds: [base.constants.CHAIN_IDS.baseSepolia],
+      });
 
-      if (BaseAccountModule) {
-        const { createBaseAccountSDK, base } = BaseAccountModule;
+      this.provider = this.baseAccountSDK.getProvider();
 
-        // Initialize Base Account SDK
-        this.baseAccountSDK = createBaseAccountSDK({
-          appName: 'Fabstir SDK',
-          appChainIds: [base.constants.CHAIN_IDS.baseSepolia],
-        });
+      // Request accounts
+      const accounts = await this.provider.request({
+        method: 'eth_requestAccounts',
+        params: []
+      });
 
-        this.provider = this.baseAccountSDK.getProvider();
-
-        // Request accounts
-        const accounts = await this.provider.request({
-          method: 'eth_requestAccounts',
-          params: []
-        });
-
-        this.eoaAddress = accounts[0];
-        this.smartAccountAddress = await this.baseAccountSDK.getAddress();
-      } else {
-        // No fallback to mocks - Base Account SDK is required
-        throw new Error(
-          'Base Account SDK not available. Cannot proceed without proper smart account support. Please ensure @base-org/account is installed and available'
-        );
-      }
+      this.eoaAddress = accounts[0];
+      this.smartAccountAddress = await this.baseAccountSDK.getAddress();
 
       this.connected = true;
     } catch (error) {

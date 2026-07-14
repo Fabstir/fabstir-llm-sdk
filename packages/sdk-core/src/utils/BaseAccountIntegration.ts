@@ -6,6 +6,35 @@
  * Provides seamless wallet connection with sub-account support
  */
 
+/**
+ * `@base-org/account` is an OPTIONAL PEER DEPENDENCY of @fabstir/sdk-core.
+ *
+ * It is never bundled (esbuild marks it `--external` in every build target), so consumers who
+ * only use the EOA / private-key / MetaMask flows are not forced to install a wallet SDK they
+ * never touch. It is a PEER rather than a plain dependency because the Base Account SDK is
+ * stateful — provider, popup lifecycle, sub-account state — and two live copies in one app
+ * means duplicate popups and divergent sub-account state. That is a correctness bug, not bloat.
+ * A peer declaration says "use the app's single instance, and warn me at install time on a
+ * version mismatch".
+ *
+ * The corollary: because it is optional, EVERY call site must fail with THIS message rather
+ * than a raw MODULE_NOT_FOUND. Route all dynamic imports of it through `loadBaseAccountSDK()`.
+ */
+export const BASE_ACCOUNT_MISSING_MESSAGE =
+  'Base Account SDK not available. Smart-wallet flows require the optional peer dependency ' +
+  '@base-org/account — install it (e.g. `pnpm add @base-org/account`) to use them. ' +
+  'The EOA / private-key / MetaMask flows do not require it.';
+
+/**
+ * Load the Base Account SDK, or throw the one canonical, actionable error.
+ * The single place @base-org/account is imported — do not `import()` it directly elsewhere.
+ */
+export async function loadBaseAccountSDK(): Promise<any> {
+  const mod = await import('@base-org/account').catch(() => null);
+  if (!mod) throw new Error(BASE_ACCOUNT_MISSING_MESSAGE);
+  return mod;
+}
+
 export interface BaseAccountConfig {
   appName: string;
   appChainIds: number[];
@@ -46,9 +75,9 @@ export class BaseAccountHelper {
       throw new Error('Base Account SDK requires browser environment');
     }
 
-    // Import dynamically to avoid build issues
-    const { createBaseAccountSDK } = await import('@base-org/account');
-    
+    // Optional peer dep: degrade to the canonical actionable error, never MODULE_NOT_FOUND.
+    const { createBaseAccountSDK } = await loadBaseAccountSDK();
+
     const sdk = createBaseAccountSDK({
       appName: this.config.appName,
       appChainIds: this.config.appChainIds,
