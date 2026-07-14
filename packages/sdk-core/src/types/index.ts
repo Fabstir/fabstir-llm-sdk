@@ -142,16 +142,37 @@ export interface JobResult {
 // ============= Storage Types =============
 
 export interface StorageOptions {
+  /**
+   * Encrypt the payload at rest (XChaCha20-Poly1305, performed by FS5).
+   * DEFAULTS TO TRUE — omitting this must fail safe, not fail open.
+   * Pass `false` to deliberately publish plaintext.
+   */
   encrypt?: boolean;
+  /** NOT IMPLEMENTED — passing `true` throws rather than silently recording a lie. */
   compress?: boolean;
   metadata?: Record<string, any>;
+  /**
+   * Full S5 path to write to, e.g. `home/platformless/clips/job-42.mp4`.
+   * Omit to default into the legacy `home/conversations/<userAddress>/` namespace.
+   * Non-conversation data should always set this.
+   */
+  path?: string;
 }
 
 export interface StorageResult {
+  /**
+   * NOTE: for `store()` this is a storage KEY (`<timestamp>-<random>`), not a content
+   * address — it cannot be verified or deduplicated. For a real content-addressed CID,
+   * use `uploadEncryptedBlob()` / `downloadDecryptedByCID()`.
+   */
   cid: string;
   url: string;
   size: number;
   timestamp: number;
+  /** Resolvable S5 path the data was actually written to. */
+  path?: string;
+  /** Whether the payload was actually encrypted at rest. Reflects the real call, never a claim. */
+  encrypted?: boolean;
 }
 
 export interface ConversationData {

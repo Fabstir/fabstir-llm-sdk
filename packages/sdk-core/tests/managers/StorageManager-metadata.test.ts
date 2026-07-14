@@ -23,7 +23,7 @@ import type { ConversationData } from '../../src/types';
 import 'fake-indexeddb/auto';
 
 // Mock S5.js
-vi.mock('@s5-dev/s5js', () => ({
+vi.mock('@julesl23/s5js', () => ({
   S5: {
     create: vi.fn().mockResolvedValue({
       recoverIdentityFromSeedPhrase: vi.fn().mockResolvedValue(undefined),

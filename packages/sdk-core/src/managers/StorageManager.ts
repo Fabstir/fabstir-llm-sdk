@@ -461,12 +461,26 @@ export class StorageManager implements IStorageManager {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
 
+    // `compress` was never implemented — it only ever recorded `compressed: true` in the
+    // metadata and uploaded the data uncompressed. Fail fast rather than keep the lie.
+    if (options?.compress) {
+      throw new SDKError(
+        'StorageOptions.compress is not implemented; it would record compressed:true without compressing.',
+        'STORAGE_COMPRESS_UNSUPPORTED'
+      );
+    }
+
     try {
       // Generate unique key based on timestamp
       const timestamp = Date.now();
       const random = Math.random().toString(36).substring(7);
       const key = `${timestamp}-${random}`;
-      const path = `${StorageManager.CONVERSATION_PATH}/${this.userAddress}/${key}.json`;
+      const path =
+        options?.path ?? `${StorageManager.CONVERSATION_PATH}/${this.userAddress}/${key}.json`;
+
+      // Encryption is ON unless the caller explicitly opts out. Forgetting the flag must fail
+      // safe (encrypted) rather than fail open (plaintext on a public network).
+      const encrypt = options?.encrypt !== false;
 
       // Prepare data with metadata
       const storageData = {
@@ -474,25 +488,32 @@ export class StorageManager implements IStorageManager {
         metadata: {
           ...options?.metadata,
           timestamp,
-          compressed: options?.compress || false,
-          encrypted: options?.encrypt || false
+          compressed: false,
+          // Derived from the SAME value handed to fs.put below, so it cannot drift from reality.
+          encrypted: encrypt
         }
       };
 
+      // FS5.put encrypts (XChaCha20-Poly1305) only when handed `options.encryption`; with no
+      // options it takes the uploadBlobWithoutEncryption branch. Passing this through IS the fix.
+      const putOptions = encrypt ? { encryption: {} } : undefined;
+
       // Store to S5 with performance tracking
       const startTime = performance.now();
-      console.log(`[Enhanced S5.js] PUT ${path}`);
-      await this.s5Client.fs.put(path, storageData);
+      console.log(`[Enhanced S5.js] PUT ${path} ${encrypt ? '(encrypted)' : '(PLAINTEXT — encrypt:false)'}`);
+      await this.s5Client.fs.put(path, storageData, putOptions);
       const duration = Math.round(performance.now() - startTime);
       console.log(`[Enhanced S5.js] Operation: Store data - Time: ${duration}ms`);
 
       // Return immediately using generated key (no getMetadata to avoid race condition)
-      // Note: If S5 CID is needed later, fetch it separately with retry logic
+      // NOTE: `cid` is a storage key, NOT a content address — see StorageResult.
       return {
         cid: key,
         url: `s5://${key}`,
         size: JSON.stringify(storageData).length,
-        timestamp
+        timestamp,
+        path,
+        encrypted: encrypt
       };
     } catch (error: any) {
       throw new SDKError(
