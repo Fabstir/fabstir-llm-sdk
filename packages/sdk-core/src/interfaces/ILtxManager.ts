@@ -38,6 +38,9 @@ export interface ILtxManager {
   /** Discover the host's CURRENT LTX bundle metadata from on-chain NodeRegistry (drift self-heal). */
   getLtxBundleMetadata(hostAddress: string): Promise<LtxBundleMetadata>;
 
+  /** The authenticated bundle CONTENTS (templates + input counts/semantics + bounds) — drives a client form. */
+  getLtxBundle(hostMetadata: LtxBundleMetadata): Promise<LtxBundle>;
+
   /** Verify provenance (input-binding live; integrity live when a proof exists on-chain; signature/merkle advisory). */
   verifyAttestation(job: LtxJob, result: LtxResult, options?: { sessionId?: bigint; proofIndex?: number }): Promise<LtxVerification>;
 

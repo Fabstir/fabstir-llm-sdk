@@ -343,6 +343,20 @@ export class LtxManager {
   }
 
   /**
+   * The host's CURRENT allow-list bundle, authenticated to the advertised bundleHash — the templates
+   * (with each one's imageInputs/videoInputs and their pinned semantic order) and the frames/fps/
+   * resolution bounds. This is what a client form is built from: getLtxBundleMetadata returns only the
+   * {version, hash, CID} pointer, and validateJob needs a job the caller cannot construct until it knows
+   * these values. Feed the metadata from getLtxBundleMetadata straight in.
+   */
+  async getLtxBundle(hostMetadata: LtxBundleMetadata): Promise<LtxBundle> {
+    if (!this.storageManager) {
+      throw new LtxError('StorageManager not available for getLtxBundle', 'LTX_PREVALIDATION_FAILED');
+    }
+    return this.resolveBundle(hostMetadata);
+  }
+
+  /**
    * Verify M0 provenance. Input-binding is the LIVE check (throws LTX_INPUT_BINDING_MISMATCH);
    * integrity is inert until on-chain proof lands (Constraint 3); signature optional (Constraint 4);
    * merkle advisory. Pass options.sessionId to exercise the (inert) on-chain integrity compare.
