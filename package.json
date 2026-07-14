@@ -35,7 +35,7 @@
     "base"
   ],
   "author": "Fabstir",
-  "license": "MIT",
+  "license": "BUSL-1.1",
   "dependencies": {
     "@base-org/account": "^2.3.1",
     "@chainsafe/libp2p-noise": "^16.0.0",

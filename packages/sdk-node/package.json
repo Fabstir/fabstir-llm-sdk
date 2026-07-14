@@ -43,7 +43,7 @@
   },
   "dependencies": {
     "@fabstir/sdk-core": "file:../sdk-core",
-    "@julesl23/s5js": "file:../sdk-core/julesl23-s5js-0.9.0-beta.33.tgz",
+    "@julesl23/s5js": "0.9.0-beta.47",
     "libp2p": "^1.0.0",
     "@libp2p/tcp": "^9.0.0",
     "@libp2p/websockets": "^8.0.0",
@@ -91,7 +91,7 @@
     "ezkl"
   ],
   "author": "Fabstir",
-  "license": "MIT",
+  "license": "BUSL-1.1",
   "publishConfig": {
     "access": "public"
   }
