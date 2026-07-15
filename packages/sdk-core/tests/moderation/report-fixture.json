@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "contentId": "c451f3a91d5afa1b1db1c9dcd2646df38ed32e21b10bb18c93cf1285e6a7ebb1",
+  "bundleHash": "sha256:ec1b85cf0e2ad12d6a7c3dccd93d164b93df9154aae7b2ba99f9f82ec1129fdf",
+  "bundleVersion": 1,
+  "samplerVersion": 1,
+  "verdict": "PASS_RATED",
+  "rating": "18",
+  "descriptors": ["sex"],
+  "category": null,
+  "stats": { "framesSampled": 7212, "maxScore": 0.91, "escalated": 38 },
+  "scoreFileCid": null,
+  "scoreDigest": null,
+  "hashMatchModule": null,
+  "hostAddress": null,
+  "signature": null
+}

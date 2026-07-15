@@ -164,6 +164,12 @@ export { analyzePromptForImageIntent, type ImageIntentResult } from './utils/ima
 // guard, so granular-path clients (submitLtx) can replicate it byte-for-byte instead of re-deriving.
 export { ltxTokens } from './utils/ltx-utils';
 
+// Moderation publish gate (M3 — ships dark behind moderationGate: false).
+// ⚠️ NOT a security control until M5 signing: reports are unsigned (D6), so
+// this is a plain verdict check. See src/moderation/gate.ts and README.
+// (Types come via `export * from './types'` → src/types/moderation.types.ts.)
+export * from './moderation';
+
 // Export wallet providers
 export { EOAProvider } from './providers/EOAProvider';
 export { SmartAccountProvider } from './providers/SmartAccountProvider';

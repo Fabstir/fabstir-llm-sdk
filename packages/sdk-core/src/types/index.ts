@@ -593,3 +593,8 @@ export * from './transcode.types';
 // ============= LTX Video Sidecar Types (M0) =============
 
 export * from './ltx.types';
+
+// ============= Moderation Publish Gate Types (M3 — ships dark) =============
+// ⚠️ NOT a security control until M5 signing — see src/moderation/gate.ts.
+
+export * from './moderation.types';
