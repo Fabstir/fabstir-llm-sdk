@@ -10,6 +10,7 @@ import { SessionConfig, SessionJob, CheckpointProof, RecoveredConversation, Chec
 import type { SearchApiResponse } from '../types/web-search.types';
 import type { BlockchainRecoveredConversation } from '../utils/checkpoint-blockchain';
 import type { ImageGenerationOptions, ImageGenerationResult } from '../types/image-generation.types';
+import type { SessionAuthorisation, DelegatedSessionConfig } from '../managers/SessionManager';
 
 export interface ISessionManager {
   /**
@@ -232,4 +233,30 @@ export interface ISessionManager {
     jobId: bigint,
     options?: CheckpointQueryOptions
   ): Promise<BlockchainRecoveredConversation>;
+
+  // =============================================================================
+  // FC1.6 Session-Auth Handshake
+  // =============================================================================
+
+  /**
+   * Register a session created externally (e.g. via a vault/delegated flow).
+   *
+   * FC1.6 opt-in: pass `authorisation` (+ required `nodeHttpUrl`) to POST the
+   * session-auth object to the node before any local state is written. When an
+   * EncryptionManager is set, `authorisation.clientAddress` is cross-checked
+   * against `getWsClientAddress()` first; a mismatch throws before the POST.
+   */
+  registerDelegatedSession(config: DelegatedSessionConfig): Promise<void>;
+
+  /**
+   * Deliver the FC1.6 session-auth authorisation to the node's
+   * `<nodeHttpUrl>/v1/session-auth` gate. Returns `{ delivered }` — true on 200,
+   * false on a tolerated 404 (pre-FC1.6 node). Throws on 401 (backend-auth key
+   * mismatch), a bad URL / sessionId, an unreachable node, or any other status.
+   */
+  postSessionAuth(
+    nodeHttpUrl: string,
+    sessionId: bigint | string,
+    authorisation: SessionAuthorisation
+  ): Promise<{ delivered: boolean }>;
 }
