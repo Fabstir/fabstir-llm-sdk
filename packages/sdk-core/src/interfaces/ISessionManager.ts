@@ -10,7 +10,7 @@ import { SessionConfig, SessionJob, CheckpointProof, RecoveredConversation, Chec
 import type { SearchApiResponse } from '../types/web-search.types';
 import type { BlockchainRecoveredConversation } from '../utils/checkpoint-blockchain';
 import type { ImageGenerationOptions, ImageGenerationResult } from '../types/image-generation.types';
-import type { SessionAuthorisation, DelegatedSessionConfig } from '../managers/SessionManager';
+import type { SessionAuthorisation, DelegatedSessionConfig, ExternalSessionConfig } from '../managers/SessionManager';
 
 export interface ISessionManager {
   /**
@@ -259,4 +259,11 @@ export interface ISessionManager {
     sessionId: bigint | string,
     authorisation: SessionAuthorisation
   ): Promise<{ delivered: boolean }>;
+
+  /**
+   * Seed the in-memory registry with a session created outside the SDK (vault /
+   * fiat flow) so the WS submit paths can run against it. No S5 write, no
+   * network call. Re-registration overwrites.
+   */
+  registerExternalSession(config: ExternalSessionConfig): void;
 }

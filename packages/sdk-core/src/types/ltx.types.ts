@@ -89,8 +89,19 @@ export interface LtxSubmitOptions {
   onProgress?: (progress: LtxProgress) => void;
   timeoutMs?: number;
   chainId?: number;
-  /** Node endpoint (http(s):// or ws(s)://). Stored on the session; submitLtx derives the WS URL from it. */
+  /**
+   * Node endpoint. Stored on the session; submitLtx derives the WS URL from it — an http(s)://
+   * base gets '/v1/ws' appended, a ws(s):// value is used verbatim. Prefer the http(s) base;
+   * with `existingSession` it is REQUIRED and the ws(s) form is rejected (see below).
+   */
   endpoint?: string;
+  /**
+   * Vault/delegated path: run generate() against a session that already exists — no escrow,
+   * no wallet touch, no session creation. `endpoint` is REQUIRED alongside it and must be the
+   * http(s):// base (the same `nodeHttpUrl` used for postSessionAuth; ws(s):// is rejected).
+   * The caller must have delivered FC1.6 session-auth for this sessionId first.
+   */
+  existingSession?: { sessionId: bigint; jobId: bigint };
 }
 
 /** Cost estimate for an LTX job (USDC). */

@@ -2340,6 +2340,56 @@ const result = await ltx.generate(job, hostAddress, hostMetadata, {
 // tokens × price × 90%, the remainder of the deposit refunds.
 ```
 
+### Generate against an existing (vault / card-paid) session — 1.36.0
+
+When a fiat service has already minted the session against vault deposits (`POST /fiat/session`)
+and the caller has already delivered the FC1.6 handshake with `postSessionAuth`, pass the ids to
+`generate()` and it skips session creation entirely — **no escrow, no wallet touch, no signature**.
+
+```typescript
+const result = await ltx.generate(job, hostAddress, hostMetadata, {
+  existingSession: { sessionId, jobId },   // bigints, from POST /fiat/session
+  endpoint: 'https://host1.fabstir.net',   // REQUIRED — the http(s) BASE, not a ws(s):// URL
+  chainId: 84532,
+  onProgress: ({ stage, pct }) => {},
+});
+```
+
+⚠️ **`endpoint` means something different here.** On the escrow path it is the node's WS URL and
+`ws(s)://` is accepted verbatim. With `existingSession` it must be the **http(s) base — the same
+`nodeHttpUrl` you passed to `postSessionAuth`** — so the URL that authorised is by construction the
+URL that connects. The SDK derives `https://host1.fabstir.net` → `wss://host1.fabstir.net/v1/ws`,
+and normalises trailing slashes and scheme case so one string works for both calls. A `ws(s)://`
+value is **rejected** (`LTX_PREVALIDATION_FAILED`) rather than silently mistargeted — including a
+`ws://` substring anywhere in the URL, which the WS derivation would treat as "already a WS URL".
+Consequence: a card-paid clip cannot currently be routed through a `ws(s)://` CORS proxy.
+
+Flow: three guards (SessionManager present · endpoint present and http(s)-form · resolvable
+chainId) → `validateJob` → in-memory registry seeding → the identical submit / tripwire /
+enrichment block as the escrow path. `validateJob` is deliberately kept: vault funds are already
+locked, so a doomed job would waste them and spin a settlement-refund cycle.
+
+Every failure on this path carries the ids for the **service-side** reclaim relay — the SDK never
+self-reclaims, because in vault mode the depositor is the service's vault:
+
+```typescript
+catch (err) {           // LtxError
+  err.code;             // LTX_PREVALIDATION_FAILED | LTX_BUNDLE_STALE | GENERATION_FAILED | TIMEOUT …
+  err.details;          // { sessionId, jobId, cause? } — relay these to your service
+}
+```
+
+Related surface: `sessionManager.registerExternalSession({ sessionId, jobId, endpoint,
+hostAddress, model, chainId })` seeds the registry directly (in-memory only — no S5 write, no
+network) if you need the submit paths without `generate()`. Re-registration overwrites, replacing
+any existing entry under that id.
+
+**Breaking (1.36.0):** `submitLtx` and `submitTranscode` no longer fall back to
+`http://localhost:8080` when a session has no `endpoint` — they throw
+`SDKError('…', 'SESSION_ENDPOINT_MISSING')` before opening a socket. `registerExternalSession` is
+also a new **required** member of `ISessionManager`, so external implementors of that interface
+must add it.
+
 ### Fetch + Decrypt the Clip
 
 ```typescript
