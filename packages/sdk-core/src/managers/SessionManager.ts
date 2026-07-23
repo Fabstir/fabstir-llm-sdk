@@ -191,8 +191,10 @@ export interface SessionAuthorisation {
 
 /**
  * Config for {@link SessionManager.registerDelegatedSession} — a session created
- * externally (e.g. via a vault/delegated flow) that the SDK adopts. The optional
- * `authorisation` + `nodeHttpUrl` pair opts into FC1.6 session-auth delivery.
+ * externally (e.g. via a vault/delegated flow) that the SDK adopts, WITH S5 chat
+ * persistence. The optional `authorisation` + `nodeHttpUrl` pair opts into FC1.6
+ * session-auth delivery. For registry seeding alone (no S5 write, no network —
+ * what the LTX vault path needs) use {@link ExternalSessionConfig} instead.
  */
 export interface DelegatedSessionConfig {
   sessionId: bigint;
@@ -210,6 +212,23 @@ export interface DelegatedSessionConfig {
   authorisation?: SessionAuthorisation;
   /** FC1.6: node http(s) base URL — REQUIRED when `authorisation` is present. */
   nodeHttpUrl?: string;
+}
+
+/**
+ * Config for {@link SessionManager.registerExternalSession} — the minimum a WS
+ * submit path needs about a session the SDK did not create. These six fields are
+ * exactly what `submitLtx`/`submitTranscode` read off the registry entry.
+ * `endpoint` must be the node's http(s) base (see `LtxSubmitOptions.existingSession`).
+ */
+export interface ExternalSessionConfig {
+  sessionId: bigint;
+  jobId: bigint;
+  /** Node http(s) base URL — the WS URL is derived from it at submit time. */
+  endpoint: string;
+  /** Host operator address (the session's `provider`). */
+  hostAddress: string;
+  model: string;
+  chainId: number;
 }
 
 export class SessionManager implements ISessionManager {
@@ -582,6 +601,40 @@ export class SessionManager implements ISessionManager {
    */
   getSession(sessionId: string): SessionState | undefined {
     return this.sessions.get(sessionId);
+  }
+
+  /**
+   * Register a session created OUTSIDE the SDK (vault / fiat flow: the service's
+   * `POST /fiat/session` mints sessionId+jobId against vault deposits) in the
+   * in-memory registry, so the WS submit paths (`submitLtx`, `submitTranscode`)
+   * get past their `sessions.get(sessionId)` guard.
+   *
+   * In-memory ONLY — no S5 persistence and no network call, unlike
+   * `registerDelegatedSession` (which also writes a chat-shaped conversation and
+   * carries the FC1.6 delivery opt-in).
+   *
+   * Re-registration overwrites (plain `Map.set`), which makes re-seeding the same
+   * session idempotent — but note it REPLACES any existing entry under that id,
+   * discarding its `prompts`/`responses`/`checkpoints`/`totalTokens`. Session ids
+   * come from a per-chain on-chain counter, so a collision means either a genuine
+   * re-seed or two chains sharing an id.
+   */
+  registerExternalSession(config: ExternalSessionConfig): void {
+    this.sessions.set(config.sessionId.toString(), {
+      sessionId: config.sessionId,
+      jobId: config.jobId,
+      chainId: config.chainId,
+      model: config.model,
+      provider: config.hostAddress,
+      endpoint: config.endpoint,
+      status: 'active',
+      prompts: [],
+      responses: [],
+      checkpoints: [],
+      totalTokens: 0,
+      startTime: Date.now(),
+      encryption: true,
+    });
   }
 
   /**
@@ -3893,7 +3946,10 @@ export class SessionManager implements ISessionManager {
     if (session.status !== 'active') throw new SDKError('Session is not active', 'SESSION_NOT_ACTIVE');
     if (!this.encryptionManager) throw new SDKError('EncryptionManager not available', 'ENCRYPTION_NOT_AVAILABLE');
 
-    const endpoint = session.endpoint || 'http://localhost:8080';
+    // No fallback: a session with no endpoint is a bug, and silently substituting localhost
+    // would send a paid job to the developer's own machine instead of the host.
+    const endpoint = session.endpoint;
+    if (!endpoint) throw new SDKError(`Session ${sessionId} has no endpoint`, 'SESSION_ENDPOINT_MISSING');
     const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
       ? endpoint : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
 
@@ -3914,7 +3970,7 @@ export class SessionManager implements ISessionManager {
       this.messageIndex = 0;
       await this.sendEncryptedInit(wsClient, {
         chainId: session.chainId, host: session.provider, modelId: session.model,
-        endpoint: session.endpoint, paymentMethod: 'deposit', encryption: true,
+        endpoint, paymentMethod: 'deposit', encryption: true,
       } as ExtendedSessionConfig, session.sessionId, session.jobId);
       localSessionKey = this.sessionKey;
       localMessageIndex = this.messageIndex;
@@ -3959,8 +4015,10 @@ export class SessionManager implements ISessionManager {
     if (session.status !== 'active') throw new SDKError('Session is not active', 'SESSION_NOT_ACTIVE');
     if (!this.encryptionManager) throw new SDKError('EncryptionManager not available', 'ENCRYPTION_NOT_AVAILABLE');
 
-    // Each transcode gets its own WebSocket + session key so concurrent jobs don't clobber each other
-    const endpoint = session.endpoint || 'http://localhost:8080';
+    // Each transcode gets its own WebSocket + session key so concurrent jobs don't clobber each other.
+    // No fallback (see submitLtx): a missing endpoint must fail, not silently target localhost.
+    const endpoint = session.endpoint;
+    if (!endpoint) throw new SDKError(`Session ${sessionId} has no endpoint`, 'SESSION_ENDPOINT_MISSING');
     const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
       ? endpoint : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
 
@@ -3986,7 +4044,7 @@ export class SessionManager implements ISessionManager {
 
       await this.sendEncryptedInit(wsClient, {
         chainId: session.chainId, host: session.provider, modelId: session.model,
-        endpoint: session.endpoint, paymentMethod: 'deposit', encryption: true,
+        endpoint, paymentMethod: 'deposit', encryption: true,
       } as ExtendedSessionConfig, session.sessionId, session.jobId);
 
       localSessionKey = this.sessionKey;

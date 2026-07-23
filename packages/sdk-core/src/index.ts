@@ -33,7 +33,7 @@ export type { S5ConnectionStatus, SyncStatus } from './managers/StorageManager';
 export { SessionManager } from './managers/SessionManager';
 // FC1.6 session-auth: consumers import these to type the /fiat/session response
 // they pass straight through to registerDelegatedSession / postSessionAuth.
-export type { SessionAuthorisation, DelegatedSessionConfig } from './managers/SessionManager';
+export type { SessionAuthorisation, DelegatedSessionConfig, ExternalSessionConfig } from './managers/SessionManager';
 export { LtxManager } from './managers/LtxManager';
 export {
   HostManager,
@@ -167,6 +167,12 @@ export { analyzePromptForImageIntent, type ImageIntentResult } from './utils/ima
 // guard, so granular-path clients (submitLtx) can replicate it byte-for-byte instead of re-deriving.
 export { ltxTokens } from './utils/ltx-utils';
 
+// The two LTX types a caller constructs (LtxJob) and passes (LtxSubmitOptions — incl. the
+// `existingSession` vault path), named explicitly as a contract pin. Both already reach the
+// entry via `export * from './types'` → `types/ltx.types`; this states the intent so a barrel
+// refactor can't silently drop them. Every other LTX type still arrives through that chain.
+export type { LtxJob, LtxSubmitOptions } from './types/ltx.types';
+
 // Export wallet providers
 export { EOAProvider } from './providers/EOAProvider';
 export { SmartAccountProvider } from './providers/SmartAccountProvider';
@@ -198,5 +204,5 @@ export type { BundlerSendUserOpConfig, UnpackedUserOpV07 } from './wallet';
 export { WebSocketClient } from './websocket/WebSocketClient';
 
 // Version
-export const VERSION = '1.35.0';
+export const VERSION = '1.36.0';
 export const SDK_TYPE = 'browser';

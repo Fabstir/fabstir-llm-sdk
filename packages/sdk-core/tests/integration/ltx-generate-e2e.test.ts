@@ -88,7 +88,7 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
 
     const stages: string[] = [];
     const result = await ltx.generate(job, LTX_HOST!, hostMetadata, {
-      endpoint: NODE_WS, // the node's WS URL — without this, submitLtx falls back to localhost
+      endpoint: NODE_WS, // the node's WS URL — REQUIRED; without it submitLtx throws SESSION_ENDPOINT_MISSING
       onProgress: (p) => stages.push(p.stage),
       timeoutMs: Number(process.env.LTX_TIMEOUT_MS || 600000), // HD renders can exceed the 600s default
     });

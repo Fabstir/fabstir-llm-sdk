@@ -161,6 +161,71 @@ export class LtxManager {
     });
   }
 
+  /**
+   * Vault path: adopt a session created OUTSIDE the SDK (the fiat service minted it against
+   * vault deposits) instead of creating one — no estimate, no deposit, no `startSession`, no
+   * wallet touch. Guards run BEFORE any network activity; the job is still validated (funds
+   * are already locked, so a doomed job would waste vault money and spin a settlement-refund
+   * cycle); then the in-memory registry is seeded so `submitLtx`'s `sessions.get` guard passes.
+   */
+  private async adoptExistingSession(
+    job: LtxJob, hostAddress: string, hostMetadata: LtxBundleMetadata,
+    existing: { sessionId: bigint; jobId: bigint }, options: LtxSubmitOptions,
+  ): Promise<{ sessionId: bigint; jobId: bigint }> {
+    // The vault was debited BEFORE generate() was called, so unlike the pre-escrow path every
+    // failure here must carry {sessionId, jobId} — that is what the UI relays to the service
+    // for reclaim. `existing` is exactly that shape.
+    if (!this.sessionManager) {
+      throw new LtxError('SessionManager not available for the existingSession path', 'LTX_PREVALIDATION_FAILED', existing);
+    }
+    if (typeof this.sessionManager.registerExternalSession !== 'function') {
+      throw new LtxError(
+        'SessionManager does not implement registerExternalSession — the existingSession path needs a newer @fabstir/sdk-core',
+        'LTX_PREVALIDATION_FAILED', existing,
+      );
+    }
+    // Q8: ONE nodeHttpUrl must serve both postSessionAuth and this call. postSessionAuth strips
+    // trailing slashes and matches the scheme case-INsensitively; submitLtx's WS derivation does
+    // neither ('…/' → '…//v1/ws', 'HTTPS://' → unconverted). Normalise to the form the derivation
+    // accepts — scheme only, since URL paths are case-sensitive.
+    const endpoint = options.endpoint
+      ?.replace(/\/+$/, '')
+      .replace(/^(https?):\/\//i, (_m, scheme) => `${scheme.toLowerCase()}://`);
+    // http(s) base ONLY, and only in a form submitLtx's derivation can actually convert: it is
+    // case-SENSITIVE and treats a 'ws://' substring ANYWHERE as "already a WS URL", passing it
+    // through verbatim. Anything else would silently mistarget, so reject it before the network.
+    if (!endpoint || !/^https?:\/\//.test(endpoint) || endpoint.includes('ws://') || endpoint.includes('wss://')) {
+      throw new LtxError(
+        `existingSession requires a plain http(s):// node endpoint, got: ${options.endpoint}`,
+        'LTX_PREVALIDATION_FAILED', existing,
+      );
+    }
+    const chainId = options.chainId ?? this.chainId;
+    if (chainId === undefined) {
+      throw new LtxError(
+        'existingSession requires a chainId (options.chainId or the SDK default)',
+        'LTX_PREVALIDATION_FAILED', existing,
+      );
+    }
+    try {
+      await this.validateJob(job, hostMetadata);
+    } catch (err: any) {
+      // Preserve the precise code (LTX_PREVALIDATION_FAILED / LTX_BUNDLE_STALE) but add the ids.
+      // `cause` is kept because this also catches transport failures from the S5 bundle read —
+      // those are NOT "your job is invalid", and the distinction is only recoverable from cause.
+      throw new LtxError(
+        err?.message ?? 'LTX pre-validation failed',
+        err instanceof LtxError ? err.code : 'LTX_PREVALIDATION_FAILED',
+        { ...existing, cause: err },
+      );
+    }
+    this.sessionManager.registerExternalSession({
+      sessionId: existing.sessionId, jobId: existing.jobId, endpoint,
+      hostAddress, model: this.ltxModelId, chainId,
+    });
+    return existing;
+  }
+
   /** Reclaim a reserved deposit after proof timeout (GENERATION_FAILED/TIMEOUT) — Constraint 8. */
   async triggerSessionTimeout(jobId: number): Promise<any> {
     if (!this.paymentManager) {
@@ -172,11 +237,16 @@ export class LtxManager {
   /**
    * Full orchestration: validate (pre-escrow) → estimate → session → submit → await ltx_complete.
    * Post-escrow tripwires: allowListVersion drift (LTX_BUNDLE_STALE) and billing over-claim (GENERATION_FAILED).
+   *
+   * With `options.existingSession` the session is adopted rather than created (vault/card-paid
+   * path — no escrow, no wallet touch); everything from the submit onwards is identical.
    */
   async generate(
     job: LtxJob, hostAddress: string, hostMetadata: LtxBundleMetadata, options?: LtxSubmitOptions,
   ): Promise<LtxResult> {
-    const { sessionId, jobId } = await this.createLtxSession(job, hostAddress, hostMetadata, options);
+    const { sessionId, jobId } = options?.existingSession
+      ? await this.adoptExistingSession(job, hostAddress, hostMetadata, options.existingSession, options)
+      : await this.createLtxSession(job, hostAddress, hostMetadata, options);
     try { // post-escrow: re-throw ANY failure with {sessionId, jobId} so the caller can triggerSessionTimeout(jobId) to reclaim
       const handle = await this.sessionManager.submitLtx(String(sessionId), job, options);
       const result: LtxResult = await handle.result;
