@@ -183,6 +183,17 @@ export interface IEncryptionManager {
   getPublicKey(): string;
 
   /**
+   * Get the WebSocket client address for the FC1.6 session-auth handshake.
+   *
+   * The EOA the node recovers from the signature on `encrypted_session_init`
+   * (the encryption-key address, NOT the wallet address). Read this before
+   * `POST /fiat/session` so the same address is used everywhere the node checks.
+   *
+   * @returns EIP-55 checksummed EVM address
+   */
+  getWsClientAddress(): string;
+
+  /**
    * Get client's stable recovery public key for checkpoint encryption.
    *
    * The host uses this key to encrypt checkpoint deltas so only the user

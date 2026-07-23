@@ -173,6 +173,45 @@ export interface ExtendedSessionConfig extends SessionConfig {
   webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 2.2)
 }
 
+/**
+ * FC1.6 session-auth authorisation object, as returned verbatim by the fiat
+ * service's `POST /fiat/session`. The SDK only relays it to the node — it never
+ * computes or signs the `FC1-SESSION-AUTH:` digest (that is the fiat service's
+ * backend-auth key's job). Shape is LOCKED to the /fiat/session wire response so
+ * consumers pass it straight through with no mapping.
+ */
+export interface SessionAuthorisation {
+  /** Scheme identifier, e.g. 'fc1-session-auth-v1'. */
+  scheme: string;
+  /** 0x-prefixed 65-byte recoverable secp256k1 signature (r||s||v). */
+  signature: string;
+  /** The burner address the WebSocket will connect with (lowercased). */
+  clientAddress: string;
+}
+
+/**
+ * Config for {@link SessionManager.registerDelegatedSession} — a session created
+ * externally (e.g. via a vault/delegated flow) that the SDK adopts. The optional
+ * `authorisation` + `nodeHttpUrl` pair opts into FC1.6 session-auth delivery.
+ */
+export interface DelegatedSessionConfig {
+  sessionId: bigint;
+  jobId: bigint;
+  hostUrl: string;
+  hostAddress: string;
+  model: string;
+  chainId: number;
+  depositAmount: string;
+  pricePerToken: number;
+  proofInterval: number;
+  duration: number;
+  ragConfig?: RAGSessionConfig;
+  /** FC1.6: the `{ scheme, signature, clientAddress }` from /fiat/session. */
+  authorisation?: SessionAuthorisation;
+  /** FC1.6: node http(s) base URL — REQUIRED when `authorisation` is present. */
+  nodeHttpUrl?: string;
+}
+
 export class SessionManager implements ISessionManager {
   private paymentManager: PaymentManager;
   private storageManager: StorageManager;
@@ -546,24 +585,123 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * FC1.6 session-auth delivery — POST the fiat service's authorisation object to
+   * the node's `<nodeHttpUrl>/v1/session-auth` gate so the node will serve the
+   * WebSocket to the authorised clientAddress.
+   *
+   * The SDK relays the authorisation verbatim; it never signs or validates the
+   * `scheme`/`signature` contents (the node is the authority). Status handling:
+   * 200 → delivered; 404 → tolerated (pre-FC1.6 node) as `{delivered:false}`;
+   * 401 → throw (backend-auth key mismatch); 400/5xx/other → throw.
+   *
+   * @param nodeHttpUrl - The node's http(s) base URL (explicit; no wss→https derivation)
+   * @param sessionId - Session id; a string must be decimal (validated client-side)
+   * @param authorisation - The `{ scheme, signature, clientAddress }` from /fiat/session
+   * @returns `{ delivered }` — true on 200, false on a tolerated 404
+   * @throws SDKError SESSION_AUTH_BAD_URL / SESSION_AUTH_BAD_SESSION_ID / SESSION_AUTH_UNREACHABLE / SESSION_AUTH_REJECTED / SESSION_AUTH_FAILED
+   */
+  async postSessionAuth(
+    nodeHttpUrl: string,
+    sessionId: bigint | string,
+    authorisation: SessionAuthorisation
+  ): Promise<{ delivered: boolean }> {
+    if (!/^https?:\/\//i.test(nodeHttpUrl)) {
+      throw new SDKError(
+        `Invalid nodeHttpUrl for session-auth (must be http(s)): ${nodeHttpUrl}`,
+        'SESSION_AUTH_BAD_URL'
+      );
+    }
+
+    // Normalise to a decimal string and validate uniformly — a negative bigint
+    // (-5n → "-5") is rejected here, same as a non-decimal string, so the
+    // fail-fast guard the node relies on is symmetric across both input types.
+    const sessionIdStr = typeof sessionId === 'bigint' ? sessionId.toString() : sessionId;
+    if (!/^\d+$/.test(sessionIdStr)) {
+      throw new SDKError(
+        `session-auth sessionId must be a non-negative decimal, got: ${String(sessionId)}`,
+        'SESSION_AUTH_BAD_SESSION_ID'
+      );
+    }
+
+    const url = `${nodeHttpUrl.replace(/\/+$/, '')}/v1/session-auth`;
+    const body = JSON.stringify({
+      sessionId: sessionIdStr,
+      clientAddress: authorisation.clientAddress,
+      scheme: authorisation.scheme,
+      signature: authorisation.signature,
+    });
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+    } catch (cause) {
+      throw new SDKError(
+        `session-auth POST to ${url} failed — node unreachable`,
+        'SESSION_AUTH_UNREACHABLE',
+        { cause }
+      );
+    }
+
+    if (response.status === 200) return { delivered: true };
+    if (response.status === 404) return { delivered: false }; // tolerated: pre-FC1.6 node
+    if (response.status === 401) {
+      throw new SDKError(
+        'session-auth rejected (401): signature did not recover to the node\'s configured backend-auth key',
+        'SESSION_AUTH_REJECTED'
+      );
+    }
+    throw new SDKError(
+      `session-auth POST to ${url} returned unexpected status ${response.status}`,
+      'SESSION_AUTH_FAILED',
+      { status: response.status }
+    );
+  }
+
+  /**
    * Register a session that was created externally (e.g., via delegated session creation).
    * This allows the SDK to track and use sessions created outside the normal startSession flow.
+   *
+   * FC1.6 opt-in: pass `authorisation` (+ required `nodeHttpUrl`) to deliver the
+   * session-auth object to the node BEFORE any local state is written. When an
+   * EncryptionManager is set, `authorisation.clientAddress` is cross-checked
+   * (case-insensitive) against `getWsClientAddress()` first; a mismatch throws
+   * before the POST. On 401 the session is NOT registered.
    */
-  async registerDelegatedSession(config: {
-    sessionId: bigint;
-    jobId: bigint;
-    hostUrl: string;
-    hostAddress: string;
-    model: string;
-    chainId: number;
-    depositAmount: string;
-    pricePerToken: number;
-    proofInterval: number;
-    duration: number;
-    ragConfig?: RAGSessionConfig;
-  }): Promise<void> {
+  async registerDelegatedSession(config: DelegatedSessionConfig): Promise<void> {
     const sessionId = config.sessionId;
     const sessionIdStr = sessionId.toString();
+
+    // FC1.6 session-auth: deliver the authorisation to the node before any local
+    // state is written (D5). This awaits the POST and throws on 401 so a rejected
+    // session is never registered.
+    if (config.authorisation) {
+      if (!config.nodeHttpUrl) {
+        throw new SDKError(
+          'registerDelegatedSession: nodeHttpUrl is required when authorisation is provided',
+          'SESSION_AUTH_BAD_URL'
+        );
+      }
+
+      // Q6 cross-check: the authorised clientAddress must equal the address the
+      // node will recover on the WS. Compare case-insensitively; surface BOTH
+      // addresses (lowercased) — they are public identifiers a debugger needs first.
+      if (this.encryptionManager) {
+        const expected = this.encryptionManager.getWsClientAddress().toLowerCase();
+        const received = config.authorisation.clientAddress.toLowerCase();
+        if (expected !== received) {
+          throw new SDKError(
+            `session-auth clientAddress mismatch: expected ${expected} (WS client address) but authorisation carries ${received}`,
+            'SESSION_AUTH_CLIENT_MISMATCH'
+          );
+        }
+      }
+
+      await this.postSessionAuth(config.nodeHttpUrl, sessionId, config.authorisation);
+    }
 
     console.log(`[SessionManager] Registering delegated session ${sessionIdStr}`);
 

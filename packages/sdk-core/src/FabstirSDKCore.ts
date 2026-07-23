@@ -1041,7 +1041,29 @@ export class FabstirSDKCore extends EventEmitter {
     this.ensureAuthenticated();
     return this.sessionManager!;
   }
-  
+
+  /**
+   * Get the WebSocket client address for the FC1.6 session-auth handshake.
+   *
+   * Returns the EOA the node recovers from the signature on
+   * `encrypted_session_init` — the encryption-key address, NOT the wallet
+   * address. Read this BEFORE calling `POST /fiat/session` so the same address
+   * is used in /fiat/session, /v1/session-auth, and the live WS connection.
+   *
+   * @throws SDKError NOT_AUTHENTICATED before authentication
+   * @throws SDKError ENCRYPTION_NOT_AVAILABLE in host-only mode (no encryption manager)
+   */
+  getWsClientAddress(): string {
+    this.ensureAuthenticated();
+    if (!this.encryptionManager) {
+      throw new SDKError(
+        'EncryptionManager not available — getWsClientAddress is unavailable in host-only mode',
+        'ENCRYPTION_NOT_AVAILABLE'
+      );
+    }
+    return this.encryptionManager.getWsClientAddress();
+  }
+
   /**
    * Get host manager
    */

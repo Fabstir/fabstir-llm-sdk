@@ -1393,6 +1393,93 @@ async recoverFromCheckpoints(
 
 This method is kept for backward compatibility with pre-Phase 9 sessions.
 
+### FC1.6 Session-Auth (vault / card-paid sessions)
+
+For vault-paid (card-paid) sessions, a fiat service creates the session on-chain and returns an
+**authorisation object**. The compute node gates its WebSocket to the exact client address the fiat
+service authorised, so the browser must (1) know the address it will connect as **before** paying,
+and (2) hand the node that authorisation over HTTP before opening the WebSocket.
+
+Available in `@fabstir/sdk-core` **1.35.0+**.
+
+#### getWsClientAddress
+
+Returns the EOA the node recovers from the signature on `encrypted_session_init` — the **encryption-key**
+address (S5-seed-derived), **not** the wallet address. Read this **before** calling the fiat service's
+`POST /fiat/session`, so the same address is used in `/fiat/session`, `/v1/session-auth`, and the live
+WebSocket (the handshake's one hard constraint).
+
+```typescript
+// On the SDK facade (EncryptionManager is intentionally not exported):
+getWsClientAddress(): string   // EIP-55 checksummed; throws NOT_AUTHENTICATED before auth,
+                               // ENCRYPTION_NOT_AVAILABLE in host-only mode
+
+const clientAddress = sdk.getWsClientAddress();
+// pass clientAddress to POST /fiat/session
+```
+
+#### SessionAuthorisation
+
+The object the fiat service returns from `POST /fiat/session`, passed straight through with no mapping
+(shape is locked to the wire response). Importable from the package entry point:
+
+```typescript
+import type { SessionAuthorisation } from '@fabstir/sdk-core';
+
+interface SessionAuthorisation {
+  scheme: string;        // 'fc1-session-auth-v1'
+  signature: string;     // 0x… 65-byte recoverable secp256k1 (r||s||v)
+  clientAddress: string; // the burner the WS connects with (lowercased)
+}
+```
+
+#### postSessionAuth
+
+Delivers the authorisation to the node's `POST <nodeHttpUrl>/v1/session-auth`. The SDK **relays**
+verbatim — it never signs or computes the `FC1-SESSION-AUTH:` digest (that is the fiat service's job).
+
+```typescript
+async postSessionAuth(
+  nodeHttpUrl: string,             // explicit http(s) base URL — no wss→https derivation
+  sessionId: bigint | string,      // string must be decimal
+  authorisation: SessionAuthorisation
+): Promise<{ delivered: boolean }> // true on 200; false on a tolerated 404 (pre-FC1.6 node)
+```
+
+**Status semantics:** `200` → `{ delivered: true }`; `404` → `{ delivered: false }` (tolerated,
+pre-FC1.6 node); `401` → throws `SESSION_AUTH_REJECTED` (backend-auth key mismatch — loud, do not
+proceed to the WS); `400`/`5xx`/other → throws `SESSION_AUTH_FAILED`. A non-http(s) URL throws
+`SESSION_AUTH_BAD_URL`; a non-decimal/negative sessionId throws `SESSION_AUTH_BAD_SESSION_ID`; an
+unreachable node throws `SESSION_AUTH_UNREACHABLE` (cause preserved in `error.details.cause`).
+
+```typescript
+const sm = sdk.getSessionManager();
+const { delivered } = await sm.postSessionAuth('https://node.example.com', sessionId, authorisation);
+```
+
+#### registerDelegatedSession (FC1.6 opt-in)
+
+Adopts an externally-created session. Pass `authorisation` (+ required `nodeHttpUrl`) to deliver the
+session-auth **before** any local state is written; on `401` the session is **not** registered. When
+an EncryptionManager is active, `authorisation.clientAddress` is cross-checked (case-insensitive)
+against `getWsClientAddress()` first — a mismatch throws `SESSION_AUTH_CLIENT_MISMATCH` (both addresses
+in the message) before the POST.
+
+```typescript
+import type { DelegatedSessionConfig } from '@fabstir/sdk-core';
+
+await sm.registerDelegatedSession({
+  sessionId, jobId, hostUrl, hostAddress, model, chainId,
+  depositAmount, pricePerToken, proofInterval, duration,
+  authorisation,                       // FC1.6 opt-in
+  nodeHttpUrl: 'https://node.example.com', // required when authorisation is present
+});
+```
+
+> **Browser note (CORS):** calling `postSessionAuth` from a browser requires the node's
+> `/v1/session-auth` route to send CORS headers. If the node cannot, use service-side delivery of the
+> authorisation instead — the SDK surface is unchanged either way.
+
 ## Web Search Integration
 
 The SDK provides automatic web search integration that enhances LLM responses with real-time information from the web. **Web search works seamlessly with both plaintext and encrypted sessions** (requires node v8.7.5+).

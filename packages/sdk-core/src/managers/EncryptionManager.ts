@@ -17,7 +17,7 @@ import type { Wallet } from 'ethers';
 import * as secp from '@noble/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha';
-import { bytesToHex, hexToBytes } from '../crypto/utilities';
+import { bytesToHex, hexToBytes, pubkeyToAddress } from '../crypto/utilities';
 import { encryptForEphemeral, decryptFromEphemeral } from '../crypto/encryption';
 import { recoverSenderAddress } from '../crypto/recovery';
 import { deriveEncryptionKeyFromSeed } from '../utils/encryption-key-derivation';
@@ -159,6 +159,24 @@ export class EncryptionManager implements IEncryptionManager {
    */
   getPublicKey(): string {
     return '0x' + this.clientPublicKey;
+  }
+
+  /**
+   * Get the WebSocket client address — the EOA the node's FC1.6 gate recovers
+   * from the signature on `encrypted_session_init`.
+   *
+   * This is the address of the ENCRYPTION key (seed-derived under `fromSeed`),
+   * NOT the wallet address held in `clientAddress`. Consumers must read this
+   * BEFORE calling `POST /fiat/session`, per the spec's hard constraint that the
+   * same address appears in /fiat/session, /v1/session-auth, and the live WS
+   * connection.
+   *
+   * @returns EIP-55 checksummed EVM address
+   */
+  getWsClientAddress(): string {
+    // Same pubkey→address derivation the node uses in recoverSenderAddress,
+    // so this getter matches exactly what the gate recovers from the WS signature.
+    return pubkeyToAddress(this.getPublicKey());
   }
 
   /**

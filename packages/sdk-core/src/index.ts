@@ -31,6 +31,9 @@ export { PaymentManager as PaymentManagerMultiChain } from './managers/PaymentMa
 export { StorageManager } from './managers/StorageManager';
 export type { S5ConnectionStatus, SyncStatus } from './managers/StorageManager';
 export { SessionManager } from './managers/SessionManager';
+// FC1.6 session-auth: consumers import these to type the /fiat/session response
+// they pass straight through to registerDelegatedSession / postSessionAuth.
+export type { SessionAuthorisation, DelegatedSessionConfig } from './managers/SessionManager';
 export { LtxManager } from './managers/LtxManager';
 export {
   HostManager,
@@ -195,5 +198,5 @@ export type { BundlerSendUserOpConfig, UnpackedUserOpV07 } from './wallet';
 export { WebSocketClient } from './websocket/WebSocketClient';
 
 // Version
-export const VERSION = '1.20.0';
+export const VERSION = '1.35.0';
 export const SDK_TYPE = 'browser';
