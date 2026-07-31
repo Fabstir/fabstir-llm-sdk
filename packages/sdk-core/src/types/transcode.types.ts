@@ -283,6 +283,69 @@ export interface GOPInfo {
 }
 
 /**
+ * Track-1 moderation verdict as delivered by the node on `transcode_complete`.
+ *
+ * The three literals are the KNOWN set, not a closed one: an unrecognised future verdict passes
+ * through unchanged, which is why `(string & {})` is part of the type deliberately. That keeps
+ * editor autocomplete for the known values while stopping the compiler from "proving" that
+ * excluding `blocked` and `flagged` leaves `cleared` — a narrowing that would type-check today
+ * and be wrong the moment the node ships a fourth verdict.
+ *
+ * Only `'cleared'` releases, and that decision belongs to the consumer's publish gate. Never
+ * write a truthiness or `!== 'blocked'` check against this.
+ */
+export type TranscodeModerationVerdict = 'cleared' | 'blocked' | 'flagged' | (string & {});
+
+/**
+ * Moderation status attached to a completed transcode.
+ *
+ * `reason` is a category/rule id only — never content, never hashes; safe to log. Treat it as
+ * OPAQUE: never branch on its value (the node is renaming 'csam-match' → 'hash-list-match',
+ * and such values may change again).
+ */
+export interface TranscodeModerationStatus {
+  verdict: TranscodeModerationVerdict;
+  reason?: string;
+}
+
+/**
+ * Runtime guard for a usable moderation status.
+ *
+ * Reads OWN properties only. Destructuring would consult the prototype chain, which is the one
+ * way absence could become a release: with a polluted `Object.prototype.verdict`, an empty
+ * payload — "the node recorded nothing" — would otherwise arrive at a consumer as a clearance.
+ *
+ * Deliberately does NOT check `verdict` against the known union: an unrecognised future verdict
+ * is valid and must survive verbatim. Only `'cleared'` releases, and that is the publish gate's
+ * call, never this guard's.
+ */
+export function isTranscodeModerationStatus(raw: unknown): raw is TranscodeModerationStatus {
+  return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+    && Object.prototype.hasOwnProperty.call(raw, 'verdict')
+    && typeof (raw as { verdict: unknown }).verdict === 'string';
+}
+
+/**
+ * Copy a moderation status down to its declared fields, and nothing else.
+ *
+ * Used at every hop, so the wire boundary and the persistence boundary cannot drift apart. A
+ * spread would not do: it copies whatever else the node attached — a matched hash, a list id,
+ * an evidence frame — straight into user-sovereign S5 storage, and it copies own ENUMERABLE
+ * properties only, so a non-enumerable `verdict` would yield a present-but-empty record that
+ * reads as truthy to a consumer checking `if (meta.moderation)`.
+ *
+ * The verdict string itself is never inspected — an unknown one is copied as faithfully as a
+ * known one.
+ */
+export function cloneTranscodeModerationStatus(raw: TranscodeModerationStatus): TranscodeModerationStatus {
+  const status: TranscodeModerationStatus = { verdict: raw.verdict };
+  const reason = Object.prototype.hasOwnProperty.call(raw, 'reason')
+    ? (raw as { reason?: unknown }).reason : undefined;
+  if (typeof reason === 'string') status.reason = reason;
+  return status;
+}
+
+/**
  * WebSocket transcode result (distinct from on-chain TranscodeJobResult)
  */
 export interface TranscodeResult {
@@ -293,6 +356,14 @@ export interface TranscodeResult {
   qualityMetrics: QualityMetrics | null;
   proofTreeCID: string | null;
   proofTreeRootHash: string | null;
+  /**
+   * The node's moderation verdict for this job, carried verbatim.
+   *
+   * Absent when the node recorded no verdict, or when the payload was structurally unusable.
+   * ABSENCE MEANS "NOT MODERATED", NEVER "CLEAN". The SDK neither verifies nor acts on this —
+   * it is the node's assertion, and its presence is not permission to publish.
+   */
+  moderation?: TranscodeModerationStatus;
 }
 
 /**
@@ -637,6 +708,17 @@ export interface TranscodedContentMetadata {
   freePreviewPercent: number;
   sources: TranscodedSource[];
   jobId: number;
+  /**
+   * Moderation verdict as it stood when this content was assembled for publish.
+   *
+   * ⚠️ A DISPLAY RECORD, NOT EVIDENCE. This metadata lives in user-sovereign S5 storage — the
+   * owner can strip or alter it — and it is point-in-time: it records what was known at publish
+   * and never updates. Do not treat its presence as clearance, its absence as "clean", or its
+   * contents as an audit trail. The authoritative record is node-side.
+   *
+   * Copied verbatim from `TranscodeResult.moderation`: absent when the result had none.
+   */
+  moderation?: TranscodeModerationStatus;
 }
 
 /** HLS transcoded source for one resolution */
@@ -658,4 +740,15 @@ export interface HlsContentMetadata {
   freePreviewPercent: number;
   sources: HlsTranscodedSource[];
   jobId: number;
+  /**
+   * Moderation verdict as it stood when this content was assembled for publish.
+   *
+   * ⚠️ A DISPLAY RECORD, NOT EVIDENCE. This metadata lives in user-sovereign S5 storage — the
+   * owner can strip or alter it — and it is point-in-time: it records what was known at publish
+   * and never updates. Do not treat its presence as clearance, its absence as "clean", or its
+   * contents as an audit trail. The authoritative record is node-side.
+   *
+   * Copied verbatim from `TranscodeResult.moderation`: absent when the result had none.
+   */
+  moderation?: TranscodeModerationStatus;
 }
