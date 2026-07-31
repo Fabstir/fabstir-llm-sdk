@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TranscodeManager } from '../../src/managers/TranscodeManager';
 import { TranscodeError } from '../../src/errors/transcode-errors';
+import type { TranscodeErrorCode } from '../../src/errors/transcode-errors';
 import type { TranscodeHandle, VideoFormat } from '../../src/types/transcode.types';
 import type { IHostSelectionService, RankedHost } from '../../src/interfaces/IHostSelectionService';
 import { HostSelectionMode } from '../../src/types/settings.types';
@@ -159,5 +160,101 @@ describe('submitTranscodeWithLoadBalancing', () => {
     const handle = await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId, { retryDelayMs: 10 });
     expect(handle.taskId).toBe('task-1');
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * WP-S1 Phase 2.3 — anti-bypass regression guard.
+ *
+ * The load balancer catches SUBMISSION failures only: it returns the handle without ever
+ * awaiting `handle.result`, so an error arriving on that already-returned promise cannot drive
+ * host-shopping. That is what stops a moderation hold being retried across hosts until one
+ * accepts it — but nothing in the code SAYS so, so it is incidental rather than defended.
+ *
+ * These tests make a future refactor that awaits the result inside the loop break loudly.
+ * The CAPACITY_FULL case is the paired control: it is the one code the loop DOES re-host on at
+ * submission, so its passing here proves these tests pin *where* the retry boundary is, not
+ * merely that moderation codes happen to be non-retryable.
+ */
+describe('submitTranscodeWithLoadBalancing — moderation holds must not bypass via retry', () => {
+  /** A handle whose job fails after submission succeeded. */
+  const mkFailingHandle = (code: TranscodeErrorCode): TranscodeHandle => {
+    const result = Promise.reject(new TranscodeError('held', code));
+    result.catch(() => {}); // keep the eager rejection from surfacing as unhandled
+    return { taskId: 'task-1', cancel: vi.fn(), result };
+  };
+
+  const runWithFailingResult = async (code: TranscodeErrorCode) => {
+    const { tm, hostSel, sessionManager } = createManager();
+    (hostSel.getRankedHostsForModel as any).mockResolvedValue([
+      mkRanked('0x1', 'http://h1:8080'), mkRanked('0x2', 'http://h2:8080'),
+    ]);
+    mockFetch.mockResolvedValue({ ok: true, json: async () => cap(2) });
+    sessionManager.submitTranscode.mockResolvedValue(mkFailingHandle(code));
+    const handle = await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId);
+    await expect(handle.result).rejects.toThrow(TranscodeError);
+    return sessionManager;
+  };
+
+  it.each(['CONTENT_BLOCKED', 'CONTENT_FLAGGED', 'MODERATION_UNAVAILABLE'] as const)(
+    '%s on handle.result does not shop for a second host',
+    async (code) => {
+      const sessionManager = await runWithFailingResult(code);
+      expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
+      expect(sessionManager.submitTranscode).toHaveBeenCalledTimes(1);
+      expect(sessionManager.startSession.mock.calls[0][0].host).toBe('0x1');
+    },
+  );
+
+  it('paired control: CAPACITY_FULL on handle.result also does not shop — the retry boundary is submission, not result', async () => {
+    const sessionManager = await runWithFailingResult('CAPACITY_FULL');
+    expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
+    expect(sessionManager.submitTranscode).toHaveBeenCalledTimes(1);
+  });
+
+  it('contrast: CAPACITY_FULL thrown at SUBMISSION does still shop — proving the tests above are not vacuous', async () => {
+    const { tm, hostSel, sessionManager } = createManager();
+    (hostSel.getRankedHostsForModel as any).mockResolvedValue([
+      mkRanked('0x1', 'http://h1:8080'), mkRanked('0x2', 'http://h2:8080'),
+    ]);
+    mockFetch.mockResolvedValue({ ok: true, json: async () => cap(2) });
+    sessionManager.submitTranscode
+      .mockRejectedValueOnce(new TranscodeError('full', 'CAPACITY_FULL'))
+      .mockResolvedValueOnce(mkHandle());
+    await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId);
+    expect(sessionManager.submitTranscode).toHaveBeenCalledTimes(2);
+    expect(sessionManager.startSession.mock.calls[1][0].host).toBe('0x2');
+  });
+
+  // The pending-count bookkeeping attaches `.finally()` to the caller's result promise, which
+  // creates a SECOND promise. When the job fails, that derived promise rejects with nobody
+  // listening — an unhandled rejection, which Node terminates the process for by default.
+  // Latent until now because no test ever handed the manager a rejecting handle; WP-S1 makes it
+  // routine, since a moderation hold is an ordinary outcome rather than a crash.
+  it('a failing job emits NO unhandled rejection from the pending-count bookkeeping', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (r: unknown) => { unhandled.push(r); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      await runWithFailingResult('CONTENT_BLOCKED');
+      // Node emits unhandledRejection at the end of the turn, once microtasks have drained.
+      // One macrotask hop is sufficient and deterministic — no fixed sleep to go flaky.
+      await new Promise(r => setImmediate(r));
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+    expect(unhandled).toHaveLength(0);
+  });
+
+  it('a moderation hold thrown at SUBMISSION is terminal — it is never re-hosted', async () => {
+    const { tm, hostSel, sessionManager } = createManager();
+    (hostSel.getRankedHostsForModel as any).mockResolvedValue([
+      mkRanked('0x1', 'http://h1:8080'), mkRanked('0x2', 'http://h2:8080'),
+    ]);
+    mockFetch.mockResolvedValue({ ok: true, json: async () => cap(2) });
+    sessionManager.submitTranscode.mockRejectedValue(new TranscodeError('held', 'CONTENT_BLOCKED'));
+    await expect(tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId))
+      .rejects.toMatchObject({ code: 'CONTENT_BLOCKED' });
+    expect(sessionManager.submitTranscode).toHaveBeenCalledTimes(1);
   });
 });
