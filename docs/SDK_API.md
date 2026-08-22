@@ -5800,9 +5800,49 @@ enum SDKErrorCode {
   TRANSCODE_FAILED = 'TRANSCODE_FAILED',       // Transcode operation failed
   TRANSCODE_TIMEOUT = 'TRANSCODE_TIMEOUT',     // Transcode timed out (retryable)
   SIDECAR_DISCONNECTED = 'SIDECAR_DISCONNECTED', // Transcoder sidecar not connected
-  NO_AVAILABLE_HOSTS = 'NO_AVAILABLE_HOSTS'    // All hosts exhausted during load balancing
+  NO_AVAILABLE_HOSTS = 'NO_AVAILABLE_HOSTS',   // All hosts exhausted during load balancing
+
+  // Moderation holds — the node refused to complete the job and sent NO completion frame.
+  // None are retryable: there is no automatic retry anywhere in the stack, so a load balancer
+  // never re-hosts a held job. A user-initiated resubmission is a new job and is legal;
+  // publishing a held job never is.
+  CONTENT_BLOCKED = 'CONTENT_BLOCKED',         // Matched a block rule — terminal for this job
+  CONTENT_FLAGGED = 'CONTENT_FLAGGED',         // Held for human review; decision arrives out of band
+  MODERATION_UNAVAILABLE = 'MODERATION_UNAVAILABLE' // No verdict recorded — infra state, still not publishable
 }
 ```
+
+### Moderation verdicts on a completed transcode
+
+A completed `TranscodeResult` may carry the node's moderation verdict:
+
+```typescript
+interface TranscodeModerationStatus {
+  verdict: 'cleared' | 'blocked' | 'flagged' | (string & {});
+  reason?: string;   // category/rule id only — never content, never hashes. OPAQUE: never branch on it
+}
+
+const result = await handle.result;
+result.moderation;   // TranscodeModerationStatus | undefined
+```
+
+`assembleHlsContentMetadata` and `assembleContentMetadata` copy the field onto the metadata they
+return, so a verdict survives to whatever you persist.
+
+Four rules, none of them optional:
+
+1. **It is the node's assertion, carried verbatim.** The SDK neither verifies nor acts on it.
+   Its presence is **not** permission to publish.
+2. **Absence means "not moderated", never "clean".** The field is omitted entirely — no key at
+   all — when the node recorded no verdict. Test for the key, not for a falsy value.
+3. **Only `'cleared'` releases.** An unrecognised future verdict string arrives **unchanged**, so
+   `verdict === 'cleared'` is the only safe release test. A truthiness check or `!== 'blocked'`
+   would release an unknown verdict — which is why the type is deliberately open (`string & {}`)
+   rather than a closed union: the compiler will not let you "prove" that excluding the other
+   values leaves `'cleared'`.
+4. **On the assembled metadata it is a display record, not evidence.** S5 metadata is
+   user-sovereign (the owner can strip it) and point-in-time (it never updates). The
+   authoritative record is node-side.
 
 ### Multi-Chain Error Types
 

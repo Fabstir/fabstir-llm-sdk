@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type { VideoFormat, QualityMetrics, TranscodedSource, TranscodedContentMetadata, TranscodeResult, HlsTranscodedSource, HlsContentMetadata } from '../types/transcode.types';
-import { isHlsOutput } from '../types/transcode.types';
+import { isHlsOutput, isTranscodeModerationStatus, cloneTranscodeModerationStatus } from '../types/transcode.types';
 
 /** VideoFormat field order matching the struct definition */
 const FIELD_ORDER: (keyof VideoFormat)[] = [
@@ -235,7 +235,16 @@ export function assembleHlsContentMetadata(
       totalDuration: output.totalDuration,
     });
   }
-  return { sourceCid, transcodedAt: Date.now(), freePreviewPercent: previewPercent, sources, jobId };
+  // Guarded conditional spread. Absent (or unusable) adds no key at all, so "not moderated"
+  // stays absent on the object AND once it is serialised to S5 — never a present-but-undefined,
+  // -null or -empty key. Both assemblers are public exports, so the result may have come from a
+  // consumer's JSON/DB round trip rather than from the WS parser, where `undefined` becomes
+  // `null`. The shallow copy makes the record a point-in-time snapshot rather than a live alias.
+  return {
+    sourceCid, transcodedAt: Date.now(), freePreviewPercent: previewPercent, sources, jobId,
+    ...(isTranscodeModerationStatus(result.moderation)
+      && { moderation: cloneTranscodeModerationStatus(result.moderation) }),
+  };
 }
 
 /** Select best resolution for device/bandwidth from transcoded sources */
@@ -269,5 +278,10 @@ export function assembleContentMetadata(
       bitrateKbps: parseBitrateKbps(fullFmt.b_v!),
     });
   }
-  return { sourceCid, transcodedAt: Date.now(), freePreviewPercent: previewPercent, sources, jobId };
+  // Guarded conditional spread — see assembleHlsContentMetadata.
+  return {
+    sourceCid, transcodedAt: Date.now(), freePreviewPercent: previewPercent, sources, jobId,
+    ...(isTranscodeModerationStatus(result.moderation)
+      && { moderation: cloneTranscodeModerationStatus(result.moderation) }),
+  };
 }

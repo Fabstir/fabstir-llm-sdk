@@ -100,8 +100,11 @@ export class TranscodeManager implements ITranscodeManager {
           const handle = await this.sessionManager.submitTranscode(
             sessionId.toString(), sourceCid, formats, options,
           );
-          // Decrement pending count when job completes or fails
-          handle.result.finally(() => {
+          // Decrement pending count when job completes or fails. Reassigning (rather than
+          // forking a second promise off handle.result) is what keeps a failed job from
+          // leaving an unhandled rejection behind — Node terminates the process on those, and
+          // a moderation hold makes failure a routine outcome. Same idiom as SessionManager:4004.
+          handle.result = handle.result.finally(() => {
             const count = this.pendingJobs.get(host.address) || 0;
             if (count > 0) this.pendingJobs.set(host.address, count - 1);
           });
