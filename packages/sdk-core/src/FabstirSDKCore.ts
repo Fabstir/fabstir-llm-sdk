@@ -116,6 +116,14 @@ export interface FabstirSDKCoreConfig {
   // or RAG. Conversation storage degrades to a no-op proxy. Also honored via the
   // SKIP_S5_STORAGE env var. Unlike hostOnly, SessionManager IS initialized.
   skipS5?: boolean;
+
+  // Moderation publish-gate ENFORCEMENT (M3 ships dark — default false).
+  // The gate is still evaluated + logged on every publish call regardless;
+  // this flag only lets it refuse publishes. Flip to true only at the
+  // documented go-live (CONTRACT-MODERATION-SERVICE.md Appendix A), together
+  // with the node's MODERATION_ENFORCE. NOT a security control until M5
+  // signing — see src/moderation/gate.ts.
+  moderationGate?: boolean;
 }
 
 export class FabstirSDKCore extends EventEmitter {
@@ -210,7 +218,10 @@ export class FabstirSDKCore extends EventEmitter {
       hostOnly: config.hostOnly,
 
       // Inference-only: skip S5 storage + RAG, keep SessionManager. Env-overridable.
-      skipS5: config.skipS5 ?? (typeof process !== 'undefined' && process.env?.SKIP_S5_STORAGE === 'true')
+      skipS5: config.skipS5 ?? (typeof process !== 'undefined' && process.env?.SKIP_S5_STORAGE === 'true'),
+
+      // Moderation publish-gate enforcement — ships dark (M3, D1).
+      moderationGate: config.moderationGate ?? false
     };
 
     // Validate all required contract addresses

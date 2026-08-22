@@ -157,6 +157,28 @@ This mode relies on `ethers.AbstractSigner` and `ethers.ContractTransactionRespo
 
 AA-signer integration spec provided by the fabstir-v2 team.
 
+## Moderation Publish Gate (M3 — ships disabled)
+
+At publish time the SDK evaluates a transcode job's `ModerationReport` and computes whether the job is publishable: only `verdict: "PASS"` or `"PASS_RATED"` allows; `BLOCK_ILLEGAL`, `BLOCK_UNRESOLVED`, a missing report (default hold), or anything failing strict validation refuses.
+
+> ⚠️ **This gate is NOT a security control.** M3 reports are **unsigned** (`signature: null`): an unsigned `{"verdict":"PASS"}` is trivially forgeable by anyone who can inject a report, so `checkModerationVerdict` is exactly what its name says — a plain verdict check with **zero cryptographic binding**. Signature verification arrives with M5 report signing; the report types already carry the M5 fields (`signature`, `scoreFileCid`, `scoreDigest`, `hostAddress`) so verification slots in without a schema change.
+
+**Enforcement ships dark.** The `moderationGate` config option defaults to `false`. While disabled, the gate is still **evaluated and logged on every publish call** — only the refusal is inert (`refusePublish` is the single field enforcement may act on). It enables only at the documented go-live (`docs/node-reference/CONTRACT-MODERATION-SERVICE.md` Appendix A), together with the node's `MODERATION_ENFORCE`.
+
+```typescript
+import { evaluateModerationGate, type ModerationFetchOutcome } from '@fabstir/sdk-core';
+
+const outcome: ModerationFetchOutcome = { kind: 'report-body', body: reportFromNode };
+const { result, refusePublish } = evaluateModerationGate(outcome, {
+  enabled: sdkConfig.moderationGate ?? false,
+  jobId,
+});
+// result.allowed === true → surface result.rating / result.descriptors on the storefront
+// refusePublish === true only when the gate is enabled AND the verdict refuses
+```
+
+How the SDK fetches a job's report from the node is still open (OQ-M3-1) — implement `ModerationReportFetcher` when the transport is pinned; transport failures must throw, never synthesise a report.
+
 ## License
 
 Business Source License 1.1 (BUSL-1.1). See [LICENSE](../../LICENSE) for details.

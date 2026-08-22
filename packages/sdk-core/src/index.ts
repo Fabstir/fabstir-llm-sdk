@@ -173,6 +173,12 @@ export { ltxTokens } from './utils/ltx-utils';
 // refactor can't silently drop them. Every other LTX type still arrives through that chain.
 export type { LtxJob, LtxSubmitOptions } from './types/ltx.types';
 
+// Moderation publish gate (M3 — ships dark behind moderationGate: false).
+// ⚠️ NOT a security control until M5 signing: reports are unsigned (D6), so
+// this is a plain verdict check. See src/moderation/gate.ts and README.
+// (Types come via `export * from './types'` → src/types/moderation.types.ts.)
+export * from './moderation';
+
 // Export wallet providers
 export { EOAProvider } from './providers/EOAProvider';
 export { SmartAccountProvider } from './providers/SmartAccountProvider';
