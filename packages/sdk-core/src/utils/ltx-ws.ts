@@ -1,6 +1,7 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // WebSocket-based encrypted LTX submit. Mirrors utils/transcode-ws.ts (Constraint 2, 7).
 import type { LtxJob, LtxHandle, LtxResult, LtxProgress } from '../types/ltx.types';
+import { LTX_ADVISORY_FIELDS } from '../types/ltx.types';
 import { LtxError, LTX_WIRE_ERROR_CODES } from '../errors/ltx-errors';
 import type { LtxErrorCode } from '../errors/ltx-errors';
 
@@ -39,6 +40,9 @@ export async function submitLtxWs(opts: LtxWsOptions): Promise<LtxHandle> {
   };
   if (job.images?.length) inner.images = job.images; // M1a: capability CIDs, order = template imageSemantics
   if (job.videos?.length) inner.videos = job.videos; // BL3: capability CIDs, order = template videoSemantics
+  // 1.38 absorb: advisory fields ride only when requested (absent keys keep the wire
+  // byte-identical). Driven by LTX_ADVISORY_FIELDS so a new field cannot be forgotten here.
+  for (const k of LTX_ADVISORY_FIELDS) if (job[k] !== undefined) inner[k] = job[k];
   if (requestId !== undefined) inner.requestId = requestId;
 
   const encrypted = encryptionManager.encryptMessage(sessionKey, JSON.stringify(inner), messageIndex.value++);

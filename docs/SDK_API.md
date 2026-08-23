@@ -2326,7 +2326,13 @@ const result = await ltx.generate(job, hostAddress, hostMetadata, {
   onProgress: ({ stage, pct }) => {}, // 'generating' | 'encrypting' | 'uploading' | 'finalising'
   timeoutMs: 1500000,           // raise above the 600s default for 1080p+ renders
 });
-// LtxJob: { templateId, templateHash, prompt, seed, frames, fps, resolution:{w,h}, lora, output, images? }
+// LtxJob: { templateId, templateHash, prompt, seed, frames, fps, resolution:{w,h}, lora, output, images?,
+//           videos?, strength?, azimuth?, elevation?, distance?, inputWire? }
+//   strength/azimuth/elevation/distance (numbers), inputWire ('exrseq-display' | 'exrseq-linear'):
+//   ADVISORY pass-through (1.38) — forwarded only when set (absent keys otherwise), deliberately
+//   OUTSIDE the input commitment; never validated by the SDK (ranges are advisory — see the
+//   LtxJob JSDoc; callers and the node enforce them). The exported LTX_ADVISORY_FIELDS const
+//   is the group as data — iterate it rather than re-typing the field list.
 //   seed: decimal string in [0, 2^64-1] (pre-validated before escrow — the sampler is u64)
 //   resolution: from bundle.bounds.resolutions; billing binds the REQUESTED dims
 // Flow: validateJob (pre-escrow, no funds locked on failure) → estimateCost →
@@ -5828,6 +5834,17 @@ result.moderation;   // TranscodeModerationStatus | undefined
 
 `assembleHlsContentMetadata` and `assembleContentMetadata` copy the field onto the metadata they
 return, so a verdict survives to whatever you persist.
+
+Since 1.38 the canonical home of this surface is job-neutral: `JobModerationVerdict`,
+`JobModerationStatus`, `isJobModerationStatus`, `cloneJobModerationStatus`, and the terminal
+hold-code union `ModerationHoldCode` (`CONTENT_BLOCKED` | `CONTENT_FLAGGED` |
+`MODERATION_UNAVAILABLE`, derived from the exported `MODERATION_HOLD_CODES` const — the
+runtime list to iterate) are exported from the entry, and the `Transcode…` names above are
+aliases of them — same types, same runtime functions, every existing import path unchanged.
+New job kinds (training is next) consume the `Job…` names and never import transcode types.
+Relatedly, `JobType.MODEL_TRAINING = 6` is reserved (SDK-side discriminator only — the
+contract keys on `bytes32` model ids); no behaviour attaches until the training interface
+design lands.
 
 Four rules, none of them optional:
 

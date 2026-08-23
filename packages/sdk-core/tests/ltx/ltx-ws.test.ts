@@ -5,6 +5,9 @@ import vectors from './vectors.json';
 import icloraVectors from './vectors-iclora.json';
 import { submitLtxWs } from '../../src/utils/ltx-ws';
 import { LtxError } from '../../src/errors/ltx-errors';
+import type { LtxJob } from '../../src/types/ltx.types';
+import { LTX_ADVISORY_FIELDS } from '../../src/types/ltx.types';
+import { LTX_ADVISORY_FIELDS as entryAdvisoryFields } from '../../src/index';
 
 const job = { ...vectors.job };
 
@@ -25,6 +28,21 @@ function makeWs() {
 }
 
 const resp = (msg: any) => ({ type: 'encrypted_response', payload: { ciphertextHex: JSON.stringify(msg), nonceHex: '', aadHex: '' } });
+
+// One fixture for the 1.38 advisory group (values arbitrary in-range); keys come from
+// the SDK's own LTX_ADVISORY_FIELDS wherever iteration is the point.
+// elevation: 0 is deliberate — a defined-but-FALSY in-range value, so a truthiness
+// regression (`if (job[k])`) in the forwarder fails these tests instead of passing green.
+const ADVISORY_VALUES = { strength: 0.7, azimuth: -30, elevation: 0, distance: 1.5, inputWire: 'exrseq-linear' } as const;
+
+async function wireOf(j: any, requestId?: string) {
+  const ws = makeWs();
+  await submitLtxWs({
+    wsClient: ws.wsClient, encryptionManager, sessionId: 's1', sessionKey: new Uint8Array(32),
+    messageIndex: { value: 0 }, job: j, requestId, timeoutMs: 5000,
+  } as any);
+  return JSON.parse(ws.sent[0].payload.ciphertextHex);
+}
 
 function submit(extra: any = {}) {
   const ws = makeWs();
@@ -139,16 +157,7 @@ describe('submitLtxWs (SP4.1, Constraint 2)', () => {
 // These assert the wire message field for field against a job carrying EVERY optional input.
 describe('submitLtxWs wire message (field-for-field, all optional inputs present)', () => {
   const iclora = icloraVectors.referencePlusControl;
-  const fullJob = { ...iclora.job, images: [...iclora.images], videos: [...iclora.videos] };
-
-  async function wireOf(j: any, requestId?: string) {
-    const ws = makeWs();
-    await submitLtxWs({
-      wsClient: ws.wsClient, encryptionManager, sessionId: 's1', sessionKey: new Uint8Array(32),
-      messageIndex: { value: 0 }, job: j, requestId, timeoutMs: 5000,
-    } as any);
-    return JSON.parse(ws.sent[0].payload.ciphertextHex);
-  }
+  const fullJob = { ...iclora.job, images: [...iclora.images], videos: [...iclora.videos], ...ADVISORY_VALUES };
 
   it('emits exactly the frozen ltx_generate shape — no field dropped, none extra', async () => {
     expect(await wireOf(fullJob, 'req-full')).toEqual({
@@ -164,15 +173,51 @@ describe('submitLtxWs wire message (field-for-field, all optional inputs present
       output: iclora.job.output,
       images: iclora.images,
       videos: iclora.videos,
+      ...ADVISORY_VALUES,
       requestId: 'req-full',
     });
   });
 
-  // Generic guard: catches the NEXT field added to LtxJob and forgotten in the whitelist.
+  // Generic guard: catches a whitelist drop of ANY field present in fullJob (a NEW
+  // LtxJob field is covered once it is added to fullJob — keep the fixture complete).
   it('carries every LtxJob field onto the wire (whitelist has no silent drops)', async () => {
     const inner = await wireOf(fullJob);
     for (const [field, value] of Object.entries(fullJob)) {
       expect(inner, `LtxJob field "${field}" was dropped by the ltx_generate whitelist`).toHaveProperty(field, value);
     }
+  });
+});
+
+describe('advisory pass-through fields (1.38 fork absorb — constraint 2)', () => {
+  it('forwards each advisory field when defined, verbatim', async () => {
+    const inner = await wireOf({ ...job, ...ADVISORY_VALUES });
+    for (const k of LTX_ADVISORY_FIELDS) {
+      expect(inner[k], `advisory field "${k}"`).toBe((ADVISORY_VALUES as Record<string, unknown>)[k]);
+    }
+  });
+
+  it('omits all advisory keys from the wire when not requested (absent, never null)', async () => {
+    const inner = await wireOf(job);
+    for (const k of LTX_ADVISORY_FIELDS) expect(k in inner, `key ${k}`).toBe(false);
+  });
+
+  it('forwards exactly the requested subset — the pre-absorb wire stays byte-identical otherwise', async () => {
+    // azimuth: 0 — second falsy pin, through the subset path.
+    const inner = await wireOf({ ...job, azimuth: 0, inputWire: 'exrseq-display' });
+    expect(inner.azimuth).toBe(0);
+    expect(inner.inputWire).toBe('exrseq-display');
+    for (const k of LTX_ADVISORY_FIELDS) {
+      if (k !== 'azimuth' && k !== 'inputWire') expect(k in inner, `key ${k}`).toBe(false);
+    }
+  });
+
+  it('LtxJob accepts the advisory fields as optional typed; the exported group pins them', () => {
+    const typed: LtxJob = { ...(job as LtxJob), ...ADVISORY_VALUES };
+    expect(typeof typed.prompt).toBe('string');
+    // The SDK's own notion of the group — the forwarder and these tests iterate THIS.
+    expect([...LTX_ADVISORY_FIELDS]).toEqual(['strength', 'azimuth', 'elevation', 'distance', 'inputWire']);
+    // Entry-surface pin: SDK_API.md tells consumers to import this const from the package
+    // entry — a barrel refactor that drops it must fail here, not at the next tarball.
+    expect(Object.is(entryAdvisoryFields, LTX_ADVISORY_FIELDS)).toBe(true);
   });
 });
