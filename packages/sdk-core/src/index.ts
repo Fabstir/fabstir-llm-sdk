@@ -173,6 +173,25 @@ export { ltxTokens } from './utils/ltx-utils';
 // refactor can't silently drop them. Every other LTX type still arrives through that chain.
 export type { LtxJob, LtxSubmitOptions } from './types/ltx.types';
 
+// Training M0 (LoRA/QLoRA). The wire-key builders are named at the entry as a contract pin:
+// `manifestCID`'s capitalisation is load-bearing — the node rejects a whole session init if a
+// serialiser mangles it — so these must never be reached only through a barrel that a refactor
+// could silently drop. `TRAINING_ERROR_CODES` is the 11-code wire set (8 named + 3 moderation
+// holds); `TEMPLATE_BOUNDS`/`SCAN_FAILURE` are sidecar-internal and deliberately absent.
+export {
+  buildTrainAction, buildTrainCancelAction, buildLoraSessionField, TRAINING_PROGRESS_STAGES,
+} from './types/training.types';
+export { TRAINING_ERROR_CODES, TRAINING_WIRE_VISIBLE_CODES, TrainingError } from './errors/training-errors';
+// The canonical training maths, pinned at the entry exactly as `ltxTokens` is: callers running
+// their own over-claim guard must be able to recompute the bill and the schedule byte-for-byte
+// rather than re-deriving them. `trainingSliceSchedule` takes sliceTokens explicitly — the job
+// does not carry it (it lives in the bundle's `perTemplate`), which is what makes the
+// `train_accepted` echo-equality check meaningful.
+export {
+  trainingTokens, trainingSliceSchedule, trainingInputCommitment, trainingSigDigest,
+} from './utils/training-utils';
+export type { TrainingJob, LoraSessionField } from './types/training.types';
+
 // Moderation publish gate (M3 — ships dark behind moderationGate: false).
 // ⚠️ NOT a security control until M5 signing: reports are unsigned (D6), so
 // this is a plain verdict check. See src/moderation/gate.ts and README.

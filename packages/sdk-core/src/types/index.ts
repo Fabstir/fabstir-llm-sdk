@@ -598,3 +598,7 @@ export * from './ltx.types';
 // ⚠️ NOT a security control until M5 signing — see src/moderation/gate.ts.
 
 export * from './moderation.types';
+// ============= Training M0 Types (LoRA/QLoRA fine-tune) =============
+// Wire shapes frozen in docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.8.
+
+export * from './training.types';
