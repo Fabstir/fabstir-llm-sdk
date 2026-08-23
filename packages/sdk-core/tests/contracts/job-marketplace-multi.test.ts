@@ -276,14 +276,15 @@ describe('JobMarketplace Multi-Chain Wrapper', () => {
 
     it('should get session details', async () => {
       const jobId = 1;
-      // Mock the sessionJobs call with correct 16-field structure
+      // Mock encodes the DEPLOYED 18-field struct (no `requester` — the old 16-field mock
+      // carried the phantom that validated the 2026-08-23 shift bug; the authoritative
+      // layout is pinned by real chain bytes in tests/contracts/sessionjobs-decode.test.ts).
       mockProvider.call.mockResolvedValue(
         ethers.AbiCoder.defaultAbiCoder().encode(
-          ['uint256', 'address', 'address', 'address', 'address', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint8', 'uint256', 'uint256', 'string'],
+          ['uint256', 'address', 'address', 'address', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint8', 'uint256', 'uint256', 'string', 'bytes32', 'string'],
           [
             1, // id
             TEST_ADDRESS, // depositor
-            TEST_ADDRESS, // requester
             HOST_ADDRESS, // host
             ethers.ZeroAddress, // paymentToken (native)
             ethers.parseEther('0.001'), // deposit
@@ -292,19 +293,22 @@ describe('JobMarketplace Multi-Chain Wrapper', () => {
             3600, // maxDuration
             Math.floor(Date.now() / 1000), // startTime
             0, // lastProofTime
-            300, // proofInterval
-            1, // status (Active)
+            1000, // proofInterval — a TOKEN count
+            300, // proofTimeoutWindow — SECONDS (do not invert with proofInterval)
+            1, // status (Completed)
             0, // withdrawnByHost
             0, // refundedToUser
-            '' // conversationCID
+            '', // conversationCID
+            ethers.ZeroHash, // lastProofHash
+            '' // lastProofCID
           ]
         )
       );
 
       const session = await wrapper.getSessionJob(jobId);
-      expect(session.requester.toLowerCase()).toBe(TEST_ADDRESS.toLowerCase());
+      expect(session.requester.toLowerCase()).toBe(TEST_ADDRESS.toLowerCase()); // deprecated alias of depositor
       expect(session.host.toLowerCase()).toBe(HOST_ADDRESS.toLowerCase());
-      expect(session.deposit).toBe('0.001');
+      expect(session.deposit).toBe(ethers.parseEther('0.001').toString()); // raw base units, never pre-formatted
     });
   });
 

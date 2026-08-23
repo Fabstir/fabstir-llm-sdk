@@ -40,12 +40,46 @@ export interface DirectSessionParams {
   modelId: string;  // Required bytes32 model ID — Phase 18: modelless sessions removed
 }
 
+/**
+ * Map an ethers Result of `sessionJobs(jobId)` to a SessionJob, by FIELD NAME against the
+ * verified 18-output ABI (JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json), never by
+ * index. History: the old index mapping assumed a phantom `requester` at [2] and shifted
+ * every later field (host ← paymentToken, deposit ← pricePerToken, …) — found from both
+ * sides of the seam 2026-08-23 and pinned here by a LIVE byte fixture
+ * (tests/contracts/fixtures/sessionjobs_931.hex). Money fields are raw base-unit strings;
+ * proofInterval is a TOKEN count, proofTimeoutWindow is SECONDS — easy to invert, don't.
+ */
+export function mapSessionJob(r: any): SessionJob {
+  return {
+    id: Number(r.id),
+    depositor: r.depositor,
+    requester: r.depositor, // deprecated alias — the deployed struct has no requester
+    host: r.host,
+    paymentToken: r.paymentToken,
+    deposit: r.deposit.toString(),
+    pricePerToken: Number(r.pricePerToken),
+    tokensUsed: Number(r.tokensUsed),
+    maxDuration: Number(r.maxDuration),
+    startTime: Number(r.startTime),
+    lastProofTime: Number(r.lastProofTime),
+    proofInterval: Number(r.proofInterval),
+    proofTimeoutWindow: Number(r.proofTimeoutWindow),
+    status: Number(r.status),
+    withdrawnByHost: r.withdrawnByHost.toString(),
+    refundedToUser: r.refundedToUser.toString(),
+    conversationCID: r.conversationCID,
+  };
+}
+
 export interface SessionJob {
   id: number;
   depositor: string;
+  /** @deprecated The deployed struct has NO requester field — this is an alias of `depositor`
+   *  kept for compile compatibility. The old mapping put `host` here (the 2026-08-23 shift bug). */
   requester: string;
   host: string;
   paymentToken: string;
+  /** Token BASE UNITS as a decimal string (wei for native, 6-dp for USDC) — never pre-formatted. */
   deposit: string;
   pricePerToken: number;
   tokensUsed: number;
@@ -405,28 +439,7 @@ export class JobMarketplaceWrapper {
 
   async getSessionJob(jobId: number): Promise<SessionJob> {
     await this.verifyChain();
-    const session = await this.contract.sessionJobs(jobId);
-
-    // Handle the struct from sessionJobs (now includes proofTimeoutWindow)
-    return {
-      id: Number(session[0]),
-      depositor: session[1],
-      requester: session[2],
-      host: session[3],
-      paymentToken: session[4],
-      deposit: ethers.formatEther(session[5]),
-      pricePerToken: Number(session[6]),
-      tokensUsed: Number(session[7]),
-      maxDuration: Number(session[8]),
-      startTime: Number(session[9]),
-      lastProofTime: Number(session[10]),
-      proofInterval: Number(session[11]),
-      proofTimeoutWindow: Number(session[12]),  // AUDIT-F3: new field
-      status: Number(session[13]),
-      withdrawnByHost: ethers.formatEther(session[14]),
-      refundedToUser: ethers.formatEther(session[15]),
-      conversationCID: session[16]
-    };
+    return mapSessionJob(await this.contract.sessionJobs(jobId));
   }
 
   /**
