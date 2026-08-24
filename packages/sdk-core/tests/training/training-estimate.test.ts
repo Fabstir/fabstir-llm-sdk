@@ -1,18 +1,21 @@
 /**
  * Phase 3 — estimate, deposit, and the early-complete fee (§C.1 money, §A.3 condition 1, Open 8).
  *
- * Vector discipline as Phase 2: only the doc's own numbers carry INTERIM. Test Vectors item 6
- * describes its rounding-bites / round-vs-floor / min-floor cases by PROPERTY and pins no inputs
- * or outputs, so those are DERIVED here and Phase 8 ADDS billing.json's cases beside them.
+ * Phase 8 (2026-08-24): billing.json has LANDED, so the
+ * C.1 money cases below are no longer DERIVED self-regression pins — the node's own numbers are
+ * the oracle, asserted in the vector block at the foot of this file. The DERIVED cases are kept
+ * beside them deliberately: they cover inputs the vector does not, and agreeing with the vector
+ * on four cases while disagreeing nowhere else is stronger than either set alone.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { TrainingManager } from '../../src/managers/TrainingManager';
 import { tokensToUsdc } from '../../src/utils/transcode-utils';
+import billing from './vectors/billing.json';
 
 const MODEL = '0x' + '5a'.repeat(32);
 // Synthetic, NOT a real deployment (CLAUDE.md bars hardcoded contract addresses in tests too).
 const USDC = '0x7C7C7c7c7C7C7c7C7c7c7C7C7c7c7C7C7c7c7c7C';
-const PRICE = 904n;                    // INTERIM: the frozen doc's sample price (item 6)
+const PRICE = 904n;                    // billing.json's sample price — now VECTOR-BACKED
 const MIN_DEPOSIT = 500_000n;          // read from chain in production; fixed here for the maths
 const job = (declaredTokens: number, epochs: number) => ({ dataset: { declaredTokens }, epochs });
 
@@ -133,14 +136,69 @@ describe('the jobMarketplace dependency is checked against the REAL wrapper, not
     await expect(mgr({ jobMarketplace: undefined }).getEarlySelfCompleteFee())
       .rejects.toThrow(/getMinTokensFee/);
   });
-  it('records that JobMarketplaceWrapper does NOT carry getMinTokensFee today', async () => {
-    // If this ever starts passing, the wrapper gained the method and Phase 5 can wire it
-    // directly — at which point delete this test and the narrow interface's warning.
+  it('JobMarketplaceWrapper NOW carries getMinTokensFee — CP1 open item CLOSED at Phase 5', async () => {
+    // This test was written at CP1 as an ABSENCE pin: it asserted the wrapper did NOT have the
+    // method, so it would FLIP the moment someone added it rather than sit silently stale. It
+    // flipped in Phase 5, which is the tripwire working. Inverted here to a presence pin, so
+    // the manager stays wirable and a later removal fails loudly.
     const { JobMarketplaceWrapper } = await import('../../src/contracts/JobMarketplace');
-    expect(typeof (JobMarketplaceWrapper.prototype as Record<string, unknown>).getMinTokensFee)
-      .not.toBe('function');
-    // ...while the two calls this build DOES rely on are present.
+    expect(typeof JobMarketplaceWrapper.prototype.getMinTokensFee).toBe('function');
     expect(typeof JobMarketplaceWrapper.prototype.getTokenMinDeposit).toBe('function');
     expect(typeof JobMarketplaceWrapper.prototype.triggerSessionTimeout).toBe('function');
+  });
+});
+
+describe('billing.json — the T1 vector, now the ORACLE for C.1 (Phase 8)', () => {
+  // Landed 2026-08-24, sha256 0d0e503ab5ae6d2e374a04279f131fafc2efe7d775cdae5a9784900b58b4c1ff.
+  // Every number below is the NODE's, not ours. Until this file existed these cases were our
+  // own computations checked against themselves.
+  const MIN = BigInt(billing.minDepositMicroUsdc);
+
+  it('reproduces ALL FOUR cases exactly — gross AND deposit', () => {
+    for (const [name, c] of Object.entries(billing.cases as Record<string, any>)) {
+      const gross = mgr().estimateTrainingPrice(job(c.trainingTokens, 1), BigInt(c.pricePerToken));
+      expect(gross, `${name} gross`).toBe(BigInt(c.grossMicroUsdc));
+      expect(mgr().computeTrainingDeposit(gross, MIN), `${name} deposit`).toBe(BigInt(c.depositMicroUsdc));
+    }
+  });
+
+  it('roundVsFloor settles the FLOOR question against the node, not against us', () => {
+    // 1,000,053 x 904 = 904,047,912 -> /1000 = 904,047.912. We floor to 904,047; a
+    // round-to-nearest gives 904,048. The node ships 904,047, so the reading is confirmed
+    // rather than assumed — this is the case the vector exists to discriminate.
+    const c = (billing.cases as any).roundVsFloor;
+    expect(c.grossMicroUsdc).toBe(904_047);
+    expect(mgr().estimateTrainingPrice(job(c.trainingTokens, 1), BigInt(c.pricePerToken))).toBe(904_047n);
+  });
+
+  it('confirms the uplift applies to the ALREADY-FLOORED gross (the Band A open question)', () => {
+    // C.1 never defines `gross`, and the two orderings disagree on ~54% of totals above the
+    // floor. We resolved it by reading LtxManager.ts:148 and logged it as a watch item for
+    // exactly this vector. Only ONE of the four cases actually discriminates — checked all
+    // four rather than assuming: `worked`, `roundingBites` and `minFloorBinds` give identical
+    // answers under both orderings, so picking any of them would have "confirmed" nothing.
+    const c = (billing.cases as any).roundVsFloor;
+    const t = BigInt(c.trainingTokens), p = BigInt(c.pricePerToken);
+    const flooredFirst = mgr().computeTrainingDeposit(mgr().estimateTrainingPrice(job(c.trainingTokens, 1), p), MIN);
+    const unflooredQuotient = (t * p * 105n + 99_999n) / 100_000n;   // ceil over the UNfloored quotient
+    expect(flooredFirst).toBe(BigInt(c.depositMicroUsdc));           // 949,250 — the node's number
+    expect(unflooredQuotient).toBe(949_251n);                        // what the other ordering gives
+    expect(unflooredQuotient).not.toBe(BigInt(c.depositMicroUsdc));
+  });
+
+  it('pins the on-chain deposit FLOOR at 500,000 base units', () => {
+    expect(MIN).toBe(500_000n);   // C.1's "0.5 USDC floor", finally stated in base units
+    expect(mgr().computeTrainingDeposit(9_040n, MIN)).toBe(MIN);
+  });
+
+  it('pins billing.pricePerToken as a DECIMAL STRING on the wire (the A1 question, closed)', () => {
+    // The single highest-consequence open item in the build: our over-claim guard compares
+    // train_accepted.billing.pricePerToken against the on-chain price. A bare number would make
+    // "904" !== 904 and abandon a FUNDED session at slice zero on an honest accept.
+    const w = (billing as any).wireShape;
+    expect(typeof w['train_accepted.billing'].pricePerToken).toBe('string');
+    expect(typeof w['train_complete.billing'].pricePerToken).toBe('string');
+    expect(w.types.pricePerToken).toMatch(/string/);
+    expect(w.types.tokens).toBe('number');       // tokens stays numeric — NOT symmetrical
   });
 });

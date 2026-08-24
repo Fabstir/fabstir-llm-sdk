@@ -192,6 +192,28 @@ export {
 } from './utils/training-utils';
 export type { TrainingJob, LoraSessionField } from './types/training.types';
 
+// Phases 4–7 surface. Named individually rather than star-exported for the same reason as the
+// block above: these are the calls a client uses to CHECK the node's arithmetic — recompute the
+// shard schedule, re-hash a fetched manifest, re-count a dataset — and a barrel a refactor can
+// silently drop would remove the check without removing the call site.
+export {
+  SHARD_PLAINTEXT_MAX_BYTES, AEAD_CHUNK_BYTES, PLAUSIBILITY_MAX_BYTES_PER_TOKEN,
+  splitShardSizes, splitShards, reassembleShards, validateJsonlTextV1,
+  canonicaliseManifest, manifestSha256, verifyPlausibility,
+} from './utils/training-shard';
+// count-v1. The tokenizer is an OPTIONAL peer dep (@huggingface/tokenizers >= 0.1.3) loaded by
+// dynamic import, and the 12 MB tokenizer.json is supplied BY THE CALLER and verified against
+// the template's pin — it belongs to the template, not to this SDK.
+export {
+  assertTokenizerPin, loadTrainingTokenizer, countSampleTokens, countDatasetTokens,
+} from './utils/training-count';
+export type { TrainingTokenizer, TokenizerEncoding } from './utils/training-count';
+// Serve-back gating. `serveBackAvailable` is the honest answer to "can this run be served
+// back?": GGUF conversion is best-effort, so a finished, owned adapter can still be unservable.
+export { toServeBackError, serveBackAvailable } from './utils/training-serve-back';
+export type { TrainingHandle, TrainingResult, TrainingPointerRecord } from './utils/training-ws';
+export type { ITrainingManager } from './interfaces/ITrainingManager';
+
 // Moderation publish gate (M3 — ships dark behind moderationGate: false).
 // ⚠️ NOT a security control until M5 signing: reports are unsigned (D6), so
 // this is a plain verdict check. See src/moderation/gate.ts and README.

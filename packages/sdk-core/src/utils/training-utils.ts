@@ -1,8 +1,9 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // Training M0 conformance primitives — pure maths, no I/O. Every shape conforms to
-// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.8 §§B.1/B.4/B.5/C.1 (all four
+// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.11 §§B.1/B.4/B.5/C.1 (all four
 // re-verified byte-identical to v0.3.6, at which this was written).
 import { AbiCoder, keccak256, getBytes, verifyMessage } from 'ethers';
+import { TrainingError } from '../errors/training-errors';
 
 /** Structural input for the B.4 input commitment. `TrainingJob` fields map onto it. */
 export interface TrainingCommitmentInput {
@@ -78,6 +79,16 @@ export function trainingTokens(job: { dataset: { declaredTokens: number }; epoch
  * the adapter hash — unsubmittable on an honest run.
  */
 export function trainingSliceSchedule(totalTokens: number, sliceTokens: number): number[] {
+  // A non-finite total (an NaN `epochs` or `declaredTokens` reaching `trainingTokens`) makes
+  // `Math.max(1, NaN)` NaN and `new Array(NaN)` throw `RangeError: Invalid array length` — an
+  // error that names neither the field nor the cause. Fail with something a caller can act on.
+  if (!Number.isFinite(totalTokens) || totalTokens <= 0
+      || !Number.isFinite(sliceTokens) || sliceTokens <= 0) {
+    throw new TrainingError(
+      `slice schedule needs finite positive inputs; got totalTokens=${totalTokens}, sliceTokens=${sliceTokens}`,
+      'VALIDATION_FAILED', { reason: 'sessionParams' },
+    );
+  }
   const slices = Math.max(1, Math.floor(totalTokens / sliceTokens));
   const deltas = new Array<number>(slices).fill(sliceTokens);
   deltas[slices - 1] = totalTokens - (slices - 1) * sliceTokens;

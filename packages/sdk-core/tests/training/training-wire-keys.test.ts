@@ -103,6 +103,23 @@ describe('entry-surface pins (the build:types `|| true` hazard)', () => {
     expect((sdk.TRAINING_WIRE_VISIBLE_CODES as readonly string[]).length).toBe(11);
     expect(sdk.TRAINING_ERROR_CODES).toContain('DECLARED_TOKENS_MISMATCH');
   });
+  it('reaches the Phases 4-7 surface — the calls that CHECK the node\'s arithmetic', async () => {
+    const sdk = (await import('../../src/index')) as Record<string, unknown>;
+    // Every one of these exists so a client can recompute something the node claims. An export
+    // silently dropped by a refactor removes the CHECK while leaving the call site compiling
+    // against a stale .d.ts — the `build:types || true` hazard, one layer out.
+    for (const fn of [
+      'splitShardSizes', 'splitShards', 'reassembleShards', 'validateJsonlTextV1',
+      'canonicaliseManifest', 'manifestSha256', 'verifyPlausibility',
+      'assertTokenizerPin', 'loadTrainingTokenizer', 'countSampleTokens', 'countDatasetTokens',
+      'toServeBackError', 'serveBackAvailable',
+    ]) expect(typeof sdk[fn], fn).toBe('function');
+    // Constants asserted by VALUE: a wrong shard size is a rejected upload, and 24 MiB exactly
+    // (25,165,824) is the v0.1 bug the pinned chunk scheme refuses to encrypt or fetch.
+    expect(sdk.SHARD_PLAINTEXT_MAX_BYTES).toBe(25_161_728);
+    expect(sdk.AEAD_CHUNK_BYTES).toBe(262_144);
+    expect(sdk.PLAUSIBILITY_MAX_BYTES_PER_TOKEN).toBe(8);
+  });
 });
 
 describe('A.1 numeric wire rule, enforced BEFORE the socket (F4)', () => {

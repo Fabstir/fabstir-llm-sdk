@@ -431,6 +431,17 @@ export class JobMarketplaceWrapper {
     return tx;
   }
 
+  /**
+   * `minTokensFee()` — the fee a DEPOSITOR pays to complete their own zero-proof session early
+   * (Open 8). Added for Training M0: the ABI already declared it (`abis/index.ts:61`) while no
+   * accessor existed, so `TrainingManager` was calling a method this wrapper did not have.
+   * Caught at CP1 by typing that dependency narrowly instead of as `any`.
+   */
+  async getMinTokensFee(): Promise<bigint> {
+    await this.verifyChain();
+    return this.contract.minTokensFee();
+  }
+
   /** Per-token minimum session deposit (tokenMinDeposits mapping; admin-mutable — read, never hardcode). */
   async getTokenMinDeposit(token: string): Promise<bigint> {
     await this.verifyChain();

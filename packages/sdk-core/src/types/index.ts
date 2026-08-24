@@ -599,6 +599,6 @@ export * from './ltx.types';
 
 export * from './moderation.types';
 // ============= Training M0 Types (LoRA/QLoRA fine-tune) =============
-// Wire shapes frozen in docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.8.
+// Wire shapes frozen in docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.11.
 
 export * from './training.types';

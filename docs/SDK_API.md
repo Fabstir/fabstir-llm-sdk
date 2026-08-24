@@ -2429,6 +2429,131 @@ All failures are typed `LtxError { code, message, details }` — wire codes `VAL
 client codes `LTX_PREVALIDATION_FAILED` (pre-escrow, no funds moved), `LTX_BUNDLE_STALE`,
 `LTX_INPUT_BINDING_MISMATCH`, `LTX_PROOF_MISMATCH`.
 
+## Training (LoRA/QLoRA fine-tune, M0)
+
+Fine-tune an adapter on a host's GPU, settling on the same compute contracts as inference.
+Wire shapes are frozen in `docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md` v0.3.9.
+
+**Gating.** `getTrainingManager()` requires `config.trainingModelId`. A host advertises the
+capability by PUBLISHING a `training` section in its bundle — a node with `TRAIN_ENABLED=false`
+omits it entirely, so absence is the advert, not a default.
+
+```typescript
+const training = sdk.getTrainingManager();
+```
+
+### Estimate before you commit
+
+```typescript
+const est = await training.estimateTrainingCost(job, hostAddress);
+// { tokens, pricePerToken, totalCostBaseUnits, depositBaseUnits, paymentToken }
+```
+
+`tokens = declaredTokens x epochs`. The bill is `floor(tokens x pricePerToken / 1000)`; the
+deposit is `max(on-chain floor, ceil(gross x 1.05))`, where the uplift applies to the ALREADY
+FLOORED gross. Both the price floor and the deposit floor are read from chain, never assumed.
+
+### prepareDataset — everything free happens here
+
+```typescript
+const tokenizer = await loadTrainingTokenizer(tokenizerJsonBytes, template.tokenizerSha256);
+const prepared  = await training.prepareDataset({
+  jsonl, tokenizer, specialsPerSample: 1, tokenizerSha256: template.tokenizerSha256,
+});
+// { manifest, manifestBytes, manifestSha256, declaredTokens, samples, totalBytes }
+```
+
+Validates `jsonl-text-v1`, counts with `count-v1`, applies the plausibility bound, shards,
+encrypts, uploads, and builds the manifest — all BEFORE any deposit. Everything after this
+costs money, so every check that can run early does.
+
+**The tokenizer is supplied by you, not bundled.** It belongs to the template, not to the SDK,
+and templates multiply. Pass the `tokenizer.json` bytes; the SDK verifies them against the
+template's pinned `tokenizerSha256` before counting a single sample, because a wrong tokenizer
+produces a plausible count that only the node's recount rejects — after escrow. Cache the file
+keyed by that sha256: it is exactly the identity being verified, so a template change
+invalidates the cache for free. `countSampleTokens` also accepts an already-constructed
+tokenizer, so an application holding one for another purpose need not load 12 MB twice.
+
+Counting needs the optional peer dependency `@huggingface/tokenizers` (>= 0.1.3), loaded by
+dynamic import. Without it you get one actionable error, never a bare `MODULE_NOT_FOUND`.
+
+### Submit and follow the run
+
+```typescript
+const handle = await training.submitTraining({
+  job, bundle, hostAddress, endpoint,
+  onProgress: (p) => ui.stage(p.stage, p.pct),
+  persistPointer: (r) => journal.write(r),   // see below - do not skip this
+});
+const result = await handle.result;          // adapter, billing, proofCIDs, moderation, warnings
+```
+
+`submitTraining` pre-validates against the bundle BEFORE creating the session, so a bounds
+failure costs nothing. Progress arrives through seven stages: `staging`, `scanning`,
+`counting`, `training`, `checkpointing`, `uploading`, `finalising`.
+
+**Persist pointers the moment they arrive.** Capability pointers are delivered ONCE, to the
+live socket; M0 has no reconnect re-delivery. The SDK keeps them in memory on the handle
+(`handle.pointers`) even if your `persistPointer` throws, but a lost process loses them. Each
+slice's checkpoint is a real, usable, owned adapter in safetensors form — a killed run is not a
+wasted one.
+
+The SDK independently recomputes every number the node echoes — the token total, the price
+against the on-chain price, the slice schedule, and each slice's delta and running total — and
+rejects the run rather than letting an over-claim settle.
+
+### Serve back a finished adapter
+
+```typescript
+const gate = serveBackAvailable({ bundleHasTraining, manifestFiles });
+if (gate.ok) await sessionManager.startSession({ ...cfg, lora: { manifestCID, manifestSha256, file: 'adapter.gguf' },
+  onServeBackError: (e) => ui.warn(e.message) });
+```
+
+The adapter is session-scoped at scale 1.0, never visible to concurrent sessions on the same
+base model, and unloaded at session end; its holding key is minted server-side and never
+accepted from the wire.
+
+**GGUF conversion is best-effort.** On failure the run ships safetensors-only plus
+`warnings: ["gguf-conversion-failed"]`. The artifact is still yours and still usable — it
+simply cannot be served back in M0. `serveBackAvailable` reports which gate failed.
+
+**Always pass `onServeBackError`.** Staging runs AFTER the session-init ack, so a staging
+failure arrives post-ack and uncorrelated. Without the callback it is silent, and the session
+answers from the BASE MODEL on a run you are paying to fine-tune.
+
+### Error law
+
+Every failure is a `TrainingError` with a `code`, and the code decides what to do next.
+
+| Code | What happened | What to do |
+|---|---|---|
+| `CAPACITY` + `chainUnavailable` | The node could not read the session. **Nothing consumed.** | Retry, same host, same session |
+| `CAPACITY` + `slotBusy`/`addressBusy`/`cooldown` | Busy. Session funded and zero-completed | Re-shop; the retry needs a FRESH session |
+| `VALIDATION_FAILED` | Job or session rejected; `detail.reason` says which | `datasetFormat`/`sessionParams` recur everywhere — fix, do not re-shop |
+| `DATASET_INTEGRITY` | Shard or manifest hash mismatch | Re-prepare the dataset |
+| `DECLARED_TOKENS_MISMATCH` | The node's recount disagrees | `remanifestWithActual()` — same shards, one round trip |
+| `SIDECAR_UNAVAILABLE` | Died before any slice settled | Re-shop; zero-settled |
+| `TRAIN_FAILED` / `TIMEOUT` | Died after `k` slices | Re-shoppable only at `k = 0`; money moved otherwise |
+| `CANCELLED` | Cancelled, or the socket closed | Completed slices settle; checkpoints are yours |
+| `LORA_STAGING_FAILED` | Adapter staging failed; `detail.reason` says why | `chain` means re-shop — note this INVERTS `chainUnavailable` above |
+| `LORA_NOT_STAGED` | The adapter is not loaded | Terminal. It never means "still staging" |
+| Moderation holds | Content hold | **Never re-shopped to another host** |
+
+`error.isRetryable`, `error.requiresFreshSession` and `error.isReshoppable(k)` encode this
+table. An unrecognised `detail.reason` is treated conservatively — session presumed consumed —
+which the node guarantees is correct by construction.
+
+### Privacy — say this to your users
+
+> the plaintext attestations are public — a run's template, host, sessionId, token volume and
+> cadence are publicly linkable (same posture as LTX; it reveals a customer's training scale,
+> so say it).
+
+Dataset and artifact manifests themselves are private (capability CIDs only). What is public is
+the on-chain proof hashes plus the attestation sha256 chain.
+
 ## Payment Management
 
 Handles ETH and USDC payments for jobs.

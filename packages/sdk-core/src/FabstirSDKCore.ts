@@ -18,7 +18,8 @@ import {
   IHostManager,
   ITreasuryManager,
   ITranscodeManager,
-  ILtxManager
+  ILtxManager,
+  ITrainingManager
 } from './interfaces';
 import { IVectorRAGManager } from './managers/interfaces/IVectorRAGManager';
 import { IWalletProvider } from './interfaces/IWalletProvider';
@@ -39,6 +40,7 @@ import { ClientManager } from './managers/ClientManager';
 import { EncryptionManager } from './managers/EncryptionManager';
 import { TranscodeManager } from './managers/TranscodeManager';
 import { LtxManager } from './managers/LtxManager';
+import { TrainingManager } from './managers/TrainingManager';
 import { JobMarketplaceWrapper } from './contracts/JobMarketplace';
 import { VectorRAGManager } from './managers/VectorRAGManager';
 import { SessionGroupManager } from './managers/SessionGroupManager';
@@ -61,6 +63,8 @@ export interface FabstirSDKCoreConfig {
   chainId?: number;
   /** Registered LTX video-sidecar model id (bytes32). Enables the LTX manager when set. */
   ltxModelId?: string;
+  /** Registered TRAINING model id (bytes32, A.2) — enables getTrainingManager(). */
+  trainingModelId?: string;
 
   // Contract addresses (optional - can use env vars)
   contractAddresses?: {
@@ -149,6 +153,7 @@ export class FabstirSDKCore extends EventEmitter {
   private sessionGroupManager?: SessionGroupManager;
   private transcodeManager?: TranscodeManager;
   private ltxManager?: LtxManager;
+  private trainingManager?: TrainingManager;
 
   private authenticated = false;
   private s5Seed?: string;
@@ -189,6 +194,7 @@ export class FabstirSDKCore extends EventEmitter {
       rpcUrl: config.rpcUrl, // Required, no fallback
       chainId: config.chainId || 84532, // Base Sepolia default
       ltxModelId: config.ltxModelId, // LTX video-sidecar model id (enables getLtxManager)
+      trainingModelId: config.trainingModelId, // Training M0 model id (enables getTrainingManager)
 
       contractAddresses: {
         // Required addresses - no fallbacks
@@ -979,6 +985,20 @@ export class FabstirSDKCore extends EventEmitter {
           chainId: this.currentChainId,
         });
       }
+
+      // Training M0. Same gate idiom as LTX: the model id IS the opt-in.
+      if (!hostOnly && !skipS5 && this.sessionManager && this.storageManager && this.contractManager && this.config.trainingModelId) {
+        this.trainingManager = new TrainingManager({
+          sessionManager: this.sessionManager,
+          storageManager: this.storageManager,
+          paymentManager: this.paymentManager,
+          jobMarketplace: new JobMarketplaceWrapper(this.currentChainId, this.signer!),
+          hostManager: this.hostManager,
+          trainingModelId: this.config.trainingModelId,
+          usdcAddress: await this.contractManager.getContractAddress('usdcToken'),
+          chainId: this.currentChainId,
+        });
+      }
     }
 
     // Initialize bridge client if configured
@@ -1144,6 +1164,15 @@ export class FabstirSDKCore extends EventEmitter {
       throw new SDKError('LtxManager not initialized (set config.ltxModelId)', 'LTX_NOT_AVAILABLE');
     }
     return this.ltxManager;
+  }
+
+  /** Get the Training M0 manager (requires config.trainingModelId to have been set). */
+  getTrainingManager(): ITrainingManager {
+    this.ensureAuthenticated();
+    if (!this.trainingManager) {
+      throw new SDKError('TrainingManager not initialized (set config.trainingModelId)', 'TRAINING_NOT_AVAILABLE');
+    }
+    return this.trainingManager;
   }
 
   /**

@@ -1,7 +1,11 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // Training M0 (LoRA/QLoRA fine-tune) types. Wire shapes frozen in
-// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.8 (FROZEN; every section this
+// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.11 (FROZEN; every section this
 // file depends on re-verified byte-identical to v0.3.6, at which it was written).
+// Doc references throughout the training surface are by SECTION (§A.1, §D.1, …), never by line
+// number. The interface is frozen for SEMANTICS but takes additive bumps often — it grew 916 to
+// 1097 lines across five revisions during this build — so line cites rot silently and point a
+// future verifier at the wrong text. Section ids are what the freeze rule actually protects.
 export * from '../errors/training-errors';
 import { TrainingError } from '../errors/training-errors';
 
@@ -14,8 +18,8 @@ export interface ManifestPointer {
 }
 
 /**
- * The moderation object AS IT APPEARS ON THE TRAINING WIRE (B.3 attestation doc:476,
- * `train_complete` doc:816).
+ * The moderation object AS IT APPEARS ON THE TRAINING WIRE (§B.3's attestation, and
+ * `train_complete` in the protocol section).
  *
  * ⚠️ Its key is **`status`**, NOT `verdict`. The training surface and the transcode/publish-gate
  * surface spell this differently, and `verdict` never appears as a JSON key anywhere in the
@@ -33,7 +37,8 @@ export interface TrainingModerationStatus {
 
 /**
  * Map the training wire object onto the SDK's generalised moderation type for consumer
- * surfacing (doc:293 — "verdict/hold surfacing on the generalised moderation types").
+ * surfacing (the 1.38.0 type-pins note — "verdict/hold surfacing on the generalised
+ * moderation types").
  * The step is EXPLICIT because the keys differ: there is no structural overlap to lean on.
  * `policyVersion` has no slot on the generalised type, so callers that need it read the wire
  * object — it is deliberately not folded into `reason`, which is a rule id, not a version.
@@ -122,20 +127,35 @@ export interface TrainingBilling {
    * The verified ON-CHAIN session price (A.3) — not an advertised or env value.
    *
    * Typed as a DECIMAL STRING on three pointers, none contradicting: the ground rule pins
-   * "`u64`-and-larger integers as decimal strings on the wire" (doc:277); it is a uint256 on
+   * "`u64`-and-larger integers as decimal strings on the wire" (the Contract A ground rule);
+   * it is a uint256 on
    * chain with NO upper bound stated anywhere in the frozen doc; and both sibling billing
    * blocks on this node already do it (`ltx.types.ts:73`, `transcode.types.ts:451`).
-   * ⚠️ OPEN (asked of the node dev 2026-08-23): the doc prints no JSON type for this field.
-   * If the node sends a bare number, the C.1 over-claim guard would compare `"904" === 904`
-   * and reject an honest accept — so this is settled BEFORE the T1 vectors land, not after.
+   * ✅ CLOSED (v0.3.11 + `billing.json`'s `wireShape` block): the type is pinned as a decimal
+   * string on both billing blocks, with `tokens` deliberately staying a NUMBER. The rule is
+   * stated in both directions so neither half gets "corrected" later.
    */
   pricePerToken: string;
 }
 
 export interface TrainAcceptedFrame {
   type: 'train_accepted';
+  /** Echoed when the client sent one (protocol section: "`requestId` echoed everywhere when
+   *  sent"). Typed because the dispatcher reads it — a type omitting a field its own consumer
+   *  reads is the shape that let `sessionId` be wrong. */
+  requestId?: string;
   status: 'processing';
-  sessionId: string;
+  /**
+   * ⚠️ A **NUMBER** here (the protocol section's `train_accepted` example, `"sessionId": 931`)
+   * and a **hex STRING** on §B.3's attestation (`"sessionId": "0x…"`). Same field name, two
+   * surfaces, two types.
+   *
+   * v0.3.11 pinned the rule rather than leaving it inferred: `pricePerToken` is a `uint256`
+   * with no published bound so it must be a string, while the ids and token counts are bounded
+   * by this document's own caps far below 2^53 and ride as numbers. A uniform guess is wrong
+   * in one direction or the other, which is why both halves are stated.
+   */
+  sessionId: number;
   allowListVersion: number;
   billing: TrainingBilling;
   schedule: { sliceTokens: number; slices: number };
@@ -166,6 +186,7 @@ export interface TrainCompleteFrame {
 
 export interface TrainErrorFrame {
   type: 'train_error';
+  requestId?: string;
   error: { code: string; message: string; detail?: Record<string, unknown> };
 }
 
@@ -248,6 +269,13 @@ export interface TrainingBundleSection {
     maxDatasetBytes: number;
     perTemplate: Record<string, {
       ranks: number[]; seqLens: number[]; sliceTokens: number; specialsPerSample: number;
+      /** Added to A.4 in v0.3.10 at the SDK's request. Both were preconditions a client was
+       *  held to and could not read: without `tokenizerSha256` a client discovering a template
+       *  from a bundle cannot verify a supplied tokenizer, and without `baseServingModelId` it
+       *  cannot check E.2's third serve-back precondition before the session is funded.
+       *  OPTIONAL here: a bundle emitted before the template is re-authored carries neither. */
+      tokenizerSha256?: string;
+      baseServingModelId?: string;
     }>;
   };
 }
@@ -277,12 +305,26 @@ function assertTrainingJobWireShape(job: TrainingJob): void {
     ['hyper.seqLen', job.hyper.seqLen],
   ];
   for (const [name, v] of numerics) {
-    if (typeof v !== 'number' || !Number.isFinite(v)) {
+    // INTEGER-ness, not merely finiteness. Every A.1 numeric is u32/u64 on the node, so a
+    // fractional value serialises perfectly, passes a finiteness check, and is then rejected by
+    // the node's non-Option deserialisation POST-ESCROW — on a session A.3 forbids retrying.
+    if (typeof v !== 'number' || !Number.isFinite(v) || !Number.isInteger(v)) {
       throw new TrainingError(
-        `TrainingJob.${name} must be a finite number (A.1 numeric wire rule); got ${String(v)}`,
+        `TrainingJob.${name} must be a finite whole number (A.1 numeric wire rule); got ${String(v)}`,
         'VALIDATION_FAILED', { reason: 'numericWireRule', field: name },
       );
     }
+  }
+  // The doc pins `1..=bounds.maxEpochs`. The UPPER bound is a per-host bundle value checked in
+  // TrainingManager; the LOWER bound is universal and belongs here. `epochs: 0` makes
+  // totalTokens zero, and the schedule then yields a single zero-token slice — below any
+  // provable size, which is exactly the unsubmittable-final-slice shape B.1 was rewritten to
+  // eliminate. It is also the one A.1 value whose floor is not 0.
+  if (job.epochs < 1) {
+    throw new TrainingError(
+      `TrainingJob.epochs must be at least 1 (A.1 pins 1..=maxEpochs); got ${job.epochs}`,
+      'VALIDATION_FAILED', { reason: 'numericWireRule', field: 'epochs' },
+    );
   }
   if (!LR_RE.test(job.hyper.lr)) {
     throw new TrainingError(

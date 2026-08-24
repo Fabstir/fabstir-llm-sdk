@@ -3,6 +3,8 @@
  * FROZEN. The capacity table has 8 ROWS carrying 10 CODES and `VALIDATION_FAILED` is in neither
  * count (it lives in A.3/C.3): the member set is arrived at by NAMING, never by counting the table.
  */
+import { TrainingError } from '../../src/errors/training-errors';
+import { buildTrainAction } from '../../src/types/training.types';
 import { describe, it, expect } from 'vitest';
 import {
   TRAINING_WIRE_ERROR_CODES, TRAINING_CLIENT_ERROR_CODES, TRAINING_SERVE_BACK_ERROR_CODES,
@@ -157,5 +159,63 @@ describe('the training moderation object uses the WIRE key `status`, not `verdic
   it('maps onto the generalised type explicitly, because the keys do not overlap (doc:293)', () => {
     expect(toJobModerationStatus({ status: 'cleared' })).toEqual({ verdict: 'cleared' });
     expect(toJobModerationStatus({ status: 'blocked', policyVersion: 'p1' }).verdict).toBe('blocked');
+  });
+});
+
+describe('client-minted reasons must not INVERT re-shopping', () => {
+  it('a malformed lr/seed and a broken dependency are TERMINAL, not re-shoppable', () => {
+    // `isReshoppable` treats any reason outside A.3's pinned four as re-shoppable, which is
+    // right for a HOST-specific reason and exactly wrong for a JOB-specific one. A malformed
+    // `lr` recurs identically on every host, and a missing dependency method is our own wiring
+    // — neither gets better elsewhere, and the load balancer would burn three hosts finding out.
+    for (const reason of ['numericWireRule', 'missingDependencyMethod']) {
+      const e = new TrainingError('x', 'VALIDATION_FAILED', { reason });
+      expect(e.isReshoppable(0), reason).toBe(false);
+    }
+  });
+  it('OUR OWN faults are never re-shoppable, whatever code carries them', () => {
+    // The governing principle: if the fault is ours, another host cannot fix it. A missing
+    // dependency method is our wiring and a failed pointer write is our storage — re-shopping
+    // either one just burns a second deposit to reach the identical failure.
+    expect(new TrainingError('x', 'ESTIMATE_MISMATCH', { reason: 'missingDependencyMethod' }).isReshoppable(0)).toBe(false);
+    expect(new TrainingError('x', 'POINTER_PERSIST_FAILED').isReshoppable(0)).toBe(false);
+  });
+  it('but a HOST-specific fault stays re-shoppable — that is the whole distinction', () => {
+    // These three are all "THIS host did something wrong", and another host is exactly the fix.
+    expect(new TrainingError('x', 'ESTIMATE_MISMATCH').isReshoppable(0)).toBe(true);
+    expect(new TrainingError('x', 'TRAINING_BUNDLE_STALE').isReshoppable(0)).toBe(true);
+    expect(new TrainingError('x', 'INPUT_BINDING_MISMATCH').isReshoppable(0)).toBe(true);
+    expect(new TrainingError('x', 'VALIDATION_FAILED', { reason: 'hostBundle' }).isReshoppable(0)).toBe(true);
+  });
+  it('and A.3\'s four pinned reasons remain terminal', () => {
+    for (const reason of ['sessionParams', 'sessionReused', 'trainActive', 'datasetFormat']) {
+      expect(new TrainingError('x', 'VALIDATION_FAILED', { reason }).isReshoppable(0), reason).toBe(false);
+    }
+  });
+});
+
+describe('A.1 numeric rule — integer-ness and the epochs floor (rev-wire D-2)', () => {
+  const J: any = {
+    templateId: 't', templateHash: `0x${'ab'.repeat(32)}`,
+    dataset: { manifestCID: 'u', manifestSha256: `0x${'cd'.repeat(32)}`, declaredTokens: 100, samples: 1 },
+    epochs: 3, hyper: { rank: 16, alpha: 32, lr: '0.1', seed: '1', seqLen: 2048 }, output: 'adapter-v1',
+  };
+  it('rejects FRACTIONAL numerics — the guard claimed integer-ness and never checked it', () => {
+    // A.1's fields are u32/u64 on the node. A fractional value serialises fine, so the client
+    // gate passes and the node's non-Option deserialisation rejects it POST-ESCROW.
+    for (const f of [{ epochs: 2.5 }, { hyper: { ...J.hyper, rank: 16.5 } }, { hyper: { ...J.hyper, seqLen: 2048.1 } }]) {
+      expect(() => buildTrainAction({ ...J, ...f }), JSON.stringify(f)).toThrow(/whole number|integer/i);
+    }
+  });
+  it('rejects epochs < 1 — zero produces a slice of ZERO tokens', () => {
+    // doc pins `1..=bounds.maxEpochs` and only the upper bound was checked. epochs 0 makes
+    // totalTokens 0, and the schedule then yields a single zero-token slice — below the
+    // minimum provable size, i.e. exactly the unsubmittable-final-slice shape B.1 was
+    // rewritten in v0.2 to eliminate.
+    expect(() => buildTrainAction({ ...J, epochs: 0 })).toThrow(/at least 1|epochs/i);
+    expect(() => buildTrainAction({ ...J, epochs: -1 })).toThrow(/at least 1|epochs/i);
+  });
+  it('still accepts a legitimate whole-number job', () => {
+    expect(() => buildTrainAction(J)).not.toThrow();
   });
 });

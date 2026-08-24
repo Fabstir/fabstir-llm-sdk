@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // Training M0 error surface. Wire codes frozen in
-// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.8 (FROZEN; the code set is
+// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.11 (FROZEN; the code set is
 // unchanged since v0.3.6, at which it was written — v0.3.7 folded in E.3, v0.3.8 D.1).
 // Pre-MVP: no fallbacks — fail fast with a typed TrainingError.
 
@@ -77,7 +77,7 @@ export const CAPACITY_REASONS = ['chainUnavailable', 'slotBusy', 'addressBusy', 
 export const LORA_STAGING_FAILED_REASONS =
   ['invalid', 'fetch', 'write', 'cancelled', 'budget', 'chain'] as const;
 
-/** The `VALIDATION_FAILED` reasons the frozen doc pins (A.3 doc:371/391, C.4 doc:630). */
+/** The `VALIDATION_FAILED` reasons the frozen doc pins (§A.3 and §C.4). */
 export const VALIDATION_FAILED_REASONS =
   ['sessionParams', 'sessionReused', 'trainActive', 'datasetFormat'] as const;
 
@@ -114,6 +114,33 @@ const TERMINAL_FOR_THIS_JOB: readonly string[] = [
 /** Money moved at k ≥ 1; a k = 0 death is the SIDECAR_UNAVAILABLE class (zero-settle, re-shoppable). */
 const RESHOPPABLE_ONLY_AT_K_ZERO: readonly string[] = ['TRAIN_FAILED', 'TIMEOUT'];
 
+/**
+ * CLIENT-MINTED `VALIDATION_FAILED` reasons that are terminal for the JOB, not the host.
+ *
+ * `isReshoppable` treats any reason outside §A.3's pinned four as re-shoppable, because the one
+ * post-escrow case the doc describes is host-specific allow-list drift. That default is right
+ * for a reason describing the HOST and exactly wrong for one describing the JOB: a malformed
+ * `lr`/`seed` recurs byte-for-byte on every host, and a missing dependency method is our own
+ * wiring. Without this list a load balancer burns three deposits discovering that.
+ *
+ * `hostBundle` is deliberately NOT here — it means THIS host cannot run the job, which is the
+ * case re-shopping exists for.
+ */
+const CLIENT_TERMINAL_REASONS: readonly string[] = [
+  'numericWireRule', 'missingDependencyMethod',
+  // Purely local configuration faults: a tokenizer whose bytes fail the template's pin, and an
+  // uninstalled optional peer dependency. Another host reaches the identical failure.
+  'tokenizerPin', 'missingDependency',
+  // §E.3's own definition: `invalid` = "the client's own claim is wrong (bad shape, unknown
+  // file, base mismatch)". An adapter's base model is fixed, so another host fails identically.
+  // Its siblings `fetch`, `write` and `chain` ARE the host's problem and stay re-shoppable.
+  'invalid',
+];
+
+/** Codes whose fault is OURS, not the host's. Another host reaches the identical failure, so
+ *  re-shopping only burns a second deposit to find that out. */
+const CLIENT_FAULT_CODES: readonly string[] = ['POINTER_PERSIST_FAILED'];
+
 export class TrainingError extends Error {
   readonly code: TrainingErrorCode;
   readonly detail?: TrainingErrorDetail;
@@ -134,13 +161,13 @@ export class TrainingError extends Error {
    * Whether the retry must ride a FRESH session. `chainUnavailable` is the ONLY case where the
    * node consumed and settled nothing — it could not read the session at all, so a straight
    * retry on the SAME session is safe once the read succeeds (v0.3.6 changelog carve-out (1),
-   * doc:71-77).
+   * the v0.3.6 changelog, carve-out (1)).
    *
    * Everything else needs a fresh session, but NOT all for the same reason, and the difference
    * matters to a caller waiting on a refund:
    *  · `SIDECAR_UNAVAILABLE` and the busy `CAPACITY` classes consume the session and zero-settle
-   *    it (doc:79), so "retry this host N times" means N FRESH sessions.
-   *  · `sessionReused`/`trainActive` schedule NO second completion (carve-out (2), doc:76-79) —
+   *    it (same carve-out), so "retry this host N times" means N FRESH sessions.
+   *  · `sessionReused`/`trainActive` schedule NO second completion (carve-out (2)) —
    *    on `sessionReused` the settle was already scheduled by the EARLIER reject, and on
    *    `trainActive` a paid run is still executing and will settle normally. Do not wait for a
    *    refund event on THIS reject, and never treat a `trainActive` session as dead: that would
@@ -161,15 +188,25 @@ export class TrainingError extends Error {
    * describe the JOB or the SESSION, so they recur identically on every host and re-shopping
    * only burns another deposit. But the one post-escrow scenario A.4 actually describes is
    * mid-flight ALLOWLIST DRIFT ("a host can bump its allowlist while a client sits between
-   * validate and `train`", doc:418-421), which is a fact about THAT HOST and carries no pinned
+   * validate and `train`", §A.4), which is a fact about THAT HOST and carries no pinned
    * reason string. The job is still valid and another host will run it, so a blanket `false`
    * would retire a good job in precisely the case the frozen doc bothers to write down.
    */
   isReshoppable(k: number): boolean {
+    // An UNRECOGNISED wire code: the node named something this SDK version does not know. It
+    // was flattened to TRAIN_FAILED so callers get a usable class, but flattening must not
+    // grant re-shopping — if it was a moderation-class code, re-shopping it is the one thing
+    // the interface forbids. Refuse, and let the user resubmit deliberately.
+    if (this.detail?.unknownCode !== undefined) return false;
+    // OUR fault, whatever code carries it: another host cannot fix our wiring or our storage.
+    if (CLIENT_TERMINAL_REASONS.includes(this.detail?.reason as string)) return false;
+    if (CLIENT_FAULT_CODES.includes(this.code)) return false;
     if (NEVER_REHOSTED.includes(this.code)) return false;
     if (TERMINAL_FOR_THIS_JOB.includes(this.code)) return false;
     if (this.code === 'VALIDATION_FAILED') {
-      return !VALIDATION_FAILED_REASONS.includes(this.detail?.reason as never);
+      const reason = this.detail?.reason as string | undefined;
+      if (CLIENT_TERMINAL_REASONS.includes(reason as string)) return false;
+      return !VALIDATION_FAILED_REASONS.includes(reason as never);
     }
     if (RESHOPPABLE_ONLY_AT_K_ZERO.includes(this.code)) return k === 0;
     return true;

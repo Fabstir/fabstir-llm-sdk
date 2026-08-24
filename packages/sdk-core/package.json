@@ -1,6 +1,6 @@
 {
   "name": "@fabstir/sdk-core",
-  "version": "1.37.0",
+  "version": "1.38.0",
   "description": "Browser-compatible core SDK for Fabstir P2P LLM marketplace",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -42,13 +42,13 @@
     "prepare": "pnpm run build",
     "build": "pnpm run build:clean && pnpm run build:esm && pnpm run build:cjs && pnpm run build:types",
     "build:clean": "rimraf dist",
-    "build:esm": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2020 --supported:class-private-field=false --supported:bigint=true --outfile=dist/index.mjs --external:ethers --external:@base-org/account --external:url --external:path --external:node:* --external:crypto --external:fs --external:stream --external:http --external:https --external:zlib --external:net --external:tls --external:assert --external:@julesl23/s5js --external:canvas --external:pdfjs-dist",
-    "build:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=node --target=es2020 --outfile=dist/index.js --external:ethers --external:@base-org/account --external:@julesl23/s5js --external:canvas --external:pdfjs-dist",
+    "build:esm": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2020 --supported:class-private-field=false --supported:bigint=true --outfile=dist/index.mjs --external:@huggingface/tokenizers --external:ethers --external:@base-org/account --external:url --external:path --external:node:* --external:crypto --external:fs --external:stream --external:http --external:https --external:zlib --external:net --external:tls --external:assert --external:@julesl23/s5js --external:canvas --external:pdfjs-dist",
+    "build:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=node --target=es2020 --outfile=dist/index.js --external:@huggingface/tokenizers --external:ethers --external:@base-org/account --external:@julesl23/s5js --external:canvas --external:pdfjs-dist",
     "build:submodules": "pnpm run build:embeddings:esm && pnpm run build:embeddings:cjs && pnpm run build:managers:esm && pnpm run build:managers:cjs",
-    "build:embeddings:esm": "esbuild src/embeddings/index.ts --bundle --format=esm --platform=browser --target=es2020 --outfile=dist/embeddings/index.mjs --external:ethers --external:@base-org/account --external:openai --external:cohere-ai --external:crypto --external:node:*",
-    "build:embeddings:cjs": "esbuild src/embeddings/index.ts --bundle --format=cjs --platform=node --target=es2020 --outfile=dist/embeddings/index.js --external:ethers --external:@base-org/account --external:openai --external:cohere-ai",
-    "build:managers:esm": "esbuild src/managers/index.ts --bundle --format=esm --platform=browser --target=es2020 --outfile=dist/managers/index.mjs --external:ethers --external:@base-org/account --external:crypto --external:node:* --external:@julesl23/s5js",
-    "build:managers:cjs": "esbuild src/managers/index.ts --bundle --format=cjs --platform=node --target=es2020 --outfile=dist/managers/index.js --external:ethers --external:@base-org/account --external:@julesl23/s5js --external:canvas --external:pdfjs-dist",
+    "build:embeddings:esm": "esbuild src/embeddings/index.ts --bundle --format=esm --platform=browser --target=es2020 --outfile=dist/embeddings/index.mjs --external:@huggingface/tokenizers --external:ethers --external:@base-org/account --external:openai --external:cohere-ai --external:crypto --external:node:*",
+    "build:embeddings:cjs": "esbuild src/embeddings/index.ts --bundle --format=cjs --platform=node --target=es2020 --outfile=dist/embeddings/index.js --external:@huggingface/tokenizers --external:ethers --external:@base-org/account --external:openai --external:cohere-ai",
+    "build:managers:esm": "esbuild src/managers/index.ts --bundle --format=esm --platform=browser --target=es2020 --outfile=dist/managers/index.mjs --external:@huggingface/tokenizers --external:ethers --external:@base-org/account --external:crypto --external:node:* --external:@julesl23/s5js",
+    "build:managers:cjs": "esbuild src/managers/index.ts --bundle --format=cjs --platform=node --target=es2020 --outfile=dist/managers/index.js --external:@huggingface/tokenizers --external:ethers --external:@base-org/account --external:@julesl23/s5js --external:canvas --external:pdfjs-dist",
     "build:browser": "pnpm run build:browser:esm && pnpm run build:browser:cjs",
     "build:browser:esm": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2020 --outfile=dist/browser.mjs --minify",
     "build:browser:cjs": "esbuild src/index.ts --bundle --format=cjs --platform=browser --target=es2020 --outfile=dist/browser.js --minify",
@@ -71,6 +71,7 @@
     "pdfjs-dist": "^3.11.174"
   },
   "devDependencies": {
+    "@huggingface/tokenizers": "^0.1.3",
     "@types/node": "^20.10.5",
     "@vitest/ui": "^1.1.0",
     "esbuild": "^0.19.10",
@@ -80,11 +81,15 @@
     "vitest": "^1.1.0"
   },
   "peerDependencies": {
+    "@huggingface/tokenizers": ">=0.1.3",
     "@base-org/account": "^2.5.0",
     "@fabstir/llm-auth": ">=0.1.0",
     "ethers": "^6.9.0"
   },
   "peerDependenciesMeta": {
+    "@huggingface/tokenizers": {
+      "optional": true
+    },
     "@base-org/account": {
       "optional": true
     },

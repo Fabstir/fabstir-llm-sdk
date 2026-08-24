@@ -63,6 +63,13 @@ import { submitTranscodeWs } from '../utils/transcode-ws';
 import type { VideoFormat, TranscodeHandle, TranscodeSubmitOptions } from '../types/transcode.types';
 import { submitLtxWs } from '../utils/ltx-ws';
 import type { LtxJob, LtxHandle, LtxSubmitOptions, LtxResult } from '../types/ltx.types';
+import type { LoraSessionField } from '../types/training.types';
+import { buildLoraSessionField } from '../types/training.types';
+import type { TrainingError } from '../errors/training-errors';
+import { toServeBackError, firstResponseTimeoutMs } from '../utils/training-serve-back';
+import { submitTrainingWs } from '../utils/training-ws';
+import type { TrainingHandle, TrainingWsOptions } from '../utils/training-ws';
+import type { TrainingJob } from '../types/training.types';
 
 /**
  * Check if a string is a bytes32 hash (0x + 64 hex chars)
@@ -171,6 +178,12 @@ export interface ExtendedSessionConfig extends SessionConfig {
     userAddress: string; // Owner address for verification
   };
   webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 2.2)
+  /** Training M0 serve-back (E.2): load this session's own fine-tuned adapter. Session-scoped,
+   *  scale 1.0, never visible to concurrent sessions on the same base model. */
+  lora?: LoraSessionField;
+  /** Fires on a post-ack `LORA_STAGING_FAILED` (E.3). Without it a staging failure is silent
+   *  and the session serves BASE-MODEL output on a paid fine-tune. */
+  onServeBackError?: (error: TrainingError) => void;
 }
 
 /**
@@ -281,6 +294,25 @@ export class SessionManager implements ISessionManager {
       throw new Error('HostManager not set; cannot resolve model price');
     }
     return this.hostManager.getModelPricing(hostAddress, convertModelToBytes32(modelId), paymentToken);
+  }
+
+  /** Last post-ack serve-back failure (E.3), or null. Cleared on each (re-)init, because a
+   *  re-init carrying `lora` RE-TRIGGERS staging: the previous attempt is evicted. */
+  private serveBackError: TrainingError | null = null;
+
+  /** Disposer for the post-ack serve-back listener. Five call sites re-init on the SHARED
+   *  `this.wsClient`, so without this each re-init would stack another listener and one
+   *  staging failure would fire the caller's handler once per init. */
+  private serveBackUnsubscribe?: () => void;
+
+  /** True while this session carries a `lora` adapter, so the first-response timeout can clear
+   *  the node's 300 s staging budget. Non-lora sessions keep the existing allowance exactly. */
+  private loraSessionActive = false;
+
+  /** The staging failure this session hit, if any. Non-null means the adapter is NOT loaded
+   *  and any answer since would have come from the BASE MODEL. */
+  getServeBackError(): TrainingError | null {
+    return this.serveBackError;
   }
 
   /**
@@ -1138,7 +1170,10 @@ export class SessionManager implements ISessionManager {
             // Once streaming starts, the sliding window uses 60s between chunks
             let timeout = setTimeout(() => {
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
-            }, 180000); // 180 seconds initial timeout for cold start (model loading)
+              // A lora session's first prompt can queue behind a 300 s stage (E.3), so the
+              // allowance clears the staging budget as well as the cold start. Unchanged at
+              // 180 s for every non-lora session.
+            }, firstResponseTimeoutMs(180000, this.loraSessionActive));
 
             // Guard against double resolution (mobile browser race condition fix)
             let isResolved = false;
@@ -1467,7 +1502,10 @@ export class SessionManager implements ISessionManager {
             // Once streaming starts, the sliding window uses 60s between chunks
             let timeout = setTimeout(() => {
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
-            }, 180000); // 180 seconds initial timeout for cold start (model loading)
+              // A lora session's first prompt can queue behind a 300 s stage (E.3), so the
+              // allowance clears the staging budget as well as the cold start. Unchanged at
+              // 180 s for every non-lora session.
+            }, firstResponseTimeoutMs(180000, this.loraSessionActive));
 
             // Guard against double resolution (mobile browser race condition fix)
             let isResolved = false;
@@ -2100,6 +2138,18 @@ export class SessionManager implements ISessionManager {
       recoveryPublicKey: recoveryPubKey
     };
 
+    // Training M0 serve-back (E.2). Built field-by-field so no serialiser can touch the key
+    // strings: a camelCase pass turns `manifestCID` into `manifestCid`, which fails the WHOLE
+    // init parse as DECRYPTION_FAILED — deliberately, since silently dropping the field would
+    // serve base-model output on a session the customer is paying to run their fine-tune.
+    this.serveBackError = null;
+    this.serveBackUnsubscribe?.();          // a re-init REPLACES the listener, never adds one
+    this.serveBackUnsubscribe = undefined;
+    this.loraSessionActive = config.lora !== undefined;
+    if (config.lora) {
+      initPayload.lora = buildLoraSessionField(config.lora);
+    }
+
     // NEW (Sub-phase 5.1.3): Include vector database info if provided
     if (config.vectorDatabase) {
       initPayload.vectorDatabase = {
@@ -2158,6 +2208,20 @@ export class SessionManager implements ISessionManager {
       });
     });
 
+    // E.3: THE ACK MEANS ACCEPTED, NOT READY. Staging runs AFTER the ack — it has to, since
+    // an adapter can be hundreds of MB and blocking the handshake on the fetch overruns the
+    // 30 s init timeout above. So `LORA_STAGING_FAILED` arrives post-ack and UNCORRELATED,
+    // by which time the ack handler has already unsubscribed and the frame lands on nobody.
+    // Without this listener the failure is SILENT and the session answers from the base
+    // model. Installed only for lora sessions, so non-lora behaviour is unchanged.
+    if (config.lora) {
+      this.serveBackUnsubscribe = ws.onMessage((data: any) => {
+        const error = toServeBackError(data);
+        if (!error) return;
+        this.serveBackError = error;
+        config.onServeBackError?.(error);
+      });
+    }
   }
 
   /**
@@ -3940,7 +4004,26 @@ export class SessionManager implements ISessionManager {
   }
 
   /** Submit an LTX video job via encrypted WebSocket (mirrors submitTranscode; Constraint 7). */
-  async submitLtx(sessionId: string, job: LtxJob, options?: LtxSubmitOptions): Promise<LtxHandle> {
+  /**
+   * Acquire an encrypted transport for a session: reuse the shared socket when it is already
+   * this session's, otherwise stand up a dedicated one and run the encrypted init on it.
+   *
+   * Extracted from `submitLtx` so training rides the SAME mechanism rather than a parallel
+   * copy of it. A second inline copy would be ~50 lines that must not drift, and the parts
+   * most worth not drifting — the no-fallback endpoint guard and the save/restore of the
+   * shared `sessionKey`/`messageIndex` around a dedicated init — are exactly the parts a
+   * copy gets subtly wrong.
+   */
+  private async acquireSessionTransport(sessionId: string): Promise<{
+    wsClient: WebSocketClient;
+    sessionKey: Uint8Array;
+    messageIndexRef: { value: number };
+    ownsWs: boolean;
+    encryptionAdapter: {
+      encryptMessage(key: Uint8Array, plaintext: string, index: number): any;
+      decryptMessage(key: Uint8Array, payload: any): string;
+    };
+  }> {
     const session = this.sessions.get(sessionId);
     if (!session) throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
     if (session.status !== 'active') throw new SDKError('Session is not active', 'SESSION_NOT_ACTIVE');
@@ -3980,11 +4063,12 @@ export class SessionManager implements ISessionManager {
 
     if (!localSessionKey) throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
 
-    const messageIndexRef = { value: localMessageIndex };
-    const ownsWs = wsClient !== this.wsClient; // dedicated per-clip socket (created above), not the shared session WS
-    const handle = await submitLtxWs({
+    return {
       wsClient,
-      encryptionManager: {
+      sessionKey: localSessionKey,
+      messageIndexRef: { value: localMessageIndex },
+      ownsWs: wsClient !== this.wsClient, // dedicated per-job socket, not the shared session WS
+      encryptionAdapter: {
         encryptMessage: (key: Uint8Array, plaintext: string, index: number) =>
           this.encryptionManager!.encryptMessage(key, plaintext, index),
         decryptMessage: (key: Uint8Array, payload: any) => {
@@ -3992,7 +4076,39 @@ export class SessionManager implements ISessionManager {
           return this.encryptionManager!.decryptMessage(key, p);
         },
       },
-      sessionId, sessionKey: localSessionKey, messageIndex: messageIndexRef,
+    };
+  }
+
+  /**
+   * Submit a training job over this session's encrypted transport (§ WebSocket protocol).
+   * Rides `acquireSessionTransport`, so LTX and training cannot drift apart on socket reuse,
+   * the endpoint guard, or the shared-key save/restore.
+   *
+   * The dedicated socket is closed once the run settles either way — but NOT before: every
+   * capability pointer arrives on THIS socket, delivered once, with no reconnect re-delivery
+   * in M0 (CK-6). Dropping it early loses the user's artifact, not just a frame.
+   */
+  async submitTraining(
+    sessionId: string, job: TrainingJob, options?: Partial<TrainingWsOptions>,
+  ): Promise<TrainingHandle> {
+    const { wsClient, sessionKey, messageIndexRef, ownsWs, encryptionAdapter } =
+      await this.acquireSessionTransport(sessionId);
+    const handle = await submitTrainingWs({
+      wsClient, encryptionManager: encryptionAdapter,
+      sessionId, sessionKey, messageIndex: messageIndexRef, job, ...options,
+    } as TrainingWsOptions);
+    if (ownsWs) {
+      handle.result = handle.result.finally(() => { void wsClient.disconnect().catch(() => {}); });
+    }
+    return handle;
+  }
+
+  async submitLtx(sessionId: string, job: LtxJob, options?: LtxSubmitOptions): Promise<LtxHandle> {
+    const { wsClient, sessionKey, messageIndexRef, ownsWs, encryptionAdapter } =
+      await this.acquireSessionTransport(sessionId);
+    const handle = await submitLtxWs({
+      wsClient, encryptionManager: encryptionAdapter,
+      sessionId, sessionKey, messageIndex: messageIndexRef,
       job, requestId: options?.requestId, onProgress: options?.onProgress, timeoutMs: options?.timeoutMs,
     });
     // Echo the conditioning seed so the granular submitLtx result is self-contained (matches generate()).

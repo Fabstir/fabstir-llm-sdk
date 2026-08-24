@@ -1,7 +1,12 @@
 /**
  * Phase 2 — the pure maths, against DESIGN-TRAINING-M0-INTERFACE.md v0.3.8 §§B.1/B.4/B.5/C.1.
  *
- * Vector discipline: `INTERIM` marks a value the FROZEN DOC ITSELF pins, replaced by the node's
+ * Phase 8 UPDATE (2026-08-24): every case below is now VECTOR-BACKED by
+ * `vectors/slice-schedule.json`, asserted case-by-case in `vectors.test.ts`. They are kept here
+ * as readable named regressions — the vector suite proves cross-side parity, these say what the
+ * rule MEANS. No provisional labels remain anywhere in this build.
+ *
+ * (Historic note: the provisional marker meant a value the FROZEN DOC ITSELF pinned, awaiting
  * T1 vector at Phase 8. Cases labelled DERIVED are formula properties the doc does NOT number
  * (its "remainder-free case" has no figures anywhere) — they are permanent, not swapped.
  * Commitment HASHES cannot be pinned until input-commitment.json/sig-digest.json land, so this
@@ -30,7 +35,7 @@ const COMMIT: TrainingCommitmentInput = {
 };
 
 describe('trainingTokens (C.1)', () => {
-  it('is declaredTokens x epochs — INTERIM: the doc worked example', () => {
+  it('is declaredTokens x epochs — VECTOR-BACKED (slice-schedule.json, every case)', () => {
     expect(trainingTokens({ dataset: { declaredTokens: 3_200_000 }, epochs: 3 })).toBe(9_600_000);
   });
   it('ignores every field that is not declaredTokens or epochs', () => {
@@ -40,18 +45,18 @@ describe('trainingTokens (C.1)', () => {
 });
 
 describe('trainingSliceSchedule (B.1) — FLOOR, and the LAST slice absorbs', () => {
-  it('INTERIM: the worked example, 9,600,000 -> 9 slices of 8x1,000,000 + 1,600,000', () => {
+  it('VECTOR-BACKED `worked`: 9,600,000 -> 9 slices of 8x1,000,000 + 1,600,000', () => {
     const d = trainingSliceSchedule(9_600_000, SLICE);
     expect(d.length).toBe(9);
     expect(d.slice(0, 8)).toEqual(Array(8).fill(1_000_000));
     expect(d[8]).toBe(1_600_000);
   });
-  it('INTERIM: the tiny-remainder case, 1,000,050 -> ONE slice of 1,000,050', () => {
+  it('VECTOR-BACKED `tinyRemainder`: 1,000,050 -> ONE slice of 1,000,050', () => {
     // The exact shape that broke v0.1: a ceil here yields [1,000,000, 50] and that 50 is below
     // MIN_PROVEN_TOKENS = 100, making the FINAL slice — the one binding the adapter — unsubmittable.
     expect(trainingSliceSchedule(1_000_050, SLICE)).toEqual([1_000_050]);
   });
-  it('INTERIM: the sub-sliceTokens case, 10,000 -> 1 slice (the only regime max(1,.) binds)', () => {
+  it('VECTOR-BACKED `subSliceTokens`: 10,000 -> 1 slice (the only regime max(1,.) binds)', () => {
     expect(trainingSliceSchedule(10_000, SLICE)).toEqual([10_000]);
   });
   it('DERIVED: a remainder-free total yields all-equal deltas (the doc names this case, numbers it never gives)', () => {
