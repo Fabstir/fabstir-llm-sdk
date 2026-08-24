@@ -67,6 +67,16 @@ describe('the tokenizer pin (§C.2 / D.2) — verify BEFORE counting, never afte
   });
 });
 
+// A bare `vitest run` prints only "5 skipped" — not the block's name — so the reason has to be
+// written to the output explicitly. Otherwise a fresh clone silently omits the parity suites
+// and nobody has any reason to go looking for why. See vectors/README.md.
+if (!TOKENIZER_PATH) {
+  console.warn(
+    '[training] count-v1 parity SKIPPED: set TRAINING_TOKENIZER_JSON=/path/to/tokenizer.json '
+    + '(sha256 0x0997f410…, see tests/training/vectors/README.md) to run the 173 parity cases.',
+  );
+}
+
 parity('count-v1 parity — the node’s own vectors are the oracle', () => {
   it('matches ALL 15 cases of the frozen counting fixture (§C.2)', () => {
     expect(fixture.countingRecipe).toBe('count-v1');
