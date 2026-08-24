@@ -13,13 +13,20 @@ import { describe, it, expect, vi } from 'vitest';
 // acquireSessionTransport stands up a REAL WebSocketClient when the session's socket is not
 // already live, so the re-init tests below need it stubbed to reach the code they are about.
 vi.mock('../../src/websocket/WebSocketClient', () => ({
-  WebSocketClient: vi.fn().mockImplementation(() => ({
-    connect: vi.fn().mockResolvedValue(undefined),
-    disconnect: vi.fn().mockResolvedValue(undefined),
-    isConnected: vi.fn().mockReturnValue(true),
-    onMessage: vi.fn().mockReturnValue(() => {}),
-    sendWithoutResponse: vi.fn().mockResolvedValue(undefined),
-  })),
+  WebSocketClient: vi.fn().mockImplementation(() => {
+    let handler: ((d: any) => void) | undefined;
+    return {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      isConnected: vi.fn().mockReturnValue(true),
+      onMessage: (h: (d: any) => void) => { handler = h; return () => { handler = undefined; }; },
+      // Answer the init, otherwise the real sendEncryptedInit waits 30 s for an ack that a
+      // silent stub never sends and the test reports a timeout instead of its assertion.
+      sendWithoutResponse: vi.fn(async (m: any) => {
+        if (m?.type === 'encrypted_session_init') setTimeout(() => handler?.({ type: 'session_init_ack' }), 0);
+      }),
+    };
+  }),
 }));
 import 'fake-indexeddb/auto';
 import { SessionManager } from '../../src/managers/SessionManager';
@@ -320,5 +327,111 @@ describe('E.2 — `lora` must survive a RE-INIT, which is the only init producti
     ws.emit({ type: 'session_init_ack' });
     await p;
     expect(sm.sessions.get('7').lora).toEqual(LORA);
+  });
+});
+
+describe('E.2 — `session.lora` must be SEEDABLE from a public entry point', () => {
+  // The re-init fix made every rebuild read `session.lora`, and the only writer read
+  // `config.lora` inside the private `sendEncryptedInit`. So the value could only come from a
+  // public entry point, and none of them carried it — the field was unreachable from outside
+  // the class and the fix was inert in production. The earlier mutants passed because they
+  // SEEDED the session by hand, which is a state production has no way to produce.
+  //
+  // These drive real public entry points and never touch sendEncryptedInit directly.
+  const external = (sm: any, extra: Record<string, unknown> = {}) => sm.registerExternalSession({
+    sessionId: 7n, jobId: 8n, chainId: 84532, model: 'm', hostAddress: '0xhost',
+    endpoint: 'http://h', ...extra,
+  });
+
+  it('registerExternalSession seeds lora, and it reaches the init payload', async () => {
+    const { sm, captured } = harness();
+    external(sm, { lora: LORA });
+    expect(sm.sessions.get('7').lora).toEqual(LORA);
+    // …and travels all the way to the encrypted payload through a rebuilt config.
+    await sm.acquireSessionTransport('7');
+    expect(captured[0].lora).toEqual(LORA);
+  });
+
+  it('registerExternalSession without lora stays exactly as before', async () => {
+    const { sm, captured } = harness();
+    external(sm);
+    await sm.acquireSessionTransport('7');
+    expect(captured[0].lora).toBeUndefined();
+  });
+
+  it('registerDelegatedSession seeds it too — the popup-free path most chats use', async () => {
+    // Their words: "this is how this app opens EVERY chat". Seeding only the external path
+    // would leave the primary one silently adapter-less.
+    const { sm } = harness();
+    sm.storageManager = { storeConversation: async () => {}, isInitialized: () => true };
+    await sm.registerDelegatedSession({
+      sessionId: 9n, jobId: 10n, hostUrl: 'http://h', hostAddress: '0xhost', model: 'm',
+      chainId: 84532, depositAmount: '1', pricePerToken: 1, proofInterval: 100, duration: 3600,
+      lora: LORA, onServeBackError: () => {},
+    }).catch(() => undefined);
+    expect(sm.sessions.get('9')?.lora).toEqual(LORA);
+    expect(typeof sm.sessions.get('9')?.onServeBackError).toBe('function');
+  });
+  it('carries onServeBackError too — a callback that cannot survive a re-init is silent', async () => {
+    // Same seeding problem, and the consequence is worse: §4b's callback is the ONLY thing
+    // that stops a post-ack staging failure from being silent. Losing it on a re-init means
+    // the session answers from the base model with nobody told.
+    const { sm } = harness();
+    const seen: any[] = [];
+    external(sm, { lora: LORA, onServeBackError: (e: any) => seen.push(e) });
+    await sm.acquireSessionTransport('7');
+    expect(typeof sm.sessions.get('7').onServeBackError).toBe('function');
+  });
+});
+
+describe('every SessionState seeding site must carry lora (structural guard)', () => {
+  // Deliberately a SOURCE-STRUCTURE test, which is unusual and is justified here: the defect
+  // class is "a seeding path forgot the field", it has now occurred twice, and one of the three
+  // paths — startSession — cannot be driven in a unit test without standing up chain,
+  // payment and host-selection plumbing. Testing behaviour where possible (the external and
+  // delegated paths above) and structure where it is not beats leaving the gap open again.
+  it('each `this.sessions.set` builds a state that includes lora and onServeBackError', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync('src/managers/SessionManager.ts', 'utf8');
+    const lines = src.split('\n');
+    const sites = lines
+      .map((l, i) => ({ l, i }))
+      .filter(({ l }) => l.includes('this.sessions.set('))
+      // the re-store sites (updating an existing session) are not SEEDING sites
+      // SEEDING sites only: those that build a SessionState from a caller's `config`. Excluded
+      // deliberately, and each for a stated reason rather than to make the test pass:
+      //   · one site re-stores an already-built session object (nothing to seed);
+      //   · two restore from persisted S5 conversation metadata, which has never carried an
+      //     adapter — see the limitation test below.
+      // Discriminate on the CALL ITSELF, not a window: a seeding site stores either an inline
+      // literal or a freshly-built `sessionState`. The excluded sites pass an existing
+      // `session` identifier — one re-storing an already-built object, two restoring from
+      // persisted S5 metadata (see the limitation test below). A window-based filter caught
+      // `config.` from a neighbouring function and mis-classified the first of those.
+      .filter(({ l }) => l.includes(', {') || l.includes('sessionState'));
+    expect(sites.length).toBeGreaterThanOrEqual(3);
+    for (const { i } of sites) {
+      const window = lines.slice(Math.max(0, i - 45), i + 20).join('\n');
+      expect(window, `sessions.set at line ${i + 1} builds a SessionState without lora`).toContain('lora');
+      expect(window, `sessions.set at line ${i + 1} builds a SessionState without onServeBackError`).toContain('onServeBackError');
+    }
+  });
+});
+
+describe('KNOWN LIMITATION — a session restored from S5 loses its adapter', () => {
+  it('is documented, not silently tolerated', async () => {
+    // Two sites rebuild SessionState from persisted conversation metadata after a reload. That
+    // metadata has never carried `lora`, so a restored serve-back session re-inits WITHOUT the
+    // adapter and the node refuses (E.3) rather than silently serving the base model — the
+    // fail-closed direction, but still a broken resume.
+    //
+    // Fixing it means persisting the adapter pointer into the conversation metadata schema,
+    // which is a storage change rather than a session-wiring one, and a restored session's
+    // adapter would need re-staging on the node regardless. Recorded here so the next person
+    // finds a decision rather than an oversight.
+    const fs = await import('node:fs');
+    const src = fs.readFileSync('src/managers/SessionManager.ts', 'utf8');
+    const restores = src.split('\n').filter((l) => l.includes('conversation.metadata.totalTokens'));
+    expect(restores.length).toBeGreaterThan(0);   // the restore paths still exist as described
   });
 });

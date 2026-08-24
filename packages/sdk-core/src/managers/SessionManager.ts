@@ -156,6 +156,10 @@ export interface SessionState {
    *  lives only in the caller's original config is dropped by the first re-init — and E.3 is
    *  explicit that a re-init MUST re-send `lora` or the node keeps refusing. */
   lora?: LoraSessionField;
+  /** §4b's serve-back callback, persisted for the same reason as `lora`: a callback that
+   *  cannot survive a re-init is silent, and silence here means the session answers from the
+   *  BASE MODEL on a run the customer is paying to fine-tune. */
+  onServeBackError?: (error: TrainingError) => void;
   lastTokenUsage?: TokenUsageInfo; // NEW: Last prompt's token usage (Phase 5)
   lastPromptTokens?: number;
   contextWindowSize?: number;
@@ -230,6 +234,11 @@ export interface DelegatedSessionConfig {
   authorisation?: SessionAuthorisation;
   /** FC1.6: node http(s) base URL — REQUIRED when `authorisation` is present. */
   nodeHttpUrl?: string;
+  /** Training M0 serve-back (E.2). Without a home on the adopted session the adapter
+   *  cannot survive the first re-init, and this is the popup-free path most chats use. */
+  lora?: LoraSessionField;
+  /** Fires on a post-ack `LORA_STAGING_FAILED` (E.3). Silent without it. */
+  onServeBackError?: (error: TrainingError) => void;
 }
 
 /**
@@ -247,6 +256,11 @@ export interface ExternalSessionConfig {
   hostAddress: string;
   model: string;
   chainId: number;
+  /** Training M0 serve-back (E.2). Without a home on the adopted session the adapter
+   *  cannot survive the first re-init, and this is the popup-free path most chats use. */
+  lora?: LoraSessionField;
+  /** Fires on a post-ack `LORA_STAGING_FAILED` (E.3). Silent without it. */
+  onServeBackError?: (error: TrainingError) => void;
 }
 
 export class SessionManager implements ISessionManager {
@@ -562,6 +576,12 @@ export class SessionManager implements ISessionManager {
         encryption: enableEncryption,  // NEW (Phase 6.2): Store encryption preference
         groupId: config.groupId,  // NEW: Session Groups integration
         webSearch: config.webSearch,  // NEW (Phase 5.1): Web search configuration
+        // Seeded the same way, and for the same reason: every init site rebuilds its config
+        // from this state, so a field that lives only in the caller's config is lost at the
+        // first re-init. `ExtendedSessionConfig` accepted `lora` while this literal dropped it,
+        // which left the whole serve-back path unreachable from outside the class.
+        lora: config.lora,
+        onServeBackError: config.onServeBackError,
         ragContext: ragConfig?.enabled
           ? { vectorDbId: ragConfig.vectorDbSessionId || `rag-${sessionId}` }
           : undefined,
@@ -671,6 +691,8 @@ export class SessionManager implements ISessionManager {
       totalTokens: 0,
       startTime: Date.now(),
       encryption: true,
+      lora: config.lora,
+      onServeBackError: config.onServeBackError,
     });
   }
 
@@ -812,6 +834,11 @@ export class SessionManager implements ISessionManager {
       ragContext: config.ragConfig?.enabled
         ? { vectorDbId: config.ragConfig.vectorDbSessionId || `rag-${sessionIdStr}` }
         : undefined,
+      // Seeded here too: this is the popup-free delegated path, which is how the UI opens
+      // every chat. Threading only the external path would leave the primary one
+      // silently adapter-less at the first re-init.
+      lora: config.lora,
+      onServeBackError: config.onServeBackError,
     };
 
     // Store in memory
@@ -1126,6 +1153,7 @@ export class SessionManager implements ISessionManager {
           paymentMethod: 'deposit',
           encryption: true,
           lora: session.lora,          // E.3: a re-init MUST re-send it
+          onServeBackError: session.onServeBackError,
         };
         await this.sendEncryptedInit(this.wsClient, config, sessionId, session.jobId);
       } else {
@@ -2154,6 +2182,7 @@ export class SessionManager implements ISessionManager {
     // this private method directly, which is exactly what the tests were doing.
     const sessionState = this.sessions.get(String(sessionId));
     if (sessionState && config.lora) sessionState.lora = config.lora;
+    if (sessionState && config.onServeBackError) sessionState.onServeBackError = config.onServeBackError;
 
     this.serveBackError = null;
     this.serveBackUnsubscribe?.();          // a re-init REPLACES the listener, never adds one
@@ -2950,6 +2979,7 @@ export class SessionManager implements ISessionManager {
         paymentMethod: 'deposit',
         encryption: true,
         lora: session.lora,          // E.3: a re-init MUST re-send it, or the node keeps refusing
+        onServeBackError: session.onServeBackError,
       };
       await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
     } else {
@@ -3114,6 +3144,7 @@ export class SessionManager implements ISessionManager {
         paymentMethod: 'deposit',
         encryption: true,
         lora: session.lora,          // E.3: a re-init MUST re-send it, or the node keeps refusing
+        onServeBackError: session.onServeBackError,
       };
       await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
     } else {
@@ -3958,6 +3989,7 @@ export class SessionManager implements ISessionManager {
       paymentMethod: 'deposit',
       encryption: true,
       lora: session.lora,            // E.3: a re-init MUST re-send it
+      onServeBackError: session.onServeBackError,
     };
     try {
       await this.sendEncryptedInit(this.wsClient, initConfig, session.sessionId, session.jobId);
@@ -4071,7 +4103,12 @@ export class SessionManager implements ISessionManager {
         chainId: session.chainId, host: session.provider, modelId: session.model,
         endpoint, paymentMethod: 'deposit', encryption: true,
         lora: session.lora,            // E.3: a re-init MUST re-send it
-      } as ExtendedSessionConfig, session.sessionId, session.jobId);
+        onServeBackError: session.onServeBackError,
+      // Deliberately partial: sendEncryptedInit reads only this subset, and the required
+      // pricing/proof fields are meaningless for a re-init on an already-funded session. The
+      // cast was always hiding that; the double cast only stops TS's overlap heuristic from
+      // objecting now that there are two more properties to weigh.
+      } as unknown as ExtendedSessionConfig, session.sessionId, session.jobId);
       localSessionKey = this.sessionKey;
       localMessageIndex = this.messageIndex;
       this.sessionKey = prevSessionKey;
@@ -4179,7 +4216,12 @@ export class SessionManager implements ISessionManager {
         chainId: session.chainId, host: session.provider, modelId: session.model,
         endpoint, paymentMethod: 'deposit', encryption: true,
         lora: session.lora,            // E.3: a re-init MUST re-send it
-      } as ExtendedSessionConfig, session.sessionId, session.jobId);
+        onServeBackError: session.onServeBackError,
+      // Deliberately partial: sendEncryptedInit reads only this subset, and the required
+      // pricing/proof fields are meaningless for a re-init on an already-funded session. The
+      // cast was always hiding that; the double cast only stops TS's overlap heuristic from
+      // objecting now that there are two more properties to weigh.
+      } as unknown as ExtendedSessionConfig, session.sessionId, session.jobId);
 
       localSessionKey = this.sessionKey;
       localMessageIndex = this.messageIndex;
