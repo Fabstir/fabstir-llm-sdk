@@ -9,6 +9,18 @@
  * failing test before anything is changed.
  */
 import { describe, it, expect, vi } from 'vitest';
+
+// acquireSessionTransport stands up a REAL WebSocketClient when the session's socket is not
+// already live, so the re-init tests below need it stubbed to reach the code they are about.
+vi.mock('../../src/websocket/WebSocketClient', () => ({
+  WebSocketClient: vi.fn().mockImplementation(() => ({
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    isConnected: vi.fn().mockReturnValue(true),
+    onMessage: vi.fn().mockReturnValue(() => {}),
+    sendWithoutResponse: vi.fn().mockResolvedValue(undefined),
+  })),
+}));
 import 'fake-indexeddb/auto';
 import { SessionManager } from '../../src/managers/SessionManager';
 import { toServeBackError, serveBackAvailable, firstResponseTimeoutMs, ADAPTER_STAGE_BUDGET_MS } from '../../src/utils/training-serve-back';
@@ -255,5 +267,58 @@ describe('E.3 — the first-response timeout must clear the staging budget', () 
     // v0.3.10 settled that there is no queue-depth term: 300 s is the whole of it.
     expect(firstResponseTimeoutMs(180_000, true)).toBe(480_000);
     expect(firstResponseTimeoutMs(180_000, false)).toBe(180_000);
+  });
+});
+
+describe('E.2 — `lora` must survive a RE-INIT, which is the only init production performs', () => {
+  // Found by the Platformless UI developer, and it is the CP1 defect class again: every
+  // sendEncryptedInit call site RECONSTRUCTS ExtendedSessionConfig from the stored SessionState,
+  // and none of them carried `lora`. The tests above call sendEncryptedInit directly, so they
+  // proved the function works and never proved anything reaches it. E.3: "A re-init MUST
+  // re-send `lora`. If the job id is unchanged and the field has vanished, the node keeps
+  // refusing rather than silently moving that session to the base model."
+  const seed = (sm: any, lora?: unknown) => {
+    sm.sessions.set('7', {
+      sessionId: 7n, jobId: 8n, chainId: 84532, model: 'm', provider: '0xhost',
+      endpoint: 'http://h', status: 'active', prompts: [], responses: [], checkpoints: [],
+      totalTokens: 0, startTime: 0, encryption: true, lora,
+    });
+  };
+
+  it('carries lora into the config that acquireSessionTransport rebuilds', async () => {
+    const { sm } = harness();
+    seed(sm, LORA);
+    const seen: any[] = [];
+    sm.sendEncryptedInit = async (_ws: any, cfg: any) => { seen.push(cfg); sm.sessionKey = new Uint8Array(32); };
+    await sm.acquireSessionTransport('7');
+    expect(seen).toHaveLength(1);
+    expect(seen[0].lora).toEqual(LORA);
+  });
+
+  it('leaves a non-lora session untouched', async () => {
+    const { sm } = harness();
+    seed(sm, undefined);
+    const seen: any[] = [];
+    sm.sendEncryptedInit = async (_ws: any, cfg: any) => { seen.push(cfg); sm.sessionKey = new Uint8Array(32); };
+    await sm.acquireSessionTransport('7');
+    expect(seen[0].lora).toBeUndefined();
+  });
+
+  it('RECORDS lora onto the session at init, so later re-inits can find it', async () => {
+    // The field has to LIVE on SessionState — the same way `webSearch` does — or every path
+    // that rebuilds a config from the session loses it again. Recording it in
+    // sendEncryptedInit makes that ONE choke point rather than six call sites to keep in step.
+    const { sm } = harness();
+    sm.sessions.set('7', {
+      sessionId: 7n, jobId: 8n, chainId: 84532, model: 'm', provider: '0xhost',
+      endpoint: 'http://h', status: 'active', prompts: [], responses: [], checkpoints: [],
+      totalTokens: 0, startTime: 0, encryption: true,
+    });
+    const ws = new FakeWs();
+    const p = sm.sendEncryptedInit(ws, cfg({ lora: LORA }), 7n, 8n);
+    await vi.waitFor(() => expect(ws.sent.length).toBeGreaterThan(0));
+    ws.emit({ type: 'session_init_ack' });
+    await p;
+    expect(sm.sessions.get('7').lora).toEqual(LORA);
   });
 });

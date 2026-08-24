@@ -151,6 +151,11 @@ export interface SessionState {
   groupId?: string; // NEW: Session Groups integration
   webSearchMetadata?: WebSearchMetadata; // NEW: Web search metadata from response
   webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 5.1)
+  /** Training M0 serve-back adapter (E.2), persisted the same way `webSearch` is. EVERY
+   *  `sendEncryptedInit` call site rebuilds its config from this state, so an adapter that
+   *  lives only in the caller's original config is dropped by the first re-init — and E.3 is
+   *  explicit that a re-init MUST re-send `lora` or the node keeps refusing. */
+  lora?: LoraSessionField;
   lastTokenUsage?: TokenUsageInfo; // NEW: Last prompt's token usage (Phase 5)
   lastPromptTokens?: number;
   contextWindowSize?: number;
@@ -1119,7 +1124,8 @@ export class SessionManager implements ISessionManager {
           modelId: session.model,
           endpoint: session.endpoint,
           paymentMethod: 'deposit',
-          encryption: true
+          encryption: true,
+          lora: session.lora,          // E.3: a re-init MUST re-send it
         };
         await this.sendEncryptedInit(this.wsClient, config, sessionId, session.jobId);
       } else {
@@ -2142,6 +2148,13 @@ export class SessionManager implements ISessionManager {
     // strings: a camelCase pass turns `manifestCID` into `manifestCid`, which fails the WHOLE
     // init parse as DECRYPTION_FAILED — deliberately, since silently dropping the field would
     // serve base-model output on a session the customer is paying to run their fine-tune.
+    // Record the adapter on the SESSION, not just in this call's config. Every other init site
+    // reconstructs its config from SessionState, so this is the one place that makes a re-init
+    // able to re-send it. Found by the UI integrator: the field was reachable only by calling
+    // this private method directly, which is exactly what the tests were doing.
+    const sessionState = this.sessions.get(String(sessionId));
+    if (sessionState && config.lora) sessionState.lora = config.lora;
+
     this.serveBackError = null;
     this.serveBackUnsubscribe?.();          // a re-init REPLACES the listener, never adds one
     this.serveBackUnsubscribe = undefined;
@@ -2935,7 +2948,8 @@ export class SessionManager implements ISessionManager {
         modelId: session.model,
         endpoint: session.endpoint,
         paymentMethod: 'deposit',
-        encryption: true
+        encryption: true,
+        lora: session.lora,          // E.3: a re-init MUST re-send it, or the node keeps refusing
       };
       await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
     } else {
@@ -3098,7 +3112,8 @@ export class SessionManager implements ISessionManager {
         modelId: session.model,
         endpoint: session.endpoint,
         paymentMethod: 'deposit',
-        encryption: true
+        encryption: true,
+        lora: session.lora,          // E.3: a re-init MUST re-send it, or the node keeps refusing
       };
       await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
     } else {
@@ -3941,7 +3956,8 @@ export class SessionManager implements ISessionManager {
       modelId: session.model,
       endpoint: session.endpoint,
       paymentMethod: 'deposit',
-      encryption: true
+      encryption: true,
+      lora: session.lora,            // E.3: a re-init MUST re-send it
     };
     try {
       await this.sendEncryptedInit(this.wsClient, initConfig, session.sessionId, session.jobId);
@@ -4054,6 +4070,7 @@ export class SessionManager implements ISessionManager {
       await this.sendEncryptedInit(wsClient, {
         chainId: session.chainId, host: session.provider, modelId: session.model,
         endpoint, paymentMethod: 'deposit', encryption: true,
+        lora: session.lora,            // E.3: a re-init MUST re-send it
       } as ExtendedSessionConfig, session.sessionId, session.jobId);
       localSessionKey = this.sessionKey;
       localMessageIndex = this.messageIndex;
@@ -4161,6 +4178,7 @@ export class SessionManager implements ISessionManager {
       await this.sendEncryptedInit(wsClient, {
         chainId: session.chainId, host: session.provider, modelId: session.model,
         endpoint, paymentMethod: 'deposit', encryption: true,
+        lora: session.lora,            // E.3: a re-init MUST re-send it
       } as ExtendedSessionConfig, session.sessionId, session.jobId);
 
       localSessionKey = this.sessionKey;
