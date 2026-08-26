@@ -107,7 +107,7 @@ describe('Sub-phase 2.1: sampling in encrypted payload', () => {
   });
 
   test('temperature/maxTokens flow into the encrypted payload when set', async () => {
-    await (sessionManager as any).sendEncryptedMessage('Hello', undefined, undefined, undefined, {
+    await (sessionManager as any).sendEncryptedMessage('42', 'Hello', undefined, undefined, undefined, {
       temperature: 0.1,
       maxTokens: 512,
     });
@@ -117,14 +117,14 @@ describe('Sub-phase 2.1: sampling in encrypted payload', () => {
   });
 
   test('temperature defaults to 0.7 and max_tokens to LLM_MAX_TOKENS when no sampling supplied', async () => {
-    await (sessionManager as any).sendEncryptedMessage('Hello');
+    await (sessionManager as any).sendEncryptedMessage('42', 'Hello');
     const parsed = JSON.parse(capturedEncryptedMessage!);
     expect(parsed.temperature).toBe(0.7);
     expect(parsed.max_tokens).toBe(LLM_MAX_TOKENS);
   });
 
   test('temperature: 0 is honored in the encrypted payload (not coerced to 0.7)', async () => {
-    await (sessionManager as any).sendEncryptedMessage('Hello', undefined, undefined, undefined, {
+    await (sessionManager as any).sendEncryptedMessage('42', 'Hello', undefined, undefined, undefined, {
       temperature: 0,
     });
     const parsed = JSON.parse(capturedEncryptedMessage!);

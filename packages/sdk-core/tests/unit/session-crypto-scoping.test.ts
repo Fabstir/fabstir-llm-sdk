@@ -141,7 +141,7 @@ describe('per-session key scoping', () => {
     // The active chat is 1133; the legacy shared key is 2001's.
     mgr.sessions = new Map([['1133', { sessionId: 1133n, status: 'active', model: 'tiny-vicuna' }]]);
 
-    await mgr.sendEncryptedMessage('hi');
+    await mgr.sendEncryptedMessage('1133', 'hi');
 
     const frame = ws.sent.find((m) => m.type === 'encrypted_message');
     expect(frame.session_id).toBe('1133');
@@ -152,11 +152,11 @@ describe('per-session key scoping', () => {
   it('keeps a per-session outgoing message index for replay protection', async () => {
     const keyA = await initSession(mgr, ws, 1133n);
     mgr.sessions = new Map([['1133', { sessionId: 1133n, status: 'active', model: 'tiny-vicuna' }]]);
-    await mgr.sendEncryptedMessage('first');   // index 0
+    await mgr.sendEncryptedMessage('1133', 'first');   // index 0
 
     await initSession(mgr, ws, 2001n);         // resets the LEGACY index to 0
 
-    await mgr.sendEncryptedMessage('second');  // must be 1133's index 1, not the reset 0
+    await mgr.sendEncryptedMessage('1133', 'second');  // must be 1133's index 1, not the reset 0
 
     const frames = ws.sent.filter((m) => m.type === 'encrypted_message');
     expect(frames[0].payload.__idx).toBe(0);
@@ -249,7 +249,44 @@ describe('frame-session correlation', () => {
   });
 });
 
+describe('frame stamp comes from the caller, not the first active session', () => {
+  let ws: FakeWs;
+  let mgr: any;
+
+  beforeEach(() => {
+    ws = new FakeWs();
+    mgr = createManager(ws);
+  });
+
+  it('stamps and keys the session it was called for, past a zombie active session inserted earlier', async () => {
+    const keyReal = await initSession(mgr, ws, 1145n); // only the real session ever inits
+
+    // A stalled setup left 1143 registered 'active' and never inited; it sits
+    // ahead of 1145 in the map, so a first-active scan picks it.
+    mgr.sessions = new Map([
+      ['1143', { sessionId: 1143n, status: 'active', model: 'tiny-vicuna' }],
+      ['1145', { sessionId: 1145n, status: 'active', model: 'tiny-vicuna' }],
+    ]);
+
+    await mgr.sendEncryptedMessage('1145', 'hi');
+
+    const frame = ws.sent.find((m: any) => m.type === 'encrypted_message');
+    expect(frame.session_id).toBe('1145');
+    expect(frame.payload.__encKeyFp).toBe(fpOf(keyFromHex(keyReal))); // scoped hit, 1145's key
+  });
+
+  it('throws SESSION_NOT_FOUND for a session id it has no record of', async () => {
+    await initSession(mgr, ws, 1145n);
+    mgr.sessions = new Map([
+      ['1145', { sessionId: 1145n, status: 'active', model: 'tiny-vicuna' }],
+    ]);
+
+    await expect(mgr.sendEncryptedMessage('9999', 'hi')).rejects.toMatchObject({ code: 'SESSION_NOT_FOUND' });
+  });
+});
+
 describe('wire recording', () => {
+
   it('logs the same key fingerprint at mint and at successful decrypt', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const ws = new FakeWs();

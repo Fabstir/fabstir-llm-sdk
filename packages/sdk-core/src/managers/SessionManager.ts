@@ -1489,7 +1489,7 @@ export class SessionManager implements ISessionManager {
             }
 
             // Send encrypted message with web search options, images, and thinking
-            this.sendEncryptedMessage(prompt, {
+            this.sendEncryptedMessage(sessionIdStr, prompt, {
               webSearch: enableWebSearchEncrypted,
               maxSearches: enableWebSearchEncrypted ? (searchConfigEncrypted.maxSearches ?? 5) : 0,
               searchQueries: resolveSearchQueries(enableWebSearchEncrypted, prompt, searchConfigEncrypted.queries, options?.rawQuery)
@@ -1681,7 +1681,7 @@ export class SessionManager implements ISessionManager {
           }
 
           // Send encrypted message with web search options, images, and thinking
-          await this.sendEncryptedMessage(prompt, {
+          await this.sendEncryptedMessage(sessionIdStr, prompt, {
             webSearch: enableWebSearchNonStreamEnc,
             maxSearches: enableWebSearchNonStreamEnc ? (searchConfigNonStreamEnc.maxSearches ?? 5) : 0,
             searchQueries: resolveSearchQueries(enableWebSearchNonStreamEnc, prompt, searchConfigNonStreamEnc.queries, options?.rawQuery)
@@ -2514,6 +2514,7 @@ export class SessionManager implements ISessionManager {
    * @private
    */
   private async sendEncryptedMessage(
+    sessionId: string,
     message: string,
     webSearchOptions?: {
       webSearch: boolean;
@@ -2551,13 +2552,17 @@ export class SessionManager implements ISessionManager {
       );
     }
 
-    // Get current session for session_id
-    const sessions = Array.from(this.sessions.values());
-    const currentSession = sessions.find(s => s.status === 'active');
+    // The frame's target is the session this call was made FOR — never derived
+    // by scanning for "the" active session. With two registered active sessions
+    // (e.g. a stalled setup that completed on-chain after queued wallet
+    // approvals and was abandoned), a first-active scan stamps the zombie's id
+    // on a frame encrypted under the real session's key, and the node rightly
+    // rejects it: that connection's key is registered for the other session.
+    const currentSession = this.sessions.get(sessionId);
     if (!currentSession) {
       throw new SDKError(
-        'No active session found for encrypted messaging',
-        'NO_ACTIVE_SESSION'
+        `Session ${sessionId} not found for encrypted messaging`,
+        'SESSION_NOT_FOUND'
       );
     }
 
@@ -2590,7 +2595,7 @@ export class SessionManager implements ISessionManager {
       // advance that session's own replay counter. Using the legacy shared
       // fields here meant the stamp and the key could name different sessions
       // whenever another flow inited in between.
-      const outSessionId = currentSession.sessionId.toString();
+      const outSessionId = sessionId;
       const scoped = this.sessionCrypto.get(outSessionId);
       const encryptKey = scoped?.key ?? this.sessionKey;
       const outIndex = scoped ? scoped.messageIndex++ : this.messageIndex++;
@@ -2605,7 +2610,7 @@ export class SessionManager implements ISessionManager {
       // Use sendWithoutResponse to avoid conflicting handlers (v1.3.28 fix)
       const messageToSend: any = {
         type: 'encrypted_message',
-        session_id: currentSession.sessionId.toString(),
+        session_id: outSessionId,
         id: `${Date.now()}-${Math.random().toString(36).substring(7)}`,
         payload: payload
       };
