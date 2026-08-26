@@ -133,6 +133,18 @@ export interface FabstirSDKCoreConfig {
 export class FabstirSDKCore extends EventEmitter {
   private config: FabstirSDKCoreConfig;
   private provider?: ethers.BrowserProvider | ethers.JsonRpcProvider;
+  /**
+   * Dedicated provider for contract reads, built from `config.rpcUrl`.
+   *
+   * `this.provider` is the *wallet's* provider on the browser auth paths
+   * (authenticateWithMetaMask, authenticateWithSigner), so it cannot serve
+   * reads without putting them back on window.ethereum. Discovery reads are
+   * public eth_calls and belong on the configured endpoint; only writes need
+   * the signer.
+   */
+  private readProvider?: ethers.BrowserProvider | ethers.JsonRpcProvider;
+  private readProviderSource: 'rpcUrl' | 'wallet' = 'wallet';
+  private chainParityListener?: (...args: any[]) => void;
   private signer?: ethers.Signer;
   private contractManager?: ContractManager;
   private bridgeClient?: UnifiedBridgeClient;
@@ -767,6 +779,13 @@ export class FabstirSDKCore extends EventEmitter {
    * Initialize all managers
    */
   private async initializeManagers(): Promise<void> {
+    // Reads go to the configured endpoint, writes to the signer. Establish
+    // this before any manager is constructed so none of them capture the
+    // wallet provider for reads.
+    this.initializeReadProvider();
+    await this.assertReadWriteChainParity();
+    this.watchWalletChainChanges();
+
     // Create auth manager with authenticated data
     this.authManager = new AuthManager(this.signer, this.provider, this.userAddress, this.s5Seed);
 
@@ -873,7 +892,7 @@ export class FabstirSDKCore extends EventEmitter {
       if (!modelRegistryAddress) {
         throw new SDKError('Model Registry address not configured', 'CONFIG_ERROR');
       }
-      this.modelManager = new ModelManager(this.provider!, modelRegistryAddress);
+      this.modelManager = new ModelManager(this.readProvider!, modelRegistryAddress);
 
       const nodeRegistryAddress = this.config.contractAddresses?.nodeRegistry;
       if (!nodeRegistryAddress) {
@@ -887,7 +906,8 @@ export class FabstirSDKCore extends EventEmitter {
         this.modelManager,
         fabTokenAddress,
         hostEarningsAddress,
-        this.contractManager
+        this.contractManager,
+        this.readProvider
       );
 
       await (this.hostManager as any).initialize();
@@ -1323,6 +1343,139 @@ export class FabstirSDKCore extends EventEmitter {
   /**
    * Get current provider
    */
+  /**
+   * Build the provider that serves contract reads.
+   *
+   * `config.rpcUrl` is required at construction, so this always resolves to a
+   * dedicated JSON-RPC provider. If that ever changes, reads degrade to the
+   * wallet — which is a legitimate deployment choice but never a silent one,
+   * so it warns and is reported by getReadProviderSource().
+   */
+  private initializeReadProvider(): void {
+    if (this.config.rpcUrl) {
+      this.readProvider = new ethers.JsonRpcProvider(this.config.rpcUrl);
+      this.readProviderSource = 'rpcUrl';
+      return;
+    }
+
+    const walletProvider = this.provider ?? (this.signer?.provider as any);
+    if (!walletProvider) {
+      throw new SDKError(
+        'No rpcUrl configured and no wallet provider available for contract reads',
+        'READ_PROVIDER_UNAVAILABLE'
+      );
+    }
+
+    this.readProvider = walletProvider;
+    this.readProviderSource = 'wallet';
+    console.warn(
+      '[SDK] No rpcUrl configured: contract reads will go through the wallet ' +
+      'provider. Host and model discovery can then be rate-limited by the ' +
+      'wallet, and a user-configured RPC endpoint is bypassed. Set config.rpcUrl ' +
+      'to route reads off the wallet.'
+    );
+  }
+
+  /**
+   * The provider serving contract reads.
+   */
+  getReadProvider(): ethers.BrowserProvider | ethers.JsonRpcProvider | undefined {
+    return this.readProvider;
+  }
+
+  /**
+   * Where contract reads are going: the configured endpoint, or the wallet.
+   */
+  getReadProviderSource(): 'rpcUrl' | 'wallet' {
+    return this.readProviderSource;
+  }
+
+  /**
+   * Reads and writes now use different providers, so they can sit on different
+   * chains — `rpcUrl` pins the read chain while the signer follows whatever
+   * network the wallet is on. Reading one chain's state and signing on another
+   * is not recoverable by preferring either side, so surface it as an error.
+   *
+   * This failure mode is introduced by the read/write split; it could not
+   * happen when one provider served both.
+   */
+  private async assertReadWriteChainParity(): Promise<void> {
+    if (this.readProviderSource !== 'rpcUrl') {
+      return; // Reads are on the wallet: one provider, nothing to diverge.
+    }
+    if (!this.readProvider || !this.signer?.provider) {
+      return;
+    }
+
+    const [readNetwork, signerNetwork] = await Promise.all([
+      this.readProvider.getNetwork(),
+      this.signer.provider.getNetwork(),
+    ]);
+
+    const readChainId = Number(readNetwork.chainId);
+    const signerChainId = Number(signerNetwork.chainId);
+
+    if (readChainId !== signerChainId) {
+      throw new SDKError(
+        `Read/write chain mismatch: reads are on chain ${readChainId} (rpcUrl) ` +
+        `but the signer is on chain ${signerChainId} (wallet). The app would read ` +
+        `one chain's state and sign transactions on another. Switch the wallet to ` +
+        `chain ${readChainId}, or point rpcUrl at chain ${signerChainId}.`,
+        'READ_WRITE_CHAIN_MISMATCH'
+      );
+    }
+  }
+
+  /**
+   * Repoint the read provider at the chain the SDK has switched to.
+   *
+   * Without this, switchChain() moves the signer to the new chain while reads
+   * stay pinned to the original `config.rpcUrl` — reads on one chain, writes on
+   * another. Falls back to the wallet provider only if the registry has no RPC
+   * URL for the chain, and says so.
+   */
+  private async reinitializeReadProviderForChain(): Promise<void> {
+    const rpcUrl = ChainRegistry.getRpcUrl(this.currentChainId);
+
+    if (!rpcUrl) {
+      const walletProvider = this.provider ?? (this.signer?.provider as any);
+      if (!walletProvider) {
+        throw new SDKError(
+          `No RPC URL configured for chain ${this.currentChainId} and no wallet provider for reads`,
+          'READ_PROVIDER_UNAVAILABLE'
+        );
+      }
+      this.readProvider = walletProvider;
+      this.readProviderSource = 'wallet';
+      console.warn(
+        `[SDK] No RPC URL registered for chain ${this.currentChainId}: contract ` +
+        'reads will go through the wallet provider and can be rate-limited.'
+      );
+      return;
+    }
+
+    this.readProvider = new ethers.JsonRpcProvider(rpcUrl);
+    this.readProviderSource = 'rpcUrl';
+    await this.assertReadWriteChainParity();
+  }
+
+  /**
+   * Re-check chain parity when the wallet switches network.
+   */
+  private watchWalletChainChanges(): void {
+    const injected = typeof window !== 'undefined' ? (window as any).ethereum : undefined;
+    if (!injected?.on || this.chainParityListener) {
+      return;
+    }
+
+    this.chainParityListener = () => {
+      this.assertReadWriteChainParity().catch((error: any) => {
+        console.error('[SDK] ' + error.message);
+      });
+    };
+    injected.on('chainChanged', this.chainParityListener);
+  }
+
   getProvider(): ethers.BrowserProvider | ethers.JsonRpcProvider | undefined {
     return this.provider;
   }
@@ -1571,6 +1724,9 @@ export class FabstirSDKCore extends EventEmitter {
   private async reinitializeManagersForChain(): Promise<void> {
     // Get new contract addresses for the chain
     const chainConfig = ChainRegistry.getChain(this.currentChainId);
+
+    // Reads must follow the chain switch too, or they stay on the old chain.
+    await this.reinitializeReadProviderForChain();
 
     // Update contract manager with new addresses
     if (this.contractManager && this.signer) {

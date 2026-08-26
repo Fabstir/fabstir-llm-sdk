@@ -81,6 +81,7 @@ describe('discoverAllActiveHostsWithModels — resilience', () => {
     hostManager = hm.hostManager;
     nodeRegistry = createMockNodeRegistry();
     (hostManager as any).nodeRegistry = nodeRegistry;
+    (hostManager as any).nodeRegistryRead = nodeRegistry;
     (hostManager as any).initialized = true;
   });
 
@@ -159,6 +160,7 @@ describe('findHostsForModel — resilience', () => {
     hostManager = hm.hostManager;
     nodeRegistry = createMockNodeRegistry();
     (hostManager as any).nodeRegistry = nodeRegistry;
+    (hostManager as any).nodeRegistryRead = nodeRegistry;
     (hostManager as any).initialized = true;
   });
 

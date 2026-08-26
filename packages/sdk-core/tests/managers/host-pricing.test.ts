@@ -129,7 +129,10 @@ describe('HostManager Pricing Methods', () => {
       null
     );
 
+    // Reads and writes are separate contract instances since the read/write
+    // provider split; stub both so reads resolve against the same mock.
     (hostManager as any).nodeRegistry = mockNodeRegistry;
+    (hostManager as any).nodeRegistryRead = mockNodeRegistry;
     (hostManager as any).initialized = true;
   });
 
