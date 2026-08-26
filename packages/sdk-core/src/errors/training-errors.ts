@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // Training M0 error surface. Wire codes frozen in
-// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.11 (FROZEN; the code set is
+// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.12 (FROZEN; the code set is
 // unchanged since v0.3.6, at which it was written — v0.3.7 folded in E.3, v0.3.8 D.1).
 // Pre-MVP: no fallbacks — fail fast with a typed TrainingError.
 

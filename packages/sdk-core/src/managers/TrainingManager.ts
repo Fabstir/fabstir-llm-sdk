@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // TrainingManager — LoRA/QLoRA fine-tune (M0). Mirrors LtxManager over the same encrypted rail.
-// Wire and money shapes frozen in docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.11
+// Wire and money shapes frozen in docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.12
 // (C.1/A.3 re-verified byte-identical to v0.3.6, at which this was written).
 import { formatUnits } from 'ethers';
 import { tokensToUsdc } from '../utils/transcode-utils';
@@ -225,6 +225,12 @@ export class TrainingManager implements ITrainingManager {
     }
     if (!per.ranks.includes(job.hyper.rank)) return fail(`rank ${job.hyper.rank} not in ${per.ranks.join(', ')}`);
     if (!per.seqLens.includes(job.hyper.seqLen)) return fail(`seqLen ${job.hyper.seqLen} not in ${per.seqLens.join(', ')}`);
+    // `alphas` is OPTIONAL by design: it landed in v0.3.12, so a bundle emitted before the
+    // template was re-authored carries none. Skipping when absent degrades the check rather
+    // than rejecting every host that has not republished — the same rule as baseServingModelId.
+    if (per.alphas && !per.alphas.includes(job.hyper.alpha)) {
+      return fail(`alpha ${job.hyper.alpha} not in ${per.alphas.join(', ')}`);
+    }
   }
 
   /**

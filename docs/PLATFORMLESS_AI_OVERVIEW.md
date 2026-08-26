@@ -167,6 +167,17 @@ A decentralised marketplace where smart contracts handle coordination, P2P conne
 - **Now inside Blender**: all four modes run in a native Blender 5.x extension in the Video Sequence Editor — the artist works with the strips already on the timeline (a prompt, a keyframe still, two stills to bridge, or a movie strip plus a reference still to restyle) and the finished clip replaces the placeholder in place, billed to the estimate and settled on-chain to the unit (SD/720p/1080p proven live, including a restyle that follows the control clip's motion and camera); the extension conforms the control strip to the job's fps/duration, adds the delivered audio as a frame-aligned sound strip, and records each clip's session id, proof CID, seed, and billing on the strip — a pure protocol client, so the host node is unchanged, and the LTX 2.3 pipeline is HDR- and EXR-native
 - Input stills and control clips encrypted client-side (stills up to 32 MB); pinned, hash-committed templates mean clients send typed parameters, never executable graphs
 
+
+13. **Model Fine-Tuning (LoRA/QLoRA)** — the same rail, now training rather than only inferring
+
+- Fine-tune an open model on **your own data, on someone else's GPU**, without owning hardware: the dataset is encrypted client-side, sharded and stored on S5 as private capability references, and the job is validated against the host's published bounds **before any money moves**
+- M0 bounds: up to **15 million training tokens**, 200,000 samples, a 256 MiB dataset, and up to 5 epochs — priced per training-token at on-chain rates, with the deposit sized to the exact estimate plus a 5% buffer
+- **Settled slice by slice, so an interrupted run is not a lost one.** Each slice anchors a proof and settles as it lands; every checkpoint contains a real, usable, owned adapter. Stop a run at hour three and you keep — and have paid for — exactly the work that executed
+- **Verifiable provenance**: the client recomputes the input commitment from its own job and dataset and checks it against the host's attestation, which answers the question a receipt cannot — *did they train my exact job on my exact data?* A valid signature alone does not
+- **Serve it back on the same network**: the finished adapter attaches to an ordinary chat session, one adapter per session, never visible to other sessions on the same base model, unloaded when the session ends
+- **Both sides count identically, by construction rather than by hope**: the client declares a token count to size the escrow and the host re-counts it, so the two implementations are pinned to a frozen fixture built from the exact tokenizer bytes the template names. A silent divergence would reject honest jobs, which is why it is tested rather than assumed
+- Honest about what is public: the artifacts stay private, but attestations are on-chain, so a run's template, host, token volume and cadence are publicly linkable — which reveals training *scale*, and we say so rather than imply otherwise
+
 ## How It Works
 
 ### For Users (Clients)
@@ -217,6 +228,24 @@ Upload to S5 → Create Job → Host Downloads → GPU Transcode → GOP Proofs
 ```
 Validate vs Allow-List Bundle → Escrow USDC → Encrypted Generate (pinned template)
 → Encrypted Clip on S5 → Verify Attestation → Proof Hash On-Chain → Settle & Refund
+```
+
+
+### For Model Fine-Tuning
+
+1. **Prepare the Data** - Validate the dataset, count tokens with the template's pinned tokenizer, shard, encrypt and upload — all before a deposit exists, so a malformed dataset costs nothing
+2. **See the Exact Price** - Cost computed from on-chain pricing per training-token, with the deposit sized to the estimate plus a 5% buffer
+3. **Escrow & Train** - USDC session opened for the run; encrypted WebSocket streams seven stages (staging → scanning → counting → training → checkpointing → uploading → finalising) over a run lasting hours
+4. **Own Every Checkpoint** - Each slice settles as it lands and hands back a usable adapter; the client stores the pointer the moment it arrives, because it is delivered once
+5. **Verify Provenance** - Client recomputes the input commitment against the attestation to prove the host trained its exact job on its exact dataset
+6. **Serve It Back** - Attach the finished adapter to a chat session on the same network, or download it and take it elsewhere
+
+**Fine-Tuning Flow**:
+
+```
+Validate vs Bundle Bounds → Prepare & Encrypt Dataset → Escrow USDC → Encrypted Train
+→ Slice Proofs On-Chain (settle as they land) → Adapter on S5 → Verify Commitment
+→ Optional Serve-Back on an Encrypted Session
 ```
 
 ### Technical Flow
@@ -285,7 +314,13 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
    - Curated model listings
    - Specialised model hosting
 
-3. **Enterprise & SaaS Services**
+3. **Model Fine-Tuning**
+   - Training billed per token at on-chain rates, settled per slice
+   - Same 10%/90% split as inference — no separate rate card
+   - Customers keep the adapter they paid for, including from interrupted runs
+   - Fine-tuned adapters served back on the network, generating ongoing inference volume
+
+4. **Enterprise & SaaS Services**
    - Private node deployments
    - Dedicated compute capacity
    - SLA guarantees
@@ -578,6 +613,21 @@ Client Wallet → Smart Contract → Host Discovery → P2P WebSocket (encrypted
 - UI5 production deployment with Base Account Kit
 - Network monitoring dashboard
 
+
+✅ **Model Fine-Tuning (LoRA/QLoRA)** — built end to end; live verification outstanding
+
+- Node-side pipeline complete: accept-time validation against the chain, encrypted dataset staging with per-shard hash verification, content scan, token re-count, the slice loop with per-slice proof submission and settlement, and encrypted adapter delivery
+- Training runs in a **separate sidecar service** reached over a Unix domain socket, never a network port — the node owns the money and trust path, the sidecar owns the GPU and nothing else
+- **Delivery before settlement**: every slice hands the client its encrypted checkpoint pointer *before* that slice's proof goes on chain, so money never moves ahead of the client holding the artefact
+- **Serve-back**: a finished adapter attaches to an ordinary chat session by pointer, verified against its manifest hash, staged private to that session and removed when it ends. The key it is held under is minted by the node and never accepted from the wire
+- **Cross-implementation token counting is pinned, not assumed.** The client declares a token count to size the escrow and the node re-counts it; a disagreement rejects an honest job. Both sides implement counting strictly from a frozen fixture generated from the exact tokenizer bytes the template names, and each is verified against it
+- **No smart-contract changes were required** — fine-tuning rides the existing session-job machinery: same escrow, same per-slice proofs, same dispute window and 90/10 split, distinguished only by its own registered model id
+
+🚀 **Model Fine-Tuning (LoRA/QLoRA)**
+
+- SDK and product UI complete against the frozen node interface; conformance proven byte-for-byte against the node's own test vectors
+- Remaining: a training run on GPU hardware, the serve-back checks against a live host, and model registration — a run and its gates, not further building
+
 🚀 **Compliance & Security**
 
 - Security audit (smart contracts) - in progress
@@ -817,6 +867,7 @@ See `.env.test` for current deployed addresses on Base Sepolia and opBNB Testnet
 13. **Permissions** — access control for groups and databases
 14. **Transcoding** — GPU video/audio transcoding (HLS segments, GOP-level proofs, host selection)
 15. **Video generation (LTX)** — validated jobs against authenticated allow-list bundles, encrypted input stills, per-clip escrowed sessions, staged progress, capability-CID delivery, provenance verification
+16. **Fine-tuning (LoRA/QLoRA)** — pre-escrow validation against host bounds, dataset counting/sharding/encryption, per-slice settlement with owned checkpoints, input-commitment verification, adapter serve-back
 
 ### Encryption Specifications
 

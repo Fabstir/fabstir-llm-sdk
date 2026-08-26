@@ -35,7 +35,10 @@ const BUNDLE = {
     minTotalTokens: 10_000, maxDeclaredTokens: 5_000_000, maxTotalTokens: 15_000_000,
     maxEpochs: 5, maxSamples: 200_000, maxDatasetBytes: 268_435_456,
     perTemplate: {
-      'train-qlora-qwen38-27b-v1': { ranks: [8, 16, 32], seqLens: [1024, 2048, 4096], sliceTokens: 1_000_000, specialsPerSample: 1 },
+      'train-qlora-qwen38-27b-v1': {
+        ranks: [8, 16, 32], seqLens: [1024, 2048, 4096], sliceTokens: 1_000_000,
+        specialsPerSample: 1, alphas: [16, 32, 64],
+      },
     },
   },
 };
@@ -78,6 +81,23 @@ describe('A.4 bundle pre-validation — the numeric mirror (constraint 4)', () =
     expect(() => mgr().validateAgainstBundle(
       bad({ dataset: { ...JOB.dataset, samples: 200_001 } }), BUNDLE as never,
     )).toThrow(/samples/i);
+  });
+  it('rejects an alpha outside the template’s list — the third pin, publishable since v0.3.12', () => {
+    // A.1 has always held the client to the template's allowed alpha values, and A.4 published
+    // ranks and seqLens and no alphas — so we stayed silent rather than guess a range. The node
+    // added the list at our request; now it is checkable BEFORE the money.
+    expect(() => mgr().validateAgainstBundle(bad({ hyper: { ...JOB.hyper, alpha: 17 } }), BUNDLE as never))
+      .toThrow(/alpha/i);
+    expect(() => mgr().validateAgainstBundle(bad({ hyper: { ...JOB.hyper, alpha: 64 } }), BUNDLE as never))
+      .not.toThrow();
+  });
+  it('SKIPS the alpha check on a bundle that predates the field', () => {
+    // Same degradation rule as baseServingModelId: a bundle emitted before the template was
+    // re-authored carries no alphas, and failing closed there would break every older host.
+    const older = { ...BUNDLE, bounds: { ...BUNDLE.bounds, perTemplate: {
+      'train-qlora-qwen38-27b-v1': { ranks: [8, 16, 32], seqLens: [1024, 2048, 4096], sliceTokens: 1_000_000, specialsPerSample: 1 },
+    } } };
+    expect(() => mgr().validateAgainstBundle(bad({ hyper: { ...JOB.hyper, alpha: 17 } }), older as never)).not.toThrow();
   });
   it('rejects a rank or seqLen outside the template’s OWN allow-lists', () => {
     expect(() => mgr().validateAgainstBundle(bad({ hyper: { ...JOB.hyper, rank: 64 } }), BUNDLE as never)).toThrow(/rank/i);

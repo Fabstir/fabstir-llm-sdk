@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // Training M0 serve-back (E.1/E.2/E.3) — pure frame mapping and the client-side gate, no I/O.
-// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.11 §§E.1/E.2/E.3.
+// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.12 §§E.1/E.2/E.3.
 //
 // Appendix A DEVIATION, recorded with cause: the plan's Phase 6 row named only
 // SessionManager.ts + training.types.ts. These two helpers are PURE and belong at neither

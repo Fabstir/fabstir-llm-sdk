@@ -2,7 +2,7 @@
 // WebSocket-based encrypted training submit + dispatch. Mirrors utils/ltx-ws.ts (Constraint 2,
 // 7) with the three things training adds: an over-claim guard on every echoed number
 // (Constraint 5), durable pointer journalling (CK-6), and a liveness watchdog.
-// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.11 § WebSocket protocol.
+// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.12 § WebSocket protocol.
 import type {
   TrainingJob, TrainingSliceEvent, TrainingCheckpointPointer, ManifestPointer,
   TrainingBilling, TrainingModerationStatus, TrainProgressFrame,

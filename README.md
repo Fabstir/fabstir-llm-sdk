@@ -15,6 +15,7 @@ A TypeScript SDK for interacting with the Fabstir P2P LLM Marketplace, enabling 
 - 🎨 **Image Generation** - Text-to-image via FLUX.2 diffusion models over E2E encrypted WebSocket, with automatic intent detection from natural language prompts
 - 🎬 **Video Transcoding** - GPU-accelerated video transcoding (H.264/AV1) with encrypted source/output support, real-time progress, GOP-level proofs, S5 storage, load balancing across multiple hosts, and HLS adaptive bitrate streaming with per-segment encryption
 - 🎥 **AI Video Generation (LTX 2.3)** - Text-to-video, image-to-video, and first-last-frame generation up to 4K over the encrypted rail, with per-clip USDC escrow that settles on-chain (host paid per megapixel-frame), encrypted input stills, staged progress, and cryptographic provenance (input commitment + on-chain proof anchor) verified client-side
+- 🧪 **Model Fine-Tuning (LoRA/QLoRA)** - Train an adapter on your own data on a marketplace GPU: dataset validated against the host's published bounds and counted with the template's pinned tokenizer **before any deposit**, then sharded, encrypted and uploaded to S5. Billed per training-token at on-chain prices and **settled slice by slice**, so an interrupted run still leaves you the checkpoints you paid for — each one a usable adapter. The client recomputes the input commitment against the host's attestation to prove it trained *your* job on *your* dataset, and the finished adapter can be served back on an ordinary encrypted chat session
 - 🔐 **End-to-End Encryption** - XChaCha20-Poly1305 encryption enabled by default with forward secrecy
 - 🔑 **ERC-4337 Smart Account Auth** - Optional `'aa-signer'` mode for email-only sign-in via Biconomy MEE / ZeroDev / Pimlico — all on-chain calls route through a caller-supplied `sendUserOp` callback (bundler-agnostic). See [packages/sdk-core/README.md](packages/sdk-core/README.md) and [docs/SDK_API.md](docs/SDK_API.md) for usage.
 - 🛡️ **Error Recovery** - Automatic retries and failover to ensure reliability
@@ -198,6 +199,43 @@ const result = await sessionManager.generateImage(
 **Auto-detected triggers:** `generate an image of`, `draw a`, `create a picture of`, `paint a`, `sketch a`, `make an image of`, `render a` — including polite forms.
 
 See [docs/SDK_API.md#image-generation](docs/SDK_API.md#image-generation) for full API reference.
+
+### Model Fine-Tuning (LoRA/QLoRA)
+
+```typescript
+const training = sdk.getTrainingManager();   // requires config.trainingModelId
+
+// The tokenizer belongs to the template, not the SDK — you supply the bytes and the
+// SDK verifies them against the template's pin before counting a single sample.
+const tokenizer = await loadTrainingTokenizer(tokenizerJsonBytes, template.tokenizerSha256);
+
+// Everything here is pre-escrow: a bad dataset costs nothing.
+const prepared = await training.prepareDataset({
+  jsonl, tokenizer, specialsPerSample: 1,
+  tokenizerSha256: template.tokenizerSha256,
+  maxDatasetBytes: bundle.training.bounds.maxDatasetBytes,
+});
+
+const est = await training.estimateTrainingCost(job, hostAddress);
+
+const handle = await training.submitTraining({
+  job, bundle, hostAddress, endpoint,
+  onProgress: (p) => console.log(p.stage, p.pct),
+  // Capability pointers are delivered ONCE — persist them as they arrive or a paid
+  // checkpoint becomes unrecoverable.
+  persistPointer: (record) => journal.write(record),
+});
+
+const result = await handle.result;   // adapter, billing, proofCIDs, moderation
+
+// Prove they trained YOUR job on YOUR dataset — a valid signature alone does not.
+const v = training.verifyTrainingSlice(attestation, binding);
+if (v.inputBindingValid !== true) warnUser();
+```
+
+Runs last hours and settle slice by slice, so a stopped run still leaves usable adapters.
+Serving one back is an ordinary session with a `lora` field — see
+[docs/SDK_API.md](docs/SDK_API.md#training-loraqlora-fine-tune-m0).
 
 ### OpenAI-Compatible Daemon (delegate-pays)
 

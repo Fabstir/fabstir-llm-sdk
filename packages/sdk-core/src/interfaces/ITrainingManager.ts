@@ -5,7 +5,7 @@
  * Interface for TrainingManager — LoRA/QLoRA fine-tune (Training M0).
  * Mirrors ILtxManager: a sidecar workload settling on the existing compute contracts with no
  * contract change. Wire shapes frozen in
- * docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.11.
+ * docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.12.
  *
  * @module ITrainingManager
  */

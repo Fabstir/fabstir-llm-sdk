@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // `count-v1` (§C.2) — the client-side count that becomes the manifest's `declaredTokens` and,
 // through it, the bill. Implemented STRICTLY from the node's shipped vectors.
-// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.11 §C.2.
+// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.12 §C.2.
 //
 // Open 7 is closed on this side as **@huggingface/tokenizers, version 0.1.3**, verified against
 // BOTH the 15-case frozen fixture and the 158-case differential corpus — 173/173, every group

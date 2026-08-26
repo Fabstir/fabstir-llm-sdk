@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // Training M0 conformance primitives — pure maths, no I/O. Every shape conforms to
-// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.11 §§B.1/B.4/B.5/C.1 (all four
+// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.12 §§B.1/B.4/B.5/C.1 (all four
 // re-verified byte-identical to v0.3.6, at which this was written).
 import { AbiCoder, keccak256, getBytes, verifyMessage } from 'ethers';
 import { TrainingError } from '../errors/training-errors';

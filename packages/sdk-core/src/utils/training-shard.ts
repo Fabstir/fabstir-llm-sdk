@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // Training M0 dataset sharding, manifest canonicalisation and the client-side plausibility
 // pre-check — pure, no I/O. Conforms to
-// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.11 §§D.1/D.2/D.3, §C.2, §C.6
+// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.12 §§D.1/D.2/D.3, §C.2, §C.6
 // (all re-verified byte-identical to v0.3.8, at which this was written).
 // Counting is NOT here: the splitter takes BYTES, never tokens — that is Phase 7 (C.2).
 import { sha256, toUtf8Bytes } from 'ethers';

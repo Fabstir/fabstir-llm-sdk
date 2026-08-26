@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // Training M0 (LoRA/QLoRA fine-tune) types. Wire shapes frozen in
-// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.11 (FROZEN; every section this
+// docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.12 (FROZEN; every section this
 // file depends on re-verified byte-identical to v0.3.6, at which it was written).
 // Doc references throughout the training surface are by SECTION (§A.1, §D.1, …), never by line
 // number. The interface is frozen for SEMANTICS but takes additive bumps often — it grew 916 to
@@ -269,6 +269,10 @@ export interface TrainingBundleSection {
     maxDatasetBytes: number;
     perTemplate: Record<string, {
       ranks: number[]; seqLens: number[]; sliceTokens: number; specialsPerSample: number;
+      /** Added to A.4 in v0.3.12 at the SDK's request — the third pin a client was held to and
+       *  could not read. OPTIONAL: a bundle emitted before the template was re-authored has no
+       *  list, and failing closed on its absence would break every host that has not published. */
+      alphas?: number[];
       /** Added to A.4 in v0.3.10 at the SDK's request. Both were preconditions a client was
        *  held to and could not read: without `tokenizerSha256` a client discovering a template
        *  from a bundle cannot verify a supplied tokenizer, and without `baseServingModelId` it
