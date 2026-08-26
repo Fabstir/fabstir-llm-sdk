@@ -277,6 +277,35 @@ export class SessionManager implements ISessionManager {
   private initialized = false;
   private sessionKey?: Uint8Array; // NEW: Store session key for Phase 4.2
   private messageIndex: number = 0; // NEW: For Phase 4.2 replay protection
+  /**
+   * The WebSocket connection generation `sessionKey` was minted on.
+   *
+   * The node registers the key against the connection that carried the init, so
+   * the key is only meaningful while the connection identity is unchanged. A
+   * silent reconnect leaves `isConnected()` true on a connection the node has no
+   * session for; comparing this instead is what distinguishes the two.
+   */
+  private sessionKeyGeneration?: number;
+  private connectionChangeUnsubscribe?: () => void;
+  /** Rejectors for encrypted work awaiting a response on the current connection. */
+  private encryptedWaiters: Set<(error: Error) => void> = new Set();
+  /**
+   * Per-session crypto state, keyed by session id.
+   *
+   * The node keeps one key PER session; a single shared `sessionKey` field
+   * cannot represent that — every init on any path (each prompt, each RAG op,
+   * each image/transcode flow) overwrote it, so two sessions interleaving on
+   * one manager decrypted and encrypted with each other's keys: aead::Error
+   * immediately after a clean init, with the node correctly reporting one key
+   * and no re-init per session. The legacy shared fields remain as "most
+   * recently inited session" for existing readers; this map is authoritative
+   * wherever a frame names its session.
+   */
+  private sessionCrypto: Map<string, { key: Uint8Array; messageIndex: number }> = new Map();
+  /** Serializes init handshakes so two mint->send->ack sequences cannot interleave. */
+  private initChain: Promise<void> = Promise.resolve();
+  /** Key fingerprints already wire-logged on a successful decrypt (one ok-line per key; failures always log). */
+  private wireOkLogged: Set<string> = new Set();
   private imageGenRateLimiter = new ImageGenerationRateLimiter();
   private pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: any) => void; timeoutId: NodeJS.Timeout }> = new Map(); // Host-side RAG request tracking
   private ragHandlerUnsubscribe?: () => void; // NEW: Store RAG handler unsubscribe function to prevent duplicate handlers
@@ -294,6 +323,122 @@ export class SessionManager implements ISessionManager {
     this.paymentManager = paymentManager;
     this.storageManager = storageManager;
     this.hostManager = hostManager; // NEW
+  }
+
+  /**
+   * Whether a frame belongs to the given session. Frames that carry a
+   * session_id (session_init_ack, encrypted_chunk, encrypted_response — node
+   * API.md:2059/:2087) are matched on it; frames that carry none (stream_end,
+   * connected) cannot be attributed and pass through.
+   */
+  private frameTargetsSession(frame: any, sessionId: string | bigint): boolean {
+    if (frame?.session_id === undefined || frame.session_id === null) {
+      return true;
+    }
+    return String(frame.session_id) === String(sessionId);
+  }
+
+  /**
+   * Short fingerprint of a key for wire logs: identifies which key was used
+   * without revealing it. Two logs with the same fp used the same key.
+   */
+  private wireFp(key: Uint8Array | undefined): string {
+    if (!key) return 'none';
+    return ethers.sha256(key).slice(2, 10);
+  }
+
+  /**
+   * Register a rejector for encrypted work awaiting a response, so it can be
+   * failed fast if the connection identity changes underneath it.
+   *
+   * @returns a function to unregister once the work settles normally
+   */
+  private registerEncryptedWaiter(reject: (error: Error) => void): () => void {
+    this.encryptedWaiters.add(reject);
+    return () => {
+      this.encryptedWaiters.delete(reject);
+    };
+  }
+
+  /**
+   * React to a WebSocket connection identity change.
+   *
+   * The key minted on the previous connection cannot be used on this one — the
+   * node has no session registered for it, so every frame would fail to decrypt.
+   * Drop the key so the next send re-inits, and fail in-flight encrypted work
+   * immediately rather than leaving it to the first-response timeout (480 s for
+   * a lora session) on an outcome already known.
+   */
+  private handleConnectionChange(generation: number): void {
+    if (this.sessionKeyGeneration === undefined || generation === this.sessionKeyGeneration) {
+      return;
+    }
+
+    console.warn(
+      `[SessionManager] WebSocket connection changed (generation ` +
+      `${this.sessionKeyGeneration} -> ${generation}); the session key minted on the ` +
+      'previous connection is no longer valid. Re-initialising on next send.'
+    );
+
+    this.sessionKey = undefined;
+    this.messageIndex = 0;
+    this.sessionKeyGeneration = undefined;
+    // Every entry was registered node-side on the connection that just died.
+    this.sessionCrypto.clear();
+    this.wireOkLogged.clear();
+    // wsSessionId is deliberately preserved: it records which session owns the
+    // client, which a change of connection identity does not alter. Clearing it
+    // would make the reuse guards treat the socket as belonging to no session.
+
+    // DELIBERATE: an interrupted prompt is NOT resent automatically here.
+    //
+    // The prompt was never answered, so nothing was billed and a resend would be
+    // safe on that count. It is still the caller's call: only the caller knows
+    // whether the user has since navigated away or cancelled, and a silent retry
+    // inside sendPrompt turns a repeatedly unstable connection into a loop that
+    // is invisible from outside. The error carries `retryable: true` and a
+    // distinct code so the caller can resend deliberately and say why.
+    const waiters = [...this.encryptedWaiters];
+    this.encryptedWaiters.clear();
+    for (const reject of waiters) {
+      const error: any = new SDKError(
+        'The WebSocket connection was replaced while this request was in flight, so the ' +
+        'session key it was encrypted under is no longer valid. The request was not ' +
+        'answered and can be sent again.',
+        'SESSION_KEY_INVALIDATED'
+      );
+      error.retryable = true;
+      try {
+        reject(error);
+      } catch (err) {
+        console.error('[SessionManager] Failed to reject in-flight request:', err);
+      }
+    }
+  }
+
+  /**
+   * Whether an `encrypted_session_init` must be sent before the next encrypted
+   * frame. Connection identity, not transport liveness — a silent reconnect
+   * leaves `isConnected()` true on a connection that was never inited.
+   */
+  private needsSessionInit(): boolean {
+    if (!this.wsClient || !this.wsClient.isConnected()) {
+      return true;
+    }
+    if (this.sessionKeyGeneration === undefined) {
+      return true;
+    }
+    return this.wsClient.getConnectionGeneration() !== this.sessionKeyGeneration;
+  }
+
+  /**
+   * Subscribe to connection identity changes on the active client.
+   */
+  private watchConnectionIdentity(client: WebSocketClient): void {
+    this.connectionChangeUnsubscribe?.();
+    this.connectionChangeUnsubscribe = client.onConnectionChange((generation: number) => {
+      this.handleConnectionChange(generation);
+    });
   }
 
   /**
@@ -1117,6 +1262,7 @@ export class SessionManager implements ISessionManager {
       // Initialize WebSocket client if not already connected
       if (!this.wsClient || !this.wsClient.isConnected()) {
         this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+        this.watchConnectionIdentity(this.wsClient);
         await this.wsClient.connect();
         this.wsSessionId = sessionIdStr;
 
@@ -1218,6 +1364,7 @@ export class SessionManager implements ISessionManager {
                 clearTimeout(timeout);
                 if (safetyTimeout) clearTimeout(safetyTimeout);
                 unsubscribe();
+                unregisterWaiter();
                 resolve(value);
               }
             };
@@ -1227,9 +1374,16 @@ export class SessionManager implements ISessionManager {
                 clearTimeout(timeout);
                 if (safetyTimeout) clearTimeout(safetyTimeout);
                 unsubscribe();
+                unregisterWaiter();
                 reject(err);
               }
             };
+
+            // Fail fast if the connection is replaced while this response is
+            // outstanding. Without this the request waits out the full
+            // first-response budget (480 s with a lora attached) on an outcome
+            // already known the moment the socket changed identity.
+            const unregisterWaiter = this.registerEncryptedWaiter(safeReject);
 
             let encChunkCount = 0;
             // v1.13.4: deferred resolution — wait for stream_end after encrypted_response
@@ -1238,6 +1392,11 @@ export class SessionManager implements ISessionManager {
               // Skip processing if already resolved
               if (isResolved) return;
 
+              // Another flow's frames on this shared socket are not ours to
+              // decrypt or to fail on: a foreign encrypted frame decrypted
+              // with this session's key is a guaranteed aead failure landing
+              // in this prompt's promise.
+              if (!this.frameTargetsSession(data, sessionIdStr)) return;
 
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
                 encChunkCount++;
@@ -1548,6 +1707,7 @@ export class SessionManager implements ISessionManager {
                 isResolved = true;
                 clearTimeout(timeout);
                 unsubscribe();
+                unregisterWaiterNs();
                 resolve(value);
               }
             };
@@ -1556,9 +1716,14 @@ export class SessionManager implements ISessionManager {
                 isResolved = true;
                 clearTimeout(timeout);
                 unsubscribe();
+                unregisterWaiterNs();
                 reject(err);
               }
             };
+
+            // Fail fast if the connection is replaced while this response is
+            // outstanding — same contract as the streaming path.
+            const unregisterWaiterNs = this.registerEncryptedWaiter(safeReject);
 
             let encNsChunkCount = 0;
             let safetyTimeoutNs: ReturnType<typeof setTimeout> | undefined;
@@ -1566,6 +1731,9 @@ export class SessionManager implements ISessionManager {
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
               // Skip processing if already resolved
               if (isResolved) return;
+
+              // Foreign frames are not ours to decrypt or to fail on.
+              if (!this.frameTargetsSession(data, sessionIdStr)) return;
 
               // MUST handle encrypted_chunk messages!
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
@@ -2122,7 +2290,24 @@ export class SessionManager implements ISessionManager {
    * Send encrypted session initialization (Phase 4.1)
    * @private
    */
-  private async sendEncryptedInit(
+  private sendEncryptedInit(
+    ws: WebSocketClient,
+    config: ExtendedSessionConfig,
+    sessionId: bigint,
+    jobId: bigint
+  ): Promise<void> {
+    // Serialize handshakes: two concurrent inits interleaving their
+    // mint->send->ack sequences is how one flow's key ends up attributed to
+    // another flow's ack. The chain never rejects (each link swallows), while
+    // the caller still sees its own link's outcome.
+    const run = this.initChain.then(() =>
+      this.sendEncryptedInitInner(ws, config, sessionId, jobId)
+    );
+    this.initChain = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  private async sendEncryptedInitInner(
     ws: WebSocketClient,
     config: ExtendedSessionConfig,
     sessionId: bigint,
@@ -2150,7 +2335,12 @@ export class SessionManager implements ISessionManager {
     this.sessionKey = crypto.getRandomValues(new Uint8Array(32));
     const sessionKeyHex = bytesToHex(this.sessionKey);
     this.messageIndex = 0;
+    // Authoritative per-session entry: frames stamped with this session id are
+    // encrypted/decrypted with THIS key, whatever later inits do to the legacy
+    // shared fields.
+    this.sessionCrypto.set(sessionId.toString(), { key: this.sessionKey, messageIndex: 0 });
     console.warn(`[SDK:encryptedInit:4] Generated session key, messageIndex reset to 0`);
+    console.warn(`[SDK:wire] mint session=${sessionId} fp=${this.wireFp(this.sessionKey)} gen=${ws.getConnectionGeneration?.() ?? '-'}`);
 
     // 2. Get host public key (uses cache, metadata, or signature recovery)
     console.warn(`[SDK:encryptedInit:5] Getting host public key for ${config.host}...`);
@@ -2226,10 +2416,25 @@ export class SessionManager implements ISessionManager {
 
       const unsubscribe = ws.onMessage((data: any) => {
         console.warn(`[SDK:encryptedInit:10] Received message type=${data.type} while waiting for ack`);
+        // Acks and errors carry session_id (node API.md:2059). One stamped for
+        // a different session belongs to another flow on this socket — treating
+        // it as ours is how an init "completes" without the node ever having
+        // processed it.
+        if ((data.type === 'session_init_ack' || data.type === 'error') &&
+            !this.frameTargetsSession(data, sessionId.toString())) {
+          console.warn(`[SDK:wire] ack session=${data.session_id} ignored (waiting=${sessionId})`);
+          return;
+        }
         if (data.type === 'session_init_ack') {
           console.warn(`[SDK:encryptedInit:11] Got session_init_ack - init complete`);
           clearTimeout(timeout);
           unsubscribe();
+          // Bind the key's lifetime to the connection that carried the init. The
+          // node registered it against this connection; a later one has no
+          // session for it.
+          if (ws === this.wsClient) {
+            this.sessionKeyGeneration = ws.getConnectionGeneration();
+          }
           resolve();
         } else if (data.type === 'error') {
           console.error(`[SDK:encryptedInit:11b] Got error: ${data.message}`);
@@ -2381,11 +2586,19 @@ export class SessionManager implements ISessionManager {
         structuredPayload.search_queries = webSearchOptions.searchQueries;
       }
 
-      // Encrypt JSON payload with session key
+      // Encrypt with the key of the session this frame is STAMPED for, and
+      // advance that session's own replay counter. Using the legacy shared
+      // fields here meant the stamp and the key could name different sessions
+      // whenever another flow inited in between.
+      const outSessionId = currentSession.sessionId.toString();
+      const scoped = this.sessionCrypto.get(outSessionId);
+      const encryptKey = scoped?.key ?? this.sessionKey;
+      const outIndex = scoped ? scoped.messageIndex++ : this.messageIndex++;
+      console.warn(`[SDK:wire] encrypt session=${outSessionId} idx=${outIndex} fp=${this.wireFp(encryptKey)} src=${scoped ? 'scoped' : 'legacy'}`);
       const payload = this.encryptionManager.encryptMessage(
-        this.sessionKey,
+        encryptKey,
         JSON.stringify(structuredPayload),
-        this.messageIndex++
+        outIndex
       );
 
       // Wrap payload with message structure (per docs lines 498-508)
@@ -2443,7 +2656,7 @@ export class SessionManager implements ISessionManager {
    * @private
    */
   private async decryptIncomingMessage(encryptedMessage: any): Promise<string> {
-    if (!this.sessionKey) {
+    if (!this.sessionKey && this.sessionCrypto.size === 0) {
       throw new SDKError(
         'Session key not available for decryption',
         'SESSION_KEY_NOT_AVAILABLE'
@@ -2457,6 +2670,21 @@ export class SessionManager implements ISessionManager {
       );
     }
 
+    // The frame names its session (node API.md:2087); use THAT session's key.
+    // The legacy shared field holds whichever session inited most recently,
+    // which is not necessarily the session this frame belongs to.
+    const frameSessionId = encryptedMessage.session_id !== undefined && encryptedMessage.session_id !== null
+      ? String(encryptedMessage.session_id)
+      : undefined;
+    const scoped = frameSessionId ? this.sessionCrypto.get(frameSessionId) : undefined;
+    const decryptKey = scoped?.key ?? this.sessionKey;
+    if (!decryptKey) {
+      throw new SDKError(
+        `No session key for session ${frameSessionId ?? '(unstamped frame)'}`,
+        'SESSION_KEY_NOT_AVAILABLE'
+      );
+    }
+
     try {
       // Extract payload from message (per docs lines 514-527 for encrypted_chunk)
       // Message structure: { type, session_id, id, payload: { ciphertextHex, nonceHex, aadHex } }
@@ -2464,12 +2692,18 @@ export class SessionManager implements ISessionManager {
 
       // Decrypt message with session key
       const plaintext = this.encryptionManager.decryptMessage(
-        this.sessionKey,
+        decryptKey,
         payload
       );
 
+      const okFp = this.wireFp(decryptKey);
+      if (!this.wireOkLogged.has(okFp)) {
+        this.wireOkLogged.add(okFp);
+        console.warn(`[SDK:wire] decrypt frame=${encryptedMessage.type} session=${frameSessionId ?? '-'} fp=${okFp} src=${scoped ? 'scoped' : 'legacy'} -> ok (further ok-decrypts under this key not logged)`);
+      }
       return plaintext;
     } catch (error: any) {
+      console.warn(`[SDK:wire] decrypt frame=${encryptedMessage.type} session=${frameSessionId ?? '-'} fp=${this.wireFp(decryptKey)} src=${scoped ? 'scoped' : 'legacy'} -> FAIL ${error.message}`);
       console.error('[SessionManager] Decryption failed:', error.message);
       throw new SDKError(
         `Failed to decrypt message: ${error.message}`,
@@ -2606,6 +2840,7 @@ export class SessionManager implements ISessionManager {
     // Reconnect WebSocket if needed
     if (!this.wsClient?.isConnected()) {
       this.wsClient = new WebSocketClient(`wss://${session.provider}/ws`);
+      this.watchConnectionIdentity(this.wsClient);
       await this.wsClient.connect();
     }
   }
@@ -2954,6 +3189,7 @@ export class SessionManager implements ISessionManager {
 
     if (!this.wsClient || !this.wsClient.isConnected()) {
       this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+      this.watchConnectionIdentity(this.wsClient);
       await this.wsClient.connect();
       this.wsSessionId = sessionId;
 
@@ -3967,6 +4203,7 @@ export class SessionManager implements ISessionManager {
       console.warn(`[SDK:generateImage:9] Creating fresh WebSocket to ${wsUrl}`);
       try {
         this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+        this.watchConnectionIdentity(this.wsClient);
         console.warn(`[SDK:generateImage:10] WebSocket created, calling connect()...`);
         await this.wsClient.connect();
         console.warn(`[SDK:generateImage:11] WebSocket connected OK`);
@@ -4088,8 +4325,11 @@ export class SessionManager implements ISessionManager {
     let localSessionKey: Uint8Array | undefined;
     let localMessageIndex: number;
 
-    if (this.wsClient?.isConnected() && this.wsSessionId === sessionId && this.sessionKey) {
-      wsClient = this.wsClient;
+    // Identity, not liveness: a silent reconnect leaves isConnected() true on a
+    // connection the node never received an init for, and reusing the key here
+    // would encrypt under a key that connection has no record of.
+    if (!this.needsSessionInit() && this.wsSessionId === sessionId && this.sessionKey) {
+      wsClient = this.wsClient!;
       localSessionKey = this.sessionKey;
       localMessageIndex = this.messageIndex;
     } else {
@@ -4198,8 +4438,11 @@ export class SessionManager implements ISessionManager {
     let localSessionKey: Uint8Array | undefined;
     let localMessageIndex: number;
 
-    if (this.wsClient?.isConnected() && this.wsSessionId === sessionId && this.sessionKey) {
-      wsClient = this.wsClient;
+    // Identity, not liveness: a silent reconnect leaves isConnected() true on a
+    // connection the node never received an init for, and reusing the key here
+    // would encrypt under a key that connection has no record of.
+    if (!this.needsSessionInit() && this.wsSessionId === sessionId && this.sessionKey) {
+      wsClient = this.wsClient!;
       localSessionKey = this.sessionKey;
       localMessageIndex = this.messageIndex;
     } else {

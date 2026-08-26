@@ -32,6 +32,16 @@ export class WebSocketClient {
   private heartbeatTimer?: number;
   private messageQueue: WebSocketMessage[] = [];
   private isReconnecting = false;
+  /**
+   * Identity of the current connection, incremented on every successful open.
+   *
+   * `isConnected()` reports transport liveness, which is true again the moment a
+   * silent reconnect completes — it cannot distinguish "the connection I inited"
+   * from "a replacement the node has no session for". Anything holding
+   * per-connection state (a session key) must compare generations, not liveness.
+   */
+  private connectionGeneration = 0;
+  private connectionChangeHandlers: Set<(generation: number) => void> = new Set();
 
   constructor(url: string, options: WebSocketOptions = {}) {
     this.url = url;
@@ -60,13 +70,22 @@ export class WebSocketClient {
         this.ws.onopen = () => {
           this.reconnectAttempts = 0;
           this.isReconnecting = false;
-          
+          this.connectionGeneration++;
+
           // Start heartbeat
           this.startHeartbeat();
-          
-          // Send queued messages
-          this.flushMessageQueue();
-          
+
+          // Queued frames belong to the connection that queued them. Replaying
+          // them here would put a request encrypted under the previous
+          // connection's key onto a connection the node registered no key for —
+          // a wrong request rather than a failed one. Both send paths follow
+          // their queue push with a direct send once the socket is open, so the
+          // frame is not lost by dropping it here. No exception for plaintext:
+          // the node has no session state for a replayed plaintext frame either.
+          this.discardMessageQueue();
+
+          this.notifyConnectionChange();
+
           resolve();
         };
 
@@ -319,6 +338,28 @@ export class WebSocketClient {
   }
 
   /**
+   * Identity of the current connection. Starts at 1 after the first successful
+   * connect and increments on every reconnect. State bound to a particular
+   * connection is only valid while this value is unchanged.
+   */
+  getConnectionGeneration(): number {
+    return this.connectionGeneration;
+  }
+
+  /**
+   * Subscribe to connection identity changes. The handler receives the new
+   * generation on every successful open, including the first.
+   *
+   * @returns unsubscribe function
+   */
+  onConnectionChange(handler: (generation: number) => void): () => void {
+    this.connectionChangeHandlers.add(handler);
+    return () => {
+      this.connectionChangeHandlers.delete(handler);
+    };
+  }
+
+  /**
    * Get connection state
    */
   getReadyState(): number {
@@ -408,15 +449,27 @@ export class WebSocketClient {
   /**
    * Flush message queue
    */
-  private async flushMessageQueue(): Promise<void> {
-    const queue = [...this.messageQueue];
+  private discardMessageQueue(): void {
+    if (this.messageQueue.length === 0) {
+      return;
+    }
+    console.warn(
+      `[WebSocketClient] Discarding ${this.messageQueue.length} queued frame(s) at ` +
+      `connection generation ${this.connectionGeneration}: they were queued for a ` +
+      'previous connection and cannot be replayed onto this one.'
+    );
     this.messageQueue = [];
-    
-    for (const message of queue) {
+  }
+
+  /**
+   * Notify subscribers that the connection identity changed.
+   */
+  private notifyConnectionChange(): void {
+    for (const handler of this.connectionChangeHandlers) {
       try {
-        await this.sendMessage(message);
+        handler(this.connectionGeneration);
       } catch (error) {
-        console.error('Failed to send queued message:', error);
+        console.error('[WebSocketClient] Connection change handler error:', error);
       }
     }
   }
