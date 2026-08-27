@@ -1,12 +1,13 @@
 # Platformless AI — Executive Summary
 
-*Last updated: July 2026*
+*Last updated: August 2026*
 
 ## What it is
 
 **Platformless AI is a marketplace for AI compute with no platform in the middle.** Users buy AI
-services — chat, document-grounded answers, image generation, video transcoding, and AI video
-generation — directly from independent GPU operators ("hosts"), the way BitTorrent connects peers
+services — chat, document-grounded answers, image generation, video transcoding, AI video
+generation, and model fine-tuning — directly from independent GPU operators ("hosts"), the way
+BitTorrent connects peers
 rather than the way an app store intermediates them. Coordination that a platform would normally
 provide is done by smart contracts on Base (an Ethereum L2): hosts register and stake on-chain,
 prices are published on-chain, payment is escrowed per session in USDC, and work is settled
@@ -26,7 +27,9 @@ Three properties, each verifiable rather than promised:
    (XChaCha20-Poly1305 with per-session keys). Media is stored encrypted on decentralized storage
    (S5); decryption keys travel only inside the encrypted channel, delivered as "capability" links
    private to the paying user. Hosts run pinned, hash-identified workloads — clients send typed
-   parameters, never executable code.
+   parameters, never executable code. Even blockchain *reads* respect the boundary: host and
+   model discovery travel over the app's configured RPC endpoint, never through the user's
+   wallet, so a deployment pointed at its own node keeps its traffic to itself.
 
 3. **Provenance without paperwork.** Every AI-generated video carries a cryptographic birth
    certificate: a commitment binding the exact inputs (prompt, seed, parameters, and the byte-exact
@@ -42,7 +45,15 @@ Three properties, each verifiable rather than promised:
 - **Image generation** (FLUX diffusion) with natural-language intent detection.
 - **Video transcoding** (GPU H.264/AV1, HLS streaming, per-segment encryption, multi-host load
   balancing).
-- **AI video generation (LTX 2.3)** — the newest capability, live end-to-end in the product UI:
+- **Model fine-tuning (LoRA/QLoRA)** — the newest capability: train an adapter on your own
+  data on a marketplace GPU. The dataset is validated against the host's published bounds and
+  counted with the template's pinned tokenizer **before any deposit** (the count verified
+  exact three ways — browser, offline, and node agree to the token), then sharded, encrypted,
+  and uploaded to S5; the finished adapter is served back on an ordinary encrypted chat
+  session. Proven end-to-end in August 2026: an adapter answering facts that exist only in
+  its 380-line training set, beside a base model that correctly identifies them as unknown.
+  Per-training-token payment is staged as the next phase.
+- **AI video generation (LTX 2.3)** — live end-to-end in the product UI:
   - **Four modes:** text-to-video, image-to-video (animate a still), first-last-frame
     (supply two stills; the model generates the motion between them), and video restyle
     (IC-LoRA union control — a reference still plus a control clip whose motion and camera
@@ -94,7 +105,8 @@ on-chain-capped allowance.
 
 ## Roadmap
 
-- **Near term:** 4K generation (final contract check in progress), production TLS endpoints,
+- **Near term:** the fine-tuning paid phase (per-training-token pricing, slice-by-slice
+  settlement), 4K generation (final contract check in progress), production TLS endpoints,
   host-signed attestations, and the prompt-fidelity template re-pin.
 - **Next:** additional pinned templates (e.g. audio-conditioned video) and C2PA/Content
   Credentials export backed by the on-chain proof. (All four generation modes — including the

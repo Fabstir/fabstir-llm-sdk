@@ -43,7 +43,7 @@ async function streamingExample() {
   const sdk = new FabstirSDKCore({
     mode: 'production' as const,
     chainId: ChainId.BASE_SEPOLIA,
-    rpcUrl: process.env.RPC_URL_BASE_SEPOLIA!,
+    rpcUrl: process.env.RPC_URL_BASE_SEPOLIA!,   // serves ALL contract reads (1.38.1+); only writes go through the wallet signer
     contractAddresses: {
       jobMarketplace: chain.contracts.jobMarketplace,
       nodeRegistry: chain.contracts.nodeRegistry,
@@ -326,7 +326,7 @@ const chain = ChainRegistry.getChain(ChainId.BASE_SEPOLIA);
 const sdk = new FabstirSDKCore({
   mode: 'production' as const,
   chainId: ChainId.BASE_SEPOLIA,
-  rpcUrl: process.env.RPC_URL_BASE_SEPOLIA!,
+  rpcUrl: process.env.RPC_URL_BASE_SEPOLIA!,   // serves ALL contract reads (1.38.1+); only writes go through the wallet signer
   contractAddresses: {
     jobMarketplace: chain.contracts.jobMarketplace,
     nodeRegistry: chain.contracts.nodeRegistry,

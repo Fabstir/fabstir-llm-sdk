@@ -81,6 +81,8 @@ A decentralised marketplace where smart contracts handle coordination, P2P conne
    - ECDSA signatures for sender authentication
    - Private communication (only you and your chosen host can read content)
    - No platform intermediary sees your prompts or responses
+   - Blockchain reads ride the app's configured RPC endpoint, never the wallet provider —
+     host and model discovery does not leak through MetaMask
 
 3. **Cryptographic Verification**
    - STARK proofs via Risc0 zkVM
@@ -1037,4 +1039,4 @@ _"We Don't Trust, We Verify - AI Infrastructure for the Ages"_
 
 ---
 
-_Last Updated: July 2026_
+_Last Updated: August 2026_

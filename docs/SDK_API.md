@@ -161,7 +161,7 @@ new FabstirSDKCore(config?: FabstirSDKCoreConfig)
 **Configuration:**
 ```typescript
 interface FabstirSDKCoreConfig {
-  rpcUrl: string;                     // REQUIRED: Blockchain RPC URL
+  rpcUrl: string;                     // REQUIRED: Blockchain RPC URL — serves EVERY contract read (1.38.1+); only writes go through the signer
   chainId?: number;                   // Optional: Chain ID (default: 84532 - Base Sepolia)
   contractAddresses: {                // REQUIRED: All 7 contracts
     jobMarketplace: string;           // REQUIRED
@@ -180,6 +180,23 @@ interface FabstirSDKCoreConfig {
 ```
 
 **⚠️ IMPORTANT:** The SDK will throw clear errors if any required contract addresses are missing.
+
+**Read/write provider split (1.38.1+):** every contract *read* (host discovery, model
+enumeration, pricing, balances used by discovery) goes through a dedicated provider built from
+`rpcUrl`; only transactions ride the wallet signer. This keeps read volume off the injected
+wallet (MetaMask rate-limits dapps under discovery load) and keeps a deployment's reads on the
+endpoint it configured. Two observability points:
+
+```typescript
+sdk.getReadProvider();        // the provider serving contract reads
+sdk.getReadProviderSource();  // 'rpcUrl' | 'wallet' — 'wallet' is never silent (it warns)
+```
+
+Because reads and writes now use different providers they could sit on different chains, so the
+SDK asserts parity between the read chain and the signer's chain at manager initialization, on
+the wallet's `chainChanged` event, and across `switchChain()` (which also rebuilds the read
+provider for the new chain). A divergence throws `READ_WRITE_CHAIN_MISMATCH` naming both chain
+ids rather than silently preferring one side.
 
 **Example (REQUIRED Configuration):**
 ```typescript
@@ -837,6 +854,26 @@ const smartProvider = await WalletProviderFactory.createProvider('smart-account'
 ## Session Management
 
 The SessionManager handles LLM session lifecycle, streaming responses, and context preservation.
+
+### Session keys, reconnects, and the wire log (1.38.2–1.38.4)
+
+Encryption state is **per session and per connection**, and the SDK enforces both:
+
+- **Per-session keys.** The node registers one key per session; the SDK holds a matching map.
+  Frames are decrypted with the key of the session stamped on them (`session_id`), outgoing
+  prompts are encrypted — and replay-protected — under the key of the session the call was made
+  for, init acks are correlated by `session_id`, and concurrent init handshakes are serialized.
+  Multiple sessions on one SessionManager cannot cross their keys.
+- **Keys die with their connection.** `WebSocketClient` counts connection generations; a silent
+  reconnect invalidates the session key (the node has no session on the new connection), rejects
+  in-flight encrypted requests immediately with `SESSION_KEY_INVALIDATED` (`retryable: true` —
+  the prompt was never answered, nothing was billed; resend deliberately), and discards frames
+  queued for the dead connection instead of replaying them. The next send re-initializes.
+- **The wire log.** Key attribution is observable end to end as `[SDK:wire]` console lines —
+  `mint`, `encrypt`, `decrypt`, and ignored-ack events, each carrying an 8-hex SHA-256 key
+  fingerprint (identifies a key without revealing it) plus session id and `scoped|legacy`
+  source. One fingerprint per session across mint → encrypt → decrypt is health; two is a bug
+  report that writes itself.
 
 ### Get SessionManager
 
@@ -5413,6 +5450,32 @@ Check if WebSocket is connected.
 isConnected(): boolean
 ```
 
+> `isConnected()` reports **transport liveness**, which is true again the moment an automatic
+> reconnect completes — it cannot distinguish the connection you initialized from a silent
+> replacement the node has no session for. State bound to a particular connection (a session
+> key) must compare **generations** instead.
+
+### getConnectionGeneration
+
+Identity of the current connection: 1 after the first successful connect, incremented on every
+reconnect (1.38.2+).
+
+```typescript
+getConnectionGeneration(): number
+```
+
+### onConnectionChange
+
+Subscribe to connection identity changes; the handler receives the new generation on every
+successful open, including the first. Returns an unsubscribe function. On a generation change
+the client also **discards** any frames queued for the previous connection — they were built
+for a connection (and, if encrypted, a key registration) that no longer exists, so replaying
+them would send wrong requests, not late ones.
+
+```typescript
+onConnectionChange(handler: (generation: number) => void): () => void
+```
+
 ### getReadyState
 
 Get WebSocket connection state.
@@ -5905,6 +5968,7 @@ enum SDKErrorCode {
   // WebSocket
   WEBSOCKET_CONNECTION_FAILED = 'WEBSOCKET_CONNECTION_FAILED',
   WEBSOCKET_MESSAGE_FAILED = 'WEBSOCKET_MESSAGE_FAILED',
+  SESSION_KEY_INVALIDATED = 'SESSION_KEY_INVALIDATED', // Connection replaced mid-request; key void. retryable: true — resend the prompt (1.38.2+)
 
   // Proofs
   INVALID_PROOF = 'INVALID_PROOF',
@@ -5925,6 +5989,7 @@ enum SDKErrorCode {
   INSUFFICIENT_DEPOSIT = 'INSUFFICIENT_DEPOSIT',
   NODE_CHAIN_MISMATCH = 'NODE_CHAIN_MISMATCH',
   DEPOSIT_ACCOUNT_UNAVAILABLE = 'DEPOSIT_ACCOUNT_UNAVAILABLE',
+  READ_WRITE_CHAIN_MISMATCH = 'READ_WRITE_CHAIN_MISMATCH', // rpcUrl reads on one chain, wallet signing on another (1.38.1+)
 
   // Transcoding
   CAPACITY_FULL = 'CAPACITY_FULL',             // Host transcode queue full (HTTP 429, retryable)
