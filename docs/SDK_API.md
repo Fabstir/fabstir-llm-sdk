@@ -944,7 +944,11 @@ const { sessionId } = await sessionManager.startSession(model, provider, {
 
 ### sendPrompt
 
-Sends a prompt to the LLM and receives response.
+Sends a prompt to the LLM and receives response. **Legacy HTTP route.** It posts to `/v1/inference`, which
+takes a job id past no session gate; from node 8.54.0 hosts configured with fiat vault addresses refuse it
+outright (`403 SESSION_AUTH_DENIED`), and its request shape serialises `jobId` as a string the node's
+deserialiser rejects (`422`). Billed inference is the encrypted WebSocket with the authorisation posted first —
+use `sendPromptStreaming`.
 
 ```typescript
 async sendPrompt(
@@ -2636,11 +2640,14 @@ no orphan reconnect loop — and leaves the shared chat session's key untouched 
 Re-fetch managers after a switch (`sdk.getTrainingManager()`); an instance held across the switch is the
 old chain's. A host-selection service you installed on the training manager survives the rebuild.
 
-⚠️ **Frozen interface vs deployed node.** The pre-flight enforces the frozen A.3 (`proofTimeoutWindow ≥ 3600`).
-The UI's real training sessions of 2026-08-26 (jobs 1127–1133) were created with `proofTimeoutWindow 300 /
-maxDuration 86400` and the deployed node accepted `train` on all of them — so the node did not enforce that
-floor then. Until the node developer confirms the floor is live, expect the pre-flight to refuse sessions the
-current node would run; that is the specification, and it is the node that has to move, not the check.
+**Session shapes the pre-flight will see (confirmed with the node developer, 2026-09-02).** The A.3 floor
+(`proofTimeoutWindow ≥ 3600`) IS enforced by the deployed node on a real chain; the training runs of 2026-08-26
+that appeared to pass with 300 ran under the node's mock-chain seams, which read a synthetic session. So the
+pre-flight refuses, by design: a **chat-shaped wallet session** (`86400 / 300`, what a UI's own session creator
+mints) and today's **fiat-service session** (`3600 / 1000 / 300`). What passes: the SDK's own wallet path
+(`submitTraining` without `existingSession` mints `14400 / 1000 / 3600`), and the fiat service's coming
+`kind: "training"` session (`14400 / 1000 / 3600`, after node 8.54.0). Open an adopted session late: the accept
+latitude is 1,200 s from creation to the `train` frame, returned as `acceptLatitudeSecs`.
 
 ```typescript
 import { TrainingError, ADOPTED_SESSION_PARAMS_REASON } from '@fabstir/sdk-core';
