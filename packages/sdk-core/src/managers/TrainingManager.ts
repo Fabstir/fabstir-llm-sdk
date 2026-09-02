@@ -19,6 +19,8 @@ import {
   TrainingError, ADOPTED_SESSION_PARAMS_REASON, EXISTING_SESSION_CONFIG_REASON, SESSION_DECODE_REASON,
 } from '../errors/training-errors';
 import { normalizeNodeHttpUrl } from '../utils/validation';
+import { assertTrainingJobWireShape } from '../types/training.types';
+import { SDKError } from '../errors';
 import type { OnChainSessionJob } from '../contracts/JobMarketplace';
 import type {
   TrainingJob, TrainingBundleSection, TrainingSliceAttestation, ManifestPointer,
@@ -66,7 +68,16 @@ const A3_MIN_PROOF_TIMEOUT_WINDOW = BigInt(A3_MIN_PROOF_TIMEOUT_WINDOW_SECS);
 const errMessage = (e: unknown): string => (e as { message?: string })?.message ?? String(e);
 
 /** SDKError codes that mean "the wire", not "our wiring" — the only foreign class that stays retryable. */
-const TRANSPORT_SDK_CODES = new Set([
+/**
+ * ethers v6 codes for "the chain could not be READ" on the pre-flight reads (session, model, price).
+ * Nothing about the session is known or consumed, so they are transport (retry the same session), not
+ * sessionDecode.
+ */
+export const RPC_TRANSIENT_CODES = new Set(['NETWORK_ERROR', 'TIMEOUT', 'SERVER_ERROR']);
+
+const MAX_UINT256 = (1n << 256n) - 1n;
+
+export const TRANSPORT_SDK_CODES = new Set([
   'WS_CONNECTION_ERROR', 'WS_CREATE_ERROR', 'WS_TIMEOUT', 'WS_NOT_CONNECTED', 'WS_SEND_ERROR',
   'WS_RECONNECT_FAILED', 'SESSION_INIT_ERROR', 'SESSION_AUTH_UNREACHABLE', 'RESPONSE_TIMEOUT',
   // The host could not be reached for its public key during the init — the wire, not our wiring.
@@ -75,9 +86,13 @@ const TRANSPORT_SDK_CODES = new Set([
 
 /** Vault / card path: the session a fiat service minted (`POST /fiat/session`) for the SDK to adopt. */
 export interface TrainingExistingSession {
-  sessionId: bigint;
-  jobId: bigint;
+  /** bigint, or the JSON forms `/fiat/session` hands a browser: a safe integer or a decimal string. */
+  sessionId: bigint | number | string;
+  jobId: bigint | number | string;
 }
+
+/** The ids every failure after adoption / after the deposit carries. `adopted` says which path. */
+type SessionIdTag = { sessionId: bigint | number | string; jobId: bigint | number | string; adopted: boolean };
 
 /** One failing A.3 check, as reported in `detail.failed`. */
 export interface A3CheckFailure { check: string; expected: string; actual: string }
@@ -87,7 +102,8 @@ export interface SubmitTrainingOptions {
   job: TrainingJob;
   bundle?: TrainingBundleSection;
   hostAddress: string;
-  endpoint?: string;
+  /** The host's plain http(s) base (the nodeHttpUrl used for postSessionAuth). Required on both paths. */
+  endpoint: string;
   paymentToken?: string;
   chainId?: number;
   requestId?: string;
@@ -271,15 +287,10 @@ export class TrainingManager implements ITrainingManager {
       return fail(`templateHash ${job.templateHash} != the host's advertised ${template.hash}`);
     }
     const b = bundle.bounds;
-    const total = trainingTokens(job);
-    // NaN compares false against every bound below and a fraction passes them all; both then throw a
-    // raw RangeError out of BigInt(total) on the money path. A malformed job is OURS — terminal.
-    if (!Number.isSafeInteger(total) || total <= 0) {
-      throw new TrainingError(
-        `declaredTokens × epochs must be a positive whole number, got ${total}`,
-        'VALIDATION_FAILED', { reason: 'numericWireRule' },
-      );
-    }
+    const total = TrainingManager.checkedTrainingTokens(job);
+    // The wire's own shape rules (lr format, seed, integrality) used to be checked only inside the transport,
+    // AFTER adoption / escrow, and their refusal rode handle.result. A malformed job is OURS: refuse it here.
+    assertTrainingJobWireShape(job);
     if (job.epochs > b.maxEpochs) return fail(`epochs ${job.epochs} exceeds maxEpochs ${b.maxEpochs}`);
     if (job.dataset.declaredTokens > b.maxDeclaredTokens) {
       return fail(`declaredTokens ${job.dataset.declaredTokens} exceeds ${b.maxDeclaredTokens}`);
@@ -309,7 +320,8 @@ export class TrainingManager implements ITrainingManager {
   /**
    * Pre-validate, fund, submit. The ORDER is the money: validation is pre-escrow so a bounds
    * failure costs nothing, and the session carries training's own lifecycle parameters
-   * (`maxDuration 14400 / proofInterval 1000 / proofTimeoutWindow 3600`) — the chat defaults
+   * (`duration 14400 / proofInterval 1000 / proofTimeoutWindow 3600` — `duration` is the key
+   * startSession reads; a `maxDuration` key here was dead and minted 3600 s sessions) — the chat defaults
    * cannot carry a multi-hour run.
    *
    * With `opts.existingSession` (vault / card path) the session is adopted rather than created —
@@ -333,21 +345,46 @@ export class TrainingManager implements ITrainingManager {
         'VALIDATION_FAILED', { reason: 'hostBundle' },
       );
     }
+    // Pre-escrow: the socket cannot be derived without the endpoint, and after startSession the
+    // deposit is locked — SESSION_ENDPOINT_MISSING used to surface only then, with no ids to reclaim by.
+    if (!opts.endpoint) {
+      throw new SDKError(
+        "submitTraining requires the host's http(s) endpoint (opts.endpoint) — refused before any deposit",
+        'SESSION_ENDPOINT_MISSING',
+      );
+    }
+    // Validated and normalised by the same rule as the adopted path and the registry: a malformed base
+    // (whitespace, a /v1 path, ws://) would pass a presence check, take the deposit, then mistarget the socket.
+    const endpoint = normalizeNodeHttpUrl(opts.endpoint);
+    if (!endpoint) {
+      throw new SDKError(
+        `submitTraining requires the host's plain http(s) base as opts.endpoint (the nodeHttpUrl used for postSessionAuth), got: ${String(opts.endpoint)} — refused before any deposit`,
+        'SESSION_ENDPOINT_INVALID',
+      );
+    }
     const { sessionId, jobId } = await this.sessionManager.startSession({
-      chainId: opts.chainId ?? this.chainId, host: opts.hostAddress, endpoint: opts.endpoint,
-      modelId: this.trainingModelId, paymentMethod: 'deposit', paymentToken: est.paymentToken,
+      chainId: opts.chainId ?? this.chainId, host: opts.hostAddress, endpoint,
+      modelId: this.trainingModelId, paymentToken: est.paymentToken,   // direct payment: approve + pay (no `useDeposit`)
       depositAmount: formatUnits(BigInt(est.depositBaseUnits), 6),
       // `duration` is the key SessionConfig/startSession read; `maxDuration` was silently ignored and the
       // session fell to PaymentManager's 3600 s default — a lifetime the node's A.3 rejects post-escrow.
       encryption: true, duration: 14400, proofInterval: 1000, proofTimeoutWindow: 3600,
     });
-    const handle: TrainingHandle = await this.sessionManager.submitTraining(
-      String(sessionId), opts.job, this.wsSubmitOptions(opts, est.pricePerToken),
-    );
-    // The reclaim affordance: `triggerSessionTimeout(Number(handle.jobId))` needs the id the
-    // SDK just minted, and nothing else on the handle carried it.
+    // Money moved: from here every failure carries the ids the SDK just minted (adopted: false), classified
+    // exactly as on the adopted path — the reclaim (`triggerSessionTimeout(Number(jobId))`) needs them.
+    const minted: SessionIdTag = { sessionId, jobId, adopted: false };
+    let handle: TrainingHandle;
+    try {
+      handle = await this.sessionManager.submitTraining(
+        String(sessionId), opts.job, this.wsSubmitOptions(opts, est.pricePerToken),
+      );
+    } catch (err) {
+      throw TrainingManager.withSessionIds(err, minted, true);
+    }
     handle.sessionId = sessionId;
     handle.jobId = jobId;
+    handle.result = handle.result.catch((err: unknown) => { throw TrainingManager.withSessionIds(err, minted, false); });
+    handle.result.catch(() => {});
     return handle;
   }
 
@@ -368,14 +405,38 @@ export class TrainingManager implements ITrainingManager {
   }
 
   /** The reclaim tag every adopted-path failure carries: `{ sessionId, jobId, adopted: true }`. */
-  private static adoptedIds(e: TrainingExistingSession) {
-    return { sessionId: e.sessionId, jobId: e.jobId, adopted: true as const };
+  private static adoptedIds(e: TrainingExistingSession): SessionIdTag {
+    return { sessionId: e.sessionId, jobId: e.jobId, adopted: true };
   }
 
-  private static failMissingDependency(what: string, ids: ReturnType<typeof TrainingManager.adoptedIds>): never {
+  /**
+   * The ids as bigints, or a typed refusal. `/fiat/session` hands the UI JSON, so a safe integer or a
+   * decimal string is as valid as a bigint; anything else used to be refused as `exists` ("expected job
+   * 2290 … got id 2290") — a fresh session bought for a type mismatch.
+   */
+  private static normalizeExistingSession(e: TrainingExistingSession | undefined): { sessionId: bigint; jobId: bigint } {
+    const asId = (v: unknown, name: string): bigint => {
+      const shaped = typeof v === 'bigint' ? v >= 0n
+        : typeof v === 'number' ? Number.isSafeInteger(v) && v >= 0
+        : typeof v === 'string' && /^\d+$/.test(v);
+      // uint256 is the on-chain type: a larger value would pass here and fail the read as sessionDecode.
+      const n = shaped ? BigInt(v as bigint | number | string) : -1n;
+      if (!shaped || n > MAX_UINT256) {
+        throw new TrainingError(
+          `existingSession.${name} must be a non-negative uint256 (bigint, safe integer or decimal string), got ${String(v)}`,
+          'VALIDATION_FAILED',
+          { reason: EXISTING_SESSION_CONFIG_REASON, consumed: false, sessionId: e?.sessionId, jobId: e?.jobId, adopted: true },
+        );
+      }
+      return n;
+    };
+    return { sessionId: asId(e?.sessionId, 'sessionId'), jobId: asId(e?.jobId, 'jobId') };
+  }
+
+  private static failMissingDependency(what: string, ids: SessionIdTag): never {
     throw new TrainingError(
       `${what} — the existingSession path FAILS CLOSED rather than proceeding unchecked`,
-      'ESTIMATE_MISMATCH', { reason: 'missingDependencyMethod', ...ids },
+      'ESTIMATE_MISMATCH', { reason: 'missingDependencyMethod', consumed: false, ...ids },
     );
   }
 
@@ -402,8 +463,9 @@ export class TrainingManager implements ITrainingManager {
       fail('exists', `job ${jobId} on this JobMarketplace`, session.id === 0n ? 'no such job (zero struct)' : `id ${session.id}`);
     }
     if (session.status !== 0) fail('status', 'Active (0)', session.status);
-    if (session.host.toLowerCase() !== hostAddress.toLowerCase()) fail('host', hostAddress, session.host);
+    // Documented order (D5, SDK_API, the reply): status, model, host, … — `detail.check` is "the first".
     if (model.toLowerCase() !== trainingModelId.toLowerCase()) fail('model', trainingModelId, model);
+    if (session.host.toLowerCase() !== hostAddress.toLowerCase()) fail('host', hostAddress, session.host);
     if (typeof price === 'string') fail('price', 'a registered price for this host, model and token', price);
     else if (price !== session.pricePerToken) fail('price', price, session.pricePerToken);
     const headroom = session.pricePerToken > 0n
@@ -437,26 +499,58 @@ export class TrainingManager implements ITrainingManager {
    * the node's terminal `sessionParams` because here the JOB is fine and the recourse is a
    * fresh, correctly shaped session for the same job.
    */
+  /**
+   * trainingTokens(job) as a bigint-safe count. NaN compares false against every bound and a fraction
+   * passes them all; both then throw a raw RangeError out of BigInt() on the money path. A malformed
+   * job is OURS — terminal. Public callers of the pre-flight get the same typed refusal, with the ids.
+   */
+  private static checkedTrainingTokens(job: TrainingJob, tag: Record<string, unknown> = {}): number {
+    const total = trainingTokens(job);
+    if (!Number.isSafeInteger(total) || total <= 0) {
+      throw new TrainingError(
+        `declaredTokens × epochs must be a positive whole number, got ${total}`,
+        'VALIDATION_FAILED', { reason: 'numericWireRule', ...tag },
+      );
+    }
+    return total;
+  }
+
   async validateExistingSession(
     existing: TrainingExistingSession, job: TrainingJob, hostAddress: string,
   ): Promise<{ session: OnChainSessionJob; pricePerToken: bigint; acceptLatitudeSecs: number }> {
-    const ids = TrainingManager.adoptedIds(existing);
+    const norm = TrainingManager.normalizeExistingSession(existing);
+    const ids = TrainingManager.adoptedIds(norm);
     const jm = this.jobMarketplace;
     if (typeof jm?.getSessionJobOnChain !== 'function' || typeof jm?.getSessionModel !== 'function') {
       TrainingManager.failMissingDependency(
         'jobMarketplace does not provide getSessionJobOnChain()/getSessionModel(), so the A.3 pre-flight cannot run', ids,
       );
     }
-    if (!this.sessionManager) TrainingManager.failMissingDependency('SessionManager is not available', ids);
+    // This method is public: a UI may call it before submit, outside the submit envelope, so every
+    // refusal it can make is typed and id-tagged here.
+    if (typeof this.sessionManager?.resolveModelPricePerToken !== 'function') {
+      TrainingManager.failMissingDependency('SessionManager does not provide resolveModelPricePerToken(), so the price check cannot run', ids);
+    }
+    const needTokens = BigInt(TrainingManager.checkedTrainingTokens(job, { ...ids, consumed: false }));   // before any read
+    // Nothing thrown here consumed the session (`consumed: false`); the read failures split in two:
+    // the chain could not be READ (transport — retry the same session) vs the bytes were read and did not
+    // decode (sessionDecode — ours, terminal).
     const decodeFailure = (what: string) => (e: unknown): never => {
+      const code = (e as { code?: string })?.code;
+      if (code && RPC_TRANSIENT_CODES.has(code)) {
+        throw new TrainingError(
+          `could not reach the chain to read ${what} for job ${norm.jobId}: ${errMessage(e)}`,
+          'SIDECAR_UNAVAILABLE', { reason: 'transport', consumed: false, cause: e, sdkCode: code, ...ids },
+        );
+      }
       throw new TrainingError(
-        `could not read ${what} for job ${existing.jobId} on chain: ${errMessage(e)}`,
-        'ESTIMATE_MISMATCH', { reason: SESSION_DECODE_REASON, cause: e, ...ids },
+        `could not read ${what} for job ${norm.jobId} on chain: ${errMessage(e)}`,
+        'ESTIMATE_MISMATCH', { reason: SESSION_DECODE_REASON, consumed: false, cause: e, ...ids },
       );
     };
     const [session, model] = await Promise.all([
-      jm.getSessionJobOnChain(existing.jobId).catch(decodeFailure('sessionJobs')),
-      jm.getSessionModel(existing.jobId).catch(decodeFailure('sessionModel')),
+      jm.getSessionJobOnChain(norm.jobId).catch(decodeFailure('sessionJobs')),
+      jm.getSessionModel(norm.jobId).catch(decodeFailure('sessionModel')),
     ]);
     // Priced for the SESSION's token, so "pricePerToken == registered price" and "the payment
     // token is one the host prices" are one read. bigint = the price; string = why there is none
@@ -472,13 +566,13 @@ export class TrainingManager implements ITrainingManager {
     const remainingSecs = Number(session.startTime + session.maxDuration) - Math.floor(Date.now() / 1000);
     const floorSecs = this.trainJobTimeoutSecs + A3_SETTLE_MARGIN_SECS;
     const failed = TrainingManager.a3Failures({
-      session, jobId: existing.jobId, model, price, needTokens: BigInt(trainingTokens(job)),
+      session, jobId: norm.jobId, model, price, needTokens,
       hostAddress, trainingModelId: this.trainingModelId, remainingSecs, floorSecs,
     });
     // A string price is always a `failed` entry; naming it here is what narrows the return type.
     if (failed.length > 0 || typeof price === 'string') {
       throw new TrainingError(
-        `adopted session ${existing.sessionId} cannot carry this job — `
+        `adopted session ${norm.sessionId} cannot carry this job — `
         + failed.map((f) => `${f.check}: expected ${f.expected}, got ${f.actual}`).join('; ')
         + '. The session is untouched; the recourse is a fresh, correctly shaped session for the same job.',
         'VALIDATION_FAILED',
@@ -494,8 +588,9 @@ export class TrainingManager implements ITrainingManager {
    * vault money and spins a zero-proof settle cycle. Mirrors `LtxManager.adoptExistingSession`.
    */
   private async submitOnExistingSession(
-    opts: SubmitTrainingOptions, existing: TrainingExistingSession,
+    opts: SubmitTrainingOptions, given: TrainingExistingSession,
   ): Promise<TrainingHandle> {
+    const existing = TrainingManager.normalizeExistingSession(given);   // a typed, id-tagged refusal on its own
     const ids = TrainingManager.adoptedIds(existing);
     // ONE envelope: every failure after this point — a guard, the bundle, the pre-flight, the
     // registry seed, the submit, a programming fault — leaves tagged with the reclaim ids.
@@ -521,6 +616,14 @@ export class TrainingManager implements ITrainingManager {
           'VALIDATION_FAILED', { reason: EXISTING_SESSION_CONFIG_REASON, ...ids },
         );
       }
+      // The pre-flight reads the SDK's chain (its wrapper); the registry entry and the init frame would
+      // carry opts.chainId. Verifying one chain's job and submitting to another is refused, not reconciled.
+      if (this.chainId !== undefined && chainId !== this.chainId) {
+        throw new TrainingError(
+          `existingSession chainId ${chainId} is not the SDK's chain ${this.chainId}; call switchChain(${chainId}) first — the pre-flight reads the SDK's chain`,
+          'VALIDATION_FAILED', { reason: EXISTING_SESSION_CONFIG_REASON, ...ids },
+        );
+      }
       this.validateAgainstBundle(opts.job, opts.bundle);
       const { pricePerToken } = await this.validateExistingSession(existing, opts.job, opts.hostAddress);
       this.sessionManager.registerExternalSession({
@@ -535,14 +638,14 @@ export class TrainingManager implements ITrainingManager {
       // The money moved before the SDK was called, so a LATE failure needs the ids as much as an
       // early one — the UI relays them to the service for reclaim.
       handle.result = handle.result.catch((err: unknown) => {
-        throw TrainingManager.withSessionIds(err, existing);
+        throw TrainingManager.withSessionIds(err, ids, false);     // late: the node had the frame
       });
       // The re-wrap is a NEW promise; mark it handled (training-ws does the same for the original)
       // so a run that fails before the consumer attaches cannot become an unhandled rejection.
       handle.result.catch(() => {});
       return handle;
     } catch (err) {
-      throw TrainingManager.withSessionIds(err, existing);
+      throw TrainingManager.withSessionIds(err, ids, true);        // pre-frame: nothing consumed
     }
   }
 
@@ -557,17 +660,30 @@ export class TrainingManager implements ITrainingManager {
    *    failure, and a UI must not buy a second session to find that out (training-ws `mapCode`'s
    *    contract for unknowns: non-re-shoppable, original preserved).
    */
-  private static withSessionIds(err: unknown, existing: TrainingExistingSession): TrainingError {
-    const tag = TrainingManager.adoptedIds(existing);
-    if (err instanceof TrainingError) return new TrainingError(err.message, err.code, { ...err.detail, ...tag });
+  /**
+   * Tag a failure with the session ids and classify anything that is not already a TrainingError.
+   * `preFrame` = raised before the `train` frame left: nothing on chain was consumed, so every such
+   * failure carries `consumed: false` (requiresFreshSession → false) — EXCEPT adoptedSessionParams,
+   * whose recourse IS a fresh, correctly shaped session. A late failure (the node had the frame) keeps
+   * whatever the node's classes say.
+   */
+  private static withSessionIds(err: unknown, tag: SessionIdTag, preFrame: boolean): TrainingError {
+    if (err instanceof TrainingError) {
+      // CAPACITY is the node's one-in-flight rule: it consumes by definition, whichever promise it rode.
+      const intact = preFrame && err.code !== 'CAPACITY' && err.detail?.reason !== ADOPTED_SESSION_PARAMS_REASON
+        ? { consumed: false } : {};
+      return new TrainingError(err.message, err.code, { ...intact, ...err.detail, ...tag });
+    }
+    // A raw (non-Training) error: pre-frame it consumed nothing; LATE (a consumer callback that threw after a
+    // slice settled, a socket that died mid-run) the node had the frame, so nothing here may claim intactness.
+    const intact = preFrame ? { consumed: false } : {};
     const sdkCode = (err as { code?: string })?.code;
     if (sdkCode && TRANSPORT_SDK_CODES.has(sdkCode)) {
-      // Every transport code is raised BEFORE the `train` frame leaves, so nothing on chain was
-      // consumed: `consumed: false` makes requiresFreshSession say "same session" — a fresh
-      // /fiat/session here would be a second charge for a failure that cost nothing.
-      return new TrainingError(errMessage(err), 'SIDECAR_UNAVAILABLE', { reason: 'transport', consumed: false, cause: err, sdkCode, ...tag });
+      // Pre-frame, every transport code is raised BEFORE the `train` frame leaves: `consumed: false` makes
+      // requiresFreshSession say "same session" — a fresh /fiat/session would be a second charge for nothing.
+      return new TrainingError(errMessage(err), 'SIDECAR_UNAVAILABLE', { reason: 'transport', ...intact, cause: err, sdkCode, ...tag });
     }
-    return new TrainingError(errMessage(err), 'ESTIMATE_MISMATCH', { reason: 'missingDependency', cause: err, sdkCode, ...tag });
+    return new TrainingError(errMessage(err), 'ESTIMATE_MISMATCH', { reason: 'missingDependency', ...intact, cause: err, sdkCode, ...tag });
   }
 
   /**
@@ -803,7 +919,7 @@ export class TrainingManager implements ITrainingManager {
       throw new TrainingError(
         'existingSession cannot be load-balanced: the session is bound on-chain to one host',
         'VALIDATION_FAILED',
-        { reason: EXISTING_SESSION_CONFIG_REASON, ...TrainingManager.adoptedIds(opts.existingSession) },
+        { reason: EXISTING_SESSION_CONFIG_REASON, consumed: false, ...TrainingManager.adoptedIds(opts.existingSession) },   // refused before anything touched it
       );
     }
     if (!this.hostSelectionService) {

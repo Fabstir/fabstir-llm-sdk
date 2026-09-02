@@ -419,3 +419,37 @@ describe('the guard cannot be silently disarmed, and the socket cannot hang', ()
     await settled;
   });
 });
+
+describe('Round 4b — a train frame that could not be SENT consumed nothing', () => {
+  it('rejects SIDECAR_UNAVAILABLE with consumed:false / settledSlices 0 — retry on the SAME session', async () => {
+    // Found in Round 4b: "failed to send train" was minted without `consumed: false`, so a frame written to
+    // no socket (closed between the init ack and the send) told the UI to buy a second session.
+    const ws = makeWs();
+    ws.wsClient.sendWithoutResponse = vi.fn(async () => { throw new Error('socket closed'); });
+    const h = await submitTrainingWs({
+      wsClient: ws.wsClient, encryptionManager, sessionId: 's1', sessionKey: new Uint8Array(32),
+      messageIndex: { value: 0 }, job: JOB, onChainPricePerToken: PRICE,
+      minAllowListVersion: 5, sliceTokens: SLICE_TOKENS,
+    } as any);
+    const e: any = await h.result.catch((x: unknown) => x);
+    expect(e.code).toBe('SIDECAR_UNAVAILABLE');
+    expect(e.detail).toMatchObject({ consumed: false, settledSlices: 0 });
+    expect(e.requiresFreshSession).toBe(false);
+  });
+});
+
+describe('Round 5b — a synchronous wire-shape refusal inside the executor consumed nothing', () => {
+  it('rides handle.result with consumed:false / settledSlices 0 (the frame was never built)', async () => {
+    const ws = makeWs();
+    const h = await submitTrainingWs({
+      wsClient: ws.wsClient, encryptionManager, sessionId: 's1', sessionKey: new Uint8Array(32),
+      messageIndex: { value: 0 }, job: { ...JOB, hyper: { ...JOB.hyper, lr: '2e-4' } }, onChainPricePerToken: PRICE,
+      minAllowListVersion: 5, sliceTokens: SLICE_TOKENS,
+    } as any);
+    const e: any = await h.result.catch((x: unknown) => x);
+    expect(e.code).toBe('VALIDATION_FAILED');
+    expect(e.detail).toMatchObject({ reason: 'numericWireRule', consumed: false, settledSlices: 0 });
+    expect(e.requiresFreshSession).toBe(false);
+    expect(ws.sent).toHaveLength(0);
+  });
+});

@@ -157,13 +157,13 @@ describe('submitTraining — the order of operations is the money', () => {
   };
   it('VALIDATES BEFORE it funds — a bounds failure must not cost a deposit', async () => {
     const { m, calls } = wired();
-    await expect(m.submitTraining({ job: bad({ epochs: 9 }), bundle: BUNDLE as never, hostAddress: '0xh' } as never))
+    await expect(m.submitTraining({ job: bad({ epochs: 9 }), bundle: BUNDLE as never, hostAddress: '0xh', endpoint: 'https://host2.fabstir.net' } as never))
       .rejects.toThrow(/epoch/i);
     expect(calls).not.toContain('session');
   });
   it('passes the bundle’s sliceTokens and minAllowListVersion into the over-claim guard', async () => {
     const { m, submitTraining } = wired();
-    await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: '0xh' } as never);
+    await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: '0xh', endpoint: 'https://host2.fabstir.net' } as never);
     const passed = submitTraining.mock.calls[0][2] as any;
     // Without these the guard silently degrades to "trust the echo", which is the whole thing
     // constraint 5 exists to prevent.
@@ -177,12 +177,16 @@ describe('submitTraining — the order of operations is the money', () => {
     // maxDuration/proofInterval/proofTimeoutWindow back to the chat defaults, which cannot
     // carry a multi-hour run, and pricing on templateId instead of the A.2 model id.
     const { m, calls } = wired();
-    await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: '0xh' } as never);
+    await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: '0xh', endpoint: 'https://host2.fabstir.net' } as never);
     const sess = (calls as any).startSessionArgs;
     expect(sess).toMatchObject({
-      modelId: MODEL, paymentMethod: 'deposit', encryption: true,
+      modelId: MODEL, encryption: true,
       duration: 14400, proofInterval: 1000, proofTimeoutWindow: 3600,   // `duration` is the key startSession reads; `maxDuration` was dead
     });
+    // Direct payment (approve + pay) is the wallet-path design: startSession decides deposit-vs-direct on
+    // `useDeposit` alone; the former `paymentMethod: 'deposit'` key was never read (Round 4).
+    expect(sess.useDeposit).toBeUndefined();
+    expect(sess).not.toHaveProperty('paymentMethod');
     expect(sess.depositAmount).toBe('9.11232');   // 9,112,320 base units at 6 decimals
   });
   it('REFUSES a non-USDC payment token rather than mis-sizing the deposit by 10^12', async () => {
@@ -192,7 +196,7 @@ describe('submitTraining — the order of operations is the money', () => {
     // M0's scope is USDC, so say so rather than compute a number we cannot justify.
     const { m } = wired();
     await expect(m.submitTraining({
-      job: JOB, bundle: BUNDLE as never, hostAddress: '0xh', paymentToken: `0x${'ee'.repeat(20)}`,
+      job: JOB, bundle: BUNDLE as never, hostAddress: '0xh', endpoint: 'https://host2.fabstir.net', paymentToken: `0x${'ee'.repeat(20)}`,
     } as never)).rejects.toThrow(/decimals|USDC|payment token/i);
   });
   it('calls methods the REAL SessionManager actually has (the CP1 lesson)', async () => {

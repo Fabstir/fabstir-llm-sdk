@@ -10,8 +10,9 @@
  * UI relays to the service for reclaim.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { getAddress } from 'ethers';
 import {
-  TrainingManager, TRAIN_JOB_TIMEOUT_SECS, A3_MIN_PROOF_TIMEOUT_WINDOW_SECS,
+  TrainingManager, TRAIN_JOB_TIMEOUT_SECS, A3_MIN_PROOF_TIMEOUT_WINDOW_SECS, TRANSPORT_SDK_CODES,
 } from '../../src/managers/TrainingManager';
 import { MAX_PROOF_TIMEOUT } from '../../src/contracts/JobMarketplace';
 import {
@@ -103,7 +104,7 @@ describe('existingSession — adopt, never create', () => {
     const h = await submit(m);
     expect(h.sessionId).toBe(1145n);
     expect(h.jobId).toBe(2290n);
-    const w = await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST } as never);
+    const w = await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST, endpoint: 'https://host2.fabstir.net' } as never);
     expect(w.sessionId).toBe(1n);
     expect(w.jobId).toBe(2n);
   });
@@ -127,7 +128,7 @@ describe('existingSession — adopt, never create', () => {
     // being minted with a lifetime the node's A.3 rejects post-escrow. The mocked-startSession test
     // asserted the dead key and was green.
     const { m, sm } = wired();
-    await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST } as never);
+    await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST, endpoint: 'https://host2.fabstir.net' } as never);
     const args = sm.startSession.mock.calls[0][0];
     expect(args.duration).toBe(14400);
     expect(args).not.toHaveProperty('maxDuration');
@@ -135,14 +136,14 @@ describe('existingSession — adopt, never create', () => {
 
   it('honours opts.chainId on the wallet path too — one options type, one meaning', async () => {
     const { m, sm } = wired();
-    await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST, chainId: 5611 } as never);
+    await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST, endpoint: 'https://host2.fabstir.net', chainId: 5611 } as never);
     expect(sm.startSession.mock.calls[0][0].chainId).toBe(5611);
   });
 
   it('is accepted per call, never cached: the next call without it takes the wallet path', async () => {
     const { m, sm } = wired();
     await submit(m);
-    await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST } as never);
+    await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST, endpoint: 'https://host2.fabstir.net' } as never);
     expect(sm.startSession).toHaveBeenCalledTimes(1);
   });
 });
@@ -242,6 +243,9 @@ describe('A.3 pre-flight on an adopted session — refuse locally, before the se
     // a session bound to host X, submitted to host Y’s endpoint, is a spent session at Y.
     ['is bound to a DIFFERENT host', (h) => h.jm.getSessionJobOnChain.mockResolvedValue(session({ host: `0x${'99'.repeat(20)}` })), 'host'],
     ['is priced off the registered price', (h) => h.sm.resolveModelPricePerToken.mockResolvedValue(905n), 'price'],
+    // Round 4: the mutant `price > session.pricePerToken` survived — one direction was never exercised. A
+    // session priced ABOVE the registered price is what the node's A.3 equality rejects post-escrow.
+    ['is priced ABOVE the registered price', (h) => h.jm.getSessionJobOnChain.mockResolvedValue(session({ pricePerToken: 905n })), 'price'],
     ['is unpriced for its token', (h) => h.sm.resolveModelPricePerToken.mockResolvedValue(0n), 'price'],
     // 9.6M tokens needed; 1 USDC at 904 → 1,106,194 tokens of headroom.
     ['cannot cover trainingTokens(job)', (h) => h.jm.getSessionJobOnChain.mockResolvedValue(session({ deposit: 1_000_000n })), 'headroom'],
@@ -405,9 +409,11 @@ describe('every failure after adoption carries { sessionId, jobId, adopted }', (
     const seen: unknown[] = [];
     const on = (r: unknown) => seen.push(r);
     process.on('unhandledRejection', on);
-    const h = await submit(m);
-    await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
-    process.off('unhandledRejection', on);
+    let h!: Awaited<ReturnType<typeof submit>>;
+    try {
+      h = await submit(m);
+      await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+    } finally { process.off('unhandledRejection', on); }                                        // never leaks into later tests
     expect(seen).toEqual([]);
     await expect(h.result).rejects.toMatchObject({ detail: expect.objectContaining(IDS) });   // still observable
   });
@@ -425,18 +431,6 @@ describe('every failure after adoption carries { sessionId, jobId, adopted }', (
     // "again" is the SAME session — a fresh /fiat/session here would be a second charge for nothing.
     expect(e.requiresFreshSession).toBe(false);
   });
-
-  it.each(['HOST_PUBKEY_UNAVAILABLE', 'NO_API_URL'])(
-    'a host that cannot be reached for its public key (%s) is a transport failure, not our wiring', async (code) => {
-      const { m, sm } = wired();
-      sm.submitTraining.mockRejectedValue(Object.assign(new Error('host down'), { code }));
-      const e = await failing(submit(m));
-      expect(e.code).toBe('SIDECAR_UNAVAILABLE');
-      expect(e.isRetryable).toBe(true);
-      expect(e.requiresFreshSession).toBe(false);
-      expect(e.detail).toMatchObject({ reason: 'transport', consumed: false, sdkCode: code, ...IDS });
-    },
-  );
 
   it.each(['SESSION_NOT_FOUND', 'SESSION_ENDPOINT_MISSING', 'ENCRYPTION_NOT_AVAILABLE', 'SESSION_KEY_NOT_AVAILABLE', 'HOST_MANAGER_NOT_AVAILABLE'])(
     'the SDK’s own wiring fault %s is terminal — never retryable, never re-shoppable, ids kept', async (code) => {
@@ -495,5 +489,311 @@ describe('calls methods the REAL classes actually have (the CP1 lesson)', () => 
     expect(typeof JobMarketplaceWrapper.prototype.getSessionJobOnChain).toBe('function');
     expect(typeof JobMarketplaceWrapper.prototype.getSessionModel).toBe('function');
     expect(typeof JobMarketplaceWrapper.prototype.triggerSessionTimeout).toBe('function');
+  });
+});
+
+describe('Round 4 — the public pre-flight, comparison case, check order, the whole transport set', () => {
+  it('validateExistingSession called DIRECTLY refuses a fractional job as numericWireRule with the ids, not a raw RangeError', async () => {
+    // The public method sat outside the submit envelope: `BigInt(trainingTokens(job))` threw a bare
+    // RangeError with no code and no session ids to a UI that called it early.
+    const { m } = wired();
+    const e = await failing(m.validateExistingSession(IDS as never, { ...JOB, dataset: { ...JOB.dataset, declaredTokens: 3_200_000.5 } }, HOST));
+    expect(e).toBeInstanceOf(TrainingError);
+    expect(e.code).toBe('VALIDATION_FAILED');
+    expect(e.detail).toMatchObject({ reason: 'numericWireRule', ...IDS });
+  });
+
+  it('validateExistingSession called DIRECTLY names a SessionManager without resolveModelPricePerToken as a missing dependency, with the ids', async () => {
+    const { m, sm } = wired();
+    delete (sm as Partial<typeof sm>).resolveModelPricePerToken;
+    const e = await failing(m.validateExistingSession(IDS as never, JOB, HOST));
+    expect(e.code).toBe('ESTIMATE_MISMATCH');
+    expect(e.detail).toMatchObject({ reason: 'missingDependencyMethod', ...IDS });
+    expect(e.message).toMatch(/resolveModelPricePerToken/);
+  });
+
+  it('address case never refuses: a checksummed on-chain host vs a lowercase caller address passes the host check', async () => {
+    const { m, jm } = wired();
+    jm.getSessionJobOnChain.mockResolvedValue(session({ host: getAddress(HOST) }));
+    expect(getAddress(HOST)).not.toBe(HOST.toLowerCase());                                     // the vectors really differ in case
+    await expect(m.validateExistingSession(IDS as never, JOB, HOST.toLowerCase())).resolves.toMatchObject({ pricePerToken: 904n });
+  });
+
+  it('model-id case never refuses: an upper-case configured trainingModelId vs the lowercase decoded sessionModel passes the model check', async () => {
+    const hexModel = `0x${'ab'.repeat(32)}`;
+    const { m, jm } = wired({ trainingModelId: hexModel.toUpperCase().replace('0X', '0x') });
+    jm.getSessionModel.mockResolvedValue(hexModel);
+    await expect(m.validateExistingSession(IDS as never, JOB, HOST)).resolves.toMatchObject({ pricePerToken: 904n });
+  });
+
+  it('checks are evaluated in the documented order — status, model, host, … — so detail.check is the documented "first"', async () => {
+    const { m, jm } = wired();
+    jm.getSessionJobOnChain.mockResolvedValue(session({ host: `0x${'99'.repeat(20)}` }));
+    jm.getSessionModel.mockResolvedValue(`0x${'22'.repeat(32)}`);
+    const e = await failing(submit(m));
+    expect(e.detail.check).toBe('model');
+    expect(e.detail.failed.map((f: { check: string }) => f.check)).toEqual(['model', 'host']);
+  });
+
+  it('the transport set is exactly the eleven codes raised before the train frame leaves', () => {
+    expect([...TRANSPORT_SDK_CODES].sort()).toEqual([
+      'WS_CONNECTION_ERROR', 'WS_CREATE_ERROR', 'WS_TIMEOUT', 'WS_NOT_CONNECTED', 'WS_SEND_ERROR', 'WS_RECONNECT_FAILED',
+      'SESSION_INIT_ERROR', 'SESSION_AUTH_UNREACHABLE', 'RESPONSE_TIMEOUT', 'HOST_PUBKEY_UNAVAILABLE', 'NO_API_URL',
+    ].sort());
+  });
+
+  it.each([...TRANSPORT_SDK_CODES])('%s is classified transport: SIDECAR_UNAVAILABLE, retryable on the SAME session, ids kept', async (code) => {
+    const { m, sm } = wired();
+    sm.submitTraining.mockRejectedValue(Object.assign(new Error('wire'), { code }));
+    const e = await failing(submit(m));
+    expect(e.code).toBe('SIDECAR_UNAVAILABLE');
+    expect(e.requiresFreshSession).toBe(false);
+    expect(e.detail).toMatchObject({ reason: 'transport', consumed: false, sdkCode: code, ...IDS });
+  });
+});
+
+describe('Round 4b — nothing the SDK refuses before the frame leaves may cost a second session', () => {
+  it.each(['NETWORK_ERROR', 'TIMEOUT', 'SERVER_ERROR'])('an RPC transient (%s) on the SESSION read is transport: retry the SAME session', async (code) => {
+    // Found in Round 4b: a 429 / network blip on getSessionJobOnChain became ESTIMATE_MISMATCH/sessionDecode —
+    // terminal AND requiresFreshSession true — and SDK_API tells the UI to read requiresFreshSession.
+    const { m, jm } = wired();
+    jm.getSessionJobOnChain.mockRejectedValue(Object.assign(new Error('429 Too Many Requests'), { code }));
+    const e = await failing(submit(m));
+    expect(e.code).toBe('SIDECAR_UNAVAILABLE');
+    expect(e.detail).toMatchObject({ reason: 'transport', consumed: false, sdkCode: code, ...IDS });
+    expect(e.isRetryable).toBe(true);
+    expect(e.requiresFreshSession).toBe(false);
+  });
+
+  it('an RPC transient on the PRICE read is transport too', async () => {
+    const { m, sm } = wired();
+    sm.resolveModelPricePerToken.mockRejectedValue(Object.assign(new Error('network down'), { code: 'NETWORK_ERROR' }));
+    const e = await failing(submit(m));
+    expect(e.code).toBe('SIDECAR_UNAVAILABLE');
+    expect(e.detail).toMatchObject({ reason: 'transport', consumed: false, sdkCode: 'NETWORK_ERROR', ...IDS });
+    expect(e.requiresFreshSession).toBe(false);
+  });
+
+  it('a layout mismatch stays sessionDecode (terminal) but says the session was NOT consumed', async () => {
+    const { m, jm } = wired();
+    jm.getSessionJobOnChain.mockRejectedValue(Object.assign(new Error('slot 15'), { code: 'SESSION_JOB_LAYOUT_MISMATCH' }));
+    const e = await failing(submit(m));
+    expect(e.code).toBe('ESTIMATE_MISMATCH');
+    expect(e.detail).toMatchObject({ reason: 'sessionDecode', consumed: false, ...IDS });
+    expect(e.isRetryable).toBe(false);
+    expect(e.requiresFreshSession).toBe(false);
+  });
+
+  it.each<[string, (h: Harness) => Record<string, unknown>, string]>([
+    ['a ws endpoint (existingSessionConfig)', () => ({ endpoint: 'wss://host2.fabstir.net/v1/ws' }), 'existingSessionConfig'],
+    ['a fractional job (numericWireRule)', () => ({ job: { ...JOB, dataset: { ...JOB.dataset, declaredTokens: 1.5 } } }), 'numericWireRule'],
+    ['our own wiring fault after adoption (missingDependency)', (h) => { h.sm.submitTraining.mockRejectedValue(Object.assign(new Error('no session'), { code: 'SESSION_NOT_FOUND' })); return {}; }, 'missingDependency'],
+  ])('%s is terminal, yet requiresFreshSession is FALSE — the session is intact', async (_n, arrange, reason) => {
+    const h = wired();
+    const e = await failing(submit(h.m, arrange(h)));
+    expect(e.detail).toMatchObject({ reason, consumed: false, ...IDS });
+    expect(e.isRetryable).toBe(false);
+    expect(e.requiresFreshSession).toBe(false);
+  });
+
+  it('adoptedSessionParams is the one pre-frame refusal whose recourse IS a fresh session', async () => {
+    const { m, jm } = wired();
+    jm.getSessionJobOnChain.mockResolvedValue(session({ status: 1 }));
+    const e = await failing(submit(m));
+    expect(e.detail.reason).toBe('adoptedSessionParams');
+    expect(e.detail).not.toHaveProperty('consumed');
+    expect(e.requiresFreshSession).toBe(true);
+  });
+
+  it('a LATE node-side rejection is not re-tagged: the node consumed the session', async () => {
+    const late = { requestId: 'r', result: Promise.reject(new TrainingError('busy', 'CAPACITY', { reason: 'slotBusy' })), cancel: vi.fn(), slices: [], pointers: [], forfeitedSlices: [] };
+    late.result.catch(() => {});
+    const { m, sm } = wired();
+    sm.submitTraining.mockResolvedValue(late);
+    const h = await submit(m);
+    const e = await failing(h.result);
+    expect(e.detail).toMatchObject({ reason: 'slotBusy', ...IDS });
+    expect(e.detail).not.toHaveProperty('consumed');
+    expect(e.requiresFreshSession).toBe(true);
+  });
+
+  it.each([
+    ['JS numbers', { sessionId: 1145, jobId: 2290 }],
+    ['decimal strings', { sessionId: '1145', jobId: '2290' }],
+  ])('ids that arrive as %s (what /fiat/session JSON gives) are adopted as bigints, not refused as exists', async (_n, ids) => {
+    const { m, sm } = wired();
+    const h = await submit(m, { existingSession: ids });
+    expect(sm.registerExternalSession.mock.calls[0][0]).toMatchObject({ sessionId: 1145n, jobId: 2290n });
+    expect(sm.submitTraining.mock.calls[0][0]).toBe('1145');
+    expect(h.sessionId).toBe(1145n); expect(h.jobId).toBe(2290n);
+  });
+
+  it.each([
+    ['a fraction', { sessionId: 1145.5, jobId: 2290 }],
+    ['a non-numeric string', { sessionId: 'abc', jobId: '2290' }],
+    ['a negative id', { sessionId: -1, jobId: 2290 }],
+    ['a missing id', { sessionId: 1145 }],
+  ])('%s as an id is a typed existingSessionConfig refusal, before any read', async (_n, ids) => {
+    const { m, jm } = wired();
+    const e = await failing(submit(m, { existingSession: ids }));
+    expect(e.code).toBe('VALIDATION_FAILED');
+    expect(e.detail).toMatchObject({ reason: 'existingSessionConfig', consumed: false });
+    expect(jm.getSessionJobOnChain).not.toHaveBeenCalled();
+  });
+
+  it('opts.chainId that is not the SDK chain is refused: the pre-flight reads the SDK chain, the frame would carry the other', async () => {
+    const { m, jm } = wired();
+    const e = await failing(submit(m, { chainId: 8453 }));
+    expect(e.code).toBe('VALIDATION_FAILED');
+    expect(e.detail).toMatchObject({ reason: 'existingSessionConfig', ...IDS });
+    expect(e.message).toMatch(/switchChain/);
+    expect(jm.getSessionJobOnChain).not.toHaveBeenCalled();
+  });
+
+  it('WALLET path: a missing endpoint is refused BEFORE startSession — never after the deposit', async () => {
+    // Found in Round 4b: startSession funded the session, then acquireSessionTransport threw
+    // SESSION_ENDPOINT_MISSING — a locked deposit and no ids to reclaim with.
+    const { m, sm } = wired();
+    const e: any = await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST } as never).catch((x: unknown) => x);
+    expect(e.code).toBe('SESSION_ENDPOINT_MISSING');
+    expect(sm.startSession).not.toHaveBeenCalled();
+  });
+
+  it('WALLET path: a post-escrow failure carries the freshly minted ids (adopted: false), classified like the adopted path', async () => {
+    const { m, sm } = wired();
+    sm.submitTraining.mockRejectedValue(Object.assign(new Error('WebSocket connection failed'), { code: 'WS_CONNECTION_ERROR' }));
+    const e = await failing(m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST, endpoint: 'https://host2.fabstir.net' } as never));
+    expect(e).toBeInstanceOf(TrainingError);
+    expect(e.code).toBe('SIDECAR_UNAVAILABLE');
+    expect(e.detail).toMatchObject({ reason: 'transport', consumed: false, sessionId: 1n, jobId: 2n, adopted: false });
+    expect(e.requiresFreshSession).toBe(false);
+  });
+
+  it('WALLET path: a TrainingError from the submit keeps its code and gains the ids', async () => {
+    const { m, sm } = wired();
+    sm.submitTraining.mockRejectedValue(new TrainingError('bad', 'VALIDATION_FAILED', { reason: 'numericWireRule' }));
+    const e = await failing(m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST, endpoint: 'https://host2.fabstir.net' } as never));
+    expect(e.code).toBe('VALIDATION_FAILED');
+    expect(e.detail).toMatchObject({ reason: 'numericWireRule', sessionId: 1n, jobId: 2n, adopted: false });
+  });
+});
+
+describe('Round 5 — the delta re-check', () => {
+  it('WALLET path: a malformed endpoint is refused BEFORE the deposit, not after it (SESSION_ENDPOINT_INVALID)', async () => {
+    // Found in Round 5: the pre-escrow guard was presence-only. `https://host/v1/ws` passed, startSession
+    // deposited, then the socket mistargeted (/v1/ws/v1/ws) and was classified transport — "retry the same
+    // session" for ever, with the deposit locked.
+    const { m, sm } = wired();
+    for (const endpoint of ['https://host2.fabstir.net/v1/ws', 'https://host2.fabstir.net ', 'wss://host2.fabstir.net']) {
+      const e: any = await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST, endpoint } as never).catch((x: unknown) => x);
+      expect(e.code).toBe('SESSION_ENDPOINT_INVALID');
+    }
+    expect(sm.startSession).not.toHaveBeenCalled();
+  });
+
+  it('WALLET path: the endpoint reaches startSession NORMALISED (one rule for both paths)', async () => {
+    const { m, sm } = wired();
+    await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST, endpoint: 'HTTPS://host2.fabstir.net//' } as never);
+    expect(sm.startSession.mock.calls[0][0].endpoint).toBe('https://host2.fabstir.net');
+  });
+
+  it('WALLET path: a LATE rejection of handle.result carries the minted ids too', async () => {
+    const late = { requestId: 'r', result: Promise.reject(new TrainingError('died', 'TRAIN_FAILED', { reason: 'oom' })), cancel: vi.fn(), slices: [], pointers: [], forfeitedSlices: [] };
+    late.result.catch(() => {});
+    const { m, sm } = wired();
+    sm.submitTraining.mockResolvedValue(late);
+    const h = await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST, endpoint: 'https://host2.fabstir.net' } as never);
+    const e = await failing(h.result);
+    expect(e.code).toBe('TRAIN_FAILED');
+    expect(e.detail).toMatchObject({ reason: 'oom', sessionId: 1n, jobId: 2n, adopted: false });
+    expect(e.detail).not.toHaveProperty('consumed');                                          // late: the node had the frame
+  });
+
+  it('an RPC transient on the sessionModel read is transport too (the third read)', async () => {
+    const { m, jm } = wired();
+    jm.getSessionModel.mockRejectedValue(Object.assign(new Error('timeout'), { code: 'TIMEOUT' }));
+    const e = await failing(submit(m));
+    expect(e.code).toBe('SIDECAR_UNAVAILABLE');
+    expect(e.detail).toMatchObject({ reason: 'transport', consumed: false, sdkCode: 'TIMEOUT', ...IDS });
+  });
+
+  it.each([
+    ['NaN', { sessionId: NaN, jobId: 2290 }], ['a boolean', { sessionId: true, jobId: 2290 }], ['null', { sessionId: null, jobId: 2290 }],
+    ['an empty string', { sessionId: '', jobId: 2290 }], ['a padded string', { sessionId: ' 12', jobId: 2290 }],
+    ['a fractional string', { sessionId: '1.5', jobId: 2290 }], ['a negative string', { sessionId: '-1', jobId: 2290 }],
+    ['a value above uint256', { sessionId: '115792089237316195423570985008687907853269984665640564039457584007913129639936', jobId: 2290 }],
+  ])('%s as an id is existingSessionConfig, refused before any read', async (_n, ids) => {
+    const { m, jm } = wired();
+    const e = await failing(submit(m, { existingSession: ids }));
+    expect(e.detail).toMatchObject({ reason: 'existingSessionConfig', consumed: false });
+    expect(jm.getSessionJobOnChain).not.toHaveBeenCalled();
+  });
+
+  it('-0 and uint256 max are valid ids', async () => {
+    const { m, sm } = wired();
+    const max = '115792089237316195423570985008687907853269984665640564039457584007913129639935';
+    const h = await submit(m, { existingSession: { sessionId: -0, jobId: 2290 } });
+    expect(h.sessionId).toBe(0n);
+    expect(sm.registerExternalSession.mock.calls[0][0].sessionId).toBe(0n);
+    await expect(m.validateExistingSession({ sessionId: max, jobId: 2290n } as never, JOB, HOST).catch((e: TrainingError) => e.detail?.reason)).resolves.not.toBe('existingSessionConfig');
+  });
+});
+
+describe('Round 5b — late raw failures are not "intact"', () => {
+  it('ADOPTED path: a raw Error rejecting handle.result after the frame left is NOT marked consumed:false', async () => {
+    // Found in Round 5: the raw-error branches of the id tagger stamped consumed:false unconditionally — a consumer
+    // onSlice that throws after slice 0 settled told the UI the billed session was intact.
+    const late = { requestId: 'r', result: Promise.reject(new Error('onSlice threw')), cancel: vi.fn(), slices: [{}], pointers: [], forfeitedSlices: [] };
+    late.result.catch(() => {});
+    const { m, sm } = wired();
+    sm.submitTraining.mockResolvedValue(late);
+    const e = await failing((await submit(m)).result);
+    expect(e.code).toBe('ESTIMATE_MISMATCH');
+    expect(e.detail).toMatchObject({ reason: 'missingDependency', ...IDS });
+    expect(e.detail).not.toHaveProperty('consumed');
+    expect(e.requiresFreshSession).toBe(true);
+  });
+
+  it('WALLET path: the same — a late raw rejection keeps "fresh session"', async () => {
+    const late = { requestId: 'r', result: Promise.reject(Object.assign(new Error('socket died'), { code: 'WS_CONNECTION_ERROR' })), cancel: vi.fn(), slices: [], pointers: [], forfeitedSlices: [] };
+    late.result.catch(() => {});
+    const { m, sm } = wired();
+    sm.submitTraining.mockResolvedValue(late);
+    const h = await m.submitTraining({ job: JOB, bundle: BUNDLE as never, hostAddress: HOST, endpoint: 'https://host2.fabstir.net' } as never);
+    const e = await failing(h.result);
+    expect(e.code).toBe('SIDECAR_UNAVAILABLE');
+    expect(e.detail).toMatchObject({ reason: 'transport', sessionId: 1n, jobId: 2n, adopted: false });
+    expect(e.detail).not.toHaveProperty('consumed');                                          // late: the frame had left
+    expect(e.requiresFreshSession).toBe(true);
+  });
+});
+
+describe('Round 5b — the wire-shape rules are checked BEFORE adoption / escrow', () => {
+  it('ADOPTED path: an lr the wire refuses (exponent form) is a pre-adopt numericWireRule refusal, before any read', async () => {
+    // Found in Round 5: assertTrainingJobWireShape ran only inside training-ws, synchronously in the executor, and
+    // its refusal rode handle.result — classified LATE (no consumed:false) after the session had been adopted.
+    const { m, jm, sm } = wired();
+    const e = await failing(submit(m, { job: { ...JOB, hyper: { ...JOB.hyper, lr: '2e-4' } } }));
+    expect(e.code).toBe('VALIDATION_FAILED');
+    expect(e.detail).toMatchObject({ reason: 'numericWireRule', consumed: false, ...IDS });
+    expect(jm.getSessionJobOnChain).not.toHaveBeenCalled();
+    expect(sm.registerExternalSession).not.toHaveBeenCalled();
+  });
+
+  it('WALLET path: the same refusal happens before startSession', async () => {
+    const { m, sm } = wired();
+    const e = await failing(m.submitTraining({ job: { ...JOB, hyper: { ...JOB.hyper, lr: '2e-4' } }, bundle: BUNDLE as never, hostAddress: HOST, endpoint: 'https://host2.fabstir.net' } as never));
+    expect(e.detail?.reason).toBe('numericWireRule');
+    expect(sm.startSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('Round 6 — every existingSessionConfig refusal says the session is intact', () => {
+  it('the load-balancer refusal of existingSession carries consumed:false and requiresFreshSession false', async () => {
+    // Round 6: the docs promise it for every existingSessionConfig; this one sat outside the envelope.
+    const { m } = wired();
+    const e = await failing((m as any).submitTrainingWithLoadBalancing({ job: JOB, bundle: BUNDLE as never, existingSession: IDS, endpoint: 'https://host2.fabstir.net' }));
+    expect(e.detail).toMatchObject({ reason: 'existingSessionConfig', consumed: false, ...IDS });
+    expect(e.requiresFreshSession).toBe(false);
   });
 });

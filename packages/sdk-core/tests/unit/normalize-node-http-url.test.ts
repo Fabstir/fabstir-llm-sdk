@@ -38,3 +38,32 @@ describe('normalizeNodeHttpUrl', () => {
     expect(normalizeNodeHttpUrl(new URL('https://host2.fabstir.net') as unknown as string)).toBeUndefined();
   });
 });
+
+describe('Round 4b — accepted-but-mistargeting inputs are refused', () => {
+  it.each([
+    ['trailing whitespace', 'https://host2.fabstir.net '],
+    ['leading whitespace', ' https://host2.fabstir.net'],
+    ['inner whitespace', 'https://host2.fabstir.net/a b'],
+    ['the WS path in http form (the SDK appends /v1/ws itself)', 'https://host2.fabstir.net/v1/ws'],
+    ['the API prefix', 'https://host2.fabstir.net/v1'],
+    ['the API prefix with a slash', 'https://host2.fabstir.net/v1/'],
+    ['userinfo', 'https://user:pw@host2.fabstir.net'],
+    ['a backslash', 'https://host2.fabstir.net\\'],
+    ['the API prefix in upper case', 'https://host2.fabstir.net/V1/ws'],
+    ['the session-auth API path', 'https://host2.fabstir.net/v1/session-auth'],
+  ])('%s → undefined', (_n, input) => {
+    expect(normalizeNodeHttpUrl(input)).toBeUndefined();
+  });
+
+  it.each([
+    ['a port', 'https://host2.fabstir.net:8443', 'https://host2.fabstir.net:8443'],
+    ['a reverse-proxy path prefix', 'https://gw.example/node1/', 'https://gw.example/node1'],
+    ['plain http for a local node', 'http://localhost:8080', 'http://localhost:8080'],
+    ['a prefix that merely starts with v1', 'https://gw.example/v1x/', 'https://gw.example/v1x'],
+    ['a v10 prefix', 'https://gw.example/v10', 'https://gw.example/v10'],
+    ['a reverse proxy that mounts nodes under /v1/<name>', 'https://gw.example/v1/node-a', 'https://gw.example/v1/node-a'],
+    ['a bare host called v1', 'http://v1:8080', 'http://v1:8080'],
+  ])('%s is still accepted', (_n, input, out) => {
+    expect(normalizeNodeHttpUrl(input)).toBe(out);
+  });
+});

@@ -195,7 +195,7 @@ The SDK uses a manager pattern where each manager handles a specific domain:
   session init; staging is post-ack with a dedicated error listener)
 - Key Features: `estimateTrainingCost` (exact before any deposit), bounds validation,
   slice-by-slice settlement design (paid phase staged next)
-- Card / vault path (1.38.5): `existingSession` adopts a service-minted session with no wallet
+- Card / vault path (1.38.6): `existingSession` adopts a service-minted session with no wallet
   touch, after an A.3 pre-flight that reads the on-chain session drift-proof (raw words against
   the 18-slot layout, fails closed) and refuses locally before the one `train` the session can
   carry; every post-adoption failure carries `{ sessionId, jobId }` for reclaim

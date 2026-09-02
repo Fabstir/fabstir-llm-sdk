@@ -114,9 +114,10 @@ const ZERO_HIGH_BYTES = '0x' + '00'.repeat(12);                    // an address
  * Decode the static head of a raw `sessionJobs(jobId)` return against the deployed 18-slot
  * layout, failing CLOSED.
  *
- * Why not the ABI decode: this repo carries THREE JobMarketplace ABIs whose `sessionJobs`
- * output has 15, 17 and 18 fields. A named decode is only as right as the ABI file it was
- * handed, and the 17-field one (no `proofTimeoutWindow`) decodes these same bytes with every
+ * Why not the ABI decode: this repo carries FOUR JobMarketplace ABIs whose `sessionJobs`
+ * output has 15, 16, 17 and 18 fields (the 16-field one carries a phantom `requester`). A named
+ * decode is only as right as the ABI file it was handed, and the 17-field one (no
+ * `proofTimeoutWindow`) decodes these same bytes with every
  * field from `status` onward shifted — silently, for the static fields. The design doc calls
  * that the 17-field decode trap and requires A.3's read to fail closed. Three layout pins do
  * that here, independent of any ABI file:

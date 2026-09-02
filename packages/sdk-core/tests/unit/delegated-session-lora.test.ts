@@ -72,7 +72,7 @@ describe('§4 — serve-back on a delegated (card-paid) session', () => {
     // The addendum's one open question. This drives the REAL sendPrompt → sendEncryptedInit over a
     // socket double that acks the init, with fake timers: the config is what the SDK BUILDS from the
     // registry entry, and the timeout is the one the SDK ARMS — 180 s + the 300 s stage budget.
-    afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); FakeWebSocket.reset(); delete (globalThis as any).WebSocket; });
+    afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); FakeWebSocket.reset(); });
 
     async function firstPrompt(withLora: boolean) {
       // A unit test must never reach a host: the legacy sendPrompt() is HTTP (POST /v1/inference) and a
@@ -80,7 +80,7 @@ describe('§4 — serve-back on a delegated (card-paid) session', () => {
       // sendPromptStreaming(); fetch is stubbed to throw so any HTTP escape is a loud failure.
       vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network is forbidden in unit tests'); }));
       vi.useFakeTimers();
-      FakeWebSocket.reset(); FakeWebSocket.autoAckInit = true; (globalThis as any).WebSocket = FakeWebSocket;
+      FakeWebSocket.reset(); FakeWebSocket.autoAckInit = true; vi.stubGlobal('WebSocket', FakeWebSocket);
       const mgr = manager();
       mgr.initialized = true;
       vi.spyOn(mgr, 'injectRAGContext').mockImplementation(async (_id: string, p: string) => p);

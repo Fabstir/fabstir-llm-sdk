@@ -46,8 +46,8 @@ function manager() {
 }
 
 describe('SessionManager.submitTraining against a registerExternalSession-seeded entry', () => {
-  beforeEach(() => { FakeWebSocket.reset(); (globalThis as any).WebSocket = FakeWebSocket; vi.mocked(submitTrainingWs).mockClear(); });
-  afterEach(() => { vi.restoreAllMocks(); delete (globalThis as any).WebSocket; });
+  beforeEach(() => { FakeWebSocket.reset(); vi.stubGlobal('WebSocket', FakeWebSocket); vi.mocked(submitTrainingWs).mockClear(); });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it('passes the registry guards and reaches the WS submit with the seeded fields', async () => {
     const { mgr, initConfigs } = manager();
@@ -91,9 +91,11 @@ describe('SessionManager.submitTraining against a registerExternalSession-seeded
     mgr.registerExternalSession({ sessionId: 1149n, jobId: 2298n, endpoint: 'https://host2.fabstir.net', hostAddress: HOST, model: MODEL, chainId: 84532 });
     const seen: unknown[] = []; const on = (r: unknown) => seen.push(r);
     process.on('unhandledRejection', on);
-    const handle = await mgr.submitTraining('1149', JOB_ANY);
-    await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
-    process.off('unhandledRejection', on);
+    let handle!: Awaited<ReturnType<typeof mgr.submitTraining>>;
+    try {
+      handle = await mgr.submitTraining('1149', JOB_ANY);
+      await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+    } finally { process.off('unhandledRejection', on); }
     expect(seen).toEqual([]);
     await expect(handle.result).rejects.toThrow(/node said no/);
   });
@@ -134,8 +136,8 @@ describe('SessionManager.submitTraining against a registerExternalSession-seeded
 });
 
 describe('adjacent: submitLtx on the SHARED socket (ownsWs === false)', () => {
-  beforeEach(() => { FakeWebSocket.reset(); (globalThis as any).WebSocket = FakeWebSocket; });
-  afterEach(() => { vi.restoreAllMocks(); delete (globalThis as any).WebSocket; });
+  beforeEach(() => { FakeWebSocket.reset(); vi.stubGlobal('WebSocket', FakeWebSocket); });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it('a rejecting LTX result nobody awaited is not an unhandled rejection even when the socket is shared', async () => {
     // submitLtx re-wraps handle.result unconditionally (`.then(r => r.seed = …)`); Round 2 marked only
@@ -149,11 +151,51 @@ describe('adjacent: submitLtx on the SHARED socket (ownsWs === false)', () => {
     mgr.wsSessionId = '1152'; mgr.sessionKey = new Uint8Array(32).fill(9); mgr.sessionKeyGeneration = 1; mgr.messageIndex = 0;
     const seen: unknown[] = []; const on = (r: unknown) => seen.push(r);
     process.on('unhandledRejection', on);
-    const handle = await mgr.submitLtx('1152', { seed: '1' } as any, {});
-    await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
-    process.off('unhandledRejection', on);
+    let handle!: Awaited<ReturnType<typeof mgr.submitLtx>>;
+    try {
+      handle = await mgr.submitLtx('1152', { seed: '1' } as any, {});
+      await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+    } finally { process.off('unhandledRejection', on); }
     expect(FakeWebSocket.urls).toHaveLength(0);                                 // shared socket: no new connection
     expect(seen).toEqual([]);
     await expect(handle.result).rejects.toThrow(/node said no/);
+  });
+});
+
+describe('Round 4b — a pre-frame init failure must not leak the dedicated socket', () => {
+  beforeEach(() => { vi.useFakeTimers(); FakeWebSocket.reset(); vi.stubGlobal('WebSocket', FakeWebSocket); });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  it('an init failure (host unreachable for its key) closes the socket; no heartbeat, no reconnect', async () => {
+    const { mgr } = manager();
+    (mgr.sendEncryptedInit as any).mockImplementation(async () => { throw Object.assign(new Error('host down'), { code: 'HOST_PUBKEY_UNAVAILABLE' }); });
+    mgr.registerExternalSession({ sessionId: 1160n, jobId: 2320n, endpoint: 'https://host2.fabstir.net', hostAddress: HOST, model: MODEL, chainId: 84532 });
+    const sharedKey = new Uint8Array(32).fill(7); mgr.sessionKey = sharedKey; mgr.wsSessionId = 'chat-9'; mgr.messageIndex = 4;   // the CHAT session's key
+    const p = mgr.submitTraining('1160', JOB_ANY).catch((e: any) => e);
+    await vi.advanceTimersByTimeAsync(20);
+    const e = await p;
+    expect(e.code).toBe('HOST_PUBKEY_UNAVAILABLE');
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);                 // closed, not left pinging
+    expect(mgr.sessionKey).toBe(sharedKey); expect(mgr.messageIndex).toBe(4);                  // the shared session's key survived the failed per-job init
+    const sent = FakeWebSocket.instances[0].sent.length;
+    await vi.advanceTimersByTimeAsync(70_000);
+    expect(FakeWebSocket.instances[0].sent.length).toBe(sent);                                // no heartbeat after the failure
+    expect(FakeWebSocket.instances).toHaveLength(1);                                          // no reconnect
+  });
+
+  it('a connect failure (host down) does not start a background reconnect loop', async () => {
+    const { mgr } = manager();
+    FakeWebSocket.autoOpen = false;
+    mgr.registerExternalSession({ sessionId: 1161n, jobId: 2322n, endpoint: 'https://host2.fabstir.net', hostAddress: HOST, model: MODEL, chainId: 84532 });
+    const p = mgr.submitTraining('1161', JOB_ANY).catch((e: any) => e);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    FakeWebSocket.instances[0].onerror?.({ message: 'ECONNREFUSED' });
+    FakeWebSocket.instances[0].drop();
+    const e = await p;
+    expect(e.code).toBe('WS_CONNECTION_ERROR');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);                                          // 5 s later: still one socket
   });
 });

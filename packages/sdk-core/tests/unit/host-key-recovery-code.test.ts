@@ -23,4 +23,21 @@ describe('requestHostPublicKey error codes', () => {
     await expect(requestHostPublicKey('https://host2.fabstir.net', `0x${'20'.repeat(20)}`))
       .rejects.toMatchObject({ code: 'HOST_PUBKEY_UNAVAILABLE' });
   });
+
+  it('a host that is DOWN — fetch itself rejects (ECONNREFUSED / ENOTFOUND) — carries the code and the cause', async () => {
+    // Round 4: the fetch sat outside any try/catch, so undici's uncoded `TypeError: fetch failed` reached
+    // the training classifier as "our wiring" — terminal, requiresFreshSession true — for a host outage.
+    const down = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+    vi.stubGlobal('fetch', vi.fn(async () => { throw down; }));
+    const e: any = await requestHostPublicKey('https://host2.fabstir.net', `0x${'20'.repeat(20)}`).catch((x) => x);
+    expect(e.code).toBe('HOST_PUBKEY_UNAVAILABLE');
+    expect(e.cause).toBe(down);
+    expect(e.message).toMatch(/fetch failed/);
+  });
+
+  it('a 200 whose body is not JSON carries the code too', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => { throw new SyntaxError('Unexpected token <'); } })));
+    await expect(requestHostPublicKey('https://host2.fabstir.net', `0x${'20'.repeat(20)}`))
+      .rejects.toMatchObject({ code: 'HOST_PUBKEY_UNAVAILABLE', message: expect.stringMatching(/Unexpected token/) });
+  });
 });

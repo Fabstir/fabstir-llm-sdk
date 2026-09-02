@@ -337,13 +337,17 @@ export async function submitTrainingWs(opts: TrainingWsOptions): Promise<Trainin
 
     try {
       send(buildTrainAction(job, requestId)).catch((err: any) => {
-        safeReject(new TrainingError(`failed to send train: ${err.message}`, 'SIDECAR_UNAVAILABLE'));
+        // The frame reached no socket: nothing consumed, same session on retry.
+        safeReject(new TrainingError(`failed to send train: ${err.message}`, 'SIDECAR_UNAVAILABLE', { consumed: false, settledSlices: 0 }));
       });
     } catch (err: any) {
       // `buildTrainAction` validates SYNCHRONOUSLY and can throw. A raw throw inside this
       // executor rejects the promise but never runs settle(), leaking the listener and the
-      // timers on every malformed submit. Route it through safeReject so cleanup happens.
-      safeReject(err);
+      // timers on every malformed submit. Route it through safeReject so cleanup happens —
+      // and say so: no frame was built, so the session was not consumed.
+      safeReject(err instanceof TrainingError
+        ? new TrainingError(err.message, err.code, { ...err.detail, consumed: false, settledSlices: 0 })
+        : err);
     }
   });
 

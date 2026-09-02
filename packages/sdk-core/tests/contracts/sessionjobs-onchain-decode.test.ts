@@ -12,8 +12,6 @@ import JobMarketplaceABI from '../../src/contracts/abis/JobMarketplaceWithModels
 import { decodeSessionJobWords, JobMarketplaceWrapper, SESSION_JOBS_OUTPUT_NAMES } from '../../src/contracts/JobMarketplace';
 
 const raw = readFileSync(join(__dirname, 'fixtures', 'sessionjobs_931.hex'), 'utf8').trim();
-// The ABI JSON is a plain array — no `.abi ?? …` fallback anywhere (house rule: a fallback hides a shape change).
-expect(Array.isArray(JobMarketplaceABI)).toBe(true);
 const named = new Interface(JobMarketplaceABI as any).decodeFunctionResult('sessionJobs', raw);
 
 const A = (n: number) => `0x${n.toString(16).padStart(40, '0')}`;
@@ -22,6 +20,10 @@ const V18 = [1145n, A(0xa1), A(0xa2), A(0xa3), 500000n, 10000n, 0n, 86400n, 1787
 const enc = (types: string[], values: unknown[]) => AbiCoder.defaultAbiCoder().encode(types, values);
 
 describe('decodeSessionJobWords — the drift-proof A.3 read', () => {
+  it('the ABI JSON is a plain array — no `.abi ?? …` fallback anywhere (house rule: a fallback hides a shape change)', () => {
+    expect(Array.isArray(JobMarketplaceABI)).toBe(true);
+  });
+
   it('agrees with the NAMED decode on the live session-931 bytes, field for field', () => {
     const s = decodeSessionJobWords(raw);
     expect(s.id).toBe(931n);

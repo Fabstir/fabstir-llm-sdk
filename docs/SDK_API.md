@@ -752,6 +752,10 @@ async switchChain(chainId: number): Promise<void>
 **Throws:**
 - `UnsupportedChainError`: If chain is not supported
 - Error if wallet provider doesn't support chain switching
+- `SDKError` `CHAIN_SWITCH_UNAUTHENTICATED` (before `authenticate()`), `CHAIN_SWITCH_IN_PROGRESS` (a switch is
+  already running), `CHAIN_SWITCH_UNSUPPORTED` (the target chain lacks a registry address) — all refused BEFORE
+  the wallet is asked to move; `CHAIN_SWITCH_FAILED` (`details = { from, to, cause }`) when the rebuild fails, after
+  every manager has been restored to the previous chain (see the training section for the rollback contract)
 
 **Example:**
 ```typescript
@@ -2425,7 +2429,11 @@ catch (err) {           // LtxError
 Related surface: `sessionManager.registerExternalSession({ sessionId, jobId, endpoint,
 hostAddress, model, chainId })` seeds the registry directly (in-memory only — no S5 write, no
 network) if you need the submit paths without `generate()`. Re-registration overwrites, replacing
-any existing entry under that id.
+any existing entry under that id. **Since 1.38.6 it validates `endpoint`**: the node's plain http(s)
+base only (normalised: trailing slashes, scheme case); a `ws(s)://` value — including a full
+`…/v1/ws` that used to work verbatim — a query, a fragment, whitespace, userinfo, a backslash, a trailing `/v1`, `/v1/ws` or `/v1/session-auth` (the SDK appends those itself; a proxy prefix such as `/v1/node-a` is fine) or a non-string throws `SDKError`
+`SESSION_ENDPOINT_INVALID` at registration, before any network. The SDK derives the socket address
+from the base. Re-seeding after a reload with a stored `wss://` value is the case that changes.
 
 **Breaking (1.36.0):** `submitLtx` and `submitTranscode` no longer fall back to
 `http://localhost:8080` when a session has no `endpoint` — they throw
@@ -2540,7 +2548,7 @@ The SDK independently recomputes every number the node echoes — the token tota
 against the on-chain price, the slice schedule, and each slice's delta and running total — and
 rejects the run rather than letting an over-claim settle.
 
-### Card / vault path — `existingSession` (1.38.5)
+### Card / vault path — `existingSession` (1.38.6)
 
 When a fiat service has minted the session against vault deposits (`POST /fiat/session`) and the
 caller has delivered the FC1.6 handshake with `postSessionAuth`, pass the ids and `submitTraining`
@@ -2602,18 +2610,29 @@ rediscover a local fault.** The reason constants are exported:
 
 | what failed | code / `detail.reason` | terminal? |
 |---|---|---|
-| the adoption call itself — endpoint not the http(s) base, query/fragment, `ws(s)://`, no chainId, load-balancing an adopted session | `VALIDATION_FAILED` / `EXISTING_SESSION_CONFIG_REASON` | yes |
-| the on-chain session or model could not be read drift-proof, or the price read failed (RPC, wiring) | `ESTIMATE_MISMATCH` / `SESSION_DECODE_REASON` | yes |
+| the adoption call itself — endpoint not the http(s) base, query/fragment, `ws(s)://`, no chainId, a `chainId` that is not the SDK's chain (`switchChain` first), ids that are not non-negative integers (bigint, safe integer or decimal string), load-balancing an adopted session | `VALIDATION_FAILED` / `EXISTING_SESSION_CONFIG_REASON` | yes |
+| the bytes of the session or model were read and did not decode (layout drift), or a read failed for a NON-transient reason (wiring) — an RPC transient on any of the three reads is `transport` instead (the wire row below) | `ESTIMATE_MISMATCH` / `SESSION_DECODE_REASON` (`detail.consumed: false`) | yes |
 | the wrapper or SessionManager lacks a method this path needs | `ESTIMATE_MISMATCH` / `missingDependencyMethod` | yes |
 | the SDK's own wiring after adoption (`SESSION_NOT_FOUND`, `ENCRYPTION_NOT_AVAILABLE`, …) or a programming fault | `ESTIMATE_MISMATCH` / `missingDependency` (`detail.sdkCode`, `detail.cause`) | yes |
 | the wire (`WS_*`, init timeout, auth unreachable, the host unreachable for its public key) | `SIDECAR_UNAVAILABLE` / `transport` (`detail.sdkCode`, `detail.cause`, `detail.consumed: false`) | no — retryable on the **same** session: every one of these is raised before `train` leaves, so nothing was consumed and `requiresFreshSession` is `false` |
 
 The host's own "no price for this token" (`ZERO_MODEL_PRICE`) is the `price` **check**, not a read
-failure. `registerExternalSession` itself now validates the endpoint the same way
+failure. With `existingSession` the option's `paymentToken` is not consulted: the session's own on-chain
+`paymentToken` is what the host must price, and that is the token the `price` check resolves. `registerExternalSession` itself now validates the endpoint the same way
 (`SESSION_ENDPOINT_INVALID`), so a caller that seeds the registry directly cannot mistarget a paid session.
 
 **`switchChain()` rebuilds every chain-bound manager** (model, host, client, transcode, LTX, training) or
 refuses with `CHAIN_SWITCH_UNSUPPORTED` if the target chain lacks a registry address — never a mixed state.
+A rebuild that fails part-way (an RPC hiccup while the host manager initialises) is **rolled back**: every
+reference goes back to the previous chain's, `getCurrentChainId()` reports the previous chain, no
+`chainChanged` fires, and the call rejects with `CHAIN_SWITCH_FAILED` (`details = { from, to, cause }`; the
+message notes it if the wallet could NOT be moved back). Retrying the same `switchChain()` re-runs the rebuild. Three refusals happen BEFORE the wallet moves
+(1.38.7): `CHAIN_SWITCH_UNAUTHENTICATED` (switch after `authenticate()`, or construct the SDK on the target
+chain), `CHAIN_SWITCH_IN_PROGRESS` (one switch at a time) and `CHAIN_SWITCH_UNSUPPORTED`.
+`PaymentManagerMultiChain` follows the switch (its default chain for calls without an explicit `chainId` moves)
+and `TreasuryManager` is rebuilt on the new `ContractManager`; a rollback restores both (1.38.7).
+A per-job socket (training, LTX) never silently reconnects, and a failed init closes it — no heartbeat,
+no orphan reconnect loop — and leaves the shared chat session's key untouched (1.38.7).
 Re-fetch managers after a switch (`sdk.getTrainingManager()`); an instance held across the switch is the
 old chain's. A host-selection service you installed on the training manager survives the rebuild.
 
@@ -2637,13 +2656,25 @@ catch (e) {
 `trainJobTimeoutSecs` defaults to M0's 12600 and is a constructor option
 (`config.trainingJobTimeoutSecs`) because the node's `TRAIN_JOB_TIMEOUT_SECS` is deployable.
 
-**Adopted-session error semantics.** `CAPACITY` on an adopted session consumes it (C.6 keys its
-one-in-flight rule on the depositor, which on the card path is the vault). `isRetryable` still
-reads true — but "again" on an adopted session always means a **fresh session**, never a retry
-on the same one; `requiresFreshSession` says so, and `detail.adopted === true` tells you which
-path you are on.
+**Adopted-session error semantics (1.38.7).** Read `requiresFreshSession(err)`, not the code. Every
+failure the SDK raises BEFORE the `train` frame leaves carries `detail.consumed === false` — the session
+is intact and `requiresFreshSession` is false: `existingSessionConfig`, `numericWireRule`, `sessionDecode`,
+`missingDependency(Method)`, the wire's own shape rules (`numericWireRule`, checked before adoption — and on the wallet path before
+any deposit, where no session exists yet so the flag is moot), and every `transport` failure, including an RPC transient on the
+pre-flight reads (session, model, price) (`SIDECAR_UNAVAILABLE / transport`, `detail.sdkCode` ∈ NETWORK_ERROR | TIMEOUT |
+SERVER_ERROR — retry the same session once the chain answers). Both code sets are exported from the package
+root as `TRANSPORT_SDK_CODES` and `RPC_TRANSIENT_CODES`, so a UI can pre-classify without string lists of its own. Two exceptions keep "fresh session":
+`adoptedSessionParams` (the session is the wrong shape; the recourse IS a fresh one) and the busy
+`CAPACITY` classes (C.6's one-in-flight rule consumes the session; only `chainUnavailable` keeps it).
+`detail.adopted` names the path: `true` for the card path, `false` for the wallet path.
 
-**Reclaim.** `handle.sessionId` and `handle.jobId` are set on both paths (1.38.5), so
+**Wallet path (1.38.7).** `opts.endpoint` is required and validated BEFORE any deposit — missing →
+`SESSION_ENDPOINT_MISSING`, not the plain http(s) base → `SESSION_ENDPOINT_INVALID` (the same rule as the
+registry: whitespace, userinfo, a backslash, a trailing `/v1`, `/v1/ws` or `/v1/session-auth`, `ws(s)://` are refused), and the normalised base is
+what `startSession` stores. After `startSession` every failure is a `TrainingError` carrying `{ sessionId, jobId,
+adopted: false }`, classified exactly as on the card path (transport → same session; our wiring → terminal).
+
+**Reclaim.** `handle.sessionId` and `handle.jobId` are set on both paths (1.38.6), so
 `training.triggerSessionTimeout(Number(handle.jobId))` needs nothing you did not already hold.
 
 ### Serve back a finished adapter

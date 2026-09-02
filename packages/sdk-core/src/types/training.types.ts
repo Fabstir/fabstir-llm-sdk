@@ -302,7 +302,7 @@ const SEED_RE = /^[0-9]+$/;
  * NOTE this checks SHAPE only — presence, finiteness, integer-ness, and the two regexes.
  * The A.4/template BOUNDS check is a separate, bundle-dependent pre-escrow step (constraint 4).
  */
-function assertTrainingJobWireShape(job: TrainingJob): void {
+export function assertTrainingJobWireShape(job: TrainingJob): void {
   const numerics: [string, number][] = [
     ['dataset.declaredTokens', job.dataset.declaredTokens], ['dataset.samples', job.dataset.samples],
     ['epochs', job.epochs], ['hyper.rank', job.hyper.rank], ['hyper.alpha', job.hyper.alpha],

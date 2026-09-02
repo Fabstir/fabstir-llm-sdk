@@ -133,6 +133,9 @@ export interface FabstirSDKCoreConfig {
   moderationGate?: boolean;
 }
 
+/** The multi-chain surface the SDK's own PaymentManagerMultiChain has and IPaymentManager does not declare. */
+type ChainSwitchable = { switchChain(chainId: number): Promise<void>; getCurrentChainId(): number };
+
 export class FabstirSDKCore extends EventEmitter {
   private config: FabstirSDKCoreConfig;
   private provider?: ethers.BrowserProvider | ethers.JsonRpcProvider;
@@ -153,6 +156,7 @@ export class FabstirSDKCore extends EventEmitter {
   private bridgeClient?: UnifiedBridgeClient;
   private walletProvider?: IWalletProvider;
   private currentChainId: number;
+  private chainSwitchInFlight?: number;
   
   // Manager instances
   private authManager?: IAuthManager;
@@ -1647,6 +1651,15 @@ export class FabstirSDKCore extends EventEmitter {
         'AA_SWITCH_CHAIN_UNSUPPORTED',
       );
     }
+    // A switch in flight owns the chain id already (it is committed before the rebuild), so this check must
+    // come BEFORE the "already on target chain" return — or a concurrent same-target call resolves as a no-op
+    // over a half-built SDK.
+    if (this.chainSwitchInFlight !== undefined) {
+      throw new SDKError(
+        `switchChain(${chainId}) refused: a switch to chain ${this.chainSwitchInFlight} is still in progress`,
+        'CHAIN_SWITCH_IN_PROGRESS',
+      );
+    }
     // Don't switch if already on target chain
     if (this.currentChainId === chainId) {
       return;
@@ -1656,7 +1669,33 @@ export class FabstirSDKCore extends EventEmitter {
     if (!ChainRegistry.isChainSupported(chainId)) {
       throw new UnsupportedChainError(chainId, ChainRegistry.getSupportedChains());
     }
+    // Every refusal happens BEFORE the wallet moves, so a refused switch leaves nothing half-done.
+    if (!this.authenticated) {
+      // authenticate() builds every manager from the constructor's contractAddresses/rpcUrl (the
+      // constructor's chain); switching first would leave the chain id on one chain and the managers on another.
+      throw new SDKError(
+        `switchChain(${chainId}) before authenticate() is not supported — construct the SDK with chainId ${chainId} instead`,
+        'CHAIN_SWITCH_UNAUTHENTICATED',
+      );
+    }
+    const target = ChainRegistry.getChain(chainId).contracts;
+    if (!target.modelRegistry || !target.nodeRegistry) {
+      throw new SDKError(
+        `Chain ${chainId} has no model/node registry configured; the managers cannot be rebuilt consistently`,
+        'CHAIN_SWITCH_UNSUPPORTED',
+      );
+    }
 
+    this.chainSwitchInFlight = chainId;
+    try {
+      await this.performChainSwitch(chainId);
+    } finally {
+      this.chainSwitchInFlight = undefined;
+    }
+  }
+
+  /** The switch proper: wallet, then a whole rebuild or a whole rollback. Guards live in switchChain(). */
+  private async performChainSwitch(chainId: number): Promise<void> {
     // Check if wallet provider supports chain switching
     if (this.walletProvider) {
       const capabilities = this.walletProvider.getCapabilities();
@@ -1669,12 +1708,30 @@ export class FabstirSDKCore extends EventEmitter {
     }
 
     const oldChainId = this.currentChainId;
+    const snapshot = this.snapshotChainState();
     this.currentChainId = chainId;
     this.config.chainId = chainId;
 
-    // Reinitialize managers with new chain if authenticated
-    if (this.authenticated) {
-      await this.reinitializeManagersForChain();
+    // A WHOLE switch or none of it: a rebuild that fails part-way is rolled back to the previous chain's
+    // references, so the SDK never reports the new chain over a mix of old and new managers, and a retry
+    // re-runs the rebuild instead of hitting the "already on target chain" guard.
+    {
+      try {
+        await this.reinitializeManagersForChain();
+      } catch (err) {
+        await this.restoreChainState(snapshot);
+        let walletNote = '';
+        if (this.walletProvider) {
+          try { await this.walletProvider.switchChain(oldChainId); }
+          catch (e) { walletNote = `; the wallet stayed on chain ${chainId} (${(e as Error)?.message ?? String(e)})`; }
+        }
+        throw new SDKError(
+          `switchChain(${chainId}) failed while rebuilding the managers; the SDK is back on chain ${oldChainId}${walletNote}: ` +
+          ((err as Error)?.message ?? String(err)),
+          'CHAIN_SWITCH_FAILED',
+          { from: oldChainId, to: chainId, cause: err },
+        );
+      }
     }
 
     // Emit chain changed event
@@ -1752,6 +1809,37 @@ export class FabstirSDKCore extends EventEmitter {
     await (this.hostManager as any).initialize();
   }
 
+  /** Every reference switchChain() replaces, captured so a failed rebuild can put them all back. */
+  private snapshotChainState() {
+    return {
+      currentChainId: this.currentChainId, configChainId: this.config.chainId,
+      readProvider: this.readProvider, readProviderSource: this.readProviderSource,
+      contractManager: this.contractManager, modelManager: this.modelManager, hostManager: this.hostManager,
+      clientManager: this.clientManager, transcodeManager: this.transcodeManager,
+      ltxManager: this.ltxManager, trainingManager: this.trainingManager,
+      treasuryManager: this.treasuryManager,
+      paymentChainId: this.paymentManager ? (this.paymentManager as unknown as ChainSwitchable).getCurrentChainId() : undefined,
+      sessionHostSelection: (this.sessionManager as any)?.hostSelectionService,
+    };
+  }
+
+  private async restoreChainState(s: ReturnType<FabstirSDKCore['snapshotChainState']>): Promise<void> {
+    this.currentChainId = s.currentChainId; this.config.chainId = s.configChainId;
+    this.readProvider = s.readProvider; this.readProviderSource = s.readProviderSource;
+    this.contractManager = s.contractManager; this.modelManager = s.modelManager; this.hostManager = s.hostManager;
+    this.clientManager = s.clientManager; this.transcodeManager = s.transcodeManager;
+    this.ltxManager = s.ltxManager; this.trainingManager = s.trainingManager;
+    this.treasuryManager = s.treasuryManager;
+    if (this.sessionManager) {
+      if (s.hostManager) (this.sessionManager as any).setHostManager(s.hostManager);
+      if (s.sessionHostSelection) (this.sessionManager as any).setHostSelectionService(s.sessionHostSelection);
+    }
+    // Last, because it is the only await in the restore: every synchronous reference is already back.
+    if (this.paymentManager && s.paymentChainId !== undefined) {
+      await (this.paymentManager as unknown as ChainSwitchable).switchChain(s.paymentChainId);
+    }
+  }
+
   private async reinitializeManagersForChain(): Promise<void> {
     // Get new contract addresses for the chain
     const chainConfig = ChainRegistry.getChain(this.currentChainId);
@@ -1771,16 +1859,21 @@ export class FabstirSDKCore extends EventEmitter {
       });
     }
 
+    // The payment manager's DEFAULT chain (every call without an explicit chainId) and the treasury
+    // manager's ContractManager are chain-bound too; both used to stay on the old chain after a switch.
+    if (this.paymentManager) {
+      await (this.paymentManager as unknown as ChainSwitchable).switchChain(this.currentChainId);
+    }
+    if (this.treasuryManager && this.contractManager) {
+      this.treasuryManager = new TreasuryManager(this.contractManager);
+      await (this.treasuryManager as TreasuryManager).initialize(this.signer!);
+    }
+
     // A WHOLE rebuild of everything chain-bound, or none of it: rebuilding only some managers leaves the
     // adopted training path reading the session on one chain and the host's price on another — a
-    // spurious refusal and a second card session for a session that was fine.
+    // spurious refusal and a second card session for a session that was fine. (The registry-address
+    // check that guards this lives in switchChain(), BEFORE the wallet moves.)
     const contracts = chainConfig.contracts;
-    if (!contracts.modelRegistry || !contracts.nodeRegistry) {
-      throw new SDKError(
-        `Chain ${this.currentChainId} has no model/node registry configured; the managers cannot be rebuilt consistently`,
-        'CHAIN_SWITCH_UNSUPPORTED',
-      );
-    }
     await this.constructModelAndHostManagers({
       modelRegistry: contracts.modelRegistry, nodeRegistry: contracts.nodeRegistry,
       fabToken: contracts.fabToken, hostEarnings: contracts.hostEarnings,

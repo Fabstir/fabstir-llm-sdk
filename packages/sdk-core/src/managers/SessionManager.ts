@@ -4354,26 +4354,35 @@ export class SessionManager implements ISessionManager {
       localSessionKey = this.sessionKey;
       localMessageIndex = this.messageIndex;
     } else {
-      wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
-      await wsClient.connect();
+      // A per-job socket never silently reconnects: a reconnected socket has no session init and the
+      // frames are not re-delivered. And a FAILED init must leave nothing behind — no open socket with a
+      // 30 s heartbeat, no background reconnect loop, and the shared session's key untouched.
+      wsClient = new WebSocketClient(wsUrl, { reconnect: false });
       const prevSessionKey = this.sessionKey;
       const prevMessageIndex = this.messageIndex;
-      this.sessionKey = undefined;
-      this.messageIndex = 0;
-      await this.sendEncryptedInit(wsClient, {
-        chainId: session.chainId, host: session.provider, modelId: session.model,
-        endpoint, paymentMethod: 'deposit', encryption: true,
-        lora: session.lora,            // E.3: a re-init MUST re-send it
-        onServeBackError: session.onServeBackError,
-      // Deliberately partial: sendEncryptedInit reads only this subset, and the required
-      // pricing/proof fields are meaningless for a re-init on an already-funded session. The
-      // cast was always hiding that; the double cast only stops TS's overlap heuristic from
-      // objecting now that there are two more properties to weigh.
-      } as unknown as ExtendedSessionConfig, session.sessionId, session.jobId);
-      localSessionKey = this.sessionKey;
-      localMessageIndex = this.messageIndex;
-      this.sessionKey = prevSessionKey;
-      this.messageIndex = prevMessageIndex;
+      try {
+        await wsClient.connect();
+        this.sessionKey = undefined;
+        this.messageIndex = 0;
+        await this.sendEncryptedInit(wsClient, {
+          chainId: session.chainId, host: session.provider, modelId: session.model,
+          endpoint, encryption: true,
+          lora: session.lora,            // E.3: a re-init MUST re-send it
+          onServeBackError: session.onServeBackError,
+        // Deliberately partial: sendEncryptedInit reads only this subset, and the required
+        // pricing/proof fields are meaningless for a re-init on an already-funded session. The
+        // cast was always hiding that; the double cast only stops TS's overlap heuristic from
+        // objecting now that there are two more properties to weigh.
+        } as unknown as ExtendedSessionConfig, session.sessionId, session.jobId);
+        localSessionKey = this.sessionKey;
+        localMessageIndex = this.messageIndex;
+      } catch (err) {
+        await wsClient.disconnect().catch(() => {});   // cleanup only — the init failure is what surfaces
+        throw err;
+      } finally {
+        this.sessionKey = prevSessionKey;
+        this.messageIndex = prevMessageIndex;
+      }
     }
 
     if (!localSessionKey) throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
