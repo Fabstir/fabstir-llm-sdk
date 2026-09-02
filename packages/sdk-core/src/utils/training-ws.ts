@@ -35,6 +35,11 @@ export interface TrainingResult {
 
 export interface TrainingHandle {
   requestId: string;
+  /** The session the run rides — created by the SDK on the wallet path, adopted on the vault
+   *  path. What a caller relays for reclaim (`triggerSessionTimeout(Number(jobId))`); set by
+   *  `TrainingManager.submitTraining`, absent when `SessionManager.submitTraining` is called direct. */
+  sessionId?: bigint;
+  jobId?: bigint;
   /** Sends `train_cancel`; the run aborts at the NEXT SLICE BOUNDARY, completed slices still
    *  settle, and M0 has deliberately no "keep training after the client is gone" mode. */
   cancel(): Promise<void>;

@@ -14,7 +14,8 @@ import type {
   ArtifactManifestV1, ManifestFileEntry,
 } from '../types/training.types';
 import type { TrainingHandle, TrainingPointerRecord } from '../utils/training-ws';
-import type { TrainingPriceEstimate } from '../managers/TrainingManager';
+import type { TrainingPriceEstimate, TrainingExistingSession, SubmitTrainingOptions } from '../managers/TrainingManager';
+import type { OnChainSessionJob } from '../contracts/JobMarketplace';
 import type { TrainingTokenizer } from '../utils/training-count';
 import type { TrainingCommitmentInput } from '../utils/training-utils';
 import type { DatasetManifestV1 } from '../types/training.types';
@@ -43,18 +44,23 @@ export interface ITrainingManager {
    */
   validateAgainstBundle(job: TrainingJob, bundle?: TrainingBundleSection): void;
 
-  /** Pre-validate → estimate → fund a training-parameterised session → submit. */
-  submitTraining(opts: {
-    job: TrainingJob;
-    bundle?: TrainingBundleSection;
-    hostAddress: string;
-    endpoint?: string;
-    paymentToken?: string;
-    requestId?: string;
-    onProgress?: (progress: unknown) => void;
-    onSlice?: (slice: unknown) => void;
-    persistPointer?: (record: TrainingPointerRecord) => void | Promise<void>;
-  }): Promise<TrainingHandle>;
+  /** Pre-validate → estimate → fund a training-parameterised session → submit. With
+   *  `existingSession` (vault / card path): guards → validate → A.3 pre-flight → adopt → submit,
+   *  with no session creation and no wallet touch; every failure after adoption carries
+   *  `{ sessionId, jobId, adopted: true }` in `detail`. */
+  submitTraining(opts: SubmitTrainingOptions): Promise<TrainingHandle>;
+
+  /**
+   * A.3 pre-flight on an ADOPTED session, before `train`: Active · `sessionModel` is the training
+   * model id · `host` is the host being connected to · `pricePerToken` equals the registered
+   * price · remaining headroom covers `trainingTokens(job)` · remaining lifetime ≥
+   * `trainJobTimeoutSecs + 600` · `proofTimeoutWindow ≥ 3600`. Reads the session drift-proof
+   * (fails CLOSED). Throws `VALIDATION_FAILED` / `adoptedSessionParams` listing every failing
+   * check — the job is fine, the session is not; get a fresh one.
+   */
+  validateExistingSession(
+    existing: TrainingExistingSession, job: TrainingJob, hostAddress: string,
+  ): Promise<{ session: OnChainSessionJob; pricePerToken: bigint; acceptLatitudeSecs: number }>;
 
   /**
    * Recompute §B.5's digest and recover the signer; with `binding`, also recompute §B.4's

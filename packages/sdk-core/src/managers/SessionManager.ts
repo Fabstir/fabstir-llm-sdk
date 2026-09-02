@@ -1,5 +1,6 @@
 // Copyright (c) 2025 Fabstir
 import { LLM_MAX_TOKENS } from '../config/llm-config';
+import { normalizeNodeHttpUrl } from '../utils/validation';
 // SPDX-License-Identifier: BUSL-1.1
 
 /**
@@ -250,7 +251,9 @@ export interface DelegatedSessionConfig {
 export interface ExternalSessionConfig {
   sessionId: bigint;
   jobId: bigint;
-  /** Node http(s) base URL — the WS URL is derived from it at submit time. */
+  /** Node http(s) base URL — the WS URL is derived from it at submit time. Validated and normalised
+   *  by `registerExternalSession` (`SESSION_ENDPOINT_INVALID` for a ws(s)://, query-bearing or
+   *  mis-cased value the derivation would use verbatim or mangle). */
   endpoint: string;
   /** Host operator address (the session's `provider`). */
   hostAddress: string;
@@ -822,13 +825,26 @@ export class SessionManager implements ISessionManager {
    * re-seed or two chains sharing an id.
    */
   registerExternalSession(config: ExternalSessionConfig): void {
+    // The rule lives at the seam, not only in the two manager callers: this is a public
+    // ISessionManager method. The WS derivation in acquireSessionTransport uses a ws(s):// value
+    // VERBATIM — a bare `wss://host` opens at the node root, and a full `wss://host/v1/ws` works
+    // only until the http base it must pair with (postSessionAuth) drifts — and it never converts
+    // 'HTTPS://'. One http(s) base, normalised here, serves both. ⚠️ Breaking (1.38.6) for callers
+    // that registered a full WS URL; declared on ISessionManager and in the consumer docs.
+    const endpoint = normalizeNodeHttpUrl(config.endpoint);
+    if (!endpoint) {
+      throw new SDKError(
+        `registerExternalSession: endpoint must be the node's plain http(s):// base (the nodeHttpUrl used for postSessionAuth), got: ${config.endpoint}`,
+        'SESSION_ENDPOINT_INVALID',
+      );
+    }
     this.sessions.set(config.sessionId.toString(), {
       sessionId: config.sessionId,
       jobId: config.jobId,
       chainId: config.chainId,
       model: config.model,
       provider: config.hostAddress,
-      endpoint: config.endpoint,
+      endpoint,
       status: 'active',
       prompts: [],
       responses: [],
@@ -4398,6 +4414,9 @@ export class SessionManager implements ISessionManager {
     } as TrainingWsOptions);
     if (ownsWs) {
       handle.result = handle.result.finally(() => { void wsClient.disconnect().catch(() => {}); });
+      // `.finally` returns a NEW promise; training-ws marked only the original handled. A run that
+      // fails before the consumer attaches would otherwise be an unhandled rejection (process exit).
+      handle.result.catch(() => {});
     }
     return handle;
   }
@@ -4418,6 +4437,10 @@ export class SessionManager implements ISessionManager {
       // payout to tab-close or the 1h timeout. Closing here settles it within ~seconds (+30s window).
       handle.result = handle.result.finally(() => { void wsClient.disconnect().catch(() => {}); });
     }
+    // Both re-wraps above are NEW promises (the `.then` is unconditional, so this must sit OUTSIDE the
+    // ownsWs guard); ltx-ws never marks its original handled. Without this a clip rejected before the
+    // consumer attaches is an unhandled rejection on the shared-socket path too.
+    handle.result.catch(() => {});
     return handle;
   }
 

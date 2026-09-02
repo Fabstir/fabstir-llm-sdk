@@ -1,7 +1,8 @@
 // Copyright (c) 2025 Fabstir
 // SPDX-License-Identifier: BUSL-1.1
 
-import { ethers, Signer, Contract } from 'ethers';
+import { ethers, Signer, Contract, Provider, dataSlice, toBigInt, getAddress, getBytes } from 'ethers';
+import { SDKError } from '../errors';
 import { ChainRegistry } from '../config/ChainRegistry';
 import { ChainId } from '../types/chain.types';
 import {
@@ -71,6 +72,96 @@ export function mapSessionJob(r: any): SessionJob {
   };
 }
 
+/**
+ * The STATIC head of the deployed `sessionJobs` struct, decoded from RAW words (A.3 pre-flight
+ * read for adopted sessions). Every number is a bigint — no `Number()` narrowing on the money
+ * path — and the decode FAILS CLOSED on any layout drift. See {@link decodeSessionJobWords}.
+ */
+export interface OnChainSessionJob {
+  id: bigint;
+  depositor: string;
+  host: string;
+  paymentToken: string;
+  /** Base units of `paymentToken`. */
+  deposit: bigint;
+  pricePerToken: bigint;
+  tokensUsed: bigint;
+  /** SECONDS. */
+  maxDuration: bigint;
+  startTime: bigint;
+  lastProofTime: bigint;
+  /** TOKENS — not seconds. */
+  proofInterval: bigint;
+  /** SECONDS — not tokens. */
+  proofTimeoutWindow: bigint;
+  /** 0 = Active, 1 = Completed, 2 = TimedOut. */
+  status: number;
+}
+
+/** The output names the wrapper's Interface decodes `sessionJobs` with — read off the ABI PRODUCTION
+ *  imports, so a test can pin them (a swap to the 16-output sibling shifts every field from `host`). */
+export const SESSION_JOBS_OUTPUT_NAMES: string[] = new ethers.Interface(JobMarketplaceABI)
+  .getFunction('sessionJobs')!.outputs.map((o) => o.name);
+
+/** Head slots in the DEPLOYED `sessionJobs` layout (pinned by the live 931 byte fixture). */
+export const SESSION_JOB_HEAD_WORDS = 18;
+const SESSION_JOB_HEAD_BYTES = SESSION_JOB_HEAD_WORDS * 32;      // 576
+const FIRST_TAIL_OFFSET = BigInt(SESSION_JOB_HEAD_BYTES);          // slot 15 must hold exactly this
+const SECOND_TAIL_MIN_OFFSET = FIRST_TAIL_OFFSET + 32n;            // after the first tail's length word
+const ZERO_HIGH_BYTES = '0x' + '00'.repeat(12);                    // an address slot's top 12 bytes
+
+/**
+ * Decode the static head of a raw `sessionJobs(jobId)` return against the deployed 18-slot
+ * layout, failing CLOSED.
+ *
+ * Why not the ABI decode: this repo carries THREE JobMarketplace ABIs whose `sessionJobs`
+ * output has 15, 17 and 18 fields. A named decode is only as right as the ABI file it was
+ * handed, and the 17-field one (no `proofTimeoutWindow`) decodes these same bytes with every
+ * field from `status` onward shifted — silently, for the static fields. The design doc calls
+ * that the 17-field decode trap and requires A.3's read to fail closed. Three layout pins do
+ * that here, independent of any ABI file:
+ *  · slot 15 is the offset of the FIRST dynamic field (`conversationCID`) and must equal the
+ *    head size, 18 × 32 = 576 — in a 17-slot layout that slot holds `lastProofHash`;
+ *  · slot 17 (`lastProofCID` offset) must land after the first tail and inside the data;
+ *  · `status` must be one of the three enum values — a shifted slot is a token count.
+ * Word layout: w0 id · w1 depositor · w2 host · w3 paymentToken · w4 deposit · w5 pricePerToken
+ * · w6 tokensUsed · w7 maxDuration · w8 startTime · w9 lastProofTime · w10 proofInterval(TOKENS)
+ * · w11 proofTimeoutWindow(SECONDS) · w12 status · w13 withdrawnByHost · w14 refundedToUser ·
+ * w15 conversationCID(offset) · w16 lastProofHash · w17 lastProofCID(offset).
+ */
+export function decodeSessionJobWords(data: string): OnChainSessionJob {
+  const bytes = getBytes(data);          // parse the hex ONCE; every slice below copies 32 bytes, not the whole return
+  const len = bytes.length;
+  const bail = (why: string): never => {
+    throw new SDKError(`sessionJobs ${why}`, 'SESSION_JOB_LAYOUT_MISMATCH');
+  };
+  // Two dynamic tails follow the head, each at least a length word.
+  if (len < SESSION_JOB_HEAD_BYTES + 64) {
+    bail(`return is ${len} bytes; the deployed 18-slot layout needs at least ${SESSION_JOB_HEAD_BYTES + 64}`);
+  }
+  const word = (i: number): bigint => toBigInt(dataSlice(bytes, i * 32, (i + 1) * 32));
+  const addr = (i: number): string => {
+    if (dataSlice(bytes, i * 32, i * 32 + 12) !== ZERO_HIGH_BYTES) bail(`slot ${i} is not an address — layout mismatch`);
+    return getAddress(dataSlice(bytes, i * 32 + 12, (i + 1) * 32));
+  };
+  const firstTail = word(15);
+  if (firstTail !== FIRST_TAIL_OFFSET) {
+    bail(`return does not match the deployed 18-slot layout (first dynamic offset ${firstTail} != ${SESSION_JOB_HEAD_BYTES})`);
+  }
+  const secondTail = word(17);
+  if (secondTail < SECOND_TAIL_MIN_OFFSET || secondTail >= BigInt(len)) {
+    bail(`return does not match the deployed 18-slot layout (second dynamic offset ${secondTail} out of range)`);
+  }
+  const status = word(12);
+  if (status > 2n) bail(`status slot holds ${status}; expected Active/Completed/TimedOut (0/1/2) — layout mismatch`);
+  return {
+    id: word(0), depositor: addr(1), host: addr(2), paymentToken: addr(3),
+    deposit: word(4), pricePerToken: word(5), tokensUsed: word(6),
+    maxDuration: word(7), startTime: word(8), lastProofTime: word(9),
+    proofInterval: word(10), proofTimeoutWindow: word(11), status: Number(status),
+  };
+}
+
 export interface SessionJob {
   id: number;
   depositor: string;
@@ -136,10 +227,12 @@ function validateProofTimeoutWindow(timeout?: number): number {
 export class JobMarketplaceWrapper {
   private readonly chainId: number;
   private readonly signer: Signer;
+  /** Optional dedicated read provider (rpcUrl). The two session reads prefer it over the wallet. */
+  private readonly readProvider?: Provider;
   private readonly contract: Contract;
   private readonly contractAddress: string;
 
-  constructor(chainId: number, signer: Signer) {
+  constructor(chainId: number, signer: Signer, readProvider?: Provider) {
     if (!ChainRegistry.isChainSupported(chainId)) {
       throw new UnsupportedChainError(chainId, ChainRegistry.getSupportedChains());
     }
@@ -147,6 +240,7 @@ export class JobMarketplaceWrapper {
 
     this.chainId = chainId;
     this.signer = signer;
+    this.readProvider = readProvider;
     this.contractAddress = chain.contracts.jobMarketplace;
     this.contract = new Contract(this.contractAddress, JobMarketplaceABI, signer);
   }
@@ -453,6 +547,48 @@ export class JobMarketplaceWrapper {
     return mapSessionJob(await this.contract.sessionJobs(jobId));
   }
 
+  /** The provider the two session reads use — the dedicated read provider when wired (1.38.1 moved
+   *  discovery reads off the injected wallet; the pre-flight is the one read between a card charge
+   *  and a spent session), else the signer's. Refused, typed, when neither exists. */
+  private sessionReadProvider(): Provider {
+    const provider = this.readProvider ?? this.signer.provider;
+    if (!provider) throw new SDKError('No provider available for the session read', 'PROVIDER_ERROR');
+    return provider;
+  }
+
+  /** `verifyChain()` against a specific provider — the one the read will use. */
+  private async assertChainOn(provider: Provider): Promise<void> {
+    const actualChainId = Number((await provider.getNetwork()).chainId);
+    if (actualChainId !== this.chainId) {
+      throw new ChainMismatchError(this.chainId, actualChainId, 'session read');
+    }
+  }
+
+  /**
+   * The A.3 pre-flight read for an ADOPTED session: `sessionJobs(jobId)` as raw words, decoded
+   * drift-proof and failing CLOSED (see {@link decodeSessionJobWords}). One `eth_call`.
+   */
+  async getSessionJobOnChain(jobId: bigint): Promise<OnChainSessionJob> {
+    const provider = this.sessionReadProvider();   // before the chain check, which dereferences the provider
+    await this.assertChainOn(provider);
+    const data = await provider.call({
+      to: this.contractAddress,
+      data: this.contract.interface.encodeFunctionData('sessionJobs', [jobId]),
+    });
+    return decodeSessionJobWords(data);
+  }
+
+  /** The bytes32 model id a session was created for (`sessionModel(jobId)`), over the same provider. */
+  async getSessionModel(jobId: bigint): Promise<string> {
+    const provider = this.sessionReadProvider();
+    await this.assertChainOn(provider);
+    const data = await provider.call({
+      to: this.contractAddress,
+      data: this.contract.interface.encodeFunctionData('sessionModel', [jobId]),
+    });
+    return this.contract.interface.decodeFunctionResult('sessionModel', data)[0] as string;
+  }
+
   /**
    * Get proof submission details for a session
    *
@@ -478,7 +614,7 @@ export class JobMarketplaceWrapper {
 
   // Chain Management
   async switchToChain(newChainId: number): Promise<JobMarketplaceWrapper> {
-    return new JobMarketplaceWrapper(newChainId, this.signer);
+    return new JobMarketplaceWrapper(newChainId, this.signer, this.readProvider);   // keep the read/write split
   }
 
   // Batch Operations

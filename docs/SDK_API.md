@@ -2540,6 +2540,112 @@ The SDK independently recomputes every number the node echoes — the token tota
 against the on-chain price, the slice schedule, and each slice's delta and running total — and
 rejects the run rather than letting an over-claim settle.
 
+### Card / vault path — `existingSession` (1.38.5)
+
+When a fiat service has minted the session against vault deposits (`POST /fiat/session`) and the
+caller has delivered the FC1.6 handshake with `postSessionAuth`, pass the ids and `submitTraining`
+adopts that session instead of creating one — **no estimate-funded `startSession`, no USDC
+approval, no wallet touch**.
+
+```typescript
+const handle = await training.submitTraining({
+  job, bundle, hostAddress,
+  existingSession: { sessionId, jobId },   // bigints, from POST /fiat/session — per call, never cached
+  endpoint: 'https://host2.fabstir.net',   // REQUIRED — the http(s) BASE used for postSessionAuth
+  chainId: 84532,                          // or the SDK default
+  onProgress, persistPointer,
+});
+```
+
+Same rules as the LTX path: `endpoint` must be the http(s) base (normalised for trailing slashes
+and scheme case; any `ws(s)://` form is rejected before the network), `validateAgainstBundle`
+still runs (funds are already locked — a doomed job wastes vault money and spins a zero-proof
+settle cycle), the on-chain price is still read so the over-claim guard never trusts the echo,
+and `registerExternalSession` seeds the registry. **Every failure after adoption carries
+`{ sessionId, jobId, adopted: true }` in `detail`** — including a late rejection of
+`handle.result` — because on this path the money moved before the SDK was called and the ids
+are what a UI relays to the service for reclaim. `existingSession` cannot be load-balanced: the
+session is bound on-chain to one host.
+
+**The A.3 pre-flight — the check only the SDK can make.** On the wallet path the SDK creates the
+session, so its parameters are right by construction. On the vault path a service created it
+with its own constants (today `maxDuration 3600 / proofTimeoutWindow 300`), and the node's A.3
+rejects `train` AFTER escrow — the session is spent (one `train` per session, ever) and the
+deposit waits on the zero-proof settle. So before `train`, `validateExistingSession` reads the
+on-chain session and refuses locally unless ALL of:
+
+| check | rule |
+|---|---|
+| `exists` | the decoded `id` equals `jobId` — a missing mapping key decodes as the zero struct, which would otherwise read as Active |
+| `status` | Active |
+| `model` | `sessionModel(jobId)` equals `trainingModelId` |
+| `host` | the session's `host` is the host being connected to (the node never needs this; a client does) |
+| `price` | `pricePerToken` equals the host's registered price for this model and the session's token |
+| `headroom` | `deposit × 1000 / pricePerToken − tokensUsed ≥ trainingTokens(job)` |
+| `lifetime` | `startTime + maxDuration − now ≥ trainJobTimeoutSecs + 600` |
+| `proofTimeoutWindow` | `≥ 3600` |
+
+The session is read **drift-proof**: raw words against the deployed 18-slot layout, failing
+CLOSED on any drift (a decoder that fails open is the exact hole A.3 exists to close). The
+pre-flight is RPC reads only — the accept latitude is 1,200 s from session creation — so no S5
+traffic or bundle re-fetch happens between adoption and the `train` frame.
+
+A refusal is `VALIDATION_FAILED` with `detail.reason === 'adoptedSessionParams'` — deliberately
+distinct from the node's terminal `sessionParams`: the **job** is fine, the **session** is not,
+and the recourse is a fresh, correctly shaped session for the same job (a second
+`/fiat/session` with new ids). `isReshoppable` stays `true`; do not retire the job.
+`detail.check` names the first failing check and `detail.failed` (typed `A3CheckFailure[]`) lists
+them all.
+
+**Every other failure on this path is classified so the UI never buys a second session to
+rediscover a local fault.** The reason constants are exported:
+
+| what failed | code / `detail.reason` | terminal? |
+|---|---|---|
+| the adoption call itself — endpoint not the http(s) base, query/fragment, `ws(s)://`, no chainId, load-balancing an adopted session | `VALIDATION_FAILED` / `EXISTING_SESSION_CONFIG_REASON` | yes |
+| the on-chain session or model could not be read drift-proof, or the price read failed (RPC, wiring) | `ESTIMATE_MISMATCH` / `SESSION_DECODE_REASON` | yes |
+| the wrapper or SessionManager lacks a method this path needs | `ESTIMATE_MISMATCH` / `missingDependencyMethod` | yes |
+| the SDK's own wiring after adoption (`SESSION_NOT_FOUND`, `ENCRYPTION_NOT_AVAILABLE`, …) or a programming fault | `ESTIMATE_MISMATCH` / `missingDependency` (`detail.sdkCode`, `detail.cause`) | yes |
+| the wire (`WS_*`, init timeout, auth unreachable, the host unreachable for its public key) | `SIDECAR_UNAVAILABLE` / `transport` (`detail.sdkCode`, `detail.cause`, `detail.consumed: false`) | no — retryable on the **same** session: every one of these is raised before `train` leaves, so nothing was consumed and `requiresFreshSession` is `false` |
+
+The host's own "no price for this token" (`ZERO_MODEL_PRICE`) is the `price` **check**, not a read
+failure. `registerExternalSession` itself now validates the endpoint the same way
+(`SESSION_ENDPOINT_INVALID`), so a caller that seeds the registry directly cannot mistarget a paid session.
+
+**`switchChain()` rebuilds every chain-bound manager** (model, host, client, transcode, LTX, training) or
+refuses with `CHAIN_SWITCH_UNSUPPORTED` if the target chain lacks a registry address — never a mixed state.
+Re-fetch managers after a switch (`sdk.getTrainingManager()`); an instance held across the switch is the
+old chain's. A host-selection service you installed on the training manager survives the rebuild.
+
+⚠️ **Frozen interface vs deployed node.** The pre-flight enforces the frozen A.3 (`proofTimeoutWindow ≥ 3600`).
+The UI's real training sessions of 2026-08-26 (jobs 1127–1133) were created with `proofTimeoutWindow 300 /
+maxDuration 86400` and the deployed node accepted `train` on all of them — so the node did not enforce that
+floor then. Until the node developer confirms the floor is live, expect the pre-flight to refuse sessions the
+current node would run; that is the specification, and it is the node that has to move, not the check.
+
+```typescript
+import { TrainingError, ADOPTED_SESSION_PARAMS_REASON } from '@fabstir/sdk-core';
+try { await training.submitTraining({ ...opts, existingSession }); }
+catch (e) {
+  if (e instanceof TrainingError && e.detail?.reason === ADOPTED_SESSION_PARAMS_REASON) {
+    // e.detail.failed: [{ check: 'lifetime', expected: '>= 13200 s remaining', actual: '3500 s' }, ...]
+    // → open a fresh, correctly shaped session and resubmit the SAME job
+  }
+}
+```
+
+`trainJobTimeoutSecs` defaults to M0's 12600 and is a constructor option
+(`config.trainingJobTimeoutSecs`) because the node's `TRAIN_JOB_TIMEOUT_SECS` is deployable.
+
+**Adopted-session error semantics.** `CAPACITY` on an adopted session consumes it (C.6 keys its
+one-in-flight rule on the depositor, which on the card path is the vault). `isRetryable` still
+reads true — but "again" on an adopted session always means a **fresh session**, never a retry
+on the same one; `requiresFreshSession` says so, and `detail.adopted === true` tells you which
+path you are on.
+
+**Reclaim.** `handle.sessionId` and `handle.jobId` are set on both paths (1.38.5), so
+`training.triggerSessionTimeout(Number(handle.jobId))` needs nothing you did not already hold.
+
 ### Serve back a finished adapter
 
 ```typescript

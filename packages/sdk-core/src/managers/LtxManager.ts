@@ -3,6 +3,7 @@
 import { formatUnits } from 'ethers';
 import { ltxTokens, canonicalBundleHash, ltxInputCommitmentFor, ltxImageHash, ltxVideoHash, ltxMerkleRoot, ltxProofHash, recoverLtxSigner } from '../utils/ltx-utils';
 import { tokensToUsdc } from '../utils/transcode-utils';
+import { normalizeNodeHttpUrl } from '../utils/validation';
 import { LtxError } from '../errors/ltx-errors';
 import type { LtxJob, LtxPriceEstimate, LtxBundle, LtxBundleMetadata, LtxSubmitOptions, LtxResult, LtxVerification } from '../types/ltx.types';
 
@@ -184,17 +185,10 @@ export class LtxManager {
         'LTX_PREVALIDATION_FAILED', existing,
       );
     }
-    // Q8: ONE nodeHttpUrl must serve both postSessionAuth and this call. postSessionAuth strips
-    // trailing slashes and matches the scheme case-INsensitively; submitLtx's WS derivation does
-    // neither ('…/' → '…//v1/ws', 'HTTPS://' → unconverted). Normalise to the form the derivation
-    // accepts — scheme only, since URL paths are case-sensitive.
-    const endpoint = options.endpoint
-      ?.replace(/\/+$/, '')
-      .replace(/^(https?):\/\//i, (_m, scheme) => `${scheme.toLowerCase()}://`);
-    // http(s) base ONLY, and only in a form submitLtx's derivation can actually convert: it is
-    // case-SENSITIVE and treats a 'ws://' substring ANYWHERE as "already a WS URL", passing it
-    // through verbatim. Anything else would silently mistarget, so reject it before the network.
-    if (!endpoint || !/^https?:\/\//.test(endpoint) || endpoint.includes('ws://') || endpoint.includes('wss://')) {
+    // Q8: ONE nodeHttpUrl must serve both postSessionAuth and this call — the normalisation and
+    // the http(s)-only rule live in normalizeNodeHttpUrl (shared with the training path).
+    const endpoint = normalizeNodeHttpUrl(options.endpoint);
+    if (!endpoint) {
       throw new LtxError(
         `existingSession requires a plain http(s):// node endpoint, got: ${options.endpoint}`,
         'LTX_PREVALIDATION_FAILED', existing,

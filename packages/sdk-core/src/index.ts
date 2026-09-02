@@ -82,7 +82,8 @@ export * from './contracts';
 export { TransactionHelper } from './contracts/TransactionHelper';
 export { ContractManager } from './contracts/ContractManager';
 export { JobMarketplaceWrapper } from './contracts/JobMarketplace';
-export type { SessionCreationParams, DirectSessionParams, SessionJob, DelegatedSessionParams } from './contracts/JobMarketplace';
+export type { SessionCreationParams, DirectSessionParams, SessionJob, DelegatedSessionParams, OnChainSessionJob } from './contracts/JobMarketplace';
+export { decodeSessionJobWords } from './contracts/JobMarketplace';
 export type { SessionJobParams, DepositBalances } from './managers/PaymentManagerMultiChain';
 
 // Export types
@@ -181,7 +182,12 @@ export type { LtxJob, LtxSubmitOptions } from './types/ltx.types';
 export {
   buildTrainAction, buildTrainCancelAction, buildLoraSessionField, TRAINING_PROGRESS_STAGES,
 } from './types/training.types';
-export { TRAINING_ERROR_CODES, TRAINING_WIRE_VISIBLE_CODES, TrainingError } from './errors/training-errors';
+export {
+  TRAINING_ERROR_CODES, TRAINING_WIRE_VISIBLE_CODES, TrainingError,
+  ADOPTED_SESSION_PARAMS_REASON, EXISTING_SESSION_CONFIG_REASON, SESSION_DECODE_REASON,
+} from './errors/training-errors';
+export { TRAIN_JOB_TIMEOUT_SECS, A3_SETTLE_MARGIN_SECS, A3_MIN_PROOF_TIMEOUT_WINDOW_SECS } from './managers/TrainingManager';
+export type { TrainingExistingSession, SubmitTrainingOptions, A3CheckFailure } from './managers/TrainingManager';
 // The canonical training maths, pinned at the entry exactly as `ltxTokens` is: callers running
 // their own over-claim guard must be able to recompute the bill and the schedule byte-for-byte
 // rather than re-deriving them. `trainingSliceSchedule` takes sliceTokens explicitly — the job

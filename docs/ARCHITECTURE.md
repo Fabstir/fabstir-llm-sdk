@@ -97,15 +97,18 @@ The SDK uses a manager pattern where each manager handles a specific domain:
   - Best host selection algorithms
   - Job lifecycle management
 
-#### **HostManagerEnhanced** (`/managers/HostManagerEnhanced.ts`)
-- Enhanced host registration and management
-- Model listing and capabilities
-- Metadata management
-- Host status tracking
+#### **HostManager** (`/managers/HostManager.ts`)
+- Host registration, staking, and management
+- Model listing, capabilities, and per-model/token pricing
+- Host discovery (`findHostsForModel`, `getActiveHosts`) and metadata management
 - Key Features:
   - JSON metadata support
   - Model validation
   - Multi-model registration
+  - Dual read/write contract instances (1.38.1+): every discovery read rides the
+    dedicated `rpcUrl` provider, only transactions touch the signer — reads are never
+    rate-limited or observed by the injected wallet (`getReadProviderSource()` reports
+    where reads are going)
 
 #### **ModelManager** (`/managers/ModelManager.ts`)
 - Model governance and validation
@@ -135,7 +138,7 @@ The SDK uses a manager pattern where each manager handles a specific domain:
   - XChaCha20-Poly1305 AEAD encryption
   - ECDH key exchange on secp256k1
   - ECDSA sender authentication
-  - Replay protection via message indexing
+  - Replay protection via per-session message indexing
 
 #### **TranscodeManager** (`/managers/TranscodeManager.ts`)
 - GPU-accelerated video transcoding with load balancing across hosts
@@ -177,6 +180,31 @@ The SDK uses a manager pattern where each manager handles a specific domain:
   canonical bundle hash (recursive key-sort → compact JSON → keccak256)
 - WebSocket submission (`submitLtxWs`): `ltx_generate` dispatch, staged progress, typed `LtxError`
   mapping, client-side cancel
+
+#### **TrainingManager** (`/managers/TrainingManager.ts`)
+- LoRA/QLoRA fine-tuning (Training M0) — mirrors LtxManager over the same encrypted WS +
+  paid-session rail; proven end-to-end August 2026 (an adapter answering facts that exist
+  only in its training set, beside a base model that correctly calls them unknown)
+- Pre-deposit validation against the host's published bounds bundle (templates, ranks,
+  alphas, seqLens) — a bad job never locks funds
+- `count-v1` client-side token counting with the template's **pinned tokenizer**
+  (`@huggingface/tokenizers`), verified exact three ways: browser == offline == node
+- Dataset sharded, encrypted, and uploaded to S5; input commitment recomputed against the
+  host's attestation to prove it trained *your* job on *your* dataset
+- Finished adapter served back on an ordinary encrypted chat session (`lora` field in the
+  session init; staging is post-ack with a dedicated error listener)
+- Key Features: `estimateTrainingCost` (exact before any deposit), bounds validation,
+  slice-by-slice settlement design (paid phase staged next)
+- Card / vault path (1.38.5): `existingSession` adopts a service-minted session with no wallet
+  touch, after an A.3 pre-flight that reads the on-chain session drift-proof (raw words against
+  the 18-slot layout, fails closed) and refuses locally before the one `train` the session can
+  carry; every post-adoption failure carries `{ sessionId, jobId }` for reclaim
+
+#### Training Utilities (`/utils/training-*.ts`)
+- `training-count.ts` — count-v1 declaredTokens (fixture-verified 173/173 against node vectors)
+- `training-shard.ts` — dataset sharding + encryption for S5 upload
+- `training-serve-back.ts` — adapter serve-back session wiring
+- `training-ws.ts` / `training-utils.ts` — WS submission and shared helpers
 
 #### **VectorRAGManager** (`/managers/VectorRAGManager.ts`)
 - Host-side vector database operations via WebSocket
@@ -265,6 +293,13 @@ The SDK interacts with smart contracts deployed on Base Sepolia (and future chai
 cat .env.test | grep CONTRACT_
 ```
 
+**Read/write provider split (1.38.1+):** every contract *read* (host discovery, model
+enumeration, pricing) goes through a dedicated provider built from `rpcUrl`; only transactions
+ride the wallet signer. Read volume never hits the injected wallet (which rate-limits dapps),
+a user-configured RPC endpoint is honored, and read/write chain parity is asserted at
+initialization, on the wallet's `chainChanged`, and across `switchChain()`
+(`READ_WRITE_CHAIN_MISMATCH` on divergence).
+
 **Required contracts** (7 total):
 - `CONTRACT_JOB_MARKETPLACE` - Job creation, assignment, payment escrow
 - `CONTRACT_NODE_REGISTRY` - Host registration, staking, model listings
@@ -284,7 +319,17 @@ User → SDK → WebSocket → Host Node (fabstir-llm-node)
         Streaming Responses     Transcoder Sidecar (ffmpeg + NVENC)
 ```
 
-All WebSocket messages use E2E encryption (ECDH + XChaCha20-Poly1305). The same connection carries LLM inference, vector operations, image generation, video transcoding, and LTX video generation. For transcoding and video generation, the host node proxies requests to GPU sidecars via localhost (ffmpeg/NVENC for transcode; a headless ComfyUI running pinned LTX 2.3 templates for generation — clients send typed parameters only, never graphs).
+All WebSocket messages use E2E encryption (ECDH + XChaCha20-Poly1305). The same connection carries LLM inference, vector operations, image generation, video transcoding, LTX video generation, and LoRA fine-tuning. For transcoding and video generation, the host node proxies requests to GPU sidecars via localhost (ffmpeg/NVENC for transcode; a headless ComfyUI running pinned LTX 2.3 templates for generation — clients send typed parameters only, never graphs).
+
+**Session crypto is per-session and per-connection (1.38.2–1.38.4).** The node registers one
+key per session; the SDK holds a matching per-session map — frames are decrypted with the key
+of the session stamped on them, outgoing prompts are encrypted (and replay-protected) under the
+key of the session the call was made for, init acks are correlated by `session_id`, and
+concurrent handshakes are serialized. `WebSocketClient` counts connection generations: a silent
+reconnect invalidates the session key (the new connection has no node-side session), fails
+in-flight encrypted requests immediately with `SESSION_KEY_INVALIDATED` (retryable), and
+discards frames queued for the dead connection rather than replaying them. Key attribution is
+observable end to end as `[SDK:wire]` log lines carrying short key fingerprints.
 
 **Key Innovation**: Gasless session ending
 - User closes WebSocket connection
@@ -560,7 +605,11 @@ S5_SEED_PHRASE="..." # Auto-generated if not provided
 
 - **End-to-end encryption by default** (XChaCha20-Poly1305 AEAD, Phase 6.2)
 - **Forward secrecy** via ephemeral session keys (discarded after use)
+- **Per-session keys bound to connection identity** — one key per session client-side to match
+  the node, invalidated the moment the connection is replaced (1.38.2–1.38.4)
 - **Sender authentication** via ECDSA signatures on every message
+- **Reads off the wallet** — chain reads ride the configured RPC endpoint, so host and model
+  discovery never leaks through the wallet provider (1.38.1+)
 - Private keys never leave the client
 - S5 seed phrases derived from wallet signatures
 - Contract interactions validated before submission
@@ -570,13 +619,12 @@ S5_SEED_PHRASE="..." # Auto-generated if not provided
 
 ## Error Handling
 
-Hierarchical error system:
-- `FabstirError` - Base error class
-- `AuthenticationError` - Auth failures
-- `PaymentError` - Payment issues
-- `SessionError` - Session problems
-- `StorageError` - S5 storage errors
-- `ContractError` - Blockchain issues
+Typed error system, fail-fast (pre-MVP: no fallbacks):
+- `SDKError` - Base class: `message`, `code` (e.g. `SESSION_KEY_INVALIDATED` with
+  `retryable: true`, `READ_WRITE_CHAIN_MISMATCH`), optional `cause`
+- Typed families under `/errors/`: `TrainingError` (wire codes frozen per the M0 interface),
+  `LtxError`, transcode, model, pricing, chain, web-search, image-generation, and context
+  errors — each mapping node wire codes to typed client errors
 
 ## Deployment Architecture
 
@@ -584,12 +632,13 @@ Hierarchical error system:
 - **Contracts**: Deployed on Base Sepolia
 - **Host Nodes**: Run `fabstir-llm-node` instances
 - **S5 Network**: Decentralized storage layer
-- **Test Harness**: Next.js app at `localhost:3000`
+- **Test Harness**: Next.js app at `localhost:3006`
 
 ## Dependencies
 
 Core dependencies:
 - `ethers` v6.x - Blockchain interactions
+- `@huggingface/tokenizers` 0.1.3 - Pinned-tokenizer token counting for training (`count-v1`)
 - `@s5-dev/s5js` - Decentralized storage
 - `ws` - WebSocket client
 - `events` - Event emitter
@@ -597,6 +646,14 @@ Core dependencies:
 
 ## Version History
 
+- **v1.38.1–1.38.4** - Read/write provider split (reads ride `rpcUrl`, never the wallet);
+  connection generations with session-key invalidation on reconnect; per-session crypto state
+  (key map, ack/frame correlation by `session_id`, serialized handshakes, `[SDK:wire]`
+  observability); frame stamp threaded from the caller
+- **v1.38.0** - Training M0: TrainingManager wire surface, count-v1, serve-back — proven
+  end-to-end August 2026
+- **v1.36.0** - LTX generation against existing vault/card-paid sessions; explicit session
+  targeting for `submitLtx`/`submitTranscode`
 - **v1.18.0** - HLS adaptive bitrate streaming: `buildHlsFormats`, M3U8 playlist generation, per-segment encryption, `isHlsOutput` type guard
 - **v1.17.x** - S5 concurrent write serialization, non-blocking endSession, session group persistence
 - **v0.5.0** - Orchestrator package: multi-agent, A2A, x402 payments, session multiplexing

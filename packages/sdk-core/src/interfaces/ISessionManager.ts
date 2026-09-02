@@ -264,6 +264,10 @@ export interface ISessionManager {
    * Seed the in-memory registry with a session created outside the SDK (vault /
    * fiat flow) so the WS submit paths can run against it. No S5 write, no
    * network call. Re-registration overwrites.
+   *
+   * @throws SDKError `SESSION_ENDPOINT_INVALID` (1.38.6+) when `endpoint` is not the node's plain
+   *   http(s) base — a `ws(s)://` value (even a full `…/v1/ws`), a query or fragment, or a non-string.
+   *   The value is normalised (trailing slashes, scheme case) before it is stored.
    */
   registerExternalSession(config: ExternalSessionConfig): void;
 }

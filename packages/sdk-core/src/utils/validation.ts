@@ -114,3 +114,26 @@ export function validateRpcUrl(url: any): void {
     throw new SDKError('Invalid RPC URL format', 'CONFIG_INVALID_RPC');
   }
 }
+
+/**
+ * Normalise a node endpoint to the http(s) BASE form the WS derivation in
+ * `SessionManager.acquireSessionTransport` can convert: trailing slashes stripped, scheme
+ * lower-cased. Returns `undefined` for anything else — no endpoint, a non-string, a non-http(s)
+ * scheme, a `ws://` / `wss://` substring ANYWHERE (the derivation is case-sensitive and treats
+ * that substring as "already a WS URL", passing it through verbatim), or a query / fragment
+ * (the derivation appends `/v1/ws` AFTER it, so the socket would open at the node root). Every
+ * one of those is a silent mistarget of a paid session. Shared by the LTX and training
+ * existingSession paths and by `registerExternalSession` (Q8: ONE nodeHttpUrl serves both
+ * postSessionAuth and the submit).
+ */
+export function normalizeNodeHttpUrl(endpoint: string | undefined): string | undefined {
+  if (typeof endpoint !== 'string') return undefined;
+  const normalized = endpoint
+    .replace(/\/+$/, '')
+    .replace(/^(https?):\/\//i, (_m, scheme: string) => `${scheme.toLowerCase()}://`);
+  if (!/^https?:\/\//.test(normalized) || normalized.includes('ws://') || normalized.includes('wss://')) {
+    return undefined;
+  }
+  if (/[?#]/.test(normalized)) return undefined;
+  return normalized;
+}

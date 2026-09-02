@@ -65,6 +65,9 @@ export interface FabstirSDKCoreConfig {
   ltxModelId?: string;
   /** Registered TRAINING model id (bytes32, A.2) — enables getTrainingManager(). */
   trainingModelId?: string;
+  /** The node's `TRAIN_JOB_TIMEOUT_SECS` (deployable; M0 pins 12600). Feeds the A.3
+   *  remaining-lifetime pre-flight on adopted (vault / card-paid) training sessions. */
+  trainingJobTimeoutSecs?: number;
 
   // Contract addresses (optional - can use env vars)
   contractAddresses?: {
@@ -207,6 +210,7 @@ export class FabstirSDKCore extends EventEmitter {
       chainId: config.chainId || 84532, // Base Sepolia default
       ltxModelId: config.ltxModelId, // LTX video-sidecar model id (enables getLtxManager)
       trainingModelId: config.trainingModelId, // Training M0 model id (enables getTrainingManager)
+      trainingJobTimeoutSecs: config.trainingJobTimeoutSecs,
 
       contractAddresses: {
         // Required addresses - no fallbacks
@@ -892,25 +896,14 @@ export class FabstirSDKCore extends EventEmitter {
       if (!modelRegistryAddress) {
         throw new SDKError('Model Registry address not configured', 'CONFIG_ERROR');
       }
-      this.modelManager = new ModelManager(this.readProvider!, modelRegistryAddress);
-
       const nodeRegistryAddress = this.config.contractAddresses?.nodeRegistry;
       if (!nodeRegistryAddress) {
         throw new SDKError('Node Registry address not configured', 'CONFIG_ERROR');
       }
-      const fabTokenAddress = this.config.contractAddresses?.fabToken;
-      const hostEarningsAddress = this.config.contractAddresses?.hostEarnings;
-      this.hostManager = new HostManager(
-        this.signer,
-        nodeRegistryAddress,
-        this.modelManager,
-        fabTokenAddress,
-        hostEarningsAddress,
-        this.contractManager,
-        this.readProvider
-      );
-
-      await (this.hostManager as any).initialize();
+      await this.constructModelAndHostManagers({
+        modelRegistry: modelRegistryAddress, nodeRegistry: nodeRegistryAddress,
+        fabToken: this.config.contractAddresses?.fabToken, hostEarnings: this.config.contractAddresses?.hostEarnings,
+      });
 
       // NEW: Enable price validation in SessionManager
       if (this.sessionManager) {
@@ -930,7 +923,7 @@ export class FabstirSDKCore extends EventEmitter {
 
       // Create ClientManager after ModelManager and HostManager are available
       this.clientManager = new ClientManager(
-        this.modelManager,
+        this.modelManager!,   // built by constructModelAndHostManagers() above
         this.hostManager as HostManager,
         this.contractManager!
       );
@@ -990,35 +983,8 @@ export class FabstirSDKCore extends EventEmitter {
         }
       }
 
-      // Initialize LtxManager when an LTX model id is configured.
-      // jobMarketplace activates the on-chain integrity poll in verifyAttestation (M1 economics —
-      // live once the node submits proofs; skips cleanly while none exist).
-      if (!hostOnly && !skipS5 && this.sessionManager && this.storageManager && this.contractManager && this.config.ltxModelId) {
-        this.ltxManager = new LtxManager({
-          sessionManager: this.sessionManager,
-          storageManager: this.storageManager,
-          paymentManager: this.paymentManager,
-          jobMarketplace: new JobMarketplaceWrapper(this.currentChainId, this.signer!),
-          hostManager: this.hostManager,
-          ltxModelId: this.config.ltxModelId,
-          usdcAddress: await this.contractManager.getContractAddress('usdcToken'),
-          chainId: this.currentChainId,
-        });
-      }
-
-      // Training M0. Same gate idiom as LTX: the model id IS the opt-in.
-      if (!hostOnly && !skipS5 && this.sessionManager && this.storageManager && this.contractManager && this.config.trainingModelId) {
-        this.trainingManager = new TrainingManager({
-          sessionManager: this.sessionManager,
-          storageManager: this.storageManager,
-          paymentManager: this.paymentManager,
-          jobMarketplace: new JobMarketplaceWrapper(this.currentChainId, this.signer!),
-          hostManager: this.hostManager,
-          trainingModelId: this.config.trainingModelId,
-          usdcAddress: await this.contractManager.getContractAddress('usdcToken'),
-          chainId: this.currentChainId,
-        });
-      }
+      // LTX + Training managers — rebuilt on switchChain(), see buildSidecarManagers.
+      await this.buildSidecarManagers(hostOnly, skipS5);
     }
 
     // Initialize bridge client if configured
@@ -1721,6 +1687,71 @@ export class FabstirSDKCore extends EventEmitter {
   /**
    * Reinitialize managers for new chain
    */
+  /**
+   * The sidecar managers (LTX, Training) each hold a JobMarketplace wrapper pinned to a chain and
+   * the chain id itself, so they are REBUILT on switchChain() — the ContractManager rebuild alone
+   * left them verifying against the old chain, which on the card-paid training path is a terminal
+   * refusal on a session already paid for. The wrappers get the dedicated read provider so the A.3
+   * pre-flight rides rpcUrl, not the injected wallet. Same gate idiom as before: the model id IS the opt-in.
+   */
+  private async buildSidecarManagers(
+    hostOnly: boolean = this.config.hostOnly === true,
+    skipS5: boolean = this.config.skipS5 === true,
+  ): Promise<void> {
+    if (hostOnly || skipS5 || !this.sessionManager || !this.storageManager || !this.contractManager) return;
+    const usdcAddress = await this.contractManager.getContractAddress('usdcToken');
+    const jobMarketplace = () => new JobMarketplaceWrapper(this.currentChainId, this.signer!, this.readProvider);
+    if (this.config.ltxModelId) {
+      // jobMarketplace activates the on-chain integrity poll in verifyAttestation (M1 economics —
+      // live once the node submits proofs; skips cleanly while none exist).
+      this.ltxManager = new LtxManager({
+        sessionManager: this.sessionManager,
+        storageManager: this.storageManager,
+        paymentManager: this.paymentManager,
+        jobMarketplace: jobMarketplace(),
+        hostManager: this.hostManager,
+        ltxModelId: this.config.ltxModelId,
+        usdcAddress,
+        chainId: this.currentChainId,
+      });
+    }
+    if (this.config.trainingModelId) {
+      this.trainingManager = new TrainingManager({
+        sessionManager: this.sessionManager,
+        storageManager: this.storageManager,
+        paymentManager: this.paymentManager,
+        jobMarketplace: jobMarketplace(),
+        hostManager: this.hostManager,
+        trainingModelId: this.config.trainingModelId,
+        usdcAddress,
+        chainId: this.currentChainId,
+        trainJobTimeoutSecs: this.config.trainingJobTimeoutSecs,
+      });
+    }
+  }
+
+  /**
+   * The chain-bound pair: ModelManager (model registry, read provider) and HostManager (node registry,
+   * read provider, model manager). ONE constructor for the initial build and the switchChain rebuild,
+   * so the two cannot drift apart.
+   */
+  private async constructModelAndHostManagers(addresses: {
+    modelRegistry: string; nodeRegistry: string; fabToken?: string; hostEarnings?: string;
+  }): Promise<void> {
+    const modelManager = new ModelManager(this.readProvider!, addresses.modelRegistry);
+    this.modelManager = modelManager;
+    this.hostManager = new HostManager(
+      this.signer!,
+      addresses.nodeRegistry,
+      modelManager,
+      addresses.fabToken,
+      addresses.hostEarnings,
+      this.contractManager,
+      this.readProvider
+    );
+    await (this.hostManager as any).initialize();
+  }
+
   private async reinitializeManagersForChain(): Promise<void> {
     // Get new contract addresses for the chain
     const chainConfig = ChainRegistry.getChain(this.currentChainId);
@@ -1740,8 +1771,43 @@ export class FabstirSDKCore extends EventEmitter {
       });
     }
 
-    // Reinitialize managers that depend on chain-specific contracts
-    // They will use the updated contract manager
+    // A WHOLE rebuild of everything chain-bound, or none of it: rebuilding only some managers leaves the
+    // adopted training path reading the session on one chain and the host's price on another — a
+    // spurious refusal and a second card session for a session that was fine.
+    const contracts = chainConfig.contracts;
+    if (!contracts.modelRegistry || !contracts.nodeRegistry) {
+      throw new SDKError(
+        `Chain ${this.currentChainId} has no model/node registry configured; the managers cannot be rebuilt consistently`,
+        'CHAIN_SWITCH_UNSUPPORTED',
+      );
+    }
+    await this.constructModelAndHostManagers({
+      modelRegistry: contracts.modelRegistry, nodeRegistry: contracts.nodeRegistry,
+      fabToken: contracts.fabToken, hostEarnings: contracts.hostEarnings,
+    });
+    if (this.sessionManager) {
+      (this.sessionManager as any).setHostManager(this.hostManager);
+      (this.sessionManager as any).setHostSelectionService(new HostSelectionService(this.hostManager as HostManager));
+    }
+    if (this.clientManager && this.contractManager) {
+      // both constructed by constructModelAndHostManagers() just above
+      this.clientManager = new ClientManager(this.modelManager!, this.hostManager as HostManager, this.contractManager);
+      await this.clientManager.initialize(this.signer);
+    }
+    if (this.transcodeManager && this.sessionManager && this.storageManager && this.contractManager && this.encryptionManager) {
+      this.transcodeManager = new TranscodeManager(
+        this.sessionManager, this.storageManager, this.contractManager,
+        this.encryptionManager, this.signer!, this.currentChainId,
+      );
+      this.transcodeManager.setHostSelectionService(new HostSelectionService(this.hostManager as HostManager));
+    }
+    // The sidecar managers hold chain-pinned wrappers and chain ids of their own. A caller-installed
+    // host-selection service on the training manager survives the rebuild.
+    const trainingHostSelection = (this.trainingManager as any)?.hostSelectionService;
+    await this.buildSidecarManagers();
+    if (trainingHostSelection && this.trainingManager) {
+      (this.trainingManager as any).setHostSelectionService(trainingHostSelection);
+    }
   }
 
   /**

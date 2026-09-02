@@ -15,7 +15,11 @@ import {
 import { countDatasetTokens } from '../utils/training-count';
 import { PLAUSIBILITY_MAX_BYTES_PER_TOKEN } from '../utils/training-shard';
 import type { TrainingTokenizer } from '../utils/training-count';
-import { TrainingError } from '../errors/training-errors';
+import {
+  TrainingError, ADOPTED_SESSION_PARAMS_REASON, EXISTING_SESSION_CONFIG_REASON, SESSION_DECODE_REASON,
+} from '../errors/training-errors';
+import { normalizeNodeHttpUrl } from '../utils/validation';
+import type { OnChainSessionJob } from '../contracts/JobMarketplace';
 import type {
   TrainingJob, TrainingBundleSection, TrainingSliceAttestation, ManifestPointer,
   ArtifactManifestV1, ManifestFileEntry, DatasetManifestV1,
@@ -38,6 +42,63 @@ export interface TrainingJobMarketplace {
   /** The lost-zero-settle backstop. Already wrapped at `contracts/JobMarketplace.ts:428`, so
    *  this is a call site, not new plumbing. Optional: not every caller wires it. */
   triggerSessionTimeout?(jobId: number): Promise<unknown>;
+  /** A.3 pre-flight on an ADOPTED session: `sessionJobs` from RAW words against the deployed
+   *  18-slot layout, failing CLOSED on drift. REQUIRED (the wrapper carries both): a missing
+   *  method is a compile error here, and a runtime refusal for JS callers — never a skipped check. */
+  getSessionJobOnChain(jobId: bigint): Promise<OnChainSessionJob>;
+  getSessionModel(jobId: bigint): Promise<string>;
+}
+
+/** M0's `TRAIN_JOB_TIMEOUT_SECS` (A.3 / § schedule). The node's is deployable — override via
+ *  `TrainingManagerDeps.trainJobTimeoutSecs` (`config.trainingJobTimeoutSecs` on the SDK).
+ *  TODO(bundle): this is a per-HOST precondition the client is held to and cannot read — the same
+ *  class as `alphas`/`tokenizerSha256`, which A.4 gained at the SDK's request. Resolve
+ *  bundle → dep → this constant once the bundle publishes it. */
+export const TRAIN_JOB_TIMEOUT_SECS = 12600;
+/** A.3's settle margin: dispute window + completion tx. */
+export const A3_SETTLE_MARGIN_SECS = 600;
+/** A.3's `proofTimeoutWindow` floor. The frozen doc pins it at the on-chain `MAX_PROOF_TIMEOUT`
+ *  (3600, live-probed) — two authorities that agree today; a test asserts the parity so that
+ *  whichever moves first is noticed. Deliberately NOT an alias of the chain constant. */
+export const A3_MIN_PROOF_TIMEOUT_WINDOW_SECS = 3600;
+const A3_MIN_PROOF_TIMEOUT_WINDOW = BigInt(A3_MIN_PROOF_TIMEOUT_WINDOW_SECS);
+
+const errMessage = (e: unknown): string => (e as { message?: string })?.message ?? String(e);
+
+/** SDKError codes that mean "the wire", not "our wiring" — the only foreign class that stays retryable. */
+const TRANSPORT_SDK_CODES = new Set([
+  'WS_CONNECTION_ERROR', 'WS_CREATE_ERROR', 'WS_TIMEOUT', 'WS_NOT_CONNECTED', 'WS_SEND_ERROR',
+  'WS_RECONNECT_FAILED', 'SESSION_INIT_ERROR', 'SESSION_AUTH_UNREACHABLE', 'RESPONSE_TIMEOUT',
+  // The host could not be reached for its public key during the init — the wire, not our wiring.
+  'HOST_PUBKEY_UNAVAILABLE', 'NO_API_URL',
+]);
+
+/** Vault / card path: the session a fiat service minted (`POST /fiat/session`) for the SDK to adopt. */
+export interface TrainingExistingSession {
+  sessionId: bigint;
+  jobId: bigint;
+}
+
+/** One failing A.3 check, as reported in `detail.failed`. */
+export interface A3CheckFailure { check: string; expected: string; actual: string }
+
+/** `submitTraining` options — ONE definition, referenced by the class and the interface. */
+export interface SubmitTrainingOptions {
+  job: TrainingJob;
+  bundle?: TrainingBundleSection;
+  hostAddress: string;
+  endpoint?: string;
+  paymentToken?: string;
+  chainId?: number;
+  requestId?: string;
+  onProgress?: (progress: unknown) => void;
+  onSlice?: (slice: unknown) => void;
+  persistPointer?: (record: TrainingPointerRecord) => void | Promise<void>;
+  /** Vault / card path: adopt this session instead of creating one — no estimate-funded
+   *  `startSession`, no approval, no wallet touch. `endpoint` is REQUIRED as the plain
+   *  http(s):// node base (the `nodeHttpUrl` used for `postSessionAuth`); the caller must
+   *  have delivered FC1.6 session-auth first. Accepted per call, never cached. */
+  existingSession?: TrainingExistingSession;
 }
 
 /** Dependencies for TrainingManager. Managers are typed loosely to avoid import cycles —
@@ -53,6 +114,8 @@ export interface TrainingManagerDeps {
   trainingModelId: string;
   usdcAddress: string;
   chainId?: number;
+  /** Overrides {@link TRAIN_JOB_TIMEOUT_SECS} for the A.3 remaining-lifetime pre-flight. */
+  trainJobTimeoutSecs?: number;
 }
 
 export interface TrainingPriceEstimate {
@@ -76,6 +139,7 @@ export class TrainingManager implements ITrainingManager {
   private readonly trainingModelId: string;
   private readonly usdcAddress: string;
   private readonly chainId?: number;
+  private readonly trainJobTimeoutSecs: number;
   private hostSelectionService?: { getRankedHostsForModel(modelId: string, mode?: unknown): Promise<{ host: { address: string; apiUrl: string } }[]> };
 
   constructor(deps: TrainingManagerDeps) {
@@ -87,6 +151,7 @@ export class TrainingManager implements ITrainingManager {
     this.trainingModelId = deps.trainingModelId;
     this.usdcAddress = deps.usdcAddress;
     this.chainId = deps.chainId;
+    this.trainJobTimeoutSecs = deps.trainJobTimeoutSecs ?? TRAIN_JOB_TIMEOUT_SECS;
   }
 
   /** `floor(trainingTokens × pricePerToken / 1000)` (C.1) — byte-identical to the shared
@@ -207,6 +272,14 @@ export class TrainingManager implements ITrainingManager {
     }
     const b = bundle.bounds;
     const total = trainingTokens(job);
+    // NaN compares false against every bound below and a fraction passes them all; both then throw a
+    // raw RangeError out of BigInt(total) on the money path. A malformed job is OURS — terminal.
+    if (!Number.isSafeInteger(total) || total <= 0) {
+      throw new TrainingError(
+        `declaredTokens × epochs must be a positive whole number, got ${total}`,
+        'VALIDATION_FAILED', { reason: 'numericWireRule' },
+      );
+    }
     if (job.epochs > b.maxEpochs) return fail(`epochs ${job.epochs} exceeds maxEpochs ${b.maxEpochs}`);
     if (job.dataset.declaredTokens > b.maxDeclaredTokens) {
       return fail(`declaredTokens ${job.dataset.declaredTokens} exceeds ${b.maxDeclaredTokens}`);
@@ -238,18 +311,14 @@ export class TrainingManager implements ITrainingManager {
    * failure costs nothing, and the session carries training's own lifecycle parameters
    * (`maxDuration 14400 / proofInterval 1000 / proofTimeoutWindow 3600`) — the chat defaults
    * cannot carry a multi-hour run.
+   *
+   * With `opts.existingSession` (vault / card path) the session is adopted rather than created —
+   * see {@link submitOnExistingSession}.
    */
-  async submitTraining(opts: {
-    job: TrainingJob;
-    bundle?: TrainingBundleSection;
-    hostAddress: string;
-    endpoint?: string;
-    paymentToken?: string;
-    requestId?: string;
-    onProgress?: (progress: unknown) => void;
-    onSlice?: (slice: unknown) => void;
-    persistPointer?: (record: TrainingPointerRecord) => void | Promise<void>;
-  }): Promise<TrainingHandle> {
+  async submitTraining(opts: SubmitTrainingOptions): Promise<TrainingHandle> {
+    if (opts.existingSession) {
+      return this.submitOnExistingSession(opts, opts.existingSession);
+    }
     this.validateAgainstBundle(opts.job, opts.bundle);
     const est = await this.estimateTrainingCost(opts.job, opts.hostAddress, opts.paymentToken);
     // `formatUnits(..., 6)` below is inherited verbatim from the LTX path and is correct for
@@ -264,22 +333,241 @@ export class TrainingManager implements ITrainingManager {
         'VALIDATION_FAILED', { reason: 'hostBundle' },
       );
     }
-    const { sessionId } = await this.sessionManager.startSession({
-      chainId: this.chainId, host: opts.hostAddress, endpoint: opts.endpoint,
+    const { sessionId, jobId } = await this.sessionManager.startSession({
+      chainId: opts.chainId ?? this.chainId, host: opts.hostAddress, endpoint: opts.endpoint,
       modelId: this.trainingModelId, paymentMethod: 'deposit', paymentToken: est.paymentToken,
       depositAmount: formatUnits(BigInt(est.depositBaseUnits), 6),
-      encryption: true, maxDuration: 14400, proofInterval: 1000, proofTimeoutWindow: 3600,
+      // `duration` is the key SessionConfig/startSession read; `maxDuration` was silently ignored and the
+      // session fell to PaymentManager's 3600 s default — a lifetime the node's A.3 rejects post-escrow.
+      encryption: true, duration: 14400, proofInterval: 1000, proofTimeoutWindow: 3600,
     });
+    const handle: TrainingHandle = await this.sessionManager.submitTraining(
+      String(sessionId), opts.job, this.wsSubmitOptions(opts, est.pricePerToken),
+    );
+    // The reclaim affordance: `triggerSessionTimeout(Number(handle.jobId))` needs the id the
+    // SDK just minted, and nothing else on the handle carried it.
+    handle.sessionId = sessionId;
+    handle.jobId = jobId;
+    return handle;
+  }
+
+  /**
+   * The WS submit options, built ONCE for both paths. Without the last three the over-claim
+   * guard degrades to "trust the echo" — the one thing constraint 5 exists to prevent — and the
+   * copy that would be forgotten is the vault path, where the money has already moved.
+   */
+  private wsSubmitOptions(opts: SubmitTrainingOptions, pricePerToken: bigint) {
     const template = opts.bundle!.templates.find((t) => t.id === opts.job.templateId)!;
-    return this.sessionManager.submitTraining(String(sessionId), opts.job, {
+    return {
       requestId: opts.requestId, onProgress: opts.onProgress, onSlice: opts.onSlice,
       persistPointer: opts.persistPointer,
-      // Without these three the over-claim guard degrades to "trust the echo" — which is the
-      // one thing constraint 5 exists to prevent.
-      onChainPricePerToken: est.pricePerToken.toString(),
+      onChainPricePerToken: pricePerToken.toString(),
       minAllowListVersion: template.minAllowListVersion,
       sliceTokens: opts.bundle!.bounds.perTemplate?.[opts.job.templateId]?.sliceTokens,
+    };
+  }
+
+  /** The reclaim tag every adopted-path failure carries: `{ sessionId, jobId, adopted: true }`. */
+  private static adoptedIds(e: TrainingExistingSession) {
+    return { sessionId: e.sessionId, jobId: e.jobId, adopted: true as const };
+  }
+
+  private static failMissingDependency(what: string, ids: ReturnType<typeof TrainingManager.adoptedIds>): never {
+    throw new TrainingError(
+      `${what} — the existingSession path FAILS CLOSED rather than proceeding unchecked`,
+      'ESTIMATE_MISMATCH', { reason: 'missingDependencyMethod', ...ids },
+    );
+  }
+
+  /**
+   * The A.3 decision, pure: every failing check in evaluation order (so `failed[0]` is stable),
+   * over values already read. Six node-side rules plus one the node never needs but the client
+   * does — the session's `host` must be the host being connected to: the node IS the host, so
+   * it cannot get that wrong; a client can, and a session bound to X submitted to Y is a spent
+   * session at Y. Reported all at once, not first-only: the live fiat shape fails two.
+   */
+  private static a3Failures(input: {
+    session: OnChainSessionJob; jobId: bigint; model: string; price: bigint | string; needTokens: bigint;
+    hostAddress: string; trainingModelId: string; remainingSecs: number; floorSecs: number;
+  }): A3CheckFailure[] {
+    const { session, jobId, model, price, needTokens, hostAddress, trainingModelId, remainingSecs, floorSecs } = input;
+    const failed: A3CheckFailure[] = [];
+    const fail = (check: string, expected: unknown, actual: unknown): void => {
+      failed.push({ check, expected: String(expected), actual: String(actual) });
+    };
+    // A missing key on a public mapping decodes as the ZERO struct — zero values with real tail
+    // offsets (640 bytes), so every layout pin is satisfied and status 0 = Active. Name it, or the
+    // refusal blames `host`.
+    if (session.id !== jobId) {
+      fail('exists', `job ${jobId} on this JobMarketplace`, session.id === 0n ? 'no such job (zero struct)' : `id ${session.id}`);
+    }
+    if (session.status !== 0) fail('status', 'Active (0)', session.status);
+    if (session.host.toLowerCase() !== hostAddress.toLowerCase()) fail('host', hostAddress, session.host);
+    if (model.toLowerCase() !== trainingModelId.toLowerCase()) fail('model', trainingModelId, model);
+    if (typeof price === 'string') fail('price', 'a registered price for this host, model and token', price);
+    else if (price !== session.pricePerToken) fail('price', price, session.pricePerToken);
+    const headroom = session.pricePerToken > 0n
+      ? session.deposit * 1000n / session.pricePerToken - session.tokensUsed
+      : 0n;
+    if (headroom < needTokens) fail('headroom', `>= ${needTokens} tokens`, `${headroom} tokens`);
+    if (remainingSecs < floorSecs) fail('lifetime', `>= ${floorSecs} s remaining`, `${remainingSecs} s`);
+    if (session.proofTimeoutWindow < A3_MIN_PROOF_TIMEOUT_WINDOW) {
+      fail('proofTimeoutWindow', `>= ${A3_MIN_PROOF_TIMEOUT_WINDOW_SECS} s`, `${session.proofTimeoutWindow} s`);
+    }
+    return failed;
+  }
+
+  /**
+   * The check only the SDK can make: A.3 pre-flight on an ADOPTED session.
+   *
+   * On the wallet path the SDK creates the session, so its parameters are right by
+   * construction. On the vault path a service created it with ITS constants (today
+   * `maxDuration 3600 / proofTimeoutWindow 300`), and the node's A.3 then rejects `train`
+   * AFTER escrow — the session is spent (one `train` per session, ever) and the deposit waits
+   * on the zero-proof settle. So the same maths runs here, BEFORE `train`, against the on-chain
+   * session decoded drift-proof (fails CLOSED — a decoder that fails open is the exact hole
+   * A.3 exists to close), and every refusal carries `{ sessionId, jobId }` for reclaim.
+   *
+   * Latency matters: the accept latitude is 1,200 s from session creation (14400 − 12600 −
+   * 600), so this is RPC reads only — the session and model in parallel, then the price for
+   * the session's own token. No S5 traffic, no bundle re-fetch. The lifetime check uses the
+   * client clock; the node re-checks on block time.
+   *
+   * A refusal is `VALIDATION_FAILED` / {@link ADOPTED_SESSION_PARAMS_REASON} — distinct from
+   * the node's terminal `sessionParams` because here the JOB is fine and the recourse is a
+   * fresh, correctly shaped session for the same job.
+   */
+  async validateExistingSession(
+    existing: TrainingExistingSession, job: TrainingJob, hostAddress: string,
+  ): Promise<{ session: OnChainSessionJob; pricePerToken: bigint; acceptLatitudeSecs: number }> {
+    const ids = TrainingManager.adoptedIds(existing);
+    const jm = this.jobMarketplace;
+    if (typeof jm?.getSessionJobOnChain !== 'function' || typeof jm?.getSessionModel !== 'function') {
+      TrainingManager.failMissingDependency(
+        'jobMarketplace does not provide getSessionJobOnChain()/getSessionModel(), so the A.3 pre-flight cannot run', ids,
+      );
+    }
+    if (!this.sessionManager) TrainingManager.failMissingDependency('SessionManager is not available', ids);
+    const decodeFailure = (what: string) => (e: unknown): never => {
+      throw new TrainingError(
+        `could not read ${what} for job ${existing.jobId} on chain: ${errMessage(e)}`,
+        'ESTIMATE_MISMATCH', { reason: SESSION_DECODE_REASON, cause: e, ...ids },
+      );
+    };
+    const [session, model] = await Promise.all([
+      jm.getSessionJobOnChain(existing.jobId).catch(decodeFailure('sessionJobs')),
+      jm.getSessionModel(existing.jobId).catch(decodeFailure('sessionModel')),
+    ]);
+    // Priced for the SESSION's token, so "pricePerToken == registered price" and "the payment
+    // token is one the host prices" are one read. bigint = the price; string = why there is none
+    // (a check failure, not an exception).
+    const noPrice = `no registered price for token ${session.paymentToken}`;
+    const price: bigint | string = await this.sessionManager
+      .resolveModelPricePerToken(hostAddress, this.trainingModelId, session.paymentToken)
+      .then((p: bigint) => (p && p > 0n ? p : noPrice))
+      // HostManager THROWS ZERO_MODEL_PRICE rather than returning 0n: that is the host's own "no
+      // price" and a fact about the session. Anything else — RPC, wiring — is a failed READ, and
+      // reporting it as adoptedSessionParams would send a card user to a second /fiat/session.
+      .catch((e: unknown) => ((e as { code?: string })?.code === 'ZERO_MODEL_PRICE' ? noPrice : decodeFailure('the registered price')(e)));
+    const remainingSecs = Number(session.startTime + session.maxDuration) - Math.floor(Date.now() / 1000);
+    const floorSecs = this.trainJobTimeoutSecs + A3_SETTLE_MARGIN_SECS;
+    const failed = TrainingManager.a3Failures({
+      session, jobId: existing.jobId, model, price, needTokens: BigInt(trainingTokens(job)),
+      hostAddress, trainingModelId: this.trainingModelId, remainingSecs, floorSecs,
     });
+    // A string price is always a `failed` entry; naming it here is what narrows the return type.
+    if (failed.length > 0 || typeof price === 'string') {
+      throw new TrainingError(
+        `adopted session ${existing.sessionId} cannot carry this job — `
+        + failed.map((f) => `${f.check}: expected ${f.expected}, got ${f.actual}`).join('; ')
+        + '. The session is untouched; the recourse is a fresh, correctly shaped session for the same job.',
+        'VALIDATION_FAILED',
+        { reason: ADOPTED_SESSION_PARAMS_REASON, check: failed[0].check, failed, ...ids },
+      );
+    }
+    return { session, pricePerToken: price, acceptLatitudeSecs: remainingSecs - floorSecs };
+  }
+
+  /**
+   * Vault / card path: adopt a session the SDK did not create, then submit exactly as the wallet
+   * path does. The job is still validated — funds are already locked, so a doomed job wastes
+   * vault money and spins a zero-proof settle cycle. Mirrors `LtxManager.adoptExistingSession`.
+   */
+  private async submitOnExistingSession(
+    opts: SubmitTrainingOptions, existing: TrainingExistingSession,
+  ): Promise<TrainingHandle> {
+    const ids = TrainingManager.adoptedIds(existing);
+    // ONE envelope: every failure after this point — a guard, the bundle, the pre-flight, the
+    // registry seed, the submit, a programming fault — leaves tagged with the reclaim ids.
+    try {
+      if (!this.sessionManager || typeof this.sessionManager.registerExternalSession !== 'function') {
+        TrainingManager.failMissingDependency(
+          'SessionManager does not implement registerExternalSession (the existingSession path needs a newer @fabstir/sdk-core)', ids,
+        );
+      }
+      // Q8: ONE nodeHttpUrl serves both postSessionAuth and this call; the http(s)-only rule and
+      // the normalisation live in normalizeNodeHttpUrl (shared with LtxManager and the registry).
+      const endpoint = normalizeNodeHttpUrl(opts.endpoint);
+      if (!endpoint) {
+        throw new TrainingError(
+          `existingSession requires a plain http(s):// node endpoint (the nodeHttpUrl used for postSessionAuth), got: ${String(opts.endpoint)}`,
+          'VALIDATION_FAILED', { reason: EXISTING_SESSION_CONFIG_REASON, ...ids },
+        );
+      }
+      const chainId = opts.chainId ?? this.chainId;
+      if (chainId === undefined) {
+        throw new TrainingError(
+          'existingSession requires a chainId (opts.chainId or the SDK default)',
+          'VALIDATION_FAILED', { reason: EXISTING_SESSION_CONFIG_REASON, ...ids },
+        );
+      }
+      this.validateAgainstBundle(opts.job, opts.bundle);
+      const { pricePerToken } = await this.validateExistingSession(existing, opts.job, opts.hostAddress);
+      this.sessionManager.registerExternalSession({
+        sessionId: existing.sessionId, jobId: existing.jobId, endpoint,
+        hostAddress: opts.hostAddress, model: this.trainingModelId, chainId,
+      });
+      const handle: TrainingHandle = await this.sessionManager.submitTraining(
+        String(existing.sessionId), opts.job, this.wsSubmitOptions(opts, pricePerToken),
+      );
+      handle.sessionId = existing.sessionId;
+      handle.jobId = existing.jobId;
+      // The money moved before the SDK was called, so a LATE failure needs the ids as much as an
+      // early one — the UI relays them to the service for reclaim.
+      handle.result = handle.result.catch((err: unknown) => {
+        throw TrainingManager.withSessionIds(err, existing);
+      });
+      // The re-wrap is a NEW promise; mark it handled (training-ws does the same for the original)
+      // so a run that fails before the consumer attaches cannot become an unhandled rejection.
+      handle.result.catch(() => {});
+      return handle;
+    } catch (err) {
+      throw TrainingManager.withSessionIds(err, existing);
+    }
+  }
+
+  /**
+   * Re-throw with the reclaim tag in `detail`, preserving a TrainingError's code and detail (so
+   * `isReshoppable`/`requiresFreshSession` read exactly as before). A foreign error is classified
+   * by the SDK's own vocabulary, never flattened to something retryable:
+   *  · a transport SDKError (WS_*, init timeout, auth unreachable) → `SIDECAR_UNAVAILABLE` /
+   *    `transport` — zero-settle class, retryable, and on an adopted session "retry" is a fresh session;
+   *  · our own wiring (SESSION_NOT_FOUND, ENCRYPTION_NOT_AVAILABLE, …) or a programming fault →
+   *    `ESTIMATE_MISMATCH` / `missingDependency` — TERMINAL: another host reaches the identical
+   *    failure, and a UI must not buy a second session to find that out (training-ws `mapCode`'s
+   *    contract for unknowns: non-re-shoppable, original preserved).
+   */
+  private static withSessionIds(err: unknown, existing: TrainingExistingSession): TrainingError {
+    const tag = TrainingManager.adoptedIds(existing);
+    if (err instanceof TrainingError) return new TrainingError(err.message, err.code, { ...err.detail, ...tag });
+    const sdkCode = (err as { code?: string })?.code;
+    if (sdkCode && TRANSPORT_SDK_CODES.has(sdkCode)) {
+      // Every transport code is raised BEFORE the `train` frame leaves, so nothing on chain was
+      // consumed: `consumed: false` makes requiresFreshSession say "same session" — a fresh
+      // /fiat/session here would be a second charge for a failure that cost nothing.
+      return new TrainingError(errMessage(err), 'SIDECAR_UNAVAILABLE', { reason: 'transport', consumed: false, cause: err, sdkCode, ...tag });
+    }
+    return new TrainingError(errMessage(err), 'ESTIMATE_MISMATCH', { reason: 'missingDependency', cause: err, sdkCode, ...tag });
   }
 
   /**
@@ -505,9 +793,19 @@ export class TrainingManager implements ITrainingManager {
    * otherwise be rejected N times, and on the paths that fund first, burn N deposits doing it.
    */
   async submitTrainingWithLoadBalancing(
-    opts: Parameters<TrainingManager['submitTraining']>[0],
+    opts: SubmitTrainingOptions,
     lb?: { maxHostRetries?: number; hostSelectionMode?: unknown },
   ): Promise<TrainingHandle> {
+    if (opts.existingSession) {
+      // A vault session is bound on-chain to ONE host. "Try the next host" with the same ids
+      // would submit a session host X owns to host Y — a spent session at Y, and the vault's
+      // money. The recourse for a refused adopted session is a fresh session, not another host.
+      throw new TrainingError(
+        'existingSession cannot be load-balanced: the session is bound on-chain to one host',
+        'VALIDATION_FAILED',
+        { reason: EXISTING_SESSION_CONFIG_REASON, ...TrainingManager.adoptedIds(opts.existingSession) },
+      );
+    }
     if (!this.hostSelectionService) {
       throw new TrainingError(
         'HostSelectionService not set — call setHostSelectionService() first',

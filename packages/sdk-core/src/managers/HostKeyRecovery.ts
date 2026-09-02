@@ -23,6 +23,7 @@
 import * as secp from '@noble/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
 import { hexToBytes, bytesToHex, pubkeyToAddress } from '../crypto/utilities';
+import { SDKError } from '../errors';
 
 /**
  * Verify host signature and recover their public key.
@@ -107,14 +108,15 @@ export async function requestHostPublicKey(
   });
 
   if (!response.ok) {
-    throw new Error(`Host key request failed: ${response.status} ${response.statusText}`);
+    // Coded so the training path can classify "the host is down" as transport, not as our wiring.
+    throw new SDKError(`Host key request failed: ${response.status} ${response.statusText}`, 'HOST_PUBKEY_UNAVAILABLE');
   }
 
   const responseData = await response.json();
   const { signature, recid } = responseData;
 
   if (!signature || recid === undefined) {
-    throw new Error('Invalid response from host: missing signature or recid');
+    throw new SDKError('Invalid response from host: missing signature or recid', 'HOST_PUBKEY_UNAVAILABLE');
   }
 
   // Verify and recover public key

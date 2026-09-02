@@ -181,7 +181,7 @@ describe('submitTraining — the order of operations is the money', () => {
     const sess = (calls as any).startSessionArgs;
     expect(sess).toMatchObject({
       modelId: MODEL, paymentMethod: 'deposit', encryption: true,
-      maxDuration: 14400, proofInterval: 1000, proofTimeoutWindow: 3600,
+      duration: 14400, proofInterval: 1000, proofTimeoutWindow: 3600,   // `duration` is the key startSession reads; `maxDuration` was dead
     });
     expect(sess.depositAmount).toBe('9.11232');   // 9,112,320 base units at 6 decimals
   });

@@ -81,6 +81,26 @@ export const LORA_STAGING_FAILED_REASONS =
 export const VALIDATION_FAILED_REASONS =
   ['sessionParams', 'sessionReused', 'trainActive', 'datasetFormat'] as const;
 
+/**
+ * CLIENT-minted `VALIDATION_FAILED` reason: the SDK's own A.3 pre-flight refused an ADOPTED
+ * (vault / card-paid) session BEFORE `train` was sent.
+ *
+ * Deliberately DISTINCT from the node's `sessionParams`. That one is pinned terminal because it
+ * lands post-escrow and consumes the session. This one fires with the session untouched, the
+ * JOB is fine and the SESSION is at fault — so `isReshoppable` stays true and
+ * `requiresFreshSession` is true: the recourse is a fresh, correctly shaped session for the
+ * same job (on the vault path, a second `/fiat/session` call with new ids). A UI must not
+ * retire the job on this reason. `detail.check` names the first failing check, `detail.failed`
+ * lists every one, and `detail.sessionId`/`jobId` are the ids to relay for reclaim.
+ */
+export const ADOPTED_SESSION_PARAMS_REASON = 'adoptedSessionParams' as const;
+/** Client-minted: the adoption CALL was mis-shaped (endpoint form, chainId, or load-balancing an
+ *  adopted session). Terminal — our wiring; another host reaches the identical failure. */
+export const EXISTING_SESSION_CONFIG_REASON = 'existingSessionConfig' as const;
+/** Client-minted: the on-chain session could not be read drift-proof (or the wrapper cannot read
+ *  it). Terminal — the A.3 pre-flight FAILS CLOSED and must never be softened into "skip". */
+export const SESSION_DECODE_REASON = 'sessionDecode' as const;
+
 export type TrainingWireErrorCode = (typeof TRAINING_WIRE_ERROR_CODES)[number] | ModerationHoldCode;
 export type TrainingClientErrorCode = (typeof TRAINING_CLIENT_ERROR_CODES)[number];
 export type TrainingServeBackErrorCode = (typeof TRAINING_SERVE_BACK_ERROR_CODES)[number];
@@ -135,6 +155,9 @@ const CLIENT_TERMINAL_REASONS: readonly string[] = [
   // file, base mismatch)". An adapter's base model is fixed, so another host fails identically.
   // Its siblings `fetch`, `write` and `chain` ARE the host's problem and stay re-shoppable.
   'invalid',
+  // The `existingSession` (vault / card) path — both OUR side. `adoptedSessionParams` is
+  // deliberately NOT here — see ADOPTED_SESSION_PARAMS_REASON.
+  EXISTING_SESSION_CONFIG_REASON, SESSION_DECODE_REASON,
 ];
 
 /** Codes whose fault is OURS, not the host's. Another host reaches the identical failure, so
@@ -153,6 +176,14 @@ export class TrainingError extends Error {
     Object.setPrototypeOf(this, TrainingError.prototype);
   }
 
+  /**
+   * Trying again may succeed with no user action. On an ADOPTED session (`detail.adopted`) the
+   * same rules apply as on a created one: `chainUnavailable` consumed nothing (the node's own
+   * carve-out), so a retry on the SAME ids is safe and free; every other `CAPACITY` class consumed
+   * the session (C.6 keys its one-in-flight rule on the depositor — the vault, on the card path),
+   * so `requiresFreshSession` is true and "again" means a second `/fiat/session`. RE-SHOPPING to
+   * another host always needs a fresh session, adopted or not: a session is bound on-chain to one host.
+   */
   get isRetryable(): boolean {
     return RETRYABLE_CODES.includes(this.code);
   }
@@ -177,6 +208,9 @@ export class TrainingError extends Error {
    * in escrow until it timed out.
    */
   get requiresFreshSession(): boolean {
+    // A client-side transport failure before `train` left consumed nothing (`consumed: false`) —
+    // the same session is intact; only the node's post-accept classes consume it.
+    if (this.detail?.consumed === false) return false;
     return !(this.code === 'CAPACITY' && this.detail?.reason === 'chainUnavailable');
   }
 
