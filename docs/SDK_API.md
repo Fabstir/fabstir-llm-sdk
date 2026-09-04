@@ -2649,6 +2649,21 @@ mints) and today's **fiat-service session** (`3600 / 1000 / 300`). What passes: 
 `kind: "training"` session (`14400 / 1000 / 3600`, after node 8.54.0). Open an adopted session late: the accept
 latitude is 1,200 s from creation to the `train` frame, returned as `acceptLatitudeSecs`.
 
+**Opening the training session on the fiat service (FT1.1, from the node developer; deploys after node 8.54.0).**
+`POST /v1/fiat/session` takes `kind: "training"` — the only accepted value; leave the field out (or `null`) for
+the standard chat/render shape, anything else is a `400`. With it the session is minted `14400 / 1000 / 3600` and
+the body's `modelId` must be the registered training model id — send the same value the SDK is configured
+with (`config.trainingModelId`, `keccak256("fabstir/training/" + templateId)`); the binding is refused both
+ways (`MODEL_KIND_MISMATCH`) before any money moves, and the pre-flight's `model` check then agrees with it.
+Training caps: 10 USDC per session, 20 USDC per user per rolling 24 h, one live training session per user, three
+attempts per minute. **Refuse, never clamp**, a deposit above the cap — `estimateTrainingCost().depositBaseUnits`
+over 10 000 000 micro must stop in the UI, because a clamped deposit funds a session that fails the node's headroom
+gate after escrow. The service's `403` reasons (`HOST_NOT_ALLOWED`, `MODEL_NOT_PRICED`, `MODEL_KIND_MISMATCH`,
+`DEPOSIT_OVER_CAP`, `DAILY_CAP_EXCEEDED`, `CONCURRENT_CAP_EXCEEDED`, `INSUFFICIENT_BALANCE`, `RATE_LIMITED`,
+`INVALID_DEPOSIT`) journal no hold and are not retryable; a `502 chain_error` may be retried within the attempt
+budget. A stranded card deposit is returned only when the service runs with `FIAT_RECLAIM_STRANDED=1` — a deploy
+precondition on the service, nothing the client can influence.
+
 ```typescript
 import { TrainingError, ADOPTED_SESSION_PARAMS_REASON } from '@fabstir/sdk-core';
 try { await training.submitTraining({ ...opts, existingSession }); }
