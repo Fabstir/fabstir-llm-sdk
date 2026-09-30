@@ -2652,9 +2652,12 @@ latitude is 1,200 s from creation to the `train` frame, returned as `acceptLatit
 **Opening the training session on the fiat service (FT1.1, from the node developer; deploys after node 8.54.0).**
 `POST /v1/fiat/session` takes `kind: "training"` — the only accepted value; leave the field out (or `null`) for
 the standard chat/render shape, anything else is a `400`. With it the session is minted `14400 / 1000 / 3600` and
-the body's `modelId` must be the registered training model id — send the same value the SDK is configured
-with (`config.trainingModelId`, `keccak256("fabstir/training/" + templateId)`); the binding is refused both
-ways (`MODEL_KIND_MISMATCH`) before any money moves, and the pre-flight's `model` check then agrees with it.
+the body's `modelId` must be the registered training model id — derive it with `trainingModelIdFor(templateId)`
+(exported from the root; `keccak256("fabstir/training/" + templateId)`) and configure the SDK with the same value
+(`config.trainingModelId`); never paste the hash. For `train-qlora-qwen38-27b-v1` it is registered and approved on
+Base Sepolia since 2026-09-04 (`isModelApproved` reads true; verified by a read-only call). The binding is refused
+both ways (`MODEL_KIND_MISMATCH`) before any money moves, and the pre-flight's `model` check then agrees with it.
+Approval alone does not make the model openable: a host must advertise and price it (the host advert pair).
 Training caps: 10 USDC per session, 20 USDC per user per rolling 24 h, one live training session per user, three
 attempts per minute. **Refuse, never clamp**, a deposit above the cap — `estimateTrainingCost().depositBaseUnits`
 over 10 000 000 micro must stop in the UI, because a clamped deposit funds a session that fails the node's headroom
@@ -2695,6 +2698,19 @@ root as `TRANSPORT_SDK_CODES` and `RPC_TRANSIENT_CODES`, so a UI can pre-classif
 registry: whitespace, userinfo, a backslash, a trailing `/v1`, `/v1/ws` or `/v1/session-auth`, `ws(s)://` are refused), and the normalised base is
 what `startSession` stores. After `startSession` every failure is a `TrainingError` carrying `{ sessionId, jobId,
 adopted: false }`, classified exactly as on the card path (transport → same session; our wiring → terminal).
+
+**Node 8.54.0 on vault hosts (1.38.8).** On a host configured with fiat vault addresses the job a connection
+bills is taken ONLY from a session init that passed the vault gate; a job id named on a prompt, a job implied by a
+session id, or the ids inside a nested request are ignored. The SDK already conforms: every connection — the shared
+chat socket and every per-job socket — sends its init before any billed frame, a session change on the shared socket
+forces a new init, and the only job the SDK names on a prompt is the init's own. A billed frame without a gated init
+is refused with an `error` frame `SESSION_AUTH_DENIED`, which the SDK surfaces typed: on the chat path an `SDKError`
+with code `SESSION_AUTH_DENIED` reaches the caller unwrapped (`details.nodeCode`, `details.sessionId`); on the
+training path a `TrainingError` `ESTIMATE_MISMATCH / sessionAuth` with `consumed: false`, `settledSlices: 0` —
+nothing was billed, the session is intact, another host does not help; on the LTX path `GENERATION_FAILED` with
+`details.nodeCode`. The fix in every case is the FC1.6 authorisation on that session (`registerDelegatedSession`
+with `authorisation` posts it), then a retry on the SAME session. The training registry's reject cooldown on such
+hosts is keyed on the authorised client, not the shared vault address.
 
 **Reclaim.** `handle.sessionId` and `handle.jobId` are set on both paths (1.38.6), so
 `training.triggerSessionTimeout(Number(handle.jobId))` needs nothing you did not already hold.

@@ -112,5 +112,17 @@ describe('§4 — serve-back on a delegated (card-paid) session', () => {
       await vi.advanceTimersByTimeAsync(180_000 + 10_000);
       expect(await outcome).toMatch(/response timeout/i);
     });
+
+    it('8.54.0 vault hosts: an `error` SESSION_AUTH_DENIED on the prompt reaches the caller with that CODE, not wrapped as WS_PROMPT_ERROR', async () => {
+      // The node refuses a billed frame on a connection whose init did not pass the vault gate, then sends a
+      // stream_end reason "error" so the promise settles. The UI must be able to branch on the code (post the
+      // authorisation, retry the same session); a REQUEST_ERROR inside a WS_PROMPT_ERROR wrapper hid it.
+      const { outcome } = await firstPrompt(false);
+      const sock = FakeWebSocket.instances[0];
+      sock.onmessage?.({ data: JSON.stringify({ type: 'error', code: 'SESSION_AUTH_DENIED', message: 'session authorisation denied: no authorised session on this connection (send a session init that passes the vault gate first)', session_id: '1145', message_id: 'm1' }) });
+      sock.onmessage?.({ data: JSON.stringify({ type: 'stream_end', reason: 'error', tokens_used: 0 }) });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await outcome).toMatch(/^SESSION_AUTH_DENIED: session authorisation denied/);
+    });
   });
 });

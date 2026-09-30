@@ -194,7 +194,7 @@ export type { TrainingExistingSession, SubmitTrainingOptions, A3CheckFailure } f
 // does not carry it (it lives in the bundle's `perTemplate`), which is what makes the
 // `train_accepted` echo-equality check meaningful.
 export {
-  trainingTokens, trainingSliceSchedule, trainingInputCommitment, trainingSigDigest,
+  trainingTokens, trainingSliceSchedule, trainingInputCommitment, trainingSigDigest, trainingModelIdFor,
 } from './utils/training-utils';
 export type { TrainingJob, LoraSessionField } from './types/training.types';
 

@@ -2,7 +2,7 @@
 // Training M0 conformance primitives — pure maths, no I/O. Every shape conforms to
 // docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.12 §§B.1/B.4/B.5/C.1 (all four
 // re-verified byte-identical to v0.3.6, at which this was written).
-import { AbiCoder, keccak256, getBytes, verifyMessage } from 'ethers';
+import { AbiCoder, keccak256, getBytes, verifyMessage, toUtf8Bytes } from 'ethers';
 import { TrainingError } from '../errors/training-errors';
 
 /** Structural input for the B.4 input commitment. `TrainingJob` fields map onto it. */
@@ -139,4 +139,17 @@ export function recoverTrainingSigner(att: TrainingAttestationFields): string | 
   } catch {
     return null; // malformed-but-present signature — advisory, never aborts verification
   }
+}
+
+/**
+ * The registered TRAINING model id for a template (A.2): `keccak256("fabstir/training/" + templateId)`.
+ * This is the price key on the host, the `modelId` the fiat service binds to `kind: "training"`, and what the
+ * A.3 pre-flight reads back as `sessionModel` — derive it, never hard-code the hash. Registered and approved on
+ * Base Sepolia for `train-qlora-qwen38-27b-v1` on 2026-09-04.
+ */
+export function trainingModelIdFor(templateId: string): string {
+  if (typeof templateId !== 'string' || templateId.length === 0) {
+    throw new TrainingError('trainingModelIdFor needs a non-empty templateId', 'VALIDATION_FAILED', { reason: 'numericWireRule' });
+  }
+  return keccak256(toUtf8Bytes(`fabstir/training/${templateId}`));
 }

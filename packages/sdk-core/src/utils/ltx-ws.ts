@@ -68,7 +68,7 @@ export async function submitLtxWs(opts: LtxWsOptions): Promise<LtxHandle> {
 
     const unsub = wsClient.onMessage((data: any) => {
       if (isSettled) return;
-      if (data.type === 'error') { safeReject(new LtxError(data.message || 'LTX failed', 'GENERATION_FAILED')); return; }
+      if (data.type === 'error') { safeReject(new LtxError(data.message || 'LTX failed', 'GENERATION_FAILED', { nodeCode: data.code })); return; }   // 8.54.0: SESSION_AUTH_DENIED arrives here
       if (data.type !== 'encrypted_response' || !data.payload) return;
       try {
         const msg = JSON.parse(encryptionManager.decryptMessage(sessionKey, data.payload));

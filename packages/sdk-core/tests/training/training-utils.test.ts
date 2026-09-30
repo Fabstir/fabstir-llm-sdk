@@ -161,3 +161,19 @@ describe('trainingSigDigest (B.5) — 10 flat static words, EIP-191', () => {
     expect(recoverTrainingSigner({ ...ATT, signature: '0xdeadbeef' })).toBeNull();
   });
 });
+
+describe('trainingModelIdFor — the A.2 model id derived, never hard-coded', () => {
+  it('is keccak256("fabstir/training/" + templateId), and matches the id the contracts developer registered', async () => {
+    const { trainingModelIdFor } = await import('../../src/utils/training-utils');
+    const { keccak256, toUtf8Bytes } = await import('ethers');
+    const id = trainingModelIdFor('train-qlora-qwen38-27b-v1');
+    expect(id).toBe(keccak256(toUtf8Bytes('fabstir/training/train-qlora-qwen38-27b-v1')));
+    // Registered and approved on Base Sepolia 2026-09-04 (addTrustedModel; isModelApproved true) — final per the node developer.
+    expect(id).toBe('0xa447563341bff3b9bc8a3ad94b874e8724a1892451d576f9575da64b05ea8215');
+  });
+  it('refuses an empty or non-string template id (a hash of nothing would look like a model)', async () => {
+    const { trainingModelIdFor } = await import('../../src/utils/training-utils');
+    expect(() => trainingModelIdFor('')).toThrow(/templateId/);
+    expect(() => trainingModelIdFor(undefined as never)).toThrow(/templateId/);
+  });
+});

@@ -243,7 +243,18 @@ export async function submitTrainingWs(opts: TrainingWsOptions): Promise<Trainin
     const unsub = wsClient.onMessage((data: any) => {
       if (isSettled) return;
       if (data.type === 'error') {
-        safeReject(new TrainingError(data.message || 'training failed', 'TRAIN_FAILED'));
+        // Node 8.54.0 on a vault host: a billed frame on a connection whose init did not pass the vault gate is
+        // refused with SESSION_AUTH_DENIED and NOTHING is billed — the session is intact and the fix is the FC1.6
+        // authorisation, not a fresh session and not another host. Any other error frame keeps the run-failed
+        // reading, now with the node's code attached.
+        if (data.code === 'SESSION_AUTH_DENIED') {
+          safeReject(new TrainingError(
+            data.message || 'session authorisation denied', 'ESTIMATE_MISMATCH',
+            { reason: 'sessionAuth', consumed: false, settledSlices: 0, sdkCode: data.code },
+          ));
+          return;
+        }
+        safeReject(new TrainingError(data.message || 'training failed', 'TRAIN_FAILED', { sdkCode: data.code }));
         return;
       }
       if (data.type !== 'encrypted_response' || !data.payload) return;

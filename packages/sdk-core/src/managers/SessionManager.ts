@@ -1468,8 +1468,12 @@ export class SessionManager implements ISessionManager {
                     data.prompt_tokens ?? 0,
                     data.context_window_size ?? 0
                   ));
+                } else if (data.code === 'SESSION_AUTH_DENIED') {
+                  // Node 8.54.0 vault hosts: the connection's init did not pass the vault gate; nothing billed.
+                  // The code must reach the caller unwrapped so it can post the authorisation and retry.
+                  safeReject(new SDKError(data.message || 'session authorisation denied', 'SESSION_AUTH_DENIED', { nodeCode: data.code, sessionId: data.session_id }));
                 } else {
-                  safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
+                  safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR', { nodeCode: data.code }));
                 }
               }
             });
@@ -1803,8 +1807,12 @@ export class SessionManager implements ISessionManager {
                     data.prompt_tokens ?? 0,
                     data.context_window_size ?? 0
                   ));
+                } else if (data.code === 'SESSION_AUTH_DENIED') {
+                  // Node 8.54.0 vault hosts: the connection's init did not pass the vault gate; nothing billed.
+                  // The code must reach the caller unwrapped so it can post the authorisation and retry.
+                  safeReject(new SDKError(data.message || 'session authorisation denied', 'SESSION_AUTH_DENIED', { nodeCode: data.code, sessionId: data.session_id }));
                 } else {
-                  safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
+                  safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR', { nodeCode: data.code }));
                 }
               }
             });
@@ -1912,6 +1920,7 @@ export class SessionManager implements ISessionManager {
       }
     } catch (error: any) {
       if (error instanceof ContextLimitError) throw error;
+      if (error?.code === 'SESSION_AUTH_DENIED') throw error;   // 8.54.0 vault gate: the caller branches on this code
       throw new SDKError(
         `Failed to send prompt via WebSocket: ${error.message}`,
         'WS_PROMPT_ERROR',

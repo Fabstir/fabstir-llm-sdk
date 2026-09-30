@@ -158,6 +158,9 @@ const CLIENT_TERMINAL_REASONS: readonly string[] = [
   // The `existingSession` (vault / card) path — both OUR side. `adoptedSessionParams` is
   // deliberately NOT here — see ADOPTED_SESSION_PARAMS_REASON.
   EXISTING_SESSION_CONFIG_REASON, SESSION_DECODE_REASON,
+  // Node 8.54.0 vault gate: the connection's init carried no accepted FC1.6 authorisation. Another host
+  // reaches the identical refusal; the fix is the authorisation on THIS session.
+  'sessionAuth',
 ];
 
 /** Codes whose fault is OURS, not the host's. Another host reaches the identical failure, so

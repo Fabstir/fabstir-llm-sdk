@@ -453,3 +453,34 @@ describe('Round 5b — a synchronous wire-shape refusal inside the executor cons
     expect(ws.sent).toHaveLength(0);
   });
 });
+
+describe('8.54.0 vault hosts — the SESSION_AUTH_DENIED error frame', () => {
+  const base = () => ({ encryptionManager, sessionId: 's1', sessionKey: new Uint8Array(32), messageIndex: { value: 0 }, job: JOB, onChainPricePerToken: PRICE, minAllowListVersion: 5, sliceTokens: SLICE_TOKENS });
+
+  it('a billed frame refused by the vault gate is typed: nothing billed, session intact, fix the authorisation — not a failed run', async () => {
+    // Node 8.54.0: on a host with vault addresses, a train frame on a connection whose init did not pass the
+    // gate gets `error` SESSION_AUTH_DENIED (and no stream_end, since an action owns no stream). Before this
+    // change ANY error frame became TRAIN_FAILED — "the run failed", requiresFreshSession true — for a frame
+    // that billed nothing.
+    const ws = makeWs();
+    const h = await submitTrainingWs({ wsClient: ws.wsClient, ...base() } as any);
+    ws.raw({ type: 'error', code: 'SESSION_AUTH_DENIED', message: 'session authorisation denied: no authorised session on this connection (send a session init that passes the vault gate first)', session_id: 's1', message_id: 'm1' });
+    const e: any = await h.result.catch((x: unknown) => x);
+    expect(e.code).toBe('ESTIMATE_MISMATCH');
+    expect(e.detail).toMatchObject({ reason: 'sessionAuth', consumed: false, settledSlices: 0, sdkCode: 'SESSION_AUTH_DENIED' });
+    expect(e.message).toMatch(/vault gate/);
+    expect(e.requiresFreshSession).toBe(false);
+    expect(e.isReshoppable(0)).toBe(false);                                                // another host does not fix the authorisation
+    expect(e.isRetryable).toBe(false);
+  });
+
+  it('any other error frame keeps the run-failed reading and now carries the node code', async () => {
+    const ws = makeWs();
+    const h = await submitTrainingWs({ wsClient: ws.wsClient, ...base() } as any);
+    ws.raw({ type: 'error', code: 'SOME_NODE_CODE', message: 'boom' });
+    const e: any = await h.result.catch((x: unknown) => x);
+    expect(e.code).toBe('TRAIN_FAILED');
+    expect(e.detail).toMatchObject({ sdkCode: 'SOME_NODE_CODE' });
+    expect(e.requiresFreshSession).toBe(true);
+  });
+});

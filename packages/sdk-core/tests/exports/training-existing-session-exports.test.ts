@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ADOPTED_SESSION_PARAMS_REASON, EXISTING_SESSION_CONFIG_REASON, SESSION_DECODE_REASON,
   TRAIN_JOB_TIMEOUT_SECS, A3_SETTLE_MARGIN_SECS, A3_MIN_PROOF_TIMEOUT_WINDOW_SECS,
-  decodeSessionJobWords, TrainingError, TRANSPORT_SDK_CODES, RPC_TRANSIENT_CODES,
+  decodeSessionJobWords, TrainingError, TRANSPORT_SDK_CODES, RPC_TRANSIENT_CODES, trainingModelIdFor,
 } from '../../src/index';
 import type { TrainingExistingSession, SubmitTrainingOptions, A3CheckFailure, OnChainSessionJob } from '../../src/index';
 
@@ -33,6 +33,7 @@ describe('existingSession exports from the package root', () => {
     expect(typeof decodeSessionJobWords).toBe('function');
     expect(TRANSPORT_SDK_CODES.has('WS_TIMEOUT')).toBe(true);                                   // the UI can pre-classify with it
     expect([...RPC_TRANSIENT_CODES].sort()).toEqual(['NETWORK_ERROR', 'SERVER_ERROR', 'TIMEOUT']);
+    expect(trainingModelIdFor('train-qlora-qwen38-27b-v1')).toMatch(/^0x[0-9a-f]{64}$/);              // derived at the root, never hard-coded
     const existing: TrainingExistingSession = { sessionId: 1n, jobId: 2n, endpoint: 'https://host.example', hostAddress: `0x${'a1'.repeat(20)}` };
     const opts: SubmitTrainingOptions = { job: {} as any, hostAddress: existing.hostAddress, endpoint: existing.endpoint, existingSession: existing };
     const failure: A3CheckFailure = { check: 'exists', expected: 'a session', actual: 'none' };
