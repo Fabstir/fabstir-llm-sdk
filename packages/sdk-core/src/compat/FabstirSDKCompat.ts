@@ -153,7 +153,7 @@ export class FabstirSDK {
           const address = await signer.getAddress();
           return `client-${address.slice(2, 10)}`; // Use first 8 chars of address
         }
-        throw new SDKError('Not authenticated', 'NOT_AUTHENTICATED');
+        throw new SDKError('Not authenticated', 'NOT_AUTHENTICATED', { retryable: false });
       },
       
       discoverPeers: async () => {

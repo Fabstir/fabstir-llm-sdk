@@ -3,6 +3,7 @@
 
 import { ethers, Signer, Contract, Provider, dataSlice, toBigInt, getAddress, getBytes } from 'ethers';
 import { SDKError } from '../errors';
+import { awaitFundingReceipt, sendFunding, sessionIdUnresolved } from './funding-receipt';
 import { ChainRegistry } from '../config/ChainRegistry';
 import { ChainId } from '../types/chain.types';
 import {
@@ -17,6 +18,14 @@ import JobMarketplaceABI from './abis/JobMarketplaceWithModelsUpgradeable-CLIENT
 export const MIN_PROOF_TIMEOUT = 60;       // 1 minute minimum
 export const MAX_PROOF_TIMEOUT = 3600;     // 1 hour maximum
 export const DEFAULT_PROOF_TIMEOUT = 300;  // 5 minutes (recommended)
+
+// The ...ForModel entry points emit SessionJobCreatedForModel (R11); either carries the job id first.
+const DIRECT_PAYMENT_EVENTS = ['SessionJobCreated', 'SessionJobCreatedForModel'];
+
+/** Each creation event's argument naming who created the session — its `msg.sender` (§35 PP7). */
+const CREATOR: Record<string, string> = {
+  SessionJobCreated: 'depositor', SessionJobCreatedForModel: 'depositor', SessionCreatedByDepositor: 'depositor', SessionCreatedByDelegate: 'delegate',
+};
 
 export interface SessionCreationParams {
   host: string;
@@ -408,7 +417,7 @@ export class JobMarketplaceWrapper {
       proofTimeoutWindow: proofTimeoutBigInt.toString(),
     });
 
-    const tx = await this.contract.createSessionFromDepositForModel(
+    return this.fund(() => this.contract.createSessionFromDepositForModel(
       params.modelId,
       params.host,
       params.paymentToken,
@@ -417,12 +426,7 @@ export class JobMarketplaceWrapper {
       durationBigInt,        // uint256 — explicit bigint
       proofIntervalBigInt,   // uint256 — explicit bigint
       proofTimeoutBigInt     // uint256 — explicit bigint
-    );
-    const receipt = await tx.wait();
-    const event = receipt.logs?.find((log: any) =>
-      log.fragment?.name === 'SessionJobCreatedForModel' || log.fragment?.name === 'SessionCreatedByDepositor'
-    );
-    return event ? Number(event.args?.sessionId || event.args[0]) : 0;
+    ), ['SessionJobCreatedForModel', 'SessionCreatedByDepositor']);
   }
 
   async createSessionJob(params: DirectSessionParams & { paymentToken?: string }): Promise<number> {
@@ -463,7 +467,7 @@ export class JobMarketplaceWrapper {
         proofTimeoutWindow: proofTimeoutBigInt.toString(),
       });
 
-      const tx = await this.contract.createSessionJobForModelWithToken(
+      return this.fund(() => this.contract.createSessionJobForModelWithToken(
         params.host,
         params.modelId,       // bytes32 model ID
         params.paymentToken,  // token address
@@ -472,13 +476,7 @@ export class JobMarketplaceWrapper {
         durationBigInt,       // uint256 — explicit bigint
         proofIntervalBigInt,  // uint256 — explicit bigint
         proofTimeoutBigInt    // uint256 — explicit bigint
-      );
-
-      const receipt = await tx.wait();
-      const event = receipt.logs.find((log: any) =>
-        log.fragment?.name === 'SessionJobCreated'
-      );
-      return event ? Number(event.args[0]) : 0;
+      ), DIRECT_PAYMENT_EVENTS);
     } else {
       // For ETH, use createSessionJobForModel
       const value = ethers.parseEther(params.paymentAmount);
@@ -495,7 +493,7 @@ export class JobMarketplaceWrapper {
         proofTimeoutWindow: proofTimeoutBigInt.toString(),
       });
 
-      const tx = await this.contract.createSessionJobForModel(
+      return this.fund(() => this.contract.createSessionJobForModel(
         params.host,
         params.modelId,       // bytes32 model ID
         priceBigInt,          // uint256 — explicit bigint
@@ -503,13 +501,7 @@ export class JobMarketplaceWrapper {
         proofIntervalBigInt,  // uint256 — explicit bigint
         proofTimeoutBigInt,   // uint256 — explicit bigint
         { value }
-      );
-
-      const receipt = await tx.wait();
-      const event = receipt.logs.find((log: any) =>
-        log.fragment?.name === 'SessionJobCreated'
-      );
-      return event ? Number(event.args[0]) : 0;
+      ), DIRECT_PAYMENT_EVENTS);
     }
   }
 
@@ -713,7 +705,7 @@ export class JobMarketplaceWrapper {
       proofInterval: proofIntervalBigInt.toString(), proofTimeoutWindow: proofTimeoutBigInt.toString(),
     });
 
-    const tx = await this.contract.createSessionForModelAsDelegate(
+    return this.fund(() => this.contract.createSessionForModelAsDelegate(
       params.payer,
       params.modelId,
       params.host,
@@ -723,12 +715,39 @@ export class JobMarketplaceWrapper {
       durationBigInt,        // uint256 — explicit bigint
       proofIntervalBigInt,   // uint256 — explicit bigint
       proofTimeoutBigInt     // uint256 — explicit bigint
-    );
+    ), ['SessionCreatedByDelegate'], 3);
+  }
 
-    const receipt = await tx.wait(3);
-    const event = receipt.logs?.find((log: any) =>
-      log.fragment?.name === 'SessionCreatedByDelegate'
-    );
-    return event ? Number(event.args?.sessionId || event.args[0]) : 0;
+  /** Send a funding transaction (re-armed for replacement detection — `sendFunding`) and return its session id. */
+  private async fund(send: () => Promise<any>, eventNames: string[], confirmations?: number): Promise<number> {
+    // Read before the send: nothing after it may fail unclassified (§35 PP7).
+    const sender = (await this.signer.getAddress()).toLowerCase();
+    return this.sessionIdFromTx(await sendFunding(this.signer.provider!, send), eventNames, sender, confirmations);
+  }
+
+  /**
+   * The session id a funding transaction created. Money may have moved once `tx` exists, so every failure here
+   * carries a transaction hash — the one that was mined — never a job id of 0 the caller would take for a real
+   * session. Events are decoded by topic through the marketplace interface (a replacement's receipt is a plain
+   * receipt with no parsed `fragment`), from the marketplace's own logs only — and only the one naming `sender` as its
+   * creator: an ERC-4337 bundle can carry another sender's creation (§35 PP7).
+   */
+  private async sessionIdFromTx(tx: any, eventNames: string[], sender: string, confirmations?: number): Promise<number> {
+    const receipt = await awaitFundingReceipt(tx, confirmations);
+    const minedHash: string = receipt?.hash ?? tx.hash;
+    const market = this.contractAddress.toLowerCase();
+    for (const log of receipt?.logs ?? []) {
+      if (String(log.address).toLowerCase() !== market) continue;
+      let parsed;
+      try {
+        parsed = this.contract.interface.parseLog({ topics: [...log.topics], data: log.data });
+      } catch (cause) {
+        throw sessionIdUnresolved(`Session transaction ${minedHash} emitted an undecodable marketplace event`, minedHash, cause);
+      }
+      if (parsed && eventNames.includes(parsed.name) && String(parsed.args[CREATOR[parsed.name]]).toLowerCase() === sender) {
+        return Number(parsed.args[0]);
+      }
+    }
+    throw sessionIdUnresolved(`Session transaction ${minedHash} emitted no ${eventNames.join('/')} event of this sender's — the session id is unknown`, minedHash);
   }
 }

@@ -32,7 +32,8 @@ import {
   TokenUsageInfo,
   ContextInfo,
   HostHealthInfo,
-  SessionStatusInfo
+  SessionStatusInfo,
+  Message
 } from '../types';
 import { validateImageAttachments } from '../utils/image-validation';
 import { HostSelectionMode } from '../types/settings.types';
@@ -134,6 +135,25 @@ function convertModelHashToName(modelHashOrName: string): string {
   return modelHashOrName;
 }
 
+/**
+ * Money has moved: a failure in a setup step after funding says so, with the ids the caller needs to use or
+ * release the session. `registered` — the in-memory session exists (every stage after the registry write).
+ */
+// The ids are whatever the funding call returned (PaymentManager's result type is a loose union).
+function fundedSetupFailed(sessionId: unknown, jobId: unknown, stage: 'registry' | 'conversation-log' | 'session-group-link', cause: any): SDKError {
+  // A step that landed, only its head not recorded (§34 OO4), completed the setup: said at the top — use the session
+  // (§35 PP6).
+  const committed = cause?.details?.committed === true;
+  return new SDKError(
+    committed
+      ? `Session ${sessionId} is set up; its ${stage} step landed but this tab could not record its head: ${cause.message}`
+      : `Session ${sessionId} was funded but its ${stage} step failed: ${cause?.message ?? cause}`,
+    'SESSION_FUNDED_SETUP_FAILED',
+    // Not retryable: the session is funded — use or release it by its ids (§20 AA8).
+    { sessionId, jobId, stage, cause, registered: stage !== 'registry', ...(committed ? { committed } : {}), retryable: false }
+  );
+}
+
 export interface SessionState {
   sessionId: bigint;
   jobId: bigint;
@@ -149,6 +169,8 @@ export interface SessionState {
   startTime: number;
   endTime?: number;
   encryption?: boolean; // NEW: Track if session uses encryption
+  /** false → nothing of this session is written to the S5 conversation log (1.39.0). */
+  conversationLog?: boolean;
   groupId?: string; // NEW: Session Groups integration
   webSearchMetadata?: WebSearchMetadata; // NEW: Web search metadata from response
   webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 5.1)
@@ -181,10 +203,16 @@ export interface ExtendedSessionConfig extends SessionConfig {
   /** AUDIT-F3: Timeout window in seconds (60-3600, default 300) */
   proofTimeoutWindow?: number;
   encryption?: boolean; // NEW: Enable E2EE
+  /** false → no S5 conversation log for this session: no initial write, no appends, no re-saves (1.39.0). */
+  conversationLog?: boolean;
   groupId?: string; // NEW: Session Groups integration
+  /**
+   * Host-side loading of a vector database from S5 (Sub-phase 5.1.3). Incompatible with sealed RAG storage
+   * (1.39.0): a host cannot open a sealed manifest, and the plaintext path it named no longer exists. Kept
+   * only so existing configs type-check; use `ragConfig` (the client searches and sends context) instead.
+   */
   vectorDatabase?: {
-    // NEW: S5 vector database for RAG (Sub-phase 5.1.3)
-    manifestPath: string; // S5 path to manifest.json (e.g., "home/vector-databases/{user}/{db}/manifest.json")
+    manifestPath: string; // S5 path to a plaintext manifest.json (legacy layout)
     userAddress: string; // Owner address for verification
   };
   webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 2.2)
@@ -231,6 +259,8 @@ export interface DelegatedSessionConfig {
   proofInterval: number;
   duration: number;
   ragConfig?: RAGSessionConfig;
+  /** false → no S5 conversation log for this session (e.g. a tier-2 extraction run). */
+  conversationLog?: boolean;
   /** FC1.6: the `{ scheme, signature, clientAddress }` from /fiat/session. */
   authorisation?: SessionAuthorisation;
   /** FC1.6: node http(s) base URL — REQUIRED when `authorisation` is present. */
@@ -674,13 +704,7 @@ export class SessionManager implements ISessionManager {
         modelId: modelIdBytes32  // Pass model ID for model-specific contract function
       };
 
-      const result = await this.paymentManager.createSessionJob(sessionJobParams);
-
-      // PaymentManagerMultiChain returns just the job ID as a number
-      // We'll use the job ID as both session ID and job ID for now
-      const jobId = typeof result === 'number' ? BigInt(result) : result.jobId || result;
-      const sessionId = typeof result === 'number' ? BigInt(result) : result.sessionId || jobId;
-
+      // Everything that can fail without the job fails HERE, before any money moves.
       // Validate and merge RAG config if provided
       let ragConfig: RAGSessionConfig | undefined;
       if (config.ragConfig) {
@@ -707,81 +731,108 @@ export class SessionManager implements ISessionManager {
         }
       }
 
-      // Create session state
-      const sessionState: SessionState = {
-        sessionId: sessionId,
-        jobId: jobId,
-        chainId: config.chainId,
-        model: convertModelHashToName(model),  // Convert hash to short name for node compatibility
-        provider,
-        endpoint,
-        status: 'active',
-        prompts: [],
-        responses: [],
-        checkpoints: [],
-        totalTokens: 0,
-        startTime: Date.now(),
-        encryption: enableEncryption,  // NEW (Phase 6.2): Store encryption preference
-        groupId: config.groupId,  // NEW: Session Groups integration
-        webSearch: config.webSearch,  // NEW (Phase 5.1): Web search configuration
-        // Seeded the same way, and for the same reason: every init site rebuilds its config
-        // from this state, so a field that lives only in the caller's config is lost at the
-        // first re-init. `ExtendedSessionConfig` accepted `lora` while this literal dropped it,
-        // which left the whole serve-back path unreachable from outside the class.
-        lora: config.lora,
-        onServeBackError: config.onServeBackError,
-        ragContext: ragConfig?.enabled
-          ? { vectorDbId: ragConfig.vectorDbSessionId || `rag-${sessionId}` }
-          : undefined,
-        ragConfig: ragConfig,  // NEW (Phase 5.1): Store RAG config
-        ragMetrics: ragConfig?.enabled ? {
-          totalRetrievals: 0,
-          averageSimilarity: 0,
-          averageLatencyMs: 0,
-          emptyRetrievals: 0,
-          totalContextTokens: 0
-        } : undefined
-      };
+      // The log's environment (sealer, cross-tab lock) is a precondition too: an insecure origin must fail
+      // here, not after the deposit (R2).
+      if (config.conversationLog !== false) await this.storageManager.assertConversationLogWritable();
 
-      // Store in memory
-      this.sessions.set(sessionId.toString(), sessionState);
+      const result = await this.paymentManager.createSessionJob(sessionJobParams);
 
-      // Persist to storage (convert BigInt values to strings for JSON serialization)
-      await this.storageManager.storeConversation({
-        id: sessionId.toString(),
-        messages: [],
-        metadata: {
+      // PaymentManagerMultiChain returns just the job ID as a number
+      // We'll use the job ID as both session ID and job ID for now
+      const jobId = typeof result === 'number' ? BigInt(result) : result.jobId || result;
+      const sessionId = typeof result === 'number' ? BigInt(result) : result.sessionId || jobId;
+
+      // Money has moved: from here every failure carries the ids, or the deposit cannot be released.
+      let stage: 'registry' | 'conversation-log' | 'session-group-link' = 'registry';
+      // A log step that landed, only its head not recorded (§34 OO4), does not stop the setup: the remaining steps run,
+      // and it is reported after them — a setup that completed (§35 PP6, §36 QQ5).
+      let logLanded: unknown;
+      try {
+        // Create session state
+        const sessionState: SessionState = {
+          sessionId: sessionId,
+          jobId: jobId,
           chainId: config.chainId,
-          model,
+          model: convertModelHashToName(model),  // Convert hash to short name for node compatibility
           provider,
-          endpoint,  // Store endpoint for session restoration
-          jobId: jobId.toString(),
-          status: 'active',  // Store status for restoration
-          totalTokens: 0,  // Initialize token count
-          startTime: sessionState.startTime,  // Store start time
-          encryption: sessionState.encryption,  // NEW (Phase 6.2): Store encryption preference
-          config: {
-            depositAmount: config.depositAmount?.toString() || '',
-            pricePerToken: config.pricePerToken?.toString() || '',
-            proofInterval: config.proofInterval?.toString() || '',
-            duration: config.duration?.toString() || ''
-          }
-        },
-        createdAt: sessionState.startTime,
-        updatedAt: sessionState.startTime
-      });
+          endpoint,
+          status: 'active',
+          prompts: [],
+          responses: [],
+          checkpoints: [],
+          totalTokens: 0,
+          startTime: Date.now(),
+          encryption: enableEncryption,  // NEW (Phase 6.2): Store encryption preference
+          conversationLog: config.conversationLog,
+          groupId: config.groupId,  // NEW: Session Groups integration
+          webSearch: config.webSearch,  // NEW (Phase 5.1): Web search configuration
+          // Seeded the same way, and for the same reason: every init site rebuilds its config
+          // from this state, so a field that lives only in the caller's config is lost at the
+          // first re-init. `ExtendedSessionConfig` accepted `lora` while this literal dropped it,
+          // which left the whole serve-back path unreachable from outside the class.
+          lora: config.lora,
+          onServeBackError: config.onServeBackError,
+          ragContext: ragConfig?.enabled
+            ? { vectorDbId: ragConfig.vectorDbSessionId || `rag-${sessionId}` }
+            : undefined,
+          ragConfig: ragConfig,  // NEW (Phase 5.1): Store RAG config
+          ragMetrics: ragConfig?.enabled ? {
+            totalRetrievals: 0,
+            averageSimilarity: 0,
+            averageLatencyMs: 0,
+            emptyRetrievals: 0,
+            totalContextTokens: 0
+          } : undefined
+        };
 
-      // NEW: Session Groups integration - Link session to group if groupId provided
-      if (config.groupId && this.sessionGroupManager) {
-        const userAddress = await this.storageManager.getUserAddress();
-        if (userAddress) {
-          await this.sessionGroupManager.addChatSession(
-            config.groupId,
-            userAddress,
-            sessionId.toString()
-          );
+        // Store in memory
+        this.sessions.set(sessionId.toString(), sessionState);
+
+        // Persist to storage (convert BigInt values to strings for JSON serialization)
+        stage = 'conversation-log';
+        if (config.conversationLog !== false) await this.storageManager.storeConversation({
+          id: sessionId.toString(),
+          messages: [],
+          metadata: {
+            chainId: config.chainId,
+            model,
+            provider,
+            endpoint,  // Store endpoint for session restoration
+            jobId: jobId.toString(),
+            status: 'active',  // Store status for restoration
+            totalTokens: 0,  // Initialize token count
+            startTime: sessionState.startTime,  // Store start time
+            encryption: sessionState.encryption,  // NEW (Phase 6.2): Store encryption preference
+            config: {
+              depositAmount: config.depositAmount?.toString() || '',
+              pricePerToken: config.pricePerToken?.toString() || '',
+              proofInterval: config.proofInterval?.toString() || '',
+              duration: config.duration?.toString() || ''
+            }
+          },
+          createdAt: sessionState.startTime,
+          updatedAt: sessionState.startTime
+        }).catch((error: any) => {
+          if (error?.details?.committed !== true) throw error;
+          logLanded = error;
+        });
+
+        // NEW: Session Groups integration - Link session to group if groupId provided
+        stage = 'session-group-link';
+        if (config.groupId && this.sessionGroupManager) {
+          const userAddress = await this.storageManager.getUserAddress();
+          if (userAddress) {
+            await this.sessionGroupManager.addChatSession(
+              config.groupId,
+              userAddress,
+              sessionId.toString()
+            );
+          }
         }
+      } catch (cause: any) {
+        throw fundedSetupFailed(sessionId, jobId, stage, cause);
       }
+      if (logLanded) throw fundedSetupFailed(sessionId, jobId, 'conversation-log', logLanded);
 
       return {
         sessionId: sessionId,
@@ -792,12 +843,38 @@ export class SessionManager implements ISessionManager {
       if (error instanceof PricingValidationError) {
         throw error;
       }
+      // The funding outcomes carry the ids / tx hash the caller needs, or say the send may have gone out: never
+      // re-wrap them (S4, §34 OO3). Anything else failed before funding: SESSION_START_ERROR means nothing was funded;
+      // the cause is in originalError.
+      if (['SESSION_FUNDED_SETUP_FAILED', 'SESSION_ID_UNRESOLVED', 'SESSION_NOT_FUNDED', 'SESSION_FUNDING_UNCERTAIN'].includes(error?.code)) {
+        throw error;
+      }
 
+      // Whether retrying may help is the cause's own verdict, when it gives one — nothing was funded, but an
+      // unclassified failure is not assumed to pass (§19 Z14).
+      const verdict = typeof error?.details?.retryable === 'boolean' ? error.details.retryable
+        : typeof error?.retryable === 'boolean' ? error.retryable : undefined;
       throw new SDKError(
         `Failed to start session: ${error.message}`,
         'SESSION_START_ERROR',
-        { originalError: error }
+        { originalError: error, ...(verdict !== undefined ? { retryable: verdict } : {}) }
       );
+    }
+  }
+
+  /**
+   * The one gate every prompt path appends its exchange through, so the opt-outs cannot be bypassed:
+   * nothing is written when the session (`conversationLog: false`) or this prompt opted out.
+   */
+  private logExchange(sessionId: string, session: SessionState, options: PromptOptions | undefined, messages: Message[]): Promise<void> {
+    if (session.conversationLog === false || options?.conversationLog === false) return Promise.resolve();
+    // One write for the whole exchange, asked for at once (§27 HH1): the store appends a conversation's exchanges in
+    // call order (§15 T4), never one's question without its answer — and one asked for before a sign-out lands.
+    // Even a store that throws instead of rejecting only rejects here: a log failure never costs a paid reply (R2).
+    try {
+      return this.storageManager.appendMessages(sessionId, messages);
+    } catch (error) {
+      return Promise.reject(error);
     }
   }
 
@@ -943,6 +1020,12 @@ export class SessionManager implements ISessionManager {
    * EncryptionManager is set, `authorisation.clientAddress` is cross-checked
    * (case-insensitive) against `getWsClientAddress()` first; a mismatch throws
    * before the POST. On 401 the session is NOT registered.
+   *
+   * The caller funded this session, so the SDK cannot refuse before money moves: call
+   * `storageManager.assertConversationLogWritable()` BEFORE funding (it refuses an insecure origin, a browser
+   * without Web Locks, a disconnected S5, or storage that failed to start — STORAGE_UNAVAILABLE), or pass
+   * `conversationLog: false`. A log write that fails here
+   * throws SESSION_FUNDED_SETUP_FAILED with the ids and `registered: true` (plan §14 S6).
    */
   async registerDelegatedSession(config: DelegatedSessionConfig): Promise<void> {
     const sessionId = config.sessionId;
@@ -992,6 +1075,7 @@ export class SessionManager implements ISessionManager {
       totalTokens: 0,
       startTime: Date.now(),
       encryption: true, // Match normal session behavior - use encryption by default (Phase 6.2)
+      conversationLog: config.conversationLog,
       ragContext: config.ragConfig?.enabled
         ? { vectorDbId: config.ragConfig.vectorDbSessionId || `rag-${sessionIdStr}` }
         : undefined,
@@ -1005,30 +1089,34 @@ export class SessionManager implements ISessionManager {
     // Store in memory
     this.sessions.set(sessionIdStr, sessionState);
 
-    // Persist to storage
-    await this.storageManager.storeConversation({
-      id: sessionIdStr,
-      messages: [],
-      metadata: {
-        chainId: config.chainId,
-        model: config.model,
-        provider: config.hostAddress,
-        endpoint: config.hostUrl,
-        jobId: config.jobId.toString(),
-        status: 'active',
-        totalTokens: 0,
-        startTime: sessionState.startTime,
-        encryption: sessionState.encryption,
-        config: {
-          depositAmount: config.depositAmount,
-          pricePerToken: config.pricePerToken.toString(),
-          proofInterval: config.proofInterval.toString(),
-          duration: config.duration.toString()
-        }
-      },
-      createdAt: sessionState.startTime,
-      updatedAt: sessionState.startTime
-    });
+    // Persist to storage. The caller funded this session: a failure says so, with the ids (it stays registered).
+    try {
+      if (config.conversationLog !== false) await this.storageManager.storeConversation({
+        id: sessionIdStr,
+        messages: [],
+        metadata: {
+          chainId: config.chainId,
+          model: config.model,
+          provider: config.hostAddress,
+          endpoint: config.hostUrl,
+          jobId: config.jobId.toString(),
+          status: 'active',
+          totalTokens: 0,
+          startTime: sessionState.startTime,
+          encryption: sessionState.encryption,
+          config: {
+            depositAmount: config.depositAmount,
+            pricePerToken: config.pricePerToken.toString(),
+            proofInterval: config.proofInterval.toString(),
+            duration: config.duration.toString()
+          }
+        },
+        createdAt: sessionState.startTime,
+        updatedAt: sessionState.startTime
+      });
+    } catch (cause: any) {
+      throw fundedSetupFailed(sessionId, config.jobId, 'conversation-log', cause);
+    }
 
     console.log(`[SessionManager] Delegated session ${sessionIdStr} registered successfully`);
   }
@@ -1139,24 +1227,12 @@ export class SessionManager implements ISessionManager {
       // Add response to session
       session.responses.push(response);
 
-      // Update storage
-      await this.storageManager.appendMessage(
-        sessionId.toString(),
-        {
-          role: 'user',
-          content: prompt,
-          timestamp: Date.now()
-        }
-      );
-
-      await this.storageManager.appendMessage(
-        sessionId.toString(),
-        {
-          role: 'assistant',
-          content: response,
-          timestamp: Date.now()
-        }
-      );
+      // Update storage without waiting: neither a failed nor a slow log write holds back the paid reply (R2, S6);
+      // the conversation lock keeps concurrent appends in order.
+      this.logExchange(sessionId.toString(), session, options, [
+        { role: 'user', content: prompt, timestamp: Date.now() },
+        { role: 'assistant', content: response, timestamp: Date.now() },
+      ]).catch(err => console.warn('[SessionManager] Failed to store the exchange:', err));
 
       // Store in conversation memory if enabled
       const conversationMemory = this.conversationMemories?.get(sessionId.toString());
@@ -1195,37 +1271,35 @@ export class SessionManager implements ISessionManager {
     const sessionIdStr = sessionId.toString();
     let session = this.sessions.get(sessionIdStr);
 
-    // If session not in memory, try to load from storage (handles SessionManager recreation)
+    // If session not in memory, try to load from storage (handles SessionManager recreation). A read that fails
+    // throws its own code (STORAGE_UNAVAILABLE, STORAGE_LOAD_ERROR with its verdict): a funded session is never
+    // reported "not found" because its log could not be read (I2 — §21 BB12).
     if (!session && this.storageManager) {
-      try {
-        const conversation = await this.storageManager.loadConversation(sessionIdStr);
-        if (conversation && conversation.metadata) {
-          // Reconstruct minimal session state from storage
-          session = {
-            sessionId: sessionId,
-            jobId: BigInt(conversation.metadata.jobId || sessionId),
-            chainId: conversation.metadata.chainId || 84532,
-            model: conversation.metadata.model || '',
-            provider: conversation.metadata.provider || '',
-            endpoint: conversation.metadata.endpoint,
-            status: (conversation.metadata.status as any) || 'active',
-            prompts: [],
-            responses: [],
-            checkpoints: [],
-            totalTokens: conversation.metadata.totalTokens || 0,
-            startTime: conversation.metadata.startTime || conversation.createdAt,
-            encryption: conversation.metadata.encryption !== false  // NEW (Phase 6.2): Restore encryption preference
-          } as SessionState;
+      const conversation = await this.storageManager.loadConversation(sessionIdStr);
+      if (conversation && conversation.metadata) {
+        // Reconstruct minimal session state from storage
+        session = {
+          sessionId: sessionId,
+          jobId: BigInt(conversation.metadata.jobId || sessionId),
+          chainId: conversation.metadata.chainId || 84532,
+          model: conversation.metadata.model || '',
+          provider: conversation.metadata.provider || '',
+          endpoint: conversation.metadata.endpoint,
+          status: (conversation.metadata.status as any) || 'active',
+          prompts: [],
+          responses: [],
+          checkpoints: [],
+          totalTokens: conversation.metadata.totalTokens || 0,
+          startTime: conversation.metadata.startTime || conversation.createdAt,
+          encryption: conversation.metadata.encryption !== false  // NEW (Phase 6.2): Restore encryption preference
+        } as SessionState;
 
-          // Add to memory for subsequent calls
-          this.sessions.set(sessionIdStr, session);
-        }
-      } catch (err) {
-        console.warn(`Could not load session ${sessionIdStr} from storage:`, err);
+        // Add to memory for subsequent calls
+        this.sessions.set(sessionIdStr, session);
       }
     }
 
-    // If still no session after trying storage, throw error
+    // No log (none was kept, or none was written): the session cannot be resumed here
     if (!session) {
       throw new SDKError('Session not found in memory or storage', 'SESSION_NOT_FOUND');
     }
@@ -1641,24 +1715,10 @@ export class SessionManager implements ISessionManager {
         }
 
         // Update storage (non-blocking to prevent S5 connection issues from freezing UI)
-        this.storageManager.appendMessage(
-          sessionId.toString(),
-          {
-            role: 'user',
-            content: prompt,
-            timestamp: Date.now(),
-            ...(Object.keys(userMsgMeta1).length > 0 ? { metadata: userMsgMeta1 } : {})
-          }
-        ).catch(err => console.warn('[SessionManager] Failed to store user message:', err));
-
-        this.storageManager.appendMessage(
-          sessionId.toString(),
-          {
-            role: 'assistant',
-            content: finalResponse,
-            timestamp: Date.now()
-          }
-        ).catch(err => console.warn('[SessionManager] Failed to store assistant message:', err));
+        this.logExchange(sessionIdStr, session, options, [
+          { role: 'user', content: prompt, timestamp: Date.now(), ...(Object.keys(userMsgMeta1).length > 0 ? { metadata: userMsgMeta1 } : {}) },
+          { role: 'assistant', content: finalResponse, timestamp: Date.now() },
+        ]).catch(err => console.warn('[SessionManager] Failed to store the exchange:', err));
 
         // Store in conversation memory if enabled (non-blocking)
         const conversationMemory = this.conversationMemories?.get(sessionIdStr);
@@ -1888,24 +1948,10 @@ export class SessionManager implements ISessionManager {
         }
 
         // Update storage (non-blocking to prevent S5 connection issues from freezing UI)
-        this.storageManager.appendMessage(
-          sessionId.toString(),
-          {
-            role: 'user',
-            content: prompt,
-            timestamp: Date.now(),
-            ...(Object.keys(userMsgMeta2).length > 0 ? { metadata: userMsgMeta2 } : {})
-          }
-        ).catch(err => console.warn('[SessionManager] Failed to store user message:', err));
-
-        this.storageManager.appendMessage(
-          sessionId.toString(),
-          {
-            role: 'assistant',
-            content: response,
-            timestamp: Date.now()
-          }
-        ).catch(err => console.warn('[SessionManager] Failed to store assistant message:', err));
+        this.logExchange(sessionIdStr, session, options, [
+          { role: 'user', content: prompt, timestamp: Date.now(), ...(Object.keys(userMsgMeta2).length > 0 ? { metadata: userMsgMeta2 } : {}) },
+          { role: 'assistant', content: response, timestamp: Date.now() },
+        ]).catch(err => console.warn('[SessionManager] Failed to store the exchange:', err));
 
         // Store in conversation memory if enabled (non-blocking)
         const conversationMemory = this.conversationMemories?.get(sessionIdStr);
@@ -2151,7 +2197,8 @@ export class SessionManager implements ISessionManager {
     const sessionIdStr = sessionId.toString();
     let session = this.sessions.get(sessionIdStr);
 
-    // If session not in memory, try to load from storage (handles page refresh case)
+    // If session not in memory, try to load from storage (handles page refresh case). Completing never depends on
+    // the log (§21 BB12): a read that fails is logged and the completion goes to the contract regardless.
     if (!session && this.storageManager) {
       try {
         const conversation = await this.storageManager.loadConversation(sessionIdStr);
@@ -2208,14 +2255,14 @@ export class SessionManager implements ISessionManager {
         this.wsClient = undefined;
       }
 
-      // Update storage
-      const conversation = await this.storageManager.loadConversation(sessionIdStr);
-      if (conversation) {
-        conversation.metadata['status'] = 'completed';
-        conversation.metadata['totalTokens'] = totalTokens;
-        conversation.metadata['endTime'] = sessionAfterTx?.endTime || Date.now();
-        conversation.updatedAt = Date.now();
-        await this.storageManager.saveConversation(conversation);
+      // Update storage (one locked load-patch-save, so an append still in flight is not overwritten).
+      // Non-blocking like endSession's: the session has settled on-chain; the log must not turn that into a throw.
+      if (sessionAfterTx?.conversationLog !== false) {
+        this.storageManager.updateConversationMetadata(sessionIdStr, {
+          status: 'completed',
+          totalTokens,
+          endTime: sessionAfterTx?.endTime || Date.now(),
+        }).catch(err => console.warn('[SessionManager] Failed to persist session completion:', err));
       }
 
       // Close WebSocket if open
@@ -2293,14 +2340,10 @@ export class SessionManager implements ISessionManager {
       }
 
       // Update storage to mark session as ended (non-blocking for fast session teardown)
-      this.storageManager.loadConversation(sessionIdStr).then(conversation => {
-        if (conversation) {
-          conversation.metadata['status'] = 'ended';
-          conversation.metadata['endTime'] = Date.now();
-          conversation.updatedAt = Date.now();
-          return this.storageManager.saveConversation(conversation);
-        }
-      }).catch(err => console.warn('[SessionManager] Failed to persist session end status:', err));
+      if (session?.conversationLog !== false) {
+        this.storageManager.updateConversationMetadata(sessionIdStr, { status: 'ended', endTime: Date.now() })
+          .catch(err => console.warn('[SessionManager] Failed to persist session end status:', err));
+      }
 
     } catch (error: any) {
       throw new SDKError(
@@ -3026,24 +3069,11 @@ export class SessionManager implements ISessionManager {
       // Add complete response to session
       session.responses.push(fullResponse);
 
-      // Update storage
-      await this.storageManager.appendMessage(
-        sessionId.toString(),
-        {
-          role: 'user',
-          content: prompt,
-          timestamp: Date.now()
-        }
-      );
-
-      await this.storageManager.appendMessage(
-        sessionId.toString(),
-        {
-          role: 'assistant',
-          content: fullResponse,
-          timestamp: Date.now()
-        }
-      );
+      // Update storage without waiting (R2, S6)
+      this.logExchange(sessionId.toString(), session, options, [
+        { role: 'user', content: prompt, timestamp: Date.now() },
+        { role: 'assistant', content: fullResponse, timestamp: Date.now() },
+      ]).catch(err => console.warn('[SessionManager] Failed to store the exchange:', err));
     } catch (error: any) {
       throw new SDKError(
         `Failed to stream response: ${error.message}`,

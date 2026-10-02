@@ -16,6 +16,7 @@
 
 import { ethers } from 'ethers';
 import { SDKError } from '../types';
+import { afterBroadcast } from '../contracts/funding-receipt';
 
 export interface SendUserOpCall {
   to: string;
@@ -110,7 +111,8 @@ export class AASigner extends ethers.AbstractSigner {
           : 0n;
 
     const { transactionHash } = await this._opts.sendUserOp({ to, data, value });
-    const receipt = await this._fetchReceiptWithRetry(provider, transactionHash);
+    // The user operation ran: a receipt not visible yet names its hash (§35 PP5).
+    const receipt = await this._fetchReceiptWithRetry(provider, transactionHash).catch((error) => { throw afterBroadcast(error, transactionHash); });
 
     const params: ethers.TransactionResponseParams = {
       hash: transactionHash,

@@ -26,24 +26,30 @@ export class P2PBridgeClient implements IP2PService {
     
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(endpoint);
+        // A closed socket's late events — its close (a browser fires it after the closing handshake), or the error of one
+        // closed while still opening — never touch its successor (plan §31 LL1, §32 MM6). (A closed socket neither opens
+        // nor delivers messages.)
+        const ws = new WebSocket(endpoint);
+        this.ws = ws;
+        const current = () => this.ws === ws;
         
-        this.ws.onopen = () => {
+        ws.onopen = () => {
           this.connected = true;
           resolve();
         };
         
-        this.ws.onerror = (error) => {
-          this.connected = false;
+        ws.onerror = (error) => {
+          if (current()) this.connected = false;
           reject(new SDKError('Failed to connect to P2P service', 'P2P_CONNECTION_FAILED', { error }));
         };
         
-        this.ws.onclose = () => {
+        ws.onclose = () => {
+          if (!current()) return;
           this.connected = false;
           this.cleanup();
         };
         
-        this.ws.onmessage = (event) => {
+        ws.onmessage = (event) => {
           this.handleMessage(event.data);
         };
         
@@ -54,11 +60,12 @@ export class P2PBridgeClient implements IP2PService {
   }
   
   async disconnect(): Promise<void> {
-    if (!this.connected || !this.ws) {
+    // A socket still opening is closed too (plan §31 LL1): a connect given up on never opens late.
+    const ws = this.ws;
+    if (!ws) {
       return;
     }
-    
-    this.ws.close();
+    ws.close();
     this.connected = false;
     this.cleanup();
   }

@@ -18,14 +18,15 @@ import { ChainRegistry } from '../../src/config/ChainRegistry';
 import { MODEL, USDC, HOST } from './fixtures';
 
 const TRAINING = { duration: 14400, proofInterval: 1000, proofTimeoutWindow: 3600 };
-const signer: any = { provider: { getNetwork: async () => ({ chainId: 84532n }) }, getAddress: async () => `0x${'ee'.repeat(20)}` };
+const SIGNER_ADDRESS = `0x${'ee'.repeat(20)}`;
+const signer: any = { provider: { getNetwork: async () => ({ chainId: 84532n }), getBlockNumber: async () => 1 }, getAddress: async () => SIGNER_ADDRESS };
 
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('layer 1 — the REAL SessionManager.startSession forwards training lifecycle to the payment manager', () => {
   it('duration / proofInterval / proofTimeoutWindow reach createSessionJob unchanged; no useDeposit', async () => {
     const paymentManager: any = { isInitialized: () => true, createSessionJob: vi.fn(async () => 123), signer };
-    const storage: any = { isInitialized: () => true, storeConversation: vi.fn(async () => {}), appendMessage: vi.fn(async () => {}) };
+    const storage: any = { isInitialized: () => true, storeConversation: vi.fn(async () => {}), appendMessage: vi.fn(async () => {}), assertConversationLogWritable: vi.fn() };
     const hostManager: any = {
       getHostInfo: vi.fn(async () => ({ address: HOST, apiUrl: 'https://host2.fabstir.net', isActive: true, supportedModels: [MODEL], stake: 0n, minPricePerToken: 904n })),
       resolveModelPricePerToken: vi.fn(async () => 904n),
@@ -85,10 +86,17 @@ describe('layer 2 — the REAL PaymentManagerMultiChain.createSessionJob forward
 describe('layer 3 — the REAL JobMarketplaceWrapper puts them on the contract call as uint256', () => {
   function wrapperWithFakeContract() {
     const w: any = new JobMarketplaceWrapper(84532, signer);
+    // A realistic receipt: the marketplace emits SessionJobCreated as a raw log, decoded by the wrapper through the
+    // contract interface (§14 S3). (An empty `logs` used to pass only through the job-id-0 fallback 1.39.0 removed.)
+    const iface = w.contract.interface;
+    // Its depositor is this signer: the id is read from this sender's creation only (plan §35 PP7).
+    const log = { address: w.contractAddress, ...iface.encodeEventLog('SessionJobCreated', [1n, SIGNER_ADDRESS, HOST, 1n]) };
+    const sent = () => { const tx = { hash: '0xtx', wait: async () => ({ hash: '0xtx', status: 1, logs: [log] }) }; return { ...tx, replaceableTransaction: () => tx }; };
     const contract: any = {
       paused: vi.fn(async () => false),
-      createSessionJobForModelWithToken: vi.fn(async () => ({ wait: async () => ({ logs: [] }) })),
-      createSessionJobForModel: vi.fn(async () => ({ wait: async () => ({ logs: [] }) })),
+      interface: iface,
+      createSessionJobForModelWithToken: vi.fn(async () => sent()),
+      createSessionJobForModel: vi.fn(async () => sent()),
     };
     w.contract = contract;
     return { w, contract };

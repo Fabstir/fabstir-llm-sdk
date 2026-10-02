@@ -5,9 +5,10 @@
  * Sub-phase 1.2 — FabstirSDKCore.authenticateAsDelegate({ signer, payer }).
  *
  * Authenticates with a plain EOA delegate signer, records the payer, and
- * propagates it to PaymentManager.setDelegatePayer. Reuses authenticate('signer').
- * `authenticate` is spied so we don't run real S5/manager init; it simulates the
- * signer path and injects a real PaymentManager so setter propagation is exercised.
+ * propagates it to PaymentManager.setDelegatePayer. Reuses the 'signer' sign-in — since plan §24 EE5 within one
+ * identity change, through the internal `_authenticate` (the public `authenticate` would queue behind itself).
+ * `_authenticate` is spied so we don't run real S5/manager init; it simulates the signer path and injects a real
+ * PaymentManager so setter propagation is exercised.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ethers } from 'ethers';
@@ -37,7 +38,7 @@ function makeSdk() {
 
   // Simulate a successful signer authentication without real init.
   const authSpy = vi
-    .spyOn(sdk, 'authenticate')
+    .spyOn(sdk as any, '_authenticate')
     .mockImplementation(async (method: any, opts: any) => {
       (sdk as any).signer = opts.signer;
       (sdk as any).authenticated = true;
@@ -54,7 +55,7 @@ describe('FabstirSDKCore.authenticateAsDelegate (1.2)', () => {
   it('sets authenticated=true and authMode=delegate via authenticate("signer")', async () => {
     const { sdk, signer, authSpy } = makeSdk();
     await sdk.authenticateAsDelegate({ signer, payer: PAYER });
-    expect(authSpy).toHaveBeenCalledWith('signer', { signer });
+    expect(authSpy).toHaveBeenCalledWith('signer', { signer }, expect.any(Number));
     expect((sdk as any).authenticated).toBe(true);
     expect((sdk as any).authMode).toBe('delegate');
   });

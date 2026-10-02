@@ -95,8 +95,7 @@ export async function generateS5SeedFromAddress(address: string, chainId: number
   const entropy = await deriveEntropyFromAddress(address, chainId);
   const seedPhrase = entropyToS5Phrase(entropy);
 
-  const words = seedPhrase.split(' ').slice(0, 3).join(' ');
-  console.log('[S5 Seed] Address-based seed generated (first 3 words):', words + '...');
+  console.log('[S5 Seed] Address-based seed generated'); // never any of its words: it is key material (§27 HH4)
 
   return seedPhrase;
 }
@@ -168,8 +167,7 @@ export async function generateS5SeedFromPrivateKey(privateKey: string): Promise<
   const entropy = await deriveEntropyFromPrivateKey(privateKey);
   const seedPhrase = entropyToS5Phrase(entropy);
 
-  const words = seedPhrase.split(' ').slice(0, 3).join(' ');
-  console.log('[S5 Seed] Deterministic seed generated (first 3 words):', words + '...');
+  console.log('[S5 Seed] Deterministic seed generated'); // never any of its words (§27 HH4)
 
   return seedPhrase;
 }
@@ -287,16 +285,12 @@ export function entropyToS5Phrase(entropy: Uint8Array): string {
     throw new Error(`Entropy must be ${SEED_LENGTH} bytes, got ${entropy.length}`);
   }
 
-  console.log('[S5 Phrase Generation] Starting with entropy:',
-    Array.from(entropy).map(b => b.toString(16).padStart(2, '0')).join(' '));
-
+  // Never logged: the phrase is a pure function of these bytes — the root of every sealing key (§28 II1).
   // Convert entropy to seed words
   const seedWords = entropyToSeedWords(entropy);
 
   // Convert seed words back to seed bytes (required for checksum)
   const seedBytes = seedWordsToSeed(seedWords);
-  console.log('[S5 Phrase Generation] Seed bytes for checksum:',
-    Array.from(seedBytes).map(b => b.toString(16).padStart(2, '0')).join(' '));
 
   // Generate Blake3 checksum words (S5.js requirement)
   const checksumWords = generateChecksumWords(seedBytes);
@@ -315,8 +309,6 @@ export function entropyToS5Phrase(entropy: Uint8Array): string {
   }
 
   const phrase = phraseWords.join(' ');
-  console.log('[S5 Phrase Generation] Final phrase (first 3 words):',
-    phraseWords.slice(0, 3).join(' ') + '...');
 
   return phrase;
 }
@@ -372,9 +364,7 @@ export function cacheSeed(walletAddress: string, seed: string): void {
 
   try {
     const cacheKey = getCacheKey(walletAddress);
-    const words = seed.split(' ').slice(0, 3).join(' ');
     console.log('[cacheSeed] Writing to cache key:', cacheKey);
-    console.log('[cacheSeed] Seed (first 3 words):', words);
     const data = {
       version: CACHE_VERSION,
       seed,
@@ -456,8 +446,7 @@ export async function getOrGenerateS5Seed(
     const cached = getCachedSeed(walletAddress);
 
     if (cached) {
-      const words = cached.split(' ').slice(0, 3).join(' ');
-      console.log('[getOrGenerateS5Seed] Found cached seed (first 3 words):', words);
+      console.log('[getOrGenerateS5Seed] Found a cached seed');
       const isValid = await verifyCachedSeed(walletAddress, cached);
 
       if (isValid) {
@@ -481,8 +470,7 @@ export async function getOrGenerateS5Seed(
 
   // Convert to S5 phrase
   const seedPhrase = entropyToS5Phrase(entropy);
-  const words = seedPhrase.split(' ').slice(0, 3).join(' ');
-  console.log('[getOrGenerateS5Seed] Generated new seed (first 3 words):', words);
+  console.log('[getOrGenerateS5Seed] Generated a new seed');
 
   // Cache for future use
   console.log('[getOrGenerateS5Seed] Caching new seed for:', walletAddress.toLowerCase());

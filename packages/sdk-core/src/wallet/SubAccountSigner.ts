@@ -17,6 +17,7 @@
 
 import { ethers } from 'ethers';
 import { hasCachedSeed } from '../utils/s5-seed-derivation';
+import { afterBroadcast } from '../contracts/funding-receipt';
 
 export interface SubAccountSignerOptions {
   provider: any;           // Base Account Kit provider
@@ -135,8 +136,13 @@ export function createSubAccountSigner(options: SubAccountSignerOptions) {
 
       console.log('[SubAccountSigner] Transaction hash:', txHash);
 
-      // Get the transaction response
-      const txResponse = await ethersProvider.getTransaction(txHash as string);
+      // Get the transaction response. Sent: a failure from here names the hash (§35 PP5).
+      let txResponse: ethers.TransactionResponse | null;
+      try {
+        txResponse = await ethersProvider.getTransaction(txHash);
+      } catch (error) {
+        throw afterBroadcast(error, txHash);
+      }
 
       if (!txResponse) {
         // Return minimal response if transaction not found yet
@@ -150,10 +156,8 @@ export function createSubAccountSigner(options: SubAccountSignerOptions) {
           gasLimit: 0n,
           gasPrice: 0n,
           chainId: chainId,
-          wait: async () => {
-            const receipt = await ethersProvider.waitForTransaction(txHash as string);
-            return receipt || ({ status: 1, hash: txHash } as any);
-          },
+          // Never an invented receipt (§35 PP5): without a timeout this resolves once the transaction is mined.
+          wait: (confirms?: number) => ethersProvider.waitForTransaction(txHash, confirms),
         } as any;
       }
 

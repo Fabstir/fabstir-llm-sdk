@@ -24,7 +24,8 @@ import type { ConversationData } from '../../src/types';
 import 'fake-indexeddb/auto';
 
 // Mock S5.js
-vi.mock('@julesl23/s5js', () => ({
+vi.mock('@julesl23/s5js', () => ({ isS5RegistryUnavailableError: () => false, // beta.56's root export (plan §19 Z1)
+ 
   S5: {
     create: vi.fn().mockResolvedValue({
       recoverIdentityFromSeedPhrase: vi.fn().mockResolvedValue(undefined),

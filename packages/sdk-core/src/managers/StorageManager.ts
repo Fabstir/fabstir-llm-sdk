@@ -29,7 +29,81 @@ import { FolderHierarchy, type FolderListItem, type FolderMetadata } from '../st
 import { getParentPath, getAncestorPaths } from '../storage/path-validator.js';
 import { SEED_MESSAGE } from '../utils/s5-seed-derivation';
 import { registerS5WithBackend } from '../utils/s5-secure-registration';
-import { AsyncMutex } from '../utils/AsyncMutex';
+import { storageSealerFromSeed, type StorageSealer } from '../storage/sealed/StorageSealer';
+import { SealedIO, isS5Absent, retryableOf, sealedBlobHash } from '../storage/sealed/sealed-io';
+import { bytesToHex, hexToBytes } from '../crypto/utilities';
+import { sha256 } from '@noble/hashes/sha256';
+import { mapWithConcurrency } from '../utils/concurrency';
+import { createRagCoherence, headNotRecorded, type RagHead } from '../storage/sealed/rag-coherence';
+import { logHeadKeyOf, isDense } from '../storage/sealed/rag-layout';
+import { reportProgress, type MigrationProgress } from '../storage/sealed/rag-migration';
+import { assertSupportedS5js, withS5Guards } from '../storage/s5-guards';
+
+/** Result of sealing the legacy plaintext conversation logs. */
+export interface LogMigrationReport {
+  sealed: number;
+  alreadySealed: number;
+  /** Plaintext files older SDKs left beside the logs (conversation-plaintext.json, summary.json, exchanges/, hierarchy.json). */
+  purged: string[];
+  /**
+   * Every failure carries a code (STORAGE_MIGRATION_FAILED when the error brought none) and `retryable`: whether
+   * retrying may help (§17 W4).
+   */
+  failed: Array<{ id: string; error: string; code: string; retryable: boolean }>;
+  /** Files beside the logs that no older SDK wrote — kept, never deleted (§20 AA10). */
+  unrecognisedFiles?: string[];
+}
+
+/**
+ * The sealed log payload. `legacyKeys`: keys of every plaintext message this log has absorbed (its legacy
+ * content, and what outdated tabs added since) — so an outdated tab's plaintext can add a new message but
+ * never resurrect one deleted after the seal (plan §14 S2).
+ */
+interface SealedLog { revision: number; conversation: ConversationData; legacyKeys?: string[] }
+type LogRead = { conversation: ConversationData | null; revision: number; legacyKeys?: string[] };
+
+const utf8Encoder = new TextEncoder();
+const messageKey = (m: any): string =>
+  bytesToHex(sha256(utf8Encoder.encode(`${m?.role}\u0000${m?.timestamp}\u0000${typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content)}`))).slice(0, 16);
+
+/** A conversation: an object with a messages array (§21 BB8, §22 CC6). */
+const isConversation = (x: unknown): x is ConversationData => typeof x === 'object' && x !== null && Array.isArray((x as any).messages);
+const notAConversation = (x: unknown) =>
+  new SDKError('A conversation needs a messages array', 'STORAGE_CONVERSATION_INVALID', { conversationId: (x as any)?.id, retryable: false });
+/** Messages to append: a list of message objects, with no holes — a hole would be sealed as `undefined` (§43 XX4, §44 YY4). */
+const isMessageList = (x: unknown): x is Message[] =>
+  isDense(x) && x.every((m) => typeof m === 'object' && m !== null && !Array.isArray(m));
+
+/** What a disposed store answers (§26 GG1): its identity is gone, so no retry passes. */
+const storageManagerDisposed = () =>
+  new SDKError('This storage manager belongs to an identity that is signed out — get the current one from the SDK', 'STORAGE_MANAGER_DISPOSED', { retryable: false });
+
+/**
+ * A storage failure in the one shape (§16 V8): `cause`, and `retryable` — the cause's verdict when it gives one,
+ * else true (an I/O failure may pass). `originalError` is kept for existing callers.
+ */
+function storageFailure(message: string, code: string, cause: unknown): SDKError {
+  // A write that landed says so, whatever wraps it (§34 OO4).
+  const committed = (cause as SDKError | undefined)?.details?.committed === true;
+  return new SDKError(message, code, { originalError: cause, cause, retryable: retryableOf(cause), ...(committed ? { committed } : {}) });
+}
+
+/**
+ * A sealed copy an outdated tab overwrote with plaintext (S2): the plaintext is the later write, so its fields win —
+ * its metadata over the sealed copy's, key by key — and the messages are the union (the plaintext's that the sealed
+ * copy has never seen, by key, in timestamp order). Never worse than the plaintext alone, however old the sealed
+ * copy (§21 BB9).
+ */
+function adoptPlaintext(sealed: SealedLog, plain: ConversationData): LogRead {
+  const plainMessages = plain.messages;
+  const seen = new Set([...(sealed.legacyKeys ?? []), ...sealed.conversation.messages.map(messageKey)]);
+  const adopted = plainMessages.filter((m) => !seen.has(messageKey(m)));
+  const legacyKeys = [...new Set([...(sealed.legacyKeys ?? []), ...plainMessages.map(messageKey)])];
+  const messages = adopted.length === 0 ? sealed.conversation.messages
+    : [...sealed.conversation.messages, ...adopted].sort((a: any, b: any) => (a?.timestamp ?? 0) - (b?.timestamp ?? 0));
+  const metadata = { ...sealed.conversation.metadata, ...plain.metadata };
+  return { conversation: { ...sealed.conversation, ...plain, metadata, messages }, revision: sealed.revision, legacyKeys };
+}
 
 export interface Exchange {
   prompt: string;
@@ -109,6 +183,16 @@ interface QueuedOperation {
   createdAt: number;
 }
 
+/**
+ * The synchronous public members — every other one is async. What the SDK's stand-in for a store that did not start
+ * relies on to refuse each the way the real one reports (§22 CC7): not the `AsyncFunction` tag, which a consumer's
+ * toolchain may compile away. A test walks the prototype so a new member is classified here.
+ */
+export const STORAGE_MANAGER_SYNC_MEMBERS = [
+  'setEncryptionManager', 'getS5Client', 'isInitialized', 'getParentPath', 'getConnectionStatus', 'getSyncStatus',
+  'getPendingOperationCount', 'getLastError', 'onSyncStatusChange', 'cleanup', 'setModelManager', 'dispose',
+] as const satisfies ReadonlyArray<keyof StorageManager>;
+
 export class StorageManager implements IStorageManager {
   static readonly DEFAULT_S5_PORTAL = 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p';
   static readonly REGISTRY_PREFIX = 'fabstir-llm';
@@ -135,9 +219,19 @@ export class StorageManager implements IStorageManager {
   private syncStatus: SyncStatus = 'synced';
   private syncListeners: Array<(status: SyncStatus) => void> = [];
   private lastError: Error | null = null;
+  /** The browser listeners `setupAutoReconnect` added — kept so disposal removes exactly these (§26 GG1). */
+  private reconnectListeners: Array<{ target: Pick<EventTarget, 'removeEventListener'>; type: string; handler: () => void }> = [];
+  /** Set by `dispose()`: every public member but `cleanup` refuses from then on (§26 GG1). */
+  private disposed = false;
+  /** Set by `cleanup()`: the connection is no longer heard, so nothing is queued for it (§31 LL2). */
+  private cleanedUp = false;
 
-  // Per-conversation save locks to prevent concurrent write race conditions
-  private conversationMutex = new AsyncMutex();
+  /** Seals the conversation log; derived from the S5 seed in initialize() (the SDK EncryptionManager's key). */
+  private sealer?: StorageSealer;
+  /** Per-conversation locks — Web Locks across tabs in a browser, an in-process mutex elsewhere. */
+  private coherence = createRagCoherence();
+  /** The tail of each conversation's appends, in call order (see `appendMessages`). */
+  private appendChains = new Map<string, Promise<void>>();
 
   // User settings cache
   private settingsCache: {
@@ -148,9 +242,8 @@ export class StorageManager implements IStorageManager {
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   /**
-   * Execute operation with per-conversation lock to prevent S5 revision conflicts.
-   * Serializes concurrent operations on the same conversation to avoid
-   * "Revision number too low" errors from S5's optimistic concurrency control.
+   * Execute operation with per-conversation lock to prevent S5 revision conflicts and lost appends.
+   * Serializes operations on the same conversation across tabs (Web Locks) as well as within one.
    *
    * @param conversationId - The conversation ID to lock
    * @param operation - Async operation to execute under lock
@@ -160,7 +253,7 @@ export class StorageManager implements IStorageManager {
     conversationId: string,
     operation: () => Promise<T>
   ): Promise<T> {
-    return this.conversationMutex.withLock(conversationId, operation);
+    return this.coherence.withLock(`conv:${conversationId}`, operation);
   }
 
   // Folder hierarchy manager (Sub-phase 2.1)
@@ -191,6 +284,7 @@ export class StorageManager implements IStorageManager {
    * Set EncryptionManager for encrypted storage (Phase 5.1)
    */
   setEncryptionManager(encryptionManager: EncryptionManager): void {
+    this.ensureNotDisposed();
     this.encryptionManager = encryptionManager;
   }
 
@@ -198,11 +292,13 @@ export class StorageManager implements IStorageManager {
    * Get S5 client instance (for VectorRAGManager)
    */
   getS5Client(): any {
+    this.ensureNotDisposed();
     return this.s5Client;
   }
 
   /** Raw blob bytes by CID (no CBOR/JSON decode) — for proofHash over exact stored bytes (Constraint 3). */
   async getRawBytes(cid: string): Promise<Uint8Array> {
+    this.ensureNotDisposed();
     if (!this.s5Client) throw new Error('S5 client not available');
     return this.s5Client.downloadByCID(cid);
   }
@@ -212,6 +308,7 @@ export class StorageManager implements IStorageManager {
    * Net-new: parse the 0xae envelope (blake3 blobHash, key, size), then reuse s5js downloadAndDecryptBlob.
    */
   async downloadDecryptedByCID(cid: string): Promise<Uint8Array> {
+    this.ensureNotDisposed();
     if (!this.s5Client) throw new Error('S5 client not available');
     if (cid[0] !== 'u') throw new Error(`Not a u-prefix capability CID: ${cid.slice(0, 12)}`);
     const body = this.base64UrlToBytes(cid.slice(1));
@@ -234,6 +331,7 @@ export class StorageManager implements IStorageManager {
    * byte-exact against capability-fixture.json).
    */
   async uploadEncryptedBlob(bytes: Uint8Array): Promise<string> {
+    this.ensureNotDisposed();
     if (!this.s5Client) throw new Error('S5 client not available');
     const r = await this.s5Client.fs.uploadBlobEncrypted(new Blob([bytes as unknown as BlobPart])); // TS lib quirk: Uint8Array<ArrayBufferLike> vs BlobPart; valid at runtime
     const norm = (h: any, what: string) => {
@@ -284,6 +382,7 @@ export class StorageManager implements IStorageManager {
    * @throws Error if CID not found or S5 client not available
    */
   async getByCID(cid: string): Promise<any> {
+    this.ensureNotDisposed();
     if (!this.s5Client) {
       throw new Error('S5 client not available');
     }
@@ -320,6 +419,7 @@ export class StorageManager implements IStorageManager {
    * Initialize storage with S5 seed
    */
   async initialize(seed: string, userAddress?: string): Promise<void> {
+    this.ensureNotDisposed();
 
     // Skip S5 initialization if explicitly disabled (e.g., for hosts)
     if (process.env.SKIP_S5_STORAGE === 'true') {
@@ -330,14 +430,19 @@ export class StorageManager implements IStorageManager {
     try {
       this.userSeed = seed;
       this.userAddress = userAddress || '';
+      // The SDK EncryptionManager's keys (fromSeed, bound to the address — §19 Z8), set before anything can fail, so
+      // the log is never written unsealed. With no address there is no sealer, and the log fails closed.
+      this.sealer = userAddress ? storageSealerFromSeed(seed, userAddress) : undefined;
 
 
       // Dynamically import S5 when needed
       let S5: any;
       try {
         const s5Module = await import('@julesl23/s5js');
+        assertSupportedS5js(s5Module); // §19 Z1: never run sealed storage on an s5js that loses updates
         S5 = s5Module.S5;
       } catch (importError: any) {
+        if (importError?.code === 'S5JS_UNSUPPORTED_VERSION') throw importError;
         console.error('❌ Failed to import S5:', importError.message);
         throw new SDKError(
           `Failed to load S5 module: ${importError.message}`,
@@ -365,7 +470,8 @@ export class StorageManager implements IStorageManager {
 
       let s5Instance: any;
       try {
-        s5Instance = await Promise.race([s5CreatePromise, timeoutPromise]);
+        // §18 X1: s5js errors carry the root keys — every consumer gets the scrubbing instance, never the raw one.
+        s5Instance = withS5Guards(await Promise.race([s5CreatePromise, timeoutPromise]) as object);
       } catch (timeoutError: any) {
         console.warn('⚠️ StorageManager.initialize: S5 instance creation failed or timed out:', timeoutError.message);
         console.warn('⚠️ StorageManager: Continuing without S5 storage (operations will fail gracefully)');
@@ -432,6 +538,7 @@ export class StorageManager implements IStorageManager {
       // Setup auto-reconnect handlers for browser environment
       this.setupAutoReconnect();
     } catch (error: any) {
+      if (error?.code === 'S5JS_UNSUPPORTED_VERSION') throw error; // fatal, and already says why (§19 Z1)
       // Capture full error details even if message is empty
       const errorMessage = error?.message || error?.toString?.() || JSON.stringify(error) || 'Unknown error';
       const errorDetails = {
@@ -447,6 +554,9 @@ export class StorageManager implements IStorageManager {
         'STORAGE_INIT_ERROR',
         errorDetails
       );
+    } finally {
+      // Disposed while it started: what the start set up since (listeners, the connection subscription) goes too.
+      if (this.disposed) this.release();
     }
   }
 
@@ -457,9 +567,12 @@ export class StorageManager implements IStorageManager {
     data: string | Uint8Array | object,
     options?: StorageOptions
   ): Promise<StorageResult> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
+
+    if (options?.path) this.refusePlaintextRagWrite(options.path);
 
     // `compress` was never implemented — it only ever recorded `compressed: true` in the
     // metadata and uploaded the data uncompressed. Fail fast rather than keep the lie.
@@ -528,6 +641,7 @@ export class StorageManager implements IStorageManager {
    * Retrieve data from S5 network
    */
   async retrieve(cid: string): Promise<any> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -563,6 +677,7 @@ export class StorageManager implements IStorageManager {
    * Delete data from S5 network
    */
   async delete(cid: string): Promise<void> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -586,6 +701,7 @@ export class StorageManager implements IStorageManager {
    * List stored items
    */
   async list(prefix?: string): Promise<string[]> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -615,6 +731,7 @@ export class StorageManager implements IStorageManager {
    * Store a conversation (implements interface method)
    */
   async storeConversation(conversation: ConversationData): Promise<StorageResult> {
+    this.ensureNotDisposed();
     return this.saveConversation(conversation);
   }
 
@@ -622,11 +739,13 @@ export class StorageManager implements IStorageManager {
    * Retrieve a conversation (implements interface method)
    */
   async retrieveConversation(conversationId: string): Promise<ConversationData> {
+    this.ensureNotDisposed();
     const conversation = await this.loadConversation(conversationId);
     if (!conversation) {
       throw new SDKError(
         `Conversation ${conversationId} not found`,
-        'CONVERSATION_NOT_FOUND'
+        'CONVERSATION_NOT_FOUND',
+        { conversationId, retryable: false }
       );
     }
     return conversation;
@@ -637,6 +756,7 @@ export class StorageManager implements IStorageManager {
    * Returns metadata only (not full conversation data)
    */
   async listConversations(): Promise<ConversationInfo[]> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -690,6 +810,7 @@ export class StorageManager implements IStorageManager {
    * Add message to conversation (implements interface method)
    */
   async addMessage(conversationId: string, message: Message): Promise<void> {
+    this.ensureNotDisposed();
     return this.appendMessage(conversationId, message);
   }
 
@@ -697,6 +818,7 @@ export class StorageManager implements IStorageManager {
    * Check if data exists (implements interface method)
    */
   async exists(cid: string): Promise<boolean> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -721,6 +843,7 @@ export class StorageManager implements IStorageManager {
     fileCount: number;
     conversations: number;
   }> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -768,6 +891,7 @@ export class StorageManager implements IStorageManager {
    * Clear all local cache (implements interface method)
    */
   async clearCache(): Promise<void> {
+    this.ensureNotDisposed();
     // S5.js handles its own caching internally
     // This method is a no-op for browser compatibility
     console.debug('Cache clear requested - S5.js manages its own cache');
@@ -788,37 +912,120 @@ export class StorageManager implements IStorageManager {
    * @throws SDKError if save fails after retries
    */
   async saveConversation(conversation: ConversationData): Promise<StorageResult> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
-    return this.withConversationLock(conversation.id, () =>
-      this._saveConversationInternal(conversation)
+    // No conversation at all is refused before its id is read (§35 PP9).
+    if (!isConversation(conversation)) throw notAConversation(conversation);
+    return this.withConversationLock(conversation.id, async () =>
+      this._saveConversationInternal(conversation, await this._readLog(conversation.id))
     );
   }
 
   /**
-   * Internal save - handles actual S5 write with retry logic for revision conflicts.
-   * Called by locked methods only (saveConversation, appendMessage).
+   * Throws unless a conversation log can be written here — checked BEFORE a session is funded (D23): an
+   * environment problem (no sealer, no usable cross-tab lock) must never surface after money has moved.
+   */
+  async assertConversationLogWritable(): Promise<void> {
+    this.ensureNotDisposed();
+    if (!this.initialized) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+    this.requireSealer();
+    await this.coherence.assertUsable();
+    if (this.connectionStatus === 'disconnected') {
+      throw new SDKError('S5 is disconnected: the conversation log cannot be written', 'STORAGE_OFFLINE', { retryable: true });
+    }
+  }
+
+  /** This identity's head for a log (S9): keyed by an id derived from the identity. */
+  private logHead(conversationId: string): { getAnyAge(): Promise<RagHead | undefined>; put(head: RagHead): Promise<void> } {
+    const key = logHeadKeyOf(this.requireSealer(), conversationId);
+    return { getAnyAge: () => this.coherence.getHeadAnyAge(key), put: (head) => this.coherence.putHead(key, head) };
+  }
+
+  private logPath(conversationId: string): string {
+    return `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversationId}/conversation.json`;
+  }
+
+  /**
+   * The log at its path — a fresh read (§18 B1) that already holds every commit of this origin's tabs; a registry
+   * miss fails it (s5js D3b), so absence is certain (S1). A head never overrides it (§19 Z5). Sealed logs carry a
+   * revision; a legacy plaintext log is revision 0; no log is revision -1.
+   *
+   * The one thing a head still recovers: plaintext at the path over a sealed copy this origin committed (an
+   * outdated tab wrote it). The sealed copy, by the head's hash, plus the plaintext's messages that are in neither
+   * it nor its `legacyKeys` snapshot; the caller's next write reseals the path (S2).
+   */
+  private async _readLog(conversationId: string): Promise<LogRead> {
+    // null: s5js threw "does not exist" (the conversation's directory is not there); undefined: the directory
+    // holds no log.
+    const readPath = async (): Promise<unknown> => {
+      try {
+        return await this.s5Client.fs.get(this.logPath(conversationId), { fresh: true }); // §18 B1
+      } catch (error: any) {
+        if (isS5Absent(error)) return null;
+        throw storageFailure(`Failed to load conversation: ${error.message}`, 'STORAGE_LOAD_ERROR', error);
+      }
+    };
+    const atPath = await readPath();
+    // Not a conversation — a message list missing included, sealed or legacy: no retry reads it differently
+    // (§20 AA8, §21 BB8, §22 CC6).
+    const unreadable = (kind: string) => new SDKError(`${kind} log ${conversationId} is unreadable`, 'STORAGE_LOAD_ERROR', { retryable: false });
+    const open = (bytes: Uint8Array) => {
+      const log = this.requireSealer().open(bytes, `conv/v1/${conversationId}`).value as SealedLog;
+      if (!isConversation(log?.conversation)) throw unreadable('Sealed');
+      return log;
+    };
+    if (atPath == null) return { conversation: null, revision: -1 };
+    if (atPath instanceof Uint8Array) return open(atPath);
+    const plain = atPath as ConversationData;
+    if (!isConversation(plain)) throw unreadable('Legacy');
+    const known = await this.logHead(conversationId).getAnyAge(); // at any age (§20 AA3)
+    let sealed: SealedLog | undefined;
+    if (known?.manifestHash && known.revision > 0) {
+      try {
+        sealed = open(await this.s5Client.downloadByCID(hexToBytes(known.manifestHash)));
+      } catch (error: any) {
+        throw storageFailure(`Failed to load conversation: ${error?.message ?? error}`, 'STORAGE_LOAD_ERROR', error);
+      }
+    }
+    return sealed ? adoptPlaintext(sealed, plain) : { conversation: plain, revision: 0, legacyKeys: plain.messages.map(messageKey) };
+  }
+
+  /**
+   * Internal save - handles actual S5 write with retry logic for revision conflicts, then commits the head
+   * (R1) so the next reader in any tab proves it has the newest copy.
+   * Called by locked methods only (saveConversation, appendMessage, updateConversationMetadata, the migration).
    * @param conversation - The conversation data to save
+   * @param base - The copy this save builds on (from `_readLog`): its revision and plaintext snapshot
    * @param maxRetries - Maximum retry attempts for revision conflicts (default: 3)
    */
   private async _saveConversationInternal(
     conversation: ConversationData,
+    base: Pick<LogRead, 'revision' | 'legacyKeys'>,
     maxRetries = 3
   ): Promise<StorageResult> {
-    const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversation.id}/conversation.json`;
+    // Nothing that is not a conversation is ever sealed (§22 CC6): every caller passes one `saveConversation` or
+    // `_readLog` checked (§36 QQ7).
+    const path = this.logPath(conversation.id);
+    const revision = Math.max(base.revision, 0) + 1;
+    const log: SealedLog = { revision, conversation, ...(base.legacyKeys?.length ? { legacyKeys: base.legacyKeys } : {}) };
+    // Every prompt carries its RAG context: the log is sealed, never written in plaintext (fail closed). A conversation
+    // the sealer cannot encode (a function, a symbol, a cycle) is the caller's to fix — no retry encodes it (§34 OO5).
+    const sealer = this.requireSealer();
+    let sealed: Uint8Array;
+    try {
+      sealed = sealer.seal({ kind: 'cbor', value: log }, `conv/v1/${conversation.id}`);
+    } catch (cause: any) {
+      throw new SDKError(`Conversation ${conversation.id} cannot be sealed: ${cause?.message ?? cause}`, 'STORAGE_CONVERSATION_INVALID', { conversationId: conversation.id, cause, retryable: false });
+    }
+    const head = this.logHead(conversation.id);
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        await this.s5Client.fs.put(path, conversation);
-
-        // Return immediately using conversation ID (no getMetadata to avoid race condition)
-        return {
-          cid: conversation.id,
-          url: `s5://${conversation.id}`,
-          size: JSON.stringify(conversation).length,
-          timestamp: conversation.updatedAt
-        };
+        await this.s5Client.fs.put(path, sealed, { mediaType: 'application/octet-stream' });
       } catch (error: any) {
         // Get error message from multiple sources (S5.js errors may have message in different places)
         const errorMsg = error?.message || error?.toString?.() || String(error) || '';
@@ -844,12 +1051,18 @@ export class StorageManager implements IStorageManager {
 
         console.log(`[StorageManager] Save failed after ${attempt} attempts, throwing error`);
         const finalErrorMsg = error.message || error.toString() || JSON.stringify(error) || 'Unknown S5 error';
-        throw new SDKError(
-          `Failed to save conversation: ${finalErrorMsg}`,
-          'STORAGE_SAVE_ERROR',
-          { originalError: error }
-        );
+        throw storageFailure(`Failed to save conversation: ${finalErrorMsg}`, 'STORAGE_SAVE_ERROR', error);
       }
+      // Written: a head this tab cannot record never reports the log as unwritten (§34 OO4) — the next read is fresh.
+      await head.put({ revision, manifestHash: sealedBlobHash(sealed) }).catch((error) => { throw headNotRecorded(error); });
+
+      // Return immediately using conversation ID (no getMetadata to avoid race condition)
+      return {
+        cid: conversation.id,
+        url: `s5://${conversation.id}`,
+        size: sealed.length,
+        timestamp: conversation.updatedAt
+      };
     }
 
     // TypeScript: unreachable but needed for return type
@@ -860,49 +1073,181 @@ export class StorageManager implements IStorageManager {
    * Load conversation data
    */
   async loadConversation(conversationId: string): Promise<ConversationData | null> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
 
-    try {
-      const path = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${conversationId}/conversation.json`;
-      const data = await this.s5Client.fs.get(path);
-      return data || null;
-    } catch (error: any) {
-      if (error.message?.includes('not found')) {
-        return null;
+    // A sealed log is opaque bytes; a legacy log is the plaintext object (re-sealed on its next write).
+    return (await this._readLog(conversationId)).conversation;
+  }
+
+  /**
+   * Patch a conversation's metadata (status, endTime, …) as ONE load-modify-save under the conversation
+   * lock, so an append in flight cannot be overwritten. No log → nothing is written.
+   */
+  async updateConversationMetadata(conversationId: string, patch: Record<string, unknown>): Promise<void> {
+    this.ensureNotDisposed();
+    if (!this.initialized) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+    await this.withConversationLock(conversationId, async () => {
+      const current = await this._readLog(conversationId);
+      const conversation = current.conversation;
+      if (!conversation) return;
+      conversation.metadata = { ...conversation.metadata, ...patch };
+      conversation.updatedAt = Date.now();
+      await this._saveConversationInternal({ ...conversation, id: conversationId }, current); // the id asked for (§43 XX7)
+    });
+  }
+
+  /**
+   * Seal every legacy plaintext conversation log and purge the plaintext files older SDKs left beside them.
+   * Idempotent; each log is handled under its cross-tab lock, so a concurrent append is never lost.
+   */
+  async migrateLegacyConversationLogs(opts: { onProgress?: (e: MigrationProgress) => void } = {}): Promise<LogMigrationReport> {
+    this.ensureNotDisposed();
+    if (!this.initialized) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
+    }
+    const io = new SealedIO(this.s5Client, (b) => this.requireSealer().isSealed(b));
+    const base = `${StorageManager.SESSIONS_PATH}/${this.userAddress}`;
+    const report: LogMigrationReport = { sealed: 0, alreadySealed: 0, purged: [], failed: [] };
+    const ids = ((await io.list(base)) ?? []).filter((e) => e.type === 'directory').map((e) => e.name);
+    let done = 0;
+    // A few conversations at a time: each is a list + (at most) one download and one upload.
+    await mapWithConcurrency(ids, 5, async (id) => {
+      try {
+        await this.withConversationLock(id, () => this._sealLegacyLogLocked(io, `${base}/${id}`, id, report));
+      } catch (error: any) {
+        // Every failure carries a code (S4): an error that brought none is STORAGE_MIGRATION_FAILED.
+        report.failed.push({
+          id, error: error?.message ?? String(error), code: typeof error?.code === 'string' ? error.code : 'STORAGE_MIGRATION_FAILED', retryable: retryableOf(error),
+        });
       }
-      throw new SDKError(
-        `Failed to load conversation: ${error.message}`,
-        'STORAGE_LOAD_ERROR',
-        { originalError: error }
-      );
+      reportProgress(opts.onProgress, { phase: 'logs', done: ++done, total: ids.length, item: id });
+    });
+    return report;
+  }
+
+  private async _sealLegacyLogLocked(io: SealedIO, dir: string, id: string, report: LogMigrationReport): Promise<void> {
+    const entries = (await io.list(dir)) ?? [];
+    const log = entries.find((e) => e.type === 'file' && e.name === 'conversation.json');
+    const sealedBefore = log?.mediaType === 'application/octet-stream'; // sealed logs are the only octet-stream ones
+    let resealed = false;
+    if (log && !sealedBefore) {
+      // Plaintext at the path — a legacy log, or an outdated tab's write over a sealed one — is always resealed
+      // (S2). `_readLog` supplies the newest content: a newer sealed copy plus what the plaintext adds.
+      const current = await this._readLog(id);
+      const conversation = current.conversation;
+      if (conversation) { // null: deleted since this listing — nothing to seal. `_readLog` refused a malformed one.
+        // A reseal whose head this tab could not record is sealed all the same (§36 QQ3): a log is read fresh from its
+        // path, never from a cache another tab trusts.
+        await this._saveConversationInternal({ ...conversation, id }, current).catch((error) => {
+          if (error?.details?.committed !== true) throw error;
+          console.warn(`[StorageManager] Log ${id} sealed; this tab could not record its head: ${error.message}`);
+        });
+        // An outdated tab's plaintext write landing after ours is not looked for here: the next run sees it and
+        // reseals it, keeping its new messages (S2, §16).
+        resealed = true;
+      }
+    }
+    const hasExchanges = entries.some((e) => e.type === 'directory' && e.name === 'exchanges');
+    const siblings = entries.filter((e) => e.type === 'file' && ['conversation-plaintext.json', 'summary.json', 'hierarchy.json'].includes(e.name));
+    // Read back, fresh, before it is counted or anything beside it deleted (§35 PP1's rule, §36 QQ3): a sealed log that
+    // does not open — resealed now, or by an earlier run — fails here and keeps its plaintext copies. A sealed log with
+    // nothing beside it is not downloaded.
+    if (resealed || hasExchanges || siblings.length) await this._readLog(id);
+    if (sealedBefore) report.alreadySealed++;
+    if (resealed) report.sealed++;
+    if (hasExchanges) {
+      // Only the files storeExchange wrote (`{timestamp}-{random}.json`, the timestamp as JS renders it — §22 CC4);
+      // anything else is someone else's — kept and reported (§20 AA10, as §19 Z13 for RAG).
+      const exchangesDir = `${dir}/exchanges`;
+      const listed = (await io.list(exchangesDir)) ?? [];
+      const ours = listed.filter((e) => e.type === 'file' && /^[1-9]\d*-[a-z0-9]*\.json$/.test(e.name)).map((e) => e.name);
+      await io.deleteFiles(exchangesDir, ours);
+      const kept = listed.filter((e) => !ours.includes(e.name)).map((e) => `${exchangesDir}/${e.name}`);
+      if (kept.length) (report.unrecognisedFiles ??= []).push(...kept);
+      if (await io.deleteDir(exchangesDir)) report.purged.push(exchangesDir);
+      else report.purged.push(...ours.map((name) => `${exchangesDir}/${name}`));
+    }
+    if (siblings.length) {
+      await io.deleteFiles(dir, siblings.map((e) => e.name));
+      report.purged.push(...siblings.map((e) => `${dir}/${e.name}`));
+      // A directory the purge emptied (e.g. `{databaseName}/` that held only hierarchy.json) goes too (S8) — only
+      // through s5js's own resolved-and-empty check, never recursively (§16 V11).
+      if (await io.deleteDir(dir)) report.purged.push(dir);
     }
   }
 
   /**
-   * Append a message to an existing conversation (or create new if not exists).
-   *
-   * **Atomicity:** The load-modify-save operation is atomic - other operations
-   * on the same conversation are blocked until this completes.
-   *
-   * **Thread Safety:** Uses per-conversation locking to prevent S5 revision conflicts.
-   * Multiple appends to the same conversation are serialized; appends to different
-   * conversations can proceed in parallel.
+   * RAG data is sealed by VectorRAGManager: a write into a RAG root through a generic funnel (queued or not)
+   * is refused. Checked on the path as s5js normalises it (repeated or leading slashes collapse).
+   */
+  private refusePlaintextRagWrite(path: string): void {
+    if (/^home\/(vector-databases|rag)(\/|$)/.test(path.replace(/\/+/g, '/').replace(/^\//, ''))) {
+      throw new SDKError(
+        `Refusing a plaintext write into RAG storage (${path}) — use the VectorRAGManager document APIs`,
+        'RAG_PLAINTEXT_WRITE_REFUSED',
+        { path, retryable: false }
+      );
+    }
+  }
+
+  private requireSealer(): StorageSealer {
+    if (!this.sealer) {
+      throw new SDKError('The conversation log is only ever stored sealed, and no sealer is set', 'STORAGE_SEALER_MISSING', { retryable: false });
+    }
+    return this.sealer;
+  }
+
+  /**
+   * Append a message to an existing conversation (or create new if not exists) — `appendMessages` with one.
    *
    * @param conversationId - The conversation ID to append to
    * @param message - The message to append
    * @throws SDKError if append fails
    */
   async appendMessage(conversationId: string, message: Message): Promise<void> {
+    this.ensureNotDisposed();
+    return this.appendMessages(conversationId, [message]);
+  }
+
+  /**
+   * Append messages — an exchange — to a conversation (or create it if it does not exist — an empty list creates it
+   * with no messages), all or none: one read-modify-write under the conversation's lock (§27 HH1).
+   *
+   * **Admitted when called:** appends to one conversation run one after another in call order, so one asked for
+   * before a `dispose()` (a sign-out) still lands whole; only one asked for after it is refused. Appends to different
+   * conversations proceed in parallel.
+   *
+   * @throws SDKError STORAGE_APPEND_ERROR (its cause's verdict) if the write fails; STORAGE_CONVERSATION_INVALID (not
+   *   retryable) unless `messages` is a list of message objects with no holes — refused before anything (§43 XX4,
+   *   §44 YY4)
+   */
+  async appendMessages(conversationId: string, messages: Message[]): Promise<void> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
+    if (!isMessageList(messages)) {
+      throw new SDKError('Messages to append are a list of message objects', 'STORAGE_CONVERSATION_INVALID', { conversationId, retryable: false });
+    }
+    const previous = this.appendChains.get(conversationId);
+    const run = (previous ?? Promise.resolve()).catch(() => undefined).then(() => this._appendLocked(conversationId, messages));
+    this.appendChains.set(conversationId, run);
+    const settle = () => { if (this.appendChains.get(conversationId) === run) this.appendChains.delete(conversationId); };
+    run.then(settle, settle);
+    return run;
+  }
 
+  private _appendLocked(conversationId: string, messages: Message[]): Promise<void> {
     return this.withConversationLock(conversationId, async () => {
       try {
-        // Load existing conversation or create new one
-        let conversation = await this.loadConversation(conversationId);
+        // Load the current copy (R1), or create a new one — on a certain absence only (S1)
+        const current = await this._readLog(conversationId);
+        let conversation = current.conversation;
 
         if (!conversation) {
           conversation = {
@@ -914,18 +1259,14 @@ export class StorageManager implements IStorageManager {
           };
         }
 
-        // Append message
-        conversation.messages.push(message);
+        conversation.messages.push(...messages);
         conversation.updatedAt = Date.now();
 
-        // Save using internal method (already under lock, no need for double-locking)
-        await this._saveConversationInternal(conversation);
+        // Save using internal method (already under lock, no need for double-locking) — under the id asked for, never
+        // a legacy log's own `id` field (§43 XX7, as the log migration does)
+        await this._saveConversationInternal({ ...conversation, id: conversationId }, current);
       } catch (error: any) {
-        throw new SDKError(
-          `Failed to append message: ${error.message}`,
-          'STORAGE_APPEND_ERROR',
-          { originalError: error }
-        );
+        throw storageFailure(`Failed to append message: ${error.message}`, 'STORAGE_APPEND_ERROR', error);
       }
     });
   }
@@ -937,6 +1278,7 @@ export class StorageManager implements IStorageManager {
     conversationId: string,
     limit?: number
   ): Promise<Message[]> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -953,11 +1295,8 @@ export class StorageManager implements IStorageManager {
       
       return messages;
     } catch (error: any) {
-      throw new SDKError(
-        `Failed to get conversation history: ${error.message}`,
-        'STORAGE_HISTORY_ERROR',
-        { originalError: error }
-      );
+      // Its cause's verdict travels with it (§22 CC6).
+      throw storageFailure(`Failed to get conversation history: ${error.message}`, 'STORAGE_HISTORY_ERROR', error);
     }
   }
 
@@ -965,6 +1304,7 @@ export class StorageManager implements IStorageManager {
    * Clear all conversations
    */
   async clearAll(): Promise<void> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -985,6 +1325,7 @@ export class StorageManager implements IStorageManager {
    * Check if storage is initialized
    */
   isInitialized(): boolean {
+    this.ensureNotDisposed();
     return this.initialized;
   }
 
@@ -994,6 +1335,7 @@ export class StorageManager implements IStorageManager {
    * Store a single exchange efficiently
    */
   async storeExchange(sessionId: string, exchange: Exchange): Promise<string> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -1064,6 +1406,7 @@ export class StorageManager implements IStorageManager {
    * Get recent exchanges with pagination
    */
   async getRecentExchanges(sessionId: string, limit: number = 10): Promise<Exchange[]> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -1109,6 +1452,7 @@ export class StorageManager implements IStorageManager {
    * List all sessions
    */
   async listSessions(): Promise<Array<{ id: string; created?: number }>> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -1148,6 +1492,7 @@ export class StorageManager implements IStorageManager {
    * Path: home/user/settings.json
    */
   async saveUserSettings(settings: UserSettings): Promise<void> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -1190,6 +1535,7 @@ export class StorageManager implements IStorageManager {
    * Uses in-memory cache with 5-minute TTL
    */
   async getUserSettings(): Promise<UserSettings | null> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -1286,6 +1632,7 @@ export class StorageManager implements IStorageManager {
    * Merges partial update with existing settings
    */
   async updateUserSettings(partial: PartialUserSettings): Promise<void> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -1335,6 +1682,7 @@ export class StorageManager implements IStorageManager {
    * Used for "Reset Preferences" functionality
    */
   async clearUserSettings(): Promise<void> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -1368,6 +1716,7 @@ export class StorageManager implements IStorageManager {
     conversation: ConversationData,
     options: { hostPubKey?: string; encrypt?: boolean }
   ): Promise<StorageResult> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -1427,6 +1776,7 @@ export class StorageManager implements IStorageManager {
    * @private
    */
   async loadConversationEncrypted(conversationId: string): Promise<ConversationData> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -1478,6 +1828,7 @@ export class StorageManager implements IStorageManager {
    * @private
    */
   async saveConversationPlaintext(conversation: ConversationData): Promise<StorageResult> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -1517,6 +1868,7 @@ export class StorageManager implements IStorageManager {
    * @private
    */
   async loadConversationPlaintext(conversationId: string): Promise<ConversationData> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -1550,6 +1902,7 @@ export class StorageManager implements IStorageManager {
    * Tries encrypted first, then falls back to plaintext
    */
   async loadConversationWithMetadata(conversationId: string): Promise<LoadConversationResult> {
+    this.ensureNotDisposed();
     if (!this.initialized) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -1627,6 +1980,7 @@ export class StorageManager implements IStorageManager {
    * @param path - Folder path
    */
   async createFolder(databaseName: string, path: string): Promise<void> {
+    this.ensureNotDisposed();
     this.folderHierarchy.createFolder(databaseName, path);
   }
 
@@ -1644,6 +1998,7 @@ export class StorageManager implements IStorageManager {
     recursive: boolean = false,
     options?: { deleteVectors?: boolean }
   ): Promise<void> {
+    this.ensureNotDisposed();
     this.folderHierarchy.deleteFolder(databaseName, path, recursive, options);
   }
 
@@ -1655,6 +2010,7 @@ export class StorageManager implements IStorageManager {
    * @param destPath - Destination folder path
    */
   async moveFolder(databaseName: string, sourcePath: string, destPath: string): Promise<void> {
+    this.ensureNotDisposed();
     this.folderHierarchy.moveFolder(databaseName, sourcePath, destPath);
   }
 
@@ -1666,6 +2022,7 @@ export class StorageManager implements IStorageManager {
    * @param newName - New folder name
    */
   async renameFolder(databaseName: string, path: string, newName: string): Promise<void> {
+    this.ensureNotDisposed();
     this.folderHierarchy.renameFolder(databaseName, path, newName);
   }
 
@@ -1682,6 +2039,7 @@ export class StorageManager implements IStorageManager {
     path: string,
     options?: { limit?: number; cursor?: string }
   ): Promise<FolderListItem[] | { items: FolderListItem[]; cursor?: string }> {
+    this.ensureNotDisposed();
     // Auto-load hierarchy if it exists
     await this.autoLoadHierarchy(databaseName);
     return this.folderHierarchy.listFolder(databaseName, path, options);
@@ -1700,6 +2058,7 @@ export class StorageManager implements IStorageManager {
     path: string,
     options?: { recursive?: boolean; formatSize?: boolean }
   ): Promise<FolderMetadata> {
+    this.ensureNotDisposed();
     return this.folderHierarchy.getFolderMetadata(databaseName, path, options);
   }
 
@@ -1715,6 +2074,7 @@ export class StorageManager implements IStorageManager {
     path: string,
     file: { name: string; size: number }
   ): Promise<void> {
+    this.ensureNotDisposed();
     this.folderHierarchy.addFileToFolder(databaseName, path, file);
   }
 
@@ -1726,6 +2086,7 @@ export class StorageManager implements IStorageManager {
    * @param fileName - File name to remove
    */
   async removeFileFromFolder(databaseName: string, path: string, fileName: string, fileSize?: number): Promise<void> {
+    this.ensureNotDisposed();
     this.folderHierarchy.removeFileFromFolder(databaseName, path, fileName, fileSize);
   }
 
@@ -1741,6 +2102,7 @@ export class StorageManager implements IStorageManager {
    * @returns CID of saved hierarchy
    */
   async saveHierarchy(databaseName: string): Promise<string> {
+    this.ensureNotDisposed();
     const hierarchyData = this.folderHierarchy.serialize(databaseName);
 
     if (this.s5Client) {
@@ -1764,6 +2126,7 @@ export class StorageManager implements IStorageManager {
    * @param cid - CID to load from (optional for in-memory storage)
    */
   async loadHierarchy(databaseName: string, cid?: string): Promise<void> {
+    this.ensureNotDisposed();
     if (this.s5Client) {
       const hierarchyPath = `${StorageManager.SESSIONS_PATH}/${this.userAddress}/${databaseName}/hierarchy.json`;
 
@@ -1814,6 +2177,7 @@ export class StorageManager implements IStorageManager {
    * @returns True if valid
    */
   async validateHierarchy(databaseName: string): Promise<boolean> {
+    this.ensureNotDisposed();
     // Simple validation - check if hierarchy exists
     try {
       this.folderHierarchy.getFolderMetadata(databaseName, '/');
@@ -1830,6 +2194,7 @@ export class StorageManager implements IStorageManager {
    * @returns True if successful
    */
   async rebuildHierarchy(databaseName: string): Promise<boolean> {
+    this.ensureNotDisposed();
     // For testing purposes, just validate current hierarchy
     return this.validateHierarchy(databaseName);
   }
@@ -1842,6 +2207,7 @@ export class StorageManager implements IStorageManager {
    * @returns Full path
    */
   async getFolderPath(databaseName: string, path: string): Promise<string> {
+    this.ensureNotDisposed();
     // Validate that folder exists
     this.folderHierarchy.getFolderMetadata(databaseName, path);
     return path;
@@ -1854,6 +2220,7 @@ export class StorageManager implements IStorageManager {
    * @returns Parent path or null if root
    */
   getParentPath(path: string): string | null {
+    this.ensureNotDisposed();
     return getParentPath(path);
   }
 
@@ -1865,6 +2232,7 @@ export class StorageManager implements IStorageManager {
    * @returns Array of ancestor paths
    */
   async getAncestors(databaseName: string, path: string): Promise<string[]> {
+    this.ensureNotDisposed();
     // Validate that folder exists
     this.folderHierarchy.getFolderMetadata(databaseName, path);
     return getAncestorPaths(path);
@@ -1878,6 +2246,7 @@ export class StorageManager implements IStorageManager {
    * @returns Array of descendant paths
    */
   async getDescendants(databaseName: string, path: string): Promise<string[]> {
+    this.ensureNotDisposed();
     const descendants: string[] = [];
 
     const collectDescendants = async (currentPath: string): Promise<void> => {
@@ -1937,9 +2306,14 @@ export class StorageManager implements IStorageManager {
       return;
     }
 
+    const listen = (target: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>, type: string, handler: () => void) => {
+      target.addEventListener(type, handler);
+      this.reconnectListeners.push({ target, type, handler });
+    };
+
     // Reconnect when tab becomes visible
     if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', () => {
+      listen(document, 'visibilitychange', () => {
         if (document.visibilityState === 'visible' && this.connectionStatus === 'disconnected') {
           console.log('[StorageManager] Tab visible, attempting S5 reconnect...');
           this.attemptReconnect();
@@ -1949,7 +2323,7 @@ export class StorageManager implements IStorageManager {
 
     // Reconnect when network comes back online
     if (typeof window !== 'undefined') {
-      window.addEventListener('online', () => {
+      listen(window, 'online', () => {
         if (this.connectionStatus === 'disconnected') {
           console.log('[StorageManager] Network online, attempting S5 reconnect...');
           this.attemptReconnect();
@@ -1980,6 +2354,7 @@ export class StorageManager implements IStorageManager {
    * Get current S5 connection status
    */
   getConnectionStatus(): S5ConnectionStatus {
+    this.ensureNotDisposed();
     return this.connectionStatus;
   }
 
@@ -1987,6 +2362,7 @@ export class StorageManager implements IStorageManager {
    * Get current sync status for UI
    */
   getSyncStatus(): SyncStatus {
+    this.ensureNotDisposed();
     return this.syncStatus;
   }
 
@@ -1994,6 +2370,7 @@ export class StorageManager implements IStorageManager {
    * Get number of pending operations in queue
    */
   getPendingOperationCount(): number {
+    this.ensureNotDisposed();
     return this.operationQueue.length;
   }
 
@@ -2001,6 +2378,7 @@ export class StorageManager implements IStorageManager {
    * Get last error if sync status is 'error'
    */
   getLastError(): Error | null {
+    this.ensureNotDisposed();
     return this.lastError;
   }
 
@@ -2009,6 +2387,7 @@ export class StorageManager implements IStorageManager {
    * @returns Unsubscribe function
    */
   onSyncStatusChange(callback: (status: SyncStatus) => void): () => void {
+    this.ensureNotDisposed();
     this.syncListeners.push(callback);
     // Immediately call with current status
     callback(this.syncStatus);
@@ -2103,6 +2482,11 @@ export class StorageManager implements IStorageManager {
     data?: any
   ): Promise<T> {
     return new Promise((resolve, reject) => {
+      // After cleanup() nothing hears S5 come back: only a flush already running would take it (§30 KK2) — else refuse (§31 LL2).
+      if (this.cleanedUp && !this.isProcessingQueue) {
+        reject(new SDKError('This store was cleaned up: a write waiting for S5 to reconnect would never be sent', 'STORAGE_CLEANUP', { retryable: false }));
+        return;
+      }
       // Check queue size limit
       if (this.operationQueue.length >= StorageManager.MAX_QUEUE_SIZE) {
         const error = new SDKError(
@@ -2195,9 +2579,12 @@ export class StorageManager implements IStorageManager {
    * S5 PUT with retry and queue support
    */
   async putWithRetry(path: string, data: any): Promise<void> {
+    this.ensureNotDisposed();
     if (!this.initialized || !this.s5Client) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
+
+    this.refusePlaintextRagWrite(path);
 
     // If disconnected, queue the operation
     if (this.connectionStatus === 'disconnected') {
@@ -2216,6 +2603,7 @@ export class StorageManager implements IStorageManager {
    * S5 GET with retry support (no queue - reads need immediate response)
    */
   async getWithRetry(path: string): Promise<any> {
+    this.ensureNotDisposed();
     if (!this.initialized || !this.s5Client) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -2230,6 +2618,7 @@ export class StorageManager implements IStorageManager {
    * S5 DELETE with retry and queue support
    */
   async deleteWithRetry(path: string): Promise<boolean> {
+    this.ensureNotDisposed();
     if (!this.initialized || !this.s5Client) {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
@@ -2250,6 +2639,7 @@ export class StorageManager implements IStorageManager {
    * Force a sync attempt - useful for UI "retry" buttons
    */
   async forceSync(): Promise<void> {
+    this.ensureNotDisposed();
     if (this.connectionStatus === 'disconnected') {
       await this.attemptReconnect();
     }
@@ -2263,19 +2653,49 @@ export class StorageManager implements IStorageManager {
    * Cleanup connection handlers
    */
   cleanup(): void {
+    // From now on nothing hears the connection come back: a write that could only wait for it refuses (§31 LL2).
+    this.cleanedUp = true;
     if (this.connectionUnsubscribe) {
       this.connectionUnsubscribe();
       this.connectionUnsubscribe = undefined;
     }
 
-    // Clear pending operations
-    for (const op of this.operationQueue) {
+    // Clear pending operations — the waiting ones: the one a flush runs settles with its own outcome, and the array is
+    // the flush's too, so it is emptied in place (§30 KK2)
+    for (const op of this.operationQueue.splice(this.isProcessingQueue ? 1 : 0)) {
       op.reject(new SDKError('StorageManager cleanup', 'STORAGE_CLEANUP'));
     }
-    this.operationQueue = [];
 
     // Clear listeners
     this.syncListeners = [];
+  }
+
+  /**
+   * Dispose of this store when its identity is forgotten — a sign-out, the next sign-in, or a start the SDK abandoned
+   * (§26 GG1). Refuses from its first line: every other public member then refuses `STORAGE_MANAGER_DISPOSED` (a
+   * synchronous one throws it) — `cleanup()` alone answers, a no-op by then — and a call in flight runs on, but stops at
+   * its next public step (an append asked for before it lands — §27 HH1). Releases what keeps it alive and holds the identity: its
+   * browser listeners and connection subscription, its queued operations (rejected), its seed and settings cache.
+   * A start still running releases what it sets up once it ends. Idempotent.
+   */
+  dispose(): void {
+    this.disposed = true;
+    this.release();
+  }
+
+  private release(): void {
+    for (const { target, type, handler } of this.reconnectListeners.splice(0)) target.removeEventListener(type, handler);
+    this.connectionUnsubscribe?.();
+    this.connectionUnsubscribe = undefined;
+    // The waiting ones only: the one a flush is running (the head) settles with its own outcome (§27 HH9).
+    for (const op of this.operationQueue.splice(this.isProcessingQueue ? 1 : 0)) op.reject(storageManagerDisposed());
+    this.syncListeners = [];
+    this.userSeed = undefined;
+    this.settingsCache = null;
+  }
+
+  private ensureNotDisposed(): void {
+    if (this.disposed) throw storageManagerDisposed();
   }
 
   // ============= AI Preference Helper Methods (Phase 4.1) =============
@@ -2285,6 +2705,7 @@ export class StorageManager implements IStorageManager {
    * Required for getDefaultModel() and setDefaultModel() validation
    */
   setModelManager(modelManager: { getModelDetails(modelId: string): Promise<ModelInfo | null> }): void {
+    this.ensureNotDisposed();
     this.modelManager = modelManager;
   }
 
@@ -2293,6 +2714,7 @@ export class StorageManager implements IStorageManager {
    * Returns ModelInfo if a default is set, null otherwise
    */
   async getDefaultModel(): Promise<ModelInfo | null> {
+    this.ensureNotDisposed();
     if (!this.modelManager) {
       throw new SDKError('ModelManager not set', 'MODEL_MANAGER_NOT_SET');
     }
@@ -2311,6 +2733,7 @@ export class StorageManager implements IStorageManager {
    * Validates model exists before setting
    */
   async setDefaultModel(modelId: string | null): Promise<void> {
+    this.ensureNotDisposed();
     if (modelId !== null) {
       if (!this.modelManager) {
         throw new SDKError('ModelManager not set', 'MODEL_MANAGER_NOT_SET');
@@ -2336,6 +2759,7 @@ export class StorageManager implements IStorageManager {
    * Returns AUTO if not set or no settings exist
    */
   async getHostSelectionMode(): Promise<HostSelectionMode> {
+    this.ensureNotDisposed();
     const settings = await this.getUserSettings();
     return settings?.hostSelectionMode ?? HostSelectionMode.AUTO;
   }
@@ -2348,6 +2772,7 @@ export class StorageManager implements IStorageManager {
     mode: HostSelectionMode,
     preferredHostAddress?: string
   ): Promise<void> {
+    this.ensureNotDisposed();
     if (mode === HostSelectionMode.SPECIFIC && !preferredHostAddress) {
       throw new SDKError(
         'preferredHostAddress required for SPECIFIC mode',
@@ -2366,6 +2791,7 @@ export class StorageManager implements IStorageManager {
    * Resets to defaults without affecting other settings
    */
   async clearAIPreferences(): Promise<void> {
+    this.ensureNotDisposed();
     await this.updateUserSettings({
       defaultModelId: null,
       hostSelectionMode: HostSelectionMode.AUTO,

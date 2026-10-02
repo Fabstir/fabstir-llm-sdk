@@ -6,6 +6,7 @@ import type { EncryptionManager } from '../managers/EncryptionManager';
 import type { EncryptedStorage } from '../interfaces/IEncryptionManager';
 import type { StorageManager } from '../managers/StorageManager';
 import { mapWithConcurrency } from '../utils/concurrency';
+import { rethrowDisposal } from '../utils/disposal';
 
 /**
  * Options for saving session groups
@@ -443,6 +444,7 @@ export class SessionGroupStorage {
           try {
             return await this.load(groupId);
           } catch (error: any) {
+            rethrowDisposal(error); // a sign-out is never "this group is unreadable" (§28 II3)
             // Log warning for groups that fail to load (corrupted, wrong key,
             // deleted, etc.) — this helps debug cross-tab encryption issues.
             // Returning null isolates the failure so one bad group does not

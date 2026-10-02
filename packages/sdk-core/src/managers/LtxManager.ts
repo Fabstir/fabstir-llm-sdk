@@ -159,6 +159,7 @@ export class LtxManager {
       paymentToken: est.paymentToken,
       depositAmount: formatUnits(depositBase, 6), // DECIMAL USDC string — startSession parseUnits() it back
       encryption: true,
+      conversationLog: false, // a render has no chat log — and no post-funding S5 write to fail
     });
   }
 

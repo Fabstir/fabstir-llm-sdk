@@ -9,6 +9,10 @@
 import { ethers } from 'ethers';
 import { connectMetaMask, connectCoinbaseWallet, isMetaMaskInstalled } from '../utils/BrowserProvider';
 import { SEED_MESSAGE } from '../utils/s5-seed-derivation';
+import { SDKError } from '../types';
+
+/** Not signed in — or signed out: the SDK disconnects a kept AuthManager at a sign-out or sign-in (plan §28 II7). */
+const notAuthenticated = () => new SDKError('Not authenticated', 'NOT_AUTHENTICATED', { retryable: false });
 
 export interface AuthResult {
   signer: ethers.Signer;
@@ -200,7 +204,7 @@ export class AuthManager {
    */
   async initializeS5(): Promise<any> {
     if (!this.s5Seed) {
-      throw new Error('Not authenticated - S5 seed not available');
+      throw notAuthenticated();
     }
 
     // Dynamically import S5 when needed
@@ -243,7 +247,7 @@ export class AuthManager {
    */
   getSigner(): ethers.Signer {
     if (!this.signer) {
-      throw new Error('Not authenticated');
+      throw notAuthenticated();
     }
     return this.signer;
   }
@@ -253,7 +257,7 @@ export class AuthManager {
    */
   getS5Seed(): string {
     if (!this.s5Seed) {
-      throw new Error('Not authenticated');
+      throw notAuthenticated();
     }
     return this.s5Seed;
   }
@@ -263,7 +267,7 @@ export class AuthManager {
    */
   getUserAddress(): string {
     if (!this.userAddress) {
-      throw new Error('Not authenticated');
+      throw notAuthenticated();
     }
     return this.userAddress;
   }

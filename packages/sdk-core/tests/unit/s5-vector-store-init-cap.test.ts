@@ -12,13 +12,17 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { S5VectorStore } from '../../src/storage/S5VectorStore';
+import { EncryptionManager } from '../../src/managers/EncryptionManager';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+// Path-aware since 1.39.0: initialize() lists the sealed root (`home/rag/v1`) as well as the legacy base.
+// Only the legacy base holds these directories; the sealed root does not exist yet (s5js throws for it).
 function makeFakeS5Client(directoryNames: string[]) {
   return {
     fs: {
-      async *list(_basePath: string) {
+      async *list(basePath: string) {
+        if (basePath !== 'home/vector-databases/0xowner') throw new Error(`Directory "${basePath}" does not exist`);
         for (const name of directoryNames) {
           yield { type: 'directory', name };
         }
@@ -31,7 +35,8 @@ function makeStore(directoryNames: string[]) {
   return new S5VectorStore({
     s5Client: makeFakeS5Client(directoryNames) as any,
     userAddress: '0xowner',
-    encryptionManager: {} as any,
+    // A real manager: init derives each legacy name's sealed id to apply "sealed wins".
+    encryptionManager: EncryptionManager.fromSeed('init cap test seed phrase', '0xowner'),
     cacheEnabled: true,
   });
 }

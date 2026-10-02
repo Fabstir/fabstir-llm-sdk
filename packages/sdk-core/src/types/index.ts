@@ -216,6 +216,8 @@ export interface PromptOptions {
   onImageGenerated?: (result: import('./image-generation.types').ImageGenerationResult) => void;
   /** Raw user query for web search (before any RAG context injection). */
   rawQuery?: string;
+  /** false → this exchange is not appended to the S5 conversation log (e.g. an extraction prompt). */
+  conversationLog?: boolean;
   /** AbortSignal to stop in-progress streaming inference. Resolves with partial response. */
   signal?: AbortSignal;
   /** Called when context utilization >= threshold. UI should trim history before next prompt. */

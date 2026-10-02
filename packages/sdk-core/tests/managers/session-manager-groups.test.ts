@@ -74,6 +74,7 @@ describe('SessionManager - Session Groups Integration', () => {
       saveConversation: vi.fn().mockResolvedValue({ success: true }),
       storeConversation: vi.fn().mockResolvedValue({ success: true }),
       loadConversation: vi.fn().mockResolvedValue(null),
+      updateConversationMetadata: vi.fn().mockResolvedValue(undefined),
       getUserAddress: vi.fn().mockReturnValue(testUserAddress),
     };
 
@@ -291,9 +292,11 @@ describe('SessionManager - Session Groups Integration', () => {
       });
     }
 
+    // 1.39.0: the end-status write is one locked `updateConversationMetadata` (it was load + save, which
+    // could overwrite an append in flight); the three pinned behaviours are unchanged.
     it('should not block on slow storage operations', async () => {
-      mockStorageManager.loadConversation = vi.fn().mockImplementation(
-        () => new Promise(resolve => setTimeout(() => resolve(null), 200))
+      mockStorageManager.updateConversationMetadata = vi.fn().mockImplementation(
+        () => new Promise(resolve => setTimeout(() => resolve(undefined), 200))
       );
       injectSession(sessionManager, 900n);
 
@@ -302,14 +305,11 @@ describe('SessionManager - Session Groups Integration', () => {
       const elapsed = Date.now() - start;
 
       expect(elapsed).toBeLessThan(100);
-      expect(mockStorageManager.loadConversation).toHaveBeenCalledWith('900');
+      expect(mockStorageManager.updateConversationMetadata).toHaveBeenCalledWith('900', expect.objectContaining({ status: 'ended' }));
     });
 
     it('should not throw when storage save fails', async () => {
-      mockStorageManager.loadConversation = vi.fn().mockResolvedValue({
-        id: '900', metadata: {}, updatedAt: 0,
-      });
-      mockStorageManager.saveConversation = vi.fn().mockRejectedValue(
+      mockStorageManager.updateConversationMetadata = vi.fn().mockRejectedValue(
         new Error('S5 write failed')
       );
       injectSession(sessionManager, 900n);
@@ -318,17 +318,14 @@ describe('SessionManager - Session Groups Integration', () => {
     });
 
     it('should persist session end status eventually', async () => {
-      mockStorageManager.loadConversation = vi.fn().mockResolvedValue({
-        id: '900', metadata: {}, updatedAt: 0,
-      });
-      mockStorageManager.saveConversation = vi.fn().mockResolvedValue({ success: true });
+      mockStorageManager.updateConversationMetadata = vi.fn().mockResolvedValue(undefined);
       injectSession(sessionManager, 900n);
 
       await sessionManager.endSession(900n);
       await new Promise(r => setTimeout(r, 0)); // flush microtasks
 
-      expect(mockStorageManager.saveConversation).toHaveBeenCalledWith(
-        expect.objectContaining({ metadata: expect.objectContaining({ status: 'ended' }) })
+      expect(mockStorageManager.updateConversationMetadata).toHaveBeenCalledWith(
+        '900', expect.objectContaining({ status: 'ended' })
       );
     });
   });

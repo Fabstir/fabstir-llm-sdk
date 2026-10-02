@@ -15,19 +15,31 @@ import { SessionJobManager } from '../../src/contracts/SessionJobManager';
 const SESSION_CREATED_BY_DELEGATE_TOPIC = ethers.id(
   'SessionCreatedByDelegate(uint256,address,address,address,bytes32,uint256)'
 );
+// The signer: the session id is read from the marketplace's event naming it as the delegate (plan §35 PP7).
+const DELEGATE = ethers.Wallet.createRandom().address;
+
+// A sent transaction as ethers returns it; the manager re-arms it for replacement detection (plan §14 S3).
+const rearmable = <T extends object>(tx: T) => {
+  const sent: any = { ...tx };
+  sent.replaceableTransaction = vi.fn(() => sent);
+  return sent;
+};
 
 // Mock contract
-const mockCreateSessionForModelAsDelegate = vi.fn().mockResolvedValue({
+const mockCreateSessionForModelAsDelegate = vi.fn().mockResolvedValue(rearmable({
   wait: vi.fn().mockResolvedValue({
     hash: '0xdelegatesessiontx',
     logs: [{
+      address: '0xMockJobMarketplace',
       topics: [
         SESSION_CREATED_BY_DELEGATE_TOPIC,
-        '0x0000000000000000000000000000000000000000000000000000000000000064'  // sessionId = 100
+        '0x0000000000000000000000000000000000000000000000000000000000000064',  // sessionId = 100
+        ethers.zeroPadValue(ethers.Wallet.createRandom().address, 32),         // payer
+        ethers.zeroPadValue(DELEGATE, 32),                                      // delegate
       ]
     }]
   })
-});
+}));
 
 const mockJobMarketplace = {
   connect: vi.fn().mockReturnThis(),
@@ -50,7 +62,8 @@ describe('SessionJobManager.createSessionForModelAsDelegate() (Feb 2026)', () =>
     vi.clearAllMocks();
     sessionJobManager = new SessionJobManager(mockContractManager as any);
     mockSigner = {
-      getAddress: vi.fn().mockResolvedValue('0xDelegateAddress')
+      getAddress: vi.fn().mockResolvedValue(DELEGATE),
+      provider: { getBlockNumber: vi.fn().mockResolvedValue(1) }
     };
   });
 
@@ -92,6 +105,14 @@ describe('SessionJobManager.createSessionForModelAsDelegate() (Feb 2026)', () =>
       BigInt(params.proofInterval),
       BigInt(params.proofTimeoutWindow)
     );
+  });
+
+  it('waits on the transaction re-armed from the block read before sending (plan §14 S3)', async () => {
+    await sessionJobManager.setSigner(mockSigner);
+    mockSigner.provider.getBlockNumber.mockResolvedValueOnce(4242);
+    await sessionJobManager.createSessionForModelAsDelegate('0xP', '0x' + 'ab'.repeat(32), '0xH', '0xU', 1n, 1n, 3600, 100, 300);
+    const sent = await mockCreateSessionForModelAsDelegate.mock.results[0].value;
+    expect(sent.replaceableTransaction).toHaveBeenCalledWith(4242);
   });
 
   it('should return SessionResult with sessionId', async () => {
@@ -166,18 +187,20 @@ describe('SessionJobManager.createSessionForModelAsDelegate() (Feb 2026)', () =>
     ).rejects.toThrow('Signer not set');
   });
 
-  it('should handle missing event gracefully', async () => {
+  // 1.39.0: this used to pin `sessionId === 0n` — a funded session reported as id 0, which no caller can
+  // reclaim. A missing event is now an error that carries the transaction hash.
+  it('refuses to report a session id it could not read (SESSION_ID_UNRESOLVED with the tx hash)', async () => {
     // Override mock to return no matching event
-    mockCreateSessionForModelAsDelegate.mockResolvedValueOnce({
+    mockCreateSessionForModelAsDelegate.mockResolvedValueOnce(rearmable({
       wait: vi.fn().mockResolvedValue({
         hash: '0xnoeventtx',
         logs: []
       })
-    });
+    }));
 
     await sessionJobManager.setSigner(mockSigner);
 
-    const result = await sessionJobManager.createSessionForModelAsDelegate(
+    await expect(sessionJobManager.createSessionForModelAsDelegate(
       '0xPayer',
       '0xModelId',
       '0xHost',
@@ -187,9 +210,6 @@ describe('SessionJobManager.createSessionForModelAsDelegate() (Feb 2026)', () =>
       3600,
       100,
       300
-    );
-
-    // Should return 0n when event not found
-    expect(result.sessionId).toBe(0n);
+    )).rejects.toMatchObject({ code: 'SESSION_ID_UNRESOLVED', details: { txHash: '0xnoeventtx' } });
   });
 });

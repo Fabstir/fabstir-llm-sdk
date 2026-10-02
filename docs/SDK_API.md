@@ -14,6 +14,7 @@
 - [Payment Management](#payment-management)
 - [Model Governance](#model-governance)
 - [Host Management](#host-management)
+- [Confidential Storage (sdk-core 1.39.0)](#confidential-storage-sdk-core-1390)
 - [Storage Management](#storage-management)
   - [User Settings Storage](#user-settings-storage)
 - [RAG and Vector Databases](#rag-and-vector-databases)
@@ -3596,6 +3597,222 @@ const usdcPrices = await hostManager.getHostModelPrices(hostAddress, usdcAddr);
 const nativePrices = await hostManager.getHostModelPrices(hostAddress, zeroAddr);
 ```
 
+## Confidential Storage (sdk-core 1.39.0)
+
+From 1.39.0 the SDK **seals** what it stores on S5 for RAG and for the conversation log: it encrypts and authenticates
+each file with XChaCha20-Poly1305 under keys derived from the S5 seed and the wallet address. Nothing is required to turn
+it on. Check `SDK_CAPABILITIES` before relying on it.
+
+| What | Where on S5 | Sealed |
+|---|---|---|
+| RAG databases: manifests, vector chunks, document bodies | `home/rag/v1/{dbId}/…` (paths carry no database name, file name or address) | yes |
+| Conversation log | `home/sessions/{address}/{sessionId}/conversation.json` | yes |
+| Session paths, `settings.json`, `saveConversationPlaintext` / `storeExchange` / `saveHierarchy` | unchanged | **no** (planned for 1.39.1) — do not call the last three |
+
+- **Confidentiality depends on the seed.** With a password-derived seed (the vault), sealed data is confidential. With
+  an address-derived seed (`generateS5SeedFromAddress`), anyone who knows the address can derive the keys: sealing is
+  then only obfuscation.
+- Each sealed file is 46 bytes larger than its content.
+- Earlier SDKs stored the same data in plaintext. `migrateToSealedStorage()` moves it and deletes the plaintext (below).
+
+### Requirements
+
+- **`@julesl23/s5js` exactly `0.9.0-beta.56`** — the dependency and any override. With another version,
+  `authenticate()` rejects `S5JS_UNSUPPORTED_VERSION` (`retryable: false`).
+- **A secure origin with IndexedDB and Web Locks** (every current browser). Without them RAG writes refuse
+  `RAG_COHERENCE_UNAVAILABLE`, and `startSession` with the conversation log on refuses before funding. In jsdom tests,
+  provide `navigator.locks` and `fake-indexeddb`. React Native (Hermes) needs a `structuredClone` polyfill.
+
+### SDK_CAPABILITIES
+
+```typescript
+import { SDK_CAPABILITIES } from '@fabstir/sdk-core';
+
+SDK_CAPABILITIES.sealedRagStorage;           // RAG manifests, chunks and bodies are sealed
+SDK_CAPABILITIES.sealedConversationLog;      // the conversation log is sealed
+SDK_CAPABILITIES.conversationLogOptOut;      // conversationLog: false writes nothing to the log
+SDK_CAPABILITIES.ragDocumentApi;             // addPendingDocument / putDocumentBody / getDocumentBody / …
+SDK_CAPABILITIES.ragLegacyMigration;         // migrateToSealedStorage and its two halves
+SDK_CAPABILITIES.fundedSetupErrorCarriesIds; // a failure after funding carries sessionId and jobId
+```
+
+`SDK_CAPABILITIES` is frozen. Read a flag with optional chaining (`SDK_CAPABILITIES?.conversationLogOptOut`) so an older
+build reads as "not supported" instead of throwing.
+
+### migrateToSealedStorage
+
+```typescript
+async migrateToSealedStorage(opts?: {
+  onProgress?: (e: MigrationProgress) => void;     // { phase: 'rag' | 'logs', done, total, item }
+  discardUnreadable?: DiscardUnreadable;          // { [databaseName]: { chunks?: number[]; bodies?: string[] } }
+}): Promise<{ rag: RagMigrationReport; logs: LogMigrationReport }>
+```
+
+Moves every RAG database and conversation log an earlier SDK stored in plaintext to sealed storage, verifies the sealed
+copy by reading it back, and only then deletes the plaintext. It is idempotent and resumable, and it also cleans up after
+browser tabs still running an older build.
+
+- **Run it on every unlock**, without awaiting it on the unlock's critical path (the log half lists every conversation
+  directory on every run).
+- `onProgress` never decides the run: one that throws, or rejects, is warned about and ignored.
+- `discardUnreadable` is the **user's** consent to migrate a database **without exactly** the unreadable items a `failed`
+  entry named (`entry.unreadable`). Never pass it by default.
+- The two halves are also available on their own: `VectorRAGManager.migrateLegacyRagStorage(opts)` and
+  `StorageManager.migrateLegacyConversationLogs(opts)`.
+
+**Throws** (otherwise it resolves, and each database's outcome is in its entry):
+
+| Code | retryable | Meaning |
+|---|---|---|
+| `MIGRATION_INCOMPLETE` | its causes' | One half threw. `details.rag` / `details.logs` carry the report that completed; `details.ragError` / `details.logsError` the error of the half that did not. Run again only when `details.retryable` is true. |
+| `STORAGE_UNAVAILABLE` | false | Storage did not start at sign-in. Authenticate again. |
+| `STORAGE_NOT_AVAILABLE` | false | This SDK instance has no storage (`hostOnly` or `skipS5`). Run the migration on the main, signed-in instance. |
+| `AUTH_SUPERSEDED` | false | A sign-out or another sign-in happened while it ran; `details` as `MIGRATION_INCOMPLETE`'s. Ignore it: the next sign-in's run finishes the work. |
+| `NOT_AUTHENTICATED` | false | Called while signed out or during a sign-in. |
+
+#### Report types
+
+```typescript
+interface RagMigrationReport {
+  startedAt: number;
+  finishedAt: number;
+  databases: RagMigrationEntry[];
+  purgedRoots: string[];                 // whole legacy roots removed (the old DocumentManager's)
+  unrecognisedFiles?: string[];          // files the migration does not own — kept, never deleted
+  purgeErrors?: Array<{ root: string; code: string }>;
+}
+
+interface RagMigrationEntry {
+  name: string;
+  status: 'migrated' | 'adopted-after-seal' | 'purged-leftover' | 'purged-deleted' | 'purged-orphan'
+        | 'purged-after-delete' | 'failed' | 'anomaly';
+  vectors: number;
+  documents: number;
+  adopted?: string[];          // documents an outdated tab uploaded after the migration — now pending: embed them
+  discarded?: string[];        // legacy documents not carried over (removed since, or a body with no entry)
+  missingBodies?: string[];    // documents whose body the sealed copy lacks — re-upload them
+  missingChunks?: number[];    // legacy chunks that did not exist — their vectors were already lost: re-embed
+  repairedBodies?: string[];   // bodies a later run supplied to documents an earlier run recorded without one
+  unreadable?: { chunks?: number[]; bodies?: string[] };          // see discardUnreadable
+  discardedUnreadable?: { chunks?: number[]; bodies?: string[] }; // left out with the user's consent
+  unrecognisedFiles?: string[]; // files outside the legacy layout in this database's directory — kept
+  legacyKept?: boolean;        // some plaintext was not removed yet (see below)
+  purgeError?: string;         // why the purge stopped, when a failure stopped it
+  error?: string;              // on 'failed' / 'anomaly'
+  code?: string;               // on 'failed': always set
+  retryable?: boolean;         // on 'failed': whether running again may help
+}
+
+interface LogMigrationReport {
+  sealed: number;
+  alreadySealed: number;
+  purged: string[];            // plaintext files older SDKs left beside the logs
+  failed: Array<{ id: string; error: string; code: string; retryable: boolean }>;
+  unrecognisedFiles?: string[];
+}
+```
+
+- `purged-*` statuses are clean-ups, not failures.
+- **`legacyKept: true`** means the sealed copy is committed and verified, but some plaintext is still on S5: an
+  outdated tab wrote to it during the run, this browser could not record the sealed copy's head (storage full or
+  blocked), or the sealed copy still lacks a body (`missingBodies`). A later run finishes the purge. It is not a
+  failure, and no data is at risk.
+- **A `failed` entry** carries `code` and `retryable`. `RAG_DATABASE_MOVED` (retryable) means another device or an
+  outdated tab changed that database during the run: nothing was committed for it — run again. For any other code, run
+  again when `retryable` is true; otherwise leave it to the next unlock.
+- **`RAG_LEGACY_UNREADABLE`** names the unreadable items in `unreadable`. Retry while `retryable` is true; when it is
+  false, ask the user and pass `discardUnreadable: { [entry.name]: entry.unreadable }`.
+- **`anomaly`** (and `RAG_MANIFEST_CORRUPT`): the legacy data is not what any SDK wrote. Nothing is migrated or purged;
+  offer an export and `deleteDatabase(name)`.
+
+### RAG documents (VectorRAGManager)
+
+Document entries, their status and their bodies change only through these calls. Each is one locked, sealed commit, so
+two tabs never overwrite each other's changes.
+
+```typescript
+const rag = sdk.getVectorRAGManager();
+
+await rag.addPendingDocument(db, { id, name, size, ... }); // add, or replace a pending entry (retry-safe)
+await rag.putDocumentBody(db, id, body);                  // string | Uint8Array — reads back with exactly this type and bytes
+const body = await rag.getDocumentBody(db, id);           // string | Uint8Array
+await rag.updateDocumentStatus(id, 'ready', { vectorCount }, db); // always pass the database
+await rag.removeDocument(db, id);                         // the entry and its sealed body (its vectors: deleteByMetadata)
+const pending = await rag.getPendingDocuments(db);
+const databases = await rag.refreshDatabases();           // drops caches, re-reads: the complete entries
+await rag.deleteDatabase(db);                             // everything under the name, sealed and legacy
+```
+
+- **Use the SDK's ids** (they carry a timestamp and a random part) and never reuse one. A document removed and
+  re-added under its id is a new document.
+- **Never write under `home/vector-databases/**` or `home/rag/**` yourself.** Writes there are refused
+  (`RAG_PLAINTEXT_WRITE_REFUSED`). Use `refreshDatabases()` instead of poking caches.
+- **`refreshDatabases()`** returns the complete entries (document arrays, dimensions, `isPublic`). `listDatabases()` is
+  synchronous and counts only. Changes from other tabs and devices show in the lists within 30 s; `refreshDatabases()`
+  forces it.
+- **`addVectors`** takes a real array of `{ id: string, vector: number[], metadata?: object }` with no holes: pass
+  `Array.from(embedding)` for a `Float32Array`. Anything else refuses `RAG_VECTORS_INVALID`. **`deleteVectors`** takes an
+  array of ids (`Array.from(set)`); anything else refuses `RAG_VECTOR_IDS_INVALID`.
+- **Results are read-only.** `listVectors`, `getVector(s)` and search return the store's cached objects: an edit would
+  be sealed by the next write. `structuredClone` a result before changing it.
+- **`RAG_DATABASE_MOVED`** (retryable) from a read or a write: another tab or device moved a legacy database to sealed
+  storage under the call. Retry the same call at once, at most 2–3 times.
+- Errors: `RAG_DOCUMENT_NOT_FOUND`, `RAG_DOCUMENT_BODY_MISSING` (listed, no body yet), `RAG_DOCUMENT_INVALID`,
+  `RAG_DOCUMENT_ALREADY_READY`, `RAG_DATABASE_NOT_FOUND`, `RAG_DATABASE_EXISTS`, `RAG_DATABASE_NAME_INVALID` — all
+  `retryable: false`.
+
+### The conversation log
+
+The log is sealed automatically: `saveConversation(conversation)` no longer takes encryption options. To keep a session
+out of the log entirely, pass **`conversationLog: false`** on the session config (`startSession`,
+`registerDelegatedSession`) and/or on each prompt's `PromptOptions`.
+
+```typescript
+const sm = sdk.getStorageManager();
+
+await sm.appendMessages(conversationId, [question, answer]); // one exchange: all or none, in call order
+await sm.appendMessage(conversationId, message);             // one message
+await sm.updateConversationMetadata(conversationId, { status: 'ended' }); // no-op when there is no log
+const conversation = await sm.loadConversation(conversationId);
+await sm.assertConversationLogWritable();                    // before paying for a card session that logs
+```
+
+- `appendMessages` takes an array of message objects with no holes; anything else refuses
+  `STORAGE_CONVERSATION_INVALID` (`retryable: false`) before anything is written. An empty array creates the log.
+- `saveConversation` needs `{ messages: [...] }` of plain data (no functions, symbols or cycles); otherwise
+  `STORAGE_CONVERSATION_INVALID`.
+- A sealed log that does not open reads as `SEALED_OPEN_FAILED`.
+
+### Funding errors: never thrown without the ids
+
+`startSession` and `registerDelegatedSession` report every failure after money moved with the ids needed to use or
+release the session (`TranscodeManager.submitTranscodeWithLoadBalancing` is not covered yet — planned for 1.39.1). All
+of these are `retryable: false`: act on the code.
+
+| Code | details | What to do |
+|---|---|---|
+| `SESSION_FUNDED_SETUP_FAILED` | `sessionId`, `jobId` (bigint), `stage`, `cause`, `registered?`, `committed?` | The session is funded. Use or release it by its ids. With `committed: true` the setup actually completed: use it. |
+| `SESSION_ID_UNRESOLVED` | `txHash` | The funding transaction was sent; its session id could not be read. Never fund again: look it up by the hash. |
+| `SESSION_FUNDING_UNCERTAIN` | `cause` | The send failed without a hash and may have been broadcast. Never start again automatically: ask the user to check the wallet's activity. |
+| `SESSION_NOT_FUNDED` | | Nothing moved. The user may start again. |
+
+### Errors and the retry rule
+
+- **Retry only when `details.retryable === true`.** An absent flag means no.
+- **`details.committed === true`** on a storage error: the write landed on S5; only this browser could not record it
+  (storage full or blocked). Never retry it and never roll back the UI's state. A RAG write's error then carries its
+  result in `details.result`; `createSession`'s carries `details.sessionId`.
+- New codes in 1.39.0, all `retryable: false` unless stated: `S5JS_UNSUPPORTED_VERSION`, `SEALED_OPEN_FAILED`,
+  `STORAGE_SEALER_MISSING`, `STORAGE_NOT_AVAILABLE`, `RAG_PLAINTEXT_WRITE_REFUSED`, `RAG_COHERENCE_UNAVAILABLE`,
+  `RAG_CHUNK_UNREADABLE`, `RAG_DELETE_INCOMPLETE`, `RAG_DOCUMENT_NOT_FOUND`, `RAG_DOCUMENT_ALREADY_READY`,
+  `RAG_DOCUMENT_BODY_MISSING`, `RAG_DOCUMENT_INVALID`, `RAG_DOCUMENT_ARRAYS_READONLY`, `RAG_MANIFEST_CORRUPT`,
+  `RAG_LEGACY_UNREADABLE` (its own verdict), `RAG_MIGRATION_FAILED` (its own verdict), `RAG_MIGRATION_VERIFY_FAILED`,
+  `RAG_DATABASE_MOVED` (**retryable**), `RAG_LOCK_TIMEOUT` (**retryable**), `RAG_DISCOVERY_INCOMPLETE` (**retryable**),
+  `RAG_VECTORS_INVALID`, `RAG_VECTOR_IDS_INVALID`, `RAG_FILTER_INVALID`, `STORAGE_CONVERSATION_INVALID`,
+  `STORAGE_MANAGER_DISPOSED`, `SESSION_GROUP_MANAGER_DISPOSED`, `RAG_MANAGER_DISPOSED`, `AUTH_SUPERSEDED`,
+  `MIGRATION_INCOMPLETE` (its causes' verdict), and the funding codes above.
+
+
 ## Storage Management
 
 Handles S5 decentralized storage operations with deterministic seed generation.
@@ -4084,130 +4301,46 @@ const storageManager = await sdk.getStorageManager();
 await storageManager.clearAIPreferences();
 ```
 
-### Encrypted Storage (Phase 5.3)
+### Conversation Storage (sealed, sdk-core 1.39.0)
 
-The SDK provides convenience methods for encrypted conversation storage with end-to-end encryption. Conversations can be encrypted with the host's public key and stored on S5 decentralized storage.
+From 1.39.0 every conversation log is **sealed** by the SDK (see
+[Confidential Storage](#confidential-storage-sdk-core-1390)). The former `encrypt` / `hostPubKey` options of
+`saveConversation` are gone: there is nothing to choose.
 
-**Features:**
-- **End-to-end encryption** - Conversations encrypted with host's public key
-- **Automatic decryption** - SDK handles decryption transparently on load
-- **Backward compatible** - Falls back to plaintext for non-encrypted conversations
-- **Sender verification** - ECDSA signatures allow conversation ownership verification
-- **Metadata tracking** - Tracks encryption status, version, and timestamps
+#### saveConversation(conversation): Promise<StorageResult>
 
-#### saveConversation(conversation, options?): Promise<string>
+Saves a conversation to the sealed log. `conversation` needs a `messages` array of plain data (no functions, symbols or
+cycles); otherwise it refuses `STORAGE_CONVERSATION_INVALID` (`retryable: false`). A storage failure carries `cause` and
+its `retryable` verdict; `details.committed === true` means the write landed (never retry it).
 
-Save a conversation with optional encryption to S5 storage.
+#### loadConversation(conversationId): Promise<ConversationData | null>
 
-**Parameters:**
-- `conversation` (ConversationData) - Conversation data to save
-- `options` (optional) - Encryption options
-  - `hostPubKey` (string) - Host's public key for encryption (required if encrypt=true)
-  - `encrypt` (boolean) - Whether to encrypt the conversation (default: false)
+Loads a conversation from the log, sealed or (from an earlier SDK) plaintext. A sealed log that does not open refuses
+`SEALED_OPEN_FAILED`; a failed read refuses `STORAGE_LOAD_ERROR` with its verdict — never read an error as "no log".
 
-**Returns:**
-- `Promise<string>` - CID (Content Identifier) of stored conversation
-
-**Throws:**
-- `SDKError` with code `STORAGE_NOT_INITIALIZED` - StorageManager not initialized
-- `SDKError` with code `INVALID_HOST_PUBLIC_KEY` - Invalid or missing host public key when encrypt=true
-- `SDKError` with code `ENCRYPTION_ERROR` - Failed to encrypt conversation
-- `SDKError` with code `STORAGE_SAVE_ERROR` - Failed to save to S5
-
-**Example (Plaintext Storage):**
 ```typescript
-const sdk = new FabstirSDKCore({ /* config */ });
 await sdk.authenticate('privatekey', { privateKey });
 
-// Save conversation without encryption
-const conversation = {
-  sessionId: 'sess-123',
+await sdk.saveConversation({
+  id: 'conv-123',
   messages: [
     { role: 'user', content: 'Hello!', timestamp: Date.now() },
-    { role: 'assistant', content: 'Hi there!', timestamp: Date.now() }
+    { role: 'assistant', content: 'Hi there!', timestamp: Date.now() },
   ],
-  metadata: {
-    model: 'llama-3',
-    startTime: Date.now()
-  }
-};
-
-const cid = await sdk.saveConversation(conversation);
-console.log('Conversation saved:', cid);
-```
-
-**Example (Encrypted Storage):**
-```typescript
-const sdk = new FabstirSDKCore({ /* config */ });
-await sdk.authenticate('privatekey', { privateKey });
-
-// 1. Get host's public key
-const hostAddress = '0x1234...';
-const hostPubKey = await sdk.getHostPublicKey(hostAddress);
-
-// 2. Save with encryption
-const conversation = {
-  sessionId: 'sess-123',
-  messages: [
-    { role: 'user', content: 'Sensitive message', timestamp: Date.now() },
-    { role: 'assistant', content: 'Response', timestamp: Date.now() }
-  ]
-};
-
-const cid = await sdk.saveConversation(conversation, {
-  hostPubKey,
-  encrypt: true
+  metadata: {},
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
 });
 
-console.log('Encrypted conversation saved:', cid);
+const conversation = await sdk.loadConversation('conv-123');
 ```
 
-#### loadConversation(conversationId): Promise<ConversationData>
-
-Load a conversation from S5 storage with automatic decryption.
-
-**Parameters:**
-- `conversationId` (string) - Conversation ID or CID to load
-
-**Returns:**
-- `Promise<ConversationData>` - Decrypted conversation data
-
-**Throws:**
-- `SDKError` with code `STORAGE_NOT_INITIALIZED` - StorageManager not initialized
-- `SDKError` with code `CONVERSATION_NOT_FOUND` - Conversation does not exist
-- `SDKError` with code `DECRYPTION_ERROR` - Failed to decrypt (wrong key or corrupted data)
-- `SDKError` with code `STORAGE_LOAD_ERROR` - Failed to load from S5
-
-**Behavior:**
-- Automatically detects encrypted vs plaintext conversations
-- Decrypts using client's private key (if encrypted)
-- Falls back to plaintext if decryption fails
-- Verifies sender signature if metadata present
-
-**Example:**
-```typescript
-const sdk = new FabstirSDKCore({ /* config */ });
-await sdk.authenticate('privatekey', { privateKey });
-
-// Load conversation (handles both encrypted and plaintext)
-try {
-  const conversation = await sdk.loadConversation('conv-123');
-
-  console.log('Session ID:', conversation.sessionId);
-  console.log('Messages:', conversation.messages.length);
-  console.log('Metadata:', conversation.metadata);
-} catch (error) {
-  if (error.code === 'CONVERSATION_NOT_FOUND') {
-    console.error('Conversation does not exist');
-  } else if (error.code === 'DECRYPTION_ERROR') {
-    console.error('Cannot decrypt - wrong key or corrupted');
-  }
-}
-```
+`StorageManager` also has `appendMessages`, `appendMessage`, `updateConversationMetadata` and
+`assertConversationLogWritable` — see [The conversation log](#the-conversation-log).
 
 #### getHostPublicKey(hostAddress): Promise<string>
 
-Get the public key of a registered host for encryption.
+Get the public key of a registered host (for the session's end-to-end encryption, which is unchanged).
 
 **Parameters:**
 - `hostAddress` (string) - Host's Ethereum address
@@ -4218,74 +4351,6 @@ Get the public key of a registered host for encryption.
 **Throws:**
 - `SDKError` with code `HOST_NOT_FOUND` - Host not registered
 - `SDKError` with code `PUBLIC_KEY_NOT_AVAILABLE` - Host has not set public key
-
-**Example:**
-```typescript
-const sdk = new FabstirSDKCore({ /* config */ });
-await sdk.authenticate('privatekey', { privateKey });
-
-// Get host public key for encryption
-const hostAddress = '0x1234...';
-const hostPubKey = await sdk.getHostPublicKey(hostAddress);
-
-// Use for encrypted storage
-const cid = await sdk.saveConversation(conversation, {
-  hostPubKey,
-  encrypt: true
-});
-```
-
-#### Complete Encrypted Workflow Example
-
-```typescript
-import { FabstirSDKCore, ChainId } from '@fabstir/sdk-core';
-import { ethers } from 'ethers';
-
-// 1. Initialize SDK
-const sdk = new FabstirSDKCore({
-  chainId: ChainId.BASE_SEPOLIA,
-  rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/YOUR_KEY',
-  contractAddresses: { /* ... */ }
-});
-
-// 2. Authenticate
-const wallet = ethers.Wallet.createRandom();
-await sdk.authenticate('privatekey', { privateKey: wallet.privateKey });
-
-// 3. Start encrypted session
-const sessionManager = await sdk.getSessionManager();
-const hostAddress = '0x1234...'; // Discovered via HostManager
-
-await sessionManager.startSession({
-  hostAddress,
-  hostUrl: 'ws://host:8080/ws',
-  jobId: 123n,
-  modelName: 'llama-3',
-  chainId: 84532,
-  encryption: true  // Enable encryption
-});
-
-// 4. Send encrypted messages
-await sessionManager.sendMessage('What is the weather?');
-
-// Wait for response...
-// Messages are encrypted in transit
-
-// 5. Save encrypted conversation
-const conversation = sessionManager.getConversation();
-const hostPubKey = await sdk.getHostPublicKey(hostAddress);
-
-const cid = await sdk.saveConversation(conversation, {
-  hostPubKey,
-  encrypt: true
-});
-
-console.log('Encrypted conversation saved with CID:', cid);
-
-// 6. Load encrypted conversation later
-const loaded = await sdk.loadConversation(cid);
-console.log('Loaded messages:', loaded.messages.length);
-```
 
 ### S5 Connection Handling (v1.4.24+)
 
@@ -4543,6 +4608,11 @@ export type SyncStatus = 'synced' | 'syncing' | 'pending' | 'error';
 ## RAG and Vector Databases
 
 The SDK includes a complete **Retrieval-Augmented Generation (RAG)** system that enhances LLM responses by retrieving relevant context from user documents.
+
+> **1.39.0:** RAG databases are sealed on S5, and document entries and bodies are managed through the RAG document API
+> (`addPendingDocument`, `putDocumentBody`, `getDocumentBody`, `updateDocumentStatus`, `removeDocument`,
+> `refreshDatabases`). Never read or write the RAG paths on S5 directly. See
+> [Confidential Storage](#confidential-storage-sdk-core-1390).
 
 ### Quick Start
 

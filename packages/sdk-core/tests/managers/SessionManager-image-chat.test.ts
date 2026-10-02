@@ -170,6 +170,7 @@ describe('Sub-phase 2.1-2.3: Encrypted Payload & Image Wiring', () => {
       initialize: vi.fn().mockResolvedValue(undefined),
       isInitialized: vi.fn().mockReturnValue(true),
       appendMessage: vi.fn().mockResolvedValue(undefined),
+      appendMessages: vi.fn().mockResolvedValue(undefined),
       loadConversation: vi.fn().mockResolvedValue(null),
     } as any;
 
@@ -381,11 +382,11 @@ describe('Sub-phase 2.1-2.3: Encrypted Payload & Image Wiring', () => {
 
     await sessionManager.sendPromptStreaming(BigInt(42), 'Describe', undefined, { images });
 
-    // Check that appendMessage was called with imageCount metadata
-    const calls = mockStorageManager.appendMessage.mock.calls;
-    const userMessageCall = calls.find((c: any) => c[1]?.role === 'user');
-    expect(userMessageCall).toBeDefined();
-    expect(userMessageCall[1].metadata?.imageCount).toBe(2);
+    // Check that the exchange was logged with imageCount metadata (one appendMessages call per exchange — §27 HH1)
+    const logged = mockStorageManager.appendMessages.mock.calls.flatMap((c: any) => c[1]);
+    const userMessage = logged.find((m: any) => m?.role === 'user');
+    expect(userMessage).toBeDefined();
+    expect(userMessage.metadata?.imageCount).toBe(2);
   });
 
   // --- Sub-phase 2.3 tests ---

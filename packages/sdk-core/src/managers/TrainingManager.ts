@@ -369,6 +369,7 @@ export class TrainingManager implements ITrainingManager {
       // `duration` is the key SessionConfig/startSession read; `maxDuration` was silently ignored and the
       // session fell to PaymentManager's 3600 s default — a lifetime the node's A.3 rejects post-escrow.
       encryption: true, duration: 14400, proofInterval: 1000, proofTimeoutWindow: 3600,
+      conversationLog: false, // a training run has no chat log — and no post-funding S5 write to fail
     });
     // Money moved: from here every failure carries the ids the SDK just minted (adopted: false), classified
     // exactly as on the adopted path — the reclaim (`triggerSessionTimeout(Number(jobId))`) needs them.

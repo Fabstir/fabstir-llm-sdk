@@ -11,7 +11,7 @@
 
 // Main SDK class
 export { FabstirSDKCore } from './FabstirSDKCore';
-export type { FabstirSDKCoreConfig } from './FabstirSDKCore';
+export type { FabstirSDKCoreConfig, BaseAccountApproval, BaseAccountSignIn } from './FabstirSDKCore';
 
 // Factory pattern - commented out to avoid sdk-node imports in browser
 // export { 
@@ -33,7 +33,7 @@ export type { S5ConnectionStatus, SyncStatus } from './managers/StorageManager';
 export { SessionManager } from './managers/SessionManager';
 // FC1.6 session-auth: consumers import these to type the /fiat/session response
 // they pass straight through to registerDelegatedSession / postSessionAuth.
-export type { SessionAuthorisation, DelegatedSessionConfig, ExternalSessionConfig } from './managers/SessionManager';
+export type { SessionAuthorisation, DelegatedSessionConfig, ExternalSessionConfig, ExtendedSessionConfig } from './managers/SessionManager';
 export { LtxManager } from './managers/LtxManager';
 export {
   HostManager,
@@ -85,6 +85,13 @@ export { JobMarketplaceWrapper } from './contracts/JobMarketplace';
 export type { SessionCreationParams, DirectSessionParams, SessionJob, DelegatedSessionParams, OnChainSessionJob } from './contracts/JobMarketplace';
 export { decodeSessionJobWords } from './contracts/JobMarketplace';
 export type { SessionJobParams, DepositBalances } from './managers/PaymentManagerMultiChain';
+
+// Sealed storage (1.39.0): capability flags and the migration report shapes
+export { SDK_CAPABILITIES } from './capabilities';
+export type { RagMigrationReport, RagMigrationEntry, RagMigrationStatus, MigrationProgress, DiscardUnreadable } from './storage/sealed/rag-migration';
+export type { DatabaseMetadata } from './database/types';
+export type { LogMigrationReport } from './managers/StorageManager';
+export type { DocumentStatus, DocumentStatusUpdates } from './storage/S5VectorStore';
 
 // Export types
 export * from './types';
@@ -257,5 +264,5 @@ export type { BundlerSendUserOpConfig, UnpackedUserOpV07 } from './wallet';
 export { WebSocketClient } from './websocket/WebSocketClient';
 
 // Version
-export const VERSION = '1.37.0';
+export const VERSION = '1.39.0';
 export const SDK_TYPE = 'browser';
