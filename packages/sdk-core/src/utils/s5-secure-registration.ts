@@ -15,6 +15,17 @@
  * 5. Client stores credentials for future use
  */
 
+import { fetchWithTimeout } from './with-timeout';
+
+/** How long one backend registration call may take — its body included (§32 MM4). */
+export const REGISTRATION_TIMEOUT_MS = 30_000;
+
+/** A backend reply read whole under the call's bound: its status, its text, and its JSON on demand. */
+async function readBody(response: Response): Promise<{ ok: boolean; status: number; text: string; json: () => any }> {
+  const text = await response.text();
+  return { ok: response.ok, status: response.status, text, json: () => JSON.parse(text) };
+}
+
 // Challenge type constants (also exported from S5.js)
 export const CHALLENGE_TYPE_REGISTER = 1;
 export const CHALLENGE_TYPE_LOGIN = 2;
@@ -63,18 +74,18 @@ export async function registerS5WithBackend(
 
   // 3. Request challenge from backend (backend adds master token)
   console.log('[S5 Secure Registration] Requesting challenge from backend...');
-  const challengeRes = await fetch(`${backendUrl}/register`, {
+  // Its body is read under the bound too (§32 MM4).
+  const challengeRes = await fetchWithTimeout(`${backendUrl}/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pubKey }),
-  });
+  }, REGISTRATION_TIMEOUT_MS, readBody);
 
   if (!challengeRes.ok) {
-    const errorText = await challengeRes.text();
-    throw new Error(`Failed to get challenge: ${challengeRes.status} - ${errorText}`);
+    throw new Error(`Failed to get challenge: ${challengeRes.status} - ${challengeRes.text}`);
   }
 
-  const { challenge } = await challengeRes.json();
+  const { challenge } = challengeRes.json();
   if (!challenge) {
     throw new Error('No challenge received from backend');
   }
@@ -101,7 +112,7 @@ export async function registerS5WithBackend(
 
   // 5. Complete registration via backend (backend adds master token)
   console.log('[S5 Secure Registration] Completing registration...');
-  const completeRes = await fetch(`${backendUrl}/register-complete`, {
+  const completeRes = await fetchWithTimeout(`${backendUrl}/register-complete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -110,14 +121,13 @@ export async function registerS5WithBackend(
       signature,
       label: 'fabstir-sdk',
     }),
-  });
+  }, REGISTRATION_TIMEOUT_MS, readBody);
 
   if (!completeRes.ok) {
-    const errorText = await completeRes.text();
-    throw new Error(`Registration failed: ${completeRes.status} - ${errorText}`);
+    throw new Error(`Registration failed: ${completeRes.status} - ${completeRes.text}`);
   }
 
-  const { authToken } = await completeRes.json();
+  const { authToken } = completeRes.json();
   if (!authToken) {
     throw new Error('No authToken received from backend');
   }

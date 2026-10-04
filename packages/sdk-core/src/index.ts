@@ -11,7 +11,7 @@
 
 // Main SDK class
 export { FabstirSDKCore } from './FabstirSDKCore';
-export type { FabstirSDKCoreConfig } from './FabstirSDKCore';
+export type { FabstirSDKCoreConfig, BaseAccountApproval, BaseAccountSignIn } from './FabstirSDKCore';
 
 // Factory pattern - commented out to avoid sdk-node imports in browser
 // export { 
@@ -33,7 +33,7 @@ export type { S5ConnectionStatus, SyncStatus } from './managers/StorageManager';
 export { SessionManager } from './managers/SessionManager';
 // FC1.6 session-auth: consumers import these to type the /fiat/session response
 // they pass straight through to registerDelegatedSession / postSessionAuth.
-export type { SessionAuthorisation, DelegatedSessionConfig, ExternalSessionConfig } from './managers/SessionManager';
+export type { SessionAuthorisation, DelegatedSessionConfig, ExternalSessionConfig, ExtendedSessionConfig } from './managers/SessionManager';
 export { LtxManager } from './managers/LtxManager';
 export {
   HostManager,
@@ -82,8 +82,16 @@ export * from './contracts';
 export { TransactionHelper } from './contracts/TransactionHelper';
 export { ContractManager } from './contracts/ContractManager';
 export { JobMarketplaceWrapper } from './contracts/JobMarketplace';
-export type { SessionCreationParams, DirectSessionParams, SessionJob, DelegatedSessionParams } from './contracts/JobMarketplace';
+export type { SessionCreationParams, DirectSessionParams, SessionJob, DelegatedSessionParams, OnChainSessionJob } from './contracts/JobMarketplace';
+export { decodeSessionJobWords } from './contracts/JobMarketplace';
 export type { SessionJobParams, DepositBalances } from './managers/PaymentManagerMultiChain';
+
+// Sealed storage (1.39.0): capability flags and the migration report shapes
+export { SDK_CAPABILITIES } from './capabilities';
+export type { RagMigrationReport, RagMigrationEntry, RagMigrationStatus, MigrationProgress, DiscardUnreadable } from './storage/sealed/rag-migration';
+export type { DatabaseMetadata } from './database/types';
+export type { LogMigrationReport } from './managers/StorageManager';
+export type { DocumentStatus, DocumentStatusUpdates } from './storage/S5VectorStore';
 
 // Export types
 export * from './types';
@@ -173,6 +181,52 @@ export { ltxTokens } from './utils/ltx-utils';
 // refactor can't silently drop them. Every other LTX type still arrives through that chain.
 export type { LtxJob, LtxSubmitOptions } from './types/ltx.types';
 
+// Training M0 (LoRA/QLoRA). The wire-key builders are named at the entry as a contract pin:
+// `manifestCID`'s capitalisation is load-bearing — the node rejects a whole session init if a
+// serialiser mangles it — so these must never be reached only through a barrel that a refactor
+// could silently drop. `TRAINING_ERROR_CODES` is the 11-code wire set (8 named + 3 moderation
+// holds); `TEMPLATE_BOUNDS`/`SCAN_FAILURE` are sidecar-internal and deliberately absent.
+export {
+  buildTrainAction, buildTrainCancelAction, buildLoraSessionField, TRAINING_PROGRESS_STAGES,
+} from './types/training.types';
+export {
+  TRAINING_ERROR_CODES, TRAINING_WIRE_VISIBLE_CODES, TrainingError,
+  ADOPTED_SESSION_PARAMS_REASON, EXISTING_SESSION_CONFIG_REASON, SESSION_DECODE_REASON,
+} from './errors/training-errors';
+export { TRAIN_JOB_TIMEOUT_SECS, A3_SETTLE_MARGIN_SECS, A3_MIN_PROOF_TIMEOUT_WINDOW_SECS, TRANSPORT_SDK_CODES, RPC_TRANSIENT_CODES } from './managers/TrainingManager';
+export type { TrainingExistingSession, SubmitTrainingOptions, A3CheckFailure } from './managers/TrainingManager';
+// The canonical training maths, pinned at the entry exactly as `ltxTokens` is: callers running
+// their own over-claim guard must be able to recompute the bill and the schedule byte-for-byte
+// rather than re-deriving them. `trainingSliceSchedule` takes sliceTokens explicitly — the job
+// does not carry it (it lives in the bundle's `perTemplate`), which is what makes the
+// `train_accepted` echo-equality check meaningful.
+export {
+  trainingTokens, trainingSliceSchedule, trainingInputCommitment, trainingSigDigest, trainingModelIdFor,
+} from './utils/training-utils';
+export type { TrainingJob, LoraSessionField } from './types/training.types';
+
+// Phases 4–7 surface. Named individually rather than star-exported for the same reason as the
+// block above: these are the calls a client uses to CHECK the node's arithmetic — recompute the
+// shard schedule, re-hash a fetched manifest, re-count a dataset — and a barrel a refactor can
+// silently drop would remove the check without removing the call site.
+export {
+  SHARD_PLAINTEXT_MAX_BYTES, AEAD_CHUNK_BYTES, PLAUSIBILITY_MAX_BYTES_PER_TOKEN,
+  splitShardSizes, splitShards, reassembleShards, validateJsonlTextV1,
+  canonicaliseManifest, manifestSha256, verifyPlausibility,
+} from './utils/training-shard';
+// count-v1. The tokenizer is an OPTIONAL peer dep (@huggingface/tokenizers >= 0.1.3) loaded by
+// dynamic import, and the 12 MB tokenizer.json is supplied BY THE CALLER and verified against
+// the template's pin — it belongs to the template, not to this SDK.
+export {
+  assertTokenizerPin, loadTrainingTokenizer, countSampleTokens, countDatasetTokens,
+} from './utils/training-count';
+export type { TrainingTokenizer, TokenizerEncoding } from './utils/training-count';
+// Serve-back gating. `serveBackAvailable` is the honest answer to "can this run be served
+// back?": GGUF conversion is best-effort, so a finished, owned adapter can still be unservable.
+export { toServeBackError, serveBackAvailable } from './utils/training-serve-back';
+export type { TrainingHandle, TrainingResult, TrainingPointerRecord } from './utils/training-ws';
+export type { ITrainingManager } from './interfaces/ITrainingManager';
+
 // Moderation publish gate (M3 — ships dark behind moderationGate: false).
 // ⚠️ NOT a security control until M5 signing: reports are unsigned (D6), so
 // this is a plain verdict check. See src/moderation/gate.ts and README.
@@ -210,5 +264,5 @@ export type { BundlerSendUserOpConfig, UnpackedUserOpV07 } from './wallet';
 export { WebSocketClient } from './websocket/WebSocketClient';
 
 // Version
-export const VERSION = '1.37.0';
+export const VERSION = '1.39.0';
 export const SDK_TYPE = 'browser';

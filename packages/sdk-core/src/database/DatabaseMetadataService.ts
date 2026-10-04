@@ -11,6 +11,7 @@ import type {
   ListDatabaseOptions,
   DatabaseType
 } from './types.js';
+import { SDKError } from '../types';
 
 /**
  * Shared metadata service for all database types
@@ -30,12 +31,12 @@ export class DatabaseMetadataService {
     // Validate database name
     const trimmedName = databaseName.trim();
     if (trimmedName.length === 0) {
-      throw new Error('Database name cannot be empty');
+      throw new SDKError('Database name cannot be empty', 'RAG_DATABASE_NAME_INVALID', { database: databaseName, retryable: false });
     }
 
     // Check for duplicates
     if (this.metadata.has(databaseName)) {
-      throw new Error('Database already exists');
+      throw new SDKError('Database already exists', 'RAG_DATABASE_EXISTS', { database: databaseName, retryable: false });
     }
 
     // Create metadata record
@@ -53,6 +54,21 @@ export class DatabaseMetadataService {
     };
 
     this.metadata.set(databaseName, metadata);
+  }
+
+  /**
+   * Record a database that exists in its store (listed there, or just opened): its counts are updated, or an entry is
+   * made. No name rule — the name is the store's, whatever an older client chose (§24 EE6); `create` is for new ones.
+   */
+  upsert(databaseName: string, type: DatabaseType, owner: string, fields: UpdateMetadata = {}): void {
+    const metadata = this.metadata.get(databaseName);
+    if (metadata) return this.update(databaseName, fields);
+    const now = Date.now();
+    this.metadata.set(databaseName, {
+      databaseName, type, createdAt: now, lastAccessedAt: now, owner,
+      vectorCount: fields.vectorCount ?? 0, storageSizeBytes: fields.storageSizeBytes ?? 0,
+      description: fields.description, isPublic: fields.isPublic ?? false,
+    });
   }
 
   /**
@@ -79,7 +95,7 @@ export class DatabaseMetadataService {
   update(databaseName: string, updates: UpdateMetadata): void {
     const metadata = this.metadata.get(databaseName);
     if (!metadata) {
-      throw new Error('Database not found');
+      throw new SDKError('Database not found', 'RAG_DATABASE_NOT_FOUND', { database: databaseName, retryable: false });
     }
 
     // Apply updates (only mutable fields)
@@ -106,7 +122,7 @@ export class DatabaseMetadataService {
   delete(databaseName: string): void {
     const exists = this.metadata.has(databaseName);
     if (!exists) {
-      throw new Error('Database not found');
+      throw new SDKError('Database not found', 'RAG_DATABASE_NOT_FOUND', { database: databaseName, retryable: false });
     }
 
     this.metadata.delete(databaseName);

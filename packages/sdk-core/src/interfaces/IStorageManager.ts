@@ -20,6 +20,20 @@ export interface IStorageManager {
    * Check if storage is initialized
    */
   isInitialized(): boolean;
+
+  /**
+   * Called by the SDK when this store's identity is forgotten — a sign-out, the next sign-in (plan §26 GG1). Every
+   * other member but `cleanup` then refuses `STORAGE_MANAGER_DISPOSED`: get the current store from the SDK.
+   */
+  dispose(): void;
+
+  /**
+   * Append messages — an exchange — to a conversation (an empty list creates it), all or none, in call order per
+   * conversation; one asked for before a sign-out lands whole (plan §27 HH1).
+   * @throws SDKError STORAGE_CONVERSATION_INVALID (not retryable) unless `messages` is a list of message objects with no
+   *   holes — refused before anything is written (§43 XX4, §44 YY4); STORAGE_APPEND_ERROR (its cause's verdict)
+   */
+  appendMessages(conversationId: string, messages: Message[]): Promise<void>;
   
   /**
    * Store data to S5 network
@@ -85,6 +99,29 @@ export interface IStorageManager {
    * Get S5 client instance (for VectorRAGManager)
    */
   getS5Client(): any;
+
+  /**
+   * S5 connection state (VectorRAGManager fails RAG writes fast while it is 'disconnected')
+   */
+  getConnectionStatus(): 'connected' | 'connecting' | 'disconnected';
+
+  /**
+   * Rejects unless a sealed conversation log can be written here — checked before funding: STORAGE_NOT_INITIALIZED,
+   * STORAGE_SEALER_MISSING, RAG_COHERENCE_UNAVAILABLE (no Web Locks, or IndexedDB will not open), STORAGE_OFFLINE,
+   * and STORAGE_UNAVAILABLE when storage failed to start (not retryable: authenticate again — plan §20 AA1).
+   * Call it yourself before a backend funds a delegated session.
+   */
+  assertConversationLogWritable(): Promise<void>;
+
+  /**
+   * Patch a conversation's metadata under the conversation lock (no log → no write)
+   */
+  updateConversationMetadata(conversationId: string, patch: Record<string, unknown>): Promise<void>;
+
+  /**
+   * Seal every legacy plaintext conversation log and purge older plaintext siblings (idempotent)
+   */
+  migrateLegacyConversationLogs(opts?: { onProgress?: (e: import('../storage/sealed/rag-migration').MigrationProgress) => void }): Promise<import('../managers/StorageManager').LogMigrationReport>;
 
   // ============= User Settings Methods =============
 

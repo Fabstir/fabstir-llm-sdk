@@ -9,7 +9,9 @@
  */
 
 /**
- * Job type enumeration (matches contract enum)
+ * SDK-side job-kind discriminator. The contract-side enum was removed as dead code
+ * 2026-01-06 (security-audit remediation); the marketplace keys on `bytes32` model ids,
+ * so these values never reach the chain — they exist for client-side dispatch only.
  */
 export enum JobType {
   LLM_INFERENCE = 0,
@@ -18,6 +20,8 @@ export enum JobType {
   IMAGE_GENERATION = 3, // Future
   THREE_D_RENDER = 4, // Future
   VIDEO_GENERATION = 5, // LTX text-to-video (M0)
+  /** Reserved by the 2026-08-22 training-jobs exchange; no behaviour until DESIGN-TRAINING-M0-INTERFACE. */
+  MODEL_TRAINING = 6,
 }
 
 /**
@@ -282,68 +286,21 @@ export interface GOPInfo {
   elapsedSeconds: number;
 }
 
-/**
- * Track-1 moderation verdict as delivered by the node on `transcode_complete`.
- *
- * The three literals are the KNOWN set, not a closed one: an unrecognised future verdict passes
- * through unchanged, which is why `(string & {})` is part of the type deliberately. That keeps
- * editor autocomplete for the known values while stopping the compiler from "proving" that
- * excluding `blocked` and `flagged` leaves `cleared` — a narrowing that would type-check today
- * and be wrong the moment the node ships a fourth verdict.
- *
- * Only `'cleared'` releases, and that decision belongs to the consumer's publish gate. Never
- * write a truthiness or `!== 'blocked'` check against this.
+/*
+ * Re-homed (1.38.0 Phase 1): the WP-S1 verdict-carriage surface — verdict/status types
+ * and the guard/clone pair — now lives in `moderation.types.ts` under neutral
+ * Job-prefixed names, so non-transcode job kinds never import transcode types. These
+ * aliases keep every existing import path AND runtime reference identical.
  */
-export type TranscodeModerationVerdict = 'cleared' | 'blocked' | 'flagged' | (string & {});
-
-/**
- * Moderation status attached to a completed transcode.
- *
- * `reason` is a category/rule id only — never content, never hashes; safe to log. Treat it as
- * OPAQUE: never branch on its value (the node is renaming 'csam-match' → 'hash-list-match',
- * and such values may change again).
- */
-export interface TranscodeModerationStatus {
-  verdict: TranscodeModerationVerdict;
-  reason?: string;
-}
-
-/**
- * Runtime guard for a usable moderation status.
- *
- * Reads OWN properties only. Destructuring would consult the prototype chain, which is the one
- * way absence could become a release: with a polluted `Object.prototype.verdict`, an empty
- * payload — "the node recorded nothing" — would otherwise arrive at a consumer as a clearance.
- *
- * Deliberately does NOT check `verdict` against the known union: an unrecognised future verdict
- * is valid and must survive verbatim. Only `'cleared'` releases, and that is the publish gate's
- * call, never this guard's.
- */
-export function isTranscodeModerationStatus(raw: unknown): raw is TranscodeModerationStatus {
-  return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
-    && Object.prototype.hasOwnProperty.call(raw, 'verdict')
-    && typeof (raw as { verdict: unknown }).verdict === 'string';
-}
-
-/**
- * Copy a moderation status down to its declared fields, and nothing else.
- *
- * Used at every hop, so the wire boundary and the persistence boundary cannot drift apart. A
- * spread would not do: it copies whatever else the node attached — a matched hash, a list id,
- * an evidence frame — straight into user-sovereign S5 storage, and it copies own ENUMERABLE
- * properties only, so a non-enumerable `verdict` would yield a present-but-empty record that
- * reads as truthy to a consumer checking `if (meta.moderation)`.
- *
- * The verdict string itself is never inspected — an unknown one is copied as faithfully as a
- * known one.
- */
-export function cloneTranscodeModerationStatus(raw: TranscodeModerationStatus): TranscodeModerationStatus {
-  const status: TranscodeModerationStatus = { verdict: raw.verdict };
-  const reason = Object.prototype.hasOwnProperty.call(raw, 'reason')
-    ? (raw as { reason?: unknown }).reason : undefined;
-  if (typeof reason === 'string') status.reason = reason;
-  return status;
-}
+import type {
+  JobModerationVerdict as TranscodeModerationVerdict,
+  JobModerationStatus as TranscodeModerationStatus,
+} from './moderation.types';
+export type { TranscodeModerationVerdict, TranscodeModerationStatus };
+export {
+  isJobModerationStatus as isTranscodeModerationStatus,
+  cloneJobModerationStatus as cloneTranscodeModerationStatus,
+} from './moderation.types';
 
 /**
  * WebSocket transcode result (distinct from on-chain TranscodeJobResult)

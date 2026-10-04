@@ -170,6 +170,7 @@ describe('Sub-phase 2.1-2.3: Encrypted Payload & Image Wiring', () => {
       initialize: vi.fn().mockResolvedValue(undefined),
       isInitialized: vi.fn().mockReturnValue(true),
       appendMessage: vi.fn().mockResolvedValue(undefined),
+      appendMessages: vi.fn().mockResolvedValue(undefined),
       loadConversation: vi.fn().mockResolvedValue(null),
     } as any;
 
@@ -237,14 +238,14 @@ describe('Sub-phase 2.1-2.3: Encrypted Payload & Image Wiring', () => {
   // --- Sub-phase 2.1 tests ---
 
   test('encrypted payload decrypts to valid JSON', async () => {
-    await (sessionManager as any).sendEncryptedMessage('Hello world');
+    await (sessionManager as any).sendEncryptedMessage('42', 'Hello world');
     expect(capturedEncryptedMessage).toBeDefined();
     const parsed = JSON.parse(capturedEncryptedMessage!);
     expect(typeof parsed).toBe('object');
   });
 
   test('decrypted JSON contains prompt, model, max_tokens, temperature, stream', async () => {
-    await (sessionManager as any).sendEncryptedMessage('Test prompt');
+    await (sessionManager as any).sendEncryptedMessage('42', 'Test prompt');
     const parsed = JSON.parse(capturedEncryptedMessage!);
     expect(parsed.prompt).toBe('Test prompt');
     expect(parsed.model).toBe('CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf');
@@ -257,13 +258,13 @@ describe('Sub-phase 2.1-2.3: Encrypted Payload & Image Wiring', () => {
     const images: ImageAttachment[] = [
       { data: 'iVBORw0KGgo=', format: 'png' },
     ];
-    await (sessionManager as any).sendEncryptedMessage('Describe this', undefined, images);
+    await (sessionManager as any).sendEncryptedMessage('42', 'Describe this', undefined, images);
     const parsed = JSON.parse(capturedEncryptedMessage!);
     expect(parsed.images).toEqual([{ data: 'iVBORw0KGgo=', format: 'png' }]);
   });
 
   test('decrypted JSON omits images field when no images provided', async () => {
-    await (sessionManager as any).sendEncryptedMessage('Just text');
+    await (sessionManager as any).sendEncryptedMessage('42', 'Just text');
     const parsed = JSON.parse(capturedEncryptedMessage!);
     expect(parsed).not.toHaveProperty('images');
   });
@@ -272,7 +273,7 @@ describe('Sub-phase 2.1-2.3: Encrypted Payload & Image Wiring', () => {
     const images: ImageAttachment[] = [
       { data: 'abc123', format: 'jpeg' },
     ];
-    await (sessionManager as any).sendEncryptedMessage('Describe', undefined, images);
+    await (sessionManager as any).sendEncryptedMessage('42', 'Describe', undefined, images);
     const parsed = JSON.parse(capturedEncryptedMessage!);
     expect(Object.keys(parsed.images[0]).sort()).toEqual(['data', 'format']);
   });
@@ -282,7 +283,7 @@ describe('Sub-phase 2.1-2.3: Encrypted Payload & Image Wiring', () => {
       { data: 'data:image/png;base64,abc', format: 'png' },
     ];
     await expect(
-      (sessionManager as any).sendEncryptedMessage('Describe', undefined, invalidImages)
+      (sessionManager as any).sendEncryptedMessage('42', 'Describe', undefined, invalidImages)
     ).rejects.toThrow();
     // encryptMessage should NOT have been called
     expect((sessionManager as any).encryptionManager.encryptMessage).not.toHaveBeenCalled();
@@ -381,11 +382,11 @@ describe('Sub-phase 2.1-2.3: Encrypted Payload & Image Wiring', () => {
 
     await sessionManager.sendPromptStreaming(BigInt(42), 'Describe', undefined, { images });
 
-    // Check that appendMessage was called with imageCount metadata
-    const calls = mockStorageManager.appendMessage.mock.calls;
-    const userMessageCall = calls.find((c: any) => c[1]?.role === 'user');
-    expect(userMessageCall).toBeDefined();
-    expect(userMessageCall[1].metadata?.imageCount).toBe(2);
+    // Check that the exchange was logged with imageCount metadata (one appendMessages call per exchange — §27 HH1)
+    const logged = mockStorageManager.appendMessages.mock.calls.flatMap((c: any) => c[1]);
+    const userMessage = logged.find((m: any) => m?.role === 'user');
+    expect(userMessage).toBeDefined();
+    expect(userMessage.metadata?.imageCount).toBe(2);
   });
 
   // --- Sub-phase 2.3 tests ---

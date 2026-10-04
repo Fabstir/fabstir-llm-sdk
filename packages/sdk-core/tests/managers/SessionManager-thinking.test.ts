@@ -149,14 +149,14 @@ describe('Sub-phase 2.1-2.2: Thinking Mode in Payloads', () => {
   // --- Sub-phase 2.1: Encrypted payload tests ---
 
   test('thinking field included in encrypted payload when set', async () => {
-    await (sessionManager as any).sendEncryptedMessage('Hello', undefined, undefined, 'high');
+    await (sessionManager as any).sendEncryptedMessage('42', 'Hello', undefined, undefined, 'high');
     expect(capturedEncryptedMessage).toBeDefined();
     const parsed = JSON.parse(capturedEncryptedMessage!);
     expect(parsed.thinking).toBe('high');
   });
 
   test('thinking field omitted from encrypted payload when not set', async () => {
-    await (sessionManager as any).sendEncryptedMessage('Hello');
+    await (sessionManager as any).sendEncryptedMessage('42', 'Hello');
     expect(capturedEncryptedMessage).toBeDefined();
     const parsed = JSON.parse(capturedEncryptedMessage!);
     expect(parsed).not.toHaveProperty('thinking');
@@ -167,7 +167,7 @@ describe('Sub-phase 2.1-2.2: Thinking Mode in Payloads', () => {
     for (const mode of modes) {
       capturedEncryptedMessage = undefined;
       (sessionManager as any).messageIndex = 0;
-      await (sessionManager as any).sendEncryptedMessage('Hello', undefined, undefined, mode);
+      await (sessionManager as any).sendEncryptedMessage('42', 'Hello', undefined, undefined, mode);
       const parsed = JSON.parse(capturedEncryptedMessage!);
       expect(parsed.thinking).toBe(mode);
     }

@@ -136,3 +136,85 @@ export interface ModerationGateEvaluation {
   /** `enabled && !result.allowed` — the ONLY field enforcement may act on. */
   refusePublish: boolean;
 }
+
+// ─── Per-JOB scan verdicts (re-homed from transcode.types, 1.38.0 Phase 1) ───
+// TWO VOCABULARIES, deliberately distinct (plan constraint 5): `ModerationVerdict`
+// above = M3 REPORT verdicts (PASS/…, about published content); `JobModerationVerdict`
+// below = the node's per-job Track-1 SCAN verdict on a completion frame
+// (`transcode_complete` today; training next). Never conflate them.
+
+/**
+ * Track-1 moderation verdict as delivered by the node on a job's completion frame.
+ *
+ * The three literals are the KNOWN set, not a closed one: an unrecognised future verdict passes
+ * through unchanged, which is why `(string & {})` is part of the type deliberately. That keeps
+ * editor autocomplete for the known values while stopping the compiler from "proving" that
+ * excluding `blocked` and `flagged` leaves `cleared` — a narrowing that would type-check today
+ * and be wrong the moment the node ships a fourth verdict.
+ *
+ * Only `'cleared'` releases, and that decision belongs to the consumer's publish gate. Never
+ * write a truthiness or `!== 'blocked'` check against this.
+ */
+export type JobModerationVerdict = 'cleared' | 'blocked' | 'flagged' | (string & {});
+
+/**
+ * Moderation status attached to a completed job.
+ *
+ * `reason` is a category/rule id only — never content, never hashes; safe to log. Treat it as
+ * OPAQUE: never branch on its value (the node is renaming 'csam-match' → 'hash-list-match',
+ * and such values may change again).
+ */
+export interface JobModerationStatus {
+  verdict: JobModerationVerdict;
+  reason?: string;
+}
+
+/**
+ * The terminal moderation hold codes a held job surfaces as, in place of its
+ * completion frame. Deliberately NON-RETRYABLE everywhere: no load balancer may re-host
+ * a held job (a user-initiated resubmission is a new job and is legal; publishing a held
+ * job never is). `TranscodeErrorCode` composes this union; training error codes will too.
+ */
+export const MODERATION_HOLD_CODES = [
+  'CONTENT_BLOCKED',         // matched a block rule — terminal for this job
+  'CONTENT_FLAGGED',         // held for human review; a reviewer decision arrives out of band
+  'MODERATION_UNAVAILABLE',  // no verdict recorded — infra state, still never publishable
+] as const;
+export type ModerationHoldCode = (typeof MODERATION_HOLD_CODES)[number];
+
+/**
+ * Runtime guard for a usable moderation status.
+ *
+ * Reads OWN properties only. Destructuring would consult the prototype chain, which is the one
+ * way absence could become a release: with a polluted `Object.prototype.verdict`, an empty
+ * payload — "the node recorded nothing" — would otherwise arrive at a consumer as a clearance.
+ *
+ * Deliberately does NOT check `verdict` against the known union: an unrecognised future verdict
+ * is valid and must survive verbatim. Only `'cleared'` releases, and that is the publish gate's
+ * call, never this guard's.
+ */
+export function isJobModerationStatus(raw: unknown): raw is JobModerationStatus {
+  return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+    && Object.prototype.hasOwnProperty.call(raw, 'verdict')
+    && typeof (raw as { verdict: unknown }).verdict === 'string';
+}
+
+/**
+ * Copy a moderation status down to its declared fields, and nothing else.
+ *
+ * Used at every hop, so the wire boundary and the persistence boundary cannot drift apart. A
+ * spread would not do: it copies whatever else the node attached — a matched hash, a list id,
+ * an evidence frame — straight into user-sovereign S5 storage, and it copies own ENUMERABLE
+ * properties only, so a non-enumerable `verdict` would yield a present-but-empty record that
+ * reads as truthy to a consumer checking `if (meta.moderation)`.
+ *
+ * The verdict string itself is never inspected — an unknown one is copied as faithfully as a
+ * known one.
+ */
+export function cloneJobModerationStatus(raw: JobModerationStatus): JobModerationStatus {
+  const status: JobModerationStatus = { verdict: raw.verdict };
+  const reason = Object.prototype.hasOwnProperty.call(raw, 'reason')
+    ? (raw as { reason?: unknown }).reason : undefined;
+  if (typeof reason === 'string') status.reason = reason;
+  return status;
+}

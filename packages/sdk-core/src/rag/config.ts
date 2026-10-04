@@ -5,6 +5,10 @@
  */
 
 import { RAGConfig, PartialRAGConfig } from './types.js';
+import { SDKError } from '../types';
+
+/** A configuration that cannot work: coded and not retryable (§24 EE6). */
+const invalid = (message: string) => new SDKError(message, 'RAG_CONFIG_INVALID', { retryable: false });
 
 /**
  * Default RAG configuration
@@ -28,17 +32,17 @@ export function validateRAGConfig(config: PartialRAGConfig): void {
   // Validate chunk size
   if (config.chunkSize !== undefined) {
     if (config.chunkSize <= 0) {
-      throw new Error('chunkSize must be positive');
+      throw invalid('chunkSize must be positive');
     }
     if (!Number.isInteger(config.chunkSize)) {
-      throw new Error('chunkSize must be an integer');
+      throw invalid('chunkSize must be an integer');
     }
   }
 
   // Validate cache size
   if (config.cacheSizeMb !== undefined) {
     if (config.cacheSizeMb < 10 || config.cacheSizeMb > 1000) {
-      throw new Error('cacheSizeMb must be between 10 and 1000');
+      throw invalid('cacheSizeMb must be between 10 and 1000');
     }
   }
 
@@ -48,13 +52,13 @@ export function validateRAGConfig(config: PartialRAGConfig): void {
       const url = new URL(config.s5Portal);
       const validProtocols = ['http:', 'https:', 'ws:', 'wss:'];
       if (!validProtocols.includes(url.protocol)) {
-        throw new Error('s5Portal must use http, https, ws, or wss protocol');
+        throw invalid('s5Portal must use http, https, ws, or wss protocol');
       }
     } catch (error) {
-      if (error instanceof Error && error.message.includes('protocol')) {
+      if (error instanceof SDKError) {
         throw error;
       }
-      throw new Error('s5Portal must be a valid URL');
+      throw invalid('s5Portal must be a valid URL');
     }
   }
 }

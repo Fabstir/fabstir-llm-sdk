@@ -114,3 +114,36 @@ export function validateRpcUrl(url: any): void {
     throw new SDKError('Invalid RPC URL format', 'CONFIG_INVALID_RPC');
   }
 }
+
+/**
+ * Normalise a node endpoint to the http(s) BASE form the WS derivation in
+ * `SessionManager.acquireSessionTransport` can convert: trailing slashes stripped, scheme
+ * lower-cased. Returns `undefined` for anything else — no endpoint, a non-string, a non-http(s)
+ * scheme, a `ws://` / `wss://` substring ANYWHERE (the derivation is case-sensitive and treats
+ * that substring as "already a WS URL", passing it through verbatim), or a query / fragment
+ * (the derivation appends `/v1/ws` AFTER it, so the socket would open at the node root). Every
+ * one of those is a silent mistarget of a paid session. Shared by the LTX and training
+ * existingSession paths and by `registerExternalSession` (Q8: ONE nodeHttpUrl serves both
+ * postSessionAuth and the submit).
+ */
+export function normalizeNodeHttpUrl(endpoint: string | undefined): string | undefined {
+  if (typeof endpoint !== 'string') return undefined;
+  // Whitespace anywhere is a copy-paste fault, not something to trim silently: the derived socket URL
+  // would be built from it ("wss://host /v1/ws") and fail as a retryable transport error for ever.
+  if (/\s/.test(endpoint)) return undefined;
+  const normalized = endpoint
+    .replace(/\/+$/, '')
+    .replace(/^(https?):\/\//i, (_m, scheme: string) => `${scheme.toLowerCase()}://`);
+  if (!/^https?:\/\//.test(normalized) || normalized.includes('ws://') || normalized.includes('wss://')) {
+    return undefined;
+  }
+  if (/[?#\\]/.test(normalized)) return undefined;
+  // A plain host[:port] authority: userinfo makes browsers refuse the WebSocket outright.
+  const authority = normalized.slice(normalized.indexOf('://') + 3).split('/')[0];
+  if (authority.length === 0 || authority.includes('@')) return undefined;
+  // A BASE, not an API path: the SDK appends /v1/ws (and /v1/session-auth) itself, so a value that already
+  // ENDS in the API prefix or one of those paths would connect to /v1/ws/v1/ws — a 404 reported as a retryable
+  // transport fault. A reverse proxy that mounts nodes under /v1/<name> is a legitimate base and stays accepted.
+  if (/\/v1(\/(ws|session-auth))?$/i.test(normalized)) return undefined;
+  return normalized;
+}

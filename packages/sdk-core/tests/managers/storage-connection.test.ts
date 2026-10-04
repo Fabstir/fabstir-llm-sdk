@@ -22,6 +22,7 @@ let connectionChangeCallback: ((status: string) => void) | null = null;
 // Mock the S5 module
 vi.mock('@julesl23/s5js', () => {
   return {
+    isS5RegistryUnavailableError: () => false, // beta.56's root export (plan §19 Z1)
     S5: {
       create: vi.fn().mockImplementation(async () => {
         connectionChangeCallback = null;

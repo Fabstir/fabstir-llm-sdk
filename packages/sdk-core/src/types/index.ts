@@ -216,6 +216,8 @@ export interface PromptOptions {
   onImageGenerated?: (result: import('./image-generation.types').ImageGenerationResult) => void;
   /** Raw user query for web search (before any RAG context injection). */
   rawQuery?: string;
+  /** false → this exchange is not appended to the S5 conversation log (e.g. an extraction prompt). */
+  conversationLog?: boolean;
   /** AbortSignal to stop in-progress streaming inference. Resolves with partial response. */
   signal?: AbortSignal;
   /** Called when context utilization >= threshold. UI should trim history before next prompt. */
@@ -598,3 +600,7 @@ export * from './ltx.types';
 // ⚠️ NOT a security control until M5 signing — see src/moderation/gate.ts.
 
 export * from './moderation.types';
+// ============= Training M0 Types (LoRA/QLoRA fine-tune) =============
+// Wire shapes frozen in docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md v0.3.12.
+
+export * from './training.types';

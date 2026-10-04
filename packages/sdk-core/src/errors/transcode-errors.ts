@@ -2,19 +2,19 @@
  * @fileoverview Transcode error class with retry support
  */
 
+import type { ModerationHoldCode } from '../types/moderation.types';
+
 export type TranscodeErrorCode =
   | 'CAPACITY_FULL'
   | 'SIDECAR_DISCONNECTED'
   | 'TRANSCODE_FAILED'
   | 'TRANSCODE_TIMEOUT'
   | 'NO_AVAILABLE_HOSTS'
-  // Moderation holds: the node refused to complete the job and sent no completion frame.
-  // All three are deliberately absent from RETRYABLE_CODES — there is no automatic retry
-  // anywhere in the stack, so a load balancer never re-hosts a held job. A user-initiated
-  // resubmission is a new job and is legal; publishing a held job never is.
-  | 'CONTENT_BLOCKED'         // matched a block rule — terminal for this job
-  | 'CONTENT_FLAGGED'         // held for human review; a reviewer decision arrives out of band
-  | 'MODERATION_UNAVAILABLE'; // no verdict recorded — infra state, still never publishable
+  // Moderation holds (ModerationHoldCode): the node refused to complete the job and sent
+  // no completion frame. Every hold code is deliberately absent from RETRYABLE_CODES — there is
+  // no automatic retry anywhere in the stack, so a load balancer never re-hosts a held job.
+  // A user-initiated resubmission is a new job and is legal; publishing a held job never is.
+  | ModerationHoldCode;
 
 const RETRYABLE_CODES: TranscodeErrorCode[] = ['CAPACITY_FULL', 'TRANSCODE_TIMEOUT'];
 

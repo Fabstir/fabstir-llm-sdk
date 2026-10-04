@@ -18,3 +18,5 @@ export { IPermissionManager } from './IPermissionManager';
 export * from './IHostSelectionService';
 export { ITranscodeManager } from './ITranscodeManager';
 export type { ILtxManager } from './ILtxManager';
+export type { ITrainingManager } from './ITrainingManager';
+

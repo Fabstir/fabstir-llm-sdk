@@ -14,6 +14,7 @@
 - [Payment Management](#payment-management)
 - [Model Governance](#model-governance)
 - [Host Management](#host-management)
+- [Confidential Storage (sdk-core 1.39.0)](#confidential-storage-sdk-core-1390)
 - [Storage Management](#storage-management)
   - [User Settings Storage](#user-settings-storage)
 - [RAG and Vector Databases](#rag-and-vector-databases)
@@ -161,7 +162,7 @@ new FabstirSDKCore(config?: FabstirSDKCoreConfig)
 **Configuration:**
 ```typescript
 interface FabstirSDKCoreConfig {
-  rpcUrl: string;                     // REQUIRED: Blockchain RPC URL
+  rpcUrl: string;                     // REQUIRED: Blockchain RPC URL — serves EVERY contract read (1.38.1+); only writes go through the signer
   chainId?: number;                   // Optional: Chain ID (default: 84532 - Base Sepolia)
   contractAddresses: {                // REQUIRED: All 7 contracts
     jobMarketplace: string;           // REQUIRED
@@ -180,6 +181,23 @@ interface FabstirSDKCoreConfig {
 ```
 
 **⚠️ IMPORTANT:** The SDK will throw clear errors if any required contract addresses are missing.
+
+**Read/write provider split (1.38.1+):** every contract *read* (host discovery, model
+enumeration, pricing, balances used by discovery) goes through a dedicated provider built from
+`rpcUrl`; only transactions ride the wallet signer. This keeps read volume off the injected
+wallet (MetaMask rate-limits dapps under discovery load) and keeps a deployment's reads on the
+endpoint it configured. Two observability points:
+
+```typescript
+sdk.getReadProvider();        // the provider serving contract reads
+sdk.getReadProviderSource();  // 'rpcUrl' | 'wallet' — 'wallet' is never silent (it warns)
+```
+
+Because reads and writes now use different providers they could sit on different chains, so the
+SDK asserts parity between the read chain and the signer's chain at manager initialization, on
+the wallet's `chainChanged` event, and across `switchChain()` (which also rebuilds the read
+provider for the new chain). A divergence throws `READ_WRITE_CHAIN_MISMATCH` naming both chain
+ids rather than silently preferring one side.
 
 **Example (REQUIRED Configuration):**
 ```typescript
@@ -735,6 +753,10 @@ async switchChain(chainId: number): Promise<void>
 **Throws:**
 - `UnsupportedChainError`: If chain is not supported
 - Error if wallet provider doesn't support chain switching
+- `SDKError` `CHAIN_SWITCH_UNAUTHENTICATED` (before `authenticate()`), `CHAIN_SWITCH_IN_PROGRESS` (a switch is
+  already running), `CHAIN_SWITCH_UNSUPPORTED` (the target chain lacks a registry address) — all refused BEFORE
+  the wallet is asked to move; `CHAIN_SWITCH_FAILED` (`details = { from, to, cause }`) when the rebuild fails, after
+  every manager has been restored to the previous chain (see the training section for the rollback contract)
 
 **Example:**
 ```typescript
@@ -838,6 +860,26 @@ const smartProvider = await WalletProviderFactory.createProvider('smart-account'
 
 The SessionManager handles LLM session lifecycle, streaming responses, and context preservation.
 
+### Session keys, reconnects, and the wire log (1.38.2–1.38.4)
+
+Encryption state is **per session and per connection**, and the SDK enforces both:
+
+- **Per-session keys.** The node registers one key per session; the SDK holds a matching map.
+  Frames are decrypted with the key of the session stamped on them (`session_id`), outgoing
+  prompts are encrypted — and replay-protected — under the key of the session the call was made
+  for, init acks are correlated by `session_id`, and concurrent init handshakes are serialized.
+  Multiple sessions on one SessionManager cannot cross their keys.
+- **Keys die with their connection.** `WebSocketClient` counts connection generations; a silent
+  reconnect invalidates the session key (the node has no session on the new connection), rejects
+  in-flight encrypted requests immediately with `SESSION_KEY_INVALIDATED` (`retryable: true` —
+  the prompt was never answered, nothing was billed; resend deliberately), and discards frames
+  queued for the dead connection instead of replaying them. The next send re-initializes.
+- **The wire log.** Key attribution is observable end to end as `[SDK:wire]` console lines —
+  `mint`, `encrypt`, `decrypt`, and ignored-ack events, each carrying an 8-hex SHA-256 key
+  fingerprint (identifies a key without revealing it) plus session id and `scoped|legacy`
+  source. One fingerprint per session across mint → encrypt → decrypt is health; two is a bug
+  report that writes itself.
+
 ### Get SessionManager
 
 ```typescript
@@ -903,7 +945,11 @@ const { sessionId } = await sessionManager.startSession(model, provider, {
 
 ### sendPrompt
 
-Sends a prompt to the LLM and receives response.
+Sends a prompt to the LLM and receives response. **Legacy HTTP route.** It posts to `/v1/inference`, which
+takes a job id past no session gate; from node 8.54.0 hosts configured with fiat vault addresses refuse it
+outright (`403 SESSION_AUTH_DENIED`), and its request shape serialises `jobId` as a string the node's
+deserialiser rejects (`422`). Billed inference is the encrypted WebSocket with the authorisation posted first —
+use `sendPromptStreaming`.
 
 ```typescript
 async sendPrompt(
@@ -2326,7 +2372,13 @@ const result = await ltx.generate(job, hostAddress, hostMetadata, {
   onProgress: ({ stage, pct }) => {}, // 'generating' | 'encrypting' | 'uploading' | 'finalising'
   timeoutMs: 1500000,           // raise above the 600s default for 1080p+ renders
 });
-// LtxJob: { templateId, templateHash, prompt, seed, frames, fps, resolution:{w,h}, lora, output, images? }
+// LtxJob: { templateId, templateHash, prompt, seed, frames, fps, resolution:{w,h}, lora, output, images?,
+//           videos?, strength?, azimuth?, elevation?, distance?, inputWire? }
+//   strength/azimuth/elevation/distance (numbers), inputWire ('exrseq-display' | 'exrseq-linear'):
+//   ADVISORY pass-through (1.38) — forwarded only when set (absent keys otherwise), deliberately
+//   OUTSIDE the input commitment; never validated by the SDK (ranges are advisory — see the
+//   LtxJob JSDoc; callers and the node enforce them). The exported LTX_ADVISORY_FIELDS const
+//   is the group as data — iterate it rather than re-typing the field list.
 //   seed: decimal string in [0, 2^64-1] (pre-validated before escrow — the sampler is u64)
 //   resolution: from bundle.bounds.resolutions; billing binds the REQUESTED dims
 // Flow: validateJob (pre-escrow, no funds locked on failure) → estimateCost →
@@ -2382,7 +2434,11 @@ catch (err) {           // LtxError
 Related surface: `sessionManager.registerExternalSession({ sessionId, jobId, endpoint,
 hostAddress, model, chainId })` seeds the registry directly (in-memory only — no S5 write, no
 network) if you need the submit paths without `generate()`. Re-registration overwrites, replacing
-any existing entry under that id.
+any existing entry under that id. **Since 1.38.6 it validates `endpoint`**: the node's plain http(s)
+base only (normalised: trailing slashes, scheme case); a `ws(s)://` value — including a full
+`…/v1/ws` that used to work verbatim — a query, a fragment, whitespace, userinfo, a backslash, a trailing `/v1`, `/v1/ws` or `/v1/session-auth` (the SDK appends those itself; a proxy prefix such as `/v1/node-a` is fine) or a non-string throws `SDKError`
+`SESSION_ENDPOINT_INVALID` at registration, before any network. The SDK derives the socket address
+from the base. Re-seeding after a reload with a stored `wss://` value is the case that changes.
 
 **Breaking (1.36.0):** `submitLtx` and `submitTranscode` no longer fall back to
 `http://localhost:8080` when a session has no `endpoint` — they throw
@@ -2422,6 +2478,294 @@ All failures are typed `LtxError { code, message, details }` — wire codes `VAL
 `SIDECAR_UNAVAILABLE`, `CAPACITY` (retryable during settlement), `GENERATION_FAILED`, `TIMEOUT`;
 client codes `LTX_PREVALIDATION_FAILED` (pre-escrow, no funds moved), `LTX_BUNDLE_STALE`,
 `LTX_INPUT_BINDING_MISMATCH`, `LTX_PROOF_MISMATCH`.
+
+## Training (LoRA/QLoRA fine-tune, M0)
+
+Fine-tune an adapter on a host's GPU, settling on the same compute contracts as inference.
+Wire shapes are frozen in `docs/node-reference/DESIGN-TRAINING-M0-INTERFACE.md` v0.3.9.
+
+**Gating.** `getTrainingManager()` requires `config.trainingModelId`. A host advertises the
+capability by PUBLISHING a `training` section in its bundle — a node with `TRAIN_ENABLED=false`
+omits it entirely, so absence is the advert, not a default.
+
+```typescript
+const training = sdk.getTrainingManager();
+```
+
+### Estimate before you commit
+
+```typescript
+const est = await training.estimateTrainingCost(job, hostAddress);
+// { tokens, pricePerToken, totalCostBaseUnits, depositBaseUnits, paymentToken }
+```
+
+`tokens = declaredTokens x epochs`. The bill is `floor(tokens x pricePerToken / 1000)`; the
+deposit is `max(on-chain floor, ceil(gross x 1.05))`, where the uplift applies to the ALREADY
+FLOORED gross. Both the price floor and the deposit floor are read from chain, never assumed.
+
+### prepareDataset — everything free happens here
+
+```typescript
+const tokenizer = await loadTrainingTokenizer(tokenizerJsonBytes, template.tokenizerSha256);
+const prepared  = await training.prepareDataset({
+  jsonl, tokenizer, specialsPerSample: 1, tokenizerSha256: template.tokenizerSha256,
+});
+// { manifest, manifestBytes, manifestSha256, declaredTokens, samples, totalBytes }
+```
+
+Validates `jsonl-text-v1`, counts with `count-v1`, applies the plausibility bound, shards,
+encrypts, uploads, and builds the manifest — all BEFORE any deposit. Everything after this
+costs money, so every check that can run early does.
+
+**The tokenizer is supplied by you, not bundled.** It belongs to the template, not to the SDK,
+and templates multiply. Pass the `tokenizer.json` bytes; the SDK verifies them against the
+template's pinned `tokenizerSha256` before counting a single sample, because a wrong tokenizer
+produces a plausible count that only the node's recount rejects — after escrow. Cache the file
+keyed by that sha256: it is exactly the identity being verified, so a template change
+invalidates the cache for free. `countSampleTokens` also accepts an already-constructed
+tokenizer, so an application holding one for another purpose need not load 12 MB twice.
+
+Counting needs the optional peer dependency `@huggingface/tokenizers` (>= 0.1.3), loaded by
+dynamic import. Without it you get one actionable error, never a bare `MODULE_NOT_FOUND`.
+
+### Submit and follow the run
+
+```typescript
+const handle = await training.submitTraining({
+  job, bundle, hostAddress, endpoint,
+  onProgress: (p) => ui.stage(p.stage, p.pct),
+  persistPointer: (r) => journal.write(r),   // see below - do not skip this
+});
+const result = await handle.result;          // adapter, billing, proofCIDs, moderation, warnings
+```
+
+`submitTraining` pre-validates against the bundle BEFORE creating the session, so a bounds
+failure costs nothing. Progress arrives through seven stages: `staging`, `scanning`,
+`counting`, `training`, `checkpointing`, `uploading`, `finalising`.
+
+**Persist pointers the moment they arrive.** Capability pointers are delivered ONCE, to the
+live socket; M0 has no reconnect re-delivery. The SDK keeps them in memory on the handle
+(`handle.pointers`) even if your `persistPointer` throws, but a lost process loses them. Each
+slice's checkpoint is a real, usable, owned adapter in safetensors form — a killed run is not a
+wasted one.
+
+The SDK independently recomputes every number the node echoes — the token total, the price
+against the on-chain price, the slice schedule, and each slice's delta and running total — and
+rejects the run rather than letting an over-claim settle.
+
+### Card / vault path — `existingSession` (1.38.6)
+
+When a fiat service has minted the session against vault deposits (`POST /fiat/session`) and the
+caller has delivered the FC1.6 handshake with `postSessionAuth`, pass the ids and `submitTraining`
+adopts that session instead of creating one — **no estimate-funded `startSession`, no USDC
+approval, no wallet touch**.
+
+```typescript
+const handle = await training.submitTraining({
+  job, bundle, hostAddress,
+  existingSession: { sessionId, jobId },   // bigints, from POST /fiat/session — per call, never cached
+  endpoint: 'https://host2.fabstir.net',   // REQUIRED — the http(s) BASE used for postSessionAuth
+  chainId: 84532,                          // or the SDK default
+  onProgress, persistPointer,
+});
+```
+
+Same rules as the LTX path: `endpoint` must be the http(s) base (normalised for trailing slashes
+and scheme case; any `ws(s)://` form is rejected before the network), `validateAgainstBundle`
+still runs (funds are already locked — a doomed job wastes vault money and spins a zero-proof
+settle cycle), the on-chain price is still read so the over-claim guard never trusts the echo,
+and `registerExternalSession` seeds the registry. **Every failure after adoption carries
+`{ sessionId, jobId, adopted: true }` in `detail`** — including a late rejection of
+`handle.result` — because on this path the money moved before the SDK was called and the ids
+are what a UI relays to the service for reclaim. `existingSession` cannot be load-balanced: the
+session is bound on-chain to one host.
+
+**The A.3 pre-flight — the check only the SDK can make.** On the wallet path the SDK creates the
+session, so its parameters are right by construction. On the vault path a service created it
+with its own constants (today `maxDuration 3600 / proofTimeoutWindow 300`), and the node's A.3
+rejects `train` AFTER escrow — the session is spent (one `train` per session, ever) and the
+deposit waits on the zero-proof settle. So before `train`, `validateExistingSession` reads the
+on-chain session and refuses locally unless ALL of:
+
+| check | rule |
+|---|---|
+| `exists` | the decoded `id` equals `jobId` — a missing mapping key decodes as the zero struct, which would otherwise read as Active |
+| `status` | Active |
+| `model` | `sessionModel(jobId)` equals `trainingModelId` |
+| `host` | the session's `host` is the host being connected to (the node never needs this; a client does) |
+| `price` | `pricePerToken` equals the host's registered price for this model and the session's token |
+| `headroom` | `deposit × 1000 / pricePerToken − tokensUsed ≥ trainingTokens(job)` |
+| `lifetime` | `startTime + maxDuration − now ≥ trainJobTimeoutSecs + 600` |
+| `proofTimeoutWindow` | `≥ 3600` |
+
+The session is read **drift-proof**: raw words against the deployed 18-slot layout, failing
+CLOSED on any drift (a decoder that fails open is the exact hole A.3 exists to close). The
+pre-flight is RPC reads only — the accept latitude is 1,200 s from session creation — so no S5
+traffic or bundle re-fetch happens between adoption and the `train` frame.
+
+A refusal is `VALIDATION_FAILED` with `detail.reason === 'adoptedSessionParams'` — deliberately
+distinct from the node's terminal `sessionParams`: the **job** is fine, the **session** is not,
+and the recourse is a fresh, correctly shaped session for the same job (a second
+`/fiat/session` with new ids). `isReshoppable` stays `true`; do not retire the job.
+`detail.check` names the first failing check and `detail.failed` (typed `A3CheckFailure[]`) lists
+them all.
+
+**Every other failure on this path is classified so the UI never buys a second session to
+rediscover a local fault.** The reason constants are exported:
+
+| what failed | code / `detail.reason` | terminal? |
+|---|---|---|
+| the adoption call itself — endpoint not the http(s) base, query/fragment, `ws(s)://`, no chainId, a `chainId` that is not the SDK's chain (`switchChain` first), ids that are not non-negative integers (bigint, safe integer or decimal string), load-balancing an adopted session | `VALIDATION_FAILED` / `EXISTING_SESSION_CONFIG_REASON` | yes |
+| the bytes of the session or model were read and did not decode (layout drift), or a read failed for a NON-transient reason (wiring) — an RPC transient on any of the three reads is `transport` instead (the wire row below) | `ESTIMATE_MISMATCH` / `SESSION_DECODE_REASON` (`detail.consumed: false`) | yes |
+| the wrapper or SessionManager lacks a method this path needs | `ESTIMATE_MISMATCH` / `missingDependencyMethod` | yes |
+| the SDK's own wiring after adoption (`SESSION_NOT_FOUND`, `ENCRYPTION_NOT_AVAILABLE`, …) or a programming fault | `ESTIMATE_MISMATCH` / `missingDependency` (`detail.sdkCode`, `detail.cause`) | yes |
+| the wire (`WS_*`, init timeout, auth unreachable, the host unreachable for its public key) | `SIDECAR_UNAVAILABLE` / `transport` (`detail.sdkCode`, `detail.cause`, `detail.consumed: false`) | no — retryable on the **same** session: every one of these is raised before `train` leaves, so nothing was consumed and `requiresFreshSession` is `false` |
+
+The host's own "no price for this token" (`ZERO_MODEL_PRICE`) is the `price` **check**, not a read
+failure. With `existingSession` the option's `paymentToken` is not consulted: the session's own on-chain
+`paymentToken` is what the host must price, and that is the token the `price` check resolves. `registerExternalSession` itself now validates the endpoint the same way
+(`SESSION_ENDPOINT_INVALID`), so a caller that seeds the registry directly cannot mistarget a paid session.
+
+**`switchChain()` rebuilds every chain-bound manager** (model, host, client, transcode, LTX, training) or
+refuses with `CHAIN_SWITCH_UNSUPPORTED` if the target chain lacks a registry address — never a mixed state.
+A rebuild that fails part-way (an RPC hiccup while the host manager initialises) is **rolled back**: every
+reference goes back to the previous chain's, `getCurrentChainId()` reports the previous chain, no
+`chainChanged` fires, and the call rejects with `CHAIN_SWITCH_FAILED` (`details = { from, to, cause }`; the
+message notes it if the wallet could NOT be moved back). Retrying the same `switchChain()` re-runs the rebuild. Three refusals happen BEFORE the wallet moves
+(1.38.7): `CHAIN_SWITCH_UNAUTHENTICATED` (switch after `authenticate()`, or construct the SDK on the target
+chain), `CHAIN_SWITCH_IN_PROGRESS` (one switch at a time) and `CHAIN_SWITCH_UNSUPPORTED`.
+`PaymentManagerMultiChain` follows the switch (its default chain for calls without an explicit `chainId` moves)
+and `TreasuryManager` is rebuilt on the new `ContractManager`; a rollback restores both (1.38.7).
+A per-job socket (training, LTX) never silently reconnects, and a failed init closes it — no heartbeat,
+no orphan reconnect loop — and leaves the shared chat session's key untouched (1.38.7).
+Re-fetch managers after a switch (`sdk.getTrainingManager()`); an instance held across the switch is the
+old chain's. A host-selection service you installed on the training manager survives the rebuild.
+
+**Session shapes the pre-flight will see (confirmed with the node developer, 2026-09-02).** The A.3 floor
+(`proofTimeoutWindow ≥ 3600`) IS enforced by the deployed node on a real chain; the training runs of 2026-08-26
+that appeared to pass with 300 ran under the node's mock-chain seams, which read a synthetic session. So the
+pre-flight refuses, by design: a **chat-shaped wallet session** (`86400 / 300`, what a UI's own session creator
+mints) and today's **fiat-service session** (`3600 / 1000 / 300`). What passes: the SDK's own wallet path
+(`submitTraining` without `existingSession` mints `14400 / 1000 / 3600`), and the fiat service's coming
+`kind: "training"` session (`14400 / 1000 / 3600`, after node 8.54.0). Open an adopted session late: the accept
+latitude is 1,200 s from creation to the `train` frame, returned as `acceptLatitudeSecs`.
+
+**Opening the training session on the fiat service (FT1.1, from the node developer; deploys after node 8.54.0).**
+`POST /v1/fiat/session` takes `kind: "training"` — the only accepted value; leave the field out (or `null`) for
+the standard chat/render shape, anything else is a `400`. With it the session is minted `14400 / 1000 / 3600` and
+the body's `modelId` must be the registered training model id — derive it with `trainingModelIdFor(templateId)`
+(exported from the root; `keccak256("fabstir/training/" + templateId)`) and configure the SDK with the same value
+(`config.trainingModelId`); never paste the hash. For `train-qlora-qwen38-27b-v1` it is registered and approved on
+Base Sepolia since 2026-09-04 (`isModelApproved` reads true; verified by a read-only call). The binding is refused
+both ways (`MODEL_KIND_MISMATCH`) before any money moves, and the pre-flight's `model` check then agrees with it.
+Approval alone does not make the model openable: a host must advertise and price it (the host advert pair).
+Training caps: 10 USDC per session, 20 USDC per user per rolling 24 h, one live training session per user, three
+attempts per minute. **Refuse, never clamp**, a deposit above the cap — `estimateTrainingCost().depositBaseUnits`
+over 10 000 000 micro must stop in the UI, because a clamped deposit funds a session that fails the node's headroom
+gate after escrow. The service's `403` reasons (`HOST_NOT_ALLOWED`, `MODEL_NOT_PRICED`, `MODEL_KIND_MISMATCH`,
+`DEPOSIT_OVER_CAP`, `DAILY_CAP_EXCEEDED`, `CONCURRENT_CAP_EXCEEDED`, `INSUFFICIENT_BALANCE`, `RATE_LIMITED`,
+`INVALID_DEPOSIT`) journal no hold and are not retryable; a `502 chain_error` may be retried within the attempt
+budget. A stranded card deposit is returned only when the service runs with `FIAT_RECLAIM_STRANDED=1` — a deploy
+precondition on the service, nothing the client can influence.
+
+```typescript
+import { TrainingError, ADOPTED_SESSION_PARAMS_REASON } from '@fabstir/sdk-core';
+try { await training.submitTraining({ ...opts, existingSession }); }
+catch (e) {
+  if (e instanceof TrainingError && e.detail?.reason === ADOPTED_SESSION_PARAMS_REASON) {
+    // e.detail.failed: [{ check: 'lifetime', expected: '>= 13200 s remaining', actual: '3500 s' }, ...]
+    // → open a fresh, correctly shaped session and resubmit the SAME job
+  }
+}
+```
+
+`trainJobTimeoutSecs` defaults to M0's 12600 and is a constructor option
+(`config.trainingJobTimeoutSecs`) because the node's `TRAIN_JOB_TIMEOUT_SECS` is deployable.
+
+**Adopted-session error semantics (1.38.7).** Read `requiresFreshSession(err)`, not the code. Every
+failure the SDK raises BEFORE the `train` frame leaves carries `detail.consumed === false` — the session
+is intact and `requiresFreshSession` is false: `existingSessionConfig`, `numericWireRule`, `sessionDecode`,
+`missingDependency(Method)`, the wire's own shape rules (`numericWireRule`, checked before adoption — and on the wallet path before
+any deposit, where no session exists yet so the flag is moot), and every `transport` failure, including an RPC transient on the
+pre-flight reads (session, model, price) (`SIDECAR_UNAVAILABLE / transport`, `detail.sdkCode` ∈ NETWORK_ERROR | TIMEOUT |
+SERVER_ERROR — retry the same session once the chain answers). Both code sets are exported from the package
+root as `TRANSPORT_SDK_CODES` and `RPC_TRANSIENT_CODES`, so a UI can pre-classify without string lists of its own. Two exceptions keep "fresh session":
+`adoptedSessionParams` (the session is the wrong shape; the recourse IS a fresh one) and the busy
+`CAPACITY` classes (C.6's one-in-flight rule consumes the session; only `chainUnavailable` keeps it).
+`detail.adopted` names the path: `true` for the card path, `false` for the wallet path.
+
+**Wallet path (1.38.7).** `opts.endpoint` is required and validated BEFORE any deposit — missing →
+`SESSION_ENDPOINT_MISSING`, not the plain http(s) base → `SESSION_ENDPOINT_INVALID` (the same rule as the
+registry: whitespace, userinfo, a backslash, a trailing `/v1`, `/v1/ws` or `/v1/session-auth`, `ws(s)://` are refused), and the normalised base is
+what `startSession` stores. After `startSession` every failure is a `TrainingError` carrying `{ sessionId, jobId,
+adopted: false }`, classified exactly as on the card path (transport → same session; our wiring → terminal).
+
+**Node 8.54.0 on vault hosts (1.38.8).** On a host configured with fiat vault addresses the job a connection
+bills is taken ONLY from a session init that passed the vault gate; a job id named on a prompt, a job implied by a
+session id, or the ids inside a nested request are ignored. The SDK already conforms: every connection — the shared
+chat socket and every per-job socket — sends its init before any billed frame, a session change on the shared socket
+forces a new init, and the only job the SDK names on a prompt is the init's own. A billed frame without a gated init
+is refused with an `error` frame `SESSION_AUTH_DENIED`, which the SDK surfaces typed: on the chat path an `SDKError`
+with code `SESSION_AUTH_DENIED` reaches the caller unwrapped (`details.nodeCode`, `details.sessionId`); on the
+training path a `TrainingError` `ESTIMATE_MISMATCH / sessionAuth` with `consumed: false`, `settledSlices: 0` —
+nothing was billed, the session is intact, another host does not help; on the LTX path `GENERATION_FAILED` with
+`details.nodeCode`. The fix in every case is the FC1.6 authorisation on that session (`registerDelegatedSession`
+with `authorisation` posts it), then a retry on the SAME session. The training registry's reject cooldown on such
+hosts is keyed on the authorised client, not the shared vault address.
+
+**Reclaim.** `handle.sessionId` and `handle.jobId` are set on both paths (1.38.6), so
+`training.triggerSessionTimeout(Number(handle.jobId))` needs nothing you did not already hold.
+
+### Serve back a finished adapter
+
+```typescript
+const gate = serveBackAvailable({ bundleHasTraining, manifestFiles });
+if (gate.ok) await sessionManager.startSession({ ...cfg, lora: { manifestCID, manifestSha256, file: 'adapter.gguf' },
+  onServeBackError: (e) => ui.warn(e.message) });
+```
+
+The adapter is session-scoped at scale 1.0, never visible to concurrent sessions on the same
+base model, and unloaded at session end; its holding key is minted server-side and never
+accepted from the wire.
+
+**GGUF conversion is best-effort.** On failure the run ships safetensors-only plus
+`warnings: ["gguf-conversion-failed"]`. The artifact is still yours and still usable — it
+simply cannot be served back in M0. `serveBackAvailable` reports which gate failed.
+
+**Always pass `onServeBackError`.** Staging runs AFTER the session-init ack, so a staging
+failure arrives post-ack and uncorrelated. Without the callback it is silent, and the session
+answers from the BASE MODEL on a run you are paying to fine-tune.
+
+### Error law
+
+Every failure is a `TrainingError` with a `code`, and the code decides what to do next.
+
+| Code | What happened | What to do |
+|---|---|---|
+| `CAPACITY` + `chainUnavailable` | The node could not read the session. **Nothing consumed.** | Retry, same host, same session |
+| `CAPACITY` + `slotBusy`/`addressBusy`/`cooldown` | Busy. Session funded and zero-completed | Re-shop; the retry needs a FRESH session |
+| `VALIDATION_FAILED` | Job or session rejected; `detail.reason` says which | `datasetFormat`/`sessionParams` recur everywhere — fix, do not re-shop |
+| `DATASET_INTEGRITY` | Shard or manifest hash mismatch | Re-prepare the dataset |
+| `DECLARED_TOKENS_MISMATCH` | The node's recount disagrees | `remanifestWithActual()` — same shards, one round trip |
+| `SIDECAR_UNAVAILABLE` | Died before any slice settled | Re-shop; zero-settled |
+| `TRAIN_FAILED` / `TIMEOUT` | Died after `k` slices | Re-shoppable only at `k = 0`; money moved otherwise |
+| `CANCELLED` | Cancelled, or the socket closed | Completed slices settle; checkpoints are yours |
+| `LORA_STAGING_FAILED` | Adapter staging failed; `detail.reason` says why | `chain` means re-shop — note this INVERTS `chainUnavailable` above |
+| `LORA_NOT_STAGED` | The adapter is not loaded | Terminal. It never means "still staging" |
+| Moderation holds | Content hold | **Never re-shopped to another host** |
+
+`error.isRetryable`, `error.requiresFreshSession` and `error.isReshoppable(k)` encode this
+table. An unrecognised `detail.reason` is treated conservatively — session presumed consumed —
+which the node guarantees is correct by construction.
+
+### Privacy — say this to your users
+
+> the plaintext attestations are public — a run's template, host, sessionId, token volume and
+> cadence are publicly linkable (same posture as LTX; it reveals a customer's training scale,
+> so say it).
+
+Dataset and artifact manifests themselves are private (capability CIDs only). What is public is
+the on-chain proof hashes plus the attestation sha256 chain.
 
 ## Payment Management
 
@@ -3253,6 +3597,222 @@ const usdcPrices = await hostManager.getHostModelPrices(hostAddress, usdcAddr);
 const nativePrices = await hostManager.getHostModelPrices(hostAddress, zeroAddr);
 ```
 
+## Confidential Storage (sdk-core 1.39.0)
+
+From 1.39.0 the SDK **seals** what it stores on S5 for RAG and for the conversation log: it encrypts and authenticates
+each file with XChaCha20-Poly1305 under keys derived from the S5 seed and the wallet address. Nothing is required to turn
+it on. Check `SDK_CAPABILITIES` before relying on it.
+
+| What | Where on S5 | Sealed |
+|---|---|---|
+| RAG databases: manifests, vector chunks, document bodies | `home/rag/v1/{dbId}/…` (paths carry no database name, file name or address) | yes |
+| Conversation log | `home/sessions/{address}/{sessionId}/conversation.json` | yes |
+| Session paths, `settings.json`, `saveConversationPlaintext` / `storeExchange` / `saveHierarchy` | unchanged | **no** (planned for 1.39.1) — do not call the last three |
+
+- **Confidentiality depends on the seed.** With a password-derived seed (the vault), sealed data is confidential. With
+  an address-derived seed (`generateS5SeedFromAddress`), anyone who knows the address can derive the keys: sealing is
+  then only obfuscation.
+- Each sealed file is 46 bytes larger than its content.
+- Earlier SDKs stored the same data in plaintext. `migrateToSealedStorage()` moves it and deletes the plaintext (below).
+
+### Requirements
+
+- **`@julesl23/s5js` exactly `0.9.0-beta.56`** — the dependency and any override. With another version,
+  `authenticate()` rejects `S5JS_UNSUPPORTED_VERSION` (`retryable: false`).
+- **A secure origin with IndexedDB and Web Locks** (every current browser). Without them RAG writes refuse
+  `RAG_COHERENCE_UNAVAILABLE`, and `startSession` with the conversation log on refuses before funding. In jsdom tests,
+  provide `navigator.locks` and `fake-indexeddb`. React Native (Hermes) needs a `structuredClone` polyfill.
+
+### SDK_CAPABILITIES
+
+```typescript
+import { SDK_CAPABILITIES } from '@fabstir/sdk-core';
+
+SDK_CAPABILITIES.sealedRagStorage;           // RAG manifests, chunks and bodies are sealed
+SDK_CAPABILITIES.sealedConversationLog;      // the conversation log is sealed
+SDK_CAPABILITIES.conversationLogOptOut;      // conversationLog: false writes nothing to the log
+SDK_CAPABILITIES.ragDocumentApi;             // addPendingDocument / putDocumentBody / getDocumentBody / …
+SDK_CAPABILITIES.ragLegacyMigration;         // migrateToSealedStorage and its two halves
+SDK_CAPABILITIES.fundedSetupErrorCarriesIds; // a failure after funding carries sessionId and jobId
+```
+
+`SDK_CAPABILITIES` is frozen. Read a flag with optional chaining (`SDK_CAPABILITIES?.conversationLogOptOut`) so an older
+build reads as "not supported" instead of throwing.
+
+### migrateToSealedStorage
+
+```typescript
+async migrateToSealedStorage(opts?: {
+  onProgress?: (e: MigrationProgress) => void;     // { phase: 'rag' | 'logs', done, total, item }
+  discardUnreadable?: DiscardUnreadable;          // { [databaseName]: { chunks?: number[]; bodies?: string[] } }
+}): Promise<{ rag: RagMigrationReport; logs: LogMigrationReport }>
+```
+
+Moves every RAG database and conversation log an earlier SDK stored in plaintext to sealed storage, verifies the sealed
+copy by reading it back, and only then deletes the plaintext. It is idempotent and resumable, and it also cleans up after
+browser tabs still running an older build.
+
+- **Run it on every unlock**, without awaiting it on the unlock's critical path (the log half lists every conversation
+  directory on every run).
+- `onProgress` never decides the run: one that throws, or rejects, is warned about and ignored.
+- `discardUnreadable` is the **user's** consent to migrate a database **without exactly** the unreadable items a `failed`
+  entry named (`entry.unreadable`). Never pass it by default.
+- The two halves are also available on their own: `VectorRAGManager.migrateLegacyRagStorage(opts)` and
+  `StorageManager.migrateLegacyConversationLogs(opts)`.
+
+**Throws** (otherwise it resolves, and each database's outcome is in its entry):
+
+| Code | retryable | Meaning |
+|---|---|---|
+| `MIGRATION_INCOMPLETE` | its causes' | One half threw. `details.rag` / `details.logs` carry the report that completed; `details.ragError` / `details.logsError` the error of the half that did not. Run again only when `details.retryable` is true. |
+| `STORAGE_UNAVAILABLE` | false | Storage did not start at sign-in. Authenticate again. |
+| `STORAGE_NOT_AVAILABLE` | false | This SDK instance has no storage (`hostOnly` or `skipS5`). Run the migration on the main, signed-in instance. |
+| `AUTH_SUPERSEDED` | false | A sign-out or another sign-in happened while it ran; `details` as `MIGRATION_INCOMPLETE`'s. Ignore it: the next sign-in's run finishes the work. |
+| `NOT_AUTHENTICATED` | false | Called while signed out or during a sign-in. |
+
+#### Report types
+
+```typescript
+interface RagMigrationReport {
+  startedAt: number;
+  finishedAt: number;
+  databases: RagMigrationEntry[];
+  purgedRoots: string[];                 // whole legacy roots removed (the old DocumentManager's)
+  unrecognisedFiles?: string[];          // files the migration does not own — kept, never deleted
+  purgeErrors?: Array<{ root: string; code: string }>;
+}
+
+interface RagMigrationEntry {
+  name: string;
+  status: 'migrated' | 'adopted-after-seal' | 'purged-leftover' | 'purged-deleted' | 'purged-orphan'
+        | 'purged-after-delete' | 'failed' | 'anomaly';
+  vectors: number;
+  documents: number;
+  adopted?: string[];          // documents an outdated tab uploaded after the migration — now pending: embed them
+  discarded?: string[];        // legacy documents not carried over (removed since, or a body with no entry)
+  missingBodies?: string[];    // documents whose body the sealed copy lacks — re-upload them
+  missingChunks?: number[];    // legacy chunks that did not exist — their vectors were already lost: re-embed
+  repairedBodies?: string[];   // bodies a later run supplied to documents an earlier run recorded without one
+  unreadable?: { chunks?: number[]; bodies?: string[] };          // see discardUnreadable
+  discardedUnreadable?: { chunks?: number[]; bodies?: string[] }; // left out with the user's consent
+  unrecognisedFiles?: string[]; // files outside the legacy layout in this database's directory — kept
+  legacyKept?: boolean;        // some plaintext was not removed yet (see below)
+  purgeError?: string;         // why the purge stopped, when a failure stopped it
+  error?: string;              // on 'failed' / 'anomaly'
+  code?: string;               // on 'failed': always set
+  retryable?: boolean;         // on 'failed': whether running again may help
+}
+
+interface LogMigrationReport {
+  sealed: number;
+  alreadySealed: number;
+  purged: string[];            // plaintext files older SDKs left beside the logs
+  failed: Array<{ id: string; error: string; code: string; retryable: boolean }>;
+  unrecognisedFiles?: string[];
+}
+```
+
+- `purged-*` statuses are clean-ups, not failures.
+- **`legacyKept: true`** means the sealed copy is committed and verified, but some plaintext is still on S5: an
+  outdated tab wrote to it during the run, this browser could not record the sealed copy's head (storage full or
+  blocked), or the sealed copy still lacks a body (`missingBodies`). A later run finishes the purge. It is not a
+  failure, and no data is at risk.
+- **A `failed` entry** carries `code` and `retryable`. `RAG_DATABASE_MOVED` (retryable) means another device or an
+  outdated tab changed that database during the run: nothing was committed for it — run again. For any other code, run
+  again when `retryable` is true; otherwise leave it to the next unlock.
+- **`RAG_LEGACY_UNREADABLE`** names the unreadable items in `unreadable`. Retry while `retryable` is true; when it is
+  false, ask the user and pass `discardUnreadable: { [entry.name]: entry.unreadable }`.
+- **`anomaly`** (and `RAG_MANIFEST_CORRUPT`): the legacy data is not what any SDK wrote. Nothing is migrated or purged;
+  offer an export and `deleteDatabase(name)`.
+
+### RAG documents (VectorRAGManager)
+
+Document entries, their status and their bodies change only through these calls. Each is one locked, sealed commit, so
+two tabs never overwrite each other's changes.
+
+```typescript
+const rag = sdk.getVectorRAGManager();
+
+await rag.addPendingDocument(db, { id, name, size, ... }); // add, or replace a pending entry (retry-safe)
+await rag.putDocumentBody(db, id, body);                  // string | Uint8Array — reads back with exactly this type and bytes
+const body = await rag.getDocumentBody(db, id);           // string | Uint8Array
+await rag.updateDocumentStatus(id, 'ready', { vectorCount }, db); // always pass the database
+await rag.removeDocument(db, id);                         // the entry and its sealed body (its vectors: deleteByMetadata)
+const pending = await rag.getPendingDocuments(db);
+const databases = await rag.refreshDatabases();           // drops caches, re-reads: the complete entries
+await rag.deleteDatabase(db);                             // everything under the name, sealed and legacy
+```
+
+- **Use the SDK's ids** (they carry a timestamp and a random part) and never reuse one. A document removed and
+  re-added under its id is a new document.
+- **Never write under `home/vector-databases/**` or `home/rag/**` yourself.** Writes there are refused
+  (`RAG_PLAINTEXT_WRITE_REFUSED`). Use `refreshDatabases()` instead of poking caches.
+- **`refreshDatabases()`** returns the complete entries (document arrays, dimensions, `isPublic`). `listDatabases()` is
+  synchronous and counts only. Changes from other tabs and devices show in the lists within 30 s; `refreshDatabases()`
+  forces it.
+- **`addVectors`** takes a real array of `{ id: string, vector: number[], metadata?: object }` with no holes: pass
+  `Array.from(embedding)` for a `Float32Array`. Anything else refuses `RAG_VECTORS_INVALID`. **`deleteVectors`** takes an
+  array of ids (`Array.from(set)`); anything else refuses `RAG_VECTOR_IDS_INVALID`.
+- **Results are read-only.** `listVectors`, `getVector(s)` and search return the store's cached objects: an edit would
+  be sealed by the next write. `structuredClone` a result before changing it.
+- **`RAG_DATABASE_MOVED`** (retryable) from a read or a write: another tab or device moved a legacy database to sealed
+  storage under the call. Retry the same call at once, at most 2–3 times.
+- Errors: `RAG_DOCUMENT_NOT_FOUND`, `RAG_DOCUMENT_BODY_MISSING` (listed, no body yet), `RAG_DOCUMENT_INVALID`,
+  `RAG_DOCUMENT_ALREADY_READY`, `RAG_DATABASE_NOT_FOUND`, `RAG_DATABASE_EXISTS`, `RAG_DATABASE_NAME_INVALID` — all
+  `retryable: false`.
+
+### The conversation log
+
+The log is sealed automatically: `saveConversation(conversation)` no longer takes encryption options. To keep a session
+out of the log entirely, pass **`conversationLog: false`** on the session config (`startSession`,
+`registerDelegatedSession`) and/or on each prompt's `PromptOptions`.
+
+```typescript
+const sm = sdk.getStorageManager();
+
+await sm.appendMessages(conversationId, [question, answer]); // one exchange: all or none, in call order
+await sm.appendMessage(conversationId, message);             // one message
+await sm.updateConversationMetadata(conversationId, { status: 'ended' }); // no-op when there is no log
+const conversation = await sm.loadConversation(conversationId);
+await sm.assertConversationLogWritable();                    // before paying for a card session that logs
+```
+
+- `appendMessages` takes an array of message objects with no holes; anything else refuses
+  `STORAGE_CONVERSATION_INVALID` (`retryable: false`) before anything is written. An empty array creates the log.
+- `saveConversation` needs `{ messages: [...] }` of plain data (no functions, symbols or cycles); otherwise
+  `STORAGE_CONVERSATION_INVALID`.
+- A sealed log that does not open reads as `SEALED_OPEN_FAILED`.
+
+### Funding errors: never thrown without the ids
+
+`startSession` and `registerDelegatedSession` report every failure after money moved with the ids needed to use or
+release the session (`TranscodeManager.submitTranscodeWithLoadBalancing` is not covered yet — planned for 1.39.1). All
+of these are `retryable: false`: act on the code.
+
+| Code | details | What to do |
+|---|---|---|
+| `SESSION_FUNDED_SETUP_FAILED` | `sessionId`, `jobId` (bigint), `stage`, `cause`, `registered?`, `committed?` | The session is funded. Use or release it by its ids. With `committed: true` the setup actually completed: use it. |
+| `SESSION_ID_UNRESOLVED` | `txHash` | The funding transaction was sent; its session id could not be read. Never fund again: look it up by the hash. |
+| `SESSION_FUNDING_UNCERTAIN` | `cause` | The send failed without a hash and may have been broadcast. Never start again automatically: ask the user to check the wallet's activity. |
+| `SESSION_NOT_FUNDED` | | Nothing moved. The user may start again. |
+
+### Errors and the retry rule
+
+- **Retry only when `details.retryable === true`.** An absent flag means no.
+- **`details.committed === true`** on a storage error: the write landed on S5; only this browser could not record it
+  (storage full or blocked). Never retry it and never roll back the UI's state. A RAG write's error then carries its
+  result in `details.result`; `createSession`'s carries `details.sessionId`.
+- New codes in 1.39.0, all `retryable: false` unless stated: `S5JS_UNSUPPORTED_VERSION`, `SEALED_OPEN_FAILED`,
+  `STORAGE_SEALER_MISSING`, `STORAGE_NOT_AVAILABLE`, `RAG_PLAINTEXT_WRITE_REFUSED`, `RAG_COHERENCE_UNAVAILABLE`,
+  `RAG_CHUNK_UNREADABLE`, `RAG_DELETE_INCOMPLETE`, `RAG_DOCUMENT_NOT_FOUND`, `RAG_DOCUMENT_ALREADY_READY`,
+  `RAG_DOCUMENT_BODY_MISSING`, `RAG_DOCUMENT_INVALID`, `RAG_DOCUMENT_ARRAYS_READONLY`, `RAG_MANIFEST_CORRUPT`,
+  `RAG_LEGACY_UNREADABLE` (its own verdict), `RAG_MIGRATION_FAILED` (its own verdict), `RAG_MIGRATION_VERIFY_FAILED`,
+  `RAG_DATABASE_MOVED` (**retryable**), `RAG_LOCK_TIMEOUT` (**retryable**), `RAG_DISCOVERY_INCOMPLETE` (**retryable**),
+  `RAG_VECTORS_INVALID`, `RAG_VECTOR_IDS_INVALID`, `RAG_FILTER_INVALID`, `STORAGE_CONVERSATION_INVALID`,
+  `STORAGE_MANAGER_DISPOSED`, `SESSION_GROUP_MANAGER_DISPOSED`, `RAG_MANAGER_DISPOSED`, `AUTH_SUPERSEDED`,
+  `MIGRATION_INCOMPLETE` (its causes' verdict), and the funding codes above.
+
+
 ## Storage Management
 
 Handles S5 decentralized storage operations with deterministic seed generation.
@@ -3741,130 +4301,46 @@ const storageManager = await sdk.getStorageManager();
 await storageManager.clearAIPreferences();
 ```
 
-### Encrypted Storage (Phase 5.3)
+### Conversation Storage (sealed, sdk-core 1.39.0)
 
-The SDK provides convenience methods for encrypted conversation storage with end-to-end encryption. Conversations can be encrypted with the host's public key and stored on S5 decentralized storage.
+From 1.39.0 every conversation log is **sealed** by the SDK (see
+[Confidential Storage](#confidential-storage-sdk-core-1390)). The former `encrypt` / `hostPubKey` options of
+`saveConversation` are gone: there is nothing to choose.
 
-**Features:**
-- **End-to-end encryption** - Conversations encrypted with host's public key
-- **Automatic decryption** - SDK handles decryption transparently on load
-- **Backward compatible** - Falls back to plaintext for non-encrypted conversations
-- **Sender verification** - ECDSA signatures allow conversation ownership verification
-- **Metadata tracking** - Tracks encryption status, version, and timestamps
+#### saveConversation(conversation): Promise<StorageResult>
 
-#### saveConversation(conversation, options?): Promise<string>
+Saves a conversation to the sealed log. `conversation` needs a `messages` array of plain data (no functions, symbols or
+cycles); otherwise it refuses `STORAGE_CONVERSATION_INVALID` (`retryable: false`). A storage failure carries `cause` and
+its `retryable` verdict; `details.committed === true` means the write landed (never retry it).
 
-Save a conversation with optional encryption to S5 storage.
+#### loadConversation(conversationId): Promise<ConversationData | null>
 
-**Parameters:**
-- `conversation` (ConversationData) - Conversation data to save
-- `options` (optional) - Encryption options
-  - `hostPubKey` (string) - Host's public key for encryption (required if encrypt=true)
-  - `encrypt` (boolean) - Whether to encrypt the conversation (default: false)
+Loads a conversation from the log, sealed or (from an earlier SDK) plaintext. A sealed log that does not open refuses
+`SEALED_OPEN_FAILED`; a failed read refuses `STORAGE_LOAD_ERROR` with its verdict — never read an error as "no log".
 
-**Returns:**
-- `Promise<string>` - CID (Content Identifier) of stored conversation
-
-**Throws:**
-- `SDKError` with code `STORAGE_NOT_INITIALIZED` - StorageManager not initialized
-- `SDKError` with code `INVALID_HOST_PUBLIC_KEY` - Invalid or missing host public key when encrypt=true
-- `SDKError` with code `ENCRYPTION_ERROR` - Failed to encrypt conversation
-- `SDKError` with code `STORAGE_SAVE_ERROR` - Failed to save to S5
-
-**Example (Plaintext Storage):**
 ```typescript
-const sdk = new FabstirSDKCore({ /* config */ });
 await sdk.authenticate('privatekey', { privateKey });
 
-// Save conversation without encryption
-const conversation = {
-  sessionId: 'sess-123',
+await sdk.saveConversation({
+  id: 'conv-123',
   messages: [
     { role: 'user', content: 'Hello!', timestamp: Date.now() },
-    { role: 'assistant', content: 'Hi there!', timestamp: Date.now() }
+    { role: 'assistant', content: 'Hi there!', timestamp: Date.now() },
   ],
-  metadata: {
-    model: 'llama-3',
-    startTime: Date.now()
-  }
-};
-
-const cid = await sdk.saveConversation(conversation);
-console.log('Conversation saved:', cid);
-```
-
-**Example (Encrypted Storage):**
-```typescript
-const sdk = new FabstirSDKCore({ /* config */ });
-await sdk.authenticate('privatekey', { privateKey });
-
-// 1. Get host's public key
-const hostAddress = '0x1234...';
-const hostPubKey = await sdk.getHostPublicKey(hostAddress);
-
-// 2. Save with encryption
-const conversation = {
-  sessionId: 'sess-123',
-  messages: [
-    { role: 'user', content: 'Sensitive message', timestamp: Date.now() },
-    { role: 'assistant', content: 'Response', timestamp: Date.now() }
-  ]
-};
-
-const cid = await sdk.saveConversation(conversation, {
-  hostPubKey,
-  encrypt: true
+  metadata: {},
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
 });
 
-console.log('Encrypted conversation saved:', cid);
+const conversation = await sdk.loadConversation('conv-123');
 ```
 
-#### loadConversation(conversationId): Promise<ConversationData>
-
-Load a conversation from S5 storage with automatic decryption.
-
-**Parameters:**
-- `conversationId` (string) - Conversation ID or CID to load
-
-**Returns:**
-- `Promise<ConversationData>` - Decrypted conversation data
-
-**Throws:**
-- `SDKError` with code `STORAGE_NOT_INITIALIZED` - StorageManager not initialized
-- `SDKError` with code `CONVERSATION_NOT_FOUND` - Conversation does not exist
-- `SDKError` with code `DECRYPTION_ERROR` - Failed to decrypt (wrong key or corrupted data)
-- `SDKError` with code `STORAGE_LOAD_ERROR` - Failed to load from S5
-
-**Behavior:**
-- Automatically detects encrypted vs plaintext conversations
-- Decrypts using client's private key (if encrypted)
-- Falls back to plaintext if decryption fails
-- Verifies sender signature if metadata present
-
-**Example:**
-```typescript
-const sdk = new FabstirSDKCore({ /* config */ });
-await sdk.authenticate('privatekey', { privateKey });
-
-// Load conversation (handles both encrypted and plaintext)
-try {
-  const conversation = await sdk.loadConversation('conv-123');
-
-  console.log('Session ID:', conversation.sessionId);
-  console.log('Messages:', conversation.messages.length);
-  console.log('Metadata:', conversation.metadata);
-} catch (error) {
-  if (error.code === 'CONVERSATION_NOT_FOUND') {
-    console.error('Conversation does not exist');
-  } else if (error.code === 'DECRYPTION_ERROR') {
-    console.error('Cannot decrypt - wrong key or corrupted');
-  }
-}
-```
+`StorageManager` also has `appendMessages`, `appendMessage`, `updateConversationMetadata` and
+`assertConversationLogWritable` — see [The conversation log](#the-conversation-log).
 
 #### getHostPublicKey(hostAddress): Promise<string>
 
-Get the public key of a registered host for encryption.
+Get the public key of a registered host (for the session's end-to-end encryption, which is unchanged).
 
 **Parameters:**
 - `hostAddress` (string) - Host's Ethereum address
@@ -3875,74 +4351,6 @@ Get the public key of a registered host for encryption.
 **Throws:**
 - `SDKError` with code `HOST_NOT_FOUND` - Host not registered
 - `SDKError` with code `PUBLIC_KEY_NOT_AVAILABLE` - Host has not set public key
-
-**Example:**
-```typescript
-const sdk = new FabstirSDKCore({ /* config */ });
-await sdk.authenticate('privatekey', { privateKey });
-
-// Get host public key for encryption
-const hostAddress = '0x1234...';
-const hostPubKey = await sdk.getHostPublicKey(hostAddress);
-
-// Use for encrypted storage
-const cid = await sdk.saveConversation(conversation, {
-  hostPubKey,
-  encrypt: true
-});
-```
-
-#### Complete Encrypted Workflow Example
-
-```typescript
-import { FabstirSDKCore, ChainId } from '@fabstir/sdk-core';
-import { ethers } from 'ethers';
-
-// 1. Initialize SDK
-const sdk = new FabstirSDKCore({
-  chainId: ChainId.BASE_SEPOLIA,
-  rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/YOUR_KEY',
-  contractAddresses: { /* ... */ }
-});
-
-// 2. Authenticate
-const wallet = ethers.Wallet.createRandom();
-await sdk.authenticate('privatekey', { privateKey: wallet.privateKey });
-
-// 3. Start encrypted session
-const sessionManager = await sdk.getSessionManager();
-const hostAddress = '0x1234...'; // Discovered via HostManager
-
-await sessionManager.startSession({
-  hostAddress,
-  hostUrl: 'ws://host:8080/ws',
-  jobId: 123n,
-  modelName: 'llama-3',
-  chainId: 84532,
-  encryption: true  // Enable encryption
-});
-
-// 4. Send encrypted messages
-await sessionManager.sendMessage('What is the weather?');
-
-// Wait for response...
-// Messages are encrypted in transit
-
-// 5. Save encrypted conversation
-const conversation = sessionManager.getConversation();
-const hostPubKey = await sdk.getHostPublicKey(hostAddress);
-
-const cid = await sdk.saveConversation(conversation, {
-  hostPubKey,
-  encrypt: true
-});
-
-console.log('Encrypted conversation saved with CID:', cid);
-
-// 6. Load encrypted conversation later
-const loaded = await sdk.loadConversation(cid);
-console.log('Loaded messages:', loaded.messages.length);
-```
 
 ### S5 Connection Handling (v1.4.24+)
 
@@ -4200,6 +4608,11 @@ export type SyncStatus = 'synced' | 'syncing' | 'pending' | 'error';
 ## RAG and Vector Databases
 
 The SDK includes a complete **Retrieval-Augmented Generation (RAG)** system that enhances LLM responses by retrieving relevant context from user documents.
+
+> **1.39.0:** RAG databases are sealed on S5, and document entries and bodies are managed through the RAG document API
+> (`addPendingDocument`, `putDocumentBody`, `getDocumentBody`, `updateDocumentStatus`, `removeDocument`,
+> `refreshDatabases`). Never read or write the RAG paths on S5 directly. See
+> [Confidential Storage](#confidential-storage-sdk-core-1390).
 
 ### Quick Start
 
@@ -5282,6 +5695,32 @@ Check if WebSocket is connected.
 isConnected(): boolean
 ```
 
+> `isConnected()` reports **transport liveness**, which is true again the moment an automatic
+> reconnect completes — it cannot distinguish the connection you initialized from a silent
+> replacement the node has no session for. State bound to a particular connection (a session
+> key) must compare **generations** instead.
+
+### getConnectionGeneration
+
+Identity of the current connection: 1 after the first successful connect, incremented on every
+reconnect (1.38.2+).
+
+```typescript
+getConnectionGeneration(): number
+```
+
+### onConnectionChange
+
+Subscribe to connection identity changes; the handler receives the new generation on every
+successful open, including the first. Returns an unsubscribe function. On a generation change
+the client also **discards** any frames queued for the previous connection — they were built
+for a connection (and, if encrypted, a key registration) that no longer exists, so replaying
+them would send wrong requests, not late ones.
+
+```typescript
+onConnectionChange(handler: (generation: number) => void): () => void
+```
+
 ### getReadyState
 
 Get WebSocket connection state.
@@ -5774,6 +6213,7 @@ enum SDKErrorCode {
   // WebSocket
   WEBSOCKET_CONNECTION_FAILED = 'WEBSOCKET_CONNECTION_FAILED',
   WEBSOCKET_MESSAGE_FAILED = 'WEBSOCKET_MESSAGE_FAILED',
+  SESSION_KEY_INVALIDATED = 'SESSION_KEY_INVALIDATED', // Connection replaced mid-request; key void. retryable: true — resend the prompt (1.38.2+)
 
   // Proofs
   INVALID_PROOF = 'INVALID_PROOF',
@@ -5794,6 +6234,7 @@ enum SDKErrorCode {
   INSUFFICIENT_DEPOSIT = 'INSUFFICIENT_DEPOSIT',
   NODE_CHAIN_MISMATCH = 'NODE_CHAIN_MISMATCH',
   DEPOSIT_ACCOUNT_UNAVAILABLE = 'DEPOSIT_ACCOUNT_UNAVAILABLE',
+  READ_WRITE_CHAIN_MISMATCH = 'READ_WRITE_CHAIN_MISMATCH', // rpcUrl reads on one chain, wallet signing on another (1.38.1+)
 
   // Transcoding
   CAPACITY_FULL = 'CAPACITY_FULL',             // Host transcode queue full (HTTP 429, retryable)
@@ -5828,6 +6269,17 @@ result.moderation;   // TranscodeModerationStatus | undefined
 
 `assembleHlsContentMetadata` and `assembleContentMetadata` copy the field onto the metadata they
 return, so a verdict survives to whatever you persist.
+
+Since 1.38 the canonical home of this surface is job-neutral: `JobModerationVerdict`,
+`JobModerationStatus`, `isJobModerationStatus`, `cloneJobModerationStatus`, and the terminal
+hold-code union `ModerationHoldCode` (`CONTENT_BLOCKED` | `CONTENT_FLAGGED` |
+`MODERATION_UNAVAILABLE`, derived from the exported `MODERATION_HOLD_CODES` const — the
+runtime list to iterate) are exported from the entry, and the `Transcode…` names above are
+aliases of them — same types, same runtime functions, every existing import path unchanged.
+New job kinds (training is next) consume the `Job…` names and never import transcode types.
+Relatedly, `JobType.MODEL_TRAINING = 6` is reserved (SDK-side discriminator only — the
+contract keys on `bytes32` model ids); no behaviour attaches until the training interface
+design lands.
 
 Four rules, none of them optional:
 

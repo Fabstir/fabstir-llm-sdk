@@ -48,6 +48,7 @@ describe('SessionManager Price Validation', () => {
     mockStorageManager = {
       isInitialized: vi.fn().mockReturnValue(true),
       storeConversation: vi.fn().mockResolvedValue(undefined),
+      assertConversationLogWritable: vi.fn(),
       appendMessage: vi.fn().mockResolvedValue(undefined)
     };
 

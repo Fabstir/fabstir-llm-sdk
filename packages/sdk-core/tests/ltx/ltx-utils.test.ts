@@ -4,7 +4,8 @@
 import { describe, it, expect } from 'vitest';
 import { keccak256 } from 'ethers';
 import vectors from './vectors.json';
-import { ltxInputCommitment, ltxInputEncoded, ltxTokens } from '../../src/utils/ltx-utils';
+import { ltxInputCommitment, ltxInputEncoded, ltxTokens,
+  ltxInputCommitmentV2, ltxInputEncodedV2, ltxInputCommitmentV3, ltxInputEncodedV3 } from '../../src/utils/ltx-utils';
 
 describe('ltx-utils: inputCommitment (Constraint 1, 9)', () => {
   it('abi-encodes the job to vectors.inputCommitment.abiEncoded (encoder localisation)', () => {
@@ -52,5 +53,30 @@ describe('ltx-utils: megapixel-frame token formula (Constraint 6)', () => {
     // 1 frame @ 1280x720 = 921600 -> 922 tokens
     expect(ltxTokens({ frames: 1, resolution: { w: 1280, h: 720 } })).toBe(922);
     expect(ltxTokens({ frames: 1, resolution: { w: 1280, h: 720 } })).toBeGreaterThanOrEqual(100);
+  });
+});
+
+describe('commitment invariance under advisory fields (1.38 absorb — constraint 1: MUST NOT widen)', () => {
+  // Regression pins: expected GREEN even at RED — they pin today's encoder behaviour.
+  // If any of these EVER fails, the input commitment widened: constraint-1 alarm, stop.
+  const five = { strength: 0.7, azimuth: -30, elevation: 12, distance: 1.5, inputWire: 'exrseq-linear' };
+  const withFive = { ...vectors.job, ...five };
+  const imgs = [keccak256('0x01'), keccak256('0x02')];
+  const vids = [keccak256('0x03')];
+
+  it('v1: encoding and commitment byte-identical with and without the five; oracle value holds', () => {
+    expect(ltxInputEncoded(withFive)).toBe(ltxInputEncoded(vectors.job));
+    expect(ltxInputCommitment(withFive)).toBe(ltxInputCommitment(vectors.job));
+    expect(ltxInputCommitment(withFive)).toBe(vectors.inputCommitment.hash);
+  });
+
+  it('v2 (imageHashes) likewise', () => {
+    expect(ltxInputEncodedV2(withFive, imgs)).toBe(ltxInputEncodedV2(vectors.job, imgs));
+    expect(ltxInputCommitmentV2(withFive, imgs)).toBe(ltxInputCommitmentV2(vectors.job, imgs));
+  });
+
+  it('v3 (imageHashes + videoHashes) likewise', () => {
+    expect(ltxInputEncodedV3(withFive, imgs, vids)).toBe(ltxInputEncodedV3(vectors.job, imgs, vids));
+    expect(ltxInputCommitmentV3(withFive, imgs, vids)).toBe(ltxInputCommitmentV3(vectors.job, imgs, vids));
   });
 });

@@ -1,5 +1,6 @@
 // Copyright (c) 2025 Fabstir
 import { LLM_MAX_TOKENS } from '../config/llm-config';
+import { normalizeNodeHttpUrl } from '../utils/validation';
 // SPDX-License-Identifier: BUSL-1.1
 
 /**
@@ -31,7 +32,8 @@ import {
   TokenUsageInfo,
   ContextInfo,
   HostHealthInfo,
-  SessionStatusInfo
+  SessionStatusInfo,
+  Message
 } from '../types';
 import { validateImageAttachments } from '../utils/image-validation';
 import { HostSelectionMode } from '../types/settings.types';
@@ -63,6 +65,13 @@ import { submitTranscodeWs } from '../utils/transcode-ws';
 import type { VideoFormat, TranscodeHandle, TranscodeSubmitOptions } from '../types/transcode.types';
 import { submitLtxWs } from '../utils/ltx-ws';
 import type { LtxJob, LtxHandle, LtxSubmitOptions, LtxResult } from '../types/ltx.types';
+import type { LoraSessionField } from '../types/training.types';
+import { buildLoraSessionField } from '../types/training.types';
+import type { TrainingError } from '../errors/training-errors';
+import { toServeBackError, firstResponseTimeoutMs } from '../utils/training-serve-back';
+import { submitTrainingWs } from '../utils/training-ws';
+import type { TrainingHandle, TrainingWsOptions } from '../utils/training-ws';
+import type { TrainingJob } from '../types/training.types';
 
 /**
  * Check if a string is a bytes32 hash (0x + 64 hex chars)
@@ -126,6 +135,25 @@ function convertModelHashToName(modelHashOrName: string): string {
   return modelHashOrName;
 }
 
+/**
+ * Money has moved: a failure in a setup step after funding says so, with the ids the caller needs to use or
+ * release the session. `registered` — the in-memory session exists (every stage after the registry write).
+ */
+// The ids are whatever the funding call returned (PaymentManager's result type is a loose union).
+function fundedSetupFailed(sessionId: unknown, jobId: unknown, stage: 'registry' | 'conversation-log' | 'session-group-link', cause: any): SDKError {
+  // A step that landed, only its head not recorded (§34 OO4), completed the setup: said at the top — use the session
+  // (§35 PP6).
+  const committed = cause?.details?.committed === true;
+  return new SDKError(
+    committed
+      ? `Session ${sessionId} is set up; its ${stage} step landed but this tab could not record its head: ${cause.message}`
+      : `Session ${sessionId} was funded but its ${stage} step failed: ${cause?.message ?? cause}`,
+    'SESSION_FUNDED_SETUP_FAILED',
+    // Not retryable: the session is funded — use or release it by its ids (§20 AA8).
+    { sessionId, jobId, stage, cause, registered: stage !== 'registry', ...(committed ? { committed } : {}), retryable: false }
+  );
+}
+
 export interface SessionState {
   sessionId: bigint;
   jobId: bigint;
@@ -141,9 +169,20 @@ export interface SessionState {
   startTime: number;
   endTime?: number;
   encryption?: boolean; // NEW: Track if session uses encryption
+  /** false → nothing of this session is written to the S5 conversation log (1.39.0). */
+  conversationLog?: boolean;
   groupId?: string; // NEW: Session Groups integration
   webSearchMetadata?: WebSearchMetadata; // NEW: Web search metadata from response
   webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 5.1)
+  /** Training M0 serve-back adapter (E.2), persisted the same way `webSearch` is. EVERY
+   *  `sendEncryptedInit` call site rebuilds its config from this state, so an adapter that
+   *  lives only in the caller's original config is dropped by the first re-init — and E.3 is
+   *  explicit that a re-init MUST re-send `lora` or the node keeps refusing. */
+  lora?: LoraSessionField;
+  /** §4b's serve-back callback, persisted for the same reason as `lora`: a callback that
+   *  cannot survive a re-init is silent, and silence here means the session answers from the
+   *  BASE MODEL on a run the customer is paying to fine-tune. */
+  onServeBackError?: (error: TrainingError) => void;
   lastTokenUsage?: TokenUsageInfo; // NEW: Last prompt's token usage (Phase 5)
   lastPromptTokens?: number;
   contextWindowSize?: number;
@@ -164,13 +203,25 @@ export interface ExtendedSessionConfig extends SessionConfig {
   /** AUDIT-F3: Timeout window in seconds (60-3600, default 300) */
   proofTimeoutWindow?: number;
   encryption?: boolean; // NEW: Enable E2EE
+  /** false → no S5 conversation log for this session: no initial write, no appends, no re-saves (1.39.0). */
+  conversationLog?: boolean;
   groupId?: string; // NEW: Session Groups integration
+  /**
+   * Host-side loading of a vector database from S5 (Sub-phase 5.1.3). Incompatible with sealed RAG storage
+   * (1.39.0): a host cannot open a sealed manifest, and the plaintext path it named no longer exists. Kept
+   * only so existing configs type-check; use `ragConfig` (the client searches and sends context) instead.
+   */
   vectorDatabase?: {
-    // NEW: S5 vector database for RAG (Sub-phase 5.1.3)
-    manifestPath: string; // S5 path to manifest.json (e.g., "home/vector-databases/{user}/{db}/manifest.json")
+    manifestPath: string; // S5 path to a plaintext manifest.json (legacy layout)
     userAddress: string; // Owner address for verification
   };
   webSearch?: SearchIntentConfig; // NEW: Web search configuration (Phase 2.2)
+  /** Training M0 serve-back (E.2): load this session's own fine-tuned adapter. Session-scoped,
+   *  scale 1.0, never visible to concurrent sessions on the same base model. */
+  lora?: LoraSessionField;
+  /** Fires on a post-ack `LORA_STAGING_FAILED` (E.3). Without it a staging failure is silent
+   *  and the session serves BASE-MODEL output on a paid fine-tune. */
+  onServeBackError?: (error: TrainingError) => void;
 }
 
 /**
@@ -208,10 +259,17 @@ export interface DelegatedSessionConfig {
   proofInterval: number;
   duration: number;
   ragConfig?: RAGSessionConfig;
+  /** false → no S5 conversation log for this session (e.g. a tier-2 extraction run). */
+  conversationLog?: boolean;
   /** FC1.6: the `{ scheme, signature, clientAddress }` from /fiat/session. */
   authorisation?: SessionAuthorisation;
   /** FC1.6: node http(s) base URL — REQUIRED when `authorisation` is present. */
   nodeHttpUrl?: string;
+  /** Training M0 serve-back (E.2). Without a home on the adopted session the adapter
+   *  cannot survive the first re-init, and this is the popup-free path most chats use. */
+  lora?: LoraSessionField;
+  /** Fires on a post-ack `LORA_STAGING_FAILED` (E.3). Silent without it. */
+  onServeBackError?: (error: TrainingError) => void;
 }
 
 /**
@@ -223,12 +281,19 @@ export interface DelegatedSessionConfig {
 export interface ExternalSessionConfig {
   sessionId: bigint;
   jobId: bigint;
-  /** Node http(s) base URL — the WS URL is derived from it at submit time. */
+  /** Node http(s) base URL — the WS URL is derived from it at submit time. Validated and normalised
+   *  by `registerExternalSession` (`SESSION_ENDPOINT_INVALID` for a ws(s)://, query-bearing or
+   *  mis-cased value the derivation would use verbatim or mangle). */
   endpoint: string;
   /** Host operator address (the session's `provider`). */
   hostAddress: string;
   model: string;
   chainId: number;
+  /** Training M0 serve-back (E.2). Without a home on the adopted session the adapter
+   *  cannot survive the first re-init, and this is the popup-free path most chats use. */
+  lora?: LoraSessionField;
+  /** Fires on a post-ack `LORA_STAGING_FAILED` (E.3). Silent without it. */
+  onServeBackError?: (error: TrainingError) => void;
 }
 
 export class SessionManager implements ISessionManager {
@@ -245,6 +310,35 @@ export class SessionManager implements ISessionManager {
   private initialized = false;
   private sessionKey?: Uint8Array; // NEW: Store session key for Phase 4.2
   private messageIndex: number = 0; // NEW: For Phase 4.2 replay protection
+  /**
+   * The WebSocket connection generation `sessionKey` was minted on.
+   *
+   * The node registers the key against the connection that carried the init, so
+   * the key is only meaningful while the connection identity is unchanged. A
+   * silent reconnect leaves `isConnected()` true on a connection the node has no
+   * session for; comparing this instead is what distinguishes the two.
+   */
+  private sessionKeyGeneration?: number;
+  private connectionChangeUnsubscribe?: () => void;
+  /** Rejectors for encrypted work awaiting a response on the current connection. */
+  private encryptedWaiters: Set<(error: Error) => void> = new Set();
+  /**
+   * Per-session crypto state, keyed by session id.
+   *
+   * The node keeps one key PER session; a single shared `sessionKey` field
+   * cannot represent that — every init on any path (each prompt, each RAG op,
+   * each image/transcode flow) overwrote it, so two sessions interleaving on
+   * one manager decrypted and encrypted with each other's keys: aead::Error
+   * immediately after a clean init, with the node correctly reporting one key
+   * and no re-init per session. The legacy shared fields remain as "most
+   * recently inited session" for existing readers; this map is authoritative
+   * wherever a frame names its session.
+   */
+  private sessionCrypto: Map<string, { key: Uint8Array; messageIndex: number }> = new Map();
+  /** Serializes init handshakes so two mint->send->ack sequences cannot interleave. */
+  private initChain: Promise<void> = Promise.resolve();
+  /** Key fingerprints already wire-logged on a successful decrypt (one ok-line per key; failures always log). */
+  private wireOkLogged: Set<string> = new Set();
   private imageGenRateLimiter = new ImageGenerationRateLimiter();
   private pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: any) => void; timeoutId: NodeJS.Timeout }> = new Map(); // Host-side RAG request tracking
   private ragHandlerUnsubscribe?: () => void; // NEW: Store RAG handler unsubscribe function to prevent duplicate handlers
@@ -265,6 +359,122 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Whether a frame belongs to the given session. Frames that carry a
+   * session_id (session_init_ack, encrypted_chunk, encrypted_response — node
+   * API.md:2059/:2087) are matched on it; frames that carry none (stream_end,
+   * connected) cannot be attributed and pass through.
+   */
+  private frameTargetsSession(frame: any, sessionId: string | bigint): boolean {
+    if (frame?.session_id === undefined || frame.session_id === null) {
+      return true;
+    }
+    return String(frame.session_id) === String(sessionId);
+  }
+
+  /**
+   * Short fingerprint of a key for wire logs: identifies which key was used
+   * without revealing it. Two logs with the same fp used the same key.
+   */
+  private wireFp(key: Uint8Array | undefined): string {
+    if (!key) return 'none';
+    return ethers.sha256(key).slice(2, 10);
+  }
+
+  /**
+   * Register a rejector for encrypted work awaiting a response, so it can be
+   * failed fast if the connection identity changes underneath it.
+   *
+   * @returns a function to unregister once the work settles normally
+   */
+  private registerEncryptedWaiter(reject: (error: Error) => void): () => void {
+    this.encryptedWaiters.add(reject);
+    return () => {
+      this.encryptedWaiters.delete(reject);
+    };
+  }
+
+  /**
+   * React to a WebSocket connection identity change.
+   *
+   * The key minted on the previous connection cannot be used on this one — the
+   * node has no session registered for it, so every frame would fail to decrypt.
+   * Drop the key so the next send re-inits, and fail in-flight encrypted work
+   * immediately rather than leaving it to the first-response timeout (480 s for
+   * a lora session) on an outcome already known.
+   */
+  private handleConnectionChange(generation: number): void {
+    if (this.sessionKeyGeneration === undefined || generation === this.sessionKeyGeneration) {
+      return;
+    }
+
+    console.warn(
+      `[SessionManager] WebSocket connection changed (generation ` +
+      `${this.sessionKeyGeneration} -> ${generation}); the session key minted on the ` +
+      'previous connection is no longer valid. Re-initialising on next send.'
+    );
+
+    this.sessionKey = undefined;
+    this.messageIndex = 0;
+    this.sessionKeyGeneration = undefined;
+    // Every entry was registered node-side on the connection that just died.
+    this.sessionCrypto.clear();
+    this.wireOkLogged.clear();
+    // wsSessionId is deliberately preserved: it records which session owns the
+    // client, which a change of connection identity does not alter. Clearing it
+    // would make the reuse guards treat the socket as belonging to no session.
+
+    // DELIBERATE: an interrupted prompt is NOT resent automatically here.
+    //
+    // The prompt was never answered, so nothing was billed and a resend would be
+    // safe on that count. It is still the caller's call: only the caller knows
+    // whether the user has since navigated away or cancelled, and a silent retry
+    // inside sendPrompt turns a repeatedly unstable connection into a loop that
+    // is invisible from outside. The error carries `retryable: true` and a
+    // distinct code so the caller can resend deliberately and say why.
+    const waiters = [...this.encryptedWaiters];
+    this.encryptedWaiters.clear();
+    for (const reject of waiters) {
+      const error: any = new SDKError(
+        'The WebSocket connection was replaced while this request was in flight, so the ' +
+        'session key it was encrypted under is no longer valid. The request was not ' +
+        'answered and can be sent again.',
+        'SESSION_KEY_INVALIDATED'
+      );
+      error.retryable = true;
+      try {
+        reject(error);
+      } catch (err) {
+        console.error('[SessionManager] Failed to reject in-flight request:', err);
+      }
+    }
+  }
+
+  /**
+   * Whether an `encrypted_session_init` must be sent before the next encrypted
+   * frame. Connection identity, not transport liveness — a silent reconnect
+   * leaves `isConnected()` true on a connection that was never inited.
+   */
+  private needsSessionInit(): boolean {
+    if (!this.wsClient || !this.wsClient.isConnected()) {
+      return true;
+    }
+    if (this.sessionKeyGeneration === undefined) {
+      return true;
+    }
+    return this.wsClient.getConnectionGeneration() !== this.sessionKeyGeneration;
+  }
+
+  /**
+   * Subscribe to connection identity changes on the active client.
+   */
+  private watchConnectionIdentity(client: WebSocketClient): void {
+    this.connectionChangeUnsubscribe?.();
+    this.connectionChangeUnsubscribe = client.onConnectionChange((generation: number) => {
+      this.handleConnectionChange(generation);
+    });
+  }
+
+  /**
    * Set HostManager for price validation (called after authentication)
    */
   setHostManager(hostManager: HostManager): void {
@@ -281,6 +491,25 @@ export class SessionManager implements ISessionManager {
       throw new Error('HostManager not set; cannot resolve model price');
     }
     return this.hostManager.getModelPricing(hostAddress, convertModelToBytes32(modelId), paymentToken);
+  }
+
+  /** Last post-ack serve-back failure (E.3), or null. Cleared on each (re-)init, because a
+   *  re-init carrying `lora` RE-TRIGGERS staging: the previous attempt is evicted. */
+  private serveBackError: TrainingError | null = null;
+
+  /** Disposer for the post-ack serve-back listener. Five call sites re-init on the SHARED
+   *  `this.wsClient`, so without this each re-init would stack another listener and one
+   *  staging failure would fire the caller's handler once per init. */
+  private serveBackUnsubscribe?: () => void;
+
+  /** True while this session carries a `lora` adapter, so the first-response timeout can clear
+   *  the node's 300 s staging budget. Non-lora sessions keep the existing allowance exactly. */
+  private loraSessionActive = false;
+
+  /** The staging failure this session hit, if any. Non-null means the adapter is NOT loaded
+   *  and any answer since would have come from the BASE MODEL. */
+  getServeBackError(): TrainingError | null {
+    return this.serveBackError;
   }
 
   /**
@@ -475,13 +704,7 @@ export class SessionManager implements ISessionManager {
         modelId: modelIdBytes32  // Pass model ID for model-specific contract function
       };
 
-      const result = await this.paymentManager.createSessionJob(sessionJobParams);
-
-      // PaymentManagerMultiChain returns just the job ID as a number
-      // We'll use the job ID as both session ID and job ID for now
-      const jobId = typeof result === 'number' ? BigInt(result) : result.jobId || result;
-      const sessionId = typeof result === 'number' ? BigInt(result) : result.sessionId || jobId;
-
+      // Everything that can fail without the job fails HERE, before any money moves.
       // Validate and merge RAG config if provided
       let ragConfig: RAGSessionConfig | undefined;
       if (config.ragConfig) {
@@ -508,75 +731,108 @@ export class SessionManager implements ISessionManager {
         }
       }
 
-      // Create session state
-      const sessionState: SessionState = {
-        sessionId: sessionId,
-        jobId: jobId,
-        chainId: config.chainId,
-        model: convertModelHashToName(model),  // Convert hash to short name for node compatibility
-        provider,
-        endpoint,
-        status: 'active',
-        prompts: [],
-        responses: [],
-        checkpoints: [],
-        totalTokens: 0,
-        startTime: Date.now(),
-        encryption: enableEncryption,  // NEW (Phase 6.2): Store encryption preference
-        groupId: config.groupId,  // NEW: Session Groups integration
-        webSearch: config.webSearch,  // NEW (Phase 5.1): Web search configuration
-        ragContext: ragConfig?.enabled
-          ? { vectorDbId: ragConfig.vectorDbSessionId || `rag-${sessionId}` }
-          : undefined,
-        ragConfig: ragConfig,  // NEW (Phase 5.1): Store RAG config
-        ragMetrics: ragConfig?.enabled ? {
-          totalRetrievals: 0,
-          averageSimilarity: 0,
-          averageLatencyMs: 0,
-          emptyRetrievals: 0,
-          totalContextTokens: 0
-        } : undefined
-      };
+      // The log's environment (sealer, cross-tab lock) is a precondition too: an insecure origin must fail
+      // here, not after the deposit (R2).
+      if (config.conversationLog !== false) await this.storageManager.assertConversationLogWritable();
 
-      // Store in memory
-      this.sessions.set(sessionId.toString(), sessionState);
+      const result = await this.paymentManager.createSessionJob(sessionJobParams);
 
-      // Persist to storage (convert BigInt values to strings for JSON serialization)
-      await this.storageManager.storeConversation({
-        id: sessionId.toString(),
-        messages: [],
-        metadata: {
+      // PaymentManagerMultiChain returns just the job ID as a number
+      // We'll use the job ID as both session ID and job ID for now
+      const jobId = typeof result === 'number' ? BigInt(result) : result.jobId || result;
+      const sessionId = typeof result === 'number' ? BigInt(result) : result.sessionId || jobId;
+
+      // Money has moved: from here every failure carries the ids, or the deposit cannot be released.
+      let stage: 'registry' | 'conversation-log' | 'session-group-link' = 'registry';
+      // A log step that landed, only its head not recorded (§34 OO4), does not stop the setup: the remaining steps run,
+      // and it is reported after them — a setup that completed (§35 PP6, §36 QQ5).
+      let logLanded: unknown;
+      try {
+        // Create session state
+        const sessionState: SessionState = {
+          sessionId: sessionId,
+          jobId: jobId,
           chainId: config.chainId,
-          model,
+          model: convertModelHashToName(model),  // Convert hash to short name for node compatibility
           provider,
-          endpoint,  // Store endpoint for session restoration
-          jobId: jobId.toString(),
-          status: 'active',  // Store status for restoration
-          totalTokens: 0,  // Initialize token count
-          startTime: sessionState.startTime,  // Store start time
-          encryption: sessionState.encryption,  // NEW (Phase 6.2): Store encryption preference
-          config: {
-            depositAmount: config.depositAmount?.toString() || '',
-            pricePerToken: config.pricePerToken?.toString() || '',
-            proofInterval: config.proofInterval?.toString() || '',
-            duration: config.duration?.toString() || ''
-          }
-        },
-        createdAt: sessionState.startTime,
-        updatedAt: sessionState.startTime
-      });
+          endpoint,
+          status: 'active',
+          prompts: [],
+          responses: [],
+          checkpoints: [],
+          totalTokens: 0,
+          startTime: Date.now(),
+          encryption: enableEncryption,  // NEW (Phase 6.2): Store encryption preference
+          conversationLog: config.conversationLog,
+          groupId: config.groupId,  // NEW: Session Groups integration
+          webSearch: config.webSearch,  // NEW (Phase 5.1): Web search configuration
+          // Seeded the same way, and for the same reason: every init site rebuilds its config
+          // from this state, so a field that lives only in the caller's config is lost at the
+          // first re-init. `ExtendedSessionConfig` accepted `lora` while this literal dropped it,
+          // which left the whole serve-back path unreachable from outside the class.
+          lora: config.lora,
+          onServeBackError: config.onServeBackError,
+          ragContext: ragConfig?.enabled
+            ? { vectorDbId: ragConfig.vectorDbSessionId || `rag-${sessionId}` }
+            : undefined,
+          ragConfig: ragConfig,  // NEW (Phase 5.1): Store RAG config
+          ragMetrics: ragConfig?.enabled ? {
+            totalRetrievals: 0,
+            averageSimilarity: 0,
+            averageLatencyMs: 0,
+            emptyRetrievals: 0,
+            totalContextTokens: 0
+          } : undefined
+        };
 
-      // NEW: Session Groups integration - Link session to group if groupId provided
-      if (config.groupId && this.sessionGroupManager) {
-        const userAddress = await this.storageManager.getUserAddress();
-        if (userAddress) {
-          await this.sessionGroupManager.addChatSession(
-            config.groupId,
-            userAddress,
-            sessionId.toString()
-          );
+        // Store in memory
+        this.sessions.set(sessionId.toString(), sessionState);
+
+        // Persist to storage (convert BigInt values to strings for JSON serialization)
+        stage = 'conversation-log';
+        if (config.conversationLog !== false) await this.storageManager.storeConversation({
+          id: sessionId.toString(),
+          messages: [],
+          metadata: {
+            chainId: config.chainId,
+            model,
+            provider,
+            endpoint,  // Store endpoint for session restoration
+            jobId: jobId.toString(),
+            status: 'active',  // Store status for restoration
+            totalTokens: 0,  // Initialize token count
+            startTime: sessionState.startTime,  // Store start time
+            encryption: sessionState.encryption,  // NEW (Phase 6.2): Store encryption preference
+            config: {
+              depositAmount: config.depositAmount?.toString() || '',
+              pricePerToken: config.pricePerToken?.toString() || '',
+              proofInterval: config.proofInterval?.toString() || '',
+              duration: config.duration?.toString() || ''
+            }
+          },
+          createdAt: sessionState.startTime,
+          updatedAt: sessionState.startTime
+        }).catch((error: any) => {
+          if (error?.details?.committed !== true) throw error;
+          logLanded = error;
+        });
+
+        // NEW: Session Groups integration - Link session to group if groupId provided
+        stage = 'session-group-link';
+        if (config.groupId && this.sessionGroupManager) {
+          const userAddress = await this.storageManager.getUserAddress();
+          if (userAddress) {
+            await this.sessionGroupManager.addChatSession(
+              config.groupId,
+              userAddress,
+              sessionId.toString()
+            );
+          }
         }
+      } catch (cause: any) {
+        throw fundedSetupFailed(sessionId, jobId, stage, cause);
       }
+      if (logLanded) throw fundedSetupFailed(sessionId, jobId, 'conversation-log', logLanded);
 
       return {
         sessionId: sessionId,
@@ -587,12 +843,38 @@ export class SessionManager implements ISessionManager {
       if (error instanceof PricingValidationError) {
         throw error;
       }
+      // The funding outcomes carry the ids / tx hash the caller needs, or say the send may have gone out: never
+      // re-wrap them (S4, §34 OO3). Anything else failed before funding: SESSION_START_ERROR means nothing was funded;
+      // the cause is in originalError.
+      if (['SESSION_FUNDED_SETUP_FAILED', 'SESSION_ID_UNRESOLVED', 'SESSION_NOT_FUNDED', 'SESSION_FUNDING_UNCERTAIN'].includes(error?.code)) {
+        throw error;
+      }
 
+      // Whether retrying may help is the cause's own verdict, when it gives one — nothing was funded, but an
+      // unclassified failure is not assumed to pass (§19 Z14).
+      const verdict = typeof error?.details?.retryable === 'boolean' ? error.details.retryable
+        : typeof error?.retryable === 'boolean' ? error.retryable : undefined;
       throw new SDKError(
         `Failed to start session: ${error.message}`,
         'SESSION_START_ERROR',
-        { originalError: error }
+        { originalError: error, ...(verdict !== undefined ? { retryable: verdict } : {}) }
       );
+    }
+  }
+
+  /**
+   * The one gate every prompt path appends its exchange through, so the opt-outs cannot be bypassed:
+   * nothing is written when the session (`conversationLog: false`) or this prompt opted out.
+   */
+  private logExchange(sessionId: string, session: SessionState, options: PromptOptions | undefined, messages: Message[]): Promise<void> {
+    if (session.conversationLog === false || options?.conversationLog === false) return Promise.resolve();
+    // One write for the whole exchange, asked for at once (§27 HH1): the store appends a conversation's exchanges in
+    // call order (§15 T4), never one's question without its answer — and one asked for before a sign-out lands.
+    // Even a store that throws instead of rejecting only rejects here: a log failure never costs a paid reply (R2).
+    try {
+      return this.storageManager.appendMessages(sessionId, messages);
+    } catch (error) {
+      return Promise.reject(error);
     }
   }
 
@@ -620,13 +902,26 @@ export class SessionManager implements ISessionManager {
    * re-seed or two chains sharing an id.
    */
   registerExternalSession(config: ExternalSessionConfig): void {
+    // The rule lives at the seam, not only in the two manager callers: this is a public
+    // ISessionManager method. The WS derivation in acquireSessionTransport uses a ws(s):// value
+    // VERBATIM — a bare `wss://host` opens at the node root, and a full `wss://host/v1/ws` works
+    // only until the http base it must pair with (postSessionAuth) drifts — and it never converts
+    // 'HTTPS://'. One http(s) base, normalised here, serves both. ⚠️ Breaking (1.38.6) for callers
+    // that registered a full WS URL; declared on ISessionManager and in the consumer docs.
+    const endpoint = normalizeNodeHttpUrl(config.endpoint);
+    if (!endpoint) {
+      throw new SDKError(
+        `registerExternalSession: endpoint must be the node's plain http(s):// base (the nodeHttpUrl used for postSessionAuth), got: ${config.endpoint}`,
+        'SESSION_ENDPOINT_INVALID',
+      );
+    }
     this.sessions.set(config.sessionId.toString(), {
       sessionId: config.sessionId,
       jobId: config.jobId,
       chainId: config.chainId,
       model: config.model,
       provider: config.hostAddress,
-      endpoint: config.endpoint,
+      endpoint,
       status: 'active',
       prompts: [],
       responses: [],
@@ -634,6 +929,8 @@ export class SessionManager implements ISessionManager {
       totalTokens: 0,
       startTime: Date.now(),
       encryption: true,
+      lora: config.lora,
+      onServeBackError: config.onServeBackError,
     });
   }
 
@@ -723,6 +1020,12 @@ export class SessionManager implements ISessionManager {
    * EncryptionManager is set, `authorisation.clientAddress` is cross-checked
    * (case-insensitive) against `getWsClientAddress()` first; a mismatch throws
    * before the POST. On 401 the session is NOT registered.
+   *
+   * The caller funded this session, so the SDK cannot refuse before money moves: call
+   * `storageManager.assertConversationLogWritable()` BEFORE funding (it refuses an insecure origin, a browser
+   * without Web Locks, a disconnected S5, or storage that failed to start — STORAGE_UNAVAILABLE), or pass
+   * `conversationLog: false`. A log write that fails here
+   * throws SESSION_FUNDED_SETUP_FAILED with the ids and `registered: true` (plan §14 S6).
    */
   async registerDelegatedSession(config: DelegatedSessionConfig): Promise<void> {
     const sessionId = config.sessionId;
@@ -772,38 +1075,48 @@ export class SessionManager implements ISessionManager {
       totalTokens: 0,
       startTime: Date.now(),
       encryption: true, // Match normal session behavior - use encryption by default (Phase 6.2)
+      conversationLog: config.conversationLog,
       ragContext: config.ragConfig?.enabled
         ? { vectorDbId: config.ragConfig.vectorDbSessionId || `rag-${sessionIdStr}` }
         : undefined,
+      // Seeded here too: this is the popup-free delegated path, which is how the UI opens
+      // every chat. Threading only the external path would leave the primary one
+      // silently adapter-less at the first re-init.
+      lora: config.lora,
+      onServeBackError: config.onServeBackError,
     };
 
     // Store in memory
     this.sessions.set(sessionIdStr, sessionState);
 
-    // Persist to storage
-    await this.storageManager.storeConversation({
-      id: sessionIdStr,
-      messages: [],
-      metadata: {
-        chainId: config.chainId,
-        model: config.model,
-        provider: config.hostAddress,
-        endpoint: config.hostUrl,
-        jobId: config.jobId.toString(),
-        status: 'active',
-        totalTokens: 0,
-        startTime: sessionState.startTime,
-        encryption: sessionState.encryption,
-        config: {
-          depositAmount: config.depositAmount,
-          pricePerToken: config.pricePerToken.toString(),
-          proofInterval: config.proofInterval.toString(),
-          duration: config.duration.toString()
-        }
-      },
-      createdAt: sessionState.startTime,
-      updatedAt: sessionState.startTime
-    });
+    // Persist to storage. The caller funded this session: a failure says so, with the ids (it stays registered).
+    try {
+      if (config.conversationLog !== false) await this.storageManager.storeConversation({
+        id: sessionIdStr,
+        messages: [],
+        metadata: {
+          chainId: config.chainId,
+          model: config.model,
+          provider: config.hostAddress,
+          endpoint: config.hostUrl,
+          jobId: config.jobId.toString(),
+          status: 'active',
+          totalTokens: 0,
+          startTime: sessionState.startTime,
+          encryption: sessionState.encryption,
+          config: {
+            depositAmount: config.depositAmount,
+            pricePerToken: config.pricePerToken.toString(),
+            proofInterval: config.proofInterval.toString(),
+            duration: config.duration.toString()
+          }
+        },
+        createdAt: sessionState.startTime,
+        updatedAt: sessionState.startTime
+      });
+    } catch (cause: any) {
+      throw fundedSetupFailed(sessionId, config.jobId, 'conversation-log', cause);
+    }
 
     console.log(`[SessionManager] Delegated session ${sessionIdStr} registered successfully`);
   }
@@ -914,24 +1227,12 @@ export class SessionManager implements ISessionManager {
       // Add response to session
       session.responses.push(response);
 
-      // Update storage
-      await this.storageManager.appendMessage(
-        sessionId.toString(),
-        {
-          role: 'user',
-          content: prompt,
-          timestamp: Date.now()
-        }
-      );
-
-      await this.storageManager.appendMessage(
-        sessionId.toString(),
-        {
-          role: 'assistant',
-          content: response,
-          timestamp: Date.now()
-        }
-      );
+      // Update storage without waiting: neither a failed nor a slow log write holds back the paid reply (R2, S6);
+      // the conversation lock keeps concurrent appends in order.
+      this.logExchange(sessionId.toString(), session, options, [
+        { role: 'user', content: prompt, timestamp: Date.now() },
+        { role: 'assistant', content: response, timestamp: Date.now() },
+      ]).catch(err => console.warn('[SessionManager] Failed to store the exchange:', err));
 
       // Store in conversation memory if enabled
       const conversationMemory = this.conversationMemories?.get(sessionId.toString());
@@ -970,37 +1271,35 @@ export class SessionManager implements ISessionManager {
     const sessionIdStr = sessionId.toString();
     let session = this.sessions.get(sessionIdStr);
 
-    // If session not in memory, try to load from storage (handles SessionManager recreation)
+    // If session not in memory, try to load from storage (handles SessionManager recreation). A read that fails
+    // throws its own code (STORAGE_UNAVAILABLE, STORAGE_LOAD_ERROR with its verdict): a funded session is never
+    // reported "not found" because its log could not be read (I2 — §21 BB12).
     if (!session && this.storageManager) {
-      try {
-        const conversation = await this.storageManager.loadConversation(sessionIdStr);
-        if (conversation && conversation.metadata) {
-          // Reconstruct minimal session state from storage
-          session = {
-            sessionId: sessionId,
-            jobId: BigInt(conversation.metadata.jobId || sessionId),
-            chainId: conversation.metadata.chainId || 84532,
-            model: conversation.metadata.model || '',
-            provider: conversation.metadata.provider || '',
-            endpoint: conversation.metadata.endpoint,
-            status: (conversation.metadata.status as any) || 'active',
-            prompts: [],
-            responses: [],
-            checkpoints: [],
-            totalTokens: conversation.metadata.totalTokens || 0,
-            startTime: conversation.metadata.startTime || conversation.createdAt,
-            encryption: conversation.metadata.encryption !== false  // NEW (Phase 6.2): Restore encryption preference
-          } as SessionState;
+      const conversation = await this.storageManager.loadConversation(sessionIdStr);
+      if (conversation && conversation.metadata) {
+        // Reconstruct minimal session state from storage
+        session = {
+          sessionId: sessionId,
+          jobId: BigInt(conversation.metadata.jobId || sessionId),
+          chainId: conversation.metadata.chainId || 84532,
+          model: conversation.metadata.model || '',
+          provider: conversation.metadata.provider || '',
+          endpoint: conversation.metadata.endpoint,
+          status: (conversation.metadata.status as any) || 'active',
+          prompts: [],
+          responses: [],
+          checkpoints: [],
+          totalTokens: conversation.metadata.totalTokens || 0,
+          startTime: conversation.metadata.startTime || conversation.createdAt,
+          encryption: conversation.metadata.encryption !== false  // NEW (Phase 6.2): Restore encryption preference
+        } as SessionState;
 
-          // Add to memory for subsequent calls
-          this.sessions.set(sessionIdStr, session);
-        }
-      } catch (err) {
-        console.warn(`Could not load session ${sessionIdStr} from storage:`, err);
+        // Add to memory for subsequent calls
+        this.sessions.set(sessionIdStr, session);
       }
     }
 
-    // If still no session after trying storage, throw error
+    // No log (none was kept, or none was written): the session cannot be resumed here
     if (!session) {
       throw new SDKError('Session not found in memory or storage', 'SESSION_NOT_FOUND');
     }
@@ -1053,6 +1352,7 @@ export class SessionManager implements ISessionManager {
       // Initialize WebSocket client if not already connected
       if (!this.wsClient || !this.wsClient.isConnected()) {
         this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+        this.watchConnectionIdentity(this.wsClient);
         await this.wsClient.connect();
         this.wsSessionId = sessionIdStr;
 
@@ -1087,7 +1387,9 @@ export class SessionManager implements ISessionManager {
           modelId: session.model,
           endpoint: session.endpoint,
           paymentMethod: 'deposit',
-          encryption: true
+          encryption: true,
+          lora: session.lora,          // E.3: a re-init MUST re-send it
+          onServeBackError: session.onServeBackError,
         };
         await this.sendEncryptedInit(this.wsClient, config, sessionId, session.jobId);
       } else {
@@ -1138,7 +1440,10 @@ export class SessionManager implements ISessionManager {
             // Once streaming starts, the sliding window uses 60s between chunks
             let timeout = setTimeout(() => {
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
-            }, 180000); // 180 seconds initial timeout for cold start (model loading)
+              // A lora session's first prompt can queue behind a 300 s stage (E.3), so the
+              // allowance clears the staging budget as well as the cold start. Unchanged at
+              // 180 s for every non-lora session.
+            }, firstResponseTimeoutMs(180000, this.loraSessionActive));
 
             // Guard against double resolution (mobile browser race condition fix)
             let isResolved = false;
@@ -1149,6 +1454,7 @@ export class SessionManager implements ISessionManager {
                 clearTimeout(timeout);
                 if (safetyTimeout) clearTimeout(safetyTimeout);
                 unsubscribe();
+                unregisterWaiter();
                 resolve(value);
               }
             };
@@ -1158,9 +1464,16 @@ export class SessionManager implements ISessionManager {
                 clearTimeout(timeout);
                 if (safetyTimeout) clearTimeout(safetyTimeout);
                 unsubscribe();
+                unregisterWaiter();
                 reject(err);
               }
             };
+
+            // Fail fast if the connection is replaced while this response is
+            // outstanding. Without this the request waits out the full
+            // first-response budget (480 s with a lora attached) on an outcome
+            // already known the moment the socket changed identity.
+            const unregisterWaiter = this.registerEncryptedWaiter(safeReject);
 
             let encChunkCount = 0;
             // v1.13.4: deferred resolution — wait for stream_end after encrypted_response
@@ -1169,6 +1482,11 @@ export class SessionManager implements ISessionManager {
               // Skip processing if already resolved
               if (isResolved) return;
 
+              // Another flow's frames on this shared socket are not ours to
+              // decrypt or to fail on: a foreign encrypted frame decrypted
+              // with this session's key is a guaranteed aead failure landing
+              // in this prompt's promise.
+              if (!this.frameTargetsSession(data, sessionIdStr)) return;
 
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
                 encChunkCount++;
@@ -1224,8 +1542,12 @@ export class SessionManager implements ISessionManager {
                     data.prompt_tokens ?? 0,
                     data.context_window_size ?? 0
                   ));
+                } else if (data.code === 'SESSION_AUTH_DENIED') {
+                  // Node 8.54.0 vault hosts: the connection's init did not pass the vault gate; nothing billed.
+                  // The code must reach the caller unwrapped so it can post the authorisation and retry.
+                  safeReject(new SDKError(data.message || 'session authorisation denied', 'SESSION_AUTH_DENIED', { nodeCode: data.code, sessionId: data.session_id }));
                 } else {
-                  safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
+                  safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR', { nodeCode: data.code }));
                 }
               }
             });
@@ -1261,7 +1583,7 @@ export class SessionManager implements ISessionManager {
             }
 
             // Send encrypted message with web search options, images, and thinking
-            this.sendEncryptedMessage(prompt, {
+            this.sendEncryptedMessage(sessionIdStr, prompt, {
               webSearch: enableWebSearchEncrypted,
               maxSearches: enableWebSearchEncrypted ? (searchConfigEncrypted.maxSearches ?? 5) : 0,
               searchQueries: resolveSearchQueries(enableWebSearchEncrypted, prompt, searchConfigEncrypted.queries, options?.rawQuery)
@@ -1393,24 +1715,10 @@ export class SessionManager implements ISessionManager {
         }
 
         // Update storage (non-blocking to prevent S5 connection issues from freezing UI)
-        this.storageManager.appendMessage(
-          sessionId.toString(),
-          {
-            role: 'user',
-            content: prompt,
-            timestamp: Date.now(),
-            ...(Object.keys(userMsgMeta1).length > 0 ? { metadata: userMsgMeta1 } : {})
-          }
-        ).catch(err => console.warn('[SessionManager] Failed to store user message:', err));
-
-        this.storageManager.appendMessage(
-          sessionId.toString(),
-          {
-            role: 'assistant',
-            content: finalResponse,
-            timestamp: Date.now()
-          }
-        ).catch(err => console.warn('[SessionManager] Failed to store assistant message:', err));
+        this.logExchange(sessionIdStr, session, options, [
+          { role: 'user', content: prompt, timestamp: Date.now(), ...(Object.keys(userMsgMeta1).length > 0 ? { metadata: userMsgMeta1 } : {}) },
+          { role: 'assistant', content: finalResponse, timestamp: Date.now() },
+        ]).catch(err => console.warn('[SessionManager] Failed to store the exchange:', err));
 
         // Store in conversation memory if enabled (non-blocking)
         const conversationMemory = this.conversationMemories?.get(sessionIdStr);
@@ -1453,7 +1761,7 @@ export class SessionManager implements ISessionManager {
           }
 
           // Send encrypted message with web search options, images, and thinking
-          await this.sendEncryptedMessage(prompt, {
+          await this.sendEncryptedMessage(sessionIdStr, prompt, {
             webSearch: enableWebSearchNonStreamEnc,
             maxSearches: enableWebSearchNonStreamEnc ? (searchConfigNonStreamEnc.maxSearches ?? 5) : 0,
             searchQueries: resolveSearchQueries(enableWebSearchNonStreamEnc, prompt, searchConfigNonStreamEnc.queries, options?.rawQuery)
@@ -1467,7 +1775,10 @@ export class SessionManager implements ISessionManager {
             // Once streaming starts, the sliding window uses 60s between chunks
             let timeout = setTimeout(() => {
               reject(new SDKError('Encrypted response timeout', 'RESPONSE_TIMEOUT'));
-            }, 180000); // 180 seconds initial timeout for cold start (model loading)
+              // A lora session's first prompt can queue behind a 300 s stage (E.3), so the
+              // allowance clears the staging budget as well as the cold start. Unchanged at
+              // 180 s for every non-lora session.
+            }, firstResponseTimeoutMs(180000, this.loraSessionActive));
 
             // Guard against double resolution (mobile browser race condition fix)
             let isResolved = false;
@@ -1476,6 +1787,7 @@ export class SessionManager implements ISessionManager {
                 isResolved = true;
                 clearTimeout(timeout);
                 unsubscribe();
+                unregisterWaiterNs();
                 resolve(value);
               }
             };
@@ -1484,9 +1796,14 @@ export class SessionManager implements ISessionManager {
                 isResolved = true;
                 clearTimeout(timeout);
                 unsubscribe();
+                unregisterWaiterNs();
                 reject(err);
               }
             };
+
+            // Fail fast if the connection is replaced while this response is
+            // outstanding — same contract as the streaming path.
+            const unregisterWaiterNs = this.registerEncryptedWaiter(safeReject);
 
             let encNsChunkCount = 0;
             let safetyTimeoutNs: ReturnType<typeof setTimeout> | undefined;
@@ -1494,6 +1811,9 @@ export class SessionManager implements ISessionManager {
             const unsubscribe = this.wsClient!.onMessage(async (data: any) => {
               // Skip processing if already resolved
               if (isResolved) return;
+
+              // Foreign frames are not ours to decrypt or to fail on.
+              if (!this.frameTargetsSession(data, sessionIdStr)) return;
 
               // MUST handle encrypted_chunk messages!
               if (data.type === 'encrypted_chunk' && this.sessionKey) {
@@ -1547,8 +1867,12 @@ export class SessionManager implements ISessionManager {
                     data.prompt_tokens ?? 0,
                     data.context_window_size ?? 0
                   ));
+                } else if (data.code === 'SESSION_AUTH_DENIED') {
+                  // Node 8.54.0 vault hosts: the connection's init did not pass the vault gate; nothing billed.
+                  // The code must reach the caller unwrapped so it can post the authorisation and retry.
+                  safeReject(new SDKError(data.message || 'session authorisation denied', 'SESSION_AUTH_DENIED', { nodeCode: data.code, sessionId: data.session_id }));
                 } else {
-                  safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR'));
+                  safeReject(new SDKError(data.message || 'Request failed', 'REQUEST_ERROR', { nodeCode: data.code }));
                 }
               }
             });
@@ -1624,24 +1948,10 @@ export class SessionManager implements ISessionManager {
         }
 
         // Update storage (non-blocking to prevent S5 connection issues from freezing UI)
-        this.storageManager.appendMessage(
-          sessionId.toString(),
-          {
-            role: 'user',
-            content: prompt,
-            timestamp: Date.now(),
-            ...(Object.keys(userMsgMeta2).length > 0 ? { metadata: userMsgMeta2 } : {})
-          }
-        ).catch(err => console.warn('[SessionManager] Failed to store user message:', err));
-
-        this.storageManager.appendMessage(
-          sessionId.toString(),
-          {
-            role: 'assistant',
-            content: response,
-            timestamp: Date.now()
-          }
-        ).catch(err => console.warn('[SessionManager] Failed to store assistant message:', err));
+        this.logExchange(sessionIdStr, session, options, [
+          { role: 'user', content: prompt, timestamp: Date.now(), ...(Object.keys(userMsgMeta2).length > 0 ? { metadata: userMsgMeta2 } : {}) },
+          { role: 'assistant', content: response, timestamp: Date.now() },
+        ]).catch(err => console.warn('[SessionManager] Failed to store the exchange:', err));
 
         // Store in conversation memory if enabled (non-blocking)
         const conversationMemory = this.conversationMemories?.get(sessionIdStr);
@@ -1656,6 +1966,7 @@ export class SessionManager implements ISessionManager {
       }
     } catch (error: any) {
       if (error instanceof ContextLimitError) throw error;
+      if (error?.code === 'SESSION_AUTH_DENIED') throw error;   // 8.54.0 vault gate: the caller branches on this code
       throw new SDKError(
         `Failed to send prompt via WebSocket: ${error.message}`,
         'WS_PROMPT_ERROR',
@@ -1886,7 +2197,8 @@ export class SessionManager implements ISessionManager {
     const sessionIdStr = sessionId.toString();
     let session = this.sessions.get(sessionIdStr);
 
-    // If session not in memory, try to load from storage (handles page refresh case)
+    // If session not in memory, try to load from storage (handles page refresh case). Completing never depends on
+    // the log (§21 BB12): a read that fails is logged and the completion goes to the contract regardless.
     if (!session && this.storageManager) {
       try {
         const conversation = await this.storageManager.loadConversation(sessionIdStr);
@@ -1943,14 +2255,14 @@ export class SessionManager implements ISessionManager {
         this.wsClient = undefined;
       }
 
-      // Update storage
-      const conversation = await this.storageManager.loadConversation(sessionIdStr);
-      if (conversation) {
-        conversation.metadata['status'] = 'completed';
-        conversation.metadata['totalTokens'] = totalTokens;
-        conversation.metadata['endTime'] = sessionAfterTx?.endTime || Date.now();
-        conversation.updatedAt = Date.now();
-        await this.storageManager.saveConversation(conversation);
+      // Update storage (one locked load-patch-save, so an append still in flight is not overwritten).
+      // Non-blocking like endSession's: the session has settled on-chain; the log must not turn that into a throw.
+      if (sessionAfterTx?.conversationLog !== false) {
+        this.storageManager.updateConversationMetadata(sessionIdStr, {
+          status: 'completed',
+          totalTokens,
+          endTime: sessionAfterTx?.endTime || Date.now(),
+        }).catch(err => console.warn('[SessionManager] Failed to persist session completion:', err));
       }
 
       // Close WebSocket if open
@@ -2028,14 +2340,10 @@ export class SessionManager implements ISessionManager {
       }
 
       // Update storage to mark session as ended (non-blocking for fast session teardown)
-      this.storageManager.loadConversation(sessionIdStr).then(conversation => {
-        if (conversation) {
-          conversation.metadata['status'] = 'ended';
-          conversation.metadata['endTime'] = Date.now();
-          conversation.updatedAt = Date.now();
-          return this.storageManager.saveConversation(conversation);
-        }
-      }).catch(err => console.warn('[SessionManager] Failed to persist session end status:', err));
+      if (session?.conversationLog !== false) {
+        this.storageManager.updateConversationMetadata(sessionIdStr, { status: 'ended', endTime: Date.now() })
+          .catch(err => console.warn('[SessionManager] Failed to persist session end status:', err));
+      }
 
     } catch (error: any) {
       throw new SDKError(
@@ -2050,7 +2358,24 @@ export class SessionManager implements ISessionManager {
    * Send encrypted session initialization (Phase 4.1)
    * @private
    */
-  private async sendEncryptedInit(
+  private sendEncryptedInit(
+    ws: WebSocketClient,
+    config: ExtendedSessionConfig,
+    sessionId: bigint,
+    jobId: bigint
+  ): Promise<void> {
+    // Serialize handshakes: two concurrent inits interleaving their
+    // mint->send->ack sequences is how one flow's key ends up attributed to
+    // another flow's ack. The chain never rejects (each link swallows), while
+    // the caller still sees its own link's outcome.
+    const run = this.initChain.then(() =>
+      this.sendEncryptedInitInner(ws, config, sessionId, jobId)
+    );
+    this.initChain = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  private async sendEncryptedInitInner(
     ws: WebSocketClient,
     config: ExtendedSessionConfig,
     sessionId: bigint,
@@ -2078,7 +2403,12 @@ export class SessionManager implements ISessionManager {
     this.sessionKey = crypto.getRandomValues(new Uint8Array(32));
     const sessionKeyHex = bytesToHex(this.sessionKey);
     this.messageIndex = 0;
+    // Authoritative per-session entry: frames stamped with this session id are
+    // encrypted/decrypted with THIS key, whatever later inits do to the legacy
+    // shared fields.
+    this.sessionCrypto.set(sessionId.toString(), { key: this.sessionKey, messageIndex: 0 });
     console.warn(`[SDK:encryptedInit:4] Generated session key, messageIndex reset to 0`);
+    console.warn(`[SDK:wire] mint session=${sessionId} fp=${this.wireFp(this.sessionKey)} gen=${ws.getConnectionGeneration?.() ?? '-'}`);
 
     // 2. Get host public key (uses cache, metadata, or signature recovery)
     console.warn(`[SDK:encryptedInit:5] Getting host public key for ${config.host}...`);
@@ -2099,6 +2429,26 @@ export class SessionManager implements ISessionManager {
       // Phase 8.1: Include recovery public key for checkpoint encryption
       recoveryPublicKey: recoveryPubKey
     };
+
+    // Training M0 serve-back (E.2). Built field-by-field so no serialiser can touch the key
+    // strings: a camelCase pass turns `manifestCID` into `manifestCid`, which fails the WHOLE
+    // init parse as DECRYPTION_FAILED — deliberately, since silently dropping the field would
+    // serve base-model output on a session the customer is paying to run their fine-tune.
+    // Record the adapter on the SESSION, not just in this call's config. Every other init site
+    // reconstructs its config from SessionState, so this is the one place that makes a re-init
+    // able to re-send it. Found by the UI integrator: the field was reachable only by calling
+    // this private method directly, which is exactly what the tests were doing.
+    const sessionState = this.sessions.get(String(sessionId));
+    if (sessionState && config.lora) sessionState.lora = config.lora;
+    if (sessionState && config.onServeBackError) sessionState.onServeBackError = config.onServeBackError;
+
+    this.serveBackError = null;
+    this.serveBackUnsubscribe?.();          // a re-init REPLACES the listener, never adds one
+    this.serveBackUnsubscribe = undefined;
+    this.loraSessionActive = config.lora !== undefined;
+    if (config.lora) {
+      initPayload.lora = buildLoraSessionField(config.lora);
+    }
 
     // NEW (Sub-phase 5.1.3): Include vector database info if provided
     if (config.vectorDatabase) {
@@ -2134,10 +2484,25 @@ export class SessionManager implements ISessionManager {
 
       const unsubscribe = ws.onMessage((data: any) => {
         console.warn(`[SDK:encryptedInit:10] Received message type=${data.type} while waiting for ack`);
+        // Acks and errors carry session_id (node API.md:2059). One stamped for
+        // a different session belongs to another flow on this socket — treating
+        // it as ours is how an init "completes" without the node ever having
+        // processed it.
+        if ((data.type === 'session_init_ack' || data.type === 'error') &&
+            !this.frameTargetsSession(data, sessionId.toString())) {
+          console.warn(`[SDK:wire] ack session=${data.session_id} ignored (waiting=${sessionId})`);
+          return;
+        }
         if (data.type === 'session_init_ack') {
           console.warn(`[SDK:encryptedInit:11] Got session_init_ack - init complete`);
           clearTimeout(timeout);
           unsubscribe();
+          // Bind the key's lifetime to the connection that carried the init. The
+          // node registered it against this connection; a later one has no
+          // session for it.
+          if (ws === this.wsClient) {
+            this.sessionKeyGeneration = ws.getConnectionGeneration();
+          }
           resolve();
         } else if (data.type === 'error') {
           console.error(`[SDK:encryptedInit:11b] Got error: ${data.message}`);
@@ -2158,6 +2523,20 @@ export class SessionManager implements ISessionManager {
       });
     });
 
+    // E.3: THE ACK MEANS ACCEPTED, NOT READY. Staging runs AFTER the ack — it has to, since
+    // an adapter can be hundreds of MB and blocking the handshake on the fetch overruns the
+    // 30 s init timeout above. So `LORA_STAGING_FAILED` arrives post-ack and UNCORRELATED,
+    // by which time the ack handler has already unsubscribed and the frame lands on nobody.
+    // Without this listener the failure is SILENT and the session answers from the base
+    // model. Installed only for lora sessions, so non-lora behaviour is unchanged.
+    if (config.lora) {
+      this.serveBackUnsubscribe = ws.onMessage((data: any) => {
+        const error = toServeBackError(data);
+        if (!error) return;
+        this.serveBackError = error;
+        config.onServeBackError?.(error);
+      });
+    }
   }
 
   /**
@@ -2203,6 +2582,7 @@ export class SessionManager implements ISessionManager {
    * @private
    */
   private async sendEncryptedMessage(
+    sessionId: string,
     message: string,
     webSearchOptions?: {
       webSearch: boolean;
@@ -2240,13 +2620,17 @@ export class SessionManager implements ISessionManager {
       );
     }
 
-    // Get current session for session_id
-    const sessions = Array.from(this.sessions.values());
-    const currentSession = sessions.find(s => s.status === 'active');
+    // The frame's target is the session this call was made FOR — never derived
+    // by scanning for "the" active session. With two registered active sessions
+    // (e.g. a stalled setup that completed on-chain after queued wallet
+    // approvals and was abandoned), a first-active scan stamps the zombie's id
+    // on a frame encrypted under the real session's key, and the node rightly
+    // rejects it: that connection's key is registered for the other session.
+    const currentSession = this.sessions.get(sessionId);
     if (!currentSession) {
       throw new SDKError(
-        'No active session found for encrypted messaging',
-        'NO_ACTIVE_SESSION'
+        `Session ${sessionId} not found for encrypted messaging`,
+        'SESSION_NOT_FOUND'
       );
     }
 
@@ -2275,18 +2659,26 @@ export class SessionManager implements ISessionManager {
         structuredPayload.search_queries = webSearchOptions.searchQueries;
       }
 
-      // Encrypt JSON payload with session key
+      // Encrypt with the key of the session this frame is STAMPED for, and
+      // advance that session's own replay counter. Using the legacy shared
+      // fields here meant the stamp and the key could name different sessions
+      // whenever another flow inited in between.
+      const outSessionId = sessionId;
+      const scoped = this.sessionCrypto.get(outSessionId);
+      const encryptKey = scoped?.key ?? this.sessionKey;
+      const outIndex = scoped ? scoped.messageIndex++ : this.messageIndex++;
+      console.warn(`[SDK:wire] encrypt session=${outSessionId} idx=${outIndex} fp=${this.wireFp(encryptKey)} src=${scoped ? 'scoped' : 'legacy'}`);
       const payload = this.encryptionManager.encryptMessage(
-        this.sessionKey,
+        encryptKey,
         JSON.stringify(structuredPayload),
-        this.messageIndex++
+        outIndex
       );
 
       // Wrap payload with message structure (per docs lines 498-508)
       // Use sendWithoutResponse to avoid conflicting handlers (v1.3.28 fix)
       const messageToSend: any = {
         type: 'encrypted_message',
-        session_id: currentSession.sessionId.toString(),
+        session_id: outSessionId,
         id: `${Date.now()}-${Math.random().toString(36).substring(7)}`,
         payload: payload
       };
@@ -2337,7 +2729,7 @@ export class SessionManager implements ISessionManager {
    * @private
    */
   private async decryptIncomingMessage(encryptedMessage: any): Promise<string> {
-    if (!this.sessionKey) {
+    if (!this.sessionKey && this.sessionCrypto.size === 0) {
       throw new SDKError(
         'Session key not available for decryption',
         'SESSION_KEY_NOT_AVAILABLE'
@@ -2351,6 +2743,21 @@ export class SessionManager implements ISessionManager {
       );
     }
 
+    // The frame names its session (node API.md:2087); use THAT session's key.
+    // The legacy shared field holds whichever session inited most recently,
+    // which is not necessarily the session this frame belongs to.
+    const frameSessionId = encryptedMessage.session_id !== undefined && encryptedMessage.session_id !== null
+      ? String(encryptedMessage.session_id)
+      : undefined;
+    const scoped = frameSessionId ? this.sessionCrypto.get(frameSessionId) : undefined;
+    const decryptKey = scoped?.key ?? this.sessionKey;
+    if (!decryptKey) {
+      throw new SDKError(
+        `No session key for session ${frameSessionId ?? '(unstamped frame)'}`,
+        'SESSION_KEY_NOT_AVAILABLE'
+      );
+    }
+
     try {
       // Extract payload from message (per docs lines 514-527 for encrypted_chunk)
       // Message structure: { type, session_id, id, payload: { ciphertextHex, nonceHex, aadHex } }
@@ -2358,12 +2765,18 @@ export class SessionManager implements ISessionManager {
 
       // Decrypt message with session key
       const plaintext = this.encryptionManager.decryptMessage(
-        this.sessionKey,
+        decryptKey,
         payload
       );
 
+      const okFp = this.wireFp(decryptKey);
+      if (!this.wireOkLogged.has(okFp)) {
+        this.wireOkLogged.add(okFp);
+        console.warn(`[SDK:wire] decrypt frame=${encryptedMessage.type} session=${frameSessionId ?? '-'} fp=${okFp} src=${scoped ? 'scoped' : 'legacy'} -> ok (further ok-decrypts under this key not logged)`);
+      }
       return plaintext;
     } catch (error: any) {
+      console.warn(`[SDK:wire] decrypt frame=${encryptedMessage.type} session=${frameSessionId ?? '-'} fp=${this.wireFp(decryptKey)} src=${scoped ? 'scoped' : 'legacy'} -> FAIL ${error.message}`);
       console.error('[SessionManager] Decryption failed:', error.message);
       throw new SDKError(
         `Failed to decrypt message: ${error.message}`,
@@ -2500,6 +2913,7 @@ export class SessionManager implements ISessionManager {
     // Reconnect WebSocket if needed
     if (!this.wsClient?.isConnected()) {
       this.wsClient = new WebSocketClient(`wss://${session.provider}/ws`);
+      this.watchConnectionIdentity(this.wsClient);
       await this.wsClient.connect();
     }
   }
@@ -2655,24 +3069,11 @@ export class SessionManager implements ISessionManager {
       // Add complete response to session
       session.responses.push(fullResponse);
 
-      // Update storage
-      await this.storageManager.appendMessage(
-        sessionId.toString(),
-        {
-          role: 'user',
-          content: prompt,
-          timestamp: Date.now()
-        }
-      );
-
-      await this.storageManager.appendMessage(
-        sessionId.toString(),
-        {
-          role: 'assistant',
-          content: fullResponse,
-          timestamp: Date.now()
-        }
-      );
+      // Update storage without waiting (R2, S6)
+      this.logExchange(sessionId.toString(), session, options, [
+        { role: 'user', content: prompt, timestamp: Date.now() },
+        { role: 'assistant', content: fullResponse, timestamp: Date.now() },
+      ]).catch(err => console.warn('[SessionManager] Failed to store the exchange:', err));
     } catch (error: any) {
       throw new SDKError(
         `Failed to stream response: ${error.message}`,
@@ -2848,6 +3249,7 @@ export class SessionManager implements ISessionManager {
 
     if (!this.wsClient || !this.wsClient.isConnected()) {
       this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+      this.watchConnectionIdentity(this.wsClient);
       await this.wsClient.connect();
       this.wsSessionId = sessionId;
 
@@ -2871,7 +3273,9 @@ export class SessionManager implements ISessionManager {
         modelId: session.model,
         endpoint: session.endpoint,
         paymentMethod: 'deposit',
-        encryption: true
+        encryption: true,
+        lora: session.lora,          // E.3: a re-init MUST re-send it, or the node keeps refusing
+        onServeBackError: session.onServeBackError,
       };
       await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
     } else {
@@ -3034,7 +3438,9 @@ export class SessionManager implements ISessionManager {
         modelId: session.model,
         endpoint: session.endpoint,
         paymentMethod: 'deposit',
-        encryption: true
+        encryption: true,
+        lora: session.lora,          // E.3: a re-init MUST re-send it, or the node keeps refusing
+        onServeBackError: session.onServeBackError,
       };
       await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
     } else {
@@ -3857,6 +4263,7 @@ export class SessionManager implements ISessionManager {
       console.warn(`[SDK:generateImage:9] Creating fresh WebSocket to ${wsUrl}`);
       try {
         this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+        this.watchConnectionIdentity(this.wsClient);
         console.warn(`[SDK:generateImage:10] WebSocket created, calling connect()...`);
         await this.wsClient.connect();
         console.warn(`[SDK:generateImage:11] WebSocket connected OK`);
@@ -3877,7 +4284,9 @@ export class SessionManager implements ISessionManager {
       modelId: session.model,
       endpoint: session.endpoint,
       paymentMethod: 'deposit',
-      encryption: true
+      encryption: true,
+      lora: session.lora,            // E.3: a re-init MUST re-send it
+      onServeBackError: session.onServeBackError,
     };
     try {
       await this.sendEncryptedInit(this.wsClient, initConfig, session.sessionId, session.jobId);
@@ -3940,7 +4349,26 @@ export class SessionManager implements ISessionManager {
   }
 
   /** Submit an LTX video job via encrypted WebSocket (mirrors submitTranscode; Constraint 7). */
-  async submitLtx(sessionId: string, job: LtxJob, options?: LtxSubmitOptions): Promise<LtxHandle> {
+  /**
+   * Acquire an encrypted transport for a session: reuse the shared socket when it is already
+   * this session's, otherwise stand up a dedicated one and run the encrypted init on it.
+   *
+   * Extracted from `submitLtx` so training rides the SAME mechanism rather than a parallel
+   * copy of it. A second inline copy would be ~50 lines that must not drift, and the parts
+   * most worth not drifting — the no-fallback endpoint guard and the save/restore of the
+   * shared `sessionKey`/`messageIndex` around a dedicated init — are exactly the parts a
+   * copy gets subtly wrong.
+   */
+  private async acquireSessionTransport(sessionId: string): Promise<{
+    wsClient: WebSocketClient;
+    sessionKey: Uint8Array;
+    messageIndexRef: { value: number };
+    ownsWs: boolean;
+    encryptionAdapter: {
+      encryptMessage(key: Uint8Array, plaintext: string, index: number): any;
+      decryptMessage(key: Uint8Array, payload: any): string;
+    };
+  }> {
     const session = this.sessions.get(sessionId);
     if (!session) throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
     if (session.status !== 'active') throw new SDKError('Session is not active', 'SESSION_NOT_ACTIVE');
@@ -3957,34 +4385,53 @@ export class SessionManager implements ISessionManager {
     let localSessionKey: Uint8Array | undefined;
     let localMessageIndex: number;
 
-    if (this.wsClient?.isConnected() && this.wsSessionId === sessionId && this.sessionKey) {
-      wsClient = this.wsClient;
+    // Identity, not liveness: a silent reconnect leaves isConnected() true on a
+    // connection the node never received an init for, and reusing the key here
+    // would encrypt under a key that connection has no record of.
+    if (!this.needsSessionInit() && this.wsSessionId === sessionId && this.sessionKey) {
+      wsClient = this.wsClient!;
       localSessionKey = this.sessionKey;
       localMessageIndex = this.messageIndex;
     } else {
-      wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
-      await wsClient.connect();
+      // A per-job socket never silently reconnects: a reconnected socket has no session init and the
+      // frames are not re-delivered. And a FAILED init must leave nothing behind — no open socket with a
+      // 30 s heartbeat, no background reconnect loop, and the shared session's key untouched.
+      wsClient = new WebSocketClient(wsUrl, { reconnect: false });
       const prevSessionKey = this.sessionKey;
       const prevMessageIndex = this.messageIndex;
-      this.sessionKey = undefined;
-      this.messageIndex = 0;
-      await this.sendEncryptedInit(wsClient, {
-        chainId: session.chainId, host: session.provider, modelId: session.model,
-        endpoint, paymentMethod: 'deposit', encryption: true,
-      } as ExtendedSessionConfig, session.sessionId, session.jobId);
-      localSessionKey = this.sessionKey;
-      localMessageIndex = this.messageIndex;
-      this.sessionKey = prevSessionKey;
-      this.messageIndex = prevMessageIndex;
+      try {
+        await wsClient.connect();
+        this.sessionKey = undefined;
+        this.messageIndex = 0;
+        await this.sendEncryptedInit(wsClient, {
+          chainId: session.chainId, host: session.provider, modelId: session.model,
+          endpoint, encryption: true,
+          lora: session.lora,            // E.3: a re-init MUST re-send it
+          onServeBackError: session.onServeBackError,
+        // Deliberately partial: sendEncryptedInit reads only this subset, and the required
+        // pricing/proof fields are meaningless for a re-init on an already-funded session. The
+        // cast was always hiding that; the double cast only stops TS's overlap heuristic from
+        // objecting now that there are two more properties to weigh.
+        } as unknown as ExtendedSessionConfig, session.sessionId, session.jobId);
+        localSessionKey = this.sessionKey;
+        localMessageIndex = this.messageIndex;
+      } catch (err) {
+        await wsClient.disconnect().catch(() => {});   // cleanup only — the init failure is what surfaces
+        throw err;
+      } finally {
+        this.sessionKey = prevSessionKey;
+        this.messageIndex = prevMessageIndex;
+      }
     }
 
     if (!localSessionKey) throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
 
-    const messageIndexRef = { value: localMessageIndex };
-    const ownsWs = wsClient !== this.wsClient; // dedicated per-clip socket (created above), not the shared session WS
-    const handle = await submitLtxWs({
+    return {
       wsClient,
-      encryptionManager: {
+      sessionKey: localSessionKey,
+      messageIndexRef: { value: localMessageIndex },
+      ownsWs: wsClient !== this.wsClient, // dedicated per-job socket, not the shared session WS
+      encryptionAdapter: {
         encryptMessage: (key: Uint8Array, plaintext: string, index: number) =>
           this.encryptionManager!.encryptMessage(key, plaintext, index),
         decryptMessage: (key: Uint8Array, payload: any) => {
@@ -3992,7 +4439,42 @@ export class SessionManager implements ISessionManager {
           return this.encryptionManager!.decryptMessage(key, p);
         },
       },
-      sessionId, sessionKey: localSessionKey, messageIndex: messageIndexRef,
+    };
+  }
+
+  /**
+   * Submit a training job over this session's encrypted transport (§ WebSocket protocol).
+   * Rides `acquireSessionTransport`, so LTX and training cannot drift apart on socket reuse,
+   * the endpoint guard, or the shared-key save/restore.
+   *
+   * The dedicated socket is closed once the run settles either way — but NOT before: every
+   * capability pointer arrives on THIS socket, delivered once, with no reconnect re-delivery
+   * in M0 (CK-6). Dropping it early loses the user's artifact, not just a frame.
+   */
+  async submitTraining(
+    sessionId: string, job: TrainingJob, options?: Partial<TrainingWsOptions>,
+  ): Promise<TrainingHandle> {
+    const { wsClient, sessionKey, messageIndexRef, ownsWs, encryptionAdapter } =
+      await this.acquireSessionTransport(sessionId);
+    const handle = await submitTrainingWs({
+      wsClient, encryptionManager: encryptionAdapter,
+      sessionId, sessionKey, messageIndex: messageIndexRef, job, ...options,
+    } as TrainingWsOptions);
+    if (ownsWs) {
+      handle.result = handle.result.finally(() => { void wsClient.disconnect().catch(() => {}); });
+      // `.finally` returns a NEW promise; training-ws marked only the original handled. A run that
+      // fails before the consumer attaches would otherwise be an unhandled rejection (process exit).
+      handle.result.catch(() => {});
+    }
+    return handle;
+  }
+
+  async submitLtx(sessionId: string, job: LtxJob, options?: LtxSubmitOptions): Promise<LtxHandle> {
+    const { wsClient, sessionKey, messageIndexRef, ownsWs, encryptionAdapter } =
+      await this.acquireSessionTransport(sessionId);
+    const handle = await submitLtxWs({
+      wsClient, encryptionManager: encryptionAdapter,
+      sessionId, sessionKey, messageIndex: messageIndexRef,
       job, requestId: options?.requestId, onProgress: options?.onProgress, timeoutMs: options?.timeoutMs,
     });
     // Echo the conditioning seed so the granular submitLtx result is self-contained (matches generate()).
@@ -4003,6 +4485,10 @@ export class SessionManager implements ISessionManager {
       // payout to tab-close or the 1h timeout. Closing here settles it within ~seconds (+30s window).
       handle.result = handle.result.finally(() => { void wsClient.disconnect().catch(() => {}); });
     }
+    // Both re-wraps above are NEW promises (the `.then` is unconditional, so this must sit OUTSIDE the
+    // ownsWs guard); ltx-ws never marks its original handled. Without this a clip rejected before the
+    // consumer attaches is an unhandled rejection on the shared-socket path too.
+    handle.result.catch(() => {});
     return handle;
   }
 
@@ -4028,8 +4514,11 @@ export class SessionManager implements ISessionManager {
     let localSessionKey: Uint8Array | undefined;
     let localMessageIndex: number;
 
-    if (this.wsClient?.isConnected() && this.wsSessionId === sessionId && this.sessionKey) {
-      wsClient = this.wsClient;
+    // Identity, not liveness: a silent reconnect leaves isConnected() true on a
+    // connection the node never received an init for, and reusing the key here
+    // would encrypt under a key that connection has no record of.
+    if (!this.needsSessionInit() && this.wsSessionId === sessionId && this.sessionKey) {
+      wsClient = this.wsClient!;
       localSessionKey = this.sessionKey;
       localMessageIndex = this.messageIndex;
     } else {
@@ -4045,7 +4534,13 @@ export class SessionManager implements ISessionManager {
       await this.sendEncryptedInit(wsClient, {
         chainId: session.chainId, host: session.provider, modelId: session.model,
         endpoint, paymentMethod: 'deposit', encryption: true,
-      } as ExtendedSessionConfig, session.sessionId, session.jobId);
+        lora: session.lora,            // E.3: a re-init MUST re-send it
+        onServeBackError: session.onServeBackError,
+      // Deliberately partial: sendEncryptedInit reads only this subset, and the required
+      // pricing/proof fields are meaningless for a re-init on an already-funded session. The
+      // cast was always hiding that; the double cast only stops TS's overlap heuristic from
+      // objecting now that there are two more properties to weigh.
+      } as unknown as ExtendedSessionConfig, session.sessionId, session.jobId);
 
       localSessionKey = this.sessionKey;
       localMessageIndex = this.messageIndex;

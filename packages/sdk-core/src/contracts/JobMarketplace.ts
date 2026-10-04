@@ -1,7 +1,9 @@
 // Copyright (c) 2025 Fabstir
 // SPDX-License-Identifier: BUSL-1.1
 
-import { ethers, Signer, Contract } from 'ethers';
+import { ethers, Signer, Contract, Provider, dataSlice, toBigInt, getAddress, getBytes } from 'ethers';
+import { SDKError } from '../errors';
+import { awaitFundingReceipt, sendFunding, sessionIdUnresolved } from './funding-receipt';
 import { ChainRegistry } from '../config/ChainRegistry';
 import { ChainId } from '../types/chain.types';
 import {
@@ -16,6 +18,14 @@ import JobMarketplaceABI from './abis/JobMarketplaceWithModelsUpgradeable-CLIENT
 export const MIN_PROOF_TIMEOUT = 60;       // 1 minute minimum
 export const MAX_PROOF_TIMEOUT = 3600;     // 1 hour maximum
 export const DEFAULT_PROOF_TIMEOUT = 300;  // 5 minutes (recommended)
+
+// The ...ForModel entry points emit SessionJobCreatedForModel (R11); either carries the job id first.
+const DIRECT_PAYMENT_EVENTS = ['SessionJobCreated', 'SessionJobCreatedForModel'];
+
+/** Each creation event's argument naming who created the session — its `msg.sender` (§35 PP7). */
+const CREATOR: Record<string, string> = {
+  SessionJobCreated: 'depositor', SessionJobCreatedForModel: 'depositor', SessionCreatedByDepositor: 'depositor', SessionCreatedByDelegate: 'delegate',
+};
 
 export interface SessionCreationParams {
   host: string;
@@ -40,12 +50,137 @@ export interface DirectSessionParams {
   modelId: string;  // Required bytes32 model ID — Phase 18: modelless sessions removed
 }
 
+/**
+ * Map an ethers Result of `sessionJobs(jobId)` to a SessionJob, by FIELD NAME against the
+ * verified 18-output ABI (JobMarketplaceWithModelsUpgradeable-CLIENT-ABI.json), never by
+ * index. History: the old index mapping assumed a phantom `requester` at [2] and shifted
+ * every later field (host ← paymentToken, deposit ← pricePerToken, …) — found from both
+ * sides of the seam 2026-08-23 and pinned here by a LIVE byte fixture
+ * (tests/contracts/fixtures/sessionjobs_931.hex). Money fields are raw base-unit strings;
+ * proofInterval is a TOKEN count, proofTimeoutWindow is SECONDS — easy to invert, don't.
+ */
+export function mapSessionJob(r: any): SessionJob {
+  return {
+    id: Number(r.id),
+    depositor: r.depositor,
+    requester: r.depositor, // deprecated alias — the deployed struct has no requester
+    host: r.host,
+    paymentToken: r.paymentToken,
+    deposit: r.deposit.toString(),
+    pricePerToken: Number(r.pricePerToken),
+    tokensUsed: Number(r.tokensUsed),
+    maxDuration: Number(r.maxDuration),
+    startTime: Number(r.startTime),
+    lastProofTime: Number(r.lastProofTime),
+    proofInterval: Number(r.proofInterval),
+    proofTimeoutWindow: Number(r.proofTimeoutWindow),
+    status: Number(r.status),
+    withdrawnByHost: r.withdrawnByHost.toString(),
+    refundedToUser: r.refundedToUser.toString(),
+    conversationCID: r.conversationCID,
+  };
+}
+
+/**
+ * The STATIC head of the deployed `sessionJobs` struct, decoded from RAW words (A.3 pre-flight
+ * read for adopted sessions). Every number is a bigint — no `Number()` narrowing on the money
+ * path — and the decode FAILS CLOSED on any layout drift. See {@link decodeSessionJobWords}.
+ */
+export interface OnChainSessionJob {
+  id: bigint;
+  depositor: string;
+  host: string;
+  paymentToken: string;
+  /** Base units of `paymentToken`. */
+  deposit: bigint;
+  pricePerToken: bigint;
+  tokensUsed: bigint;
+  /** SECONDS. */
+  maxDuration: bigint;
+  startTime: bigint;
+  lastProofTime: bigint;
+  /** TOKENS — not seconds. */
+  proofInterval: bigint;
+  /** SECONDS — not tokens. */
+  proofTimeoutWindow: bigint;
+  /** 0 = Active, 1 = Completed, 2 = TimedOut. */
+  status: number;
+}
+
+/** The output names the wrapper's Interface decodes `sessionJobs` with — read off the ABI PRODUCTION
+ *  imports, so a test can pin them (a swap to the 16-output sibling shifts every field from `host`). */
+export const SESSION_JOBS_OUTPUT_NAMES: string[] = new ethers.Interface(JobMarketplaceABI)
+  .getFunction('sessionJobs')!.outputs.map((o) => o.name);
+
+/** Head slots in the DEPLOYED `sessionJobs` layout (pinned by the live 931 byte fixture). */
+export const SESSION_JOB_HEAD_WORDS = 18;
+const SESSION_JOB_HEAD_BYTES = SESSION_JOB_HEAD_WORDS * 32;      // 576
+const FIRST_TAIL_OFFSET = BigInt(SESSION_JOB_HEAD_BYTES);          // slot 15 must hold exactly this
+const SECOND_TAIL_MIN_OFFSET = FIRST_TAIL_OFFSET + 32n;            // after the first tail's length word
+const ZERO_HIGH_BYTES = '0x' + '00'.repeat(12);                    // an address slot's top 12 bytes
+
+/**
+ * Decode the static head of a raw `sessionJobs(jobId)` return against the deployed 18-slot
+ * layout, failing CLOSED.
+ *
+ * Why not the ABI decode: this repo carries FOUR JobMarketplace ABIs whose `sessionJobs`
+ * output has 15, 16, 17 and 18 fields (the 16-field one carries a phantom `requester`). A named
+ * decode is only as right as the ABI file it was handed, and the 17-field one (no
+ * `proofTimeoutWindow`) decodes these same bytes with every
+ * field from `status` onward shifted — silently, for the static fields. The design doc calls
+ * that the 17-field decode trap and requires A.3's read to fail closed. Three layout pins do
+ * that here, independent of any ABI file:
+ *  · slot 15 is the offset of the FIRST dynamic field (`conversationCID`) and must equal the
+ *    head size, 18 × 32 = 576 — in a 17-slot layout that slot holds `lastProofHash`;
+ *  · slot 17 (`lastProofCID` offset) must land after the first tail and inside the data;
+ *  · `status` must be one of the three enum values — a shifted slot is a token count.
+ * Word layout: w0 id · w1 depositor · w2 host · w3 paymentToken · w4 deposit · w5 pricePerToken
+ * · w6 tokensUsed · w7 maxDuration · w8 startTime · w9 lastProofTime · w10 proofInterval(TOKENS)
+ * · w11 proofTimeoutWindow(SECONDS) · w12 status · w13 withdrawnByHost · w14 refundedToUser ·
+ * w15 conversationCID(offset) · w16 lastProofHash · w17 lastProofCID(offset).
+ */
+export function decodeSessionJobWords(data: string): OnChainSessionJob {
+  const bytes = getBytes(data);          // parse the hex ONCE; every slice below copies 32 bytes, not the whole return
+  const len = bytes.length;
+  const bail = (why: string): never => {
+    throw new SDKError(`sessionJobs ${why}`, 'SESSION_JOB_LAYOUT_MISMATCH');
+  };
+  // Two dynamic tails follow the head, each at least a length word.
+  if (len < SESSION_JOB_HEAD_BYTES + 64) {
+    bail(`return is ${len} bytes; the deployed 18-slot layout needs at least ${SESSION_JOB_HEAD_BYTES + 64}`);
+  }
+  const word = (i: number): bigint => toBigInt(dataSlice(bytes, i * 32, (i + 1) * 32));
+  const addr = (i: number): string => {
+    if (dataSlice(bytes, i * 32, i * 32 + 12) !== ZERO_HIGH_BYTES) bail(`slot ${i} is not an address — layout mismatch`);
+    return getAddress(dataSlice(bytes, i * 32 + 12, (i + 1) * 32));
+  };
+  const firstTail = word(15);
+  if (firstTail !== FIRST_TAIL_OFFSET) {
+    bail(`return does not match the deployed 18-slot layout (first dynamic offset ${firstTail} != ${SESSION_JOB_HEAD_BYTES})`);
+  }
+  const secondTail = word(17);
+  if (secondTail < SECOND_TAIL_MIN_OFFSET || secondTail >= BigInt(len)) {
+    bail(`return does not match the deployed 18-slot layout (second dynamic offset ${secondTail} out of range)`);
+  }
+  const status = word(12);
+  if (status > 2n) bail(`status slot holds ${status}; expected Active/Completed/TimedOut (0/1/2) — layout mismatch`);
+  return {
+    id: word(0), depositor: addr(1), host: addr(2), paymentToken: addr(3),
+    deposit: word(4), pricePerToken: word(5), tokensUsed: word(6),
+    maxDuration: word(7), startTime: word(8), lastProofTime: word(9),
+    proofInterval: word(10), proofTimeoutWindow: word(11), status: Number(status),
+  };
+}
+
 export interface SessionJob {
   id: number;
   depositor: string;
+  /** @deprecated The deployed struct has NO requester field — this is an alias of `depositor`
+   *  kept for compile compatibility. The old mapping put `host` here (the 2026-08-23 shift bug). */
   requester: string;
   host: string;
   paymentToken: string;
+  /** Token BASE UNITS as a decimal string (wei for native, 6-dp for USDC) — never pre-formatted. */
   deposit: string;
   pricePerToken: number;
   tokensUsed: number;
@@ -102,10 +237,12 @@ function validateProofTimeoutWindow(timeout?: number): number {
 export class JobMarketplaceWrapper {
   private readonly chainId: number;
   private readonly signer: Signer;
+  /** Optional dedicated read provider (rpcUrl). The two session reads prefer it over the wallet. */
+  private readonly readProvider?: Provider;
   private readonly contract: Contract;
   private readonly contractAddress: string;
 
-  constructor(chainId: number, signer: Signer) {
+  constructor(chainId: number, signer: Signer, readProvider?: Provider) {
     if (!ChainRegistry.isChainSupported(chainId)) {
       throw new UnsupportedChainError(chainId, ChainRegistry.getSupportedChains());
     }
@@ -113,6 +250,7 @@ export class JobMarketplaceWrapper {
 
     this.chainId = chainId;
     this.signer = signer;
+    this.readProvider = readProvider;
     this.contractAddress = chain.contracts.jobMarketplace;
     this.contract = new Contract(this.contractAddress, JobMarketplaceABI, signer);
   }
@@ -279,7 +417,7 @@ export class JobMarketplaceWrapper {
       proofTimeoutWindow: proofTimeoutBigInt.toString(),
     });
 
-    const tx = await this.contract.createSessionFromDepositForModel(
+    return this.fund(() => this.contract.createSessionFromDepositForModel(
       params.modelId,
       params.host,
       params.paymentToken,
@@ -288,12 +426,7 @@ export class JobMarketplaceWrapper {
       durationBigInt,        // uint256 — explicit bigint
       proofIntervalBigInt,   // uint256 — explicit bigint
       proofTimeoutBigInt     // uint256 — explicit bigint
-    );
-    const receipt = await tx.wait();
-    const event = receipt.logs?.find((log: any) =>
-      log.fragment?.name === 'SessionJobCreatedForModel' || log.fragment?.name === 'SessionCreatedByDepositor'
-    );
-    return event ? Number(event.args?.sessionId || event.args[0]) : 0;
+    ), ['SessionJobCreatedForModel', 'SessionCreatedByDepositor']);
   }
 
   async createSessionJob(params: DirectSessionParams & { paymentToken?: string }): Promise<number> {
@@ -334,7 +467,7 @@ export class JobMarketplaceWrapper {
         proofTimeoutWindow: proofTimeoutBigInt.toString(),
       });
 
-      const tx = await this.contract.createSessionJobForModelWithToken(
+      return this.fund(() => this.contract.createSessionJobForModelWithToken(
         params.host,
         params.modelId,       // bytes32 model ID
         params.paymentToken,  // token address
@@ -343,13 +476,7 @@ export class JobMarketplaceWrapper {
         durationBigInt,       // uint256 — explicit bigint
         proofIntervalBigInt,  // uint256 — explicit bigint
         proofTimeoutBigInt    // uint256 — explicit bigint
-      );
-
-      const receipt = await tx.wait();
-      const event = receipt.logs.find((log: any) =>
-        log.fragment?.name === 'SessionJobCreated'
-      );
-      return event ? Number(event.args[0]) : 0;
+      ), DIRECT_PAYMENT_EVENTS);
     } else {
       // For ETH, use createSessionJobForModel
       const value = ethers.parseEther(params.paymentAmount);
@@ -366,7 +493,7 @@ export class JobMarketplaceWrapper {
         proofTimeoutWindow: proofTimeoutBigInt.toString(),
       });
 
-      const tx = await this.contract.createSessionJobForModel(
+      return this.fund(() => this.contract.createSessionJobForModel(
         params.host,
         params.modelId,       // bytes32 model ID
         priceBigInt,          // uint256 — explicit bigint
@@ -374,13 +501,7 @@ export class JobMarketplaceWrapper {
         proofIntervalBigInt,  // uint256 — explicit bigint
         proofTimeoutBigInt,   // uint256 — explicit bigint
         { value }
-      );
-
-      const receipt = await tx.wait();
-      const event = receipt.logs.find((log: any) =>
-        log.fragment?.name === 'SessionJobCreated'
-      );
-      return event ? Number(event.args[0]) : 0;
+      ), DIRECT_PAYMENT_EVENTS);
     }
   }
 
@@ -397,6 +518,17 @@ export class JobMarketplaceWrapper {
     return tx;
   }
 
+  /**
+   * `minTokensFee()` — the fee a DEPOSITOR pays to complete their own zero-proof session early
+   * (Open 8). Added for Training M0: the ABI already declared it (`abis/index.ts:61`) while no
+   * accessor existed, so `TrainingManager` was calling a method this wrapper did not have.
+   * Caught at CP1 by typing that dependency narrowly instead of as `any`.
+   */
+  async getMinTokensFee(): Promise<bigint> {
+    await this.verifyChain();
+    return this.contract.minTokensFee();
+  }
+
   /** Per-token minimum session deposit (tokenMinDeposits mapping; admin-mutable — read, never hardcode). */
   async getTokenMinDeposit(token: string): Promise<bigint> {
     await this.verifyChain();
@@ -405,28 +537,49 @@ export class JobMarketplaceWrapper {
 
   async getSessionJob(jobId: number): Promise<SessionJob> {
     await this.verifyChain();
-    const session = await this.contract.sessionJobs(jobId);
+    return mapSessionJob(await this.contract.sessionJobs(jobId));
+  }
 
-    // Handle the struct from sessionJobs (now includes proofTimeoutWindow)
-    return {
-      id: Number(session[0]),
-      depositor: session[1],
-      requester: session[2],
-      host: session[3],
-      paymentToken: session[4],
-      deposit: ethers.formatEther(session[5]),
-      pricePerToken: Number(session[6]),
-      tokensUsed: Number(session[7]),
-      maxDuration: Number(session[8]),
-      startTime: Number(session[9]),
-      lastProofTime: Number(session[10]),
-      proofInterval: Number(session[11]),
-      proofTimeoutWindow: Number(session[12]),  // AUDIT-F3: new field
-      status: Number(session[13]),
-      withdrawnByHost: ethers.formatEther(session[14]),
-      refundedToUser: ethers.formatEther(session[15]),
-      conversationCID: session[16]
-    };
+  /** The provider the two session reads use — the dedicated read provider when wired (1.38.1 moved
+   *  discovery reads off the injected wallet; the pre-flight is the one read between a card charge
+   *  and a spent session), else the signer's. Refused, typed, when neither exists. */
+  private sessionReadProvider(): Provider {
+    const provider = this.readProvider ?? this.signer.provider;
+    if (!provider) throw new SDKError('No provider available for the session read', 'PROVIDER_ERROR');
+    return provider;
+  }
+
+  /** `verifyChain()` against a specific provider — the one the read will use. */
+  private async assertChainOn(provider: Provider): Promise<void> {
+    const actualChainId = Number((await provider.getNetwork()).chainId);
+    if (actualChainId !== this.chainId) {
+      throw new ChainMismatchError(this.chainId, actualChainId, 'session read');
+    }
+  }
+
+  /**
+   * The A.3 pre-flight read for an ADOPTED session: `sessionJobs(jobId)` as raw words, decoded
+   * drift-proof and failing CLOSED (see {@link decodeSessionJobWords}). One `eth_call`.
+   */
+  async getSessionJobOnChain(jobId: bigint): Promise<OnChainSessionJob> {
+    const provider = this.sessionReadProvider();   // before the chain check, which dereferences the provider
+    await this.assertChainOn(provider);
+    const data = await provider.call({
+      to: this.contractAddress,
+      data: this.contract.interface.encodeFunctionData('sessionJobs', [jobId]),
+    });
+    return decodeSessionJobWords(data);
+  }
+
+  /** The bytes32 model id a session was created for (`sessionModel(jobId)`), over the same provider. */
+  async getSessionModel(jobId: bigint): Promise<string> {
+    const provider = this.sessionReadProvider();
+    await this.assertChainOn(provider);
+    const data = await provider.call({
+      to: this.contractAddress,
+      data: this.contract.interface.encodeFunctionData('sessionModel', [jobId]),
+    });
+    return this.contract.interface.decodeFunctionResult('sessionModel', data)[0] as string;
   }
 
   /**
@@ -454,7 +607,7 @@ export class JobMarketplaceWrapper {
 
   // Chain Management
   async switchToChain(newChainId: number): Promise<JobMarketplaceWrapper> {
-    return new JobMarketplaceWrapper(newChainId, this.signer);
+    return new JobMarketplaceWrapper(newChainId, this.signer, this.readProvider);   // keep the read/write split
   }
 
   // Batch Operations
@@ -552,7 +705,7 @@ export class JobMarketplaceWrapper {
       proofInterval: proofIntervalBigInt.toString(), proofTimeoutWindow: proofTimeoutBigInt.toString(),
     });
 
-    const tx = await this.contract.createSessionForModelAsDelegate(
+    return this.fund(() => this.contract.createSessionForModelAsDelegate(
       params.payer,
       params.modelId,
       params.host,
@@ -562,12 +715,39 @@ export class JobMarketplaceWrapper {
       durationBigInt,        // uint256 — explicit bigint
       proofIntervalBigInt,   // uint256 — explicit bigint
       proofTimeoutBigInt     // uint256 — explicit bigint
-    );
+    ), ['SessionCreatedByDelegate'], 3);
+  }
 
-    const receipt = await tx.wait(3);
-    const event = receipt.logs?.find((log: any) =>
-      log.fragment?.name === 'SessionCreatedByDelegate'
-    );
-    return event ? Number(event.args?.sessionId || event.args[0]) : 0;
+  /** Send a funding transaction (re-armed for replacement detection — `sendFunding`) and return its session id. */
+  private async fund(send: () => Promise<any>, eventNames: string[], confirmations?: number): Promise<number> {
+    // Read before the send: nothing after it may fail unclassified (§35 PP7).
+    const sender = (await this.signer.getAddress()).toLowerCase();
+    return this.sessionIdFromTx(await sendFunding(this.signer.provider!, send), eventNames, sender, confirmations);
+  }
+
+  /**
+   * The session id a funding transaction created. Money may have moved once `tx` exists, so every failure here
+   * carries a transaction hash — the one that was mined — never a job id of 0 the caller would take for a real
+   * session. Events are decoded by topic through the marketplace interface (a replacement's receipt is a plain
+   * receipt with no parsed `fragment`), from the marketplace's own logs only — and only the one naming `sender` as its
+   * creator: an ERC-4337 bundle can carry another sender's creation (§35 PP7).
+   */
+  private async sessionIdFromTx(tx: any, eventNames: string[], sender: string, confirmations?: number): Promise<number> {
+    const receipt = await awaitFundingReceipt(tx, confirmations);
+    const minedHash: string = receipt?.hash ?? tx.hash;
+    const market = this.contractAddress.toLowerCase();
+    for (const log of receipt?.logs ?? []) {
+      if (String(log.address).toLowerCase() !== market) continue;
+      let parsed;
+      try {
+        parsed = this.contract.interface.parseLog({ topics: [...log.topics], data: log.data });
+      } catch (cause) {
+        throw sessionIdUnresolved(`Session transaction ${minedHash} emitted an undecodable marketplace event`, minedHash, cause);
+      }
+      if (parsed && eventNames.includes(parsed.name) && String(parsed.args[CREATOR[parsed.name]]).toLowerCase() === sender) {
+        return Number(parsed.args[0]);
+      }
+    }
+    throw sessionIdUnresolved(`Session transaction ${minedHash} emitted no ${eventNames.join('/')} event of this sender's — the session id is unknown`, minedHash);
   }
 }

@@ -140,6 +140,19 @@ Sent **plaintext** (not wrapped in `encrypted_message`) so the host can cancel t
 
 The encrypted handshake replaces the plaintext `session_init` above. The client generates an ephemeral X25519 keypair, sends its public key plus an encrypted inner `session_init` payload, and the host replies with its own public key — both sides derive the shared session key via ECDH. After this point all inference / image-gen / transcode requests go through `encrypted_message`.
 
+**Correlation rules (required of clients, enforced by sdk-core 1.38.3+).** The node keeps one
+key **per session**, and frames in both directions carry `session_id`:
+
+- `session_init_ack` names the session it acknowledges. A client with an init in flight MUST
+  match the ack's `session_id` against its own — on a shared socket, someone else's ack
+  arriving first is otherwise indistinguishable from success.
+- `encrypted_chunk` / `encrypted_response` name their session. Decrypt with **that session's**
+  key; a frame for another session on the same socket is not yours to decrypt or to fail on.
+  (`stream_end` carries no `session_id` and cannot be attributed this way.)
+- A client serving several sessions therefore holds a key **map**, not a single key, and
+  encrypts each outgoing `encrypted_message` — including its replay-protection AAD counter,
+  `message_${index}` per session — under the key of the session stamped on the envelope.
+
 ```json
 {
   "type": "encrypted_init",
@@ -772,6 +785,27 @@ When the orchestrator runs in **delegate-pays** mode (its OpenAI daemon, funded 
 ## Connection Management
 
 ### Reconnection Strategy
+
+**The protocol rule first: a session key does not survive a reconnect.** The node registers
+the key against the connection that carried the `encrypted_session_init`; a new socket — even
+to the same host, milliseconds later — has **no session state**, and every encrypted frame
+sent under the old key fails authentication (`aead::Error`) on one side or the other. Any
+reconnecting client MUST therefore treat reconnection as a session-crypto event, not just a
+transport event:
+
+1. Track **connection identity** (a generation counter incremented per successful open) —
+   `readyState === OPEN` cannot distinguish the connection you initialized from a silent
+   replacement.
+2. On a generation change: drop the session key, fail any in-flight encrypted request
+   immediately (sdk-core rejects with `SESSION_KEY_INVALIDATED`, `retryable: true`) rather
+   than letting it wait out a response timeout, and **discard** frames queued while the old
+   socket was down — replayed onto the new connection they are wrong requests, not late ones.
+3. Send a fresh `encrypted_session_init` — and wait for its correlated ack — before the next
+   encrypted frame.
+
+`@fabstir/sdk-core` 1.38.2+ implements all three (`WebSocketClient.getConnectionGeneration()`
+/ `onConnectionChange()`); the sketch below shows the transport half for implementors writing
+their own client — pair it with the rule above.
 
 ```javascript
 class WebSocketManager {

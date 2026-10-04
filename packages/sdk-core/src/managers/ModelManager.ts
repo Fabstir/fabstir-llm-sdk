@@ -34,6 +34,7 @@ export class ModelManager {
   constructor(
     provider: Provider,
     registryAddress: string,
+    /** @deprecated Ignored — ModelRegistry access is read-only, see below. */
     signer?: Signer
   ) {
     if (!registryAddress || !isAddress(registryAddress)) {
@@ -43,10 +44,13 @@ export class ModelManager {
       );
     }
 
+    // ModelRegistry is read-only from the SDK's side — every call here is an
+    // eth_call. Binding to the signer put model enumeration on the injected
+    // wallet, where it gets rate-limited; reads belong on the provider.
     this.modelRegistry = new Contract(
       registryAddress,
       ModelRegistryABI,
-      signer || provider
+      provider
     );
     this.modelCache = new Map();
     this.cacheTimeout = DEFAULT_MODEL_CONFIG.cacheTimeout || 300000; // 5 minutes default
@@ -62,7 +66,9 @@ export class ModelManager {
 
     try {
       // Verify contract is accessible by checking if it has code
-      const code = await this.modelRegistry.runner?.provider?.getCode(await this.modelRegistry.getAddress());
+      const runner: any = this.modelRegistry.runner;
+      const runnerProvider = runner?.provider ?? runner;
+      const code = await runnerProvider?.getCode(await this.modelRegistry.getAddress());
       if (!code || code === '0x') {
         throw new Error(
           `ModelRegistry contract not deployed at ${await this.modelRegistry.getAddress()}. Cannot proceed without contract deployment`

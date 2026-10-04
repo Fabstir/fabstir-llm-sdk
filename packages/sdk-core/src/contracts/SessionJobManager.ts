@@ -10,6 +10,7 @@ import { ethers, Contract, Signer } from 'ethers';
 import { ContractManager } from './ContractManager';
 import { TransactionHelper } from './TransactionHelper';
 import { PRICE_PRECISION } from '../managers/HostManager';
+import { awaitFundingReceipt, ownCreationLog, sendFunding, sessionIdUnresolved } from './funding-receipt';
 
 export interface SessionConfig {
   depositAmount: string; // e.g., '2' for $2 USDC
@@ -197,7 +198,7 @@ export class SessionJobManager {
       throw new Error('modelId is required for session creation (Phase 18: modelless sessions removed). Set params.modelId to the bytes32 model hash.');
     }
 
-    const tx = await (jobMarketplaceWithSigner as any)['createSessionJobForModelWithToken'](
+    const tx = await sendFunding(this.signer!.provider!, () => (jobMarketplaceWithSigner as any)['createSessionJobForModelWithToken'](
       params.provider, // host address
       params.modelId, // bytes32 model ID
       usdcAddress, // token address (USDC)
@@ -205,19 +206,22 @@ export class SessionJobManager {
       params.sessionConfig.pricePerToken, // price per token
       params.sessionConfig.duration, // max duration
       params.sessionConfig.proofInterval // proof interval
-    );
+    ));
 
     console.log('Transaction sent, waiting for confirmation...');
-    const receipt = await tx.wait(3); // Wait for 3 confirmations
+    const receipt = await awaitFundingReceipt(tx, 3);
     console.log('Transaction confirmed:', receipt.hash);
     
-    // Parse events to get job ID (which is also the session ID for session jobs)
-    const sessionCreatedEvent = receipt.logs.find(
-      (log: any) => log.topics[0] === ethers.id('SessionJobCreated(uint256,address,address,uint256)')
-    );
+    // Parse events to get job ID (which is also the session ID for session jobs). The ...ForModel entry point emits
+    // SessionJobCreatedForModel (R11, §15 T8); both carry the job id as the first indexed topic, the depositor as the
+    // second — this signer's, never another sender's from the same bundle (§35 PP7).
+    const sessionCreatedEvent = ownCreationLog(receipt?.logs ?? [], jobMarketplaceAddress, userAddress, {
+      [ethers.id('SessionJobCreated(uint256,address,address,uint256)')]: 2,
+      [ethers.id('SessionJobCreatedForModel(uint256,address,address,bytes32,uint256)')]: 2,
+    });
 
     if (!sessionCreatedEvent) {
-      throw new Error('SessionJobCreated event not found');
+      throw sessionIdUnresolved('SessionJobCreated event not found — the session id is unknown', receipt.hash ?? tx.hash);
     }
 
     // Decode event data - jobId is in topics[1], requester in topics[2], host in topics[3]
@@ -593,7 +597,10 @@ export class SessionJobManager {
     }
 
     const jobMarketplace = this.contractManager.getJobMarketplace();
-    const tx = await jobMarketplace.connect(this.signer).createSessionForModelAsDelegate(
+    // Read before the send: nothing after it may fail unclassified (§35 PP7).
+    const market = await this.contractManager.getContractAddress('jobMarketplace');
+    const delegate = await this.signer.getAddress();
+    const tx = await sendFunding(this.signer!.provider!, () => (jobMarketplace.connect(this.signer!) as any).createSessionForModelAsDelegate(
       payer,
       modelId,
       host,
@@ -603,15 +610,18 @@ export class SessionJobManager {
       BigInt(maxDuration),
       BigInt(proofInterval),
       BigInt(proofTimeoutWindow)
-    );
+    ));
 
-    const receipt = await tx.wait(3);
+    const receipt = await awaitFundingReceipt(tx, 3);
 
-    // Parse SessionCreatedByDelegate event
-    const event = receipt.logs.find(
-      (log: any) => log.topics[0] === ethers.id('SessionCreatedByDelegate(uint256,address,address,address,bytes32,uint256)')
-    );
-    const sessionId = event ? BigInt(event.topics[1]) : 0n;
+    // Parse SessionCreatedByDelegate event: the marketplace's, naming this signer as its delegate (§35 PP7)
+    const event = ownCreationLog(receipt?.logs ?? [], market, delegate, {
+      [ethers.id('SessionCreatedByDelegate(uint256,address,address,address,bytes32,uint256)')]: 3,
+    });
+    if (!event) {
+      throw sessionIdUnresolved('SessionCreatedByDelegate event not found — the session id is unknown', receipt.hash ?? tx.hash);
+    }
+    const sessionId = BigInt(event.topics[1]);
 
     return {
       sessionId,

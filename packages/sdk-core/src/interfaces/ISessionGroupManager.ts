@@ -17,6 +17,12 @@ import type {
  */
 export interface ISessionGroupManager {
   /**
+   * Called by the SDK when this manager's identity is forgotten — a sign-out, the next sign-in (plan §26 GG1). Every
+   * other member then refuses `SESSION_GROUP_MANAGER_DISPOSED`: get the current manager from the SDK.
+   */
+  dispose(): void;
+
+  /**
    * Create a new session group
    *
    * @param input - Group creation parameters

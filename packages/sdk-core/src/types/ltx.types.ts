@@ -28,7 +28,31 @@ export interface LtxJob {
    * videos[i] maps to the template's pinned videoSemantics[i]. Absent/empty unless videoInputs>0.
    */
   videos?: string[];
+  /**
+   * Advisory pass-through fields (1.38 fork absorb, 2026-08-22 exchange): forwarded on the wire
+   * only when defined — absent keys otherwise, so the pre-absorb wire stays byte-identical.
+   * Deliberately OUTSIDE the input commitment (v1/v2/v3); widening it is a separate,
+   * on-record mainnet-cut decision. Ranges — strength (0, 1], azimuth [-65, 65],
+   * elevation [-25, 40], distance [0.5, 2] — are ADVISORY: validated by callers and the
+   * node, NEVER by the SDK (the `loras` over-reject lesson). Numbers must be FINITE:
+   * like the vendored fork this mirrors, a NaN/Infinity value survives to JSON.stringify
+   * and reaches the wire as null — callers own that guard too.
+   */
+  strength?: number;
+  azimuth?: number;
+  elevation?: number;
+  distance?: number;
+  inputWire?: 'exrseq-display' | 'exrseq-linear';
 }
+
+/**
+ * The advisory pass-through group AS DATA — the single source the ws forwarder and the
+ * tests iterate. The `satisfies` check pins MEMBERSHIP (every listed name is a real LtxJob
+ * key); it cannot pin exhaustiveness — when adding an advisory field, add it to LtxJob AND
+ * this list (the forwarder and the test key-sets then follow automatically).
+ */
+export const LTX_ADVISORY_FIELDS =
+  ['strength', 'azimuth', 'elevation', 'distance', 'inputWire'] as const satisfies readonly (keyof LtxJob)[];
 
 /** Public, KEY-LESS manifest at outputCID: content hashes + Merkle root, no decryption keys. */
 export interface LtxManifest {

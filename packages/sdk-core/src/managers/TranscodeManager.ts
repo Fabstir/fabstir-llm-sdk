@@ -96,6 +96,7 @@ export class TranscodeManager implements ITranscodeManager {
             duration: options?.duration ?? 3600,
             proofInterval: options?.proofInterval ?? 100,
             encryption: options?.encryption !== false,
+            conversationLog: false, // a transcode has no chat log — and no post-funding S5 write to fail
           });
           const handle = await this.sessionManager.submitTranscode(
             sessionId.toString(), sourceCid, formats, options,
@@ -133,21 +134,20 @@ export class TranscodeManager implements ITranscodeManager {
   }> {
     const modelId = computeTranscodeModelId(params.mediaFormats);
 
-    // Upload format spec and create session concurrently (independent I/O)
-    const [formatSpecCID, { jobId }] = await Promise.all([
-      this.storageManager.uploadJSON(params.mediaFormats),
-      this.sessionManager.startSession({
-        host: params.hostAddress,
-        modelId,
-        chainId: params.chainId,
-      }),
-    ]);
-
+    // Everything that can fail comes before the funding — the estimate (a malformed format throws), then the spec
+    // upload — so a funded session's ids always reach the caller (I7, §23 DD3, §24 EE8).
     const units = estimateTranscodeUnits(params.maxDuration, params.mediaFormats);
     const estimatedCost = String(billingUnitsToTokens(units));
+    const formatSpecCID = await this.storageManager.uploadJSON(params.mediaFormats);
+    const { jobId } = await this.sessionManager.startSession({
+      host: params.hostAddress,
+      modelId,
+      chainId: params.chainId,
+      conversationLog: false,
+    });
 
     return {
-      jobId: jobId ?? 0n,
+      jobId,
       estimatedCost,
       formatSpecHash: modelId,
       formatSpecCID,

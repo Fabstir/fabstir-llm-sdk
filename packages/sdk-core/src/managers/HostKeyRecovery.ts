@@ -23,6 +23,7 @@
 import * as secp from '@noble/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
 import { hexToBytes, bytesToHex, pubkeyToAddress } from '../crypto/utilities';
+import { SDKError } from '../errors';
 
 /**
  * Verify host signature and recover their public key.
@@ -99,22 +100,35 @@ export async function requestHostPublicKey(
   const challenge = crypto.getRandomValues(new Uint8Array(32));
   const challengeHex = bytesToHex(challenge);
 
-  // Request signature from host
-  const response = await fetch(`${hostApiUrl}/v1/auth/challenge`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ challenge: challengeHex })
-  });
-
-  if (!response.ok) {
-    throw new Error(`Host key request failed: ${response.status} ${response.statusText}`);
+  // Request signature from host. A host that is DOWN makes fetch itself reject (ECONNREFUSED,
+  // ENOTFOUND, TLS) with an uncoded TypeError — coded here so the training path classifies it as
+  // transport (retry on the same session), not as our wiring (terminal).
+  let response: Response;
+  try {
+    response = await fetch(`${hostApiUrl}/v1/auth/challenge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challenge: challengeHex })
+    });
+  } catch (e) {
+    throw new SDKError(`Host key request failed: ${(e as Error)?.message ?? String(e)}`, 'HOST_PUBKEY_UNAVAILABLE', e);
   }
 
-  const responseData = await response.json();
+  if (!response.ok) {
+    // Coded so the training path can classify "the host is down" as transport, not as our wiring.
+    throw new SDKError(`Host key request failed: ${response.status} ${response.statusText}`, 'HOST_PUBKEY_UNAVAILABLE');
+  }
+
+  let responseData: { signature?: string; recid?: number };
+  try {
+    responseData = await response.json();
+  } catch (e) {
+    throw new SDKError(`Host key response was not JSON: ${(e as Error)?.message ?? String(e)}`, 'HOST_PUBKEY_UNAVAILABLE', e);
+  }
   const { signature, recid } = responseData;
 
   if (!signature || recid === undefined) {
-    throw new Error('Invalid response from host: missing signature or recid');
+    throw new SDKError('Invalid response from host: missing signature or recid', 'HOST_PUBKEY_UNAVAILABLE');
   }
 
   // Verify and recover public key

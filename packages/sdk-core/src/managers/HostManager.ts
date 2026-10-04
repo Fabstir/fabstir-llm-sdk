@@ -82,6 +82,15 @@ export class HostManager {
   private contractManager: ContractManager;
   private modelManager: ModelManager;
   private nodeRegistry?: Contract;
+  /**
+   * Provider-bound NodeRegistry used for every eth_call. Kept separate from
+   * `nodeRegistry` so reads leave through the configured JSON-RPC endpoint
+   * instead of the injected wallet, which rate-limits dapps under the read
+   * volume that model/host discovery generates.
+   */
+  private nodeRegistryRead!: Contract;
+  private readProvider?: Provider;
+  private readProviderSource: 'rpcUrl' | 'wallet' = 'wallet';
   private signer?: Signer;
   private initialized = false;
   private nodeRegistryAddress?: string;
@@ -96,7 +105,8 @@ export class HostManager {
     modelManager: ModelManager,
     fabTokenAddress?: string,
     hostEarningsAddress?: string,
-    contractManager?: any
+    contractManager?: any,
+    readProvider?: Provider
   ) {
     if (!isAddress(nodeRegistryAddress)) {
       throw new ModelRegistryError(
@@ -120,11 +130,33 @@ export class HostManager {
       console.error('NodeRegistryABI is NOT a valid array:', NodeRegistryABI);
     }
 
-    this.nodeRegistry = new Contract(
+    const writeContract = new Contract(
       nodeRegistryAddress,
       NodeRegistryABI,
       signer
     );
+    this.nodeRegistry = writeContract;
+
+    // Reads ride `readProvider` when one is supplied; writes always ride the
+    // signer. Without a read provider both fall back to the signer, which is
+    // the pre-split behaviour — say so rather than let it degrade quietly.
+    this.readProvider = readProvider;
+    this.readProviderSource = readProvider ? 'rpcUrl' : 'wallet';
+    if (readProvider) {
+      this.nodeRegistryRead = new Contract(
+        nodeRegistryAddress,
+        NodeRegistryABI,
+        readProvider
+      );
+    } else {
+      this.nodeRegistryRead = writeContract;
+      console.warn(
+        '[HostManager] No read provider supplied: contract reads will go through ' +
+        'the signer\'s provider (the wallet). Host and model discovery can then be ' +
+        'rate-limited by the wallet and bypasses the configured rpcUrl. Pass a ' +
+        'readProvider built from rpcUrl to route reads off the wallet.'
+      );
+    }
 
     // Verify the contract interface is loaded
     if (this.nodeRegistry.interface) {
@@ -144,6 +176,22 @@ export class HostManager {
   }
 
   /**
+   * Where contract reads are actually going. `'wallet'` means they ride the
+   * signer's provider, which is observable rather than something to be
+   * rediscovered from a rate-limit message.
+   */
+  getReadProviderSource(): 'rpcUrl' | 'wallet' {
+    return this.readProviderSource;
+  }
+
+  /**
+   * The provider serving contract reads, if one was supplied.
+   */
+  getReadProvider(): Provider | undefined {
+    return this.readProvider;
+  }
+
+  /**
    * Initialize the enhanced host manager
    */
   async initialize(): Promise<void> {
@@ -153,8 +201,9 @@ export class HostManager {
 
     await this.modelManager.initialize();
 
-    // Initialize discovery service
-    const provider = this.signer?.provider;
+    // Initialize discovery service on the read provider — its calls are all
+    // eth_call and must not ride the wallet.
+    const provider = this.readProvider ?? this.signer?.provider;
     if (provider && this.nodeRegistryAddress) {
       this.discoveryService = new HostDiscoveryService(
         this.nodeRegistryAddress,
@@ -262,7 +311,7 @@ export class HostManager {
       // Check if node is already registered
       const signerAddress = await this.signer.getAddress();
 
-      const nodeInfo = await this.nodeRegistry['nodes'](signerAddress);
+      const nodeInfo = await this.nodeRegistryRead['nodes'](signerAddress);
       console.log('Node info from contract:', {
         operator: nodeInfo[0],
         stakedAmount: nodeInfo[1]?.toString(),
@@ -542,13 +591,13 @@ export class HostManager {
       }
 
       // Get nodes supporting this model
-      const nodeAddresses = await this.nodeRegistry['getNodesForModel'](modelId);
+      const nodeAddresses = await this.nodeRegistryRead['getNodesForModel'](modelId);
       console.log(`[HostManager] findHostsForModel: modelId=${modelId}, found ${nodeAddresses.length} nodes:`, nodeAddresses);
       const hosts: HostInfo[] = [];
 
       for (const address of nodeAddresses) {
         try {
-          const info = await this.nodeRegistry['getNodeFullInfo'](address);
+          const info = await this.nodeRegistryRead['getNodeFullInfo'](address);
           console.log(`[HostManager] Raw getNodeFullInfo(${address}):`, JSON.stringify(info, (_, v) => typeof v === 'bigint' ? v.toString() + 'n' : v));
 
           // Parse metadata with defaults on failure
@@ -610,7 +659,7 @@ export class HostManager {
         const validHosts: HostInfo[] = [];
         for (const host of hosts) {
           try {
-            const modelPrice: bigint = await this.nodeRegistry['getModelPricing'](host.address, modelId, usdcAddr);
+            const modelPrice: bigint = await this.nodeRegistryRead['getModelPricing'](host.address, modelId, usdcAddr);
             // Override node-level registration price with actual per-model USDC price
             host.minPricePerTokenStable = modelPrice;
             validHosts.push(host);
@@ -686,7 +735,7 @@ export class HostManager {
     }
 
     try {
-      const info = await this.nodeRegistry['getNodeFullInfo'](hostAddress);
+      const info = await this.nodeRegistryRead['getNodeFullInfo'](hostAddress);
       return info[5]; // Model IDs are at index 5
     } catch (error: any) {
       console.error('Error fetching host models:', error);
@@ -712,7 +761,7 @@ export class HostManager {
     }
 
     try {
-      const info = await this.nodeRegistry['getNodeFullInfo'](hostAddress);
+      const info = await this.nodeRegistryRead['getNodeFullInfo'](hostAddress);
 
       // Check if registered (operator address will be non-zero)
       const isRegistered = info[0] !== ethers.ZeroAddress;
@@ -768,7 +817,7 @@ export class HostManager {
 
       // Ensure discoveryService is initialized
       if (!this.discoveryService) {
-        const provider = this.signer?.provider;
+        const provider = this.readProvider ?? this.signer?.provider;
         if (!provider) {
           throw new SDKError('No provider available', 'PROVIDER_ERROR');
         }
@@ -874,12 +923,12 @@ export class HostManager {
 
     try {
       // Get all active nodes
-      const activeNodes = await this.nodeRegistry['getAllActiveNodes']();
+      const activeNodes = await this.nodeRegistryRead['getAllActiveNodes']();
       const hosts: HostInfo[] = [];
 
       for (const address of activeNodes) {
         try {
-          const info = await this.nodeRegistry['getNodeFullInfo'](address);
+          const info = await this.nodeRegistryRead['getNodeFullInfo'](address);
 
           // Parse metadata with defaults on failure
           let metadata: HostMetadata;
@@ -1254,7 +1303,7 @@ export class HostManager {
 
     try {
       // Phase 18: contract returns (bytes32[], uint256[]) for a specific token
-      const [modelIds, prices] = await this.nodeRegistry['getHostModelPrices'](hostAddress, tokenAddress);
+      const [modelIds, prices] = await this.nodeRegistryRead['getHostModelPrices'](hostAddress, tokenAddress);
 
       const result: ModelPricing[] = [];
       for (let i = 0; i < modelIds.length; i++) {
@@ -1306,7 +1355,7 @@ export class HostManager {
       );
     }
 
-    const price = await this.nodeRegistry.getModelPricing(hostAddress, modelId, tokenAddress);
+    const price = await this.nodeRegistryRead.getModelPricing(hostAddress, modelId, tokenAddress);
     const priceValue = BigInt(price);
 
     if (priceValue === 0n) {
@@ -1336,7 +1385,7 @@ export class HostManager {
 
     try {
       const hostEarningsABI = await this.contractManager.getContractABI('hostEarnings');
-      const provider = this.signer?.provider || await this.contractManager.getProvider();
+      const provider = this.readProvider ?? this.signer?.provider ?? await this.contractManager.getProvider();
 
       const earnings = new ethers.Contract(
         this.hostEarningsAddress,
@@ -1618,7 +1667,7 @@ export class HostManager {
     if (!this.nodeRegistry) {
       throw new ModelRegistryError('NodeRegistry not initialized', '');
     }
-    return this.nodeRegistry.nodeSupportsModel(hostAddress, modelId);
+    return this.nodeRegistryRead.nodeSupportsModel(hostAddress, modelId);
   }
 
   /**
@@ -1631,7 +1680,7 @@ export class HostManager {
     if (!this.nodeRegistry) {
       throw new ModelRegistryError('NodeRegistry not initialized', '');
     }
-    return this.nodeRegistry.getNodeModels(hostAddress);
+    return this.nodeRegistryRead.getNodeModels(hostAddress);
   }
 
   /**

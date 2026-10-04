@@ -17,6 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     docker.io \
     && rm -rf /var/lib/apt/lists/*
 
+# --- Upgrade to Node 22 (required by Claude Code 2.1.241+) ---
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
 # --- Global Node tools for SDK dev ---
 RUN npm install -g pnpm typescript ts-node vitest
 

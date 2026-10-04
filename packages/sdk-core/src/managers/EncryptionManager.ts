@@ -21,6 +21,7 @@ import { bytesToHex, hexToBytes, pubkeyToAddress } from '../crypto/utilities';
 import { encryptForEphemeral, decryptFromEphemeral } from '../crypto/encryption';
 import { recoverSenderAddress } from '../crypto/recovery';
 import { deriveEncryptionKeyFromSeed } from '../utils/encryption-key-derivation';
+import { createStorageSealer, type StorageSealer } from '../storage/sealed/StorageSealer';
 import type {
   IEncryptionManager,
   SessionInitPayload,
@@ -43,6 +44,7 @@ export class EncryptionManager implements IEncryptionManager {
   private clientPrivateKey: string;
   private clientPublicKey: string;
   private clientAddress: string;
+  private storageSealer?: StorageSealer;
 
   /**
    * Create EncryptionManager
@@ -151,6 +153,16 @@ export class EncryptionManager implements IEncryptionManager {
    */
   private getClientPrivateKey(): string {
     return this.clientPrivateKey;
+  }
+
+  /**
+   * The sealer for everything stored on S5 for RAG and the conversation log. Its keys are HKDF-derived
+   * from this manager's private key — the seed-derived key under `fromSeed`, so vault-confidential when
+   * the vault supplies the seed. The key material stays inside the sealer's closure.
+   */
+  getStorageSealer(): StorageSealer {
+    this.storageSealer ??= createStorageSealer(hexToBytes(this.clientPrivateKey), this.clientAddress);
+    return this.storageSealer;
   }
 
   /**

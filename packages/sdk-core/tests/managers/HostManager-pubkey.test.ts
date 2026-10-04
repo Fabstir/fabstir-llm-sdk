@@ -64,6 +64,7 @@ describe('HostManager - Public Key Management', () => {
 
     // Inject mocked contract after initialization
     (hostManager as any).nodeRegistry = nodeRegistry;
+    (hostManager as any).nodeRegistryRead = nodeRegistry;
     (hostManager as any).initialized = true;
   });
 

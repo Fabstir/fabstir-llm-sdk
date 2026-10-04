@@ -12,6 +12,8 @@ import type {
 } from '../types/session-groups.types';
 import { SessionGroupStorage } from '../storage/SessionGroupStorage';
 import { AsyncMutex } from '../utils/AsyncMutex';
+import { SDKError } from '../types';
+import { rethrowDisposal } from '../utils/disposal';
 
 /**
  * Session Group Manager
@@ -32,10 +34,29 @@ export class SessionGroupManager implements ISessionGroupManager {
   private storage: SessionGroupStorage | null = null;
   private storageInitialized: boolean = false;
   private groupLock = new AsyncMutex();
+  /** Set by `dispose()`: every public member refuses from then on (plan §26 GG1). */
+  private disposed = false;
 
   constructor(storage?: SessionGroupStorage) {
     this.storage = storage || null;
     this.storageInitialized = !!storage;
+  }
+
+  /**
+   * Dispose of this manager when its identity is forgotten — a sign-out or the next sign-in (plan §26 GG1). Refuses
+   * from its first line: every other public member then refuses `SESSION_GROUP_MANAGER_DISPOSED`. A call in flight keeps
+   * what it reads (plan §27 HH2) and stops at its next storage step, saying so — the disposed store's refusal is never
+   * taken as best-effort. What it holds goes with it once nothing does.
+   */
+  dispose(): void {
+    this.disposed = true;
+  }
+
+  private ensureNotDisposed(): void {
+    if (this.disposed) {
+      throw new SDKError('This session-group manager belongs to an identity that is signed out — get the current one from the SDK',
+        'SESSION_GROUP_MANAGER_DISPOSED', { retryable: false });
+    }
   }
 
   /**
@@ -72,6 +93,7 @@ export class SessionGroupManager implements ISessionGroupManager {
    * Create a new session group
    */
   async createSessionGroup(input: CreateSessionGroupInput): Promise<SessionGroup> {
+    this.ensureNotDisposed();
     // Validate required fields
     if (!input.name || input.name.trim() === '') {
       throw new Error('name is required');
@@ -116,6 +138,7 @@ export class SessionGroupManager implements ISessionGroupManager {
         await this.groupLock.withLock(id, () => this.storage!.save(group));
         console.log(`[Enhanced S5.js] Session group saved successfully`);
       } catch (err) {
+        rethrowDisposal(err);
         console.error('[SessionGroupManager.createSessionGroup] Failed to save to S5 storage:', err);
         // Don't throw - allow operation to continue with in-memory only
         // This allows testing without full S5 setup
@@ -129,6 +152,7 @@ export class SessionGroupManager implements ISessionGroupManager {
    * List all session groups for a user
    */
   async listSessionGroups(owner: string): Promise<SessionGroup[]> {
+    this.ensureNotDisposed();
     // If S5 storage is available, load from S5
     if (this.storage) {
       try {
@@ -143,6 +167,7 @@ export class SessionGroupManager implements ISessionGroupManager {
         userGroups.forEach(g => this.groups.set(g.id, g));
         return userGroups;
       } catch (err: any) {
+        rethrowDisposal(err);
         // Only log unexpected errors (directory not found is expected on first load)
         if (!err.message?.includes('not found') && !err.message?.includes('does not exist')) {
           console.error('[SessionGroupManager.listSessionGroups] Failed to load from S5 storage:', err);
@@ -166,6 +191,7 @@ export class SessionGroupManager implements ISessionGroupManager {
    * Get a specific session group by ID
    */
   async getSessionGroup(groupId: string, requestor: string): Promise<SessionGroup> {
+    this.ensureNotDisposed();
     // Validate group ID
     if (!groupId || groupId.trim() === '') {
       throw new Error('Invalid group ID');
@@ -197,6 +223,7 @@ export class SessionGroupManager implements ISessionGroupManager {
           console.warn(`[SessionGroupManager.getSessionGroup] ⚠️  Group ${groupId} not found in S5`);
         }
       } catch (err) {
+        rethrowDisposal(err);
         console.error('[SessionGroupManager.getSessionGroup] Failed to load from S5 storage:', err);
         // Continue with cache-only check below
       }
@@ -234,6 +261,7 @@ export class SessionGroupManager implements ISessionGroupManager {
     requestor: string,
     updates: UpdateSessionGroupInput
   ): Promise<SessionGroup> {
+    this.ensureNotDisposed();
     // Validate group ID
     if (!groupId || groupId.trim() === '') {
       throw new Error('Invalid group ID');
@@ -284,6 +312,7 @@ export class SessionGroupManager implements ISessionGroupManager {
    * Soft-delete a session group (sets deleted: true)
    */
   async deleteSessionGroup(groupId: string, requestor: string): Promise<void> {
+    this.ensureNotDisposed();
     const group = this.groups.get(groupId);
 
     if (!group) {
@@ -315,6 +344,7 @@ export class SessionGroupManager implements ISessionGroupManager {
     requestor: string,
     databaseId: string
   ): Promise<SessionGroup> {
+    this.ensureNotDisposed();
     const group = await this.getSessionGroup(groupId, requestor);
 
     // Validate database exists
@@ -346,6 +376,7 @@ export class SessionGroupManager implements ISessionGroupManager {
     requestor: string,
     databaseId: string
   ): Promise<SessionGroup> {
+    this.ensureNotDisposed();
     const group = await this.getSessionGroup(groupId, requestor);
 
     // Remove database from linked list
@@ -375,6 +406,7 @@ export class SessionGroupManager implements ISessionGroupManager {
     requestor: string,
     databaseId?: string
   ): Promise<SessionGroup> {
+    this.ensureNotDisposed();
     const group = await this.getSessionGroup(groupId, requestor);
 
     // If setting a database (not clearing)
@@ -402,6 +434,7 @@ export class SessionGroupManager implements ISessionGroupManager {
     groupId: string,
     requestor: string
   ): Promise<VectorDatabaseMetadata[]> {
+    this.ensureNotDisposed();
     const group = await this.getSessionGroup(groupId, requestor);
 
     // Map database IDs to metadata
@@ -423,6 +456,7 @@ export class SessionGroupManager implements ISessionGroupManager {
    * Handle database deletion by removing from all groups
    */
   async handleDatabaseDeletion(databaseId: string): Promise<void> {
+    this.ensureNotDisposed();
     // Iterate through all groups
     for (const group of this.groups.values()) {
       let modified = false;
@@ -459,6 +493,7 @@ export class SessionGroupManager implements ISessionGroupManager {
     requestor: string,
     sessionId: string
   ): Promise<SessionGroup> {
+    this.ensureNotDisposed();
     const group = await this.getSessionGroup(groupId, requestor);
 
     // Add session if not already in list (avoid duplicates)
@@ -475,6 +510,7 @@ export class SessionGroupManager implements ISessionGroupManager {
    * List all chat sessions in a session group
    */
   async listChatSessions(groupId: string, requestor: string): Promise<string[]> {
+    this.ensureNotDisposed();
     const group = await this.getSessionGroup(groupId, requestor);
     return [...group.chatSessions]; // Return copy
   }
@@ -486,6 +522,7 @@ export class SessionGroupManager implements ISessionGroupManager {
     groupId: string,
     document: import('../types/session-groups.types').GroupDocumentMetadata
   ): Promise<import('../types/session-groups.types').SessionGroup> {
+    this.ensureNotDisposed();
     const group = this.groups.get(groupId);
     if (!group) {
       throw new Error(`Session group not found: ${groupId}`);
@@ -516,6 +553,7 @@ export class SessionGroupManager implements ISessionGroupManager {
     groupId: string,
     documentId: string
   ): Promise<import('../types/session-groups.types').SessionGroup> {
+    this.ensureNotDisposed();
     const group = this.groups.get(groupId);
     if (!group) {
       throw new Error(`Session group not found: ${groupId}`);
@@ -544,6 +582,7 @@ export class SessionGroupManager implements ISessionGroupManager {
    * This method only creates the metadata tracking structure.
    */
   async startChatSession(groupId: string, initialMessage?: string): Promise<ChatSession> {
+    this.ensureNotDisposed();
     const group = this.groups.get(groupId);
     if (!group) {
       throw new Error(`Session group not found: ${groupId}`);
@@ -590,6 +629,7 @@ export class SessionGroupManager implements ISessionGroupManager {
           await this.groupLock.withLock(groupId, () => this.storage!.save(group));
           console.log(`[SessionGroupManager.startChatSession] ✅ Saved session ${sessionId} to S5`);
         } catch (error) {
+          rethrowDisposal(error);
           console.error(`[SessionGroupManager.startChatSession] ❌ Failed to save to S5:`, error);
           // Don't throw - session is already in memory, S5 is best-effort
         }
@@ -625,6 +665,7 @@ export class SessionGroupManager implements ISessionGroupManager {
     sessionIds: string[],
     requestor: string,
   ): Promise<Array<ChatSession | null>> {
+    this.ensureNotDisposed();
     if (sessionIds.length === 0) return [];
 
     // Fast path: every requested session is already in cache.
@@ -633,6 +674,7 @@ export class SessionGroupManager implements ISessionGroupManager {
       try {
         await this.getSessionGroup(groupId, requestor);
       } catch (err) {
+        rethrowDisposal(err);
         console.error(
           '[SessionGroupManager.getChatSessionsBulk] Failed to load group from S5:',
           err,
@@ -652,6 +694,7 @@ export class SessionGroupManager implements ISessionGroupManager {
   }
 
   async getChatSession(groupId: string, sessionId: string, requestor?: string): Promise<ChatSession | null> {
+    this.ensureNotDisposed();
     // First check memory cache
     let session = this.chatStorage.get(sessionId);
 
@@ -671,6 +714,7 @@ export class SessionGroupManager implements ISessionGroupManager {
           console.warn(`[SessionGroupManager.getChatSession] ⚠️  Session ${sessionId} not found in group ${groupId} even after S5 load`);
         }
       } catch (err) {
+        rethrowDisposal(err);
         console.error('[SessionGroupManager.getChatSession] Failed to load group from S5:', err);
         return null;
       }
@@ -702,6 +746,7 @@ export class SessionGroupManager implements ISessionGroupManager {
     sessionId: string,
     message: ChatMessage
   ): Promise<void> {
+    this.ensureNotDisposed();
     // Get session (from memory or load from S5)
     const session = await this.getChatSession(groupId, sessionId);
     if (!session) {
@@ -738,6 +783,7 @@ export class SessionGroupManager implements ISessionGroupManager {
             await this.storage.save(group);
             console.log(`[SessionGroupManager.addMessage] ✅ Saved message to S5 for session ${sessionId}`);
           } catch (error) {
+            rethrowDisposal(error);
             console.error(`[SessionGroupManager.addMessage] ❌ Failed to save to S5:`, error);
             // Don't throw - message is already in memory, S5 is best-effort
           }
@@ -755,6 +801,7 @@ export class SessionGroupManager implements ISessionGroupManager {
    * Updates the group's session list and persists changes to S5.
    */
   async deleteChatSession(groupId: string, sessionId: string): Promise<void> {
+    this.ensureNotDisposed();
     // Get the session to verify it exists
     const session = await this.getChatSession(groupId, sessionId);
     if (!session) {
@@ -801,6 +848,7 @@ export class SessionGroupManager implements ISessionGroupManager {
           await this.storage.save(updatedGroup);
           console.log(`[SessionGroupManager.deleteChatSession] ✅ Persisted deletion to S5 for session ${sessionId}`);
         } catch (error) {
+          rethrowDisposal(error);
           console.error(`[SessionGroupManager.deleteChatSession] ❌ Failed to save to S5:`, error);
           // Don't throw - session is already deleted from memory, S5 is best-effort
         }

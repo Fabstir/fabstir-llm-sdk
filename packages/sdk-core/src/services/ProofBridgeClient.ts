@@ -9,6 +9,10 @@
 import { IProofService, ProofRequest, ProofResult, ProofStatus } from '../interfaces/IProofService';
 import { SDKError } from '../types';
 import { ProofVerifier } from './ProofVerifier';
+import { fetchWithTimeout } from '../utils/with-timeout';
+
+/** How long one step of a bridge connect may take — a health check, its body included, or the socket's open (plan §30 KK1, §31 LL1). */
+export const BRIDGE_TIMEOUT_MS = 30_000;
 
 export class ProofBridgeClient implements IProofService {
   private endpoint?: string;
@@ -26,7 +30,8 @@ export class ProofBridgeClient implements IProofService {
     
     // Test connection
     try {
-      const response = await fetch(`${endpoint}/health`);
+      // Bounded (plan §30 KK1): a connect always settles, so one superseded never holds the next.
+      const response = await fetchWithTimeout(`${endpoint}/health`, {}, BRIDGE_TIMEOUT_MS);
       if (!response.ok) {
         throw new Error('Proof service not healthy');
       }

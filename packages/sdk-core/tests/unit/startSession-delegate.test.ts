@@ -38,6 +38,7 @@ function mockStorage() {
     updateUserSettings: vi.fn().mockResolvedValue(undefined),
     getUserAddress: vi.fn().mockResolvedValue('0xUser'),
     storeConversation: vi.fn().mockResolvedValue({ cid: 'cid' }),
+    assertConversationLogWritable: vi.fn(),
     loadConversation: vi.fn().mockResolvedValue(null),
     saveConversation: vi.fn().mockResolvedValue({ cid: 'cid' }),
   } as any;

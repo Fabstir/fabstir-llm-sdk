@@ -30,10 +30,17 @@ describe('ltx.types + errors + exports (SP2.1)', () => {
     expect(e.code).toBe('VALIDATION_FAILED');
   });
 
-  it('JobType.VIDEO_GENERATION is defined and distinct', () => {
-    expect(JobType.VIDEO_GENERATION).toBeDefined();
-    const others = [JobType.LLM_INFERENCE, JobType.VIDEO_TRANSCODE, JobType.AUDIO_TRANSCODE, JobType.IMAGE_GENERATION, JobType.THREE_D_RENDER];
-    expect(others).not.toContain(JobType.VIDEO_GENERATION);
+  it('JobType values are pinned — including the MODEL_TRAINING = 6 reservation (1.38)', () => {
+    // Regression pin: these values are type-load-bearing (LTX rides VIDEO_GENERATION).
+    // MODEL_TRAINING is reserved by the 2026-08-22 training-jobs exchange; no behaviour
+    // attaches to it until DESIGN-TRAINING-M0-INTERFACE.
+    expect(JobType.LLM_INFERENCE).toBe(0);
+    expect(JobType.VIDEO_TRANSCODE).toBe(1);
+    expect(JobType.AUDIO_TRANSCODE).toBe(2);
+    expect(JobType.IMAGE_GENERATION).toBe(3);
+    expect(JobType.THREE_D_RENDER).toBe(4);
+    expect(JobType.VIDEO_GENERATION).toBe(5);
+    expect(JobType.MODEL_TRAINING).toBe(6);
   });
 
   it('LtxResult/LtxManifest/LtxBundle resolve from ../../src', () => {

@@ -65,8 +65,9 @@ describe('WalletConnect Removal Verification', () => {
       }
     });
 
-    // Check that the method signature is correct
-    const authenticateStr = sdk.authenticate.toString();
+    // Check that the method signature is correct. authenticate() queues identity changes (plan §23 DD1); the
+    // dispatch by method lives in _authenticate.
+    const authenticateStr = (sdk as any)._authenticate.toString();
 
     // Should NOT contain walletconnect
     expect(authenticateStr).not.toContain('walletconnect');
