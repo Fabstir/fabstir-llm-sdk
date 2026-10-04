@@ -101,7 +101,7 @@ pnpm host --help
 # Register as a host (requires FAB tokens for stake)
 pnpm host register \
   --private-key 0x... \
-  --rpc-url https://base-sepolia.g.alchemy.com/v2/YOUR_KEY \
+  --rpc-url https://base-sepolia.gateway.tenderly.co \
   --stake 1000
 
 # Check host info

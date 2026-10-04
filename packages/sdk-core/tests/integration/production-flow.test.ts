@@ -57,12 +57,12 @@ describe('Production Flow Integration - No Mocks', () => {
   let sdk: FabstirSDKCore;
   let provider: any;
   let mockBrowserProvider: any;
-  const TEST_PRIVATE_KEY = process.env.TEST_USER_1_PRIVATE_KEY || '0x2d5db36770a53811d9a11163a5e6577bb867e19552921bf40f74064308bea952';
+  const TEST_PRIVATE_KEY = process.env.TEST_USER_1_PRIVATE_KEY!;
   const TEST_ADDRESS = '0x8D642988E3e7b6DB15b6058461d5563835b04bF6';
 
   beforeEach(() => {
     // Use real Base Sepolia RPC
-    const rpcUrl = process.env.RPC_URL_BASE_SEPOLIA || 'https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR';
+    const rpcUrl = process.env.RPC_URL_BASE_SEPOLIA!;
     provider = new ethers.JsonRpcProvider(rpcUrl);
 
     // Create mock browser-like provider for EOAProvider

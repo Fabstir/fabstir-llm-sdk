@@ -122,7 +122,7 @@ describe('unregister Command SDK Integration', () => {
       'test',
       'unregister',
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify HostManager.unregisterHost was called
@@ -147,7 +147,7 @@ describe('unregister Command SDK Integration', () => {
       'test',
       'unregister',
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify getHostStatus was called to check registration
@@ -172,7 +172,7 @@ describe('unregister Command SDK Integration', () => {
       'test',
       'unregister',
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify staked amount was fetched from getHostStatus
@@ -204,7 +204,7 @@ describe('unregister Command SDK Integration', () => {
       'test',
       'unregister',
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify unregisterHost was called (SDK waits for 3 confirmations internally)
@@ -247,7 +247,7 @@ describe('unregister Command SDK Integration', () => {
       'test',
       'unregister',
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify getHostStatus was called at least twice (before and after unregistration)
@@ -277,7 +277,7 @@ describe('unregister Command SDK Integration', () => {
       'test',
       'unregister',
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify unregisterHost was NOT called
@@ -312,7 +312,7 @@ describe('unregister Command SDK Integration', () => {
         'test',
         'unregister',
         '--private-key',
-        '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+        '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
       ]);
     }).rejects.toThrow();
 
@@ -419,7 +419,7 @@ describe('unregister Command - Node Lifecycle Integration', () => {
       'test',
       'unregister',
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify node was stopped
@@ -467,7 +467,7 @@ describe('unregister Command - Node Lifecycle Integration', () => {
       'test',
       'unregister',
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify no attempt to stop node
@@ -510,7 +510,7 @@ describe('unregister Command - Node Lifecycle Integration', () => {
       'test',
       'unregister',
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify no attempt to stop already-stopped process
@@ -550,7 +550,7 @@ describe('unregister Command - Node Lifecycle Integration', () => {
       'test',
       'unregister',
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify console shows stopping message

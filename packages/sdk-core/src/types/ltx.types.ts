@@ -152,6 +152,13 @@ export interface LtxBundle {
     videoInputs?: number;
     /** Pinned semantic order of videos[i] (e.g. ["controlVideo"]) — node-authoritative. */
     videoSemantics?: string[];
+    /**
+     * v26: the template takes exact LTX frame counts — frames = 8k + 1 — instead of whole seconds (Alpha Gen,
+     * Layout to Render at 25 fps). Only `true` enables it.
+     */
+    frameGrid?: boolean;
+    /** v26: this template's own frame ceiling (applied to `frameGrid` templates), within the bundle's bounds. */
+    maxFrames?: number;
   }[];
   /** ADVISORY only — never hard-gate job.lora (Constraint 8). */
   loras: string[];

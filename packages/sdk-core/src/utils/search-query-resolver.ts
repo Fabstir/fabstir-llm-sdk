@@ -1,7 +1,11 @@
-/**
- * Resolves search_queries to send to the node.
- * Priority: customQueries > rawQuery > stripRAGContext(prompt) > prompt
- */
+// Whether a prompt searches the web, and with which queries — decided on the user's text, never on the RAG
+// documents a prompt carries (1.39.2).
+import type { PromptOptions } from '../types';
+import type { SearchIntentConfig } from '../types/web-search.types';
+import { analyzePromptForSearchIntent } from './search-intent-analyzer';
+import { userTextOf } from './rag-prompt';
+
+/** search_queries for the node. Priority: customQueries > userTextOf(prompt, rawQuery) */
 export function resolveSearchQueries(
   enableWebSearch: boolean,
   prompt: string,
@@ -10,13 +14,24 @@ export function resolveSearchQueries(
 ): string[] | null {
   if (!enableWebSearch) return null;
   if (customQueries && customQueries.length > 0) return customQueries;
-  if (rawQuery) return [rawQuery];
-  return [stripRAGContext(prompt)];
+  return [userTextOf(prompt, rawQuery)];
 }
 
-function stripRAGContext(prompt: string): string {
-  const endMarker = '--- End of Knowledge Base Context ---';
-  const idx = prompt.lastIndexOf(endMarker);
-  if (idx === -1) return prompt;
-  return prompt.substring(idx + endMarker.length).trim();
+/** One decision for every prompt path: images → off; forceDisabled; forceEnabled; else auto-detect. */
+export function resolveWebSearch(
+  config: SearchIntentConfig | undefined,
+  prompt: string,
+  options?: Pick<PromptOptions, 'images' | 'rawQuery'>
+): { enabled: boolean; maxSearches: number; queries: string[] | null } {
+  const c = config ?? {};
+  let enabled: boolean;
+  if (options?.images && options.images.length > 0) enabled = false; // the VLM handles images locally
+  else if (c.forceDisabled) enabled = false;
+  else if (c.forceEnabled) enabled = true;
+  else enabled = c.autoDetect !== false && analyzePromptForSearchIntent(userTextOf(prompt, options?.rawQuery));
+  return {
+    enabled,
+    maxSearches: enabled ? (c.maxSearches ?? 5) : 0,
+    queries: resolveSearchQueries(enabled, prompt, c.queries, options?.rawQuery),
+  };
 }

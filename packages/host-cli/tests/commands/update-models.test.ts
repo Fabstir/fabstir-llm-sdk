@@ -115,7 +115,7 @@ describe('update-models Command SDK Integration', () => {
       modelId1,
       modelId2,
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify HostManager.updateSupportedModels was called with correct params
@@ -143,7 +143,7 @@ describe('update-models Command SDK Integration', () => {
       'update-models',
       '0x1234',
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Should be called with padded bytes32
@@ -179,7 +179,7 @@ describe('update-models Command SDK Integration', () => {
       modelId1,
       modelId2,
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify models were used
@@ -206,7 +206,7 @@ describe('update-models Command SDK Integration', () => {
       'update-models',
       modelId1,
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify getHostStatus was called to check registration
@@ -241,7 +241,7 @@ describe('update-models Command SDK Integration', () => {
         'update-models',
         modelId1,
         '--private-key',
-        '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+        '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
       ]);
     }).rejects.toThrow();
 
@@ -273,7 +273,7 @@ describe('update-models Command SDK Integration', () => {
       modelId1,
       modelId2,
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify models were fetched after update
@@ -303,7 +303,7 @@ describe('update-models Command SDK Integration', () => {
         'update-models',
         modelId1,
         '--private-key',
-        '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+        '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
       ]);
     }).rejects.toThrow();
 

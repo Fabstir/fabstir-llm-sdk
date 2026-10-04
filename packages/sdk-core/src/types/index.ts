@@ -214,7 +214,8 @@ export interface PromptOptions {
   onTokenUsage?: (usage: TokenUsageInfo) => void;
   /** Called when image generation intent is auto-detected and image is generated */
   onImageGenerated?: (result: import('./image-generation.types').ImageGenerationResult) => void;
-  /** Raw user query for web search (before any RAG context injection). */
+  /** The user's own text (before any RAG context injection). Decides whether to search the web, and is the query
+   *  (1.39.2). Image-generation routing does not read it. */
   rawQuery?: string;
   /** false → this exchange is not appended to the S5 conversation log (e.g. an extraction prompt). */
   conversationLog?: boolean;

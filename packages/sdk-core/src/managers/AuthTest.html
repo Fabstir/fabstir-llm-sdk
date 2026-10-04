@@ -133,7 +133,7 @@
             try {
                 // Test private key (never do this in production!)
                 const testPrivateKey = '0x' + '1'.repeat(64);
-                const rpcUrl = 'https://base-sepolia.g.alchemy.com/v2/demo';
+                const rpcUrl = 'https://base-sepolia.gateway.tenderly.co';
                 
                 const provider = new ethers.JsonRpcProvider(rpcUrl);
                 const wallet = new ethers.Wallet(testPrivateKey, provider);

@@ -24,7 +24,7 @@ describe('Model Governance Integration', () => {
     // Setup provider
     provider = new ethers.JsonRpcProvider(
       process.env.RPC_URL_BASE_SEPOLIA ||
-      'https://base-sepolia.g.alchemy.com/v2/demo'
+      'https://base-sepolia.gateway.tenderly.co'
     );
 
     // Create test wallet (read-only operations)

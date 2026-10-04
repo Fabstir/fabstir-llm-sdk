@@ -151,7 +151,7 @@ describe('Base Smart Account S5 Seed Derivation', () => {
   });
 
   it('should NOT use hardcoded fallback seed', async () => {
-    const HARDCODED_FALLBACK = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+    const HARDCODED_FALLBACK = process.env.S5_SEED_PHRASE!;
 
     // Derive seed from a signature
     const entropy = await deriveEntropyFromSignature(MOCK_SIGNATURE_1);

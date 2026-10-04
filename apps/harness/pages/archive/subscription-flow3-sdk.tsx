@@ -21,7 +21,7 @@ const TEST_HOST_2_ADDRESS = process.env.NEXT_PUBLIC_TEST_HOST_2_ADDRESS!;
 
 // Note: In production, private key should NEVER be in browser code
 // This is only for testing purposes - use a secure method in production
-const TEST_USER_1_PRIVATE_KEY = "0x2d5db36770a53811d9a11163a5e6577bb867e19552921bf40f74064308bea952";
+const TEST_USER_1_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_USER_1_PRIVATE_KEY!;
 
 // ERC20 ABIs  
 const erc20BalanceOfAbi = [{

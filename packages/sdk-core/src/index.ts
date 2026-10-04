@@ -170,6 +170,7 @@ export { ContextLimitError } from './errors/context-errors';
 // Export image generation errors
 export { ImageGenerationError } from './errors/image-generation-errors';
 export { analyzePromptForImageIntent, type ImageIntentResult } from './utils/image-intent-analyzer';
+export { RAG_CONTEXT_START_MARKER, RAG_CONTEXT_END_MARKER } from './utils/rag-prompt';
 
 // Canonical LTX megapixel-frame token count — the exact maths generate() uses for the over-claim
 // guard, so granular-path clients (submitLtx) can replicate it byte-for-byte instead of re-deriving.
@@ -264,5 +265,5 @@ export type { BundlerSendUserOpConfig, UnpackedUserOpV07 } from './wallet';
 export { WebSocketClient } from './websocket/WebSocketClient';
 
 // Version
-export const VERSION = '1.39.0';
+export const VERSION = '1.39.2';
 export const SDK_TYPE = 'browser';

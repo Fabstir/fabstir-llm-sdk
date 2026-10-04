@@ -10,9 +10,9 @@ describe('Test Host Node - Real Integration', () => {
   let provider: ethers.providers.JsonRpcProvider;
   
   // Load test private key directly from .env.test since dotenv isn't available
-  const TEST_HOST_1_PRIVATE_KEY = '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2';
+  const TEST_HOST_1_PRIVATE_KEY = process.env.TEST_HOST_1_PRIVATE_KEY!;
   const TEST_HOST_1_ADDRESS = '0x4594F755F593B517Bb3194F4DeC20C48a3f04504';
-  const RPC_URL_BASE_SEPOLIA = 'https://base-sepolia.g.alchemy.com/v2/demo';
+  const RPC_URL_BASE_SEPOLIA = 'https://base-sepolia.gateway.tenderly.co';
   const CONTRACT_JOB_MARKETPLACE = '0x445882e14b22E921c7d4Fe32a7736a32197578AF';
   
   beforeAll(async () => {

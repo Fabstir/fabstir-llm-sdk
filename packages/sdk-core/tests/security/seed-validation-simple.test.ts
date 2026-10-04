@@ -1,6 +1,7 @@
 // Copyright (c) 2025 Fabstir
 // SPDX-License-Identifier: BUSL-1.1
 
+import { readFileSync } from 'fs';
 import { describe, it, expect } from 'vitest';
 import { FabstirSDKCore } from '../../src/FabstirSDKCore';
 
@@ -18,7 +19,7 @@ describe('Seed Validation Simple Tests', () => {
 
   it('should reject test seed in production mode', async () => {
     const sdk = new FabstirSDKCore({ ...mockConfig, mode: 'production' });
-    const testSeed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+    const testSeed = process.env.S5_SEED_PHRASE!;
 
     sdk.setS5Seed(testSeed);
 
@@ -27,7 +28,7 @@ describe('Seed Validation Simple Tests', () => {
 
   it('should accept test seed in development mode', async () => {
     const sdk = new FabstirSDKCore({ ...mockConfig, mode: 'development' });
-    const testSeed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+    const testSeed = process.env.S5_SEED_PHRASE!;
 
     sdk.setS5Seed(testSeed);
 
@@ -75,9 +76,14 @@ describe('Seed Validation Simple Tests', () => {
     await expect(sdk.initializeForTesting()).resolves.toBeUndefined();
   });
 
+  it('the SDK source carries no seed phrase: the test seed is recognised by its hash', () => {
+    const src = readFileSync(new URL('../../src/FabstirSDKCore.ts', import.meta.url), 'utf8');
+    expect(src.includes(process.env.S5_SEED_PHRASE!)).toBe(false);
+  });
+
   it('should not expose hardcoded seed in SDK string', () => {
     const sdk = new FabstirSDKCore({ ...mockConfig, mode: 'production' });
-    const knownTestSeed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+    const knownTestSeed = process.env.S5_SEED_PHRASE!;
 
     const sdkString = sdk.toString();
 

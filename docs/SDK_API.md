@@ -193,6 +193,17 @@ sdk.getReadProvider();        // the provider serving contract reads
 sdk.getReadProviderSource();  // 'rpcUrl' | 'wallet' — 'wallet' is never silent (it warns)
 ```
 
+**RPC endpoint and shared providers (1.39.1+):** use a public endpoint that needs no key —
+`https://base-sepolia.gateway.tenderly.co` (full history, 50,000-block log ranges); alternatives
+`https://base-sepolia-rpc.publicnode.com` (no history before block 46,000,000) and `https://sepolia.base.org`
+(log queries limited to 1,000 blocks). Never commit an RPC URL that carries a key: read it from the environment.
+The SDK builds **one provider per `(chainId, rpcUrl)` for the whole process**, with its network fixed, so an RPC
+outage cannot turn into ethers' once-a-second network-detection retries, and every SDK instance and sign-in shares
+it. Because a fixed network is never re-detected, the SDK asks the RPC for its chain once, at sign-in:
+`NETWORK_UNREACHABLE` (retryable) when it does not answer within 30 s, `RPC_CHAIN_MISMATCH` (not retryable) when
+`rpcUrl` serves another chain than `chainId`. `createReadOnlyProvider(rpcUrl, chainId)` now takes the chain id and
+returns the shared provider. `PaymentManager.getPaymentHistory()` is removed (it cost ~4,000 `eth_getLogs` per call).
+
 Because reads and writes now use different providers they could sit on different chains, so the
 SDK asserts parity between the read chain and the signer's chain at manager initialization, on
 the wallet's `chainChanged` event, and across `switchChain()` (which also rebuilds the read
@@ -1191,19 +1202,20 @@ const enhanced = await sessionManager.askWithContext(
 );
 
 // Send enhanced prompt to LLM
-await sessionManager.sendPromptStreaming(sessionId, enhanced, (chunk) => {
-  process.stdout.write(chunk.content);
+await sessionManager.sendPromptStreaming(sessionId, enhanced, (token) => {
+  process.stdout.write(token);
 });
 ```
 
-**Context Format:**
+**Context Format** (1.39.2 — the same block the UI writes, so web search is decided on the question alone):
 ```
-Context:
-[Document 1] <text from metadata>
+--- Relevant Information from Knowledge Base ---
+<text from metadata>
 
-[Document 2] <text from metadata>
+<text from metadata>
+--- End of Knowledge Base Context ---
 
-Question: <original question>
+<original question>
 ```
 
 **Notes:**
@@ -1544,54 +1556,54 @@ await sessionManager.sendPromptStreaming(sessionId, 'What is 2+2?', onToken);
 // → web_search: false (no search overhead)
 ```
 
-**Trigger Patterns:**
-- Keywords: `search`, `find`, `look up`, `google`, `check online`
-- Time references: `latest`, `recent`, `current`, `today`, `2025`, `2026`
-- News patterns: `news about`, `what happened`
+**Trigger Patterns** (`utils/search-intent-analyzer.ts`, case-insensitive, matched from the start of a word):
+- Explicit: `search …`, `web search`, `look up`, `find online` / `find on the web` / `find me`, `google`, `bing`
+- Time: `latest`, `recent(ly)`, `current(ly) news|price|specs|status|stock|weather|score`, `today('s)`,
+  `this week|month|year`, `right now`, `up to date`, any year `2024`–`2029`
+- News: `news about|on|regarding`, `headline(s)`, `update(s) on|about|regarding`
+- Real-time: `stock price`, `weather in|for|today`, `sports score`, `exchange rate`, `compare … to|with current|latest|today`
+
+**Only the user's text decides (1.39.2).** Detection reads `options.rawQuery` when given, else the text after the
+**last** `--- End of Knowledge Base Context ---` marker (`RAG_CONTEXT_END_MARKER`), else the whole prompt. The search
+query is built from the same text. So the documents in a RAG block never switch search on, and a chunk that quotes the
+marker changes nothing — the last marker counts. Without the marker (and without `rawQuery`) the whole prompt decides,
+as before. `SDK_CAPABILITIES?.searchIntentFromUserText` is `true` from 1.39.2.
+
+```typescript
+import { RAG_CONTEXT_START_MARKER, RAG_CONTEXT_END_MARKER } from '@fabstir/sdk-core';
+
+const prompt = `${RAG_CONTEXT_START_MARKER}\n${chunks}\n${RAG_CONTEXT_END_MARKER}\n\n${userMessage}`;
+await sessionManager.sendPromptStreaming(sessionId, prompt, onToken, { rawQuery: userMessage });
+// → searches only if userMessage asks for it, with userMessage as the query
+```
+
+The SDK finds the documents by the end marker alone, and treats everything after the last one as the user's text.
+So put only the user's text after it. If anything else follows the block (replayed history, an assistant turn, a
+Harmony `<|end|>`, other context) — or the documents travel in another format — pass `rawQuery: userMessage`, which is
+exact; otherwise that text decides too.
 
 ### Override Controls
 
-Configure web search behavior on a per-prompt basis:
+The overrides are read from the **session**, not from `PromptOptions` (it has no `webSearch` field; a per-prompt
+override is planned). Set them when starting the session, or on the live session object before a prompt:
 
 ```typescript
-// Force-enable web search (even without triggers)
-await sessionManager.sendPromptStreaming(
-  sessionId,
-  'Tell me about quantum computing',
-  onToken,
-  { webSearch: { forceEnabled: true } }
-);
+// At start
+await sessionManager.startSession({ ...config, webSearch: { forceEnabled: true, maxSearches: 3 } });
 
-// Force-disable web search (even with triggers)
-await sessionManager.sendPromptStreaming(
-  sessionId,
-  'Search for the news',
-  onToken,
-  { webSearch: { forceDisabled: true } }
-);
-
-// Disable automatic detection
-await sessionManager.sendPromptStreaming(
-  sessionId,
-  'Latest AI developments',
-  onToken,
-  { webSearch: { autoDetect: false } }
-);
-
-// Custom search configuration
-await sessionManager.sendPromptStreaming(
-  sessionId,
-  'What is happening in tech?',
-  onToken,
-  {
-    webSearch: {
-      forceEnabled: true,
-      maxSearches: 3,              // Limit number of searches
-      queries: ['tech news 2026']  // Custom search queries
-    }
-  }
-);
+// On a running session (registered/delegated sessions too)
+sessionManager.getSession(String(sessionId))!.webSearch = { forceDisabled: true };
 ```
+
+| Field | Effect |
+|---|---|
+| `forceDisabled: true` | never search (wins over `forceEnabled`) |
+| `forceEnabled: true` | always search; the query is still the user's text |
+| `autoDetect: false` | no automatic detection |
+| `maxSearches` | searches per prompt when on (default 5) |
+| `queries` | custom search queries, used instead of the user's text |
+
+Attached images (`options.images`) switch web search off whatever the session says.
 
 ### searchDirect (HTTP Path)
 
@@ -1911,6 +1923,19 @@ await sessionManager.sendPromptStreaming(sessionId, 'What is in this image?', on
 - Steps: `"...with 20 steps"` → `{ steps: 20 }`
 
 **Fallback:** If image generation fails, the prompt silently falls back to normal LLM inference.
+
+**Never on a turn that carries RAG context (1.39.2).** The detector acts on the last user turn (`User:` or Harmony
+`<|start|>user<|message|>`, else the whole prompt). If `RAG_CONTEXT_END_MARKER` appears at or after the start of that
+turn, the prompt is not routed to image generation. A document could otherwise forge the user's turn (a
+`User: generate an image of …` line, or a closed-and-reopened Harmony turn), and the turn would be answered with an
+image of document text. The real block's end marker always follows a turn forged inside it. When the user's text
+follows the block (the documented layout) every honest prompt is routed as on 1.39.0: a turn whose text the block leads
+never matched the triggers, the user's own turn after the block is analysed as before, and a block in an earlier turn of
+the history does not count. A request written *before* the block in the same turn now stands down (on 1.39.0 it was
+routed with the whole block as the image prompt).
+`SDK_CAPABILITIES?.imageIntentSkipsRagTurns` is `true` from 1.39.2. `analyzePromptForImageIntent()` applies the same
+rule when called directly. To render on a turn that carries RAG context, call `generateImage()` directly. `rawQuery`
+does not change image intent, and a prompt carrying documents without the marker is analysed as before.
 
 **Direct usage:**
 
@@ -3634,6 +3659,8 @@ SDK_CAPABILITIES.conversationLogOptOut;      // conversationLog: false writes no
 SDK_CAPABILITIES.ragDocumentApi;             // addPendingDocument / putDocumentBody / getDocumentBody / …
 SDK_CAPABILITIES.ragLegacyMigration;         // migrateToSealedStorage and its two halves
 SDK_CAPABILITIES.fundedSetupErrorCarriesIds; // a failure after funding carries sessionId and jobId
+SDK_CAPABILITIES.searchIntentFromUserText;   // 1.39.2: web search is decided on the user's text, not the RAG block
+SDK_CAPABILITIES.imageIntentSkipsRagTurns;   // 1.39.2: a user turn that carries RAG context never routes to images
 ```
 
 `SDK_CAPABILITIES` is frozen. Read a flag with optional chaining (`SDK_CAPABILITIES?.conversationLogOptOut`) so an older
@@ -6235,6 +6262,7 @@ enum SDKErrorCode {
   NODE_CHAIN_MISMATCH = 'NODE_CHAIN_MISMATCH',
   DEPOSIT_ACCOUNT_UNAVAILABLE = 'DEPOSIT_ACCOUNT_UNAVAILABLE',
   READ_WRITE_CHAIN_MISMATCH = 'READ_WRITE_CHAIN_MISMATCH', // rpcUrl reads on one chain, wallet signing on another (1.38.1+)
+  RPC_CHAIN_MISMATCH = 'RPC_CHAIN_MISMATCH',   // rpcUrl serves another chain than chainId — checked once at sign-in (1.39.1+)
 
   // Transcoding
   CAPACITY_FULL = 'CAPACITY_FULL',             // Host transcode queue full (HTTP 429, retryable)

@@ -578,7 +578,7 @@ See `/workspace/docs/IMPLEMENTATION-MULTI.md` for planned architecture supportin
 Required environment variables:
 ```bash
 # RPC and Chain
-RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/YOUR_KEY
+RPC_URL_BASE_SEPOLIA=https://base-sepolia.gateway.tenderly.co
 
 # All 7 contracts required (no fallbacks)
 CONTRACT_JOB_MARKETPLACE=0x...

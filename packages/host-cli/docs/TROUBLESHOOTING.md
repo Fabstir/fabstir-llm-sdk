@@ -219,9 +219,9 @@ fabstir-host config set network.rpcUrl https://sepolia.base.org
 
 3. Check rate limits:
 ```bash
-# Use private RPC with higher limits
-# Get free tier from Alchemy/Infura
-fabstir-host config set network.rpcUrl https://base-sepolia.g.alchemy.com/v2/YOUR_KEY
+# Use a public endpoint with higher limits (no API key needed):
+# https://base-sepolia.gateway.tenderly.co (full history, 50,000-block log ranges)
+fabstir-host config set network.rpcUrl https://base-sepolia.gateway.tenderly.co
 ```
 
 ---
@@ -509,7 +509,7 @@ fabstir-host config set network.rpcUrl https://base-sepolia.g.alchemy.com/v2/YOU
 
    # Export if not set
    export CONTRACT_JOB_MARKETPLACE="0xdEa1B47872C27458Bb7331Ade99099761C4944Dc"
-   export RPC_URL_BASE_SEPOLIA="https://base-sepolia.g.alchemy.com/v2/YOUR_KEY"
+   export RPC_URL_BASE_SEPOLIA="https://base-sepolia.gateway.tenderly.co"
    ```
 
 2. **Pass all required environment variables**:

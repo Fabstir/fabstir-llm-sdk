@@ -29,7 +29,8 @@ export class BalanceTracker {
   private fabContract: ethers.Contract;
 
   constructor() {
-    const rpcUrl = process.env.RPC_URL_BASE_SEPOLIA || 'https://base-sepolia.g.alchemy.com/v2/demo';
+    const rpcUrl = process.env.RPC_URL_BASE_SEPOLIA;
+    if (!rpcUrl) throw new Error('RPC_URL_BASE_SEPOLIA is not set (e.g. https://base-sepolia.gateway.tenderly.co)');
     this.provider = new ethers.providers.JsonRpcProvider(rpcUrl);
     this.usdcContract = new ethers.Contract(
       process.env.CONTRACT_USDC_TOKEN || '0x036CbD53842c5426634e7929541eC2318f3dCF7e',

@@ -40,6 +40,7 @@ import type { IPaymentManager,
  } from '@fabstir/sdk-core';
 import { DocumentManager, HostAdapter } from '@fabstir/sdk-core';
 import { ALLOWED_IMAGE_SIZES, ImageGenerationError } from '@fabstir/sdk-core';
+import { RAG_CONTEXT_START_MARKER, RAG_CONTEXT_END_MARKER } from '@fabstir/sdk-core';
 import type { ImageGenerationResult } from '@fabstir/sdk-core';
 
 // Image generation entry type for gallery display
@@ -758,7 +759,7 @@ export default function ChatContextDemo() {
     const smartWalletLower = smartWallet.toLowerCase();
     if (!hasCachedSeed(smartWalletLower)) {
       const testSeed =
-        "yield organic score bishop free juice atop village video element unless sneak care rock update";
+        process.env.NEXT_PUBLIC_S5_SEED_PHRASE!;
       cacheSeed(smartWalletLower, testSeed);
       console.log("[S5 Seed] Pre-cached test seed for smartWallet (primary)");
       addMessage("system", "💾 Pre-cached S5 seed (no popup)");
@@ -1558,14 +1559,15 @@ export default function ChatContextDemo() {
             ragContext += "Sections marked [Image Description] contain AI-analyzed descriptions of uploaded images - ";
             ragContext += "use this information to answer questions about those images. ";
             ragContext += "Sections marked [Extracted Text] contain OCR text from images.\n\n";
-            ragContext += "Relevant information from uploaded documents:\n\n";
+            ragContext += `${RAG_CONTEXT_START_MARKER}\n\n`;
             searchResults.forEach((result: any, idx: number) => {
               console.log(`[RAG] Result ${idx}:`, result);
               // Try different field names that might contain the text
               const text = result.text || result.content || result.metadata?.text || result.chunk || 'No text found';
               ragContext += `[Document ${idx + 1}] ${text}\n\n`;
             });
-            ragContext += "---\n\n";
+            // The SDK decides web search and image routing on the text after this marker (sdk-core 1.39.2)
+            ragContext += `${RAG_CONTEXT_END_MARKER}\n\n`;
             console.log("[RAG] Context prepared:", ragContext.substring(0, 200) + "...");
           } else {
             console.log("[RAG] No relevant chunks found (no documents uploaded yet)");
@@ -1623,7 +1625,9 @@ export default function ChatContextDemo() {
       setStatus("Sending message...");
       const response = await sm.sendPromptStreaming(
         currentSessionId,
-        fullPrompt
+        fullPrompt,
+        undefined,
+        { rawQuery: userMessage }  // the user's own text: web search is decided on it, never on the documents
       );
 
       // Clean up the response to remove any repetitive patterns

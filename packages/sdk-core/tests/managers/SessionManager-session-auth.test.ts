@@ -21,7 +21,7 @@ import { SessionManager } from '../../src/managers/SessionManager';
 import { EncryptionManager } from '../../src/managers/EncryptionManager';
 import 'fake-indexeddb/auto';
 
-const SEED = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+const SEED = 'assume ego assume ego assume ego assume ego assume ego assume ego admit size total';
 
 // A well-formed authorisation exactly as /fiat/session returns it (clientAddress lowercased).
 function makeAuth(clientAddress: string) {

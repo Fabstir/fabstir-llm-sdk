@@ -10,6 +10,7 @@ import { ethers } from 'ethers';
 import { connectMetaMask, connectCoinbaseWallet, isMetaMaskInstalled } from '../utils/BrowserProvider';
 import { SEED_MESSAGE } from '../utils/s5-seed-derivation';
 import { SDKError } from '../types';
+import { sharedRpcProvider } from '../utils/rpc-provider';
 
 /** Not signed in — or signed out: the SDK disconnects a kept AuthManager at a sign-out or sign-in (plan §28 II7). */
 const notAuthenticated = () => new SDKError('Not authenticated', 'NOT_AUTHENTICATED', { retryable: false });
@@ -26,6 +27,8 @@ export interface AuthResult {
 export interface AuthOptions {
   privateKey?: string;
   rpcUrl?: string;
+  /** The chain `rpcUrl` serves; this manager's chain (Base Sepolia) unless given. */
+  chainId?: number;
   useSmartWallet?: boolean;
   sponsorDeployment?: boolean;
   paymasterUrl?: string;
@@ -136,8 +139,8 @@ export class AuthManager {
       throw new Error('RPC URL required');
     }
 
-    // Create JSON-RPC provider
-    this.provider = new ethers.JsonRpcProvider(options.rpcUrl);
+    // The process's shared provider for this RPC, its network fixed (no detection retry storm)
+    this.provider = sharedRpcProvider(options.rpcUrl, options.chainId ?? AuthManager.BASE_SEPOLIA_CHAIN_ID);
     
     // Create wallet from private key
     const wallet = new ethers.Wallet(options.privateKey, this.provider);

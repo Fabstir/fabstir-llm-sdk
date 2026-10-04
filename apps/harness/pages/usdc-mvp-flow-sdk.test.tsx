@@ -180,7 +180,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
     // Pre-cache S5 seed for TEST_USER_1 to avoid popup
     const userAddr = TEST_USER_1_ADDRESS.toLowerCase();
     if (!hasCachedSeed(userAddr)) {
-      const testSeed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+      const testSeed = process.env.NEXT_PUBLIC_S5_SEED_PHRASE!;
       cacheSeed(userAddr, testSeed);
       console.log(`[S5 Seed] Pre-cached test seed for ${userAddr}`);
     }
@@ -1562,7 +1562,7 @@ export default function BaseUsdcMvpFlowSDKTest() {
         // Pre-cache seed for sub-account to avoid popup
         const subAccountLower = subAccount.toLowerCase();
         if (!hasCachedSeed(subAccountLower)) {
-          const testSeed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+          const testSeed = process.env.NEXT_PUBLIC_S5_SEED_PHRASE!;
           cacheSeed(subAccountLower, testSeed);
           addLog(`Pre-cached S5 seed for sub-account to avoid popup`);
         }

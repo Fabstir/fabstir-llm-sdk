@@ -32,7 +32,8 @@ export class TestHostNode {
 
   constructor(config: any, privateKey: string) {
     this.config = config;
-    const rpcUrl = process.env.RPC_URL_BASE_SEPOLIA || 'https://base-sepolia.g.alchemy.com/v2/demo';
+    const rpcUrl = process.env.RPC_URL_BASE_SEPOLIA;
+    if (!rpcUrl) throw new Error('RPC_URL_BASE_SEPOLIA is not set (e.g. https://base-sepolia.gateway.tenderly.co)');
     this.provider = new ethers.providers.JsonRpcProvider(rpcUrl);
     this.signer = new ethers.Wallet(privateKey, this.provider);
     const nodeRegistryAddress = process.env.CONTRACT_NODE_REGISTRY || '0x87516C13Ea2f99de598665e14cab64E191A0f8c4';
@@ -129,7 +130,8 @@ export class TestHostNode {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const config = JSON.parse(readFileSync(path.join(__dirname, 'host-config.json'), 'utf-8'));
-  const privateKey = process.env.TEST_HOST_1_PRIVATE_KEY || '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2';
+  const privateKey = process.env.TEST_HOST_1_PRIVATE_KEY;
+    if (!privateKey) throw new Error('TEST_HOST_1_PRIVATE_KEY is not set');
   const hostNode = new TestHostNode(config, privateKey);
   (async () => {
     try {

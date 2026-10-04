@@ -164,6 +164,8 @@ describe('SDK_CAPABILITIES (D22)', () => {
       ragDocumentApi: true,
       ragLegacyMigration: true,
       fundedSetupErrorCarriesIds: true,
+      searchIntentFromUserText: true,
+      imageIntentSkipsRagTurns: true,
     });
   });
 });

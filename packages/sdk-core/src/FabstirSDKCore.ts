@@ -59,13 +59,15 @@ import { ensureSubAccount, createSubAccountSigner, SubAccountOptions } from './w
 import { AASigner, type AASignerOptions } from './wallet';
 import { retryableOf } from './storage/sealed/sealed-io';
 import { withTimeout } from './utils/with-timeout';
+import { sharedRpcProvider, verifyRpcChain, NETWORK_TIMEOUT_MS, networkUnreachable } from './utils/rpc-provider';
+import { sha256 } from '@noble/hashes/sha256';
+import { bytesToHex } from '@noble/hashes/utils';
+
+/** SHA-256 of the repository's well-known test seed (refused in production mode by validateSeed). */
+const KNOWN_TEST_SEED_SHA256 = 'ef52b4316e947e9707187d9b872f1ff0e163044b30dcb436538e8727eaf4cf86';
 
 /** How long storage may take to start before the SDK goes on without it (STORAGE_UNAVAILABLE — §24 EE4). */
 const STORAGE_START_TIMEOUT_MS = 90_000;
-/** How long the chain may take to answer network detection (§24 EE4). */
-const NETWORK_TIMEOUT_MS = 30_000;
-const networkUnreachable = () =>
-  new SDKError('The chain did not answer network detection in time', 'NETWORK_UNREACHABLE', { retryable: true });
 /** How long a Base Account approval — its send and confirmation — may take before the sign-in goes on without it (§25 FF2, §26 GG4). */
 const APPROVAL_TIMEOUT_MS = 120_000;
 const authSuperseded = () => new SDKError('A sign-out superseded this sign-in', 'AUTH_SUPERSEDED', { retryable: false });
@@ -491,7 +493,7 @@ export class FabstirSDKCore extends EventEmitter {
 
     // VoidSigner cannot sign transactions - it's read-only
     // This is a critical issue that must be fixed
-    const provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
+    const provider = sharedRpcProvider(this.config.rpcUrl!, this.config.chainId!);
     this.provider = provider;
 
     // CRITICAL: VoidSigner cannot sign transactions
@@ -607,7 +609,7 @@ export class FabstirSDKCore extends EventEmitter {
       throw new SDKError('RPC URL required for private key auth', 'RPC_URL_REQUIRED');
     }
 
-    this.provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
+    this.provider = sharedRpcProvider(this.config.rpcUrl, this.config.chainId!);
 
     // Create wallet without provider first (for offline signing)
     const wallet = new ethers.Wallet(privateKey);
@@ -671,7 +673,7 @@ export class FabstirSDKCore extends EventEmitter {
       throw new SDKError('RPC URL required for aa-signer auth', 'AA_RPC_URL_MISSING');
     }
 
-    this.provider = new ethers.JsonRpcProvider(options.rpcUrl);
+    this.provider = sharedRpcProvider(options.rpcUrl, options.chainId);
     this.eoaWallet = new ethers.Wallet(options.eoaPrivateKey, this.provider);
     this.signer = new AASigner(
       {
@@ -717,7 +719,7 @@ export class FabstirSDKCore extends EventEmitter {
       this.provider = signer.provider as ethers.BrowserProvider | ethers.JsonRpcProvider;
     } else if (this.config.rpcUrl) {
       // Create provider if not available
-      this.provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
+      this.provider = sharedRpcProvider(this.config.rpcUrl, this.config.chainId!);
     } else {
       throw new SDKError('Provider or RPC URL required', 'PROVIDER_REQUIRED');
     }
@@ -1493,7 +1495,7 @@ export class FabstirSDKCore extends EventEmitter {
    */
   private initializeReadProvider(): void {
     if (this.config.rpcUrl) {
-      this.readProvider = new ethers.JsonRpcProvider(this.config.rpcUrl);
+      this.readProvider = sharedRpcProvider(this.config.rpcUrl, this.config.chainId!);
       this.readProviderSource = 'rpcUrl';
       return;
     }
@@ -1543,7 +1545,13 @@ export class FabstirSDKCore extends EventEmitter {
     if (this.readProviderSource !== 'rpcUrl') {
       return; // Reads are on the wallet: one provider, nothing to diverge.
     }
-    if (!this.readProvider || !this.signer?.provider) {
+    if (!this.readProvider) {
+      return;
+    }
+    // The read provider's network is fixed (never detected): ask the RPC which chain it serves, once (R3) — a dead or
+    // wrong rpcUrl is caught here, NETWORK_UNREACHABLE within the bound or RPC_CHAIN_MISMATCH.
+    await verifyRpcChain(this.readProvider as ethers.JsonRpcProvider, this.currentChainId);
+    if (!this.signer?.provider) {
       return;
     }
 
@@ -1594,7 +1602,7 @@ export class FabstirSDKCore extends EventEmitter {
       return;
     }
 
-    this.readProvider = new ethers.JsonRpcProvider(rpcUrl);
+    this.readProvider = sharedRpcProvider(rpcUrl, this.currentChainId);
     this.readProviderSource = 'rpcUrl';
     await this.assertReadWriteChainParity();
   }
@@ -1661,9 +1669,8 @@ export class FabstirSDKCore extends EventEmitter {
       throw new SDKError('No seed phrase set', 'SEED_MISSING');
     }
 
-    // Check for known test seed
-    const knownTestSeed = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
-    if (this.s5Seed === knownTestSeed) {
+    // The known test seed, recognised by its SHA-256 — the phrase itself never ships in the SDK
+    if (bytesToHex(sha256(new TextEncoder().encode(this.s5Seed))) === KNOWN_TEST_SEED_SHA256) {
       if (this.config.mode === 'production') {
         throw new SDKError(
           'Test seed phrase not allowed in production mode',

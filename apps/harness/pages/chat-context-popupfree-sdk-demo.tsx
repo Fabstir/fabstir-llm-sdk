@@ -542,7 +542,7 @@ export default function ChatContextDemo() {
     const subAccountLower = sub.toLowerCase();
     if (!hasCachedSeed(subAccountLower)) {
       const testSeed =
-        "yield organic score bishop free juice atop village video element unless sneak care rock update";
+        process.env.NEXT_PUBLIC_S5_SEED_PHRASE!;
       cacheSeed(subAccountLower, testSeed);
       console.log("[S5 Seed] Pre-cached test seed for sub-account");
       addMessage("system", "💾 Pre-cached S5 seed (no popup)");

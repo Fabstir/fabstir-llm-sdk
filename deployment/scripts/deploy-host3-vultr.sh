@@ -220,8 +220,8 @@ cat > /tmp/fabstir-host.env << EOF
 HOST_PRIVATE_KEY=${HOST_PRIVATE_KEY}
 PUBLIC_URL=${PUBLIC_URL}
 
-# Blockchain - Get free API key from https://www.alchemy.com/
-RPC_URL=${RPC_URL:-https://base-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY}
+# Blockchain - free public endpoint, no API key needed
+RPC_URL=${RPC_URL:-https://base-sepolia.gateway.tenderly.co}
 CHAIN_ID=84532
 
 # Contracts

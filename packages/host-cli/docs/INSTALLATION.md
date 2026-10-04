@@ -27,8 +27,8 @@ This guide covers installing the Fabstir Host CLI from source. This is a **pre-M
 - **ETH Balance**: Minimum 0.01 ETH on Base Sepolia (for gas fees)
 - **FAB Tokens**: Minimum 1000 FAB for staking (testnet)
 - **RPC Access**: Base Sepolia RPC endpoint
-  - Free tier available from Alchemy, Infura, or public RPC
-  - Recommended: Alchemy (https://www.alchemy.com)
+  - Recommended: `https://base-sepolia.gateway.tenderly.co` (free, no API key; full history, 50,000-block log ranges)
+  - Alternatives: `https://base-sepolia-rpc.publicnode.com` (no history before block 46,000,000), `https://sepolia.base.org` (log queries limited to 1,000 blocks)
 
 ### Development Tools
 
@@ -149,7 +149,7 @@ CONTRACT_FAB_TOKEN=0x...
 CONTRACT_USDC_TOKEN=0x...
 
 # Network Configuration
-RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY
+RPC_URL_BASE_SEPOLIA=https://base-sepolia.gateway.tenderly.co
 CHAIN_ID=84532
 
 # Test Accounts (for development)
@@ -161,12 +161,13 @@ TEST_HOST_1_ADDRESS=0x...
 
 ### Get RPC URL
 
-If you don't have an RPC URL:
+Use the free public endpoint, which needs no API key:
 
-1. Sign up for Alchemy (free tier): https://www.alchemy.com
-2. Create a new app for "Base Sepolia"
-3. Copy the HTTPS URL
-4. Add to `.env.test` as `RPC_URL_BASE_SEPOLIA`
+```
+RPC_URL_BASE_SEPOLIA=https://base-sepolia.gateway.tenderly.co
+```
+
+Never commit an RPC URL that contains an API key: read it from the environment.
 
 ## Verification
 
@@ -254,7 +255,7 @@ Test Files  5 passed (5)
 ```bash
 pnpm host info \
   --private-key 0xYOUR_PRIVATE_KEY \
-  --rpc-url https://base-sepolia.g.alchemy.com/v2/YOUR_KEY
+  --rpc-url https://base-sepolia.gateway.tenderly.co
 ```
 
 4. **Register as a host**:

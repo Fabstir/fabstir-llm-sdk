@@ -6,6 +6,7 @@
  */
 
 import { ethers } from 'ethers';
+import { sharedRpcProvider } from './rpc-provider';
 
 export interface WalletInfo {
   address: string;
@@ -91,10 +92,11 @@ export async function connectCoinbaseWallet(): Promise<WalletInfo> {
 }
 
 /**
- * Create a read-only provider for a given RPC URL
+ * The read-only provider for an RPC URL on a chain — the process's shared one, its network fixed (no detection retry
+ * storm when the RPC is down).
  */
-export function createReadOnlyProvider(rpcUrl: string): ethers.JsonRpcProvider {
-  return new ethers.JsonRpcProvider(rpcUrl);
+export function createReadOnlyProvider(rpcUrl: string, chainId: number): ethers.JsonRpcProvider {
+  return sharedRpcProvider(rpcUrl, chainId);
 }
 
 /**

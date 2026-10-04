@@ -59,7 +59,7 @@ CONTRACT_USDC_TOKEN=0x036CbD53842c5426634e7929541eC2318f3dCF7e
 
 ```bash
 # RPC Endpoints
-RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY
+RPC_URL_BASE_SEPOLIA=https://base-sepolia.gateway.tenderly.co
 RPC_URL_BASE_MAINNET=https://mainnet.base.org
 
 # Default Network
@@ -201,7 +201,7 @@ interface SDKConfig {
 ```bash
 Network: baseSepolia
 Chain ID: 84532
-RPC URL: https://base-sepolia.g.alchemy.com/v2/...
+RPC URL: https://base-sepolia.gateway.tenderly.co
 Explorer: https://sepolia.basescan.org
 Native Token: ETH (testnet)
 ```
@@ -411,11 +411,11 @@ const manager = getHostManager(); // Works!
 
 ```bash
 # For Base Sepolia (chainId 84532)
-RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/...
+RPC_URL_BASE_SEPOLIA=https://base-sepolia.gateway.tenderly.co
 
 # For Ethereum Mainnet (chainId 1)
 # This is WRONG for Base - don't use
-RPC_URL=https://eth-mainnet.g.alchemy.com/v2/...
+RPC_URL=https://ethereum-rpc.publicnode.com
 ```
 
 ### Error: "Contract address not found"
