@@ -114,9 +114,20 @@ export class LtxManager {
     if (!fps.includes(job.fps)) {
       throw new LtxError(`fps ${job.fps} not in allow-list`, 'LTX_PREVALIDATION_FAILED');
     }
-    // Node duration rule (v8.34.0): clips are a whole number of seconds — frames = fps × seconds + 1.
     // The node rejects off-grid counts AFTER escrow; gate here so a bad job never locks funds.
-    if ((job.frames - 1) % job.fps !== 0) {
+    if (tpl.frameGrid === true) {
+      // Allow-list v26 frame grid: LTX renders 8k+1 frames, and the node bills exactly those — no whole-second rule.
+      if (tpl.maxFrames !== undefined && !(Number.isInteger(tpl.maxFrames) && tpl.maxFrames > 0)) {
+        throw new LtxError(`template ${job.templateId} has a malformed maxFrames`, 'LTX_PREVALIDATION_FAILED');
+      }
+      if ((job.frames - 1) % 8 !== 0) {
+        throw new LtxError(`frames ${job.frames} is not on the LTX frame grid (frames must be 8 × k + 1)`, 'LTX_PREVALIDATION_FAILED');
+      }
+      if (tpl.maxFrames !== undefined && job.frames > tpl.maxFrames) {
+        throw new LtxError(`frames ${job.frames} exceeds template ${job.templateId}'s maxFrames ${tpl.maxFrames}`, 'LTX_PREVALIDATION_FAILED');
+      }
+    } else if ((job.frames - 1) % job.fps !== 0) {
+      // Node duration rule (v8.34.0): clips are a whole number of seconds — frames = fps × seconds + 1.
       throw new LtxError(
         `frames ${job.frames} is not a whole number of seconds at ${job.fps} fps (frames must be fps × seconds + 1)`, 'LTX_PREVALIDATION_FAILED',
       );

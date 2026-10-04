@@ -48,8 +48,8 @@ import { PricingValidationError } from '../errors/pricing-errors';
 import { WebSearchError } from '../errors/web-search-errors';
 import { ContextLimitError } from '../errors/context-errors';
 import { bytesToHex } from '../crypto/utilities';
-import { analyzePromptForSearchIntent } from '../utils/search-intent-analyzer';
-import { resolveSearchQueries } from '../utils/search-query-resolver';
+import { resolveWebSearch } from '../utils/search-query-resolver';
+import { RAG_CONTEXT_START_MARKER, RAG_CONTEXT_END_MARKER } from '../utils/rag-prompt';
 import { analyzePromptForImageIntent } from '../utils/image-intent-analyzer';
 import { recoverFromCheckpointsFlow, recoverFromCheckpointsFlowWithHttp } from '../utils/checkpoint-recovery';
 import { recoverFromBlockchain, type BlockchainRecoveredConversation, type CheckpointQueryOptions } from '../utils/checkpoint-blockchain';
@@ -1267,6 +1267,10 @@ export class SessionManager implements ISessionManager {
     if (!this.initialized) {
       throw new SDKError('SessionManager not initialized', 'SESSION_NOT_INITIALIZED');
     }
+    // rawQuery decides web search (1.39.2): refuse a non-string before anything is sent
+    if (options?.rawQuery !== undefined && typeof options.rawQuery !== 'string') {
+      throw new SDKError('options.rawQuery must be a string', 'INVALID_PARAMETER', { field: 'rawQuery' });
+    }
 
     const sessionIdStr = sessionId.toString();
     let session = this.sessions.get(sessionIdStr);
@@ -1417,6 +1421,9 @@ export class SessionManager implements ISessionManager {
       // Collect full response
       let fullResponse = '';
 
+      // Web search, decided on the user's text — never on the RAG documents (1.39.2)
+      const search = resolveWebSearch(session.webSearch, prompt, options);
+
       // Set up streaming handler
       if (onToken) {
         // NEW (Phase 6.2): Send encrypted or plaintext message based on session settings
@@ -1565,28 +1572,11 @@ export class SessionManager implements ISessionManager {
               }, { once: true });
             }
 
-            // AUTOMATIC WEB SEARCH INTENT DETECTION for encrypted path (Phase 5.1)
-            const searchConfigEncrypted = session.webSearch || {};
-            let enableWebSearchEncrypted = false;
-
-            // Disable web search when images are attached — VLM handles images locally
-            const hasImagesEncrypted = options?.images && options.images.length > 0;
-            if (hasImagesEncrypted) {
-              enableWebSearchEncrypted = false;
-            } else if (searchConfigEncrypted.forceDisabled) {
-              enableWebSearchEncrypted = false;
-            } else if (searchConfigEncrypted.forceEnabled) {
-              enableWebSearchEncrypted = true;
-            } else if (searchConfigEncrypted.autoDetect !== false) {
-              // Default: auto-detect search intent from prompt
-              enableWebSearchEncrypted = analyzePromptForSearchIntent(prompt);
-            }
-
             // Send encrypted message with web search options, images, and thinking
             this.sendEncryptedMessage(sessionIdStr, prompt, {
-              webSearch: enableWebSearchEncrypted,
-              maxSearches: enableWebSearchEncrypted ? (searchConfigEncrypted.maxSearches ?? 5) : 0,
-              searchQueries: resolveSearchQueries(enableWebSearchEncrypted, prompt, searchConfigEncrypted.queries, options?.rawQuery)
+              webSearch: search.enabled,
+              maxSearches: search.maxSearches,
+              searchQueries: search.queries
             }, options?.images, options?.thinking, { temperature: options?.temperature, maxTokens: options?.maxTokens }).catch((err) => {
               console.error('[SessionManager] Failed to send encrypted message:', err);
               reject(err);
@@ -1610,23 +1600,6 @@ export class SessionManager implements ISessionManager {
             } else if (data.type === 'session_completed') {
             }
           });
-
-          // AUTOMATIC WEB SEARCH INTENT DETECTION (Phase 5.1)
-          const searchConfig = session.webSearch || {};
-          let enableWebSearch = false;
-
-          // Disable web search when images are attached — VLM handles images locally
-          const hasImagesPlaintext = options?.images && options.images.length > 0;
-          if (hasImagesPlaintext) {
-            enableWebSearch = false;
-          } else if (searchConfig.forceDisabled) {
-            enableWebSearch = false;
-          } else if (searchConfig.forceEnabled) {
-            enableWebSearch = true;
-          } else if (searchConfig.autoDetect !== false) {
-            // Default: auto-detect search intent from prompt
-            enableWebSearch = analyzePromptForSearchIntent(prompt);
-          }
 
           // Send plaintext message (only if session explicitly opted out of encryption)
           const plaintextRequest: any = {
@@ -1654,9 +1627,9 @@ export class SessionManager implements ISessionManager {
             jobId: session.jobId.toString(),  // Include jobId for settlement tracking
             prompt: augmentedPrompt,  // Use RAG-augmented prompt
             // Web search fields (v8.7.0+) - AUTOMATICALLY ENABLED based on intent
-            web_search: enableWebSearch,
-            max_searches: enableWebSearch ? (searchConfig.maxSearches ?? 5) : 0,
-            search_queries: resolveSearchQueries(enableWebSearch, prompt, searchConfig.queries, options?.rawQuery),
+            web_search: search.enabled,
+            max_searches: search.maxSearches,
+            search_queries: search.queries,
             request: plaintextRequest
           });
 
@@ -1743,28 +1716,11 @@ export class SessionManager implements ISessionManager {
             );
           }
 
-          // AUTOMATIC WEB SEARCH INTENT DETECTION for non-streaming encrypted path
-          const searchConfigNonStreamEnc = session.webSearch || {};
-          let enableWebSearchNonStreamEnc = false;
-
-          // Disable web search when images are attached — VLM handles images locally
-          const hasImagesNonStreamEnc = options?.images && options.images.length > 0;
-          if (hasImagesNonStreamEnc) {
-            enableWebSearchNonStreamEnc = false;
-          } else if (searchConfigNonStreamEnc.forceDisabled) {
-            enableWebSearchNonStreamEnc = false;
-          } else if (searchConfigNonStreamEnc.forceEnabled) {
-            enableWebSearchNonStreamEnc = true;
-          } else if (searchConfigNonStreamEnc.autoDetect !== false) {
-            // Default: auto-detect search intent from prompt
-            enableWebSearchNonStreamEnc = analyzePromptForSearchIntent(prompt);
-          }
-
           // Send encrypted message with web search options, images, and thinking
           await this.sendEncryptedMessage(sessionIdStr, prompt, {
-            webSearch: enableWebSearchNonStreamEnc,
-            maxSearches: enableWebSearchNonStreamEnc ? (searchConfigNonStreamEnc.maxSearches ?? 5) : 0,
-            searchQueries: resolveSearchQueries(enableWebSearchNonStreamEnc, prompt, searchConfigNonStreamEnc.queries, options?.rawQuery)
+            webSearch: search.enabled,
+            maxSearches: search.maxSearches,
+            searchQueries: search.queries
           }, options?.images, options?.thinking, { temperature: options?.temperature, maxTokens: options?.maxTokens });
 
           // Wait for encrypted response (non-streaming) - MUST accumulate chunks!
@@ -1878,23 +1834,6 @@ export class SessionManager implements ISessionManager {
             });
           });
         } else {
-          // AUTOMATIC WEB SEARCH INTENT DETECTION (Phase 5.1) - Non-streaming path
-          const searchConfigNonStream = session.webSearch || {};
-          let enableWebSearchNonStream = false;
-
-          // Disable web search when images are attached — VLM handles images locally
-          const hasImagesPlaintextNonStream = options?.images && options.images.length > 0;
-          if (hasImagesPlaintextNonStream) {
-            enableWebSearchNonStream = false;
-          } else if (searchConfigNonStream.forceDisabled) {
-            enableWebSearchNonStream = false;
-          } else if (searchConfigNonStream.forceEnabled) {
-            enableWebSearchNonStream = true;
-          } else if (searchConfigNonStream.autoDetect !== false) {
-            // Default: auto-detect search intent from prompt
-            enableWebSearchNonStream = analyzePromptForSearchIntent(prompt);
-          }
-
           // Send plaintext message (only if session explicitly opted out of encryption)
           const plaintextRequestNonStream: any = {
             model: session.model,
@@ -1929,9 +1868,9 @@ export class SessionManager implements ISessionManager {
             jobId: session.jobId.toString(),  // Include jobId for settlement tracking
             prompt: augmentedPrompt,  // Use RAG-augmented prompt
             // Web search fields (v8.7.0+) - AUTOMATICALLY ENABLED based on intent
-            web_search: enableWebSearchNonStream,
-            max_searches: enableWebSearchNonStream ? (searchConfigNonStream.maxSearches ?? 5) : 0,
-            search_queries: resolveSearchQueries(enableWebSearchNonStream, prompt, searchConfigNonStream.queries, options?.rawQuery),
+            web_search: search.enabled,
+            max_searches: search.maxSearches,
+            search_queries: search.queries,
             request: plaintextRequestNonStream
           });
 
@@ -3592,9 +3531,9 @@ export class SessionManager implements ISessionManager {
       return question;
     }
 
-    // Format: Context:\n{chunk1}\n\n{chunk2}\n\n...\n\nQuestion: {question}
+    // The UI's block format: the question follows the end marker, where userTextOf finds it (U4)
     const context = contextChunks.join('\n\n');
-    return `Context:\n${context}\n\nQuestion: ${question}`;
+    return `${RAG_CONTEXT_START_MARKER}\n${context}\n${RAG_CONTEXT_END_MARKER}\n\n${question}`;
   }
 
   /**

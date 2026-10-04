@@ -36,7 +36,7 @@ docker run -d \
   -e MODEL_PATH=/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
   -e HOST_PRIVATE_KEY=0xYOUR_PRIVATE_KEY \
   -e CHAIN_ID=84532 \
-  -e RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/YOUR_KEY \
+  -e RPC_URL_BASE_SEPOLIA=https://base-sepolia.gateway.tenderly.co \
   -e CONTRACT_JOB_MARKETPLACE=0xdEa1B47872C27458Bb7331Ade99099761C4944Dc \
   -e CONTRACT_NODE_REGISTRY=0x2AA37Bb6E9f0a5d0F3b2836f3a5F656755906218 \
   -e CONTRACT_PROOF_SYSTEM=0x2ACcc60893872A499700908889B38C5420CBcFD1 \
@@ -194,7 +194,7 @@ echo $HOST_PRIVATE_KEY
 For **Base Sepolia testnet** (use these values):
 ```bash
 export CHAIN_ID=84532
-export RPC_URL_BASE_SEPOLIA="https://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY"
+export RPC_URL_BASE_SEPOLIA="https://base-sepolia.gateway.tenderly.co"
 
 # Contract addresses (current testnet deployment)
 export CONTRACT_JOB_MARKETPLACE="0xdEa1B47872C27458Bb7331Ade99099761C4944Dc"

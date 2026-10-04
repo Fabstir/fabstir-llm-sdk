@@ -23,7 +23,15 @@ export const SDK_CAPABILITIES = Object.freeze({
    * throws SESSION_ID_UNRESOLVED with its txHash, and one that provably funded nothing SESSION_NOT_FUNDED.
    * A send that may have been broadcast but names no hash throws SESSION_FUNDING_UNCERTAIN: check the wallet's
    * activity before starting again. TranscodeManager.createTranscodeJob funds last (nothing after it can fail).
-   * Not yet covered: TranscodeManager.submitTranscodeWithLoadBalancing (planned, 1.39.1).
+   * Not yet covered: TranscodeManager.submitTranscodeWithLoadBalancing (planned, Milestone B).
    */
   fundedSetupErrorCarriesIds: true,
+  /**
+   * sendPromptStreaming decides web search on the user's text: options.rawQuery, else the text after the last
+   * RAG_CONTEXT_END_MARKER, else the whole prompt — the text the search query is built from (1.39.2).
+   */
+  searchIntentFromUserText: true,
+  /** Image generation is never auto-routed when RAG_CONTEXT_END_MARKER appears at or after the start of the user turn
+   *  the detector acts on (a turn that carries RAG context, where a document could have forged it) (1.39.2). */
+  imageIntentSkipsRagTurns: true,
 } as const);

@@ -203,11 +203,11 @@ cat > /tmp/fabstir-host.env << 'EOF'
 # Host Identity (TEST_HOST_3 - provided by Fabstir team)
 # ⚠️ WARNING: This is a TEST KEY ONLY for Base Sepolia testnet
 # NEVER use this key on mainnet or with real funds
-HOST_PRIVATE_KEY=0x36c4dbaead98ebd10417c0325da8cf1217e12488185f8c4aec68d5c476f39fa5
+HOST_PRIVATE_KEY=<your-host-private-key>
 
 # Network
 PUBLIC_URL=http://AUTO_DETECT:8083
-RPC_URL=https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR
+RPC_URL=https://base-sepolia.gateway.tenderly.co
 CHAIN_ID=84532
 
 # Contracts (Base Sepolia)

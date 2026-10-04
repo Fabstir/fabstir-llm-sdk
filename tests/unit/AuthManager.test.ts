@@ -94,7 +94,7 @@ describe('AuthManager', () => {
     it('should authenticate with private key', async () => {
       const result = await authManager.authenticate('private-key', {
         privateKey: '0xTestPrivateKey123',
-        rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/test'
+        rpcUrl: 'https://base-sepolia.gateway.tenderly.co'
       });
 
       expect(result).toHaveProperty('signer');
@@ -107,7 +107,7 @@ describe('AuthManager', () => {
 
     it('should authenticate with base provider', async () => {
       const result = await authManager.authenticate('base', {
-        rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/test'
+        rpcUrl: 'https://base-sepolia.gateway.tenderly.co'
       });
 
       expect(result).toHaveProperty('signer');
@@ -265,7 +265,7 @@ describe('AuthManager', () => {
   describe('Network Configuration', () => {
     it('should use Base Sepolia network config', async () => {
       const result = await authManager.authenticate('base', {
-        rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/test'
+        rpcUrl: 'https://base-sepolia.gateway.tenderly.co'
       });
 
       expect(result.network).toMatchObject({

@@ -108,7 +108,7 @@ describe('update-url Command SDK Integration', () => {
       'update-url',
       validUrl,
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify HostManager.updateApiUrl was called with correct URL
@@ -137,7 +137,7 @@ describe('update-url Command SDK Integration', () => {
         'update-url',
         invalidUrl,
         '--private-key',
-        '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+        '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
       ]);
     }).rejects.toThrow();
 
@@ -165,7 +165,7 @@ describe('update-url Command SDK Integration', () => {
       'update-url',
       validUrl,
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify getHostStatus was called to check registration
@@ -191,7 +191,7 @@ describe('update-url Command SDK Integration', () => {
       'update-url',
       validUrl,
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify current URL was fetched from getHostStatus
@@ -224,7 +224,7 @@ describe('update-url Command SDK Integration', () => {
       'update-url',
       validUrl,
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify updateApiUrl was called (SDK waits for 3 confirmations internally)
@@ -270,7 +270,7 @@ describe('update-url Command SDK Integration', () => {
       'update-url',
       validUrl,
       '--private-key',
-      '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
     ]);
 
     // Verify getHostStatus was called at least twice (before and after update)
@@ -300,7 +300,7 @@ describe('update-url Command SDK Integration', () => {
         'update-url',
         validUrl,
         '--private-key',
-        '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2',
+        '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
       ]);
     }).rejects.toThrow();
 

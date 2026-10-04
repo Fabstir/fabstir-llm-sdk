@@ -9,14 +9,14 @@ import { ethers } from 'ethers';
 // Chain configuration
 const CHAIN_HEX = "0x14a34";  // Base Sepolia
 const CHAIN_ID_NUM = 84532;
-const RPC_URL = "https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR";
+const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA!;
 
 // Contract addresses
 const USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as const;
 
 // Test accounts from .env.test
 const TEST_USER_1_ADDRESS = "0x8D642988E3e7b6DB15b6058461d5563835b04bF6";
-const TEST_USER_1_PRIVATE_KEY = "0x2d5db36770a53811d9a11163a5e6577bb867e19552921bf40f74064308bea952"; // Replace with actual key
+const TEST_USER_1_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_USER_1_PRIVATE_KEY!; // Replace with actual key
 const TEST_HOST_1_ADDRESS = "0x4594F755F593B517Bb3194F4DeC20C48a3f04504";
 const TEST_HOST_2_ADDRESS = "0x20f2A5FCDf271A5E6b04383C2915Ea980a50948c";
 

@@ -199,7 +199,7 @@ kubectl exec -n fabstir-host $POD -- curl -X POST http://localhost:3001/api/regi
       "maxConcurrent": 2,
       "costPerToken": 0.002
     },
-    "privateKey": "0x36c4dbaead98ebd10417c0325da8cf1217e12488185f8c4aec68d5c476f39fa5",
+    "privateKey": "<your-host-private-key>",
     "minPricePerTokenNative": "11363636363636",
     "minPricePerTokenStable": "2000"
   }'
@@ -297,7 +297,7 @@ Look for:
 
 **Solution**: Ensure ConfigMap has ALL required variables:
 - `NETWORK: "base-sepolia"`
-- `RPC_URL_BASE_SEPOLIA: "https://base-sepolia.g.alchemy.com/v2/..."`
+- `RPC_URL_BASE_SEPOLIA: "https://base-sepolia.gateway.tenderly.co"`
 - `CONTRACT_*` addresses
 - `ENTRY_POINT_ADDRESS`
 - `BASE_CONTRACT_SPEND_PERMISSION_MANAGER`

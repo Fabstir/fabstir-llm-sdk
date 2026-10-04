@@ -11,7 +11,7 @@ export { FabstirSDK } from './FabstirSDK';
 export * from './types/index';
 
 // Constants from integration tests
-export const DEFAULT_RPC_URL = 'https://base-sepolia.g.alchemy.com/v2/demo';
+export const DEFAULT_RPC_URL = 'https://base-sepolia.gateway.tenderly.co';
 export const DEFAULT_S5_PORTAL = 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p';
 export const MIN_ETH_PAYMENT = '0.005';  // From integration tests - minimum for profitability
 

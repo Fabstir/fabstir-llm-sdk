@@ -355,7 +355,7 @@ main()
  * Required Environment Variables:
  * 
  * PRIVATE_KEY=0x...
- * RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/your-key
+ * RPC_URL_BASE_SEPOLIA=https://base-sepolia.gateway.tenderly.co
  * S5_PORTAL_URL=wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p
  * CONTRACT_JOB_MARKETPLACE=0xD937c594682Fe74E6e3d06239719805C04BE804A
  * CONTRACT_NODE_REGISTRY=0x87516C13Ea2f99de598665e14cab64E191A0f8c4

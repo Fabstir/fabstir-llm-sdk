@@ -26,7 +26,6 @@ beforeAll(() => {
   process.env.CONTRACT_FAB_TOKEN = '0xC78949004B4EB6dEf2D66e49Cd81231472612D62';
   process.env.CONTRACT_USDC_TOKEN = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
   process.env.ENTRY_POINT_ADDRESS = '0x0000000071727De22E5E9d8BAf0edAc6f37da032';
-  process.env.RPC_URL_BASE_SEPOLIA = 'https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR';
 
   // Skip S5 storage for this test (WebSocket not available in Node test environment)
   // We're testing SDK convenience methods, not actual S5 operations
@@ -63,7 +62,7 @@ describe('SDK Encrypted Storage Integration (Phase 5.3)', () => {
   let sdk: FabstirSDKCore;
   let clientWallet: ethers.Wallet;
   let hostWallet: ethers.Wallet;
-  const rpcUrl = process.env.RPC_URL_BASE_SEPOLIA || 'https://base-sepolia.g.alchemy.com/v2/demo';
+  const rpcUrl = process.env.RPC_URL_BASE_SEPOLIA!;
 
   beforeEach(async () => {
     // Create client and host wallets
@@ -84,7 +83,7 @@ describe('SDK Encrypted Storage Integration (Phase 5.3)', () => {
         modelRegistry: '0x92b2De840bB2171203011A6dBA928d855cA8183E'
       },
       s5Config: {
-        seedPhrase: 'yield organic score bishop free juice atop village video element unless sneak care rock update'
+        seedPhrase: process.env.S5_SEED_PHRASE!
       }
     });
 

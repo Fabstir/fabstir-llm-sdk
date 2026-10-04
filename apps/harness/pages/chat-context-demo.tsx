@@ -521,7 +521,7 @@ export default function ChatContextDemo() {
     const smartWalletLower = smartWallet.toLowerCase();
     if (!hasCachedSeed(smartWalletLower)) {
       const testSeed =
-        "yield organic score bishop free juice atop village video element unless sneak care rock update";
+        process.env.NEXT_PUBLIC_S5_SEED_PHRASE!;
       cacheSeed(smartWalletLower, testSeed);
       console.log("[S5 Seed] Pre-cached test seed for smartWallet (primary)");
       addMessage("system", "💾 Pre-cached S5 seed (no popup)");

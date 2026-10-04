@@ -19,7 +19,7 @@ import {
   type StorageSealer,
 } from '../../../src/storage/sealed/StorageSealer';
 
-const SEED_A = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+const SEED_A = 'assume ego assume ego assume ego assume ego assume ego assume ego admit size total';
 const SEED_B = 'abandon ability able about above absent absorb abstract absurd abuse access accident acid acoustic acquire';
 const ADDR = '0x000000000000000000000000000000000000dEaD';
 /** The address raw sealers are bound to (plan §19 Z8). */

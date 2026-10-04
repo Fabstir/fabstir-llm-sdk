@@ -11,7 +11,7 @@
 import { test, expect } from 'vitest';
 import { storageSealerFromSeed } from '../../../src/storage/sealed/StorageSealer';
 
-const SEED = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+const SEED = 'assume ego assume ego assume ego assume ego assume ego assume ego admit size total';
 const ADDR = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 
 test('a CBOR payload seals and opens under jsdom', () => {

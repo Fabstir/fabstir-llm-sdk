@@ -28,7 +28,7 @@ describe('Configuration Wizard', () => {
         .mockResolvedValueOnce({ walletChoice: 'generate' })
         .mockResolvedValueOnce({
           network: 'base-sepolia',
-          rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/key'
+          rpcUrl: 'https://base-sepolia.gateway.tenderly.co'
         })
         .mockResolvedValueOnce({
           inferencePort: 8080,
@@ -45,7 +45,7 @@ describe('Configuration Wizard', () => {
 
       expect(config).toBeDefined();
       expect(config.network).toBe('base-sepolia');
-      expect(config.rpcUrl).toBe('https://base-sepolia.g.alchemy.com/v2/key');
+      expect(config.rpcUrl).toBe('https://base-sepolia.gateway.tenderly.co');
       expect(config.models).toContain('llama-70b');
     });
 
@@ -177,12 +177,12 @@ describe('Configuration Wizard', () => {
     it('should collect network configuration', async () => {
       vi.mocked(inquirer.prompt).mockResolvedValueOnce({
         network: 'base-sepolia',
-        rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/key'
+        rpcUrl: 'https://base-sepolia.gateway.tenderly.co'
       });
 
       const config = await ConfigWizard.promptNetworkConfig();
       expect(config.network).toBe('base-sepolia');
-      expect(config.rpcUrl).toBe('https://base-sepolia.g.alchemy.com/v2/key');
+      expect(config.rpcUrl).toBe('https://base-sepolia.gateway.tenderly.co');
     });
 
     it('should provide default RPC URLs', async () => {

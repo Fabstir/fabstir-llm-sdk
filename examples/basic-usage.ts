@@ -21,7 +21,7 @@ async function main() {
   // 1. Initialize SDK with configuration
   const sdk = new FabstirSDK({
     rpcUrl: process.env.RPC_URL_BASE_SEPOLIA || 
-      'https://base-sepolia.g.alchemy.com/v2/your-key',
+      'https://base-sepolia.gateway.tenderly.co',
     s5PortalUrl: process.env.S5_PORTAL_URL || 
       'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p'
   });
@@ -112,7 +112,7 @@ main()
  * Required Environment Variables:
  * 
  * PRIVATE_KEY=0x... (Your Ethereum private key)
- * RPC_URL_BASE_SEPOLIA=https://base-sepolia.g.alchemy.com/v2/your-key
+ * RPC_URL_BASE_SEPOLIA=https://base-sepolia.gateway.tenderly.co
  * S5_PORTAL_URL=wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p
  * HOST_ADDRESS=0x... (Optional: specific host address)
  */

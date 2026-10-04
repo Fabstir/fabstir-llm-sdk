@@ -14,6 +14,10 @@ import { StorageManager } from '../../src/managers/StorageManager';
 import type { SearchResult } from '../../src/types/rag-websocket';
 import { HostAdapter } from '../../src/embeddings/adapters/HostAdapter';
 
+// The RAG block layout (1.39.2, U4): the question follows the end marker.
+const START = '--- Relevant Information from Knowledge Base ---';
+const END = '--- End of Knowledge Base Context ---';
+
 // Helper function to create test query vector (executed at runtime)
 function createQueryVector(): number[] {
   return new Array(384).fill(0.5);
@@ -93,11 +97,11 @@ describe('SessionManager.askWithContext()', () => {
       expect(sessionManager.searchVectors).toHaveBeenCalledWith(sessionId, queryVector, 5, 0.7);
 
       // Verify enhanced prompt format
-      expect(enhancedPrompt).toContain('Context:');
+      expect(enhancedPrompt).toContain(START);
       expect(enhancedPrompt).toContain('Document 0 contains relevant information');
       expect(enhancedPrompt).toContain('Document 1 contains relevant information');
       expect(enhancedPrompt).toContain('Document 2 contains relevant information');
-      expect(enhancedPrompt).toContain(`Question: ${question}`);
+      expect(enhancedPrompt).toContain(`${END}\n\n${question}`);
     });
 
     it('should use custom topK parameter', async () => {
@@ -177,7 +181,7 @@ describe('SessionManager.askWithContext()', () => {
 
       // Should return original question (graceful degradation)
       expect(result).toBe(question);
-      expect(result).not.toContain('Context:');
+      expect(result).not.toContain(START);
     });
   });
 
@@ -299,9 +303,10 @@ describe('SessionManager.askWithContext()', () => {
 
       // Verify format structure
       const lines = enhancedPrompt.split('\n');
-      expect(lines[0]).toBe('Context:');
+      expect(lines[0]).toBe(START);
+      expect(lines[lines.length - 3]).toBe(END);
       expect(lines[lines.length - 2]).toBe('');
-      expect(lines[lines.length - 1]).toBe(`Question: ${question}`);
+      expect(lines[lines.length - 1]).toBe(question);
     });
   });
 
@@ -434,8 +439,8 @@ describe('SessionManager.askWithContext()', () => {
       const enhancedPrompt = await sessionManager.askWithContext(sessionId, longQuestion);
 
       // Should still format correctly
-      expect(enhancedPrompt).toContain('Context:');
-      expect(enhancedPrompt).toContain(`Question: ${longQuestion}`);
+      expect(enhancedPrompt).toContain(START);
+      expect(enhancedPrompt).toContain(`${END}\n\n${longQuestion}`);
     });
 
     it('should handle context with special characters', async () => {
@@ -522,7 +527,7 @@ describe('SessionManager.askWithContext()', () => {
 
       // Verify format is correct for single result
       expect(enhancedPrompt).toBe(
-        `Context:\nDocument 0 contains relevant information about the topic.\n\nQuestion: ${question}`
+        `${START}\nDocument 0 contains relevant information about the topic.\n${END}\n\n${question}`
       );
     });
 

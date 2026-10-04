@@ -26,7 +26,6 @@ beforeAll(() => {
   process.env.CONTRACT_FAB_TOKEN = '0xC78949004B4EB6dEf2D66e49Cd81231472612D62';
   process.env.CONTRACT_USDC_TOKEN = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
   process.env.ENTRY_POINT_ADDRESS = '0x0000000071727De22E5E9d8BAf0edAc6f37da032';
-  process.env.RPC_URL_BASE_SEPOLIA = 'https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR';
 
   // Skip S5 storage for this test (WebSocket not available in Node test environment)
   process.env.SKIP_S5_STORAGE = 'true';
@@ -63,12 +62,12 @@ describe('End-to-End Encryption Integration (Phase 6.1)', () => {
   let hostSdk: FabstirSDKCore;
   let clientWallet: ethers.Wallet;
   let hostWallet: ethers.Wallet;
-  const rpcUrl = 'https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR'; // From .env.test
+  const rpcUrl = process.env.RPC_URL_BASE_SEPOLIA!; // From .env.test
 
   // Test account keys from .env.test
-  const TEST_USER_1_PRIVATE_KEY = '0x2d5db36770a53811d9a11163a5e6577bb867e19552921bf40f74064308bea952';
+  const TEST_USER_1_PRIVATE_KEY = process.env.TEST_USER_1_PRIVATE_KEY!;
   const TEST_USER_1_ADDRESS = '0x8D642988E3e7b6DB15b6058461d5563835b04bF6';
-  const TEST_HOST_1_PRIVATE_KEY = '0xe7855c0ea54ccca55126d40f97d90868b2a73bad0363e92ccdec0c4fbd6c0ce2';
+  const TEST_HOST_1_PRIVATE_KEY = process.env.TEST_HOST_1_PRIVATE_KEY!;
   const TEST_HOST_1_ADDRESS = '0x4594F755F593B517Bb3194F4DeC20C48a3f04504';
 
   beforeEach(async () => {
@@ -90,7 +89,7 @@ describe('End-to-End Encryption Integration (Phase 6.1)', () => {
         modelRegistry: '0x92b2De840bB2171203011A6dBA928d855cA8183E'
       },
       s5Config: {
-        seedPhrase: 'yield organic score bishop free juice atop village video element unless sneak care rock update'
+        seedPhrase: process.env.S5_SEED_PHRASE!
       }
     });
 

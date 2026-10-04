@@ -12,7 +12,7 @@ describe('Configuration Validation', () => {
         version: '1.0.0',
         walletAddress: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
         network: 'base-sepolia',
-        rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/key',
+        rpcUrl: 'https://base-sepolia.gateway.tenderly.co',
         inferencePort: 8080,
         publicUrl: 'https://host.example.com',
         models: ['llama-70b'],

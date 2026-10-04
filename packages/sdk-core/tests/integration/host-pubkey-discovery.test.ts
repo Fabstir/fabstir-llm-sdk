@@ -20,7 +20,7 @@ describe('Host Public Key Discovery Integration', () => {
     const sdk = new FabstirSDKCore({
       mode: 'development',
       chainId: ChainId.BASE_SEPOLIA,
-      rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/test',
+      rpcUrl: 'https://base-sepolia.gateway.tenderly.co',
       contractAddresses: {
         jobMarketplace: chain.contracts.jobMarketplace,
         nodeRegistry: chain.contracts.nodeRegistry,
@@ -43,7 +43,7 @@ describe('Host Public Key Discovery Integration', () => {
     const sdk = new FabstirSDKCore({
       mode: 'development',
       chainId: ChainId.BASE_SEPOLIA,
-      rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/test',
+      rpcUrl: 'https://base-sepolia.gateway.tenderly.co',
       contractAddresses: {
         jobMarketplace: chain.contracts.jobMarketplace,
         nodeRegistry: chain.contracts.nodeRegistry,
@@ -70,7 +70,7 @@ describe('Host Public Key Discovery Integration', () => {
     const sdk = new FabstirSDKCore({
       mode: 'development',
       chainId: ChainId.BASE_SEPOLIA,
-      rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/test',
+      rpcUrl: 'https://base-sepolia.gateway.tenderly.co',
       contractAddresses: {
         jobMarketplace: chain.contracts.jobMarketplace,
         nodeRegistry: chain.contracts.nodeRegistry,

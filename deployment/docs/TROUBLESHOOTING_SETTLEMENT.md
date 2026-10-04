@@ -46,9 +46,9 @@ kubectl exec -n fabstir-host $POD -- env | grep -E "HOST_PRIVATE_KEY|CONTRACT_JO
 
 **Expected output:**
 ```
-HOST_PRIVATE_KEY=0x36c4dbaead98ebd10417c0325da8cf1217e12488185f8c4aec68d5c476f39fa5
+HOST_PRIVATE_KEY=<your-host-private-key>
 CONTRACT_JOB_MARKETPLACE=0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E
-RPC_URL=https://base-sepolia.g.alchemy.com/v2/...
+RPC_URL=https://base-sepolia.gateway.tenderly.co
 CHAIN_ID=84532
 ```
 
@@ -64,9 +64,9 @@ kubectl get configmap -n fabstir-host fabstir-host-config -o yaml
 **Verify these critical values:**
 ```yaml
 data:
-  HOST_PRIVATE_KEY: "0x36c4dbaead98ebd10417c0325da8cf1217e12488185f8c4aec68d5c476f39fa5"
+  HOST_PRIVATE_KEY: "<your-host-private-key>"
   CONTRACT_JOB_MARKETPLACE: "0xc6D44D7f2DfA8fdbb1614a8b6675c78D3cfA376E"  # NOT 0x1273E6358aa52Bb5B160c34Bf2e617B745e4A944
-  RPC_URL: "https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR"
+  RPC_URL: "https://base-sepolia.gateway.tenderly.co"
   CHAIN_ID: "84532"
 ```
 
@@ -144,7 +144,7 @@ kubectl rollout restart deployment -n fabstir-host fabstir-host
 kubectl edit configmap -n fabstir-host fabstir-host-config
 
 # Add this line in data section:
-HOST_PRIVATE_KEY: "0x36c4dbaead98ebd10417c0325da8cf1217e12488185f8c4aec68d5c476f39fa5"
+HOST_PRIVATE_KEY: "<your-host-private-key>"
 
 # Restart pod
 kubectl rollout restart deployment -n fabstir-host fabstir-host
@@ -279,7 +279,7 @@ cast call 0xDFFDecDfa0CF5D6cbE299711C7e4559eB16F42D6 \
 
 | Variable | Required | Purpose | Example |
 |----------|----------|---------|---------|
-| `HOST_PRIVATE_KEY` | ✅ Yes | Signs transactions | `0x36c4dbaead...` |
+| `HOST_PRIVATE_KEY` | ✅ Yes | Signs transactions | `<your-host-private-key>` |
 | `CONTRACT_JOB_MARKETPLACE` | ✅ Yes | Contract to call | `0xc6D44D7f2DfA...` |
 | `RPC_URL` | ✅ Yes | Blockchain endpoint | `https://sepolia.base.org` |
 | `CHAIN_ID` | ✅ Yes | Network identifier | `84532` |

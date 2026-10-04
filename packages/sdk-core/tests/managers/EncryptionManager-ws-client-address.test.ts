@@ -35,7 +35,7 @@ function makeConfig() {
   };
 }
 
-const SEED = 'yield organic score bishop free juice atop village video element unless sneak care rock update';
+const SEED = 'assume ego assume ego assume ego assume ego assume ego assume ego admit size total';
 
 describe('EncryptionManager.getWsClientAddress', () => {
   test('returns computeAddress(getPublicKey()) — the encryption-key EOA', () => {

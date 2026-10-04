@@ -33,6 +33,8 @@ function createRecordingProvider(label: string, chainId = 84532) {
     calls,
     _isProvider: true,
     getNetwork: vi.fn().mockResolvedValue({ chainId: BigInt(chainId), name: label }),
+    // The SDK asks a fixed-network read provider for its chain once, explicitly (IMPLEMENTATION-RPC-USAGE R3).
+    send: vi.fn().mockImplementation(async (method: string) => (method === 'eth_chainId' ? '0x' + chainId.toString(16) : null)),
     getBlockNumber: vi.fn().mockResolvedValue(1),
     getCode: vi.fn().mockResolvedValue('0x1234'),
     call: vi.fn().mockImplementation(async (tx: any) => {

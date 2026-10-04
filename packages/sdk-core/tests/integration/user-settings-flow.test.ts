@@ -22,7 +22,7 @@ vi.mock('../../src/config/environment', () => ({
     },
     entryPoint: '0x0000000000000000000000000000000000000000',
     chainId: 84532,
-    rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR',
+    rpcUrl: process.env.RPC_URL_BASE_SEPOLIA!,
   }),
   getOpBNBTestnet: () => ({
     contracts: {
@@ -58,8 +58,8 @@ describe('User Settings Integration - E2E', () => {
   let sdk: FabstirSDKCore;
   let storageManager: IStorageManager;
 
-  const TEST_PRIVATE_KEY = process.env.TEST_USER_1_PRIVATE_KEY || '0x2d5db36770a53811d9a11163a5e6577bb867e19552921bf40f74064308bea952';
-  const RPC_URL = process.env.RPC_URL_BASE_SEPOLIA || 'https://base-sepolia.g.alchemy.com/v2/1pZoccdtgU8CMyxXzE3l_ghnBBaJABMR';
+  const TEST_PRIVATE_KEY = process.env.TEST_USER_1_PRIVATE_KEY!;
+  const RPC_URL = process.env.RPC_URL_BASE_SEPOLIA!;
 
   beforeAll(async () => {
     // Initialize SDK with test credentials
