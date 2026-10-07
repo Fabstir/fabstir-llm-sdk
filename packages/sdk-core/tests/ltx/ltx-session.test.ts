@@ -4,10 +4,12 @@ import { describe, it, expect, vi } from 'vitest';
 import vectors from './vectors.json';
 import bundleFixture from './bundle-fixture.json';
 import { LtxManager } from '../../src/managers/LtxManager';
+import { ltxModelIdFor } from '../../src/utils/ltx-utils';
 import { tokensToUsdc } from '../../src/utils/transcode-utils';
 import { parseUnits } from 'ethers';
 
-const LTX_MODEL_ID = '0x0101010101010101010101010101010101010101010101010101010101010101';
+// The job's own model (1.39.3): a manager refuses a job of another template's model before any escrow.
+const LTX_MODEL_ID = ltxModelIdFor(vectors.job.templateId);
 const USDC = '0x00000000000000000000000000000000000000abcd';
 const HOST = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 const PRICE = 5n;

@@ -13,13 +13,16 @@ import type {
 } from '../types/ltx.types';
 
 export interface ILtxManager {
-  /** Estimate the exact USDC cost (megapixel-frame tokens × on-chain price). Priced on the LTX model id. */
+  /**
+   * Estimate the exact USDC cost (megapixel-frame tokens × on-chain price), priced on the job's template model,
+   * ltxModelIdFor(templateId) (1.39.3).
+   */
   estimateCost(job: LtxJob, hostAddress: string, paymentToken?: string): Promise<LtxPriceEstimate>;
 
   /** Pre-escrow validation against the host's versioned allow-list bundle. Returns the authenticated bundle. */
   validateJob(job: LtxJob, hostMetadata: LtxBundleMetadata): Promise<LtxBundle>;
 
-  /** Validate (pre-escrow) then create the session with an exact USDC deposit. */
+  /** Validate (pre-escrow) then create the session, on the job's template model, with an exact USDC deposit. */
   createLtxSession(
     job: LtxJob, hostAddress: string, hostMetadata: LtxBundleMetadata, options?: LtxSubmitOptions,
   ): Promise<{ sessionId: bigint; jobId: bigint }>;
@@ -28,6 +31,12 @@ export interface ILtxManager {
   generate(
     job: LtxJob, hostAddress: string, hostMetadata: LtxBundleMetadata, options?: LtxSubmitOptions,
   ): Promise<LtxResult>;
+
+  /** Encrypt + upload input images (job.images, in the template's imageSemantics order); returns capability CIDs. */
+  uploadImages(images: Uint8Array[], hostMetadata?: LtxBundleMetadata): Promise<{ cids: string[]; hashes: string[] }>;
+
+  /** Encrypt + upload input videos (mp4; job.videos, in the template's videoSemantics order); returns capability CIDs. */
+  uploadVideos(videos: Uint8Array[], hostMetadata?: LtxBundleMetadata): Promise<{ cids: string[]; hashes: string[] }>;
 
   /** Fetch + decrypt the private capability CIDs, index-aligned to manifest.frameHashes. */
   downloadFrames(result: LtxResult): Promise<Uint8Array[]>;

@@ -101,7 +101,15 @@ describe('submitLtxWs (SP4.1, Constraint 2)', () => {
       const err = await (await handle).result.catch((e) => e);
       expect(err).toBeInstanceOf(LtxError);
       expect(err.code).toBe(code);
+      expect(err.details).toEqual({ nodeCode: code }); // 1.39.3 (L5): the node's own code rides along
     }
+  });
+
+  it('an unknown ltx_error code maps to GENERATION_FAILED and keeps the node\'s code (1.39.3, L5)', async () => {
+    const { ws, handle } = submit();
+    ws.emit(resp({ type: 'ltx_error', error: { code: 'TEMPLATE_MODEL_MISMATCH', message: 'session model differs' } }));
+    const err = await (await handle).result.catch((e) => e);
+    expect(err).toMatchObject({ code: 'GENERATION_FAILED', details: { nodeCode: 'TEMPLATE_MODEL_MISMATCH' } });
   });
 
   it('returns a handle with requestId and a cancel() function', async () => {

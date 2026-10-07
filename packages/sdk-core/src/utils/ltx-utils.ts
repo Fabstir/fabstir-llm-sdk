@@ -2,6 +2,19 @@
 // LTX 2.3 sidecar conformance primitives — every value conforms to docs/node-reference/vectors.json.
 import { AbiCoder, keccak256, sha256, toUtf8Bytes, getBytes, hexlify, verifyMessage } from 'ethers';
 import { computeMerkleRoot } from './transcode-proof';
+import { LtxError } from '../errors/ltx-errors';
+
+/** A template's registered model id — the node's rule: keccak256("Lightricks/LTX-Video/" + templateId). */
+export function ltxModelIdFor(templateId: string): string {
+  if (typeof templateId !== 'string' || templateId.length === 0) {
+    throw new LtxError('ltxModelIdFor needs a non-empty templateId', 'LTX_PREVALIDATION_FAILED');
+  }
+  try {
+    return keccak256(toUtf8Bytes(`Lightricks/LTX-Video/${templateId}`));
+  } catch (err) { // a lone surrogate cannot be UTF-8 encoded
+    throw new LtxError(`templateId ${JSON.stringify(templateId)} is not valid text`, 'LTX_PREVALIDATION_FAILED', { cause: err });
+  }
+}
 
 /** Structural input for the LTX input commitment. LtxJob (ltx.types) is assignable. */
 export interface LtxCommitmentInput {

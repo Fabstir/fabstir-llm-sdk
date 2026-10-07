@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // LtxManager — LTX 2.3 video sidecar (M0). Mirrors TranscodeManager over the same encrypted rail.
 import { formatUnits } from 'ethers';
-import { ltxTokens, canonicalBundleHash, ltxInputCommitmentFor, ltxImageHash, ltxVideoHash, ltxMerkleRoot, ltxProofHash, recoverLtxSigner } from '../utils/ltx-utils';
+import { ltxTokens, ltxModelIdFor, canonicalBundleHash, ltxInputCommitmentFor, ltxImageHash, ltxVideoHash, ltxMerkleRoot, ltxProofHash, recoverLtxSigner } from '../utils/ltx-utils';
 import { tokensToUsdc } from '../utils/transcode-utils';
 import { normalizeNodeHttpUrl } from '../utils/validation';
 import { LtxError } from '../errors/ltx-errors';
@@ -15,8 +15,6 @@ export interface LtxManagerDeps {
   jobMarketplace?: any;
   /** HostManager — reads the host's on-chain NodeRegistry metadata for bundle discovery. */
   hostManager?: any;
-  /** Registered LTX model id (bytes32) — the price key. Never the templateHash (Constraint 6). */
-  ltxModelId: string;
   /** USDC token address (payment token) for this chain. */
   usdcAddress: string;
   chainId?: number;
@@ -28,7 +26,6 @@ export class LtxManager {
   private readonly paymentManager: any;
   private readonly jobMarketplace: any;
   private readonly hostManager: any;
-  private readonly ltxModelId: string;
   private readonly usdcAddress: string;
   private readonly chainId?: number;
   private bundleCache?: LtxBundle;
@@ -41,7 +38,6 @@ export class LtxManager {
     this.paymentManager = deps.paymentManager;
     this.jobMarketplace = deps.jobMarketplace;
     this.hostManager = deps.hostManager;
-    this.ltxModelId = deps.ltxModelId;
     this.usdcAddress = deps.usdcAddress;
     this.chainId = deps.chainId;
   }
@@ -54,14 +50,13 @@ export class LtxManager {
     if (!this.sessionManager) {
       throw new LtxError('SessionManager not available for estimateCost', 'LTX_PREVALIDATION_FAILED');
     }
+    const modelId = this.modelIdFor(job);
     const token = paymentToken ?? this.usdcAddress;
     const tokens = ltxTokens(job);
-    const pricePerToken: bigint = await this.sessionManager.resolveModelPricePerToken(
-      hostAddress, this.ltxModelId, token,
-    );
+    const pricePerToken: bigint = await this.sessionManager.resolveModelPricePerToken(hostAddress, modelId, token);
     if (!pricePerToken || pricePerToken <= 0n) {
       throw new LtxError(
-        `No on-chain LTX price for model ${this.ltxModelId} (token ${token})`,
+        `No on-chain LTX price for model ${modelId} (token ${token})`,
         'LTX_PREVALIDATION_FAILED',
       );
     }
@@ -89,6 +84,10 @@ export class LtxManager {
     if (!/^\d+$/.test(job.seed) || BigInt(job.seed) > 0xffffffffffffffffn) {
       throw new LtxError(`seed must be a decimal integer in [0, 2^64-1], got "${job.seed}"`, 'LTX_PREVALIDATION_FAILED');
     }
+    // The node parses output into its two kinds; anything else is refused after the session is opened (OutputKind).
+    if (!LTX_OUTPUT_KINDS.includes(job.output)) {
+      throw new LtxError(`output must be one of ${LTX_OUTPUT_KINDS.join(', ')}, got ${JSON.stringify(job.output)}`, 'LTX_PREVALIDATION_FAILED');
+    }
     const bundle = await this.resolveBundle(hostMetadata);
 
     const tpl = bundle.templates.find((t) => t.templateId === job.templateId);
@@ -114,26 +113,55 @@ export class LtxManager {
     if (!fps.includes(job.fps)) {
       throw new LtxError(`fps ${job.fps} not in allow-list`, 'LTX_PREVALIDATION_FAILED');
     }
-    // The node rejects off-grid counts AFTER escrow; gate here so a bad job never locks funds.
-    if (tpl.frameGrid === true) {
-      // Allow-list v26 frame grid: LTX renders 8k+1 frames, and the node bills exactly those — no whole-second rule.
-      if (tpl.maxFrames !== undefined && !(Number.isInteger(tpl.maxFrames) && tpl.maxFrames > 0)) {
+    // v26: an entry's own fps list narrows the bounds (the node refuses others at 0 tokens, after escrow).
+    if (tpl.fps !== undefined) {
+      if (!Array.isArray(tpl.fps) || !tpl.fps.every((f) => Number.isInteger(f) && f > 0)) { // an empty list admits nothing below
+        throw new LtxError(`template ${job.templateId} has a malformed fps list`, 'LTX_PREVALIDATION_FAILED');
+      }
+      if (!tpl.fps.includes(job.fps)) {
+        throw new LtxError(`fps ${job.fps} not in template ${job.templateId}'s fps list [${tpl.fps.join(', ')}]`, 'LTX_PREVALIDATION_FAILED');
+      }
+    }
+    // The node rejects these AFTER escrow; gate here so a bad job never locks funds.
+    // maxFrames bounds every template that carries it (node check_template_rules), frameGrid or not.
+    if (tpl.maxFrames !== undefined) {
+      if (!(Number.isInteger(tpl.maxFrames) && tpl.maxFrames > 0)) {
         throw new LtxError(`template ${job.templateId} has a malformed maxFrames`, 'LTX_PREVALIDATION_FAILED');
       }
+      if (job.frames > tpl.maxFrames) {
+        throw new LtxError(`frames ${job.frames} exceeds template ${job.templateId}'s maxFrames ${tpl.maxFrames}`, 'LTX_PREVALIDATION_FAILED');
+      }
+    }
+    if (tpl.frameGrid === true) {
+      // Allow-list v26 frame grid: LTX renders 8k+1 frames, and the node bills exactly those — no whole-second rule.
       if ((job.frames - 1) % 8 !== 0) {
         throw new LtxError(`frames ${job.frames} is not on the LTX frame grid (frames must be 8 × k + 1)`, 'LTX_PREVALIDATION_FAILED');
       }
-      if (tpl.maxFrames !== undefined && job.frames > tpl.maxFrames) {
-        throw new LtxError(`frames ${job.frames} exceeds template ${job.templateId}'s maxFrames ${tpl.maxFrames}`, 'LTX_PREVALIDATION_FAILED');
+    } else {
+      // Node duration rule (check_length → validate_duration): 5 to 15 whole seconds — the range on the integer
+      // second count first, then frames = fps × seconds + 1.
+      const seconds = Math.floor((job.frames - 1) / job.fps);
+      if (seconds < 5 || seconds > 15) {
+        throw new LtxError(`a ${job.templateId} clip of ${job.frames} frames at ${job.fps} fps is ${seconds} s — it must be 5 to 15 s`, 'LTX_PREVALIDATION_FAILED');
       }
-    } else if ((job.frames - 1) % job.fps !== 0) {
-      // Node duration rule (v8.34.0): clips are a whole number of seconds — frames = fps × seconds + 1.
-      throw new LtxError(
-        `frames ${job.frames} is not a whole number of seconds at ${job.fps} fps (frames must be fps × seconds + 1)`, 'LTX_PREVALIDATION_FAILED',
-      );
+      if ((job.frames - 1) % job.fps !== 0) {
+        throw new LtxError(
+          `frames ${job.frames} is not a whole number of seconds at ${job.fps} fps (frames must be fps × seconds + 1)`, 'LTX_PREVALIDATION_FAILED',
+        );
+      }
     }
     if (!resolutions.some((r) => r.w === job.resolution.w && r.h === job.resolution.h)) {
       throw new LtxError(`resolution ${job.resolution.w}x${job.resolution.h} not in allow-list`, 'LTX_PREVALIDATION_FAILED');
+    }
+    // v26: a named size rule on the entry; an unknown name is refused outright, as the node does.
+    if (tpl.resolutionRule !== undefined) {
+      const rule = LTX_RESOLUTION_RULES.get(tpl.resolutionRule); // a Map: no inherited names, non-strings miss
+      if (!rule) {
+        throw new LtxError(`template ${job.templateId} has an unknown resolutionRule ${JSON.stringify(tpl.resolutionRule)}`, 'LTX_PREVALIDATION_FAILED');
+      }
+      if (!rule(job.resolution.w, job.resolution.h)) {
+        throw new LtxError(`resolution ${job.resolution.w}x${job.resolution.h} breaks template ${job.templateId}'s resolutionRule ${tpl.resolutionRule}`, 'LTX_PREVALIDATION_FAILED');
+      }
     }
     // loras is ADVISORY — job.lora is NOT gated (baked into the pinned template).
     return bundle;
@@ -149,6 +177,7 @@ export class LtxManager {
     if (!this.sessionManager || !this.paymentManager) {
       throw new LtxError('SessionManager/PaymentManager not available for createLtxSession', 'LTX_PREVALIDATION_FAILED');
     }
+    const modelId = this.modelIdFor(job); // no network: an unusable templateId is refused before the bundle read
     await this.validateJob(job, hostMetadata); // pre-escrow — no funds locked on failure
     const est = await this.estimateCost(job, hostAddress);
     // Contract enforces a per-token minimum deposit ("Low deposit"); admin-mutable → read on-chain, clamp up.
@@ -165,7 +194,7 @@ export class LtxManager {
       chainId: options?.chainId ?? this.chainId,
       host: hostAddress,
       endpoint: options?.endpoint, // node URL — submitLtx reads session.endpoint for the WS connect
-      modelId: this.ltxModelId,
+      modelId,
       paymentMethod: 'deposit',
       paymentToken: est.paymentToken,
       depositAmount: formatUnits(depositBase, 6), // DECIMAL USDC string — startSession parseUnits() it back
@@ -213,6 +242,7 @@ export class LtxManager {
         'LTX_PREVALIDATION_FAILED', existing,
       );
     }
+    const model = this.modelIdFor(job, existing); // carries the ids itself; no network, so outside the bundle-read catch
     try {
       await this.validateJob(job, hostMetadata);
     } catch (err: any) {
@@ -227,7 +257,7 @@ export class LtxManager {
     }
     this.sessionManager.registerExternalSession({
       sessionId: existing.sessionId, jobId: existing.jobId, endpoint,
-      hostAddress, model: this.ltxModelId, chainId,
+      hostAddress, model, chainId,
     });
     return existing;
   }
@@ -275,7 +305,10 @@ export class LtxManager {
       } catch { /* billing enrichment is advisory; tokens, proofCID and seed are already surfaced */ }
       return result;
     } catch (err: any) {
-      throw new LtxError(err?.message ?? 'LTX generation failed', err instanceof LtxError ? err.code : 'GENERATION_FAILED', { sessionId, jobId });
+      // Keep only the node's code from the error's details: the rest can be a raw, circular WS error (not relayable).
+      const nodeCode = err?.details?.nodeCode;
+      throw new LtxError(err?.message ?? 'LTX generation failed', err instanceof LtxError ? err.code : 'GENERATION_FAILED',
+        { ...(nodeCode !== undefined ? { nodeCode } : {}), sessionId, jobId });
     }
   }
 
@@ -503,4 +536,26 @@ export class LtxManager {
     this.bundleCache = bundle;
     return bundle;
   }
+
+  /**
+   * The model a job is priced, escrowed and registered on: its template's, ltxModelIdFor(templateId) — the node's own
+   * derivation, and the model it checks a session against (a job of another model is refused after the session is
+   * opened). Deriving it makes that mismatch impossible, so one manager serves every template.
+   */
+  private modelIdFor(job: LtxJob, ids?: { sessionId: bigint; jobId: bigint }): string {
+    try {
+      return ltxModelIdFor(job.templateId);
+    } catch (err: any) {
+      throw new LtxError(err?.message ?? 'templateId has no model id', 'LTX_PREVALIDATION_FAILED', { ...ids, templateId: job.templateId, cause: err });
+    }
+  }
 }
+
+/** The node's output kinds (OutputKind): exr-sequence = the single H.264 artefact, exr-frames = per-frame 16-bit EXR. */
+const LTX_OUTPUT_KINDS: readonly string[] = ['exr-sequence', 'exr-frames'];
+
+/** Named size rules a v26 entry may carry (the node applies the same table). */
+const LTX_RESOLUTION_RULES = new Map<unknown, (w: number, h: number) => boolean>([
+  // Both sides divisible by 64, at most 1920 on the long side, at most 1920 × 1088 pixels.
+  ['div64-fhd', (w, h) => w % 64 === 0 && h % 64 === 0 && Math.max(w, h) <= 1920 && w * h <= 1920 * 1088],
+]);

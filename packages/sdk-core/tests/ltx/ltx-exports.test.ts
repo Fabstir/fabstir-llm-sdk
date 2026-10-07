@@ -39,7 +39,7 @@ describe('LTX SDK exports + wiring (SP5.2)', () => {
     expect(_i).toBeNull();
   });
 
-  it('preserves config.ltxModelId through validateConfig (regression: getLtxManager wiring)', () => {
+  it('accepts a legacy config.ltxModelId and ignores it — every job runs on its template\'s model (1.39.3)', () => {
     const A = '0x' + '1'.repeat(40);
     const sdk = new FabstirSDKCore({
       chainId: 84532,
@@ -47,7 +47,8 @@ describe('LTX SDK exports + wiring (SP5.2)', () => {
       ltxModelId: '0xdeadbeef',
       contractAddresses: { jobMarketplace: A, nodeRegistry: A, proofSystem: A, hostEarnings: A, usdcToken: A },
     } as any);
-    // validateConfig must carry ltxModelId onto this.config, else the LtxManager construction guard never fires.
-    expect((sdk as any).config.ltxModelId).toBe('0xdeadbeef');
+    // Before 1.39.3 the id was the LTX opt-in and had to survive validateConfig; now nothing reads it (the manager is
+    // built regardless — ltx-entry-rules M6 — and each job derives its model).
+    expect((sdk as any).config.ltxModelId).toBeUndefined();
   });
 });

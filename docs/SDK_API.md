@@ -2353,11 +2353,19 @@ pre-validates every job **before escrow**. Full integration walkthrough:
 ```typescript
 const sdk = new FabstirSDKCore({
   // ...usual config...
-  ltxModelId: '0x…', // bytes32 — the registered LTX model id (each template family has its own)
+  // no LTX setting needed since 1.39.3 (ltxModelId is deprecated and ignored)
 });
 await sdk.authenticate(...);
-const ltx = sdk.getLtxManager(); // throws LTX_NOT_AVAILABLE if ltxModelId missing
+const ltx = sdk.getLtxManager(); // LTX_NOT_AVAILABLE only on a hostOnly / skipS5 sign-in
 ```
+
+**One manager serves every template (1.39.3).** Each job runs on its own template's model,
+`ltxModelIdFor(templateId)` = `keccak256("Lightricks/LTX-Video/" + templateId)` — the node's derivation, and the id every
+LTX template is registered and approved under. `estimateCost`, `createLtxSession` and `generate` price, escrow and
+register on it — the node refuses a job whose template is not the model its session was opened and priced for, and
+deriving the model makes that mismatch impossible. `config.ltxModelId` is deprecated and ignored (before 1.39.3 it was
+required, and every session was opened on that one model). On the existingSession (vault) path the node checks the
+on-chain session's model, so the fiat session must be opened for `ltxModelIdFor(templateId)`.
 
 ### Host Inputs (bundle metadata)
 
@@ -2389,6 +2397,34 @@ const { cids, hashes } = await ltx.uploadImages([firstFrameBytes /*, lastFrameBy
 // plaintexts are rejected before upload.
 ```
 
+### Allow-list v26 rules (1.39.3)
+
+`validateJob` (run before escrow by `createLtxSession` / `generate`) applies the node's own job rules (checked against
+fabstir-llm-node 8.59.1): the bundle's `bounds`, and
+
+| Rule | Detail |
+|---|---|
+| `output` | `"exr-sequence"` (the single H.264 artefact) or `"exr-frames"` (per-frame 16-bit EXR) — anything else is refused. |
+| Clip length, templates without `frameGrid` | 5 to 15 whole seconds: `frames = fps × seconds + 1`. |
+| `fps` (v26) | `job.fps` must be in the entry's own list (Alpha Gen and Layout to Render: `[24, 25]`), as well as in `bounds.fps`. A malformed list is refused. |
+| `resolutionRule` (v26) | The size must satisfy the named rule, as well as be in `bounds.resolutions`. `div64-fhd`: both sides divisible by 64, long side ≤ 1920, area ≤ 1920 × 1088 — of the v26 sizes only 768×512, 512×768, 1024×1024, 1536×1024, 1024×1536, 1920×1088 and 1088×1920 qualify (not 1280×720 or 1920×1080). An unknown rule name is refused outright, as the node does. |
+| `frameGrid` (1.39.1) | Exact 8k+1 frame counts instead of whole seconds: Alpha 121, 129, 137, 145; Layout 121 to 361 in steps of 8. |
+| `maxFrames` | The entry's frame ceiling — on every template that carries it (Alpha 145, Layout 361). |
+| `exactControl` (v26) | On the 8k+1 grid the control (or source) clip must carry the full billed frame count. **Node-checked**: the SDK does not parse the clip, so a short clip is refused by the node at 0 tokens, after the session is opened. A longer clip is accepted and cropped by the node. |
+
+Two rules are **not in the bundle**, so the caller must apply them before calling `generate`: Alpha Gen needs
+`output: "exr-frames"` — with `"exr-sequence"` the job runs, bills and returns only the 8-bit matte preview; Layout to
+Render must not send `"exr-frames"` (it has no EXR output — the node refuses at 0 tokens, after the session is opened).
+Inputs: Alpha takes one source video (`job.videos[0]`); Layout one control video (`job.videos[0]`) and one reference
+image (`job.images[0]`) — upload them with `uploadVideos` (mp4) / `uploadImages` first. The clip's fps must equal
+`job.fps`: neither the SDK nor the node checks it (the Platformless helper does, with ffprobe), and a mismatched clip
+renders mistimed and is billed — check it in your form. Results: with `"exr-frames"`,
+`frames[0]` is the preview mp4 and the EXR frames follow (as many as the billed frames) — read them with
+`downloadFrames`; with `"exr-sequence"` the single H.264 artefact is `frames[0]` (`downloadOutputVideo`).
+`manifest.colourEncoding` is an opaque string (new in v26: `"matte-linear"` on Alpha's EXR frames).
+v26 is live on host 4 (2026-10-06); read each host's version with `getLtxBundleMetadata`.
+`SDK_CAPABILITIES?.ltxEntryFpsAndResolutionRule` and `SDK_CAPABILITIES?.ltxModelFromTemplate` are `true` from 1.39.3.
+
 ### Generate
 
 ```typescript
@@ -2406,7 +2442,7 @@ const result = await ltx.generate(job, hostAddress, hostMetadata, {
 //   is the group as data — iterate it rather than re-typing the field list.
 //   seed: decimal string in [0, 2^64-1] (pre-validated before escrow — the sampler is u64)
 //   resolution: from bundle.bounds.resolutions; billing binds the REQUESTED dims
-// Flow: validateJob (pre-escrow, no funds locked on failure) → estimateCost →
+// Flow: the job's model (ltxModelIdFor) → validateJob (pre-escrow, no funds locked on failure) → estimateCost →
 //       session + USDC escrow (max($0.50 floor, cost × 1.05 ceil) — deposit is the settlement
 //       ceiling, the pad keeps the claim strictly inside it; overage refunds at settlement;
 //       delegate path automatic under authenticateAsDelegate) → encrypted ltx_generate →
@@ -2442,7 +2478,7 @@ value is **rejected** (`LTX_PREVALIDATION_FAILED`) rather than silently mistarge
 Consequence: a card-paid clip cannot currently be routed through a `ws(s)://` CORS proxy.
 
 Flow: three guards (SessionManager present · endpoint present and http(s)-form · resolvable
-chainId) → `validateJob` → in-memory registry seeding → the identical submit / tripwire /
+chainId) → the job's model (1.39.3) → `validateJob` → in-memory registry seeding → the identical submit / tripwire /
 enrichment block as the escrow path. `validateJob` is deliberately kept: vault funds are already
 locked, so a doomed job would waste them and spin a settlement-refund cycle.
 
@@ -2452,7 +2488,8 @@ self-reclaims, because in vault mode the depositor is the service's vault:
 ```typescript
 catch (err) {           // LtxError
   err.code;             // LTX_PREVALIDATION_FAILED | LTX_BUNDLE_STALE | GENERATION_FAILED | TIMEOUT …
-  err.details;          // { sessionId, jobId, cause? } — relay these to your service
+  err.details;          // { sessionId, jobId, … } — relay these to your service; also cause?, nodeCode?,
+                        // templateId? (an unusable templateId, 1.39.3)
 }
 ```
 
@@ -2502,7 +2539,13 @@ await ltx.triggerSessionTimeout(Number(err.details.jobId));
 All failures are typed `LtxError { code, message, details }` — wire codes `VALIDATION_FAILED`,
 `SIDECAR_UNAVAILABLE`, `CAPACITY` (retryable during settlement), `GENERATION_FAILED`, `TIMEOUT`;
 client codes `LTX_PREVALIDATION_FAILED` (pre-escrow, no funds moved), `LTX_BUNDLE_STALE`,
-`LTX_INPUT_BINDING_MISMATCH`, `LTX_PROOF_MISMATCH`.
+`LTX_INPUT_BINDING_MISMATCH`, `LTX_PROOF_MISMATCH`. From 1.39.3 an `ltx_error` carries the node's own code as
+`details.nodeCode`, and `generate()` keeps it beside `sessionId`/`jobId` (nothing else from the original error's
+details is copied); a code the SDK does not know maps to `GENERATION_FAILED`. Today's node sends its 0-token session
+refusals (wrong model, no on-chain job id, proof cannot land) as `VALIDATION_FAILED` and a too-short control clip as
+`GENERATION_FAILED` — the same codes as before, so they are not yet distinguishable from a failed render. A failure at
+session init — including the vault gate's denial on the existingSession path — arrives as `GENERATION_FAILED` without
+a node code (`SESSION_INIT_ERROR` does not carry one yet).
 
 ## Training (LoRA/QLoRA fine-tune, M0)
 
@@ -3661,6 +3704,8 @@ SDK_CAPABILITIES.ragLegacyMigration;         // migrateToSealedStorage and its t
 SDK_CAPABILITIES.fundedSetupErrorCarriesIds; // a failure after funding carries sessionId and jobId
 SDK_CAPABILITIES.searchIntentFromUserText;   // 1.39.2: web search is decided on the user's text, not the RAG block
 SDK_CAPABILITIES.imageIntentSkipsRagTurns;   // 1.39.2: a user turn that carries RAG context never routes to images
+SDK_CAPABILITIES.ltxEntryFpsAndResolutionRule; // 1.39.3: validateJob applies a v26 entry's fps list and resolutionRule
+SDK_CAPABILITIES.ltxModelFromTemplate;       // 1.39.3: each job runs on its template's model; ltxModelId is ignored
 ```
 
 `SDK_CAPABILITIES` is frozen. Read a flag with optional chaining (`SDK_CAPABILITIES?.conversationLogOptOut`) so an older

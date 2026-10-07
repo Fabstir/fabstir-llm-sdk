@@ -166,6 +166,8 @@ describe('SDK_CAPABILITIES (D22)', () => {
       fundedSetupErrorCarriesIds: true,
       searchIntentFromUserText: true,
       imageIntentSkipsRagTurns: true,
+      ltxEntryFpsAndResolutionRule: true,
+      ltxModelFromTemplate: true,
     });
   });
 });

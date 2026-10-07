@@ -34,4 +34,8 @@ export const SDK_CAPABILITIES = Object.freeze({
   /** Image generation is never auto-routed when RAG_CONTEXT_END_MARKER appears at or after the start of the user turn
    *  the detector acts on (a turn that carries RAG context, where a document could have forged it) (1.39.2). */
   imageIntentSkipsRagTurns: true,
+  /** LtxManager.validateJob applies a v26 entry's own fps list and resolutionRule (unknown rule names refused) (1.39.3). */
+  ltxEntryFpsAndResolutionRule: true,
+  /** Every LTX job runs on its own template's model, ltxModelIdFor(templateId); config.ltxModelId is ignored (1.39.3). */
+  ltxModelFromTemplate: true,
 } as const);

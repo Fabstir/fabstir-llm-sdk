@@ -84,7 +84,7 @@ export async function submitLtxWs(opts: LtxWsOptions): Promise<LtxHandle> {
             requestId: msg.requestId ?? resolvedRequestId, allowListVersion: acceptedVersion,
           });
         } else if (msg.type === 'ltx_error') {
-          safeReject(new LtxError(msg.error?.message || 'LTX generation failed', mapErrorCode(msg.error?.code)));
+          safeReject(new LtxError(msg.error?.message || 'LTX generation failed', mapErrorCode(msg.error?.code), { nodeCode: msg.error?.code }));
         }
       } catch (err: any) { if (!isSettled) safeReject(err); }
     });
