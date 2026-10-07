@@ -4,13 +4,32 @@ import { AbiCoder, keccak256, sha256, toUtf8Bytes, getBytes, hexlify, verifyMess
 import { computeMerkleRoot } from './transcode-proof';
 import { LtxError } from '../errors/ltx-errors';
 
-/** A template's registered model id — the node's rule: keccak256("Lightricks/LTX-Video/" + templateId). */
-export function ltxModelIdFor(templateId: string): string {
+/** The model family of a bundle entry, by its `sidecar` field (node template_model_id; any other value is refused). */
+const LTX_MODEL_FAMILIES = new Map<string | undefined, string>([
+  [undefined, 'Lightricks/LTX-Video'],
+  ['relight', 'NVIDIA/Cosmos-DiffusionRenderer'], // VFX Passes (bundle v27)
+]);
+
+/** The model family for an entry's `sidecar` — the one list of known families; an unknown sidecar is refused. */
+export function ltxModelFamily(sidecar?: string): string {
+  const family = LTX_MODEL_FAMILIES.get(sidecar);
+  if (family === undefined) {
+    throw new LtxError(`unknown sidecar ${JSON.stringify(sidecar)} (known: none, "relight")`, 'LTX_PREVALIDATION_FAILED');
+  }
+  return family;
+}
+
+/**
+ * A template's registered model id — the node's rule: keccak256(family + "/" + templateId), the family from the entry's
+ * `sidecar` (absent: "Lightricks/LTX-Video"; "relight": "NVIDIA/Cosmos-DiffusionRenderer").
+ */
+export function ltxModelIdFor(templateId: string, sidecar?: string): string {
   if (typeof templateId !== 'string' || templateId.length === 0) {
     throw new LtxError('ltxModelIdFor needs a non-empty templateId', 'LTX_PREVALIDATION_FAILED');
   }
+  const family = ltxModelFamily(sidecar);
   try {
-    return keccak256(toUtf8Bytes(`Lightricks/LTX-Video/${templateId}`));
+    return keccak256(toUtf8Bytes(`${family}/${templateId}`));
   } catch (err) { // a lone surrogate cannot be UTF-8 encoded
     throw new LtxError(`templateId ${JSON.stringify(templateId)} is not valid text`, 'LTX_PREVALIDATION_FAILED', { cause: err });
   }

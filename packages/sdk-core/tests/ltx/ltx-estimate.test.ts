@@ -2,6 +2,7 @@
 // Sub-phase 3.1: LtxManager.estimateCost — megapixel-frame tokens → USDC (mocked price).
 import { describe, it, expect, vi } from 'vitest';
 import vectors from './vectors.json';
+import bundleFixture from './bundle-fixture.json';
 import { LtxManager } from '../../src/managers/LtxManager';
 import { ltxModelIdFor } from '../../src/utils/ltx-utils';
 import { LtxError } from '../../src/errors/ltx-errors';
@@ -12,10 +13,17 @@ const LTX_MODEL_ID = ltxModelIdFor(vectors.job.templateId);
 const USDC = '0x00000000000000000000000000000000000000abcd';
 const HOST = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 
+// 1.39.4: the model family is in the bundle entry, so estimateCost reads the host's authenticated bundle.
+const META = { allowListVersion: bundleFixture.allowListVersion, bundleHash: bundleFixture.bundleHash, bundleCID: 'bCid' };
+
 function makeManager(price: bigint) {
   const resolveModelPricePerToken = vi.fn().mockResolvedValue(price);
   const sessionManager = { resolveModelPricePerToken } as any;
-  const manager = new LtxManager({ sessionManager, ltxModelId: LTX_MODEL_ID, usdcAddress: USDC } as any);
+  const manager = new LtxManager({
+    sessionManager, usdcAddress: USDC,
+    storageManager: { getByCID: vi.fn(async () => bundleFixture) },
+    hostManager: { getHostInfo: vi.fn(async () => ({ metadata: { ltx: META } })) },
+  } as any);
   return { manager, resolveModelPricePerToken };
 }
 
@@ -40,7 +48,8 @@ describe('LtxManager.estimateCost (SP3.1, Constraint 6)', () => {
   });
 
   it('throws LtxError on a 0n on-chain price (no zero deposit, no fallback)', async () => {
-    const { manager } = makeManager(0n);
+    const { manager, resolveModelPricePerToken } = makeManager(0n);
     await expect(manager.estimateCost(vectors.job, HOST)).rejects.toBeInstanceOf(LtxError);
+    expect(resolveModelPricePerToken).toHaveBeenCalled(); // refused for the price, not for a missing bundle
   });
 });

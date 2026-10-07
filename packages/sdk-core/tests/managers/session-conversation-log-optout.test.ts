@@ -168,6 +168,8 @@ describe('SDK_CAPABILITIES (D22)', () => {
       imageIntentSkipsRagTurns: true,
       ltxEntryFpsAndResolutionRule: true,
       ltxModelFromTemplate: true,
+      ltxModelFamilyFromEntry: true,
+      ltxProofTimeoutWindow: true,
     });
   });
 });

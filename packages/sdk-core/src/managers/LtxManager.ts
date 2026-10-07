@@ -1,11 +1,14 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // LtxManager — LTX 2.3 video sidecar (M0). Mirrors TranscodeManager over the same encrypted rail.
 import { formatUnits } from 'ethers';
-import { ltxTokens, ltxModelIdFor, canonicalBundleHash, ltxInputCommitmentFor, ltxImageHash, ltxVideoHash, ltxMerkleRoot, ltxProofHash, recoverLtxSigner } from '../utils/ltx-utils';
+import { ltxTokens, ltxModelIdFor, ltxModelFamily, canonicalBundleHash, ltxInputCommitmentFor, ltxImageHash, ltxVideoHash, ltxMerkleRoot, ltxProofHash, recoverLtxSigner } from '../utils/ltx-utils';
 import { tokensToUsdc } from '../utils/transcode-utils';
 import { normalizeNodeHttpUrl } from '../utils/validation';
+import { MIN_PROOF_TIMEOUT, MAX_PROOF_TIMEOUT } from '../contracts/JobMarketplace';
 import { LtxError } from '../errors/ltx-errors';
 import type { LtxJob, LtxPriceEstimate, LtxBundle, LtxBundleMetadata, LtxSubmitOptions, LtxResult, LtxVerification } from '../types/ltx.types';
+
+type LtxEntry = LtxBundle['templates'][number];
 
 /** Dependencies for LtxManager. Managers are typed loosely to avoid import cycles. */
 export interface LtxManagerDeps {
@@ -44,13 +47,19 @@ export class LtxManager {
 
   /**
    * Estimate the exact USDC cost of an LTX job: megapixel-frame tokens × on-chain price / precision.
-   * Priced on the LTX model id (not the templateHash). Deterministic — frame count is known up front.
+   * Priced on the template's model (not the templateHash) — its family is in the authenticated bundle entry, so the
+   * bundle is read: `hostMetadata` when given, else the host's current metadata. Deterministic — frames are known.
    */
-  async estimateCost(job: LtxJob, hostAddress: string, paymentToken?: string): Promise<LtxPriceEstimate> {
-    if (!this.sessionManager) {
-      throw new LtxError('SessionManager not available for estimateCost', 'LTX_PREVALIDATION_FAILED');
+  async estimateCost(job: LtxJob, hostAddress: string, paymentToken?: string, hostMetadata?: LtxBundleMetadata): Promise<LtxPriceEstimate> {
+    if (!this.sessionManager || !this.storageManager) {
+      throw new LtxError('SessionManager/StorageManager not available for estimateCost', 'LTX_PREVALIDATION_FAILED');
     }
-    const modelId = this.modelIdFor(job);
+    const bundle = await this.resolveBundle(hostMetadata ?? await this.getLtxBundleMetadata(hostAddress));
+    return this.priceOn(this.modelOf(this.entryIn(bundle, job)), job, hostAddress, paymentToken);
+  }
+
+  /** The estimate on a known model: one on-chain price read. */
+  private async priceOn(modelId: string, job: LtxJob, hostAddress: string, paymentToken?: string): Promise<LtxPriceEstimate> {
     const token = paymentToken ?? this.usdcAddress;
     const tokens = ltxTokens(job);
     const pricePerToken: bigint = await this.sessionManager.resolveModelPricePerToken(hostAddress, modelId, token);
@@ -95,6 +104,16 @@ export class LtxManager {
       throw new LtxError(
         `Template ${job.templateId} not allow-listed or templateHash mismatch`, 'LTX_PREVALIDATION_FAILED',
       );
+    }
+    // VFX Passes (v27): the entry's sidecar names its model family; the node refuses a bundle with any other value.
+    ltxModelFamily(tpl.sidecar);
+    if (tpl.sidecar === 'relight') { // node D5/D3: refused at 0 tokens, after the session is opened
+      if (job.output !== 'exr-frames') {
+        throw new LtxError(`relight template ${job.templateId} delivers exr-frames only (output must be "exr-frames")`, 'LTX_PREVALIDATION_FAILED');
+      }
+      if (job.prompt !== '') {
+        throw new LtxError(`relight template ${job.templateId} takes no prompt — send prompt: "" (got ${typeof job.prompt === 'string' ? 'text' : String(job.prompt)})`, 'LTX_PREVALIDATION_FAILED');
+      }
     }
     const requiredImages = tpl.imageInputs ?? 0;
     const suppliedImages = job.images?.length ?? 0;
@@ -174,12 +193,27 @@ export class LtxManager {
   async createLtxSession(
     job: LtxJob, hostAddress: string, hostMetadata: LtxBundleMetadata, options?: LtxSubmitOptions,
   ): Promise<{ sessionId: bigint; jobId: bigint }> {
+    const { sessionId, jobId } = await this.openLtxSession(job, hostAddress, hostMetadata, options);
+    return { sessionId, jobId };
+  }
+
+  /** createLtxSession's body; also returns the validated entry, so generate needs no bundle read after escrow. */
+  private async openLtxSession(
+    job: LtxJob, hostAddress: string, hostMetadata: LtxBundleMetadata, options?: LtxSubmitOptions,
+  ): Promise<{ sessionId: bigint; jobId: bigint; entry: LtxEntry }> {
     if (!this.sessionManager || !this.paymentManager) {
       throw new LtxError('SessionManager/PaymentManager not available for createLtxSession', 'LTX_PREVALIDATION_FAILED');
     }
-    const modelId = this.modelIdFor(job); // no network: an unusable templateId is refused before the bundle read
-    await this.validateJob(job, hostMetadata); // pre-escrow — no funds locked on failure
-    const est = await this.estimateCost(job, hostAddress);
+    const proofWindow = options?.proofTimeoutWindow;
+    if (proofWindow !== undefined && !(Number.isInteger(proofWindow) && proofWindow >= MIN_PROOF_TIMEOUT && proofWindow <= MAX_PROOF_TIMEOUT)) {
+      throw new LtxError(
+        `proofTimeoutWindow must be an integer number of seconds in ${MIN_PROOF_TIMEOUT}..${MAX_PROOF_TIMEOUT}, got ${String(proofWindow)}`,
+        'LTX_PREVALIDATION_FAILED',
+      );
+    }
+    const entry = this.entryIn(await this.validateJob(job, hostMetadata), job); // pre-escrow — no funds locked on failure
+    const modelId = this.modelOf(entry);
+    const est = await this.priceOn(modelId, job, hostAddress);
     // Contract enforces a per-token minimum deposit ("Low deposit"); admin-mutable → read on-chain, clamp up.
     // Overage is a refundable balance: settlement charges actual tokens×price and refunds the rest.
     const floor: bigint = await this.paymentManager.getTokenMinDeposit(est.paymentToken, options?.chainId ?? this.chainId);
@@ -190,7 +224,8 @@ export class LtxManager {
     // estimate and session open; the overage refunds at settlement.
     const padded = (estBase * 105n + 99n) / 100n;
     const depositBase = padded > floor ? padded : floor;
-    return this.sessionManager.startSession({
+    const windowField = proofWindow !== undefined ? { proofTimeoutWindow: proofWindow } : {}; // absent: startSession's call unchanged
+    const ids: { sessionId: bigint; jobId: bigint } = await this.sessionManager.startSession({
       chainId: options?.chainId ?? this.chainId,
       host: hostAddress,
       endpoint: options?.endpoint, // node URL — submitLtx reads session.endpoint for the WS connect
@@ -198,9 +233,11 @@ export class LtxManager {
       paymentMethod: 'deposit',
       paymentToken: est.paymentToken,
       depositAmount: formatUnits(depositBase, 6), // DECIMAL USDC string — startSession parseUnits() it back
+      ...windowField, // a passes job proves once, at the end
       encryption: true,
       conversationLog: false, // a render has no chat log — and no post-funding S5 write to fail
     });
+    return { ...ids, entry };
   }
 
   /**
@@ -213,7 +250,7 @@ export class LtxManager {
   private async adoptExistingSession(
     job: LtxJob, hostAddress: string, hostMetadata: LtxBundleMetadata,
     existing: { sessionId: bigint; jobId: bigint }, options: LtxSubmitOptions,
-  ): Promise<{ sessionId: bigint; jobId: bigint }> {
+  ): Promise<{ sessionId: bigint; jobId: bigint; entry: LtxEntry }> {
     // The vault was debited BEFORE generate() was called, so unlike the pre-escrow path every
     // failure here must carry {sessionId, jobId} — that is what the UI relays to the service
     // for reclaim. `existing` is exactly that shape.
@@ -242,9 +279,11 @@ export class LtxManager {
         'LTX_PREVALIDATION_FAILED', existing,
       );
     }
-    const model = this.modelIdFor(job, existing); // carries the ids itself; no network, so outside the bundle-read catch
+    let entry: LtxEntry;
+    let model: string;
     try {
-      await this.validateJob(job, hostMetadata);
+      entry = this.entryIn(await this.validateJob(job, hostMetadata), job);
+      model = this.modelOf(entry); // inside: every failure on this path carries the ids
     } catch (err: any) {
       // Preserve the precise code (LTX_PREVALIDATION_FAILED / LTX_BUNDLE_STALE) but add the ids.
       // `cause` is kept because this also catches transport failures from the S5 bundle read —
@@ -259,7 +298,7 @@ export class LtxManager {
       sessionId: existing.sessionId, jobId: existing.jobId, endpoint,
       hostAddress, model, chainId,
     });
-    return existing;
+    return { ...existing, entry };
   }
 
   /** Reclaim a reserved deposit after proof timeout (GENERATION_FAILED/TIMEOUT) — Constraint 8. */
@@ -280,11 +319,11 @@ export class LtxManager {
   async generate(
     job: LtxJob, hostAddress: string, hostMetadata: LtxBundleMetadata, options?: LtxSubmitOptions,
   ): Promise<LtxResult> {
-    const { sessionId, jobId } = options?.existingSession
+    const { sessionId, jobId, entry } = options?.existingSession
       ? await this.adoptExistingSession(job, hostAddress, hostMetadata, options.existingSession, options)
-      : await this.createLtxSession(job, hostAddress, hostMetadata, options);
+      : await this.openLtxSession(job, hostAddress, hostMetadata, options);
     try { // post-escrow: re-throw ANY failure with {sessionId, jobId} so the caller can triggerSessionTimeout(jobId) to reclaim
-      const handle = await this.sessionManager.submitLtx(String(sessionId), job, options);
+      const handle = await this.sessionManager.submitLtx(String(sessionId), job, this.clientWait(entry, options));
       const result: LtxResult = await handle.result;
       if (result.allowListVersion !== undefined && Number(result.allowListVersion) !== Number(hostMetadata.allowListVersion)) {
         throw new LtxError(`allowListVersion drift: accepted ${result.allowListVersion} != validated ${hostMetadata.allowListVersion}`, 'LTX_BUNDLE_STALE');
@@ -299,7 +338,7 @@ export class LtxManager {
       // Enrich the billing block for downstream clients: the wire pricePerToken can read "0", so restate the
       // authoritative on-chain price and derive gross. Best-effort — a price read must NEVER fail a delivered clip.
       try {
-        const { pricePerToken } = await this.estimateCost(job, hostAddress);
+        const { pricePerToken } = await this.estimateCost(job, hostAddress, undefined, hostMetadata);
         result.billing.pricePerToken = pricePerToken.toString();
         result.billing.gross = tokensToUsdc(result.billing.tokens, pricePerToken).toString();
       } catch { /* billing enrichment is advisory; tokens, proofCID and seed are already surfaced */ }
@@ -538,16 +577,30 @@ export class LtxManager {
   }
 
   /**
-   * The model a job is priced, escrowed and registered on: its template's, ltxModelIdFor(templateId) — the node's own
-   * derivation, and the model it checks a session against (a job of another model is refused after the session is
-   * opened). Deriving it makes that mismatch impossible, so one manager serves every template.
+   * A VFX Passes job renders for up to ~45 minutes, and the node abandons a job whose client socket goes (0 tokens: the
+   * user is refunded and the render lost, the host eats the GPU time) — so wait at least as long as the longest proof
+   * window (V10), as the helper does. LTX jobs keep submitLtx's own default.
    */
-  private modelIdFor(job: LtxJob, ids?: { sessionId: bigint; jobId: bigint }): string {
-    try {
-      return ltxModelIdFor(job.templateId);
-    } catch (err: any) {
-      throw new LtxError(err?.message ?? 'templateId has no model id', 'LTX_PREVALIDATION_FAILED', { ...ids, templateId: job.templateId, cause: err });
-    }
+  private clientWait(entry: LtxEntry, options?: LtxSubmitOptions): LtxSubmitOptions | undefined {
+    if (entry.sidecar !== 'relight') return options;
+    const asked = Number.isFinite(options?.timeoutMs) ? options!.timeoutMs! : 0; // a NaN is no wait
+    return { ...options, timeoutMs: Math.max(asked, MAX_PROOF_TIMEOUT * 1000) };
+  }
+
+  /** The job's entry in an authenticated bundle; a template not in it is refused. */
+  private entryIn(bundle: LtxBundle, job: LtxJob): LtxEntry {
+    const tpl = bundle.templates.find((t) => t.templateId === job.templateId);
+    if (!tpl) throw new LtxError(`Template ${job.templateId} not allow-listed`, 'LTX_PREVALIDATION_FAILED');
+    return tpl;
+  }
+
+  /**
+   * The model a job is priced, escrowed and registered on: its entry's, ltxModelIdFor(templateId, sidecar) — the node's
+   * own derivation and the model it checks a session against (a job of another model is refused after the session is
+   * opened). One manager serves every template and family.
+   */
+  private modelOf(entry: LtxEntry): string {
+    return ltxModelIdFor(entry.templateId, entry.sidecar);
   }
 }
 
@@ -558,4 +611,6 @@ const LTX_OUTPUT_KINDS: readonly string[] = ['exr-sequence', 'exr-frames'];
 const LTX_RESOLUTION_RULES = new Map<unknown, (w: number, h: number) => boolean>([
   // Both sides divisible by 64, at most 1920 on the long side, at most 1920 × 1088 pixels.
   ['div64-fhd', (w, h) => w % 64 === 0 && h % 64 === 0 && Math.max(w, h) <= 1920 && w * h <= 1920 * 1088],
+  // VFX Passes: the relight model runs at a fixed size; only 1920 × 1088 is billed for it.
+  ['relight-fhd', (w, h) => w === 1920 && h === 1088],
 ]);
