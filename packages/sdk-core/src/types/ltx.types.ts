@@ -16,7 +16,10 @@ export interface LtxJob {
   resolution: { w: number; h: number };
   /** Pinned, allow-listed LoRA id (e.g. "ltx-iclora-hdr@v1"). */
   lora: string;
-  /** Output format, e.g. "exr-sequence". */
+  /**
+   * Output kind (node OutputKind): "exr-sequence" = the single H.264 artefact; "exr-frames" = per-frame 16-bit EXR.
+   * Other values are refused before escrow. Alpha Gen needs "exr-frames"; Layout to Render refuses it.
+   */
   output: string;
   /**
    * M1a image templates: input images as S5 capability CIDs (u-prefix 0xae), ORDER-significant —
@@ -159,6 +162,12 @@ export interface LtxBundle {
     frameGrid?: boolean;
     /** v26: this template's own frame ceiling (applied to `frameGrid` templates), within the bundle's bounds. */
     maxFrames?: number;
+    /** v26: this template's own fps list, within bounds.fps (Alpha Gen, Layout to Render: [24, 25]). */
+    fps?: number[];
+    /** v26: a named size rule the resolution must satisfy, within bounds.resolutions (e.g. "div64-fhd"). Unknown names are refused. */
+    resolutionRule?: string;
+    /** v26: on the 8k+1 grid the control clip must carry the full billed frame count. Node-checked; the SDK does not parse the clip. */
+    exactControl?: boolean;
   }[];
   /** ADVISORY only — never hard-gate job.lora (Constraint 8). */
   loras: string[];
@@ -174,6 +183,8 @@ export interface LtxBundle {
     videoMaxBytes?: number;
     /** v3: accepted video container formats (e.g. ["mp4"]); host authoritative on decode. */
     videoFormats?: string[];
+    /** Aggregate ceiling for deep (sharded) inputs (node ≥ 8.50). uploadVideos gates on videoMaxBytes. */
+    deepVideoMaxBytes?: number;
   };
 }
 

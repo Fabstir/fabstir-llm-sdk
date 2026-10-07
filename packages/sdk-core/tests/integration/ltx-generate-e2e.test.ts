@@ -9,7 +9,7 @@ import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { describe, it, expect } from 'vitest';
 import { ethers } from 'ethers';
-import { FabstirSDKCore } from '../../src';
+import { FabstirSDKCore, ltxModelIdFor } from '../../src';
 import type { LtxJob, LtxBundleMetadata } from '../../src';
 import { ChainRegistry } from '../../src/config/ChainRegistry';
 import { ChainId } from '../../src/types/chain.types';
@@ -23,7 +23,7 @@ const RUN = process.env.RUN_LTX_E2E === '1';
 
 // Pending external inputs (all required for a live run):
 const NODE_WS = process.env.LTX_NODE_WS_URL;        // live node on the L40S host
-const LTX_MODEL_ID = process.env.LTX_MODEL_ID;      // bytes32 registered by Jules
+const LTX_MODEL_ID = process.env.LTX_MODEL_ID;      // optional since 1.39.3: cross-checked against ltxModelIdFor
 const LTX_HOST = process.env.LTX_HOST_ADDRESS;      // host operator address
 const LTX_TEMPLATE_HASH = process.env.LTX_TEMPLATE_HASH;
 const BUNDLE_CID = process.env.LTX_BUNDLE_CID;      // node-published allow-list bundle (S5)
@@ -33,7 +33,7 @@ const BUNDLE_HASH = process.env.LTX_BUNDLE_HASH;
 describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
   it('generates a tiny clip, streams progress, decrypts a frame, verifies input-binding', async () => {
     // Fail loudly if enabled without the required inputs — never silently pass.
-    for (const [k, v] of Object.entries({ NODE_WS, LTX_MODEL_ID, LTX_HOST, LTX_TEMPLATE_HASH, BUNDLE_CID, BUNDLE_HASH })) {
+    for (const [k, v] of Object.entries({ NODE_WS, LTX_HOST, LTX_TEMPLATE_HASH, BUNDLE_CID, BUNDLE_HASH })) {
       if (!v) throw new Error(`LTX E2E requires env ${k} (pending external input)`);
     }
 
@@ -45,11 +45,12 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
       mode: 'production',
       chainId: ChainId.BASE_SEPOLIA,
       rpcUrl,
-      ltxModelId: LTX_MODEL_ID,
       contractAddresses: chain.contracts, // forward all resolved addresses (proofSystem/hostEarnings are also required)
       s5Config: { seedPhrase: process.env.S5_SEED_PHRASE }, // use the project's portal-registered S5 identity, not an address-derived one
     });
     await sdk.authenticate('signer', { signer: wallet });
+    // 1.39.3: the job's model is derived from its template — a registered id from env must equal it
+    if (LTX_MODEL_ID) expect(ltxModelIdFor('ltx-t2v-hdr')).toBe(LTX_MODEL_ID.toLowerCase());
     const ltx = sdk.getLtxManager();
 
     const job: LtxJob = {
@@ -158,7 +159,7 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
   }, 1800000); // HD render (LTX_TIMEOUT_MS) + (LTX_EXPECT_PROOF) proof poll + 30s settle window + SessionCompleted poll
 
   // M1a image-to-video — additionally gated on the i2v pending inputs (own model id + template + an input image).
-  const I2V_READY = !!(process.env.LTX_I2V_MODEL_ID && process.env.LTX_I2V_TEMPLATE_HASH && process.env.LTX_I2V_IMAGE_PATH);
+  const I2V_READY = !!(process.env.LTX_I2V_TEMPLATE_HASH && process.env.LTX_I2V_IMAGE_PATH);
   it.skipIf(!I2V_READY)('i2v: uploads an encrypted image, generates, verifies the v2 image binding', async () => {
     for (const [k, v] of Object.entries({ NODE_WS, LTX_HOST, BUNDLE_CID, BUNDLE_HASH })) {
       if (!v) throw new Error(`LTX i2v E2E requires env ${k}`);
@@ -169,11 +170,12 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
     const wallet = new ethers.Wallet(process.env.TEST_USER_1_PRIVATE_KEY!, new ethers.JsonRpcProvider(rpcUrl));
     const sdk = new FabstirSDKCore({
       mode: 'production', chainId: ChainId.BASE_SEPOLIA, rpcUrl,
-      ltxModelId: process.env.LTX_I2V_MODEL_ID!,          // i2v has its OWN registered model id
       contractAddresses: chain.contracts,
       s5Config: { seedPhrase: process.env.S5_SEED_PHRASE },
     });
     await sdk.authenticate('signer', { signer: wallet });
+    // 1.39.3: the job's model is derived from its template — a registered id from env must equal it
+    if (process.env.LTX_I2V_MODEL_ID) expect(ltxModelIdFor('ltx-i2v-hdr')).toBe(process.env.LTX_I2V_MODEL_ID.toLowerCase());
     const ltx = sdk.getLtxManager();
     const hostMetadata: LtxBundleMetadata = { allowListVersion: BUNDLE_VERSION, bundleHash: BUNDLE_HASH!, bundleCID: BUNDLE_CID };
 
@@ -204,7 +206,7 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
   }, 600000);
 
   // M1b first-last-frame — gated on the flf2v inputs (own model id + template + TWO comma-separated image paths).
-  const FLF2V_READY = !!(process.env.LTX_FLF2V_MODEL_ID && process.env.LTX_FLF2V_TEMPLATE_HASH && process.env.LTX_FLF2V_IMAGE_PATHS?.includes(','));
+  const FLF2V_READY = !!(process.env.LTX_FLF2V_TEMPLATE_HASH && process.env.LTX_FLF2V_IMAGE_PATHS?.includes(','));
   it.skipIf(!FLF2V_READY)('flf2v: two images (first,last), generates the in-between, verifies the v2 binding', async () => {
     for (const [k, v] of Object.entries({ NODE_WS, LTX_HOST, BUNDLE_CID, BUNDLE_HASH })) {
       if (!v) throw new Error(`LTX flf2v E2E requires env ${k}`);
@@ -215,11 +217,12 @@ describe.skipIf(!RUN)('LTX generate E2E (live node, RUN_LTX_E2E=1)', () => {
     const wallet = new ethers.Wallet(process.env.TEST_USER_1_PRIVATE_KEY!, new ethers.JsonRpcProvider(rpcUrl));
     const sdk = new FabstirSDKCore({
       mode: 'production', chainId: ChainId.BASE_SEPOLIA, rpcUrl,
-      ltxModelId: process.env.LTX_FLF2V_MODEL_ID!,        // flf2v has its OWN registered model id
       contractAddresses: chain.contracts,
       s5Config: { seedPhrase: process.env.S5_SEED_PHRASE },
     });
     await sdk.authenticate('signer', { signer: wallet });
+    // 1.39.3: the job's model is derived from its template — a registered id from env must equal it
+    if (process.env.LTX_FLF2V_MODEL_ID) expect(ltxModelIdFor('ltx-flf2v-hdr')).toBe(process.env.LTX_FLF2V_MODEL_ID.toLowerCase());
     const ltx = sdk.getLtxManager();
     const hostMetadata: LtxBundleMetadata = { allowListVersion: BUNDLE_VERSION, bundleHash: BUNDLE_HASH!, bundleCID: BUNDLE_CID };
 

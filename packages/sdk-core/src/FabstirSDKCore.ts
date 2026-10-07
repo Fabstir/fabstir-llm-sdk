@@ -89,7 +89,10 @@ export interface FabstirSDKCoreConfig {
   // Network configuration
   rpcUrl?: string;
   chainId?: number;
-  /** Registered LTX video-sidecar model id (bytes32). Enables the LTX manager when set. */
+  /**
+   * @deprecated Ignored since 1.39.3: every LTX job runs on its own template's model, ltxModelIdFor(templateId), and
+   * the LTX manager needs no opt-in. Kept so existing configs still compile.
+   */
   ltxModelId?: string;
   /** Registered TRAINING model id (bytes32, A.2) — enables getTrainingManager(). */
   trainingModelId?: string;
@@ -251,7 +254,6 @@ export class FabstirSDKCore extends EventEmitter {
       mode: config.mode || 'production',
       rpcUrl: config.rpcUrl, // Required, no fallback
       chainId: config.chainId || 84532, // Base Sepolia default
-      ltxModelId: config.ltxModelId, // LTX video-sidecar model id (enables getLtxManager)
       trainingModelId: config.trainingModelId, // Training M0 model id (enables getTrainingManager)
       trainingJobTimeoutSecs: config.trainingJobTimeoutSecs,
 
@@ -1306,12 +1308,12 @@ export class FabstirSDKCore extends EventEmitter {
     return this.transcodeManager;
   }
 
-  /** Get the LTX video-sidecar manager (requires config.ltxModelId to have been set). */
+  /** Get the LTX video-sidecar manager — one manager serves every template (each job runs on its template's model). */
   getLtxManager(): ILtxManager {
     this.ensureAuthenticated();
     if (this.storageUnavailable) throw this.storageUnavailable; // its results are read from storage (§23 DD3)
     if (!this.ltxManager) {
-      throw new SDKError('LtxManager not initialized (set config.ltxModelId)', 'LTX_NOT_AVAILABLE');
+      throw new SDKError('LtxManager not initialized (hostOnly or skipS5 sign-in)', 'LTX_NOT_AVAILABLE');
     }
     return this.ltxManager;
   }
@@ -1961,7 +1963,7 @@ export class FabstirSDKCore extends EventEmitter {
    * the chain id itself, so they are REBUILT on switchChain() — the ContractManager rebuild alone
    * left them verifying against the old chain, which on the card-paid training path is a terminal
    * refusal on a session already paid for. The wrappers get the dedicated read provider so the A.3
-   * pre-flight rides rpcUrl, not the injected wallet. Same gate idiom as before: the model id IS the opt-in.
+   * pre-flight rides rpcUrl, not the injected wallet. Training's model id is its opt-in; LTX needs none (1.39.3).
    */
   private async buildSidecarManagers(
     hostOnly: boolean = this.config.hostOnly === true,
@@ -1970,20 +1972,18 @@ export class FabstirSDKCore extends EventEmitter {
     if (hostOnly || skipS5 || !this.sessionManager || !this.storageManager || !this.contractManager) return;
     const usdcAddress = await this.contractManager.getContractAddress('usdcToken');
     const jobMarketplace = () => new JobMarketplaceWrapper(this.currentChainId, this.signer!, this.readProvider);
-    if (this.config.ltxModelId) {
-      // jobMarketplace activates the on-chain integrity poll in verifyAttestation (M1 economics —
-      // live once the node submits proofs; skips cleanly while none exist).
-      this.ltxManager = new LtxManager({
-        sessionManager: this.sessionManager,
-        storageManager: this.storageManager,
-        paymentManager: this.paymentManager,
-        jobMarketplace: jobMarketplace(),
-        hostManager: this.hostManager,
-        ltxModelId: this.config.ltxModelId,
-        usdcAddress,
-        chainId: this.currentChainId,
-      });
-    }
+    // LTX needs no opt-in since 1.39.3: each job runs on its template's model (config.ltxModelId is ignored).
+    // jobMarketplace activates the on-chain integrity poll in verifyAttestation (M1 economics —
+    // live once the node submits proofs; skips cleanly while none exist).
+    this.ltxManager = new LtxManager({
+      sessionManager: this.sessionManager,
+      storageManager: this.storageManager,
+      paymentManager: this.paymentManager,
+      jobMarketplace: jobMarketplace(),
+      hostManager: this.hostManager,
+      usdcAddress,
+      chainId: this.currentChainId,
+    });
     if (this.config.trainingModelId) {
       this.trainingManager = new TrainingManager({
         sessionManager: this.sessionManager,

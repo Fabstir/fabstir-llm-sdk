@@ -173,8 +173,9 @@ export { analyzePromptForImageIntent, type ImageIntentResult } from './utils/ima
 export { RAG_CONTEXT_START_MARKER, RAG_CONTEXT_END_MARKER } from './utils/rag-prompt';
 
 // Canonical LTX megapixel-frame token count — the exact maths generate() uses for the over-claim
-// guard, so granular-path clients (submitLtx) can replicate it byte-for-byte instead of re-deriving.
-export { ltxTokens } from './utils/ltx-utils';
+// guard, so granular-path clients (submitLtx) can replicate it byte-for-byte instead of re-deriving —
+// and a template's model id, the one every job is priced, escrowed and registered on (1.39.3).
+export { ltxTokens, ltxModelIdFor } from './utils/ltx-utils';
 
 // The two LTX types a caller constructs (LtxJob) and passes (LtxSubmitOptions — incl. the
 // `existingSession` vault path), named explicitly as a contract pin. Both already reach the
@@ -265,5 +266,5 @@ export type { BundlerSendUserOpConfig, UnpackedUserOpV07 } from './wallet';
 export { WebSocketClient } from './websocket/WebSocketClient';
 
 // Version
-export const VERSION = '1.39.2';
+export const VERSION = '1.39.3';
 export const SDK_TYPE = 'browser';
