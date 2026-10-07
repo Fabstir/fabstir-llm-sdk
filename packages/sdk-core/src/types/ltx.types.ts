@@ -114,6 +114,7 @@ export interface LtxHandle {
 export interface LtxSubmitOptions {
   requestId?: string;
   onProgress?: (progress: LtxProgress) => void;
+  /** Client wait for the result (ms; default 600 000). generate raises it to at least 3 600 000 for a VFX Passes job. */
   timeoutMs?: number;
   chainId?: number;
   /**
@@ -129,6 +130,12 @@ export interface LtxSubmitOptions {
    * The caller must have delivered FC1.6 session-auth for this sessionId first.
    */
   existingSession?: { sessionId: bigint; jobId: bigint };
+  /**
+   * createLtxSession / generate (escrow path): the session's proof timeout window in seconds, an integer in 60..3600.
+   * Absent: the SDK's default (300 s). A VFX Passes job proves once, at the end — pass 3600 for it. No effect with
+   * `existingSession` (the service fixed the window when it opened the session).
+   */
+  proofTimeoutWindow?: number;
 }
 
 /** Cost estimate for an LTX job (USDC). */
@@ -168,6 +175,8 @@ export interface LtxBundle {
     resolutionRule?: string;
     /** v26: on the 8k+1 grid the control clip must carry the full billed frame count. Node-checked; the SDK does not parse the clip. */
     exactControl?: boolean;
+    /** v27: the model family — absent: Lightricks LTX; "relight": NVIDIA Cosmos DiffusionRenderer (VFX Passes). */
+    sidecar?: string;
   }[];
   /** ADVISORY only — never hard-gate job.lora (Constraint 8). */
   loras: string[];

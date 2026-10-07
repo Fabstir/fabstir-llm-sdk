@@ -15,9 +15,10 @@ import type {
 export interface ILtxManager {
   /**
    * Estimate the exact USDC cost (megapixel-frame tokens × on-chain price), priced on the job's template model,
-   * ltxModelIdFor(templateId) (1.39.3).
+   * ltxModelIdFor(templateId, entry.sidecar) from the authenticated bundle — `hostMetadata` when given, else the host's
+   * current metadata (1.39.4).
    */
-  estimateCost(job: LtxJob, hostAddress: string, paymentToken?: string): Promise<LtxPriceEstimate>;
+  estimateCost(job: LtxJob, hostAddress: string, paymentToken?: string, hostMetadata?: LtxBundleMetadata): Promise<LtxPriceEstimate>;
 
   /** Pre-escrow validation against the host's versioned allow-list bundle. Returns the authenticated bundle. */
   validateJob(job: LtxJob, hostMetadata: LtxBundleMetadata): Promise<LtxBundle>;

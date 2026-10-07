@@ -2360,12 +2360,15 @@ const ltx = sdk.getLtxManager(); // LTX_NOT_AVAILABLE only on a hostOnly / skipS
 ```
 
 **One manager serves every template (1.39.3).** Each job runs on its own template's model,
-`ltxModelIdFor(templateId)` = `keccak256("Lightricks/LTX-Video/" + templateId)` — the node's derivation, and the id every
-LTX template is registered and approved under. `estimateCost`, `createLtxSession` and `generate` price, escrow and
+`ltxModelIdFor(templateId, sidecar)` = `keccak256(family + "/" + templateId)` — the node's derivation, and the id every
+template is registered and approved under. The family comes from the bundle entry's `sidecar` (1.39.4): absent →
+`"Lightricks/LTX-Video"`; `"relight"` → `"NVIDIA/Cosmos-DiffusionRenderer"` (VFX Passes); any other value is refused.
+`estimateCost`, `createLtxSession` and `generate` price, escrow and
 register on it — the node refuses a job whose template is not the model its session was opened and priced for, and
 deriving the model makes that mismatch impossible. `config.ltxModelId` is deprecated and ignored (before 1.39.3 it was
 required, and every session was opened on that one model). On the existingSession (vault) path the node checks the
-on-chain session's model, so the fiat session must be opened for `ltxModelIdFor(templateId)`.
+on-chain session's model, so the fiat session must be opened for `ltxModelIdFor(templateId, entry.sidecar)` — for a
+VFX Passes template the NVIDIA id, not the Lightricks one.
 
 ### Host Inputs (bundle metadata)
 
@@ -2380,7 +2383,9 @@ const hostMetadata = {
 ### Price Estimation
 
 ```typescript
-const est = await ltx.estimateCost(job, hostAddress);
+const est = await ltx.estimateCost(job, hostAddress, undefined, hostMetadata); // hostMetadata optional (1.39.4)
+// The model's family is in the bundle entry, so estimateCost reads the authenticated bundle: the hostMetadata you
+// pass, else the host's current metadata (one extra NodeRegistry read). A template not in the bundle is refused.
 // { totalCost,           // decimal USDC string, exact at every resolution
 //   totalCostBaseUnits,  // integer base units = tokens × pricePerToken / 1000
 //   tokens,              // ceil(frames × w × h / 1000) — megapixel-frame billing
@@ -2396,6 +2401,42 @@ const { cids, hashes } = await ltx.uploadImages([firstFrameBytes /*, lastFrameBy
 // the provenance commitment. Fail-closed: > bounds.imageMaxBytes, empty, or exact 256 KiB-multiple
 // plaintexts are rejected before upload.
 ```
+
+### VFX Passes (bundle v27, sdk-core 1.39.4)
+
+Three templates — `cosmos-passes-key`, `cosmos-passes-std`, `cosmos-passes-full` — run NVIDIA Cosmos
+DiffusionRenderer (entry `sidecar: "relight"`), priced and escrowed on their NVIDIA-family model. Besides the v26 rules
+below (`fps: [24, 25]`, `frameGrid`, `maxFrames: 145` → 121, 129, 137 or 145 frames; one source video in
+`job.videos[0]`), `validateJob` refuses before escrow what the node refuses at 0 tokens after the session opens:
+
+- `resolutionRule: "relight-fhd"` — exactly 1920×1088 (a 1920×1080 scene runs as 1088);
+- `output` must be `"exr-frames"` (results: the preview mp4 at `frames[0]`, then the EXR frames — `downloadFrames`);
+- `prompt` must be `""`.
+
+A passes job renders for up to ~45 minutes and proves once, at the end:
+
+```typescript
+await ltx.generate(job, hostAddress, hostMetadata, {
+  endpoint: 'https://host1.example',  // REQUIRED, as for every generate
+  proofTimeoutWindow: 3600,           // seconds, integer 60..3600 — the session's proof window
+  // timeoutMs: at least 3_600_000 for a passes job (1.39.4 raises a shorter one); LTX jobs keep the 600 s default
+});
+```
+
+- `proofTimeoutWindow` (on `createLtxSession` / `generate`) reaches the contract's session window. Absent, the session
+  gets the SDK's default (300 s) and the call is unchanged — and five minutes of proof silence then lets anyone time
+  the session out mid-render. It has no effect with `existingSession` (the service opened that session — for a passes
+  template it must open it on the NVIDIA id with a 3600 s window).
+- The client wait: the node abandons a job whose client socket goes (0 tokens — the user is refunded, the render is
+  lost, the host eats the GPU time), so `generate` waits at least an hour for a passes job (a longer `timeoutMs` is
+  kept). With `createLtxSession` + `submitLtx` directly, pass `timeoutMs` ≥ 3_600_000 yourself (the helper does).
+- Pick these by `entry.sidecar === "relight"`, not by template name. `lora` is `"<templateId>@v1"`. Passes jobs take
+  none of the advisory fields (`strength`, `azimuth`, `elevation`, `distance`, `inputWire`) — the node refuses them
+  after the session is opened. The source clip must carry at least the billed frame count (`exactControl`).
+- Output: one multi-channel EXR per frame of data passes (`manifest.colourEncoding: "vfx-passes-v1"`) — Key: normal;
+  Std: normal + basecolor; Full: normal, basecolor, depth, roughness, metallic — not a picture.
+
+`SDK_CAPABILITIES?.ltxModelFamilyFromEntry` and `SDK_CAPABILITIES?.ltxProofTimeoutWindow` are `true` from 1.39.4.
 
 ### Allow-list v26 rules (1.39.3)
 
@@ -2442,7 +2483,7 @@ const result = await ltx.generate(job, hostAddress, hostMetadata, {
 //   is the group as data — iterate it rather than re-typing the field list.
 //   seed: decimal string in [0, 2^64-1] (pre-validated before escrow — the sampler is u64)
 //   resolution: from bundle.bounds.resolutions; billing binds the REQUESTED dims
-// Flow: the job's model (ltxModelIdFor) → validateJob (pre-escrow, no funds locked on failure) → estimateCost →
+// Flow: validateJob (pre-escrow, no funds locked on failure) → the entry's model (ltxModelIdFor) → estimateCost →
 //       session + USDC escrow (max($0.50 floor, cost × 1.05 ceil) — deposit is the settlement
 //       ceiling, the pad keeps the claim strictly inside it; overage refunds at settlement;
 //       delegate path automatic under authenticateAsDelegate) → encrypted ltx_generate →
@@ -3706,6 +3747,8 @@ SDK_CAPABILITIES.searchIntentFromUserText;   // 1.39.2: web search is decided on
 SDK_CAPABILITIES.imageIntentSkipsRagTurns;   // 1.39.2: a user turn that carries RAG context never routes to images
 SDK_CAPABILITIES.ltxEntryFpsAndResolutionRule; // 1.39.3: validateJob applies a v26 entry's fps list and resolutionRule
 SDK_CAPABILITIES.ltxModelFromTemplate;       // 1.39.3: each job runs on its template's model; ltxModelId is ignored
+SDK_CAPABILITIES.ltxModelFamilyFromEntry;    // 1.39.4: the family comes from the entry's sidecar (VFX Passes → NVIDIA)
+SDK_CAPABILITIES.ltxProofTimeoutWindow;      // 1.39.4: createLtxSession / generate take proofTimeoutWindow (seconds)
 ```
 
 `SDK_CAPABILITIES` is frozen. Read a flag with optional chaining (`SDK_CAPABILITIES?.conversationLogOptOut`) so an older

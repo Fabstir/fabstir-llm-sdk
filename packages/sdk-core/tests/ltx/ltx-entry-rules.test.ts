@@ -165,6 +165,7 @@ describe('L4 — every job runs on its own template\'s model', () => {
     const m = new LtxManager({
       sessionManager: { resolveModelPricePerToken, startSession, registerExternalSession, submitLtx },
       storageManager: { getByCID }, paymentManager: { getTokenMinDeposit },
+      hostManager: { getHostInfo: vi.fn(async () => ({ metadata: { ltx: meta(b) } })) }, // 1.39.4: estimateCost reads the entry
       ltxModelId: configured, usdcAddress: '0xabc', chainId: 84532,
     } as any);
     return { m, b, resolveModelPricePerToken, startSession, registerExternalSession, submitLtx, getByCID };

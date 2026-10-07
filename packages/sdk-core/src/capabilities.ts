@@ -36,6 +36,14 @@ export const SDK_CAPABILITIES = Object.freeze({
   imageIntentSkipsRagTurns: true,
   /** LtxManager.validateJob applies a v26 entry's own fps list and resolutionRule (unknown rule names refused) (1.39.3). */
   ltxEntryFpsAndResolutionRule: true,
-  /** Every LTX job runs on its own template's model, ltxModelIdFor(templateId); config.ltxModelId is ignored (1.39.3). */
+  /** Every LTX job runs on its own template's model, ltxModelIdFor(templateId, sidecar); config.ltxModelId is ignored (1.39.3). */
   ltxModelFromTemplate: true,
+  /**
+   * VFX Passes (bundle v27): the model family comes from the bundle entry's sidecar ("relight" → NVIDIA Cosmos), and
+   * validateJob applies its rules — relight-fhd (1920 × 1088), output "exr-frames", no prompt; generate waits up to an
+   * hour for a passes job unless timeoutMs is set (1.39.4).
+   */
+  ltxModelFamilyFromEntry: true,
+  /** createLtxSession / generate take an optional proofTimeoutWindow (seconds, 60..3600) (1.39.4). */
+  ltxProofTimeoutWindow: true,
 } as const);

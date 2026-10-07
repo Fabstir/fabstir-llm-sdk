@@ -90,7 +90,7 @@ export interface FabstirSDKCoreConfig {
   rpcUrl?: string;
   chainId?: number;
   /**
-   * @deprecated Ignored since 1.39.3: every LTX job runs on its own template's model, ltxModelIdFor(templateId), and
+   * @deprecated Ignored since 1.39.3: every LTX job runs on its own template's model, ltxModelIdFor(templateId, sidecar), and
    * the LTX manager needs no opt-in. Kept so existing configs still compile.
    */
   ltxModelId?: string;
