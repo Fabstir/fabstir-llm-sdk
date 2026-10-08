@@ -2402,7 +2402,7 @@ const { cids, hashes } = await ltx.uploadImages([firstFrameBytes /*, lastFrameBy
 // plaintexts are rejected before upload.
 ```
 
-### VFX Passes (bundle v27, sdk-core 1.39.4 / 1.39.5)
+### VFX Passes (bundle v27, sdk-core 1.39.4 – 1.39.6)
 
 Three templates — `cosmos-passes-key`, `cosmos-passes-std`, `cosmos-passes-full` — run NVIDIA Cosmos
 DiffusionRenderer (entry `sidecar: "relight"`), priced and escrowed on their NVIDIA-family model. Besides the v26 rules
@@ -2413,27 +2413,47 @@ below (`fps: [24, 25]`, `frameGrid`, `maxFrames: 145` → 121, 129, 137 or 145 f
 - `output` must be `"exr-frames"` (results: the preview mp4 at `frames[0]`, then the EXR frames — `downloadFrames`);
 - `prompt` must be `""`.
 
-A passes job renders for up to ~45 minutes and proves once, at the end:
+A passes job renders for a long time: up to ~45 minutes on node 8.60.0, where it proves once, at the end; up to two
+hours once the node takes 15 s of footage through all five passes — that node release posts proofs during the render,
+so the gap between proofs stays under the hour.
 
 ```typescript
 await ltx.generate(job, hostAddress, hostMetadata, {
   endpoint: 'https://host1.example',  // REQUIRED, as for every generate
+  // sessionDuration: defaults to 14400 for a passes job (1.39.6); an explicit positive integer wins — the SESSION's
+  //   lifetime in seconds, not the clip's length
   // proofTimeoutWindow: defaults to 3600 for a passes job (1.39.5); an explicit integer 60..3600 wins
-  // timeoutMs: at least 3_600_000 for a passes job (1.39.4 raises a shorter one); LTX jobs keep the 600 s default
+  // timeoutMs: at least the passes session's duration (14_400_000 by default; 1.39.6 raises a shorter one); LTX jobs
+  //   keep the 600 s default
 });
 ```
 
+- `sessionDuration` (on `createLtxSession` / `generate`, 1.39.6) is how long the session lives, in seconds — the
+  contract's `maxDuration`. It is **not** the clip's length: a form's "duration" (5–15 s) passed here would open a
+  session that dies mid-render. Absent, a passes session lives 14400 s (four hours, room for a two-hour render); LTX
+  templates keep the SDK's default (3600 s) and an unchanged call. An explicit value always wins; anything but a
+  positive integer is refused, on the escrow path, before any network call (with `existingSession` it is ignored).
 - `proofTimeoutWindow` (on `createLtxSession` / `generate`) reaches the contract's session window. Absent, a passes
   session gets 3600 (1.39.5) — with the 300 s default, five minutes of proof silence would let anyone time the session
   out mid-render; LTX templates keep the SDK's default (300 s) and an unchanged call. An explicit value always wins.
+  60..3600 is the contract's own range: `MAX_PROOF_TIMEOUT` is a compile-time constant of the audited marketplace, and
+  a larger window reverts ("Bad timeout").
   The same window delays a reclaim: a failed passes session becomes reclaimable (`triggerSessionTimeout`) only after
   up to an hour of proof silence.
-- Card-paid (`existingSession`): the window has no effect — the service opens the session, on the NVIDIA id, with its
-  own window. **Pending:** the card service still opens card sessions with 300 s; the node developer is changing it to
-  3600 and will confirm once a card-paid passes session reads 3600 on chain.
+- Card-paid (`existingSession`): the window and `sessionDuration` have no effect — the service opens the session, on
+  the NVIDIA id, with its own window and duration. **Pending:** the card service still opens card sessions with a
+  300 s window; the node developer is changing it to 3600, and setting the card session's duration, and will confirm
+  once a card-paid passes session reads them on chain.
 - The client wait: the node abandons a job whose client socket goes (0 tokens — the user is refunded, the render is
-  lost, the host eats the GPU time), so `generate` waits at least an hour for a passes job (a longer `timeoutMs` is
-  kept). With `createLtxSession` + `submitLtx` directly, pass `timeoutMs` ≥ 3_600_000 yourself (the helper does).
+  lost, the host eats the GPU time), so `generate` waits at least as long as the passes session lives: the
+  `sessionDuration` it opened with (14400 s by default), or four hours on the card path, where the service chose it
+  (1.39.6; one hour before). A longer `timeoutMs` is kept. It is a ceiling, not a delay: the result resolves as soon as
+  the node sends it. With `createLtxSession` + `submitLtx` directly, pass a `timeoutMs` covering the render yourself.
+- A closed socket ends the wait at once (1.39.6, every LTX job, both paths): the result can only arrive on the socket
+  that sent the job, so `generate` / `submitLtx` reject with `GENERATION_FAILED`, `details: { reason: 'WS_CLOSED',
+  closeCode }` (`generate` adds `sessionId`/`jobId`), instead of waiting for the timeout. The node normally settles
+  the dropped session itself, at the tokens proven so far (0 on node 8.60.0, where a passes job proves at the end);
+  reclaim as for any `GENERATION_FAILED` if it does not (card-paid: the service reclaims).
 - Pick these by `entry.sidecar === "relight"`, not by template name. `lora` is `"<templateId>@v1"`. Passes jobs take
   none of the advisory fields (`strength`, `azimuth`, `elevation`, `distance`, `inputWire`) — the node refuses them
   after the session is opened. The source clip must carry at least the billed frame count (`exactControl`).
@@ -2441,7 +2461,7 @@ await ltx.generate(job, hostAddress, hostMetadata, {
   Std: normal + basecolor; Full: normal, basecolor, depth, roughness, metallic — not a picture.
 
 `SDK_CAPABILITIES?.ltxModelFamilyFromEntry` and `SDK_CAPABILITIES?.ltxProofTimeoutWindow` are `true` from 1.39.4;
-`SDK_CAPABILITIES?.ltxRelightProofWindowDefault` from 1.39.5.
+`SDK_CAPABILITIES?.ltxRelightProofWindowDefault` from 1.39.5; `SDK_CAPABILITIES?.ltxSessionDuration` from 1.39.6.
 
 ### Allow-list v26 rules (1.39.3)
 
@@ -2586,7 +2606,8 @@ All failures are typed `LtxError { code, message, details }` — wire codes `VAL
 `SIDECAR_UNAVAILABLE`, `CAPACITY` (retryable during settlement), `GENERATION_FAILED`, `TIMEOUT`;
 client codes `LTX_PREVALIDATION_FAILED` (pre-escrow, no funds moved), `LTX_BUNDLE_STALE`,
 `LTX_INPUT_BINDING_MISMATCH`, `LTX_PROOF_MISMATCH`. From 1.39.3 an `ltx_error` carries the node's own code as
-`details.nodeCode`, and `generate()` keeps it beside `sessionId`/`jobId` (nothing else from the original error's
+`details.nodeCode`, and `generate()` keeps it — and from 1.39.6 the SDK's own `reason`/`closeCode` for a closed
+socket — beside `sessionId`/`jobId` (nothing else from the original error's
 details is copied); a code the SDK does not know maps to `GENERATION_FAILED`. Today's node sends its 0-token session
 refusals (wrong model, no on-chain job id, proof cannot land) as `VALIDATION_FAILED` and a too-short control clip as
 `GENERATION_FAILED` — the same codes as before, so they are not yet distinguishable from a failed render. A failure at
@@ -3755,6 +3776,7 @@ SDK_CAPABILITIES.ltxModelFromTemplate;       // 1.39.3: each job runs on its tem
 SDK_CAPABILITIES.ltxModelFamilyFromEntry;    // 1.39.4: the family comes from the entry's sidecar (VFX Passes → NVIDIA)
 SDK_CAPABILITIES.ltxProofTimeoutWindow;      // 1.39.4: createLtxSession / generate take proofTimeoutWindow (seconds)
 SDK_CAPABILITIES.ltxRelightProofWindowDefault; // 1.39.5: a passes session defaults to proofTimeoutWindow 3600
+SDK_CAPABILITIES.ltxSessionDuration;         // 1.39.6: createLtxSession / generate take sessionDuration; passes default 14400
 ```
 
 `SDK_CAPABILITIES` is frozen. Read a flag with optional chaining (`SDK_CAPABILITIES?.conversationLogOptOut`) so an older

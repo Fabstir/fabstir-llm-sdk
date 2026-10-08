@@ -114,7 +114,11 @@ export interface LtxHandle {
 export interface LtxSubmitOptions {
   requestId?: string;
   onProgress?: (progress: LtxProgress) => void;
-  /** Client wait for the result (ms; default 600 000). generate raises it to at least 3 600 000 for a VFX Passes job. */
+  /**
+   * Client wait for the result (ms; default 600 000). For a VFX Passes job generate raises it to at least the
+   * session's lifetime — its sessionDuration × 1000 (14 400 000 by default), or 14 400 000 for an existingSession
+   * (1.39.6). A closed socket ends the wait at once (GENERATION_FAILED, details.reason "WS_CLOSED").
+   */
   timeoutMs?: number;
   chainId?: number;
   /**
@@ -132,10 +136,17 @@ export interface LtxSubmitOptions {
   existingSession?: { sessionId: bigint; jobId: bigint };
   /**
    * createLtxSession / generate (escrow path): the session's proof timeout window in seconds, an integer in 60..3600.
-   * Absent: 3600 for a VFX Passes job (it proves once, at the end — 1.39.5), else the SDK's default (300 s). No effect with
-   * `existingSession` (the service fixed the window when it opened the session).
+   * Absent: 3600 for a VFX Passes job (1.39.5; on node 8.60.0 it proves once, at the end), else the SDK's default
+   * (300 s). No effect with `existingSession` (the service fixed the window when it opened the session).
    */
   proofTimeoutWindow?: number;
+  /**
+   * createLtxSession / generate (escrow path): how long the session lives, in seconds — a positive integer (sent to the
+   * contract as maxDuration). Not the clip's length. Absent: 14400 for a VFX Passes job (up to two hours of rendering —
+   * 1.39.6), else the SDK's default (3600 s). No effect with `existingSession` (the service fixed it when it opened the
+   * session).
+   */
+  sessionDuration?: number;
 }
 
 /** Cost estimate for an LTX job (USDC). */
