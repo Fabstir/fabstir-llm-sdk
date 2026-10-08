@@ -170,6 +170,7 @@ describe('SDK_CAPABILITIES (D22)', () => {
       ltxModelFromTemplate: true,
       ltxModelFamilyFromEntry: true,
       ltxProofTimeoutWindow: true,
+      ltxRelightProofWindowDefault: true,
     });
   });
 });

@@ -132,7 +132,7 @@ export interface LtxSubmitOptions {
   existingSession?: { sessionId: bigint; jobId: bigint };
   /**
    * createLtxSession / generate (escrow path): the session's proof timeout window in seconds, an integer in 60..3600.
-   * Absent: the SDK's default (300 s). A VFX Passes job proves once, at the end — pass 3600 for it. No effect with
+   * Absent: 3600 for a VFX Passes job (it proves once, at the end — 1.39.5), else the SDK's default (300 s). No effect with
    * `existingSession` (the service fixed the window when it opened the session).
    */
   proofTimeoutWindow?: number;

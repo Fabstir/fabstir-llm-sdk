@@ -2402,7 +2402,7 @@ const { cids, hashes } = await ltx.uploadImages([firstFrameBytes /*, lastFrameBy
 // plaintexts are rejected before upload.
 ```
 
-### VFX Passes (bundle v27, sdk-core 1.39.4)
+### VFX Passes (bundle v27, sdk-core 1.39.4 / 1.39.5)
 
 Three templates — `cosmos-passes-key`, `cosmos-passes-std`, `cosmos-passes-full` — run NVIDIA Cosmos
 DiffusionRenderer (entry `sidecar: "relight"`), priced and escrowed on their NVIDIA-family model. Besides the v26 rules
@@ -2418,15 +2418,19 @@ A passes job renders for up to ~45 minutes and proves once, at the end:
 ```typescript
 await ltx.generate(job, hostAddress, hostMetadata, {
   endpoint: 'https://host1.example',  // REQUIRED, as for every generate
-  proofTimeoutWindow: 3600,           // seconds, integer 60..3600 — the session's proof window
+  // proofTimeoutWindow: defaults to 3600 for a passes job (1.39.5); an explicit integer 60..3600 wins
   // timeoutMs: at least 3_600_000 for a passes job (1.39.4 raises a shorter one); LTX jobs keep the 600 s default
 });
 ```
 
-- `proofTimeoutWindow` (on `createLtxSession` / `generate`) reaches the contract's session window. Absent, the session
-  gets the SDK's default (300 s) and the call is unchanged — and five minutes of proof silence then lets anyone time
-  the session out mid-render. It has no effect with `existingSession` (the service opened that session — for a passes
-  template it must open it on the NVIDIA id with a 3600 s window).
+- `proofTimeoutWindow` (on `createLtxSession` / `generate`) reaches the contract's session window. Absent, a passes
+  session gets 3600 (1.39.5) — with the 300 s default, five minutes of proof silence would let anyone time the session
+  out mid-render; LTX templates keep the SDK's default (300 s) and an unchanged call. An explicit value always wins.
+  The same window delays a reclaim: a failed passes session becomes reclaimable (`triggerSessionTimeout`) only after
+  up to an hour of proof silence.
+- Card-paid (`existingSession`): the window has no effect — the service opens the session, on the NVIDIA id, with its
+  own window. **Pending:** the card service still opens card sessions with 300 s; the node developer is changing it to
+  3600 and will confirm once a card-paid passes session reads 3600 on chain.
 - The client wait: the node abandons a job whose client socket goes (0 tokens — the user is refunded, the render is
   lost, the host eats the GPU time), so `generate` waits at least an hour for a passes job (a longer `timeoutMs` is
   kept). With `createLtxSession` + `submitLtx` directly, pass `timeoutMs` ≥ 3_600_000 yourself (the helper does).
@@ -2436,7 +2440,8 @@ await ltx.generate(job, hostAddress, hostMetadata, {
 - Output: one multi-channel EXR per frame of data passes (`manifest.colourEncoding: "vfx-passes-v1"`) — Key: normal;
   Std: normal + basecolor; Full: normal, basecolor, depth, roughness, metallic — not a picture.
 
-`SDK_CAPABILITIES?.ltxModelFamilyFromEntry` and `SDK_CAPABILITIES?.ltxProofTimeoutWindow` are `true` from 1.39.4.
+`SDK_CAPABILITIES?.ltxModelFamilyFromEntry` and `SDK_CAPABILITIES?.ltxProofTimeoutWindow` are `true` from 1.39.4;
+`SDK_CAPABILITIES?.ltxRelightProofWindowDefault` from 1.39.5.
 
 ### Allow-list v26 rules (1.39.3)
 
@@ -3749,6 +3754,7 @@ SDK_CAPABILITIES.ltxEntryFpsAndResolutionRule; // 1.39.3: validateJob applies a 
 SDK_CAPABILITIES.ltxModelFromTemplate;       // 1.39.3: each job runs on its template's model; ltxModelId is ignored
 SDK_CAPABILITIES.ltxModelFamilyFromEntry;    // 1.39.4: the family comes from the entry's sidecar (VFX Passes → NVIDIA)
 SDK_CAPABILITIES.ltxProofTimeoutWindow;      // 1.39.4: createLtxSession / generate take proofTimeoutWindow (seconds)
+SDK_CAPABILITIES.ltxRelightProofWindowDefault; // 1.39.5: a passes session defaults to proofTimeoutWindow 3600
 ```
 
 `SDK_CAPABILITIES` is frozen. Read a flag with optional chaining (`SDK_CAPABILITIES?.conversationLogOptOut`) so an older

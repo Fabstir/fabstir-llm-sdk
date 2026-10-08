@@ -46,4 +46,6 @@ export const SDK_CAPABILITIES = Object.freeze({
   ltxModelFamilyFromEntry: true,
   /** createLtxSession / generate take an optional proofTimeoutWindow (seconds, 60..3600) (1.39.4). */
   ltxProofTimeoutWindow: true,
+  /** A VFX Passes session defaults to proofTimeoutWindow 3600 when the caller passes none; an explicit value wins (1.39.5). */
+  ltxRelightProofWindowDefault: true,
 } as const);
