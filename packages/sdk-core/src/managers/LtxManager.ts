@@ -224,7 +224,10 @@ export class LtxManager {
     // estimate and session open; the overage refunds at settlement.
     const padded = (estBase * 105n + 99n) / 100n;
     const depositBase = padded > floor ? padded : floor;
-    const windowField = proofWindow !== undefined ? { proofTimeoutWindow: proofWindow } : {}; // absent: startSession's call unchanged
+    // A passes job proves once, at the end: its session defaults to the longest window (1.39.5); an explicit value wins.
+    // LTX templates without a window keep startSession's call unchanged.
+    const sessionWindow = proofWindow ?? (entry.sidecar === 'relight' ? MAX_PROOF_TIMEOUT : undefined);
+    const windowField = sessionWindow !== undefined ? { proofTimeoutWindow: sessionWindow } : {};
     const ids: { sessionId: bigint; jobId: bigint } = await this.sessionManager.startSession({
       chainId: options?.chainId ?? this.chainId,
       host: hostAddress,

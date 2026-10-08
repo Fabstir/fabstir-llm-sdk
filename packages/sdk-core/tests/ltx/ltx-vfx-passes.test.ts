@@ -213,7 +213,33 @@ describe('V10 — generate waits long enough for a passes job (round 1)', () => 
   });
 });
 
+describe('V11 — a passes session defaults to the 3600 s proof window (1.39.5)', () => {
+  it('W1: a passes job without a window opens its session with 3600 — via createLtxSession and generate', async () => {
+    const h = manager();
+    await h.m.createLtxSession(passesJob(), '0xhost', meta(h.b));
+    expect(h.startSession.mock.calls[0][0]).toMatchObject({ proofTimeoutWindow: 3600 });
+    await h.m.generate(passesJob(), '0xhost', meta(h.b)).catch(() => {});
+    expect(h.startSession.mock.calls[1][0]).toMatchObject({ proofTimeoutWindow: 3600 });
+  });
+
+  it('W2: an explicit window wins', async () => {
+    const h = manager();
+    await h.m.createLtxSession(passesJob(), '0xhost', meta(h.b), { proofTimeoutWindow: 600 });
+    expect(h.startSession.mock.calls[0][0]).toMatchObject({ proofTimeoutWindow: 600 });
+  });
+
+  it('W3/W4: an LTX job keeps the unchanged call; the vault path opens no session', async () => {
+    const h = manager();
+    await h.m.createLtxSession(t2vJob(), '0xhost', meta(h.b));
+    expect('proofTimeoutWindow' in h.startSession.mock.calls[0][0]).toBe(false);
+    await h.m.generate(passesJob(), '0xhost', meta(h.b), { existingSession: { sessionId: 5n, jobId: 6n }, endpoint: 'http://node:8080', chainId: 84532 }).catch(() => {});
+    expect(h.startSession).toHaveBeenCalledTimes(1);
+    expect(h.registerExternalSession).toHaveBeenCalled(); // the vault path ran (not an early throw)
+  });
+});
+
 it('C1 — capability flags', () => {
   expect((entry as any).SDK_CAPABILITIES.ltxModelFamilyFromEntry).toBe(true);
   expect((entry as any).SDK_CAPABILITIES.ltxProofTimeoutWindow).toBe(true);
+  expect((entry as any).SDK_CAPABILITIES.ltxRelightProofWindowDefault).toBe(true); // C2 (1.39.5)
 });
