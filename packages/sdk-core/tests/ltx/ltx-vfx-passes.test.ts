@@ -1,6 +1,7 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 // VFX Passes, bundle v27 (docs/development/IMPLEMENTATION-VFX-PASSES.md): the model family comes from the entry's
 // `sidecar` (V1, V2), the relight rules (V3, V4), and createLtxSession's optional proofTimeoutWindow (V5).
+// V15 (docs/development/IMPLEMENTATION-LONG-VIDEO-SESSIONS.md): sessionDuration and the passes client wait (1.39.6).
 import { describe, it, expect, vi } from 'vitest';
 import { ethers } from 'ethers';
 import bundleFixture from './bundle-fixture.json';
@@ -152,7 +153,7 @@ describe('V5 — createLtxSession\'s optional proofTimeoutWindow', () => {
     }
   });
 
-  it('P5: through the REAL SessionManager.startSession the window reaches the payment manager (contract layers: wallet-path-onchain-args)', async () => {
+  it('P5 / S8: through the REAL SessionManager.startSession the window and the duration reach the payment manager (contract layers: wallet-path-onchain-args)', async () => {
     const b = bundle();
     const HOST = ethers.Wallet.createRandom().address;
     const signer: any = { provider: { getNetwork: async () => ({ chainId: 84532n }), getBlockNumber: async () => 1 }, getAddress: async () => `0x${'ee'.repeat(20)}` };
@@ -168,27 +169,27 @@ describe('V5 — createLtxSession\'s optional proofTimeoutWindow', () => {
     await sm.initialize();
     const m = new LtxManager({ sessionManager: sm, storageManager: storage, paymentManager, hostManager, usdcAddress: `0x${'ab'.repeat(20)}`, chainId: 84532 } as any);
     await m.createLtxSession(passesJob(), HOST, meta(b), { proofTimeoutWindow: 3600, endpoint: 'https://host1.fabstir.net' });
-    expect(paymentManager.createSessionJob).toHaveBeenCalledWith(expect.objectContaining({ proofTimeoutWindow: 3600, modelId: PASSES_IDS['cosmos-passes-key'] }));
+    expect(paymentManager.createSessionJob).toHaveBeenCalledWith(expect.objectContaining({ proofTimeoutWindow: 3600, duration: 14400, modelId: PASSES_IDS['cosmos-passes-key'] }));
   });
 });
 
 describe('V10 — generate waits long enough for a passes job (round 1)', () => {
-  it('T1: a passes job without timeoutMs waits 3,600,000 ms; an explicit value and LTX jobs are unchanged', async () => {
+  it('T1: a passes job without timeoutMs waits 14,400,000 ms; an explicit value and LTX jobs are unchanged', async () => {
     const h = manager();
     await h.m.generate(passesJob(), '0xhost', meta(h.b), { proofTimeoutWindow: 3600 }).catch(() => {});
-    expect(h.submitLtx.mock.calls[0][2]).toMatchObject({ timeoutMs: 3_600_000, proofTimeoutWindow: 3600 });
+    expect(h.submitLtx.mock.calls[0][2]).toMatchObject({ timeoutMs: 14_400_000, proofTimeoutWindow: 3600 });
     await h.m.generate(passesJob(), '0xhost', meta(h.b), { timeoutMs: 2_800_000 }).catch(() => {});
-    expect(h.submitLtx.mock.calls[1][2]).toMatchObject({ timeoutMs: 3_600_000 }); // round 2: at least an hour, as the helper does
+    expect(h.submitLtx.mock.calls[1][2]).toMatchObject({ timeoutMs: 14_400_000 }); // round 2: a shorter wait is raised, as the helper does
     await h.m.generate(t2vJob(), '0xhost', meta(h.b)).catch(() => {});
     expect(h.submitLtx.mock.calls[2][2]?.timeoutMs).toBeUndefined();
     await h.m.generate(passesJob(), '0xhost', meta(h.b), { existingSession: { sessionId: 5n, jobId: 6n }, endpoint: 'http://node:8080', chainId: 84532 }).catch(() => {});
-    expect(h.submitLtx.mock.calls[3][2]).toMatchObject({ timeoutMs: 3_600_000 }); // the card-paid render is just as long
+    expect(h.submitLtx.mock.calls[3][2]).toMatchObject({ timeoutMs: 14_400_000 }); // the card-paid render is just as long
 
-    await h.m.generate(passesJob(), '0xhost', meta(h.b), { timeoutMs: 5_000_000 }).catch(() => {});
-    expect(h.submitLtx.mock.calls[4][2]).toMatchObject({ timeoutMs: 5_000_000 }); // a longer wait is kept
+    await h.m.generate(passesJob(), '0xhost', meta(h.b), { timeoutMs: 20_000_000 }).catch(() => {});
+    expect(h.submitLtx.mock.calls[4][2]).toMatchObject({ timeoutMs: 20_000_000 }); // a longer wait is kept
 
     await h.m.generate(passesJob(), '0xhost', meta(h.b), { timeoutMs: NaN }).catch(() => {});
-    expect(h.submitLtx.mock.calls[5][2]).toMatchObject({ timeoutMs: 3_600_000 }); // a caller's NaN is not a wait (round 3)
+    expect(h.submitLtx.mock.calls[5][2]).toMatchObject({ timeoutMs: 14_400_000 }); // a caller's NaN is not a wait (round 3)
   });
 
   it('T3: on the vault path a model-id failure still carries the session ids (round 3)', async () => {
@@ -228,13 +229,83 @@ describe('V11 — a passes session defaults to the 3600 s proof window (1.39.5)'
     expect(h.startSession.mock.calls[0][0]).toMatchObject({ proofTimeoutWindow: 600 });
   });
 
-  it('W3/W4: an LTX job keeps the unchanged call; the vault path opens no session', async () => {
+  it('W3/W4 / S6: an LTX job keeps the unchanged call; the vault path opens no session, whatever sessionDuration says', async () => {
     const h = manager();
     await h.m.createLtxSession(t2vJob(), '0xhost', meta(h.b));
     expect('proofTimeoutWindow' in h.startSession.mock.calls[0][0]).toBe(false);
-    await h.m.generate(passesJob(), '0xhost', meta(h.b), { existingSession: { sessionId: 5n, jobId: 6n }, endpoint: 'http://node:8080', chainId: 84532 }).catch(() => {});
+    await h.m.generate(passesJob(), '0xhost', meta(h.b), { sessionDuration: 7200, existingSession: { sessionId: 5n, jobId: 6n }, endpoint: 'http://node:8080', chainId: 84532 }).catch(() => {});
     expect(h.startSession).toHaveBeenCalledTimes(1);
     expect(h.registerExternalSession).toHaveBeenCalled(); // the vault path ran (not an early throw)
+  });
+});
+
+describe('V15 — sessionDuration and the passes client wait (1.39.6)', () => {
+  it('S1: sessionDuration reaches startSession as duration — from createLtxSession and through generate', async () => {
+    const h = manager();
+    await h.m.createLtxSession(passesJob(), '0xhost', meta(h.b), { sessionDuration: 7200 });
+    expect(h.startSession.mock.calls[0][0]).toMatchObject({ duration: 7200 });
+    await h.m.generate(passesJob(), '0xhost', meta(h.b), { sessionDuration: 7200 }).catch(() => {});
+    expect(h.startSession.mock.calls[1][0]).toMatchObject({ duration: 7200 });
+  });
+
+  it('S2: an LTX job without it keeps the unchanged call; with it, the value is sent', async () => {
+    const h = manager();
+    await h.m.createLtxSession(t2vJob(), '0xhost', meta(h.b));
+    expect('duration' in h.startSession.mock.calls[0][0]).toBe(false);
+    await h.m.createLtxSession(t2vJob(), '0xhost', meta(h.b), { sessionDuration: 900 });
+    expect(h.startSession.mock.calls[1][0]).toMatchObject({ duration: 900 });
+    expect('proofTimeoutWindow' in h.startSession.mock.calls[1][0]).toBe(false);
+  });
+
+  it('S3: a sessionDuration that is not a positive integer is refused before the bundle read and any escrow', async () => {
+    for (const sessionDuration of [0, -1, 1.5, NaN, Infinity, '7200']) {
+      const h = manager();
+      await expect(h.m.createLtxSession(passesJob(), '0xhost', meta(h.b), { sessionDuration } as any)).rejects.toMatchObject({ ...refused, message: expect.stringContaining('sessionDuration') });
+      expect(h.getByCID).not.toHaveBeenCalled();
+      expect(h.startSession).not.toHaveBeenCalled();
+    }
+    const h = manager();
+    await expect(h.m.createLtxSession(passesJob(), '0xhost', meta(h.b), { sessionDuration: 1 })).resolves.toBeTruthy();
+  });
+
+  it('S4: a passes job with nothing passed opens a 14400 s session with the 3600 s window', async () => {
+    const h = manager();
+    await h.m.createLtxSession(passesJob(), '0xhost', meta(h.b));
+    expect(h.startSession.mock.calls[0][0]).toMatchObject({ duration: 14400, proofTimeoutWindow: 3600 });
+    await h.m.generate(passesJob(), '0xhost', meta(h.b)).catch(() => {});
+    expect(h.startSession.mock.calls[1][0]).toMatchObject({ duration: 14400, proofTimeoutWindow: 3600 });
+  });
+
+  it('S5: explicit values win, each on its own', async () => {
+    const h = manager();
+    await h.m.createLtxSession(passesJob(), '0xhost', meta(h.b), { sessionDuration: 9000 });
+    expect(h.startSession.mock.calls[0][0]).toMatchObject({ duration: 9000, proofTimeoutWindow: 3600 });
+    await h.m.createLtxSession(passesJob(), '0xhost', meta(h.b), { proofTimeoutWindow: 600 });
+    expect(h.startSession.mock.calls[1][0]).toMatchObject({ duration: 14400, proofTimeoutWindow: 600 });
+  });
+
+  it('S7: a passes job waits at least as long as its session lives — the duration it opened with', async () => {
+    const h = manager();
+    await h.m.generate(passesJob(), '0xhost', meta(h.b), { sessionDuration: 28800, timeoutMs: 3_600_000 }).catch(() => {});
+    expect(h.submitLtx.mock.calls[0][2]).toMatchObject({ timeoutMs: 28_800_000 }); // a longer session: a longer wait
+    await h.m.generate(passesJob(), '0xhost', meta(h.b), { sessionDuration: 9000 }).catch(() => {});
+    expect(h.submitLtx.mock.calls[1][2]).toMatchObject({ timeoutMs: 9_000_000 }); // past the session nothing is paid
+    await h.m.generate(passesJob(), '0xhost', meta(h.b), { sessionDuration: 9000, existingSession: { sessionId: 5n, jobId: 6n }, endpoint: 'http://node:8080', chainId: 84532 }).catch(() => {});
+    expect(h.submitLtx.mock.calls[2][2]).toMatchObject({ timeoutMs: 14_400_000 }); // vault: the card session's length is not ours
+    await h.m.generate(passesJob(), '0xhost', meta(h.b), { existingSession: { sessionId: 5n, jobId: 6n, duration: 99n } as any, endpoint: 'http://node:8080', chainId: 84532 }).catch(() => {});
+    expect(h.submitLtx.mock.calls[3][2]).toMatchObject({ timeoutMs: 14_400_000 }); // only the two ids are taken from existingSession
+    await h.m.generate(passesJob(), '0xhost', meta(h.b), { timeoutMs: Infinity }).catch(() => {});
+    expect(h.submitLtx.mock.calls[4][2]).toMatchObject({ timeoutMs: Infinity }); // the longest wait is kept (the timer holds it at its limit)
+  });
+
+  it('K4: generate keeps the closed-socket classification beside the session ids (and nothing raw)', async () => {
+    const h = manager();
+    const raw: any = { self: null }; raw.self = raw; // a circular WS error must not be relayed
+    h.submitLtx.mockImplementationOnce(async () => ({ requestId: 'r', cancel() {}, result: Promise.reject(new LtxError('closed', 'GENERATION_FAILED', { reason: 'WS_CLOSED', closeCode: 1006, raw })) }));
+    const err = await h.m.generate(passesJob(), '0xhost', meta(h.b)).catch((e) => e);
+    expect(err).toBeInstanceOf(LtxError);
+    expect(err.code).toBe('GENERATION_FAILED');
+    expect(err.details).toEqual({ reason: 'WS_CLOSED', closeCode: 1006, sessionId: 7n, jobId: 7n });
   });
 });
 
@@ -242,4 +313,5 @@ it('C1 — capability flags', () => {
   expect((entry as any).SDK_CAPABILITIES.ltxModelFamilyFromEntry).toBe(true);
   expect((entry as any).SDK_CAPABILITIES.ltxProofTimeoutWindow).toBe(true);
   expect((entry as any).SDK_CAPABILITIES.ltxRelightProofWindowDefault).toBe(true); // C2 (1.39.5)
+  expect((entry as any).SDK_CAPABILITIES.ltxSessionDuration).toBe(true); // C3 (1.39.6)
 });

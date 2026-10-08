@@ -197,10 +197,11 @@ export class LtxManager {
     return { sessionId, jobId };
   }
 
-  /** createLtxSession's body; also returns the validated entry, so generate needs no bundle read after escrow. */
+  /** createLtxSession's body; also returns the validated entry and the session's duration, so generate needs no bundle
+   *  read after escrow. */
   private async openLtxSession(
     job: LtxJob, hostAddress: string, hostMetadata: LtxBundleMetadata, options?: LtxSubmitOptions,
-  ): Promise<{ sessionId: bigint; jobId: bigint; entry: LtxEntry }> {
+  ): Promise<OpenedLtxSession> {
     if (!this.sessionManager || !this.paymentManager) {
       throw new LtxError('SessionManager/PaymentManager not available for createLtxSession', 'LTX_PREVALIDATION_FAILED');
     }
@@ -208,6 +209,13 @@ export class LtxManager {
     if (proofWindow !== undefined && !(Number.isInteger(proofWindow) && proofWindow >= MIN_PROOF_TIMEOUT && proofWindow <= MAX_PROOF_TIMEOUT)) {
       throw new LtxError(
         `proofTimeoutWindow must be an integer number of seconds in ${MIN_PROOF_TIMEOUT}..${MAX_PROOF_TIMEOUT}, got ${String(proofWindow)}`,
+        'LTX_PREVALIDATION_FAILED',
+      );
+    }
+    const sessionDuration = options?.sessionDuration;
+    if (sessionDuration !== undefined && !(Number.isInteger(sessionDuration) && sessionDuration > 0)) {
+      throw new LtxError(
+        `sessionDuration must be a positive integer number of seconds, got ${String(sessionDuration)}`,
         'LTX_PREVALIDATION_FAILED',
       );
     }
@@ -224,10 +232,13 @@ export class LtxManager {
     // estimate and session open; the overage refunds at settlement.
     const padded = (estBase * 105n + 99n) / 100n;
     const depositBase = padded > floor ? padded : floor;
-    // A passes job proves once, at the end: its session defaults to the longest window (1.39.5); an explicit value wins.
-    // LTX templates without a window keep startSession's call unchanged.
-    const sessionWindow = proofWindow ?? (entry.sidecar === 'relight' ? MAX_PROOF_TIMEOUT : undefined);
+    // A passes job defaults to the longest window (1.39.5) and a session that outlives a two-hour render (1.39.6); an
+    // explicit value wins, each on its own. LTX templates without them keep startSession's call unchanged.
+    const relight = entry.sidecar === 'relight';
+    const sessionWindow = proofWindow ?? (relight ? MAX_PROOF_TIMEOUT : undefined);
     const windowField = sessionWindow !== undefined ? { proofTimeoutWindow: sessionWindow } : {};
+    const duration = sessionDuration ?? (relight ? RELIGHT_SESSION_DURATION : undefined);
+    const durationField = duration !== undefined ? { duration } : {};
     const ids: { sessionId: bigint; jobId: bigint } = await this.sessionManager.startSession({
       chainId: options?.chainId ?? this.chainId,
       host: hostAddress,
@@ -236,11 +247,12 @@ export class LtxManager {
       paymentMethod: 'deposit',
       paymentToken: est.paymentToken,
       depositAmount: formatUnits(depositBase, 6), // DECIMAL USDC string — startSession parseUnits() it back
-      ...windowField, // a passes job proves once, at the end
+      ...windowField,
+      ...durationField,
       encryption: true,
       conversationLog: false, // a render has no chat log — and no post-funding S5 write to fail
     });
-    return { ...ids, entry };
+    return { ...ids, entry, duration };
   }
 
   /**
@@ -253,7 +265,7 @@ export class LtxManager {
   private async adoptExistingSession(
     job: LtxJob, hostAddress: string, hostMetadata: LtxBundleMetadata,
     existing: { sessionId: bigint; jobId: bigint }, options: LtxSubmitOptions,
-  ): Promise<{ sessionId: bigint; jobId: bigint; entry: LtxEntry }> {
+  ): Promise<OpenedLtxSession> {
     // The vault was debited BEFORE generate() was called, so unlike the pre-escrow path every
     // failure here must carry {sessionId, jobId} — that is what the UI relays to the service
     // for reclaim. `existing` is exactly that shape.
@@ -301,7 +313,7 @@ export class LtxManager {
       sessionId: existing.sessionId, jobId: existing.jobId, endpoint,
       hostAddress, model, chainId,
     });
-    return { ...existing, entry };
+    return { sessionId: existing.sessionId, jobId: existing.jobId, entry };
   }
 
   /** Reclaim a reserved deposit after proof timeout (GENERATION_FAILED/TIMEOUT) — Constraint 8. */
@@ -322,11 +334,11 @@ export class LtxManager {
   async generate(
     job: LtxJob, hostAddress: string, hostMetadata: LtxBundleMetadata, options?: LtxSubmitOptions,
   ): Promise<LtxResult> {
-    const { sessionId, jobId, entry } = options?.existingSession
+    const { sessionId, jobId, entry, duration } = options?.existingSession
       ? await this.adoptExistingSession(job, hostAddress, hostMetadata, options.existingSession, options)
       : await this.openLtxSession(job, hostAddress, hostMetadata, options);
     try { // post-escrow: re-throw ANY failure with {sessionId, jobId} so the caller can triggerSessionTimeout(jobId) to reclaim
-      const handle = await this.sessionManager.submitLtx(String(sessionId), job, this.clientWait(entry, options));
+      const handle = await this.sessionManager.submitLtx(String(sessionId), job, this.clientWait(entry, options, duration));
       const result: LtxResult = await handle.result;
       if (result.allowListVersion !== undefined && Number(result.allowListVersion) !== Number(hostMetadata.allowListVersion)) {
         throw new LtxError(`allowListVersion drift: accepted ${result.allowListVersion} != validated ${hostMetadata.allowListVersion}`, 'LTX_BUNDLE_STALE');
@@ -347,10 +359,14 @@ export class LtxManager {
       } catch { /* billing enrichment is advisory; tokens, proofCID and seed are already surfaced */ }
       return result;
     } catch (err: any) {
-      // Keep only the node's code from the error's details: the rest can be a raw, circular WS error (not relayable).
-      const nodeCode = err?.details?.nodeCode;
+      // Keep only the plain classifiers from the error's details — the node's code, the SDK's own reason and close code
+      // (WS_CLOSED, 1.39.6): the rest can be a raw, circular WS error (not relayable).
+      const details = err?.details ?? {};
+      const kept = Object.fromEntries(
+        RELAYED_DETAILS.filter((k) => ['string', 'number'].includes(typeof details[k])).map((k) => [k, details[k]]),
+      );
       throw new LtxError(err?.message ?? 'LTX generation failed', err instanceof LtxError ? err.code : 'GENERATION_FAILED',
-        { ...(nodeCode !== undefined ? { nodeCode } : {}), sessionId, jobId });
+        { ...kept, sessionId, jobId });
     }
   }
 
@@ -580,14 +596,17 @@ export class LtxManager {
   }
 
   /**
-   * A VFX Passes job renders for up to ~45 minutes, and the node abandons a job whose client socket goes (0 tokens: the
-   * user is refunded and the render lost, the host eats the GPU time) — so wait at least as long as the longest proof
-   * window (V10), as the helper does. LTX jobs keep submitLtx's own default.
+   * A VFX Passes job renders for up to two hours, and the node abandons a job whose client socket goes (0 tokens: the
+   * user is refunded and the render lost, the host eats the GPU time) — so wait at least as long as its session lives:
+   * the duration it opened with, else (a card session) the default passes session (1.39.6; past the session nothing is
+   * paid). LTX jobs keep submitLtx's own default.
    */
-  private clientWait(entry: LtxEntry, options?: LtxSubmitOptions): LtxSubmitOptions | undefined {
+  private clientWait(
+    entry: LtxEntry, options: LtxSubmitOptions | undefined, sessionDuration: number | undefined,
+  ): LtxSubmitOptions | undefined {
     if (entry.sidecar !== 'relight') return options;
-    const asked = Number.isFinite(options?.timeoutMs) ? options!.timeoutMs! : 0; // a NaN is no wait
-    return { ...options, timeoutMs: Math.max(asked, MAX_PROOF_TIMEOUT * 1000) };
+    const asked = (options?.timeoutMs ?? 0) > 0 ? options!.timeoutMs! : 0; // a NaN is no wait; Infinity is the longest
+    return { ...options, timeoutMs: Math.max(asked, (sessionDuration ?? RELIGHT_SESSION_DURATION) * 1000) };
   }
 
   /** The job's entry in an authenticated bundle; a template not in it is refused. */
@@ -609,6 +628,15 @@ export class LtxManager {
 
 /** The node's output kinds (OutputKind): exr-sequence = the single H.264 artefact, exr-frames = per-frame 16-bit EXR. */
 const LTX_OUTPUT_KINDS: readonly string[] = ['exr-sequence', 'exr-frames'];
+
+/** A VFX Passes session's default lifetime, seconds: all five passes over 15 s of footage render for up to two hours. */
+const RELIGHT_SESSION_DURATION = 14400;
+
+/** The error details generate relays beside the session ids: plain values only. */
+const RELAYED_DETAILS = ['nodeCode', 'reason', 'closeCode'] as const;
+
+/** An LTX session as generate uses it; `duration` is set only where the SDK opened the session. */
+type OpenedLtxSession = { sessionId: bigint; jobId: bigint; entry: LtxEntry; duration?: number };
 
 /** Named size rules a v26 entry may carry (the node applies the same table). */
 const LTX_RESOLUTION_RULES = new Map<unknown, (w: number, h: number) => boolean>([

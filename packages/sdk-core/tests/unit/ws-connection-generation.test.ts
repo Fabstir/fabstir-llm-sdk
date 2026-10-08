@@ -162,3 +162,24 @@ describe('WebSocketClient connection generation', () => {
     expect((client as any).messageQueue).toHaveLength(0);
   });
 });
+
+describe('WebSocketClient.onClose (1.39.6, IMPLEMENTATION-LONG-VIDEO-SESSIONS L7)', () => {
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    (globalThis as any).WebSocket = FakeWebSocket;
+  });
+
+  it('tells a subscriber the socket closed, with the close event; unsubscribe stops it', async () => {
+    const client = new WebSocketClient('ws://node.example/v1/ws', { reconnect: false });
+    const p = client.connect();
+    FakeWebSocket.instances[0].open();
+    await p;
+    const seen: any[] = [];
+    const unsub = client.onClose((e) => seen.push(e));
+    FakeWebSocket.instances[0].drop();
+    expect(seen).toEqual([{ code: 1006, reason: 'idle' }]);
+    unsub();
+    FakeWebSocket.instances[0].drop();
+    expect(seen).toHaveLength(1);
+  });
+});

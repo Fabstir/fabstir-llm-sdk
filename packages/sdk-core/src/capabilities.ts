@@ -48,4 +48,10 @@ export const SDK_CAPABILITIES = Object.freeze({
   ltxProofTimeoutWindow: true,
   /** A VFX Passes session defaults to proofTimeoutWindow 3600 when the caller passes none; an explicit value wins (1.39.5). */
   ltxRelightProofWindowDefault: true,
+  /**
+   * createLtxSession / generate take an optional sessionDuration (seconds); a VFX Passes session defaults to 14400 and
+   * generate waits at least as long as the session lives unless timeoutMs is longer; a closed socket ends any LTX wait
+   * at once (GENERATION_FAILED, details.reason "WS_CLOSED") (1.39.6).
+   */
+  ltxSessionDuration: true,
 } as const);

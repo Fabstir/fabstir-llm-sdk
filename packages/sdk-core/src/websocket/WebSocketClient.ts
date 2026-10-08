@@ -42,6 +42,7 @@ export class WebSocketClient {
    */
   private connectionGeneration = 0;
   private connectionChangeHandlers: Set<(generation: number) => void> = new Set();
+  private closeHandlers: Set<(event: { code?: number; reason?: string }) => void> = new Set();
 
   constructor(url: string, options: WebSocketOptions = {}) {
     this.url = url;
@@ -112,6 +113,9 @@ export class WebSocketClient {
         this.ws.onclose = (event) => {
           this.stopHeartbeat();
           this.connectionPromise = undefined;
+          for (const handler of this.closeHandlers) {
+            try { handler(event); } catch (error) { console.error('[WebSocketClient] close handler error:', error); }
+          }
 
           if (this.options.reconnect && !this.isReconnecting) {
             this.handleReconnect();
@@ -356,6 +360,19 @@ export class WebSocketClient {
     this.connectionChangeHandlers.add(handler);
     return () => {
       this.connectionChangeHandlers.delete(handler);
+    };
+  }
+
+  /**
+   * Subscribe to the socket closing, for any reason (a reconnect, if enabled, still follows). Work bound to the
+   * closed connection — a reply the server can now only send to it — will not arrive.
+   *
+   * @returns unsubscribe function
+   */
+  onClose(handler: (event: { code?: number; reason?: string }) => void): () => void {
+    this.closeHandlers.add(handler);
+    return () => {
+      this.closeHandlers.delete(handler);
     };
   }
 

@@ -7,7 +7,11 @@ import type { LtxErrorCode } from '../errors/ltx-errors';
 
 /** Parameters for submitLtxWs. */
 export interface LtxWsOptions {
-  wsClient: { sendWithoutResponse(data: any): Promise<void>; onMessage(handler: (data: any) => void): () => void };
+  wsClient: {
+    sendWithoutResponse(data: any): Promise<void>;
+    onMessage(handler: (data: any) => void): () => void;
+    onClose(handler: (event: { code?: number }) => void): () => void;
+  };
   encryptionManager: {
     encryptMessage(key: Uint8Array, plaintext: string, index: number): { ciphertextHex: string; nonceHex: string; aadHex: string };
     decryptMessage(key: Uint8Array, payload: any): string;
@@ -20,6 +24,9 @@ export interface LtxWsOptions {
   onProgress?: (progress: LtxProgress) => void;
   timeoutMs?: number;
 }
+
+/** The longest delay setTimeout holds (2^31 − 1 ms, about 24.8 days); a longer one fires at once. */
+const MAX_TIMER_MS = 2_147_483_647;
 
 /** Map a node ltx_error code to a typed LtxErrorCode; unknown codes → GENERATION_FAILED. */
 function mapErrorCode(raw: unknown): LtxErrorCode {
@@ -57,14 +64,19 @@ export async function submitLtxWs(opts: LtxWsOptions): Promise<LtxHandle> {
   let cancelFn: () => void = () => {};
 
   const resultPromise = new Promise<LtxResult>((resolve, reject) => {
-    const settle = () => { isSettled = true; clearTimeout(timer); unsub(); };
+    const settle = () => { isSettled = true; clearTimeout(timer); unsub(); unsubClose(); };
     const safeResolve = (r: LtxResult) => { if (!isSettled) { settle(); resolve(r); } };
     const safeReject = (e: Error) => { if (!isSettled) { settle(); reject(e); } };
     // Client-side cancel: settle the local wait so callers don't hang. The frozen protocol has NO
     // node cancel action; on-chain reclaim of a reserved deposit is LtxManager.triggerSessionTimeout.
     cancelFn = () => safeReject(new LtxError('LTX generation cancelled by client', 'GENERATION_FAILED'));
 
-    const timer = setTimeout(() => safeReject(new LtxError('LTX generation timed out', 'TIMEOUT')), timeoutMs);
+    // The node drops a job whose client socket goes, and ltx_complete is the only carrier of the result: once the
+    // socket closes nothing can arrive, so end the wait now rather than at the timeout (1.39.6).
+    const unsubClose = wsClient.onClose((event) => safeReject(new LtxError(
+      'Connection to the host closed before the LTX result arrived — the node drops a job whose client disconnects',
+      'GENERATION_FAILED', { reason: 'WS_CLOSED', closeCode: event?.code },
+    )));
 
     const unsub = wsClient.onMessage((data: any) => {
       if (isSettled) return;
@@ -88,6 +100,10 @@ export async function submitLtxWs(opts: LtxWsOptions): Promise<LtxHandle> {
         }
       } catch (err: any) { if (!isSettled) safeReject(err); }
     });
+
+    // Armed last, once both subscriptions exist (settle() releases them). A longer wait than the timer can hold would
+    // fire at once — hold it at the limit instead.
+    const timer = setTimeout(() => safeReject(new LtxError('LTX generation timed out', 'TIMEOUT')), Math.min(timeoutMs, MAX_TIMER_MS));
 
     wsClient.sendWithoutResponse(envelope).catch((err: any) => {
       safeReject(new LtxError(`Failed to send ltx_generate: ${err.message}`, 'SIDECAR_UNAVAILABLE'));

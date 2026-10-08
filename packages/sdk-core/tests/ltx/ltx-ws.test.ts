@@ -19,12 +19,14 @@ const encryptionManager = {
 
 function makeWs() {
   let handler: ((data: any) => void) | undefined;
+  let closeHandler: ((event: { code?: number }) => void) | undefined;
   const sent: any[] = [];
   const wsClient = {
     sendWithoutResponse: vi.fn(async (data: any) => { sent.push(data); }),
     onMessage: (h: (data: any) => void) => { handler = h; return () => { handler = undefined; }; },
+    onClose: (h: (event: { code?: number }) => void) => { closeHandler = h; return () => { closeHandler = undefined; }; },
   };
-  return { wsClient, sent, emit: (d: any) => handler?.(d) };
+  return { wsClient, sent, emit: (d: any) => handler?.(d), close: (code = 1006) => closeHandler?.({ code }), closeSubscribed: () => closeHandler !== undefined };
 }
 
 const resp = (msg: any) => ({ type: 'encrypted_response', payload: { ciphertextHex: JSON.stringify(msg), nonceHex: '', aadHex: '' } });
@@ -227,5 +229,59 @@ describe('advisory pass-through fields (1.38 fork absorb — constraint 2)', () 
     // Entry-surface pin: SDK_API.md tells consumers to import this const from the package
     // entry — a barrel refactor that drops it must fail here, not at the next tarball.
     expect(Object.is(entryAdvisoryFields, LTX_ADVISORY_FIELDS)).toBe(true);
+  });
+});
+
+describe('the wait ends when the result can no longer arrive (1.39.6, IMPLEMENTATION-LONG-VIDEO-SESSIONS L7)', () => {
+  it('K1: a socket that closes before the result rejects at once — the node drops a job whose client disconnects', async () => {
+    const { ws, handle } = submit({ timeoutMs: 14_400_000 });
+    const h = await handle;
+    ws.close(1006);
+    await expect(h.result).rejects.toMatchObject({ code: 'GENERATION_FAILED', details: { reason: 'WS_CLOSED', closeCode: 1006 } });
+    expect(ws.closeSubscribed()).toBe(false);
+  });
+
+  it('K2: a close after the result changes nothing, and the close subscription ends with the wait', async () => {
+    const { ws, handle } = submit();
+    const h = await handle;
+    ws.emit(resp({ type: 'ltx_complete', outputCID: 'out', proofCID: 'p', manifest: {}, frames: [], billing: {} }));
+    await expect(h.result).resolves.toMatchObject({ outputCID: 'out' });
+    expect(ws.closeSubscribed()).toBe(false);
+    ws.close();
+    await expect(h.result).resolves.toMatchObject({ outputCID: 'out' });
+  });
+
+  it('K5: a client the close can not be observed on refuses the submit — and leaves no timer behind', async () => {
+    vi.useFakeTimers();
+    try {
+      const ws = makeWs();
+      const { onClose: _none, ...noClose } = ws.wsClient;
+      const h = await submitLtxWs({
+        wsClient: noClose, encryptionManager, sessionId: 's1', sessionKey: new Uint8Array(32),
+        messageIndex: { value: 0 }, job, timeoutMs: 1000,
+      } as any);
+      await expect(h.result).rejects.toThrow(TypeError);
+      await vi.advanceTimersByTimeAsync(5000); // a timer armed before the throw would now fire settle() on unset handles
+      expect(vi.getTimerCount()).toBe(0);
+      expect(ws.sent).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('K3: a wait beyond the timer limit (2^31 - 1 ms) is held at the limit, not fired at once', async () => {
+    vi.useFakeTimers();
+    try {
+      const { handle } = submit({ timeoutMs: 3_000_000_000 });
+      const h = await handle;
+      let settled = false;
+      h.result.then(() => { settled = true; }, () => { settled = true; });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(2_147_483_647);
+      await expect(h.result).rejects.toMatchObject({ code: 'TIMEOUT' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
