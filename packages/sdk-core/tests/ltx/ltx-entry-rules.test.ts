@@ -120,6 +120,25 @@ describe('L2 — an entry\'s resolutionRule', () => {
   });
 });
 
+describe('L11 — refine-hd, Refine Details (1.39.7, IMPLEMENTATION-LTX-REFINE-HD)', () => {
+  /** A refine-hd entry at w×h, with that size added to the bounds so only the rule can refuse it. */
+  const refineAt = (w: number, h: number) =>
+    validate(bundle({ resolutionRule: 'refine-hd' }, { ...V26_BOUNDS, resolutions: [...V26_BOUNDS.resolutions, { w, h }] }), alphaJob({ resolution: { w, h } }));
+
+  it('H-A: 1536x1024, 1024x1536, 1280x768 and 768x512 pass', async () => {
+    for (const [w, h] of [[1536, 1024], [1024, 1536], [1280, 768], [768, 512]]) await expect(refineAt(w, h)).resolves.toBeTruthy();
+  });
+
+  it('H-R: each clause refuses on its own, naming the rule', async () => {
+    // 1920x1088: long side and area; 1600x960: long side only; 1536x1088 / 1088x1536: area only; 1500x1000: ÷64 only (both sides);
+    // 1000x512 / 512x1000: ÷64 on one side only
+    for (const [w, h] of [[1920, 1088], [1600, 960], [1536, 1088], [1088, 1536], [1500, 1000], [1000, 512], [512, 1000]]) {
+      // the rule-break message ("breaks … resolutionRule refine-hd"), not the unknown-rule one ("… resolutionRule \"refine-hd\"")
+      await expect(refineAt(w, h)).rejects.toMatchObject({ ...refused, message: expect.stringContaining('resolutionRule refine-hd') });
+    }
+  });
+});
+
 describe('L10 — the node\'s own job rules (fabstir-llm-node 8.59.1), before escrow', () => {
   it('N1: a template without frameGrid takes 5 to 15 whole seconds (check_length → validate_duration)', async () => {
     for (const frames of [121, 361]) await expect(validate(bundle(), t2vJob({ frames }))).resolves.toBeTruthy();       // 5 s, 15 s at 24 fps
@@ -273,5 +292,6 @@ describe('L5 — the node\'s own code reaches generate() callers', () => {
 it('C1 — capability flags and the root export', () => {
   expect((entry as any).SDK_CAPABILITIES.ltxEntryFpsAndResolutionRule).toBe(true);
   expect((entry as any).SDK_CAPABILITIES.ltxModelFromTemplate).toBe(true);
+  expect((entry as any).SDK_CAPABILITIES.ltxRefineHdRule).toBe(true); // H-C (1.39.7)
   expect(typeof (entry as any).ltxModelIdFor).toBe('function');
 });
