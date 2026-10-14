@@ -2473,7 +2473,7 @@ fabstir-llm-node 8.59.1): the bundle's `bounds`, and
 | `output` | `"exr-sequence"` (the single H.264 artefact) or `"exr-frames"` (per-frame 16-bit EXR) — anything else is refused. |
 | Clip length, templates without `frameGrid` | 5 to 15 whole seconds: `frames = fps × seconds + 1`. |
 | `fps` (v26) | `job.fps` must be in the entry's own list (Alpha Gen and Layout to Render: `[24, 25]`), as well as in `bounds.fps`. A malformed list is refused. |
-| `resolutionRule` (v26) | The size must satisfy the named rule, as well as be in `bounds.resolutions`. `div64-fhd`: both sides divisible by 64, long side ≤ 1920, area ≤ 1920 × 1088 — of the v26 sizes only 768×512, 512×768, 1024×1024, 1536×1024, 1024×1536, 1920×1088 and 1088×1920 qualify (not 1280×720 or 1920×1080). An unknown rule name is refused outright, as the node does. |
+| `resolutionRule` (v26) | The size must satisfy the named rule, as well as be in `bounds.resolutions`. `div64-fhd`: both sides divisible by 64, long side ≤ 1920, area ≤ 1920 × 1088 — of the v26 sizes only 768×512, 512×768, 1024×1024, 1536×1024, 1024×1536, 1920×1088 and 1088×1920 qualify (not 1280×720 or 1920×1080). `refine-hd` (1.39.7, Refine Details `ltx-refine-hdr`): both sides divisible by 64, long side ≤ 1536, area ≤ 1536 × 1024 — e.g. 1536×1024, 1024×1536, 1280×768, 768×512 (not 1920×1088 or 1536×1088). `relight-fhd`: see VFX Passes. An unknown rule name is refused outright, as the node does. |
 | `frameGrid` (1.39.1) | Exact 8k+1 frame counts instead of whole seconds: Alpha 121, 129, 137, 145; Layout 121 to 361 in steps of 8. |
 | `maxFrames` | The entry's frame ceiling — on every template that carries it (Alpha 145, Layout 361). |
 | `exactControl` (v26) | On the 8k+1 grid the control (or source) clip must carry the full billed frame count. **Node-checked**: the SDK does not parse the clip, so a short clip is refused by the node at 0 tokens, after the session is opened. A longer clip is accepted and cropped by the node. |
@@ -3777,6 +3777,7 @@ SDK_CAPABILITIES.ltxModelFamilyFromEntry;    // 1.39.4: the family comes from th
 SDK_CAPABILITIES.ltxProofTimeoutWindow;      // 1.39.4: createLtxSession / generate take proofTimeoutWindow (seconds)
 SDK_CAPABILITIES.ltxRelightProofWindowDefault; // 1.39.5: a passes session defaults to proofTimeoutWindow 3600
 SDK_CAPABILITIES.ltxSessionDuration;         // 1.39.6: createLtxSession / generate take sessionDuration; passes default 14400
+SDK_CAPABILITIES.ltxRefineHdRule;            // 1.39.7: validateJob knows resolutionRule "refine-hd" (Refine Details)
 ```
 
 `SDK_CAPABILITIES` is frozen. Read a flag with optional chaining (`SDK_CAPABILITIES?.conversationLogOptOut`) so an older

@@ -54,4 +54,6 @@ export const SDK_CAPABILITIES = Object.freeze({
    * at once (GENERATION_FAILED, details.reason "WS_CLOSED") (1.39.6).
    */
   ltxSessionDuration: true,
+  /** validateJob knows resolutionRule "refine-hd" (Refine Details: ÷64, long side ≤ 1536, area ≤ 1536 × 1024) (1.39.7). */
+  ltxRefineHdRule: true,
 } as const);

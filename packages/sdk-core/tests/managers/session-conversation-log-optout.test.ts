@@ -172,6 +172,7 @@ describe('SDK_CAPABILITIES (D22)', () => {
       ltxProofTimeoutWindow: true,
       ltxRelightProofWindowDefault: true,
       ltxSessionDuration: true,
+      ltxRefineHdRule: true,
     });
   });
 });
