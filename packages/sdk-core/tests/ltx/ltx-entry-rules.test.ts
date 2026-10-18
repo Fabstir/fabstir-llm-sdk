@@ -157,6 +157,25 @@ describe('L12 — div64-uhd, Refine Details at 4K (1.39.8, IMPLEMENTATION-LTX-DI
   });
 });
 
+describe('L13 — speed, Slow Motion (1.39.9, IMPLEMENTATION-LTX-SPEED-FIELD)', () => {
+  it('SP1: a speed in [0.025, 1.0] passes', async () => {
+    for (const speed of [0.025, 0.2, 1.0]) await expect(validate(bundle(), alphaJob({ speed }))).resolves.toBeTruthy();
+  });
+
+  it('SP2: anything else is refused before the bundle read, naming speed', async () => {
+    for (const speed of [0, 0.0249, 1.01, -0.5, NaN, Infinity, -Infinity, '0.5']) {
+      const getByCID = vi.fn();
+      const m = new LtxManager({ storageManager: { getByCID }, usdcAddress: '0xabc' } as any);
+      await expect(m.validateJob(alphaJob({ speed }), meta(bundle()))).rejects.toMatchObject({ ...refused, message: expect.stringContaining('speed') });
+      expect(getByCID).not.toHaveBeenCalled();
+    }
+  });
+
+  it('SP3: absent, the job is unchanged', async () => {
+    await expect(validate(bundle(), alphaJob())).resolves.toBeTruthy();
+  });
+});
+
 describe('L10 — the node\'s own job rules (fabstir-llm-node 8.59.1), before escrow', () => {
   it('N1: a template without frameGrid takes 5 to 15 whole seconds (check_length → validate_duration)', async () => {
     for (const frames of [121, 361]) await expect(validate(bundle(), t2vJob({ frames }))).resolves.toBeTruthy();       // 5 s, 15 s at 24 fps
@@ -312,5 +331,6 @@ it('C1 — capability flags and the root export', () => {
   expect((entry as any).SDK_CAPABILITIES.ltxModelFromTemplate).toBe(true);
   expect((entry as any).SDK_CAPABILITIES.ltxRefineHdRule).toBe(true); // H-C (1.39.7)
   expect((entry as any).SDK_CAPABILITIES.ltxDiv64UhdRule).toBe(true); // U-C (1.39.8)
+  expect((entry as any).SDK_CAPABILITIES.ltxSpeedField).toBe(true); // 1.39.9
   expect(typeof (entry as any).ltxModelIdFor).toBe('function');
 });

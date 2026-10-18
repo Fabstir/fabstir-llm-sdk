@@ -97,6 +97,10 @@ export class LtxManager {
     if (!LTX_OUTPUT_KINDS.includes(job.output)) {
       throw new LtxError(`output must be one of ${LTX_OUTPUT_KINDS.join(', ')}, got ${JSON.stringify(job.output)}`, 'LTX_PREVALIDATION_FAILED');
     }
+    // Slow Motion (1.39.9): the node refuses a speed outside [0.025, 1.0] at accept — after the session is opened.
+    if (job.speed !== undefined && !(typeof job.speed === 'number' && job.speed >= LTX_SPEED_MIN && job.speed <= LTX_SPEED_MAX)) {
+      throw new LtxError(`speed must be a number in [${LTX_SPEED_MIN}, ${LTX_SPEED_MAX}], got ${String(job.speed)}`, 'LTX_PREVALIDATION_FAILED');
+    }
     const bundle = await this.resolveBundle(hostMetadata);
 
     const tpl = bundle.templates.find((t) => t.templateId === job.templateId);
@@ -628,6 +632,10 @@ export class LtxManager {
 
 /** The node's output kinds (OutputKind): exr-sequence = the single H.264 artefact, exr-frames = per-frame 16-bit EXR. */
 const LTX_OUTPUT_KINDS: readonly string[] = ['exr-sequence', 'exr-frames'];
+
+/** Slow Motion's speed range (node 8.60.5, before accept); NaN fails both comparisons, ±Infinity one. */
+const LTX_SPEED_MIN = 0.025;
+const LTX_SPEED_MAX = 1.0;
 
 /** A VFX Passes session's default lifetime, seconds: all five passes over 15 s of footage render for up to two hours. */
 const RELIGHT_SESSION_DURATION = 14400;

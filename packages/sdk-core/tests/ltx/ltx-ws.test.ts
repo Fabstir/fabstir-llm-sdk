@@ -35,7 +35,7 @@ const resp = (msg: any) => ({ type: 'encrypted_response', payload: { ciphertextH
 // the SDK's own LTX_ADVISORY_FIELDS wherever iteration is the point.
 // elevation: 0 is deliberate — a defined-but-FALSY in-range value, so a truthiness
 // regression (`if (job[k])`) in the forwarder fails these tests instead of passing green.
-const ADVISORY_VALUES = { strength: 0.7, azimuth: -30, elevation: 0, distance: 1.5, inputWire: 'exrseq-linear' } as const;
+const ADVISORY_VALUES = { strength: 0.7, azimuth: -30, elevation: 0, distance: 1.5, inputWire: 'exrseq-linear', speed: 0.2 } as const;
 
 async function wireOf(j: any, requestId?: string) {
   const ws = makeWs();
@@ -225,7 +225,7 @@ describe('advisory pass-through fields (1.38 fork absorb — constraint 2)', () 
     const typed: LtxJob = { ...(job as LtxJob), ...ADVISORY_VALUES };
     expect(typeof typed.prompt).toBe('string');
     // The SDK's own notion of the group — the forwarder and these tests iterate THIS.
-    expect([...LTX_ADVISORY_FIELDS]).toEqual(['strength', 'azimuth', 'elevation', 'distance', 'inputWire']);
+    expect([...LTX_ADVISORY_FIELDS]).toEqual(['strength', 'azimuth', 'elevation', 'distance', 'inputWire', 'speed']); // speed: 1.39.9
     // Entry-surface pin: SDK_API.md tells consumers to import this const from the package
     // entry — a barrel refactor that drops it must fail here, not at the next tarball.
     expect(Object.is(entryAdvisoryFields, LTX_ADVISORY_FIELDS)).toBe(true);

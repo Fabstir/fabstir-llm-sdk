@@ -174,6 +174,7 @@ describe('SDK_CAPABILITIES (D22)', () => {
       ltxSessionDuration: true,
       ltxRefineHdRule: true,
       ltxDiv64UhdRule: true,
+      ltxSpeedField: true,
     });
   });
 });

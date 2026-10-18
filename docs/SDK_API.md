@@ -2455,7 +2455,7 @@ await ltx.generate(job, hostAddress, hostMetadata, {
   the dropped session itself, at the tokens proven so far (0 on node 8.60.0, where a passes job proves at the end);
   reclaim as for any `GENERATION_FAILED` if it does not (card-paid: the service reclaims).
 - Pick these by `entry.sidecar === "relight"`, not by template name. `lora` is `"<templateId>@v1"`. Passes jobs take
-  none of the advisory fields (`strength`, `azimuth`, `elevation`, `distance`, `inputWire`) — the node refuses them
+  none of the advisory fields (`strength`, `azimuth`, `elevation`, `distance`, `inputWire`, `speed`) — the node refuses them
   after the session is opened. The source clip must carry at least the billed frame count (`exactControl`).
 - Output: one multi-channel EXR per frame of data passes (`manifest.colourEncoding: "vfx-passes-v1"`) — Key: normal;
   Std: normal + basecolor; Full: normal, basecolor, depth, roughness, metallic — not a picture.
@@ -2500,12 +2500,17 @@ const result = await ltx.generate(job, hostAddress, hostMetadata, {
   timeoutMs: 1500000,           // raise above the 600s default for 1080p+ renders
 });
 // LtxJob: { templateId, templateHash, prompt, seed, frames, fps, resolution:{w,h}, lora, output, images?,
-//           videos?, strength?, azimuth?, elevation?, distance?, inputWire? }
+//           videos?, strength?, azimuth?, elevation?, distance?, inputWire?, speed? }
 //   strength/azimuth/elevation/distance (numbers), inputWire ('exrseq-display' | 'exrseq-linear'):
 //   ADVISORY pass-through (1.38) — forwarded only when set (absent keys otherwise), deliberately
 //   OUTSIDE the input commitment; never validated by the SDK (ranges are advisory — see the
 //   LtxJob JSDoc; callers and the node enforce them). The exported LTX_ADVISORY_FIELDS const
 //   is the group as data — iterate it rather than re-typing the field list.
+//   speed (1.39.9, Slow Motion ltx-slowmo-hdr): forwarded the same way, but the one advisory field the SDK DOES
+//   validate — validateJob refuses anything but a finite number in [0.025, 1.0] before escrow (the node refuses it
+//   at accept, after the session opens). The motion is conditioned on fps / speed; the file still plays at fps.
+//   Sending speed to a template without a speed handle, or Slow Motion without one, is refused by the node, not
+//   (yet) by the SDK — send it only for the Slow Motion template.
 //   seed: decimal string in [0, 2^64-1] (pre-validated before escrow — the sampler is u64)
 //   resolution: from bundle.bounds.resolutions; billing binds the REQUESTED dims
 // Flow: validateJob (pre-escrow, no funds locked on failure) → the entry's model (ltxModelIdFor) → estimateCost →
@@ -3779,6 +3784,7 @@ SDK_CAPABILITIES.ltxRelightProofWindowDefault; // 1.39.5: a passes session defau
 SDK_CAPABILITIES.ltxSessionDuration;         // 1.39.6: createLtxSession / generate take sessionDuration; passes default 14400
 SDK_CAPABILITIES.ltxRefineHdRule;            // 1.39.7: validateJob knows resolutionRule "refine-hd" (Refine Details)
 SDK_CAPABILITIES.ltxDiv64UhdRule;            // 1.39.8: validateJob knows resolutionRule "div64-uhd" (Refine Details at 4K)
+SDK_CAPABILITIES.ltxSpeedField;              // 1.39.9: LtxJob.speed (Slow Motion) forwarded; validateJob checks [0.025, 1.0]
 ```
 
 `SDK_CAPABILITIES` is frozen. Read a flag with optional chaining (`SDK_CAPABILITIES?.conversationLogOptOut`) so an older

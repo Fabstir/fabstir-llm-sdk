@@ -266,5 +266,5 @@ export type { BundlerSendUserOpConfig, UnpackedUserOpV07 } from './wallet';
 export { WebSocketClient } from './websocket/WebSocketClient';
 
 // Version
-export const VERSION = '1.39.8';
+export const VERSION = '1.39.9';
 export const SDK_TYPE = 'browser';
