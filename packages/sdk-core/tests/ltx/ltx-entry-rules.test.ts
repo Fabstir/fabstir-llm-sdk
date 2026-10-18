@@ -139,6 +139,24 @@ describe('L11 — refine-hd, Refine Details (1.39.7, IMPLEMENTATION-LTX-REFINE-H
   });
 });
 
+describe('L12 — div64-uhd, Refine Details at 4K (1.39.8, IMPLEMENTATION-LTX-DIV64-UHD)', () => {
+  /** A div64-uhd entry at w×h, with that size added to the bounds so only the rule can refuse it. */
+  const uhdAt = (w: number, h: number) =>
+    validate(bundle({ resolutionRule: 'div64-uhd' }, { ...V26_BOUNDS, resolutions: [...V26_BOUNDS.resolutions, { w, h }] }), alphaJob({ resolution: { w, h } }));
+
+  it('U-A: 3840x2176, 2176x3840, 2560x1408, 1920x1088 and 1536x1024 pass', async () => {
+    for (const [w, h] of [[3840, 2176], [2176, 3840], [2560, 1408], [1920, 1088], [1536, 1024]]) await expect(uhdAt(w, h)).resolves.toBeTruthy();
+  });
+
+  it('U-R: each clause refuses on its own, naming the rule', async () => {
+    // the request's five: 3840x2160, 1920x1080, 2560x1440 break h ÷64; 4096x2176, 3904x2176 break long side + area.
+    // Added so each clause is pinned alone: 2160x3840 (w ÷64), 3904x64 (long side), 3840x2240 / 2240x3840 (area).
+    for (const [w, h] of [[3840, 2160], [4096, 2176], [3904, 2176], [1920, 1080], [2560, 1440], [2160, 3840], [3904, 64], [3840, 2240], [2240, 3840]]) {
+      await expect(uhdAt(w, h)).rejects.toMatchObject({ ...refused, message: expect.stringContaining('resolutionRule div64-uhd') });
+    }
+  });
+});
+
 describe('L10 — the node\'s own job rules (fabstir-llm-node 8.59.1), before escrow', () => {
   it('N1: a template without frameGrid takes 5 to 15 whole seconds (check_length → validate_duration)', async () => {
     for (const frames of [121, 361]) await expect(validate(bundle(), t2vJob({ frames }))).resolves.toBeTruthy();       // 5 s, 15 s at 24 fps
@@ -293,5 +311,6 @@ it('C1 — capability flags and the root export', () => {
   expect((entry as any).SDK_CAPABILITIES.ltxEntryFpsAndResolutionRule).toBe(true);
   expect((entry as any).SDK_CAPABILITIES.ltxModelFromTemplate).toBe(true);
   expect((entry as any).SDK_CAPABILITIES.ltxRefineHdRule).toBe(true); // H-C (1.39.7)
+  expect((entry as any).SDK_CAPABILITIES.ltxDiv64UhdRule).toBe(true); // U-C (1.39.8)
   expect(typeof (entry as any).ltxModelIdFor).toBe('function');
 });

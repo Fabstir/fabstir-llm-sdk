@@ -644,6 +644,8 @@ const LTX_RESOLUTION_RULES = new Map<unknown, (w: number, h: number) => boolean>
   ['div64-fhd', (w, h) => w % 64 === 0 && h % 64 === 0 && Math.max(w, h) <= 1920 && w * h <= 1920 * 1088],
   // Refine Details: the OUTPUT is at most 1536 × 1024 (2× of 768 × 512), on the /64 grid, either orientation.
   ['refine-hd', (w, h) => w % 64 === 0 && h % 64 === 0 && Math.max(w, h) <= 1536 && w * h <= 1536 * 1024],
+  // Refine Details at 4K: the OUTPUT is at most 3840 × 2176 (2× of 1920 × 1088), on the /64 grid, either orientation.
+  ['div64-uhd', (w, h) => w % 64 === 0 && h % 64 === 0 && Math.max(w, h) <= 3840 && w * h <= 3840 * 2176],
   // VFX Passes: the relight model runs at a fixed size; only 1920 × 1088 is billed for it.
   ['relight-fhd', (w, h) => w === 1920 && h === 1088],
 ]);
