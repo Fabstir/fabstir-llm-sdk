@@ -56,4 +56,6 @@ export const SDK_CAPABILITIES = Object.freeze({
   ltxSessionDuration: true,
   /** validateJob knows resolutionRule "refine-hd" (Refine Details: ÷64, long side ≤ 1536, area ≤ 1536 × 1024) (1.39.7). */
   ltxRefineHdRule: true,
+  /** validateJob knows resolutionRule "div64-uhd" (Refine Details at 4K: ÷64, long side ≤ 3840, area ≤ 3840 × 2176) (1.39.8). */
+  ltxDiv64UhdRule: true,
 } as const);
