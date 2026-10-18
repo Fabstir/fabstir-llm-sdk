@@ -58,4 +58,6 @@ export const SDK_CAPABILITIES = Object.freeze({
   ltxRefineHdRule: true,
   /** validateJob knows resolutionRule "div64-uhd" (Refine Details at 4K: ÷64, long side ≤ 3840, area ≤ 3840 × 2176) (1.39.8). */
   ltxDiv64UhdRule: true,
+  /** LtxJob.speed (Slow Motion) is forwarded to the node, and validateJob refuses one outside [0.025, 1.0] (1.39.9). */
+  ltxSpeedField: true,
 } as const);

@@ -46,6 +46,13 @@ export interface LtxJob {
   elevation?: number;
   distance?: number;
   inputWire?: 'exrseq-display' | 'exrseq-linear';
+  /**
+   * Slow Motion (`ltx-slowmo-hdr`, 1.39.9): the model is conditioned on a motion frame rate of fps / speed while the file
+   * still plays at fps (0.2 at 24 fps is five times slower). Forwarded like the fields above, outside the commitment —
+   * but, unlike them, validated by the SDK: validateJob refuses anything but a finite number in [0.025, 1.0] before
+   * escrow, because the node refuses it at accept, after the session is opened.
+   */
+  speed?: number;
 }
 
 /**
@@ -55,7 +62,7 @@ export interface LtxJob {
  * this list (the forwarder and the test key-sets then follow automatically).
  */
 export const LTX_ADVISORY_FIELDS =
-  ['strength', 'azimuth', 'elevation', 'distance', 'inputWire'] as const satisfies readonly (keyof LtxJob)[];
+  ['strength', 'azimuth', 'elevation', 'distance', 'inputWire', 'speed'] as const satisfies readonly (keyof LtxJob)[];
 
 /** Public, KEY-LESS manifest at outputCID: content hashes + Merkle root, no decryption keys. */
 export interface LtxManifest {
