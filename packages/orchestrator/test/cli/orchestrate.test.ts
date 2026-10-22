@@ -45,6 +45,7 @@ vi.mock('@fabstir/sdk-core', () => ({
     contracts: { jobMarketplace: '0x1', nodeRegistry: '0x2', paymentEscrow: '0x3', proofSystem: '0x4', hostEarnings: '0x5', usdcToken: '0x6', fabToken: '0x7' },
   }) },
   ChainId: { BASE_SEPOLIA: 84532 },
+  SDK_CAPABILITIES: { hostEndpointFromRegistry: true, hostLivenessBeforeFunding: true },
 }));
 
 import { runCLI } from '../../src/cli/orchestrate';
@@ -171,5 +172,53 @@ describe('CLI', () => {
     await runCLI(['node', 'orchestrate', 'test goal']);
     expect(mockApproveToken).not.toHaveBeenCalled();
     consoleSpy.mockRestore();
+  });
+
+  // 0.8.0 (O5): FABSTIR_HOST pins the host; an invalid one is refused at start-up.
+  it('P1c: FABSTIR_HOST reaches the orchestrator config as host', async () => {
+    process.env.FABSTIR_HOST = '0x' + '4'.repeat(40);
+    const { OrchestratorManager } = await import('../../src/core/OrchestratorManager');
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runCLI(['node', 'orchestrate', 'test goal']);
+    expect((OrchestratorManager as any).mock.calls.at(-1)[0].host).toBe('0x' + '4'.repeat(40));
+    consoleSpy.mockRestore();
+  });
+
+  it('P2: an FABSTIR_HOST that is not an address is refused before anything starts', async () => {
+    process.env.FABSTIR_HOST = 'host2';
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
+    await runCLI(['node', 'orchestrate', 'test']);
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('FABSTIR_HOST'));
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(mockAuthenticate).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  // 0.8.0 round 1 (G2): FABSTIR_HOST on an sdk-core without hostEndpointFromRegistry would fund the pinned host and talk
+  // to localhost — refused at start-up.
+  it('P4: FABSTIR_HOST with an sdk-core that lacks hostEndpointFromRegistry is refused before anything starts', async () => {
+    const sdkCore: any = await import('@fabstir/sdk-core');
+    process.env.FABSTIR_HOST = '0x' + '4'.repeat(40);
+    sdkCore.SDK_CAPABILITIES.hostEndpointFromRegistry = false;
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
+    try {
+      await runCLI(['node', 'orchestrate', 'test']);
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('hostEndpointFromRegistry'));
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(mockAuthenticate).not.toHaveBeenCalled();
+    } finally {
+      sdkCore.SDK_CAPABILITIES.hostEndpointFromRegistry = true;
+      consoleSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+  });
+
+  it('G1: the CLI source starts with a node shebang, so the bin runs as a command', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    expect(readFileSync(join(__dirname, '../../src/cli/orchestrate.ts'), 'utf8').startsWith('#!/usr/bin/env node')).toBe(true);
   });
 });

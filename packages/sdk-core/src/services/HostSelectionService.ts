@@ -157,6 +157,7 @@ export class HostSelectionService implements IHostSelectionService {
    * @param modelId - Model ID (bytes32 hash)
    * @param mode - Selection mode
    * @param preferredHostAddress - Required for SPECIFIC mode
+   * @param excludeAddresses - Hosts to leave out (1.39.10). SPECIFIC mode returns null when its host is excluded.
    * @returns Selected host or null if none available
    * @throws Error if SPECIFIC mode without preferredHostAddress
    * @throws Error if preferred host unavailable in SPECIFIC mode
@@ -164,8 +165,10 @@ export class HostSelectionService implements IHostSelectionService {
   async selectHostForModel(
     modelId: string,
     mode: HostSelectionMode,
-    preferredHostAddress?: string
+    preferredHostAddress?: string,
+    excludeAddresses: readonly string[] = []
   ): Promise<HostInfo | null> {
+    const excluded = new Set(excludeAddresses.map((a) => a.toLowerCase()));
     if (!this.hostManager) {
       throw new Error('HostManager not set - call setHostManager() first');
     }
@@ -175,6 +178,7 @@ export class HostSelectionService implements IHostSelectionService {
       if (!preferredHostAddress) {
         throw new Error('preferredHostAddress required for SPECIFIC mode');
       }
+      if (excluded.has(preferredHostAddress.toLowerCase())) return null;
 
       const host = await this.hostManager.getHostInfo(preferredHostAddress);
       if (!host || !host.isActive) {
@@ -195,7 +199,8 @@ export class HostSelectionService implements IHostSelectionService {
     }
 
     // Other modes - get ranked hosts and use weighted random
-    const rankedHosts = await this.getRankedHostsForModel(modelId, mode);
+    // Excluded hosts must not use up the ranking window: widen it by their number, then drop them.
+    const rankedHosts = (await this.getRankedHostsForModel(modelId, mode, 10 + excluded.size)).filter((r) => !excluded.has(r.host.address.toLowerCase()));
     if (rankedHosts.length === 0) {
       return null;
     }

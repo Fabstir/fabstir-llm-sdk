@@ -1,0 +1,31 @@
+# OpenShell provider profile: Platformless AI (Fabstir) OpenAI-compatible daemon.
+# The daemon runs OUTSIDE the sandbox on the gateway host and holds the only payment
+# key (a delegate with an on-chain capped USDC allowance). The sandbox holds no secret.
+id: fabstir-openai
+display_name: Platformless AI
+description: Fabstir orchestrator OpenAI-compatible daemon (delegate-pays, host-local)
+category: inference
+inference_capable: true
+credentials: []
+endpoints:
+  - host: host.openshell.internal
+    port: 13457
+    protocol: rest
+    enforcement: enforce
+    rules:
+      - allow:
+          method: GET
+          path: /v1/models
+      - allow:
+          method: POST
+          path: /v1/chat/completions
+      - allow:
+          method: POST
+          path: /v1/responses
+    # The daemon's control plane (/v1/delegate/*) can change the payer: never from a sandbox.
+    deny_rules:
+      - method: "*"
+        path: /v1/delegate/**
+binaries:
+  - /usr/local/bin/opencode
+  - /usr/bin/curl

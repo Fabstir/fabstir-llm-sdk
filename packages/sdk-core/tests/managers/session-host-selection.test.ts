@@ -6,11 +6,18 @@
  * @description Tests for SessionManager host selection integration
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SessionManager } from '../../src/managers/SessionManager';
 import { HostSelectionMode } from '../../src/types/settings.types';
 import { HostInfo } from '../../src/types/models';
 import { IHostSelectionService } from '../../src/interfaces/IHostSelectionService';
+
+// 1.39.10 (IMPLEMENTATION-ORCHESTRATOR-OPENSHELL O4): startSession probes a host it selected before funding. These mock
+// hosts have no server, so the probe is stubbed as answering; the probe itself is pinned in session-host-preflight.test.ts.
+beforeEach(() => {
+  vi.spyOn(SessionManager.prototype as any, '_checkHostHealth').mockResolvedValue({ status: 'healthy', issues: [], checkedAt: 0 });
+});
+afterEach(() => vi.restoreAllMocks());
 
 // Helper to create mock HostInfo
 function createMockHost(address: string, apiUrl: string): HostInfo {
@@ -108,7 +115,8 @@ describe('SessionManager Host Selection Integration', () => {
       expect(mockHostSelectionService.selectHostForModel).toHaveBeenCalledWith(
         modelId,
         HostSelectionMode.AUTO,
-        undefined
+        undefined,
+        [], // 1.39.10: the hosts excluded so far (none on the first pick)
       );
       expect(result.sessionId).toBeDefined();
     });
@@ -138,7 +146,8 @@ describe('SessionManager Host Selection Integration', () => {
       expect(mockHostSelectionService.selectHostForModel).toHaveBeenCalledWith(
         modelId,
         HostSelectionMode.CHEAPEST,
-        undefined
+        undefined,
+        [], // 1.39.10: the hosts excluded so far (none on the first pick)
       );
     });
 
@@ -168,7 +177,8 @@ describe('SessionManager Host Selection Integration', () => {
       expect(mockHostSelectionService.selectHostForModel).toHaveBeenCalledWith(
         modelId,
         HostSelectionMode.SPECIFIC,
-        preferredAddress
+        preferredAddress,
+        [], // 1.39.10: the hosts excluded so far (none on the first pick)
       );
     });
 

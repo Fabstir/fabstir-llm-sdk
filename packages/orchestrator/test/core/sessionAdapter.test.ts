@@ -113,4 +113,15 @@ describe('SessionAdapter', () => {
     const result = await adapter.sendPrompt(1n, 'Hello');
     expect(result.tokensUsed).toBe(42);
   });
+
+  // 0.8.0 (IMPLEMENTATION-ORCHESTRATOR-OPENSHELL O5): a pinned host reaches startSession; unset keeps AUTO.
+  it('P1: createSession passes a pinned host to startSession', async () => {
+    await adapter.createSession('repo:file.gguf', { ...config, host: '0x' + '4'.repeat(40) });
+    expect(sdk._sessionManager.startSession.mock.calls[0][0].host).toBe('0x' + '4'.repeat(40));
+  });
+
+  it('P3: without a pinned host, startSession gets host "" (AUTO selection)', async () => {
+    await adapter.createSession('repo:file.gguf', config);
+    expect(sdk._sessionManager.startSession.mock.calls[0][0].host).toBe('');
+  });
 });

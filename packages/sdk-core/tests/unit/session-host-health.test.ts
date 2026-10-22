@@ -30,6 +30,7 @@ describe('SessionManager Host Health Check', () => {
   describe('_checkHostHealth', () => {
     it('returns healthy for 200 with status: healthy', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true, status: 200, // a real 200 (1.39.10: the probe needs response.ok)
         json: () => Promise.resolve({ status: 'healthy' }),
       });
 
@@ -41,6 +42,7 @@ describe('SessionManager Host Health Check', () => {
 
     it('returns degraded for 200 with status: degraded and issues array', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true, status: 200, // a real 200 (1.39.10: the probe needs response.ok)
         json: () => Promise.resolve({ status: 'degraded', issues: ['high latency', 'low memory'] }),
       });
 
@@ -59,6 +61,7 @@ describe('SessionManager Host Health Check', () => {
 
     it('converts ws:// endpoint to http:// for health URL', async () => {
       const fetchMock = vi.fn().mockResolvedValue({
+        ok: true, status: 200, // a real 200 (1.39.10: the probe needs response.ok)
         json: () => Promise.resolve({ status: 'healthy' }),
       });
       globalThis.fetch = fetchMock;
@@ -74,6 +77,7 @@ describe('SessionManager Host Health Check', () => {
   describe('onHostHealthWarning callback', () => {
     it('fires for degraded host', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true, status: 200, // a real 200 (1.39.10: the probe needs response.ok)
         json: () => Promise.resolve({ status: 'degraded', issues: ['GPU temp high'] }),
       });
 
@@ -107,6 +111,7 @@ describe('SessionManager Host Health Check', () => {
 
     it('does NOT fire for healthy host', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true, status: 200, // a real 200 (1.39.10: the probe needs response.ok)
         json: () => Promise.resolve({ status: 'healthy' }),
       });
 
@@ -128,6 +133,7 @@ describe('SessionManager Host Health Check', () => {
   describe('getHostHealth', () => {
     it('returns stored health after check', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true, status: 200, // a real 200 (1.39.10: the probe needs response.ok)
         json: () => Promise.resolve({ status: 'healthy' }),
       });
 

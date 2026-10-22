@@ -12,6 +12,12 @@ import { PaymentManager } from '../../src/managers/PaymentManager';
 import { StorageManager } from '../../src/managers/StorageManager';
 import { HostManager } from '../../src/managers/HostManager';
 import { PricingValidationError } from '../../src/errors/pricing-errors';
+
+// 1.39.10 (IMPLEMENTATION-ORCHESTRATOR-OPENSHELL O3/O4): an explicit host without an endpoint now reads the registry
+// and must answer /v1/health before funding. These mock hosts have no server, so the probe is stubbed as answering.
+beforeEach(() => {
+  vi.spyOn(SessionManager.prototype as any, '_checkHostHealth').mockResolvedValue({ status: 'healthy', issues: [], checkedAt: 0 });
+});
 import dotenv from 'dotenv';
 
 // Load test environment
@@ -181,6 +187,7 @@ describe('SessionManager Price Validation', () => {
       const config = {
         chainId: 84532,
         host: mockHostAddress,
+        endpoint: 'http://localhost:8080', // 1.39.10: without a HostManager the SDK cannot read it from the registry
         modelId: 'model1',
         depositAmount: '100',
         pricePerToken: 500, // Would be rejected if validation was active

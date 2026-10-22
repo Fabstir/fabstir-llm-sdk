@@ -335,4 +335,11 @@ describe('SessionPool', () => {
       expect(adapterSDK.getPaymentManager().completeSessionJob).toHaveBeenCalled();
     });
   });
+
+  // 0.8.0 (O5): the pool's pinned host reaches every session it opens.
+  it('P1b: OrchestratorConfig.host reaches startSession on acquire', async () => {
+    const pinned = new SessionPool({ ...createConfig(seedSDK), host: '0x' + '4'.repeat(40) });
+    await pinned.acquire('fast-model', { chainId: 84532, depositAmount: '0.001' });
+    expect(mockSDKInstance._sessionManager.startSession.mock.calls[0][0].host).toBe('0x' + '4'.repeat(40));
+  });
 });

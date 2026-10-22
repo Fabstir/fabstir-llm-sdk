@@ -9,13 +9,20 @@
  * PaymentManager is in delegate mode — same host auto-selection, same {sessionId,
  * jobId} mapping from the wrapper's numeric id. No SessionManager source change.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ethers } from 'ethers';
 import { SessionManager } from '../../src/managers/SessionManager';
 import { PaymentManager } from '../../src/managers/PaymentManagerMultiChain';
 import { ChainId } from '../../src/types/chain.types';
 import { HostSelectionMode } from '../../src/types/settings.types';
 import { HostInfo } from '../../src/types/models';
+
+// 1.39.10 (IMPLEMENTATION-ORCHESTRATOR-OPENSHELL O4): startSession probes a host it selected before funding. These mock
+// hosts have no server, so the probe is stubbed as answering; the probe itself is pinned in session-host-preflight.test.ts.
+beforeEach(() => {
+  vi.spyOn(SessionManager.prototype as any, '_checkHostHealth').mockResolvedValue({ status: 'healthy', issues: [], checkedAt: 0 });
+});
+afterEach(() => vi.restoreAllMocks());
 
 const PAYER = '0x2222222222222222222222222222222222222222';
 const DELEGATE_ADDR = '0x3333333333333333333333333333333333333333';
@@ -102,7 +109,7 @@ describe('startSession delegate flow (2.2 — SessionManager unchanged)', () => 
 
   it('host auto-selection runs identically in delegate mode (no pinning)', async () => {
     const { selection } = await start(true);
-    expect(selection.selectHostForModel).toHaveBeenCalledWith(MODEL_ID, HostSelectionMode.AUTO, undefined);
+    expect(selection.selectHostForModel).toHaveBeenCalledWith(MODEL_ID, HostSelectionMode.AUTO, undefined, []); // 1.39.10: + exclusions
   });
 
   it('non-delegate startSession is byte-identical (self-funded path, no delegate call)', async () => {
