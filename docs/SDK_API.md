@@ -954,6 +954,27 @@ const { sessionId } = await sessionManager.startSession(model, provider, {
 });
 ```
 
+**Host and endpoint before funding (1.39.10):**
+- **Explicit host, no endpoint** (`config.host`, no `config.endpoint`): the endpoint is the host's `apiUrl` from the
+  NodeRegistry, after the endpoint transform. Before 1.39.10 the session kept no endpoint and later calls fell back to
+  `http://localhost:8080`. A host that is not active, has no `apiUrl` or does not serve the model is refused with
+  `HOST_NOT_AVAILABLE` (`details.host`). Note: `HostManager` reads a registry RPC failure as "not registered", so an
+  outage also surfaces as "not an active registered host".
+- **Liveness**: a host the SDK chose (AUTO) or whose endpoint it looked up must answer `GET {endpoint}/v1/health`
+  within 3 s **before anything is funded**. An explicit host that does not answer → `HOST_UNREACHABLE`
+  (`details: { host, endpoint }`). In AUTO mode a host that does not answer is skipped and selection runs again over
+  the rest (a host with no `apiUrl` is skipped too); if none answers → `NO_HOSTS_AVAILABLE`
+  (`details.unreachable: [{ host, endpoint }]`). "Answers" means a 2xx whose JSON has a `status`: `degraded` and
+  `unhealthy` hosts answer and are used; a proxy's 404/500, a page without a status, or a node older than 8.39.0
+  (no `/v1/health`) does not. From an https page an `http://` apiUrl is blocked as mixed content, so it reads as
+  not answering too.
+- **An endpoint you pass** (`config.endpoint`) is not probed, with or without a host (with no host, AUTO picks the
+  host and the endpoint transform still applies to your endpoint, as before 1.39.10). Callers that
+  pass one (LTX `generate`/`createLtxSession` with `endpoint`, training, the helper) keep their behaviour. Callers that
+  pass a host but no endpoint — `TranscodeManager.createTranscodeJob`, `createLtxSession` without `endpoint` — now get
+  the registry endpoint and the probe instead of the localhost default.
+- Flags: `SDK_CAPABILITIES?.hostEndpointFromRegistry`, `SDK_CAPABILITIES?.hostLivenessBeforeFunding`.
+
 ### sendPrompt
 
 Sends a prompt to the LLM and receives response. **Legacy HTTP route.** It posts to `/v1/inference`, which
@@ -3785,6 +3806,8 @@ SDK_CAPABILITIES.ltxSessionDuration;         // 1.39.6: createLtxSession / gener
 SDK_CAPABILITIES.ltxRefineHdRule;            // 1.39.7: validateJob knows resolutionRule "refine-hd" (Refine Details)
 SDK_CAPABILITIES.ltxDiv64UhdRule;            // 1.39.8: validateJob knows resolutionRule "div64-uhd" (Refine Details at 4K)
 SDK_CAPABILITIES.ltxSpeedField;              // 1.39.9: LtxJob.speed (Slow Motion) forwarded; validateJob checks [0.025, 1.0]
+SDK_CAPABILITIES.hostEndpointFromRegistry;   // 1.39.10: an explicit host without an endpoint reads its apiUrl from the registry
+SDK_CAPABILITIES.hostLivenessBeforeFunding;  // 1.39.10: a chosen / looked-up host must answer /v1/health before funding
 ```
 
 `SDK_CAPABILITIES` is frozen. Read a flag with optional chaining (`SDK_CAPABILITIES?.conversationLogOptOut`) so an older
@@ -6202,7 +6225,8 @@ Select the best host for a model based on user preferences.
 async selectHostForModel(
   modelId: string,
   mode: HostSelectionMode,
-  preferredHostAddress?: string
+  preferredHostAddress?: string,
+  excludeAddresses?: readonly string[]   // 1.39.10
 ): Promise<HostInfo | null>
 ```
 
@@ -6210,6 +6234,8 @@ async selectHostForModel(
 - `modelId` - Model ID to find hosts for
 - `mode` - Selection mode (AUTO, CHEAPEST, RELIABLE, FASTEST, SPECIFIC)
 - `preferredHostAddress` - Required for SPECIFIC mode
+- `excludeAddresses` - Hosts to leave out, compared case-insensitively (startSession passes the ones that did not
+  answer its health probe). In SPECIFIC mode an excluded preferred host gives `null`.
 
 **Returns:**
 - `HostInfo` if a host is found

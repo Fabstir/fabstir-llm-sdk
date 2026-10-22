@@ -1,6 +1,6 @@
 {
   "name": "@fabstir/orchestrator",
-  "version": "0.7.4",
+  "version": "0.8.0",
   "description": "Multi-agent orchestration for Fabstir P2P LLM marketplace",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -41,7 +41,10 @@
   "author": "Fabstir",
   "license": "BUSL-1.1",
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
   ],
   "publishConfig": {
     "access": "public"

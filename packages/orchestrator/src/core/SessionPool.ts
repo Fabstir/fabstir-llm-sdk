@@ -150,7 +150,7 @@ export class SessionPool {
 
       const adapter = new SessionAdapter(sdk);
       const session = await this.withTxLock(() =>
-        adapter.createSession(model, adapterConfig),
+        adapter.createSession(model, this.config.host ? { ...adapterConfig, host: this.config.host } : adapterConfig),
       );
 
       this.totalDeposit += depositNum;

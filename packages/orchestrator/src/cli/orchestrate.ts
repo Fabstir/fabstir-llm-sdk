@@ -1,9 +1,10 @@
+#!/usr/bin/env node
 import 'fake-indexeddb/auto';
 import { WebSocket } from 'ws';
 (globalThis as any).WebSocket = WebSocket;
 import 'dotenv/config';
 import { ethers } from 'ethers';
-import { FabstirSDKCore, ChainRegistry, ChainId } from '@fabstir/sdk-core';
+import { FabstirSDKCore, ChainRegistry, ChainId, SDK_CAPABILITIES } from '@fabstir/sdk-core';
 import { OrchestratorManager } from '../core/OrchestratorManager';
 import { OrchestratorA2AServer } from '../a2a/server/OrchestratorA2AServer';
 import { SessionPool } from '../core/SessionPool';
@@ -13,6 +14,7 @@ import { resolveBindHost, AuthGate } from '../openai/gating';
 import { DelegateControlPlane } from '../delegate/control-plane';
 import { loadOrCreateDelegateKey, defaultDelegateKeyPath } from '../delegate/delegate-key';
 import { buildSmartDelegate } from '../delegate/smart-account';
+import { openShellProfileFromArgs } from '../openshell/profile';
 
 /** CDP base-sepolia 4337 endpoint (the one chat uses) — the zero-config bundler/paymaster default. */
 export const CDP_BASE_SEPOLIA_RPC = 'https://api.developer.coinbase.com/rpc/v1/base-sepolia';
@@ -98,12 +100,35 @@ export async function buildDelegateContext(opts: {
 }
 
 export async function runCLI(argv: string[]): Promise<void> {
+  // `openshell-profile` prints the OpenShell provider profile and exits: no key, SDK or network (0.8.0).
+  if (argv[2] === 'openshell-profile') {
+    try {
+      process.stdout.write(openShellProfileFromArgs(argv.slice(3), process.env));
+    } catch (err: any) {
+      console.error(err?.message ?? String(err));
+      process.exit(1);
+    }
+    return;
+  }
   const privateKey = process.env.FABSTIR_PRIVATE_KEY;
   // Delegate-pays mode (Constraint 10): FABSTIR_PAYER is the bridge sub-account
   // whose USDC allowance funds sessions; the daemon's hot EOA is its delegate.
   const payer = process.env.FABSTIR_PAYER;
   if (!privateKey && !payer) {
     console.error('FABSTIR_PRIVATE_KEY is required (or FABSTIR_PAYER for delegate-pays mode)');
+    process.exit(1);
+    return;
+  }
+  // FABSTIR_HOST pins every session to one host (0.8.0); unset → AUTO. Refused here, before any key or chain use.
+  const host = process.env.FABSTIR_HOST || undefined;
+  if (host !== undefined && !ethers.isAddress(host)) {
+    console.error(`FABSTIR_HOST must be a host's 0x address, got "${host}"`);
+    process.exit(1);
+    return;
+  }
+  // An older sdk-core would fund the pinned host and then talk to localhost: refuse rather than run on it.
+  if (host !== undefined && (SDK_CAPABILITIES as Record<string, unknown> | undefined)?.hostEndpointFromRegistry !== true) {
+    console.error('FABSTIR_HOST needs @fabstir/sdk-core >= 1.39.10 (SDK_CAPABILITIES.hostEndpointFromRegistry); the installed sdk-core lacks it');
     process.exit(1);
     return;
   }
@@ -167,6 +192,7 @@ export async function runCLI(argv: string[]): Promise<void> {
     maxConcurrentSessions: maxSessions,
     proofGracePeriodMs,
     paymentToken,
+    host,
     budget: {
       maxDepositPerSubTask: process.env.FABSTIR_MAX_DEPOSIT_PER_TASK ?? '0.001',
       maxTotalDeposit: process.env.FABSTIR_MAX_TOTAL_DEPOSIT ?? '0.01',
@@ -206,7 +232,7 @@ export async function runCLI(argv: string[]): Promise<void> {
       sdk, chainId, signer: delegate!.signer as any, delegatePayer: payer,
       models: { fast: fastModel, deep: deepModel }, maxConcurrentSessions: maxSessions,
       budget: { maxDepositPerSubTask: sessionDeposit, maxTotalDeposit: process.env.FABSTIR_MAX_TOTAL_DEPOSIT ?? '0.01', maxSubTasks: 1000 },
-      proofGracePeriodMs, paymentToken,
+      proofGracePeriodMs, paymentToken, host,
     });
     const modelRouter = new ModelRouter(sdk, { fast: fastModel, deep: deepModel });
     await modelRouter.initialize();
@@ -224,7 +250,7 @@ export async function runCLI(argv: string[]): Promise<void> {
     });
     new DelegateControlPlane({ sdk, delegateAddress: delegate!.address, chainId, initialPayer: payer }).mount(openai.app);
     await openai.start(openaiPort, bindHost);
-    console.log(`OpenAI delegate daemon on http://${bindHost}:${openaiPort} (delegate ${delegate!.address})`);
+    console.log(`OpenAI delegate daemon on http://${bindHost}:${openaiPort} (delegate ${delegate!.address}; host ${host ?? 'AUTO'})`);
   } else {
     // A2A server path needs OrchestratorManager (orchestrate over A2A).
     const manager = new OrchestratorManager(managerConfig);

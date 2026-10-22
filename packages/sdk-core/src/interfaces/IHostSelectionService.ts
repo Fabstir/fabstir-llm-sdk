@@ -69,12 +69,14 @@ export interface IHostSelectionService {
    * @param modelId - Model ID (bytes32 hash)
    * @param mode - Selection mode
    * @param preferredHostAddress - Required for SPECIFIC mode
+   * @param excludeAddresses - Hosts to leave out (e.g. ones that did not answer a health probe, 1.39.10)
    * @returns Selected host or null if none available
    */
   selectHostForModel(
     modelId: string,
     mode: HostSelectionMode,
-    preferredHostAddress?: string
+    preferredHostAddress?: string,
+    excludeAddresses?: readonly string[]
   ): Promise<HostInfo | null>;
 
   /**

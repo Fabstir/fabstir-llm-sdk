@@ -60,4 +60,12 @@ export const SDK_CAPABILITIES = Object.freeze({
   ltxDiv64UhdRule: true,
   /** LtxJob.speed (Slow Motion) is forwarded to the node, and validateJob refuses one outside [0.025, 1.0] (1.39.9). */
   ltxSpeedField: true,
+  /** startSession with a host but no endpoint reads the host's apiUrl from the registry — never a localhost default (1.39.10). */
+  hostEndpointFromRegistry: true,
+  /**
+   * Before funding, startSession probes GET /v1/health on a host whose endpoint it took from the registry (AUTO, or an
+   * explicit host without an endpoint); one that does not answer (2xx with a status) is skipped (AUTO) or refused
+   * (HOST_UNREACHABLE). An endpoint the caller passes is used as given and not probed (1.39.10).
+   */
+  hostLivenessBeforeFunding: true,
 } as const);

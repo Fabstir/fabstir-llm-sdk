@@ -586,8 +586,14 @@ export class SessionManager implements ISessionManager {
     let provider = config.host || config.provider;
     let endpoint = config.endpoint;
 
-    // NEW (Phase 5.1): Automatic host selection when no host is provided
-    if (!provider && this.hostSelectionService) {
+    // Host and endpoint are settled BEFORE any funding (1.39.10). A host the SDK chose (AUTO) or whose endpoint it looked
+    // up (an explicit host with no endpoint) must answer GET /v1/health first; an endpoint the caller supplied is theirs.
+    if (provider && !endpoint) {
+      endpoint = await this.registryEndpoint(provider, convertModelToBytes32(model));
+      if ((await this._checkHostHealth(endpoint)).status === 'unreachable') {
+        throw new SDKError(`Host ${provider} did not answer at ${endpoint}/v1/health — no session opened`, 'HOST_UNREACHABLE', { host: provider, endpoint });
+      }
+    } else if (!provider && this.hostSelectionService) {
       // Get user's preferred host selection mode
       const mode = await this.storageManager.getHostSelectionMode();
       const settings = await this.storageManager.getUserSettings();
@@ -597,38 +603,42 @@ export class SessionManager implements ISessionManager {
       const modelIdForSelection = convertModelToBytes32(model);
       console.log(`[SessionManager] Auto-discovery: model="${model}" -> bytes32=${modelIdForSelection}, mode=${mode}`);
 
-      // Select host using user's preferences
-      const selectedHost = await this.hostSelectionService.selectHostForModel(
-        modelIdForSelection,
-        mode,
-        preferredHostAddress
-      );
-
-      if (!selectedHost) {
-        throw new SDKError(`No hosts available for model "${model}" (hash: ${modelIdForSelection})`, 'NO_HOSTS_AVAILABLE');
-      }
-
-      provider = selectedHost.address;
-      // Set endpoint from discovered host's apiUrl
-      if (selectedHost.apiUrl && !endpoint) {
-        endpoint = selectedHost.apiUrl;
-      }
-
-      // Apply endpoint transform (e.g. Docker localhost → host.docker.internal)
-      if (endpoint && this.endpointTransform) {
-        const original = endpoint;
-        endpoint = this.endpointTransform(endpoint);
-        if (endpoint !== original) {
-          console.log(`[SessionManager] Endpoint transformed: ${original} -> ${endpoint}`);
+      // Select a host that answers: one that does not is excluded and selection runs again over the rest.
+      const unreachable: { host: string; endpoint: string }[] = [];
+      for (;;) {
+        const excluded = unreachable.map((u) => u.host);
+        const selectedHost = await this.hostSelectionService.selectHostForModel(modelIdForSelection, mode, preferredHostAddress, excluded);
+        if (!selectedHost || excluded.some((a) => a.toLowerCase() === selectedHost.address.toLowerCase())) {
+          const skipped = unreachable.length ? `; did not answer: ${excluded.join(', ')}` : '';
+          throw new SDKError(`No hosts available for model "${model}" (hash: ${modelIdForSelection})${skipped}`, 'NO_HOSTS_AVAILABLE', { unreachable });
         }
+        if (endpoint) { // an endpoint the caller passed is used as given (transformed, as before) — not probed
+          provider = selectedHost.address;
+          endpoint = this.transformEndpoint(endpoint);
+          break;
+        }
+        if (!selectedHost.apiUrl) {
+          console.warn(`[SessionManager] Host ${selectedHost.address} has no apiUrl — skipped`);
+          unreachable.push({ host: selectedHost.address, endpoint: '' });
+          continue;
+        }
+        const candidate = this.transformEndpoint(selectedHost.apiUrl);
+        if ((await this._checkHostHealth(candidate)).status === 'unreachable') {
+          console.warn(`[SessionManager] Host ${selectedHost.address} did not answer at ${candidate}/v1/health — skipped`);
+          unreachable.push({ host: selectedHost.address, endpoint: candidate });
+          continue;
+        }
+        provider = selectedHost.address;
+        endpoint = candidate;
+        break;
       }
 
       // Store selected host for next time
       await this.storageManager.updateUserSettings({
-        lastHostAddress: selectedHost.address,
+        lastHostAddress: provider,
       });
 
-      console.log(`[SessionManager] Auto-selected host: ${selectedHost.address}, apiUrl: ${selectedHost.apiUrl} (mode: ${mode})`);
+      console.log(`[SessionManager] Auto-selected host: ${provider}, endpoint: ${endpoint} (mode: ${mode})`);
     }
 
     // NEW (Phase 6.2): Enable encryption by default (opt-out with encryption: false)
@@ -4530,11 +4540,42 @@ export class SessionManager implements ISessionManager {
     return session?.lastHostHealth;
   }
 
+  /** An explicit host's endpoint, from the registry: an active registered host with an apiUrl serving the model, else refused. */
+  private async registryEndpoint(host: string, modelId: string): Promise<string> {
+    if (!this.hostManager) {
+      throw new SDKError(`No endpoint for host ${host}: pass endpoint, or set a HostManager so it can be read from the registry`, 'HOST_NOT_AVAILABLE', { host });
+    }
+    let info: Awaited<ReturnType<HostManager['getHostInfo']>>;
+    try {
+      info = await this.hostManager.getHostInfo(host);
+    } catch (cause: any) {
+      throw new SDKError(`Could not read host ${host} from the registry: ${cause?.message ?? String(cause)} — no session opened`, 'HOST_NOT_AVAILABLE', { host, cause });
+    }
+    if (!info.isActive || !info.apiUrl) { // an unregistered host reads isActive: false (HostManager.getHostStatus)
+      throw new SDKError(`Host ${host} is not an active registered host with an apiUrl — no session opened`, 'HOST_NOT_AVAILABLE', { host });
+    }
+    if (!(info.supportedModels ?? []).some((m) => m.toLowerCase() === modelId.toLowerCase())) {
+      throw new SDKError(`Host ${host} does not serve model ${modelId} — no session opened`, 'HOST_NOT_AVAILABLE', { host, modelId });
+    }
+    return this.transformEndpoint(info.apiUrl);
+  }
+
+  /** The configured endpoint transform (e.g. Docker localhost → host.docker.internal), applied to a discovered URL. */
+  private transformEndpoint(url: string): string {
+    if (!this.endpointTransform) return url;
+    const out = this.endpointTransform(url);
+    if (out !== url) console.log(`[SessionManager] Endpoint transformed: ${url} -> ${out}`);
+    return out;
+  }
+
   private async _checkHostHealth(endpoint: string): Promise<HostHealthInfo> {
     try {
       const httpUrl = endpoint.replace(/^ws(s?):\/\//, 'http$1://').replace(/\/v1\/ws$/, '');
       const response = await fetch(`${httpUrl}/v1/health`, { signal: AbortSignal.timeout(3000) });
+      // Only a 2xx carrying a status is an answer: a proxy's JSON 404/500 or a page without one is not the node (1.39.10).
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
+      if (typeof data?.status !== 'string') throw new Error('no status');
       return {
         status: data.status,
         issues: data.issues || [],

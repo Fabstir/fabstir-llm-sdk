@@ -21,7 +21,7 @@ export class SessionAdapter {
     const sessionManager = this.sdk.getSessionManager();
     const sessionConfig = {
       modelId: model,
-      host: '',
+      host: config.host ?? '', // '' → the SDK's AUTO selection
       chainId: config.chainId,
       depositAmount: config.depositAmount,
       encryption: config.encryption ?? true,

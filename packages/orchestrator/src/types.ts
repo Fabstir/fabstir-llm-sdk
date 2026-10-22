@@ -29,6 +29,11 @@ export interface OrchestratorConfig {
   budget: BudgetConfig;
   taskStoragePrefix?: string;
   paymentToken?: string;
+  /**
+   * Pin every session to this host address (FABSTIR_HOST, 0.8.0). Its endpoint comes from the registry and must
+   * answer before a session is funded (sdk-core 1.39.10). Unset → AUTO selection.
+   */
+  host?: string;
   proofGracePeriodMs?: number;
   /**
    * Delegate-pays mode: the payer (owner) whose on-chain-capped USDC allowance
@@ -145,4 +150,6 @@ export interface SessionAdapterConfig {
   depositAmount: string;
   encryption?: boolean;
   paymentToken?: string;
+  /** Pinned host address (0.8.0); unset → the SDK's AUTO selection, which skips a host that does not answer. */
+  host?: string;
 }
