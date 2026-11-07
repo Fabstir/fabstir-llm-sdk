@@ -4,21 +4,11 @@
 name: Build Production Docker Image (Private Beta)
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'packages/host-cli/**'
-      - 'packages/sdk-core/**'
-      - 'deployment/Dockerfile.production.comprehensive'
-      - '.github/workflows/docker-build-beta.yml'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - 'packages/host-cli/**'
-      - 'packages/sdk-core/**'
-      - 'deployment/Dockerfile.production.comprehensive'
+  # Manual only. The automatic push/pull_request triggers were removed because this job can never pass from a checkout:
+  # "Check for required files" needs fabstir-llm-node-v8.1.6-websocket-error-logging.tar.gz, s5js-dist.tar.gz and
+  # s5js-0.3.0.tgz at the repo root, and *.tar.gz / *.tgz are gitignored. It failed in ~14 s on every host-cli or
+  # sdk-core PR and push (e.g. PRs #41, #42). The host image in use is built from packages/host-cli/Dockerfile.
+  # Restore the triggers once those inputs are fetched in the job (or the image is retired).
   workflow_dispatch:  # Allow manual trigger
 
 env:
