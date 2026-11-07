@@ -208,7 +208,7 @@ describe('init ack correlation', () => {
     await vi.waitFor(() => expect(ws.sent.length).toBeGreaterThan(0));
 
     ws.emit({ type: 'session_init_ack', status: 'success' });
-    await expect(init).resolves.toBeUndefined();
+    await expect(init).resolves.toBeInstanceOf(Uint8Array);   // 1.39.12: the init returns the key it sent
   });
 });
 

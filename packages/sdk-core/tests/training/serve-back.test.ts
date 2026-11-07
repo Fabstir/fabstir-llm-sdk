@@ -296,7 +296,7 @@ describe('E.2 — `lora` must survive a RE-INIT, which is the only init producti
     const { sm } = harness();
     seed(sm, LORA);
     const seen: any[] = [];
-    sm.sendEncryptedInit = async (_ws: any, cfg: any) => { seen.push(cfg); sm.sessionKey = new Uint8Array(32); };
+    sm.sendEncryptedInit = async (_ws: any, cfg: any) => { seen.push(cfg); return new Uint8Array(32); };
     await sm.acquireSessionTransport('7');
     expect(seen).toHaveLength(1);
     expect(seen[0].lora).toEqual(LORA);
@@ -306,7 +306,7 @@ describe('E.2 — `lora` must survive a RE-INIT, which is the only init producti
     const { sm } = harness();
     seed(sm, undefined);
     const seen: any[] = [];
-    sm.sendEncryptedInit = async (_ws: any, cfg: any) => { seen.push(cfg); sm.sessionKey = new Uint8Array(32); };
+    sm.sendEncryptedInit = async (_ws: any, cfg: any) => { seen.push(cfg); return new Uint8Array(32); };
     await sm.acquireSessionTransport('7');
     expect(seen[0].lora).toBeUndefined();
   });

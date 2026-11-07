@@ -56,6 +56,32 @@ export function makeFakeEncryptionManager(opts: { clientAddress?: string } = {})
   };
 }
 
+/**
+ * Answer GET /v1/version as a node with `features` — the 1.39.15 `session-job-completion` probe — so a unit test never
+ * reaches a real host (the seeded endpoints resolve). Any other fetch is a test bug and throws. Default: an old node.
+ */
+export function stubNodeVersion(features: string[] = []) {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (String(url).endsWith('/v1/version')) return { ok: true, json: async () => ({ features }) } as any;
+    throw new Error(`unexpected fetch in a unit test: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+/**
+ * 1.39.18: an encrypted transcode needs its host on `setConfidentialHosts` (fail closed), and a submit without
+ * `timeoutMs` reads the session's lifetime from the chain. Give a test SessionManager both: `hosts` allowed, and a session
+ * that started now and lasts `maxDuration`.
+ */
+export function transcodeReady(mgr: any, hosts: string[], maxDuration = 3600) {
+  mgr.setConfidentialHosts(hosts);
+  mgr.setSessionJobReader(() => ({
+    getSessionJobOnChain: vi.fn(async () => ({ startTime: BigInt(Math.floor(Date.now() / 1000)), maxDuration: BigInt(maxDuration) })),
+  }));
+  return mgr;
+}
+
 /** The host-pubkey lookup `sendEncryptedInit` makes (compressed, `02`-prefixed). */
 export const fakeHostManager = () => ({ getHostPublicKey: vi.fn(async () => '02' + 'cd'.repeat(32)) });
 

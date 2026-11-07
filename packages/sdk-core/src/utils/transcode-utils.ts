@@ -2,6 +2,7 @@
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type { VideoFormat, QualityMetrics, TranscodedSource, TranscodedContentMetadata, TranscodeResult, HlsTranscodedSource, HlsContentMetadata } from '../types/transcode.types';
 import { isHlsOutput, isTranscodeModerationStatus, cloneTranscodeModerationStatus } from '../types/transcode.types';
+import { TranscodeError } from '../errors/transcode-errors';
 
 /** VideoFormat field order matching the struct definition */
 const FIELD_ORDER: (keyof VideoFormat)[] = [
@@ -44,12 +45,18 @@ export function billingUnitsToTokens(units: number): number {
   return Math.ceil(units * 1000);
 }
 
-/** Extract resolution factor from vf string (e.g. 'scale=1920x1080') */
+/**
+ * Billing resolution factor from a vf string, exactly as the node reads it (billing.rs resolution_factor_from_vf): a pure
+ * `scale=WxH` or `scale=W:H`, anything else 1.0. A wider match here would estimate less than the node bills.
+ */
 export function resolutionFactor(vf?: string): number {
-  if (!vf) return 1.0;
-  const match = vf.match(/(\d+)x(\d+)/);
-  if (!match) return 1.0;
-  const height = parseInt(match[2], 10);
+  if (!vf?.startsWith('scale=')) return 1.0;
+  const scale = vf.slice('scale='.length);
+  const split = scale.includes('x') ? scale.indexOf('x') : scale.indexOf(':');   // the first x, else the first colon
+  const heightText = split < 0 ? '' : scale.slice(split + 1);
+  if (!/^\+?\d+$/.test(heightText)) return 1.0;
+  const height = Number(heightText);
+  if (height > 0xffffffff) return 1.0;                                            // the node parses a u32
   if (height <= 480) return 0.25;
   if (height <= 720) return 0.5;
   if (height <= 1080) return 1.0;
@@ -82,6 +89,99 @@ export function estimateTranscodeUnits(
     total += durationSeconds * resolutionFactor(fmt.vf) * codecFactor(fmt.vcodec);
   }
   return isEncrypted ? total * ENCRYPTION_FACTOR : total;
+}
+
+/** Lifetime a transcode session never goes below: today's default, which also outlasts the node's 1,800 s run limit. */
+export const TRANSCODE_SESSION_MIN_SECONDS = 3600;
+/** Added to the time the rate needs: the estimate can undershoot, and the final proof must land before expiry. */
+export const TRANSCODE_SESSION_MARGIN_SECONDS = 600;
+
+/**
+ * The most rate-limited time a node (8.62.4) can release a result for: its final claim waits at most 3,600 s
+ * (FINAL_WAIT_CEILING_SECS), after a run of at most 1,800 s (the default TRANSCODE_TIMEOUT_SECONDS). A job whose deposit
+ * pays for it and owes more has its tokens paid and its result withheld (BILLING_FAILED), however long the session.
+ * A deposit that pays for less caps what is owed and escapes this; sizing is for a job funded in full.
+ */
+export const TRANSCODE_MAX_RELEASABLE_RATE_SECONDS = 5400;
+
+/**
+ * The session lifetime (the contract's `maxDuration`, the SDK's `duration`) a transcode of this source needs (1.39.17).
+ * The model's rate cap limits how fast tokens can be claimed, so from node 8.62.4 a job the cap cannot bill before expiry
+ * stops with SESSION_NOT_BILLABLE soon after it starts. A longer session costs nothing extra: the deposit sets the spend.
+ *
+ * @param sourceSeconds length of the source video
+ * @param options.ratePerSecond the model's rate from the chain (TranscodeManager.sizeTranscodeSession reads it)
+ * @param options.finalWaitUncapped the node reports `transcode-final-wait-uncapped` (8.62.6+): SOURCE_TOO_LONG does not apply
+ * @throws TranscodeError `details.reason` INVALID_SOURCE_DURATION, INVALID_RATE, or SOURCE_TOO_LONG (funded in full, a job
+ *   the node is certain to withhold, so funding it can only lose the deposit)
+ */
+export function transcodeSessionDuration(
+  sourceSeconds: number, formats: VideoFormat[],
+  options: { ratePerSecond: number; isEncrypted?: boolean; marginSeconds?: number; minimumSeconds?: number; finalWaitUncapped?: boolean },
+): number {
+  if (!Number.isFinite(sourceSeconds) || sourceSeconds <= 0) {
+    throw new TranscodeError(`Source length must be a positive number of seconds, got ${sourceSeconds}`, 'TRANSCODE_FAILED', undefined,
+      { reason: 'INVALID_SOURCE_DURATION' });
+  }
+  const { ratePerSecond, isEncrypted = true, marginSeconds = TRANSCODE_SESSION_MARGIN_SECONDS, minimumSeconds = TRANSCODE_SESSION_MIN_SECONDS } = options;
+  // 0 included: the node can never bill at a rate of 0 (biller.rs), whatever the contract's "no cap" reads as.
+  if (!Number.isFinite(ratePerSecond) || ratePerSecond <= 0) {
+    throw new TranscodeError(`The model's rate limit must be read from the chain, got ${ratePerSecond}`, 'TRANSCODE_FAILED', undefined,
+      { reason: 'INVALID_RATE' });
+  }
+  const tokens = billingUnitsToTokens(estimateTranscodeUnits(sourceSeconds, formats, isEncrypted));
+  const maxTokens = TRANSCODE_MAX_RELEASABLE_RATE_SECONDS * ratePerSecond;
+  // A node reporting `transcode-final-wait-uncapped` (8.62.6) waits as long as the rate needs: no limit to refuse at.
+  if (tokens > maxTokens && !options.finalWaitUncapped) {
+    throw new TranscodeError(
+      `A ${sourceSeconds} s source costs ${tokens} tokens, more than the ${maxTokens} a node can bill in full and still release at ${ratePerSecond} tokens/s`,
+      'TRANSCODE_FAILED', undefined, { reason: 'SOURCE_TOO_LONG', tokens, maxTokens, ratePerSecond },
+    );
+  }
+  return Math.max(minimumSeconds, Math.ceil(tokens / ratePerSecond) + marginSeconds);
+}
+
+/** The first byte of a multibase string in the encodings s5js decodes (u base64url, z base58btc, b base32, f hex). */
+function multibaseFirstByte(body: string): number | undefined {
+  const prefix = body[0], rest = body.slice(1);
+  const index = (alphabet: string, c: string | undefined) => (c === undefined ? -1 : alphabet.indexOf(c));
+  if (prefix === 'u') {
+    const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const hi = index(A, rest[0]), lo = index(A, rest[1]);
+    return hi < 0 || lo < 0 ? undefined : (hi << 2) | (lo >> 4);
+  }
+  if (prefix === 'b') {
+    const A = 'abcdefghijklmnopqrstuvwxyz234567';
+    const hi = index(A, rest[0]), lo = index(A, rest[1]);
+    return hi < 0 || lo < 0 ? undefined : ((hi << 3) | (lo >> 2)) & 0xff;
+  }
+  if (prefix === 'f') {
+    return /^[0-9a-f]{2}/.test(rest) ? parseInt(rest.slice(0, 2), 16) : undefined;
+  }
+  if (prefix === 'z') {
+    const A = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    if (!rest || [...rest].some((c) => A.indexOf(c) < 0)) return undefined;
+    if (rest[0] === '1') return 0;   // a leading zero byte
+    let n = 0n;
+    for (const c of rest) n = n * 58n + BigInt(A.indexOf(c));
+    const hex = n.toString(16);
+    return parseInt((hex.length % 2 ? '0' : '') + hex.slice(0, hex.length % 2 ? 1 : 2), 16);
+  }
+  return undefined;
+}
+
+/** Whether a source CID is an S5 encrypted capability CID (first byte 0xae, any multibase s5js reads): it carries its own key. */
+export function isCapabilityCid(sourceCid: string): boolean {
+  const body = sourceCid.includes('://') ? sourceCid.slice(sourceCid.indexOf('://') + 3) : sourceCid;
+  return multibaseFirstByte(body) === 0xae;
+}
+
+/**
+ * Whether a transcode exposes keys to the host running it (1.39.18): an encrypted job (`isEncrypted` defaults to true), or
+ * a source CID that carries its own key whatever `isEncrypted` says. Such a job goes only to an allowlisted host.
+ */
+export function isEncryptedTranscode(sourceCid: string, isEncrypted?: boolean): boolean {
+  return isEncrypted !== false || isCapabilityCid(sourceCid);
 }
 
 /** Validate quality metrics against tier thresholds */

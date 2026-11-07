@@ -209,6 +209,7 @@ export class LtxManager {
     if (!this.sessionManager || !this.paymentManager) {
       throw new LtxError('SessionManager/PaymentManager not available for createLtxSession', 'LTX_PREVALIDATION_FAILED');
     }
+    this.assertConfidentialHost(hostAddress);   // before any estimate or deposit (1.39.19)
     const proofWindow = options?.proofTimeoutWindow;
     if (proofWindow !== undefined && !(Number.isInteger(proofWindow) && proofWindow >= MIN_PROOF_TIMEOUT && proofWindow <= MAX_PROOF_TIMEOUT)) {
       throw new LtxError(
@@ -282,6 +283,7 @@ export class LtxManager {
         'LTX_PREVALIDATION_FAILED', existing,
       );
     }
+    this.assertConfidentialHost(hostAddress, existing);   // before the session is adopted (1.39.19)
     // Q8: ONE nodeHttpUrl must serve both postSessionAuth and this call — the normalisation and
     // the http(s)-only rule live in normalizeNodeHttpUrl (shared with the training path).
     const endpoint = normalizeNodeHttpUrl(options.endpoint);
@@ -313,11 +315,31 @@ export class LtxManager {
         { ...existing, cause: err },
       );
     }
-    this.sessionManager.registerExternalSession({
-      sessionId: existing.sessionId, jobId: existing.jobId, endpoint,
-      hostAddress, model, chainId,
-    });
+    try {
+      this.sessionManager.registerExternalSession({
+        sessionId: existing.sessionId, jobId: existing.jobId, endpoint,
+        hostAddress, model, chainId,
+      });
+    } catch (err: any) {
+      if (err?.code === 'SESSION_JOB_IN_FLIGHT') throw LtxManager.jobInFlight(err, existing);
+      throw err;
+    }
     return { sessionId: existing.sessionId, jobId: existing.jobId, entry };
+  }
+
+  /** LTX jobs put keys in the host's hands: only a confidentialHosts host (1.39.19). The refusal as an LtxError. */
+  private assertConfidentialHost(hostAddress: string, ids?: { sessionId: bigint; jobId: bigint }): void {
+    try {
+      this.sessionManager.assertConfidentialHost(hostAddress, 'ltx');
+    } catch (err: any) {
+      if (err?.code !== 'CONFIDENTIAL_HOST_NOT_ALLOWED') throw err;
+      throw new LtxError(err.message, 'CONFIDENTIAL_HOST_NOT_ALLOWED', { ...err.details, ...ids });
+    }
+  }
+
+  /** The SDK's one-job-per-session refusal as an LtxError: its own code, which job holds the session, and the ids (1.39.14). */
+  private static jobInFlight(err: any, ids: { sessionId: bigint; jobId: bigint }): LtxError {
+    return new LtxError(err.message, 'SESSION_JOB_IN_FLIGHT', { inFlight: err.details?.inFlight, retryable: false, ...ids });
   }
 
   /** Reclaim a reserved deposit after proof timeout (GENERATION_FAILED/TIMEOUT) — Constraint 8. */
@@ -369,6 +391,11 @@ export class LtxManager {
       const kept = Object.fromEntries(
         RELAYED_DETAILS.filter((k) => ['string', 'number'].includes(typeof details[k])).map((k) => [k, details[k]]),
       );
+      // The SDK's one-job-per-session refusal keeps its own code and says which job holds the session (1.39.14).
+      if (err?.code === 'SESSION_JOB_IN_FLIGHT') throw LtxManager.jobInFlight(err, { sessionId, jobId });
+      if (err?.code === 'CONFIDENTIAL_HOST_NOT_ALLOWED') {   // raised at the submit choke point (1.39.19)
+        throw new LtxError(err.message, 'CONFIDENTIAL_HOST_NOT_ALLOWED', { ...err.details, sessionId, jobId });
+      }
       throw new LtxError(err?.message ?? 'LTX generation failed', err instanceof LtxError ? err.code : 'GENERATION_FAILED',
         { ...kept, sessionId, jobId });
     }

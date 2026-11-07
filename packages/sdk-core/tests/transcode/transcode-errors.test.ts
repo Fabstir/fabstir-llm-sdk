@@ -7,9 +7,9 @@ describe('TranscodeError', () => {
     expect(err.isRetryable).toBe(true);
   });
 
-  it('TRANSCODE_TIMEOUT is retryable', () => {
+  it('TRANSCODE_TIMEOUT is NOT retryable (1.39.18): the node keeps running and billing the job', () => {
     const err = new TranscodeError('timeout', 'TRANSCODE_TIMEOUT');
-    expect(err.isRetryable).toBe(true);
+    expect(err.isRetryable).toBe(false);
   });
 
   it('SIDECAR_DISCONNECTED is not retryable', () => {

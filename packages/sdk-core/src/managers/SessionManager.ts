@@ -61,8 +61,11 @@ import { ImageGenerationError } from '../errors/image-generation-errors';
 import { ImageGenerationRateLimiter } from '../utils/image-generation-rate-limiter';
 import { generateImageWs } from '../utils/image-generation-ws';
 import { generateImageHttp } from '../utils/image-generation-http';
-import { submitTranscodeWs } from '../utils/transcode-ws';
-import type { VideoFormat, TranscodeHandle, TranscodeSubmitOptions } from '../types/transcode.types';
+import { submitTranscodeWs, TRANSCODE_DEFAULT_TIMEOUT_MS } from '../utils/transcode-ws';
+import { fetchTranscodeResultWs, type TranscodeResultAnswer } from '../utils/transcode-result-ws';
+import { TranscodeError } from '../errors/transcode-errors';
+import { isEncryptedTranscode } from '../utils/transcode-utils';
+import type { VideoFormat, TranscodeHandle, TranscodeSubmitOptions, TranscodeResult } from '../types/transcode.types';
 import { submitLtxWs } from '../utils/ltx-ws';
 import type { LtxJob, LtxHandle, LtxSubmitOptions, LtxResult } from '../types/ltx.types';
 import type { LoraSessionField } from '../types/training.types';
@@ -140,6 +143,26 @@ function convertModelHashToName(modelHashOrName: string): string {
  * release the session. `registered` — the in-memory session exists (every stage after the registry write).
  */
 // The ids are whatever the funding call returned (PaymentManager's result type is a loose union).
+/**
+ * Failures worth another result-fetch attempt: the wire, not a verdict (1.39.15). The transport codes of TrainingManager's
+ * TRANSPORT_SDK_CODES except SESSION_INIT_ERROR (the node refusing the init will refuse the next one too), plus the fetch's
+ * own timeout, close and send failures.
+ */
+const TRANSIENT_FETCH_CODES = new Set([
+  'WS_CONNECTION_ERROR', 'WS_CREATE_ERROR', 'WS_TIMEOUT', 'WS_NOT_CONNECTED', 'WS_SEND_ERROR', 'WS_RECONNECT_FAILED',
+  'SESSION_AUTH_UNREACHABLE', 'RESPONSE_TIMEOUT', 'HOST_PUBKEY_UNAVAILABLE', 'NO_API_URL',
+]);
+function isTransientFetchFailure(err: any): boolean {
+  if (err instanceof TranscodeError) {
+    const reason = (err.details as any)?.reason;
+    return !(err.details as any)?.nodeCode && ['FETCH_TIMEOUT', 'WS_CLOSED', 'SEND_FAILED'].includes(reason);
+  }
+  return TRANSIENT_FETCH_CODES.has(err?.code);
+}
+
+/** A job that rides `submitOverTransport`; one per session at a time (1.39.14). */
+type SessionJobKind = 'transcode' | 'ltx' | 'training';
+
 function fundedSetupFailed(sessionId: unknown, jobId: unknown, stage: 'registry' | 'conversation-log' | 'session-group-link', cause: any): SDKError {
   // A step that landed, only its head not recorded (§34 OO4), completed the setup: said at the top — use the session
   // (§35 PP6).
@@ -335,6 +358,14 @@ export class SessionManager implements ISessionManager {
    * wherever a frame names its session.
    */
   private sessionCrypto: Map<string, { key: Uint8Array; messageIndex: number }> = new Map();
+  /** Reads a session job through the dedicated read provider (FabstirSDKCore wires it), never the wallet (1.39.18 K2). */
+  private sessionJobReader?: (chainId: number) => { getSessionJobOnChain(jobId: bigint): Promise<{ startTime: bigint | number; maxDuration: bigint | number }> };
+  /** Hosts trusted with confidential jobs, lower-cased; undefined = none configured, so none allowed (1.39.19). */
+  private confidentialHosts?: Set<string>;
+  /** Per session id: whether its node reports `session-job-completion` (1.39.15 H1). Only definitive answers are kept. */
+  private jobCompletionNodes: Map<string, boolean> = new Map();
+  /** The one job in flight per session id (1.39.14, IMPLEMENTATION-SESSION-JOB-EXCLUSIVE G1). */
+  private jobsInFlight: Map<string, SessionJobKind> = new Map();
   /** Serializes init handshakes so two mint->send->ack sequences cannot interleave. */
   private initChain: Promise<void> = Promise.resolve();
   /** Key fingerprints already wire-logged on a successful decrypt (one ok-line per key; failures always log). */
@@ -491,6 +522,14 @@ export class SessionManager implements ISessionManager {
       throw new Error('HostManager not set; cannot resolve model price');
     }
     return this.hostManager.getModelPricing(hostAddress, convertModelToBytes32(modelId), paymentToken);
+  }
+
+  /** The model's on-chain rate cap in tokens per second, the same route as its price (1.39.17). */
+  async resolveModelRateLimit(modelId: string): Promise<number> {
+    if (!this.hostManager) {
+      throw new Error('HostManager not set; cannot resolve model rate limit');
+    }
+    return this.hostManager.getModelRateLimit(convertModelToBytes32(modelId));
   }
 
   /** Last post-ack serve-back failure (E.3), or null. Cleared on each (re-)init, because a
@@ -912,6 +951,10 @@ export class SessionManager implements ISessionManager {
    * re-seed or two chains sharing an id.
    */
   registerExternalSession(config: ExternalSessionConfig): void {
+    // Re-seeding replaces the record (prompts, tokens, lora); never under a running job (1.39.14, G8).
+    this.refuseIfJobInFlight(String(config.sessionId));
+    // The record may now name another node, so what its old node reported no longer applies (1.39.15).
+    this.jobCompletionNodes.delete(String(config.sessionId));
     // The rule lives at the seam, not only in the two manager callers: this is a public
     // ISessionManager method. The WS derivation in acquireSessionTransport uses a ws(s):// value
     // VERBATIM — a bare `wss://host` opens at the node root, and a full `wss://host/v1/ws` works
@@ -1178,6 +1221,7 @@ export class SessionManager implements ISessionManager {
     if (session.status !== 'active') {
       throw new SDKError(`Session is ${session.status}`, 'SESSION_NOT_ACTIVE');
     }
+    const endpoint = this.requireEndpoint(session, sessionId);
 
     try {
       // Inject RAG context if enabled
@@ -1187,7 +1231,6 @@ export class SessionManager implements ISessionManager {
       session.prompts.push(prompt);
 
       // Use REST API instead of WebSocket (as per node implementation)
-      const endpoint = session.endpoint || 'http://localhost:8080';
       const httpUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
 
       // Call REST API for inference with augmented prompt
@@ -1321,6 +1364,8 @@ export class SessionManager implements ISessionManager {
     if (session.status !== 'active') {
       throw new SDKError(`Session is ${session.status}`, 'SESSION_NOT_ACTIVE');
     }
+    // Before image routing, which swallows generateImage's errors into the LLM path.
+    const endpoint = this.requireEndpoint(session, sessionId);
 
     // Auto-detect image generation intent (like search intent auto-detection)
     const imageIntent = analyzePromptForImageIntent(prompt);
@@ -1349,7 +1394,6 @@ export class SessionManager implements ISessionManager {
       session.prompts.push(prompt);
 
       // Get WebSocket URL from endpoint
-      const endpoint = session.endpoint || 'http://localhost:8080';
       const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
         ? endpoint 
         : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
@@ -2158,6 +2202,9 @@ export class SessionManager implements ISessionManager {
             jobId: BigInt(conversation.metadata.jobId || sessionId),
             model: conversation.metadata.model || '',
             provider: conversation.metadata.provider || '',
+            // A failed completion leaves this entry active in memory, and later calls skip the restore that
+            // would supply the endpoint — so carry it here too (1.39.13 review; no localhost fallback after it).
+            endpoint: conversation.metadata.endpoint,
             status: conversation.metadata.status || 'active',
             prompts: [],
             responses: [],
@@ -2311,25 +2358,35 @@ export class SessionManager implements ISessionManager {
     ws: WebSocketClient,
     config: ExtendedSessionConfig,
     sessionId: bigint,
-    jobId: bigint
-  ): Promise<void> {
+    jobId: bigint,
+    scope: 'shared' | 'dedicated' = 'shared'
+  ): Promise<Uint8Array> {
+    // A dedicated socket carries only its own ack and its init touches no shared state (E1), so
+    // there is nothing to serialise — and queuing would make every creator wait behind the others' acks.
+    if (scope === 'dedicated') return this.sendEncryptedInitInner(ws, config, sessionId, jobId, scope);
     // Serialize handshakes: two concurrent inits interleaving their
     // mint->send->ack sequences is how one flow's key ends up attributed to
     // another flow's ack. The chain never rejects (each link swallows), while
     // the caller still sees its own link's outcome.
     const run = this.initChain.then(() =>
-      this.sendEncryptedInitInner(ws, config, sessionId, jobId)
+      this.sendEncryptedInitInner(ws, config, sessionId, jobId, scope)
     );
     this.initChain = run.then(() => undefined, () => undefined);
     return run;
   }
 
+  /**
+   * `scope: 'dedicated'` (a per-job socket) reads and writes only this call's state: the key is
+   * returned, never stored in the shared fields or `sessionCrypto`, and the shared serve-back
+   * listener and lora flag are left alone (IMPLEMENTATION-TRANSPORT-ISOLATION E1).
+   */
   private async sendEncryptedInitInner(
     ws: WebSocketClient,
     config: ExtendedSessionConfig,
     sessionId: bigint,
-    jobId: bigint
-  ): Promise<void> {
+    jobId: bigint,
+    scope: 'shared' | 'dedicated'
+  ): Promise<Uint8Array> {
     console.warn(`[SDK:encryptedInit:1] ENTER sessionId=${sessionId} jobId=${jobId} host=${config.host} endpoint=${config.endpoint}`);
 
     if (!this.encryptionManager) {
@@ -2349,15 +2406,18 @@ export class SessionManager implements ISessionManager {
     }
 
     // 1. Generate random session key (32 bytes)
-    this.sessionKey = crypto.getRandomValues(new Uint8Array(32));
-    const sessionKeyHex = bytesToHex(this.sessionKey);
-    this.messageIndex = 0;
-    // Authoritative per-session entry: frames stamped with this session id are
-    // encrypted/decrypted with THIS key, whatever later inits do to the legacy
-    // shared fields.
-    this.sessionCrypto.set(sessionId.toString(), { key: this.sessionKey, messageIndex: 0 });
-    console.warn(`[SDK:encryptedInit:4] Generated session key, messageIndex reset to 0`);
-    console.warn(`[SDK:wire] mint session=${sessionId} fp=${this.wireFp(this.sessionKey)} gen=${ws.getConnectionGeneration?.() ?? '-'}`);
+    const sessionKey = crypto.getRandomValues(new Uint8Array(32));
+    const sessionKeyHex = bytesToHex(sessionKey);
+    if (scope === 'shared') {
+      this.sessionKey = sessionKey;
+      this.messageIndex = 0;
+      // Authoritative per-session entry: frames stamped with this session id are
+      // encrypted/decrypted with THIS key, whatever later inits do to the legacy
+      // shared fields.
+      this.sessionCrypto.set(sessionId.toString(), { key: sessionKey, messageIndex: 0 });
+    }
+    console.warn(`[SDK:encryptedInit:4] Generated ${scope} session key, messageIndex reset to 0`);
+    console.warn(`[SDK:wire] mint session=${sessionId} fp=${this.wireFp(sessionKey)} gen=${ws.getConnectionGeneration?.() ?? '-'}`);
 
     // 2. Get host public key (uses cache, metadata, or signature recovery)
     console.warn(`[SDK:encryptedInit:5] Getting host public key for ${config.host}...`);
@@ -2391,10 +2451,12 @@ export class SessionManager implements ISessionManager {
     if (sessionState && config.lora) sessionState.lora = config.lora;
     if (sessionState && config.onServeBackError) sessionState.onServeBackError = config.onServeBackError;
 
-    this.serveBackError = null;
-    this.serveBackUnsubscribe?.();          // a re-init REPLACES the listener, never adds one
-    this.serveBackUnsubscribe = undefined;
-    this.loraSessionActive = config.lora !== undefined;
+    if (scope === 'shared') {
+      this.serveBackError = null;
+      this.serveBackUnsubscribe?.();          // a re-init REPLACES the listener, never adds one
+      this.serveBackUnsubscribe = undefined;
+      this.loraSessionActive = config.lora !== undefined;
+    }
     if (config.lora) {
       initPayload.lora = buildLoraSessionField(config.lora);
     }
@@ -2479,13 +2541,16 @@ export class SessionManager implements ISessionManager {
     // Without this listener the failure is SILENT and the session answers from the base
     // model. Installed only for lora sessions, so non-lora behaviour is unchanged.
     if (config.lora) {
-      this.serveBackUnsubscribe = ws.onMessage((data: any) => {
+      // A dedicated socket's listener lives and dies with that socket; only the shared one is tracked.
+      const unsubscribe = ws.onMessage((data: any) => {
         const error = toServeBackError(data);
         if (!error) return;
         this.serveBackError = error;
         config.onServeBackError?.(error);
       });
+      if (scope === 'shared') this.serveBackUnsubscribe = unsubscribe;
     }
+    return sessionKey;
   }
 
   /**
@@ -2967,13 +3032,13 @@ export class SessionManager implements ISessionManager {
     if (session.status !== 'active') {
       throw new SDKError(`Session is ${session.status}`, 'SESSION_NOT_ACTIVE');
     }
+    const endpoint = this.requireEndpoint(session, sessionId);
 
     try {
       // Add prompt to session
       session.prompts.push(prompt);
 
       // For now, use REST API and simulate streaming
-      const endpoint = session.endpoint || 'http://localhost:8080';
       const httpUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
       
       // Call REST API for inference
@@ -3182,12 +3247,12 @@ export class SessionManager implements ISessionManager {
       );
     }
 
-    // 2. Force new WebSocket if session changed (old connection belongs to previous session)
-    const endpoint = session.endpoint || 'http://localhost:8080';
+    const endpoint = this.requireEndpoint(session, sessionId);
     const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
       ? endpoint
       : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
 
+    // 2. Force new WebSocket if session changed (old connection belongs to previous session)
     if (this.wsClient && this.wsSessionId && this.wsSessionId !== sessionId) {
       try { await this.wsClient.disconnect(); } catch (_) { /* ignore */ }
       this.wsClient = undefined;
@@ -3476,23 +3541,26 @@ export class SessionManager implements ISessionManager {
     question: string,
     topK: number = 5
   ): Promise<string> {
+    // Get session to retrieve host endpoint and chainId
+    const session = this.sessions.get(sessionId);
+    if (!session || session.status !== 'active') {
+      return question; // Graceful degradation
+    }
+
+    // Check if RAG context is configured - if not, return original question
+    // (no point generating embeddings without a vector database)
+    if (!session.ragContext?.vectorDbId) {
+      return question; // Graceful degradation
+    }
+
+    // A missing endpoint is a bug, not something to degrade around: outside the catch below (F3).
+    const endpoint = this.requireEndpoint(session, sessionId);
+
     try {
-      // Get session to retrieve host endpoint and chainId
-      const session = this.sessions.get(sessionId);
-      if (!session || session.status !== 'active') {
-        return question; // Graceful degradation
-      }
-
-      // Check if RAG context is configured - if not, return original question
-      // (no point generating embeddings without a vector database)
-      if (!session.ragContext?.vectorDbId) {
-        return question; // Graceful degradation
-      }
-
       // Create HostAdapter to generate embedding
       const { HostAdapter } = await import('../embeddings/adapters/HostAdapter');
       const hostAdapter = new HostAdapter({
-        hostUrl: session.endpoint || 'http://localhost:8080',
+        hostUrl: endpoint,
         chainId: session.chainId || 84532,
         model: 'all-MiniLM-L6-v2'
       });
@@ -3889,6 +3957,7 @@ export class SessionManager implements ISessionManager {
     if (session.status !== 'active') {
       throw new SDKError('Session must be active to generate embeddings', 'SESSION_INACTIVE');
     }
+    const endpoint = this.requireEndpoint(session, sessionId);
 
     // Chunk configuration
     const chunkSize = options?.chunkSize || 512;
@@ -3910,7 +3979,6 @@ export class SessionManager implements ISessionManager {
 
 
     // Get HTTP endpoint from session
-    const endpoint = session.endpoint || 'http://localhost:8080';
     const httpUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
     const embedUrl = `${httpUrl}/v1/embed`;
 
@@ -4017,7 +4085,7 @@ export class SessionManager implements ISessionManager {
         return null;
       }
       // Get HTTP URL from endpoint (convert ws:// to http:// if needed)
-      const endpoint = session.endpoint || 'http://localhost:8080';
+      const endpoint = this.requireEndpoint(session, id);
       const hostUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
 
       return {
@@ -4048,6 +4116,7 @@ export class SessionManager implements ISessionManager {
         userPrivateKey
       );
     } catch (error: any) {
+      if (error instanceof SDKError && error.code === 'SESSION_ENDPOINT_MISSING') throw error;   // F4: typed, as thrown
       // Convert to SDKError if not already
       if (error.message?.startsWith('SESSION_NOT_FOUND')) {
         throw new SDKError(error.message, 'SESSION_NOT_FOUND');
@@ -4192,7 +4261,7 @@ export class SessionManager implements ISessionManager {
     console.warn(`[SDK:generateImage:6] EncryptionManager OK`);
 
     // Lazily initialize WebSocket if not connected
-    const endpoint = session.endpoint || 'http://localhost:8080';
+    const endpoint = this.requireEndpoint(session, sessionId);
     const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
       ? endpoint
       : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
@@ -4245,14 +4314,16 @@ export class SessionManager implements ISessionManager {
       throw err;
     }
 
-    if (!this.sessionKey) {
+    // The init just wrote this session's entry; its counter is the one chat continues from (E3).
+    const imageCrypto = this.sessionCrypto.get(sessionId);
+    if (!imageCrypto) {
       console.error(`[SDK:generateImage:16] SESSION_KEY_NOT_AVAILABLE after init`);
       throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
     }
 
     // Delegate to standalone utility
     console.warn(`[SDK:generateImage:17] Calling generateImageWs prompt="${prompt.substring(0, 50)}..." msgIdx=${this.messageIndex}`);
-    const messageIndexRef = { value: this.messageIndex };
+    const messageIndexRef = this.liveIndex(imageCrypto);
     try {
       const result = await generateImageWs({
         wsClient: this.wsClient,
@@ -4266,12 +4337,11 @@ export class SessionManager implements ISessionManager {
         },
         rateLimiter: this.imageGenRateLimiter,
         sessionId,
-        sessionKey: this.sessionKey,
+        sessionKey: imageCrypto.key,
         messageIndex: messageIndexRef,
         prompt,
         options,
       });
-      this.messageIndex = messageIndexRef.value;
       console.warn(`[SDK:generateImage:18] generateImageWs completed OK, size=${result.size} processingTime=${result.processingTimeMs}ms`);
 
       // Track image generation billing as token usage
@@ -4299,6 +4369,172 @@ export class SessionManager implements ISessionManager {
 
   /** Submit an LTX video job via encrypted WebSocket (mirrors submitTranscode; Constraint 7). */
   /**
+   * The hosts trusted with confidential jobs (1.39.19): an encrypted transcode, every LTX job and every training job put
+   * keys in the host's hands, and nothing on the node or the contracts stops another host taking them, so the SDK refuses
+   * such a job for any other host — and, with no list configured, for every host. Unencrypted transcodes and chat stay
+   * open. Set through FabstirSDKCore's `confidentialHosts`.
+   */
+  setConfidentialHosts(hosts: readonly string[]): void {
+    if (!Array.isArray(hosts) || hosts.some((h) => typeof h !== 'string' || !ethers.isAddress(h))) {
+      throw new SDKError('confidentialHosts must be a list of host addresses', 'INVALID_CONFIDENTIAL_HOSTS', { hosts, retryable: false });
+    }
+    this.confidentialHosts = new Set(hosts.map((h) => h.toLowerCase()));
+  }
+
+  /** The configured confidential hosts (lower-cased), or undefined when none is configured. */
+  getConfidentialHosts(): string[] | undefined {
+    return this.confidentialHosts ? [...this.confidentialHosts] : undefined;
+  }
+
+  /**
+   * Refuse a confidential job for `host` unless it is on the list (fail closed): SDKError CONFIDENTIAL_HOST_NOT_ALLOWED,
+   * `details { reason: 'NO_ALLOWLIST' | 'HOST_NOT_ALLOWED', host, job }`. The managers call it before funding (1.39.19).
+   */
+  assertConfidentialHost(host: string, job: SessionJobKind): void {
+    if (!this.confidentialHosts) {
+      throw new SDKError(`Confidential ${job} jobs are refused: no confidentialHosts are configured`, 'CONFIDENTIAL_HOST_NOT_ALLOWED',
+        { reason: 'NO_ALLOWLIST', host, job, retryable: false });
+    }
+    if (!this.confidentialHosts.has(String(host).toLowerCase())) {
+      throw new SDKError(`Host ${host} is not trusted with confidential ${job} jobs (confidentialHosts)`, 'CONFIDENTIAL_HOST_NOT_ALLOWED',
+        { reason: 'HOST_NOT_ALLOWED', host, job, retryable: false });
+    }
+  }
+
+  /** How the SDK reads a session job on chain for the transcode wait: the read provider's path, never the wallet's (1.39.18). */
+  setSessionJobReader(reader: NonNullable<SessionManager['sessionJobReader']>): void {
+    this.sessionJobReader = reader;
+  }
+
+
+  /** How often a dropped transcode's stored result is asked for, and how long one answer may take (1.39.15 H4). */
+  static TRANSCODE_RESULT_POLL_MS = 15_000;
+  static TRANSCODE_RESULT_ANSWER_MS = 30_000;
+
+  /**
+   * Whether the session's node reports `session-job-completion` in GET /v1/version (1.39.15 H1). A 2xx answer is
+   * remembered for the session; a probe that fails is not, and counts as NO: a wrong "no" is 1.39.14's loud refusal or
+   * final WS_CLOSED, a wrong "yes" a frame that silently fails to decrypt or a session settling under a running job.
+   */
+  private async isJobCompletionNode(sessionId: string, fresh = false): Promise<boolean> {
+    const known = this.jobCompletionNodes.get(sessionId);
+    if (known !== undefined && !fresh) return known;
+    const session = this.sessions.get(sessionId);
+    if (!session?.endpoint?.trim()) return false;   // the caller's own guard reports SESSION_ENDPOINT_MISSING
+    try {
+      const httpUrl = session.endpoint.trim()
+        .replace(/^(wss?|https?):\/\//i, (_m, scheme: string) => `${{ ws: 'http', wss: 'https' }[scheme.toLowerCase()] ?? scheme.toLowerCase()}://`)
+        .replace(/\/+$/, '').replace(/\/v1\/ws$/i, '').replace(/\/+$/, '');
+      const response = await fetch(`${httpUrl}/v1/version`, { signal: AbortSignal.timeout(3000) });
+      if (!response.ok) return false;
+      const data = await response.json();
+      const yes = Array.isArray(data?.features) && data.features.includes('session-job-completion');
+      this.jobCompletionNodes.set(sessionId, yes);
+      return yes;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Ask a node that reports `session-job-completion` for a transcode's stored result: the outputs of a job whose
+   * connection dropped, kept for 7 days and served only to the identity that submitted it (1.39.15 H3). Works on a
+   * session already ended or completed; never bills, re-runs or settles. Save the output CIDs as soon as they arrive.
+   *
+   * @returns `{ status: 'complete', result }`, or `{ status: 'pending' }` while the job still runs (ask again later)
+   * @throws TranscodeError TRANSCODE_FAILED with `details.nodeCode` RESULT_NOT_FOUND / RESULT_EXPIRED (gone — treat both
+   *   the same), NOT_OWNER, or the job's own failure (e.g. BILLING_FAILED, a moderation hold)
+   * @throws SDKError TRANSCODE_RESULT_UNSUPPORTED (not retryable) — the node does not report the marker
+   */
+  async fetchTranscodeResult(sessionId: string, taskId: string): Promise<TranscodeResultAnswer> {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
+    this.requireEndpoint(session, sessionId);
+    if (!(await this.isJobCompletionNode(sessionId, true))) {
+      throw new SDKError(
+        `The node for session ${sessionId} does not report session-job-completion, so it keeps no transcode results`,
+        'TRANSCODE_RESULT_UNSUPPORTED', { sessionId, taskId, retryable: false },
+      );
+    }
+    const { wsClient, sessionKey, messageIndexRef, encryptionAdapter } = await this.acquireSessionTransport(sessionId, 'fetch');
+    try {
+      return await fetchTranscodeResultWs({
+        wsClient, encryptionManager: encryptionAdapter, sessionId, sessionKey, messageIndex: messageIndexRef,
+        taskId, timeoutMs: SessionManager.TRANSCODE_RESULT_ANSWER_MS,
+      });
+    } finally {
+      void wsClient.disconnect().catch(() => {});
+    }
+  }
+
+  /**
+   * A transcode whose connection dropped after `transcode_accepted`, on a `session-job-completion` node: the node carries
+   * it to the end and keeps the result, so fetch it until it is there, gone, or the submit's own deadline passes (H4).
+   * A failed attempt (host unreachable) waits for the next tick; the node's verdict (gone, NOT_OWNER, the job's failure)
+   * ends it.
+   */
+  private async recoverTranscodeResult(
+    sessionId: string, taskId: string, deadline: number, cancelled: { signal: Promise<never> },
+  ): Promise<TranscodeResult> {
+    const timedOut = () => new TranscodeError(
+      `The connection for transcode ${taskId} dropped and its stored result did not arrive before the deadline`,
+      'TRANSCODE_TIMEOUT', undefined, { reason: 'WS_CLOSED', taskId },
+    );
+    // Every wait — an attempt or the pause between attempts — is bounded by the caller's deadline and by cancel().
+    const bounded = <T>(work: Promise<T>): Promise<T> => {
+      work.catch(() => {});   // an abandoned attempt still settles (its socket closes in fetchTranscodeResult's finally)
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadlineHit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(timedOut()), Math.max(0, deadline - Date.now())); });
+      return Promise.race([work, deadlineHit, cancelled.signal]).finally(() => clearTimeout(timer));
+    };
+    for (;;) {
+      try {
+        const answer = await bounded(this.fetchTranscodeResult(sessionId, taskId));
+        if (answer.status === 'complete') return answer.result;
+      } catch (err: any) {
+        // Only a transport failure is worth another attempt; the node's verdict, a refused init, a missing session, a
+        // node that no longer reports the marker, the deadline or cancel() end the recovery.
+        if (!isTransientFetchFailure(err)) throw err;
+      }
+      if (deadline - Date.now() <= 0) throw timedOut();
+      await bounded(new Promise((r) => setTimeout(r, SessionManager.TRANSCODE_RESULT_POLL_MS)));
+    }
+  }
+
+  /** SESSION_JOB_IN_FLIGHT when `sessionId` has a job in flight in this manager (1.39.14, G1/G8). */
+  private refuseIfJobInFlight(sessionId: string): void {
+    const inFlight = this.jobsInFlight.get(sessionId);
+    if (!inFlight) return;
+    throw new SDKError(
+      `Session ${sessionId} already has a ${inFlight} job in flight. Run one job per session: the node keeps one ` +
+      'key per session and completes the session when any of its sockets closes',
+      'SESSION_JOB_IN_FLIGHT', { sessionId, inFlight, retryable: false },
+    );
+  }
+
+  /**
+   * The session's endpoint, or a typed refusal. No fallback: a session with no endpoint is a bug,
+   * and substituting localhost would send the user's prompt or a paid job to the developer's own
+   * machine instead of the host. Callers check it before any side effect and outside any try that
+   * rewraps errors (1.36.0 Q7 for the WS submits; every other site 1.39.13).
+   */
+  private requireEndpoint(session: SessionState, sessionId: string | bigint): string {
+    if (!session.endpoint?.trim()) {
+      throw new SDKError(`Session ${sessionId} has no endpoint`, 'SESSION_ENDPOINT_MISSING');
+    }
+    return session.endpoint;
+  }
+
+  /**
+   * The session's own replay counter as a `{ value }` ref, live rather than a copy: chat and any job
+   * on the shared socket draw from ONE counter per key, so no index repeats under that key and there
+   * is no write-back step a throw could skip (IMPLEMENTATION-TRANSPORT-ISOLATION E3).
+   */
+  private liveIndex(entry: { messageIndex: number }): { value: number } {
+    return { get value() { return entry.messageIndex; }, set value(v: number) { entry.messageIndex = v; } };
+  }
+
+  /**
    * Acquire an encrypted transport for a session: reuse the shared socket when it is already
    * this session's, otherwise stand up a dedicated one and run the encrypted init on it.
    *
@@ -4308,7 +4544,7 @@ export class SessionManager implements ISessionManager {
    * shared `sessionKey`/`messageIndex` around a dedicated init — are exactly the parts a
    * copy gets subtly wrong.
    */
-  private async acquireSessionTransport(sessionId: string): Promise<{
+  private async acquireSessionTransport(sessionId: string, mode: 'job' | 'fetch' = 'job'): Promise<{
     wsClient: WebSocketClient;
     sessionKey: Uint8Array;
     messageIndexRef: { value: number };
@@ -4320,65 +4556,61 @@ export class SessionManager implements ISessionManager {
   }> {
     const session = this.sessions.get(sessionId);
     if (!session) throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
-    if (session.status !== 'active') throw new SDKError('Session is not active', 'SESSION_NOT_ACTIVE');
+    // A result fetch works on a session the caller ended or the node completed (1.39.15 H3).
+    if (mode === 'job' && session.status !== 'active') throw new SDKError('Session is not active', 'SESSION_NOT_ACTIVE');
     if (!this.encryptionManager) throw new SDKError('EncryptionManager not available', 'ENCRYPTION_NOT_AVAILABLE');
 
-    // No fallback: a session with no endpoint is a bug, and silently substituting localhost
-    // would send a paid job to the developer's own machine instead of the host.
-    const endpoint = session.endpoint;
-    if (!endpoint) throw new SDKError(`Session ${sessionId} has no endpoint`, 'SESSION_ENDPOINT_MISSING');
+    const endpoint = this.requireEndpoint(session, sessionId);
     const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
       ? endpoint : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
 
     let wsClient: WebSocketClient;
-    let localSessionKey: Uint8Array | undefined;
-    let localMessageIndex: number;
+    let sessionKey: Uint8Array;
+    let messageIndexRef: { value: number };
 
     // Identity, not liveness: a silent reconnect leaves isConnected() true on a
     // connection the node never received an init for, and reusing the key here
     // would encrypt under a key that connection has no record of.
-    if (!this.needsSessionInit() && this.wsSessionId === sessionId && this.sessionKey) {
+    // The entry must also be the key the LAST shared init minted: a session-switch teardown clears
+    // `sessionKey` but leaves the old entry, and a fresh socket restarts at generation 1.
+    const shared = this.sessionCrypto.get(sessionId);
+    // A fetch always gets its own connection: the node serves it on a freshly inited one, and never settles on it.
+    if (mode === 'job' && !this.needsSessionInit() && this.wsSessionId === sessionId && shared && shared.key === this.sessionKey) {
       wsClient = this.wsClient!;
-      localSessionKey = this.sessionKey;
-      localMessageIndex = this.messageIndex;
+      sessionKey = shared.key;
+      messageIndexRef = this.liveIndex(shared);
     } else {
       // A per-job socket never silently reconnects: a reconnected socket has no session init and the
-      // frames are not re-delivered. And a FAILED init must leave nothing behind — no open socket with a
-      // 30 s heartbeat, no background reconnect loop, and the shared session's key untouched.
+      // frames are not re-delivered. A FAILED init must leave nothing behind — no open socket with a
+      // 30 s heartbeat, no background reconnect loop — and the init itself touches no shared state (E1).
       wsClient = new WebSocketClient(wsUrl, { reconnect: false });
-      const prevSessionKey = this.sessionKey;
-      const prevMessageIndex = this.messageIndex;
       try {
         await wsClient.connect();
-        this.sessionKey = undefined;
-        this.messageIndex = 0;
-        await this.sendEncryptedInit(wsClient, {
+        sessionKey = await this.sendEncryptedInit(wsClient, {
           chainId: session.chainId, host: session.provider, modelId: session.model,
           endpoint, encryption: true,
-          lora: session.lora,            // E.3: a re-init MUST re-send it
-          onServeBackError: session.onServeBackError,
+          // E.3: a job's re-init MUST re-send it. A result fetch's must NOT (1.39.16): the node stages the adapter
+          // after the ack (up to 300 s, re-fetched from S5) and the fetch frame waits behind it; a fetch never prompts.
+          lora: mode === 'fetch' ? undefined : session.lora,
+          onServeBackError: mode === 'fetch' ? undefined : session.onServeBackError,
         // Deliberately partial: sendEncryptedInit reads only this subset, and the required
         // pricing/proof fields are meaningless for a re-init on an already-funded session. The
         // cast was always hiding that; the double cast only stops TS's overlap heuristic from
         // objecting now that there are two more properties to weigh.
-        } as unknown as ExtendedSessionConfig, session.sessionId, session.jobId);
-        localSessionKey = this.sessionKey;
-        localMessageIndex = this.messageIndex;
+        } as unknown as ExtendedSessionConfig, session.sessionId, session.jobId, 'dedicated');
+        // Inside the try: a keyless init is a failed init, and its socket must not outlive it.
+        if (!sessionKey) throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
       } catch (err) {
         await wsClient.disconnect().catch(() => {});   // cleanup only — the init failure is what surfaces
         throw err;
-      } finally {
-        this.sessionKey = prevSessionKey;
-        this.messageIndex = prevMessageIndex;
       }
+      messageIndexRef = { value: 0 };
     }
-
-    if (!localSessionKey) throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
 
     return {
       wsClient,
-      sessionKey: localSessionKey,
-      messageIndexRef: { value: localMessageIndex },
+      sessionKey,
+      messageIndexRef,
       ownsWs: wsClient !== this.wsClient, // dedicated per-job socket, not the shared session WS
       encryptionAdapter: {
         encryptMessage: (key: Uint8Array, plaintext: string, index: number) =>
@@ -4389,6 +4621,97 @@ export class SessionManager implements ISessionManager {
         },
       },
     };
+  }
+
+  /**
+   * Run a WS submit over this session's transport, and close a socket it OPENED on every outcome:
+   * a throw before the handle exists, and the result settling either way. A reused shared socket
+   * is never closed here. The node settles the session when its socket closes, so a leaked
+   * dedicated socket leaves the host unpaid and the session Active until the tab unloads.
+   */
+  private async submitOverTransport<H extends { result: Promise<any> }>(
+    sessionId: string, kind: SessionJobKind,
+    submit: (t: Awaited<ReturnType<SessionManager['acquireSessionTransport']>> & { jobCompletionNode: boolean }) => Promise<H>,
+    /** Work that may refuse the job before any socket, run AFTER the claim so the claim stays first (1.39.18). */
+    prepare?: () => Promise<void>,
+    /** The job puts keys in the host's hands: only a confidential host may take it (1.39.19). */
+    confidential = true,
+  ): Promise<H> {
+    // Confidential hosts (1.39.19): checked on a usable session only, so the session guards (not found, not active, no
+    // endpoint, no EncryptionManager) keep their precedence; the record checked is the one the job must go out on.
+    const usable = this.sessions.get(sessionId);
+    let guarded: SessionState | undefined;
+    if (usable && usable.status === 'active' && usable.endpoint?.trim() && this.encryptionManager) {
+      guarded = usable;
+      if (confidential) {
+        try {
+          this.assertConfidentialHost(usable.provider, kind);
+        } catch (err: any) {
+          throw kind === 'transcode'
+            ? new TranscodeError(err.message, 'CONFIDENTIAL_HOST_NOT_ALLOWED', usable.provider, err.details)
+            : err;
+        }
+      }
+    }
+    // One job per session (1.39.14) on a node WITHOUT `session-job-completion`: it holds ONE key per session id across
+    // connections (a second init replaces the first job's key) and completes the session when any of its sockets
+    // closes. A node that reports the marker keys by connection and completes per job, so nothing is claimed (1.39.15
+    // H2). Check and claim are one synchronous step after the probe, so two submits in one tick cannot both pass.
+    // Until a node is KNOWN to report the marker, claim synchronously on entry exactly as 1.39.14 does (the first caller
+    // wins, and registerExternalSession is refused from the first instant); a probe that then says yes gives it back.
+    let jobCompletionNode = this.jobCompletionNodes.get(sessionId) === true;
+    let release = () => {};
+    if (!jobCompletionNode) {
+      this.refuseIfJobInFlight(sessionId);
+      this.jobsInFlight.set(sessionId, kind);
+      release = () => { this.jobsInFlight.delete(sessionId); };
+      if (this.sessions.get(sessionId)?.status === 'active') {   // else acquire throws its typed refusal
+        try {
+          jobCompletionNode = await this.isJobCompletionNode(sessionId);
+        } catch (err) {
+          release();
+          throw err;
+        }
+        if (jobCompletionNode) { release(); release = () => {}; }
+      }
+    }
+    let transport: Awaited<ReturnType<SessionManager['acquireSessionTransport']>>;
+    try {
+      if (prepare) await prepare();
+      transport = await this.acquireSessionTransport(sessionId);
+    } catch (err) {
+      release();
+      throw err;
+    }
+    const { wsClient, ownsWs } = transport;
+    const close = () => { void wsClient.disconnect().catch(() => {}); };
+    let handle: H;
+    try {
+      // A re-registration while this submit awaited could point the record at another host; the job frame carries the
+      // keys, so it goes out only to the host and endpoint the check passed (1.39.18 review R1, now for every job). An
+      // identical re-seed (the same session adopted again for the same host) is not a swap (1.39.19 review).
+      const current = this.sessions.get(sessionId);
+      const sameTarget = !!current && !!guarded
+        && String(current.provider).toLowerCase() === String(guarded.provider).toLowerCase()
+        && current.endpoint === guarded.endpoint;
+      if (!sameTarget) {
+        throw kind === 'transcode'
+          ? new TranscodeError(`Session ${sessionId} was re-registered while the transcode was being submitted`, 'TRANSCODE_FAILED',
+            undefined, { reason: 'SESSION_CHANGED', sessionId })
+          : new SDKError(`Session ${sessionId} was re-registered while the ${kind} job was being submitted`, 'SESSION_CHANGED',
+            { reason: 'SESSION_CHANGED', sessionId, retryable: false });
+      }
+      handle = await submit({ ...transport, jobCompletionNode });
+    } catch (err) {
+      if (ownsWs) close();
+      release();
+      throw err;
+    }
+    handle.result = handle.result.finally(() => { if (ownsWs) close(); release(); });
+    // Every re-wrap is a NEW promise the *-ws module never marked handled. Without this a job
+    // rejected before the consumer attaches is an unhandled rejection (process exit in Node).
+    handle.result.catch(() => {});
+    return handle;
   }
 
   /**
@@ -4403,120 +4726,96 @@ export class SessionManager implements ISessionManager {
   async submitTraining(
     sessionId: string, job: TrainingJob, options?: Partial<TrainingWsOptions>,
   ): Promise<TrainingHandle> {
-    const { wsClient, sessionKey, messageIndexRef, ownsWs, encryptionAdapter } =
-      await this.acquireSessionTransport(sessionId);
-    const handle = await submitTrainingWs({
-      wsClient, encryptionManager: encryptionAdapter,
-      sessionId, sessionKey, messageIndex: messageIndexRef, job, ...options,
-    } as TrainingWsOptions);
-    if (ownsWs) {
-      handle.result = handle.result.finally(() => { void wsClient.disconnect().catch(() => {}); });
-      // `.finally` returns a NEW promise; training-ws marked only the original handled. A run that
-      // fails before the consumer attaches would otherwise be an unhandled rejection (process exit).
-      handle.result.catch(() => {});
-    }
-    return handle;
+    return this.submitOverTransport(sessionId, 'training', ({ wsClient, sessionKey, messageIndexRef, encryptionAdapter }) =>
+      submitTrainingWs({
+        wsClient, encryptionManager: encryptionAdapter,
+        sessionId, sessionKey, messageIndex: messageIndexRef, job, ...options,
+      } as TrainingWsOptions));
   }
 
   async submitLtx(sessionId: string, job: LtxJob, options?: LtxSubmitOptions): Promise<LtxHandle> {
-    const { wsClient, sessionKey, messageIndexRef, ownsWs, encryptionAdapter } =
-      await this.acquireSessionTransport(sessionId);
-    const handle = await submitLtxWs({
-      wsClient, encryptionManager: encryptionAdapter,
-      sessionId, sessionKey, messageIndex: messageIndexRef,
-      job, requestId: options?.requestId, onProgress: options?.onProgress, timeoutMs: options?.timeoutMs,
+    // Frames/verify use S5, not this WS, so the dedicated socket can close as soon as the clip settles.
+    return this.submitOverTransport(sessionId, 'ltx', async ({ wsClient, sessionKey, messageIndexRef, encryptionAdapter }) => {
+      const handle = await submitLtxWs({
+        wsClient, encryptionManager: encryptionAdapter,
+        sessionId, sessionKey, messageIndex: messageIndexRef,
+        job, requestId: options?.requestId, onProgress: options?.onProgress, timeoutMs: options?.timeoutMs,
+      });
+      // Echo the conditioning seed so the granular submitLtx result is self-contained (matches generate()).
+      handle.result = handle.result.then((r: LtxResult) => { r.seed = job.seed; return r; });
+      return handle;
     });
-    // Echo the conditioning seed so the granular submitLtx result is self-contained (matches generate()).
-    handle.result = handle.result.then((r: LtxResult) => { r.seed = job.seed; return r; });
-    if (ownsWs) {
-      // Close the dedicated socket once the clip settles either way (frames/verify use S5, not this WS).
-      // The node settles the SESSION on socket death (M1 economics) — a lingering WS defers the host's
-      // payout to tab-close or the 1h timeout. Closing here settles it within ~seconds (+30s window).
-      handle.result = handle.result.finally(() => { void wsClient.disconnect().catch(() => {}); });
-    }
-    // Both re-wraps above are NEW promises (the `.then` is unconditional, so this must sit OUTSIDE the
-    // ownsWs guard); ltx-ws never marks its original handled. Without this a clip rejected before the
-    // consumer attaches is an unhandled rejection on the shared-socket path too.
-    handle.result.catch(() => {});
-    return handle;
   }
 
-  /** Submit a transcode job via encrypted WebSocket (mirrors generateImage pattern). */
+  /** Submit a transcode job via encrypted WebSocket (rides the same transport as submitLtx/submitTraining). */
   async submitTranscode(
     sessionId: string, sourceCid: string, formats: VideoFormat[], options?: TranscodeSubmitOptions
   ): Promise<TranscodeHandle> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
-    if (session.status !== 'active') throw new SDKError('Session is not active', 'SESSION_NOT_ACTIVE');
-    if (!this.encryptionManager) throw new SDKError('EncryptionManager not available', 'ENCRYPTION_NOT_AVAILABLE');
+    // A usable session only: the guards (not found, not active, no endpoint) keep their precedence (K6).
+    let timeoutMs = options?.timeoutMs;
+    const usable = this.sessions.get(sessionId);
+    // The wait is read after the claim (prepare), so registerExternalSession is refused from the first instant (1.39.15 V1).
+    let deadline = Date.now() + (timeoutMs ?? TRANSCODE_DEFAULT_TIMEOUT_MS);
+    const prepare = usable && usable.status === 'active' && usable.endpoint?.trim() && this.encryptionManager && timeoutMs === undefined
+      ? async () => { timeoutMs = await this.transcodeWaitForSession(sessionId, usable); deadline = Date.now() + timeoutMs; }
+      : undefined;
+    return this.submitOverTransport(sessionId, 'transcode', async ({ wsClient, sessionKey, messageIndexRef, encryptionAdapter, jobCompletionNode }) => {
+      const session = this.sessions.get(sessionId)!;   // acquireSessionTransport refused a missing one
+      const handle = await submitTranscodeWs({
+        wsClient, encryptionManager: encryptionAdapter,
+        sessionId, sessionKey, messageIndex: messageIndexRef,
+        sourceCid, formats, jobId: Number(session.jobId),
+        chainId: options?.chainId ?? session.chainId, isEncrypted: options?.isEncrypted,
+        isGpu: options?.isGpu, onProgress: options?.onProgress, timeoutMs, previewPercent: options?.previewPercent,
+      });
+      // On a session-job-completion node a drop after the accept is not final: the node finishes and keeps the result (H4).
+      if (jobCompletionNode) {
+        // cancel() during recovery stops the SDK's polling. The node cannot be told over a dead socket: it finishes and
+        // bills the job, and the result stays fetchable (fetchTranscodeResult) for 7 days.
+        let cancel!: (err: Error) => void;
+        const cancelled = { signal: new Promise<never>((_, reject) => { cancel = reject; }) };
+        cancelled.signal.catch(() => {});
+        const sendCancel = handle.cancel;
+        handle.cancel = () => {
+          sendCancel();
+          cancel(new TranscodeError(`Transcode ${handle.taskId || ''} cancelled by the client`.replace('  ', ' '), 'TRANSCODE_FAILED',
+            undefined, { reason: 'CANCELLED', taskId: handle.taskId || undefined }));
+        };
+        handle.result = handle.result.catch((err: any) => {
+          const taskId = err?.details?.reason === 'WS_CLOSED' ? err.details.taskId : undefined;
+          if (!taskId) throw err;   // closed before the accept: no task to fetch
+          return this.recoverTranscodeResult(sessionId, taskId, deadline, cancelled);
+        });
+      }
+      return handle;
+    }, prepare, isEncryptedTranscode(sourceCid, options?.isEncrypted));
+  }
 
-    // Each transcode gets its own WebSocket + session key so concurrent jobs don't clobber each other.
-    // No fallback (see submitLtx): a missing endpoint must fail, not silently target localhost.
-    const endpoint = session.endpoint;
-    if (!endpoint) throw new SDKError(`Session ${sessionId} has no endpoint`, 'SESSION_ENDPOINT_MISSING');
-    const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
-      ? endpoint : endpoint.replace('http://', 'ws://').replace('https://', 'wss://') + '/v1/ws';
-
-    // Reuse existing WS if it matches this session (backward compat / single-session),
-    // otherwise create a dedicated connection for this transcode job
-    let wsClient: WebSocketClient;
-    let localSessionKey: Uint8Array | undefined;
-    let localMessageIndex: number;
-
-    // Identity, not liveness: a silent reconnect leaves isConnected() true on a
-    // connection the node never received an init for, and reusing the key here
-    // would encrypt under a key that connection has no record of.
-    if (!this.needsSessionInit() && this.wsSessionId === sessionId && this.sessionKey) {
-      wsClient = this.wsClient!;
-      localSessionKey = this.sessionKey;
-      localMessageIndex = this.messageIndex;
-    } else {
-      wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
-      await wsClient.connect();
-
-      // Save/restore shared state so sendEncryptedInit writes to per-call locals
-      const prevSessionKey = this.sessionKey;
-      const prevMessageIndex = this.messageIndex;
-      this.sessionKey = undefined;
-      this.messageIndex = 0;
-
-      await this.sendEncryptedInit(wsClient, {
-        chainId: session.chainId, host: session.provider, modelId: session.model,
-        endpoint, paymentMethod: 'deposit', encryption: true,
-        lora: session.lora,            // E.3: a re-init MUST re-send it
-        onServeBackError: session.onServeBackError,
-      // Deliberately partial: sendEncryptedInit reads only this subset, and the required
-      // pricing/proof fields are meaningless for a re-init on an already-funded session. The
-      // cast was always hiding that; the double cast only stops TS's overlap heuristic from
-      // objecting now that there are two more properties to weigh.
-      } as unknown as ExtendedSessionConfig, session.sessionId, session.jobId);
-
-      localSessionKey = this.sessionKey;
-      localMessageIndex = this.messageIndex;
-      // Restore previous shared state (for non-transcode WS usage)
-      this.sessionKey = prevSessionKey;
-      this.messageIndex = prevMessageIndex;
+  /**
+   * How long to wait for a transcode on this session: until the session's own on-chain expiry plus 300 s (1.39.18). The
+   * node keeps only a job it can bill before expiry and its run limit sits inside the lifetime, so the result arrives by
+   * then. Read from the chain, because a session minted elsewhere (registerExternalSession) carries no lifetime here.
+   */
+  private async transcodeWaitForSession(sessionId: string, session: SessionState): Promise<number> {
+    let job: any;
+    try {
+      if (!this.sessionJobReader) throw new Error('no session reader is wired (FabstirSDKCore sets one)');
+      job = await this.sessionJobReader(session.chainId).getSessionJobOnChain(BigInt(session.jobId));
+    } catch (err: any) {
+      throw new TranscodeError(`Could not read session ${sessionId} on chain to time the transcode: ${err?.message ?? err}`,
+        'TRANSCODE_FAILED', undefined, { reason: 'SESSION_UNREADABLE', sessionId, jobId: String(session.jobId) });
     }
-
-    if (!localSessionKey) throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
-
-    const messageIndexRef = { value: localMessageIndex };
-    const handle = await submitTranscodeWs({
-      wsClient,
-      encryptionManager: {
-        encryptMessage: (key: Uint8Array, plaintext: string, index: number) =>
-          this.encryptionManager!.encryptMessage(key, plaintext, index),
-        decryptMessage: (key: Uint8Array, payload: any) => {
-          const p = payload.payload || payload;
-          return this.encryptionManager!.decryptMessage(key, p);
-        },
-      },
-      sessionId, sessionKey: localSessionKey, messageIndex: messageIndexRef,
-      sourceCid, formats, jobId: Number(session.jobId),
-      chainId: options?.chainId ?? session.chainId, isEncrypted: options?.isEncrypted,
-      isGpu: options?.isGpu, onProgress: options?.onProgress, timeoutMs: options?.timeoutMs, previewPercent: options?.previewPercent,
-    });
-    return handle;
+    const startTime = Number(job?.startTime), maxDuration = Number(job?.maxDuration);
+    if (!(startTime > 0) || !(maxDuration > 0)) {
+      throw new TranscodeError(`Session ${sessionId} has no start time or lifetime on chain`, 'TRANSCODE_FAILED', undefined,
+        { reason: 'SESSION_UNREADABLE', sessionId, jobId: String(session.jobId) });
+    }
+    const ms = (startTime + maxDuration + 300) * 1000 - Date.now();
+    if (ms <= 0) {
+      throw new TranscodeError(`Session ${sessionId} expired on chain`, 'TRANSCODE_FAILED', undefined,
+        { reason: 'SESSION_EXPIRED', sessionId, jobId: String(session.jobId) });
+    }
+    return Math.min(ms, 2_147_483_647);   // a longer setTimeout delay fires at once
   }
 
   /**

@@ -45,7 +45,7 @@ const BUNDLE = {
 
 function mgr(over: Record<string, unknown> = {}) {
   return new TrainingManager({
-    sessionManager: { resolveModelPricePerToken: vi.fn().mockResolvedValue(904n) },
+    sessionManager: { assertConfidentialHost: () => {},  resolveModelPricePerToken: vi.fn().mockResolvedValue(904n) },
     paymentManager: { getTokenMinDeposit: vi.fn().mockResolvedValue(0n) },
     trainingModelId: MODEL, usdcAddress: USDC, chainId: 84532, ...over,
   } as never);
@@ -147,7 +147,7 @@ describe('submitTraining — the order of operations is the money', () => {
     const calls: string[] = [];
     const submitTraining = vi.fn(async () => { calls.push('submit'); return { requestId: 'r', result: Promise.resolve({}), cancel: vi.fn(), slices: [], pointers: [], forfeitedSlices: [] }; });
     const m = mgr({
-      sessionManager: {
+      sessionManager: { assertConfidentialHost: () => {}, 
         resolveModelPricePerToken: vi.fn(async () => { calls.push('price'); return 904n; }),
         startSession: vi.fn(async (a: any) => { calls.push('session'); (calls as any).startSessionArgs = a; return { sessionId: 1n, jobId: 2n }; }),
         submitTraining,
@@ -483,7 +483,7 @@ describe('the three Phase 5 methods the plan named', () => {
 
     it('moves to the next host when the first is NOT reshoppable-blocked', async () => {
       let calls = 0;
-      const m = mgr({ sessionManager: {
+      const m = mgr({ sessionManager: { assertConfidentialHost: () => {}, getConfidentialHosts: () => ['0xh1', '0xh2'], 
         resolveModelPricePerToken: vi.fn(async () => 904n),
         startSession: vi.fn(async () => ({ sessionId: 1n, jobId: 2n })),
         submitTraining: vi.fn(async () => {
@@ -506,7 +506,7 @@ describe('the three Phase 5 methods the plan named', () => {
       // tested the UNKNOWN-code path instead of the hold path — and unknown codes ARE
       // re-shoppable, so the test would have failed for entirely the wrong reason.
       const submitTraining = vi.fn(async () => { throw new TrainingError('held', 'CONTENT_BLOCKED'); });
-      const m = mgr({ sessionManager: {
+      const m = mgr({ sessionManager: { assertConfidentialHost: () => {}, getConfidentialHosts: () => ['0xh1', '0xh2'], 
         resolveModelPricePerToken: vi.fn(async () => 904n),
         startSession: vi.fn(async () => ({ sessionId: 1n, jobId: 2n })), submitTraining,
       } });
@@ -519,7 +519,7 @@ describe('the three Phase 5 methods the plan named', () => {
       const submitTraining = vi.fn(async () => {
         throw new TrainingError('died', 'TRAIN_FAILED', { settledSlices: 3 });
       });
-      const m = mgr({ sessionManager: {
+      const m = mgr({ sessionManager: { assertConfidentialHost: () => {}, getConfidentialHosts: () => ['0xh1', '0xh2'], 
         resolveModelPricePerToken: vi.fn(async () => 904n),
         startSession: vi.fn(async () => ({ sessionId: 1n, jobId: 2n })), submitTraining,
       } });
@@ -531,7 +531,7 @@ describe('the three Phase 5 methods the plan named', () => {
     it('validates ONCE, BEFORE ranking hosts — not once per host', async () => {
       const startSession = vi.fn();
       const getRankedHostsForModel = vi.fn(async () => hosts);
-      const m = mgr({ sessionManager: { startSession, submitTraining: vi.fn() } });
+      const m = mgr({ sessionManager: { assertConfidentialHost: () => {}, getConfidentialHosts: () => ['0xh1', '0xh2'],  startSession, submitTraining: vi.fn() } });
       m.setHostSelectionService({ getRankedHostsForModel } as never);
       await expect(m.submitTrainingWithLoadBalancing({ job: bad({ epochs: 9 }), bundle: BUNDLE as never } as never))
         .rejects.toThrow(/epoch/i);

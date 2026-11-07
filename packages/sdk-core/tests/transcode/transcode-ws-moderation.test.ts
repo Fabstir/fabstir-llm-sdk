@@ -17,6 +17,7 @@ function createMocks() {
     wsClient: {
       sendWithoutResponse: vi.fn().mockResolvedValue(undefined),
       onMessage: vi.fn((h: any) => { handlers.push(h); return () => {}; }),
+      onClose: vi.fn(() => () => {}),
     },
     encryptionManager: {
       encryptMessage: vi.fn().mockReturnValue({ ciphertextHex: 'a', nonceHex: 'b', aadHex: 'c' }),

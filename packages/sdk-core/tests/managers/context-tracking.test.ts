@@ -56,7 +56,7 @@ function createMockedSM(opts: { encryption?: boolean } = {}) {
   // Session state
   const sessionState = {
     sessionId: BigInt(42), jobId: BigInt(100), chainId: 84532,
-    model: 'test-model', provider: 'test-host', status: 'active' as const,
+    model: 'test-model', provider: 'test-host', endpoint: 'https://host1.fabstir.net', status: 'active' as const,
     prompts: [] as string[], responses: [] as string[], checkpoints: [],
     totalTokens: 0, startTime: Date.now(), encryption,
   };

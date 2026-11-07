@@ -20,6 +20,8 @@ import {
   ModelValidationError
 } from '../errors/model-errors';
 import { SDKError } from '../errors';
+// The SDK-wide typed error (code + details.retryable); this file's other throws still use the older class above.
+import { SDKError as TypedSDKError } from '../types';
 import { ModelManager } from './ModelManager';
 import { HostManager } from './HostManager';
 import { ContractManager } from '../contracts/ContractManager';
@@ -412,8 +414,14 @@ export class ClientManager {
    * Discover nodes that support a specific chain
    */
   async discoverNodes(chainId: number): Promise<any[]> {
-    // For now, use a discovery endpoint (could be configurable)
-    const discoveryUrl = process.env.NODE_DISCOVERY_URL || 'http://localhost:8080';
+    // No fallback: an unset discovery URL is a configuration bug, not a reason to query the developer's own machine.
+    // Read as the literal `process.env.NODE_DISCOVERY_URL` so a bundler's text-replacing `define` still injects it; the
+    // try keeps a browser without `process` a typed refusal below rather than a ReferenceError (1.39.13).
+    let discoveryUrl: string | undefined;
+    try { discoveryUrl = process.env.NODE_DISCOVERY_URL; } catch { discoveryUrl = undefined; }
+    if (!discoveryUrl?.trim()) {
+      throw new TypedSDKError('NODE_DISCOVERY_URL is not set: node discovery needs a discovery endpoint', 'NODE_DISCOVERY_URL_MISSING', { retryable: false });
+    }
 
     try {
       const response = await fetch(`${discoveryUrl}/v1/models?chain_id=${chainId}`);

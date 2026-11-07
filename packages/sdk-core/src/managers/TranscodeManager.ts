@@ -17,12 +17,16 @@ import type {
   VideoFormat,
   TranscodeHandle,
   TranscodeLoadBalancedOptions,
+  TranscodeSessionSize,
 } from '../types/transcode.types';
 import type { IHostSelectionService } from '../interfaces/IHostSelectionService';
 import { TranscodeError } from '../errors/transcode-errors';
 import { fetchTranscodeCapacity } from '../utils/transcode-capacity';
 import { HostSelectionMode } from '../types/settings.types';
-import { computeTranscodeModelId, estimateTranscodeUnits, billingUnitsToTokens, tokensToUsdc } from '../utils/transcode-utils';
+import { computeTranscodeModelId, estimateTranscodeUnits, billingUnitsToTokens, tokensToUsdc, transcodeSessionDuration, isEncryptedTranscode, TRANSCODE_MAX_RELEASABLE_RATE_SECONDS } from '../utils/transcode-utils';
+
+/** A longer setTimeout delay overflows and fires at once. */
+const MAX_TIMER_MS = 2_147_483_647;
 
 /** Contract status codes → human-readable strings */
 const CONTRACT_STATUS: Record<number, string> = { 0: 'created', 1: 'active', 2: 'completed', 3: 'cancelled' };
@@ -56,6 +60,43 @@ export class TranscodeManager implements ITranscodeManager {
       throw new Error('HostSelectionService not set — call setHostSelectionService() first');
     }
 
+    // What can fail comes before the funding. A CID without its network (s5://<cid>) is refused by node 8.62.1+, and
+    // earlier nodes dropped it until the 30 min timeout, so no node ever ran one.
+    if (!/^[^\s:/]+:\/\/\S+$/.test(sourceCid)) {
+      throw new TranscodeError(`sourceCid must name its storage network, e.g. s5://<cid>, got ${sourceCid}`, 'TRANSCODE_FAILED', undefined,
+        { reason: 'SOURCE_CID_NO_NETWORK' });
+    }
+    // The host running an encrypted job sees its keys: only allowlisted hosts are considered, and none configured refuses
+    // (1.39.18 K5). SessionManager.submitTranscode enforces it again for every path; this keeps a refused host unfunded.
+    let allowed: Set<string> | undefined;
+    if (isEncryptedTranscode(sourceCid, options?.isEncrypted)) {
+      const list = this.sessionManager.getConfidentialHosts();
+      if (!list) {
+        throw new TranscodeError('Encrypted transcodes are refused: no confidentialHosts are configured',
+          'CONFIDENTIAL_HOST_NOT_ALLOWED', undefined, { reason: 'NO_ALLOWLIST', job: 'transcode' });
+      }
+      allowed = new Set(list.map((h: string) => h.toLowerCase()));
+    }
+    let sessionDuration = options?.duration ?? 3600;
+    // Over the 5,400 s limit, only a node reporting `transcode-final-wait-uncapped` can release the result (K1).
+    let needsUncappedFinalWait = false;
+    if (options?.sourceDurationSeconds !== undefined) {
+      const sized = await this.sizeFor(options.sourceDurationSeconds, formats, modelId, options.isEncrypted, true);
+      needsUncappedFinalWait = sized.tokens > TRANSCODE_MAX_RELEASABLE_RATE_SECONDS * sized.ratePerSecond;
+      const requiredSeconds = sized.duration;
+      if (options.duration !== undefined && options.duration < requiredSeconds) {
+        throw new TranscodeError(
+          `A ${options.duration} s session cannot bill a ${options.sourceDurationSeconds} s source before it expires; it needs ${requiredSeconds} s`,
+          'TRANSCODE_FAILED', undefined, { reason: 'SESSION_TOO_SHORT', duration: options.duration, requiredSeconds },
+        );
+      }
+      sessionDuration = options.duration ?? requiredSeconds;
+    }
+    // The wait is the session's lifetime + 300 s (the node developer, 1.39.18): the node keeps only a job it can bill
+    // before expiry, so the result arrives by then. The caller's own timeoutMs stands.
+    const submitOptions = { ...options, timeoutMs: options?.timeoutMs ?? Math.min((sessionDuration + 300) * 1000, MAX_TIMER_MS) };
+    let skippedForFinalWait = 0, skippedOther = 0;
+
     const mode = options?.hostSelectionMode ?? HostSelectionMode.AUTO;
     const maxRetries = options?.maxHostRetries ?? 3;
     const ranked = await this.hostSelectionService.getRankedHostsForModel(modelId, mode);
@@ -68,17 +109,33 @@ export class TranscodeManager implements ITranscodeManager {
         await new Promise(r => setTimeout(r, retryDelay));
       }
 
-      for (const { host } of ranked.slice(0, maxRetries)) {
+      const candidates = allowed ? ranked.filter(({ host }) => allowed!.has(String(host.address).toLowerCase())) : ranked;
+      if (allowed && candidates.length === 0) {
+        throw new TranscodeError('No host on confidentialHosts serves this model', 'CONFIDENTIAL_HOST_NOT_ALLOWED', undefined,
+          { reason: 'HOST_NOT_ALLOWED', job: 'transcode' });
+      }
+      // A host that cannot release an over-limit job's result is not one of the maxRetries attempts (review R5).
+      let attempts = 0;
+      for (const { host } of candidates) {
+        if (attempts >= maxRetries) break;
+        if (needsUncappedFinalWait && !(await this.hasFeatureFlag(host.apiUrl, 'transcode-final-wait-uncapped'))) {
+          console.log(`[TranscodeManager] Skipping ${host.address}: its final claim cannot wait long enough for this source`);
+          skippedForFinalWait++;
+          continue;
+        }
+        attempts++;
         try {
           const capacity = await fetchTranscodeCapacity(host.apiUrl);
           const pending = this.pendingJobs.get(host.address) || 0;
           const effectiveAvailable = capacity.available - pending;
           if (!capacity.sidecarConnected || effectiveAvailable <= 0) {
             console.log(`[TranscodeManager] Skipping ${host.address}: no capacity (available=${capacity.available}, pending=${pending}, effective=${effectiveAvailable}, sidecar=${capacity.sidecarConnected})`);
+            skippedOther++;
             continue;
           }
         } catch {
           console.log(`[TranscodeManager] Skipping ${host.address}: capacity fetch failed`);
+          skippedOther++;
           continue;
         }
 
@@ -93,13 +150,13 @@ export class TranscodeManager implements ITranscodeManager {
             chainId: this.chainId,
             endpoint: host.apiUrl,
             depositAmount: options?.depositAmount ?? '0.0002',
-            duration: options?.duration ?? 3600,
+            duration: sessionDuration,
             proofInterval: options?.proofInterval ?? 100,
             encryption: options?.encryption !== false,
             conversationLog: false, // a transcode has no chat log — and no post-funding S5 write to fail
           });
           const handle = await this.sessionManager.submitTranscode(
-            sessionId.toString(), sourceCid, formats, options,
+            sessionId.toString(), sourceCid, formats, submitOptions,
           );
           // Decrement pending count when job completes or fails. Reassigning (rather than
           // forking a second promise off handle.result) is what keeps a failed job from
@@ -116,6 +173,7 @@ export class TranscodeManager implements ITranscodeManager {
           if (count > 0) this.pendingJobs.set(host.address, count - 1);
           if (err instanceof TranscodeError && err.code === 'CAPACITY_FULL') {
             console.log(`[TranscodeManager] CAPACITY_FULL on ${host.address}, trying next host`);
+            skippedOther++;
             continue;
           }
           throw err;
@@ -123,6 +181,13 @@ export class TranscodeManager implements ITranscodeManager {
       }
     }
 
+    // Only when the marker was the sole reason: a host that was merely busy might take the job later (review R5).
+    if (skippedForFinalWait > 0 && skippedOther === 0) {
+      throw new TranscodeError(
+        'No host can bill this source in full and still release its result (none reports transcode-final-wait-uncapped)',
+        'TRANSCODE_FAILED', undefined, { reason: 'SOURCE_TOO_LONG' },
+      );
+    }
     throw new TranscodeError('No hosts available with transcode capacity', 'NO_AVAILABLE_HOSTS');
   }
 
@@ -138,11 +203,14 @@ export class TranscodeManager implements ITranscodeManager {
     // upload — so a funded session's ids always reach the caller (I7, §23 DD3, §24 EE8).
     const units = estimateTranscodeUnits(params.maxDuration, params.mediaFormats);
     const estimatedCost = String(billingUnitsToTokens(units));
+    // maxDuration is the source length here (the estimate above reads it so); encrypted is the longer case.
+    const { duration } = await this.sizeTranscodeSession(params.maxDuration, params.mediaFormats, { modelId });
     const formatSpecCID = await this.storageManager.uploadJSON(params.mediaFormats);
     const { jobId } = await this.sessionManager.startSession({
       host: params.hostAddress,
       modelId,
       chainId: params.chainId,
+      duration,
       conversationLog: false,
     });
 
@@ -179,6 +247,33 @@ export class TranscodeManager implements ITranscodeManager {
 
   async getProofTree(jobId: bigint): Promise<TranscodeProofTree> {
     throw new Error('Not implemented');
+  }
+
+  /**
+   * The session lifetime a transcode of this source needs, from the model's rate cap on chain (1.39.17). For a caller that
+   * funds its own session: pass `duration` as the session's `maxDuration`, and at least `duration × 1000` as the submit's
+   * `timeoutMs`. Pass `modelId` if the session is funded on a named model: the default is the formats' own id. A failed
+   * chain read throws; no rate is assumed. A source the node is certain to withhold throws SOURCE_TOO_LONG.
+   */
+  async sizeTranscodeSession(
+    sourceSeconds: number, formats: VideoFormat[], options?: { modelId?: string; isEncrypted?: boolean; hostUrl?: string },
+  ): Promise<TranscodeSessionSize> {
+    // With the host known, a node reporting `transcode-final-wait-uncapped` (8.62.6) lifts SOURCE_TOO_LONG (1.39.18 K1).
+    const finalWaitUncapped = options?.hostUrl ? await this.hasFeatureFlag(options.hostUrl, 'transcode-final-wait-uncapped') : false;
+    return this.sizeFor(sourceSeconds, formats, options?.modelId ?? computeTranscodeModelId(formats), options?.isEncrypted, finalWaitUncapped);
+  }
+
+  private async sizeFor(
+    sourceSeconds: number, formats: VideoFormat[], modelId: string, isEncrypted: boolean | undefined, finalWaitUncapped: boolean,
+  ): Promise<TranscodeSessionSize> {
+    const encrypted = isEncrypted ?? true;
+    const ratePerSecond: number = await this.sessionManager.resolveModelRateLimit(modelId);
+    return {
+      duration: transcodeSessionDuration(sourceSeconds, formats, { ratePerSecond, isEncrypted: encrypted, finalWaitUncapped }),
+      tokens: billingUnitsToTokens(estimateTranscodeUnits(sourceSeconds, formats, encrypted)),
+      ratePerSecond,
+      finalWaitUncapped,
+    };
   }
 
   /**

@@ -218,7 +218,7 @@ describe('Sub-phase 2.1-2.3: Encrypted Payload & Image Wiring', () => {
       jobId: BigInt(100),
       chainId: 84532,
       model: 'CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf',
-      provider: 'test-host',
+      provider: 'test-host', endpoint: 'https://host1.fabstir.net',
       status: 'active' as const,
       prompts: [] as string[],
       responses: [] as string[],

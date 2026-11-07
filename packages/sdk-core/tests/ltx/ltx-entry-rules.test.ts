@@ -219,7 +219,7 @@ describe('L4 — every job runs on its own template\'s model', () => {
     const getByCID = vi.fn(async () => b);
     const getTokenMinDeposit = vi.fn(async () => 1n);
     const m = new LtxManager({
-      sessionManager: { resolveModelPricePerToken, startSession, registerExternalSession, submitLtx },
+      sessionManager: { assertConfidentialHost: () => {},  resolveModelPricePerToken, startSession, registerExternalSession, submitLtx },
       storageManager: { getByCID }, paymentManager: { getTokenMinDeposit },
       hostManager: { getHostInfo: vi.fn(async () => ({ metadata: { ltx: meta(b) } })) }, // 1.39.4: estimateCost reads the entry
       ltxModelId: configured, usdcAddress: '0xabc', chainId: 84532,
@@ -267,7 +267,7 @@ describe('L4 — every job runs on its own template\'s model', () => {
 
   it('M6: the SDK builds an LtxManager without config.ltxModelId', async () => {
     const sdk = realSdk({
-      sessionManager: {}, storageManager: {}, paymentManager: {}, hostManager: {}, currentChainId: 84532,
+      sessionManager: { assertConfidentialHost: () => {}, }, storageManager: {}, paymentManager: {}, hostManager: {}, currentChainId: 84532,
       contractManager: { getContractAddress: async () => '0xusdc' },
     });
     await sdk.buildSidecarManagers(false, false);
@@ -280,7 +280,7 @@ describe('L5 — the node\'s own code reaches generate() callers', () => {
     const b = bundle();
     const refusal = new LtxError('session model differs', 'GENERATION_FAILED', { nodeCode: 'TEMPLATE_MODEL_MISMATCH' });
     const m = new LtxManager({
-      sessionManager: {
+      sessionManager: { assertConfidentialHost: () => {}, 
         resolveModelPricePerToken: vi.fn(async () => 1000n),
         startSession: vi.fn(async () => ({ sessionId: 7n, jobId: 8n })),
         submitLtx: vi.fn(async () => ({ requestId: 'r', cancel() {}, result: Promise.reject(refusal) })),
@@ -296,7 +296,7 @@ describe('L5 — the node\'s own code reaches generate() callers', () => {
     const b = bundle();
     const denied = new SDKError('session authorisation denied', 'SESSION_AUTH_DENIED', { nodeCode: 'SESSION_AUTH_DENIED', sessionId: '7' });
     const m = new LtxManager({
-      sessionManager: {
+      sessionManager: { assertConfidentialHost: () => {}, 
         resolveModelPricePerToken: vi.fn(async () => 1000n),
         startSession: vi.fn(async () => ({ sessionId: 7n, jobId: 8n })),
         submitLtx: vi.fn(async () => { throw denied; }),
@@ -313,7 +313,7 @@ describe('L5 — the node\'s own code reaches generate() callers', () => {
     const socketEvent: any = { type: 'error' }; socketEvent.target = { onerror: socketEvent }; // circular, like a WS event
     const broken = new SDKError('WebSocket send failed', 'WS_SEND_FAILED', { originalError: socketEvent });
     const m = new LtxManager({
-      sessionManager: {
+      sessionManager: { assertConfidentialHost: () => {}, 
         resolveModelPricePerToken: vi.fn(async () => 1000n),
         startSession: vi.fn(async () => ({ sessionId: 7n, jobId: 8n })),
         submitLtx: vi.fn(async () => { throw broken; }),

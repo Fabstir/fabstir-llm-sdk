@@ -68,4 +68,37 @@ export const SDK_CAPABILITIES = Object.freeze({
    * (HOST_UNREACHABLE). An endpoint the caller passes is used as given and not probed (1.39.10).
    */
   hostLivenessBeforeFunding: true,
+  /**
+   * submitTranscode / submitLtx / submitTraining close a socket they opened themselves (a delegate session's) on every
+   * outcome — result resolved or rejected, or a throw before the handle — so the node settles the session (1.39.11).
+   */
+  dedicatedSocketClosed: true,
+  /** A dedicated socket's encrypted init works only on its own state and is not queued behind other inits, so concurrent
+   *  submits on delegate sessions need no ordering by the caller (1.39.12). */
+  dedicatedInitIsolated: true,
+  /** On the shared socket, jobs (submitTranscode/submitLtx/submitTraining, generateImage) and chat draw from one live
+   *  message counter per session key, so no index repeats under a key (1.39.12). */
+  sharedSocketMessageIndex: true,
+  /** submitTranscode's result rejects TRANSCODE_FAILED with details.reason 'WS_CLOSED' when its socket closes (1.39.12). */
+  transcodeWsClosed: true,
+  /** submitTranscode / submitLtx / submitTraining refuse a second concurrent job on a session (SESSION_JOB_IN_FLIGHT) until
+   *  the node keys sessions by connection; per SessionManager instance (1.39.14). */
+  sessionJobExclusive: true,
+  /** On a node reporting `session-job-completion` in /v1/version, the one-job-per-session refusal is lifted (1.39.15). */
+  jobCompletionNodes: true,
+  /** On such a node, SessionManager.fetchTranscodeResult collects a dropped transcode's stored result, and a submitted
+   *  transcode whose connection drops after the accept recovers it instead of rejecting WS_CLOSED (1.39.15). */
+  transcodeResultFetch: true,
+  /** TranscodeManager sizes a session to its source (sourceDurationSeconds, sizeTranscodeSession) from the model's rate cap on chain (1.39.17). */
+  transcodeSessionSizing: true,
+  /** SOURCE_TOO_LONG is lifted on a node reporting `transcode-final-wait-uncapped` (8.62.6) (1.39.18). */
+  transcodeFinalWaitUncapped: true,
+  /** submitTranscode with no timeoutMs waits until the session's on-chain expiry + 300 s; TRANSCODE_TIMEOUT is not retryable (1.39.18). */
+  transcodeWaitFromSession: true,
+  /** A transcode handle's cancel() settles its result at once (CANCELLED); the node sends nothing more after a cancel (1.39.18). */
+  transcodeCancelSettles: true,
+  /** Encrypted transcodes go only to the configured hosts, refused with none configured (1.39.18; the list is `confidentialHosts` since 1.39.19). */
+  encryptedTranscodeAllowlist: true,
+  /** One confidentialHosts list for encrypted transcodes, LTX and training, fail closed, checked before funding (1.39.19). */
+  confidentialHosts: true,
 } as const);

@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SessionManager } from '../../src/managers/SessionManager';
 import { submitTrainingWs } from '../../src/utils/training-ws';
 import { submitLtxWs } from '../../src/utils/ltx-ws';
-import { FakeWebSocket } from '../helpers/session-doubles';
+import { FakeWebSocket, stubNodeVersion } from '../helpers/session-doubles';
 import { MODEL, HOST, JOB, LORA } from '../training/fixtures';
 
 vi.mock('../../src/utils/ltx-ws', async (importOriginal) => {
@@ -31,16 +31,21 @@ vi.mock('../../src/utils/training-ws', async (importOriginal) => {
   };
 });
 
+
+// 1.39.15: submits probe the node's /v1/version for `session-job-completion`; keep that off the network (an old node).
+beforeEach(() => { stubNodeVersion(); });
+afterEach(() => { vi.unstubAllGlobals(); });
+
 const JOB_ANY: any = JOB;
 
 function manager() {
   const mgr: any = new SessionManager({} as any, { storeConversation: vi.fn() } as any);
+  (mgr as any).assertConfidentialHost = () => {};   // 1.39.19: the confidential-host check is not under test here
   mgr.encryptionManager = { encryptMessage: vi.fn(), decryptMessage: vi.fn() };
   const initConfigs: any[] = [];
   vi.spyOn(mgr, 'sendEncryptedInit').mockImplementation(async (_ws: any, cfg: any, sid: bigint, jid: bigint) => {
     initConfigs.push({ ...cfg, __sid: sid, __jid: jid });
-    mgr.sessionKey = new Uint8Array(32).fill(9);
-    mgr.messageIndex = 0;
+    return new Uint8Array(32).fill(9);   // a dedicated init returns its key and writes nothing shared (1.39.12)
   });
   return { mgr, initConfigs };
 }
@@ -149,6 +154,7 @@ describe('adjacent: submitLtx on the SHARED socket (ownsWs === false)', () => {
     // Prime the shared client so acquireSessionTransport REUSES it (identity + key present).
     mgr.wsClient = { isConnected: () => true, getConnectionGeneration: () => 1, onMessage: () => () => {}, sendWithoutResponse: async () => {}, disconnect: async () => {} };
     mgr.wsSessionId = '1152'; mgr.sessionKey = new Uint8Array(32).fill(9); mgr.sessionKeyGeneration = 1; mgr.messageIndex = 0;
+    mgr.sessionCrypto.set('1152', { key: mgr.sessionKey, messageIndex: 0 });   // the shared init's per-session entry
     const seen: unknown[] = []; const on = (r: unknown) => seen.push(r);
     process.on('unhandledRejection', on);
     let handle!: Awaited<ReturnType<typeof mgr.submitLtx>>;

@@ -25,6 +25,7 @@ describe('ClientManager Multi-Chain Support', () => {
     vi.clearAllMocks();
     originalFetch = global.fetch;
     global.fetch = vi.fn();
+    process.env.NODE_DISCOVERY_URL = 'http://discovery.test';   // 1.39.13: no localhost fallback — the URL is required
 
     mockModelManager = {
       initialize: vi.fn(),
@@ -52,6 +53,7 @@ describe('ClientManager Multi-Chain Support', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    delete process.env.NODE_DISCOVERY_URL;
     vi.restoreAllMocks();
   });
 

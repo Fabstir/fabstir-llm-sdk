@@ -23,6 +23,7 @@ import type {
   Resolution,
   Codec,
   QualityTier,
+  TranscodeSessionSize,
 } from '../types/transcode.types';
 
 /**
@@ -137,6 +138,16 @@ export interface ITranscodeManager {
     videoDurationSeconds: number,
     options?: { isEncrypted?: boolean; paymentToken?: string; modelId?: string }
   ): Promise<TranscodePriceEstimate>;
+
+  /**
+   * The session lifetime a transcode of this source needs, from the model's rate cap on chain (1.39.17).
+   * `duration` is what to fund the session with (the contract's `maxDuration`).
+   */
+  sizeTranscodeSession(
+    sourceSeconds: number,
+    formats: VideoFormat[],
+    options?: { modelId?: string; isEncrypted?: boolean; hostUrl?: string }
+  ): Promise<TranscodeSessionSize>;
 
   /**
    * Find available transcode hosts based on filters

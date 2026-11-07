@@ -82,7 +82,7 @@ function createMockedSessionManager(opts: { encryption?: boolean } = {}) {
     jobId: BigInt(100),
     chainId: 84532,
     model: 'CohereForAI/TinyVicuna-1B-32k-GGUF:tiny-vicuna-1b.q4_k_m.gguf',
-    provider: 'test-host',
+    provider: 'test-host', endpoint: 'https://host1.fabstir.net',
     status: 'active' as const,
     prompts: [] as string[],
     responses: [] as string[],

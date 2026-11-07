@@ -107,6 +107,18 @@ export class ModelManager {
   }
 
   /**
+   * The model's on-chain rate cap in tokens per second (1.39.17)
+   */
+  async getModelRateLimit(modelId: string): Promise<number> {
+    this.ensureInitialized();
+
+    if (!this.isValidModelId(modelId)) {
+      throw new InvalidModelIdError(modelId);
+    }
+    return Number(await this.modelRegistry.getModelRateLimit(modelId));
+  }
+
+  /**
    * Check if a model is approved on-chain
    */
   async isModelApproved(modelId: string): Promise<boolean> {

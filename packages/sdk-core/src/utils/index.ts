@@ -28,7 +28,7 @@ export * from './image-generation-ws';
 export * from './image-intent-analyzer';
 
 export { AsyncMutex } from './AsyncMutex';
-export { computeTranscodeModelId, buildStreamingFormats, buildHlsFormats, selectResolution,
+export { transcodeSessionDuration, isEncryptedTranscode, computeTranscodeModelId, buildStreamingFormats, buildHlsFormats, selectResolution,
   assembleContentMetadata, assembleHlsContentMetadata, buildMasterPlaylist, buildVariantPlaylist } from './transcode-utils';
 export { fetchTranscodeCapacity } from './transcode-capacity';
 export { TranscodeError } from '../errors/transcode-errors';

@@ -28,22 +28,25 @@ describe('the closed wire error set (capacity table + A.3/C.3)', () => {
     const wireVisible = new Set([...TRAINING_WIRE_ERROR_CODES, ...MODERATION_HOLD_CODES]);
     expect(wireVisible.size).toBe(11);
   });
-  it('exports the 11-code WIRE-VISIBLE set separately from the full 17-code set', () => {
+  it('exports the 11-code WIRE-VISIBLE set separately from the full 19-code set (SESSION_JOB_IN_FLIGHT 1.39.14, CONFIDENTIAL_HOST_NOT_ALLOWED 1.39.19)', () => {
     // A consumer validating an inbound train_error must not accept client-side or serve-back
     // codes the node can never send on that frame.
     expect(TRAINING_WIRE_VISIBLE_CODES.length).toBe(11);
     expect(TRAINING_WIRE_VISIBLE_CODES).not.toContain('ESTIMATE_MISMATCH');
     expect(TRAINING_WIRE_VISIBLE_CODES).not.toContain('LORA_NOT_STAGED');
-    expect(TRAINING_ERROR_CODES.length).toBe(17);
+    expect(TRAINING_WIRE_VISIBLE_CODES).not.toContain('SESSION_JOB_IN_FLIGHT');
+    expect(TRAINING_ERROR_CODES.length).toBe(19);
   });
   it('EXCLUDES the two sidecar-internal codes (doc:112 TEMPLATE_BOUNDS, doc:123 SCAN_FAILURE)', () => {
     // Both are sidecar 4xx/no-verdict responses that MAP to a wire code; neither is one.
     expect(TRAINING_ERROR_CODES).not.toContain('TEMPLATE_BOUNDS');
     expect(TRAINING_ERROR_CODES).not.toContain('SCAN_FAILURE');
   });
-  it('carries the 4 client-side codes and the 2 serve-back codes as distinct groups', () => {
+  it('carries the 6 client-side codes and the 2 serve-back codes as distinct groups', () => {
     expect([...TRAINING_CLIENT_ERROR_CODES]).toEqual([
       'TRAINING_BUNDLE_STALE', 'ESTIMATE_MISMATCH', 'INPUT_BINDING_MISMATCH', 'POINTER_PERSIST_FAILED',
+      'SESSION_JOB_IN_FLIGHT',   // 1.39.14: the SDK's one-job-per-session refusal
+      'CONFIDENTIAL_HOST_NOT_ALLOWED',   // 1.39.19
     ]);
     expect([...TRAINING_SERVE_BACK_ERROR_CODES]).toEqual(['LORA_STAGING_FAILED', 'LORA_NOT_STAGED']);
   });
