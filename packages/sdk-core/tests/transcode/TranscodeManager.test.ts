@@ -33,7 +33,7 @@ const TEST_JOB_PARAMS: CreateTranscodeJobParams = {
 
 /** Minimal mock factories */
 function mockSessionManager() {
-  return { startSession: vi.fn().mockResolvedValue({ sessionId: 'sess-123', jobId: 1n }), endSession: vi.fn().mockResolvedValue(undefined), resolveModelPricePerToken: vi.fn().mockResolvedValue(TEST_PRICE) };
+  return { startSession: vi.fn().mockResolvedValue({ sessionId: 'sess-123', jobId: 1n }), endSession: vi.fn().mockResolvedValue(undefined), resolveModelPricePerToken: vi.fn().mockResolvedValue(TEST_PRICE), resolveModelRateLimit: vi.fn().mockResolvedValue(2000) };
 }
 function mockStorageManager() {
   return { uploadFile: vi.fn().mockResolvedValue({ cid: 'bafyabc' }), downloadFile: vi.fn().mockResolvedValue(new Blob(['video'])), uploadJSON: vi.fn().mockResolvedValue('bafyjson') };

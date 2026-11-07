@@ -23,7 +23,7 @@ function makeManager(order?: string[], minDeposit: bigint = 0n) {
   const triggerSessionTimeout = vi.fn(async () => ({ success: true, transactionHash: '0xtx' }));
   const getTokenMinDeposit = vi.fn(async () => minDeposit);
   const manager = new LtxManager({
-    sessionManager: { resolveModelPricePerToken, startSession },
+    sessionManager: { assertConfidentialHost: () => {},  resolveModelPricePerToken, startSession },
     storageManager: { getByCID },
     paymentManager: { triggerSessionTimeout, getTokenMinDeposit },
     ltxModelId: LTX_MODEL_ID, usdcAddress: USDC, chainId: 84532,

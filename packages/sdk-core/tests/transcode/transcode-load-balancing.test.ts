@@ -22,6 +22,8 @@ function createManager() {
   const sessionManager = {
     startSession: vi.fn().mockResolvedValue({ sessionId: 100n, jobId: 1n }),
     submitTranscode: vi.fn().mockResolvedValue(mkHandle()),
+    // 1.39.18: encrypted transcodes go only to allowlisted hosts; these tests' hosts are on the list.
+    getConfidentialHosts: vi.fn(() => ['0x1', '0x2', '0x3', '0x4', '0xabc']),
   };
   const tm = new TranscodeManager(sessionManager, {} as any, {} as any, {} as any, {} as any, 84532);
   const hostSel: IHostSelectionService = {
@@ -50,7 +52,7 @@ describe('submitTranscodeWithLoadBalancing', () => {
     const { tm, hostSel, sessionManager } = createManager();
     (hostSel.getRankedHostsForModel as any).mockResolvedValue([mkRanked('0x1', 'http://h1:8080')]);
     mockFetch.mockResolvedValue({ ok: true, json: async () => cap(2) });
-    const handle = await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId);
+    const handle = await tm.submitTranscodeWithLoadBalancing('s5://cid-1', formats, modelId);
     expect(handle.taskId).toBe('task-1');
     expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
   });
@@ -62,7 +64,7 @@ describe('submitTranscodeWithLoadBalancing', () => {
     ]);
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => cap(0) })
              .mockResolvedValueOnce({ ok: true, json: async () => cap(2) });
-    await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId);
+    await tm.submitTranscodeWithLoadBalancing('s5://cid-1', formats, modelId);
     expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
     expect(sessionManager.startSession.mock.calls[0][0].host).toBe('0x2');
   });
@@ -74,7 +76,7 @@ describe('submitTranscodeWithLoadBalancing', () => {
     ]);
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => cap(2, false) })
              .mockResolvedValueOnce({ ok: true, json: async () => cap(2, true) });
-    await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId);
+    await tm.submitTranscodeWithLoadBalancing('s5://cid-1', formats, modelId);
     expect(sessionManager.startSession.mock.calls[0][0].host).toBe('0x2');
   });
 
@@ -85,7 +87,7 @@ describe('submitTranscodeWithLoadBalancing', () => {
     ]);
     mockFetch.mockRejectedValueOnce(new Error('ECONNREFUSED'))
              .mockResolvedValueOnce({ ok: true, json: async () => cap(2) });
-    await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId);
+    await tm.submitTranscodeWithLoadBalancing('s5://cid-1', formats, modelId);
     expect(sessionManager.startSession.mock.calls[0][0].host).toBe('0x2');
   });
 
@@ -98,7 +100,7 @@ describe('submitTranscodeWithLoadBalancing', () => {
     sessionManager.submitTranscode
       .mockRejectedValueOnce(new TranscodeError('Full', 'CAPACITY_FULL'))
       .mockResolvedValueOnce(mkHandle());
-    await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId);
+    await tm.submitTranscodeWithLoadBalancing('s5://cid-1', formats, modelId);
     expect(sessionManager.startSession).toHaveBeenCalledTimes(2);
   });
 
@@ -106,7 +108,7 @@ describe('submitTranscodeWithLoadBalancing', () => {
     const { tm, hostSel } = createManager();
     (hostSel.getRankedHostsForModel as any).mockResolvedValue([mkRanked('0x1', 'http://h1:8080')]);
     mockFetch.mockResolvedValue({ ok: true, json: async () => cap(0) });
-    await expect(tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId))
+    await expect(tm.submitTranscodeWithLoadBalancing('s5://cid-1', formats, modelId))
       .rejects.toMatchObject({ code: 'NO_AVAILABLE_HOSTS' });
   });
 
@@ -115,7 +117,7 @@ describe('submitTranscodeWithLoadBalancing', () => {
     const hosts = Array.from({ length: 5 }, (_, i) => mkRanked(`0x${i}`, `http://h${i}:8080`));
     (hostSel.getRankedHostsForModel as any).mockResolvedValue(hosts);
     mockFetch.mockResolvedValue({ ok: true, json: async () => cap(0) });
-    await expect(tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId, { retryDelayMs: 0 }))
+    await expect(tm.submitTranscodeWithLoadBalancing('s5://cid-1', formats, modelId, { retryDelayMs: 0 }))
       .rejects.toMatchObject({ code: 'NO_AVAILABLE_HOSTS' });
     // Default maxHostRetries=3, 2 rounds = 6 capacity fetches
     expect(mockFetch).toHaveBeenCalledTimes(6);
@@ -125,7 +127,7 @@ describe('submitTranscodeWithLoadBalancing', () => {
     const { tm, hostSel } = createManager();
     (hostSel.getRankedHostsForModel as any).mockResolvedValue([mkRanked('0x1', 'http://h1:8080')]);
     mockFetch.mockResolvedValue({ ok: true, json: async () => cap(2) });
-    const handle = await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId);
+    const handle = await tm.submitTranscodeWithLoadBalancing('s5://cid-1', formats, modelId);
     expect(handle).toHaveProperty('taskId');
     expect(handle).toHaveProperty('cancel');
     expect(handle).toHaveProperty('result');
@@ -136,8 +138,8 @@ describe('submitTranscodeWithLoadBalancing', () => {
     (hostSel.getRankedHostsForModel as any).mockResolvedValue([mkRanked('0x1', 'http://h1:8080')]);
     mockFetch.mockResolvedValue({ ok: true, json: async () => cap(2) });
     const opts = { isGpu: true, timeoutMs: 60000 };
-    await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId, opts);
-    expect(sessionManager.submitTranscode).toHaveBeenCalledWith('100', 'cid-1', formats, opts);
+    await tm.submitTranscodeWithLoadBalancing('s5://cid-1', formats, modelId, opts);
+    expect(sessionManager.submitTranscode).toHaveBeenCalledWith('100', 's5://cid-1', formats, { ...opts, timeoutMs: 60000 });
   });
 
   it('calls onHostSelected with chosen host address and URL', async () => {
@@ -145,7 +147,7 @@ describe('submitTranscodeWithLoadBalancing', () => {
     (hostSel.getRankedHostsForModel as any).mockResolvedValue([mkRanked('0xABC', 'http://chosen:8080')]);
     mockFetch.mockResolvedValue({ ok: true, json: async () => cap(2) });
     const onHostSelected = vi.fn();
-    await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId, { onHostSelected });
+    await tm.submitTranscodeWithLoadBalancing('s5://cid-1', formats, modelId, { onHostSelected });
     expect(onHostSelected).toHaveBeenCalledOnce();
     expect(onHostSelected).toHaveBeenCalledWith('0xABC', 'http://chosen:8080');
   });
@@ -157,7 +159,7 @@ describe('submitTranscodeWithLoadBalancing', () => {
     mockFetch
       .mockRejectedValueOnce(new Error('timeout'))
       .mockResolvedValueOnce({ ok: true, json: async () => cap(2) });
-    const handle = await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId, { retryDelayMs: 10 });
+    const handle = await tm.submitTranscodeWithLoadBalancing('s5://cid-1', formats, modelId, { retryDelayMs: 10 });
     expect(handle.taskId).toBe('task-1');
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
@@ -191,7 +193,7 @@ describe('submitTranscodeWithLoadBalancing — moderation holds must not bypass 
     ]);
     mockFetch.mockResolvedValue({ ok: true, json: async () => cap(2) });
     sessionManager.submitTranscode.mockResolvedValue(mkFailingHandle(code));
-    const handle = await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId);
+    const handle = await tm.submitTranscodeWithLoadBalancing('s5://cid-1', formats, modelId);
     await expect(handle.result).rejects.toThrow(TranscodeError);
     return sessionManager;
   };
@@ -221,7 +223,7 @@ describe('submitTranscodeWithLoadBalancing — moderation holds must not bypass 
     sessionManager.submitTranscode
       .mockRejectedValueOnce(new TranscodeError('full', 'CAPACITY_FULL'))
       .mockResolvedValueOnce(mkHandle());
-    await tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId);
+    await tm.submitTranscodeWithLoadBalancing('s5://cid-1', formats, modelId);
     expect(sessionManager.submitTranscode).toHaveBeenCalledTimes(2);
     expect(sessionManager.startSession.mock.calls[1][0].host).toBe('0x2');
   });
@@ -253,7 +255,7 @@ describe('submitTranscodeWithLoadBalancing — moderation holds must not bypass 
     ]);
     mockFetch.mockResolvedValue({ ok: true, json: async () => cap(2) });
     sessionManager.submitTranscode.mockRejectedValue(new TranscodeError('held', 'CONTENT_BLOCKED'));
-    await expect(tm.submitTranscodeWithLoadBalancing('cid-1', formats, modelId))
+    await expect(tm.submitTranscodeWithLoadBalancing('s5://cid-1', formats, modelId))
       .rejects.toMatchObject({ code: 'CONTENT_BLOCKED' });
     expect(sessionManager.submitTranscode).toHaveBeenCalledTimes(1);
   });

@@ -328,6 +328,14 @@ export class TrainingManager implements ITrainingManager {
    * see {@link submitOnExistingSession}.
    */
   async submitTraining(opts: SubmitTrainingOptions): Promise<TrainingHandle> {
+    // Training puts keys in the host's hands: only a confidentialHosts host, before anything is funded (1.39.19).
+    try {
+      this.sessionManager.assertConfidentialHost(opts.hostAddress, 'training');
+    } catch (err: any) {
+      if (err?.code !== 'CONFIDENTIAL_HOST_NOT_ALLOWED') throw err;
+      const ids = opts.existingSession ? { sessionId: opts.existingSession.sessionId, jobId: opts.existingSession.jobId, adopted: true } : {};
+      throw new TrainingError(err.message, 'CONFIDENTIAL_HOST_NOT_ALLOWED', { consumed: false, ...err.details, ...ids });
+    }
     if (opts.existingSession) {
       return this.submitOnExistingSession(opts, opts.existingSession);
     }
@@ -679,6 +687,22 @@ export class TrainingManager implements ITrainingManager {
     // slice settled, a socket that died mid-run) the node had the frame, so nothing here may claim intactness.
     const intact = preFrame ? { consumed: false } : {};
     const sdkCode = (err as { code?: string })?.code;
+    if (sdkCode === 'SESSION_JOB_IN_FLIGHT') {
+      // The SDK's one-job-per-session refusal (1.39.14): raised before any frame, so the session is intact for after
+      // the job that holds it ends.
+      const inFlight = (err as { details?: { inFlight?: string } }).details?.inFlight;
+      return new TrainingError(errMessage(err), 'SESSION_JOB_IN_FLIGHT', { ...intact, inFlight, retryable: false, ...tag });
+    }
+    if (sdkCode === 'CONFIDENTIAL_HOST_NOT_ALLOWED') {
+      // The host is not trusted with confidential jobs (1.39.19); raised before any frame.
+      const d = (err as { details?: Record<string, unknown> }).details ?? {};
+      return new TrainingError(errMessage(err), 'CONFIDENTIAL_HOST_NOT_ALLOWED', { ...intact, reason: d.reason as any, host: d.host, retryable: false, ...tag });
+    }
+    if (sdkCode === 'SESSION_CHANGED') {
+      // The session was re-registered for another target mid-submit (1.39.18 R1): nothing was sent, so the same session
+      // can be used again once its record is settled — a same-session retry, like a transport failure before the frame.
+      return new TrainingError(errMessage(err), 'SIDECAR_UNAVAILABLE', { reason: 'transport', ...intact, cause: err, sdkCode, ...tag });
+    }
     if (sdkCode && TRANSPORT_SDK_CODES.has(sdkCode)) {
       // Pre-frame, every transport code is raised BEFORE the `train` frame leaves: `consumed: false` makes
       // requiresFreshSession say "same session" — a fresh /fiat/session would be a second charge for nothing.
@@ -933,8 +957,19 @@ export class TrainingManager implements ITrainingManager {
     const ranked = await this.hostSelectionService.getRankedHostsForModel(
       this.trainingModelId, lb?.hostSelectionMode,
     );
-    let lastError: unknown;
-    for (const { host } of ranked.slice(0, lb?.maxHostRetries ?? 3)) {
+    // Training is confidential (1.39.19): only listed hosts are candidates, so unlisted ones use up no retry slots.
+    const listed = this.sessionManager.getConfidentialHosts();
+    if (!listed) {
+      throw new TrainingError('Training jobs are refused: no confidentialHosts are configured', 'CONFIDENTIAL_HOST_NOT_ALLOWED',
+        { consumed: false, reason: 'NO_ALLOWLIST', retryable: false });
+    }
+    const allowed = new Set(listed.map((h: string) => h.toLowerCase()));
+    const candidates = ranked.filter(({ host }) => allowed.has(String(host.address).toLowerCase()));
+    let lastError: unknown = candidates.length === 0
+      ? new TrainingError('No host on confidentialHosts serves the training model', 'CONFIDENTIAL_HOST_NOT_ALLOWED',
+        { consumed: false, reason: 'HOST_NOT_ALLOWED', retryable: false })
+      : undefined;
+    for (const { host } of candidates.slice(0, lb?.maxHostRetries ?? 3)) {
       try {
         return await this.submitTraining({ ...opts, hostAddress: host.address, endpoint: host.apiUrl });
       } catch (err) {

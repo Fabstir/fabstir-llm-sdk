@@ -100,6 +100,14 @@ export interface FabstirSDKCoreConfig {
    *  remaining-lifetime pre-flight on adopted (vault / card-paid) training sessions. */
   trainingJobTimeoutSecs?: number;
 
+  /**
+   * The host addresses trusted with confidential jobs (1.39.19): an encrypted transcode, every LTX job and every training
+   * job put keys in the host's hands. With none configured those jobs are refused (CONFIDENTIAL_HOST_NOT_ALLOWED);
+   * unencrypted transcodes and chat stay open. Read the addresses from your configuration; never hardcode them.
+   * (Replaces 1.39.18's `transcode.encryptedHosts`, which is refused.)
+   */
+  confidentialHosts?: string[];
+
   // Contract addresses (optional - can use env vars)
   contractAddresses?: {
     jobMarketplace?: string;
@@ -288,8 +296,20 @@ export class FabstirSDKCore extends EventEmitter {
       skipS5: config.skipS5 ?? (typeof process !== 'undefined' && process.env?.SKIP_S5_STORAGE === 'true'),
 
       // Moderation publish-gate enforcement — ships dark (M3, D1).
-      moderationGate: config.moderationGate ?? false
+      moderationGate: config.moderationGate ?? false,
+
+      confidentialHosts: config.confidentialHosts,
     };
+    // 1.39.18's key, refused rather than ignored: ignoring it would refuse every confidential job as NO_ALLOWLIST (1.39.19).
+    if ((config as any).transcode?.encryptedHosts !== undefined) {
+      throw new SDKError('transcode.encryptedHosts was renamed confidentialHosts in 1.39.19 (it now covers transcode, LTX and training)',
+        'CONFIG_RENAMED', { retryable: false });
+    }
+    // An unusable allowlist fails here, not at the first confidential job.
+    if (config.confidentialHosts !== undefined
+      && (!Array.isArray(config.confidentialHosts) || config.confidentialHosts.some((h) => typeof h !== 'string' || !ethers.isAddress(h)))) {
+      throw new SDKError('confidentialHosts must be a list of host addresses', 'INVALID_CONFIDENTIAL_HOSTS', { retryable: false });
+    }
 
     // Validate all required contract addresses
     validateRequiredAddresses(defaultConfig.contractAddresses as any);
@@ -1022,6 +1042,7 @@ export class FabstirSDKCore extends EventEmitter {
 
         // Create SessionManager after storage init (so it gets the proxy if storage failed)
         this.sessionManager = new SessionManager(this.paymentManager as any, this.storageManager);
+        this.wireSessionManagerPolicy(this.sessionManager as SessionManager);
 
         // Create EncryptionManager
         // PRIORITY: Use S5 seed for encryption key derivation (ensures cross-tab consistency)
@@ -1141,6 +1162,21 @@ export class FabstirSDKCore extends EventEmitter {
       // LTX + Training managers — rebuilt on switchChain(), see buildSidecarManagers.
       await this.buildSidecarManagers(hostOnly, skipS5);
     }
+  }
+
+  /**
+   * The SessionManager's policy from this SDK's config: the confidential-host list (1.39.19), and the session reader the
+   * transcode wait uses, through the read provider rather than the wallet (1.39.18). A session on another chain than
+   * the SDK's is refused rather than read from the wrong one.
+   */
+  private wireSessionManagerPolicy(sm: SessionManager): void {
+    if (this.config.confidentialHosts) sm.setConfidentialHosts(this.config.confidentialHosts);
+    sm.setSessionJobReader((chainId: number) => {
+      if (chainId !== this.currentChainId) {
+        throw new SDKError(`Session is on chain ${chainId}; this SDK is on ${this.currentChainId}`, 'CHAIN_MISMATCH', { chainId });
+      }
+      return new JobMarketplaceWrapper(this.currentChainId, this.signer!, this.readProvider);
+    });
   }
 
   /** The signed-in identity's bridge client, for `bridgeConfig.url` (always set — it defaults); connected with autoConnect. */

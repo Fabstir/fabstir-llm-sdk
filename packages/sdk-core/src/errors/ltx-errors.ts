@@ -10,6 +10,10 @@ export const LTX_WIRE_ERROR_CODES = [
 /** Client-side (SDK) failure codes: pre-validation, bundle drift, and verification mismatches. */
 export const LTX_CLIENT_ERROR_CODES = [
   'LTX_BUNDLE_STALE', 'LTX_PREVALIDATION_FAILED', 'LTX_INPUT_BINDING_MISMATCH', 'LTX_PROOF_MISMATCH',
+  // The SDK refused a second concurrent job on the session before any frame (1.39.14)
+  'SESSION_JOB_IN_FLIGHT',
+  // The host is not on confidentialHosts (or none is configured); refused before any session is funded (1.39.19)
+  'CONFIDENTIAL_HOST_NOT_ALLOWED',
 ] as const;
 
 /** All LTX error codes (wire + client). */
@@ -19,7 +23,7 @@ export type LtxWireErrorCode = (typeof LTX_WIRE_ERROR_CODES)[number];
 export type LtxClientErrorCode = (typeof LTX_CLIENT_ERROR_CODES)[number];
 export type LtxErrorCode = (typeof LTX_ERROR_CODES)[number];
 
-/** Typed LTX error. `code` is one of the 9 wire/client codes; `details` carries context. */
+/** Typed LTX error. `code` is one of the 11 wire/client codes; `details` carries context. */
 export class LtxError extends Error {
   readonly code: LtxErrorCode;
   readonly details?: unknown;

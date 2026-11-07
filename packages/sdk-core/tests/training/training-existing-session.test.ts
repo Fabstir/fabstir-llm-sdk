@@ -34,6 +34,7 @@ const session = (over: Record<string, unknown> = {}) => ({
 function wired(over: Record<string, unknown> = {}) {
   const handle = { requestId: 'r', result: Promise.resolve({}), cancel: vi.fn(), slices: [], pointers: [], forfeitedSlices: [] };
   const sm = {
+    assertConfidentialHost: () => {},   // 1.39.19: the confidential-host check is not under test here
     resolveModelPricePerToken: vi.fn().mockResolvedValue(904n),
     registerExternalSession: vi.fn(),
     startSession: vi.fn(async () => ({ sessionId: 1n, jobId: 2n })),
@@ -350,7 +351,7 @@ describe('the read fails CLOSED', () => {
   });
 
   it('refuses when the SessionManager cannot seed the registry (older sdk-core) — terminal, with the ids', async () => {
-    const { m } = wired({ sessionManager: { resolveModelPricePerToken: vi.fn().mockResolvedValue(904n) } });
+    const { m } = wired({ sessionManager: { assertConfidentialHost: () => {},  resolveModelPricePerToken: vi.fn().mockResolvedValue(904n) } });
     const e = await failing(submit(m));
     expect(e.code).toBe('ESTIMATE_MISMATCH');
     expect(e.detail).toMatchObject({ reason: 'missingDependencyMethod', ...IDS });
@@ -358,7 +359,7 @@ describe('the read fails CLOSED', () => {
   });
 
   it('a SessionManager without the price read is a tagged refusal, not a TypeError escaping untagged', async () => {
-    const { m } = wired({ sessionManager: { registerExternalSession: vi.fn(), submitTraining: vi.fn() } });
+    const { m } = wired({ sessionManager: { assertConfidentialHost: () => {},  registerExternalSession: vi.fn(), submitTraining: vi.fn() } });
     const e = await failing(submit(m));
     expect(e).toBeInstanceOf(TrainingError);
     expect(e.detail).toMatchObject(IDS);

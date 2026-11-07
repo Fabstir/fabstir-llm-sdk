@@ -9,6 +9,7 @@ function createMocks() {
   const wsClient = {
     sendWithoutResponse: vi.fn(async (data: any) => { sent.push(data); }),
     onMessage: vi.fn((h: (data: any) => void) => { handler = h; return () => { handler = null; }; }),
+    onClose: vi.fn(() => () => {}),
   };
   const encryptionManager = {
     encryptMessage: vi.fn((_k: Uint8Array, plaintext: string, _i: number) => {

@@ -91,6 +91,9 @@ export default function TranscodeLBTestPage() {
       const chain = ChainRegistry.getChain(ChainId.BASE_SEPOLIA);
       const newSdk = new FabstirSDKCore({
         mode: 'production' as const,
+        // 1.39.19: hosts trusted with confidential jobs (encrypted transcodes, LTX, training); comma-separated addresses.
+        // Unset refuses those jobs.
+        confidentialHosts: process.env.NEXT_PUBLIC_CONFIDENTIAL_HOSTS?.split(',').map((h) => h.trim()),
         chainId: ChainId.BASE_SEPOLIA,
         rpcUrl: RPC_URL,
         contractAddresses: {

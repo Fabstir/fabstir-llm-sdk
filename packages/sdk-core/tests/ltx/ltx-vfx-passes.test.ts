@@ -56,7 +56,7 @@ function manager(b = bundle()) {
   const getByCID = vi.fn(async () => b);
   const getHostInfo = vi.fn(async () => ({ metadata: { ltx: meta(b) } }));
   const m = new LtxManager({
-    sessionManager: { resolveModelPricePerToken, startSession, registerExternalSession, submitLtx },
+    sessionManager: { assertConfidentialHost: () => {},  resolveModelPricePerToken, startSession, registerExternalSession, submitLtx },
     storageManager: { getByCID }, paymentManager: { getTokenMinDeposit: vi.fn(async () => 1n) },
     hostManager: { getHostInfo }, usdcAddress: '0xabc', chainId: 84532,
   } as any);
@@ -165,6 +165,7 @@ describe('V5 — createLtxSession\'s optional proofTimeoutWindow', () => {
       getModelPricing: vi.fn(async () => 904n),
     };
     const sm: any = new SessionManager(paymentManager, storage);
+    sm.assertConfidentialHost = () => {};   // 1.39.19: the confidential-host check is not under test here
     sm.setHostManager(hostManager);
     await sm.initialize();
     const m = new LtxManager({ sessionManager: sm, storageManager: storage, paymentManager, hostManager, usdcAddress: `0x${'ab'.repeat(20)}`, chainId: 84532 } as any);

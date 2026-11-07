@@ -1,15 +1,24 @@
 // Copyright (c) 2025 Fabstir. SPDX-License-Identifier: BUSL-1.1
 import 'fake-indexeddb/auto';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { stubNodeVersion, transcodeReady } from '../helpers/session-doubles';
+
+const TEST_HOST = '0x' + 'c3'.repeat(20);
 import { SessionManager } from '../../src/managers/SessionManager';
 import type { VideoFormat, TranscodeHandle } from '../../src/types/transcode.types';
 
 // Mock submitTranscodeWs to capture calls without needing a real WebSocket
-vi.mock('../../src/utils/transcode-ws', () => ({
+vi.mock('../../src/utils/transcode-ws', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/utils/transcode-ws')>()),
   submitTranscodeWs: vi.fn(),
 }));
 
 import { submitTranscodeWs } from '../../src/utils/transcode-ws';
+
+// 1.39.15: submits probe the node's /v1/version for `session-job-completion`; keep that off the network (an old node).
+beforeEach(() => { stubNodeVersion(); });
+afterEach(() => { vi.unstubAllGlobals(); });
+
 const mockSubmitTranscodeWs = vi.mocked(submitTranscodeWs);
 
 const TEST_SESSION_ID = 'sess-transcode-1';
@@ -20,12 +29,12 @@ const TEST_FORMATS: VideoFormat[] = [
 function createSessionManager(): SessionManager {
   const pm = { depositNative: vi.fn() } as any;
   const sm = { uploadJSON: vi.fn() } as any;
-  return new SessionManager(pm, sm);
+  return transcodeReady(new SessionManager(pm, sm), [TEST_HOST]);
 }
 
 function injectSession(mgr: SessionManager, sessionId: string, overrides: Record<string, unknown> = {}): void {
   const session = {
-    sessionId: 1n, jobId: 42n, chainId: 84532, model: '0xabc', provider: '0xhost',
+    sessionId: 1n, jobId: 42n, chainId: 84532, model: '0xabc', provider: TEST_HOST,
     endpoint: 'http://localhost:8083', status: 'active', prompts: [], responses: [],
     checkpoints: [], totalTokens: 0, startTime: Date.now(), ...overrides,
   };
@@ -38,9 +47,12 @@ function injectEncryptionAndWs(mgr: SessionManager): void {
     decryptMessage: vi.fn().mockReturnValue('{}'),
   };
   // Pre-inject wsClient and sessionKey so submitTranscode skips WS init
-  (mgr as any).wsClient = { isConnected: () => true, sendWithoutResponse: vi.fn(), onMessage: vi.fn(() => () => {}) };
+  // The shared socket must carry an identity: reuse is decided by connection generation, not liveness.
+  (mgr as any).wsClient = { isConnected: () => true, getConnectionGeneration: () => 1, sendWithoutResponse: vi.fn(), onMessage: vi.fn(() => () => {}) };
   (mgr as any).wsSessionId = TEST_SESSION_ID;
   (mgr as any).sessionKey = new Uint8Array(32);
+  (mgr as any).sessionKeyGeneration = 1;
+  (mgr as any).sessionCrypto.set(TEST_SESSION_ID, { key: (mgr as any).sessionKey, messageIndex: 5 });
   (mgr as any).messageIndex = 5;
 }
 

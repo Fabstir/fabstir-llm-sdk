@@ -29,7 +29,7 @@ function makeManager(order?: string[], resultOverride: Record<string, unknown> =
   const submitLtx = vi.fn(async () => { order?.push('submit'); return { requestId: 'r', cancel() {}, result: Promise.resolve(completeResult(resultOverride)) }; });
   const getByCID = vi.fn(async () => { order?.push('validate'); return bundleFixture; });
   const manager = new LtxManager({
-    sessionManager: { resolveModelPricePerToken, startSession, submitLtx },
+    sessionManager: { assertConfidentialHost: () => {},  resolveModelPricePerToken, startSession, submitLtx },
     storageManager: { getByCID },
     paymentManager: { getTokenMinDeposit: vi.fn(async () => 0n) },
     ltxModelId: LTX_MODEL_ID, usdcAddress: USDC, chainId: 84532,
@@ -99,7 +99,7 @@ describe('LtxManager.generate (SP4.2)', () => {
     const submitLtx = vi.fn(async () => ({ requestId: 'r', cancel() {}, result: Promise.reject(new LtxError('node timed out', 'TIMEOUT')) }));
     const getByCID = vi.fn(async () => bundleFixture);
     const manager = new LtxManager({
-      sessionManager: { resolveModelPricePerToken, startSession, submitLtx },
+      sessionManager: { assertConfidentialHost: () => {},  resolveModelPricePerToken, startSession, submitLtx },
       storageManager: { getByCID },
       paymentManager: { getTokenMinDeposit: vi.fn(async () => 0n) },
       ltxModelId: LTX_MODEL_ID, usdcAddress: USDC, chainId: 84532,

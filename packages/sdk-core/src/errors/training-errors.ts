@@ -26,6 +26,10 @@ export const TRAINING_WIRE_ERROR_CODES = [
 /** Client-side (SDK) failures: bundle drift, estimate divergence, verification mismatches. */
 export const TRAINING_CLIENT_ERROR_CODES = [
   'TRAINING_BUNDLE_STALE', 'ESTIMATE_MISMATCH', 'INPUT_BINDING_MISMATCH', 'POINTER_PERSIST_FAILED',
+  // The SDK refused a second concurrent job on the session before any frame (1.39.14)
+  'SESSION_JOB_IN_FLIGHT',
+  // The host is not on confidentialHosts (or none is configured); refused before any session is funded (1.39.19)
+  'CONFIDENTIAL_HOST_NOT_ALLOWED',
 ] as const;
 
 /** Serve-back (E.2) codes. These ride the LLM SESSION surface, not `train_error`. */

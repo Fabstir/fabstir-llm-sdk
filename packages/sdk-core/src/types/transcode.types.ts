@@ -308,7 +308,12 @@ export {
 export interface TranscodeResult {
   taskId: string;
   outputs: TranscodeOutputUnion[];
-  billing: { units: number; tokens: number };
+  /**
+   * `tokens` is what the run cost. `provenTokens` (nodes reporting `session-job-completion`, 1.39.15) is what is proven
+   * on chain for it, and may differ in either direction: the session's first proof is padded up to the contract minimum,
+   * and a run is billed only up to the remaining deposit. Read it; never infer it from `tokens`.
+   */
+  billing: { units: number; tokens: number; provenTokens?: number };
   duration: number;
   qualityMetrics: QualityMetrics | null;
   proofTreeCID: string | null;
@@ -330,6 +335,18 @@ export interface TranscodeHandle {
   taskId: string;
   cancel(): void;
   result: Promise<TranscodeResult>;
+}
+
+/** SessionManager.fetchTranscodeResult's answer (nodes reporting `session-job-completion`, 1.39.15). */
+export type TranscodeResultAnswer = { status: 'complete'; result: TranscodeResult } | { status: 'pending' };
+
+/** TranscodeManager.sizeTranscodeSession's answer (1.39.17). `duration` is what to fund the session with. */
+export interface TranscodeSessionSize {
+  duration: number;
+  tokens: number;
+  ratePerSecond: number;
+  /** The host reports `transcode-final-wait-uncapped` (1.39.18): no SOURCE_TOO_LONG limit applied. */
+  finalWaitUncapped: boolean;
 }
 
 /** Options for SessionManager.submitTranscode */
@@ -356,8 +373,15 @@ export interface TranscodeLoadBalancedOptions extends TranscodeSubmitOptions {
   maxHostRetries?: number;
   hostSelectionMode?: import('./settings.types').HostSelectionMode;
   onHostSelected?: (hostAddress: string, hostUrl: string) => void;
+  /**
+   * Length of the source video in seconds. Sizes the session to the job before funding (1.39.17): without it the session
+   * gets 3,600 s, and the node stops a job the model's rate cap cannot bill in that time (SESSION_NOT_BILLABLE). Also makes
+   * the submit's default `timeoutMs` the session's lifetime. A source the node is certain to withhold is refused (SOURCE_TOO_LONG).
+   */
+  sourceDurationSeconds?: number;
   /** Session config passed through to startSession */
   depositAmount?: string;
+  /** Session lifetime in seconds (the contract's maxDuration). With sourceDurationSeconds, a value too short for the job is refused before funding. */
   duration?: number;
   proofInterval?: number;
   encryption?: boolean;
@@ -372,7 +396,7 @@ export interface CreateTranscodeJobParams {
   inputCID: string; // S5 CID of source video
   mediaFormats: VideoFormat[]; // Required — sent to node
   formatSpec?: TranscodeFormatSpec; // Optional — for future contract format spec registration
-  maxDuration: number; // Max job duration in seconds
+  maxDuration: number; // Length of the source in seconds: sizes the estimate and the session (not the session's own maxDuration)
   proofInterval: number; // GOPs between proof submissions
   chainId: number;
   paymentToken?: string; // Address of payment token (default: USDC)

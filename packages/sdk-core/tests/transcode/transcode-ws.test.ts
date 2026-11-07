@@ -9,6 +9,7 @@ const makeMocks = () => {
     ws: {
       sendWithoutResponse: vi.fn().mockResolvedValue(undefined),
       onMessage: vi.fn((h: (d: any) => void) => { handler = h; return vi.fn(); }),
+      onClose: vi.fn(() => () => {}),
     },
     enc: {
       encryptMessage: vi.fn((_k: Uint8Array, pt: string, _i: number) => ({ ciphertextHex: 'encrypted-' + pt, nonceHex: 'n', aadHex: 'a' })),
@@ -106,7 +107,7 @@ describe('submitTranscodeWs', () => {
 
 describe('cancelTranscodeWs', () => {
   it('sends plaintext transcode_cancel', () => {
-    const ws = { sendWithoutResponse: vi.fn().mockResolvedValue(undefined), onMessage: vi.fn(() => vi.fn()) };
+    const ws = { sendWithoutResponse: vi.fn().mockResolvedValue(undefined), onMessage: vi.fn(() => vi.fn()), onClose: vi.fn(() => () => {}) };
     cancelTranscodeWs(ws, 'sess-xyz');
     expect(ws.sendWithoutResponse).toHaveBeenCalledWith({ type: 'transcode_cancel', session_id: 'sess-xyz' });
   });
@@ -116,6 +117,9 @@ describe('handle.cancel()', () => {
   it('calls cancelTranscodeWs', async () => {
     const m = makeMocks();
     const h = await submitTranscodeWs(baseOpts(m.ws, m.enc, { sessionId: 'sess-cancel' }));
+    h.result.catch(() => {});
+    // 1.39.18: the node reads a cancel only once it has acked, so cancel() sends it after transcode_accepted.
+    m.messageHandler(encResp({ type: 'transcode_accepted', taskId: 'task-1' }));
     h.cancel();
     const cancelCall = m.ws.sendWithoutResponse.mock.calls.find((c: any[]) => c[0].type === 'transcode_cancel');
     expect(cancelCall).toBeDefined();

@@ -354,7 +354,7 @@ describe('OO5 — a conversation the sealer cannot encode', () => {
 describe('OO6 — createTranscodeJob returns the session\'s own job id', () => {
   test('never a 0 in its place', async () => {
     const startSession = vi.fn(async () => ({ sessionId: 9n, jobId: undefined }));
-    const m = new TranscodeManager({ startSession } as any, { uploadJSON: async () => 'cid' } as any, {} as any, {} as any, {} as any, 84532);
+    const m = new TranscodeManager({ startSession, resolveModelRateLimit: async () => 2000 } as any, { uploadJSON: async () => 'cid' } as any, {} as any, {} as any, {} as any, 84532);
     const result = await m.createTranscodeJob({ hostAddress: ethers.Wallet.createRandom().address, chainId: 84532, maxDuration: 60, mediaFormats: [{ id: 1, ext: 'mp4', vcodec: 'h264', acodec: 'aac' }] } as any);
     expect(result.jobId).not.toBe(0n);
   });

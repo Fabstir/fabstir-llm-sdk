@@ -69,7 +69,11 @@ function describeShape(raw: unknown): string {
 
 /** Parameters for submitTranscodeWs */
 export interface TranscodeWsOptions {
-  wsClient: { sendWithoutResponse(data: any): Promise<void>; onMessage(handler: (data: any) => void): () => void };
+  wsClient: {
+    sendWithoutResponse(data: any): Promise<void>;
+    onMessage(handler: (data: any) => void): () => void;
+    onClose(handler: (event: { code?: number }) => void): () => void;
+  };
   encryptionManager: {
     encryptMessage(key: Uint8Array, plaintext: string, index: number): { ciphertextHex: string; nonceHex: string; aadHex: string };
     decryptMessage(key: Uint8Array, payload: any): string;
@@ -88,10 +92,13 @@ export interface TranscodeWsOptions {
   previewPercent?: number;
 }
 
+/** How long a transcode's result is waited for when the caller sets no `timeoutMs`. */
+export const TRANSCODE_DEFAULT_TIMEOUT_MS = 300_000;
+
 /** Submit a transcode job via encrypted WebSocket. Returns a TranscodeHandle immediately. */
 export async function submitTranscodeWs(opts: TranscodeWsOptions): Promise<TranscodeHandle> {
   const { wsClient, encryptionManager, sessionId, sessionKey, messageIndex,
-    sourceCid, formats, isEncrypted = true, isGpu, jobId, chainId, onProgress, timeoutMs = 300000, previewPercent } = opts;
+    sourceCid, formats, isEncrypted = true, isGpu, jobId, chainId, onProgress, timeoutMs = TRANSCODE_DEFAULT_TIMEOUT_MS, previewPercent } = opts;
 
   const inner: Record<string, unknown> = { action: 'transcode', sourceCid, mediaFormats: formats, isEncrypted };
   if (isGpu !== undefined) inner.isGpu = isGpu;
@@ -107,13 +114,35 @@ export async function submitTranscodeWs(opts: TranscodeWsOptions): Promise<Trans
 
   let resolvedTaskId = '';
   let isSettled = false;
+  let cancelLocally: () => void = () => {};
+  let cancelRequested = false;
 
   const resultPromise = new Promise<TranscodeResult>((resolve, reject) => {
-    const settle = () => { isSettled = true; clearTimeout(timer); unsub(); };
+    const settle = () => { isSettled = true; clearTimeout(timer); unsub(); unsubClose(); };
     const safeResolve = (r: TranscodeResult) => { if (!isSettled) { settle(); resolve(r); } };
     const safeReject = (e: Error) => { if (!isSettled) { settle(); reject(e); } };
 
-    const timer = setTimeout(() => safeReject(new TranscodeError('Transcode timed out', 'TRANSCODE_TIMEOUT')), timeoutMs);
+    // The node keeps running and billing after the client stops waiting: name the task so it can be fetched (1.39.18).
+    const timer = setTimeout(() => safeReject(new TranscodeError(
+      resolvedTaskId ? `Transcode ${resolvedTaskId} still running when the wait ended` : 'Transcode timed out', 'TRANSCODE_TIMEOUT', undefined,
+      { reason: 'WAIT_TIMEOUT', ...(resolvedTaskId && { taskId: resolvedTaskId }) },
+    )), timeoutMs);
+    // From transcoder 6cc694e the node sends nothing on this socket after a transcode_cancel: settle here (1.39.18).
+    cancelLocally = () => safeReject(new TranscodeError(
+      `Transcode ${resolvedTaskId || ''} cancelled by the client`.replace('  ', ' '), 'TRANSCODE_FAILED', undefined,
+      { reason: 'CANCELLED', ...(resolvedTaskId && { taskId: resolvedTaskId }) },
+    ));
+
+    // The node relays a transcode's progress and result only on the connection that submitted it, so after a close
+    // nothing more arrives here — end the wait now rather than at the timeout (1.39.12; same shape as LTX's WS_CLOSED).
+    // A node without `session-job-completion` finishes the job unbilled and keeps no result; on one that reports it,
+    // SessionManager fetches the stored result by `details.taskId` instead of surfacing this (1.39.15).
+    const unsubClose = wsClient.onClose((event) => safeReject(new TranscodeError(
+      resolvedTaskId
+        ? "Connection to the host closed before the transcode result arrived — this node does not keep a dropped transcode's result, so its outputs are lost"
+        : 'Connection to the host closed before the node accepted the transcode',
+      'TRANSCODE_FAILED', undefined, { reason: 'WS_CLOSED', closeCode: event?.code, ...(resolvedTaskId && { taskId: resolvedTaskId }) },
+    )));
 
     const unsub = wsClient.onMessage((data: any) => {
       if (isSettled) return;
@@ -127,27 +156,15 @@ export async function submitTranscodeWs(opts: TranscodeWsOptions): Promise<Trans
         if (msg.type === 'transcode_accepted') {
           resolvedTaskId = msg.taskId;
           handle.taskId = resolvedTaskId;
+          // The node reads a cancel only once it has acked, so one asked for earlier is sent now (1.39.18).
+          if (cancelRequested) { cancelTranscodeWs(wsClient, sessionId); cancelLocally(); }
         } else if (msg.type === 'transcode_progress' && onProgress) {
           const g = msg.gopInfo;
           onProgress(msg.progress, g ? { currentGop: g.currentGop, totalGops: g.totalGops, elapsedSeconds: g.elapsedSeconds } : undefined);
         } else if (msg.type === 'transcode_complete') {
-          const qm = msg.qualityMetrics;
-          const moderation = parseModeration(msg.moderation);
-          safeResolve({
-            taskId: msg.taskId, outputs: msg.outputs, billing: msg.billing, duration: msg.duration,
-            qualityMetrics: qm ? { psnrDB: qm.psnr_db, ssim: qm.ssim ?? undefined, actualBitrate: qm.actual_bitrate, averageGOPSize: qm.average_gop_size ?? undefined } : null,
-            proofTreeCID: msg.proofTreeCID ?? null, proofTreeRootHash: msg.proofTreeRootHash ?? null,
-            // Conditional spread: an absent verdict adds no key at all, so absence survives
-            // JSON serialisation as absence rather than as an explicit `undefined`.
-            ...(moderation !== undefined && { moderation }),
-          });
+          safeResolve(parseTranscodeComplete(msg));
         } else if (msg.type === 'transcode_error') {
-          const nodeCode = typeof msg.error === 'object' ? msg.error?.code
-                         : typeof msg.error === 'string' ? msg.error : undefined;
-          const sdkCode: TranscodeErrorCode = NODE_ERROR_CODES.get(nodeCode) ?? 'TRANSCODE_FAILED';
-          const errMsg = typeof msg.error === 'object' ? msg.error?.message || 'Transcode failed'
-                       : typeof msg.error === 'string' ? msg.error : 'Transcode failed';
-          safeReject(new TranscodeError(errMsg, sdkCode));
+          safeReject(transcodeErrorFrom(msg, resolvedTaskId || undefined));
         }
       } catch (err: any) { if (!isSettled) safeReject(err); }
     });
@@ -157,8 +174,43 @@ export async function submitTranscodeWs(opts: TranscodeWsOptions): Promise<Trans
     });
   });
 
-  const handle: TranscodeHandle = { taskId: resolvedTaskId, cancel: () => cancelTranscodeWs(wsClient, sessionId), result: resultPromise };
+  const handle: TranscodeHandle = {
+    taskId: resolvedTaskId,
+    cancel: () => {
+      if (!resolvedTaskId) { cancelRequested = true; return; }   // sent with the accept: earlier the node would not read it
+      cancelTranscodeWs(wsClient, sessionId); cancelLocally();
+    },
+    result: resultPromise,
+  };
   return handle;
+}
+
+/** A `transcode_complete` frame as the SDK's TranscodeResult (shared with the 1.39.15 result fetch). */
+export function parseTranscodeComplete(msg: any): TranscodeResult {
+  const qm = msg.qualityMetrics;
+  const moderation = parseModeration(msg.moderation);
+  return {
+    taskId: msg.taskId, outputs: msg.outputs, billing: msg.billing, duration: msg.duration,
+    qualityMetrics: qm ? { psnrDB: qm.psnr_db, ssim: qm.ssim ?? undefined, actualBitrate: qm.actual_bitrate, averageGOPSize: qm.average_gop_size ?? undefined } : null,
+    proofTreeCID: msg.proofTreeCID ?? null, proofTreeRootHash: msg.proofTreeRootHash ?? null,
+    // Conditional spread: an absent verdict adds no key at all, so absence survives
+    // JSON serialisation as absence rather than as an explicit `undefined`.
+    ...(moderation !== undefined && { moderation }),
+  };
+}
+
+/**
+ * A `transcode_error` frame as a TranscodeError. The four mapped node codes keep their SDK codes; every rejection
+ * carries the node's own code in `details.nodeCode` (1.39.15: PROOF_WINDOW_TOO_SHORT, BILLING_FAILED, RESULT_EXPIRED, …
+ * were otherwise indistinguishable TRANSCODE_FAILEDs).
+ */
+export function transcodeErrorFrom(msg: any, taskId?: string): TranscodeError {
+  const nodeCode = typeof msg.error === 'object' ? msg.error?.code
+                 : typeof msg.error === 'string' ? msg.error : undefined;
+  const sdkCode: TranscodeErrorCode = NODE_ERROR_CODES.get(nodeCode) ?? 'TRANSCODE_FAILED';
+  const errMsg = typeof msg.error === 'object' ? msg.error?.message || 'Transcode failed'
+               : typeof msg.error === 'string' ? msg.error : 'Transcode failed';
+  return new TranscodeError(errMsg, sdkCode, undefined, { nodeCode, ...((taskId ?? msg.taskId) && { taskId: taskId ?? msg.taskId }) });
 }
 
 /** Send a plaintext cancel message for a transcode job. */

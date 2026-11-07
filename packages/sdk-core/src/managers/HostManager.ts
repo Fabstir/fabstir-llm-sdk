@@ -1333,6 +1333,11 @@ export class HostManager {
    * @param tokenAddress - Token address (ethers.ZeroAddress for native, USDC address for stable)
    * @returns Effective price as bigint (custom if set, otherwise default)
    */
+  /** The model's on-chain rate cap in tokens per second (1.39.17). */
+  async getModelRateLimit(modelId: string): Promise<number> {
+    return this.modelManager.getModelRateLimit(modelId);
+  }
+
   async getModelPricing(
     hostAddress: string,
     modelId: string,

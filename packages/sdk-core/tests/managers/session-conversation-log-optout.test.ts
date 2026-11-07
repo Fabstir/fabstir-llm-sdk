@@ -177,6 +177,19 @@ describe('SDK_CAPABILITIES (D22)', () => {
       ltxSpeedField: true,
       hostEndpointFromRegistry: true,
       hostLivenessBeforeFunding: true,
+      dedicatedSocketClosed: true,
+      dedicatedInitIsolated: true,
+      sharedSocketMessageIndex: true,
+      transcodeWsClosed: true,
+      sessionJobExclusive: true,
+      jobCompletionNodes: true,
+      transcodeResultFetch: true,
+      transcodeSessionSizing: true,
+      transcodeFinalWaitUncapped: true,
+      transcodeWaitFromSession: true,
+      transcodeCancelSettles: true,
+      encryptedTranscodeAllowlist: true,
+      confidentialHosts: true,
     });
   });
 });
