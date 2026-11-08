@@ -35,18 +35,19 @@ describe('the closed wire error set (capacity table + A.3/C.3)', () => {
     expect(TRAINING_WIRE_VISIBLE_CODES).not.toContain('ESTIMATE_MISMATCH');
     expect(TRAINING_WIRE_VISIBLE_CODES).not.toContain('LORA_NOT_STAGED');
     expect(TRAINING_WIRE_VISIBLE_CODES).not.toContain('SESSION_JOB_IN_FLIGHT');
-    expect(TRAINING_ERROR_CODES.length).toBe(19);
+    expect(TRAINING_ERROR_CODES.length).toBe(21);
   });
   it('EXCLUDES the two sidecar-internal codes (doc:112 TEMPLATE_BOUNDS, doc:123 SCAN_FAILURE)', () => {
     // Both are sidecar 4xx/no-verdict responses that MAP to a wire code; neither is one.
     expect(TRAINING_ERROR_CODES).not.toContain('TEMPLATE_BOUNDS');
     expect(TRAINING_ERROR_CODES).not.toContain('SCAN_FAILURE');
   });
-  it('carries the 6 client-side codes and the 2 serve-back codes as distinct groups', () => {
+  it('carries the 8 client-side codes and the 2 serve-back codes as distinct groups', () => {
     expect([...TRAINING_CLIENT_ERROR_CODES]).toEqual([
       'TRAINING_BUNDLE_STALE', 'ESTIMATE_MISMATCH', 'INPUT_BINDING_MISMATCH', 'POINTER_PERSIST_FAILED',
       'SESSION_JOB_IN_FLIGHT',   // 1.39.14: the SDK's one-job-per-session refusal
       'CONFIDENTIAL_HOST_NOT_ALLOWED',   // 1.39.19
+      'SESSION_NOT_ACTIVE', 'SESSION_STATUS_UNREADABLE',   // 1.39.21: the settled-session guard
     ]);
     expect([...TRAINING_SERVE_BACK_ERROR_CODES]).toEqual(['LORA_STAGING_FAILED', 'LORA_NOT_STAGED']);
   });

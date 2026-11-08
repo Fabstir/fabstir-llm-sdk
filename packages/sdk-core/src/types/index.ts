@@ -219,6 +219,9 @@ export interface PromptOptions {
   rawQuery?: string;
   /** false → this exchange is not appended to the S5 conversation log (e.g. an extraction prompt). */
   conversationLog?: boolean;
+  /** true / false forces web search on / off for this prompt, over the session's `webSearch` config (Milestone B D30).
+   *  Images still turn it off. Omit to let the session config and the user's text decide. */
+  webSearch?: boolean;
   /** AbortSignal to stop in-progress streaming inference. Resolves with partial response. */
   signal?: AbortSignal;
   /** Called when context utilization >= threshold. UI should trim history before next prompt. */

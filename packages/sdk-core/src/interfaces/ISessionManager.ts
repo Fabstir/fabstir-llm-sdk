@@ -125,6 +125,11 @@ export interface ISessionManager {
   endSession(sessionId: bigint): Promise<void>;
 
   /**
+   * The shared connection's generation (changes on every reconnect); `undefined` with no shared connection.
+   */
+  getConnectionGeneration(): number | undefined;
+
+  /**
    * Generate an image within a session (diffusion). sessionId is the string key.
    */
   generateImage(

@@ -30,6 +30,10 @@ export const TRAINING_CLIENT_ERROR_CODES = [
   'SESSION_JOB_IN_FLIGHT',
   // The host is not on confidentialHosts (or none is configured); refused before any session is funded (1.39.19)
   'CONFIDENTIAL_HOST_NOT_ALLOWED',
+  // The session was settled on chain (detail.sdkReason 'SETTLED_ON_CHAIN'), or ended here: open a fresh one (1.39.21)
+  'SESSION_NOT_ACTIVE',
+  // Its on-chain status could not be read; nothing was sent; retry the same session (1.39.21)
+  'SESSION_STATUS_UNREADABLE',
 ] as const;
 
 /** Serve-back (E.2) codes. These ride the LLM SESSION surface, not `train_error`. */
@@ -125,7 +129,7 @@ export interface TrainingErrorDetail {
 }
 
 /** Trying again may succeed with no user action. */
-const RETRYABLE_CODES: readonly string[] = ['CAPACITY', 'SIDECAR_UNAVAILABLE'];
+const RETRYABLE_CODES: readonly string[] = ['CAPACITY', 'SIDECAR_UNAVAILABLE', 'SESSION_STATUS_UNREADABLE'];
 /** Re-hosting is FORBIDDEN, not merely futile: a held job must never reach another host (WP-S1). */
 const NEVER_REHOSTED: readonly string[] = [...MODERATION_HOLD_CODES];
 /** Terminal for THIS attempt, and re-shopping cannot help because the cause travels with the
@@ -169,7 +173,10 @@ const CLIENT_TERMINAL_REASONS: readonly string[] = [
 
 /** Codes whose fault is OURS, not the host's. Another host reaches the identical failure, so
  *  re-shopping only burns a second deposit to find that out. */
-const CLIENT_FAULT_CODES: readonly string[] = ['POINTER_PERSIST_FAILED'];
+const CLIENT_FAULT_CODES: readonly string[] = ['POINTER_PERSIST_FAILED',
+  // The 1.39.21 settled-session guard: about this session or the chain read, not the host; never buy another host's
+  // session automatically for it.
+  'SESSION_NOT_ACTIVE', 'SESSION_STATUS_UNREADABLE'];
 
 export class TrainingError extends Error {
   readonly code: TrainingErrorCode;
@@ -192,6 +199,8 @@ export class TrainingError extends Error {
    * another host always needs a fresh session, adopted or not: a session is bound on-chain to one host.
    */
   get isRetryable(): boolean {
+    // A guard refusal that says it is not retryable (a chain mismatch) is not, whatever its code (1.39.21)
+    if (this.code === 'SESSION_STATUS_UNREADABLE' && this.detail?.retryable === false) return false;
     return RETRYABLE_CODES.includes(this.code);
   }
 

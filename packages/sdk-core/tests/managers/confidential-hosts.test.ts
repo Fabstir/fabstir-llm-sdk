@@ -30,7 +30,7 @@ function manager(list: string[] | null = [HOST]) {
   const mgr: any = new SessionManager({} as any, { storeConversation: vi.fn() } as any);
   mgr.encryptionManager = { encryptMessage: vi.fn(), decryptMessage: vi.fn() };
   vi.spyOn(mgr, 'sendEncryptedInit').mockImplementation(async () => new Uint8Array(32).fill(9));
-  mgr.setSessionJobReader(() => ({ getSessionJobOnChain: vi.fn(async () => ({ startTime: BigInt(Math.floor(Date.now() / 1000)), maxDuration: 3600n })) }));
+  mgr.setSessionJobReader(() => ({ getSessionJobOnChain: vi.fn(async () => ({ status: 0, startTime: BigInt(Math.floor(Date.now() / 1000)), maxDuration: 3600n })) }));
   mgr.registerExternalSession({ sessionId: 1600n, jobId: 3200n, endpoint: 'https://host1.fabstir.test', hostAddress: HOST, model: MODEL, chainId: 84532 });
   if (list) mgr.setConfidentialHosts(list);
   return mgr;

@@ -134,8 +134,17 @@ describe('re-init decision after invalidation', () => {
   it('reports no re-init needed while the connection holds', () => {
     const mgr = createManager();
     mgr.wsClient = { isConnected: () => true, getConnectionGeneration: () => 1 };
+    mgr.sessionKeyClient = mgr.wsClient;   // the client the init was acked on
 
     expect(mgr.needsSessionInit()).toBe(false);
+  });
+
+  it('reports a re-init is needed on a replacement client at the same generation number (1.39.20)', () => {
+    const mgr = createManager();
+    mgr.sessionKeyClient = { isConnected: () => true, getConnectionGeneration: () => 1 };
+    mgr.wsClient = { isConnected: () => true, getConnectionGeneration: () => 1 };   // every client starts at 1
+
+    expect(mgr.needsSessionInit()).toBe(true);
   });
 
   it('reports a re-init is needed when there is no client at all', () => {

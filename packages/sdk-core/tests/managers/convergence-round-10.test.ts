@@ -105,7 +105,7 @@ describe('DD3 — nothing is funded that cannot be reported', () => {
   test('createTranscodeJob uploads the spec first: an upload that fails funds nothing', async () => {
     const startSession = vi.fn(async () => ({ sessionId: 7n, jobId: 7n }));
     const uploadFailure = Object.assign(new Error('portal busy'), { code: 'STORAGE_SAVE_ERROR' });
-    const m = new TranscodeManager({ startSession, resolveModelRateLimit: async () => 2000 }, { uploadJSON: async () => { throw uploadFailure; } }, {}, {}, {} as any, 84532);
+    const m = new TranscodeManager({ startSession, resolveModelRateLimit: async () => 2000 }, { uploadEncryptedBlob: async () => { throw uploadFailure; } }, {}, {}, {} as any, 84532);
     expect(await caught(m.createTranscodeJob({ mediaFormats: [{ id: 1, ext: 'mp4', vcodec: 'libx264', vf: 'scale=1280x720' }], hostAddress: '0x' + '1'.repeat(40), chainId: 84532, maxDuration: 60 } as any))).toBe(uploadFailure);
     expect(startSession).not.toHaveBeenCalled();
   });

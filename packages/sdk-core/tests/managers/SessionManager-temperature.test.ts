@@ -178,7 +178,7 @@ describe('Sub-phase 2.2: sampling in sendPrompt REST body', () => {
 
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => {
       capturedBody = JSON.parse(init.body);
-      return { ok: true, json: async () => ({ response: 'ok' }) } as any;
+      return { ok: true, json: async () => ({ content: 'ok' }) } as any;
     }));
   });
 

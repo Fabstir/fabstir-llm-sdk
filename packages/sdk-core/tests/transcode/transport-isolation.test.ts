@@ -133,7 +133,7 @@ describe('E3: one counter per key on the shared socket', () => {
     const ws = new FakeWs();
     const key = new Uint8Array(32).fill(5);
     const entry = { key, messageIndex: 3 };                       // three chat frames already sent (0, 1, 2)
-    Object.assign(mgr, { wsClient: ws, wsSessionId: '1433', sessionKey: key, messageIndex: 0, sessionKeyGeneration: 1 });
+    Object.assign(mgr, { wsClient: ws, wsSessionId: '1433', sessionKey: key, messageIndex: 0, sessionKeyGeneration: 1, sessionKeyClient: ws });
     mgr.sessionCrypto.set('1433', entry);
     let used = -1;
     vi.mocked(submitTranscodeWs).mockImplementationOnce(async (o: any) => {

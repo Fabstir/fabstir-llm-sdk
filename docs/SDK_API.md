@@ -890,6 +890,21 @@ Encryption state is **per session and per connection**, and the SDK enforces bot
   fingerprint (identifies a key without revealing it) plus session id and `scoped|legacy`
   source. One fingerprint per session across mint → encrypt → decrypt is health; two is a bug
   report that writes itself.
+- **No re-init on nodes that keep keys per connection (1.39.20).** Before each prompt
+  (`sendPromptStreaming`), `uploadVectors`, `searchVectors` and `generateImage`, the SDK used to re-send the
+  encrypted session init on the shared connection. A re-init replaces the session's key, so a reply
+  still streaming on that session lost its key and was cut short. On a node reporting
+  `session-job-completion` (8.62+), which keeps a session's key for the connection until it closes,
+  the re-init is skipped when the connection is unchanged, belongs to this session and already holds
+  its key, and no LoRA staging failure is recorded (a re-init is what stages the adapter again). A
+  replacement socket always gets an init. Older nodes, and a failed `/v1/version` probe, keep the re-init.
+  `SDK_CAPABILITIES.sharedConnectionKeyReuse`.
+- **`getConnectionGeneration()` (1.39.20)** on `SessionManager` returns a number that increases on
+  every open of the shared connection, whether a reconnect or a replacement socket, or `undefined`
+  with no shared connection (or one not yet open). The node drops a connection's keys and RAG vectors
+  when it closes, so key a "vectors already sent" record on it and re-send when it changes.
+- **A refused init keeps the node's code (1.39.20).** `SESSION_INIT_ERROR` carries
+  `details { nodeCode, sessionId }`, e.g. `nodeCode: 'SESSION_AUTH_DENIED'` from a vault host.
 
 ### Get SessionManager
 
@@ -1019,6 +1034,8 @@ interface PromptOptions {
   onTokenUsage?: (usage: TokenUsageInfo) => void;
   onImageGenerated?: (result: ImageGenerationResult) => void;
   rawQuery?: string;
+  webSearch?: boolean;               // 1.39.20: force web search on/off for this prompt (images still turn it off)
+  conversationLog?: boolean;         // false: this exchange is not written to the conversation log
   signal?: AbortSignal;
   onContextWarning?: (usage: TokenUsageInfo) => void;
   contextWarningThreshold?: number;  // default 0.8
@@ -1085,6 +1102,71 @@ interface CheckpointProof {
 
 Completes a session and triggers payment distribution.
 
+**`completeSession(id)` and `endSession(id)` release only session `id` (1.39.20).** They drop `id`'s key. They close the
+shared socket only when `id` owns it (a socket is owned from the moment it is created, so one still connecting for
+another session is safe), and with it reject the RAG/search requests waiting on that
+socket (`SESSION_ENDED`). Ending one session no longer closes another session's socket or clears its key, and a socket
+another session opens while the close is in progress is kept. `SDK_CAPABILITIES.sessionEndScoped`.
+
+**No new work on a session the node may have settled (1.39.21).** The node settles a session on its own, and tells the
+client nothing. It does so when the session's last connection closes, after the last billed transcode on a live
+connection (60 s later), after an LTX completion, or at expiry. A prompt or image on a settled session would be answered
+unbilled. So after any event that can lead to a settlement, the SDK reads the session's status on chain before new work.
+The events are:
+- a job ending (a failed one marks the session until it is seen settled);
+- a job's socket closing;
+- the chat socket reconnecting, being replaced, or closed for another session;
+- `pauseSession`, a failed `completeSession`;
+- a session adopted with `registerExternalSession` or `registerDelegatedSession`, or restored from its log.
+
+New work means `sendPrompt`, `sendPromptStreaming`, `streamResponse`, `uploadVectors`, `searchVectors`, `webSearch`,
+`generateImage`, and transcode, LTX and training submits. `fetchTranscodeResult` is not gated, since it serves settled
+sessions.
+- Settled: `SESSION_NOT_ACTIVE` with `details { reason: 'SETTLED_ON_CHAIN', sessionId, status, retryable: false }`. The
+  session is marked `completed`. Open a new session.
+- Unreadable (RPC down, no reader): `SESSION_STATUS_UNREADABLE`, `details.retryable: true`. Nothing is sent; retry. A
+  session on another chain than the SDK's reader gets `retryable: false`, `reason: 'CHAIN_MISMATCH'`.
+- Active: the work goes ahead. For 20 minutes after the event (`SessionManager.SETTLE_HORIZON_MS`, covering the node's
+  longest settle path with its retries), each new call reads again; after a failed job, until the session is seen
+  settled. A fresh `startSession` session is not read. Each read is one `eth_call`, with a 30 s timeout.
+LTX and training keep both codes as their own (`LtxError` / `TrainingError` codes `SESSION_NOT_ACTIVE` and
+`SESSION_STATUS_UNREADABLE`, with the session ids). They are not `GENERATION_FAILED` or `ESTIMATE_MISMATCH`. For training:
+- settled → `requiresFreshSession` is true;
+- unreadable → `consumed: false` and `isRetryable`.
+Neither is re-shopped to another host. The status is checked again right before each frame is sent, so a session another
+call has just found settled is not used.
+
+`SDK_CAPABILITIES.settledSessionGuard`. A read inside a settlement the node has decided but not yet sent can still see
+Active. From 1.39.22, nodes reporting `session-settled-notice` close that gap (below).
+
+**The node's settled notice and refusal (1.39.22, node 8.63.0 `session-settled-notice`).** Such a node announces each
+settlement it decides with a `session_settled` frame on every connection carrying the session (and right after an init
+on a session it has settled), and refuses new work on it with `SESSION_SETTLED`. The SDK settles the session locally from
+either. Later work is refused with `SESSION_NOT_ACTIVE`, `details { reason: 'SETTLED_BY_NODE', nodeReason, nodeCode:
+'SESSION_SETTLED' }` (`nodeReason`: `last_connection_closed`, `work_finished`, `ltx_finished`, `training_finished`,
+`expired`, `settled_on_chain`, `completion`, or `refused`). Work already in flight is not aborted by a notice.
+- Vector uploads and searches refused this way fail at once (the refusal is matched by session, not by request id).
+- LTX: `LtxError` `SESSION_NOT_ACTIVE`. Training: `TrainingError` `SESSION_NOT_ACTIVE` (fresh session, not re-shopped).
+- A transcode keeps its `TranscodeError` (`details.nodeCode: 'SESSION_SETTLED'`), and the session is settled locally.
+
+On such a node the chain is read only for what the node cannot see: one read per event (no 20 minute re-reads, no sticky
+marks), plus a read on every new connection (a node restart forgets what it settled), after any node error on the
+session, after 10 minutes idle (`SessionManager.SETTLED_NOTICE_IDLE_MS`), and for adopted or restored sessions. REST
+inference (`sendPrompt`, `streamResponse`) keeps the 1.39.21 rules unless the node also reports `session-settled-rest`
+(below). Nodes without the marker are unchanged. `SDK_CAPABILITIES.settledNotice`.
+
+**REST inference (1.39.23).** `sendPrompt` and `streamResponse` call `/v1/inference`.
+- **Request body.** Before 1.39.23 the body sent `jobId` as a string, which the node rejects (422), so REST inference
+  never worked. The body now sends `session_id`, a numeric `job_id` and `chain_id`, and reads the node's `content`.
+- **409 `SESSION_SETTLED`.** On a node reporting `session-settled-rest` (8.63.1), the node answers this for a settled
+  session. The SDK settles the session and throws `SESSION_NOT_ACTIVE` with `details { reason: 'SETTLED_BY_NODE',
+  httpStatus: 409 }`. On such a node REST prompts also need only one chain read per event.
+- **403 `SESSION_AUTH_DENIED`.** A host serving card-paid sessions refuses REST inference outright. The SDK throws
+  `SESSION_AUTH_DENIED`, `details.httpStatus: 403`. Use `sendPromptStreaming` on those hosts.
+- **Vector refusals.** A vector refusal from 8.63.1 echoes `requestId` and fails only that request.
+
+`SDK_CAPABILITIES.settledRest`.
+
 ```typescript
 async completeSession(
   sessionId: bigint,
@@ -1113,11 +1195,20 @@ async uploadVectors(
 **Returns:**
 ```typescript
 interface UploadVectorsResult {
-  uploaded: number;
-  status: 'success' | 'error';
-  error?: string;
+  uploaded: number;   // the node's own counts, summed over batches (1.39.20)
+  rejected: number;
+  errors: string[];   // the node's messages for rejected vectors, plus "Batch N failed: …" for a batch that was not answered
 }
 ```
+
+The node answers each batch with `status` `success`, `partial` or `error` and its own `uploaded` / `rejected` /
+`errors`. Before 1.39.20 a partial or failed batch was reported as `rejected: 1, errors: []`. An answer without those
+counts throws `UPLOAD_RESPONSE_MALFORMED`, with `details { batch, uploadedSoFar, rejectedSoFar, errorsSoFar }` from the
+batches already confirmed. A batch that gets no answer at all (timeout, closed socket) still counts all
+its vectors as rejected. `SDK_CAPABILITIES.uploadVectorsNodeCounts`.
+
+`sendPrompt` and `sendPromptStreaming` on a session without encryption sent the session id in place of the prompt
+before 1.39.20; they now send the prompt as given (add any RAG context to it yourself, as with encrypted sessions).
 
 **Example:**
 ```typescript
@@ -1605,8 +1696,13 @@ exact; otherwise that text decides too.
 
 ### Override Controls
 
-The overrides are read from the **session**, not from `PromptOptions` (it has no `webSearch` field; a per-prompt
-override is planned). Set them when starting the session, or on the live session object before a prompt:
+The overrides are read from the **session**, and from 1.39.20 a prompt can force its own: `PromptOptions.webSearch`
+`true` or `false` wins over the session config for that prompt (images still turn search off). Pass
+`webSearch: false` on an extraction prompt instead of changing the session. (`sendPrompt`, the REST path, never searches
+the web.) A delegated session takes the config at
+registration: `registerDelegatedSession({ ..., webSearch: { forceDisabled: true } })`
+(`SDK_CAPABILITIES.delegatedWebSearchConfig`). Set them when starting the session, or on the live session object before
+a prompt:
 
 ```typescript
 // At start
@@ -1654,16 +1750,16 @@ interface SearchApiResponse {
 }
 ```
 
-### webSearch (WebSocket Path)
+### webSearch
 
-Performs a web search via WebSocket (real-time feedback):
+Searches through the session's host. From 1.39.23 this is REST `POST /v1/search` on the session's endpoint, with the
+session's chain. It bills no session. The node never had a WebSocket `searchRequest` handler, so the old WebSocket path
+was never answered. The call works with or without an open socket, and the session only names the host.
 
 ```typescript
-const results = await sessionManager.webSearch(
-  sessionId,
-  'latest AI breakthroughs'
-);
-// Returns same SearchApiResponse as searchDirect
+const results = await sessionManager.webSearch(sessionId, 'latest AI breakthroughs', 5);
+// Same SearchApiResponse as searchDirect; WebSearchError on a bad query (invalid_query), rate limit (rate_limited),
+// a 30 s timeout (timeout), search disabled (search_disabled), or other failures (provider_error)
 ```
 
 ### getWebSearchCapabilities
@@ -2114,6 +2210,16 @@ A transcode counts as encrypted when `isEncrypted` is not `false`, or when its s
 - `cancel()` settles `handle.result` at once (`details.reason: 'CANCELLED'`). A cancel issued before the node accepts the job is held until the accept arrives, because the node only reads a cancel after its ack.
 - On a node reporting `transcode-final-wait-uncapped` (8.62.6), `SOURCE_TOO_LONG` does not apply: `sizeTranscodeSession(…, { hostUrl })` and the load balancer check each host.
 
+**Funded sessions it could not use (1.39.20)**: a host can answer `CAPACITY_FULL` after its session was funded. The
+load balancer then moves to the next host, and now reports what it funded. `handle.orphanedSessions` lists
+`{ sessionId, jobId, host }` (`TranscodeOrphanedSession`) for each funded session that was not used, and is absent when
+there are none. When the call fails, the error carries the same list as `details.orphanedSessions`: on the final
+`NO_AVAILABLE_HOSTS`, and on any failure after a session was funded. An error with a code (`TranscodeError`, or an
+`SDKError` such as `SESSION_FUNDING_UNCERTAIN` from the next host's funding) is thrown as itself, with `orphanedSessions`
+added to its details. Any other error becomes `TRANSCODE_FAILED` with `details { reason: 'POST_FUNDING_FAILURE', orphanedSessions,
+cause }`. A failure before anything was funded is thrown unchanged. Reclaim the listed sessions
+(e.g. `transcodeManager.cancelTranscodeJob(jobId)`). `SDK_CAPABILITIES.transcodeOrphanedSessions`.
+
 **Pending job tracking**: The load balancer tracks in-flight jobs per host so that rapid sequential submissions don't all land on the same host. `effectiveAvailable = capacity.available - pendingJobs` ensures overflow to secondary hosts even when the capacity endpoint hasn't yet updated.
 
 **Per-transcode WebSocket connections**: `submitTranscode` reuses the session's own socket when it already has one (a session opened with `startSession` in this SDK instance). Otherwise it opens a dedicated socket with its own session key, which never silently reconnects. A delegate session (`registerExternalSession`) always gets a dedicated socket.
@@ -2394,6 +2500,21 @@ const modelId = computeTranscodeModelId(formats);
 ```
 
 ### Encrypted Source Upload
+
+**`TranscodeManager` helpers (repaired in 1.39.20)**: these called storage and contract methods that do not exist, and
+always threw. `SDK_CAPABILITIES.transcodeStorageMethods`.
+- `uploadVideoForTranscode(file, encrypt?, onProgress?)` encrypts and uploads the bytes (`StorageManager.uploadEncryptedBlob`)
+  and returns `{ cid: 's5://u…' }`, a capability CID carrying its key, ready to use as `sourceCid`. There is no plaintext
+  upload path: `encrypt: false` is refused (`TRANSCODE_FAILED`, `details.reason: 'PLAINTEXT_UPLOAD_UNSUPPORTED'`).
+  `onProgress` reports 100 on completion.
+- `downloadTranscodedVideo(outputCID)` returns a `Blob`: a capability CID is decrypted with its own key, a plain CID is
+  read as raw bytes; `s5://` is optional. It writes no files: an `outputPath` is refused (`OUTPUT_PATH_UNSUPPORTED`).
+- `createTranscodeJob` stores the format spec as an encrypted blob; `formatSpecCID` is its `s5://` capability CID.
+- `cancelTranscodeJob(jobId)` calls `completeSessionJob(jobId, '')` on the JobMarketplace and waits 3 confirmations.
+- `getTranscodeJobStatus(jobId)` reads `sessionJobs(jobId)`: `status` is `'active'`, `'completed'` (progress 100) or
+  `'timedOut'`. Before 1.39.20 the labels were shifted by one. An unknown status throws `UNKNOWN_SESSION_STATUS`.
+
+The manual route:
 
 Upload source video encrypted to S5 using `uploadBlobEncrypted`, then construct the S5 encrypted CID (0xae format) which embeds the decryption key:
 
@@ -2691,7 +2812,8 @@ details is copied); a code the SDK does not know maps to `GENERATION_FAILED`. To
 refusals (wrong model, no on-chain job id, proof cannot land) as `VALIDATION_FAILED` and a too-short control clip as
 `GENERATION_FAILED` — the same codes as before, so they are not yet distinguishable from a failed render. A failure at
 session init — including the vault gate's denial on the existingSession path — arrives as `GENERATION_FAILED` without
-a node code (`SESSION_INIT_ERROR` does not carry one yet).
+a node code before 1.39.20. From 1.39.20 `SESSION_INIT_ERROR` carries the node's code, and `generate()` relays it as
+`details.nodeCode` (e.g. `SESSION_AUTH_DENIED`).
 
 ## Training (LoRA/QLoRA fine-tune, M0)
 
@@ -2903,9 +3025,12 @@ is intact and `requiresFreshSession` is false: `existingSessionConfig`, `numeric
 any deposit, where no session exists yet so the flag is moot), and every `transport` failure, including an RPC transient on the
 pre-flight reads (session, model, price) (`SIDECAR_UNAVAILABLE / transport`, `detail.sdkCode` ∈ NETWORK_ERROR | TIMEOUT |
 SERVER_ERROR — retry the same session once the chain answers). Both code sets are exported from the package
-root as `TRANSPORT_SDK_CODES` and `RPC_TRANSIENT_CODES`, so a UI can pre-classify without string lists of its own. Two exceptions keep "fresh session":
-`adoptedSessionParams` (the session is the wrong shape; the recourse IS a fresh one) and the busy
-`CAPACITY` classes (C.6's one-in-flight rule consumes the session; only `chainUnavailable` keeps it).
+root as `TRANSPORT_SDK_CODES` and `RPC_TRANSIENT_CODES`, so a UI can pre-classify without string lists of its own. Three exceptions keep "fresh session":
+`adoptedSessionParams` (the session is the wrong shape; the recourse IS a fresh one), the busy
+`CAPACITY` classes (C.6's one-in-flight rule consumes the session; only `chainUnavailable` keeps it), and (1.39.21)
+`SESSION_NOT_ACTIVE` for a session settled on chain (`detail.sdkReason: 'SETTLED_ON_CHAIN'`), ended or completed. A
+*paused* session keeps `consumed: false`: resume it and retry. `SESSION_STATUS_UNREADABLE` keeps `consumed: false` and is
+retryable, unless `detail.retryable` is false (a chain mismatch).
 `detail.adopted` names the path: `true` for the card path, `false` for the wallet path.
 
 **Wallet path (1.38.7).** `opts.endpoint` is required and validated BEFORE any deposit — missing →

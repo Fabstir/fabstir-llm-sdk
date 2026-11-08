@@ -21,7 +21,7 @@ describe('ltx.types + errors + exports (SP2.1)', () => {
   it('LTX_ERROR_CODES exposes every wire + client code (5 + 6; SESSION_JOB_IN_FLIGHT 1.39.14, CONFIDENTIAL_HOST_NOT_ALLOWED 1.39.19)', () => {
     for (const c of CODES) expect(LTX_ERROR_CODES).toContain(c);
     expect(LTX_ERROR_CODES).toContain('SESSION_JOB_IN_FLIGHT');
-    expect(LTX_ERROR_CODES.length).toBe(11);
+    expect(LTX_ERROR_CODES.length).toBe(13);
   });
 
   it('LtxError carries its code and is an Error', () => {

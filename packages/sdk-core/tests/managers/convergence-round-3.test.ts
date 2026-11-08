@@ -78,7 +78,7 @@ describe('T4 — an exchange reaches the log as one unit, in order', () => {
   // (pinned on the real store in convergence-round-14).
   test('two exchanges whose log writes are not awaited never interleave', async () => {
     let answered = 0;
-    vi.stubGlobal('fetch', vi.fn(async () => { const n = ++answered; return { ok: true, json: async () => ({ response: `A${n}` }) }; }));
+    vi.stubGlobal('fetch', vi.fn(async () => { const n = ++answered; return { ok: true, json: async () => ({ content: `A${n}` }) }; }));
     const logged: string[] = [];
     const storageManager = {
       isInitialized: () => true, assertConversationLogWritable: vi.fn(), storeConversation: vi.fn().mockResolvedValue(undefined),

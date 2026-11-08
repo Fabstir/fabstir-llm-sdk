@@ -677,6 +677,12 @@ export class TrainingManager implements ITrainingManager {
    * whatever the node's classes say.
    */
   private static withSessionIds(err: unknown, tag: SessionIdTag, preFrame: boolean): TrainingError {
+    // The node's SESSION_SETTLED refusal (8.63.0): training-ws reads any error frame as TRAIN_FAILED with its code. The
+    // session takes no new work: SESSION_NOT_ACTIVE, a fresh session, never re-shopped (1.39.22 N2).
+    if (err instanceof TrainingError && err.detail?.sdkCode === 'SESSION_SETTLED') {
+      return new TrainingError(err.message, 'SESSION_NOT_ACTIVE',
+        { ...err.detail, sdkReason: 'SETTLED_BY_NODE', retryable: false, ...tag });
+    }
     if (err instanceof TrainingError) {
       // CAPACITY is the node's one-in-flight rule: it consumes by definition, whichever promise it rode.
       const intact = preFrame && err.code !== 'CAPACITY' && err.detail?.reason !== ADOPTED_SESSION_PARAMS_REASON
@@ -697,6 +703,21 @@ export class TrainingManager implements ITrainingManager {
       // The host is not trusted with confidential jobs (1.39.19); raised before any frame.
       const d = (err as { details?: Record<string, unknown> }).details ?? {};
       return new TrainingError(errMessage(err), 'CONFIDENTIAL_HOST_NOT_ALLOWED', { ...intact, reason: d.reason as any, host: d.host, retryable: false, ...tag });
+    }
+    if (sdkCode === 'SESSION_NOT_ACTIVE') {
+      // The settled-session guard (1.39.21), or a session ended or completed here: nothing was sent, but this session
+      // takes no new work, so no `consumed: false` — requiresFreshSession is true. A PAUSED session is intact: resume it
+      // and retry the same session (settled-guard review round 5).
+      const d = (err as { details?: { reason?: string; status?: string; nodeReason?: string } }).details;
+      const sdkReason = d?.reason;
+      const nodeReason = d?.nodeReason;   // 1.39.22: why the node settled it, when it did
+      const paused = d?.status === 'paused';
+      return new TrainingError(errMessage(err), 'SESSION_NOT_ACTIVE', { ...(paused ? intact : {}), cause: err, sdkCode, sdkReason, ...(nodeReason ? { nodeReason } : {}), retryable: false, ...tag });
+    }
+    if (sdkCode === 'SESSION_STATUS_UNREADABLE') {
+      // The guard could not read the session's status (1.39.21): nothing was sent; the same session, retried.
+      const d = (err as { details?: { retryable?: boolean } }).details;
+      return new TrainingError(errMessage(err), 'SESSION_STATUS_UNREADABLE', { ...intact, cause: err, sdkCode, retryable: d?.retryable !== false, ...tag });
     }
     if (sdkCode === 'SESSION_CHANGED') {
       // The session was re-registered for another target mid-submit (1.39.18 R1): nothing was sent, so the same session

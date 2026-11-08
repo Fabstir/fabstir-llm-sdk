@@ -23,7 +23,8 @@ export const SDK_CAPABILITIES = Object.freeze({
    * throws SESSION_ID_UNRESOLVED with its txHash, and one that provably funded nothing SESSION_NOT_FUNDED.
    * A send that may have been broadcast but names no hash throws SESSION_FUNDING_UNCERTAIN: check the wallet's
    * activity before starting again. TranscodeManager.createTranscodeJob funds last (nothing after it can fail).
-   * Not yet covered: TranscodeManager.submitTranscodeWithLoadBalancing (planned, Milestone B).
+   * TranscodeManager.submitTranscodeWithLoadBalancing reports the sessions it funded and could not use (1.39.20,
+   * `transcodeOrphanedSessions`).
    */
   fundedSetupErrorCarriesIds: true,
   /**
@@ -101,4 +102,37 @@ export const SDK_CAPABILITIES = Object.freeze({
   encryptedTranscodeAllowlist: true,
   /** One confidentialHosts list for encrypted transcodes, LTX and training, fail closed, checked before funding (1.39.19). */
   confidentialHosts: true,
+  /** DelegatedSessionConfig.webSearch, and PromptOptions.webSearch forcing search on/off for one prompt (1.39.20). */
+  delegatedWebSearchConfig: true,
+  /** endSession / completeSession release only their own session: another session's shared socket, key and waiters are
+   *  left alone (1.39.20). */
+  sessionEndScoped: true,
+  /** SESSION_INIT_ERROR carries details { nodeCode, sessionId } (1.39.20). */
+  sessionInitErrorDetails: true,
+  /** uploadVectors reports the node's own uploaded / rejected / errors; an ack without them throws
+   *  UPLOAD_RESPONSE_MALFORMED (1.39.20). */
+  uploadVectorsNodeCounts: true,
+  /** SessionManager.getConnectionGeneration() (1.39.20). */
+  connectionGenerationAccessor: true,
+  /** On a `session-job-completion` node, a prompt, upload or search on a connection that already holds the session's key
+   *  sends no re-init, so a reply in flight keeps its key (1.39.20). */
+  sharedConnectionKeyReuse: true,
+  /** submitTranscodeWithLoadBalancing: funded sessions it could not use travel as handle.orphanedSessions or
+   *  details.orphanedSessions (1.39.20). */
+  transcodeOrphanedSessions: true,
+  /** TranscodeManager upload/download/createTranscodeJob/cancel/status use StorageManager and JobMarketplace APIs that
+   *  exist (1.39.20). */
+  transcodeStorageMethods: true,
+  /** After an event at which the node may settle a session unannounced, the next new work on it reads its status on
+   *  chain: settled → SESSION_NOT_ACTIVE (details.reason 'SETTLED_ON_CHAIN'); unreadable → SESSION_STATUS_UNREADABLE,
+   *  retryable (1.39.21). */
+  settledSessionGuard: true,
+  /** The node's `session_settled` notice and `SESSION_SETTLED` refusal (8.63.0, `session-settled-notice`) settle the
+   *  session locally (SESSION_NOT_ACTIVE, details.reason 'SETTLED_BY_NODE'); on such a node the chain is read only for
+   *  what the node cannot see (1.39.22). */
+  settledNotice: true,
+  /** HTTP 409 SESSION_SETTLED from /v1/inference settles the session (SETTLED_BY_NODE); 403 SESSION_AUTH_DENIED reaches the
+   *  caller as SESSION_AUTH_DENIED; on a `session-settled-rest` node REST prompts need no repeated chain reads; webSearch()
+   *  uses REST /v1/search (1.39.23). */
+  settledRest: true,
 } as const);

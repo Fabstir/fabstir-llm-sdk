@@ -17,15 +17,16 @@ export function resolveSearchQueries(
   return [userTextOf(prompt, rawQuery)];
 }
 
-/** One decision for every prompt path: images → off; forceDisabled; forceEnabled; else auto-detect. */
+/** One decision for every prompt path: images → off; the prompt's own webSearch; forceDisabled; forceEnabled; else auto-detect. */
 export function resolveWebSearch(
   config: SearchIntentConfig | undefined,
   prompt: string,
-  options?: Pick<PromptOptions, 'images' | 'rawQuery'>
+  options?: Pick<PromptOptions, 'images' | 'rawQuery' | 'webSearch'>
 ): { enabled: boolean; maxSearches: number; queries: string[] | null } {
   const c = config ?? {};
   let enabled: boolean;
   if (options?.images && options.images.length > 0) enabled = false; // the VLM handles images locally
+  else if (typeof options?.webSearch === 'boolean') enabled = options.webSearch; // per prompt wins (Milestone B D30)
   else if (c.forceDisabled) enabled = false;
   else if (c.forceEnabled) enabled = true;
   else enabled = c.autoDetect !== false && analyzePromptForSearchIntent(userTextOf(prompt, options?.rawQuery));

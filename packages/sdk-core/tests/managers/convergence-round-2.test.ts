@@ -185,7 +185,7 @@ describe('S5 — the manager answers from the store, not from a second list', ()
 
 describe('S6 — R2 completed', () => {
   test('streamResponse finishes while the log write is still pending', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ response: 'paid' }) })));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ content: 'paid' }) })));
     const storageManager = {
       isInitialized: () => true, assertConversationLogWritable: vi.fn(), storeConversation: vi.fn().mockResolvedValue(undefined),
       appendMessage: vi.fn(() => new Promise(() => {})), getUserAddress: () => '0xu',
@@ -198,7 +198,7 @@ describe('S6 — R2 completed', () => {
   });
 
   test('sendPrompt returns the paid reply while the log write is still pending', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ response: 'the paid answer' }) })));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ content: 'the paid answer' }) })));
     const storageManager = {
       isInitialized: () => true, assertConversationLogWritable: vi.fn(), storeConversation: vi.fn().mockResolvedValue(undefined),
       appendMessage: vi.fn(() => new Promise(() => {})), getUserAddress: () => '0xu',

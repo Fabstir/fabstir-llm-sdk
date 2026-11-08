@@ -76,8 +76,18 @@ export function stubNodeVersion(features: string[] = []) {
  */
 export function transcodeReady(mgr: any, hosts: string[], maxDuration = 3600) {
   mgr.setConfidentialHosts(hosts);
+  activeOnChain(mgr, maxDuration);
+  return mgr;
+}
+
+/**
+ * 1.39.21: an adopted session (registerExternalSession / registerDelegatedSession) is read on chain before its first new
+ * work, and an unreadable status refuses. Answer as FabstirSDKCore's reader would for a live session: Active (status 0),
+ * started now, lasting `maxDuration`.
+ */
+export function activeOnChain(mgr: any, maxDuration = 3600) {
   mgr.setSessionJobReader(() => ({
-    getSessionJobOnChain: vi.fn(async () => ({ startTime: BigInt(Math.floor(Date.now() / 1000)), maxDuration: BigInt(maxDuration) })),
+    getSessionJobOnChain: vi.fn(async () => ({ status: 0, startTime: BigInt(Math.floor(Date.now() / 1000)), maxDuration: BigInt(maxDuration) })),
   }));
   return mgr;
 }

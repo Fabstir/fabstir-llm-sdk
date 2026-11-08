@@ -18,18 +18,40 @@ import type {
   TranscodeHandle,
   TranscodeLoadBalancedOptions,
   TranscodeSessionSize,
+  TranscodeOrphanedSession,
 } from '../types/transcode.types';
 import type { IHostSelectionService } from '../interfaces/IHostSelectionService';
 import { TranscodeError } from '../errors/transcode-errors';
 import { fetchTranscodeCapacity } from '../utils/transcode-capacity';
 import { HostSelectionMode } from '../types/settings.types';
-import { computeTranscodeModelId, estimateTranscodeUnits, billingUnitsToTokens, tokensToUsdc, transcodeSessionDuration, isEncryptedTranscode, TRANSCODE_MAX_RELEASABLE_RATE_SECONDS } from '../utils/transcode-utils';
+import { computeTranscodeModelId, estimateTranscodeUnits, billingUnitsToTokens, tokensToUsdc, transcodeSessionDuration, isEncryptedTranscode, isCapabilityCid, TRANSCODE_MAX_RELEASABLE_RATE_SECONDS } from '../utils/transcode-utils';
 
 /** A longer setTimeout delay overflows and fires at once. */
 const MAX_TIMER_MS = 2_147_483_647;
 
-/** Contract status codes → human-readable strings */
-const CONTRACT_STATUS: Record<number, string> = { 0: 'created', 1: 'active', 2: 'completed', 3: 'cancelled' };
+/** JobMarketplace SessionStatus (Active, Completed, TimedOut: types/proof.types.ts, contracts API_REFERENCE). */
+const CONTRACT_STATUS: Record<number, string> = { 0: 'active', 1: 'completed', 2: 'timedOut' };
+
+/**
+ * A load-balancer failure with the sessions it funded and could not use (Milestone B D40). None → `err` unchanged. An
+ * error with a code (TranscodeError, SDKError such as SESSION_FUNDING_UNCERTAIN) is the same error, its details plus
+ * `orphanedSessions`, so a caller branching on its class or code still can (review m2). Anything else becomes
+ * TRANSCODE_FAILED with `details { reason: 'POST_FUNDING_FAILURE', orphanedSessions, cause }`.
+ */
+function withOrphanedSessions(err: unknown, orphaned: TranscodeOrphanedSession[], host: string): unknown {
+  if (orphaned.length === 0) return err;
+  if (err instanceof Error && typeof (err as { code?: unknown }).code === 'string') {
+    const coded = err as Error & { details?: unknown };
+    const d = coded.details;
+    // TranscodeError.details is readonly to callers only; it is a plain property.
+    (coded as { details?: unknown }).details = d === undefined ? { orphanedSessions: orphaned }
+      : typeof d === 'object' && d !== null ? { ...(d as object), orphanedSessions: orphaned }
+      : { detail: d, orphanedSessions: orphaned };
+    return coded;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return new TranscodeError(message, 'TRANSCODE_FAILED', host, { reason: 'POST_FUNDING_FAILURE', orphanedSessions: orphaned, cause: err });
+}
 
 /** TranscodeManager — manages video/audio transcoding jobs */
 export class TranscodeManager implements ITranscodeManager {
@@ -96,6 +118,8 @@ export class TranscodeManager implements ITranscodeManager {
     // before expiry, so the result arrives by then. The caller's own timeoutMs stands.
     const submitOptions = { ...options, timeoutMs: options?.timeoutMs ?? Math.min((sessionDuration + 300) * 1000, MAX_TIMER_MS) };
     let skippedForFinalWait = 0, skippedOther = 0;
+    // Sessions funded on a host that then refused the job: they travel with the outcome (Milestone B D40).
+    const orphaned: TranscodeOrphanedSession[] = [];
 
     const mode = options?.hostSelectionMode ?? HostSelectionMode.AUTO;
     const maxRetries = options?.maxHostRetries ?? 3;
@@ -143,8 +167,9 @@ export class TranscodeManager implements ITranscodeManager {
         this.pendingJobs.set(host.address, (this.pendingJobs.get(host.address) || 0) + 1);
         options?.onHostSelected?.(host.address, host.apiUrl);
 
+        let funded: TranscodeOrphanedSession | undefined;
         try {
-          const { sessionId } = await this.sessionManager.startSession({
+          const { sessionId, jobId } = await this.sessionManager.startSession({
             host: host.address,
             modelId,
             chainId: this.chainId,
@@ -155,7 +180,8 @@ export class TranscodeManager implements ITranscodeManager {
             encryption: options?.encryption !== false,
             conversationLog: false, // a transcode has no chat log — and no post-funding S5 write to fail
           });
-          const handle = await this.sessionManager.submitTranscode(
+          funded = { sessionId, jobId, host: host.address };
+          const handle: TranscodeHandle = await this.sessionManager.submitTranscode(
             sessionId.toString(), sourceCid, formats, submitOptions,
           );
           // Decrement pending count when job completes or fails. Reassigning (rather than
@@ -166,17 +192,19 @@ export class TranscodeManager implements ITranscodeManager {
             const count = this.pendingJobs.get(host.address) || 0;
             if (count > 0) this.pendingJobs.set(host.address, count - 1);
           });
+          if (orphaned.length > 0) handle.orphanedSessions = orphaned;
           return handle;
         } catch (err) {
           // Decrement on submission failure
           const count = this.pendingJobs.get(host.address) || 0;
           if (count > 0) this.pendingJobs.set(host.address, count - 1);
+          if (funded) orphaned.push(funded);
           if (err instanceof TranscodeError && err.code === 'CAPACITY_FULL') {
             console.log(`[TranscodeManager] CAPACITY_FULL on ${host.address}, trying next host`);
             skippedOther++;
             continue;
           }
-          throw err;
+          throw withOrphanedSessions(err, orphaned, host.address);
         }
       }
     }
@@ -188,7 +216,8 @@ export class TranscodeManager implements ITranscodeManager {
         'TRANSCODE_FAILED', undefined, { reason: 'SOURCE_TOO_LONG' },
       );
     }
-    throw new TranscodeError('No hosts available with transcode capacity', 'NO_AVAILABLE_HOSTS');
+    throw new TranscodeError('No hosts available with transcode capacity', 'NO_AVAILABLE_HOSTS', undefined,
+      orphaned.length > 0 ? { orphanedSessions: orphaned } : undefined);
   }
 
   async createTranscodeJob(params: CreateTranscodeJobParams): Promise<{
@@ -205,7 +234,8 @@ export class TranscodeManager implements ITranscodeManager {
     const estimatedCost = String(billingUnitsToTokens(units));
     // maxDuration is the source length here (the estimate above reads it so); encrypted is the longer case.
     const { duration } = await this.sizeTranscodeSession(params.maxDuration, params.mediaFormats, { modelId });
-    const formatSpecCID = await this.storageManager.uploadJSON(params.mediaFormats);
+    // Encrypted like every StorageManager write by default; the capability CID carries its key (Milestone B D46).
+    const formatSpecCID = `s5://${await this.storageManager.uploadEncryptedBlob(new TextEncoder().encode(JSON.stringify(params.mediaFormats)))}`;
     const { jobId } = await this.sessionManager.startSession({
       host: params.hostAddress,
       modelId,
@@ -316,27 +346,49 @@ export class TranscodeManager implements ITranscodeManager {
   }
 
   async cancelTranscodeJob(jobId: bigint): Promise<{ txHash: string }> {
-    const contract = this.contractManager.getContract('jobMarketplace');
-    const tx = await contract.completeSessionJob(jobId);
+    // A transcode keeps no conversation log, so the completion carries an empty CID (Milestone B D46).
+    const tx = await this.contractManager.getJobMarketplace().completeSessionJob(jobId, '');
     const receipt = await tx.wait(3);
     return { txHash: receipt.hash };
   }
 
+  /**
+   * Encrypt and upload a source video; returns its `s5://` capability CID (the key travels inside it), ready to pass as
+   * `sourceCid`. There is no plaintext upload path: `encrypt: false` is refused. Progress reports 100 on completion.
+   */
   async uploadVideoForTranscode(
     videoFile: File | Blob,
     encrypt?: boolean,
     onProgress?: (percentComplete: number) => void,
   ): Promise<{ cid: string; encryptionKey?: string }> {
-    const result = await this.storageManager.uploadFile(videoFile, { encrypt, onProgress });
-    return { cid: result.cid, encryptionKey: result.encryptionKey };
+    if (encrypt === false) {
+      throw new TranscodeError('uploadVideoForTranscode has no plaintext upload path; sources are uploaded encrypted',
+        'TRANSCODE_FAILED', undefined, { reason: 'PLAINTEXT_UPLOAD_UNSUPPORTED' });
+    }
+    const cid = await this.storageManager.uploadEncryptedBlob(new Uint8Array(await videoFile.arrayBuffer()));
+    onProgress?.(100);
+    return { cid: `s5://${cid}` };
   }
 
+  /**
+   * Fetch a transcoded output as a Blob: a capability CID is decrypted with the key it carries, a plain CID is read as
+   * raw bytes. `s5://` is optional. The SDK writes no files: an `outputPath` is refused. Progress reports 100 on completion.
+   */
   async downloadTranscodedVideo(
     outputCID: string,
     outputPath?: string,
     onProgress?: (percentComplete: number) => void,
   ): Promise<Blob | string> {
-    return this.storageManager.downloadFile(outputCID, { outputPath, onProgress });
+    if (outputPath !== undefined) {
+      throw new TranscodeError('downloadTranscodedVideo returns a Blob; it does not write files (outputPath)',
+        'TRANSCODE_FAILED', undefined, { reason: 'OUTPUT_PATH_UNSUPPORTED' });
+    }
+    const cid = outputCID.replace(/^s5:\/\//, '');
+    const bytes: Uint8Array = isCapabilityCid(cid)
+      ? await this.storageManager.downloadDecryptedByCID(cid)
+      : await this.storageManager.getRawBytes(cid);
+    onProgress?.(100);
+    return new Blob([bytes as unknown as BlobPart]);
   }
 
   async getTranscodeJobStatus(jobId: bigint): Promise<{
@@ -346,12 +398,14 @@ export class TranscodeManager implements ITranscodeManager {
     totalGOPs?: number;
     elapsedSeconds?: number;
   }> {
-    const contract = this.contractManager.getContract('jobMarketplace');
-    const job = await contract.getSessionJob(jobId);
-    return {
-      status: CONTRACT_STATUS[Number(job.status)] || 'unknown',
-      progress: Number(job.status) === 2 ? 100 : 0,
-    };
+    const job = await this.contractManager.getJobMarketplace().sessionJobs(jobId);
+    const code = Number(job.status);
+    const status = CONTRACT_STATUS[code];
+    if (!status) {
+      throw new TranscodeError(`Unknown session status ${code} for job ${jobId}`, 'TRANSCODE_FAILED', undefined,
+        { reason: 'UNKNOWN_SESSION_STATUS', status: code });
+    }
+    return { status, progress: code === 1 ? 100 : 0 };
   }
 
   // ── Non-MVP stubs ──

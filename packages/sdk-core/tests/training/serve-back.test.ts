@@ -30,6 +30,7 @@ vi.mock('../../src/websocket/WebSocketClient', () => ({
 }));
 import 'fake-indexeddb/auto';
 import { SessionManager } from '../../src/managers/SessionManager';
+import { activeOnChain } from '../helpers/session-doubles';
 import { toServeBackError, serveBackAvailable, firstResponseTimeoutMs, ADAPTER_STAGE_BUDGET_MS } from '../../src/utils/training-serve-back';
 import { TrainingError } from '../../src/errors/training-errors';
 
@@ -58,6 +59,7 @@ function harness() {
       return { type: 'encrypted_session_init', payload: {} };
     },
   };
+  activeOnChain(sm);   // 1.39.21: an adopted session is read on chain (Active) before its first new work
   return { sm, captured };
 }
 
