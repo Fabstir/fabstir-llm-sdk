@@ -49,7 +49,7 @@ const delegated = (over: Record<string, unknown> = {}) => ({
 });
 
 beforeEach(() => {
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ response: 'the answer' }) })));
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ content: 'the answer' }) })));
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -190,6 +190,17 @@ describe('SDK_CAPABILITIES (D22)', () => {
       transcodeCancelSettles: true,
       encryptedTranscodeAllowlist: true,
       confidentialHosts: true,
+      delegatedWebSearchConfig: true,
+      sessionEndScoped: true,
+      sessionInitErrorDetails: true,
+      uploadVectorsNodeCounts: true,
+      connectionGenerationAccessor: true,
+      sharedConnectionKeyReuse: true,
+      transcodeOrphanedSessions: true,
+      transcodeStorageMethods: true,
+      settledSessionGuard: true,
+      settledNotice: true,
+      settledRest: true,
     });
   });
 });

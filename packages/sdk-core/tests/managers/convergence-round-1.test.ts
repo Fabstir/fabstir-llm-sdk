@@ -49,7 +49,7 @@ async function caught(p: Promise<unknown>): Promise<any> {
 
 beforeEach(() => {
   __resetInProcessCoherenceForTests();
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ response: 'the paid answer' }) })));
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ content: 'the paid answer' }) })));
 });
 afterEach(() => vi.unstubAllGlobals());
 

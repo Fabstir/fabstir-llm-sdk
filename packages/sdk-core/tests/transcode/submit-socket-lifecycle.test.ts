@@ -146,6 +146,7 @@ describe('a reused shared socket is never closed by a submit path', () => {
     mgr.sessionKey = new Uint8Array(32).fill(5);
     mgr.sessionCrypto.set(SID, { key: mgr.sessionKey, messageIndex: 0 });
     mgr.sessionKeyGeneration = 3;
+    mgr.sessionKeyClient = shared;   // the client the init was acked on (1.39.20: generations are per client)
     return { mgr, shared };
   }
 

@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { SessionManager } from '../../src/managers/SessionManager';
-import { FakeWs, FakeWebSocket, makeFakeEncryptionManager, fakeHostManager } from '../helpers/session-doubles';
+import { FakeWs, FakeWebSocket, makeFakeEncryptionManager, fakeHostManager, activeOnChain } from '../helpers/session-doubles';
 import { ADAPTER_STAGE_BUDGET_MS } from '../../src/utils/training-serve-back';
 import { LORA } from '../training/fixtures';
 
@@ -25,6 +25,7 @@ function manager() {
   const mgr: any = new SessionManager({} as any, { storeConversation: vi.fn().mockResolvedValue(undefined) } as any);
   mgr.encryptionManager = makeFakeEncryptionManager({ clientAddress: AUTH.clientAddress });
   mgr.hostManager = fakeHostManager();
+  activeOnChain(mgr);   // 1.39.21: an adopted session is read on chain (Active) before its first new work
   return mgr;
 }
 const register = (mgr: any, over: Record<string, unknown>) => mgr.registerDelegatedSession({ ...BASE, ...over });

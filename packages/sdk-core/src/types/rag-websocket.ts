@@ -57,9 +57,11 @@ export interface UploadVectorsMessage {
 export interface UploadVectorsResponse {
   type: 'uploadVectorsResponse';
   requestId: string;
-  status: 'success' | 'error';
+  /** "success" (none rejected), "partial" (some), "error" (all): node `handle_upload_vectors`. */
+  status: 'success' | 'partial' | 'error';
   uploaded: number;
-  error?: string;
+  rejected: number;
+  errors: string[];
 }
 
 /**

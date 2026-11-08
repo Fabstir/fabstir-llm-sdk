@@ -43,7 +43,9 @@ import { HostManager, PRICE_PRECISION } from './HostManager';
 import { EncryptionManager } from './EncryptionManager';
 import { WebSocketClient } from '../websocket/WebSocketClient';
 import { ChainRegistry } from '../config/ChainRegistry';
-import { UnsupportedChainError } from '../errors/ChainErrors';
+import { UnsupportedChainError, ChainMismatchError } from '../errors/ChainErrors';
+import { withTimeout } from '../utils/with-timeout';
+import { NETWORK_TIMEOUT_MS } from '../utils/rpc-provider';
 import { PricingValidationError } from '../errors/pricing-errors';
 import { WebSearchError } from '../errors/web-search-errors';
 import { ContextLimitError } from '../errors/context-errors';
@@ -293,6 +295,9 @@ export interface DelegatedSessionConfig {
   lora?: LoraSessionField;
   /** Fires on a post-ack `LORA_STAGING_FAILED` (E.3). Silent without it. */
   onServeBackError?: (error: TrainingError) => void;
+  /** Web search for this session's prompts, as on a started session (Milestone B D30). `{ forceDisabled: true }` for an
+   *  extraction session; a prompt's own `PromptOptions.webSearch` still wins. */
+  webSearch?: SearchIntentConfig;
 }
 
 /**
@@ -342,7 +347,14 @@ export class SessionManager implements ISessionManager {
    * session for; comparing this instead is what distinguishes the two.
    */
   private sessionKeyGeneration?: number;
+  /** The client `sessionKeyGeneration` was read from: generations are per client (Milestone B review M1). */
+  private sessionKeyClient?: WebSocketClient;
   private connectionChangeUnsubscribe?: () => void;
+  private settledFrameUnsubscribe?: () => void;
+  /** Opens of any shared client, counted here: each WebSocketClient restarts its own count at 1 (Milestone B round 2). */
+  private sharedConnectionOpens = 0;
+  /** The client whose latest open `sharedConnectionOpens` counted. */
+  private sharedConnectionCounted?: WebSocketClient;
   /** Rejectors for encrypted work awaiting a response on the current connection. */
   private encryptedWaiters: Set<(error: Error) => void> = new Set();
   /**
@@ -359,11 +371,45 @@ export class SessionManager implements ISessionManager {
    */
   private sessionCrypto: Map<string, { key: Uint8Array; messageIndex: number }> = new Map();
   /** Reads a session job through the dedicated read provider (FabstirSDKCore wires it), never the wallet (1.39.18 K2). */
-  private sessionJobReader?: (chainId: number) => { getSessionJobOnChain(jobId: bigint): Promise<{ startTime: bigint | number; maxDuration: bigint | number }> };
+  private sessionJobReader?: (chainId: number) => { getSessionJobOnChain(jobId: bigint): Promise<{ startTime: bigint | number; maxDuration: bigint | number; status?: number | bigint }> };
+  /** Sessions the node may have settled since the SDK last read them (1.39.21 S1): the mark's epoch, when it was set, and
+   *  whether it is sticky (a job that ended without its result, which the node may still be running). */
+  private maySettle: Map<string, { epoch: number; at: number; sticky: boolean }> = new Map();
+  private maySettleEpoch = 0;
+  /**
+   * How long after an event the node may still settle (review rounds 1–2, `checkpoint_manager.rs`
+   * `complete_session_job_latched`, the disconnect path in `server.rs`): up to 120 s waiting for a pending proof, a forced
+   * final checkpoint (a proof, its tx and up to 60 s confirmation), the contract's dispute window (30 s,
+   * `disputeWindow()`) + 5 s from that proof, the completion tx behind the node's tx queue, a "Dispute wait" revert
+   * retried at 10/20/40/80/160 s (310 s), and one full second attempt 35 s after a failure. 20 minutes covers that with
+   * margin. An Active read inside it does not clear the mark.
+   */
+  static SETTLE_HORIZON_MS = 20 * 60_000;
+  /** Sessions the guard found settled on chain, so a later refusal names the reason (review round 2). */
+  private settledOnChain: Set<string> = new Set();
+  /** Sessions the node told us it settled (1.39.22 N1/N2): the node's reason, or 'refused' for a SESSION_SETTLED refusal. */
+  private settledByNode: Map<string, string> = new Map();
+  /** Whether the session's node reports `session-settled-notice` (1.39.22 N3); set on a 2xx /v1/version only. */
+  private settledNoticeNodes: Map<string, boolean> = new Map();
+  /** Whether it also refuses REST inference on a settled session (`session-settled-rest`, 8.63.1; 1.39.23 R1). */
+  private settledRestNodes: Map<string, boolean> = new Map();
+  /** When each session last passed the gate, for the idle mark on notice nodes (1.39.22 N3). */
+  private lastGatedAt: Map<string, number> = new Map();
+  /** Idle time after which a notice node's session is read again: the node cannot see a settlement made on chain by
+   *  someone else (the depositor, triggerSessionTimeout) (owner, 2026-11-08). */
+  static SETTLED_NOTICE_IDLE_MS = 10 * 60_000;
+  /** Bound once, so the same function can be attached to and detached from every socket. */
+  private readonly settledFrameListener = (data: any) => this.onSettledFrame(data, true);
+  /** The same, on a dedicated job socket: its refusal is not about the shared socket's waiters. */
+  private readonly dedicatedSettledFrameListener = (data: any) => this.onSettledFrame(data, false);
   /** Hosts trusted with confidential jobs, lower-cased; undefined = none configured, so none allowed (1.39.19). */
   private confidentialHosts?: Set<string>;
   /** Per session id: whether its node reports `session-job-completion` (1.39.15 H1). Only definitive answers are kept. */
   private jobCompletionNodes: Map<string, boolean> = new Map();
+  /** When sharedConnectionHoldsKey's probe last failed, per session (round 3 m3). */
+  private holdsKeyProbeFailedAt: Map<string, number> = new Map();
+  /** How long a failed probe makes sharedConnectionHoldsKey re-init without asking again. */
+  static HOLDS_KEY_PROBE_RETRY_MS = 60_000;
   /** The one job in flight per session id (1.39.14, IMPLEMENTATION-SESSION-JOB-EXCLUSIVE G1). */
   private jobsInFlight: Map<string, SessionJobKind> = new Map();
   /** Serializes init handshakes so two mint->send->ack sequences cannot interleave. */
@@ -434,7 +480,10 @@ export class SessionManager implements ISessionManager {
    * a lora session) on an outcome already known.
    */
   private handleConnectionChange(generation: number): void {
-    if (this.sessionKeyGeneration === undefined || generation === this.sessionKeyGeneration) {
+    // Same generation on the SAME client is the open that carried the init; on a replacement client it is a new
+    // connection that merely restarted the count (Milestone B round 2).
+    if (this.sessionKeyGeneration === undefined ||
+        (generation === this.sessionKeyGeneration && this.sessionKeyClient === this.wsClient)) {
       return;
     }
 
@@ -447,6 +496,7 @@ export class SessionManager implements ISessionManager {
     this.sessionKey = undefined;
     this.messageIndex = 0;
     this.sessionKeyGeneration = undefined;
+    this.sessionKeyClient = undefined;
     // Every entry was registered node-side on the connection that just died.
     this.sessionCrypto.clear();
     this.wireOkLogged.clear();
@@ -481,15 +531,282 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * 1.39.22 N1/N2, on every SDK socket: the node's `session_settled` notice and its `SESSION_SETTLED` refusal settle the
+   * named session locally; on a notice node any other error naming a session marks it for a read (N3).
+   */
+  private onSettledFrame(data: any, fromShared: boolean): void {
+    const sid = data?.session_id === undefined || data?.session_id === null ? undefined : String(data.session_id);
+    if (!sid || !this.sessions.has(sid)) return;
+    // A notice names its job too: a record re-seeded for another job under the id is not the one settled (review)
+    if (data.type === 'session_settled' && data.job_id !== undefined && String(data.job_id) !== String(this.sessions.get(sid)!.jobId)) return;
+    if (data.type === 'session_settled') {
+      this.markSettledByNode(sid, typeof data.reason === 'string' ? data.reason : 'completion');
+    } else if (data.type === 'error' && data.code === 'SESSION_SETTLED') {
+      this.markSettledByNode(sid, 'refused');
+      // A vector request carries `requestId`, not `id`, so its refusal names only the session: fail that session's
+      // waiters on its shared socket now instead of at their timeout.
+      // Only the shared socket's own refusal, and only vector waiters: the node does not refuse a searchRequest (review).
+      // 8.63.1 echoes the frame's requestId: then only that request is refused (1.39.23 R3); 8.63.0 names only the session.
+      if (fromShared && this.wsSessionId === sid) {
+        const only = typeof data.requestId === 'string' ? data.requestId : undefined;
+        for (const [id, pending] of this.pendingRequests) {
+          if (only !== undefined && id !== only) continue;
+          clearTimeout(pending.timeoutId);
+          this.pendingRequests.delete(id);
+          pending.reject(this.settledByNodeError(sid, data));
+        }
+      }
+    } else if (data.type === 'error' && this.settledNoticeNodes.get(sid) === true) {
+      this.markMaySettle(sid);   // the node errored on this session: read it before more work (N3)
+    }
+  }
+
+  /** The node settled `sessionId` (1.39.22): completed locally, its mark dropped, later work refused SETTLED_BY_NODE. */
+  private markSettledByNode(sessionId: string, nodeReason: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    if (!this.settledByNode.has(sessionId)) this.settledByNode.set(sessionId, nodeReason);
+    this.maySettle.delete(sessionId);
+    if (session.status === 'active' || session.status === 'paused') {   // a paused one cannot be resumed (review)
+      session.status = 'completed';
+      session.endTime = Date.now();
+      if (session.conversationLog !== false) {
+        this.storageManager.updateConversationMetadata(sessionId, { status: 'completed', endTime: session.endTime })
+          .catch(err => console.warn('[SessionManager] Failed to persist the settled status:', err));
+      }
+    }
+  }
+
+  /**
+   * 1.39.23 R2: an HTTP refusal of REST inference. 409 `SESSION_SETTLED` (8.63.1): the node settled the session. 403
+   * `SESSION_AUTH_DENIED`: a card-serving host refuses REST inference outright; the code reaches the caller as on the
+   * WebSocket paths. Anything else returns, for the caller's own error.
+   */
+  private refuseOnRestRefusal(sessionId: string, httpStatus: number, body: string): void {
+    let parsed: any;
+    try { parsed = JSON.parse(body); } catch { return; }
+    const code = parsed?.code ?? parsed?.error;
+    if (httpStatus === 409 && code === 'SESSION_SETTLED') {
+      // It names the job it refused: a record re-seeded for another job meanwhile is not the one settled (review)
+      const job = this.sessions.get(sessionId)?.jobId;
+      if (parsed?.job_id !== undefined && job !== undefined && String(parsed.job_id) !== String(job)) return;
+      this.markSettledByNode(sessionId, 'refused');
+      const err = this.settledByNodeError(sessionId, parsed);
+      (err.details as Record<string, unknown>).httpStatus = httpStatus;
+      throw err;
+    }
+    if (httpStatus === 403 && code === 'SESSION_AUTH_DENIED') {
+      throw new SDKError(parsed?.message || 'session authorisation denied', 'SESSION_AUTH_DENIED',
+        { nodeCode: code, sessionId, httpStatus });
+    }
+  }
+
+  /** A refusal for work on a session the node settled (1.39.22). */
+  private settledByNodeError(sessionId: string, frame?: any): SDKError {
+    return new SDKError(frame?.message || `Session ${sessionId} was settled by its node; open a new session`, 'SESSION_NOT_ACTIVE',
+      { reason: 'SETTLED_BY_NODE', nodeReason: this.settledByNode.get(sessionId), nodeCode: 'SESSION_SETTLED', sessionId, retryable: false });
+  }
+
+  /** A node's REST base (http(s), no trailing /v1/ws) from any endpoint form a session holds (1.39.23 review). */
+  private static nodeRestBase(endpoint: string): string {
+    return endpoint.trim()
+      .replace(/^(wss?|https?):\/\//i, (_m, scheme: string) => `${{ ws: 'http', wss: 'https' }[scheme.toLowerCase()] ?? scheme.toLowerCase()}://`)
+      .replace(/\/+$/, '').replace(/\/v1\/ws$/i, '').replace(/\/+$/, '');
+  }
+
+  /** Whether an error is the node's settled refusal, in any of the shapes the paths deliver it (1.39.22 N2). */
+  private static isSettledRefusal(err: any): boolean {
+    return err?.code === 'SESSION_SETTLED' || err?.details?.nodeCode === 'SESSION_SETTLED'
+      || err?.details?.originalError?.code === 'SESSION_SETTLED' || err?.detail?.sdkCode === 'SESSION_SETTLED'
+      || (err?.code === 'SESSION_NOT_ACTIVE' && err?.details?.reason === 'SETTLED_BY_NODE');
+  }
+
+  /**
+   * 1.39.22 N3: whether the session's node reports `session-settled-notice`. One /v1/version read, shared with the
+   * job-completion probe; a failed probe answers no (1.39.21's rules) and is not asked again for a minute.
+   */
+  private async isSettledNoticeNode(sessionId: string): Promise<boolean> {
+    const known = this.settledNoticeNodes.get(sessionId);
+    if (known !== undefined) return known;
+    const failedAt = this.holdsKeyProbeFailedAt.get(sessionId);
+    if (failedAt !== undefined && Date.now() - failedAt < SessionManager.HOLDS_KEY_PROBE_RETRY_MS) return false;
+    if (!this.jobCompletionNodes.has(sessionId)) {
+      await this.isJobCompletionNode(sessionId);
+      if (!this.jobCompletionNodes.has(sessionId)) this.holdsKeyProbeFailedAt.set(sessionId, Date.now());
+    }
+    return this.settledNoticeNodes.get(sessionId) === true;
+  }
+
+  /**
+   * 1.39.21 S1: after an event at which the node may settle `sessionId` without telling the client (its last connection
+   * closed, a job ended, a session adopted from elsewhere), the next new work on it reads its status on chain first.
+   */
+  private markMaySettle(sessionId: string | undefined, sticky = false): void {
+    if (sessionId === undefined) return;
+    const prev = this.maySettle.get(sessionId);
+    this.maySettle.set(sessionId, { epoch: ++this.maySettleEpoch, at: Date.now(), sticky: sticky || !!prev?.sticky });
+  }
+
+  /**
+   * 1.39.21 S2/S3: refuse new work on a marked session the chain reports settled; the node would answer it unbilled. One
+   * read per mark. Active clears the mark (unless a newer one arrived during the read). Unreadable refuses, retryable,
+   * and keeps the mark (owner, 2026-11-07).
+   */
+  private async refuseIfSettledOnChain(sessionId: string, session: SessionState, opts: { rest?: boolean } = {}): Promise<void> {
+    // Whether the node refuses this work on a settled session: every WebSocket kind does on a notice node (1.39.22); REST
+    // inference (sendPrompt, streamResponse) only on a node reporting `session-settled-rest` (8.63.1, 1.39.23 R1).
+    // Every gate re-checks the status: a caller that passed its own check before an await may meet a session another
+    // call (or an earlier gate in this one) has since found settled (review round 2).
+    this.refuseIfNoLongerActive(sessionId, session);
+    // 1.39.22 N3: on a notice node, a session idle for 10 minutes is read: a settlement on chain by someone else is
+    // invisible to the node
+    const last = this.lastGatedAt.get(sessionId);
+    if (this.settledNoticeNodes.get(sessionId) === true && last !== undefined
+        && Date.now() - last > SessionManager.SETTLED_NOTICE_IDLE_MS) {
+      this.markMaySettle(sessionId);
+    }
+    const mark = this.maySettle.get(sessionId);
+    if (mark === undefined) { this.lastGatedAt.set(sessionId, Date.now()); return; }
+    let status: number;
+    try {
+      if (!this.sessionJobReader) throw new Error('no session reader is wired (FabstirSDKCore sets one)');
+      const job = await withTimeout(this.sessionJobReader(session.chainId).getSessionJobOnChain(BigInt(session.jobId)),
+        NETWORK_TIMEOUT_MS, () => new Error(`no answer within ${NETWORK_TIMEOUT_MS} ms`));
+      const raw = job?.status;
+      status = typeof raw === 'number' || typeof raw === 'bigint' ? Number(raw) : NaN;
+      if (!Number.isInteger(status)) throw new Error(`no session status on chain (got ${String(raw)})`);
+    } catch (err: any) {
+      // A session on another chain than the reader's is not a passing outage (review round 1)
+      const wrongChain = err instanceof ChainMismatchError || err?.code === 'CHAIN_MISMATCH';
+      throw new SDKError(`Could not read session ${sessionId}'s status on chain: ${err?.message ?? err}`,
+        'SESSION_STATUS_UNREADABLE', { sessionId, retryable: !wrongChain, ...(wrongChain ? { reason: 'CHAIN_MISMATCH' } : {}) });
+    }
+    if (status !== 0) {
+      this.maySettle.delete(sessionId);
+      this.settledOnChain.add(sessionId);
+      const live = this.sessions.get(sessionId) ?? session;   // a record re-seeded during the read is the same session
+      for (const s of new Set([session, live])) { s.status = 'completed'; s.endTime = Date.now(); }
+      // The shared socket is left open: a reply still streaming on it would otherwise be cut off (settled-guard review
+      // round 6). Every later call on this session is refused by its status; the socket goes when another replaces it.
+      if (session.conversationLog !== false) {
+        this.storageManager.updateConversationMetadata(sessionId, { status: 'completed', endTime: session.endTime })
+          .catch(err => console.warn('[SessionManager] Failed to persist the settled status:', err));
+      }
+      throw new SDKError(`Session ${sessionId} was settled on chain; open a new session`, 'SESSION_NOT_ACTIVE',
+        { reason: 'SETTLED_ON_CHAIN', sessionId, status, retryable: false });
+    }
+    // The read awaited: another gate may have found it settled meanwhile, or it was ended, completed or re-registered
+    // (settled-guard review round 3).
+    this.refuseIfNoLongerActive(sessionId, session);
+    // Active: the mark ends only once the node can no longer be settling from it, and never while it is sticky. On a
+    // notice node (1.39.22 N3) the node announces and refuses every settlement it decides, so one read clears it.
+    const notice = await this.isSettledNoticeNode(sessionId);   // one probe answers both markers
+    const nodeRefuses = opts.rest ? this.settledRestNodes.get(sessionId) === true : true;
+    this.refuseIfNoLongerActive(sessionId, session);
+    const current = this.maySettle.get(sessionId);
+    if (current?.epoch === mark.epoch
+        && ((notice && nodeRefuses) || (!mark.sticky && Date.now() - mark.at >= SessionManager.SETTLE_HORIZON_MS))) {
+      this.maySettle.delete(sessionId);
+    }
+    this.lastGatedAt.set(sessionId, Date.now());
+  }
+
+  /**
+   * The gate's status check: at its start, after its read, and right before each send. It reads the CURRENT record: a
+   * re-registration (an identical re-seed, a concurrent restore) is not a refusal, and the new record carries its own
+   * mark (settled-guard review round 4).
+   */
+  private refuseIfNoLongerActive(sessionId: string, session: SessionState): void {
+    const current = this.sessions.get(sessionId) ?? session;
+    // Both: a call holding a record that was ended stops, even if the id was re-adopted since (the new record's mark is
+    // for its own calls); an identical re-seed of a live record leaves both active (settled-guard review round 5).
+    if (current.status !== 'active' || session.status !== 'active') {
+      throw this.settledByNode.has(sessionId) ? this.settledByNodeError(sessionId)
+        : this.settledOnChain.has(sessionId)
+        ? new SDKError(`Session ${sessionId} was settled on chain; open a new session`, 'SESSION_NOT_ACTIVE',
+          { reason: 'SETTLED_ON_CHAIN', sessionId, retryable: false })
+        : (() => {
+          // The held record first: it is what this call was using (settled-guard review round 6)
+          const status = session.status !== 'active' ? session.status : current.status;
+          return new SDKError(`Session ${sessionId} is not active (status: ${status})`, 'SESSION_NOT_ACTIVE', { sessionId, status });
+        })();
+    }
+  }
+
+  /**
+   * A re-registered session may name another node, model, job or lora: forget what its node reported, and unbind its key
+   * from the shared connection it owns, so the next operation inits with the new record (Milestone B round 5).
+   */
+  private forgetSessionTransportFacts(sessionId: string): void {
+    // Adopted from elsewhere (a card service, a reload): it may already be settled (1.39.21 S1)
+    this.markMaySettle(sessionId);
+    this.settledOnChain.delete(sessionId);   // a new record for this id (settled-guard review round 3)
+    this.settledByNode.delete(sessionId);
+    this.settledNoticeNodes.delete(sessionId);
+    this.settledRestNodes.delete(sessionId);
+    this.jobCompletionNodes.delete(sessionId);
+    this.holdsKeyProbeFailedAt.delete(sessionId);
+    if (this.wsSessionId === sessionId) {
+      this.sessionKeyGeneration = undefined;
+      this.sessionKeyClient = undefined;
+    }
+  }
+
+  /**
+   * Milestone B D38: whether the shared connection already holds this session's key on a node that keeps keys per
+   * connection, so the re-init before a prompt, upload or search can be skipped. Node 8.62 (which reports
+   * `session-job-completion`) registers the key for the connection (`store_key_for(conn_id, sid)`) until it closes, and
+   * at "Encrypted session complete" appends the exchange instead of clearing the session. Older nodes, and a failed
+   * probe, keep the re-init. So does a failed LoRA staging: only a re-init carrying the adapter stages it again.
+   */
+  private async sharedConnectionHoldsKey(sessionId: string): Promise<boolean> {
+    // A shared init in flight has already put its new key in the shared fields, before the node has it (review m1).
+    // Settle every shared init queued so far. One queued later has already written its new key into the shared fields
+    // before the node has it, so `holds` also requires that none was queued since (round 3).
+    let chain: Promise<void>;
+    do { chain = this.initChain; await chain; } while (chain !== this.initChain);
+    const holds = () => {
+      const shared = this.sessionCrypto.get(sessionId);
+      return this.initChain === chain
+        && !this.needsSessionInit() && this.wsSessionId === sessionId && !!this.sessionKey && shared?.key === this.sessionKey
+        && this.serveBackError === null;   // a failed LoRA staging needs the re-init that stages it again (review M2)
+    };
+    // Checked before the probe (no probe when a re-init is due anyway; a failed probe is not cached) and again after it,
+    // since the probe awaits: nothing may await between the last check and the caller's send (round 2).
+    if (!holds()) return false;
+    // A failed probe is not cached for jobs (they ask again each submit); here it is, briefly, so an old or unreachable
+    // node does not cost every prompt a probe. Its answer is the safe one: re-init (round 3 m3).
+    const failedAt = this.holdsKeyProbeFailedAt.get(sessionId);
+    if (failedAt !== undefined && Date.now() - failedAt < SessionManager.HOLDS_KEY_PROBE_RETRY_MS) return false;
+    if (!(await this.isJobCompletionNode(sessionId))) {
+      if (!this.jobCompletionNodes.has(sessionId)) this.holdsKeyProbeFailedAt.set(sessionId, Date.now());
+      return false;
+    }
+    return holds();
+  }
+
+  /**
+   * The shared connection's identity (Milestone B D37): it increases on every open of the shared connection, a reconnect
+   * or a replacement socket alike, and the node drops a connection's keys and vectors when it closes. `undefined` with no
+   * shared connection, or one not open (not yet, or closed and awaiting a reconnect). Counted by the SessionManager, since each socket restarts its own count.
+   */
+  getConnectionGeneration(): number | undefined {
+    return this.wsClient && this.sharedConnectionCounted === this.wsClient && this.wsClient.isConnected()
+      ? this.sharedConnectionOpens : undefined;   // a closed socket awaiting reconnect has no node connection (round 3)
+  }
+
+  /**
    * Whether an `encrypted_session_init` must be sent before the next encrypted
    * frame. Connection identity, not transport liveness — a silent reconnect
-   * leaves `isConnected()` true on a connection that was never inited.
+   * leaves `isConnected()` true on a connection that was never inited. The client
+   * counts too: every WebSocketClient starts its generations at 1, so a
+   * replacement client repeats the old one's number (Milestone B review M1).
    */
   private needsSessionInit(): boolean {
     if (!this.wsClient || !this.wsClient.isConnected()) {
       return true;
     }
-    if (this.sessionKeyGeneration === undefined) {
+    if (this.sessionKeyGeneration === undefined || this.sessionKeyClient !== this.wsClient) {
       return true;
     }
     return this.wsClient.getConnectionGeneration() !== this.sessionKeyGeneration;
@@ -499,8 +816,16 @@ export class SessionManager implements ISessionManager {
    * Subscribe to connection identity changes on the active client.
    */
   private watchConnectionIdentity(client: WebSocketClient): void {
+    // 1.39.22: the node's settled notice and refusal, on every shared client; on a notice node a new connection is read
+    this.settledFrameUnsubscribe?.();
+    this.settledFrameUnsubscribe = client.onMessage(this.settledFrameListener);
+    if (this.wsSessionId !== undefined && this.settledNoticeNodes.get(this.wsSessionId) === true) this.markMaySettle(this.wsSessionId);
     this.connectionChangeUnsubscribe?.();
     this.connectionChangeUnsubscribe = client.onConnectionChange((generation: number) => {
+      this.sharedConnectionOpens++;
+      this.sharedConnectionCounted = client;
+      // A reconnect: the node saw the previous connection close and may have settled its session (1.39.21 S1)
+      if (generation > 1) this.markMaySettle(this.wsSessionId);
       this.handleConnectionChange(generation);
     });
   }
@@ -954,7 +1279,7 @@ export class SessionManager implements ISessionManager {
     // Re-seeding replaces the record (prompts, tokens, lora); never under a running job (1.39.14, G8).
     this.refuseIfJobInFlight(String(config.sessionId));
     // The record may now name another node, so what its old node reported no longer applies (1.39.15).
-    this.jobCompletionNodes.delete(String(config.sessionId));
+    this.forgetSessionTransportFacts(String(config.sessionId));
     // The rule lives at the seam, not only in the two manager callers: this is a public
     // ISessionManager method. The WS derivation in acquireSessionTransport uses a ws(s):// value
     // VERBATIM — a bare `wss://host` opens at the node root, and a full `wss://host/v1/ws` works
@@ -1113,6 +1438,7 @@ export class SessionManager implements ISessionManager {
     }
 
     console.log(`[SessionManager] Registering delegated session ${sessionIdStr}`);
+    this.forgetSessionTransportFacts(sessionIdStr);
 
     const sessionState: SessionState = {
       sessionId,
@@ -1129,6 +1455,7 @@ export class SessionManager implements ISessionManager {
       startTime: Date.now(),
       encryption: true, // Match normal session behavior - use encryption by default (Phase 6.2)
       conversationLog: config.conversationLog,
+      webSearch: config.webSearch,
       ragContext: config.ragConfig?.enabled
         ? { vectorDbId: config.ragConfig.vectorDbSessionId || `rag-${sessionIdStr}` }
         : undefined,
@@ -1197,6 +1524,7 @@ export class SessionManager implements ISessionManager {
 
     // Restore session to memory
     this.sessions.set(sessionId, session as SessionState);
+    this.markMaySettle(sessionId);   // restored from storage: the node may have settled it (1.39.21)
 
     return session as SessionState;
   }
@@ -1218,20 +1546,19 @@ export class SessionManager implements ISessionManager {
       throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
     }
 
-    if (session.status !== 'active') {
-      throw new SDKError(`Session is ${session.status}`, 'SESSION_NOT_ACTIVE');
-    }
+    this.refuseIfNoLongerActive(sessionId.toString(), session);   // names a settled session's reason (1.39.22)
     const endpoint = this.requireEndpoint(session, sessionId);
+    await this.refuseIfSettledOnChain(sessionId.toString(), session, { rest: true });   // 1.39.21 S2; REST: refused by the node only with session-settled-rest (1.39.23 R1)
 
     try {
-      // Inject RAG context if enabled
-      const augmentedPrompt = await this.injectRAGContext(sessionId.toString(), prompt);
+      // The caller's prompt as given; the caller adds any RAG context (Milestone B D39: this sent the session id).
+      const augmentedPrompt = prompt;
 
       // Add original prompt to session (not augmented)
       session.prompts.push(prompt);
 
       // Use REST API instead of WebSocket (as per node implementation)
-      const httpUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
+      const httpUrl = SessionManager.nodeRestBase(endpoint);   // any endpoint form (1.39.23 review)
 
       // Call REST API for inference with augmented prompt
       const inferenceUrl = `${httpUrl}/v1/inference`;
@@ -1240,8 +1567,12 @@ export class SessionManager implements ISessionManager {
         prompt: augmentedPrompt,  // Use RAG-augmented prompt
         max_tokens: options?.maxTokens ?? LLM_MAX_TOKENS,  // Allow longer responses for poems, stories, etc.
         temperature: options?.temperature ?? 0.7,  // Add temperature for better responses
-        sessionId: sessionId.toString(),
-        jobId: session.jobId.toString()
+        // The node's InferenceRequest (handlers.rs): job_id is a u64 (a string fails to parse, 422) and session_id has no
+        // camelCase alias; the settled refusal (409) and billing key on them (1.39.23 review)
+        session_id: sessionId.toString(),
+        job_id: Number(session.jobId),
+        chain_id: session.chainId,
+        ...(options?.thinking ? { thinking: options.thinking } : {}),   // as streamResponse sends it (1.39.23 review)
       };
       
       
@@ -1261,15 +1592,17 @@ export class SessionManager implements ISessionManager {
       
       if (!fetchResponse.ok) {
         const errorText = await fetchResponse.text();
+        this.refuseOnRestRefusal(sessionId.toString(), fetchResponse.status, errorText);   // 1.39.23 R2
         throw new Error(`Inference failed: ${fetchResponse.status} - ${errorText}`);
       }
       
       const result = await fetchResponse.json();
       
       // Try different possible response fields
-      let response = result.response || result.text || result.content || result.generated_text;
-      
-      if (!response) {
+      // The node's InferenceResponse carries the reply as `content` (handlers.rs); an empty reply is a reply (1.39.23 review)
+      let response = result?.content;
+
+      if (typeof response !== 'string') {
         console.error('Unexpected response format:', result);
         throw new Error('No response received from inference endpoint. Response: ' + JSON.stringify(result));
       }
@@ -1300,6 +1633,8 @@ export class SessionManager implements ISessionManager {
 
       return response;
     } catch (error: any) {
+      // The node's REST refusals reach the caller as themselves (1.39.23 R2)
+      if (error?.code === 'SESSION_NOT_ACTIVE' || error?.code === 'SESSION_AUTH_DENIED') throw error;
       throw new SDKError(
         `Failed to send prompt: ${error.message}`,
         'PROMPT_SEND_ERROR',
@@ -1353,6 +1688,8 @@ export class SessionManager implements ISessionManager {
 
         // Add to memory for subsequent calls
         this.sessions.set(sessionIdStr, session);
+        // Restored from its log: its earlier connections are gone, so the node may have settled it (1.39.21 S1)
+        this.markMaySettle(sessionIdStr);
       }
     }
 
@@ -1361,11 +1698,10 @@ export class SessionManager implements ISessionManager {
       throw new SDKError('Session not found in memory or storage', 'SESSION_NOT_FOUND');
     }
 
-    if (session.status !== 'active') {
-      throw new SDKError(`Session is ${session.status}`, 'SESSION_NOT_ACTIVE');
-    }
+    this.refuseIfNoLongerActive(sessionIdStr, session);   // names a settled session's reason (1.39.22)
     // Before image routing, which swallows generateImage's errors into the LLM path.
     const endpoint = this.requireEndpoint(session, sessionId);
+    await this.refuseIfSettledOnChain(sessionIdStr, session);   // 1.39.21 S2
 
     // Auto-detect image generation intent (like search intent auto-detection)
     const imageIntent = analyzePromptForImageIntent(prompt);
@@ -1382,16 +1718,16 @@ export class SessionManager implements ISessionManager {
         }
         return `Image generated successfully`;
       } catch (imgErr) {
+        // The settled-session refusals are not an image failure: never fall back to the LLM on them (review round 2)
+        const code = (imgErr as any)?.code;
+        if (code === 'SESSION_NOT_ACTIVE' || code === 'SESSION_STATUS_UNREADABLE') throw imgErr;
         console.warn(`[SDK:sendPromptStreaming] Image generation failed, falling back to LLM:`, imgErr);
       }
     }
 
     try {
-      // Inject RAG context if enabled
-      const augmentedPrompt = await this.injectRAGContext(sessionIdStr, prompt);
-
-      // Add original prompt to session (not augmented)
-      session.prompts.push(prompt);
+      // The caller's prompt as given; the caller adds any RAG context (Milestone B D39: this sent the session id).
+      const augmentedPrompt = prompt;
 
       // Get WebSocket URL from endpoint
       const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
@@ -1400,6 +1736,7 @@ export class SessionManager implements ISessionManager {
 
       // Force new WebSocket if session changed (old connection belongs to previous session)
       if (this.wsClient && this.wsSessionId && this.wsSessionId !== sessionIdStr) {
+        this.markMaySettle(this.wsSessionId);   // its connection closes: the node may settle it (1.39.21 S1)
         try { await this.wsClient.disconnect(); } catch (_) { /* ignore */ }
         this.wsClient = undefined;
         this.wsSessionId = undefined;
@@ -1409,10 +1746,13 @@ export class SessionManager implements ISessionManager {
 
       // Initialize WebSocket client if not already connected
       if (!this.wsClient || !this.wsClient.isConnected()) {
+        // A dead shared client being replaced: its session's connection closed (1.39.21 S1)
+        if (this.wsClient) this.markMaySettle(this.wsSessionId);
         this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+        // Owned from creation, so ending another session never closes it while it connects (Milestone B review M3)
+        this.wsSessionId = sessionIdStr;
         this.watchConnectionIdentity(this.wsClient);
         await this.wsClient.connect();
-        this.wsSessionId = sessionIdStr;
 
         // Set up global RAG message handlers
         this._setupRAGMessageHandlers();
@@ -1424,6 +1764,12 @@ export class SessionManager implements ISessionManager {
         this._setupSessionStatusHandler();
       }
 
+      // Again after the socket setup, which may have replaced a dropped connection (1.39.21 S1/S2)
+      await this.refuseIfSettledOnChain(sessionIdStr, session);
+
+      // Add original prompt to session (not augmented) — only once it will be sent (settled-guard review round 7)
+      session.prompts.push(prompt);
+
       // Non-blocking host health check (fires callback asynchronously)
       if (options?.onHostHealthWarning && session.endpoint) {
         this._checkHostHealth(session.endpoint).then(health => {
@@ -1434,22 +1780,23 @@ export class SessionManager implements ISessionManager {
         }).catch(() => {});
       }
 
-      // CRITICAL FIX: Always send session_init before each prompt
-      // The node clears sessions from SessionStore after "Encrypted session complete"
-      // so we must re-initialize the session for each prompt to ensure RAG operations work
+      // Re-init before each prompt, except where the node keeps the key for the connection (Milestone B D38): a
+      // re-init mid-stream replaces the key a reply on this session is still decrypted with.
       if (session.encryption && this.encryptionManager) {
-        // Send encrypted session init
-        const config: ExtendedSessionConfig = {
-          chainId: session.chainId,
-          host: session.provider,
-          modelId: session.model,
-          endpoint: session.endpoint,
-          paymentMethod: 'deposit',
-          encryption: true,
-          lora: session.lora,          // E.3: a re-init MUST re-send it
-          onServeBackError: session.onServeBackError,
-        };
-        await this.sendEncryptedInit(this.wsClient, config, sessionId, session.jobId);
+        if (!(await this.sharedConnectionHoldsKey(sessionIdStr))) {
+          // Send encrypted session init
+          const config: ExtendedSessionConfig = {
+            chainId: session.chainId,
+            host: session.provider,
+            modelId: session.model,
+            endpoint: session.endpoint,
+            paymentMethod: 'deposit',
+            encryption: true,
+            lora: session.lora,          // E.3: a re-init MUST re-send it
+            onServeBackError: session.onServeBackError,
+          };
+          await this.sendEncryptedInit(this.wsClient, config, sessionId, session.jobId);
+        }
       } else {
         // Send plaintext session init (opt-out or no encryption manager)
         const signer = (this.paymentManager as any).signer;
@@ -1491,10 +1838,7 @@ export class SessionManager implements ISessionManager {
             );
           }
 
-          // Send encrypted message and wait for complete response
-          if (this.sessionKey) {
-          }
-
+          this.refuseIfNoLongerActive(sessionIdStr, session);   // 1.39.21: the session may have been found settled since the gate (review round 4)
           response = await new Promise<string>((resolve, reject) => {
             // Use sliding timeout window - resets on each chunk received
             // Initial timeout is longer (180s) for cold start scenarios (model loading into GPU)
@@ -1641,6 +1985,7 @@ export class SessionManager implements ISessionManager {
           // Plaintext streaming mode
           let ptChunkCount = 0;
 
+          this.refuseIfNoLongerActive(sessionIdStr, session);   // before the listener, so a refusal leaves none (round 5)
           const unsubscribe = this.wsClient.onMessage(async (data: any) => {
 
             if (data.type === 'stream_chunk' && data.content) {
@@ -1771,6 +2116,7 @@ export class SessionManager implements ISessionManager {
           }
 
           // Send encrypted message with web search options, images, and thinking
+          this.refuseIfNoLongerActive(sessionIdStr, session);   // 1.39.21: the session may have been found settled since the gate (review round 4)
           await this.sendEncryptedMessage(sessionIdStr, prompt, {
             webSearch: search.enabled,
             maxSearches: search.maxSearches,
@@ -1910,6 +2256,7 @@ export class SessionManager implements ISessionManager {
 
           // VLM token tracking (Phase 5): capture tokens from response/stream_end
           let ptNsUsage: TokenUsageInfo | undefined;
+          this.refuseIfNoLongerActive(sessionIdStr, session);   // 1.39.21: the session may have been found settled since the gate (review round 4)
           const tokenUnsub = this.wsClient.onMessage((data: any) => {
             if (data.type === 'response' || data.type === 'stream_end') {
               ptNsUsage = this._processStreamEnd(data, 0, session, options);
@@ -1960,6 +2307,14 @@ export class SessionManager implements ISessionManager {
     } catch (error: any) {
       if (error instanceof ContextLimitError) throw error;
       if (error?.code === 'SESSION_AUTH_DENIED') throw error;   // 8.54.0 vault gate: the caller branches on this code
+      // 1.39.21: the settled-session refusals reach the caller as themselves (open a new session / retry the read)
+      if (error?.code === 'SESSION_NOT_ACTIVE' || error?.code === 'SESSION_STATUS_UNREADABLE') throw error;
+      // The node's SESSION_SETTLED refusal (1.39.22 N2): the encrypted paths reject REQUEST_ERROR with its nodeCode, the
+      // plaintext path WS_REQUEST_ERROR carrying the node frame
+      if (SessionManager.isSettledRefusal(error)) {
+        this.markSettledByNode(sessionIdStr, 'refused');
+        throw this.settledByNodeError(sessionIdStr, error?.details?.originalError);
+      }
       throw new SDKError(
         `Failed to send prompt via WebSocket: ${error.message}`,
         'WS_PROMPT_ERROR',
@@ -1973,24 +2328,18 @@ export class SessionManager implements ISessionManager {
   // =============================================================================
 
   /**
-   * Perform a web search via WebSocket (Path C).
+   * Search the web through the session's host: REST `POST /v1/search` on its endpoint, with the session's chain (1.39.23,
+   * owner 2026-11-08: the node has no WebSocket `searchRequest` handler and will not get one). It bills no session, so it
+   * is not gated on the session's settled state; the session only names the host. Same answer as `searchDirect`.
    *
-   * Sends a search request through the existing WebSocket connection and
-   * waits for results. Requires an active session with WebSocket connection.
-   *
-   * @param sessionId - Active session ID
+   * @param sessionId - A session this manager knows (its endpoint is the host searched)
    * @param query - Search query (1-500 characters)
    * @param numResults - Number of results to return (1-20, default 10)
-   * @returns Search results from the host's configured provider
-   * @throws WebSearchError on invalid query, timeout, or provider error
+   * @throws SDKError SESSION_NOT_FOUND / SESSION_ENDPOINT_MISSING; WebSearchError as `searchDirect`
    *
    * @example
    * ```typescript
-   * const results = await sessionManager.webSearch(
-   *   sessionId,
-   *   'latest NVIDIA GPU specs',
-   *   5
-   * );
+   * const results = await sessionManager.webSearch(sessionId, 'latest NVIDIA GPU specs', 5);
    * console.log(`Found ${results.resultCount} results via ${results.provider}`);
    * ```
    */
@@ -2003,50 +2352,9 @@ export class SessionManager implements ISessionManager {
     if (!session) {
       throw new SDKError(`Session ${sessionId} not found`, 'SESSION_NOT_FOUND');
     }
-
-    if (!this.wsClient || !this.wsClient.isConnected()) {
-      throw new SDKError('WebSocket not connected', 'WS_NOT_CONNECTED');
-    }
-
-    // Validate query
-    if (!query || query.trim().length === 0) {
-      throw new WebSearchError('Query cannot be empty', 'invalid_query');
-    }
-    if (query.length > 500) {
-      throw new WebSearchError('Query must be 1-500 characters', 'invalid_query');
-    }
-
-    const requestId = `search-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-
-    return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        this.pendingRequests.delete(requestId);
-        reject(new WebSearchError('Search timeout', 'timeout'));
-      }, 30000);
-
-      this.pendingRequests.set(requestId, {
-        resolve: (result) => {
-          clearTimeout(timeoutId);
-          this.pendingRequests.delete(requestId);
-          resolve(result);
-        },
-        reject: (error) => {
-          clearTimeout(timeoutId);
-          this.pendingRequests.delete(requestId);
-          reject(error);
-        },
-        timeoutId
-      });
-
-      // Send search request via WebSocket
-      this.wsClient!.sendWithoutResponse({
-        type: 'searchRequest',
-        query,
-        num_results: Math.min(Math.max(numResults, 1), 20),
-        request_id: requestId,
-        chain_id: session.chainId
-      });
-    });
+    // Any form a session's endpoint takes (http(s), ws(s), a trailing /v1/ws)
+    const httpBase = SessionManager.nodeRestBase(this.requireEndpoint(session, sessionId));
+    return this.searchDirect(httpBase, query, { numResults, chainId: session.chainId });
   }
 
   /**
@@ -2076,7 +2384,7 @@ export class SessionManager implements ISessionManager {
     options: { numResults?: number; chainId?: number } = {}
   ): Promise<SearchApiResponse> {
     // Validate query
-    if (!query || query.length > 500) {
+    if (!query || query.trim().length === 0 || query.length > 500) {
       throw new WebSearchError('Query must be 1-500 characters', 'invalid_query');
     }
 
@@ -2084,7 +2392,8 @@ export class SessionManager implements ISessionManager {
     const chainId = options.chainId || this.chainId;
 
     try {
-      const response = await fetch(`${hostUrl}/v1/search`, {
+      const response = await fetch(`${SessionManager.nodeRestBase(hostUrl)}/v1/search`, {
+        signal: AbortSignal.timeout(30_000),   // the WebSocket path's 30 s, kept (1.39.23)
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2098,7 +2407,7 @@ export class SessionManager implements ISessionManager {
       if (response.status === 429) {
         const retryAfter = response.headers.get('Retry-After');
         throw new WebSearchError(
-          `Rate limited. Retry after ${retryAfter}s`,
+          retryAfter ? `Rate limited. Retry after ${retryAfter}s` : 'Rate limited',
           'rate_limited',
           retryAfter ? parseInt(retryAfter, 10) : undefined
         );
@@ -2106,6 +2415,10 @@ export class SessionManager implements ISessionManager {
 
       if (response.status === 503) {
         throw new WebSearchError('Web search disabled on host', 'search_disabled');
+      }
+
+      if (response.status === 400) {   // the node's own query validation (1.39.23 review)
+        throw new WebSearchError(`Search refused: ${response.statusText}`, 'invalid_query');
       }
 
       if (!response.ok) {
@@ -2116,6 +2429,9 @@ export class SessionManager implements ISessionManager {
     } catch (error) {
       if (error instanceof WebSearchError) {
         throw error;
+      }
+      if ((error as Error)?.name === 'TimeoutError') {   // the 30 s signal (1.39.23 review)
+        throw new WebSearchError('Search timeout', 'timeout');
       }
       throw new WebSearchError(
         `Search request failed: ${(error as Error).message}`,
@@ -2215,6 +2531,7 @@ export class SessionManager implements ISessionManager {
 
           // Add to memory for this session
           this.sessions.set(sessionIdStr, session);
+          // (A completion that then fails marks it below: the node may have settled it first.)
         }
       } catch (err) {
         console.warn(`Could not load session ${sessionIdStr} from storage:`, err);
@@ -2245,11 +2562,8 @@ export class SessionManager implements ISessionManager {
       } else {
       }
       
-      // Clean up WebSocket connection if active
-      if (this.wsClient && this.wsClient.isConnected()) {
-        await this.wsClient.disconnect();
-        this.wsClient = undefined;
-      }
+      // Only this session's shared-socket state (Milestone B D32)
+      await this.releaseSharedSocketFor(sessionIdStr);
 
       // Update storage (one locked load-patch-save, so an append still in flight is not overwritten).
       // Non-blocking like endSession's: the session has settled on-chain; the log must not turn that into a throw.
@@ -2261,13 +2575,10 @@ export class SessionManager implements ISessionManager {
         }).catch(err => console.warn('[SessionManager] Failed to persist session completion:', err));
       }
 
-      // Close WebSocket if open
-      if (this.wsClient?.isConnected()) {
-        await this.wsClient.disconnect();
-      }
-
       return txHash;
     } catch (error: any) {
+      // A completion that failed may have failed because the node settled the session first (1.39.21 review round 1)
+      this.markMaySettle(sessionIdStr);
       throw new SDKError(
         `Failed to complete session: ${error.message}`,
         'SESSION_COMPLETE_ERROR',
@@ -2284,56 +2595,15 @@ export class SessionManager implements ISessionManager {
     const sessionIdStr = sessionId.toString();
 
     try {
-      // Clean up RAG handler before closing WebSocket
-      if (this.ragHandlerUnsubscribe) {
-        this.ragHandlerUnsubscribe();
-        this.ragHandlerUnsubscribe = undefined;
-      }
-
-      // Clean up web search handler
-      if (this.searchHandlerUnsubscribe) {
-        this.searchHandlerUnsubscribe();
-        this.searchHandlerUnsubscribe = undefined;
-      }
-
-      // Clean up session status handler
-      if (this.sessionStatusUnsubscribe) {
-        this.sessionStatusUnsubscribe();
-        this.sessionStatusUnsubscribe = undefined;
-      }
-
-      // Reject any pending RAG/search requests (WebSocket is closing)
-      for (const [id, pending] of this.pendingRequests) {
-        clearTimeout(pending.timeoutId);
-        pending.reject(new SDKError('Session ended', 'SESSION_ENDED'));
-      }
-      this.pendingRequests.clear();
-
-      for (const [id, pending] of this.pendingSearches) {
-        clearTimeout(pending.timeoutId);
-        pending.reject(new SDKError('Session ended', 'SESSION_ENDED'));
-      }
-      this.pendingSearches.clear();
-
-      // Fully tear down WebSocket connection (must be fresh for next session)
-      if (this.wsClient) {
-        try {
-          await this.wsClient.disconnect();
-        } catch (_) { /* ignore disconnect errors */ }
-        this.wsClient = undefined;
-      }
-      this.wsSessionId = undefined;
-
-      // Clear encryption state so next session sends fresh session_init + ECDH
-      this.sessionKey = undefined;
-      this.messageIndex = 0;
-
-      // Update session state in memory
+      // Ended first, so a prompt racing the close below is refused instead of opening a socket on an ended session
       const session = this.sessions.get(sessionIdStr);
       if (session) {
         session.status = 'ended';
         session.endTime = Date.now();
       }
+
+      // Only this session's shared-socket state (Milestone B D32)
+      await this.releaseSharedSocketFor(sessionIdStr);
 
       // Update storage to mark session as ended (non-blocking for fast session teardown)
       if (session?.conversationLog !== false) {
@@ -2347,6 +2617,64 @@ export class SessionManager implements ISessionManager {
         'SESSION_END_ERROR',
         { originalError: error }
       );
+    }
+  }
+
+  /**
+   * What ending or completing `sessionId` releases (Milestone B D32): only what is its own. Its key entry always goes.
+   * The shared socket, with its handlers and waiters (they belong to the socket), is closed only when this session owns
+   * it. After the awaited close the shared fields are cleared only if they still describe the socket
+   * that was closed: another session may have installed its own meanwhile.
+   */
+  private async releaseSharedSocketFor(sessionId: string): Promise<void> {
+    this.sessionCrypto.delete(sessionId);
+    this.holdsKeyProbeFailedAt.delete(sessionId);
+    this.maySettle.delete(sessionId);   // ended or completed: refused by its status from now on
+    this.lastGatedAt.delete(sessionId);
+    const socket = this.wsClient;
+    // Only the owner: every creation site assigns the owner with the client, so a socket another session is still
+    // connecting is never closed here (review M3).
+    if (this.wsSessionId !== sessionId) return;
+    if (!socket) {
+      this.wsSessionId = undefined;
+      this.sessionKey = undefined;
+      this.messageIndex = 0;
+      this.sessionKeyGeneration = undefined;
+      this.sessionKeyClient = undefined;
+      return;
+    }
+
+    this.ragHandlerUnsubscribe?.();
+    this.ragHandlerUnsubscribe = undefined;
+    this.searchHandlerUnsubscribe?.();
+    this.searchHandlerUnsubscribe = undefined;
+    this.sessionStatusUnsubscribe?.();
+    this.sessionStatusUnsubscribe = undefined;
+    for (const waiters of [this.pendingRequests, this.pendingSearches] as Map<string, any>[]) {
+      for (const pending of waiters.values()) {
+        clearTimeout(pending.timeoutId);
+        pending.reject(new SDKError('Session ended', 'SESSION_ENDED'));
+      }
+      waiters.clear();
+    }
+
+    try {
+      await socket.disconnect();
+    } catch (_) { /* ignore disconnect errors */ }
+
+    if (this.wsClient === socket) {
+      this.wsClient = undefined;
+      this.wsSessionId = undefined;
+      // The next session sends a fresh session_init + ECDH
+      this.sessionKey = undefined;
+      this.messageIndex = 0;
+      this.sessionKeyGeneration = undefined;
+      this.sessionKeyClient = undefined;
+      // The serve-back listener and its state belong to this socket's init (review m4)
+      this.serveBackUnsubscribe?.();
+      this.serveBackUnsubscribe = undefined;
+      this.serveBackError = null;
+      this.loraSessionActive = false;
     }
   }
 
@@ -2370,7 +2698,15 @@ export class SessionManager implements ISessionManager {
     // the caller still sees its own link's outcome.
     const run = this.initChain.then(() =>
       this.sendEncryptedInitInner(ws, config, sessionId, jobId, scope)
-    );
+    ).catch((err) => {
+      // A failed shared init has already put its key in the shared fields, a key the node never acked. Unbind it from
+      // the connection so the next operation inits again instead of encrypting under it (Milestone B round 4).
+      if (ws === this.wsClient) {
+        this.sessionKeyGeneration = undefined;
+        this.sessionKeyClient = undefined;
+      }
+      throw err;
+    });
     this.initChain = run.then(() => undefined, () => undefined);
     return run;
   }
@@ -2513,13 +2849,15 @@ export class SessionManager implements ISessionManager {
           // session for it.
           if (ws === this.wsClient) {
             this.sessionKeyGeneration = ws.getConnectionGeneration();
+            this.sessionKeyClient = ws;
           }
           resolve();
         } else if (data.type === 'error') {
           console.error(`[SDK:encryptedInit:11b] Got error: ${data.message}`);
           clearTimeout(timeout);
           unsubscribe();
-          reject(new SDKError(data.message || 'Session init failed', 'SESSION_INIT_ERROR'));
+          // The node's own code travels with it (Milestone B D33), as REQUEST_ERROR's does.
+          reject(new SDKError(data.message || 'Session init failed', 'SESSION_INIT_ERROR', { nodeCode: data.code, sessionId: sessionId.toString() }));
         }
         // Ignore ALL other message types (encrypted_response, encrypted_chunk, etc.)
       });
@@ -2926,7 +3264,10 @@ export class SessionManager implements ISessionManager {
 
     // Reconnect WebSocket if needed
     if (!this.wsClient?.isConnected()) {
+      // A dead shared client being replaced: its session's connection closed (1.39.21 S1)
+      if (this.wsClient) this.markMaySettle(this.wsSessionId);
       this.wsClient = new WebSocketClient(`wss://${session.provider}/ws`);
+      this.wsSessionId = sessionId.toString();   // owned from creation (Milestone B review M3)
       this.watchConnectionIdentity(this.wsClient);
       await this.wsClient.connect();
     }
@@ -2953,6 +3294,7 @@ export class SessionManager implements ISessionManager {
 
     // Disconnect WebSocket to save resources
     if (this.wsClient?.isConnected()) {
+      this.markMaySettle(this.wsSessionId);   // its connection closes (1.39.21)
       await this.wsClient.disconnect();
     }
   }
@@ -3029,17 +3371,16 @@ export class SessionManager implements ISessionManager {
       throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
     }
 
-    if (session.status !== 'active') {
-      throw new SDKError(`Session is ${session.status}`, 'SESSION_NOT_ACTIVE');
-    }
+    this.refuseIfNoLongerActive(sessionId.toString(), session);   // names a settled session's reason (1.39.22)
     const endpoint = this.requireEndpoint(session, sessionId);
+    await this.refuseIfSettledOnChain(sessionId.toString(), session, { rest: true });   // 1.39.21 S2; REST: refused by the node only with session-settled-rest (1.39.23 R1)
 
     try {
       // Add prompt to session
       session.prompts.push(prompt);
 
       // For now, use REST API and simulate streaming
-      const httpUrl = endpoint.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
+      const httpUrl = SessionManager.nodeRestBase(endpoint);   // any endpoint form (1.39.23 review)
       
       // Call REST API for inference
       const inferenceUrl = `${httpUrl}/v1/inference`;
@@ -3048,8 +3389,11 @@ export class SessionManager implements ISessionManager {
         prompt: prompt,
         max_tokens: options?.maxTokens ?? LLM_MAX_TOKENS,  // Allow longer responses for poems, stories, etc.
         temperature: options?.temperature ?? 0.7,  // Add temperature for better responses
-        sessionId: sessionId.toString(),
-        jobId: session.jobId.toString(),
+        // The node's InferenceRequest (handlers.rs): job_id is a u64 (a string fails to parse, 422) and session_id has no
+        // camelCase alias; the settled refusal (409) and billing key on them (1.39.23 review)
+        session_id: sessionId.toString(),
+        job_id: Number(session.jobId),
+        chain_id: session.chainId,
         ...(options?.thinking ? { thinking: options.thinking } : {})
       };
       
@@ -3063,13 +3407,15 @@ export class SessionManager implements ISessionManager {
       
       if (!fetchResponse.ok) {
         const errorText = await fetchResponse.text();
+        this.refuseOnRestRefusal(sessionId.toString(), fetchResponse.status, errorText);   // 1.39.23 R2
         throw new Error(`Inference failed: ${fetchResponse.status} - ${errorText}`);
       }
       
       const result = await fetchResponse.json();
-      const fullResponse = result.response || result.text;
-      
-      if (!fullResponse) {
+      // The node's InferenceResponse carries the reply as `content` (handlers.rs) (1.39.23 review: this read `response`)
+      const fullResponse = result?.content;
+
+      if (typeof fullResponse !== 'string') {
         throw new Error('No response received from inference endpoint');
       }
       
@@ -3089,6 +3435,8 @@ export class SessionManager implements ISessionManager {
         { role: 'assistant', content: fullResponse, timestamp: Date.now() },
       ]).catch(err => console.warn('[SessionManager] Failed to store the exchange:', err));
     } catch (error: any) {
+      // The node's REST refusals reach the caller as themselves (1.39.23 R2)
+      if (error?.code === 'SESSION_NOT_ACTIVE' || error?.code === 'SESSION_AUTH_DENIED') throw error;
       throw new SDKError(
         `Failed to stream response: ${error.message}`,
         'STREAM_ERROR',
@@ -3207,6 +3555,10 @@ export class SessionManager implements ISessionManager {
    */
   clearSessions(): void {
     this.sessions.clear();
+    this.maySettle.clear();   // no sessions left to gate
+    this.settledOnChain.clear();
+    this.settledByNode.clear();
+    this.lastGatedAt.clear();
     if (this.wsClient?.isConnected()) {
       this.wsClient.disconnect();
     }
@@ -3240,12 +3592,7 @@ export class SessionManager implements ISessionManager {
       );
     }
 
-    if (session.status !== 'active') {
-      throw new SDKError(
-        `Session ${sessionId} is not active (status: ${session.status})`,
-        'SESSION_NOT_ACTIVE'
-      );
-    }
+    this.refuseIfNoLongerActive(sessionId, session);   // names a settled session's reason (1.39.22)
 
     const endpoint = this.requireEndpoint(session, sessionId);
     const wsUrl = endpoint.includes('ws://') || endpoint.includes('wss://')
@@ -3254,6 +3601,7 @@ export class SessionManager implements ISessionManager {
 
     // 2. Force new WebSocket if session changed (old connection belongs to previous session)
     if (this.wsClient && this.wsSessionId && this.wsSessionId !== sessionId) {
+      this.markMaySettle(this.wsSessionId);   // its connection closes: the node may settle it (1.39.21 S1)
       try { await this.wsClient.disconnect(); } catch (_) { /* ignore */ }
       this.wsClient = undefined;
       this.wsSessionId = undefined;
@@ -3262,10 +3610,12 @@ export class SessionManager implements ISessionManager {
     }
 
     if (!this.wsClient || !this.wsClient.isConnected()) {
+      // A dead shared client being replaced: its session's connection closed (1.39.21 S1)
+      if (this.wsClient) this.markMaySettle(this.wsSessionId);
       this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+      this.wsSessionId = sessionId;   // owned from creation (Milestone B review M3)
       this.watchConnectionIdentity(this.wsClient);
       await this.wsClient.connect();
-      this.wsSessionId = sessionId;
 
       // Set up global RAG message handlers
       this._setupRAGMessageHandlers();
@@ -3277,21 +3627,23 @@ export class SessionManager implements ISessionManager {
       this._setupSessionStatusHandler();
     }
 
-    // CRITICAL FIX: Always send session_init before RAG operations
-    // The node clears sessions from SessionStore after "Encrypted session complete"
-    // so we must re-initialize the session to ensure RAG operations work
+    await this.refuseIfSettledOnChain(sessionId, session);   // 1.39.21 S2, after the socket setup (it may have replaced a dropped connection)
+
+    // Re-init before RAG operations, except where the node keeps the key for the connection (Milestone B D38)
     if (session.encryption && this.encryptionManager) {
-      const config: ExtendedSessionConfig = {
-        chainId: session.chainId,
-        host: session.provider,
-        modelId: session.model,
-        endpoint: session.endpoint,
-        paymentMethod: 'deposit',
-        encryption: true,
-        lora: session.lora,          // E.3: a re-init MUST re-send it, or the node keeps refusing
-        onServeBackError: session.onServeBackError,
-      };
-      await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
+      if (!(await this.sharedConnectionHoldsKey(sessionId))) {
+        const config: ExtendedSessionConfig = {
+          chainId: session.chainId,
+          host: session.provider,
+          modelId: session.model,
+          endpoint: session.endpoint,
+          paymentMethod: 'deposit',
+          encryption: true,
+          lora: session.lora,          // E.3: a re-init MUST re-send it, or the node keeps refusing
+          onServeBackError: session.onServeBackError,
+        };
+        await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
+      }
     } else {
       const signer = (this.paymentManager as any).signer;
       if (!signer) {
@@ -3365,16 +3717,29 @@ export class SessionManager implements ISessionManager {
       };
 
       try {
+        this.refuseIfNoLongerActive(sessionId, session);   // 1.39.21: the session may have been found settled since the gate (review round 4)
+      } catch (refusal: any) {
+        // Batches already accepted landed: report them, as a malformed ack does (settled-guard review round 5)
+        if (totalUploaded > 0) session.ragContext = session.ragContext || { vectorDbId: `vectors-${sessionId}` };
+        refusal.details = { ...refusal.details, batch: batchIndex + 1, uploadedSoFar: totalUploaded, rejectedSoFar: totalRejected, errorsSoFar: allErrors };
+        throw refusal;
+      }
+      try {
         // Send message and wait for response (with 30s timeout)
         const response = await this._sendRAGRequest(requestId, message, 30000);
 
-        // Accumulate results
-        totalUploaded += response.uploaded || 0;
-        totalRejected += response.rejected || 0;
-        if (response.errors && response.errors.length > 0) {
-          allErrors.push(...response.errors);
-        }
+        // Accumulate the node's own counts (validated in _handleUploadVectorsResponse, Milestone B D36)
+        totalUploaded += response.uploaded;
+        totalRejected += response.rejected;
+        allErrors.push(...response.errors);
       } catch (error: any) {
+        // A malformed ack is a protocol fault, not a batch outcome: fail fast instead of reporting a count, carrying what
+        // the earlier batches confirmed (review m3).
+        if (error?.code === 'UPLOAD_RESPONSE_MALFORMED' || (error?.code === 'SESSION_NOT_ACTIVE' && error?.details?.reason === 'SETTLED_BY_NODE')) {
+          if (totalUploaded > 0) session.ragContext = session.ragContext || { vectorDbId: `vectors-${sessionId}` };
+          error.details = { ...error.details, batch: batchIndex + 1, uploadedSoFar: totalUploaded, rejectedSoFar: totalRejected, errorsSoFar: allErrors };
+          throw error;
+        }
         // If batch fails, add error and continue (best effort)
         allErrors.push(`Batch ${batchIndex + 1} failed: ${error.message}`);
         totalRejected += batch.length;
@@ -3419,12 +3784,7 @@ export class SessionManager implements ISessionManager {
     if (!session) {
       throw new SDKError(`Session ${sessionId} not found`, 'SESSION_NOT_FOUND');
     }
-    if (session.status !== 'active') {
-      throw new SDKError(
-        `Session ${sessionId} is not active (status: ${session.status})`,
-        'SESSION_NOT_ACTIVE'
-      );
-    }
+    this.refuseIfNoLongerActive(sessionId, session);   // names a settled session's reason (1.39.22)
 
     // Validate WebSocket connection
     if (!this.wsClient) {
@@ -3442,21 +3802,23 @@ export class SessionManager implements ISessionManager {
       );
     }
 
-    // CRITICAL FIX: Always send session_init before RAG operations
-    // The node clears sessions from SessionStore after "Encrypted session complete"
-    // so we must re-initialize the session to ensure RAG operations work
+    await this.refuseIfSettledOnChain(sessionId, session);   // 1.39.21 S2
+
+    // Re-init before RAG operations, except where the node keeps the key for the connection (Milestone B D38)
     if (session.encryption && this.encryptionManager) {
-      const config: ExtendedSessionConfig = {
-        chainId: session.chainId,
-        host: session.provider,
-        modelId: session.model,
-        endpoint: session.endpoint,
-        paymentMethod: 'deposit',
-        encryption: true,
-        lora: session.lora,          // E.3: a re-init MUST re-send it, or the node keeps refusing
-        onServeBackError: session.onServeBackError,
-      };
-      await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
+      if (!(await this.sharedConnectionHoldsKey(sessionId))) {
+        const config: ExtendedSessionConfig = {
+          chainId: session.chainId,
+          host: session.provider,
+          modelId: session.model,
+          endpoint: session.endpoint,
+          paymentMethod: 'deposit',
+          encryption: true,
+          lora: session.lora,          // E.3: a re-init MUST re-send it, or the node keeps refusing
+          onServeBackError: session.onServeBackError,
+        };
+        await this.sendEncryptedInit(this.wsClient, config, session.sessionId, session.jobId);
+      }
     } else {
       const signer = (this.paymentManager as any).signer;
       if (signer) {
@@ -3513,6 +3875,7 @@ export class SessionManager implements ISessionManager {
     };
 
     // Send request and wait for response (10-second timeout)
+    this.refuseIfNoLongerActive(sessionId, session);   // 1.39.21: the session may have been found settled since the gate (review round 4)
     const response = await this._sendRAGRequest(requestId, message, 10000);
 
     // Handle error response
@@ -3664,20 +4027,17 @@ export class SessionManager implements ISessionManager {
     clearTimeout(pending.timeoutId);
     this.pendingRequests.delete(response.requestId);
 
-    // Resolve with response data
-    if (response.status === 'success') {
-      pending.resolve({
-        uploaded: response.uploaded,
-        rejected: 0,
-        errors: []
-      });
-    } else {
-      pending.resolve({
-        uploaded: response.uploaded || 0,
-        rejected: 1,
-        errors: response.error ? [response.error] : []
-      });
+    // The node's own counts, whatever the status (Milestone B D36). An ack without them is refused, not guessed at.
+    const { uploaded, rejected, errors } = response as Partial<UploadVectorsResponse>;
+    if (!Number.isInteger(uploaded) || !Number.isInteger(rejected) || !Array.isArray(errors) || errors.some((e) => typeof e !== 'string')) {
+      pending.reject(new SDKError(
+        'The node\'s uploadVectorsResponse has no uploaded/rejected/errors counts',
+        'UPLOAD_RESPONSE_MALFORMED',
+        { requestId: response.requestId, status: response.status }
+      ));
+      return;
     }
+    pending.resolve({ uploaded, rejected, errors });
   }
 
   /**
@@ -4248,10 +4608,8 @@ export class SessionManager implements ISessionManager {
     }
     console.warn(`[SDK:generateImage:3] Session found: status=${session.status} endpoint=${session.endpoint} provider=${session.provider} model=${session.model} chainId=${session.chainId} jobId=${session.jobId} sessionId=${session.sessionId}`);
 
-    if (session.status !== 'active') {
-      console.error(`[SDK:generateImage:4] SESSION_NOT_ACTIVE status=${session.status}`);
-      throw new SDKError('Session is not active', 'SESSION_NOT_ACTIVE');
-    }
+    if (session.status !== 'active') console.error(`[SDK:generateImage:4] SESSION_NOT_ACTIVE status=${session.status}`);
+    this.refuseIfNoLongerActive(sessionId, session);   // names a settled session's reason (1.39.22)
 
     // Require encryption manager
     if (!this.encryptionManager) {
@@ -4270,6 +4628,7 @@ export class SessionManager implements ISessionManager {
     // Force new WebSocket if session changed (old connection belongs to previous session)
     if (this.wsClient && this.wsSessionId && this.wsSessionId !== sessionId) {
       console.warn(`[SDK:generateImage:8] Session changed ${this.wsSessionId} -> ${sessionId}, tearing down old WebSocket`);
+      this.markMaySettle(this.wsSessionId);   // its connection closes: the node may settle it (1.39.21 S1)
       try { await this.wsClient.disconnect(); } catch (_) { /* ignore */ }
       this.wsClient = undefined;
       this.wsSessionId = undefined;
@@ -4280,12 +4639,14 @@ export class SessionManager implements ISessionManager {
     if (!this.wsClient || !this.wsClient.isConnected()) {
       console.warn(`[SDK:generateImage:9] Creating fresh WebSocket to ${wsUrl}`);
       try {
+        // A dead shared client being replaced: its session's connection closed (1.39.21 S1)
+        if (this.wsClient) this.markMaySettle(this.wsSessionId);
         this.wsClient = new WebSocketClient(wsUrl, { chainId: session.chainId });
+        this.wsSessionId = sessionId;   // owned from creation (Milestone B review M3)
         this.watchConnectionIdentity(this.wsClient);
         console.warn(`[SDK:generateImage:10] WebSocket created, calling connect()...`);
         await this.wsClient.connect();
         console.warn(`[SDK:generateImage:11] WebSocket connected OK`);
-        this.wsSessionId = sessionId;
       } catch (err: any) {
         console.error(`[SDK:generateImage:12] WebSocket connect FAILED: ${err.message}`, err);
         throw err;
@@ -4294,24 +4655,29 @@ export class SessionManager implements ISessionManager {
       console.warn(`[SDK:generateImage:9b] Reusing existing WebSocket (connected=${this.wsClient.isConnected()})`);
     }
 
-    // Always send session_init with fresh ECDH key exchange
-    console.warn(`[SDK:generateImage:13] Sending sendEncryptedInit for session ${sessionId} job ${session.jobId}`);
-    const initConfig: ExtendedSessionConfig = {
-      chainId: session.chainId,
-      host: session.provider,
-      modelId: session.model,
-      endpoint: session.endpoint,
-      paymentMethod: 'deposit',
-      encryption: true,
-      lora: session.lora,            // E.3: a re-init MUST re-send it
-      onServeBackError: session.onServeBackError,
-    };
-    try {
-      await this.sendEncryptedInit(this.wsClient, initConfig, session.sessionId, session.jobId);
-      console.warn(`[SDK:generateImage:14] sendEncryptedInit completed OK, hasKey=${!!this.sessionKey}`);
-    } catch (err: any) {
-      console.error(`[SDK:generateImage:15] sendEncryptedInit FAILED: ${err.message}`, err);
-      throw err;
+    await this.refuseIfSettledOnChain(sessionId, session);   // 1.39.21 S2, after the socket setup
+
+    // Send session_init with a fresh ECDH key exchange, except where the node keeps the key for the connection (Milestone
+    // B D38, review m1): a re-init would replace the key a chat reply on this session is still decrypted with.
+    if (!(await this.sharedConnectionHoldsKey(sessionId))) {
+      console.warn(`[SDK:generateImage:13] Sending sendEncryptedInit for session ${sessionId} job ${session.jobId}`);
+      const initConfig: ExtendedSessionConfig = {
+        chainId: session.chainId,
+        host: session.provider,
+        modelId: session.model,
+        endpoint: session.endpoint,
+        paymentMethod: 'deposit',
+        encryption: true,
+        lora: session.lora,            // E.3: a re-init MUST re-send it
+        onServeBackError: session.onServeBackError,
+      };
+      try {
+        await this.sendEncryptedInit(this.wsClient, initConfig, session.sessionId, session.jobId);
+        console.warn(`[SDK:generateImage:14] sendEncryptedInit completed OK, hasKey=${!!this.sessionKey}`);
+      } catch (err: any) {
+        console.error(`[SDK:generateImage:15] sendEncryptedInit FAILED: ${err.message}`, err);
+        throw err;
+      }
     }
 
     // The init just wrote this session's entry; its counter is the one chat continues from (E3).
@@ -4324,6 +4690,7 @@ export class SessionManager implements ISessionManager {
     // Delegate to standalone utility
     console.warn(`[SDK:generateImage:17] Calling generateImageWs prompt="${prompt.substring(0, 50)}..." msgIdx=${this.messageIndex}`);
     const messageIndexRef = this.liveIndex(imageCrypto);
+    this.refuseIfNoLongerActive(sessionId, session);   // 1.39.21: the session may have been found settled since the gate (review round 4)
     try {
       const result = await generateImageWs({
         wsClient: this.wsClient,
@@ -4363,6 +4730,8 @@ export class SessionManager implements ISessionManager {
       return result;
     } catch (err: any) {
       console.error(`[SDK:generateImage:19] generateImageWs FAILED: ${err.message}`, err);
+      // The node refused it on a settled session: the listener has settled it; say so (1.39.22 N2)
+      if (this.settledByNode.has(sessionId)) throw this.settledByNodeError(sessionId);
       throw err;
     }
   }
@@ -4430,6 +4799,9 @@ export class SessionManager implements ISessionManager {
       const data = await response.json();
       const yes = Array.isArray(data?.features) && data.features.includes('session-job-completion');
       this.jobCompletionNodes.set(sessionId, yes);
+      this.settledNoticeNodes.set(sessionId, Array.isArray(data?.features) && data.features.includes('session-settled-notice'));
+      this.settledRestNodes.set(sessionId, Array.isArray(data?.features) && data.features.includes('session-settled-rest'));
+      this.holdsKeyProbeFailedAt.delete(sessionId);
       return yes;
     } catch {
       return false;
@@ -4557,7 +4929,7 @@ export class SessionManager implements ISessionManager {
     const session = this.sessions.get(sessionId);
     if (!session) throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
     // A result fetch works on a session the caller ended or the node completed (1.39.15 H3).
-    if (mode === 'job' && session.status !== 'active') throw new SDKError('Session is not active', 'SESSION_NOT_ACTIVE');
+    if (mode === 'job') this.refuseIfNoLongerActive(sessionId, session);   // carries details.status (1.39.21)
     if (!this.encryptionManager) throw new SDKError('EncryptionManager not available', 'ENCRYPTION_NOT_AVAILABLE');
 
     const endpoint = this.requireEndpoint(session, sessionId);
@@ -4573,6 +4945,15 @@ export class SessionManager implements ISessionManager {
     // would encrypt under a key that connection has no record of.
     // The entry must also be the key the LAST shared init minted: a session-switch teardown clears
     // `sessionKey` but leaves the old entry, and a fresh socket restarts at generation 1.
+    // A shared init in flight has already written its new key, before the node has it (Milestone B round 2).
+    if (mode === 'job') {
+      // 1.39.21 S2, before any socket or frame, and BEFORE the init-chain wait: an init queued during the chain read would
+      // otherwise sit between the wait and the reuse check below (settled-guard review round 3).
+      await this.refuseIfSettledOnChain(sessionId, session);
+      await this.initChain;
+      // The session may have been completed, ended or found settled during the wait (round 3 m2; settled-guard round 4)
+      this.refuseIfNoLongerActive(sessionId, session);
+    }
     const shared = this.sessionCrypto.get(sessionId);
     // A fetch always gets its own connection: the node serves it on a freshly inited one, and never settles on it.
     if (mode === 'job' && !this.needsSessionInit() && this.wsSessionId === sessionId && shared && shared.key === this.sessionKey) {
@@ -4583,7 +4964,13 @@ export class SessionManager implements ISessionManager {
       // A per-job socket never silently reconnects: a reconnected socket has no session init and the
       // frames are not re-delivered. A FAILED init must leave nothing behind — no open socket with a
       // 30 s heartbeat, no background reconnect loop — and the init itself touches no shared state (E1).
+      // 1.39.22 N3: a new connection on a notice node is read first (a node restart forgets what it settled)
+      if (mode === 'job' && this.settledNoticeNodes.get(sessionId) === true) {
+        this.markMaySettle(sessionId);
+        await this.refuseIfSettledOnChain(sessionId, session);
+      }
       wsClient = new WebSocketClient(wsUrl, { reconnect: false });
+      wsClient.onMessage(this.dedicatedSettledFrameListener);   // its notice and refusal (1.39.22); the socket's close drops it
       try {
         await wsClient.connect();
         sessionKey = await this.sendEncryptedInit(wsClient, {
@@ -4602,6 +4989,7 @@ export class SessionManager implements ISessionManager {
         if (!sessionKey) throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
       } catch (err) {
         await wsClient.disconnect().catch(() => {});   // cleanup only — the init failure is what surfaces
+        if (mode === 'job') this.markMaySettle(sessionId);   // the node may have registered the job (1.39.21)
         throw err;
       }
       messageIndexRef = { value: 0 };
@@ -4701,13 +5089,27 @@ export class SessionManager implements ISessionManager {
           : new SDKError(`Session ${sessionId} was re-registered while the ${kind} job was being submitted`, 'SESSION_CHANGED',
             { reason: 'SESSION_CHANGED', sessionId, retryable: false });
       }
+      // The record this submit was guarded on, and the current one (settled-guard review round 6)
+      this.refuseIfNoLongerActive(sessionId, guarded!);   // sameTarget above requires `guarded`   // 1.39.21: the session may have been found settled since the gate (review round 4)
       handle = await submit({ ...transport, jobCompletionNode });
     } catch (err) {
       if (ownsWs) close();
       release();
+      this.markMaySettle(sessionId);   // 1.39.21 S1: a job's end, or its socket's close, can settle the session
       throw err;
     }
-    handle.result = handle.result.finally(() => { if (ownsWs) close(); release(); });
+    // A job that failed (timed out, lost its socket, cancelled locally) may still be running on the node and settle the
+    // session when it ends: its mark is sticky (1.39.21 review round 1).
+    handle.result = handle.result.then(
+      (value) => { if (ownsWs) close(); release(); this.markMaySettle(sessionId); return value; },
+      (err) => {
+        if (ownsWs) close(); release();
+        // The node's settled refusal (an encrypted transcode_error SESSION_SETTLED, an LTX/training error) settles it
+        if (SessionManager.isSettledRefusal(err)) this.markSettledByNode(sessionId, 'refused');
+        else this.markMaySettle(sessionId, true);
+        throw err;
+      },
+    );
     // Every re-wrap is a NEW promise the *-ws module never marked handled. Without this a job
     // rejected before the consumer attaches is an unhandled rejection (process exit in Node).
     handle.result.catch(() => {});

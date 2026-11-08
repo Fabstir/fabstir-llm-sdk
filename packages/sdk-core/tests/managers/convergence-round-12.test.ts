@@ -176,10 +176,10 @@ describe('FF5 — pins round 11 lacked', () => {
 
   test("EE8: a malformed format fails before the upload, too", async () => {
     const startSession = vi.fn(async () => ({ sessionId: 7n, jobId: 7n }));
-    const uploadJSON = vi.fn(async () => 'cid');
-    const m = new TranscodeManager({ startSession }, { uploadJSON }, {}, {}, {} as any, 84532);
+    const uploadEncryptedBlob = vi.fn(async () => 'ucid');
+    const m = new TranscodeManager({ startSession }, { uploadEncryptedBlob }, {}, {}, {} as any, 84532);
     await caught(m.createTranscodeJob({ mediaFormats: [{ id: 1, ext: 'mp4', vcodec: 264, vf: null }], hostAddress: '0x' + '1'.repeat(40), chainId: 84532, maxDuration: 60 } as any));
-    expect(uploadJSON).not.toHaveBeenCalled();
+    expect(uploadEncryptedBlob).not.toHaveBeenCalled();
     expect(startSession).not.toHaveBeenCalled();
   });
 });

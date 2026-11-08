@@ -335,6 +335,17 @@ export interface TranscodeHandle {
   taskId: string;
   cancel(): void;
   result: Promise<TranscodeResult>;
+  /** TranscodeManager.submitTranscodeWithLoadBalancing only: sessions it funded on earlier hosts that then refused the
+   *  job (CAPACITY_FULL after funding). Present only when there are some; reclaim them (Milestone B D40). */
+  orphanedSessions?: TranscodeOrphanedSession[];
+}
+
+/** A session the transcode load balancer funded and could not use (Milestone B D40). */
+export interface TranscodeOrphanedSession {
+  sessionId: bigint;
+  jobId: bigint;
+  /** The host the session was funded with. */
+  host: string;
 }
 
 /** SessionManager.fetchTranscodeResult's answer (nodes reporting `session-job-completion`, 1.39.15). */

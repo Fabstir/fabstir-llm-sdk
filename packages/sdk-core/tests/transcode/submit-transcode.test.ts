@@ -52,6 +52,7 @@ function injectEncryptionAndWs(mgr: SessionManager): void {
   (mgr as any).wsSessionId = TEST_SESSION_ID;
   (mgr as any).sessionKey = new Uint8Array(32);
   (mgr as any).sessionKeyGeneration = 1;
+  (mgr as any).sessionKeyClient = (mgr as any).wsClient;   // the client the init was acked on (1.39.20: generations are per client)
   (mgr as any).sessionCrypto.set(TEST_SESSION_ID, { key: (mgr as any).sessionKey, messageIndex: 5 });
   (mgr as any).messageIndex = 5;
 }
@@ -80,8 +81,9 @@ describe('SessionManager.submitTranscode', () => {
   it('throws SESSION_NOT_ACTIVE for non-active session', async () => {
     injectSession(mgr, TEST_SESSION_ID, { status: 'completed' });
     injectEncryptionAndWs(mgr);
+    // 1.39.21: the refusal names the status, as the other paths' refusals do
     await expect(mgr.submitTranscode(TEST_SESSION_ID, 'bafysrc', TEST_FORMATS))
-      .rejects.toThrow('Session is not active');
+      .rejects.toMatchObject({ code: 'SESSION_NOT_ACTIVE', details: { status: 'completed' } });
   });
 
   it('calls submitTranscodeWs with correct parameters', async () => {

@@ -138,7 +138,7 @@ describe('G1: one job per session within a SessionManager', () => {
     const ws = new FakeWs();
     const disconnect = vi.spyOn(ws, 'disconnect');
     const key = new Uint8Array(32).fill(5);
-    Object.assign(mgr, { wsClient: ws, wsSessionId: '1433', sessionKey: key, sessionKeyGeneration: 1 });
+    Object.assign(mgr, { wsClient: ws, wsSessionId: '1433', sessionKey: key, sessionKeyGeneration: 1, sessionKeyClient: ws });
     mgr.sessionCrypto.set('1433', { key, messageIndex: 0 });
     const first = pending();
     vi.mocked(submitTranscodeWs).mockResolvedValueOnce(first.handle as any);

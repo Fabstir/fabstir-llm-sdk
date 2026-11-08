@@ -112,7 +112,8 @@ describe('H1/H2: the one-job refusal is lifted for exactly the nodes that report
     marker(true);
     await mgr.submitTranscode('1433', 'bC', ['mp4'] as any);
     await expect(mgr.submitTranscode('1433', 'bD', ['mp4'] as any)).resolves.toBeDefined();
-    expect(versionCalls).toBe(2);
+    // 3: the 1.39.22 settled-notice gate asks once too (its failure is then held for a minute), the job probe twice
+    expect(versionCalls).toBe(3);
   });
 
   it('J3b: a definitive "no" is remembered for the session', async () => {
@@ -308,7 +309,7 @@ describe('round 1: recovery is bounded, and the fetch is its own connection', ()
     const shared = { isConnected: () => true, getConnectionGeneration: () => 1, disconnect: vi.fn(async () => {}),
       onMessage: vi.fn(() => () => {}), onClose: vi.fn(() => () => {}), sendWithoutResponse: vi.fn(async () => {}) };
     const key = new Uint8Array(32).fill(5);
-    Object.assign(mgr, { wsClient: shared, wsSessionId: '1433', sessionKey: key, sessionKeyGeneration: 1 });
+    Object.assign(mgr, { wsClient: shared, wsSessionId: '1433', sessionKey: key, sessionKeyGeneration: 1, sessionKeyClient: shared });
     mgr.sessionCrypto.set('1433', { key, messageIndex: 0 });
     await mgr.fetchTranscodeResult('1433', 'task-1');
     expect(FakeWebSocket.instances).toHaveLength(1);

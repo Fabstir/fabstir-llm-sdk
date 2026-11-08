@@ -52,6 +52,9 @@ function manager({ allow = [HOST] as string[] | null, job = { startTime: Math.fl
   vi.spyOn(mgr, 'sendEncryptedInit').mockImplementation(async () => new Uint8Array(32).fill(9));
   mgr.registerExternalSession({ sessionId: 1500n, jobId: 3000n, endpoint: 'https://host2.fabstir.test', hostAddress: HOST, model: MODEL, chainId: 84532 });
   if (allow) mgr.setConfidentialHosts(allow);   // null: none configured
+  // These tests pin the transcode wait's own chain read; the 1.39.21 settled-session gate reads first for an adopted
+  // session, and is covered in session-settled-guard.test.ts. Start from a session it has already read.
+  mgr.maySettle.clear();
   return mgr;
 }
 
@@ -157,7 +160,11 @@ describe('K5: submitTranscode is the guard every path passes', () => {
     const mgr = manager();
     mgr.jobCompletionNodes.set('1500', true);   // no claim on such a node, so nothing else stops a re-registration
     let release!: () => void;
-    mgr.reader.getSessionJobOnChain = vi.fn(() => new Promise((r) => { release = () => r({ startTime: BigInt(Math.floor(Date.now() / 1000)), maxDuration: 3600n }); }));
+    const live = { status: 0, startTime: BigInt(Math.floor(Date.now() / 1000)), maxDuration: 3600n };
+    // The first read (the wait) is held; the re-registration below marks the session, and the 1.39.21 gate's read
+    // answers Active, so the swap check is what refuses.
+    mgr.reader.getSessionJobOnChain = vi.fn(async () => live)
+      .mockImplementationOnce(() => new Promise((r) => { release = () => r(live); }));
     const pending = mgr.submitTranscode('1500', PLAIN_CID, [P1080] as any).catch((e: any) => e);
     await new Promise((r) => setTimeout(r, 0));
     mgr.registerExternalSession({ sessionId: 1500n, jobId: 3000n, endpoint: 'https://evil.test', hostAddress: OTHER_HOST, model: MODEL, chainId: 84532 });

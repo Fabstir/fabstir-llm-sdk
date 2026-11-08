@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SessionManager } from '../../src/managers/SessionManager';
 import { submitTrainingWs } from '../../src/utils/training-ws';
 import { submitLtxWs } from '../../src/utils/ltx-ws';
-import { FakeWebSocket, stubNodeVersion } from '../helpers/session-doubles';
+import { FakeWebSocket, stubNodeVersion, activeOnChain } from '../helpers/session-doubles';
 import { MODEL, HOST, JOB, LORA } from '../training/fixtures';
 
 vi.mock('../../src/utils/ltx-ws', async (importOriginal) => {
@@ -40,6 +40,7 @@ const JOB_ANY: any = JOB;
 
 function manager() {
   const mgr: any = new SessionManager({} as any, { storeConversation: vi.fn() } as any);
+  activeOnChain(mgr);   // 1.39.21: an adopted session is read on chain (Active) before its first new work
   (mgr as any).assertConfidentialHost = () => {};   // 1.39.19: the confidential-host check is not under test here
   mgr.encryptionManager = { encryptMessage: vi.fn(), decryptMessage: vi.fn() };
   const initConfigs: any[] = [];
@@ -153,7 +154,7 @@ describe('adjacent: submitLtx on the SHARED socket (ownsWs === false)', () => {
     mgr.registerExternalSession({ sessionId: 1152n, jobId: 2304n, endpoint: 'https://host2.fabstir.net', hostAddress: HOST, model: MODEL, chainId: 84532 });
     // Prime the shared client so acquireSessionTransport REUSES it (identity + key present).
     mgr.wsClient = { isConnected: () => true, getConnectionGeneration: () => 1, onMessage: () => () => {}, sendWithoutResponse: async () => {}, disconnect: async () => {} };
-    mgr.wsSessionId = '1152'; mgr.sessionKey = new Uint8Array(32).fill(9); mgr.sessionKeyGeneration = 1; mgr.messageIndex = 0;
+    mgr.wsSessionId = '1152'; mgr.sessionKey = new Uint8Array(32).fill(9); mgr.sessionKeyGeneration = 1; mgr.sessionKeyClient = mgr.wsClient; mgr.messageIndex = 0;
     mgr.sessionCrypto.set('1152', { key: mgr.sessionKey, messageIndex: 0 });   // the shared init's per-session entry
     const seen: unknown[] = []; const on = (r: unknown) => seen.push(r);
     process.on('unhandledRejection', on);

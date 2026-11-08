@@ -149,7 +149,7 @@ describe('HH1 — an exchange is logged whole: a sign-out never tears it', () =>
   });
 
   test('end to end: a sign-out right after the reply — the log keeps the question AND the paid answer', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ response: 'the paid answer' }) })));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ content: 'the paid answer' }) })));
     const net = new FakeS5Network();
     const store = sm(net.tab());
     const sessions = new SessionManager({ isInitialized: () => true, createSessionJob: vi.fn().mockResolvedValue(77) } as any, store as any);

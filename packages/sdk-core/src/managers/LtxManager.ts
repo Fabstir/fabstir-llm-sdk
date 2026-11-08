@@ -396,6 +396,16 @@ export class LtxManager {
       if (err?.code === 'CONFIDENTIAL_HOST_NOT_ALLOWED') {   // raised at the submit choke point (1.39.19)
         throw new LtxError(err.message, 'CONFIDENTIAL_HOST_NOT_ALLOWED', { ...err.details, sessionId, jobId });
       }
+      // The node's SESSION_SETTLED refusal (8.63.0) arrives from ltx-ws as GENERATION_FAILED with its node code: the
+      // session takes no new work, so it is SESSION_NOT_ACTIVE, not a failed render (1.39.22 N2).
+      if (err?.details?.nodeCode === 'SESSION_SETTLED' || err?.code === 'SESSION_SETTLED') {
+        throw new LtxError(err.message, 'SESSION_NOT_ACTIVE',
+          { ...kept, nodeReason: err?.details?.nodeReason, reason: 'SETTLED_BY_NODE', nodeCode: 'SESSION_SETTLED', retryable: false, sessionId, jobId });
+      }
+      // The settled-session guard (1.39.21): nothing was sent. Not a failed render: keep the code, reason and retryable.
+      if (!(err instanceof LtxError) && (err?.code === 'SESSION_NOT_ACTIVE' || err?.code === 'SESSION_STATUS_UNREADABLE')) {
+        throw new LtxError(err.message, err.code, { ...err.details, sessionId, jobId });
+      }
       throw new LtxError(err?.message ?? 'LTX generation failed', err instanceof LtxError ? err.code : 'GENERATION_FAILED',
         { ...kept, sessionId, jobId });
     }

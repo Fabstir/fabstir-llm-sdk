@@ -217,8 +217,8 @@ describe('EE7 — a disposed manager refuses every call', () => {
 describe('EE8 — createTranscodeJob reaches funding only when nothing after it can fail', () => {
   test('a malformed format fails before anything is uploaded or funded', async () => {
     const startSession = vi.fn(async () => ({ sessionId: 7n, jobId: 7n }));
-    const uploadJSON = vi.fn(async () => 'cid');
-    const m = new TranscodeManager({ startSession }, { uploadJSON }, {}, {}, {} as any, 84532);
+    const uploadEncryptedBlob = vi.fn(async () => 'ucid');
+    const m = new TranscodeManager({ startSession }, { uploadEncryptedBlob }, {}, {}, {} as any, 84532);
     await caught(m.createTranscodeJob({ mediaFormats: [{ id: 1, ext: 'mp4', vcodec: 264, vf: null }], hostAddress: '0x' + '1'.repeat(40), chainId: 84532, maxDuration: 60 } as any));
     expect(startSession).not.toHaveBeenCalled();
   });

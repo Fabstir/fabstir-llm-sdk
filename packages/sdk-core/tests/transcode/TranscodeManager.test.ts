@@ -36,10 +36,10 @@ function mockSessionManager() {
   return { startSession: vi.fn().mockResolvedValue({ sessionId: 'sess-123', jobId: 1n }), endSession: vi.fn().mockResolvedValue(undefined), resolveModelPricePerToken: vi.fn().mockResolvedValue(TEST_PRICE), resolveModelRateLimit: vi.fn().mockResolvedValue(2000) };
 }
 function mockStorageManager() {
-  return { uploadFile: vi.fn().mockResolvedValue({ cid: 'bafyabc' }), downloadFile: vi.fn().mockResolvedValue(new Blob(['video'])), uploadJSON: vi.fn().mockResolvedValue('bafyjson') };
+  return { uploadEncryptedBlob: vi.fn().mockResolvedValue('uEncCid'), downloadDecryptedByCID: vi.fn().mockResolvedValue(new Uint8Array([1])), getRawBytes: vi.fn().mockResolvedValue(new Uint8Array([2])) };
 }
 function mockContractManager() {
-  return { getContract: vi.fn().mockReturnValue({ getSessionJob: vi.fn().mockResolvedValue({ status: 1, tokensClaimed: 0n }), completeSessionJob: vi.fn().mockResolvedValue({ wait: vi.fn().mockResolvedValue({ hash: '0xdef' }) }) }), getContractAddress: vi.fn().mockResolvedValue(USDC_ADDRESS) };
+  return { getJobMarketplace: vi.fn().mockReturnValue({ sessionJobs: vi.fn().mockResolvedValue({ status: 0n }), completeSessionJob: vi.fn().mockResolvedValue({ wait: vi.fn().mockResolvedValue({ hash: '0xdef' }) }) }), getContractAddress: vi.fn().mockResolvedValue(USDC_ADDRESS) };
 }
 function mockEncryptionManager() {
   return { encryptMessage: vi.fn().mockReturnValue({ ciphertextHex: '0xenc', nonceHex: '0xnonce', aadHex: '0xaad' }), decryptMessage: vi.fn().mockReturnValue('{}') };
@@ -93,7 +93,7 @@ describe('TranscodeManager', () => {
       const storage = mockStorageManager();
       const mgr = createManager({ storage });
       await mgr.createTranscodeJob(TEST_JOB_PARAMS);
-      expect(storage.uploadJSON).toHaveBeenCalled();
+      expect(storage.uploadEncryptedBlob).toHaveBeenCalled();
     });
   });
 
@@ -195,7 +195,7 @@ describe('TranscodeManager', () => {
       const mgr = createManager({ storage });
       const result = await mgr.uploadVideoForTranscode(new Blob(['video']));
       expect(result).toHaveProperty('cid');
-      expect(storage.uploadFile).toHaveBeenCalled();
+      expect(storage.uploadEncryptedBlob).toHaveBeenCalled();
     });
   });
 
@@ -205,7 +205,7 @@ describe('TranscodeManager', () => {
       const mgr = createManager({ storage });
       const result = await mgr.downloadTranscodedVideo('bafyoutput');
       expect(result).toBeInstanceOf(Blob);
-      expect(storage.downloadFile).toHaveBeenCalled();
+      expect(storage.getRawBytes).toHaveBeenCalledWith('bafyoutput');
     });
   });
 

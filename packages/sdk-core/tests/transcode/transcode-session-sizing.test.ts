@@ -91,7 +91,7 @@ describe('TranscodeManager', () => {
       getConfidentialHosts: vi.fn(() => ['0xhost']),
       ...overrides,
     };
-    const storage = { uploadJSON: vi.fn(async () => 'bSpec') };
+    const storage = { uploadEncryptedBlob: vi.fn(async () => 'uSpec') };
     const tm: any = new TranscodeManager(sm as any, storage as any, {} as any, {} as any, {} as any, 84532);
     tm.setHostSelectionService({ getRankedHostsForModel: vi.fn(async () => [{ host: HOST }]) } as any);
     return { tm, sm, storage };
@@ -194,7 +194,7 @@ describe('TranscodeManager', () => {
       resolveModelRateLimit: vi.fn(async () => { order.push('rate'); return RATE; }),
       startSession: vi.fn(async () => { order.push('fund'); return { sessionId: 7n, jobId: 8n }; }),
     });
-    storage.uploadJSON.mockImplementation(async () => { order.push('upload'); return 'bSpec'; });
+    storage.uploadEncryptedBlob.mockImplementation(async () => { order.push('upload'); return 'uSpec'; });
     await tm.createTranscodeJob({ hostAddress: '0xhost', inputCID: CID, mediaFormats: [P1080], maxDuration: 7200, proofInterval: 100, chainId: 84532 });
     expect(order).toEqual(['rate', 'upload', 'fund']);
     expect(sm.startSession.mock.calls[0][0].duration).toBe(4561);
