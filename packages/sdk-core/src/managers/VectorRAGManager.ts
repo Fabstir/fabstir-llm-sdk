@@ -618,6 +618,31 @@ export class VectorRAGManager implements IVectorRAGManager {
   }
 
   /**
+   * Sealed databases whose manifest never opens (`{ dbId, code }`, code SEALED_OPEN_FAILED or RAG_MANIFEST_CORRUPT), as
+   * the last discovery found them (`initialize`, `refreshDatabases`). They are in no listing; `deleteDatabaseById`
+   * removes them (D44).
+   */
+  listUnreadableDatabases(): Array<{ dbId: string; code: string }> {
+    this.ensureNotDisposed();
+    return this.vectorStore.listUnreadableDatabases();
+  }
+
+  /**
+   * Delete a sealed database by id — for one `listUnreadableDatabases` names, whose name cannot be read (D44). When
+   * its manifest opens, it is a database this manager knows by name: its sessions and metadata go too, as with
+   * `deleteDatabase`.
+   */
+  async deleteDatabaseById(dbId: string): Promise<void> {
+    this.ensureNotDisposed();
+    const { value: name, unrecorded } = await landedWrite(this.vectorStore.deleteDatabaseById(dbId));
+    if (name !== undefined) {
+      for (const session of this.listSessions(name)) await this.destroySession(session.sessionId);
+      if (this.metadataService.exists(name)) this.metadataService.delete(name);
+    }
+    if (unrecorded) throw unrecorded;
+  }
+
+  /**
    * Drop every cache and re-read the databases from S5 — sees what another tab created, changed or deleted.
    * @returns the complete entries read (document arrays included — §22 CC8), with this manager's own fields (`isPublic`).
    */

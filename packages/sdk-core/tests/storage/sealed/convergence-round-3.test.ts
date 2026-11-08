@@ -339,21 +339,6 @@ describe('T7 — retryability has one shape', () => {
   });
 });
 
-describe('T8 — DocumentManager: an indexed body that reads as nothing is an error, not a TypeError', () => {
-  test('DOCUMENT_BODY_UNREADABLE (retryable) on a registry miss', async () => {
-    const { DocumentManager } = await import('../../../src/managers/DocumentManager');
-    const { extractionCache } = await import('../../../src/documents/extractors');
-    const net = new FakeS5Network();
-    const dm = new DocumentManager();
-    Object.assign(dm as any, { initialized: true, userAddress: ADDR, s5Client: net.tab(), sealer: sealer() });
-    const { documentId } = await dm.uploadDocument(new File(['body'], 'notes.txt', { type: 'text/plain' }), 'db');
-    extractionCache.clear();
-    (dm as any).getFromRegistry('db', documentId).textCached = '';
-    (dm as any).s5Client = net.tab();                                     // a fresh view of the directory
-    net.registryMiss('home/documents/v1', 1);
-    expect(await caught(dm.extractText(documentId, 'db'))).toMatchObject({ code: 'DOCUMENT_BODY_UNREADABLE', details: { retryable: true } });
-  });
-});
 
 describe('T8 — the preflight opens IndexedDB', () => {
   test('assertUsable rejects when the head store will not open', async () => {

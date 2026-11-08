@@ -8,13 +8,24 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { StorageManager } from '../../src/managers/StorageManager';
+import { sealer } from '../helpers/sealed-fixtures';
 import { UserSettings, UserSettingsVersion } from '../../src/types/settings.types';
+
+/** What a put wrote: sealed since 1.39.24 (D34). A legacy plaintext read re-seals first, so the update is the last put. */
+/** The sealed record `{ settings, legacyStamp? }` (1.39.24): its settings. */
+const opened = (b: any) => b instanceof Uint8Array ? (sealer().open(b, 'settings/v1').value as any).settings : b;
+/** This identity's sealed settings path (1.39.24 review: one per identity on a shared seed). */
+const SETTINGS = `home/user/v2/${sealer().deriveId('owner', 'storage')}/settings`;
+/** A get that finds `value` at this identity's settings path only (the legacy shared file absent). */
+const atSettings = (value: any) => vi.fn(async (path: string) => (path === SETTINGS ? value : undefined));
+const lastSaved = (put: any) => opened(put.mock.calls[put.mock.calls.length - 1][1]);
 
 describe('StorageManager - User Settings', () => {
   let storageManager: StorageManager;
 
   beforeEach(() => {
     storageManager = new StorageManager();
+    (storageManager as any).sealer = sealer();   // settings are sealed (1.39.24 D34); initialize() sets it
   });
 
   describe('saveUserSettings()', () => {
@@ -75,7 +86,8 @@ describe('StorageManager - User Settings', () => {
       await storageManager.saveUserSettings(settings);
 
       expect(mockPut).toHaveBeenCalledTimes(1);
-      expect(mockPut).toHaveBeenCalledWith('home/user/settings.json', settings);
+      expect(mockPut).toHaveBeenCalledWith(SETTINGS, expect.any(Uint8Array), { mediaType: 'application/octet-stream' });
+      expect(lastSaved(mockPut)).toEqual(settings);   // sealed (1.39.24 D34)
     });
 
     it('should throw error on S5 network failure', async () => {
@@ -114,7 +126,8 @@ describe('StorageManager - User Settings', () => {
 
       await storageManager.saveUserSettings(settings);
 
-      expect(mockPut).toHaveBeenCalledWith('home/user/settings.json', settings);
+      expect(mockPut).toHaveBeenCalledWith(SETTINGS, expect.any(Uint8Array), { mediaType: 'application/octet-stream' });
+      expect(lastSaved(mockPut)).toEqual(settings);   // sealed (1.39.24 D34)
     });
   });
 
@@ -128,12 +141,12 @@ describe('StorageManager - User Settings', () => {
     it('should return null for first-time user (no settings file)', async () => {
       const mockGet = vi.fn().mockResolvedValue(undefined);
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       const result = await storageManager.getUserSettings();
 
       expect(result).toBeNull();
-      expect(mockGet).toHaveBeenCalledWith('home/user/settings.json');
+      expect(mockGet).toHaveBeenCalledWith(SETTINGS, { fresh: true });
     });
 
     it('should return saved settings', async () => {
@@ -145,20 +158,20 @@ describe('StorageManager - User Settings', () => {
         theme: 'dark',
       };
 
-      const mockGet = vi.fn().mockResolvedValue(savedSettings);
+      const mockGet = atSettings(savedSettings);
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       const result = await storageManager.getUserSettings();
 
       expect(result).toEqual(savedSettings);
-      expect(mockGet).toHaveBeenCalledWith('home/user/settings.json');
+      expect(mockGet).toHaveBeenCalledWith(SETTINGS, { fresh: true });
     });
 
     it('should return null if settings file not found', async () => {
       const mockGet = vi.fn().mockRejectedValue(new Error('File not found'));
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       const result = await storageManager.getUserSettings();
 
@@ -171,9 +184,9 @@ describe('StorageManager - User Settings', () => {
         selectedModel: 'test-model',
       };
 
-      const mockGet = vi.fn().mockResolvedValue(invalidSettings);
+      const mockGet = atSettings(invalidSettings);
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       await expect(storageManager.getUserSettings()).rejects.toThrow(
         'Invalid UserSettings structure'
@@ -186,9 +199,9 @@ describe('StorageManager - User Settings', () => {
         selectedModel: 'test-model',
       };
 
-      const mockGet = vi.fn().mockResolvedValue(invalidSettings);
+      const mockGet = atSettings(invalidSettings);
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       await expect(storageManager.getUserSettings()).rejects.toThrow(
         'Invalid UserSettings structure'
@@ -198,7 +211,7 @@ describe('StorageManager - User Settings', () => {
     it('should throw error on network error (not "not found")', async () => {
       const mockGet = vi.fn().mockRejectedValue(new Error('Network timeout'));
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       await expect(storageManager.getUserSettings()).rejects.toThrow(
         'Failed to load user settings'
@@ -224,7 +237,7 @@ describe('StorageManager - User Settings', () => {
         theme: 'dark',
       };
 
-      const mockGet = vi.fn().mockResolvedValue(existingSettings);
+      const mockGet = atSettings(existingSettings);
       const mockPut = vi.fn().mockResolvedValue(undefined);
       (storageManager as any).initialized = true;
       (storageManager as any).s5Client = { fs: { get: mockGet, put: mockPut } };
@@ -233,10 +246,10 @@ describe('StorageManager - User Settings', () => {
 
       await storageManager.updateUserSettings(partial);
 
-      expect(mockGet).toHaveBeenCalledWith('home/user/settings.json');
+      expect(mockGet).toHaveBeenCalledWith(SETTINGS, { fresh: true });
       expect(mockPut).toHaveBeenCalledTimes(1);
 
-      const savedSettings = mockPut.mock.calls[0][1];
+      const savedSettings = lastSaved(mockPut);
       expect(savedSettings.selectedModel).toBe('new-model');
       expect(savedSettings.preferredPaymentToken).toBe('USDC'); // Preserved
       expect(savedSettings.theme).toBe('dark'); // Preserved
@@ -254,7 +267,7 @@ describe('StorageManager - User Settings', () => {
         autoApproveAmount: '5.0',
       };
 
-      const mockGet = vi.fn().mockResolvedValue(existingSettings);
+      const mockGet = atSettings(existingSettings);
       const mockPut = vi.fn().mockResolvedValue(undefined);
       (storageManager as any).initialized = true;
       (storageManager as any).s5Client = { fs: { get: mockGet, put: mockPut } };
@@ -263,7 +276,7 @@ describe('StorageManager - User Settings', () => {
 
       await storageManager.updateUserSettings(partial);
 
-      const savedSettings = mockPut.mock.calls[0][1];
+      const savedSettings = lastSaved(mockPut);
       expect(savedSettings.selectedModel).toBe('model-1'); // Unchanged
       expect(savedSettings.lastUsedModels).toEqual(['model-a', 'model-b']); // Unchanged
       expect(savedSettings.preferredPaymentToken).toBe('ETH'); // Unchanged
@@ -279,14 +292,14 @@ describe('StorageManager - User Settings', () => {
         selectedModel: 'test-model',
       };
 
-      const mockGet = vi.fn().mockResolvedValue(existingSettings);
+      const mockGet = atSettings(existingSettings);
       const mockPut = vi.fn().mockResolvedValue(undefined);
       (storageManager as any).initialized = true;
       (storageManager as any).s5Client = { fs: { get: mockGet, put: mockPut } };
 
       await storageManager.updateUserSettings({ theme: 'dark' });
 
-      const savedSettings = mockPut.mock.calls[0][1];
+      const savedSettings = lastSaved(mockPut);
       expect(savedSettings.lastUpdated).toBeGreaterThan(oldTimestamp);
     });
 
@@ -304,7 +317,7 @@ describe('StorageManager - User Settings', () => {
       await storageManager.updateUserSettings(partial);
 
       expect(mockPut).toHaveBeenCalledTimes(1);
-      const savedSettings = mockPut.mock.calls[0][1];
+      const savedSettings = lastSaved(mockPut);
       expect(savedSettings.version).toBe(UserSettingsVersion.V1);
       expect(savedSettings.selectedModel).toBe('first-model');
       expect(savedSettings.preferredPaymentToken).toBe('USDC');
@@ -314,7 +327,7 @@ describe('StorageManager - User Settings', () => {
     it('should throw error on network failure', async () => {
       const mockGet = vi.fn().mockRejectedValue(new Error('Network error'));
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       const partial: PartialUserSettings = { selectedModel: 'new-model' };
 
@@ -330,14 +343,14 @@ describe('StorageManager - User Settings', () => {
         selectedModel: 'test-model',
       };
 
-      const mockGet = vi.fn().mockResolvedValue(existingSettings);
+      const mockGet = atSettings(existingSettings);
       const mockPut = vi.fn().mockResolvedValue(undefined);
       (storageManager as any).initialized = true;
       (storageManager as any).s5Client = { fs: { get: mockGet, put: mockPut } };
 
       await storageManager.updateUserSettings({});
 
-      const savedSettings = mockPut.mock.calls[0][1];
+      const savedSettings = lastSaved(mockPut);
       expect(savedSettings.selectedModel).toBe('test-model'); // Unchanged
       expect(savedSettings.lastUpdated).toBeGreaterThan(existingSettings.lastUpdated);
     });
@@ -350,47 +363,44 @@ describe('StorageManager - User Settings', () => {
       );
     });
 
-    it('should delete settings file', async () => {
-      const mockDelete = vi.fn().mockResolvedValue(true);
+    // 1.39.24: the settings are replaced by a sealed cleared record, not deleted — with none, the next read would adopt
+    // the shared legacy file, which may be another identity's (review round 4).
+    const clearedClient = (put = vi.fn().mockResolvedValue(undefined)) =>
+      ({ fs: { put, delete: vi.fn().mockResolvedValue(true), get: vi.fn().mockResolvedValue(undefined) } });
+
+    it('should replace the settings with a sealed cleared record', async () => {
+      const client = clearedClient();
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { delete: mockDelete } };
+      (storageManager as any).s5Client = client;
 
       await storageManager.clearUserSettings();
 
-      expect(mockDelete).toHaveBeenCalledWith('home/user/settings.json');
+      expect(client.fs.put).toHaveBeenCalledWith(SETTINGS, expect.any(Uint8Array), { mediaType: 'application/octet-stream' });
+      expect(lastSaved(client.fs.put)).toBeNull();
     });
 
     it('should not throw if settings file does not exist', async () => {
-      const mockDelete = vi.fn().mockResolvedValue(false); // Returns false when file doesn't exist
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { delete: mockDelete } };
+      (storageManager as any).s5Client = clearedClient();
 
       await expect(storageManager.clearUserSettings()).resolves.toBeUndefined();
-      expect(mockDelete).toHaveBeenCalledWith('home/user/settings.json');
     });
 
     it('should result in getUserSettings returning null after clear', async () => {
-      const mockDelete = vi.fn().mockResolvedValue(true);
-      const mockGet = vi.fn().mockResolvedValue(undefined);
+      const client = clearedClient();
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = {
-        fs: {
-          delete: mockDelete,
-          get: mockGet
-        }
-      };
+      (storageManager as any).s5Client = client;
 
       await storageManager.clearUserSettings();
+      client.fs.get.mockImplementation(async (path: string) => (path === SETTINGS ? client.fs.put.mock.calls[0][1] : undefined));
       const settings = await storageManager.getUserSettings();
 
-      expect(mockDelete).toHaveBeenCalledWith('home/user/settings.json');
       expect(settings).toBeNull();
     });
 
     it('should throw error on network failure', async () => {
-      const mockDelete = vi.fn().mockRejectedValue(new Error('Network error'));
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { delete: mockDelete } };
+      (storageManager as any).s5Client = clearedClient(vi.fn().mockRejectedValue(new Error('Network error')));
 
       await expect(storageManager.clearUserSettings()).rejects.toThrow(
         'Failed to clear user settings'
@@ -406,17 +416,17 @@ describe('StorageManager - User Settings', () => {
         selectedModel: 'cached-model',
       };
 
-      const mockGet = vi.fn().mockResolvedValue(settings);
+      const mockGet = atSettings(settings);
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       // First call - should hit S5
       const firstResult = await storageManager.getUserSettings();
-      expect(mockGet).toHaveBeenCalledTimes(1);
+      expect(mockGet).toHaveBeenCalledTimes(2);
 
       // Second call within TTL - should use cache
       const secondResult = await storageManager.getUserSettings();
-      expect(mockGet).toHaveBeenCalledTimes(1); // Still 1, not 2
+      expect(mockGet).toHaveBeenCalledTimes(2); // Still 2: this identity's path and the legacy file, read once
       expect(secondResult).toEqual(firstResult);
     });
 
@@ -427,13 +437,13 @@ describe('StorageManager - User Settings', () => {
         selectedModel: 'test-model',
       };
 
-      const mockGet = vi.fn().mockResolvedValue(settings);
+      const mockGet = atSettings(settings);
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       // First call
       await storageManager.getUserSettings();
-      expect(mockGet).toHaveBeenCalledTimes(1);
+      expect(mockGet).toHaveBeenCalledTimes(2);
 
       // Manually expire cache by setting old timestamp
       const cache = (storageManager as any).settingsCache;
@@ -443,7 +453,7 @@ describe('StorageManager - User Settings', () => {
 
       // Second call should fetch from S5 again
       await storageManager.getUserSettings();
-      expect(mockGet).toHaveBeenCalledTimes(2);
+      expect(mockGet).toHaveBeenCalledTimes(4);
     });
 
     it('should reduce S5 calls with cache hits', async () => {
@@ -453,9 +463,9 @@ describe('StorageManager - User Settings', () => {
         selectedModel: 'test-model',
       };
 
-      const mockGet = vi.fn().mockResolvedValue(settings);
+      const mockGet = atSettings(settings);
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       // Make 5 calls
       for (let i = 0; i < 5; i++) {
@@ -463,7 +473,7 @@ describe('StorageManager - User Settings', () => {
       }
 
       // Should only call S5 once (other 4 are cache hits)
-      expect(mockGet).toHaveBeenCalledTimes(1);
+      expect(mockGet).toHaveBeenCalledTimes(2);
     });
 
     it('should call S5 on cache miss', async () => {
@@ -473,32 +483,32 @@ describe('StorageManager - User Settings', () => {
         selectedModel: 'test-model',
       };
 
-      const mockGet = vi.fn().mockResolvedValue(settings);
+      const mockGet = atSettings(settings);
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       // Ensure no cache
       (storageManager as any).settingsCache = null;
 
       // Should call S5
       await storageManager.getUserSettings();
-      expect(mockGet).toHaveBeenCalledTimes(1);
+      expect(mockGet).toHaveBeenCalledTimes(2);
     });
 
     it('should cache null for first-time user', async () => {
       const mockGet = vi.fn().mockResolvedValue(undefined);
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       // First call
       const firstResult = await storageManager.getUserSettings();
       expect(firstResult).toBeNull();
-      expect(mockGet).toHaveBeenCalledTimes(1);
+      expect(mockGet).toHaveBeenCalledTimes(2);   // this identity's path, then the legacy shared file (1.39.24)
 
       // Second call should use cached null
       const secondResult = await storageManager.getUserSettings();
       expect(secondResult).toBeNull();
-      expect(mockGet).toHaveBeenCalledTimes(1); // Still 1
+      expect(mockGet).toHaveBeenCalledTimes(2); // Still 2
     });
   });
 
@@ -511,7 +521,7 @@ describe('StorageManager - User Settings', () => {
       };
 
       const mockPut = vi.fn().mockResolvedValue(undefined);
-      const mockGet = vi.fn().mockResolvedValue(settings);
+      const mockGet = atSettings(settings);
       (storageManager as any).initialized = true;
       (storageManager as any).s5Client = { fs: { put: mockPut, get: mockGet } };
 
@@ -531,7 +541,7 @@ describe('StorageManager - User Settings', () => {
         selectedModel: 'old-model',
       };
 
-      const mockGet = vi.fn().mockResolvedValue(initialSettings);
+      const mockGet = atSettings(initialSettings);
       const mockPut = vi.fn().mockResolvedValue(undefined);
       (storageManager as any).initialized = true;
       (storageManager as any).s5Client = { fs: { get: mockGet, put: mockPut } };
@@ -557,14 +567,14 @@ describe('StorageManager - User Settings', () => {
 
       const mockDelete = vi.fn().mockResolvedValue(true);
       const mockGet = vi.fn()
-        .mockResolvedValueOnce(settings) // First get
-        .mockResolvedValueOnce(undefined); // After clear
+        .mockResolvedValueOnce(settings) // First get (this identity's path)
+        .mockResolvedValue(undefined); // the legacy file, and everything after clear
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { delete: mockDelete, get: mockGet } };
+      (storageManager as any).s5Client = { fs: { delete: mockDelete, get: mockGet, put: vi.fn() } };
 
       // Get settings to populate cache
       await storageManager.getUserSettings();
-      expect(mockGet).toHaveBeenCalledTimes(1);
+      expect(mockGet).toHaveBeenCalledTimes(2);
 
       // Clear settings
       await storageManager.clearUserSettings();
@@ -573,9 +583,9 @@ describe('StorageManager - User Settings', () => {
       const cache = (storageManager as any).settingsCache;
       expect(cache).toBeNull();
 
-      // Next get should fetch from S5 (cache miss)
+      // Next get should fetch from S5 (cache miss): this identity's path, then the legacy file (1.39.24)
       await storageManager.getUserSettings();
-      expect(mockGet).toHaveBeenCalledTimes(2); // Called again after clear
+      expect(mockGet).toHaveBeenCalledTimes(6); // the clear reads both paths, and the next get both again (1.39.24)
     });
 
     it('should use new cache after save', async () => {
@@ -592,7 +602,7 @@ describe('StorageManager - User Settings', () => {
       };
 
       const mockPut = vi.fn().mockResolvedValue(undefined);
-      const mockGet = vi.fn().mockResolvedValue(settings1);
+      const mockGet = atSettings(settings1);
       (storageManager as any).initialized = true;
       (storageManager as any).s5Client = { fs: { put: mockPut, get: mockGet } };
 
@@ -620,8 +630,9 @@ describe('StorageManager - User Settings', () => {
         theme: 'dark',
       };
 
-      const mockGet = vi.fn().mockResolvedValue(initialSettings);
       const mockPut = vi.fn().mockResolvedValue(undefined);
+      // S5 returns what was last written (an update reads fresh — 1.39.24 review round 5)
+      const mockGet = vi.fn(async (path: string) => (path === SETTINGS ? (mockPut.mock.calls.at(-1)?.[1] ?? initialSettings) : undefined));
       (storageManager as any).initialized = true;
       (storageManager as any).s5Client = { fs: { get: mockGet, put: mockPut } };
 
@@ -689,7 +700,7 @@ describe('StorageManager - User Settings', () => {
     it('should include error code in load failures', async () => {
       const mockGet = vi.fn().mockRejectedValue(new Error('Network timeout'));
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       try {
         await storageManager.getUserSettings();
@@ -707,9 +718,9 @@ describe('StorageManager - User Settings', () => {
         // Missing version and lastUpdated
       };
 
-      const mockGet = vi.fn().mockResolvedValue(invalidSettings);
+      const mockGet = atSettings(invalidSettings);
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       try {
         await storageManager.getUserSettings();
@@ -723,7 +734,7 @@ describe('StorageManager - User Settings', () => {
     it('should include error code in update failures', async () => {
       const mockGet = vi.fn().mockRejectedValue(new Error('Connection refused'));
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       try {
         await storageManager.updateUserSettings({ selectedModel: 'new-model' });
@@ -735,9 +746,9 @@ describe('StorageManager - User Settings', () => {
     });
 
     it('should include error code in clear failures', async () => {
-      const mockDelete = vi.fn().mockRejectedValue(new Error('Permission denied'));
+      const mockPut = vi.fn().mockRejectedValue(new Error('Permission denied'));
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { delete: mockDelete } };
+      (storageManager as any).s5Client = { fs: { put: mockPut, delete: vi.fn(), get: vi.fn().mockResolvedValue(undefined) } };   // a cleared record is written (1.39.24)
 
       try {
         await storageManager.clearUserSettings();
@@ -772,7 +783,7 @@ describe('StorageManager - User Settings', () => {
     it('should provide user-friendly error messages', async () => {
       const mockGet = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       try {
         await storageManager.getUserSettings();
@@ -795,7 +806,7 @@ describe('StorageManager - User Settings', () => {
 
       const mockGet = vi.fn().mockRejectedValue(new Error('Network timeout'));
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       // Pre-populate cache with expired data
       (storageManager as any).settingsCache = {
@@ -812,7 +823,7 @@ describe('StorageManager - User Settings', () => {
     it('should throw error on network failure with no cache', async () => {
       const mockGet = vi.fn().mockRejectedValue(new Error('Network timeout'));
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       // No cache
       (storageManager as any).settingsCache = null;
@@ -836,7 +847,7 @@ describe('StorageManager - User Settings', () => {
 
       const mockGet = vi.fn().mockRejectedValue(new Error('Connection refused'));
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       // Pre-populate cache
       (storageManager as any).settingsCache = {
@@ -852,7 +863,7 @@ describe('StorageManager - User Settings', () => {
     it('should use stale cache for null (first-time user) on network error', async () => {
       const mockGet = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       // Cache has null (first-time user, expired)
       (storageManager as any).settingsCache = {
@@ -873,7 +884,7 @@ describe('StorageManager - User Settings', () => {
 
       const mockGet = vi.fn().mockRejectedValue(new Error('Network error'));
       (storageManager as any).initialized = true;
-      (storageManager as any).s5Client = { fs: { get: mockGet } };
+      (storageManager as any).s5Client = { fs: { get: mockGet, put: vi.fn() } };   // a legacy plaintext read re-seals (1.39.24)
 
       // Fresh cache (within 5-min TTL)
       (storageManager as any).settingsCache = {

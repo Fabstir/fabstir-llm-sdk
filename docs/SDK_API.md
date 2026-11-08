@@ -3945,8 +3945,46 @@ it on. Check `SDK_CAPABILITIES` before relying on it.
 | What | Where on S5 | Sealed |
 |---|---|---|
 | RAG databases: manifests, vector chunks, document bodies | `home/rag/v1/{dbId}/…` (paths carry no database name, file name or address) | yes |
-| Conversation log | `home/sessions/{address}/{sessionId}/conversation.json` | yes |
-| Session paths, `settings.json`, `saveConversationPlaintext` / `storeExchange` / `saveHierarchy` | unchanged | **no** (planned for 1.39.1) — do not call the last three |
+| Conversation log | `home/sessions/v2/{owner}/{id}/log` from 1.39.24 (no address, no session id; `{owner}` and `{id}` are derived from the identity). Before: `home/sessions/{address}/{sessionId}/conversation.json` | yes |
+| User settings | `home/user/v2/{owner}/settings` from 1.39.24 (before: `home/user/settings.json`, plaintext) | yes, from 1.39.24 |
+| Session groups | `home/session-groups/v2/{owner}/{id}` from 1.39.24 (before: `home/session-groups/{address}/{groupId}.json`, encrypted) | yes, from 1.39.24 |
+| `storeExchange`, `updateSessionSummary`, `getRecentExchanges`, `save/loadConversationPlaintext`, `save/loadConversationEncrypted`, `loadConversationWithMetadata`, `saveHierarchy`, `loadHierarchy` | — | **removed in 1.39.24**; `store({ encrypt: false })` throws `STORAGE_PLAINTEXT_REFUSED` |
+
+**1.39.24 (Milestone B2).** Nothing is left in plaintext, and no path names the wallet or a session:
+- **Conversation logs** move to opaque paths:
+  - A log at its old path is still read.
+  - The next write, or `migrateLegacyConversationLogs()` (run it on unlock as before), moves it. The report gains
+    `moved`.
+  - If a tab on an older SDK writes at the old path after the move, the migration merges its messages into the moved
+    log rather than dropping them. Keep the stale-build guard, so such tabs reload.
+  - `listConversations()` / `listSessions()` now list sealed logs. Before, they listed none. Each log is opened to find
+    its id.
+  - `clearAll()` really clears. Before, it removed nothing.
+- **User settings** are sealed, one file per identity. The older shared plaintext file names no identity, so it is
+  adopted only while this identity has no sealed settings. It is then sealed at this identity's path and deleted.
+  Once an identity has sealed settings, the shared file is left alone, unless it is that identity's own leftover
+  (same `lastUpdated`). On a shared S5 seed, a second address that signs in later starts with no settings, because the
+  first one to read took the shared file. `clearUserSettings()` leaves a sealed cleared record, so after a reset
+  `getUserSettings()` returns `null` and the shared file is never adopted again.
+- **Session groups** are sealed at opaque paths. A legacy group is read, sealed and its old file deleted on first load.
+  If both copies exist (an older SDK edited the old file after the move), the newer by `updatedAt` wins.
+- **One directory per identity.** `{owner}` is derived from the identity, so two addresses on one S5 seed never list,
+  overwrite or clear each other's logs, settings or session groups.
+- **Whose database is it?** Each sealed database carries a small sealed `owner` file that only its identity can open.
+  It is written at the first commit, so databases from before 1.39.24 get it at their next write.
+  `listUnreadableDatabases()` offers a broken database only when that file opens, or when one of this identity's
+  coherence heads names it. `deleteDatabaseById` refuses any other with `RAG_DATABASE_NOT_OWNED`.
+- **RAG**:
+  - Only the vector chunks that changed are re-sealed and written (`incrementalRagChunks`).
+  - A sealed database that can never be opened is listed by `vectorRAGManager.listUnreadableDatabases()` →
+    `[{ dbId, code }]` and removed with `deleteDatabaseById(dbId)` (`unreadableDatabaseCleanup`).
+  - Expired coherence heads are pruned.
+- **`managers/DocumentManager`** keeps no S5 client of its own; it connected to a fixed peer, ignoring the configured
+  portal. Documents live in the instance; `initialize()` takes no arguments. RAG document bodies are stored sealed by
+  `VectorRAGManager` as before.
+
+Flags: `sealedSettings`, `opaqueConversationLogs`, `sealedSessionGroups`, `incrementalRagChunks`,
+`unreadableDatabaseCleanup`.
 
 - **Confidentiality depends on the seed.** With a password-derived seed (the vault), sealed data is confidential. With
   an address-derived seed (`generateS5SeedFromAddress`), anyone who knows the address can derive the keys: sealing is

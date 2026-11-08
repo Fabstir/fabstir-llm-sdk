@@ -19,6 +19,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { S5VectorStore } from '../../src/storage/S5VectorStore';
 import { EncryptionManager } from '../../src/managers/EncryptionManager';
 import type { Vector, VectorDatabaseMetadata, FolderStats } from '@fabstir/sdk-core-mock';
+import { FakeS5Network } from '../helpers/fake-s5';
+import { encryptionManager as sealedEncryptionManager } from '../helpers/sealed-fixtures';
+import { __resetInProcessCoherenceForTests } from '../../src/storage/sealed/rag-coherence';
 
 // Mock S5 client with in-memory storage
 const createMockS5Client = () => {
@@ -461,6 +464,10 @@ describe('S5VectorStore', () => {
 
   describe('Database Metadata Methods', () => {
     beforeEach(async () => {
+      // The store's real API over the fake S5 network and a real sealer (the file-level mocks predate sealed storage).
+      __resetInProcessCoherenceForTests();
+      const tab = new FakeS5Network().tab();
+      store = new S5VectorStore({ s5Client: tab as any, userAddress, encryptionManager: sealedEncryptionManager(), pathToHash: tab.pathToHash });
       await store.createDatabase({
         name: 'test-db',
         owner: userAddress,
@@ -469,35 +476,34 @@ describe('S5VectorStore', () => {
     });
 
     it('should retrieve database metadata', async () => {
-      const metadata = await store.getVectorDatabaseMetadata('test-db');
+      const metadata = await store.getDatabaseMetadata('test-db');
 
       expect(metadata).toBeDefined();
-      expect(metadata.name).toBe('test-db');
+      expect(metadata.databaseName).toBe('test-db');
       expect(metadata.owner).toBe(userAddress);
       expect(metadata.description).toBe('Initial description');
     });
 
-    it('should use getDatabaseMetadata as alias', async () => {
+    it('should return the same metadata as getDatabase', async () => {
       const metadata = await store.getDatabaseMetadata('test-db');
 
-      expect(metadata).toBeDefined();
-      expect(metadata.name).toBe('test-db');
+      expect(metadata).toEqual(await store.getDatabase('test-db'));
     });
 
     it('should update database metadata', async () => {
-      await store.updateVectorDatabaseMetadata('test-db', {
+      await store.updateDatabaseMetadata('test-db', {
         description: 'Updated description',
         dimensions: 128,
       });
 
-      const metadata = await store.getVectorDatabaseMetadata('test-db');
+      const metadata = await store.getDatabaseMetadata('test-db');
       expect(metadata.description).toBe('Updated description');
       expect(metadata.dimensions).toBe(128);
     });
 
     it('should throw error for nonexistent database', async () => {
       await expect(
-        store.getVectorDatabaseMetadata('nonexistent')
+        store.getDatabaseMetadata('nonexistent')
       ).rejects.toThrow('not found');
     });
   });

@@ -135,4 +135,14 @@ export const SDK_CAPABILITIES = Object.freeze({
    *  caller as SESSION_AUTH_DENIED; on a `session-settled-rest` node REST prompts need no repeated chain reads; webSearch()
    *  uses REST /v1/search (1.39.23). */
   settledRest: true,
+  /** User settings are sealed at home/user/v2/{owner}/settings; the older plaintext home/user/settings.json is read, sealed there and deleted (1.39.24). */
+  sealedSettings: true,
+  /** Conversation logs live at opaque paths (no address, no id); legacy logs are read and moved, and listed (1.39.24). */
+  opaqueConversationLogs: true,
+  /** Session groups are sealed at opaque paths; a legacy group is read, sealed and its old file deleted (1.39.24). */
+  sealedSessionGroups: true,
+  /** A RAG vector write re-seals and rewrites only the chunks whose vectors changed; a no-op writes none (1.39.24). */
+  incrementalRagChunks: true,
+  /** listUnreadableDatabases() / deleteDatabaseById() for a sealed database that never opens; expired heads are pruned (1.39.24). */
+  unreadableDatabaseCleanup: true,
 } as const);

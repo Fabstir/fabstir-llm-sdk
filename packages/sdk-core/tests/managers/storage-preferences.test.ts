@@ -58,6 +58,10 @@ describe('StorageManager Preference Helpers', () => {
   let storageManager: StorageManager;
   let mockS5Client: any;
   let storedSettings: any = null;
+  /** The settings as written: sealed since 1.39.24 (D34), opened with the manager's own sealer. */
+  const stored = () => storedSettings instanceof Uint8Array
+    ? (storageManager as any).sealer.open(storedSettings, 'settings/v1').value.settings   // the sealed record (1.39.24)
+    : storedSettings;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -72,13 +76,13 @@ describe('StorageManager Preference Helpers', () => {
 
     // Setup mock fs methods with settings storage
     mockS5Client.fs.put = vi.fn().mockImplementation(async (path: string, data: any) => {
-      if (path === 'home/user/settings.json') {
+      if (/^home\/user\/v2\/[^/]+\/settings$/.test(path)) {   // this identity's sealed settings (1.39.24)
         storedSettings = data;
       }
     });
 
     mockS5Client.fs.get = vi.fn().mockImplementation(async (path: string) => {
-      if (path === 'home/user/settings.json') {
+      if (/^home\/user\/v2\/[^/]+\/settings$/.test(path)) {   // this identity's sealed settings (1.39.24)
         return storedSettings;
       }
       return null;
@@ -189,7 +193,7 @@ describe('StorageManager Preference Helpers', () => {
 
       await storageManager.setDefaultModel(modelId);
 
-      expect(storedSettings.defaultModelId).toBe(modelId);
+      expect(stored().defaultModelId).toBe(modelId);
     });
 
     it('should clear defaultModelId when passed null', async () => {
@@ -209,7 +213,7 @@ describe('StorageManager Preference Helpers', () => {
 
       await storageManager.setDefaultModel(null);
 
-      expect(storedSettings.defaultModelId).toBeNull();
+      expect(stored().defaultModelId).toBeNull();
     });
 
     it('should throw error when model does not exist', async () => {
@@ -289,7 +293,7 @@ describe('StorageManager Preference Helpers', () => {
 
       await storageManager.setHostSelectionMode(HostSelectionMode.RELIABLE);
 
-      expect(storedSettings.hostSelectionMode).toBe(HostSelectionMode.RELIABLE);
+      expect(stored().hostSelectionMode).toBe(HostSelectionMode.RELIABLE);
     });
 
     it('should set preferredHostAddress when mode is SPECIFIC', async () => {
@@ -306,8 +310,8 @@ describe('StorageManager Preference Helpers', () => {
 
       await storageManager.setHostSelectionMode(HostSelectionMode.SPECIFIC, hostAddress);
 
-      expect(storedSettings.hostSelectionMode).toBe(HostSelectionMode.SPECIFIC);
-      expect(storedSettings.preferredHostAddress).toBe(hostAddress);
+      expect(stored().hostSelectionMode).toBe(HostSelectionMode.SPECIFIC);
+      expect(stored().preferredHostAddress).toBe(hostAddress);
     });
 
     it('should throw error when SPECIFIC mode without preferredHostAddress', async () => {
@@ -339,8 +343,8 @@ describe('StorageManager Preference Helpers', () => {
 
       await storageManager.setHostSelectionMode(HostSelectionMode.AUTO);
 
-      expect(storedSettings.hostSelectionMode).toBe(HostSelectionMode.AUTO);
-      expect(storedSettings.preferredHostAddress).toBeNull();
+      expect(stored().hostSelectionMode).toBe(HostSelectionMode.AUTO);
+      expect(stored().preferredHostAddress).toBeNull();
     });
   });
 
@@ -362,12 +366,12 @@ describe('StorageManager Preference Helpers', () => {
 
       await storageManager.clearAIPreferences();
 
-      expect(storedSettings.defaultModelId).toBeNull();
-      expect(storedSettings.hostSelectionMode).toBe(HostSelectionMode.AUTO);
-      expect(storedSettings.preferredHostAddress).toBeNull();
+      expect(stored().defaultModelId).toBeNull();
+      expect(stored().hostSelectionMode).toBe(HostSelectionMode.AUTO);
+      expect(stored().preferredHostAddress).toBeNull();
       // Other settings should remain unchanged
-      expect(storedSettings.preferredPaymentToken).toBe('USDC');
-      expect(storedSettings.theme).toBe('dark');
+      expect(stored().preferredPaymentToken).toBe('USDC');
+      expect(stored().theme).toBe('dark');
     });
 
     it('should work when no settings exist (creates new settings)', async () => {
@@ -376,9 +380,9 @@ describe('StorageManager Preference Helpers', () => {
       await storageManager.clearAIPreferences();
 
       expect(storedSettings).not.toBeNull();
-      expect(storedSettings.defaultModelId).toBeNull();
-      expect(storedSettings.hostSelectionMode).toBe(HostSelectionMode.AUTO);
-      expect(storedSettings.preferredHostAddress).toBeNull();
+      expect(stored().defaultModelId).toBeNull();
+      expect(stored().hostSelectionMode).toBe(HostSelectionMode.AUTO);
+      expect(stored().preferredHostAddress).toBeNull();
     });
   });
 });

@@ -3,16 +3,32 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import 'fake-indexeddb/auto';
+
+vi.mock('../../src/contracts/ContractManager', () => ({ ContractManager: class { async setSigner() {} } }));
 import { SessionGroupStorage } from '../../src/storage/SessionGroupStorage';
+import { StorageManager } from '../../src/managers/StorageManager';
+import { storageSealerFromSeed, isSealedBytes, type StorageSealer } from '../../src/storage/sealed/StorageSealer';
+import { SEED } from '../helpers/sealed-fixtures';
 import type { SessionGroup } from '../../src/types/session-groups.types';
 import type { EncryptionManager } from '../../src/managers/EncryptionManager';
 
 /**
  * SessionGroupStorage Test Suite
  *
- * Tests S5 persistence with encryption for Session Groups.
- * Following TDD bounded autonomy: Write ALL tests first, then implement.
+ * Tests S5 persistence for Session Groups. Since 1.39.24 groups are sealed with the StorageManager's sealer at
+ * `home/session-groups/v2/{deriveId('owner', 'storage')}/{deriveId('group', id)}`; the legacy EncryptionManager-encrypted
+ * `home/session-groups/{address}/{id}.json` is read and moved (see milestone-b2-session-groups.test.ts).
  */
+
+/** A StorageManager over `s5Client` holding the sealer for `address`. */
+function storageManagerFor(s5Client: any, address: string): StorageManager {
+  const s = new StorageManager();
+  Object.assign(s as any, {
+    initialized: true, s5Client, userAddress: address, connectionStatus: 'connected',
+    sealer: storageSealerFromSeed(SEED, address),
+  });
+  return s;
+}
 
 describe('SessionGroupStorage', () => {
   let storage: SessionGroupStorage;
@@ -21,10 +37,25 @@ describe('SessionGroupStorage', () => {
   const testUserAddress = '0x742d35Cc6634C0532925a3b844Bc454e4438f44e';
   const testUserSeed = 'test-seed-phrase-for-s5-storage';
   const testHostPubKey = '0x03' + '1'.repeat(64); // Mock compressed public key
+  const testSealer: StorageSealer = storageSealerFromSeed(SEED, testUserAddress);
+  const opaqueOf = (id: string) => testSealer.deriveId('group', id);
+  const sealedPathOf = (id: string) => `home/session-groups/v2/${testSealer.deriveId('owner', 'storage')}/${opaqueOf(id)}`;
+  const legacyPathOf = (id: string) => `home/session-groups/${testUserAddress}/${id}.json`;
+  const legacyEncrypted = (data: any) => ({
+    payload: {
+      ciphertextHex: Buffer.from(JSON.stringify(data)).toString('hex'),
+      nonceHex: '000000000000000000000000',
+      ephemeralPubKeyHex: '0x03' + '2'.repeat(64),
+      signatureHex: '0x' + '3'.repeat(130),
+    },
+    storedAt: new Date().toISOString(),
+    conversationId: 'session-group-storage',
+  });
+  let mockData: Map<string, any>;
 
   beforeEach(async () => {
     // Create mock S5 client with correct Enhanced s5.js API methods
-    const mockData = new Map<string, any>();
+    mockData = new Map<string, any>();
 
     mockS5Client = {
       fs: {
@@ -85,7 +116,8 @@ describe('SessionGroupStorage', () => {
       mockS5Client,
       testUserSeed,
       testUserAddress,
-      mockEncryptionManager
+      mockEncryptionManager,
+      storageManagerFor(mockS5Client, testUserAddress)
     );
   });
 
@@ -94,7 +126,7 @@ describe('SessionGroupStorage', () => {
   });
 
   describe('save()', () => {
-    it('should persist session group to S5 with encryption', async () => {
+    it('should persist session group to S5, sealed, at an opaque path', async () => {
       const group: SessionGroup = {
         id: 'sg-123',
         name: 'Test Group',
@@ -110,18 +142,17 @@ describe('SessionGroupStorage', () => {
 
       await storage.save(group);
 
-      // Verify encryption was called
-      expect(mockEncryptionManager.encryptForStorage).toHaveBeenCalledWith(
-        testHostPubKey,
-        group
-      );
+      // Sealed with the identity's sealer, not the EncryptionManager (1.39.24)
+      expect(mockEncryptionManager.encryptForStorage).not.toHaveBeenCalled();
 
-      // Verify S5 put was called with correct path (✅ correct API)
+      // One file per group, at a path that names neither the wallet nor the group
       expect(mockS5Client.fs.put).toHaveBeenCalled();
       const putCall = mockS5Client.fs.put.mock.calls[0];
-      expect(putCall[0]).toContain(
-        `home/session-groups/${testUserAddress}/sg-123.json`
-      );
+      expect(putCall[0]).toBe(sealedPathOf('sg-123'));
+      expect(putCall[0]).not.toContain(testUserAddress);
+      expect(putCall[0]).not.toContain('sg-123');
+      expect(isSealedBytes(putCall[1])).toBe(true);
+      expect(putCall[2]).toEqual({ mediaType: 'application/octet-stream' });
     });
 
     it('should cache saved groups in memory for performance', async () => {
@@ -139,6 +170,8 @@ describe('SessionGroupStorage', () => {
       };
 
       await storage.save(group);
+      // save() reads the sealed copy back (network verification) — only the load after it must not
+      mockS5Client.fs.get.mockClear();
 
       // Load should use cache, not call S5
       const loaded = await storage.load('sg-456');
@@ -150,7 +183,7 @@ describe('SessionGroupStorage', () => {
   });
 
   describe('load()', () => {
-    it('should retrieve session group from S5 and decrypt', async () => {
+    it('should retrieve a legacy session group from S5, decrypt it, and move it to the sealed layout', async () => {
       const group: SessionGroup = {
         id: 'sg-789',
         name: 'Loaded Group',
@@ -164,17 +197,8 @@ describe('SessionGroupStorage', () => {
         deleted: false,
       };
 
-      // Setup mock to return encrypted data (✅ correct API)
-      mockS5Client.fs.get.mockResolvedValueOnce({
-        payload: {
-          ciphertextHex: Buffer.from(JSON.stringify(group)).toString('hex'),
-          nonceHex: '000000000000000000000000',
-          ephemeralPubKeyHex: '0x03' + '2'.repeat(64),
-          signatureHex: '0x' + '3'.repeat(130),
-        },
-        storedAt: new Date().toISOString(),
-        conversationId: 'session-group-storage',
-      });
+      // A legacy (EncryptionManager-encrypted) file at the legacy path
+      mockData.set(legacyPathOf('sg-789'), legacyEncrypted(group));
 
       const loaded = await storage.load('sg-789');
 
@@ -184,11 +208,29 @@ describe('SessionGroupStorage', () => {
 
       // Verify decryption was called
       expect(mockEncryptionManager.decryptFromStorage).toHaveBeenCalled();
+
+      // Moved: sealed at the opaque path, legacy file deleted
+      expect(isSealedBytes(mockData.get(sealedPathOf('sg-789')))).toBe(true);
+      expect(mockData.has(legacyPathOf('sg-789'))).toBe(false);
+    });
+
+    it('should retrieve a sealed session group from S5 and open it', async () => {
+      const group: SessionGroup = {
+        id: 'sg-sealed', name: 'Sealed Group', description: '', createdAt: new Date('2025-01-15T12:00:00Z'),
+        updatedAt: new Date('2025-01-15T12:00:00Z'), owner: testUserAddress, linkedDatabases: ['db-9'], chatSessions: [],
+        metadata: {}, deleted: false,
+      };
+      await storage.save(group);
+      storage.clearCache();
+
+      const loaded = await storage.load('sg-sealed');
+      expect(loaded).toMatchObject({ id: 'sg-sealed', name: 'Sealed Group', linkedDatabases: ['db-9'] });
+      expect(loaded.createdAt).toEqual(new Date('2025-01-15T12:00:00Z'));
+      expect(mockEncryptionManager.decryptFromStorage).not.toHaveBeenCalled();
     });
 
     it('should throw error if group does not exist', async () => {
-      // ✅ correct API: get() returns null when not found
-      mockS5Client.fs.get.mockResolvedValueOnce(null);
+      // ✅ correct API: get() returns null when not found (at both paths)
 
       await expect(storage.load('nonexistent-id')).rejects.toThrow(
         'Session group not found: nonexistent-id'
@@ -268,10 +310,9 @@ describe('SessionGroupStorage', () => {
       // Now delete
       await storage.delete('sg-delete');
 
-      // Verify S5 delete was called (✅ correct API)
-      expect(mockS5Client.fs.delete).toHaveBeenCalledWith(
-        `home/session-groups/${testUserAddress}/sg-delete.json`
-      );
+      // Verify S5 delete was called at both layouts (✅ correct API)
+      expect(mockS5Client.fs.delete).toHaveBeenCalledWith(sealedPathOf('sg-delete'));
+      expect(mockS5Client.fs.delete).toHaveBeenCalledWith(legacyPathOf('sg-delete'));
 
       // Verify removed from cache and S5
       // get() will return null because delete() removed it from mock data
@@ -289,26 +330,29 @@ describe('SessionGroupStorage', () => {
       const result = await storage.exists('sg-exists');
 
       expect(result).toBe(true);
-      expect(mockS5Client.fs.getMetadata).toHaveBeenCalledWith(
-        `home/session-groups/${testUserAddress}/sg-exists.json`
-      );
+      expect(mockS5Client.fs.getMetadata).toHaveBeenCalledWith(sealedPathOf('sg-exists'));
 
       // Should not load the file content
       expect(mockS5Client.fs.get).not.toHaveBeenCalled();
     });
 
     it('should return false if group does not exist', async () => {
-      // getMetadata returns null when file doesn't exist (✅ correct API)
-      mockS5Client.fs.getMetadata.mockResolvedValueOnce(null);
-
+      // getMetadata returns null when file doesn't exist (✅ correct API) — at both paths
       const result = await storage.exists('sg-nonexistent');
 
       expect(result).toBe(false);
+      expect(mockS5Client.fs.getMetadata).toHaveBeenCalledWith(sealedPathOf('sg-nonexistent'));
+      expect(mockS5Client.fs.getMetadata).toHaveBeenCalledWith(legacyPathOf('sg-nonexistent'));
+    });
+
+    it('should find a legacy group', async () => {
+      mockData.set(legacyPathOf('sg-legacy'), legacyEncrypted({ id: 'sg-legacy' }));
+      expect(await storage.exists('sg-legacy')).toBe(true);
     });
   });
 
   describe('Encryption', () => {
-    it('should verify data is encrypted at rest', async () => {
+    it('should verify data is sealed at rest', async () => {
       const group: SessionGroup = {
         id: 'sg-encrypted',
         name: 'Encrypted Group',
@@ -324,20 +368,19 @@ describe('SessionGroupStorage', () => {
 
       await storage.save(group);
 
-      // Verify encryption was called with host public key
-      expect(mockEncryptionManager.encryptForStorage).toHaveBeenCalledWith(
-        testHostPubKey,
-        group
-      );
-
-      // Verify encrypted payload was written to S5 (✅ correct API)
+      // Verify a sealed envelope was written to S5 (✅ correct API)
       const putCall = mockS5Client.fs.put.mock.calls[0];
-      const writtenData = putCall[1]; // Second argument is the data object
+      const writtenData: Uint8Array = putCall[1]; // Second argument is the data
 
-      // Should have encrypted storage structure
-      expect(writtenData).toHaveProperty('payload');
-      expect(writtenData.payload).toHaveProperty('ciphertextHex');
-      expect(writtenData.payload).toHaveProperty('signatureHex');
+      expect(isSealedBytes(writtenData)).toBe(true);
+      const asText = Buffer.from(writtenData).toString('latin1');
+      for (const clear of ['confidential', 'Sensitive data', 'sg-encrypted', testUserAddress]) {
+        expect(asText).not.toContain(clear);
+      }
+      // It opens only under its own context, bound to its opaque id
+      const opened = testSealer.open(writtenData, `group/v1/${opaqueOf('sg-encrypted')}`);
+      expect(opened).toMatchObject({ kind: 'cbor', value: { id: 'sg-encrypted', metadata: { secret: 'confidential' } } });
+      expect(() => testSealer.open(writtenData, `group/v1/${opaqueOf('other')}`)).toThrow();
     });
   });
 
@@ -350,14 +393,16 @@ describe('SessionGroupStorage', () => {
         mockS5Client,
         'seed-a',
         userA,
-        mockEncryptionManager
+        mockEncryptionManager,
+        storageManagerFor(mockS5Client, userA)
       );
 
       const storageB = new SessionGroupStorage(
         mockS5Client,
         'seed-b',
         userB,
-        mockEncryptionManager
+        mockEncryptionManager,
+        storageManagerFor(mockS5Client, userB)
       );
 
       const groupA: SessionGroup = {
@@ -375,9 +420,11 @@ describe('SessionGroupStorage', () => {
 
       await storageA.save(groupA);
 
-      // Verify paths are different (✅ correct API)
+      // Paths name no wallet; the opaque id is keyed per address, so B's id for the same group differs (✅ correct API)
       const putCallA = mockS5Client.fs.put.mock.calls[0];
-      expect(putCallA[0]).toContain(`home/session-groups/${userA}/`);
+      expect(putCallA[0]).not.toContain(userA);
+      expect(putCallA[0]).toBe(`home/session-groups/v2/${storageSealerFromSeed(SEED, userA).deriveId('owner', 'storage')}/${storageSealerFromSeed(SEED, userA).deriveId('group', 'sg-userA')}`);
+      expect(storageSealerFromSeed(SEED, userB).deriveId('group', 'sg-userA')).not.toBe(storageSealerFromSeed(SEED, userA).deriveId('group', 'sg-userA'));
 
       // User B cannot access User A's groups (different path)
       // get() will return null because User B's path is different
@@ -417,12 +464,38 @@ describe('SessionGroupStorage', () => {
       await expect(storage.load('sg-corrupt')).rejects.toThrow();
     });
 
-    it('should handle missing encryption keys', async () => {
+    it('should refuse to store without a sealer (no StorageManager): STORAGE_SEALER_MISSING', async () => {
+      const storageNoSealer = new SessionGroupStorage(
+        mockS5Client,
+        testUserSeed,
+        testUserAddress,
+        mockEncryptionManager // no StorageManager, so no sealer
+      );
+
+      const group: SessionGroup = {
+        id: 'sg-no-sealer',
+        name: 'No Sealer',
+        description: 'Should fail',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        owner: testUserAddress,
+        linkedDatabases: [],
+        chatSessions: [],
+        metadata: {},
+        deleted: false,
+      };
+
+      await expect(storageNoSealer.save(group)).rejects.toMatchObject({ code: 'STORAGE_SEALER_MISSING' });
+      expect(mockS5Client.fs.put).not.toHaveBeenCalled();
+    });
+
+    it('should need the EncryptionManager to read a legacy group', async () => {
       const storageNoEncryption = new SessionGroupStorage(
         mockS5Client,
         testUserSeed,
         testUserAddress,
-        undefined // No encryption manager
+        undefined, // No encryption manager
+        storageManagerFor(mockS5Client, testUserAddress)
       );
 
       const group: SessionGroup = {
@@ -438,9 +511,12 @@ describe('SessionGroupStorage', () => {
         deleted: false,
       };
 
-      await expect(storageNoEncryption.save(group)).rejects.toThrow(
+      mockData.set(legacyPathOf('sg-no-encryption'), legacyEncrypted(group));
+      await expect(storageNoEncryption.load('sg-no-encryption')).rejects.toThrow(
         'EncryptionManager required for storage operations'
       );
+      // the legacy file is kept
+      expect(mockData.has(legacyPathOf('sg-no-encryption'))).toBe(true);
     });
   });
 

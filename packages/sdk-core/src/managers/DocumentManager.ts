@@ -23,10 +23,6 @@ import {
   isImageType
 } from '../documents/extractors.js';
 import { chunkText } from '../documents/chunker.js';
-import { storageSealerFromSeed, type StorageSealer } from '../storage/sealed/StorageSealer';
-import { SDKError } from '../types';
-import { assertSupportedS5js, withS5Guards } from '../storage/s5-guards';
-import { retryableOf } from '../storage/sealed/sealed-io';
 import type { EmbeddingService } from '../embeddings/EmbeddingService.js';
 
 
@@ -50,7 +46,6 @@ export interface DocumentManagerOptions {
  */
 interface DocumentRegistryEntry {
   metadata: DocumentMetadata;
-  s5Path: string;
   textCached?: string;
 }
 
@@ -59,54 +54,23 @@ interface DocumentRegistryEntry {
  * Handles document upload, storage, extraction, and chunking
  */
 export class DocumentManager {
-  private userSeed?: string;
-  private userAddress?: string;
-  private s5Client?: any;
-  private sealer?: StorageSealer;
   private initialized = false;
   private embeddingService?: EmbeddingService;
 
-  // Document registry (in-memory for now, can be S5-backed later)
+  // Document registry: in memory, for this instance (1.39.24: no S5 of its own)
   private documentRegistry = new Map<string, Map<string, DocumentRegistryEntry>>();
-
-  // S5 paths
-  private static readonly DOCUMENTS_PATH = 'home/documents';
 
   constructor(options?: DocumentManagerOptions) {
     this.embeddingService = options?.embeddingService;
   }
 
   /**
-   * Initialize document manager
+   * Ready the manager. Documents live in this instance (its registry and extraction cache) for the page's lifetime;
+   * since 1.39.24 it keeps no S5 client of its own (it opened one to a fixed peer, ignoring the SDK's configured
+   * portal) — RAG document bodies are stored sealed by VectorRAGManager. Earlier arguments are accepted and unused.
    */
-  async initialize(seedPhrase: string, userAddress: string): Promise<void> {
-    this.userSeed = seedPhrase;
-    this.userAddress = userAddress;
-    // Same seed-derived key the SDK's EncryptionManager uses, so the SDK can open what is stored here.
-    this.sealer = storageSealerFromSeed(seedPhrase, userAddress);
-
-    // Initialize S5 client
-    try {
-      const s5Module = await import('@julesl23/s5js');
-      assertSupportedS5js(s5Module); // §19 Z1
-      const S5 = s5Module.S5;
-
-      // §18 X1: s5js errors carry the root keys — only the scrubbing instance is kept.
-      const s5Instance = withS5Guards(await S5.create({
-        initialPeers: ['wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p'],
-        skipIdentityLoad: true, // Prevent stale cached identity before SDK provides wallet-derived seed
-      }));
-
-      await s5Instance.recoverIdentityFromSeedPhrase(this.userSeed);
-      await s5Instance.fs.ensureIdentityInitialized();
-
-      this.s5Client = s5Instance;
-      this.initialized = true;
-    } catch (error: any) {
-      if (error?.code === 'S5JS_UNSUPPORTED_VERSION') throw error; // never fall back onto an s5js that loses updates
-      console.warn('S5 initialization failed, using in-memory storage');
-      this.initialized = true; // Still mark as initialized for testing
-    }
+  async initialize(..._unused: unknown[]): Promise<void> {
+    this.initialized = true;
   }
 
   /**
@@ -142,9 +106,6 @@ export class DocumentManager {
     });
 
     try {
-      // Upload file to S5
-      const s5Path = await this.uploadToS5(file, databaseName, documentId);
-
       // Report progress: extracting
       options?.onProgress?.({
         stage: 'extracting',
@@ -163,11 +124,10 @@ export class DocumentManager {
         type,
         size: file.size,
         uploadedAt: Date.now(),
-        s5Path
       };
 
       // Store in registry
-      this.addToRegistry(databaseName, documentId, { metadata, s5Path, textCached: extractionResult.text });
+      this.addToRegistry(databaseName, documentId, { metadata, textCached: extractionResult.text });
 
       // Report progress: complete
       options?.onProgress?.({
@@ -178,7 +138,6 @@ export class DocumentManager {
 
       return {
         documentId,
-        s5Path,
         metadata
       };
     } catch (error) {
@@ -211,7 +170,6 @@ export class DocumentManager {
           return {
             success: true,
             documentId: result.documentId,
-            s5Path: result.s5Path,
             metadata: result.metadata
           };
         } catch (error) {
@@ -402,15 +360,6 @@ export class DocumentManager {
       throw new Error('Document not found');
     }
 
-    // Remove from S5 (if available)
-    if (this.s5Client) {
-      try {
-        await this.s5Client.fs.delete(entry.s5Path);
-      } catch (error) {
-        console.warn('Failed to delete from S5:', error);
-      }
-    }
-
     // Remove from registry
     this.removeFromRegistry(databaseName, documentId);
 
@@ -448,33 +397,8 @@ export class DocumentManager {
       return entry.textCached;
     }
 
-    // Load from S5 (sealed by uploadToS5 — open it under the same context) and extract
-    if (this.s5Client) {
-      const key = entry.s5Path.split('/').pop()!;
-      // Indexed, so it was written: an unreadable body is a failure (a registry miss, a lost blob), not absence.
-      // One shape either way (T7), keeping s5js's retry verdict when it gives one (§18 B3). A default read: this
-      // instance only reads bodies it wrote, and its own write evicted its cached view (§18 B1 applies elsewhere).
-      const unreadable = (cause?: unknown) => new SDKError(`Document ${documentId} could not be read from S5`, 'DOCUMENT_BODY_UNREADABLE', {
-        documentId, ...(cause !== undefined ? { cause } : {}), retryable: retryableOf(cause),
-      });
-      const stored = await this.s5Client.fs.get(entry.s5Path).catch((cause: unknown) => { throw unreadable(cause); });
-      if (!(stored instanceof Uint8Array)) throw unreadable();
-      const opened = this.sealer!.open(stored, `docs/v1/${key}`).value as Uint8Array;
-      const buffer = opened.buffer.slice(opened.byteOffset, opened.byteOffset + opened.byteLength) as ArrayBuffer;
-      const result = await extractTextFromBuffer(
-        buffer,
-        entry.metadata.type,
-        entry.metadata.name
-      );
-
-      // Cache the result
-      extractionCache.set(documentId, result);
-      entry.textCached = result.text;
-
-      return result.text;
-    }
-
-    throw new Error('Cannot extract text: S5 client not available');
+    // Every upload caches its text (1.39.24: no S5 copy to read it back from)
+    throw new Error('Document text not available');
   }
 
   /**
@@ -525,19 +449,6 @@ export class DocumentManager {
     return `${databaseName}_${nameHash}_${timestamp}_${random}`;
   }
 
-  /** Sealed at an opaque path — no plaintext, and no database name, file name or address on S5. */
-  private async uploadToS5(file: File, databaseName: string, documentId: string): Promise<string> {
-    const key = this.sealer!.deriveId('doc', `${databaseName}:${documentId}`);
-    const s5Path = `${DocumentManager.DOCUMENTS_PATH}/v1/${key}`;
-
-    if (this.s5Client) {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const sealed = this.sealer!.seal({ kind: 'bytes', value: bytes }, `docs/v1/${key}`);
-      await this.s5Client.fs.put(s5Path, sealed, { mediaType: 'application/octet-stream' });
-    }
-
-    return s5Path;
-  }
 
   private addToRegistry(
     databaseName: string,

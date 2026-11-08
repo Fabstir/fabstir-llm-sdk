@@ -178,8 +178,9 @@ describe('II3/II4 — every session-group storage step stops on a disposal and s
       return groups.deleteChatSession(group.id, chat.sessionId);
     }],
     ['SessionGroupStorage.loadAll (a group in the listing)', async () => {
-      const s5Client = { fs: { list: async function* () { yield { type: 'file', name: 'sg-1.json' }; } } };
-      const store = { getWithRetry: async () => { throw disposed(); } };
+      // A legacy group in the listing (1.39.24: the sealed directory is listed too, and is empty here).
+      const s5Client = { fs: { list: async function* (dir: string) { if (dir.endsWith(ADDR)) yield { type: 'file', name: 'sg-1.json' }; } } };
+      const store = { getWithRetry: async () => { throw disposed(); }, getSealer: () => sealer(), withStorageLock: (_k: string, fn: () => Promise<unknown>) => fn() };
       return new SessionGroupStorage(s5Client, SEED, ADDR, em(), store as any).loadAll();
     }],
   ] as const) {

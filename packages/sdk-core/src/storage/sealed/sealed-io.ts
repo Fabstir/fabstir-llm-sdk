@@ -243,8 +243,13 @@ export class SealedIO {
         if (e.type === 'directory') await walk(`${d}/${e.name}`, false);
         await del(`${d}/${e.name}`, e.type === 'directory');
       }
-      // Anything in doubt keeps the `last` names (and so the directory): it can be deleted again.
-      if (!doubtful) for (const e of entries.filter((x) => last.has(x.name))) await del(`${d}/${e.name}`, e.type === 'directory');
+      // Anything in doubt keeps the `last` names (and so the directory): it can be deleted again. They go in the order
+      // given, each only once the one before it is gone (1.39.24 review round 3: a database's owner marker after its
+      // manifest).
+      for (const name of top ? opts.last ?? [] : []) {
+        if (doubtful) break;
+        for (const e of entries.filter((x) => x.name === name)) await del(`${d}/${e.name}`, e.type === 'directory');
+      }
       return true;
     };
     if (!(await walk(dir, true))) return false;

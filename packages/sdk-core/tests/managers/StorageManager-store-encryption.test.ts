@@ -98,11 +98,9 @@ describe('StorageManager.store() encryption (security regression)', () => {
   });
 
   describe('explicit opt-out', () => {
-    test('store({ encrypt: false }) uploads plaintext (no encryption option)', async () => {
-      await storageManager.store({ public: 'data' }, { encrypt: false });
-
-      const { options } = putCall(mockS5Client);
-      expect(options?.encryption).toBeUndefined();
+    test('store({ encrypt: false }) is refused: nothing is written in plaintext (1.39.24 D35)', async () => {
+      await expect(storageManager.store({ public: 'data' }, { encrypt: false })).rejects.toMatchObject({ code: 'STORAGE_PLAINTEXT_REFUSED' });
+      expect(mockS5Client.fs.put).not.toHaveBeenCalled();
     });
   });
 
@@ -116,13 +114,6 @@ describe('StorageManager.store() encryption (security regression)', () => {
       expect(data.metadata.encrypted).toBe(true);
     });
 
-    test('metadata.encrypted is false when the caller opted out', async () => {
-      await storageManager.store({ public: 'x' }, { encrypt: false });
-
-      const { data, options } = putCall(mockS5Client);
-      expect(data.metadata.encrypted).toBe(!!options?.encryption);
-      expect(data.metadata.encrypted).toBe(false);
-    });
   });
 
   describe('namespace', () => {

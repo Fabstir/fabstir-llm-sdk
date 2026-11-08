@@ -54,7 +54,7 @@ describe('confidentiality (I1, D6)', () => {
       }
       expect(sealer().isSealed(w.bytes)).toBe(true);
     }
-    expect(net.filePaths().every((p) => /^home\/rag\/v1\/[0-9a-f]{32}\/(manifest|chunk-\d+)$/.test(p))).toBe(true);
+    expect(net.filePaths().every((p) => /^home\/rag\/v1\/[0-9a-f]{32}\/(manifest|owner|chunk-\d+)$/.test(p))).toBe(true);
   });
 
   test('another tab with the same seed reads everything back', async () => {

@@ -7,6 +7,9 @@ import type { EncryptedStorage } from '../interfaces/IEncryptionManager';
 import type { StorageManager } from '../managers/StorageManager';
 import { mapWithConcurrency } from '../utils/concurrency';
 import { rethrowDisposal } from '../utils/disposal';
+import { SDKError } from '../types';
+import type { StorageSealer } from './sealed/StorageSealer';
+import { isS5Absent } from './sealed/sealed-io';
 
 /**
  * Options for saving session groups
@@ -42,19 +45,28 @@ export interface SessionGroupSaveOptions {
 /**
  * Session Group Storage Layer
  *
- * Handles S5 persistence for Session Groups with encryption.
- * Groups are stored at: home/session-groups/{userAddress}/{groupId}.json
+ * Groups are sealed with the identity's StorageSealer (1.39.24), one file per group, at
+ *   home/session-groups/v2/{deriveId('owner', 'storage')}/{deriveId('group', groupId)}
+ * — the path names neither the wallet nor the group, and each identity on a shared S5 seed has its own directory. Each file is `{ kind: 'cbor', value: group }` sealed under
+ * `group/v1/{opaqueId}` (bound to the opaque id, so a listing opens a file without knowing the group id; the id is in
+ * the payload). The sealer is the StorageManager's (`getSealer()`): without one nothing is read or written.
+ *
+ * The legacy layout, home/session-groups/{userAddress}/{groupId}.json (EncryptionManager-encrypted), is still read:
+ * a legacy group is moved on first touch (`load`, `loadAll`) — sealed, written, read back, then the legacy file is
+ * deleted. Of the two copies the newer by `updatedAt` wins (an older SDK may still edit the legacy file), the sealed
+ * copy is re-read fresh just before a move writes it (another tab may have moved and edited it), and the legacy file
+ * is re-read fresh before it is deleted. `delete` and `exists` cover both layouts.
  *
  * Features:
- * - End-to-end encryption using EncryptionManager
  * - In-memory caching for performance
- * - User isolation (each user has separate directory)
- * - Auto-sync on changes
+ * - Revision-conflict retry on writes
  * - Auto-reconnect on S5 connection issues (v1.4.26+)
  * - Network persistence verification (v1.11.2+) - ensures data survives browser close
  */
 export class SessionGroupStorage {
   private static readonly STORAGE_PATH = 'home/session-groups';
+  /** The sealed layout (1.39.24): `{SEALED_ROOT}/{ownerSegment}/{opaqueId}`. */
+  private static readonly SEALED_ROOT = 'home/session-groups/v2';
   /**
    * Concurrency cap for parallel S5 fetches in `loadAll`. Raised from 10 to
    * 20 in 1.20.0 after empirical confirmation that the S5 portal handles the
@@ -76,9 +88,9 @@ export class SessionGroupStorage {
    *
    * @param s5Client - S5 client instance
    * @param userSeed - User's S5 seed phrase
-   * @param userAddress - User's wallet address (for directory isolation)
-   * @param encryptionManager - Optional encryption manager for secure storage
-   * @param storageManager - Optional StorageManager for retry/reconnect support (v1.4.26+)
+   * @param userAddress - User's wallet address (names the legacy directory only)
+   * @param encryptionManager - Reads legacy (pre-1.39.24) groups
+   * @param storageManager - Supplies the sealer, and retry/reconnect support. Required for every read and write.
    */
   constructor(
     s5Client: any,
@@ -100,16 +112,22 @@ export class SessionGroupStorage {
   }
 
   /**
-   * Save session group to S5 with encryption
+   * Save session group to S5, sealed
    *
    * @param group - Session group to save
    * @param options - Save options (timeoutMs, waitForNetwork, verifyRetries)
-   * @throws Error if encryption manager not available
+   * @throws SDKError STORAGE_SEALER_MISSING if there is no sealer
    * @throws Error if S5 write fails
    * @throws Error if S5 operation times out
    * @throws Error if network verification fails (when waitForNetwork is true)
    */
   async save(group: SessionGroup, options: SessionGroupSaveOptions | number = {}): Promise<void> {
+    // Under the group's lock: a move from the legacy layout never writes its older copy over this save (round 3).
+    return this.withGroupLock(group.id, () => this.saveUnlocked(group, options));
+  }
+
+  /** `save` without the lock — for a caller already holding it (the move; Web Locks are not re-entrant). */
+  private async saveUnlocked(group: SessionGroup, options: SessionGroupSaveOptions | number = {}): Promise<void> {
     // Support legacy signature: save(group, timeoutMs)
     const opts: SessionGroupSaveOptions = typeof options === 'number'
       ? { timeoutMs: options }
@@ -120,27 +138,16 @@ export class SessionGroupStorage {
     const verifyRetries = opts.verifyRetries ?? 3;
     const verifyRetryDelayMs = opts.verifyRetryDelayMs ?? 1000;
 
-    if (!this.encryptionManager || !this.hostPubKey) {
-      throw new Error('EncryptionManager required for storage operations');
-    }
+    const sealer = this.sealer();
+    const opaqueId = sealer.deriveId('group', group.id);
+    const sealed = sealer.seal({ kind: 'cbor', value: group }, SessionGroupStorage.sealContext(opaqueId));
+    const path = this.sealedPath(opaqueId);
 
-    const groupSize = JSON.stringify(group).length;
-    console.log(`[SessionGroupStorage] 💾 Saving session group "${group.name}" (${groupSize} bytes plaintext, waitForNetwork=${waitForNetwork})`);
-
-    // Encrypt group data
-    const encrypted = await this.encryptionManager.encryptForStorage(
-      this.hostPubKey,
-      group
-    );
-
-    // Build S5 path
-    const path = this.buildPath(group.id);
-
-    console.log(`[SessionGroupStorage] 📤 Uploading encrypted session group to S5: ${path}`);
+    console.log(`[SessionGroupStorage] 💾 Saving sealed session group (${sealed.length} bytes) to ${path}, waitForNetwork=${waitForNetwork}`);
 
     const startTime = performance.now();
 
-    await this.putWithRevisionRetry(path, encrypted, timeoutMs);
+    await this.putWithRevisionRetry(path, sealed, timeoutMs);
 
     const writeDuration = Math.round(performance.now() - startTime);
     console.log(`[SessionGroupStorage] 📝 Local write completed in ${writeDuration}ms`);
@@ -155,7 +162,6 @@ export class SessionGroupStorage {
 
       if (!verified) {
         // Data is saved locally but network sync not confirmed
-        // This is a warning, not a hard failure - local data will eventually sync
         console.warn(`[SessionGroupStorage] ⚠️ Network verification failed for "${group.name}" - data saved locally but may not persist across browser sessions`);
         throw new Error(`Session group "${group.name}" saved locally but network persistence could not be verified. Keep browser open until sync completes.`);
       }
@@ -168,34 +174,32 @@ export class SessionGroupStorage {
   }
 
   /**
-   * Put data to S5 with automatic retry on revision/directory conflicts.
+   * Put sealed bytes to S5 (`application/octet-stream`) with automatic retry on revision/directory conflicts.
    *
    * S5.js can throw "Revision number too low" or "DirectoryTransactionException"
    * when concurrent writes race on the same path. This method retries with
    * exponential backoff (100ms, 200ms, 400ms) to let the previous write settle.
+   * The write goes to the S5 client directly (as the sealed conversation log does): `putWithRetry` takes no
+   * media type.
    *
    * @param path - S5 filesystem path
-   * @param data - Data to write
+   * @param data - Sealed bytes to write
    * @param timeoutMs - Timeout per attempt in milliseconds
    * @param maxRetries - Maximum number of attempts (default: 3)
    */
   private async putWithRevisionRetry(
     path: string,
-    data: any,
+    data: Uint8Array,
     timeoutMs: number,
     maxRetries = 3,
   ): Promise<void> {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        if (this.storageManager) {
-          await this.storageManager.putWithRetry(path, data);
-        } else {
-          const putPromise = this.s5Client.fs.put(path, data);
-          const timeoutPromise = new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error(`S5 put operation timed out after ${timeoutMs}ms`)), timeoutMs);
-          });
-          await Promise.race([putPromise, timeoutPromise]);
-        }
+        await withTimeout(
+          this.s5Client.fs.put(path, data, { mediaType: 'application/octet-stream' }),
+          timeoutMs,
+          `S5 put operation timed out after ${timeoutMs}ms`,
+        );
         return; // Success
       } catch (error: any) {
         const msg = error?.message || '';
@@ -243,6 +247,7 @@ export class SessionGroupStorage {
         console.log(`[SessionGroupStorage] ✅ Network verification successful on attempt ${attempt}`);
         return true;
       } catch (error: any) {
+        rethrowDisposal(error);
         console.log(`[SessionGroupStorage] ⏳ Verification attempt ${attempt} failed: ${error.message}`);
 
         if (attempt < maxRetries) {
@@ -259,63 +264,46 @@ export class SessionGroupStorage {
   }
 
   /**
-   * Load session group directly from S5 network, bypassing local cache
+   * Load a sealed session group directly from S5, bypassing local cache
    *
-   * Used for network persistence verification.
+   * Used for network persistence verification (the read-back after every write).
    *
    * @param groupId - Session group ID
    * @param timeoutMs - Timeout in milliseconds
-   * @returns Decrypted session group from network
-   * @throws Error if group not found on network or decryption fails
+   * @returns The opened session group
+   * @throws Error if group not found on network, SEALED_OPEN_FAILED if it does not open
    */
   private async loadFromNetwork(groupId: string, timeoutMs: number = 15000): Promise<SessionGroup> {
-    if (!this.encryptionManager) {
-      throw new Error('EncryptionManager required for storage operations');
-    }
-
-    const path = this.buildPath(groupId);
+    const sealer = this.sealer();
+    const opaqueId = sealer.deriveId('group', groupId);
 
     // Direct S5 call - do NOT check cache
-    const getPromise = this.s5Client.fs.get(path);
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
-        reject(new Error(`S5 network read timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-    });
+    const value = await withTimeout(
+      this.s5Client.fs.get(this.sealedPath(opaqueId)),
+      timeoutMs,
+      `S5 network read timed out after ${timeoutMs}ms`,
+    );
 
-    const encrypted = await Promise.race([getPromise, timeoutPromise]);
-
-    if (!encrypted) {
+    if (value === undefined || value === null) {
       throw new Error(`Session group not found on network: ${groupId}`);
     }
 
-    // Decrypt to verify data integrity
-    const { data: group } = await this.encryptionManager.decryptFromStorage<SessionGroup>(
-      encrypted as EncryptedStorage
-    );
-
-    // Verify the group ID matches (data integrity check)
-    if (group.id !== groupId) {
-      throw new Error(`Data integrity check failed: expected ${groupId}, got ${group.id}`);
-    }
-
-    // Re-populate cache with verified data
-    group.createdAt = new Date(group.createdAt);
-    group.updatedAt = new Date(group.updatedAt);
+    // Opening checks integrity: the context binds the file to its opaque id, and the id inside to the path.
+    const group = SessionGroupStorage.openSealed(sealer, value, opaqueId);
     this.cache.set(groupId, group);
-
     return group;
   }
 
   /**
-   * Load session group from S5 and decrypt
+   * Load a session group: the sealed copy and any legacy copy, the newer winning; a legacy copy is then moved to the
+   * sealed layout (written, read back, legacy deleted) — see `reconcileLegacy`.
    *
    * @param groupId - Session group ID
-   * @param timeoutMs - Timeout in milliseconds (default: 15000 = 15s) - only used if StorageManager not available
-   * @returns Decrypted session group
+   * @param timeoutMs - Timeout in milliseconds (default: 15000 = 15s) - used for direct S5 writes and read-backs
+   * @returns The session group
    * @throws Error if group not found
-   * @throws Error if decryption fails
-   * @throws Error if S5 operation times out
+   * @throws SDKError SEALED_OPEN_FAILED if the sealed file does not open; STORAGE_SEALER_MISSING without a sealer
+   * @throws Error if a legacy group cannot be decrypted, or its move cannot be verified
    */
   async load(groupId: string, timeoutMs: number = 15000): Promise<SessionGroup> {
     // Check cache first
@@ -324,186 +312,182 @@ export class SessionGroupStorage {
       return this.cache.get(groupId)!;
     }
 
-    if (!this.encryptionManager) {
-      throw new Error('EncryptionManager required for storage operations');
-    }
-
-    // Build S5 path
-    const path = this.buildPath(groupId);
-
-    console.log(`[SessionGroupStorage] 📥 Downloading encrypted session group from S5: ${path}`);
-
-    const startTime = performance.now();
-    let encrypted: any;
-
-    // Use StorageManager's retry/reconnect logic if available (v1.4.26+)
-    if (this.storageManager) {
-      try {
-        encrypted = await this.storageManager.getWithRetry(path);
-      } catch (error: any) {
-        console.error(`[SessionGroupStorage] ❌ load(${groupId}) failed after retries:`, error.message);
-        throw error;
-      }
-    } else {
-      // Fallback: direct S5 call with timeout protection
-      const getPromise = this.s5Client.fs.get(path);
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
-          reject(new Error(`S5 get operation timed out after ${timeoutMs}ms - S5 connection may be stale`));
-        }, timeoutMs);
-      });
-
-      try {
-        encrypted = await Promise.race([getPromise, timeoutPromise]);
-      } catch (error: any) {
-        if (error.message?.includes('timed out')) {
-          console.error(`[SessionGroupStorage] ⏰ load(${groupId}) timed out - S5 connection may need reconnection`);
-        }
-        throw error;
-      }
-    }
-
-    const downloadDuration = Math.round(performance.now() - startTime);
-
-    if (!encrypted) {
+    const sealed = await this.readSealed(groupId, false);
+    const group = await this.reconcileLegacy(groupId, sealed, timeoutMs);
+    if (!group) {
       throw new Error(`Session group not found: ${groupId}`);
     }
-
-    console.log(`[SessionGroupStorage] ✅ Encrypted data downloaded in ${downloadDuration}ms`);
-
-    // Decrypt (encrypted is already an object from S5)
-    const { data: group } = await this.encryptionManager.decryptFromStorage<SessionGroup>(
-      encrypted as EncryptedStorage
-    );
-
-    // Deserialize dates (they may be strings after decryption)
-    group.createdAt = new Date(group.createdAt);
-    group.updatedAt = new Date(group.updatedAt);
-
-    console.log(`[SessionGroupStorage] ✅ Session group "${group.name}" loaded and decrypted successfully`);
-
-    // Update cache
-    this.cache.set(groupId, group);
-
     return group;
   }
 
-  /**
-   * Load all session groups for current user
-   *
-   * @param timeoutMs - Timeout in milliseconds (default: 30000 = 30s)
-   * @returns Array of all session groups
-   * @throws Error if directory read fails or times out
-   */
-  async loadAll(timeoutMs: number = 30000): Promise<SessionGroup[]> {
-    const dirPath = this.buildDirPath();
-
-    // Wrap the async iteration in a timeout to prevent hanging
-    const loadWithTimeout = async (): Promise<SessionGroup[]> => {
-      const groups: SessionGroup[] = [];
-      const entries: Array<{ type: string; name: string }> = [];
-
-      // First, collect all entries from the iterator with timeout protection
-      // This prevents hanging if the S5 WebSocket is in a bad state
-      const listPromise = (async () => {
-        for await (const entry of this.s5Client.fs.list(dirPath)) {
-          entries.push(entry);
-        }
-      })();
-
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
-          reject(new Error(`S5 directory listing timed out after ${timeoutMs}ms - S5 connection may be stale`));
-        }, timeoutMs);
-      });
-
-      try {
-        await Promise.race([listPromise, timeoutPromise]);
-      } catch (error: any) {
-        if (error.message?.includes('timed out')) {
-          console.error(`[SessionGroupStorage] ⏰ loadAll timed out - S5 connection may need reconnection`);
-          throw error;
-        }
-        throw error;
-      }
-
-      // Process the collected entries in parallel with bounded concurrency.
-      // Each load is an independent S5 fetch + decrypt; the previous sequential
-      // for-of would multiply per-group latency by the group count (e.g. 20
-      // groups x 3.5s = 70s on cold path). With concurrency=10 the cold-path
-      // total is ~ceil(N/10) * single-load-time.
-      const fileEntries = entries.filter(
-        (e) => e.type === 'file' && e.name.endsWith('.json'),
-      );
-
-      const loaded = await mapWithConcurrency(
-        fileEntries,
-        SessionGroupStorage.LOAD_ALL_CONCURRENCY,
-        async (entry) => {
-          const groupId = entry.name.replace('.json', '');
-          try {
-            return await this.load(groupId);
-          } catch (error: any) {
-            rethrowDisposal(error); // a sign-out is never "this group is unreadable" (§28 II3)
-            // Log warning for groups that fail to load (corrupted, wrong key,
-            // deleted, etc.) — this helps debug cross-tab encryption issues.
-            // Returning null isolates the failure so one bad group does not
-            // reject the whole batch.
-            console.warn(
-              `[SessionGroupStorage] Failed to decrypt group ${groupId}:`,
-              error.message,
-            );
-            return null;
-          }
-        },
-      );
-
-      for (const group of loaded) {
-        if (group !== null) groups.push(group);
-      }
-
-      return groups;
-    };
-
-    try {
-      return await loadWithTimeout();
-    } catch (error: any) {
-      // Directory doesn't exist yet - return empty array
-      if (error.message?.includes('not found') || error.message?.includes('does not exist')) {
-        return [];
-      }
-      throw error;
-    }
+  /** The sealed copy of a group, opened; undefined when there is none. */
+  private async readSealed(groupId: string, fresh: boolean): Promise<SessionGroup | undefined> {
+    const sealer = this.sealer();
+    const opaqueId = sealer.deriveId('group', groupId);
+    const value = await this.read(this.sealedPath(opaqueId), groupId, fresh);
+    return value === undefined ? undefined : SessionGroupStorage.openSealed(sealer, value, opaqueId);
   }
 
   /**
-   * Delete session group from S5 and cache (hard delete)
+   * Settle a group's two copies: `sealed` (already read, or undefined) and the legacy file (read here).
+   *
+   * - No legacy file: the sealed copy (or undefined).
+   * - The legacy copy is not newer (by `updatedAt`): the sealed copy wins, and the legacy file is a leftover.
+   * - Otherwise the legacy copy is moved — unless a fresh re-read of the sealed copy, just before writing, finds one
+   *   at least as new (another tab moved it, and perhaps edited it, meanwhile): that one wins and is not overwritten.
+   * - The legacy file is deleted only if a fresh re-read finds it no newer than the winner (an older SDK may have
+   *   written it again); otherwise it is left for the next touch.
+   *
+   * A legacy file that does not decrypt is reported and left alone; with no sealed copy that is the caller's error.
+   */
+  private async reconcileLegacy(groupId: string, sealed: SessionGroup | undefined, timeoutMs: number): Promise<SessionGroup | undefined> {
+    // One tab at a time per group, `delete` included: two moves racing could write the older copy over an edit, and a
+    // delete landing mid-move could be undone by it (1.39.24 review round 2). The legacy read is inside the lock.
+    return this.withGroupLock(groupId, () => this.reconcileLegacyLocked(groupId, sealed, timeoutMs));
+  }
+
+  private async reconcileLegacyLocked(groupId: string, sealed: SessionGroup | undefined, timeoutMs: number): Promise<SessionGroup | undefined> {
+    const legacyPath = this.buildLegacyPath(groupId);
+    const legacyValue = await this.read(legacyPath, groupId);
+    if (legacyValue === undefined) {
+      // No sealed copy when the caller looked, and no legacy one now: another tab may have moved it while this one
+      // waited for the lock — look again, fresh.
+      const found = sealed ?? await this.readSealed(groupId, true);
+      if (found) this.cache.set(groupId, found);
+      return found;
+    }
+
+    let legacy: SessionGroup;
+    try {
+      legacy = await this.decryptLegacy(legacyValue, groupId);
+    } catch (error: any) {
+      rethrowDisposal(error);
+      if (!sealed) throw error;
+      SessionGroupStorage.reportUnreadable(`legacy session group ${groupId} (the sealed copy is used)`, error);
+      this.cache.set(groupId, sealed);
+      return sealed;
+    }
+
+    let winner = sealed;
+    if (!winner || newerThan(legacy, winner)) {
+      const current = await this.readSealed(groupId, true);
+      if (current && !newerThan(legacy, current)) {
+        winner = current;
+      } else {
+        console.log(`[SessionGroupStorage] 🔒 Moving legacy session group ${groupId} to the sealed layout`);
+        // save() reads the sealed copy back (waitForNetwork) and throws if it cannot; only then is the legacy file deleted.
+        await this.saveUnlocked(legacy, { timeoutMs, waitForNetwork: true });
+        winner = legacy;
+      }
+    }
+
+    const again = await this.read(legacyPath, groupId, true);
+    let drop = again !== undefined;
+    if (again !== undefined && again !== legacyValue) {
+      try {
+        drop = !newerThan(await this.decryptLegacy(again, groupId), winner);
+      } catch (error: any) {
+        rethrowDisposal(error);
+        drop = false;
+      }
+      if (!drop) console.warn(`[SessionGroupStorage] legacy session group ${groupId} changed during its move; it is left for the next read`);
+    }
+    if (drop) await this.deleteFile(legacyPath, groupId);
+
+    this.cache.set(groupId, winner);
+    return winner;
+  }
+
+  /**
+   * Load all session groups for current user: every sealed file, plus every legacy group (moved as in `load`).
+   * De-duplicated by group id, the newer copy by `updatedAt` winning (the sealed one on a tie) — a legacy file left
+   * behind by an interrupted move is deleted, one an older SDK edited since is adopted (`reconcileLegacy`).
+   *
+   * Per-entry failures (a sealed file that does not open, a legacy file that does not decrypt or move) are isolated:
+   * each is reported with console.error (its code and message) and left out, so one bad group does not reject the
+   * whole batch; nothing is deleted on a failure. A disposal (sign-out) rejects the whole call.
+   *
+   * @param timeoutMs - Timeout for each directory listing in milliseconds (default: 30000 = 30s)
+   * @returns Array of all session groups
+   * @throws Error if a directory read fails or times out (an absent directory is empty)
+   */
+  async loadAll(timeoutMs: number = 30000): Promise<SessionGroup[]> {
+    const sealer = this.sealer();
+
+    const [sealedEntries, legacyEntries] = await Promise.all([
+      this.listFiles(this.sealedDir(), timeoutMs),
+      this.listFiles(this.buildDirPath(), timeoutMs),
+    ]);
+
+    // Each load is an independent S5 fetch + open; bounded concurrency keeps the cold path at
+    // ~ceil(N/20) * single-load-time instead of N * single-load-time.
+    const sealedGroups = await mapWithConcurrency(
+      sealedEntries,
+      SessionGroupStorage.LOAD_ALL_CONCURRENCY,
+      async (opaqueId) => {
+        try {
+          const value = await this.read(this.sealedPath(opaqueId), opaqueId);
+          if (value === undefined) return null; // deleted between the listing and the read
+          const group = SessionGroupStorage.openSealed(sealer, value, opaqueId);
+          this.cache.set(group.id, group);
+          return group;
+        } catch (error: any) {
+          rethrowDisposal(error); // a sign-out is never "this group is unreadable" (§28 II3)
+          SessionGroupStorage.reportUnreadable(`sealed session group file ${opaqueId}`, error);
+          return null;
+        }
+      },
+    );
+
+    const byId = new Map<string, SessionGroup>();
+    for (const g of sealedGroups) if (g !== null) byId.set(g.id, g);
+
+    const legacyIds = legacyEntries
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => name.slice(0, -'.json'.length));
+
+    const migrated = await mapWithConcurrency(
+      legacyIds,
+      SessionGroupStorage.LOAD_ALL_CONCURRENCY,
+      async (groupId) => {
+        try {
+          return (await this.reconcileLegacy(groupId, byId.get(groupId), 15000)) ?? null;
+        } catch (error: any) {
+          rethrowDisposal(error); // a sign-out is never "this group is unreadable" (§28 II3)
+          SessionGroupStorage.reportUnreadable(`legacy session group ${groupId}`, error);
+          return null;
+        }
+      },
+    );
+
+    for (const group of migrated) {
+      if (group !== null) byId.set(group.id, group);
+    }
+
+    return [...byId.values()];
+  }
+
+  /**
+   * Delete session group from S5 (both layouts) and cache (hard delete)
    *
    * @param groupId - Session group ID to delete
    * @throws Error if S5 delete fails
    */
   async delete(groupId: string): Promise<void> {
-    const path = this.buildPath(groupId);
-
-    // Use StorageManager's retry/reconnect logic if available (v1.4.26+)
-    if (this.storageManager) {
-      try {
-        await this.storageManager.deleteWithRetry(path);
-      } catch (error: any) {
-        console.error(`[SessionGroupStorage] ❌ delete(${groupId}) failed after retries:`, error.message);
-        throw error;
-      }
-    } else {
-      // Fallback: direct S5 call
-      await this.s5Client.fs.delete(path);
-    }
+    const opaqueId = this.sealer().deriveId('group', groupId);
+    // Legacy first: left behind by a failed second delete, a legacy copy with no sealed one would be moved back on the
+    // next load (1.39.24 review round 2). Under the group's lock, so no move is half done meanwhile.
+    await this.withGroupLock(groupId, async () => {
+      await this.deleteFile(this.buildLegacyPath(groupId), groupId);
+      await this.deleteFile(this.sealedPath(opaqueId), groupId);
+    });
 
     // Remove from cache
     this.cache.delete(groupId);
   }
 
   /**
-   * Check if session group exists without loading
+   * Check if session group exists (in either layout) without loading
    *
    * @param groupId - Session group ID
    * @returns True if group exists
@@ -514,24 +498,140 @@ export class SessionGroupStorage {
       return true;
     }
 
-    // Check S5 using getMetadata()
-    const path = this.buildPath(groupId);
-    const metadata = await this.s5Client.fs.getMetadata(path);
-    return !!metadata;
+    const opaqueId = this.sealer().deriveId('group', groupId);
+    for (const path of [this.sealedPath(opaqueId), this.buildLegacyPath(groupId)]) {
+      try {
+        if (await this.s5Client.fs.getMetadata(path)) return true;
+      } catch (error) {
+        if (!isS5Absent(error)) throw error;
+      }
+    }
+    return false;
+  }
+
+  /** The group's cross-tab lock (the StorageManager's), named by its opaque id. */
+  private async withGroupLock<T>(groupId: string, fn: () => Promise<T>): Promise<T> {
+    const key = `group:${this.sealer().deriveId('group', groupId)}`;   // STORAGE_SEALER_MISSING first, without a manager
+    return this.storageManager!.withStorageLock(key, fn);
+  }
+
+  /** The identity's sealer. Session groups are only ever stored sealed: no StorageManager, no sealer, no storage. */
+  private sealer(): StorageSealer {
+    if (!this.storageManager) {
+      throw new SDKError(
+        'Session groups are only ever stored sealed, and no StorageManager (which holds the sealer) was given',
+        'STORAGE_SEALER_MISSING',
+        { retryable: false },
+      );
+    }
+    return this.storageManager.getSealer();
   }
 
   /**
-   * Build S5 path for a session group
+   * One read through the StorageManager's retry/reconnect. @returns undefined when S5 says the file is not there;
+   * any other failure throws.
+   */
+  private async read(path: string, label: string, fresh = false): Promise<unknown> {
+    let value: unknown;
+    try {
+      value = await (fresh ? this.storageManager!.getWithRetry(path, { fresh: true }) : this.storageManager!.getWithRetry(path));
+    } catch (error: any) {
+      if (isS5Absent(error)) return undefined;
+      console.error(`[SessionGroupStorage] ❌ read of ${label} failed after retries:`, error?.message);
+      throw error;
+    }
+    return value === null ? undefined : value;
+  }
+
+  /** The names of the files in `dir` (an absent directory has none), with the listing under a timeout. */
+  private async listFiles(dir: string, timeoutMs: number): Promise<string[]> {
+    const names: string[] = [];
+    const listing = (async () => {
+      for await (const entry of this.s5Client.fs.list(dir)) {
+        if (entry.type === 'file') names.push(entry.name);
+      }
+    })();
+    try {
+      await withTimeout(listing, timeoutMs, `S5 directory listing timed out after ${timeoutMs}ms - S5 connection may be stale`);
+    } catch (error: any) {
+      if (isS5Absent(error)) return [];
+      if (error.message?.includes('timed out')) {
+        console.error(`[SessionGroupStorage] ⏰ loadAll timed out - S5 connection may need reconnection`);
+      }
+      throw error;
+    }
+    return names;
+  }
+
+  /** Delete one file through the StorageManager's retry/reconnect; one that is not there is already deleted. */
+  private async deleteFile(path: string, label: string): Promise<void> {
+    try {
+      await this.storageManager!.deleteWithRetry(path);
+    } catch (error: any) {
+      if (isS5Absent(error)) return;
+      console.error(`[SessionGroupStorage] ❌ delete(${label}) failed after retries:`, error?.message);
+      throw error;
+    }
+  }
+
+  /** Decrypt a legacy (EncryptionManager) group file and check it is the group asked for. */
+  private async decryptLegacy(value: unknown, groupId: string): Promise<SessionGroup> {
+    if (!this.encryptionManager) {
+      throw new Error('EncryptionManager required for storage operations');
+    }
+    const { data: group } = await this.encryptionManager.decryptFromStorage<SessionGroup>(value as EncryptedStorage);
+    if (!group || typeof group !== 'object' || group.id !== groupId) {
+      throw new Error(`Data integrity check failed: expected ${groupId}, got ${(group as any)?.id}`);
+    }
+    return reviveDates(group);
+  }
+
+  /**
+   * Open a sealed group file. The context binds it to its opaque id, and the id inside must derive that same opaque
+   * id — a file moved, swapped or tampered with throws SEALED_OPEN_FAILED.
+   */
+  private static openSealed(sealer: StorageSealer, value: unknown, opaqueId: string): SessionGroup {
+    if (!ArrayBuffer.isView(value)) {
+      throw new SDKError(`Session group file ${opaqueId} is not sealed`, 'SEALED_OPEN_FAILED', { reason: 'not a sealed envelope', retryable: false });
+    }
+    const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    const payload = sealer.open(bytes, SessionGroupStorage.sealContext(opaqueId));
+    const group = payload.value as SessionGroup;
+    if (payload.kind !== 'cbor' || !group || typeof group !== 'object' || typeof group.id !== 'string' || sealer.deriveId('group', group.id) !== opaqueId) {
+      throw new SDKError(`Session group file ${opaqueId} does not hold the group its path names`, 'SEALED_OPEN_FAILED', { reason: 'not this group', retryable: false });
+    }
+    return reviveDates(group);
+  }
+
+  private static reportUnreadable(what: string, error: any): void {
+    console.error(`[SessionGroupStorage] ❌ ${what} cannot be read and is left out (${error?.code ?? 'ERROR'}):`, error?.message ?? error);
+  }
+
+  /** This identity's directory: identities sharing an S5 seed never list or overwrite each other's groups. */
+  private sealedDir(): string {
+    return `${SessionGroupStorage.SEALED_ROOT}/${this.sealer().deriveId('owner', 'storage')}`;
+  }
+
+  private sealedPath(opaqueId: string): string {
+    return `${this.sealedDir()}/${opaqueId}`;
+  }
+
+  private static sealContext(opaqueId: string): string {
+    return `group/v1/${opaqueId}`;
+  }
+
+  /**
+   * Legacy S5 path for a session group (read, moved and deleted — never written)
    *
    * @param groupId - Session group ID
    * @returns Full S5 path
    */
-  private buildPath(groupId: string): string {
+  private buildLegacyPath(groupId: string): string {
     return `${SessionGroupStorage.STORAGE_PATH}/${this.userAddress}/${groupId}.json`;
   }
 
   /**
-   * Build S5 directory path for user's session groups
+   * Legacy S5 directory of the user's session groups
    *
    * @returns Directory path
    */
@@ -551,5 +651,31 @@ export class SessionGroupStorage {
    */
   getCacheSize(): number {
     return this.cache.size;
+  }
+}
+
+/** `a` was updated after `b` (an unreadable date counts as the oldest). */
+function newerThan(a: SessionGroup, b: SessionGroup): boolean {
+  const t = (g: SessionGroup) => { const n = new Date(g.updatedAt).getTime(); return Number.isFinite(n) ? n : -Infinity; };
+  return t(a) > t(b);
+}
+
+/** Dates come back as Dates from CBOR and as strings from the legacy JSON; either way they leave as Dates. */
+function reviveDates(group: SessionGroup): SessionGroup {
+  group.createdAt = new Date(group.createdAt);
+  group.updatedAt = new Date(group.updatedAt);
+  return group;
+}
+
+/** `promise`, or a rejection with `message` after `timeoutMs` (the timer is cleared either way). */
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
   }
 }

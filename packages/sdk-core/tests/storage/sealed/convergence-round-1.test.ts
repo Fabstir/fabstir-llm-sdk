@@ -342,15 +342,3 @@ describe('R9 — one plaintext refusal on the normalised path, in every public w
   });
 });
 
-describe('R10 — every sealing context has a matching opener', () => {
-  test('DocumentManager reads back the text of a document it stored sealed', async () => {
-    const net = new FakeS5Network();
-    const dm = new DocumentManager();
-    Object.assign(dm as any, { initialized: true, userAddress: ADDR, s5Client: net.tab(), sealer: sealer() });
-    const { documentId } = await dm.uploadDocument(new File(['sealed text body'], 'notes.txt', { type: 'text/plain' }), DB);
-    const { extractionCache } = await import('../../../src/documents/extractors');
-    extractionCache.clear();
-    (dm as any).getFromRegistry(DB, documentId).textCached = '';
-    expect(await dm.extractText(documentId, DB)).toBe('sealed text body');
-  });
-});

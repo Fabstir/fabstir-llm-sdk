@@ -70,6 +70,12 @@ export const sealedLayout = {
   chunkPath: (dbId: string, n: number) => `${SEALED_ROOT}/${dbId}/chunk-${n}`,
   documentsDir: (dbId: string) => `${SEALED_ROOT}/${dbId}/documents`,
   docPath: (dbId: string, docKey: string) => `${SEALED_ROOT}/${dbId}/documents/${docKey}`,
+  /**
+   * A small sealed marker that only this identity opens: the evidence a database whose manifest no longer opens is
+   * still this identity's (D44, 1.39.24 review). The sealed root is shared by every identity on the seed.
+   */
+  ownerPath: (dbId: string) => `${SEALED_ROOT}/${dbId}/owner`,
+  ownerContext: (dbId: string) => `rag/v1/${dbId}/owner`,
   // The incarnation cannot be in the manifest's own context (it is read from inside the manifest).
   manifestContext: (dbId: string) => `rag/v1/${dbId}/manifest`,
   chunkContext: (dbId: string, incarnation: string, n: number) => `rag/v1/${dbId}/${incarnation}/chunk/${n}`,

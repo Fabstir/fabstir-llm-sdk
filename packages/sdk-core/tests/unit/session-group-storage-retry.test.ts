@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SessionGroupStorage } from '../../src/storage/SessionGroupStorage';
+import { sealer } from '../helpers/sealed-fixtures';
 
 describe('SessionGroupStorage revision retry', () => {
   let storage: SessionGroupStorage;
@@ -42,6 +43,8 @@ describe('SessionGroupStorage revision retry', () => {
       'test-user-seed',
       'test-user-address',
       mockEncryptionManager,
+      // 1.39.24: groups are sealed with the StorageManager's sealer (the write itself goes to the S5 client).
+      { getSealer: () => sealer(), withStorageLock: (_k: string, fn: () => Promise<unknown>) => fn() } as any,
     );
   });
 

@@ -7,6 +7,7 @@ import type { Vector, SearchResult } from '../types';
 import { SDKError } from '../types';
 import type { DatabaseMetadata } from '../database/types';
 import { mapWithConcurrency } from '../utils/concurrency';
+import { rethrowDisposal } from '../utils/disposal';
 import type { StorageSealer } from './sealed/StorageSealer';
 import { SealedIO, retryableOf, type PathToHash } from './sealed/sealed-io';
 import { createRagCoherence, headNotRecorded, type RagCoherence, type RagHead } from './sealed/rag-coherence';
@@ -48,6 +49,13 @@ export type DocumentStatus = 'pending' | 'processing' | 'ready' | 'failed';
 export type DocumentStatusUpdates = { vectorCount?: number; embeddingProgress?: number; embeddingError?: string };
 
 type Loaded = { kind: 'sealed' | 'legacy'; dbId: string; manifest: DatabaseManifest };
+/**
+ * Which ids each chunk held when it was read, in their order (D42), keyed by chunk number: `loaded` counts the entries
+ * the chunk file had — more than `ids` when an id it held also appears in a later chunk (that one wins, as in the map).
+ */
+type ChunkLayout = Map<number, { ids: string[]; loaded: number }>;
+/** A database's vectors as read, and the chunk each came from — what a commit compares its working copy with. */
+type VectorSnapshot = { vectors: Map<string, Vector>; layout: ChunkLayout };
 type Current = Loaded | { kind: 'absent'; dbId: string; tombstone?: RagHead };
 
 const notFound = (name: string) => new SDKError(`Database "${name}" not found`, 'RAG_DATABASE_NOT_FOUND', { database: name, retryable: false });
@@ -166,10 +174,17 @@ export class S5VectorStore {
   private readonly chunkSize: number;
   private readonly isOnline?: () => boolean;
   private manifestCache: Map<string, DatabaseManifest>;
-  private vectorCache: Map<string, { signature: string; vectors: Map<string, Vector> }>;
+  private vectorCache: Map<string, { signature: string } & VectorSnapshot>;
   private initialized = false;
   /** What the last discovery could not read (empty = complete). See `_doInitialize`. */
   private discoveryFailures: DiscoveryFailure[] = [{ what: 'not discovered yet', code: 'RAG_DISCOVERY_INCOMPLETE' }];
+  /**
+   * Sealed databases whose manifest never opens (SEALED_OPEN_FAILED, RAG_MANIFEST_CORRUPT), dbId → code, as the last
+   * discovery and the reconciles since found them (D44). Listed nowhere else; `deleteDatabaseById` removes them.
+   */
+  private unreadable = new Map<string, string>();
+  /** Databases whose owner marker this instance has written (D44): one write per database per instance. */
+  private ownerMarked = new Set<string>();
   /** When the cached discovery started, and when each cached manifest was read (coherence clock — §16 V2). */
   private discoveredAt = -Infinity;
   private readonly cachedAt = new Map<string, number>();
@@ -251,9 +266,11 @@ export class S5VectorStore {
         // Only a complete discovery is remembered as one: after a transient failure the next call looks again.
         const startedAt = this.coherence.now();
         const seen = new Set<string>();
-        const failures = await this._doInitialize(generation, startedAt, seen);
+        const unreadable = new Map<string, string>();
+        const failures = await this._doInitialize(generation, startedAt, seen, unreadable);
         if (generation !== this.generation) return; // reset meanwhile: its answer may miss what was cleared
         this.discoveryFailures = failures;
+        this.unreadable = unreadable;
         if (failures.length === 0) {
           this.initialized = true;
           this.discoveredAt = startedAt;
@@ -278,9 +295,15 @@ export class S5VectorStore {
    * a listed directory without a manifest is no database (being created, being deleted, or an interrupted
    * migration's orphan — §16 V5) — but a legacy one may have moved, and the sealed side decides (§39 TT1); the legacy
    * root is listed before the sealed one (§40 UU2). Permanent failures (a manifest that will not open under this key, a corrupt one)
-   * do not make the discovery incomplete: such a database can never be read — `deleteDatabase` removes it.
+   * do not make the discovery incomplete: such a database can never be read — a sealed one is collected in `unreadable`
+   * (D44: `listUnreadableDatabases`, `deleteDatabaseById`); a legacy one is deleted by name (`deleteDatabase`).
+   * Last, it prunes this identity's heads that no read trusts any more (D44 — see `RagCoherence.pruneHeads`), keeping
+   * those of the unreadable databases it found: they are what shows such a database is this identity's.
    */
-  private async _doInitialize(generation: number, startedAt: number, seen: Set<string>): Promise<DiscoveryFailure[]> {
+  private async _doInitialize(generation: number, startedAt: number, seen: Set<string>, unreadable: Map<string, string>): Promise<DiscoveryFailure[]> {
+    // Every database this identity has a head for, at any age: the evidence an unreadable one is its own (below). Read
+    // before anything is pruned; pruning runs last and keeps the unreadable ones' heads (1.39.24 review).
+    const ownAnyAge = new Set((await this.heads.listHeadKeysAnyAge()).filter((id) => DB_ID.test(id)));
     const failures: DiscoveryFailure[] = [];
     // A superseded discovery caches nothing: its reads may be older than the current one's (§19 Z18). What it caches is
     // as old as the discovery's start (§38 SS1).
@@ -288,12 +311,24 @@ export class S5VectorStore {
       seen.add(name);
       if (this.cacheEnabled && generation === this.generation) this._cacheManifest(name, manifest, startedAt);
     };
-    const attempt = async <T>(what: string, fn: () => Promise<T>, id: { dbId?: string; database?: string } = {}): Promise<T | undefined> => {
+    /**
+     * This identity's heads, once listed below: a sealed database that never opens is collected (D44) only when one of
+     * them names it. The sealed root is shared by every identity on the seed, and another identity's databases never
+     * open here either — they are not this one's to offer for deletion (1.39.24 review).
+     */
+    const own = ownAnyAge;
+    /** Sealed databases that failed for good, not yet known to be this identity's: settled after the reads. */
+    const candidates = new Map<string, string>();
+    /** Sealed databases this discovery opened: their heads are kept by the prune (1.39.24 review round 2). */
+    const opened = new Set<string>();
+    /** `sealedDbId`: the sealed database read, when it is one — a permanent failure of it is collected (D44). */
+    const attempt = async <T>(what: string, fn: () => Promise<T>, id: { dbId?: string; database?: string } = {}, sealedDbId = id.dbId): Promise<T | undefined> => {
       try {
         return await this._withRetries(fn);
       } catch (error: any) {
         console.warn(`[S5VectorStore] ⚠️ Failed to load ${what}:`, error);
         if (!NOT_RETRYABLE.has(error?.code)) failures.push({ what, code: error?.code ?? 'S5_IO_ERROR', ...id });
+        else if (sealedDbId !== undefined) (own.has(sealedDbId) ? unreadable : candidates).set(sealedDbId, error.code);
         return undefined;
       }
     };
@@ -308,6 +343,7 @@ export class S5VectorStore {
       this.heads.listHeads(),
     ]);
     const heads = allHeads.filter(([id]) => DB_ID.test(id));
+
     const listed = sealedListing ?? [];
 
     // 1. Sealed databases: the (fresh) listing ∪ this browser's heads — a tombstone among them is evidence below.
@@ -317,7 +353,7 @@ export class S5VectorStore {
     await mapWithConcurrency([...ids], S5VectorStore.INIT_CONCURRENCY, async (dbId) => {
       const found = await attempt(`sealed ${dbId}`, () => this._readSealedById(dbId, headOf.get(dbId)), { dbId });
       if (found === null) noManifest.add(dbId);
-      if (found && 'manifest' in found) cache(found.manifest.name, found.manifest);
+      if (found && 'manifest' in found) { opened.add(dbId); cache(found.manifest.name, found.manifest); }
     });
 
     // 2. Legacy databases with no sealed evidence at all — listed, or a head (a tombstone included): a sealed
@@ -332,8 +368,24 @@ export class S5VectorStore {
       if (manifest && !manifest.deleted) return cache(name, manifest);
       if (manifest !== null) return; // a failed read (recorded), or a legacy delete marker
       // Its manifest gone since the listing: a migration may have moved it — the sealed side decides (§39 TT1).
-      const found = await attempt(`sealed "${name}"`, () => this._readSealedById(this._dbId(name)), { database: name });
-      if (found && 'manifest' in found) cache(found.manifest.name, found.manifest);
+      const found = await attempt(`sealed "${name}"`, () => this._readSealedById(this._dbId(name)), { database: name }, this._dbId(name));
+      if (found && 'manifest' in found) { opened.add(this._dbId(name)); cache(found.manifest.name, found.manifest); }
+    });
+    // No head of this identity names them: their owner marker decides (a device that never used them, or a head pruned
+    // while the database still opened). Another identity's never opens here, and is left alone.
+    await mapWithConcurrency([...candidates], S5VectorStore.INIT_CONCURRENCY, async ([dbId, code]) => {
+      try {
+        if (await this._ownerMarkerOpens(dbId)) unreadable.set(dbId, code);
+      } catch (error: any) {
+        rethrowDisposal(error);
+        // Not "not this identity's": unknown for now — the discovery is incomplete, so not cached (round 3)
+        console.warn(`[S5VectorStore] ⚠️ Failed to read the owner marker of ${dbId}:`, error);
+        failures.push({ what: `the owner marker of ${dbId}`, code: error?.code ?? 'S5_IO_ERROR', dbId });
+      }
+    });
+    // Housekeeping (D44): a failure to prune is logged, never a failed discovery (1.39.24 review m7).
+    await this.heads.pruneHeads(new Set([...unreadable.keys(), ...opened])).catch((error: any) => {
+      console.warn('[S5VectorStore] Could not prune expired heads:', error?.message ?? error);
     });
     return failures;
   }
@@ -370,10 +422,12 @@ export class S5VectorStore {
       try {
         const readAt = this.coherence.now();
         const found = await this._readSealedById(dbId, head);
+        this.unreadable.delete(dbId);
         if (found && 'manifest' in found) this._cacheManifest(found.manifest.name, found.manifest, readAt);
       } catch (error: any) {
         // The cached entry (if any) stays; the view is incomplete — callers deciding on "all" hear it (T3).
         if (!NOT_RETRYABLE.has(error?.code)) failures.push({ what: `sealed ${dbId}`, code: error?.code ?? 'S5_IO_ERROR', dbId });
+        else this.unreadable.set(dbId, error.code); // D44
       }
     }
     return failures;
@@ -418,6 +472,8 @@ export class S5VectorStore {
         folderPaths: [],
         incarnation: randomHex(8), // a re-created database must not accept an earlier incarnation's files
       };
+      // Another tab or device may have deleted it (marker included) since this instance marked it (round 3)
+      this.ownerMarked.delete(dbId);
       await this._commitLocked(config.name, dbId, cur.tombstone?.revision ?? 0, manifest);
       return this._manifestToMetadata(manifest);
     });
@@ -485,46 +541,94 @@ export class S5VectorStore {
    */
   async deleteDatabase(databaseName: string): Promise<void> {
     const dbId = this._dbId(databaseName);
-    await this._withWriteLock(dbId, async () => {
-      // The sealed side is read only to name the incarnation the tombstone deletes. A manifest that will never open
-      // (another key, corrupt) does not stop a delete (§15 T5); one that cannot be read NOW does: a tombstone without
-      // its incarnation could resurrect or hide the database (§16 V4). The legacy side is deleted from its listings
-      // and its manifest is never read, so one that never reads cannot block its own deletion (§19 Z7).
-      // The head is read once, before anything is deleted (§35 PP8): failing to read it leaves everything in place.
-      const known = await this.heads.getHead(dbId);
-      let sealed: Awaited<ReturnType<S5VectorStore['_readSealedById']>> | undefined;
-      let readError: unknown;
-      try {
-        sealed = await this._readSealedById(dbId, known);
-      } catch (error: any) {
-        if (!NOT_RETRYABLE.has(error?.code)) throw error;
-        readError = error;
+    await this._withWriteLock(dbId, () => this._deleteLocked(dbId, databaseName));
+  }
+
+  /**
+   * The sealed databases whose manifest can never be opened under this identity (SEALED_OPEN_FAILED: another key, or
+   * a manifest sealed for another place; RAG_MANIFEST_CORRUPT: plaintext where a sealed manifest belongs), as the last
+   * discovery (`initialize`, `listDatabases`) and the reconciles since found them. Such a database is in no listing;
+   * `deleteDatabaseById` removes it (D44). A legacy database whose manifest never reads is deleted by name.
+   */
+  listUnreadableDatabases(): Array<{ dbId: string; code: string }> {
+    return [...this.unreadable].map(([dbId, code]) => ({ dbId, code }));
+  }
+
+  /**
+   * Delete a sealed database by its id (D44) — the way to remove one whose manifest never opens, so its name is
+   * unknown. As `deleteDatabase`: its sealed tree, then a tombstone; with no incarnation to name, the `legacy`
+   * sentinel. A manifest that opens names the database, and its legacy directory goes too.
+   *
+   * @returns the name of the database deleted, when its manifest opened (also `details.result` of a `committed: true`
+   *   error); undefined for an unreadable one
+   * @throws RAG_DATABASE_ID_INVALID unless `dbId` is a database id; RAG_DATABASE_NOT_FOUND when nothing of it exists
+   */
+  async deleteDatabaseById(dbId: string): Promise<string | undefined> {
+    if (typeof dbId !== 'string' || !DB_ID.test(dbId)) {
+      throw new SDKError('A database id is 32 lowercase hex characters', 'RAG_DATABASE_ID_INVALID', { dbId, retryable: false });
+    }
+    return this._withWriteLock(dbId, () => this._deleteLocked(dbId));
+  }
+
+  /**
+   * `deleteDatabase`'s body, under the lock. `databaseName`: when the caller knows it (else the manifest says it).
+   * @returns the name, when known
+   */
+  private async _deleteLocked(dbId: string, databaseName?: string): Promise<string | undefined> {
+    // The sealed side is read only to name the incarnation the tombstone deletes. A manifest that will never open
+    // (another key, corrupt) does not stop a delete (§15 T5); one that cannot be read NOW does: a tombstone without
+    // its incarnation could resurrect or hide the database (§16 V4). The legacy side is deleted from its listings
+    // and its manifest is never read, so one that never reads cannot block its own deletion (§19 Z7).
+    // The head is read once, before anything is deleted (§35 PP8): failing to read it leaves everything in place.
+    const known = await this.heads.getHead(dbId);
+    let sealed: Awaited<ReturnType<S5VectorStore['_readSealedById']>> | undefined;
+    let readError: unknown;
+    try {
+      sealed = await this._readSealedById(dbId, known);
+    } catch (error: any) {
+      if (!NOT_RETRYABLE.has(error?.code)) throw error;
+      // A manifest this identity cannot open, and no head of its own naming it: another identity's database on the same
+      // seed (1.39.24 review). Never deleted from here.
+      if (databaseName === undefined && !(await this.heads.getHeadAnyAge(dbId)) && !(await this._ownerMarkerOpens(dbId))) {
+        throw new SDKError(`Database ${dbId} is not this identity's (it does not open, and no head of this identity names it)`,
+          'RAG_DATABASE_NOT_OWNED', { dbId, retryable: false });
       }
-      // The legacy tree first, then the sealed one, each manifest last: an interrupted delete leaves the database
-      // still listed and deletable again — never a nameless directory (§16 V5), and never its stale legacy copy in
-      // the sealed one's place (§17 W7). A name that is not one path segment has no legacy directory (§19 Z2).
-      const hadLegacy = legacyLayout.isName(databaseName)
-        && await this.io.deleteTree(this._legacyDir(databaseName), { last: ['manifest.json'] });
-      const hadSealed = await this.io.deleteTree(sealedLayout.dir(dbId), { last: ['manifest'] });
-      if (!hadSealed && !hadLegacy) {
-        if (readError) throw readError;
-        if (!sealed || 'tombstone' in sealed) throw notFound(databaseName);
+      readError = error;
+    }
+    const name = databaseName ?? (sealed && 'manifest' in sealed ? sealed.manifest.name : undefined);
+    // The legacy tree first, then the sealed one, each manifest last: an interrupted delete leaves the database
+    // still listed and deletable again — never a nameless directory (§16 V5), and never its stale legacy copy in
+    // the sealed one's place (§17 W7). A name that is not one path segment has no legacy directory (§19 Z2).
+    const hadLegacy = name !== undefined && legacyLayout.isName(name)
+      && await this.io.deleteTree(this._legacyDir(name), { last: ['manifest.json'] });
+    // The marker goes last, once the manifest is gone: an interrupted delete leaves a database still offered and
+    // deletable again on any device (round 3). This instance writes the marker again at a re-create.
+    this.ownerMarked.delete(dbId);
+    const hadSealed = await this.io.deleteTree(sealedLayout.dir(dbId), { last: ['manifest', 'owner'] });
+    if (!hadSealed && !hadLegacy) {
+      if (readError) throw readError;
+      if (!sealed || 'tombstone' in sealed) {
+        throw name !== undefined ? notFound(name)
+          : new SDKError(`Database ${dbId} not found`, 'RAG_DATABASE_NOT_FOUND', { dbId, retryable: false });
       }
-      const previous = Math.max(
-        known?.revision ?? 0,
-        !sealed ? 0 : 'tombstone' in sealed ? sealed.tombstone.revision ?? 0 : sealed.manifest.revision ?? 0,
-      );
-      // The incarnation deleted — or, deleting again, the one the tombstone already names: a tombstone naming it is
-      // kept at any age, and never becomes one that is not (§21 BB13). With no sealed one to name (a legacy-only
-      // database, or a sealed manifest that cannot be read), the sentinel: kept at any age too, it covers every legacy
-      // manifest and never a sealed one (§29 JJ1).
-      const incarnation = (!sealed ? undefined : 'manifest' in sealed ? sealed.manifest.incarnation : sealed.tombstone.incarnation)
-        ?? LEGACY_INCARNATION;
-      // Deleted on S5: this tab forgets it even when its head cannot be recorded, then says the delete landed (§34 OO4).
-      const unrecorded = await this.heads.putHead(dbId, { revision: previous + 1, deleted: true, incarnation }).then(() => undefined, headNotRecorded);
-      this._forget(databaseName);
-      if (unrecorded) throw unrecorded;
-    });
+    }
+    const previous = Math.max(
+      known?.revision ?? 0,
+      !sealed ? 0 : 'tombstone' in sealed ? sealed.tombstone.revision ?? 0 : sealed.manifest.revision ?? 0,
+    );
+    // The incarnation deleted — or, deleting again, the one the tombstone already names: a tombstone naming it is
+    // kept at any age, and never becomes one that is not (§21 BB13). With no sealed one to name (a legacy-only
+    // database, or a sealed manifest that cannot be read), the sentinel: kept at any age too, it covers every legacy
+    // manifest and never a sealed one (§29 JJ1).
+    const incarnation = (!sealed ? undefined : 'manifest' in sealed ? sealed.manifest.incarnation : sealed.tombstone.incarnation)
+      ?? LEGACY_INCARNATION;
+    // Deleted on S5: this tab forgets it even when its head cannot be recorded, then says the delete landed (§34 OO4).
+    const unrecorded = await this.heads.putHead(dbId, { revision: previous + 1, deleted: true, incarnation }).then(() => undefined, headNotRecorded);
+    this.unreadable.delete(dbId);
+    if (name !== undefined) this._forget(name);
+    for (const cachedName of [...this.manifestCache.keys()]) if (this._dbId(cachedName) === dbId) this._forget(cachedName);
+    if (unrecorded) throw new SDKError(unrecorded.message, unrecorded.code, { ...unrecorded.details, result: name });
+    return name;
   }
 
   /**
@@ -680,6 +784,7 @@ export class S5VectorStore {
   private _resetDiscovery(): void {
     this.generation++;
     this.manifestCache.clear();
+    this.ownerMarked.clear();
     this.cachedAt.clear();
     this.initialized = false;
   }
@@ -713,7 +818,9 @@ export class S5VectorStore {
       }
       const all = await load();
       for (const vector of vectors) {
-        all.set(vector.id, vector);
+        // A copy: a commit rewrites a chunk whose objects are not the ones it read (D42), and a caller may pass back an
+        // object the store gave it, edited in place.
+        all.set(vector.id, { ...vector });
         const folderPath = vector.metadata?.folderPath;
         if (folderPath && !manifest.folderPaths.includes(folderPath)) manifest.folderPaths.push(folderPath);
       }
@@ -1019,6 +1126,33 @@ export class S5VectorStore {
     return legacyManifestFrom(await this.io.readPath(path), path);
   }
 
+  /**
+   * Write this identity's owner marker for `dbId` once per instance, before the manifest commit (D44): it is what shows
+   * the database is this identity's once its manifest no longer opens. Databases from before 1.39.24 get it at their
+   * next commit.
+   */
+  private async _markOwner(dbId: string): Promise<void> {
+    if (this.ownerMarked.has(dbId)) return;
+    const bytes = this.sealer.seal({ kind: 'cbor', value: { v: 1 } }, sealedLayout.ownerContext(dbId));
+    await this.io.write(sealedLayout.ownerPath(dbId), bytes);
+    this.ownerMarked.add(dbId);
+  }
+
+  /**
+   * Whether `dbId`'s owner marker opens under this identity's key: absent or unopenable → false. A read that fails
+   * now throws — that is "unknown", never "not this identity's" (round 3).
+   */
+  private async _ownerMarkerOpens(dbId: string): Promise<boolean> {
+    const read = await this.io.readPath(sealedLayout.ownerPath(dbId));
+    if (read.state !== 'sealed') return false;
+    try {
+      this.sealer.open(read.bytes, sealedLayout.ownerContext(dbId));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private _openManifest(dbId: string, bytes: Uint8Array): DatabaseManifest {
     return this.sealer.open(bytes, sealedLayout.manifestContext(dbId)).value as DatabaseManifest;
   }
@@ -1115,10 +1249,15 @@ export class S5VectorStore {
 
   /** All vectors of a loaded database. Any unreadable chunk throws; nothing partial is cached (I2). */
   private async _vectors(databaseName: string, loaded: Loaded): Promise<Map<string, Vector>> {
+    return (await this._snapshot(databaseName, loaded)).vectors;
+  }
+
+  /** The vectors and the chunk each came from (D42). The map and its objects are the cache's: never edit them. */
+  private async _snapshot(databaseName: string, loaded: Loaded): Promise<VectorSnapshot> {
     const { manifest, kind, dbId } = loaded;
     const signature = this._chunkSignature(kind, manifest);
     const cached = this.vectorCache.get(databaseName);
-    if (this.cacheEnabled && cached?.signature === signature) return cached.vectors;
+    if (this.cacheEnabled && cached?.signature === signature) return cached;
 
     const chunks = await Promise.all(manifest.chunks.map(async (c) => {
       try {
@@ -1134,11 +1273,21 @@ export class S5VectorStore {
     }));
 
     const vectors = new Map<string, Vector>();
-    for (const chunk of chunks) {
-      for (const vector of chunk?.vectors ?? []) vectors.set(vector.id, vector);
-    }
-    if (this.cacheEnabled) this.vectorCache.set(databaseName, { signature, vectors });
-    return vectors;
+    const owner = new Map<string, number>();
+    manifest.chunks.forEach((c, i) => {
+      for (const vector of chunks[i]?.vectors ?? []) {
+        vectors.set(vector.id, vector);
+        owner.set(vector.id, c.chunkId);
+      }
+    });
+    const layout: ChunkLayout = new Map();
+    manifest.chunks.forEach((c, i) => {
+      const listed = (chunks[i]?.vectors ?? []).map((v) => v.id);
+      layout.set(c.chunkId, { ids: [...new Set(listed.filter((id) => owner.get(id) === c.chunkId))], loaded: listed.length });
+    });
+    const snapshot = { vectors, layout };
+    if (this.cacheEnabled) this.vectorCache.set(databaseName, { signature, ...snapshot });
+    return snapshot;
   }
 
   /**
@@ -1213,10 +1362,20 @@ export class S5VectorStore {
       if (cur.kind === 'absent') throw notFound(databaseName);
       const manifest = structuredClone(cur.manifest);
       let vectors: Map<string, Vector> | undefined;
+      let base: VectorSnapshot | undefined;
+      // The working copy is a new map over the read objects: mutators replace an object, never edit it, so a chunk whose
+      // objects are all the ones it read is unchanged (D42).
+      const load = async () => {
+        if (!vectors) {
+          base = await this._snapshot(databaseName, cur);
+          vectors = new Map(base.vectors);
+        }
+        return vectors;
+      };
       try {
-        const result = await fn(manifest, async () => (vectors ??= new Map(await this._vectors(databaseName, cur))), dbId);
+        const result = await fn(manifest, load, dbId);
         const dropped = Object.keys(cur.manifest.bodies ?? {}).filter((key) => !manifest.bodies?.[key]);
-        await this._commitLocked(databaseName, dbId, cur.manifest.revision ?? 0, manifest, vectors, undefined, dropped).catch((error: any) => {
+        await this._commitLocked(databaseName, dbId, cur.manifest.revision ?? 0, manifest, vectors, undefined, dropped, base).catch((error: any) => {
           // A write that landed carries what it did — a count, … — so its caller can still say so (§37 RR2).
           if (error?.details?.committed === true) throw new SDKError(error.message, error.code, { ...error.details, result });
           throw error;
@@ -1230,9 +1389,43 @@ export class S5VectorStore {
   }
 
   /**
-   * Write the chunks (when given) and the manifest, then the head; then sweep the chunks past the new count and the
-   * `droppedBodies`. Caller holds the lock. Once the manifest is written the commit has landed: a head this tab cannot
-   * record still lets the cache take the manifest and the sweeps run, then throws `committed: true` (§34 OO4).
+   * Lay `vectors` out over the chunks `base` read (D42). A chunk keeps the ids it held that are still there, in their
+   * order; it is dirty when one went, or one's object is not the one read. New ids fill the last chunk, then new ones
+   * numbered past every chunk listed. An emptied chunk is dropped. Chunk numbers never shift: the seal context names
+   * them. With no chunks listed (a new database, a migration) every chunk is new.
+   */
+  private _layOut(entries: DatabaseManifest['chunks'], vectors: Map<string, Vector>, base?: VectorSnapshot) {
+    if (entries.length > 0 && !base) {
+      throw new SDKError('A vector commit over existing chunks needs the vectors it read', 'RAG_INTERNAL', { retryable: false });
+    }
+    const placed = new Set<string>();
+    const plan = entries.map((entry) => {
+      const was = base!.layout.get(entry.chunkId);
+      if (!was) throw new SDKError(`Chunk ${entry.chunkId} was not read`, 'RAG_INTERNAL', { chunkId: entry.chunkId, retryable: false });
+      const ids = was.ids.filter((id) => vectors.has(id));
+      for (const id of ids) placed.add(id);
+      const dirty = ids.length !== was.loaded || ids.some((id) => vectors.get(id) !== base!.vectors.get(id));
+      return { chunkId: entry.chunkId, ids, dirty, entry: entry as DatabaseManifest['chunks'][number] | undefined };
+    });
+    const fresh = [...vectors.keys()].filter((id) => !placed.has(id));
+    const last = plan[plan.length - 1];
+    if (last && fresh.length && last.ids.length < this.chunkSize) {
+      last.ids.push(...fresh.splice(0, this.chunkSize - last.ids.length));
+      last.dirty = true;
+    }
+    let next = entries.reduce((max, e) => Math.max(max, e.chunkId + 1), 0);
+    while (fresh.length) plan.push({ chunkId: next++, ids: fresh.splice(0, this.chunkSize), dirty: true, entry: undefined });
+    return plan.filter((c) => c.ids.length > 0);
+  }
+
+  /**
+   * Write the changed chunks (when vectors are given — D42) and the manifest, then the head; then sweep every chunk
+   * file the manifest does not name, and the `droppedBodies`. Caller holds the lock. Once the manifest is written the
+   * commit has landed: a head this tab cannot record still lets the cache take the manifest and the sweeps run, then
+   * throws `committed: true` (§34 OO4).
+   *
+   * `base`: what the caller read (its `vectors` is a working copy over those objects); required when the manifest
+   * already lists chunks.
    */
   private async _commitLocked(
     databaseName: string,
@@ -1242,24 +1435,27 @@ export class S5VectorStore {
     vectors?: Map<string, Vector>,
     beforeManifest?: (manifest: DatabaseManifest) => Promise<void>,
     droppedBodies: string[] = [],
+    base?: VectorSnapshot,
   ): Promise<void> {
+    let layout: ChunkLayout | undefined;
     if (vectors) {
-      const all = Array.from(vectors.values());
-      const chunks: VectorChunk[] = [];
-      for (let i = 0; i < all.length; i += this.chunkSize) {
-        chunks.push({ chunkId: chunks.length, vectors: all.slice(i, i + this.chunkSize) });
-      }
+      const plan = this._layOut(manifest.chunks, vectors, base);
       // Two at a time: each sealed chunk can be ~40 MB, and sealing all of them at once holds them all in memory.
-      manifest.chunks = await mapWithConcurrency(chunks, 2, async (chunk) => {
-        const bytes = this.sealer.seal({ kind: 'cbor', value: chunk }, sealedLayout.chunkContext(dbId, manifest.incarnation!, chunk.chunkId));
-        const cid = await this.io.write(sealedLayout.chunkPath(dbId, chunk.chunkId), bytes);
-        return { chunkId: chunk.chunkId, cid, vectorCount: chunk.vectors.length, sizeBytes: bytes.length, updatedAt: Date.now() };
-      });
+      const written = new Map(await mapWithConcurrency(plan.filter((c) => c.dirty), 2, async (c) => {
+        const chunk: VectorChunk = { chunkId: c.chunkId, vectors: c.ids.map((id) => vectors.get(id)!) };
+        const bytes = this.sealer.seal({ kind: 'cbor', value: chunk }, sealedLayout.chunkContext(dbId, manifest.incarnation!, c.chunkId));
+        const cid = await this.io.write(sealedLayout.chunkPath(dbId, c.chunkId), bytes);
+        return [c.chunkId, { chunkId: c.chunkId, cid, vectorCount: c.ids.length, sizeBytes: bytes.length, updatedAt: Date.now() }] as const;
+      }));
+      // An unchanged chunk keeps its entry exactly as it was: its file is not touched.
+      manifest.chunks = plan.map((c) => (c.dirty ? written.get(c.chunkId)! : c.entry!));
       manifest.chunkCount = manifest.chunks.length;
       manifest.vectorCount = vectors.size;
+      layout = new Map(plan.map((c) => [c.chunkId, { ids: c.ids, loaded: c.ids.length }]));
     }
     // The commit point is the manifest: a caller that must verify what it wrote does so first (§16 V7).
     if (beforeManifest) await beforeManifest(manifest);
+    await this._markOwner(dbId);
     manifest.revision = previousRevision + 1;
     manifest.updated = Date.now();
     const sealedManifest = this.sealer.seal({ kind: 'cbor', value: manifest }, sealedLayout.manifestContext(dbId));
@@ -1268,15 +1464,16 @@ export class S5VectorStore {
       .then(() => undefined, headNotRecorded);
 
     if (this.cacheEnabled) this._cacheManifest(databaseName, manifest, this.coherence.now()); // our own commit
-    if (vectors) {
+    if (vectors && layout) {
       const dir = sealedLayout.dir(dbId);
       if (this.cacheEnabled) {
-        this.vectorCache.set(databaseName, { signature: this._chunkSignature('sealed', manifest), vectors });
+        this.vectorCache.set(databaseName, { signature: this._chunkSignature('sealed', manifest), vectors, layout });
       }
+      // Numbers are not dense once a chunk is dropped: any chunk file the manifest does not name is a leftover (D42).
+      const named = new Set(manifest.chunks.map((c) => `chunk-${c.chunkId}`));
       const orphans = ((await this.io.list(dir).catch(() => undefined)) ?? [])
-        .map((e) => /^chunk-(\d+)$/.exec(e.name))
-        .filter((m): m is RegExpExecArray => m !== null && Number(m[1]) >= manifest.chunkCount)
-        .map((m) => m[0]);
+        .map((e) => e.name)
+        .filter((name) => /^chunk-\d+$/.test(name) && !named.has(name));
       if (orphans.length) await this._deleteOrphans(dir, orphans);
     }
     if (droppedBodies.length) await this._deleteOrphans(sealedLayout.documentsDir(dbId), droppedBodies);
@@ -1284,7 +1481,7 @@ export class S5VectorStore {
   }
 
   /**
-   * After a commit, files the manifest no longer references (chunks past the new count, removed bodies) are
+   * After a commit, files the manifest no longer references (chunks it does not name, removed bodies) are
    * sealed leftovers: remove them. Best effort — the commit already succeeded; the chunk sweep reruns at
    * every vector commit and deleteDatabase removes everything.
    */

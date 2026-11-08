@@ -172,6 +172,15 @@ export interface IVectorRAGManager {
   deleteDatabase(databaseName: string): Promise<void>;
 
   /**
+   * Sealed databases whose manifest never opens (`code` SEALED_OPEN_FAILED or RAG_MANIFEST_CORRUPT), as the last
+   * discovery found them. They are in no listing; `deleteDatabaseById` removes them.
+   */
+  listUnreadableDatabases(): Array<{ dbId: string; code: string }>;
+
+  /** Delete a sealed database by id (one `listUnreadableDatabases` names). RAG_DATABASE_ID_INVALID for a malformed id. */
+  deleteDatabaseById(dbId: string): Promise<void>;
+
+  /**
    * Re-read the databases from S5 (sees other tabs' and devices' changes). Replaces this manager's list only from
    * a complete one: RAG_DISCOVERY_INCOMPLETE leaves the list as it was. Returns the complete entries read, document
    * arrays included.

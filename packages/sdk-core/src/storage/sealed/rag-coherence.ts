@@ -58,6 +58,18 @@ export interface RagCoherence {
   getHeadAnyAge(dbId: string): Promise<RagHead | undefined>;
   putHead(dbId: string, head: RagHead): Promise<void>;
   listHeads(): Promise<Array<[string, RagHead]>>;
+  /** Remove one head of this scope (a root key in the root scope). */
+  deleteHead(dbId: string): Promise<void>;
+  /**
+   * Remove this scope's heads that no read returns any more, in one atomic step (a head another tab commits meanwhile
+   * is never removed): a head older than the trust window, or one with no commit time, unless it is a tombstone that
+   * recorded an incarnation — those never expire (§16 V3). Only keys directly in this scope: never another scope's,
+   * never a nested one's. The root scope refuses (RAG_HEAD_SCOPE_REQUIRED): its keys are log heads, which
+   * `getHeadAnyAge` reads at any age (S2), so an expired one is not garbage.
+   */
+  pruneHeads(keep?: ReadonlySet<string>): Promise<void>;
+  /** This scope's head keys at any age (direct keys only): what this identity has ever committed and not yet pruned. */
+  listHeadKeysAnyAge(): Promise<string[]>;
   /** The same locks, with head keys confined to `scope` (an identity tag): `listHeads` sees only that scope's. */
   scoped(scope: string): RagCoherence;
   /** The clock head ages are measured on — callers age their own caches on it too (§16 V2). */
@@ -113,17 +125,33 @@ export function headNotRecorded(error: SDKError): SDKError {
 
 interface Clock { now: () => number; trustMs: number }
 
+/** What a mechanism provides; `withScope` builds the rest on it. */
+interface HeadBase {
+  assertUsable(): Promise<void>;
+  withLock<T>(dbId: string, fn: () => Promise<T>): Promise<T>;
+  getHead(key: string): Promise<RagHead | undefined>;
+  putHead(key: string, head: RagHead): Promise<void>;
+  listHeads(): Promise<Array<[string, RagHead]>>;
+  deleteHead(key: string): Promise<void>;
+  /** Delete every head `doomed` selects, atomically with respect to any other head write. */
+  deleteWhere(doomed: (key: string, head: RagHead) => boolean): Promise<void>;
+}
+
+const scopeRequired = () =>
+  new SDKError('pruneHeads needs a scope: root keys are log heads, read at any age', 'RAG_HEAD_SCOPE_REQUIRED', { retryable: false });
+
 /**
  * Head keys prefixed by `scope/` (the root scope '' has none); locks unchanged. Heads are stamped with their
  * commit time and dropped on read once older than the trust window (T2).
  */
-function withScope(base: Omit<RagCoherence, 'scoped' | 'now' | 'trustMs' | 'getHeadAnyAge'>, scope: string, clock: Clock): RagCoherence {
+function withScope(base: HeadBase, scope: string, clock: Clock): RagCoherence {
   const prefix = scope === '' ? '' : `${scope}/`;
   // A tombstone that recorded an incarnation — the deleted one's, or the `legacy` sentinel (§29 JJ1) — never covers a
   // database re-created since, so it never goes stale (§16 V3 — legacy data under it is only ever purged); every other
   // head is trusted for the window only (§15 T2).
+  const keptForever = (head: RagHead) => head.deleted === true && head.incarnation !== undefined;
   const trusted = (head: RagHead | undefined) =>
-    head && head.at !== undefined && ((head.deleted && head.incarnation !== undefined) || clock.now() - head.at <= clock.trustMs) ? head : undefined;
+    head && head.at !== undefined && (keptForever(head) || clock.now() - head.at <= clock.trustMs) ? head : undefined;
   return {
     assertUsable: () => base.assertUsable(),
     withLock: (key, fn) => base.withLock(key, fn),
@@ -133,6 +161,21 @@ function withScope(base: Omit<RagCoherence, 'scoped' | 'now' | 'trustMs' | 'getH
     listHeads: async () => (await base.listHeads())
       .filter(([key, head]) => key.startsWith(prefix) && trusted(head))
       .map(([key, head]): [string, RagHead] => [key.slice(prefix.length), head]),
+    deleteHead: (key) => base.deleteHead(prefix + key),
+    // What is safe to delete (D44): exactly the heads `getHead` and `listHeads` already ignore — no read of this scope
+    // sees them, so removing them changes no answer. A tombstone that recorded an incarnation is kept at any age: it is
+    // what stops a deleted database (or the legacy copy under the `legacy` sentinel) from coming back (§16 V3, §29 JJ1).
+    // A head without `at` (written before heads were stamped) is never trusted, so it goes. The age is judged inside the
+    // deleting transaction, so a head another tab commits meanwhile is fresh and stays.
+    // `keep`: keys whose head is still evidence of something (an unreadable database this identity owns, 1.39.24).
+    pruneHeads: async (keep?: ReadonlySet<string>) => {
+      if (prefix === '') throw scopeRequired();
+      await base.deleteWhere((key, head) => key.startsWith(prefix) && !key.slice(prefix.length).includes('/')
+        && !keep?.has(key.slice(prefix.length)) && !keptForever(head) && !trusted(head));
+    },
+    listHeadKeysAnyAge: async () => (await base.listHeads())
+      .filter(([key]) => key.startsWith(prefix) && !key.slice(prefix.length).includes('/'))
+      .map(([key]) => key.slice(prefix.length)),
     scoped: (inner) => withScope(base, prefix + inner, clock),
     now: () => clock.now(),
     trustMs: () => clock.trustMs,
@@ -182,6 +225,11 @@ export function createRagCoherence(opts: RagCoherenceOptions = {}): RagCoherence
       async getHead(dbId) { return processHeads.get(dbId); },
       async putHead(dbId, head) { processHeads.set(dbId, { ...head }); },
       async listHeads() { return [...processHeads]; },
+      async deleteHead(dbId) { processHeads.delete(dbId); },
+      async deleteWhere(doomed) {
+        // Synchronous: no other head write interleaves.
+        for (const [key, head] of [...processHeads]) if (doomed(key, head)) processHeads.delete(key);
+      },
     }, '', clock);
   }
 
@@ -266,6 +314,27 @@ export function createRagCoherence(opts: RagCoherenceOptions = {}): RagCoherence
       const { os } = await store('readonly');
       const [keys, values] = await guarded(Promise.all([idbRequest(os.getAllKeys()), idbRequest(os.getAll())]));
       return keys.map((k, i) => [String(k), values[i] as RagHead]);
+    },
+    async deleteHead(dbId) {
+      const { os, done } = await store('readwrite');
+      os.delete(dbId);
+      await done;
+    },
+    async deleteWhere(doomed) {
+      // One readwrite transaction: IndexedDB serialises it with every other tab's putHead, so a head is judged and
+      // deleted as it is at that moment — never one committed after it was read.
+      const { os, done } = await store('readwrite');
+      await guarded(new Promise<void>((resolve, reject) => {
+        const req = os.openCursor();
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          const cursor = req.result;
+          if (!cursor) return resolve();
+          if (doomed(String(cursor.key), cursor.value as RagHead)) cursor.delete();
+          cursor.continue();
+        };
+      }));
+      await done;
     },
   }, '', clock);
 }
