@@ -166,7 +166,9 @@ export class HostSelectionService implements IHostSelectionService {
     modelId: string,
     mode: HostSelectionMode,
     preferredHostAddress?: string,
-    excludeAddresses: readonly string[] = []
+    excludeAddresses: readonly string[] = [],
+    /** Only hosts this accepts are candidates — applied before the ranking window (a storage region's hosts, 1.39.27). */
+    allow?: (host: HostInfo) => boolean
   ): Promise<HostInfo | null> {
     const excluded = new Set(excludeAddresses.map((a) => a.toLowerCase()));
     if (!this.hostManager) {
@@ -184,6 +186,7 @@ export class HostSelectionService implements IHostSelectionService {
       if (!host || !host.isActive) {
         throw new Error(`Preferred host ${preferredHostAddress} is not available`);
       }
+      if (allow && !allow(host)) return null;
 
       const supportsModel = await this.hostManager.hostSupportsModel(
         preferredHostAddress,
@@ -200,7 +203,7 @@ export class HostSelectionService implements IHostSelectionService {
 
     // Other modes - get ranked hosts and use weighted random
     // Excluded hosts must not use up the ranking window: widen it by their number, then drop them.
-    const rankedHosts = (await this.getRankedHostsForModel(modelId, mode, 10 + excluded.size)).filter((r) => !excluded.has(r.host.address.toLowerCase()));
+    const rankedHosts = (await this.getRankedHostsForModel(modelId, mode, 10 + excluded.size, allow)).filter((r) => !excluded.has(r.host.address.toLowerCase()));
     if (rankedHosts.length === 0) {
       return null;
     }
@@ -219,13 +222,15 @@ export class HostSelectionService implements IHostSelectionService {
   async getRankedHostsForModel(
     modelId: string,
     mode: HostSelectionMode,
-    limit: number = 10
+    limit: number = 10,
+    allow?: (host: HostInfo) => boolean
   ): Promise<RankedHost[]> {
     if (!this.hostManager) {
       throw new Error('HostManager not set - call setHostManager() first');
     }
 
-    const hosts = await this.hostManager.findHostsForModel(modelId);
+    const found = await this.hostManager.findHostsForModel(modelId);
+    const hosts = allow ? found.filter(allow) : found;
     console.log(`[HostSelectionService] Scoring ${hosts.length} hosts, first host:`, hosts[0] ? { address: hosts[0].address, stake: hosts[0].stake, stakeType: typeof hosts[0].stake } : 'none');
 
     const ranked: RankedHost[] = hosts.map((host) => ({

@@ -206,6 +206,11 @@ describe('SDK_CAPABILITIES (D22)', () => {
       sealedSessionGroups: true,
       incrementalRagChunks: true,
       unreadableDatabaseCleanup: true,
+      sessionGroupMemoryFirst: true,
+      sessionGroupChatRevision: true,
+      sessionGroupDeleteRestores: true,
+      storageRegion: true,
+      closeUnsubmittedSession: true,
     });
   });
 });

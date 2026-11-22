@@ -38,6 +38,7 @@ import { createRagCoherence, headNotRecorded, type RagHead } from '../storage/se
 import { logHeadKeyOf, isDense } from '../storage/sealed/rag-layout';
 import { reportProgress, type MigrationProgress } from '../storage/sealed/rag-migration';
 import { assertSupportedS5js, withS5Guards } from '../storage/s5-guards';
+import { STORAGE_REGIONS, STORAGE_REGION_REFUSALS, storageRegionEntry, type StorageRegionEntry, type BuiltStorageRegion } from '../config/storage-regions';
 
 /** Result of sealing the legacy plaintext conversation logs. */
 export interface LogMigrationReport {
@@ -197,7 +198,7 @@ export const STORAGE_MANAGER_SYNC_MEMBERS = [
 ] as const satisfies ReadonlyArray<keyof StorageManager>;
 
 export class StorageManager implements IStorageManager {
-  static readonly DEFAULT_S5_PORTAL = 'wss://z2DcjTLqfj6PTMsDbFfgtuHtYmrKeibFTkvqY8QZeyR3YmE@s5.platformlessai.ai/s5/p2p';
+  static readonly DEFAULT_S5_PORTAL = STORAGE_REGIONS.global.peer;
   static readonly REGISTRY_PREFIX = 'fabstir-llm';
   static readonly CONVERSATION_PATH = 'home/conversations';
   static readonly SESSIONS_PATH = 'home/sessions';
@@ -279,17 +280,35 @@ export class StorageManager implements IStorageManager {
   // When set, registration uses backend proxy to keep master token server-side
   private authApiUrl?: string;
 
+  /** The region's table entry and key, when regional. */
+  private readonly region?: StorageRegionEntry & { key: string };
+
   constructor(
     private s5PortalUrl: string = StorageManager.DEFAULT_S5_PORTAL,
     masterTokenOrAuthApiUrl?: string,
-    isAuthApiUrl: boolean = false
+    isAuthApiUrl: boolean = false,
+    /** A storage region other than 'global' (1.39.27): its one peer, its portal, registration through the auth API only. */
+    private readonly regionKey?: Exclude<BuiltStorageRegion, 'global'>
   ) {
+    this.region = regionKey ? { key: regionKey, ...storageRegionEntry(regionKey) } : undefined;
     this.folderHierarchy = new FolderHierarchy();
     if (isAuthApiUrl) {
       this.authApiUrl = masterTokenOrAuthApiUrl;
     } else {
       this.masterToken = masterTokenOrAuthApiUrl;
     }
+  }
+
+  /** In a region (R3, R7): only its own peer, and registration only through the auth API — a master token or no route
+   *  would register on (or try) a portal the region does not name. The SDK refuses these at construction too. */
+  private refuseRegionalConflicts(): void {
+    if (!this.region) return;
+    const refuse = (field: string, why: string) => {
+      throw new SDKError(`storage region '${this.region!.key}': ${why}`, 'STORAGE_REGION_CONFIG_REFUSED', { field, region: this.region!.key, retryable: false });
+    };
+    if (this.s5PortalUrl && this.s5PortalUrl !== this.region.peer) refuse('portalUrl', 'the S5 peer is not this region\'s');
+    if (this.masterToken !== undefined) refuse('masterToken', 'a master token is never used in a region');
+    if (!this.authApiUrl) refuse('authApiUrl', 'registration needs the auth API (s5Config.authApiUrl)');
   }
 
   /**
@@ -432,6 +451,7 @@ export class StorageManager implements IStorageManager {
    */
   async initialize(seed: string, userAddress?: string): Promise<void> {
     this.ensureNotDisposed();
+    this.refuseRegionalConflicts(); // before S5 starts: no connection, no registration anywhere (R7)
 
     // Skip S5 initialization if explicitly disabled (e.g., for hosts)
     if (process.env.SKIP_S5_STORAGE === 'true') {
@@ -467,8 +487,8 @@ export class StorageManager implements IStorageManager {
       }
 
 
-      // Use the correct portal URL or empty array to skip default peers
-      const peersToUse = this.s5PortalUrl ? [this.s5PortalUrl] : [];
+      // Use the correct portal URL or empty array to skip default peers. In a region: exactly its one peer, always.
+      const peersToUse = this.region ? [this.region.peer] : this.s5PortalUrl ? [this.s5PortalUrl] : [];
 
       // Create S5 instance with timeout protection
       // skipIdentityLoad: true prevents S5 from loading stale cached identity
@@ -511,13 +531,12 @@ export class StorageManager implements IStorageManager {
         // This is explicitly configured, so errors should NOT be silently caught
         console.log('[StorageManager] Using secure backend registration via:', this.authApiUrl);
         try {
-          await registerS5WithBackend(s5Instance, {
-            backendUrl: this.authApiUrl,
-            portalHost: 's5.platformlessai.ai',
-            portalUrl: 'https://s5.platformlessai.ai',
-          });
+          // The region's portal, and its key for the backend to choose the region's token; Global sends no region (R8).
+          const portal = this.region ?? STORAGE_REGIONS.global;
+          await registerS5WithBackend(s5Instance, { backendUrl: this.authApiUrl, portalHost: portal.portalHost, portalUrl: portal.portalUrl, region: this.region?.key });
           console.log('[StorageManager] Secure backend registration complete');
         } catch (error: any) {
+          if (STORAGE_REGION_REFUSALS.has(error?.code)) throw error;   // its own code, to the sign-in (1.39.28)
           console.error('[StorageManager] Secure backend registration FAILED:', error.message);
           throw new SDKError(
             `Secure S5 registration failed: ${error.message}. Check that backend API routes are configured at ${this.authApiUrl}`,
@@ -529,7 +548,7 @@ export class StorageManager implements IStorageManager {
         // Direct registration with master token (for server-side apps or testing)
         try {
           console.log('[StorageManager] Using master token for registration');
-          await s5Instance.registerOnNewPortal('https://s5.platformlessai.ai', this.masterToken);
+          await s5Instance.registerOnNewPortal(STORAGE_REGIONS.global.portalUrl, this.masterToken);
           console.log('[StorageManager] Master token registration complete');
         } catch (error: any) {
           console.warn('[StorageManager] Master token registration failed:', error.message);
@@ -538,7 +557,7 @@ export class StorageManager implements IStorageManager {
       } else {
         // Try without token (works for returning users / login)
         try {
-          await s5Instance.registerOnNewPortal('https://s5.platformlessai.ai');
+          await s5Instance.registerOnNewPortal(STORAGE_REGIONS.global.portalUrl);
           console.log('[StorageManager] Portal registration complete (no token)');
         } catch (error: any) {
           console.warn('[StorageManager] Portal registration skipped:', error.message);
@@ -554,6 +573,7 @@ export class StorageManager implements IStorageManager {
       this.setupAutoReconnect();
     } catch (error: any) {
       if (error?.code === 'S5JS_UNSUPPORTED_VERSION') throw error; // fatal, and already says why (§19 Z1)
+      if (STORAGE_REGION_REFUSALS.has(error?.code)) throw error;   // a region refusal keeps its code (1.39.28)
       // Capture full error details even if message is empty
       const errorMessage = error?.message || error?.toString?.() || JSON.stringify(error) || 'Unknown error';
       const errorDetails = {

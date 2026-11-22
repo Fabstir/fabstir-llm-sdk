@@ -7,6 +7,7 @@ import { normalizeNodeHttpUrl } from '../utils/validation';
 import { MIN_PROOF_TIMEOUT, MAX_PROOF_TIMEOUT } from '../contracts/JobMarketplace';
 import { LtxError } from '../errors/ltx-errors';
 import type { LtxJob, LtxPriceEstimate, LtxBundle, LtxBundleMetadata, LtxSubmitOptions, LtxResult, LtxVerification } from '../types/ltx.types';
+import { HOST_GATE_CODES } from '../utils/region-policy';
 
 type LtxEntry = LtxBundle['templates'][number];
 
@@ -209,7 +210,7 @@ export class LtxManager {
     if (!this.sessionManager || !this.paymentManager) {
       throw new LtxError('SessionManager/PaymentManager not available for createLtxSession', 'LTX_PREVALIDATION_FAILED');
     }
-    this.assertConfidentialHost(hostAddress);   // before any estimate or deposit (1.39.19)
+    this.assertConfidentialHost(hostAddress, undefined, options?.endpoint);   // before any estimate or deposit (1.39.19, 1.39.27)
     const proofWindow = options?.proofTimeoutWindow;
     if (proofWindow !== undefined && !(Number.isInteger(proofWindow) && proofWindow >= MIN_PROOF_TIMEOUT && proofWindow <= MAX_PROOF_TIMEOUT)) {
       throw new LtxError(
@@ -283,7 +284,7 @@ export class LtxManager {
         'LTX_PREVALIDATION_FAILED', existing,
       );
     }
-    this.assertConfidentialHost(hostAddress, existing);   // before the session is adopted (1.39.19)
+    this.assertConfidentialHost(hostAddress, existing, options.endpoint);   // before the session is adopted (1.39.19, 1.39.27)
     // Q8: ONE nodeHttpUrl must serve both postSessionAuth and this call — the normalisation and
     // the http(s)-only rule live in normalizeNodeHttpUrl (shared with the training path).
     const endpoint = normalizeNodeHttpUrl(options.endpoint);
@@ -328,12 +329,13 @@ export class LtxManager {
   }
 
   /** LTX jobs put keys in the host's hands: only a confidentialHosts host (1.39.19). The refusal as an LtxError. */
-  private assertConfidentialHost(hostAddress: string, ids?: { sessionId: bigint; jobId: bigint }): void {
+  private assertConfidentialHost(hostAddress: string, ids?: { sessionId: bigint; jobId: bigint }, endpoint?: string): void {
     try {
+      this.sessionManager.assertRegionHost({ address: hostAddress, endpoint, job: 'ltx' });   // the storage region's hosts (1.39.27)
       this.sessionManager.assertConfidentialHost(hostAddress, 'ltx');
     } catch (err: any) {
-      if (err?.code !== 'CONFIDENTIAL_HOST_NOT_ALLOWED') throw err;
-      throw new LtxError(err.message, 'CONFIDENTIAL_HOST_NOT_ALLOWED', { ...err.details, ...ids });
+      if (!HOST_GATE_CODES.has(err?.code)) throw err;
+      throw new LtxError(err.message, err.code, { ...err.details, ...ids });
     }
   }
 
@@ -393,8 +395,8 @@ export class LtxManager {
       );
       // The SDK's one-job-per-session refusal keeps its own code and says which job holds the session (1.39.14).
       if (err?.code === 'SESSION_JOB_IN_FLIGHT') throw LtxManager.jobInFlight(err, { sessionId, jobId });
-      if (err?.code === 'CONFIDENTIAL_HOST_NOT_ALLOWED') {   // raised at the submit choke point (1.39.19)
-        throw new LtxError(err.message, 'CONFIDENTIAL_HOST_NOT_ALLOWED', { ...err.details, sessionId, jobId });
+      if (HOST_GATE_CODES.has(err?.code)) {   // the submit choke point (1.39.19, 1.39.27)
+        throw new LtxError(err.message, err.code, { ...err.details, sessionId, jobId });
       }
       // The node's SESSION_SETTLED refusal (8.63.0) arrives from ltx-ws as GENERATION_FAILED with its node code: the
       // session takes no new work, so it is SESSION_NOT_ACTIVE, not a failed render (1.39.22 N2).

@@ -25,6 +25,7 @@ import { SDKError as TypedSDKError } from '../types';
 import { ModelManager } from './ModelManager';
 import { HostManager } from './HostManager';
 import { ContractManager } from '../contracts/ContractManager';
+import { RegionPolicy } from '../utils/region-policy';
 
 export class ClientManager {
   private modelManager: ModelManager;
@@ -33,6 +34,13 @@ export class ClientManager {
   private jobMarketplace?: ethers.Contract;
   private signer?: ethers.Signer;
   private initialized = false;
+  /** The storage region's host gate (1.39.27): Global (unrestricted) until the SDK installs its region's. */
+  private regionPolicy: RegionPolicy = new RegionPolicy('global');
+
+  /** The storage region's host gate (1.39.27), installed by FabstirSDKCore for its region. */
+  setRegionPolicy(policy: RegionPolicy): void {
+    this.regionPolicy = policy;
+  }
 
   constructor(
     modelManager: ModelManager,
@@ -221,6 +229,9 @@ export class ClientManager {
     if (!this.initialized || !this.signer) {
       throw new SDKError('ClientManager not initialized', 'CLIENT_NOT_INITIALIZED');
     }
+    // The prompt goes on chain to the host: only a storage region's host (1.39.27).
+    this.regionPolicy.assertOpen('inference');
+    if (options?.hostAddress) this.regionPolicy.assertHost({ address: options.hostAddress, job: 'inference' });
 
     // Get model ID
     const modelId = await this.modelManager.getModelId(modelSpec.repo, modelSpec.file);
@@ -241,6 +252,7 @@ export class ClientManager {
       }
       hostAddress = host.address;
     }
+    this.regionPolicy.assertHost({ address: hostAddress, job: 'inference' });   // 1.39.27
 
     // Verify host supports the model
     const hostSupportsModel = await this.hostManager.hostSupportsModel(hostAddress, modelId);
@@ -454,6 +466,7 @@ export class ClientManager {
    * Get list of chains a node supports
    */
   async getNodeChains(nodeUrl: string): Promise<number[]> {
+    this.regionPolicy.assertHost({ endpoint: nodeUrl, job: 'probe' });   // 1.39.27
     try {
       const response = await fetch(`${nodeUrl}/v1/chains`);
       if (!response.ok) {
@@ -474,6 +487,7 @@ export class ClientManager {
    * Check node health with chain validation
    */
   async checkNodeHealth(nodeUrl: string, chainId?: number): Promise<boolean> {
+    this.regionPolicy.assertHost({ endpoint: nodeUrl, job: 'probe' });   // 1.39.27
     try {
       const response = await fetch(`${nodeUrl}/v1/health`);
       if (!response.ok) {

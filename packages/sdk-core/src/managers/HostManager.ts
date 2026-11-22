@@ -34,6 +34,7 @@ import { getWebSearchCapabilitiesFromHost } from '../utils/host-web-search-capab
 import type { WebSearchCapabilities } from '../types/web-search.types';
 import { getImageGenerationCapabilitiesFromHost } from '../utils/host-image-generation-capabilities';
 import type { ImageGenerationCapabilities } from '../types/image-generation.types';
+import { RegionPolicy } from '../utils/region-policy';
 
 /**
  * Pricing constants for host registration - DUAL PRICING
@@ -78,7 +79,17 @@ export interface HostRegistrationWithModels {
   stableTokenAddress?: string;       // Optional USDC address for setModelTokenPricing (auto-resolved from ContractManager if omitted)
 }
 
+/** What a host offers when the SDK will not search there (a storage region, 1.39.27). */
+const NO_WEB_SEARCH: WebSearchCapabilities = {
+  supportsWebSearch: false, supportsInferenceSearch: false, supportsStreamingSearch: false, supportsWebSocketSearch: false,
+  provider: null, rateLimitPerMinute: 0,
+};
+
 export class HostManager {
+  /** The storage region's host gate (1.39.27): Global (unrestricted) until the SDK installs its region's. */
+  private regionPolicy: RegionPolicy = new RegionPolicy('global');
+  /** The SessionManager's endpoint transform: its output for a listed origin is a listed host too (1.39.27). */
+  private regionTransform?: (url: string) => string;
   private contractManager: ContractManager;
   private modelManager: ModelManager;
   private nodeRegistry?: Contract;
@@ -1143,6 +1154,7 @@ export class HostManager {
         'NO_API_URL'
       );
     }
+    this.regionPolicy.assertHost({ address: hostAddress, endpoint: apiUrl, job: 'probe' }, this.regionTransform);   // the challenge is a host contact (1.39.27)
 
     // Request signature-based recovery
     const pubKey = await requestHostPublicKey(apiUrl, hostAddress);
@@ -1172,6 +1184,10 @@ export class HostManager {
     hostAddress: string,
     apiUrl?: string
   ): Promise<WebSearchCapabilities> {
+    // In a storage region web search is refused (1.39.27): no host offers it there, and none is asked.
+    if (this.regionPolicy.regional) {
+      return { ...NO_WEB_SEARCH };
+    }
     // Get API URL from parameter or lookup from contract
     let hostApiUrl = apiUrl;
     if (!hostApiUrl) {
@@ -1199,6 +1215,16 @@ export class HostManager {
     }
 
     return getWebSearchCapabilitiesFromHost(hostApiUrl);
+  }
+
+  /** The storage region's host gate (1.39.27), installed by FabstirSDKCore for its region. */
+  setRegionPolicy(policy: RegionPolicy): void {
+    this.regionPolicy = policy;
+  }
+
+  /** Set by the SessionManager from its endpoint transform (1.39.27). */
+  setRegionTransform(transform?: (url: string) => string): void {
+    this.regionTransform = transform;
   }
 
   /**
@@ -1242,6 +1268,7 @@ export class HostManager {
       };
     }
 
+    this.regionPolicy.assertHost({ address: hostAddress, endpoint: hostApiUrl, job: 'probe' }, this.regionTransform);   // 1.39.27
     return getImageGenerationCapabilitiesFromHost(hostApiUrl);
   }
 

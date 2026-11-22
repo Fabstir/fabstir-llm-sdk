@@ -56,7 +56,7 @@ function manager(b = bundle()) {
   const getByCID = vi.fn(async () => b);
   const getHostInfo = vi.fn(async () => ({ metadata: { ltx: meta(b) } }));
   const m = new LtxManager({
-    sessionManager: { assertConfidentialHost: () => {},  resolveModelPricePerToken, startSession, registerExternalSession, submitLtx },
+    sessionManager: { assertConfidentialHost: () => {}, assertRegionHost: () => {},  resolveModelPricePerToken, startSession, registerExternalSession, submitLtx },
     storageManager: { getByCID }, paymentManager: { getTokenMinDeposit: vi.fn(async () => 1n) },
     hostManager: { getHostInfo }, usdcAddress: '0xabc', chainId: 84532,
   } as any);

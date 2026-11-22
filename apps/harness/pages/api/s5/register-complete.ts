@@ -14,12 +14,11 @@
  */
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-
-const S5_PORTAL_URL = 'https://s5.platformlessai.ai';
-const S5_MASTER_TOKEN = process.env.S5_MASTER_TOKEN;
+import { regionPortal, regionEcho } from '../../../lib/s5-region-portals';
 
 interface CompleteResponse {
   authToken?: string;
+  region?: string;
   error?: string;
 }
 
@@ -32,11 +31,14 @@ export default async function handler(
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Verify master token is configured
-  if (!S5_MASTER_TOKEN) {
-    console.error('[S5 Register Complete] S5_MASTER_TOKEN not configured');
-    return res.status(500).json({ error: 'Server configuration error' });
+  // The region's portal and token (sdk-core 1.39.27): no region = Global; a region without a token is refused
+  const portal = regionPortal(req.body?.region);
+  if (!portal.ok) {
+    console.error(`[S5 Register Complete] ${portal.error}`);
+    return res.status(portal.status).json({ error: portal.error });
   }
+  const S5_PORTAL_URL = portal.portalUrl;
+  const S5_MASTER_TOKEN = portal.token;
   console.log(`[S5 Register Complete] Master token present: ${S5_MASTER_TOKEN?.substring(0, 8)}...${S5_MASTER_TOKEN?.slice(-4)}`);
 
   const { pubKey, response, signature, label } = req.body;
@@ -129,7 +131,7 @@ export default async function handler(
     console.log('[S5 Register Complete] Registration successful, authToken received');
 
     // Return user's auth token for subsequent S5 operations
-    return res.status(200).json({ authToken });
+    return res.status(200).json({ authToken, ...regionEcho(req.body?.region) });
   } catch (error: any) {
     console.error('[S5 Register Complete] Error:', error.message);
     return res.status(500).json({ error: 'Registration completion failed' });

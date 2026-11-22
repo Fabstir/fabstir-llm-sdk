@@ -38,7 +38,13 @@ export interface ChatSession {
     [key: string]: any;
   };
   created: number;
+  /** Last activity (epoch ms). Yours to set; `addMessage` moves it. Order your chat list by it. */
   updated: number;
+  /**
+   * Set by SessionGroupManager on every change it makes to the chat (1.39.26, epoch ms) — do not set it. It decides
+   * which copy of a chat is later when another tab's copy of the group is adopted; copy it with the chat (`{ ...chat }`).
+   */
+  revision?: number;
 }
 
 /**

@@ -144,6 +144,10 @@ export async function runCLI(argv: string[]): Promise<void> {
   const chain = ChainRegistry.getChain(chainId as ChainId);
   const rpcUrl = process.env.FABSTIR_RPC_URL ?? chain.rpcUrl;
 
+  // A storage region (sdk-core 1.39.27): its storage registers through the app backend (FABSTIR_S5_AUTH_API), and a
+  // delegate signer needs the base seed (FABSTIR_S5_SEED) — a region never uses the address-derived identity.
+  const storageRegion = process.env.FABSTIR_STORAGE_REGION;
+  const regional = storageRegion !== undefined && storageRegion !== 'global';
   const sdk = new FabstirSDKCore({
     chainId,
     rpcUrl,
@@ -151,6 +155,8 @@ export async function runCLI(argv: string[]): Promise<void> {
     // Delegate/coding-agent daemon proxies chat — no S5 persistence/RAG needed.
     // (orchestrate/A2A paths keep S5 for conversation/RAG features.)
     skipS5: !!payer,
+    ...(storageRegion !== undefined ? { storageRegion } : {}),
+    ...(regional ? { s5Config: { authApiUrl: process.env.FABSTIR_S5_AUTH_API, seedPhrase: process.env.FABSTIR_S5_SEED } } : {}),
   } as any);
 
   // Build the delegate (legacy EOA or, on FABSTIR_GASLESS=1, a SimpleAccount AASigner)

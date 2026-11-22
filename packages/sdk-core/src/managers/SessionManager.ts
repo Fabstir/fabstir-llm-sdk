@@ -51,6 +51,7 @@ import { WebSearchError } from '../errors/web-search-errors';
 import { ContextLimitError } from '../errors/context-errors';
 import { bytesToHex } from '../crypto/utilities';
 import { resolveWebSearch } from '../utils/search-query-resolver';
+import { RegionPolicy, webSearchRefusedInRegion, HOST_GATE_CODES } from '../utils/region-policy';
 import { RAG_CONTEXT_START_MARKER, RAG_CONTEXT_END_MARKER } from '../utils/rag-prompt';
 import { analyzePromptForImageIntent } from '../utils/image-intent-analyzer';
 import { recoverFromCheckpointsFlow, recoverFromCheckpointsFlowWithHttp } from '../utils/checkpoint-recovery';
@@ -163,7 +164,8 @@ function isTransientFetchFailure(err: any): boolean {
 }
 
 /** A job that rides `submitOverTransport`; one per session at a time (1.39.14). */
-type SessionJobKind = 'transcode' | 'ltx' | 'training';
+/** 'close': closeUnsubmittedSession's session start holds the slot too, so a job's key is never replaced (1.39.29). */
+type SessionJobKind = 'transcode' | 'ltx' | 'training' | 'close';
 
 function fundedSetupFailed(sessionId: unknown, jobId: unknown, stage: 'registry' | 'conversation-log' | 'session-group-link', cause: any): SDKError {
   // A step that landed, only its head not recorded (§34 OO4), completed the setup: said at the top — use the session
@@ -404,6 +406,8 @@ export class SessionManager implements ISessionManager {
   private readonly dedicatedSettledFrameListener = (data: any) => this.onSettledFrame(data, false);
   /** Hosts trusted with confidential jobs, lower-cased; undefined = none configured, so none allowed (1.39.19). */
   private confidentialHosts?: Set<string>;
+  /** The storage region's host gate (1.39.27); Global (unrestricted) until the SDK installs its region's. */
+  private regionPolicy: RegionPolicy = new RegionPolicy('global');
   /** Per session id: whether its node reports `session-job-completion` (1.39.15 H1). Only definitive answers are kept. */
   private jobCompletionNodes: Map<string, boolean> = new Map();
   /** When sharedConnectionHoldsKey's probe last failed, per session (round 3 m3). */
@@ -835,6 +839,7 @@ export class SessionManager implements ISessionManager {
    */
   setHostManager(hostManager: HostManager): void {
     this.hostManager = hostManager;
+    this.shareRegionTransform();
   }
 
   /**
@@ -896,6 +901,12 @@ export class SessionManager implements ISessionManager {
    */
   setEndpointTransform(transform: (url: string) => string): void {
     this.endpointTransform = transform;
+    this.shareRegionTransform();
+  }
+
+  /** The HostManager's region gate accepts the URLs this SessionManager reaches hosts at (1.39.27). */
+  private shareRegionTransform(): void {
+    (this.hostManager as { setRegionTransform?: (t?: (url: string) => string) => void } | undefined)?.setRegionTransform?.(this.endpointTransform);
   }
 
   /**
@@ -945,6 +956,10 @@ export class SessionManager implements ISessionManager {
       throw new UnsupportedChainError(config.chainId, ChainRegistry.getSupportedChains());
     }
 
+    // In a region (1.39.27): a session forcing web search on is refused, and with no host listed nothing is chosen.
+    if (config.webSearch) this.refuseWebSearchInRegion('session webSearch.forceEnabled', config.webSearch);
+    this.regionPolicy.assertOpen('session');
+
     // Extract parameters for backward compatibility
     const model = config.modelId || config.model;
     let provider = config.host || config.provider;
@@ -953,7 +968,9 @@ export class SessionManager implements ISessionManager {
     // Host and endpoint are settled BEFORE any funding (1.39.10). A host the SDK chose (AUTO) or whose endpoint it looked
     // up (an explicit host with no endpoint) must answer GET /v1/health first; an endpoint the caller supplied is theirs.
     if (provider && !endpoint) {
+      this.assertRegionHost({ address: provider, job: 'session' });             // before the registry read
       endpoint = await this.registryEndpoint(provider, convertModelToBytes32(model));
+      this.assertRegionHost({ address: provider, endpoint, job: 'session' });   // before the health probe
       if ((await this._checkHostHealth(endpoint)).status === 'unreachable') {
         throw new SDKError(`Host ${provider} did not answer at ${endpoint}/v1/health — no session opened`, 'HOST_UNREACHABLE', { host: provider, endpoint });
       }
@@ -969,12 +986,27 @@ export class SessionManager implements ISessionManager {
 
       // Select a host that answers: one that does not is excluded and selection runs again over the rest.
       const unreachable: { host: string; endpoint: string }[] = [];
+      // In a region only its hosts are candidates (filtered before ranking) and none outside is contacted (1.39.27).
+      const inRegion = (h: { address: string; apiUrl?: string | null }) =>
+        this.regionPolicy.allows({ address: h.address, endpoint: endpoint ?? h.apiUrl ?? undefined }, this.endpointTransform);
+      const allow = this.regionPolicy.restricted ? inRegion : undefined;
+      const outsideRegion: string[] = [];   // a selection service that ignored `allow`: skipped all the same
       for (;;) {
-        const excluded = unreachable.map((u) => u.host);
-        const selectedHost = await this.hostSelectionService.selectHostForModel(modelIdForSelection, mode, preferredHostAddress, excluded);
+        const excluded = [...unreachable.map((u) => u.host), ...outsideRegion];
+        const selectedHost = allow   // Global: called exactly as before 1.39.27
+          ? await this.hostSelectionService.selectHostForModel(modelIdForSelection, mode, preferredHostAddress, excluded, allow)
+          : await this.hostSelectionService.selectHostForModel(modelIdForSelection, mode, preferredHostAddress, excluded);
         if (!selectedHost || excluded.some((a) => a.toLowerCase() === selectedHost.address.toLowerCase())) {
-          const skipped = unreachable.length ? `; did not answer: ${excluded.join(', ')}` : '';
+          if (this.regionPolicy.restricted && unreachable.length === 0) {
+            throw new SDKError(`storageRegion '${this.regionPolicy.region}': no host on this region's list serves model "${model}" — no session opened`,
+              'REGION_HOST_NOT_ALLOWED', { region: this.regionPolicy.region, reason: 'HOST_NOT_LISTED', job: 'session', retryable: false });
+          }
+          const skipped = unreachable.length ? `; did not answer: ${unreachable.map((u) => u.host).join(', ')}` : '';
           throw new SDKError(`No hosts available for model "${model}" (hash: ${modelIdForSelection})${skipped}`, 'NO_HOSTS_AVAILABLE', { unreachable });
+        }
+        if (allow && !allow(selectedHost)) {
+          outsideRegion.push(selectedHost.address);
+          continue;
         }
         if (endpoint) { // an endpoint the caller passed is used as given (transformed, as before) — not probed
           provider = selectedHost.address;
@@ -1004,6 +1036,8 @@ export class SessionManager implements ISessionManager {
 
       console.log(`[SessionManager] Auto-selected host: ${provider}, endpoint: ${endpoint} (mode: ${mode})`);
     }
+    // Whatever path chose them, the host and endpoint the session will be funded for (1.39.27).
+    this.assertRegionHost({ address: provider, endpoint, job: 'session' });
 
     // NEW (Phase 6.2): Enable encryption by default (opt-out with encryption: false)
     const enableEncryption = config.encryption !== false;
@@ -1276,6 +1310,7 @@ export class SessionManager implements ISessionManager {
    * re-seed or two chains sharing an id.
    */
   registerExternalSession(config: ExternalSessionConfig): void {
+    this.assertRegionHost({ address: config.hostAddress, endpoint: config.endpoint, job: 'session' });   // 1.39.27
     // Re-seeding replaces the record (prompts, tokens, lora); never under a running job (1.39.14, G8).
     this.refuseIfJobInFlight(String(config.sessionId));
     // The record may now name another node, so what its old node reported no longer applies (1.39.15).
@@ -1333,6 +1368,7 @@ export class SessionManager implements ISessionManager {
     sessionId: bigint | string,
     authorisation: SessionAuthorisation
   ): Promise<{ delivered: boolean }> {
+    this.assertRegionHost({ endpoint: nodeHttpUrl, job: 'session-auth' });   // 1.39.27
     if (!/^https?:\/\//i.test(nodeHttpUrl)) {
       throw new SDKError(
         `Invalid nodeHttpUrl for session-auth (must be http(s)): ${nodeHttpUrl}`,
@@ -1408,6 +1444,10 @@ export class SessionManager implements ISessionManager {
   async registerDelegatedSession(config: DelegatedSessionConfig): Promise<void> {
     const sessionId = config.sessionId;
     const sessionIdStr = sessionId.toString();
+    // In a region (1.39.27): before the session-auth delivery or any record.
+    if (config.webSearch) this.refuseWebSearchInRegion('delegated webSearch.forceEnabled', config.webSearch);
+    this.assertRegionHost({ address: config.hostAddress, endpoint: config.hostUrl, job: 'session' });
+    if (config.nodeHttpUrl !== undefined) this.assertRegionHost({ address: config.hostAddress, endpoint: config.nodeHttpUrl, job: 'session-auth' });
 
     // FC1.6 session-auth: deliver the authorisation to the node before any local
     // state is written (D5). This awaits the POST and throws on 401 so a rejected
@@ -1547,6 +1587,7 @@ export class SessionManager implements ISessionManager {
     }
 
     this.refuseIfNoLongerActive(sessionId.toString(), session);   // names a settled session's reason (1.39.22)
+    if (this.regionPolicy.regional) this.resolveSearch(session, prompt, options);   // explicit search refused before contact (1.39.27)
     const endpoint = this.requireEndpoint(session, sessionId);
     await this.refuseIfSettledOnChain(sessionId.toString(), session, { rest: true });   // 1.39.21 S2; REST: refused by the node only with session-settled-rest (1.39.23 R1)
 
@@ -1573,6 +1614,7 @@ export class SessionManager implements ISessionManager {
         job_id: Number(session.jobId),
         chain_id: session.chainId,
         ...(options?.thinking ? { thinking: options.thinking } : {}),   // as streamResponse sends it (1.39.23 review)
+        ...this.regionalNoSearch(),
       };
       
       
@@ -1699,6 +1741,9 @@ export class SessionManager implements ISessionManager {
     }
 
     this.refuseIfNoLongerActive(sessionIdStr, session);   // names a settled session's reason (1.39.22)
+    // Web search, decided on the user's text — never on the RAG documents (1.39.2) — and before any contact: in a storage
+    // region an explicit request is refused here, not after the socket opened (1.39.27).
+    const search = this.resolveSearch(session, prompt, options);
     // Before image routing, which swallows generateImage's errors into the LLM path.
     const endpoint = this.requireEndpoint(session, sessionId);
     await this.refuseIfSettledOnChain(sessionIdStr, session);   // 1.39.21 S2
@@ -1822,8 +1867,6 @@ export class SessionManager implements ISessionManager {
       // Collect full response
       let fullResponse = '';
 
-      // Web search, decided on the user's text — never on the RAG documents (1.39.2)
-      const search = resolveWebSearch(session.webSearch, prompt, options);
 
       // Set up streaming handler
       if (onToken) {
@@ -2307,6 +2350,8 @@ export class SessionManager implements ISessionManager {
     } catch (error: any) {
       if (error instanceof ContextLimitError) throw error;
       if (error?.code === 'SESSION_AUTH_DENIED') throw error;   // 8.54.0 vault gate: the caller branches on this code
+      // The SDK's own host-gate and region refusals keep their codes (1.39.27)
+      if (HOST_GATE_CODES.has(error?.code) || error?.code === 'WEB_SEARCH_REFUSED_IN_REGION') throw error;
       // 1.39.21: the settled-session refusals reach the caller as themselves (open a new session / retry the read)
       if (error?.code === 'SESSION_NOT_ACTIVE' || error?.code === 'SESSION_STATUS_UNREADABLE') throw error;
       // The node's SESSION_SETTLED refusal (1.39.22 N2): the encrypted paths reject REQUEST_ERROR with its nodeCode, the
@@ -2348,6 +2393,7 @@ export class SessionManager implements ISessionManager {
     query: string,
     numResults: number = 10
   ): Promise<SearchApiResponse> {
+    this.refuseWebSearchInRegion('webSearch()');   // 1.39.27
     const session = this.getSession(sessionId.toString());
     if (!session) {
       throw new SDKError(`Session ${sessionId} not found`, 'SESSION_NOT_FOUND');
@@ -2383,6 +2429,7 @@ export class SessionManager implements ISessionManager {
     query: string,
     options: { numResults?: number; chainId?: number } = {}
   ): Promise<SearchApiResponse> {
+    this.refuseWebSearchInRegion('searchDirect()');   // 1.39.27
     // Validate query
     if (!query || query.trim().length === 0 || query.length > 500) {
       throw new WebSearchError('Query must be 1-500 characters', 'invalid_query');
@@ -2617,6 +2664,45 @@ export class SessionManager implements ISessionManager {
         'SESSION_END_ERROR',
         { originalError: error }
       );
+    }
+  }
+
+  /**
+   * End a session the host has not been told about (1.39.29): the session start a job makes (connect, the encrypted
+   * session init, its ack) and then a clean close, with no job frame. The host completes a session whose last
+   * connection closes with nothing in flight, so nothing is billed and the deposit returns. Use it instead of
+   * `endSession` for an adopted or funded session that is being abandoned before its first job.
+   *
+   * Resolves `'closed'`, or `'already-settled'` when the chain or the node has already settled it (no connection).
+   * Refuses with the usual session codes (`SESSION_NOT_FOUND`, `SESSION_NOT_ACTIVE`, `SESSION_JOB_IN_FLIGHT`, …) before
+   * any connection. A failed init throws and leaves the session active, so the call can be retried.
+   */
+  async closeUnsubmittedSession(sessionId: bigint | string): Promise<'closed' | 'already-settled'> {
+    const sid = String(sessionId);
+    if (!this.sessions.has(sid)) throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
+    this.refuseIfJobInFlight(sid);   // a second init would replace a running job's key on a node without the marker
+    this.jobsInFlight.set(sid, 'close');
+    try {
+      // Always a connection of its own, inited and acked here: a shared one may never have been acked, and a connection
+      // the host has no init for completes nothing (review M1).
+      let transport: Awaited<ReturnType<SessionManager['acquireSessionTransport']>>;
+      try {
+        transport = await this.acquireSessionTransport(sid, 'close');   // every job guard, the same init, no adapter
+      } catch (err) {
+        if (this.settledOnChain.has(sid) || this.settledByNode.has(sid)) return 'already-settled';
+        throw err;
+      }
+      try {
+        if (this.settledOnChain.has(sid) || this.settledByNode.has(sid)) return 'already-settled';   // its notice came with the ack
+        // Ended before the close, so nothing new starts on it; this also closes the session's own shared connection,
+        // which would otherwise hold the host's completion open.
+        await this.endSession(BigInt(sid));
+        return 'closed';
+      } finally {
+        await transport.wsClient.disconnect();
+      }
+    } finally {
+      this.jobsInFlight.delete(sid);
     }
   }
 
@@ -3259,6 +3345,7 @@ export class SessionManager implements ISessionManager {
     if (session.status !== 'paused') {
       throw new SDKError(`Cannot resume session in ${session.status} state`, 'INVALID_STATE');
     }
+    this.assertRegionHost({ address: session.provider, endpoint: session.endpoint, job: 'session' });   // 1.39.27
 
     session.status = 'active';
 
@@ -3372,6 +3459,7 @@ export class SessionManager implements ISessionManager {
     }
 
     this.refuseIfNoLongerActive(sessionId.toString(), session);   // names a settled session's reason (1.39.22)
+    if (this.regionPolicy.regional) this.resolveSearch(session, prompt, options);   // explicit search refused before contact (1.39.27)
     const endpoint = this.requireEndpoint(session, sessionId);
     await this.refuseIfSettledOnChain(sessionId.toString(), session, { rest: true });   // 1.39.21 S2; REST: refused by the node only with session-settled-rest (1.39.23 R1)
 
@@ -3394,7 +3482,8 @@ export class SessionManager implements ISessionManager {
         session_id: sessionId.toString(),
         job_id: Number(session.jobId),
         chain_id: session.chainId,
-        ...(options?.thinking ? { thinking: options.thinking } : {})
+        ...(options?.thinking ? { thinking: options.thinking } : {}),
+        ...this.regionalNoSearch(),
       };
       
       const fetchResponse = await fetch(inferenceUrl, {
@@ -3785,6 +3874,7 @@ export class SessionManager implements ISessionManager {
       throw new SDKError(`Session ${sessionId} not found`, 'SESSION_NOT_FOUND');
     }
     this.refuseIfNoLongerActive(sessionId, session);   // names a settled session's reason (1.39.22)
+    this.assertRegionHost({ address: session.provider, endpoint: session.endpoint, job: 'vectors' });   // 1.39.27
 
     // Validate WebSocket connection
     if (!this.wsClient) {
@@ -4476,7 +4566,7 @@ export class SessionManager implements ISessionManager {
         userPrivateKey
       );
     } catch (error: any) {
-      if (error instanceof SDKError && error.code === 'SESSION_ENDPOINT_MISSING') throw error;   // F4: typed, as thrown
+      if (error instanceof SDKError && (error.code === 'SESSION_ENDPOINT_MISSING' || HOST_GATE_CODES.has(error.code))) throw error;   // F4: typed, as thrown (+ host gates, 1.39.27)
       // Convert to SDKError if not already
       if (error.message?.startsWith('SESSION_NOT_FOUND')) {
         throw new SDKError(error.message, 'SESSION_NOT_FOUND');
@@ -4770,6 +4860,36 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  /** The storage region's host gate (1.39.27), installed by FabstirSDKCore for its region. */
+  setRegionPolicy(policy: RegionPolicy): void {
+    this.regionPolicy = policy;
+  }
+
+  getRegionPolicy(): RegionPolicy {
+    return this.regionPolicy;
+  }
+
+  /** Refuse unless the region allows this host (address listed; URL at its listed origin) — REGION_HOST_NOT_ALLOWED. The
+   *  endpoint transform's output for a listed origin is accepted (it is how this SDK reaches that host). */
+  assertRegionHost(target: { address?: string; endpoint?: string; job: string }): void {
+    this.regionPolicy.assertHost(target, this.endpointTransform);
+  }
+
+  /** Whether a prompt searches, decided on the user's text and the storage region (1.39.27: off, explicit refused). */
+  private resolveSearch(session: { webSearch?: SessionState['webSearch'] }, prompt: string, options?: PromptOptions) {
+    return resolveWebSearch(session.webSearch, prompt, options, this.regionPolicy.region);
+  }
+
+  /** The REST body's search fields in a region: none, said explicitly (the node also searches on its own text match). */
+  private regionalNoSearch(): { web_search?: false; max_searches?: 0 } {
+    return this.regionPolicy.regional ? { web_search: false, max_searches: 0 } : {};
+  }
+
+  /** In a region, web search is refused (it sends prompt text to a provider outside the region). */
+  private refuseWebSearchInRegion(where: string, config?: { forceEnabled?: boolean }): void {
+    if (this.regionPolicy.regional && (config === undefined || config.forceEnabled)) throw webSearchRefusedInRegion(this.regionPolicy.region, where);
+  }
+
   /** How the SDK reads a session job on chain for the transcode wait: the read provider's path, never the wallet's (1.39.18). */
   setSessionJobReader(reader: NonNullable<SessionManager['sessionJobReader']>): void {
     this.sessionJobReader = reader;
@@ -4790,6 +4910,7 @@ export class SessionManager implements ISessionManager {
     if (known !== undefined && !fresh) return known;
     const session = this.sessions.get(sessionId);
     if (!session?.endpoint?.trim()) return false;   // the caller's own guard reports SESSION_ENDPOINT_MISSING
+    this.assertRegionHost({ address: session.provider, endpoint: session.endpoint, job: 'probe' });   // 1.39.27, as every gate
     try {
       const httpUrl = session.endpoint.trim()
         .replace(/^(wss?|https?):\/\//i, (_m, scheme: string) => `${{ ws: 'http', wss: 'https' }[scheme.toLowerCase()] ?? scheme.toLowerCase()}://`)
@@ -4894,6 +5015,8 @@ export class SessionManager implements ISessionManager {
     if (!session.endpoint?.trim()) {
       throw new SDKError(`Session ${sessionId} has no endpoint`, 'SESSION_ENDPOINT_MISSING');
     }
+    // Every record-based path reaches its host through here: the region's gate too (1.39.27).
+    this.assertRegionHost({ address: session.provider, endpoint: session.endpoint, job: 'session' });
     return session.endpoint;
   }
 
@@ -4916,7 +5039,7 @@ export class SessionManager implements ISessionManager {
    * shared `sessionKey`/`messageIndex` around a dedicated init — are exactly the parts a
    * copy gets subtly wrong.
    */
-  private async acquireSessionTransport(sessionId: string, mode: 'job' | 'fetch' = 'job'): Promise<{
+  private async acquireSessionTransport(sessionId: string, mode: 'job' | 'fetch' | 'close' = 'job'): Promise<{
     wsClient: WebSocketClient;
     sessionKey: Uint8Array;
     messageIndexRef: { value: number };
@@ -4929,7 +5052,8 @@ export class SessionManager implements ISessionManager {
     const session = this.sessions.get(sessionId);
     if (!session) throw new SDKError('Session not found', 'SESSION_NOT_FOUND');
     // A result fetch works on a session the caller ended or the node completed (1.39.15 H3).
-    if (mode === 'job') this.refuseIfNoLongerActive(sessionId, session);   // carries details.status (1.39.21)
+    // 'close' (closeUnsubmittedSession, 1.39.29) keeps every job guard, always opens its own socket, and sends no adapter.
+    if (mode !== 'fetch') this.refuseIfNoLongerActive(sessionId, session);   // carries details.status (1.39.21)
     if (!this.encryptionManager) throw new SDKError('EncryptionManager not available', 'ENCRYPTION_NOT_AVAILABLE');
 
     const endpoint = this.requireEndpoint(session, sessionId);
@@ -4946,7 +5070,7 @@ export class SessionManager implements ISessionManager {
     // The entry must also be the key the LAST shared init minted: a session-switch teardown clears
     // `sessionKey` but leaves the old entry, and a fresh socket restarts at generation 1.
     // A shared init in flight has already written its new key, before the node has it (Milestone B round 2).
-    if (mode === 'job') {
+    if (mode !== 'fetch') {
       // 1.39.21 S2, before any socket or frame, and BEFORE the init-chain wait: an init queued during the chain read would
       // otherwise sit between the wait and the reuse check below (settled-guard review round 3).
       await this.refuseIfSettledOnChain(sessionId, session);
@@ -4965,7 +5089,7 @@ export class SessionManager implements ISessionManager {
       // frames are not re-delivered. A FAILED init must leave nothing behind — no open socket with a
       // 30 s heartbeat, no background reconnect loop — and the init itself touches no shared state (E1).
       // 1.39.22 N3: a new connection on a notice node is read first (a node restart forgets what it settled)
-      if (mode === 'job' && this.settledNoticeNodes.get(sessionId) === true) {
+      if (mode !== 'fetch' && this.settledNoticeNodes.get(sessionId) === true) {
         this.markMaySettle(sessionId);
         await this.refuseIfSettledOnChain(sessionId, session);
       }
@@ -4978,8 +5102,8 @@ export class SessionManager implements ISessionManager {
           endpoint, encryption: true,
           // E.3: a job's re-init MUST re-send it. A result fetch's must NOT (1.39.16): the node stages the adapter
           // after the ack (up to 300 s, re-fetched from S5) and the fetch frame waits behind it; a fetch never prompts.
-          lora: mode === 'fetch' ? undefined : session.lora,
-          onServeBackError: mode === 'fetch' ? undefined : session.onServeBackError,
+          lora: mode === 'job' ? session.lora : undefined,
+          onServeBackError: mode === 'job' ? session.onServeBackError : undefined,
         // Deliberately partial: sendEncryptedInit reads only this subset, and the required
         // pricing/proof fields are meaningless for a re-init on an already-funded session. The
         // cast was always hiding that; the double cast only stops TS's overlap heuristic from
@@ -4989,7 +5113,7 @@ export class SessionManager implements ISessionManager {
         if (!sessionKey) throw new SDKError('Session key not available after init', 'SESSION_KEY_NOT_AVAILABLE');
       } catch (err) {
         await wsClient.disconnect().catch(() => {});   // cleanup only — the init failure is what surfaces
-        if (mode === 'job') this.markMaySettle(sessionId);   // the node may have registered the job (1.39.21)
+        if (mode !== 'fetch') this.markMaySettle(sessionId);   // the node may have registered the job (1.39.21)
         throw err;
       }
       messageIndexRef = { value: 0 };
@@ -5233,6 +5357,7 @@ export class SessionManager implements ISessionManager {
     prompt: string,
     options?: ImageGenerationOptions
   ): Promise<ImageGenerationResult> {
+    this.assertRegionHost({ endpoint: hostUrl, job: 'image' });   // 1.39.27
     return generateImageHttp(hostUrl, prompt, options);
   }
 

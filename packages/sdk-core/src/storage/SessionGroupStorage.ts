@@ -655,7 +655,7 @@ export class SessionGroupStorage {
 }
 
 /** `a` was updated after `b` (an unreadable date counts as the oldest). */
-function newerThan(a: SessionGroup, b: SessionGroup): boolean {
+export function newerThan(a: SessionGroup, b: SessionGroup): boolean {
   const t = (g: SessionGroup) => { const n = new Date(g.updatedAt).getTime(); return Number.isFinite(n) ? n : -Infinity; };
   return t(a) > t(b);
 }

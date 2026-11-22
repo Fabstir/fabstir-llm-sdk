@@ -145,4 +145,18 @@ export const SDK_CAPABILITIES = Object.freeze({
   incrementalRagChunks: true,
   /** listUnreadableDatabases() / deleteDatabaseById() for a sealed database that never opens; expired heads are pruned (1.39.24). */
   unreadableDatabaseCleanup: true,
+  /** SessionGroupManager: a stored group never replaces newer memory (listSessionGroups, getSessionGroup), and no older
+   *  group object is saved after a newer one; getCachedSessionGroups(owner); updateChatSession(…, mutate) (1.39.25). */
+  sessionGroupMemoryFirst: true,
+  /** ChatSession.revision: stamped by SessionGroupManager on each change it makes to a chat (start, addMessage,
+   *  updateChatSession, a new object passed to updateSessionGroup); on adopting another tab's group, the chat with the
+   *  later of revision / updated is kept (1.39.26). */
+  sessionGroupChatRevision: true,
+  /** deleteSessionGroup whose save fails rejects with the group not deleted; SessionGroupManager is exported (1.39.26). */
+  sessionGroupDeleteRestores: true,
+  /** storageRegion ('global' | 'uk'; 'eu' refused): regional storage, hosts and S5 identity, fail closed; web search
+   *  refused in a region (1.39.27). */
+  storageRegion: true,
+  /** SessionManager.closeUnsubmittedSession: start a session with the host and close it with no job (1.39.29). */
+  closeUnsubmittedSession: true,
 } as const);

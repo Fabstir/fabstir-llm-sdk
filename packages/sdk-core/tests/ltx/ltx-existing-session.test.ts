@@ -74,7 +74,7 @@ function makeVaultManager(opts: {
   const manager = new LtxManager({
     sessionManager: omitSessionManager
       ? undefined
-      : { assertConfidentialHost: () => {}, resolveModelPricePerToken, startSession, submitLtx, registerExternalSession },   // 1.39.19 check not under test
+      : { assertConfidentialHost: () => {}, assertRegionHost: () => {}, resolveModelPricePerToken, startSession, submitLtx, registerExternalSession },   // 1.39.19 check not under test
     storageManager: { getByCID },
     paymentManager,
     ltxModelId: LTX_MODEL_ID, usdcAddress: USDC, chainId,
@@ -201,7 +201,7 @@ describe('LtxManager.generate — existingSession (vault) path', () => {
     // without the seeding method. Without this guard the path dies with an untyped
     // "registerExternalSession is not a function" thrown outside generate()'s wrapper.
     const manager = new LtxManager({
-      sessionManager: { assertConfidentialHost: () => {},  resolveModelPricePerToken: vi.fn(), startSession: vi.fn(), submitLtx: vi.fn() },
+      sessionManager: { assertConfidentialHost: () => {}, assertRegionHost: () => {},  resolveModelPricePerToken: vi.fn(), startSession: vi.fn(), submitLtx: vi.fn() },
       storageManager: { getByCID: vi.fn(async () => bundleFixture) },
       paymentManager: makePaymentSpy().paymentManager,
       ltxModelId: LTX_MODEL_ID, usdcAddress: USDC, chainId: 84532,
@@ -287,7 +287,7 @@ describe('LtxManager.generate — existingSession (vault) path', () => {
     const submitLtx = vi.fn(async () => { order.push('submit'); return { requestId: 'r', cancel() {}, result: Promise.resolve(completeResult()) }; });
     const getByCID = vi.fn(async () => { order.push('validate'); return bundleFixture; });
     const manager = new LtxManager({
-      sessionManager: { assertConfidentialHost: () => {},  resolveModelPricePerToken, startSession, submitLtx, registerExternalSession },
+      sessionManager: { assertConfidentialHost: () => {}, assertRegionHost: () => {},  resolveModelPricePerToken, startSession, submitLtx, registerExternalSession },
       storageManager: { getByCID },
       paymentManager: { getTokenMinDeposit: vi.fn(async () => 0n) },
       ltxModelId: LTX_MODEL_ID, usdcAddress: USDC, chainId: 84532,

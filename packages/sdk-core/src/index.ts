@@ -31,6 +31,8 @@ export { PaymentManager as PaymentManagerMultiChain } from './managers/PaymentMa
 export { StorageManager } from './managers/StorageManager';
 export type { S5ConnectionStatus, SyncStatus } from './managers/StorageManager';
 export { SessionManager } from './managers/SessionManager';
+export { SessionGroupManager } from './managers/SessionGroupManager';
+export type { ISessionGroupManager } from './interfaces/ISessionGroupManager';
 // FC1.6 session-auth: consumers import these to type the /fiat/session response
 // they pass straight through to registerDelegatedSession / postSessionAuth.
 export type { SessionAuthorisation, DelegatedSessionConfig, ExternalSessionConfig, ExtendedSessionConfig } from './managers/SessionManager';
@@ -158,8 +160,14 @@ export {
   generateS5SeedFromAddress,
   hasCachedSeed,
   exportAllCachedSeeds,
-  SEED_DOMAIN_SEPARATOR
+  SEED_DOMAIN_SEPARATOR,
+  // Storage regions (1.39.27)
+  deriveRegionalS5Seed,
+  s5PhraseToSeedBytes,
+  REGION_SEED_INFO_PREFIX
 } from './utils/s5-seed-derivation';
+export { STORAGE_REGIONS } from './config/storage-regions';
+export type { StorageRegion, StorageRegionEntry, RegionHost } from './config/storage-regions';
 
 // Export web search errors
 export { WebSearchError } from './errors/web-search-errors';
@@ -266,5 +274,5 @@ export type { BundlerSendUserOpConfig, UnpackedUserOpV07 } from './wallet';
 export { WebSocketClient } from './websocket/WebSocketClient';
 
 // Version
-export const VERSION = '1.39.24';
+export const VERSION = '1.39.29';
 export const SDK_TYPE = 'browser';
