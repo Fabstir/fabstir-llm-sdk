@@ -30,6 +30,9 @@ const H2 = ethers.getAddress('0x' + '6b'.repeat(20));
 const H1_URL = 'https://h1.example:8443';
 const LISTED = [{ address: H1, apiOrigin: H1_URL }];
 const MODEL = ethers.id('region-test-model');   // a bytes32 model id, used as given
+/** These tests were written for an empty UK list (every UK job refused). From 1.39.32 the table lists host2
+ * (tests/region/region-uk-hosts.test.ts), so they name the empty list explicitly. */
+const NO_UK_HOSTS: readonly never[] = [];
 const REGION = { code: 'REGION_HOST_NOT_ALLOWED' };
 
 let fetchSpy: any;
@@ -51,7 +54,7 @@ describe('RegionPolicy (R10)', () => {
     expect(g.restricted).toBe(false);
     expect(g.regional).toBe(false);
     expect(() => g.assertHost({ address: H2, endpoint: 'https://any.example', job: 'session' })).not.toThrow();
-    const uk = new RegionPolicy('uk');
+    const uk = new RegionPolicy('uk', NO_UK_HOSTS);
     expect(uk.restricted).toBe(true);
     expect(uk.regional).toBe(true);
     expect(() => uk.assertHost({ address: H1, endpoint: H1_URL, job: 'session' })).toThrow(refusedWith('NO_HOSTS'));
@@ -110,7 +113,7 @@ const noContact = (m: any) => {
 
 describe('SessionManager gates, empty UK list: every path refuses before any contact (acceptance a)', () => {
   test('startSession, explicit host or auto-selected', async () => {
-    const m = sm(new RegionPolicy('uk'));
+    const m = sm(new RegionPolicy('uk', NO_UK_HOSTS));
     m.hostSelectionService = { selectHostForModel: vi.fn() };
     await expect(m.startSession({ chainId: 84532, host: H1, modelId: MODEL })).rejects.toMatchObject(REGION);
     await expect(m.startSession({ chainId: 84532, host: H1, endpoint: H1_URL, modelId: MODEL })).rejects.toMatchObject(REGION);
@@ -121,7 +124,7 @@ describe('SessionManager gates, empty UK list: every path refuses before any con
     noContact(m);
   });
   test('adopted, delegated and session-auth', async () => {
-    const m = sm(new RegionPolicy('uk'));
+    const m = sm(new RegionPolicy('uk', NO_UK_HOSTS));
     expect(() => m.registerExternalSession({ sessionId: 7n, jobId: 7n, endpoint: H1_URL, hostAddress: H1, model: MODEL, chainId: 84532 })).toThrow(expect.objectContaining(REGION));
     await expect(m.registerDelegatedSession({ sessionId: 8n, jobId: 8n, hostUrl: H1_URL, hostAddress: H1, model: MODEL, chainId: 84532, nodeHttpUrl: H1_URL, authorisation: { scheme: 'x', signature: '0x', clientAddress: H1 } })).rejects.toMatchObject(REGION);
     await expect(m.postSessionAuth(H1_URL, 8n, { scheme: 'x', signature: '0x', clientAddress: H1 })).rejects.toMatchObject(REGION);
@@ -129,7 +132,7 @@ describe('SessionManager gates, empty UK list: every path refuses before any con
     noContact(m);
   });
   test('every record-based path (a record restored from storage or adopted earlier)', async () => {
-    const m = sm(new RegionPolicy('uk'));
+    const m = sm(new RegionPolicy('uk', NO_UK_HOSTS));
     m.encryptionManager = {};   // generateImage's own precondition, so it reaches the endpoint
     record(m, H1, H1_URL);
     expect(() => m.requireEndpoint(m.sessions.get('7'), '7')).toThrow(expect.objectContaining(REGION));
@@ -147,7 +150,7 @@ describe('SessionManager gates, empty UK list: every path refuses before any con
     noContact(m);
   });
   test('URL-only methods', async () => {
-    const m = sm(new RegionPolicy('uk'));
+    const m = sm(new RegionPolicy('uk', NO_UK_HOSTS));
     await expect(m.generateImageHttpRequest(H1_URL, 'a cat')).rejects.toMatchObject(REGION);
     noContact(m);
   });
@@ -203,7 +206,7 @@ describe('the other managers (R11)', () => {
     m.startSession = vi.fn(async () => { throw new Error('stop here'); });
     await expect(tm.submitTranscodeWithLoadBalancing('s5://cid', [], MODEL, { maxHostRetries: 3, retryDelayMs: 0 })).rejects.toBeDefined();
     expect(fetchSpy.mock.calls.map((c: any[]) => String(c[0])).every((u: string) => u.startsWith(H1_URL))).toBe(true);
-    const empty = sm(new RegionPolicy('uk'));
+    const empty = sm(new RegionPolicy('uk', NO_UK_HOSTS));
     const tm2: any = new TranscodeManager(empty, {} as any, 84532 as any);
     const rank = vi.fn(async () => ranked);
     tm2.setHostSelectionService({ getRankedHostsForModel: rank });
@@ -211,13 +214,13 @@ describe('the other managers (R11)', () => {
     expect(rank).not.toHaveBeenCalled();
   });
   test('transcode probes by URL', async () => {
-    const tm: any = new TranscodeManager(sm(new RegionPolicy('uk')), {} as any, 84532 as any);
+    const tm: any = new TranscodeManager(sm(new RegionPolicy('uk', NO_UK_HOSTS)), {} as any, 84532 as any);
     await expect(tm.isTranscodingAvailable(H1_URL)).rejects.toMatchObject(REGION);
     await expect(tm.isTrustlessAvailable(H1_URL)).rejects.toMatchObject(REGION);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
   test('LTX and training: refused as their own error types, before anything is funded', async () => {
-    const m = sm(new RegionPolicy('uk'));
+    const m = sm(new RegionPolicy('uk', NO_UK_HOSTS));
     m.assertConfidentialHost = vi.fn();
     const ltx: any = Object.create(LtxManager.prototype);
     ltx.sessionManager = m;
@@ -233,12 +236,12 @@ describe('the other managers (R11)', () => {
     const hm: any = Object.create(HostManager.prototype);
     hm.publicKeyCache = new Map();
     hm.getHostInfo = vi.fn(async () => ({ apiUrl: H1_URL, metadata: {} }));
-    hm.setRegionPolicy(new RegionPolicy('uk'));
+    hm.setRegionPolicy(new RegionPolicy('uk', NO_UK_HOSTS));
     await expect(hm.getHostPublicKey(H1)).rejects.toMatchObject(REGION);
     await expect(hm.getImageGenerationCapabilities(H1, H1_URL)).rejects.toMatchObject(REGION);
     expect(await hm.getWebSearchCapabilities(H1, H1_URL)).toMatchObject({ supportsWebSearch: false, supportsInferenceSearch: false });
     const cm: any = Object.create(ClientManager.prototype);
-    cm.setRegionPolicy(new RegionPolicy('uk'));
+    cm.setRegionPolicy(new RegionPolicy('uk', NO_UK_HOSTS));
     cm.initialized = true; cm.signer = {};
     await expect(cm.createInferenceJob({ repo: 'r', file: 'f' }, 'p', 1, { hostAddress: H1 })).rejects.toMatchObject(REGION);
     await expect(cm.getNodeChains(H1_URL)).rejects.toMatchObject(REGION);
@@ -321,12 +324,12 @@ describe('mutation-gate round 1 (survivors M29 M38 M44 M47 M52 M60 M69 M70)', ()
     expect(() => p.assertHost({ address: H3, endpoint: 'https://h3.example', job: 'session' })).not.toThrow();
   });
   test('M38: a delegated session with no session-auth is gated on its own hostUrl', async () => {
-    const m = sm(new RegionPolicy('uk'));
+    const m = sm(new RegionPolicy('uk', NO_UK_HOSTS));
     await expect(m.registerDelegatedSession({ sessionId: 8n, jobId: 8n, hostUrl: H1_URL, hostAddress: H1, model: MODEL, chainId: 84532 })).rejects.toMatchObject(REGION);
     expect(m.sessions.size).toBe(0);
   });
   test('M44: webSearch() refuses as web search before anything about the session', async () => {
-    const m = sm(new RegionPolicy('uk'));
+    const m = sm(new RegionPolicy('uk', NO_UK_HOSTS));
     record(m, H1, H1_URL);
     await expect(m.webSearch(7n, 'q')).rejects.toMatchObject({ code: 'WEB_SEARCH_REFUSED_IN_REGION' });
   });
@@ -351,7 +354,7 @@ describe('mutation-gate round 1 (survivors M29 M38 M44 M47 M52 M60 M69 M70)', ()
   });
   test('M60: a legacy inference job with no host named is refused before any selection', async () => {
     const cm: any = Object.create(ClientManager.prototype);
-    cm.setRegionPolicy(new RegionPolicy('uk'));
+    cm.setRegionPolicy(new RegionPolicy('uk', NO_UK_HOSTS));
     cm.initialized = true; cm.signer = {};
     cm.modelManager = { getModelId: vi.fn() };
     await expect(cm.createInferenceJob({ repo: 'r', file: 'f' }, 'p', 1)).rejects.toMatchObject(REGION);
@@ -422,7 +425,7 @@ describe('review round 1 (adversarial M1 M2 m1 m2; plan 8): every region refusal
     m.refuseIfSettledOnChain = async () => {};
     connectSpy.mockImplementation(async () => {});
     vi.spyOn(WebSocketClient.prototype, 'isConnected').mockReturnValue(true);
-    m.sendEncryptedInit = async () => { throw new RegionPolicy('uk').assertHost({ address: H1, job: 'session' }) as any; };
+    m.sendEncryptedInit = async () => { throw new RegionPolicy('uk', NO_UK_HOSTS).assertHost({ address: H1, job: 'session' }) as any; };
     await expect(m.sendPromptStreaming(7n, 'hello')).rejects.toMatchObject({ code: 'REGION_HOST_NOT_ALLOWED' });
   });
   test('M2: the HostManager gate accepts the endpoint transform its SessionManager uses', async () => {
@@ -443,7 +446,7 @@ describe('review round 1 (adversarial M1 M2 m1 m2; plan 8): every region refusal
     await expect(other.getHostPublicKey(H1, 'https://host.docker.internal:8443')).rejects.toMatchObject(REGION);   // no transform shared
   });
   test('m1: checkpoint recovery keeps the region code (not RECOVERY_FAILED)', async () => {
-    const m = sm(new RegionPolicy('uk'));
+    const m = sm(new RegionPolicy('uk', NO_UK_HOSTS));
     record(m, H1, H1_URL);
     await expect(m.recoverFromCheckpoints(7n)).rejects.toMatchObject(REGION);
   });
@@ -464,7 +467,7 @@ describe('review round 1 (adversarial M1 M2 m1 m2; plan 8): every region refusal
     expect('web_search' in JSON.parse(fetchSpy.mock.calls[0][1].body)).toBe(false);   // Global body unchanged
   });
   test('plan 8: transcode probes refuse as TranscodeError', async () => {
-    const tm: any = new TranscodeManager(sm(new RegionPolicy('uk')), {} as any, 84532 as any);
+    const tm: any = new TranscodeManager(sm(new RegionPolicy('uk', NO_UK_HOSTS)), {} as any, 84532 as any);
     await expect(tm.isTranscodingAvailable(H1_URL)).rejects.toMatchObject({ name: 'TranscodeError', code: 'REGION_HOST_NOT_ALLOWED' });
   });
 });
@@ -481,10 +484,10 @@ describe('review round 2 (M1 m4 m5)', () => {
     return { tr, rank };
   };
   test('M1: training load balancing in a region with no host refuses with the region code, before ranking', async () => {
-    const { tr, rank } = trainer(new RegionPolicy('uk'), [H1], [{ host: { address: H1, apiUrl: H1_URL } }]);
+    const { tr, rank } = trainer(new RegionPolicy('uk', NO_UK_HOSTS), [H1], [{ host: { address: H1, apiUrl: H1_URL } }]);
     await expect(tr.submitTrainingWithLoadBalancing({} as any)).rejects.toMatchObject({ name: 'TrainingError', code: 'REGION_HOST_NOT_ALLOWED', detail: expect.objectContaining({ consumed: false }) });
     expect(rank).not.toHaveBeenCalled();
-    const none = trainer(new RegionPolicy('uk'), undefined, []);
+    const none = trainer(new RegionPolicy('uk', NO_UK_HOSTS), undefined, []);
     await expect(none.tr.submitTrainingWithLoadBalancing({} as any)).rejects.toMatchObject({ code: 'REGION_HOST_NOT_ALLOWED' });   // region first, as transcode
   });
   test('M1: confidential hosts exist but none is in the region: the region code', async () => {
@@ -492,7 +495,7 @@ describe('review round 2 (M1 m4 m5)', () => {
     await expect(tr.submitTrainingWithLoadBalancing({} as any)).rejects.toMatchObject({ code: 'REGION_HOST_NOT_ALLOWED', detail: expect.objectContaining({ reason: 'HOST_NOT_LISTED' }) });
   });
   test('m4: createTranscodeJob refuses before any upload or chain read', async () => {
-    const m = sm(new RegionPolicy('uk'));
+    const m = sm(new RegionPolicy('uk', NO_UK_HOSTS));
     const storage = { uploadEncryptedBlob: vi.fn() };
     const tm: any = new TranscodeManager(m, storage as any, 84532 as any);
     tm.sizeTranscodeSession = vi.fn();

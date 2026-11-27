@@ -138,11 +138,11 @@ describe('STORAGE_REGIONS (R1)', () => {
     expect(STORAGE_REGIONS.global.portalHost).toBe('s5.platformlessai.ai');
     expect(STORAGE_REGIONS.global.hosts).toBeNull(); // unrestricted, as today
   });
-  test('uk: the brief\'s portal and peer; its host list is empty (every UK job refused)', () => {
+  test('uk: the brief\'s portal and peer; its host list is host2 from 1.39.32 (region-uk-hosts.test.ts)', () => {
     expect(STORAGE_REGIONS.uk.portalUrl).toBe('https://s5-uk.platformlessai.ai');
     expect(STORAGE_REGIONS.uk.portalHost).toBe('s5-uk.platformlessai.ai');
     expect(STORAGE_REGIONS.uk.peer).toBe('wss://z2DXG8VjbxzY23kt6nJuYPriFEjQKHXJSpnWGSc7SPCgwvc@s5-uk.platformlessai.ai/s5/p2p');
-    expect(STORAGE_REGIONS.uk.hosts).toEqual([]);
+    expect(STORAGE_REGIONS.uk.hosts).toEqual([{ address: process.env.TEST_HOST_2_ADDRESS, apiOrigin: new URL(process.env.TEST_HOST_2_URL!).origin }]);
   });
   test('no eu entry; the table cannot be changed at run time', () => {
     expect((STORAGE_REGIONS as any).eu).toBeUndefined();

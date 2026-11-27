@@ -47,7 +47,11 @@ export const STORAGE_REGIONS: Readonly<Record<BuiltStorageRegion, StorageRegionE
     portalUrl: 'https://s5-uk.platformlessai.ai',
     portalHost: 's5-uk.platformlessai.ai',
     peer: 'wss://z2DXG8VjbxzY23kt6nJuYPriFEjQKHXJSpnWGSc7SPCgwvc@s5-uk.platformlessai.ai/s5/p2p',
-    hosts: [], // no UK host yet: every UK job is refused until the first one is added here
+    // The owner's choice (1.39.32). Not a contract address: a host's wallet, checked against the NodeRegistry (active,
+    // apiUrl = this origin) and against .env.test TEST_HOST_2_* by tests/region/region-uk-hosts.test.ts.
+    hosts: [
+      { address: '0x20f2A5FCDf271A5E6b04383C2915Ea980a50948c', apiOrigin: 'https://host2.fabstir.net' }, // host2
+    ],
   }),
 });
 

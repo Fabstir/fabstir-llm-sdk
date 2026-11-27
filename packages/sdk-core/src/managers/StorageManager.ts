@@ -37,7 +37,8 @@ import { mapWithConcurrency } from '../utils/concurrency';
 import { createRagCoherence, headNotRecorded, type RagHead } from '../storage/sealed/rag-coherence';
 import { logHeadKeyOf, isDense } from '../storage/sealed/rag-layout';
 import { reportProgress, type MigrationProgress } from '../storage/sealed/rag-migration';
-import { assertSupportedS5js, withS5Guards } from '../storage/s5-guards';
+import { assertSupportedS5js, withS5Guards, withConnectionGate } from '../storage/s5-guards';
+import { S5Reconnector } from '../storage/s5-reconnect';
 import { STORAGE_REGIONS, STORAGE_REGION_REFUSALS, storageRegionEntry, type StorageRegionEntry, type BuiltStorageRegion } from '../config/storage-regions';
 
 /** Result of sealing the legacy plaintext conversation logs. */
@@ -218,6 +219,8 @@ export class StorageManager implements IStorageManager {
   // Connection handling (v0.9.0-beta.5)
   private connectionStatus: S5ConnectionStatus = 'disconnected';
   private connectionUnsubscribe?: () => void;
+  /** Redials S5 after a drop, in every environment, and gates storage calls on the connection (1.39.30). */
+  private reconnector?: S5Reconnector;
   private operationQueue: QueuedOperation[] = [];
   private isProcessingQueue = false;
   private syncStatus: SyncStatus = 'synced';
@@ -518,8 +521,8 @@ export class StorageManager implements IStorageManager {
       await s5Instance.recoverIdentityFromSeedPhrase(this.userSeed);
       console.log('[StorageManager] Identity recovered');
 
-      // Store the S5 instance - we'll use s5Instance.fs for file operations
-      this.s5Client = s5Instance;
+      // Store the S5 instance. Every call through it waits for a connection once the start is done (1.39.30 D4, D6).
+      this.s5Client = withConnectionGate(s5Instance, () => this.gateS5());
 
       // Setup connection change listener (v0.9.0-beta.5)
       this.setupConnectionHandling(s5Instance);
@@ -569,7 +572,9 @@ export class StorageManager implements IStorageManager {
       console.log('[StorageManager] Identity initialized');
       this.initialized = true;
 
-      // Setup auto-reconnect handlers for browser environment
+      // From here the reconnector acts on drops — one during the start included (1.39.30 D6).
+      this.reconnector?.onStatus(this.connectionStatus);
+      // Browser hints that cut a backoff wait short
       this.setupAutoReconnect();
     } catch (error: any) {
       if (error?.code === 'S5JS_UNSUPPORTED_VERSION') throw error; // fatal, and already says why (§19 Z1)
@@ -2060,6 +2065,11 @@ export class StorageManager implements IStorageManager {
    * Setup connection change listener
    */
   private setupConnectionHandling(s5Instance: any): void {
+    // A second start replaces the first instance: its loop and its events end here.
+    this.reconnector?.stop();
+    this.reconnector = undefined;
+    this.connectionUnsubscribe?.();
+    this.connectionUnsubscribe = undefined;
     // Check if the new connection API is available
     if (typeof s5Instance.onConnectionChange !== 'function') {
       console.warn('[StorageManager] S5 v0.9.0-beta.5 connection API not available');
@@ -2067,15 +2077,18 @@ export class StorageManager implements IStorageManager {
       return;
     }
 
+    const reconnector = new S5Reconnector(s5Instance);
+    this.reconnector = reconnector;
     // Subscribe to connection changes (fires immediately with current status)
     this.connectionUnsubscribe = s5Instance.onConnectionChange((status: S5ConnectionStatus) => {
+      if (reconnector !== this.reconnector) return; // a replaced instance's late event
       const previousStatus = this.connectionStatus;
       this.connectionStatus = status;
+      // The reconnector acts on (and logs) state changes once the start completes; the start syncs it then (D6, D8).
+      if (this.initialized) reconnector.onStatus(status);
 
-      console.log(`[StorageManager] S5 connection: ${previousStatus} → ${status}`);
-
-      if (status === 'connected' && previousStatus === 'disconnected') {
-        // Connection restored - flush queued operations
+      if (status === 'connected' && previousStatus !== 'connected') {
+        // Connection restored — via `connecting` too, the way s5js's reconnect() reports it (F5)
         this.flushQueue();
       } else if (status === 'disconnected') {
         // Connection lost - update sync status
@@ -2087,7 +2100,8 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * Setup auto-reconnect handlers for browser environment
+   * Browser hints — tab visible, network online — that start a reconnect attempt now rather than at the next backoff
+   * step. The reconnect itself does not depend on them (1.39.30 D1).
    */
   private setupAutoReconnect(): void {
     // Only setup in browser environment
@@ -2103,40 +2117,38 @@ export class StorageManager implements IStorageManager {
     // Reconnect when tab becomes visible
     if (typeof document !== 'undefined') {
       listen(document, 'visibilitychange', () => {
-        if (document.visibilityState === 'visible' && this.connectionStatus === 'disconnected') {
-          console.log('[StorageManager] Tab visible, attempting S5 reconnect...');
-          this.attemptReconnect();
-        }
+        if (document.visibilityState === 'visible' && this.connectionStatus === 'disconnected') this.reconnector?.kick();
       });
     }
 
     // Reconnect when network comes back online
     if (typeof window !== 'undefined') {
       listen(window, 'online', () => {
-        if (this.connectionStatus === 'disconnected') {
-          console.log('[StorageManager] Network online, attempting S5 reconnect...');
-          this.attemptReconnect();
-        }
+        if (this.connectionStatus === 'disconnected') this.reconnector?.kick();
       });
     }
   }
 
-  /**
-   * Attempt to reconnect to S5
-   */
+  /** Join the reconnect attempt in flight, or start one; its outcome is the connection status (1.39.30 D2). */
   private async attemptReconnect(): Promise<void> {
-    if (!this.s5Client || typeof this.s5Client.reconnect !== 'function') {
-      console.warn('[StorageManager] S5 reconnect() not available');
-      return;
-    }
+    await this.reconnector?.whenConnected().catch(() => undefined);
+  }
 
-    try {
-      await this.s5Client.reconnect();
-      console.log('[StorageManager] S5 reconnected successfully');
-    } catch (error: any) {
-      console.warn('[StorageManager] S5 reconnect failed:', error.message);
-      // Connection change listener will update status
+  /** The gate on every S5 call through `s5Client` (D4): open until the start is done (D6), or with no connection API. */
+  private gateS5(): Promise<void> {
+    return this.initialized && this.reconnector ? this.reconnector.whenConnected() : Promise.resolve();
+  }
+
+  /**
+   * Resolves once S5 is connected: at once, or when the reconnect attempt in flight (or one started now) connects.
+   * Rejects `STORAGE_OFFLINE` (retryable) if that attempt fails (1.39.30).
+   */
+  async whenConnected(): Promise<void> {
+    this.ensureNotDisposed();
+    if (!this.initialized || !this.s5Client) {
+      throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
+    await this.gateS5();
   }
 
   /**
@@ -2350,6 +2362,11 @@ export class StorageManager implements IStorageManager {
           console.log(`[StorageManager] Queued ${op.type} completed for ${op.path}`);
 
         } catch (error: any) {
+          // The link dropped again: the write stays queued for the next reconnect, which flushes again (1.39.30).
+          if (this.connectionStatus !== 'connected') {
+            console.log(`[StorageManager] S5 dropped during the flush: ${this.operationQueue.length} operation(s) stay queued`);
+            break;
+          }
           // Failed after retries - reject and remove from queue
           this.operationQueue.shift();
           op.reject(error);
@@ -2359,7 +2376,7 @@ export class StorageManager implements IStorageManager {
     } finally {
       // CRITICAL: Always reset flag even if an unexpected exception occurs
       this.isProcessingQueue = false;
-      this.updateSyncStatus(this.lastError ? 'error' : 'synced');
+      this.updateSyncStatus(this.operationQueue.length > 0 ? 'pending' : this.lastError ? 'error' : 'synced');
       console.log('[StorageManager] Queue flush complete');
     }
   }
@@ -2375,8 +2392,8 @@ export class StorageManager implements IStorageManager {
 
     this.refusePlaintextRagWrite(path);
 
-    // If disconnected, queue the operation
-    if (this.connectionStatus === 'disconnected') {
+    // Not connected (also while a reconnect is in progress): queue it for the reconnect's flush (1.39.30)
+    if (this.connectionStatus !== 'connected') {
       console.log(`[StorageManager] S5 disconnected, queueing PUT for ${path}`);
       return this.queueOperation('put', path, data);
     }
@@ -2412,8 +2429,8 @@ export class StorageManager implements IStorageManager {
       throw new SDKError('StorageManager not initialized', 'STORAGE_NOT_INITIALIZED');
     }
 
-    // If disconnected, queue the operation
-    if (this.connectionStatus === 'disconnected') {
+    // Not connected (also while a reconnect is in progress): queue it for the reconnect's flush (1.39.30)
+    if (this.connectionStatus !== 'connected') {
       console.log(`[StorageManager] S5 disconnected, queueing DELETE for ${path}`);
       return this.queueOperation('delete', path);
     }
@@ -2444,6 +2461,7 @@ export class StorageManager implements IStorageManager {
   cleanup(): void {
     // From now on nothing hears the connection come back: a write that could only wait for it refuses (§31 LL2).
     this.cleanedUp = true;
+    this.reconnector?.stop();
     if (this.connectionUnsubscribe) {
       this.connectionUnsubscribe();
       this.connectionUnsubscribe = undefined;
@@ -2474,6 +2492,7 @@ export class StorageManager implements IStorageManager {
 
   private release(): void {
     for (const { target, type, handler } of this.reconnectListeners.splice(0)) target.removeEventListener(type, handler);
+    this.reconnector?.stop();
     this.connectionUnsubscribe?.();
     this.connectionUnsubscribe = undefined;
     // The waiting ones only: the one a flush is running (the head) settles with its own outcome (§27 HH9).

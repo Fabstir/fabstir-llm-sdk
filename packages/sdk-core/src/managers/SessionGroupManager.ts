@@ -16,6 +16,15 @@ import { SDKError } from '../types';
 import { rethrowDisposal } from '../utils/disposal';
 
 /**
+ * A save failure that proves nothing reached S5: the connection gate refuses before s5js sees the call (1.39.30). Any
+ * other failure may come after the write (a timeout, or the read-back that "could not be verified").
+ */
+function savedNothing(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === 'STORAGE_OFFLINE' || code === 'STORAGE_CLEANUP';
+}
+
+/**
  * Session Group Manager
  *
  * Manages Session Groups (Claude Projects-style organization).
@@ -136,6 +145,28 @@ export class SessionGroupManager implements ISessionGroupManager {
     return copy;
   }
 
+  /** A new chat into memory and into the group. */
+  private addChat(group: SessionGroup, session: ChatSession): void {
+    this.chatStorage.set(session.sessionId, session);
+    this.knownChats.add(session);
+    if (group.chatSessions.includes(session.sessionId)) return;
+    group.chatSessions.push(session.sessionId);
+    this.touch(group);
+    group.chatSessionsData ??= {};
+    group.chatSessionsData[session.sessionId] = session;
+  }
+
+  /** Undo `addChat`: from the object it went into and from the one memory holds now (a list may have renewed it). */
+  private withdrawChat(addedTo: SessionGroup, session: ChatSession): void {
+    this.chatStorage.delete(session.sessionId);
+    this.knownChats.delete(session);
+    for (const g of new Set([addedTo, this.groups.get(addedTo.id)])) {
+      if (!g) continue;
+      g.chatSessions = g.chatSessions.filter((id) => id !== session.sessionId);
+      if (g.chatSessionsData) delete g.chatSessionsData[session.sessionId];
+    }
+  }
+
   /** Save the group as it is in memory when its turn under the lock comes — never an object captured earlier. */
   private persist(groupId: string): Promise<void> {
     return this.groupLock.withLock(groupId, async () => {
@@ -213,22 +244,26 @@ export class SessionGroupManager implements ISessionGroupManager {
       deleted: false,
     };
 
-    // Store in memory cache
-    this.groups.set(id, group);
+    if (!this.storage) {
+      this.groups.set(id, group);   // memory only (no storage attached)
+      return group;
+    }
 
-    // Persist to S5 storage if available
-    if (this.storage) {
+    // Into memory and saved in one turn under the group's lock. A failed save reaches the caller (1.39.31 S1); the group
+    // leaves memory only when the failure proves nothing was written — else it may exist on S5, and a retry would make
+    // a second one (review round 1 MAJOR).
+    const storage = this.storage;
+    await this.groupLock.withLock(id, async () => {
+      this.groups.set(id, group);
       try {
         console.log(`[Enhanced S5.js] Creating session group: /home/session-groups/${id}/`);
-        await this.persist(id);
+        await storage.save(group);
         console.log(`[Enhanced S5.js] Session group saved successfully`);
       } catch (err) {
-        rethrowDisposal(err);
-        console.error('[SessionGroupManager.createSessionGroup] Failed to save to S5 storage:', err);
-        // Don't throw - allow operation to continue with in-memory only
-        // This allows testing without full S5 setup
+        if (savedNothing(err)) this.groups.delete(id);
+        throw err;
       }
-    }
+    });
 
     return group;
   }
@@ -680,37 +715,28 @@ export class SessionGroupManager implements ISessionGroupManager {
       revision: now
     };
 
-    // Store chat session in memory
-    this.chatStorage.set(sessionId, session);
-    this.knownChats.add(session);
-
-    // Add session ID to group
-    if (!group.chatSessions.includes(sessionId)) {
-      group.chatSessions.push(sessionId);
-      this.touch(group);
-
-      // Initialize chatSessionsData if not exists
-      if (!group.chatSessionsData) {
-        group.chatSessionsData = {};
-      }
-
-      // Store session data in group for persistence
-      group.chatSessionsData[sessionId] = session;
-
-      // Persist to S5
-      if (this.storage) {
-        try {
-          await this.persist(groupId);
-          console.log(`[SessionGroupManager.startChatSession] ✅ Saved session ${sessionId} to S5`);
-        } catch (error) {
-          rethrowDisposal(error);
-          console.error(`[SessionGroupManager.startChatSession] ❌ Failed to save to S5:`, error);
-          // Don't throw - session is already in memory, S5 is best-effort
-        }
-      } else {
-        console.warn('[SessionGroupManager.startChatSession] ⚠️  S5 storage not available, session only in memory');
-      }
+    if (!this.storage) {
+      this.addChat(group, session);
+      console.warn('[SessionGroupManager.startChatSession] ⚠️  S5 storage not available, session only in memory');
+      return session;
     }
+
+    // Added, saved and — on a failure that proves nothing was written — withdrawn in ONE turn under the group's lock, so
+    // no other save of this group carries a chat that is then withdrawn (1.39.31 S2, review round 1). A failure that may
+    // have written keeps the chat: it may exist on S5 (review round 1 MAJOR).
+    const storage = this.storage;
+    await this.groupLock.withLock(groupId, async () => {
+      const target = this.groups.get(groupId);
+      if (!target) throw new Error(`Session group not found: ${groupId}`);
+      this.addChat(target, session);
+      try {
+        await storage.save(target);
+        console.log(`[SessionGroupManager.startChatSession] ✅ Saved session ${sessionId} to S5`);
+      } catch (error) {
+        if (savedNothing(error)) this.withdrawChat(target, session);
+        throw error;
+      }
+    });
 
     return session;
   }

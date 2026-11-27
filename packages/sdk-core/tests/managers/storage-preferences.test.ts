@@ -26,7 +26,8 @@ vi.mock('@julesl23/s5js', () => ({ isS5RegistryUnavailableError: () => false, //
         list: vi.fn().mockImplementation(async function* () {}),
         getMetadata: vi.fn().mockResolvedValue(null),
       },
-      onConnectionChange: vi.fn().mockReturnValue(() => {}),
+      // As s5js: the current status at once (1.39.30 gates S5 calls on it).
+      onConnectionChange: vi.fn((cb: (status: string) => void) => { cb('connected'); return () => {}; }),
     }),
   },
 }));

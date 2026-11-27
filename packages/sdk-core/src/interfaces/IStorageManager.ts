@@ -106,6 +106,13 @@ export interface IStorageManager {
   getConnectionStatus(): 'connected' | 'connecting' | 'disconnected';
 
   /**
+   * Resolves once S5 is connected — at once, or when the reconnect attempt in flight (or one started now) connects;
+   * rejects STORAGE_OFFLINE (retryable) if that attempt fails. Every S5 call through getS5Client() already waits
+   * this way (1.39.30).
+   */
+  whenConnected(): Promise<void>;
+
+  /**
    * Rejects unless a sealed conversation log can be written here — checked before funding: STORAGE_NOT_INITIALIZED,
    * STORAGE_SEALER_MISSING, RAG_COHERENCE_UNAVAILABLE (no Web Locks, or IndexedDB will not open), STORAGE_OFFLINE,
    * and STORAGE_UNAVAILABLE when storage failed to start (not retryable: authenticate again — plan §20 AA1).

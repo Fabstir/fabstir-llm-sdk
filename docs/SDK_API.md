@@ -4361,6 +4361,21 @@ const session = await sessionGroupManager.updateChatSession(groupId, sessionId, 
 
 Still true: two tabs that change the same group each save the whole group, and the last save wins.
 
+**1.39.31: a failed save fails a creation.** `createSessionGroup` and `startChatSession` reject with the save's own
+error. Before 1.39.31 both logged the failure and returned as if saved.
+- `STORAGE_OFFLINE` or `STORAGE_CLEANUP`: nothing reached S5, because the connection check refuses before the write.
+  The new group, or chat, is removed from memory: it is not listed and cannot be fetched, and a retry creates exactly
+  one.
+- Any other error (a timeout, an S5 error, "network persistence could not be verified"): the write may have landed.
+  The group or chat stays in memory and is listed, so the next save of the group carries it. Do not retry the create
+  then; list instead.
+- A new chat is added, saved and, when the save is refused, withdrawn in one turn under the group's lock, so no other
+  save of the group carries it.
+- A `listSessionGroups()` made while a creation's save is in flight can show the new group; if that save is refused,
+  the next list does not.
+- The other save paths are unchanged: they reject and keep the change in memory. With no storage attached, both
+  methods still create in memory only.
+
 **1.39.26: `ChatSession.revision`** (`SDK_CAPABILITIES.sessionGroupChatRevision`). The manager stamps `revision` (epoch
 milliseconds) on every change it makes to a chat: `startChatSession`, `addMessage`, `updateChatSession`, and
 `updateSessionGroup` for each chat you pass as a new object. Do not set it; copy it with the chat (`{ ...chat }` does).
@@ -5092,14 +5107,46 @@ Clean up connection handlers and reject pending operations. Call when disposing 
 storageManager.cleanup();
 ```
 
-#### Auto-Reconnect Behavior
+#### Auto-Reconnect Behavior (1.39.30)
 
-The SDK automatically attempts to reconnect in these scenarios:
+The StorageManager redials S5 by itself whenever the connection drops, in Node and in a browser alike. This covers a
+portal restart, a network drop, and a machine waking from sleep. No browser event is needed.
 
-1. **Tab becomes visible** - When user returns to the tab after it was backgrounded
-2. **Network comes online** - When device regains network connectivity
+- **Backoff.** The first attempt comes about a second after the drop. The waits then double, 2, 4, 8, 16 and 32 s,
+  and settle at 60 s. Each wait has jitter, from half the delay to the full delay. Only one attempt is ever in flight,
+  and each attempt is s5js's `reconnect()`, which waits up to 10 s. The retry timer does not keep a Node process alive.
+  A link that drops again within 30 s of reconnecting keeps the waits growing, so a flapping portal is not redialled
+  every second. A link that stays up for 30 s starts the next outage over at 1 s.
+- **Browser hints.** When the tab becomes visible or the network comes back online, the next attempt starts at once
+  instead of waiting out the backoff.
+- **Queued writes flush** as soon as the connection is back. A `putWithRetry`/`deleteWithRetry` queued while
+  disconnected no longer waits for `forceSync()`. The two queue whenever S5 is not connected, which includes while a
+  reconnect is in progress. A write whose flush meets another drop stays queued for the next reconnect. Before, it
+  was rejected.
+- **Logs.** One line each: `S5 connection lost; reconnecting`, then `S5 still unreachable after N attempts; retrying
+  every 60s` (once), then `S5 reconnected after N attempt(s), Xs`.
+- **Storage calls wait for the connection.** Every asynchronous call on `getS5Client().fs` waits when S5 is not
+  connected, and so does `getS5Client().downloadByCID`. That includes the SDK's own conversation, settings, session
+  group and RAG storage. The call joins the reconnect attempt in flight, or starts one at once, and runs once
+  connected. If that attempt fails, the call rejects with `STORAGE_OFFLINE` (`details.retryable: true`) and nothing
+  reaches s5js. A write made while disconnected would otherwise be kept only locally: s5js sends registry updates to
+  connected peers only, and nothing re-sends them later. While connected, no call waits. After `cleanup()` or
+  `dispose()` nothing reconnects that store, so a call made while disconnected rejects with `STORAGE_CLEANUP`
+  (`retryable: false`).
+- **Not detected: a half-open socket.** When a peer vanishes without closing the TCP connection, s5js reports
+  `connected` until TCP gives up, because it has no ping.
 
-When reconnection succeeds, queued operations are automatically flushed.
+##### whenConnected(): Promise<void>
+
+Resolves at once when S5 is connected. Otherwise it resolves when the reconnect attempt in flight, or one it starts,
+connects. If that attempt fails it rejects with `STORAGE_OFFLINE` (retryable). Use it before a batch of work that
+needs storage at the end; storage calls themselves already wait. It throws `STORAGE_NOT_INITIALIZED` before
+`initialize()` and `STORAGE_MANAGER_DISPOSED` after `dispose()`. Capability flag: `SDK_CAPABILITIES.s5AutoReconnect`.
+
+```typescript
+await storageManager.whenConnected();       // S5 is connected now, or this threw STORAGE_OFFLINE
+await storageManager.getS5Client().fs.put(path, bytes);
+```
 
 #### Complete UI Integration Example
 

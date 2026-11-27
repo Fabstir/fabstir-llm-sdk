@@ -159,4 +159,6 @@ export const SDK_CAPABILITIES = Object.freeze({
   storageRegion: true,
   /** SessionManager.closeUnsubmittedSession: start a session with the host and close it with no job (1.39.29). */
   closeUnsubmittedSession: true,
+  /** StorageManager redials S5 after a drop in every environment (Node included) and gates S5 calls on the connection (1.39.30). */
+  s5AutoReconnect: true,
 } as const);

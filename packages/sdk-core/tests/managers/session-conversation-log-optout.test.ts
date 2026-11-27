@@ -211,6 +211,7 @@ describe('SDK_CAPABILITIES (D22)', () => {
       sessionGroupDeleteRestores: true,
       storageRegion: true,
       closeUnsubmittedSession: true,
+      s5AutoReconnect: true,
     });
   });
 });
