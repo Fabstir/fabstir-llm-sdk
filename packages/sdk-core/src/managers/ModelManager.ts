@@ -14,6 +14,7 @@ import {
   PriceRange,
 } from '../types/models';
 import { IHostManager } from '../interfaces/IHostManager';
+import { mapWithConcurrency, DISCOVERY_CONCURRENCY } from '../utils/concurrency';
 import { DEFAULT_MODEL_CONFIG } from '../constants/models';
 import {
   ModelNotApprovedError,
@@ -30,6 +31,8 @@ export class ModelManager {
   private cacheTimeout: number;
   private initialized: boolean = false;
   private hostManager?: IHostManager;
+  /** The availability read in flight, shared by overlapping callers with the same host manager (1.39.33 A3). */
+  private availabilityRun?: { hostManager: IHostManager; promise: Promise<ModelWithAvailability[]> };
 
   constructor(
     provider: Provider,
@@ -205,8 +208,9 @@ export class ModelManager {
         return [];
       }
 
-      // Fetch details for each model in parallel
-      const modelPromises = modelIds.map(async (modelId) => {
+      // Fetch details for the models in parallel, at most 8 reads at a time (1.39.33 B2): all at once was one JSON-RPC
+      // burst that rate-limited RPCs refuse in part, and each refused model was silently left out.
+      const models = await mapWithConcurrency(modelIds, DISCOVERY_CONCURRENCY, async (modelId: string) => {
         try {
           // Get model details
           const model = await this.modelRegistry.models(modelId);
@@ -230,8 +234,6 @@ export class ModelManager {
           return null;
         }
       });
-
-      const models = await Promise.all(modelPromises);
 
       // Filter out nulls and inactive models
       const activeModels = models.filter(
@@ -413,22 +415,34 @@ export class ModelManager {
       throw new Error('HostManager not set');
     }
 
+    // One run for every overlapping caller with the same host manager (1.39.33 A3); each gets its own copies.
+    const hostManager = this.hostManager;
+    let run = this.availabilityRun;
+    if (!run || run.hostManager !== hostManager) {
+      const promise: Promise<ModelWithAvailability[]> = this.readAvailability(hostManager).finally(() => {
+        if (this.availabilityRun?.promise === promise) this.availabilityRun = undefined;   // never clears a newer run
+      });
+      run = { hostManager, promise };
+      this.availabilityRun = run;
+    }
+    const results = await run.promise;
+    return results.map((r) => ({ ...r, model: { ...r.model }, priceRange: { ...r.priceRange } }));
+  }
+
+  /** The run behind getAvailableModelsWithHosts: the approved models, then every model's hosts in one pass (1.39.33
+   *  B1: 1 + 2 × hosts reads), only the hosts the storage region allows (A4). Results in the models' order. */
+  private async readAvailability(hostManager: IHostManager): Promise<ModelWithAvailability[]> {
     const models = await this.getAllApprovedModels();
-    const results: ModelWithAvailability[] = [];
-
-    for (const model of models) {
-      const hosts = await this.hostManager.findHostsForModel(model.modelId);
-      const priceRange = this.calculatePriceRange(hosts);
-
-      results.push({
+    const hostsByModel = await hostManager.findHostsForModels(models.map((m) => m.modelId), { inRegion: true });
+    return models.map((model) => {
+      const hosts = hostsByModel.get(model.modelId)!;
+      return {
         model,
         hostCount: hosts.length,
-        priceRange,
+        priceRange: this.calculatePriceRange(hosts),
         isAvailable: hosts.length > 0,
-      });
-    }
-
-    return results;
+      };
+    });
   }
 
   /**
@@ -443,7 +457,7 @@ export class ModelManager {
       throw new Error('HostManager not set');
     }
 
-    const hosts = await this.hostManager.findHostsForModel(modelId);
+    const hosts = await this.hostManager.findHostsForModel(modelId, { inRegion: true });   // 1.39.33 A4
     const priceRange = this.calculatePriceRange(hosts);
 
     return {

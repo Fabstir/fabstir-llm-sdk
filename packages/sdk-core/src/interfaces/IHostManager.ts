@@ -113,7 +113,13 @@ export interface IHostManager {
   /**
    * Find hosts that support a specific model
    */
-  findHostsForModel(modelId: string): Promise<HostInfo[]>;
+  findHostsForModel(modelId: string, opts?: FindHostsOptions): Promise<HostInfo[]>;
+
+  /**
+   * The hosts of many models in one pass (1.39.33): 1 + 2 × active hosts reads, however many models. Every given id has
+   * an entry (`[]` when none serves it).
+   */
+  findHostsForModels(modelIds: readonly string[], opts?: FindHostsOptions): Promise<Map<string, HostInfo[]>>;
 
   /**
    * Check if host supports a specific model
@@ -194,4 +200,10 @@ export interface IHostManager {
    * @returns Effective price as bigint
    */
   getModelPricing(hostAddress: string, modelId: string, tokenAddress: string): Promise<bigint>;
+}
+
+/** Options for `findHostsForModel` and `findHostsForModels` (1.39.33). */
+export interface FindHostsOptions {
+  /** Only the hosts the storage region allows (a session could use them there); Global keeps all. */
+  inRegion?: boolean;
 }

@@ -3650,6 +3650,22 @@ interface ModelWithAvailability {
 **Throws:**
 - `Error` if HostManager not set via `setHostManager()`
 
+**1.39.33:**
+- **Speed.** All models' hosts come from one pass, `HostManager.findHostsForModels`. That is 1 + 2 × active hosts
+  chain reads, however many models there are; before, it was one read per model plus two per host for each model,
+  one after another.
+  - The model registry is read at most 8 reads at a time.
+  - Measured on Base Sepolia with two callers at once: 0.85 s on Alchemy, against 59.5 s before.
+  - On a free, rate-limited RPC (about 4 reads/s) it is still tens of seconds, because the RPC is the limit.
+- **Shared run.** Overlapping calls with the same host manager share one run. Each caller still gets its own
+  array and objects, including `model` and `priceRange`, and a call made after a run settles reads afresh.
+- **Storage regions.** In a region (for example UK), `hostCount`, `priceRange` and `isAvailable` count only the hosts
+  the region allows. A model that only an outside host serves shows as unavailable, rather than failing later at
+  session start. `getModelPriceRange` does the same. Global is unchanged.
+- **RPC.** The SDK sends every chain read as its own JSON-RPC request, never as a batch. Rate-limited RPCs refuse or
+  throttle a batch as a whole: the free Tenderly gateway refuses batches of 4 or more reads, and Alchemy throttled
+  part of a burst of 110. A single request is accepted everywhere.
+
 **Example:**
 ```typescript
 const modelManager = sdk.getModelManager();
@@ -3782,7 +3798,26 @@ await hostManager.registerHostWithModels({
 Finds hosts that support a specific model.
 
 ```typescript
-async findHostsForModel(modelId: string): Promise<HostInfo[]>
+async findHostsForModel(modelId: string, opts?: { inRegion?: boolean }): Promise<HostInfo[]>
+```
+
+`opts.inRegion` (1.39.33): only the hosts the storage region allows. Global keeps all. Without the option, the result
+is as before. The hosts' reads now run in parallel, at most 8 at a time.
+
+### findHostsForModels (1.39.33)
+
+The hosts of many models in one pass: 1 + 2 × active hosts chain reads, however many models.
+- The reads: `getAllActiveNodes`, then for each host `getNodeFullInfo` (which lists its models) and
+  `getHostModelPrices(host, USDC)`.
+- Only **active** hosts count, because an inactive host can't take a session. `findHostsForModel` follows
+  `getNodesForModel` and does not check.
+- A host counts for a model when it lists the model **and** has a USDC price for it. That is the same rule as
+  `findHostsForModel`: a price of 0, or none, leaves the host out. A model listed twice counts once.
+- A host whose reads fail is skipped.
+- Every id you pass has an entry in the map, `[]` when no host serves it.
+
+```typescript
+async findHostsForModels(modelIds: readonly string[], opts?: { inRegion?: boolean }): Promise<Map<string, HostInfo[]>>
 ```
 
 **Returns:**
