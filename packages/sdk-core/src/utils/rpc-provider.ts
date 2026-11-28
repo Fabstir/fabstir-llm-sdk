@@ -26,12 +26,20 @@ export const networkUnreachable = (cause?: unknown) =>
 const providers = new Map<string, ethers.JsonRpcProvider>();
 const verified = new WeakMap<ethers.JsonRpcProvider, Promise<void>>();
 
+/**
+ * One JSON-RPC request per call, never a batch (1.39.33 B3). ethers groups calls made together into one batch request;
+ * rate-limited RPCs refuse or throttle such bursts whole (measured on testnet, IMPLEMENTATION-MODEL-AVAILABILITY-SPEED.md
+ * V8–V9: Tenderly's gateway refuses a batch of 4+ eth_calls; Alchemy throttled part of a burst of 110), so a read fails
+ * that would have passed on its own. A single request is accepted everywhere, and a throttled one is retried by itself.
+ */
+export const RPC_BATCH_MAX_COUNT = 1;
+
 /** The process's provider for `rpcUrl` on `chainId`, built once with that network fixed. Nothing may destroy it. */
 export function sharedRpcProvider(rpcUrl: string, chainId: number): ethers.JsonRpcProvider {
   const key = `${chainId}@${rpcUrl}`;
   let provider = providers.get(key);
   if (!provider) {
-    provider = new ethers.JsonRpcProvider(rpcUrl, ethers.Network.from(chainId), { staticNetwork: true });
+    provider = new ethers.JsonRpcProvider(rpcUrl, ethers.Network.from(chainId), { staticNetwork: true, batchMaxCount: RPC_BATCH_MAX_COUNT });
     providers.set(key, provider);
   }
   return provider;

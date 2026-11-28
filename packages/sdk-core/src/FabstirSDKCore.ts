@@ -51,7 +51,10 @@ import { ContractManager, ContractAddresses } from './contracts/ContractManager'
 import { UnifiedBridgeClient } from './services/UnifiedBridgeClient';
 import { HostSelectionService } from './services/HostSelectionService';
 import { SDKConfig, SDKError } from './types';
-import { getOrGenerateS5Seed, hasCachedSeed, cacheSeed, deriveEntropyFromSignature, entropyToS5Phrase, SEED_DOMAIN_SEPARATOR, generateS5SeedFromPrivateKey, generateS5SeedFromAddress } from './utils/s5-seed-derivation';
+import { getOrGenerateS5Seed, hasCachedSeed, cacheSeed, deriveEntropyFromSignature, entropyToS5Phrase, SEED_DOMAIN_SEPARATOR, generateS5SeedFromPrivateKey, generateS5SeedFromAddress, deriveRegionalSeedFromBytes, s5PhraseToSeedBytes, addressSeedBytes, privateKeySeedBytes } from './utils/s5-seed-derivation';
+import { equalBytes } from '@noble/ciphers/utils';
+import { resolveStorageRegion, storageRegionEntry, regionalSeedSealed, STORAGE_REGION_REFUSALS, type StorageRegion, type BuiltStorageRegion } from './config/storage-regions';
+import { RegionPolicy } from './utils/region-policy';
 import { ChainRegistry } from './config/ChainRegistry';
 import { ChainId, ChainConfig } from './types/chain.types';
 import { UnsupportedChainError } from './errors/ChainErrors';
@@ -107,6 +110,14 @@ export interface FabstirSDKCoreConfig {
    * (Replaces 1.39.18's `transcode.encryptedHosts`, which is refused.)
    */
   confidentialHosts?: string[];
+
+  /**
+   * Where this client's storage and jobs are kept (1.39.27). Default 'global' (as before). In any other region: storage,
+   * documents, vectors and registration use only that region's S5 portal and peer; jobs go only to that region's hosts;
+   * web search is refused; the S5 identity is derived from the supplied seed (`s5Config.seedPhrase`) or private key with
+   * the region as a label, and is never address-derived or cached. 'eu' is refused until it is built.
+   */
+  storageRegion?: StorageRegion;
 
   // Contract addresses (optional - can use env vars)
   contractAddresses?: {
@@ -299,7 +310,10 @@ export class FabstirSDKCore extends EventEmitter {
       moderationGate: config.moderationGate ?? false,
 
       confidentialHosts: config.confidentialHosts,
+
+      storageRegion: resolveStorageRegion(config.storageRegion),
     };
+    this.refuseRegionalConfigConflicts(defaultConfig);
     // 1.39.18's key, refused rather than ignored: ignoring it would refuse every confidential job as NO_ALLOWLIST (1.39.19).
     if ((config as any).transcode?.encryptedHosts !== undefined) {
       throw new SDKError('transcode.encryptedHosts was renamed confidentialHosts in 1.39.19 (it now covers transcode, LTX and training)',
@@ -324,7 +338,112 @@ export class FabstirSDKCore extends EventEmitter {
 
     return defaultConfig;
   }
-  
+
+  /** The StorageManager for this configuration. In a region: its peer and portal, registration through the auth API
+   *  (construction already refused anything else, R3). Global: as before — the caller's peer or the default; the auth
+   *  API (secure) preferred over a master token (exposed). */
+  private buildStorageManager(): StorageManager {
+    const s5 = this.config.s5Config ?? {};
+    if (this.isRegional()) {
+      const key = this.config.storageRegion as Exclude<BuiltStorageRegion, 'global'>;
+      return new StorageManager(storageRegionEntry(key).peer, s5.authApiUrl, true, key);
+    }
+    if (s5.authApiUrl) return new StorageManager(s5.portalUrl || StorageManager.DEFAULT_S5_PORTAL, s5.authApiUrl, true);
+    return new StorageManager(s5.portalUrl || StorageManager.DEFAULT_S5_PORTAL, s5.masterToken, false);
+  }
+
+  /** The RAG config's `s5Portal` (validated, never connected to — the RAG uses the StorageManager's client). */
+  private ragS5Portal(): string {
+    if (this.isRegional()) return storageRegionEntry(this.config.storageRegion as BuiltStorageRegion).peer;
+    return this.config.s5Config?.portalUrl || DEFAULT_RAG_CONFIG.s5Portal;
+  }
+
+  /** A ClientManager over this SDK's model and host managers, with the region's host gate (1.39.27). */
+  private buildClientManager(): ClientManager {
+    const clientManager = new ClientManager(this.modelManager!, this.hostManager as HostManager, this.contractManager!);
+    clientManager.setRegionPolicy(this.regionPolicy());
+    return clientManager;
+  }
+
+  /** The host gate for this SDK's storage region (1.39.27): the region table's list, fail closed. */
+  private regionPolicy(): RegionPolicy {
+    return this.hostGate ??= new RegionPolicy(this.getStorageRegion());   // one per SDK: its region never changes
+  }
+  private hostGate?: RegionPolicy;
+  /** The signed-in identity's addresses in a region (owner §0 S4), for setS5Seed; cleared with the identity. */
+  private regionIdentityAddresses: string[] = [];
+
+  /** The storage region this SDK keeps storage and jobs in (1.39.27). */
+  getStorageRegion(): BuiltStorageRegion {
+    return (this.config.storageRegion ?? 'global') as BuiltStorageRegion;   // absent means Global, as isRegional() reads it
+  }
+
+  /** A region other than 'global': everything below follows the region table, never a fallback. */
+  private isRegional(): boolean {
+    // Absent means Global (the documented default); validateConfig always resolves it for a constructed SDK.
+    return this.config.storageRegion !== undefined && this.config.storageRegion !== 'global';
+  }
+
+  /** In a region, the configuration may not name another region's storage or put a registration token in the client
+   *  (R3): `masterToken`, a `portalUrl` that is not the region's, and — with storage on — no `authApiUrl` are refused. */
+  private refuseRegionalConfigConflicts(config: FabstirSDKCoreConfig): void {
+    if (config.storageRegion === 'global') return;   // resolved: never undefined here
+    const region = storageRegionEntry(config.storageRegion as BuiltStorageRegion);
+    const s5 = config.s5Config ?? {};
+    const refuse = (field: string, why: string) => {
+      throw new SDKError(`storageRegion '${config.storageRegion}': ${why}`, 'STORAGE_REGION_CONFIG_REFUSED', { field, region: config.storageRegion, retryable: false });
+    };
+    if (s5.masterToken !== undefined) refuse('masterToken', 's5Config.masterToken would put a registration token in the client; register through s5Config.authApiUrl');
+    if (s5.portalUrl !== undefined && s5.portalUrl !== region.peer && s5.portalUrl !== region.portalUrl) {
+      refuse('portalUrl', `s5Config.portalUrl names another region's storage (this region's peer is ${region.peer})`);
+    }
+    if (config.hostOnly !== true && config.skipS5 !== true && !s5.authApiUrl) {
+      refuse('authApiUrl', 'storage registration needs s5Config.authApiUrl (the application backend that holds the region\'s token)');
+    }
+  }
+
+  /**
+   * The one place a regional session's S5 seed is made (owner §0 S1–S5). From the supplied seed when there is one,
+   * else from the private-key seed; with neither, refused — never the address-derived identity, never the cache. A
+   * supplied seed equal to the address-derived seed of any of `addresses`, on any supported chain, is refused (a
+   * consumer whose vault went missing). Synchronous, so `setS5Seed` goes through it too.
+   */
+  private regionalSeed(source: { supplied?: string; privateKey?: string; addresses: Array<string | undefined> }, remember = true): string {
+    const region = this.config.storageRegion as Exclude<BuiltStorageRegion, 'global'>;
+    // Remembered for setS5Seed: the identity's addresses whose address-derived seed is refused (a Base Account's primary).
+    // Not by a check that runs before the identity is replaced (the Base Account's up-front one).
+    if (remember) this.regionIdentityAddresses = [...new Set(source.addresses.filter((a): a is string => !!a))];
+    let base: Uint8Array;
+    if (source.supplied !== undefined) {
+      base = s5PhraseToSeedBytes(source.supplied);
+      // Every chain id this SDK knows, configured here or not: the consumer's vault may have fallen back on another.
+      const chains = new Set<number>([...Object.values(ChainId).filter((v): v is number => typeof v === 'number'),
+        ...ChainRegistry.getSupportedChains(), this.config.chainId!]);
+      for (const address of source.addresses) {
+        if (!address) continue;
+        for (const chain of chains) {
+          if (equalBytes(addressSeedBytes(address, chain), base)) {
+            throw new SDKError('s5Config.seedPhrase is the address-derived seed, which anyone who knows the address can rebuild; a region needs a secret seed',
+              'STORAGE_REGION_SEED_REFUSED', { reason: 'ADDRESS_DERIVED', region, retryable: false });
+          }
+        }
+      }
+    } else if (source.privateKey) {
+      base = privateKeySeedBytes(source.privateKey);
+    } else {
+      throw new SDKError(`storageRegion '${region}' needs s5Config.seedPhrase (a secret seed) for this sign-in: the address-derived identity is never used in a region`,
+        'STORAGE_REGION_SEED_REQUIRED', { region, retryable: false });
+    }
+    return deriveRegionalSeedFromBytes(base, region);
+  }
+
+  /** After a sign-in that is still current: cache a seed the SDK derived (§27 HH3). Never a supplied seed, and never in a
+   *  region (S3: a derived regional seed always differs from the supplied one, and would land in plain localStorage). */
+  private cacheDerivedSeed(): void {
+    if (this.isRegional()) return;
+    if (this.s5Seed && this.s5Seed !== this.config.s5Config?.seedPhrase) cacheSeed(this.userAddress!, this.s5Seed);
+  }
+
   /**
    * Authenticate with wallet
    */
@@ -361,7 +480,7 @@ export class FabstirSDKCore extends EventEmitter {
   }
 
   /** `derivedSeed`: the Base Account composite's, for its signer step — never a public option (§29 JJ3). */
-  private async _authenticate(method: 'metamask' | 'privatekey' | 'signer' | 'aa-signer', options: any, epoch: number, derivedSeed?: string): Promise<void> {
+  private async _authenticate(method: 'metamask' | 'privatekey' | 'signer' | 'aa-signer', options: any, epoch: number, derivedSeed?: string, identityAddresses?: string[]): Promise<void> {
     this.refuseIfSuperseded(epoch);
     // A sign-in starts by forgetting the previous identity (§25 FF1): its managers — a RAG manager the UI holds
     // included — refuse from now on, and no delegate payer carries over (§24 EE5). Authenticated only once the new
@@ -379,7 +498,7 @@ export class FabstirSDKCore extends EventEmitter {
         if (!options || !options.signer) {
           throw new SDKError('Signer required in options', 'SIGNER_MISSING');
         }
-        await this.authenticateWithSigner(options.signer, derivedSeed);
+        await this.authenticateWithSigner(options.signer, derivedSeed, identityAddresses);
       } else if (method === 'aa-signer') {
         await this.authenticateWithAASigner(options);
       } else {
@@ -388,7 +507,7 @@ export class FabstirSDKCore extends EventEmitter {
       this.assertCurrent(epoch);
       // Only now — the sign-in still the current one — is its derived seed cached (§27 HH3): a sign-out during a wallet
       // prompt or the derivation never leaves this identity's seed behind. A provided seed is never cached.
-      if (this.s5Seed && this.s5Seed !== this.config.s5Config?.seedPhrase) cacheSeed(this.userAddress!, this.s5Seed);
+      this.cacheDerivedSeed();
 
       this.authMode = method;
 
@@ -418,6 +537,8 @@ export class FabstirSDKCore extends EventEmitter {
       this.forgetIdentity();
       // An s5js the SDK cannot run on is a configuration error with its own code — never folded into AUTH_FAILED.
       if (error?.code === 'S5JS_UNSUPPORTED_VERSION') throw error;
+      // The storage region's refusals are configuration errors with their own codes, likewise (1.39.27).
+      if (STORAGE_REGION_REFUSALS.has(error?.code)) throw error;
       // Nested (NETWORK_UNREACHABLE, …): the cause's own verdict travels with it, never a default (§25 FF3).
       const retryable = explicitVerdict(error);
       throw new SDKError(
@@ -578,7 +699,9 @@ export class FabstirSDKCore extends EventEmitter {
     }
     
     // Generate or retrieve S5 seed deterministically (skip in hostOnly mode)
-    if (this.config.hostOnly !== true) {
+    if (this.config.hostOnly !== true && this.isRegional()) {
+      this.s5Seed = this.regionalSeed({ supplied: this.config.s5Config?.seedPhrase, addresses: [this.userAddress] });
+    } else if (this.config.hostOnly !== true) {
       try {
         // PRIORITY 1: Use provided seedPhrase if available (for cross-tab consistency)
         if (this.config.s5Config?.seedPhrase) {
@@ -645,7 +768,9 @@ export class FabstirSDKCore extends EventEmitter {
     // 1. 100% deterministic - same key always produces same seed
     // 2. Survives browser data clear
     // 3. Works across devices
-    if (this.config.hostOnly !== true) {
+    if (this.config.hostOnly !== true && this.isRegional()) {
+      this.s5Seed = this.regionalSeed({ supplied: this.config.s5Config?.seedPhrase, privateKey, addresses: [this.userAddress] });
+    } else if (this.config.hostOnly !== true) {
       try {
         // PRIORITY 1: Use provided seedPhrase if available (for cross-tab consistency)
         if (this.config.s5Config?.seedPhrase) {
@@ -708,7 +833,9 @@ export class FabstirSDKCore extends EventEmitter {
     );
     this.userAddress = options.smartAccountAddress;
 
-    if (this.config.hostOnly !== true) {
+    if (this.config.hostOnly !== true && this.isRegional()) {
+      this.s5Seed = this.regionalSeed({ supplied: this.config.s5Config?.seedPhrase, privateKey: options.eoaPrivateKey, addresses: [this.userAddress, this.eoaWallet.address] });
+    } else if (this.config.hostOnly !== true) {
       try {
         if (this.config.s5Config?.seedPhrase) {
           this.s5Seed = this.config.s5Config.seedPhrase;
@@ -729,7 +856,7 @@ export class FabstirSDKCore extends EventEmitter {
    * derived for this signer (the Base Account's, from its primary account — §28 II5) — after a provided seed, before
    * the cache; `_authenticate` caches it once the sign-in is current.
    */
-  private async authenticateWithSigner(signer: ethers.Signer, derivedSeed?: string): Promise<void> {
+  private async authenticateWithSigner(signer: ethers.Signer, derivedSeed?: string, identityAddresses: string[] = []): Promise<void> {
     if (!signer) {
       throw new SDKError('Signer required', 'SIGNER_REQUIRED');
     }
@@ -749,7 +876,10 @@ export class FabstirSDKCore extends EventEmitter {
     this.userAddress = await this.signer.getAddress();
 
     // Generate or retrieve S5 seed deterministically (skip in hostOnly mode)
-    if (this.config.hostOnly !== true) {
+    if (this.config.hostOnly !== true && this.isRegional()) {
+      // `identityAddresses`: a Base Account's primary account, whose address-derived seed is refused too (S4).
+      this.s5Seed = this.regionalSeed({ supplied: this.config.s5Config?.seedPhrase, addresses: [this.userAddress, ...identityAddresses] });
+    } else if (this.config.hostOnly !== true) {
       try {
         // PRIORITY 1: Use provided seedPhrase if available (for cross-tab consistency)
         if (this.config.s5Config?.seedPhrase) {
@@ -835,6 +965,11 @@ export class FabstirSDKCore extends EventEmitter {
     }
     // Requested before a sign-out: no wallet step at all (§25 FF2).
     this.refuseIfSuperseded(epoch);
+    // In a region, a sign-in that would be refused is refused before any wallet step: no seed, or the primary's
+    // address-derived one (1.39.27; the sub-account is checked again at the signer step).
+    if (this.isRegional() && this.config.hostOnly !== true) {
+      this.regionalSeed({ supplied: this.config.s5Config?.seedPhrase, addresses: [primaryAccount] }, false);
+    }
 
     // 1. Ensure sub-account exists with spend permissions
     const subAccountResult = await ensureSubAccount(provider, primaryAccount, {
@@ -854,7 +989,9 @@ export class FabstirSDKCore extends EventEmitter {
     const subAccountLower = subAccountResult.address.toLowerCase();
     console.log('[BaseAccount Auth] Sub-account address:', subAccountLower);
     console.log('[BaseAccount Auth] Primary account address:', primaryAccount.toLowerCase());
-    const derivedSeed = this.config.s5Config?.seedPhrase || hasCachedSeed(subAccountLower)
+    // In a region: no pre-derivation and no cache — the signer step makes the regional seed and refuses the primary's
+    // address-derived one (owner §0 S3, S4).
+    const derivedSeed = this.isRegional() || this.config.s5Config?.seedPhrase || hasCachedSeed(subAccountLower)
       ? undefined
       : await generateS5SeedFromAddress(primaryAccount, chainId);
 
@@ -868,7 +1005,7 @@ export class FabstirSDKCore extends EventEmitter {
 
 
     // 4. Authenticate SDK with the custom signer (within this change — never queued behind it)
-    await this._authenticate('signer', { signer: customSigner }, epoch, derivedSeed);
+    await this._authenticate('signer', { signer: customSigner }, epoch, derivedSeed, [primaryAccount]);   // read only in a region (S4)
 
 
     // 5. Approve JobMarketplace to spend USDC from sub-account
@@ -969,6 +1106,7 @@ export class FabstirSDKCore extends EventEmitter {
       if (!store.isInitialized()) failure = new SDKError('S5 did not connect', 'STORAGE_NOT_INITIALIZED');
     } catch (storageErr: any) {
       if (storageErr?.code === 'S5JS_UNSUPPORTED_VERSION') throw storageErr;
+      if (STORAGE_REGION_REFUSALS.has(storageErr?.code)) throw storageErr;   // a configuration error, never a degraded store (1.39.27)
       failure = storageErr;
     }
     if (failure === undefined) return;
@@ -991,11 +1129,13 @@ export class FabstirSDKCore extends EventEmitter {
     this.watchWalletChainChanges();
 
     // Create auth manager with authenticated data
-    this.authManager = new AuthManager(this.signer, this.provider, this.userAddress, this.s5Seed);
+    this.authManager = new AuthManager(this.signer, this.provider, this.userAddress, this.s5Seed, this.config.storageRegion);
 
     // Create other managers
     // Use PaymentManagerMultiChain for deposit/withdrawal support
-    this.paymentManager = new PaymentManagerMultiChain(undefined, this.currentChainId);
+    const paymentManager = new PaymentManagerMultiChain(undefined, this.currentChainId);
+    paymentManager.setRegionPolicy(this.regionPolicy());   // nothing funded outside the region (1.39.27)
+    this.paymentManager = paymentManager;
 
     // Host-only mode: Skip S5/Storage/Session/Encryption (for host CLI operations)
     const hostOnly = this.config.hostOnly === true;
@@ -1003,26 +1143,7 @@ export class FabstirSDKCore extends EventEmitter {
     const skipS5 = this.config.skipS5 === true;
 
     if (!hostOnly && !skipS5) {
-      // StorageManager constructor takes s5PortalUrl and auth config
-      const s5PortalUrl = this.config.s5Config?.portalUrl;
-      const s5AuthApiUrl = this.config.s5Config?.authApiUrl;
-      const s5MasterToken = this.config.s5Config?.masterToken;
-
-      // Prefer authApiUrl (secure) over masterToken (exposed)
-      if (s5AuthApiUrl) {
-        this.storageManager = new StorageManager(
-          s5PortalUrl || StorageManager.DEFAULT_S5_PORTAL,
-          s5AuthApiUrl,
-          true  // isAuthApiUrl = true
-        );
-      } else {
-        this.storageManager = new StorageManager(
-          s5PortalUrl || StorageManager.DEFAULT_S5_PORTAL,
-          s5MasterToken,
-          false  // isAuthApiUrl = false (using masterToken)
-        );
-      }
-
+      this.storageManager = this.buildStorageManager();
     }
 
     // VectorRAGManager needs userAddress, seedPhrase, config, and sessionManager
@@ -1095,11 +1216,7 @@ export class FabstirSDKCore extends EventEmitter {
       }
 
       // Create ClientManager after ModelManager and HostManager are available
-      this.clientManager = new ClientManager(
-        this.modelManager!,   // built by constructModelAndHostManagers() above
-        this.hostManager as HostManager,
-        this.contractManager!
-      );
+      this.clientManager = this.buildClientManager();   // ModelManager and HostManager: built by constructModelAndHostManagers() above
       await this.clientManager.initialize(this.signer);
 
       await (this.treasuryManager as any).initialize(this.signer);
@@ -1109,7 +1226,7 @@ export class FabstirSDKCore extends EventEmitter {
       if (!hostOnly && !skipS5 && !this.storageUnavailable && this.userAddress && this.s5Seed && this.sessionManager) {
         const ragConfig = {
           ...DEFAULT_RAG_CONFIG,
-          s5Portal: this.config.s5Config?.portalUrl || DEFAULT_RAG_CONFIG.s5Portal
+          s5Portal: this.ragS5Portal()
         };
         const storageForRag = this.storageManager!;
         this.vectorRAGManager = new VectorRAGManager({
@@ -1171,6 +1288,7 @@ export class FabstirSDKCore extends EventEmitter {
    */
   private wireSessionManagerPolicy(sm: SessionManager): void {
     if (this.config.confidentialHosts) sm.setConfidentialHosts(this.config.confidentialHosts);
+    sm.setRegionPolicy(this.regionPolicy());   // the storage region's host gate (1.39.27)
     sm.setSessionJobReader((chainId: number) => {
       if (chainId !== this.currentChainId) {
         throw new SDKError(`Session is on chain ${chainId}; this SDK is on ${this.currentChainId}`, 'CHAIN_MISMATCH', { chainId });
@@ -1765,13 +1883,16 @@ export class FabstirSDKCore extends EventEmitter {
    * Set S5 seed phrase
    */
   setS5Seed(seed: string): void {
-    this.s5Seed = seed;
+    // In a region the seed given is a base seed, derived through the one entry point (owner §0 S2).
+    this.s5Seed = this.isRegional() ? this.regionalSeed({ supplied: seed, addresses: [this.userAddress, ...this.regionIdentityAddresses] }) : seed;
   }
 
   /**
    * Get S5 seed (for testing only)
    */
   getS5Seed(): string | undefined {
+    // A regional seed is never handed back: fed in again as seedPhrase it would derive a third identity (owner §0 S5).
+    if (this.isRegional()) throw regionalSeedSealed(this.config.storageRegion!);
     return this.s5Seed;
   }
   
@@ -1800,6 +1921,7 @@ export class FabstirSDKCore extends EventEmitter {
    */
   private forgetIdentity(): Promise<void> {
     this.identitiesForgotten++;
+    this.regionIdentityAddresses = [];
     // Managers the UI still holds refuse from now on (§25 FF1, §26 GG1): disposal refuses from its first line.
     void this.vectorRAGManager?.dispose().catch(() => undefined);
     this.storageManager?.dispose();
@@ -2045,7 +2167,7 @@ export class FabstirSDKCore extends EventEmitter {
   }): Promise<void> {
     const modelManager = new ModelManager(this.readProvider!, addresses.modelRegistry);
     this.modelManager = modelManager;
-    this.hostManager = new HostManager(
+    const hostManager = new HostManager(
       this.signer!,
       addresses.nodeRegistry,
       modelManager,
@@ -2054,6 +2176,8 @@ export class FabstirSDKCore extends EventEmitter {
       this.contractManager,
       this.readProvider
     );
+    hostManager.setRegionPolicy(this.regionPolicy());   // its host probes follow the region (1.39.27)
+    this.hostManager = hostManager;
     await (this.hostManager as any).initialize();
   }
 
@@ -2132,7 +2256,7 @@ export class FabstirSDKCore extends EventEmitter {
     }
     if (this.clientManager && this.contractManager) {
       // both constructed by constructModelAndHostManagers() just above
-      this.clientManager = new ClientManager(this.modelManager!, this.hostManager as HostManager, this.contractManager);
+      this.clientManager = this.buildClientManager();
       await this.clientManager.initialize(this.signer);
     }
     if (this.transcodeManager && this.sessionManager && this.storageManager && this.contractManager && this.encryptionManager) {

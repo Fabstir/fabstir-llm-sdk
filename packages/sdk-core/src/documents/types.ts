@@ -15,7 +15,6 @@ export type DocumentType = 'txt' | 'md' | 'html' | 'pdf' | 'docx' | 'png' | 'jpe
  */
 export interface UploadResult {
   documentId: string;
-  s5Path: string;
   metadata: DocumentMetadata;
 }
 
@@ -28,7 +27,6 @@ export interface DocumentMetadata {
   type: DocumentType;
   size: number;
   uploadedAt: number;
-  s5Path: string;
 }
 
 /**
@@ -73,7 +71,6 @@ export interface BatchProgress {
 export interface BatchResult {
   success: boolean;
   documentId?: string;
-  s5Path?: string;
   metadata?: DocumentMetadata;
   error?: string;
 }

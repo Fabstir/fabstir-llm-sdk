@@ -303,7 +303,7 @@ describe('V8 — one error shape everywhere', () => {
     const sm = new StorageManager();
     Object.assign(sm as any, { initialized: true, s5Client: net.tab(), userAddress: ADDR, connectionStatus: 'connected', sealer: sealer() });
     await sm.saveConversation({ id: '41', messages: [], metadata: {}, createdAt: 1, updatedAt: 1 } as any);
-    net.fail('get', `home/sessions/${ADDR}/41/conversation.json`, 'dir404', 1);
+    net.fail('get', `home/sessions/v2/${sealer().deriveId('owner', 'storage')}/${sealer().deriveId('conv', '41')}/log`, 'dir404', 1);   // its opaque path (1.39.24 D41)
     const fresh = new StorageManager();
     Object.assign(fresh as any, { initialized: true, s5Client: net.tab(), userAddress: ADDR, connectionStatus: 'connected', sealer: sealer() });
     const err = await caught(fresh.loadConversation('41'));

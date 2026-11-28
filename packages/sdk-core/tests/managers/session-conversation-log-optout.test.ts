@@ -201,6 +201,17 @@ describe('SDK_CAPABILITIES (D22)', () => {
       settledSessionGuard: true,
       settledNotice: true,
       settledRest: true,
+      sealedSettings: true,
+      opaqueConversationLogs: true,
+      sealedSessionGroups: true,
+      incrementalRagChunks: true,
+      unreadableDatabaseCleanup: true,
+      sessionGroupMemoryFirst: true,
+      sessionGroupChatRevision: true,
+      sessionGroupDeleteRestores: true,
+      storageRegion: true,
+      closeUnsubmittedSession: true,
+      s5AutoReconnect: true,
     });
   });
 });

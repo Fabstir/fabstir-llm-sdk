@@ -71,6 +71,8 @@ describe('AA3 — S2 recovers a sealed log under plaintext at any age', () => {
     net.advance(60_000);
     await net.tab().fs.put(logPath('41'), conv('41', [msg('m1', 1), msg('old', 3)]));   // it never saw m2
     await s.appendMessage('41', msg('m4', 4) as any);
+    // 1.39.24 D41: the log is at its opaque path; the outdated tab's copy at the legacy path is merged by the migration
+    await s.migrateLegacyConversationLogs();
     expect((await s.loadConversation('41'))?.messages.map((m: any) => m.content)).toEqual(['m1', 'm2', 'old', 'm4']);
   });
 });

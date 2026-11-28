@@ -34,6 +34,10 @@ import { getWebSearchCapabilitiesFromHost } from '../utils/host-web-search-capab
 import type { WebSearchCapabilities } from '../types/web-search.types';
 import { getImageGenerationCapabilitiesFromHost } from '../utils/host-image-generation-capabilities';
 import type { ImageGenerationCapabilities } from '../types/image-generation.types';
+import { RegionPolicy } from '../utils/region-policy';
+import { mapWithConcurrency, DISCOVERY_CONCURRENCY } from '../utils/concurrency';
+
+import type { FindHostsOptions } from '../interfaces/IHostManager';
 
 /**
  * Pricing constants for host registration - DUAL PRICING
@@ -78,7 +82,17 @@ export interface HostRegistrationWithModels {
   stableTokenAddress?: string;       // Optional USDC address for setModelTokenPricing (auto-resolved from ContractManager if omitted)
 }
 
+/** What a host offers when the SDK will not search there (a storage region, 1.39.27). */
+const NO_WEB_SEARCH: WebSearchCapabilities = {
+  supportsWebSearch: false, supportsInferenceSearch: false, supportsStreamingSearch: false, supportsWebSocketSearch: false,
+  provider: null, rateLimitPerMinute: 0,
+};
+
 export class HostManager {
+  /** The storage region's host gate (1.39.27): Global (unrestricted) until the SDK installs its region's. */
+  private regionPolicy: RegionPolicy = new RegionPolicy('global');
+  /** The SessionManager's endpoint transform: its output for a listed origin is a listed host too (1.39.27). */
+  private regionTransform?: (url: string) => string;
   private contractManager: ContractManager;
   private modelManager: ModelManager;
   private nodeRegistry?: Contract;
@@ -579,7 +593,7 @@ export class HostManager {
   /**
    * Get all hosts supporting a specific model
    */
-  async findHostsForModel(modelId: string): Promise<HostInfo[]> {
+  async findHostsForModel(modelId: string, opts: FindHostsOptions = {}): Promise<HostInfo[]> {
     if (!this.initialized || !this.nodeRegistry) {
       throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
     }
@@ -591,64 +605,19 @@ export class HostManager {
       }
 
       // Get nodes supporting this model
-      const nodeAddresses = await this.nodeRegistryRead['getNodesForModel'](modelId);
+      const nodeAddresses: string[] = await this.nodeRegistryRead['getNodesForModel'](modelId);
       console.log(`[HostManager] findHostsForModel: modelId=${modelId}, found ${nodeAddresses.length} nodes:`, nodeAddresses);
-      const hosts: HostInfo[] = [];
 
-      for (const address of nodeAddresses) {
-        try {
-          const info = await this.nodeRegistryRead['getNodeFullInfo'](address);
-          console.log(`[HostManager] Raw getNodeFullInfo(${address}):`, JSON.stringify(info, (_, v) => typeof v === 'bigint' ? v.toString() + 'n' : v));
-
-          // Parse metadata with defaults on failure
-          let metadata: HostMetadata;
-          try {
-            if (info[3] && typeof info[3] === 'string' && info[3].startsWith('{')) {
-              const parsed = JSON.parse(info[3]);
-              metadata = {
-                hardware: parsed.hardware || { gpu: 'Unknown', vram: 0, ram: 0 },
-                capabilities: parsed.capabilities || ['inference', 'streaming'],
-                location: parsed.location || 'Unknown',
-                maxConcurrent: parsed.maxConcurrent || 10,
-                costPerToken: Number(info[7] || 0),
-                publicKey: parsed.publicKey,
-                x402: parsed.x402,
-              };
-            } else {
-              metadata = {
-                hardware: { gpu: 'Unknown', vram: 0, ram: 0 },
-                capabilities: ['inference', 'streaming'],
-                location: 'Unknown',
-                maxConcurrent: 10,
-                costPerToken: Number(info[7] || 0)
-              };
-            }
-          } catch (e) {
-            console.warn(`[HostManager] Failed to parse metadata for ${address}, using defaults`);
-            metadata = {
-              hardware: { gpu: 'Unknown', vram: 0, ram: 0 },
-              capabilities: ['inference', 'streaming'],
-              location: 'Unknown',
-              maxConcurrent: 10,
-              costPerToken: Number(info[7] || 0)
-            };
-          }
-
-          hosts.push({
-            address,
-            apiUrl: info[4],                           // apiUrl at index 4
-            metadata,
-            supportedModels: info[5],                  // model IDs array at index 5
-            isActive: info[2],                         // isActive at index 2
-            stake: info[1],                            // stake at index 1
-            minPricePerTokenNative: info[6] || 0n,     // Native pricing at index 6
-            minPricePerTokenStable: info[7] || 0n      // Stable pricing at index 7
-          });
-        } catch (error) {
-          console.warn(`[HostManager] Failed to get info for host ${address}, skipping:`, error);
-          continue;
-        }
-      }
+      // Each host's full info, read in parallel, bounded (1.39.33). A host whose read fails is skipped, as before.
+      const read = await mapWithConcurrency(nodeAddresses, DISCOVERY_CONCURRENCY, (address) =>
+        (this.nodeRegistryRead['getNodeFullInfo'](address) as Promise<any>).then(
+          (info) => this.hostInfoFrom(address, info),
+          (error) => {
+            console.warn(`[HostManager] Failed to get info for host ${address}, skipping:`, error);
+            return null;
+          },
+        ));
+      let hosts = read.filter((h): h is HostInfo => h !== null);
 
       // Phase 18: Filter out hosts without valid model-token pricing
       // and populate minPricePerTokenStable with the actual per-model USDC price
@@ -656,24 +625,128 @@ export class HostManager {
         ? await this.contractManager.getContractAddress('usdcToken').catch(() => null as any)
         : null;
       if (usdcAddr) {
-        const validHosts: HostInfo[] = [];
-        for (const host of hosts) {
+        const priced = await mapWithConcurrency(hosts, DISCOVERY_CONCURRENCY, async (host) => {
           try {
-            const modelPrice: bigint = await this.nodeRegistryRead['getModelPricing'](host.address, modelId, usdcAddr);
             // Override node-level registration price with actual per-model USDC price
-            host.minPricePerTokenStable = modelPrice;
-            validHosts.push(host);
+            host.minPricePerTokenStable = await this.nodeRegistryRead['getModelPricing'](host.address, modelId, usdcAddr);
+            return host;
           } catch {
             console.warn(`[HostManager] Host ${host.address} has no model pricing for ${modelId}, excluding from results`);
+            return null;
           }
-        }
-        return validHosts;
+        });
+        hosts = priced.filter((h): h is HostInfo => h !== null);
       }
 
-      return hosts;
+      // In a storage region, only the hosts a session may use there (1.39.33 A4); Global keeps all.
+      return opts.inRegion ? this.regionPolicy.filter(hosts, this.regionTransform) : hosts;
     } catch (error: any) {
       throw new SDKError(`Failed to find hosts for model: ${error.message}`, 'DISCOVERY_ERROR', error);
     }
+  }
+
+  /**
+   * The hosts of many models at once (1.39.33 B1): `getAllActiveNodes`, then per active host its full info (which lists
+   * its models) and its per-model USDC prices (`getHostModelPrices`) — 1 + 2 × hosts reads, however many models. Only
+   * ACTIVE hosts count (an inactive one cannot take a session; `findHostsForModel` follows `getNodesForModel` and does
+   * not check). Otherwise the same rule as `findHostsForModel`: a host counts for a model it lists and has a price for
+   * (no price, or 0, is what `getModelPricing`'s revert means), once even if it lists the model twice, and a host whose
+   * reads fail is skipped. Checked live on testnet: the same hosts and prices for every model. Every given id has an
+   * entry, `[]` when none serves it. `inRegion`: only the hosts the storage region allows.
+   */
+  async findHostsForModels(modelIds: readonly string[], opts: FindHostsOptions = {}): Promise<Map<string, HostInfo[]>> {
+    if (!this.initialized || !this.nodeRegistry) {
+      throw new SDKError('HostManager not initialized', 'HOST_NOT_INITIALIZED');
+    }
+    try {
+      for (const id of modelIds) {
+        if (!this.modelManager.isValidModelId(id)) throw new InvalidModelIdError(id);
+      }
+      if (modelIds.length === 0) return new Map();
+      const active: string[] = await this.nodeRegistryRead['getAllActiveNodes']();
+      const usdcAddr = this.contractManager?.getContractAddress
+        ? await this.contractManager.getContractAddress('usdcToken').catch(() => null as any)
+        : null;
+      const read = await mapWithConcurrency(active, DISCOVERY_CONCURRENCY, async (address) => {
+        try {
+          const info = await this.nodeRegistryRead['getNodeFullInfo'](address);
+          if (!usdcAddr) return { address, info, prices: undefined };
+          const [ids, prices]: [string[], bigint[]] = await this.nodeRegistryRead['getHostModelPrices'](address, usdcAddr);
+          return { address, info, prices: new Map(ids.map((id, i) => [String(id).toLowerCase(), prices[i]])) };
+        } catch (error) {
+          console.warn(`[HostManager] Failed to get info for host ${address}, skipping:`, error);
+          return null;
+        }
+      });
+      const byModel = new Map<string, HostInfo[]>(modelIds.map((id) => [id.toLowerCase(), []]));
+      for (const host of read) {
+        if (!host) continue;
+        const base = this.hostInfoFrom(host.address, host.info);   // parsed once per host
+        const seen = new Set<string>();
+        for (const listed of (host.info[5] ?? []) as string[]) {
+          const key = String(listed).toLowerCase();
+          const list = byModel.get(key);
+          if (!list || seen.has(key)) continue;   // a model listed twice counts once
+          seen.add(key);
+          const info: HostInfo = { ...base, metadata: { ...base.metadata } };   // its own object: this model's price
+          if (host.prices) {
+            const price = host.prices.get(key);
+            if (!price) continue;   // no model pricing: left out, as findHostsForModel does
+            info.minPricePerTokenStable = price;
+          }
+          list.push(info);
+        }
+      }
+      return new Map(modelIds.map((id) => {
+        const hosts = byModel.get(id.toLowerCase())!;
+        return [id, opts.inRegion ? this.regionPolicy.filter(hosts, this.regionTransform) : hosts];
+      }));
+    } catch (error: any) {
+      throw new SDKError(`Failed to find hosts for models: ${error.message}`, 'DISCOVERY_ERROR', error);
+    }
+  }
+
+  /** A host's HostInfo from its `getNodeFullInfo` tuple (metadata parsed with defaults on failure). A new object per
+   *  call: the pricing step sets this model's price on it. */
+  private hostInfoFrom(address: string, info: any): HostInfo {
+    console.log(`[HostManager] Raw getNodeFullInfo(${address}):`, JSON.stringify(info, (_, v) => typeof v === 'bigint' ? v.toString() + 'n' : v));
+    const defaults = (): HostMetadata => ({
+      hardware: { gpu: 'Unknown', vram: 0, ram: 0 },
+      capabilities: ['inference', 'streaming'],
+      location: 'Unknown',
+      maxConcurrent: 10,
+      costPerToken: Number(info[7] || 0)
+    });
+    let metadata: HostMetadata;
+    try {
+      if (info[3] && typeof info[3] === 'string' && info[3].startsWith('{')) {
+        const parsed = JSON.parse(info[3]);
+        metadata = {
+          hardware: parsed.hardware || { gpu: 'Unknown', vram: 0, ram: 0 },
+          capabilities: parsed.capabilities || ['inference', 'streaming'],
+          location: parsed.location || 'Unknown',
+          maxConcurrent: parsed.maxConcurrent || 10,
+          costPerToken: Number(info[7] || 0),
+          publicKey: parsed.publicKey,
+          x402: parsed.x402,
+        };
+      } else {
+        metadata = defaults();
+      }
+    } catch (e) {
+      console.warn(`[HostManager] Failed to parse metadata for ${address}, using defaults`);
+      metadata = defaults();
+    }
+    return {
+      address,
+      apiUrl: info[4],                           // apiUrl at index 4
+      metadata,
+      supportedModels: info[5],                  // model IDs array at index 5
+      isActive: info[2],                         // isActive at index 2
+      stake: info[1],                            // stake at index 1
+      minPricePerTokenNative: info[6] || 0n,     // Native pricing at index 6
+      minPricePerTokenStable: info[7] || 0n      // Stable pricing at index 7
+    };
   }
 
   /**
@@ -1143,6 +1216,7 @@ export class HostManager {
         'NO_API_URL'
       );
     }
+    this.regionPolicy.assertHost({ address: hostAddress, endpoint: apiUrl, job: 'probe' }, this.regionTransform);   // the challenge is a host contact (1.39.27)
 
     // Request signature-based recovery
     const pubKey = await requestHostPublicKey(apiUrl, hostAddress);
@@ -1172,6 +1246,10 @@ export class HostManager {
     hostAddress: string,
     apiUrl?: string
   ): Promise<WebSearchCapabilities> {
+    // In a storage region web search is refused (1.39.27): no host offers it there, and none is asked.
+    if (this.regionPolicy.regional) {
+      return { ...NO_WEB_SEARCH };
+    }
     // Get API URL from parameter or lookup from contract
     let hostApiUrl = apiUrl;
     if (!hostApiUrl) {
@@ -1199,6 +1277,16 @@ export class HostManager {
     }
 
     return getWebSearchCapabilitiesFromHost(hostApiUrl);
+  }
+
+  /** The storage region's host gate (1.39.27), installed by FabstirSDKCore for its region. */
+  setRegionPolicy(policy: RegionPolicy): void {
+    this.regionPolicy = policy;
+  }
+
+  /** Set by the SessionManager from its endpoint transform (1.39.27). */
+  setRegionTransform(transform?: (url: string) => string): void {
+    this.regionTransform = transform;
   }
 
   /**
@@ -1242,6 +1330,7 @@ export class HostManager {
       };
     }
 
+    this.regionPolicy.assertHost({ address: hostAddress, endpoint: hostApiUrl, job: 'probe' }, this.regionTransform);   // 1.39.27
     return getImageGenerationCapabilitiesFromHost(hostApiUrl);
   }
 

@@ -100,7 +100,7 @@ describe("Z5 — a head never overrides a fresh read; heads are trusted for 30 s
     const b = new StorageManager();
     Object.assign(b as any, { initialized: true, s5Client: net.tab(), userAddress: ADDR, connectionStatus: 'connected', sealer: storageSealerFromSeed(SEED, ADDR), coherence: browserOrigin({ now: () => net.now })() });
     await b.saveConversation({ id: '9', messages: [{ role: 'user', content: 'old', timestamp: 1 }], metadata: {}, createdAt: 1, updatedAt: 1 } as any);
-    await net.tab().fs.delete(`home/sessions/${ADDR}/9/conversation.json`);   // removed elsewhere
+    await net.tab().fs.delete(`home/sessions/v2/${storageSealerFromSeed(SEED, ADDR).deriveId('owner', 'storage')}/${storageSealerFromSeed(SEED, ADDR).deriveId('conv', '9')}/log`);   // removed elsewhere (its opaque path, 1.39.24)
     expect(await b.loadConversation('9')).toBeNull();
   });
 

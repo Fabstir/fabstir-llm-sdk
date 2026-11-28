@@ -28,6 +28,7 @@ import type {
 } from '../types/training.types';
 import type { TrainingHandle, TrainingPointerRecord } from '../utils/training-ws';
 import type { ITrainingManager } from '../interfaces/ITrainingManager';
+import { HOST_GATE_CODES } from '../utils/region-policy';
 
 /**
  * The JobMarketplace surface this manager actually calls, typed NARROWLY on purpose.
@@ -330,11 +331,13 @@ export class TrainingManager implements ITrainingManager {
   async submitTraining(opts: SubmitTrainingOptions): Promise<TrainingHandle> {
     // Training puts keys in the host's hands: only a confidentialHosts host, before anything is funded (1.39.19).
     try {
+      // The storage region's hosts first (1.39.27): the address, and the endpoint it is reached at.
+      this.sessionManager.assertRegionHost({ address: opts.hostAddress, endpoint: opts.endpoint, job: 'training' });
       this.sessionManager.assertConfidentialHost(opts.hostAddress, 'training');
     } catch (err: any) {
-      if (err?.code !== 'CONFIDENTIAL_HOST_NOT_ALLOWED') throw err;
+      if (!HOST_GATE_CODES.has(err?.code)) throw err;
       const ids = opts.existingSession ? { sessionId: opts.existingSession.sessionId, jobId: opts.existingSession.jobId, adopted: true } : {};
-      throw new TrainingError(err.message, 'CONFIDENTIAL_HOST_NOT_ALLOWED', { consumed: false, ...err.details, ...ids });
+      throw new TrainingError(err.message, err.code, { consumed: false, ...err.details, ...ids });
     }
     if (opts.existingSession) {
       return this.submitOnExistingSession(opts, opts.existingSession);
@@ -699,10 +702,10 @@ export class TrainingManager implements ITrainingManager {
       const inFlight = (err as { details?: { inFlight?: string } }).details?.inFlight;
       return new TrainingError(errMessage(err), 'SESSION_JOB_IN_FLIGHT', { ...intact, inFlight, retryable: false, ...tag });
     }
-    if (sdkCode === 'CONFIDENTIAL_HOST_NOT_ALLOWED') {
-      // The host is not trusted with confidential jobs (1.39.19); raised before any frame.
+    if (sdkCode === 'CONFIDENTIAL_HOST_NOT_ALLOWED' || sdkCode === 'REGION_HOST_NOT_ALLOWED') {   // HOST_GATE_CODES, narrowed
+      // The host is not trusted with confidential jobs (1.39.19) / not in the storage region (1.39.27); before any frame.
       const d = (err as { details?: Record<string, unknown> }).details ?? {};
-      return new TrainingError(errMessage(err), 'CONFIDENTIAL_HOST_NOT_ALLOWED', { ...intact, reason: d.reason as any, host: d.host, retryable: false, ...tag });
+      return new TrainingError(errMessage(err), sdkCode, { ...intact, reason: d.reason as any, host: d.host, retryable: false, ...tag });
     }
     if (sdkCode === 'SESSION_NOT_ACTIVE') {
       // The settled-session guard (1.39.21), or a session ended or completed here: nothing was sent, but this session
@@ -975,6 +978,13 @@ export class TrainingManager implements ITrainingManager {
       );
     }
     this.validateAgainstBundle(opts.job, opts.bundle);
+    // The storage region first, as in transcode (1.39.27): with no host listed, refused before ranking.
+    const region = this.sessionManager.getRegionPolicy?.();
+    try {
+      region?.assertOpen('training');
+    } catch (err: any) {
+      throw new TrainingError(err.message, 'REGION_HOST_NOT_ALLOWED', { consumed: false, ...err.details, retryable: false });
+    }
     const ranked = await this.hostSelectionService.getRankedHostsForModel(
       this.trainingModelId, lb?.hostSelectionMode,
     );
@@ -985,11 +995,15 @@ export class TrainingManager implements ITrainingManager {
         { consumed: false, reason: 'NO_ALLOWLIST', retryable: false });
     }
     const allowed = new Set(listed.map((h: string) => h.toLowerCase()));
-    const candidates = ranked.filter(({ host }) => allowed.has(String(host.address).toLowerCase()));
-    let lastError: unknown = candidates.length === 0
-      ? new TrainingError('No host on confidentialHosts serves the training model', 'CONFIDENTIAL_HOST_NOT_ALLOWED',
-        { consumed: false, reason: 'HOST_NOT_ALLOWED', retryable: false })
-      : undefined;
+    // …and only the storage region's hosts (1.39.27), so an outside one uses up no retry slot either.
+    const confidential = ranked.filter(({ host }) => allowed.has(String(host.address).toLowerCase()));
+    const candidates = region ? confidential.filter(({ host }) => region.allows({ address: host.address, endpoint: host.apiUrl })) : confidential;
+    let lastError: unknown = candidates.length > 0 ? undefined
+      : region?.restricted && confidential.length > 0
+        ? new TrainingError(`No host on storage region '${region.region}'s list serves the training model`, 'REGION_HOST_NOT_ALLOWED',
+          { consumed: false, reason: 'HOST_NOT_LISTED', region: region.region, job: 'training', retryable: false })
+        : new TrainingError('No host on confidentialHosts serves the training model', 'CONFIDENTIAL_HOST_NOT_ALLOWED',
+          { consumed: false, reason: 'HOST_NOT_ALLOWED', retryable: false });
     for (const { host } of candidates.slice(0, lb?.maxHostRetries ?? 3)) {
       try {
         return await this.submitTraining({ ...opts, hostAddress: host.address, endpoint: host.apiUrl });

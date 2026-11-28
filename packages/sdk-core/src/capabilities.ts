@@ -135,4 +135,30 @@ export const SDK_CAPABILITIES = Object.freeze({
    *  caller as SESSION_AUTH_DENIED; on a `session-settled-rest` node REST prompts need no repeated chain reads; webSearch()
    *  uses REST /v1/search (1.39.23). */
   settledRest: true,
+  /** User settings are sealed at home/user/v2/{owner}/settings; the older plaintext home/user/settings.json is read, sealed there and deleted (1.39.24). */
+  sealedSettings: true,
+  /** Conversation logs live at opaque paths (no address, no id); legacy logs are read and moved, and listed (1.39.24). */
+  opaqueConversationLogs: true,
+  /** Session groups are sealed at opaque paths; a legacy group is read, sealed and its old file deleted (1.39.24). */
+  sealedSessionGroups: true,
+  /** A RAG vector write re-seals and rewrites only the chunks whose vectors changed; a no-op writes none (1.39.24). */
+  incrementalRagChunks: true,
+  /** listUnreadableDatabases() / deleteDatabaseById() for a sealed database that never opens; expired heads are pruned (1.39.24). */
+  unreadableDatabaseCleanup: true,
+  /** SessionGroupManager: a stored group never replaces newer memory (listSessionGroups, getSessionGroup), and no older
+   *  group object is saved after a newer one; getCachedSessionGroups(owner); updateChatSession(…, mutate) (1.39.25). */
+  sessionGroupMemoryFirst: true,
+  /** ChatSession.revision: stamped by SessionGroupManager on each change it makes to a chat (start, addMessage,
+   *  updateChatSession, a new object passed to updateSessionGroup); on adopting another tab's group, the chat with the
+   *  later of revision / updated is kept (1.39.26). */
+  sessionGroupChatRevision: true,
+  /** deleteSessionGroup whose save fails rejects with the group not deleted; SessionGroupManager is exported (1.39.26). */
+  sessionGroupDeleteRestores: true,
+  /** storageRegion ('global' | 'uk'; 'eu' refused): regional storage, hosts and S5 identity, fail closed; web search
+   *  refused in a region (1.39.27). */
+  storageRegion: true,
+  /** SessionManager.closeUnsubmittedSession: start a session with the host and close it with no job (1.39.29). */
+  closeUnsubmittedSession: true,
+  /** StorageManager redials S5 after a drop in every environment (Node included) and gates S5 calls on the connection (1.39.30). */
+  s5AutoReconnect: true,
 } as const);

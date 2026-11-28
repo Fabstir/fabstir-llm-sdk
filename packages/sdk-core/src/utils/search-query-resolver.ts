@@ -4,6 +4,7 @@ import type { PromptOptions } from '../types';
 import type { SearchIntentConfig } from '../types/web-search.types';
 import { analyzePromptForSearchIntent } from './search-intent-analyzer';
 import { userTextOf } from './rag-prompt';
+import { webSearchRefusedInRegion } from './region-policy';
 
 /** search_queries for the node. Priority: customQueries > userTextOf(prompt, rawQuery) */
 export function resolveSearchQueries(
@@ -17,13 +18,20 @@ export function resolveSearchQueries(
   return [userTextOf(prompt, rawQuery)];
 }
 
-/** One decision for every prompt path: images → off; the prompt's own webSearch; forceDisabled; forceEnabled; else auto-detect. */
+/** One decision for every prompt path: images → off; the prompt's own webSearch; forceDisabled; forceEnabled; else auto-detect.
+ *  In a storage region other than 'global' (1.39.27): an explicit request is refused, and everything else is off. */
 export function resolveWebSearch(
   config: SearchIntentConfig | undefined,
   prompt: string,
-  options?: Pick<PromptOptions, 'images' | 'rawQuery' | 'webSearch'>
+  options?: Pick<PromptOptions, 'images' | 'rawQuery' | 'webSearch'>,
+  region: string = 'global'
 ): { enabled: boolean; maxSearches: number; queries: string[] | null } {
   const c = config ?? {};
+  if (region !== 'global') {
+    if (options?.webSearch === true) throw webSearchRefusedInRegion(region, 'PromptOptions.webSearch');
+    if (c.forceEnabled && options?.webSearch !== false) throw webSearchRefusedInRegion(region, 'webSearch.forceEnabled');
+    return { enabled: false, maxSearches: 0, queries: null };
+  }
   let enabled: boolean;
   if (options?.images && options.images.length > 0) enabled = false; // the VLM handles images locally
   else if (typeof options?.webSearch === 'boolean') enabled = options.webSearch; // per prompt wins (Milestone B D30)

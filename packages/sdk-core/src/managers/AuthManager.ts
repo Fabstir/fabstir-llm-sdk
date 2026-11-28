@@ -11,6 +11,7 @@ import { connectMetaMask, connectCoinbaseWallet, isMetaMaskInstalled } from '../
 import { SEED_MESSAGE } from '../utils/s5-seed-derivation';
 import { SDKError } from '../types';
 import { sharedRpcProvider } from '../utils/rpc-provider';
+import { regionalSeedSealed } from '../config/storage-regions';
 
 /** Not signed in — or signed out: the SDK disconnects a kept AuthManager at a sign-out or sign-in (plan §28 II7). */
 const notAuthenticated = () => new SDKError('Not authenticated', 'NOT_AUTHENTICATED', { retryable: false });
@@ -43,13 +44,17 @@ export class AuthManager {
   private userAddress?: string;
   private eoaAddress?: string;
   private isSmartWallet: boolean = false;
+  /** The SDK's storage region (1.39.27); outside 'global' the seed is sealed in here (owner §0 S5). */
+  private readonly storageRegion: string;
 
   constructor(
     signer?: ethers.Signer,
     provider?: ethers.BrowserProvider | ethers.JsonRpcProvider,
     userAddress?: string,
-    s5Seed?: string
+    s5Seed?: string,
+    storageRegion: string = 'global'
   ) {
+    this.storageRegion = storageRegion;
     if (signer) this.signer = signer;
     if (provider) this.provider = provider;
     if (userAddress) {
@@ -66,6 +71,8 @@ export class AuthManager {
     provider: 'metamask' | 'coinbase' | 'private-key',
     options?: AuthOptions
   ): Promise<AuthResult> {
+    // Its seed path (a signature hash) would replace the regional identity and hand the seed back (owner §0 S5).
+    this.refuseIfRegional();
     switch (provider) {
       case 'metamask':
         return this.authenticateWithMetaMask();
@@ -166,6 +173,11 @@ export class AuthManager {
     };
   }
 
+  /** Outside 'global' the regional seed is sealed here: no hand-back, no legacy seed path, no S5 of its own (1.39.27). */
+  private refuseIfRegional(): void {
+    if (this.storageRegion !== 'global') throw regionalSeedSealed(this.storageRegion);
+  }
+
   /**
    * Generate S5 seed using Web Crypto API (browser-compatible)
    */
@@ -206,6 +218,8 @@ export class AuthManager {
    * Initialize S5 client with browser-compatible seed
    */
   async initializeS5(): Promise<any> {
+    // An S5 of its own would use s5js's default public peers, outside any region.
+    this.refuseIfRegional();
     if (!this.s5Seed) {
       throw notAuthenticated();
     }
@@ -259,6 +273,7 @@ export class AuthManager {
    * Get S5 seed
    */
   getS5Seed(): string {
+    this.refuseIfRegional();
     if (!this.s5Seed) {
       throw notAuthenticated();
     }

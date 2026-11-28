@@ -128,12 +128,18 @@ export class SessionPool {
     }
 
     try {
+      const parent = (this.config.sdk as any).config ?? {};
+      // The parent's storage region (sdk-core 1.39.27): its hosts only. In a region a signer has no identity but the
+      // base seed (never the address-derived one), so the parent's is passed on; Global children are as before.
+      const regional = parent.storageRegion !== undefined && parent.storageRegion !== 'global';
       const sdk = new FabstirSDKCore({
         chainId: this.config.chainId,
-        rpcUrl: (this.config.sdk as any).config?.rpcUrl ?? '',
-        contractAddresses: (this.config.sdk as any).config?.contractAddresses ?? {},
+        rpcUrl: parent.rpcUrl ?? '',
+        contractAddresses: parent.contractAddresses ?? {},
         // Per-acquire SDKs only run sessions (sendPrompt) — no S5 persistence/RAG.
         skipS5: true,
+        ...(parent.storageRegion !== undefined ? { storageRegion: parent.storageRegion } : {}),
+        ...(regional && parent.s5Config?.seedPhrase ? { s5Config: { seedPhrase: parent.s5Config.seedPhrase } } : {}),
       } as any);
       if (this.config.delegatePayer) {
         // Delegate-pays: the per-acquire SDK spends the payer's capped USDC

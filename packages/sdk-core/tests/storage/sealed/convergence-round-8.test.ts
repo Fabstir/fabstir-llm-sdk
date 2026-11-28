@@ -141,6 +141,7 @@ describe('BB9 — S2 at any age never loses what the plaintext alone holds', () 
     await s.saveConversation({ id: '7', messages: [msg('m1', 1), msg('sealed-only', 2)], metadata: { status: 'active', totalTokens: 0, title: 'kept' }, createdAt: 1, updatedAt: 1 } as any);
     net.advance(7 * 24 * 3600_000);                                   // a week later, an outdated tab ends the session
     await net.tab().fs.put(logPath('7'), { id: '7', messages: [msg('m1', 1), msg('m3', 3)], metadata: { status: 'completed', totalTokens: 812, endTime: 99 }, createdAt: 1, updatedAt: 99 });
+    await s.migrateLegacyConversationLogs();   // 1.39.24 D41: the legacy-path copy is merged here, not on read
     const read = await s.loadConversation('7');
     expect(read?.metadata).toEqual({ status: 'completed', totalTokens: 812, endTime: 99, title: 'kept' });
     expect(read?.updatedAt).toBe(99);

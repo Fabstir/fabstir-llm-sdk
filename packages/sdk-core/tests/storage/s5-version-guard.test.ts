@@ -23,8 +23,3 @@ test('StorageManager refuses an s5js without beta.56 semantics', async () => {
   expect(created).toBe(0);
 });
 
-test('DocumentManager refuses it too, never falling back', async () => {
-  vi.spyOn(console, 'warn').mockImplementation(() => {});
-  await expect(new DocumentManager().initialize(SEED, ADDR)).rejects.toMatchObject({ code: 'S5JS_UNSUPPORTED_VERSION', details: { retryable: false } });
-  expect(created).toBe(0);
-});

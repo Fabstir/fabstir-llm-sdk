@@ -121,14 +121,16 @@ describe('QQ3 — the log migration: a reseal that landed is sealed; nothing is 
     const s = store(net.tab(), { coherence: { ...base, putHead: async () => { throw headFailure(); } } });
     const report = await s.migrateLegacyConversationLogs();
     expect({ sealed: report.sealed, failed: report.failed }).toEqual({ sealed: 1, failed: [] });
-    expect(net.filePaths().filter((p) => p.startsWith(dir('41')))).toEqual([`${dir('41')}/conversation.json`]);
+    // Moved to its opaque path (1.39.24 D41): nothing of it is left at the legacy one
+    expect(net.filePaths().filter((p) => p.startsWith(dir('41')))).toEqual([]);
+    expect(net.filePaths()).toContain(`home/sessions/v2/${sealer().deriveId('owner', 'storage')}/${sealer().deriveId('conv', '41')}/log`);
   });
 
   test('a reseal that fails outright: failed, its plaintext copies kept', async () => {
     const net = new FakeS5Network();
     await net.tab().fs.put(`${dir('c3')}/conversation.json`, legacyLog('c3'));
     await net.tab().fs.put(`${dir('c3')}/summary.json`, { summary: 'plaintext summary' });
-    net.fail('put', `${dir('c3')}/conversation.json`, new SDKError('portal refused', 'S5_IO_ERROR', { retryable: false }), 5);
+    net.fail('put', `home/sessions/v2/${sealer().deriveId('owner', 'storage')}/${sealer().deriveId('conv', 'c3')}/log`, new SDKError('portal refused', 'S5_IO_ERROR', { retryable: false }), 5);   // its move (1.39.24)
     const report = await store(net.tab()).migrateLegacyConversationLogs();
     expect({ sealed: report.sealed, failed: report.failed.map((f: any) => f.id) }).toEqual({ sealed: 0, failed: ['c3'] });
     expect(net.filePaths()).toContain(`${dir('c3')}/summary.json`);

@@ -14,6 +14,11 @@ import { ethers } from 'ethers';
 // Use the CORRECT S5.js wordlist - must be exactly 1024 words!
 import { wordlist as s5Wordlist } from './s5-wordlist-correct';
 import { blake3 } from '@noble/hashes/blake3';
+import { hkdf } from '@noble/hashes/hkdf';
+import { sha256 } from '@noble/hashes/sha256';
+import { concatBytes, hexToBytes } from '@noble/hashes/utils';
+import { SDKError } from '../types';
+import { resolveStorageRegion } from '../config/storage-regions';
 
 // S5 constants (matching S5.js implementation)
 const SEED_LENGTH = 16; // S5 uses 16 bytes of entropy
@@ -61,19 +66,7 @@ export async function deriveEntropyFromSignature(signature: string): Promise<Uin
  * @returns 16 bytes of entropy for S5 seed generation
  */
 export async function deriveEntropyFromAddress(address: string, chainId: number): Promise<Uint8Array> {
-  // Normalize address to lowercase for case-insensitivity
-  const normalizedAddress = address.toLowerCase();
-
-  // Combine: address + domain separator + chainId
-  const encoder = new TextEncoder();
-  const data = encoder.encode(normalizedAddress + SEED_DOMAIN_SEPARATOR + chainId.toString());
-
-  // Hash to get deterministic entropy
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const fullHash = new Uint8Array(hashBuffer);
-
-  // S5 needs exactly 16 bytes of entropy
-  return fullHash.slice(0, SEED_LENGTH);
+  return addressSeedBytes(address, chainId);   // one formula, synchronous (1.39.27); its output is pinned by test vectors
 }
 
 /**
@@ -121,31 +114,7 @@ const S5_SEED_DERIVATION_DOMAIN = 'fabstir-s5-seed-from-private-key-v1';
  * @returns 16 bytes of entropy for S5 seed generation
  */
 export async function deriveEntropyFromPrivateKey(privateKey: string): Promise<Uint8Array> {
-  // Normalize private key (remove 0x prefix if present)
-  const normalizedKey = privateKey.startsWith('0x') ? privateKey.slice(2) : privateKey;
-
-  // Validate it's a valid hex string of correct length (32 bytes = 64 hex chars)
-  if (!/^[0-9a-fA-F]{64}$/.test(normalizedKey)) {
-    throw new Error('Invalid private key format - must be 32 bytes hex');
-  }
-
-  // Combine domain separator with private key for HKDF-like derivation
-  // This ensures the derived seed is specific to Fabstir S5 usage
-  const encoder = new TextEncoder();
-  const domainBytes = encoder.encode(S5_SEED_DERIVATION_DOMAIN);
-  const keyBytes = new Uint8Array(normalizedKey.match(/.{2}/g)!.map(byte => parseInt(byte, 16)));
-
-  // Concatenate domain + key
-  const combined = new Uint8Array(domainBytes.length + keyBytes.length);
-  combined.set(domainBytes);
-  combined.set(keyBytes, domainBytes.length);
-
-  // Hash to get deterministic entropy
-  const hashBuffer = await crypto.subtle.digest('SHA-256', combined);
-  const fullHash = new Uint8Array(hashBuffer);
-
-  // S5 needs exactly 16 bytes of entropy
-  return fullHash.slice(0, SEED_LENGTH);
+  return privateKeySeedBytes(privateKey);   // one formula, synchronous (1.39.27); its output is pinned by test vectors
 }
 
 /**
@@ -311,6 +280,76 @@ export function entropyToS5Phrase(entropy: Uint8Array): string {
   const phrase = phraseWords.join(' ');
 
   return phrase;
+}
+
+/** The address-derived seed bytes: SHA256(address.toLowerCase() + SEED_DOMAIN_SEPARATOR + chainId)[0..16]. */
+export function addressSeedBytes(address: string, chainId: number): Uint8Array {
+  return sha256(new TextEncoder().encode(address.toLowerCase() + SEED_DOMAIN_SEPARATOR + chainId.toString())).slice(0, SEED_LENGTH);
+}
+
+/** The private-key seed bytes: SHA256(S5_SEED_DERIVATION_DOMAIN || key)[0..16]; the key is 32 bytes of hex (0x optional). */
+export function privateKeySeedBytes(privateKey: string): Uint8Array {
+  const key = privateKey.startsWith('0x') ? privateKey.slice(2) : privateKey;
+  if (!/^[0-9a-fA-F]{64}$/.test(key)) throw new Error('Invalid private key format - must be 32 bytes hex');
+  return sha256(concatBytes(new TextEncoder().encode(S5_SEED_DERIVATION_DOMAIN), hexToBytes(key))).slice(0, SEED_LENGTH);
+}
+
+/** The HKDF `info` prefix of a regional seed; the region key follows it. Versioned: never changed once released. */
+export const REGION_SEED_INFO_PREFIX = 'fabstir-s5-region-v1:';
+
+const seedRefused = (reason: string, why: string) =>
+  new SDKError(`S5 seed phrase refused: ${why}`, 'STORAGE_REGION_SEED_REFUSED', { reason, retryable: false });
+
+/**
+ * The 16 seed bytes of an S5 phrase, read exactly as s5js reads it (`validatePhrase`): trimmed, lowercased, spaces
+ * collapsed; each word by its first three letters; the 13th among the first 256 words; the two checksum words checked.
+ * Throws STORAGE_REGION_SEED_REFUSED (`reason: 'INVALID_PHRASE'`) for anything s5js would reject.
+ */
+export function s5PhraseToSeedBytes(phrase: string): Uint8Array {
+  if (typeof phrase !== 'string') throw seedRefused('INVALID_PHRASE', 'not a string');
+  const words = phrase.trim().toLowerCase().replace(/\s+/g, ' ').split(' ');
+  if (words.length !== PHRASE_LENGTH) throw seedRefused('INVALID_PHRASE', `an S5 phrase has ${PHRASE_LENGTH} words`);
+  const seedWords = new Uint16Array(SEED_WORDS_LENGTH);
+  for (let i = 0; i < SEED_WORDS_LENGTH; i++) {
+    const at = prefixIndex(words[i], i === LAST_WORD_INDEX ? 256 : s5Wordlist.length);
+    if (at < 0) throw seedRefused('INVALID_PHRASE', `word ${i + 1} is not in the S5 word list`);
+    seedWords[i] = at;
+  }
+  const seed = seedWordsToSeed(seedWords);
+  const checksum = generateChecksumWords(seed);
+  for (let i = 0; i < CHECKSUM_WORDS_LENGTH; i++) {
+    const w = words[SEED_WORDS_LENGTH + i];
+    if (w.length < 3 || w.slice(0, 3) !== s5Wordlist[checksum[i]].slice(0, 3)) throw seedRefused('INVALID_PHRASE', 'the checksum does not match');
+  }
+  return seed;
+}
+
+/** The index of the first of the first `bound` words sharing `word`'s three-letter prefix, or -1 (s5js's rule). */
+function prefixIndex(word: string, bound: number): number {
+  if (word.length < 3) return -1;
+  const prefix = word.slice(0, 3);
+  for (let j = 0; j < bound; j++) if (s5Wordlist[j].slice(0, 3) === prefix) return j;
+  return -1;
+}
+
+/**
+ * The S5 seed phrase a region uses for a base seed (1.39.27): HKDF-SHA256 with the base's 16 seed bytes as key
+ * material, no salt, info `fabstir-s5-region-v1:<region>`, 16 bytes, encoded with entropyToS5Phrase. One way: the
+ * regional identity reveals nothing of the base, and each region's differs. 'global' is never derived (it is the base).
+ * Fixed for good: changing it would orphan every regional account. Pass the BASE seed every time — never a phrase this
+ * returned, or the identity becomes a third one.
+ */
+export function deriveRegionalS5Seed(basePhrase: string, region: 'uk' | 'eu'): string {
+  const r = resolveStorageRegion(region);
+  if (r === 'global') {
+    throw new SDKError("'global' is never derived: its seed is the base seed", 'STORAGE_REGION_INVALID', { region, retryable: false });
+  }
+  return deriveRegionalSeedFromBytes(s5PhraseToSeedBytes(basePhrase), r);
+}
+
+/** `deriveRegionalS5Seed` from the base's 16 seed bytes (already read and checked). */
+export function deriveRegionalSeedFromBytes(seedBytes: Uint8Array, region: 'uk' | 'eu'): string {
+  return entropyToS5Phrase(hkdf(sha256, seedBytes, new Uint8Array(0), new TextEncoder().encode(REGION_SEED_INFO_PREFIX + region), SEED_LENGTH));
 }
 
 /**

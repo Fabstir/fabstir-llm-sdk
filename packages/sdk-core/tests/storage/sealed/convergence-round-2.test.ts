@@ -21,6 +21,8 @@ import { createRagCoherence, __resetInProcessCoherenceForTests, type RagCoherenc
 
 const legacyDir = (name: string) => `home/vector-databases/${ADDR}/${name}`;
 const logPath = (id: string, addr = ADDR) => `home/sessions/${addr}/${id}/conversation.json`;
+/** Where a log lives since 1.39.24 (D41). */
+const v2Path = (id: string) => `home/sessions/v2/${sealer().deriveId('owner', 'storage')}/${sealer().deriveId('conv', id)}/log`;
 const msg = (content: string, timestamp = 1) => ({ role: 'user', content, timestamp });
 const conversation = (id: string, messages: Array<ReturnType<typeof msg>>) => ({ id, messages, metadata: {}, createdAt: 1, updatedAt: 1 });
 const legacyManifest = (name: string, docIds: string[], chunks = 0) => ({
@@ -162,7 +164,7 @@ describe('S1 — an s5js "absent" never authorises destroying or replacing data 
     const net = new FakeS5Network();
     await storage(net.tab()).saveConversation(conversation('41', [msg('m1'), msg('m2', 2)]) as any);
     __resetInProcessCoherenceForTests();
-    net.registryMiss(`home/sessions/${ADDR}/41`, 1);
+    net.registryMiss(`home/sessions/v2/${sealer().deriveId('owner', 'storage')}/${sealer().deriveId('conv', '41')}`, 1);   // its opaque directory (1.39.24)
     expect(await caught(storage(net.tab()).appendMessage('41', msg('m3', 3) as any))).toMatchObject({ details: { retryable: true } });
     await storage(net.tab()).appendMessage('41', msg('m3', 3) as any);
     expect((await storage(net.tab()).loadConversation('41'))?.messages.map((m: any) => m.content)).toEqual(['m1', 'm2', 'm3']);
@@ -185,8 +187,8 @@ describe('S2 — whether a log is sealed is decided by the bytes at its path', (
     const net = new FakeS5Network();
     const origin = await sealedThenOutdatedWrite(net, ['m1']);
     const report = await storage(net.tab(), origin()).migrateLegacyConversationLogs();
-    expect(report).toMatchObject({ sealed: 1, alreadySealed: 0 });
-    expect(await sealedAt(net, logPath('41'))).toBe(true);
+    expect(report).toMatchObject({ sealed: 1, alreadySealed: 0, moved: 1 });
+    expect(await sealedAt(net, v2Path('41'))).toBe(true);
     expect((await storage(net.tab(), origin()).loadConversation('41'))?.messages.map((m: any) => m.content)).toEqual(['m1', 'from the old tab']);
   });
 
@@ -200,11 +202,12 @@ describe('S2 — whether a log is sealed is decided by the bytes at its path', (
     expect((await storage(net.tab(), origin()).loadConversation('41'))?.messages.map((m: any) => m.content)).toEqual(['m1', 'from the old tab']);
   });
 
-  test('an append over such plaintext also reseals the path and keeps both writers\' messages', async () => {
+  test('an append over such plaintext keeps both writers\' messages once the migration merges the legacy copy (1.39.24)', async () => {
     const net = new FakeS5Network();
     const origin = await sealedThenOutdatedWrite(net, ['m1']);
     await storage(net.tab(), origin()).appendMessage('41', msg('m4', 200) as any);
-    expect(await sealedAt(net, logPath('41'))).toBe(true);
+    await storage(net.tab(), origin()).migrateLegacyConversationLogs();
+    expect(await sealedAt(net, v2Path('41'))).toBe(true);
     expect((await storage(net.tab(), origin()).loadConversation('41'))?.messages.map((m: any) => m.content)).toEqual(['m1', 'from the old tab', 'm4']);
   });
 });

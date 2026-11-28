@@ -46,8 +46,8 @@ describe('BB3 — the unavailable store refuses each member the way the real one
     // Run untranspiled, the tag is the truth: it keeps STORAGE_MANAGER_SYNC_MEMBERS complete (§22 CC7). A synchronous
     // member that is neither listed nor one of these private helpers fails here until it is classified.
     const isAsync = (fn: unknown) => Object.prototype.toString.call(fn) === '[object AsyncFunction]';
-    const privateHelpers = new Set(['bytesToBase64Url', 'base64UrlToBytes', 'logHead', 'logPath', 'refusePlaintextRagWrite', 'requireSealer',
-      'setupConnectionHandling', 'setupAutoReconnect', 'updateSyncStatus', 'isConnectionError', 'queueOperation', 'release', 'ensureNotDisposed', '_appendLocked']);
+    const privateHelpers = new Set(['bytesToBase64Url', 'base64UrlToBytes', 'logHead', 'logPath', 'logOpaqueId', 'legacyLogPath', 'ownerSegment', 'logRoot', 'settingsPath', 'openSettingsRecord', 'refusePlaintextRagWrite', 'requireSealer',
+      'setupConnectionHandling', 'setupAutoReconnect', 'updateSyncStatus', 'isConnectionError', 'queueOperation', 'release', 'ensureNotDisposed', '_appendLocked', 'refuseRegionalConflicts', 'gateS5']);
     const listed = new Set<string>(STORAGE_MANAGER_SYNC_MEMBERS);
     const proto = StorageManager.prototype as any;
     // `dispose`: nothing started, nothing to release (§26 GG1) — a sign-out with storage unavailable never throws.

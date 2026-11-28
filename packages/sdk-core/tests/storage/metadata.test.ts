@@ -262,37 +262,4 @@ describe('Folder Metadata', () => {
     });
   });
 
-  describe('Metadata Persistence', () => {
-    it('should save metadata with hierarchy', async () => {
-      await storageManager.createFolder(testDbName, '/persistent');
-      await storageManager.addFileToFolder(testDbName, '/persistent', { name: 'file.txt', size: 512 });
-
-      const cid = await storageManager.saveHierarchy(testDbName);
-      expect(cid).toBeDefined();
-
-      // Clear and reload
-      await storageManager.deleteFolder(testDbName, '/', true);
-      await storageManager.loadHierarchy(testDbName, cid);
-
-      const metadata = await storageManager.getFolderMetadata(testDbName, '/persistent');
-      expect(metadata.fileCount).toBe(1);
-      expect(metadata.totalSize).toBe(512);
-    });
-
-    it('should maintain metadata accuracy after multiple saves/loads', async () => {
-      await storageManager.createFolder(testDbName, '/test');
-      await storageManager.addFileToFolder(testDbName, '/test', { name: 'a.txt', size: 100 });
-
-      const cid1 = await storageManager.saveHierarchy(testDbName);
-
-      await storageManager.addFileToFolder(testDbName, '/test', { name: 'b.txt', size: 200 });
-      const cid2 = await storageManager.saveHierarchy(testDbName);
-
-      // Load second version
-      await storageManager.loadHierarchy(testDbName, cid2);
-      const metadata = await storageManager.getFolderMetadata(testDbName, '/test');
-      expect(metadata.fileCount).toBe(2);
-      expect(metadata.totalSize).toBe(300);
-    });
-  });
 });

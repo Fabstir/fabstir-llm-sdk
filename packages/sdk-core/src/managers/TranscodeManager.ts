@@ -88,6 +88,15 @@ export class TranscodeManager implements ITranscodeManager {
       throw new TranscodeError(`sourceCid must name its storage network, e.g. s5://<cid>, got ${sourceCid}`, 'TRANSCODE_FAILED', undefined,
         { reason: 'SOURCE_CID_NO_NETWORK' });
     }
+    // The storage region's hosts only (1.39.27): none listed refuses before any ranking or probe —
+    // first, as in LTX and training.
+    const region = this.sessionManager.getRegionPolicy?.();
+    try {
+      region?.assertOpen('transcode');
+    } catch (e: any) {
+      if (e?.code !== 'REGION_HOST_NOT_ALLOWED') throw e;   // only the region's refusal is relabelled
+      throw new TranscodeError(e.message, 'REGION_HOST_NOT_ALLOWED', undefined, e.details);
+    }
     // The host running an encrypted job sees its keys: only allowlisted hosts are considered, and none configured refuses
     // (1.39.18 K5). SessionManager.submitTranscode enforces it again for every path; this keeps a refused host unfunded.
     let allowed: Set<string> | undefined;
@@ -133,7 +142,13 @@ export class TranscodeManager implements ITranscodeManager {
         await new Promise(r => setTimeout(r, retryDelay));
       }
 
-      const candidates = allowed ? ranked.filter(({ host }) => allowed!.has(String(host.address).toLowerCase())) : ranked;
+      const confidential = allowed ? ranked.filter(({ host }) => allowed!.has(String(host.address).toLowerCase())) : ranked;
+      // Outside the region: never probed, never funded (1.39.27).
+      const candidates = region ? confidential.filter(({ host }) => region.allows({ address: host.address, endpoint: host.apiUrl })) : confidential;
+      if (region?.restricted && candidates.length === 0 && confidential.length > 0) {
+        throw new TranscodeError(`No host on storage region '${region.region}'s list serves this model`, 'REGION_HOST_NOT_ALLOWED', undefined,
+          { region: region.region, reason: 'HOST_NOT_LISTED', job: 'transcode', retryable: false });
+      }
       if (allowed && candidates.length === 0) {
         throw new TranscodeError('No host on confidentialHosts serves this model', 'CONFIDENTIAL_HOST_NOT_ALLOWED', undefined,
           { reason: 'HOST_NOT_ALLOWED', job: 'transcode' });
@@ -226,6 +241,13 @@ export class TranscodeManager implements ITranscodeManager {
     formatSpecHash: string;
     formatSpecCID: string;
   }> {
+    // The storage region's hosts only (1.39.27): refused before the spec upload and any chain read.
+    try {
+      this.sessionManager.assertRegionHost?.({ address: params.hostAddress, job: 'transcode' });
+    } catch (e: any) {
+      if (e?.code !== 'REGION_HOST_NOT_ALLOWED') throw e;   // only the region's refusal is relabelled
+      throw new TranscodeError(e.message, 'REGION_HOST_NOT_ALLOWED', undefined, e.details);
+    }
     const modelId = computeTranscodeModelId(params.mediaFormats);
 
     // Everything that can fail comes before the funding — the estimate (a malformed format throws), then the spec
@@ -461,6 +483,13 @@ export class TranscodeManager implements ITranscodeManager {
   }
 
   private async hasFeatureFlag(hostUrl: string, flag: string): Promise<boolean> {
+    try {
+      // Through the SessionManager, so its endpoint transform is accepted too (1.39.27: refused, not "false")
+      this.sessionManager.assertRegionHost?.({ endpoint: hostUrl, job: 'probe' });
+    } catch (e: any) {
+      if (e?.code !== 'REGION_HOST_NOT_ALLOWED') throw e;   // only the region's refusal is relabelled
+      throw new TranscodeError(e.message, 'REGION_HOST_NOT_ALLOWED', undefined, e.details);
+    }
     try {
       const res = await fetch(`${hostUrl}/v1/version`);
       if (!res.ok) return false;

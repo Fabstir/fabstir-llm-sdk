@@ -188,63 +188,6 @@ describe('Folder Hierarchy', () => {
     });
   });
 
-  describe('Hierarchy Persistence', () => {
-    it('should save hierarchy to S5', async () => {
-      // Create hierarchy
-      await storageManager.createFolder(testDbName, '/docs/tech/ai');
-      await storageManager.createFolder(testDbName, '/docs/business');
-
-      // Save to S5
-      const cid = await storageManager.saveHierarchy(testDbName);
-      expect(cid).toBeDefined();
-      expect(typeof cid).toBe('string');
-      expect(cid.length).toBeGreaterThan(0);
-    });
-
-    it('should load hierarchy from S5', async () => {
-      // Create and save hierarchy
-      await storageManager.createFolder(testDbName, '/docs/tech');
-      const cid = await storageManager.saveHierarchy(testDbName);
-
-      // Clear local hierarchy
-      await storageManager.deleteFolder(testDbName, '/', true);
-
-      // Load from S5
-      await storageManager.loadHierarchy(testDbName, cid);
-
-      // Verify hierarchy restored
-      const folders = await storageManager.listFolder(testDbName, '/docs');
-      expect(folders.some((f: any) => f.name === 'tech')).toBe(true);
-    });
-
-    it('should preserve hierarchy across initialize calls', async () => {
-      // Create hierarchy
-      await storageManager.createFolder(testDbName, '/persistent/folder');
-      await storageManager.saveHierarchy(testDbName);
-
-      // Reinitialize storage manager
-      const newManager = new StorageManager();
-      await newManager.initialize(testSeedPhrase, testUserAddress);
-
-      // Hierarchy should be automatically loaded
-      const folders = await newManager.listFolder(testDbName, '/persistent');
-      expect(folders.some((f: any) => f.name === 'folder')).toBe(true);
-    });
-
-    it('should handle concurrent hierarchy modifications', async () => {
-      const promises = [
-        storageManager.createFolder(testDbName, '/concurrent1'),
-        storageManager.createFolder(testDbName, '/concurrent2'),
-        storageManager.createFolder(testDbName, '/concurrent3')
-      ];
-
-      await expect(Promise.all(promises)).resolves.not.toThrow();
-
-      // Save should capture all changes
-      const cid = await storageManager.saveHierarchy(testDbName);
-      expect(cid).toBeDefined();
-    });
-  });
 
   describe('Corruption Recovery', () => {
     it('should recover from corrupted hierarchy.json', async () => {

@@ -125,6 +125,12 @@ export interface ISessionManager {
   endSession(sessionId: bigint): Promise<void>;
 
   /**
+   * End a session the host has not been told about (1.39.29): the encrypted session start a job makes, then a clean
+   * close with no job frame, so the host completes it with nothing billed. `'already-settled'` when it already was.
+   */
+  closeUnsubmittedSession(sessionId: bigint | string): Promise<'closed' | 'already-settled'>;
+
+  /**
    * The shared connection's generation (changes on every reconnect); `undefined` with no shared connection.
    */
   getConnectionGeneration(): number | undefined;

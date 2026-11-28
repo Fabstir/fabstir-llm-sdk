@@ -10,10 +10,19 @@ import type {
   ChatSession,
   ChatMessage,
 } from '../types/session-groups.types';
-import { SessionGroupStorage } from '../storage/SessionGroupStorage';
+import { SessionGroupStorage, newerThan } from '../storage/SessionGroupStorage';
 import { AsyncMutex } from '../utils/AsyncMutex';
 import { SDKError } from '../types';
 import { rethrowDisposal } from '../utils/disposal';
+
+/**
+ * A save failure that proves nothing reached S5: the connection gate refuses before s5js sees the call (1.39.30). Any
+ * other failure may come after the write (a timeout, or the read-back that "could not be verified").
+ */
+function savedNothing(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === 'STORAGE_OFFLINE' || code === 'STORAGE_CLEANUP';
+}
 
 /**
  * Session Group Manager
@@ -22,6 +31,12 @@ import { rethrowDisposal } from '../utils/disposal';
  * Groups organize related chat sessions and vector databases.
  *
  * Storage: S5-backed with in-memory caching for performance
+ *
+ * Memory is the authority for a group this manager holds (1.39.25): a stored copy replaces it only when its `updatedAt`
+ * is strictly later (`install`); every change is made to the group object that is in memory at that instant and stamped
+ * with `touch`; every save writes the one that is in memory when the save runs (`persist`). A chat of a group in memory
+ * is one object, in `chatStorage` and in the group's `chatSessionsData`; `chatStorage` is a cache a consumer may empty,
+ * so a change looks in both.
  */
 export class SessionGroupManager implements ISessionGroupManager {
   private groups: Map<string, SessionGroup> = new Map();
@@ -34,6 +49,11 @@ export class SessionGroupManager implements ISessionGroupManager {
   private storage: SessionGroupStorage | null = null;
   private storageInitialized: boolean = false;
   private groupLock = new AsyncMutex();
+  /**
+   * Every chat object this manager has taken in or stamped (1.39.26). One of these passed back to `updateSessionGroup`
+   * is not a new version of its chat: it is the current object, or an older one a caller still held.
+   */
+  private knownChats = new WeakSet<ChatSession>();
   /** Set by `dispose()`: every public member refuses from then on (plan §26 GG1). */
   private disposed = false;
 
@@ -57,6 +77,102 @@ export class SessionGroupManager implements ISessionGroupManager {
       throw new SDKError('This session-group manager belongs to an identity that is signed out — get the current one from the SDK',
         'SESSION_GROUP_MANAGER_DISPOSED', { retryable: false });
     }
+  }
+
+  /**
+   * Take a group read from storage into memory, and return the group that is in memory afterwards. Memory wins unless
+   * the stored copy is strictly newer: a copy read before a save of this manager landed is older by its stamp. A newer
+   * copy (another tab or device wrote it) is adopted with its chats; only a chat whose in-memory stamp (`chatStamp`:
+   * the later of `revision` and `updated`) is strictly later than the stored one's is kept — this manager changed it
+   * after the copy's writer last did. A chat the newer copy no longer has stays in `chatStorage`, as it always did:
+   * whether it was deleted elsewhere or never seen there cannot be told from here, and it is not this method's to drop.
+   */
+  private install(loaded: SessionGroup): SessionGroup {
+    const current = this.groups.get(loaded.id);
+    if (current && !newerThan(loaded, current)) return current;
+    const chats = loaded.chatSessionsData ?? {};
+    for (const [sessionId, session] of Object.entries(chats)) {
+      const held = this.chatInMemory(loaded.id, sessionId);
+      const kept = held && chatStamp(held) > chatStamp(session) ? held : session;
+      chats[sessionId] = kept;
+      this.chatStorage.set(sessionId, kept);
+      if (kept && typeof kept === 'object') this.knownChats.add(kept);
+    }
+    this.groups.set(loaded.id, loaded);
+    return loaded;
+  }
+
+  /**
+   * Stamp a change — always later than the stamp it replaces. A clock set back must not make a stored copy look newer,
+   * and a change made after adopting a copy stamped ahead of this clock must still look newer to the device that wrote it.
+   */
+  private touch(group: SessionGroup): void {
+    const previous = new Date(group.updatedAt).getTime();
+    group.updatedAt = new Date(Math.max(Date.now(), Number.isFinite(previous) ? previous + 1 : 0));
+  }
+
+  /**
+   * Stamp a change to a chat (1.39.26): `revision`, later than the chat's previous stamps — and than those of the
+   * object it `replaces`, when it is a new object for that chat — whatever the clock says. `updated` is the callers'
+   * (it orders their chat lists); this one is the manager's, and tells which copy of a chat was changed last when
+   * another tab's group is adopted.
+   */
+  private stampChat(session: ChatSession, replaces?: ChatSession): void {
+    const previous = Math.max(chatStamp(session), chatStamp(replaces));
+    session.revision = Math.max(Date.now(), Number.isFinite(previous) ? previous + 1 : 0);
+    this.knownChats.add(session);
+  }
+
+  /**
+   * The group's chat as memory holds it: the cache when its entry is this group's, else the group's own record (a
+   * consumer may have emptied the cache, and the cache is keyed by chat id alone).
+   */
+  private chatInMemory(groupId: string, sessionId: string): ChatSession | undefined {
+    const cached = this.chatStorage.get(sessionId);
+    return cached?.groupId === groupId ? cached : this.groups.get(groupId)?.chatSessionsData?.[sessionId] ?? undefined;
+  }
+
+  /**
+   * Put memory's state of a group into a new group object, with new `chatSessions` and `chatSessionsData` containers
+   * (the chats stay the same objects), and return it. Every list has always handed out new objects, and consumers
+   * compare references to see a change. Safe because no change or save holds a group across an await (`persist`).
+   */
+  private renew(group: SessionGroup): SessionGroup {
+    const copy: SessionGroup = { ...group };
+    if (Array.isArray(group.chatSessions)) copy.chatSessions = [...group.chatSessions];
+    if (group.chatSessionsData) copy.chatSessionsData = { ...group.chatSessionsData };
+    this.groups.set(copy.id, copy);
+    return copy;
+  }
+
+  /** A new chat into memory and into the group. */
+  private addChat(group: SessionGroup, session: ChatSession): void {
+    this.chatStorage.set(session.sessionId, session);
+    this.knownChats.add(session);
+    if (group.chatSessions.includes(session.sessionId)) return;
+    group.chatSessions.push(session.sessionId);
+    this.touch(group);
+    group.chatSessionsData ??= {};
+    group.chatSessionsData[session.sessionId] = session;
+  }
+
+  /** Undo `addChat`: from the object it went into and from the one memory holds now (a list may have renewed it). */
+  private withdrawChat(addedTo: SessionGroup, session: ChatSession): void {
+    this.chatStorage.delete(session.sessionId);
+    this.knownChats.delete(session);
+    for (const g of new Set([addedTo, this.groups.get(addedTo.id)])) {
+      if (!g) continue;
+      g.chatSessions = g.chatSessions.filter((id) => id !== session.sessionId);
+      if (g.chatSessionsData) delete g.chatSessionsData[session.sessionId];
+    }
+  }
+
+  /** Save the group as it is in memory when its turn under the lock comes — never an object captured earlier. */
+  private persist(groupId: string): Promise<void> {
+    return this.groupLock.withLock(groupId, async () => {
+      const group = this.groups.get(groupId);
+      if (group && this.storage) await this.storage.save(group);
+    });
   }
 
   /**
@@ -128,22 +244,26 @@ export class SessionGroupManager implements ISessionGroupManager {
       deleted: false,
     };
 
-    // Store in memory cache
-    this.groups.set(id, group);
+    if (!this.storage) {
+      this.groups.set(id, group);   // memory only (no storage attached)
+      return group;
+    }
 
-    // Persist to S5 storage if available
-    if (this.storage) {
+    // Into memory and saved in one turn under the group's lock. A failed save reaches the caller (1.39.31 S1); the group
+    // leaves memory only when the failure proves nothing was written — else it may exist on S5, and a retry would make
+    // a second one (review round 1 MAJOR).
+    const storage = this.storage;
+    await this.groupLock.withLock(id, async () => {
+      this.groups.set(id, group);
       try {
         console.log(`[Enhanced S5.js] Creating session group: /home/session-groups/${id}/`);
-        await this.groupLock.withLock(id, () => this.storage!.save(group));
+        await storage.save(group);
         console.log(`[Enhanced S5.js] Session group saved successfully`);
       } catch (err) {
-        rethrowDisposal(err);
-        console.error('[SessionGroupManager.createSessionGroup] Failed to save to S5 storage:', err);
-        // Don't throw - allow operation to continue with in-memory only
-        // This allows testing without full S5 setup
+        if (savedNothing(err)) this.groups.delete(id);
+        throw err;
       }
-    }
+    });
 
     return group;
   }
@@ -153,38 +273,50 @@ export class SessionGroupManager implements ISessionGroupManager {
    */
   async listSessionGroups(owner: string): Promise<SessionGroup[]> {
     this.ensureNotDisposed();
-    // If S5 storage is available, load from S5
+    const listed = new Set<string>();
+    const result: SessionGroup[] = [];
     if (this.storage) {
       try {
         console.log(`[Enhanced S5.js] Listing directory: /home/session-groups/`);
         const allGroups = await this.storage.loadAll();
-
-        // Filter by owner and non-deleted
-        const userGroups = allGroups.filter(g => g.owner === owner && !g.deleted);
-        console.log(`[Enhanced S5.js] Found ${userGroups.length} session groups`);
-
-        // Update in-memory cache
-        userGroups.forEach(g => this.groups.set(g.id, g));
-        return userGroups;
+        for (const loaded of allGroups) {
+          if (loaded.owner !== owner) continue;
+          if (loaded.deleted && !this.groups.has(loaded.id)) continue; // a deleted group is not taken into memory
+          let group = this.install(loaded);
+          if (group !== loaded) group = this.renew(group); // memory won: its state, in a new object all the same
+          listed.add(group.id);
+          if (!group.deleted) result.push(group);
+        }
+        console.log(`[Enhanced S5.js] Found ${result.length} session groups`);
       } catch (err: any) {
         rethrowDisposal(err);
         // Only log unexpected errors (directory not found is expected on first load)
         if (!err.message?.includes('not found') && !err.message?.includes('does not exist')) {
           console.error('[SessionGroupManager.listSessionGroups] Failed to load from S5 storage:', err);
         }
-        // Fall back to in-memory cache
+        // What memory holds is returned below
       }
     }
 
-    // Fallback: use in-memory cache only
-    const result: SessionGroup[] = [];
-    for (const group of this.groups.values()) {
-      if (group.owner === owner && !group.deleted) {
-        result.push(group);
-      }
+    // Then the groups only memory holds: a create whose save has not landed, a file storage could not read this time.
+    for (const group of this.heldFor(owner)) {
+      if (!listed.has(group.id)) result.push(this.renew(group));
     }
-
     return result;
+  }
+
+  /**
+   * The owner's groups as memory holds them now — no storage read: empty until a list or a load has run. The objects
+   * are the manager's own.
+   */
+  getCachedSessionGroups(owner: string): SessionGroup[] {
+    this.ensureNotDisposed();
+    return this.heldFor(owner);
+  }
+
+  /** `getCachedSessionGroups` without the disposal check: a list in flight at a sign-out keeps what it read (§27 HH2). */
+  private heldFor(owner: string): SessionGroup[] {
+    return [...this.groups.values()].filter((group) => group.owner === owner && !group.deleted);
   }
 
   /**
@@ -204,21 +336,11 @@ export class SessionGroupManager implements ISessionGroupManager {
     if (!group && this.storage) {
       try {
         console.log(`[SessionGroupManager.getSessionGroup] Loading group ${groupId} from S5...`);
-        group = await this.storage.load(groupId);
-        if (group) {
-          console.log(`[SessionGroupManager.getSessionGroup] ✅ Loaded from S5: ${group.chatSessions.length} session IDs`);
-          console.log(`[SessionGroupManager.getSessionGroup] chatSessionsData exists: ${!!group.chatSessionsData}, count: ${group.chatSessionsData ? Object.keys(group.chatSessionsData).length : 0}`);
-
-          // Update in-memory cache
-          this.groups.set(groupId, group);
-
-          // Populate chat sessions from chatSessionsData
-          if (group.chatSessionsData) {
-            for (const [sessionId, session] of Object.entries(group.chatSessionsData)) {
-              this.chatStorage.set(sessionId, session);
-              console.log(`[SessionGroupManager.getSessionGroup] Cached session ${sessionId} in chatStorage`);
-            }
-          }
+        const loaded = await this.storage.load(groupId);
+        if (loaded) {
+          console.log(`[SessionGroupManager.getSessionGroup] ✅ Loaded from S5: ${loaded.chatSessions.length} session IDs`);
+          // Memory may hold the group by now (a list installed it while this load ran): `install` keeps the newer.
+          group = this.install(loaded);
         } else {
           console.warn(`[SessionGroupManager.getSessionGroup] ⚠️  Group ${groupId} not found in S5`);
         }
@@ -293,18 +415,20 @@ export class SessionGroupManager implements ISessionGroupManager {
     }
 
     if (updates.chatSessionsData !== undefined) {
-      group.chatSessionsData = { ...(group.chatSessionsData || {}), ...updates.chatSessionsData };
+      const held = group.chatSessionsData || {};
       for (const [sid, session] of Object.entries(updates.chatSessionsData)) {
+        // An object this manager has never held is a new version of the chat. One it has held says nothing — the
+        // group's own object passed along in a whole record, or an older one from a copy of the group the caller kept:
+        // stamping those would make this tab's unchanged or stale chats beat another tab's real edits. A chat changed
+        // in place goes through updateChatSession.
+        if (session && typeof session === 'object' && !this.knownChats.has(session)) this.stampChat(session, held[sid]);
         this.chatStorage.set(sid, session);
       }
+      group.chatSessionsData = { ...held, ...updates.chatSessionsData };
     }
 
-    group.updatedAt = new Date();
-
-    this.groups.set(groupId, group);
-    if (this.storage) {
-      await this.groupLock.withLock(groupId, () => this.storage!.save(group));
-    }
+    this.touch(group);
+    await this.persist(groupId);
     return group;
   }
 
@@ -324,16 +448,23 @@ export class SessionGroupManager implements ISessionGroupManager {
       throw new Error('Permission denied');
     }
 
-    // Soft delete
-    group.deleted = true;
-    group.updatedAt = new Date();
-
-    this.groups.set(groupId, group);
-
-    // Persist to S5 storage
-    if (this.storage) {
-      await this.groupLock.withLock(groupId, () => this.storage!.save(group));
-    }
+    // Soft delete — set, stamped and saved as one step under the group's lock. Nothing later would save a deleted
+    // group on purpose, so a delete whose save failed is taken back (1.39.26); the second stamp keeps memory newer
+    // than a deleted copy that landed before the save threw (a failed network verification).
+    await this.groupLock.withLock(groupId, async () => {
+      const current = this.groups.get(groupId)!;
+      const before = current.deleted;
+      current.deleted = true;
+      this.touch(current);
+      try {
+        if (this.storage) await this.storage.save(current);
+      } catch (error) {
+        const restored = this.groups.get(groupId)!; // a list may have put a new object in memory during the save
+        restored.deleted = before;
+        this.touch(restored);
+        throw error;
+      }
+    });
   }
 
   /**
@@ -345,7 +476,7 @@ export class SessionGroupManager implements ISessionGroupManager {
     databaseId: string
   ): Promise<SessionGroup> {
     this.ensureNotDisposed();
-    const group = await this.getSessionGroup(groupId, requestor);
+    await this.getSessionGroup(groupId, requestor);
 
     // Validate database exists
     const exists = await this.databaseExists(databaseId);
@@ -353,16 +484,12 @@ export class SessionGroupManager implements ISessionGroupManager {
       throw new Error('Vector database not found');
     }
 
+    const group = this.groups.get(groupId)!; // as it is now: it may have been replaced during the awaits above
     // Add database if not already linked (avoid duplicates)
     if (!group.linkedDatabases.includes(databaseId)) {
       group.linkedDatabases.push(databaseId);
-      group.updatedAt = new Date();
-      this.groups.set(groupId, group);
-
-      // Persist to S5 storage
-      if (this.storage) {
-        await this.groupLock.withLock(groupId, () => this.storage!.save(group));
-      }
+      this.touch(group);
+      await this.persist(groupId);
     }
 
     return group;
@@ -377,7 +504,8 @@ export class SessionGroupManager implements ISessionGroupManager {
     databaseId: string
   ): Promise<SessionGroup> {
     this.ensureNotDisposed();
-    const group = await this.getSessionGroup(groupId, requestor);
+    await this.getSessionGroup(groupId, requestor);
+    const group = this.groups.get(groupId)!; // as it is now
 
     // Remove database from linked list
     group.linkedDatabases = group.linkedDatabases.filter((id) => id !== databaseId);
@@ -387,13 +515,8 @@ export class SessionGroupManager implements ISessionGroupManager {
       group.defaultDatabase = undefined;
     }
 
-    group.updatedAt = new Date();
-    this.groups.set(groupId, group);
-
-    // Persist to S5 storage
-    if (this.storage) {
-      await this.groupLock.withLock(groupId, () => this.storage!.save(group));
-    }
+    this.touch(group);
+    await this.persist(groupId);
 
     return group;
   }
@@ -407,7 +530,8 @@ export class SessionGroupManager implements ISessionGroupManager {
     databaseId?: string
   ): Promise<SessionGroup> {
     this.ensureNotDisposed();
-    const group = await this.getSessionGroup(groupId, requestor);
+    await this.getSessionGroup(groupId, requestor);
+    const group = this.groups.get(groupId)!; // as it is now
 
     // If setting a database (not clearing)
     if (databaseId !== undefined) {
@@ -418,11 +542,8 @@ export class SessionGroupManager implements ISessionGroupManager {
     }
 
     group.defaultDatabase = databaseId;
-    group.updatedAt = new Date();
-    this.groups.set(groupId, group);
-    if (this.storage) {
-      await this.groupLock.withLock(groupId, () => this.storage!.save(group));
-    }
+    this.touch(group);
+    await this.persist(groupId);
 
     return group;
   }
@@ -476,8 +597,7 @@ export class SessionGroupManager implements ISessionGroupManager {
 
       // Save if modified
       if (modified) {
-        group.updatedAt = new Date();
-        this.groups.set(group.id, group);
+        this.touch(group);
       }
     }
 
@@ -494,13 +614,13 @@ export class SessionGroupManager implements ISessionGroupManager {
     sessionId: string
   ): Promise<SessionGroup> {
     this.ensureNotDisposed();
-    const group = await this.getSessionGroup(groupId, requestor);
+    await this.getSessionGroup(groupId, requestor);
+    const group = this.groups.get(groupId)!; // as it is now
 
     // Add session if not already in list (avoid duplicates)
     if (!group.chatSessions.includes(sessionId)) {
       group.chatSessions.push(sessionId);
-      group.updatedAt = new Date();
-      this.groups.set(groupId, group);
+      this.touch(group);
     }
 
     return group;
@@ -535,13 +655,8 @@ export class SessionGroupManager implements ISessionGroupManager {
 
     // Add document
     group.documents.push(document);
-    group.updatedAt = new Date();
-    this.groups.set(groupId, group);
-
-    // Persist to S5 storage
-    if (this.storage) {
-      await this.groupLock.withLock(groupId, () => this.storage!.save(group));
-    }
+    this.touch(group);
+    await this.persist(groupId);
 
     return { ...group }; // Return copy
   }
@@ -562,13 +677,8 @@ export class SessionGroupManager implements ISessionGroupManager {
     // Remove document
     if (group.documents) {
       group.documents = group.documents.filter(doc => doc.id !== documentId);
-      group.updatedAt = new Date();
-      this.groups.set(groupId, group);
-
-      // Persist to S5 storage
-      if (this.storage) {
-        await this.groupLock.withLock(groupId, () => this.storage!.save(group));
-      }
+      this.touch(group);
+      await this.persist(groupId);
     }
 
     return { ...group }; // Return copy
@@ -601,42 +711,32 @@ export class SessionGroupManager implements ISessionGroupManager {
         databasesUsed: group.linkedDatabases
       },
       created: now,
-      updated: now
+      updated: now,
+      revision: now
     };
 
-    // Store chat session in memory
-    this.chatStorage.set(sessionId, session);
-
-    // Add session ID to group
-    if (!group.chatSessions.includes(sessionId)) {
-      group.chatSessions.push(sessionId);
-      group.updatedAt = new Date();
-
-      // Initialize chatSessionsData if not exists
-      if (!group.chatSessionsData) {
-        group.chatSessionsData = {};
-      }
-
-      // Store session data in group for persistence
-      group.chatSessionsData[sessionId] = session;
-
-      // Update in-memory cache
-      this.groups.set(groupId, group);
-
-      // Persist to S5
-      if (this.storage) {
-        try {
-          await this.groupLock.withLock(groupId, () => this.storage!.save(group));
-          console.log(`[SessionGroupManager.startChatSession] ✅ Saved session ${sessionId} to S5`);
-        } catch (error) {
-          rethrowDisposal(error);
-          console.error(`[SessionGroupManager.startChatSession] ❌ Failed to save to S5:`, error);
-          // Don't throw - session is already in memory, S5 is best-effort
-        }
-      } else {
-        console.warn('[SessionGroupManager.startChatSession] ⚠️  S5 storage not available, session only in memory');
-      }
+    if (!this.storage) {
+      this.addChat(group, session);
+      console.warn('[SessionGroupManager.startChatSession] ⚠️  S5 storage not available, session only in memory');
+      return session;
     }
+
+    // Added, saved and — on a failure that proves nothing was written — withdrawn in ONE turn under the group's lock, so
+    // no other save of this group carries a chat that is then withdrawn (1.39.31 S2, review round 1). A failure that may
+    // have written keeps the chat: it may exist on S5 (review round 1 MAJOR).
+    const storage = this.storage;
+    await this.groupLock.withLock(groupId, async () => {
+      const target = this.groups.get(groupId);
+      if (!target) throw new Error(`Session group not found: ${groupId}`);
+      this.addChat(target, session);
+      try {
+        await storage.save(target);
+        console.log(`[SessionGroupManager.startChatSession] ✅ Saved session ${sessionId} to S5`);
+      } catch (error) {
+        if (savedNothing(error)) this.withdrawChat(target, session);
+        throw error;
+      }
+    });
 
     return session;
   }
@@ -747,35 +847,27 @@ export class SessionGroupManager implements ISessionGroupManager {
     message: ChatMessage
   ): Promise<void> {
     this.ensureNotDisposed();
-    // Get session (from memory or load from S5)
-    const session = await this.getChatSession(groupId, sessionId);
-    if (!session) {
+    if (!(await this.getChatSession(groupId, sessionId))) {
       throw new Error(`Session ${sessionId} not found in group ${groupId}`);
     }
 
-    // Lock covers mutation + save to prevent concurrent overwrites
+    // The lock covers read, change and save. The session is read inside it: it may have been replaced or deleted
+    // while this call waited its turn.
     await this.groupLock.withLock(groupId, async () => {
-      // Add message to session
+      const session = this.chatInMemory(groupId, sessionId);
+      if (!session) {
+        throw new Error(`Session ${sessionId} not found in group ${groupId}`);
+      }
       session.messages.push(message);
+      this.stampChat(session);
       session.updated = Date.now();
-
-      // Update memory cache
       this.chatStorage.set(sessionId, session);
 
-      // Get group and update chatSessionsData
       const group = this.groups.get(groupId);
       if (group) {
-        // Initialize chatSessionsData if not exists
-        if (!group.chatSessionsData) {
-          group.chatSessionsData = {};
-        }
-
-        // Update session data in group
+        group.chatSessionsData = group.chatSessionsData || {};
         group.chatSessionsData[sessionId] = session;
-        group.updatedAt = new Date();
-
-        // Update in-memory cache
-        this.groups.set(groupId, group);
+        this.touch(group);
 
         // Persist to S5
         if (this.storage) {
@@ -791,6 +883,52 @@ export class SessionGroupManager implements ISessionGroupManager {
           console.warn('[SessionGroupManager.addMessage] ⚠️  S5 storage not available, message only in memory');
         }
       }
+    });
+  }
+
+  /**
+   * Change a stored chat: `mutate` runs on the chat as it is when this call's turn under the group's lock comes (after
+   * every `addMessage` queued before it — so not at the call), then the chat's `revision` and the group are stamped
+   * and the group is saved. The chat's `updated` is left to `mutate`: a rename or a pin is not activity.
+   *
+   * `mutate` must be synchronous — the lock is not held across a caller's await. An `async` function is refused before
+   * it runs; any other function that returns a promise is refused after its synchronous part ran. What a refused or
+   * throwing `mutate` changed stays in memory unsaved, and the next save of the group writes it — as does the change
+   * of a call whose save failed (call again with a no-op `mutate` to save it).
+   *
+   * @returns the chat — the manager's own object
+   * @throws SDKError INVALID_MUTATOR if `mutate` is not a synchronous function
+   * @throws Error if the group or chat is not found, the requestor is not the owner, or the save fails
+   */
+  async updateChatSession(
+    groupId: string,
+    sessionId: string,
+    requestor: string,
+    mutate: (session: ChatSession) => void
+  ): Promise<ChatSession> {
+    this.ensureNotDisposed();
+    const refuse = () => new SDKError('updateChatSession takes a synchronous function: the group lock is not held across an await',
+      'INVALID_MUTATOR', { retryable: false });
+    if (typeof mutate !== 'function' || mutate.constructor?.name === 'AsyncFunction') throw refuse();
+    await this.getSessionGroup(groupId, requestor);
+
+    return this.groupLock.withLock(groupId, async () => {
+      const before = this.chatInMemory(groupId, sessionId);
+      if (!before) {
+        throw new Error(`Session ${sessionId} not found in group ${groupId}`);
+      }
+      const returned: unknown = mutate(before);
+      if (returned && typeof (returned as any).then === 'function') throw refuse();
+      // Read again: `mutate` may have swapped the chat object (updateSessionGroup) or changed the group.
+      const session = this.chatInMemory(groupId, sessionId) ?? before;
+      this.stampChat(session);
+      const group = this.groups.get(groupId)!;
+      this.chatStorage.set(sessionId, session);
+      group.chatSessionsData = group.chatSessionsData || {};
+      group.chatSessionsData[sessionId] = session;
+      this.touch(group);
+      if (this.storage) await this.storage.save(group);
+      return session;
     });
   }
 
@@ -830,8 +968,8 @@ export class SessionGroupManager implements ISessionGroupManager {
         chatSessionsData: {
           ...(group.chatSessionsData || {}),
         },
-        updatedAt: new Date(),
       };
+      this.touch(updatedGroup);
 
       // Remove session data from chatSessionsData on the NEW object
       if (updatedGroup.chatSessionsData[sessionId]) {
@@ -864,4 +1002,13 @@ export class SessionGroupManager implements ISessionGroupManager {
   private generateId(): string {
     return `sg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
   }
+}
+
+/**
+ * A chat's stamp, epoch ms: the later of the `revision` this manager gives it and the `updated` its callers move — so
+ * chats written before 1.39.26, and a later `addMessage` from a tab on an older SDK, still compare. Neither: the oldest.
+ */
+function chatStamp(session: ChatSession | null | undefined): number {
+  const stamp = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : -Infinity);
+  return Math.max(stamp(session?.revision), stamp(session?.updated));
 }

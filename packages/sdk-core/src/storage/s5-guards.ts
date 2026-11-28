@@ -196,3 +196,81 @@ function scrubbedIterator(it: AsyncIterator<unknown>): AsyncIterableIterator<unk
     [Symbol.asyncIterator]() { return this; },
   };
 }
+
+/**
+ * The S5 calls that wait for a connection (1.39.30, IMPLEMENTATION-S5-RECONNECT.md D4/D5): every public async method
+ * of s5js's `FS5` — a write made while disconnected lands only in the local registry (F4) — and `downloadByCID`.
+ * A test holds this list to s5js's own prototype, so a new s5js method cannot slip past it.
+ */
+export const GATED_FS_METHODS: ReadonlySet<string> = new Set([
+  'get', 'put', 'getMetadata', 'delete', 'list', 'uploadBlobWithoutEncryption', 'downloadAndDecryptBlob',
+  'uploadBlobEncrypted', 'createDirectory', 'createFile', 'runTransactionOnDirectory', 'ensureIdentityInitialized',
+  'repairDirectory', 'getKeySet', 'putImage', 'getThumbnail', 'getImageMetadata', 'createImageGallery',
+  'getPublicDirectoryKey', 'readFromPublicDirectory', 'getPublicDirectoryKeyFrom',
+]);
+export const GATED_S5_METHODS: ReadonlySet<string> = new Set(['downloadByCID']);
+/** Identity, registration, local signing, and `reconnect` itself — which the gate would otherwise wait on. */
+export const UNGATED_S5_METHODS: ReadonlySet<string> = new Set([
+  'recoverIdentityFromSeedPhrase', 'registerOnNewPortal', 'reconnect', 'getSigningPublicKey', 'sign',
+  'storePortalCredentials', 'deriveKeyPair',
+]);
+
+/**
+ * `s5` whose gated calls first await `gate()` — a rejection rejects the call before s5js sees it. `list` waits on its
+ * first `next()`. Everything else, and every non-function property, passes through. Methods run on the object they
+ * were read from; wrappers are cached per object and function, so a replaced `fs` is always the one used.
+ */
+export function withConnectionGate<T extends object>(s5: T, gate: () => Promise<void>): T {
+  const gatedFs = new WeakMap<object, object>();
+  const view = (obj: object, gated: ReadonlySet<string>, isInstance: boolean): object => {
+    // Per object, then per function: a wrapper runs on the object it was read from, never on an earlier one.
+    const fns = new WeakMap<Function, Function>();
+    const wrap = (fn: Function, name: string): Function => {
+      let w = fns.get(fn);
+      if (!w) {
+        w = new Proxy(fn, {
+          apply: (target, _this, args) => name === 'list'
+            ? gatedIterator(gate, () => Reflect.apply(target, obj, args))
+            : gate().then(() => Reflect.apply(target, obj, args)),
+        });
+        fns.set(fn, w);
+      }
+      return w;
+    };
+    return new Proxy(obj, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop, target);
+        if (isInstance && prop === 'fs' && value !== null && typeof value === 'object') {
+          let v = gatedFs.get(value);
+          if (!v) gatedFs.set(value, (v = view(value, GATED_FS_METHODS, false)));
+          return v;
+        }
+        return typeof value === 'function' && typeof prop === 'string' && gated.has(prop) ? wrap(value, prop) : value;
+      },
+    });
+  };
+  return view(s5, GATED_S5_METHODS, true) as T;
+}
+
+function gatedIterator(gate: () => Promise<void>, open: () => AsyncIterator<unknown>): AsyncIterableIterator<unknown> {
+  let opening: Promise<AsyncIterator<unknown>> | undefined;
+  let closed = false;
+  const ready = () => (opening ??= gate().then(open));
+  return {
+    // Closed before it opened: it never opens (no gate, no s5js list).
+    next: (...args: [] | [unknown]) => (closed && !opening
+      ? Promise.resolve({ done: true, value: undefined })
+      : ready().then((it) => it.next(...args))),
+    return: async (value?: unknown) => {
+      closed = true;
+      const it = opening && (await opening.catch(() => undefined));
+      return it?.return ? it.return(value) : { done: true, value };
+    },
+    throw: async (e?: unknown) => {
+      const it = opening && (await opening.catch(() => undefined));
+      if (it?.throw) return it.throw(e);
+      throw e;
+    },
+    [Symbol.asyncIterator]() { return this; },
+  };
+}

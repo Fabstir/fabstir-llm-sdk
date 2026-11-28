@@ -76,7 +76,8 @@ export interface IHostSelectionService {
     modelId: string,
     mode: HostSelectionMode,
     preferredHostAddress?: string,
-    excludeAddresses?: readonly string[]
+    excludeAddresses?: readonly string[],
+    allow?: (host: HostInfo) => boolean
   ): Promise<HostInfo | null>;
 
   /**
@@ -89,6 +90,7 @@ export interface IHostSelectionService {
   getRankedHostsForModel(
     modelId: string,
     mode: HostSelectionMode,
-    limit?: number
+    limit?: number,
+    allow?: (host: HostInfo) => boolean
   ): Promise<RankedHost[]>;
 }

@@ -16,6 +16,7 @@
  */
 
 import { fetchWithTimeout } from './with-timeout';
+import { SDKError } from '../types';
 
 /** How long one backend registration call may take — its body included (§32 MM4). */
 export const REGISTRATION_TIMEOUT_MS = 30_000;
@@ -24,6 +25,19 @@ export const REGISTRATION_TIMEOUT_MS = 30_000;
 async function readBody(response: Response): Promise<{ ok: boolean; status: number; text: string; json: () => any }> {
   const text = await response.text();
   return { ok: response.ok, status: response.status, text, json: () => JSON.parse(text) };
+}
+
+/**
+ * A regional registration's replies must each name the region asked for (1.39.28). A backend that has not been updated
+ * ignores `region` and uses the Global portal and token, so a reply without the echo is refused before anything in it
+ * is used: no challenge signed, no completion sent, no token set. Global reads no echo.
+ */
+function requireRegionEcho(reply: any, region: string | undefined, call: 'register' | 'register-complete'): void {
+  if (region === undefined || reply?.region === region) return;
+  const received = typeof reply?.region === 'string' && reply.region.length <= 32 ? reply.region : null;
+  throw new SDKError(
+    `storage region '${region}': the registration backend's /${call} reply does not name the region (received ${JSON.stringify(received)}); the backend must be updated for storage regions`,
+    'STORAGE_REGION_REGISTRATION_REFUSED', { region, call, received, retryable: false });
 }
 
 // Challenge type constants (also exported from S5.js)
@@ -40,6 +54,9 @@ export interface SecureRegistrationOptions {
   portalHost: string;
   /** Portal URL for credential storage (e.g., 'https://s5.platformlessai.ai') */
   portalUrl: string;
+  /** The storage region (1.39.27), sent in both calls so the backend uses that region's portal and token; omitted for
+   *  Global, whose bodies are unchanged. */
+  region?: string;
 }
 
 /**
@@ -55,7 +72,8 @@ export async function registerS5WithBackend(
   s5: any,
   options: SecureRegistrationOptions
 ): Promise<string> {
-  const { backendUrl, portalHost, portalUrl } = options;
+  const { backendUrl, portalHost, portalUrl, region } = options;
+  const regionField = region === undefined ? {} : { region };
 
   if (!s5.identity) {
     throw new Error('S5 identity not initialized. Call recoverIdentityFromSeedPhrase() first.');
@@ -78,14 +96,16 @@ export async function registerS5WithBackend(
   const challengeRes = await fetchWithTimeout(`${backendUrl}/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pubKey }),
+    body: JSON.stringify({ pubKey, ...regionField }),
   }, REGISTRATION_TIMEOUT_MS, readBody);
 
   if (!challengeRes.ok) {
     throw new Error(`Failed to get challenge: ${challengeRes.status} - ${challengeRes.text}`);
   }
 
-  const { challenge } = challengeRes.json();
+  const challengeReply = challengeRes.json();
+  requireRegionEcho(challengeReply, region, 'register');
+  const { challenge } = challengeReply;
   if (!challenge) {
     throw new Error('No challenge received from backend');
   }
@@ -120,6 +140,7 @@ export async function registerS5WithBackend(
       response,
       signature,
       label: 'fabstir-sdk',
+      ...regionField,
     }),
   }, REGISTRATION_TIMEOUT_MS, readBody);
 
@@ -127,7 +148,9 @@ export async function registerS5WithBackend(
     throw new Error(`Registration failed: ${completeRes.status} - ${completeRes.text}`);
   }
 
-  const { authToken } = completeRes.json();
+  const completeReply = completeRes.json();
+  requireRegionEcho(completeReply, region, 'register-complete');
+  const { authToken } = completeReply;
   if (!authToken) {
     throw new Error('No authToken received from backend');
   }

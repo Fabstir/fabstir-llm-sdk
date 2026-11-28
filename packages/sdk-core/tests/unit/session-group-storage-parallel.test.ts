@@ -14,6 +14,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SessionGroupStorage } from '../../src/storage/SessionGroupStorage';
 import type { SessionGroup } from '../../src/types/session-groups.types';
+import { sealer } from '../helpers/sealed-fixtures';
+
+/** 1.39.24: groups are sealed with the StorageManager's sealer. */
+const sealing = { getSealer: () => sealer() } as any;
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -33,10 +37,15 @@ function makeFakeGroup(id: string): SessionGroup {
   } as unknown as SessionGroup;
 }
 
+/**
+ * The entries are legacy groups (`home/session-groups/{address}/{id}.json`), each settled through `reconcileLegacy`;
+ * the sealed directory (`home/session-groups/v2/{owner}`) is empty.
+ */
 function makeFakeS5Client(entryNames: string[]) {
   return {
     fs: {
-      async *list(_dirPath: string) {
+      async *list(dirPath: string) {
+        if (dirPath.includes('/v2')) return;
         for (const name of entryNames) {
           yield { type: 'file', name };
         }
@@ -51,14 +60,14 @@ describe('SessionGroupStorage.loadAll — parallel cold-path fetches', () => {
     const entryNames = groupIds.map((id) => `${id}.json`);
     const s5Client = makeFakeS5Client(entryNames);
 
-    const storage = new SessionGroupStorage(s5Client, 'seed', '0xowner');
+    const storage = new SessionGroupStorage(s5Client, 'seed', '0xowner', undefined, sealing);
 
     let inFlight = 0;
     let peak = 0;
     const loadDelayMs = 30;
 
     const loadSpy = vi
-      .spyOn(storage, 'load')
+      .spyOn(storage as any, 'reconcileLegacy')
       .mockImplementation(async (groupId: string) => {
         inFlight++;
         peak = Math.max(peak, inFlight);
@@ -88,9 +97,9 @@ describe('SessionGroupStorage.loadAll — parallel cold-path fetches', () => {
   it('isolates per-group failures: one bad group does not reject the whole batch', async () => {
     const entryNames = ['ok1.json', 'bad.json', 'ok2.json'];
     const s5Client = makeFakeS5Client(entryNames);
-    const storage = new SessionGroupStorage(s5Client, 'seed', '0xowner');
+    const storage = new SessionGroupStorage(s5Client, 'seed', '0xowner', undefined, sealing);
 
-    vi.spyOn(storage, 'load').mockImplementation(async (groupId: string) => {
+    vi.spyOn(storage as any, 'reconcileLegacy').mockImplementation(async (groupId: string) => {
       if (groupId === 'bad') throw new Error('decrypt failed');
       return makeFakeGroup(groupId);
     });
@@ -104,11 +113,11 @@ describe('SessionGroupStorage.loadAll — parallel cold-path fetches', () => {
   it('preserves input order in the returned array', async () => {
     const entryNames = ['a.json', 'b.json', 'c.json', 'd.json'];
     const s5Client = makeFakeS5Client(entryNames);
-    const storage = new SessionGroupStorage(s5Client, 'seed', '0xowner');
+    const storage = new SessionGroupStorage(s5Client, 'seed', '0xowner', undefined, sealing);
 
     // Make later-indexed groups resolve faster — sliding-window without order
     // preservation would jumble the result.
-    vi.spyOn(storage, 'load').mockImplementation(async (groupId: string) => {
+    vi.spyOn(storage as any, 'reconcileLegacy').mockImplementation(async (groupId: string) => {
       const delay = ({ a: 40, b: 30, c: 20, d: 10 } as Record<string, number>)[groupId] ?? 0;
       await wait(delay);
       return makeFakeGroup(groupId);
@@ -120,10 +129,50 @@ describe('SessionGroupStorage.loadAll — parallel cold-path fetches', () => {
 
   it('returns empty array when directory has no .json entries', async () => {
     const s5Client = makeFakeS5Client(['readme.txt', 'subdir']);
-    const storage = new SessionGroupStorage(s5Client, 'seed', '0xowner');
-    vi.spyOn(storage, 'load').mockImplementation(async () => makeFakeGroup('unused'));
+    const storage = new SessionGroupStorage(s5Client, 'seed', '0xowner', undefined, sealing);
+    vi.spyOn(storage as any, 'reconcileLegacy').mockImplementation(async () => makeFakeGroup('unused'));
 
     const groups = await storage.loadAll();
     expect(groups).toEqual([]);
+  });
+
+  it('opens sealed (v2) files in parallel too, with at most LOAD_ALL_CONCURRENCY=20 in flight', async () => {
+    const seal = sealer();
+    const files = new Map<string, Uint8Array>();
+    for (let i = 0; i < 25; i++) {
+      const id = `g${i}`;
+      const opaqueId = seal.deriveId('group', id);
+      files.set(`home/session-groups/v2/${seal.deriveId('owner', 'storage')}/${opaqueId}`, seal.seal({ kind: 'cbor', value: makeFakeGroup(id) }, `group/v1/${opaqueId}`));
+    }
+    const s5Client = {
+      fs: {
+        async *list(dirPath: string) {
+          if (!dirPath.includes('/v2/')) return;
+          for (const path of files.keys()) yield { type: 'file', name: path.split('/').pop()! };
+        },
+      },
+    };
+    let inFlight = 0;
+    let peak = 0;
+    const manager = {
+      getSealer: () => seal,
+      getWithRetry: async (path: string) => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await wait(30);
+        inFlight--;
+        return files.get(path);
+      },
+    } as any;
+    const storage = new SessionGroupStorage(s5Client, 'seed', '0xowner', undefined, manager);
+
+    const start = Date.now();
+    const groups = await storage.loadAll();
+    const elapsed = Date.now() - start;
+
+    expect(groups.map((g) => g.id).sort()).toEqual(Array.from({ length: 25 }, (_, i) => `g${i}`).sort());
+    expect(peak).toBeGreaterThanOrEqual(2);
+    expect(peak).toBeLessThanOrEqual(20);
+    expect(elapsed).toBeLessThan(400);
   });
 });

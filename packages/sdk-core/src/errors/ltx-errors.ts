@@ -14,6 +14,8 @@ export const LTX_CLIENT_ERROR_CODES = [
   'SESSION_JOB_IN_FLIGHT',
   // The host is not on confidentialHosts (or none is configured); refused before any session is funded (1.39.19)
   'CONFIDENTIAL_HOST_NOT_ALLOWED',
+  // The host is not on the storage region's list (or none is listed); refused before any session is funded (1.39.27)
+  'REGION_HOST_NOT_ALLOWED',
   // The session was settled on chain (details.reason 'SETTLED_ON_CHAIN'), or ended here: open a new one (1.39.21)
   'SESSION_NOT_ACTIVE',
   // Its on-chain status could not be read; nothing was sent (details.retryable) (1.39.21)

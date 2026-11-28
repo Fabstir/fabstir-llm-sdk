@@ -14,6 +14,7 @@
 - [Payment Management](#payment-management)
 - [Model Governance](#model-governance)
 - [Host Management](#host-management)
+- [Storage Region (sdk-core 1.39.27)](#storage-region-sdk-core-13927)
 - [Confidential Storage (sdk-core 1.39.0)](#confidential-storage-sdk-core-1390)
 - [Storage Management](#storage-management)
   - [User Settings Storage](#user-settings-storage)
@@ -1098,6 +1099,30 @@ interface CheckpointProof {
 }
 ```
 
+### closeUnsubmittedSession (1.39.29)
+
+Ends a session the host has not been told about, such as a funded or adopted session abandoned before its first job.
+`endSession` only ends it locally, so the host never hears of it, and the deposit waits for the session's timeout.
+
+```typescript
+const outcome = await sessionManager.closeUnsubmittedSession(sessionId);   // bigint | string
+// 'closed': the host was given the session start and then the close; it completes the session with nothing billed
+// 'already-settled': the chain or the node had already settled it; no connection was made
+```
+
+- It runs the same encrypted session start a job makes (connect, `encrypted_session_init`, the host's ack), with every
+  job guard: active session, endpoint, storage region, the settled read. It then closes the connection cleanly. It
+  sends no prompt and no job frame. The host completes a session whose last connection closes with nothing in flight.
+- If this SDK already holds the shared connection for the session, that connection is closed instead (no second one).
+- The session is `'ended'` afterwards. Use this instead of `endSession`, not after it: an ended session is refused.
+- Refused before any connection: `SESSION_NOT_FOUND`, `SESSION_NOT_ACTIVE`, `SESSION_NO_ENDPOINT`,
+  `REGION_HOST_NOT_ALLOWED`, and `SESSION_JOB_IN_FLIGHT` (it takes the session's job slot while it runs, so no job's
+  key is replaced).
+- A failed init (no ack, or an error) throws, closes its connection and leaves the session active, so the call can be
+  retried.
+- If another connection for the session is open elsewhere (another client), the host leaves completion to that one.
+- `SDK_CAPABILITIES.closeUnsubmittedSession`.
+
 ### completeSession
 
 Completes a session and triggers payment distribution.
@@ -2160,7 +2185,7 @@ interface TranscodeSubmitOptions {
   isGpu?: boolean;         // Use GPU acceleration (default: true)
   chainId?: number;        // Blockchain context
   onProgress?: (progress: number, gopInfo?: GOPInfo) => void;
-  timeoutMs?: number;      // Default: 300000 (5 min)
+  timeoutMs?: number;      // Default (1.39.18+): the session's on-chain expiry + 300 s (load balancer: its funded duration + 300 s)
   previewPercent?: number; // HLS: first N% of segments uploaded unencrypted (default: 0)
 }
 ```
@@ -2186,7 +2211,7 @@ const result = await handle.result;
 **Sizing the session to the source (1.39.17)**: since node 8.62.4, a job the model's rate cap cannot bill before the session expires stops with `SESSION_NOT_BILLABLE` soon after it starts. On a 3,600 s session at 2,000 tokens/s, the longest encrypted H.264 source is about 1 h 49 min for 1080p alone, 1 h 12 min for 720p + 1080p, and 29 min for 480p + 720p + 1080p + 4K. When you know the source length, pass `sourceDurationSeconds`:
 
 - `submitTranscodeWithLoadBalancing` then funds `max(3600, tokens / rate + 600)` seconds, reading the rate from the chain for the model. A longer session costs nothing extra: the deposit sets the spend. A longer explicit `duration` is kept. A shorter one is refused before funding (`TRANSCODE_FAILED`, `details.reason: 'SESSION_TOO_SHORT'`, with `requiredSeconds`).
-- The default `timeoutMs` becomes the session's lifetime, because the result cannot be released before the rate has paid for the job. Your own `timeoutMs` stands. Without `sourceDurationSeconds`, the default is still 5 minutes, so pass `timeoutMs` for any job that may run longer: a client timeout does not stop the node, which keeps running and billing the job.
+- The default `timeoutMs` is the funded session's lifetime plus 300 s (1.39.18; 3,900 s for the default 3,600 s session), because the result cannot be released before the rate has paid for the job. Your own `timeoutMs` stands. A client timeout does not stop the node, which keeps running and billing the job.
 - A source the node is certain to withhold when funded in full is refused before funding (`details.reason: 'SOURCE_TOO_LONG'`). That is over 5,400 s of rate, or 10.8M tokens at 2,000 tokens/s: the node's final claim waits at most 3,600 s after a run of at most 1,800 s. Between about 7M and 10.8M tokens the result depends on how fast the encode finishes; past the node's limit it ends `BILLING_FAILED` with the tokens paid and the result withheld.
 
 If you fund your own session, for example through a card service and `registerExternalSession`, call `transcodeManager.sizeTranscodeSession(sourceSeconds, formats, { modelId })`. It returns `{ duration, tokens, ratePerSecond }`. Fund the session with `duration` as its `maxDuration`, and pass at least `duration * 1000` as `timeoutMs` on the submit. The pure calculation is exported as `transcodeSessionDuration`. Feature-detect with `SDK_CAPABILITIES.transcodeSessionSizing`.
@@ -3625,6 +3650,22 @@ interface ModelWithAvailability {
 **Throws:**
 - `Error` if HostManager not set via `setHostManager()`
 
+**1.39.33:**
+- **Speed.** All models' hosts come from one pass, `HostManager.findHostsForModels`. That is 1 + 2 × active hosts
+  chain reads, however many models there are; before, it was one read per model plus two per host for each model,
+  one after another.
+  - The model registry is read at most 8 reads at a time.
+  - Measured on Base Sepolia with two callers at once: 0.85 s on Alchemy, against 59.5 s before.
+  - On a free, rate-limited RPC (about 4 reads/s) it is still tens of seconds, because the RPC is the limit.
+- **Shared run.** Overlapping calls with the same host manager share one run. Each caller still gets its own
+  array and objects, including `model` and `priceRange`, and a call made after a run settles reads afresh.
+- **Storage regions.** In a region (for example UK), `hostCount`, `priceRange` and `isAvailable` count only the hosts
+  the region allows. A model that only an outside host serves shows as unavailable, rather than failing later at
+  session start. `getModelPriceRange` does the same. Global is unchanged.
+- **RPC.** The SDK sends every chain read as its own JSON-RPC request, never as a batch. Rate-limited RPCs refuse or
+  throttle a batch as a whole: the free Tenderly gateway refuses batches of 4 or more reads, and Alchemy throttled
+  part of a burst of 110. A single request is accepted everywhere.
+
 **Example:**
 ```typescript
 const modelManager = sdk.getModelManager();
@@ -3757,7 +3798,26 @@ await hostManager.registerHostWithModels({
 Finds hosts that support a specific model.
 
 ```typescript
-async findHostsForModel(modelId: string): Promise<HostInfo[]>
+async findHostsForModel(modelId: string, opts?: { inRegion?: boolean }): Promise<HostInfo[]>
+```
+
+`opts.inRegion` (1.39.33): only the hosts the storage region allows. Global keeps all. Without the option, the result
+is as before. The hosts' reads now run in parallel, at most 8 at a time.
+
+### findHostsForModels (1.39.33)
+
+The hosts of many models in one pass: 1 + 2 × active hosts chain reads, however many models.
+- The reads: `getAllActiveNodes`, then for each host `getNodeFullInfo` (which lists its models) and
+  `getHostModelPrices(host, USDC)`.
+- Only **active** hosts count, because an inactive host can't take a session. `findHostsForModel` follows
+  `getNodesForModel` and does not check.
+- A host counts for a model when it lists the model **and** has a USDC price for it. That is the same rule as
+  `findHostsForModel`: a price of 0, or none, leaves the host out. A model listed twice counts once.
+- A host whose reads fail is skipped.
+- Every id you pass has an entry in the map, `[]` when no host serves it.
+
+```typescript
+async findHostsForModels(modelIds: readonly string[], opts?: { inRegion?: boolean }): Promise<Map<string, HostInfo[]>>
 ```
 
 **Returns:**
@@ -3936,6 +3996,94 @@ const usdcPrices = await hostManager.getHostModelPrices(hostAddress, usdcAddr);
 const nativePrices = await hostManager.getHostModelPrices(hostAddress, zeroAddr);
 ```
 
+## Storage Region (sdk-core 1.39.27)
+
+`storageRegion` keeps a client's storage and jobs in one region, with no fallback to another region, ever.
+
+```typescript
+const sdk = new FabstirSDKCore({
+  ...,
+  storageRegion: 'uk',                                  // 'global' (default) | 'uk'; 'eu' is refused until built
+  s5Config: {
+    authApiUrl: '/api/s5',                              // required in a region: the backend holds the region's token
+    seedPhrase: vaultSeed,                              // the BASE seed, every time (see "Identity" below)
+  },
+});
+sdk.getStorageRegion();                                 // 'uk'
+```
+
+**Global** (`storageRegion` left out, or `'global'`) is exactly 1.39.26: the same portal, peer, registration calls and
+bodies, S5 seed, cache and sealing key.
+
+**In a region other than Global:**
+
+| What | Behaviour |
+|---|---|
+| Storage, documents, vectors and RAG, session groups | Only the region's S5 portal and its one peer (`initialPeers` is exactly that peer). If it is unreachable, the call fails. |
+| Registration | Only through `s5Config.authApiUrl`. Both calls (`<authApiUrl>/register` and `/register-complete`) carry `region` (e.g. `"uk"`). The backend uses that region's portal and token, and refuses a region it has no token for. **From 1.39.28 the backend must echo it:** each successful reply carries the same `region` (`{ challenge, region }`, `{ authToken, region }`). A reply without it, or with another value, fails the sign-in with `STORAGE_REGION_REGISTRATION_REFUSED` (`details { region, call: 'register' \| 'register-complete', received }`) before the challenge is signed or the token used, so a backend not updated for regions never completes a registration. Global sends no `region` and reads none, as before. |
+| Refused at construction (`STORAGE_REGION_CONFIG_REFUSED`, `details.field`) | `s5Config.masterToken` (it would put a token in the client); an `s5Config.portalUrl` that is not the region's peer or portal URL; no `s5Config.authApiUrl` (unless `skipS5` or `hostOnly`). |
+| Jobs | Only a host on the region's list (`STORAGE_REGIONS.<region>.hosts`), reached at its listed origin. Unlisted hosts, another origin, and every job when the list is empty are refused with `REGION_HOST_NOT_ALLOWED` (`details { region, reason: 'NO_HOSTS' \| 'HOST_NOT_LISTED' \| 'ENDPOINT_NOT_LISTED', host, endpoint, job }`), before any probe, registration or funding. LTX, training and transcode raise it as their own `LtxError` / `TrainingError` (`consumed: false`) / `TranscodeError`. **The UK list is empty in 1.39.27: every UK job is refused.** |
+| Web search | `webSearch()`, `searchDirect()`, a prompt's `webSearch: true` and a session or delegated `webSearch.forceEnabled` are refused with `WEB_SEARCH_REFUSED_IN_REGION`, before any contact with the host. The SDK's own search-intent detection is off, `getWebSearchCapabilities` reports no search, and WebSocket frames and REST bodies carry `web_search: false`. **Pending node-side:** nodes up to today also start a search when the prompt text looks like it needs one, whatever `web_search` says; a regional host must run without a search provider until the node honours an explicit `false`. |
+
+Refused at construction, whatever else is configured: `'eu'` (`STORAGE_REGION_UNAVAILABLE`) and any value that is not
+a region (`STORAGE_REGION_INVALID`). `authenticate()` rejects with these region codes as they are, not wrapped in
+`AUTH_FAILED`. Transcode probes (`isTranscodingAvailable`, `isTrustlessAvailable`, `sizeTranscodeSession` with a
+`hostUrl`) refuse as `TranscodeError`.
+
+The table ships with the release (`STORAGE_REGIONS`, exported); it is never fetched at run time. SDK methods that take a
+host URL (`postSessionAuth`, `generateImageHttpRequest`, the TranscodeManager and ClientManager probes, the HostManager
+probes) follow the region too. Exported free functions and classes that take a URL and hold no SDK (`HostAdapter`,
+`X402HostClient`, `generateImageHttp`, the `fetch*` utilities, `WebSocketClient`) are your own calls; no region applies
+to them.
+
+### Identity in a region
+
+The S5 identity is separate per region. It is derived one way from the seed you supply (or, with `privatekey` /
+`aa-signer`, from the private-key seed), with the region as a label:
+
+```
+regional seed = entropyToS5Phrase( HKDF-SHA256( ikm  = the 16 seed bytes of the base phrase (checksum checked),
+                                                salt = empty,
+                                                info = "fabstir-s5-region-v1:" + region,   // e.g. "...:uk"
+                                                L    = 16 ) )
+```
+
+The derivation is fixed for good: changing it would orphan every regional account. The same wallet therefore has a
+different S5 public key in each region, and nothing is copied between regions.
+
+- **Supply the base seed every time.** Never feed back a seed the SDK derived, or the user lands on a third identity and
+  their files appear lost. `getS5Seed()` refuses in a region (`STORAGE_REGION_SEED_SEALED`), as do `AuthManager`'s
+  `getS5Seed`, `authenticate` and `initializeS5`. `setS5Seed(base)` derives through the same entry point.
+- **No address-derived identity in a region.** A sign-in with no supplied seed and no private key (metamask, signer,
+  Base Account) is refused (`STORAGE_REGION_SEED_REQUIRED`). A supplied seed equal to the address-derived seed of the
+  session's address (or the Base Account's primary account), on any supported chain, is refused
+  (`STORAGE_REGION_SEED_REFUSED`, `reason: 'ADDRESS_DERIVED'`). A phrase s5js would reject is refused with
+  `reason: 'INVALID_PHRASE'`.
+- **No seed cache in a region:** nothing is read from or written to `localStorage`.
+- **Every SDK instance needs it**, including an orchestrator sub-instance with `skipS5: true`: in a region a signer
+  sign-in without `seedPhrase` is refused even when the instance stores nothing. Pass `storageRegion` and the base seed
+  to every instance you build (`@fabstir/orchestrator`'s `SessionPool` does this for its own).
+- **A region starts empty.** A user's Global files, conversations, settings and RAG databases do not appear in a
+  region: it is a different identity on a different portal, and nothing is copied.
+
+Exported: `deriveRegionalS5Seed(basePhrase, region)`, `s5PhraseToSeedBytes(phrase)`, `REGION_SEED_INFO_PREFIX`.
+
+**Test vectors** (region `uk`):
+
+| Base phrase | UK phrase |
+|---|---|
+| `abandon adjust boy rush advice believe inform achieve alter club rural educate address peace myself` | `address will hate have public window job square action joke loud mixture bold code wedding` |
+| `zone zone zone zone zone zone zone zone zone zone zone zone dump say blind` | `obvious paper public rabbit alter time often quality night million come rage cable must tide` |
+| `against onion flag author which north tell nobody suffer prepare wake vote circle bring safety` | `joy cave sport cover history have hence gesture blue hair academy billion also nowhere error` |
+
+The base phrases are the canonical encodings of the bytes `00 01 … 0f`, sixteen `ff` bytes, and the first 16 bytes of
+`SHA-256("fabstir-region-vector-3")`. The phrase is read as s5js reads it: case, spacing and letters after each word's
+third do not change the result.
+
+### Capability flag
+
+`SDK_CAPABILITIES.storageRegion === true`.
+
 ## Confidential Storage (sdk-core 1.39.0)
 
 From 1.39.0 the SDK **seals** what it stores on S5 for RAG and for the conversation log: it encrypts and authenticates
@@ -3945,8 +4093,46 @@ it on. Check `SDK_CAPABILITIES` before relying on it.
 | What | Where on S5 | Sealed |
 |---|---|---|
 | RAG databases: manifests, vector chunks, document bodies | `home/rag/v1/{dbId}/…` (paths carry no database name, file name or address) | yes |
-| Conversation log | `home/sessions/{address}/{sessionId}/conversation.json` | yes |
-| Session paths, `settings.json`, `saveConversationPlaintext` / `storeExchange` / `saveHierarchy` | unchanged | **no** (planned for 1.39.1) — do not call the last three |
+| Conversation log | `home/sessions/v2/{owner}/{id}/log` from 1.39.24 (no address, no session id; `{owner}` and `{id}` are derived from the identity). Before: `home/sessions/{address}/{sessionId}/conversation.json` | yes |
+| User settings | `home/user/v2/{owner}/settings` from 1.39.24 (before: `home/user/settings.json`, plaintext) | yes, from 1.39.24 |
+| Session groups | `home/session-groups/v2/{owner}/{id}` from 1.39.24 (before: `home/session-groups/{address}/{groupId}.json`, encrypted) | yes, from 1.39.24 |
+| `storeExchange`, `updateSessionSummary`, `getRecentExchanges`, `save/loadConversationPlaintext`, `save/loadConversationEncrypted`, `loadConversationWithMetadata`, `saveHierarchy`, `loadHierarchy` | — | **removed in 1.39.24**; `store({ encrypt: false })` throws `STORAGE_PLAINTEXT_REFUSED` |
+
+**1.39.24 (Milestone B2).** Nothing is left in plaintext, and no path names the wallet or a session:
+- **Conversation logs** move to opaque paths:
+  - A log at its old path is still read.
+  - The next write, or `migrateLegacyConversationLogs()` (run it on unlock as before), moves it. The report gains
+    `moved`.
+  - If a tab on an older SDK writes at the old path after the move, the migration merges its messages into the moved
+    log rather than dropping them. Keep the stale-build guard, so such tabs reload.
+  - `listConversations()` / `listSessions()` now list sealed logs. Before, they listed none. Each log is opened to find
+    its id.
+  - `clearAll()` really clears. Before, it removed nothing.
+- **User settings** are sealed, one file per identity. The older shared plaintext file names no identity, so it is
+  adopted only while this identity has no sealed settings. It is then sealed at this identity's path and deleted.
+  Once an identity has sealed settings, the shared file is left alone, unless it is that identity's own leftover
+  (same `lastUpdated`). On a shared S5 seed, a second address that signs in later starts with no settings, because the
+  first one to read took the shared file. `clearUserSettings()` leaves a sealed cleared record, so after a reset
+  `getUserSettings()` returns `null` and the shared file is never adopted again.
+- **Session groups** are sealed at opaque paths. A legacy group is read, sealed and its old file deleted on first load.
+  If both copies exist (an older SDK edited the old file after the move), the newer by `updatedAt` wins.
+- **One directory per identity.** `{owner}` is derived from the identity, so two addresses on one S5 seed never list,
+  overwrite or clear each other's logs, settings or session groups.
+- **Whose database is it?** Each sealed database carries a small sealed `owner` file that only its identity can open.
+  It is written at the first commit, so databases from before 1.39.24 get it at their next write.
+  `listUnreadableDatabases()` offers a broken database only when that file opens, or when one of this identity's
+  coherence heads names it. `deleteDatabaseById` refuses any other with `RAG_DATABASE_NOT_OWNED`.
+- **RAG**:
+  - Only the vector chunks that changed are re-sealed and written (`incrementalRagChunks`).
+  - A sealed database that can never be opened is listed by `vectorRAGManager.listUnreadableDatabases()` →
+    `[{ dbId, code }]` and removed with `deleteDatabaseById(dbId)` (`unreadableDatabaseCleanup`).
+  - Expired coherence heads are pruned.
+- **`managers/DocumentManager`** keeps no S5 client of its own; it connected to a fixed peer, ignoring the configured
+  portal. Documents live in the instance; `initialize()` takes no arguments. RAG document bodies are stored sealed by
+  `VectorRAGManager` as before.
+
+Flags: `sealedSettings`, `opaqueConversationLogs`, `sealedSessionGroups`, `incrementalRagChunks`,
+`unreadableDatabaseCleanup`.
 
 - **Confidentiality depends on the seed.** With a password-derived seed (the vault), sealed data is confidential. With
   an address-derived seed (`generateS5SeedFromAddress`), anyone who knows the address can derive the keys: sealing is
@@ -4163,6 +4349,88 @@ of these are `retryable: false`: act on the code.
   `RAG_VECTORS_INVALID`, `RAG_VECTOR_IDS_INVALID`, `RAG_FILTER_INVALID`, `STORAGE_CONVERSATION_INVALID`,
   `STORAGE_MANAGER_DISPOSED`, `SESSION_GROUP_MANAGER_DISPOSED`, `RAG_MANAGER_DISPOSED`, `AUTH_SUPERSEDED`,
   `MIGRATION_INCOMPLETE` (its causes' verdict), and the funding codes above.
+
+### Session groups: memory first (1.39.25)
+
+`SessionGroupManager` keeps every group it has loaded in memory and saves the whole group on each change. Until 1.39.24
+a list could put an older stored copy over newer memory, and the next save wrote it back. From 1.39.25
+(`SDK_CAPABILITIES.sessionGroupMemoryFirst`):
+
+- **A stored copy replaces a group in memory only when its `updatedAt` is strictly later.** That can only be a copy
+  another tab or device wrote. A read that predates one of this manager's own saves changes nothing. This holds for
+  `listSessionGroups` and for a `getSessionGroup` load.
+- **`listSessionGroups(owner)`** reads storage, then returns memory's state:
+  - a new object for each group on every call, as before (with new `chatSessions` and `chatSessionsData` containers);
+    the chats inside are the manager's own objects;
+  - a group whose create has not been saved yet (or whose save failed) is included, after the stored ones;
+  - a group deleted in memory is not returned, even if the read still had it.
+- **Every change stamps `updatedAt` later than the stamp before it**, and every save writes the group as it is in memory
+  when the save runs.
+- **`addMessage`** appends to the chat as it is when its turn comes. If the chat was deleted while the call waited, it
+  rejects with `Session … not found`.
+- **A change whose save failed stays in memory** and is written by the next save of that group. A list no longer
+  reverts it. The one exception, from 1.39.26, is `deleteSessionGroup`: if its save fails it rejects and the group is
+  not deleted. Call it again to retry.
+
+```typescript
+// The owner's groups as memory holds them: synchronous, no storage read. Empty until a list or a load has run.
+const groups = sessionGroupManager.getCachedSessionGroups(owner);
+
+// Change a stored chat. The function runs when this call's turn under the group's lock comes,
+// after every addMessage queued before it; the group is then saved.
+const session = await sessionGroupManager.updateChatSession(groupId, sessionId, owner, (session) => {
+  session.metadata.customTitle = 'Tax questions';   // or: session.messages.splice(-2)
+});
+```
+
+`updateChatSession`:
+- The function must be synchronous. An `async` function is refused before it runs (`INVALID_MUTATOR`). Any other
+  function that returns a promise is refused after its synchronous part ran.
+- It does not touch the chat's `updated`. Set it in the function when the change should count as activity. From
+  1.39.26 it always moves the chat's `revision` (below).
+- The change reaches memory when the call's turn comes, not at the call. Keep your own optimistic state until it
+  resolves.
+- If the save fails it throws and the change stays in memory. Call again with `() => {}` to save it; do not run the
+  same change twice.
+- It returns the manager's own chat object.
+
+Still true: two tabs that change the same group each save the whole group, and the last save wins.
+
+**1.39.31: a failed save fails a creation.** `createSessionGroup` and `startChatSession` reject with the save's own
+error. Before 1.39.31 both logged the failure and returned as if saved.
+- `STORAGE_OFFLINE` or `STORAGE_CLEANUP`: nothing reached S5, because the connection check refuses before the write.
+  The new group, or chat, is removed from memory: it is not listed and cannot be fetched, and a retry creates exactly
+  one.
+- Any other error (a timeout, an S5 error, "network persistence could not be verified"): the write may have landed.
+  The group or chat stays in memory and is listed, so the next save of the group carries it. Do not retry the create
+  then; list instead.
+- A new chat is added, saved and, when the save is refused, withdrawn in one turn under the group's lock, so no other
+  save of the group carries it.
+- A `listSessionGroups()` made while a creation's save is in flight can show the new group; if that save is refused,
+  the next list does not.
+- The other save paths are unchanged: they reject and keep the change in memory. With no storage attached, both
+  methods still create in memory only.
+
+**1.39.26: `ChatSession.revision`** (`SDK_CAPABILITIES.sessionGroupChatRevision`). The manager stamps `revision` (epoch
+milliseconds) on every change it makes to a chat: `startChatSession`, `addMessage`, `updateChatSession`, and
+`updateSessionGroup` for each chat you pass as a new object. Do not set it; copy it with the chat (`{ ...chat }` does).
+
+- When a list adopts a group another tab wrote, each chat is taken from the copy with the later stamp, where a chat's
+  stamp is the later of its `revision` and its `updated`. Your own change to a chat therefore survives another tab
+  saving an older copy of the group, whether or not you moved `updated`, and is written back by this tab's next save
+  of the group.
+- `updated` stays yours: order the chat list by it. A rename or pin through `updateChatSession` moves `revision` only.
+- `updateSessionGroup` stamps a chat only when you pass an object the manager has never held, which is what a copy
+  is. Passing the whole `chatSessionsData` record therefore marks only the chats you replaced with copies. A chat
+  changed in place needs `updateChatSession`.
+- Build a whole record from the group as it is now (`getSessionGroup`), never from an older copy: an older chat object
+  put back this way replaces the newer one in this tab (it is not stamped, so another tab's later copy still wins the
+  merge).
+- `deleteSessionGroup` takes effect at its turn under the group's lock: with a save of that group in flight, the group
+  is still listed until then.
+
+`SessionGroupManager` is exported from the package root from 1.39.26 (`new SessionGroupManager()` works without
+storage, for tests). `SDK_CAPABILITIES.sessionGroupDeleteRestores` marks the `deleteSessionGroup` change.
 
 
 ## Storage Management
@@ -4874,14 +5142,46 @@ Clean up connection handlers and reject pending operations. Call when disposing 
 storageManager.cleanup();
 ```
 
-#### Auto-Reconnect Behavior
+#### Auto-Reconnect Behavior (1.39.30)
 
-The SDK automatically attempts to reconnect in these scenarios:
+The StorageManager redials S5 by itself whenever the connection drops, in Node and in a browser alike. This covers a
+portal restart, a network drop, and a machine waking from sleep. No browser event is needed.
 
-1. **Tab becomes visible** - When user returns to the tab after it was backgrounded
-2. **Network comes online** - When device regains network connectivity
+- **Backoff.** The first attempt comes about a second after the drop. The waits then double, 2, 4, 8, 16 and 32 s,
+  and settle at 60 s. Each wait has jitter, from half the delay to the full delay. Only one attempt is ever in flight,
+  and each attempt is s5js's `reconnect()`, which waits up to 10 s. The retry timer does not keep a Node process alive.
+  A link that drops again within 30 s of reconnecting keeps the waits growing, so a flapping portal is not redialled
+  every second. A link that stays up for 30 s starts the next outage over at 1 s.
+- **Browser hints.** When the tab becomes visible or the network comes back online, the next attempt starts at once
+  instead of waiting out the backoff.
+- **Queued writes flush** as soon as the connection is back. A `putWithRetry`/`deleteWithRetry` queued while
+  disconnected no longer waits for `forceSync()`. The two queue whenever S5 is not connected, which includes while a
+  reconnect is in progress. A write whose flush meets another drop stays queued for the next reconnect. Before, it
+  was rejected.
+- **Logs.** One line each: `S5 connection lost; reconnecting`, then `S5 still unreachable after N attempts; retrying
+  every 60s` (once), then `S5 reconnected after N attempt(s), Xs`.
+- **Storage calls wait for the connection.** Every asynchronous call on `getS5Client().fs` waits when S5 is not
+  connected, and so does `getS5Client().downloadByCID`. That includes the SDK's own conversation, settings, session
+  group and RAG storage. The call joins the reconnect attempt in flight, or starts one at once, and runs once
+  connected. If that attempt fails, the call rejects with `STORAGE_OFFLINE` (`details.retryable: true`) and nothing
+  reaches s5js. A write made while disconnected would otherwise be kept only locally: s5js sends registry updates to
+  connected peers only, and nothing re-sends them later. While connected, no call waits. After `cleanup()` or
+  `dispose()` nothing reconnects that store, so a call made while disconnected rejects with `STORAGE_CLEANUP`
+  (`retryable: false`).
+- **Not detected: a half-open socket.** When a peer vanishes without closing the TCP connection, s5js reports
+  `connected` until TCP gives up, because it has no ping.
 
-When reconnection succeeds, queued operations are automatically flushed.
+##### whenConnected(): Promise<void>
+
+Resolves at once when S5 is connected. Otherwise it resolves when the reconnect attempt in flight, or one it starts,
+connects. If that attempt fails it rejects with `STORAGE_OFFLINE` (retryable). Use it before a batch of work that
+needs storage at the end; storage calls themselves already wait. It throws `STORAGE_NOT_INITIALIZED` before
+`initialize()` and `STORAGE_MANAGER_DISPOSED` after `dispose()`. Capability flag: `SDK_CAPABILITIES.s5AutoReconnect`.
+
+```typescript
+await storageManager.whenConnected();       // S5 is connected now, or this threw STORAGE_OFFLINE
+await storageManager.getS5Client().fs.put(path, bytes);
+```
 
 #### Complete UI Integration Example
 

@@ -5,6 +5,9 @@
  * Concurrency utilities for bounded parallel async work.
  */
 
+/** Chain reads in flight at once during host discovery (1.39.33): fast, without flooding a public RPC. */
+export const DISCOVERY_CONCURRENCY = 8;
+
 /**
  * Run `fn` over `items` with at most `limit` calls in flight at any time.
  *

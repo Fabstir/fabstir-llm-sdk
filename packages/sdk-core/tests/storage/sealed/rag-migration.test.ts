@@ -157,21 +157,6 @@ describe('what is purged rather than migrated', () => {
     expect(net.filePaths()).toEqual([]);
   });
 
-  test('managers/DocumentManager.uploadDocument stores the file sealed at an opaque path (D29)', async () => {
-    const net = new FakeS5Network();
-    const dm = new DocumentManager();
-    Object.assign(dm as any, { initialized: true, userAddress: ADDR, s5Client: net.tab(), sealer: em().getStorageSealer() });
-    const result = await dm.uploadDocument(new File(['secret custody text'], 'custody-notes.txt', { type: 'text/plain' }), 'research');
-    expect(net.writes).toHaveLength(1);
-    const [w] = net.writes;
-    expect(w.path).toMatch(/^home\/documents\/v1\/[0-9a-f]{32}$/);
-    expect(result.s5Path).toBe(w.path);
-    const text = Buffer.from(w.bytes).toString('latin1');
-    for (const n of ['custody', 'secret', 'research', ADDR]) expect(`${w.path}${text}`).not.toContain(n);
-    const key = w.path.split('/').pop();
-    const opened = em().getStorageSealer().open(w.bytes, `docs/v1/${key}`);
-    expect(new TextDecoder().decode(opened.value as Uint8Array)).toBe('secret custody text');
-  });
 });
 
 describe('idempotent, never re-seals, fails safe', () => {

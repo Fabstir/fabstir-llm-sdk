@@ -38,7 +38,7 @@ export interface StorageSealer {
   /** Magic + version only — says "this is an envelope", not "this envelope is authentic". */
   isSealed(bytes: Uint8Array): boolean;
   /** Keyed, deterministic 128-bit id (32 hex chars) — names on S5 without revealing the input. */
-  deriveId(label: 'db' | 'doc' | 'heads' | 'conv', input: string): string;
+  deriveId(label: 'db' | 'doc' | 'heads' | 'conv' | 'group' | 'owner', input: string): string;
 }
 
 const MAGIC = [0xff, 0x53, 0x45, 0x4c];

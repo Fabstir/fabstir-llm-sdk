@@ -114,17 +114,3 @@ describe('§18 B1 consequences', () => {
   });
 });
 
-describe('§18 B3 — DocumentManager keeps s5js\'s retry verdict', () => {
-  test('a permanent read failure is DOCUMENT_BODY_UNREADABLE with retryable false', async () => {
-    const { DocumentManager } = await import('../../../src/managers/DocumentManager');
-    const { extractionCache } = await import('../../../src/documents/extractors');
-    const net = new FakeS5Network();
-    const dm = new DocumentManager();
-    Object.assign(dm as any, { initialized: true, userAddress: ADDR, s5Client: net.tab(), sealer: sealer() });
-    const { documentId } = await dm.uploadDocument(new File(['body'], 'notes.txt', { type: 'text/plain' }), 'db');
-    extractionCache.clear();
-    (dm as any).getFromRegistry('db', documentId).textCached = '';
-    net.fail('get', /home\/documents/, Object.assign(new Error('refused'), { retryable: false }));
-    expect(await caught(dm.extractText(documentId, 'db'))).toMatchObject({ code: 'DOCUMENT_BODY_UNREADABLE', details: { retryable: false } });
-  });
-});

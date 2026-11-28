@@ -3,6 +3,7 @@
 
 import type {
   SessionGroup,
+  ChatSession,
   CreateSessionGroupInput,
   UpdateSessionGroupInput,
   VectorDatabaseMetadata,
@@ -33,12 +34,27 @@ export interface ISessionGroupManager {
   createSessionGroup(input: CreateSessionGroupInput): Promise<SessionGroup>;
 
   /**
-   * List all session groups for a user
+   * List all session groups for a user: reads storage, then returns the groups as memory holds them.
+   *
+   * A stored copy never replaces a group memory already holds unless its `updatedAt` is strictly later (1.39.25), so a
+   * read that predates one of this manager's own saves changes nothing. Each call returns a new object per group,
+   * with new `chatSessions` and `chatSessionsData` containers (the chats inside are the manager's own objects). Groups
+   * only memory holds — a create whose save has not landed or failed — follow the stored ones.
    *
    * @param owner - Wallet address of owner
    * @returns Array of session groups (excludes deleted)
    */
   listSessionGroups(owner: string): Promise<SessionGroup[]>;
+
+  /**
+   * The owner's groups as memory holds them now, without reading storage (1.39.25): empty until `listSessionGroups` or
+   * `getSessionGroup` has loaded something. Synchronous. The objects are the manager's own; the array is new each call.
+   *
+   * @param owner - Wallet address of owner
+   * @returns Array of session groups (excludes deleted)
+   * @throws {SDKError} SESSION_GROUP_MANAGER_DISPOSED on a signed-out identity's manager (thrown, not rejected)
+   */
+  getCachedSessionGroups(owner: string): SessionGroup[];
 
   /**
    * Get a specific session group by ID
@@ -52,7 +68,9 @@ export interface ISessionGroupManager {
   getSessionGroup(groupId: string, requestor: string): Promise<SessionGroup>;
 
   /**
-   * Update a session group
+   * Update a session group. A chat passed in `chatSessionsData` as an object the manager has never held (a copy) gets
+   * a new `revision` (1.39.26); one it has held before — the group's own object, or an older one you kept — is taken
+   * as passed but not stamped. Change a chat in place through `updateChatSession`.
    *
    * @param groupId - Session group ID
    * @param requestor - Wallet address of requestor
@@ -68,7 +86,8 @@ export interface ISessionGroupManager {
   ): Promise<SessionGroup>;
 
   /**
-   * Soft-delete a session group (sets deleted: true)
+   * Soft-delete a session group (sets deleted: true). If the save fails it rejects and the group is not deleted
+   * (1.39.26): call again to retry.
    *
    * @param groupId - Session group ID
    * @param requestor - Wallet address of requestor
@@ -222,11 +241,35 @@ export interface ISessionGroupManager {
    * @param groupId - Session group ID
    * @param sessionId - Chat session ID
    * @param message - Message to add
-   * @throws {Error} If group or session not found
+   * @throws {Error} If group or session not found — also when the chat was deleted while this call waited (1.39.25)
    */
   addMessage(
     groupId: string,
     sessionId: string,
     message: { role: 'user' | 'assistant' | 'system'; content: string; timestamp: number }
   ): Promise<void>;
+
+  /**
+   * Change a stored chat under the group's lock (1.39.25): `mutate` runs on the chat as it is when this call's turn
+   * comes — after every `addMessage` queued before it, so not at the call — and the group is then stamped and saved.
+   * The chat's own `updated` is left to `mutate` (set it when the change should count as activity).
+   *
+   * What `mutate` changed stays in memory if the save fails, if `mutate` throws, or if it is refused after running;
+   * the next save of the group writes it. To save again after a failure, call with a no-op `mutate`.
+   *
+   * @param groupId - Session group ID
+   * @param sessionId - Chat session ID
+   * @param requestor - Wallet address of requestor
+   * @param mutate - Synchronous function that changes the chat in place. An `async` function is refused before it
+   *   runs; any other function that returns a promise is refused after its synchronous part ran.
+   * @returns The changed chat (the manager's own object)
+   * @throws {SDKError} INVALID_MUTATOR if `mutate` is not a synchronous function
+   * @throws {Error} If the group or chat is not found, the requestor is not owner, or the save fails
+   */
+  updateChatSession(
+    groupId: string,
+    sessionId: string,
+    requestor: string,
+    mutate: (session: ChatSession) => void
+  ): Promise<ChatSession>;
 }

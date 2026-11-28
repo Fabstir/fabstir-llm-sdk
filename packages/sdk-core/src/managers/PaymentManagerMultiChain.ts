@@ -26,6 +26,7 @@ import {
 } from '../types';
 import { ChainId, ChainConfig } from '../types/chain.types';
 import { ChainRegistry } from '../config/ChainRegistry';
+import { RegionPolicy } from '../utils/region-policy';
 import { JobMarketplaceWrapper } from '../contracts/JobMarketplace';
 import { DELEGATION_ERRORS } from '../types/errors';
 import {
@@ -55,6 +56,13 @@ export interface DepositBalances {
 }
 
 export class PaymentManager implements IPaymentManager {
+  /** The storage region's host gate (1.39.27): Global (unrestricted) until the SDK installs its region's. */
+  private regionPolicy: RegionPolicy = new RegionPolicy('global');
+
+  setRegionPolicy(policy: RegionPolicy): void {
+    this.regionPolicy = policy;
+  }
+
   static readonly MIN_ETH_PAYMENT = '0.0001'; // UUPS upgrade - reduced minimum
   static readonly TOKENS_PER_PROOF = 100;
   // NO DEFAULT PRICE - must be explicitly set from host's registered price
@@ -301,6 +309,8 @@ export class PaymentManager implements IPaymentManager {
     if (!ethers.isAddress(params.host)) {
       throw new Error('Invalid address: ' + params.host);
     }
+    // Nothing is funded for a host outside the storage region (1.39.27; SessionManager checks first, this is the floor).
+    this.regionPolicy.assertHost({ address: params.host, job: 'funding' });
 
     // Verify chain if specified
     if (params.chainId && this.signer) {

@@ -12,6 +12,8 @@ export type TranscodeErrorCode =
   | 'NO_AVAILABLE_HOSTS'
   // An encrypted transcode for a host not on confidentialHosts, or with none configured (1.39.18; renamed 1.39.19).
   | 'CONFIDENTIAL_HOST_NOT_ALLOWED'
+  // A host outside the storage region's list, or none listed (1.39.27).
+  | 'REGION_HOST_NOT_ALLOWED'
   // Moderation holds (ModerationHoldCode): the node refused to complete the job and sent
   // no completion frame. Every hold code is deliberately absent from RETRYABLE_CODES — there is
   // no automatic retry anywhere in the stack, so a load balancer never re-hosts a held job.

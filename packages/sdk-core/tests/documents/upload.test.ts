@@ -44,7 +44,6 @@ describe('Document Upload', () => {
 
       expect(result).toBeDefined();
       expect(result.documentId).toBeDefined();
-      expect(result.s5Path).toBeDefined();
       expect(result.metadata.name).toBe('test.txt');
       expect(result.metadata.type).toBe('txt');
       expect(result.metadata.size).toBeGreaterThan(0);
@@ -137,7 +136,6 @@ describe('Document Upload', () => {
       expect(metadata.type).toBe('txt');
       expect(metadata.size).toBe(content.length);
       expect(metadata.uploadedAt).toBeDefined();
-      expect(metadata.s5Path).toBeDefined();
     });
 
     it('should list all uploaded documents', async () => {
@@ -190,7 +188,6 @@ describe('Document Upload', () => {
 
       expect(results.length).toBe(3);
       expect(results.every((r: any) => r.documentId)).toBe(true);
-      expect(results.every((r: any) => r.s5Path)).toBe(true);
     });
 
     it('should handle batch upload with some failures', async () => {

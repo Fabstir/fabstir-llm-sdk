@@ -73,6 +73,9 @@ function createMockHostManager(hostsPerModel: Map<string, HostInfo[]>): IHostMan
     findHostsForModel: vi.fn().mockImplementation(async (modelId: string) => {
       return hostsPerModel.get(modelId) || [];
     }),
+    // 1.39.33: getAvailableModelsWithHosts asks for every model's hosts in one pass
+    findHostsForModels: vi.fn().mockImplementation(async (modelIds: readonly string[]) =>
+      new Map(modelIds.map((id) => [id, hostsPerModel.get(id) || []]))),
     getHostInfo: vi.fn(),
     hostSupportsModel: vi.fn(),
     registerHostWithModels: vi.fn(),

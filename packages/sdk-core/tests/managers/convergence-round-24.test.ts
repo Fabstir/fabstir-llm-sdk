@@ -122,12 +122,12 @@ describe('RR4 — the log migration reads a log back before counting it, and onl
     expect({ sealed: report.sealed, failed: report.failed.map((f: any) => f.id) }).toEqual({ sealed: 0, failed: ['c2'] });
   });
 
-  test('a log sealed before, with nothing beside it: not downloaded', async () => {
+  test('a log already at its opaque path is not seen by the migration at all: nothing read (1.39.24 D41)', async () => {
     const net = new FakeS5Network();
     const s = store(net.tab());
-    await s.saveConversation(legacyLog('c3') as any);                 // sealed, nothing beside it
+    await s.saveConversation(legacyLog('c3') as any);                 // at its opaque path, nothing at the legacy one
     const readLog = vi.spyOn(s as any, '_readLog');
     const report = await s.migrateLegacyConversationLogs();
-    expect({ alreadySealed: report.alreadySealed, reads: readLog.mock.calls.length }).toEqual({ alreadySealed: 1, reads: 0 });
+    expect({ alreadySealed: report.alreadySealed, moved: report.moved, reads: readLog.mock.calls.length }).toEqual({ alreadySealed: 0, moved: 0, reads: 0 });
   });
 });

@@ -192,18 +192,6 @@ describe("the SDK's S5 instances", () => {
     expect(leaksAnywhere(calls)).toBe(false);
   });
 
-  test("DocumentManager's own instance is redacting too", async () => {
-    captureConsole();
-    fsImpl = {
-      ensureIdentityInitialized: async () => undefined,
-      get: async () => { throw pathNotFound(`Directory "${uri('home/documents/x')}" does not exist`); },
-    };
-    const dm = new DocumentManager();
-    await dm.initialize(SEED, ADDR);
-    const caught = await (dm as any).s5Client.fs.get('home/documents/x').catch((e: unknown) => e);
-    expect(caught).toBeInstanceOf(Error);
-    expect(leaksAnywhere(caught)).toBe(false);
-  });
 });
 
 describe('§19 Z6 — scrubbing never throws, and never loses the error', () => {
@@ -290,7 +278,7 @@ describe('§19 Z17 — the S5 instance refuses plaintext into a RAG root', () =>
 });
 
 describe('§19 Z8 — the SDK binds its sealers to the address they serve', () => {
-  test('StorageManager and DocumentManager seal for (seed, address)', async () => {
+  test('StorageManager seals for (seed, address) (DocumentManager has no sealer of its own since 1.39.24)', async () => {
     const { storageSealerFromSeed } = await import('../../src/storage/sealed/StorageSealer');
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -299,9 +287,6 @@ describe('§19 Z8 — the SDK binds its sealers to the address they serve', () =
     const sm = new StorageManager();
     await sm.initialize(SEED, ADDR);
     expect((sm as any).sealer.deriveId('conv', '5')).toBe(expected);
-    const dm = new DocumentManager();
-    await dm.initialize(SEED, ADDR);
-    expect((dm as any).sealer.deriveId('conv', '5')).toBe(expected);
   });
 });
 
